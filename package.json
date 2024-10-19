@@ -1,0 +1,18 @@
+{
+  "name": "stone",
+  "version": "0.0.0",
+  "description": "the stone language compiler",
+  "main": "index.js",
+  "author": "akonwi",
+  "license": "MIT",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.13",
+    "@types/node": "^22.7.7",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.3"
+  }
+}
