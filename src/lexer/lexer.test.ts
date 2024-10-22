@@ -1,5 +1,5 @@
 import { Lexer, Token, TokenType } from "./lexer";
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, test } from "bun:test";
 
 describe("Lexer", () => {
 	it("should tokenize a simple let declaration", () => {
@@ -281,6 +281,125 @@ describe("Lexer", () => {
 				value: "",
 				line: 5,
 				column: 5,
+			}),
+		]);
+	});
+
+	describe("functions", () => {
+		test("a simple function", () => {});
+		const input = `func greet(name: String) -> String {
+  return "Hello, " + name + "!"
+}`;
+		const tokens = new Lexer(input).tokenize();
+
+		expect(tokens).toEqual([
+			Token.init({
+				type: TokenType.FUNC,
+				line: 1,
+				column: 1,
+				value: "func",
+			}),
+			Token.init({
+				type: TokenType.IDENTIFIER,
+				line: 1,
+				column: 6,
+				value: "greet",
+			}),
+			Token.init({
+				type: TokenType.LEFT_PAREN,
+				line: 1,
+				column: 11,
+				value: "(",
+			}),
+			Token.init({
+				type: TokenType.IDENTIFIER,
+				line: 1,
+				column: 12,
+				value: "name",
+			}),
+			Token.init({
+				type: TokenType.COLON,
+				line: 1,
+				column: 16,
+				value: ":",
+			}),
+			Token.init({
+				type: TokenType.IDENTIFIER,
+				line: 1,
+				column: 18,
+				value: "String",
+			}),
+			Token.init({
+				type: TokenType.RIGHT_PAREN,
+				line: 1,
+				column: 24,
+				value: ")",
+			}),
+			Token.init({
+				type: TokenType.ARROW,
+				line: 1,
+				column: 26,
+				value: "->",
+			}),
+			Token.init({
+				type: TokenType.IDENTIFIER,
+				line: 1,
+				column: 29,
+				value: "String",
+			}),
+			Token.init({
+				type: TokenType.LEFT_BRACE,
+				column: 36,
+				line: 1,
+				value: "{",
+			}),
+			Token.init({
+				type: TokenType.RETURN,
+				line: 2,
+				column: 3,
+				value: "return",
+			}),
+			Token.init({
+				column: 10,
+				line: 2,
+				type: TokenType.STRING,
+				value: '"Hello, "',
+			}),
+			Token.init({
+				column: 20,
+				line: 2,
+				type: TokenType.PLUS,
+				value: "+",
+			}),
+			Token.init({
+				column: 22,
+				line: 2,
+				type: TokenType.IDENTIFIER,
+				value: "name",
+			}),
+			Token.init({
+				column: 27,
+				line: 2,
+				type: TokenType.PLUS,
+				value: "+",
+			}),
+			Token.init({
+				column: 29,
+				line: 2,
+				type: TokenType.STRING,
+				value: '"!"',
+			}),
+			Token.init({
+				column: 1,
+				line: 3,
+				type: TokenType.RIGHT_BRACE,
+				value: "}",
+			}),
+			Token.init({
+				column: 2,
+				line: 3,
+				type: TokenType.EOF,
+				value: "",
 			}),
 		]);
 	});
