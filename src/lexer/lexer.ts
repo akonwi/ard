@@ -65,7 +65,7 @@ export enum TokenType {
 export class Token {
 	constructor(
 		public readonly type: TokenType,
-		public readonly value: string,
+		public readonly lexeme: string,
 		public readonly line: number,
 		public readonly column: number,
 	) {}
@@ -80,6 +80,7 @@ export class Token {
 	}
 }
 
+// TODO: support resetting the source
 export class Lexer {
 	private source: string;
 	private tokens: Token[] = [];
