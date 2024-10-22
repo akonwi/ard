@@ -22,7 +22,7 @@ function print(expression: Expr): string {
 }
 
 describe("Printer", () => {
-	test("printing AST in RPN", () => {
+	test("printing AST in lisp", () => {
 		// "-123 * 45.67"
 		const expression: Expr = {
 			type: "Binary",
