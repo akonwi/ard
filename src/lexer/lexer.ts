@@ -56,6 +56,7 @@ export enum TokenType {
 	COMMA = "COMMA",
 	DOT = "DOT",
 	COLON = "COLON",
+	SEMICOLON = "SEMICOLON",
 	ARROW = "ARROW",
 
 	// Special tokens

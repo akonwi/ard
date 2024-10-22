@@ -1,25 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { Token, TokenType } from "../lexer/lexer";
 import type { Expr } from "../ast";
-
-function print(expression: Expr): string {
-	switch (expression.type) {
-		case "Binary": {
-			return `(${expression.operator.lexeme} ${print(expression.right)} ${print(
-				expression.left,
-			)})`;
-		}
-		case "Unary": {
-			return `(${expression.operator.lexeme} ${print(expression.right)})`;
-		}
-		case "Grouping": {
-			return `(group ${print(expression.expression)})`;
-		}
-		case "Literal": {
-			return `${expression.token.lexeme}`;
-		}
-	}
-}
+import { print } from "./printer";
 
 describe("Printer", () => {
 	test("printing AST in lisp", () => {

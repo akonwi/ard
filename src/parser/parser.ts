@@ -8,12 +8,17 @@ export class Parser {
 
 	constructor(private tokens: Token[]) {}
 
-	parse(): Stmt[] {
-		const statements: Stmt[] = [];
-		while (!this.isAtEnd()) {
-			statements.push(this.declaration());
+	parse(): Expr | null {
+		try {
+			return this.expression();
+		} catch (error) {
+			return null;
 		}
-		return statements;
+		// const statements: Stmt[] = [];
+		// while (!this.isAtEnd()) {
+		// 	statements.push(this.declaration());
+		// }
+		// return statements;
 	}
 
 	private expression(): Expr {
@@ -218,24 +223,6 @@ export class Parser {
 		return statements;
 	}
 
-	private literal(): Expr {
-		const token = this.previous();
-		return { type: "Literal", value: token.lexeme };
-	}
-
-	private assignment(): Expr {
-		const expr = this.or();
-		if (this.match(TokenType.ASSIGN)) {
-			const equals = this.previous();
-			const value = this.assignment();
-			if (expr.type === "Variable") {
-				return { type: "Assign", name: expr.name, value };
-			}
-			this.error(equals, "Invalid assignment target.");
-		}
-		return expr;
-	}
-
 	private or(): Expr {
 		let expr = this.and();
 		while (this.match(TokenType.OR)) {
@@ -288,35 +275,7 @@ export class Parser {
 			this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
 			return { type: "Grouping", expression: expr };
 		}
-	}
-
-	private call(): Expr {
-		let expr = this.primary();
-		while (true) {
-			if (this.match(TokenType.LEFT_PAREN)) {
-				expr = this.finishCall(expr);
-			} else {
-				break;
-			}
-		}
-		return expr;
-	}
-
-	private finishCall(callee: Expr): Expr {
-		const args: Expr[] = [];
-		if (!this.check(TokenType.RIGHT_PAREN)) {
-			do {
-				if (args.length >= 255) {
-					this.error(this.peek(), "Can't have more than 255 arguments.");
-				}
-				args.push(this.expression());
-			} while (this.match(TokenType.COMMA));
-		}
-		const paren = this.consume(
-			TokenType.RIGHT_PAREN,
-			"Expect ')' after arguments.",
-		);
-		return { type: "Call", callee, paren, arguments: args };
+		throw this.error(this.peek(), "Expect expression");
 	}
 
 	private match(...types: TokenType[]): boolean {
@@ -361,7 +320,13 @@ export class Parser {
 	}
 
 	private error(token: Token, message: string): ParseError {
-		// Report error here
+		if (token.type == TokenType.EOF) {
+			console.log(`Syntax error on line ${token.line}, at end: ${message}`);
+		} else {
+			console.log(
+				`Syntax error on line ${token.line}, at ${token.lexeme}: ${message}`,
+			);
+		}
 		return new ParseError(
 			message + " at " + token.line + ":" + token.column + ".",
 		);
@@ -370,7 +335,7 @@ export class Parser {
 	private synchronize() {
 		this.advance();
 		while (!this.isAtEnd()) {
-			// @ts-expect-error TODO: remove semicolons
+			// explicit semicolons may be an explicit statement boundary
 			if (this.previous().type === TokenType.SEMICOLON) return;
 			switch (this.peek().type) {
 				case TokenType.FUNC:
@@ -385,4 +350,33 @@ export class Parser {
 			this.advance();
 		}
 	}
+
+	// private call(): Expr {
+	// 	let expr = this.primary();
+	// 	while (true) {
+	// 		if (this.match(TokenType.LEFT_PAREN)) {
+	// 			expr = this.finishCall(expr);
+	// 		} else {
+	// 			break;
+	// 		}
+	// 	}
+	// 	return expr;
+	// }
+
+	// private finishCall(callee: Expr): Expr {
+	// 	const args: Expr[] = [];
+	// 	if (!this.check(TokenType.RIGHT_PAREN)) {
+	// 		do {
+	// 			if (args.length >= 255) {
+	// 				this.error(this.peek(), "Can't have more than 255 arguments.");
+	// 			}
+	// 			args.push(this.expression());
+	// 		} while (this.match(TokenType.COMMA));
+	// 	}
+	// 	const paren = this.consume(
+	// 		TokenType.RIGHT_PAREN,
+	// 		"Expect ')' after arguments.",
+	// 	);
+	// 	return { type: "Call", callee, paren, arguments: args };
+	// }
 }
