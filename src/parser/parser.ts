@@ -1,6 +1,8 @@
 import type { Expr, Stmt } from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 
+class ParseError extends Error {}
+
 export class Parser {
 	private current = 0;
 
@@ -12,6 +14,57 @@ export class Parser {
 			statements.push(this.declaration());
 		}
 		return statements;
+	}
+
+	private expression(): Expr {
+		return this.equality();
+	}
+
+	private equality(): Expr {
+		let expr = this.comparison();
+		while (this.match(TokenType.NOT_EQUAL, TokenType.EQUAL)) {
+			const operator = this.previous();
+			const right = this.comparison();
+			expr = { type: "Binary", left: expr, operator, right };
+		}
+		return expr;
+	}
+
+	private comparison(): Expr {
+		let expr = this.term();
+		while (
+			this.match(
+				TokenType.GREATER_THAN,
+				TokenType.GREATER_EQUAL,
+				TokenType.LESS_THAN,
+				TokenType.LESS_EQUAL,
+			)
+		) {
+			const operator = this.previous();
+			const right = this.term();
+			expr = { type: "Binary", left: expr, operator, right };
+		}
+		return expr;
+	}
+
+	private term(): Expr {
+		let expr = this.factor();
+		while (this.match(TokenType.MINUS, TokenType.PLUS)) {
+			const operator = this.previous();
+			const right = this.factor();
+			expr = { type: "Binary", left: expr, operator, right };
+		}
+		return expr;
+	}
+
+	private factor(): Expr {
+		let expr = this.unary();
+		while (this.match(TokenType.SLASH, TokenType.STAR)) {
+			const operator = this.previous();
+			const right = this.unary();
+			expr = { type: "Binary", left: expr, operator, right };
+		}
+		return expr;
 	}
 
 	private declaration(): Stmt {
@@ -156,13 +209,6 @@ export class Parser {
 		return statements;
 	}
 
-	private expression(): Expr {
-		if (this.match(TokenType.IDENTIFIER)) {
-			return this.literal();
-		}
-		return this.assignment();
-	}
-
 	private literal(): Expr {
 		const token = this.previous();
 		return { type: "Literal", value: token.lexeme };
@@ -196,53 +242,6 @@ export class Parser {
 		while (this.match(TokenType.AND)) {
 			const operator = this.previous();
 			const right = this.equality();
-			expr = { type: "Binary", left: expr, operator, right };
-		}
-		return expr;
-	}
-
-	private equality(): Expr {
-		let expr = this.comparison();
-		while (this.match(TokenType.NOT_EQUAL, TokenType.EQUAL)) {
-			const operator = this.previous();
-			const right = this.comparison();
-			expr = { type: "Binary", left: expr, operator, right };
-		}
-		return expr;
-	}
-
-	private comparison(): Expr {
-		let expr = this.term();
-		while (
-			this.match(
-				TokenType.GREATER_THAN,
-				TokenType.GREATER_EQUAL,
-				TokenType.LESS_THAN,
-				TokenType.LESS_EQUAL,
-			)
-		) {
-			const operator = this.previous();
-			const right = this.term();
-			expr = { type: "Binary", left: expr, operator, right };
-		}
-		return expr;
-	}
-
-	private term(): Expr {
-		let expr = this.factor();
-		while (this.match(TokenType.MINUS, TokenType.PLUS)) {
-			const operator = this.previous();
-			const right = this.factor();
-			expr = { type: "Binary", left: expr, operator, right };
-		}
-		return expr;
-	}
-
-	private factor(): Expr {
-		let expr = this.unary();
-		while (this.match(TokenType.SLASH, TokenType.MULTIPLY)) {
-			const operator = this.previous();
-			const right = this.unary();
 			expr = { type: "Binary", left: expr, operator, right };
 		}
 		return expr;
@@ -372,5 +371,3 @@ export class Parser {
 		}
 	}
 }
-
-class ParseError extends Error {}

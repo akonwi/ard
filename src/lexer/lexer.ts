@@ -35,7 +35,7 @@ export enum TokenType {
 	// Operators
 	PLUS = "PLUS",
 	MINUS = "MINUS",
-	MULTIPLY = "MULTIPLY",
+	STAR = "MULTIPLY",
 	SLASH = "DIVIDE",
 	ASSIGN = "ASSIGN",
 	EQUAL = "EQUAL",
@@ -177,7 +177,7 @@ export class Lexer {
 				this.addToken(TokenType.PLUS);
 				break;
 			case "*":
-				this.addToken(TokenType.MULTIPLY, c);
+				this.addToken(TokenType.STAR, c);
 				break;
 			case "/":
 				if (this.match("/")) {

@@ -105,7 +105,7 @@ describe("Lexer", () => {
 				column: 5,
 			}),
 			Token.init({
-				type: TokenType.MULTIPLY,
+				type: TokenType.STAR,
 				lexeme: "*",
 				line: 1,
 				column: 7,

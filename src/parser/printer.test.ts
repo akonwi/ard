@@ -27,7 +27,7 @@ describe("Printer", () => {
 		const expression: Expr = {
 			type: "Binary",
 			operator: Token.init({
-				type: TokenType.MULTIPLY,
+				type: TokenType.STAR,
 				lexeme: "*",
 				line: 1,
 				column: 1,
