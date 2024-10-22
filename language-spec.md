@@ -1,10 +1,12 @@
 # Stone Language Specification
 
-Stone is a modern, statically-typed programming language designed for clarity, safety, and expressiveness. It combines features from languages like Swift and JavaScript, while introducing its own unique characteristics.
+Stone is a modern, statically-typed programming language designed for clarity, safety, and expressiveness.
+It combines features from JavaScript, Swift, and Go while introducing its own unique characteristics.
 
 ## 1. Basic Syntax
 
 Stone uses a clean, expressive syntax designed for readability and ease of use.
+Note: trying to follow Go's philosophy for readablity left to right, rather than usual Spiraling in C based syntax.
 
 ### Variables and Constants
 
