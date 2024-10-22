@@ -5,9 +5,7 @@
   "main": "index.js",
   "author": "akonwi",
   "license": "MIT",
-  "scripts": {
-    "test": "jest"
-  },
+  "scripts": {},
   "devDependencies": {
     "@types/bun": "^1.1.11",
     "@types/node": "^22.7.7",
