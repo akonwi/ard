@@ -187,7 +187,7 @@ describe("Lexer", () => {
 			}),
 			Token.init({
 				type: TokenType.STRING,
-				lexeme: '"Hello, world!"',
+				lexeme: "Hello, world!",
 				line: 1,
 				column: 15,
 			}),
@@ -363,7 +363,7 @@ describe("Lexer", () => {
 				column: 10,
 				line: 2,
 				type: TokenType.STRING,
-				lexeme: '"Hello, "',
+				lexeme: "Hello, ",
 			}),
 			Token.init({
 				column: 20,
@@ -387,7 +387,7 @@ describe("Lexer", () => {
 				column: 29,
 				line: 2,
 				type: TokenType.STRING,
-				lexeme: '"!"',
+				lexeme: "!",
 			}),
 			Token.init({
 				column: 1,
