@@ -23,14 +23,15 @@ export enum TokenType {
 	FROM = "FROM",
 	AND = "AND",
 	OR = "OR",
-	NOT = "NOT",
+	BANG = "BANG",
 
 	// Literals
 	IDENTIFIER = "IDENTIFIER",
 	INTEGER = "INTEGER",
 	DOUBLE = "DOUBLE",
 	STRING = "STRING",
-	BOOLEAN = "BOOLEAN",
+	TRUE = "TRUE",
+	FALSE = "FALSE",
 
 	// Operators
 	PLUS = "PLUS",
@@ -111,8 +112,8 @@ export class Lexer {
 		internal: TokenType.INTERNAL,
 		import: TokenType.IMPORT,
 		from: TokenType.FROM,
-		true: TokenType.BOOLEAN,
-		false: TokenType.BOOLEAN,
+		true: TokenType.TRUE,
+		false: TokenType.FALSE,
 	};
 
 	constructor(source: string) {
@@ -191,7 +192,7 @@ export class Lexer {
 				this.addToken(this.match("=") ? TokenType.EQUAL : TokenType.ASSIGN);
 				break;
 			case "!":
-				this.addToken(this.match("=") ? TokenType.NOT_EQUAL : TokenType.NOT);
+				this.addToken(this.match("=") ? TokenType.NOT_EQUAL : TokenType.BANG);
 				break;
 			case "<":
 				this.addToken(

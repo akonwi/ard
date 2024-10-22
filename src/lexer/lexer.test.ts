@@ -66,7 +66,7 @@ describe("Lexer", () => {
 				column: 7,
 			}),
 			Token.init({
-				type: TokenType.BOOLEAN,
+				type: TokenType.TRUE,
 				lexeme: "true",
 				line: 1,
 				column: 9,

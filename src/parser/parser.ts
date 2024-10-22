@@ -67,6 +67,15 @@ export class Parser {
 		return expr;
 	}
 
+	private unary(): Expr {
+		if (this.match(TokenType.BANG, TokenType.MINUS)) {
+			const operator = this.previous();
+			const right = this.unary();
+			return { type: "Unary", operator, right };
+		}
+		return this.primary();
+	}
+
 	private declaration(): Stmt {
 		try {
 			if (this.match(TokenType.LET)) return this.letDeclaration();
@@ -245,15 +254,6 @@ export class Parser {
 			expr = { type: "Binary", left: expr, operator, right };
 		}
 		return expr;
-	}
-
-	private unary(): Expr {
-		if (this.match(TokenType.NOT, TokenType.MINUS)) {
-			const operator = this.previous();
-			const right = this.unary();
-			return { type: "Unary", operator, right };
-		}
-		return this.call();
 	}
 
 	private call(): Expr {
