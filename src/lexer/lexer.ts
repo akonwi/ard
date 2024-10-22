@@ -72,11 +72,11 @@ export class Token {
 
 	static init(params: {
 		type: TokenType;
-		value: string;
+		lexeme: string;
 		line: number;
 		column: number;
 	}): Token {
-		return new Token(params.type, params.value, params.line, params.column);
+		return new Token(params.type, params.lexeme, params.line, params.column);
 	}
 }
 
@@ -128,7 +128,7 @@ export class Lexer {
 		this.tokens.push(
 			Token.init({
 				type: TokenType.EOF,
-				value: "",
+				lexeme: "",
 				line: this.line,
 				column: this.column,
 			}),
@@ -177,7 +177,7 @@ export class Lexer {
 				this.addToken(TokenType.PLUS);
 				break;
 			case "*":
-				this.addToken(TokenType.MULTIPLY);
+				this.addToken(TokenType.MULTIPLY, c);
 				break;
 			case "/":
 				if (this.match("/")) {
@@ -319,12 +319,12 @@ export class Lexer {
 		return this.source.charAt(this.current - 1);
 	}
 
-	private addToken(type: TokenType, literal: string = "") {
-		const text = this.source.substring(this.start, this.current);
+	private addToken(type: TokenType, literal?: string) {
+		const text = literal ?? this.source.substring(this.start, this.current);
 		this.tokens.push(
 			Token.init({
 				type,
-				value: text,
+				lexeme: text,
 				line: this.line,
 				column: this.column - (this.current - this.start),
 			}),
