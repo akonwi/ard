@@ -8,24 +8,35 @@ Stone uses a clean, expressive syntax designed for readability and ease of use.
 
 ### Variables and Constants
 
-- Use `let` for constants and `var` for variables
+- Use `let` for constants and `mut` for variables
 - Type inference is supported, but types can be explicitly declared
 
 ```stone
 let name: String = "Alice"
-var age = 30  // Type inferred as Int
+mut age = 30  // Type inferred as Int
 ```
 
 ### Functions
 
-- Use `func` keyword to define functions
+- Use `fn` keyword to define functions
 - Return type is specified after `->`
 
 ```stone
-func greet(person: String) -> String {
+fn greet(person: String) -> String {
     return "Hello, " + person + "!"
 }
 ```
+
+### WIP: Callbacks
+- could be a way to handle return values as an attached statement
+  - side-effecty, no control over when it's executed
+
+```stone
+greet name: "John" => (msg) {
+  print "Received $msg"
+}
+```
+
 
 ### Control Flow
 
