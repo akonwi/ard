@@ -21,6 +21,9 @@ export enum TokenType {
 	INTERNAL = "INTERNAL",
 	IMPORT = "IMPORT",
 	FROM = "FROM",
+	AND = "AND",
+	OR = "OR",
+	NOT = "NOT",
 
 	// Literals
 	IDENTIFIER = "IDENTIFIER",
@@ -41,9 +44,6 @@ export enum TokenType {
 	LESS_THAN = "LESS_THAN",
 	GREATER_EQUAL = "GREATER_EQUAL",
 	LESS_EQUAL = "LESS_EQUAL",
-	AND = "AND",
-	OR = "OR",
-	NOT = "NOT",
 
 	// Delimiters
 	LEFT_PAREN = "LEFT_PAREN",
