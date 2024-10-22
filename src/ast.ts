@@ -2,9 +2,7 @@
 
 import type { Token } from "./lexer/lexer";
 
-type Primary = { type: "Primary"; token: Token };
-
-type Literal = { type: "Literal"; token: Token };
+type Literal = { type: "Literal"; token: Token; value: any };
 type Grouping = { type: "Grouping"; expression: Expr };
 type Unary = {
 	type: "Unary";

@@ -256,6 +256,40 @@ export class Parser {
 		return expr;
 	}
 
+	private primary(): Expr {
+		if (this.match(TokenType.FALSE)) {
+			return { type: "Literal", value: false, token: this.previous() };
+		}
+		if (this.match(TokenType.TRUE)) {
+			return { type: "Literal", value: true, token: this.previous() };
+		}
+		if (this.match(TokenType.INTEGER)) {
+			const token = this.previous();
+			return { type: "Literal", value: Number(token.lexeme), token };
+		}
+		// memo: this distinction probably doesn't matter in a JS runtime
+		if (this.match(TokenType.DOUBLE)) {
+			const token = this.previous();
+			return { type: "Literal", value: parseFloat(token.lexeme), token };
+		}
+		if (this.match(TokenType.STRING)) {
+			const token = this.previous();
+			return {
+				type: "Literal",
+				value: token.lexeme,
+				token,
+			};
+		}
+		// if (this.match(TokenType.IDENTIFIER)) {
+		// 	return { type: "Variable", name: this.previous() };
+		// }
+		if (this.match(TokenType.LEFT_PAREN)) {
+			const expr = this.expression();
+			this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
+			return { type: "Grouping", expression: expr };
+		}
+	}
+
 	private call(): Expr {
 		let expr = this.primary();
 		while (true) {
@@ -283,25 +317,6 @@ export class Parser {
 			"Expect ')' after arguments.",
 		);
 		return { type: "Call", callee, paren, arguments: args };
-	}
-
-	private primary(): Expr {
-		if (this.match(TokenType.BOOLEAN))
-			return { type: "Literal", value: this.peek().lexeme === "true" };
-		if (this.match(TokenType.TRUE)) return { type: "Literal", value: true };
-		if (this.match(TokenType.INTEGER, TokenType.DOUBLE, TokenType.STRING)) {
-			return { type: "Literal", value: this.previous().lexeme };
-		}
-		if (this.match(TokenType.IDENTIFIER)) {
-			return { type: "Variable", name: this.previous() };
-		}
-		if (this.match(TokenType.LEFT_PAREN)) {
-			const expr = this.expression();
-			this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
-			return { type: "Grouping", expression: expr };
-		}
-		debugger;
-		throw this.error(this.peek(), "Expect expression.");
 	}
 
 	private match(...types: TokenType[]): boolean {
