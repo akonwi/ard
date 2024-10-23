@@ -2,14 +2,14 @@
 
 import type { Token } from "./lexer/lexer";
 
-type Literal = { type: "Literal"; token: Token; value: any };
-type Grouping = { type: "Grouping"; expression: Expr };
-type Unary = {
+export type Literal = { type: "Literal"; token: Token; value: any };
+export type Grouping = { type: "Grouping"; expression: Expr };
+export type Unary = {
 	type: "Unary";
 	operator: Token;
 	right: Expr;
 };
-type Binary = {
+export type Binary = {
 	type: "Binary";
 	left: Expr;
 	operator: Token;
