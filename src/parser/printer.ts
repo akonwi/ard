@@ -21,8 +21,8 @@ export function print(expression: Expr): string {
 	}
 }
 
-const input = "1 + 2 + (2 * 3) - 4";
-console.log("input =>", input);
-const ast = new Parser(new Lexer(input).tokenize()).parse();
-console.log("AST", ast);
-if (ast) console.log(print(ast));
+// const input = "1 + 2 + (2 * 3) - 4";
+// console.log("input =>", input);
+// const ast = new Parser(new Lexer(input).tokenize()).parse();
+// console.log("AST", ast);
+// if (ast) console.log(print(ast));
