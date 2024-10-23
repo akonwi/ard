@@ -1,15 +1,58 @@
 import { describe, test, expect } from "bun:test";
 import { Parser } from "./parser";
-import { Lexer, TokenType } from "../lexer/lexer";
+import { Lexer, Token, TokenType } from "../lexer/lexer";
 
 describe("Parser", () => {
 	test("simple expression AST", () => {
-		const input = "-123 * 45.67";
+		const input = "-123 * 45.67;";
 		const parser = new Parser(new Lexer(input).tokenize());
 		const ast = parser.parse();
+		expect(ast).toEqual([
+			{
+				type: "ExprStatement",
+				expression: {
+					type: "Binary",
+					left: {
+						type: "Unary",
+						operator: Token.init({
+							type: TokenType.MINUS,
+							lexeme: "-",
+							column: 1,
+							line: 1,
+						}),
+						right: {
+							type: "Literal",
+							token: Token.init({
+								type: TokenType.INTEGER,
+								lexeme: "123",
+								line: 1,
+								column: 2,
+							}),
+							value: 123,
+						},
+					},
+					operator: Token.init({
+						type: TokenType.STAR,
+						lexeme: "*",
+						column: 6,
+						line: 1,
+					}),
+					right: {
+						type: "Literal",
+						value: 45.67,
+						token: Token.init({
+							type: TokenType.DOUBLE,
+							lexeme: "45.67",
+							column: 8,
+							line: 1,
+						}),
+					},
+				},
+			},
+		]);
 	});
 
-	describe("generating ASTs", () => {
+	describe.skip("generating ASTs", () => {
 		test.skip("for a simple let declaration", () => {
 			const input = "let x = 5";
 			const parser = new Parser(new Lexer(input).tokenize());

@@ -1,4 +1,4 @@
-import type { Expr, Stmt } from "../ast";
+import type { Expr, Print, Stmt } from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 
 class ParseError extends Error {}
@@ -8,17 +8,12 @@ export class Parser {
 
 	constructor(private tokens: Token[]) {}
 
-	parse(): Expr | null {
-		try {
-			return this.expression();
-		} catch (error) {
-			return null;
+	parse(): Stmt[] {
+		const statements: Stmt[] = [];
+		while (!this.isAtEnd()) {
+			statements.push(this.statement());
 		}
-		// const statements: Stmt[] = [];
-		// while (!this.isAtEnd()) {
-		// 	statements.push(this.declaration());
-		// }
-		// return statements;
+		return statements;
 	}
 
 	private expression(): Expr {
@@ -81,10 +76,33 @@ export class Parser {
 		return this.primary();
 	}
 
+	private statement(): Stmt {
+		if (this.match(TokenType.PRINT)) return this.printStatement();
+		return this.expressionStatement();
+		// if (this.match(TokenType.IF)) return this.ifStatement();
+		// if (this.match(TokenType.WHILE)) return this.whileStatement();
+		// if (this.match(TokenType.FOR)) return this.forStatement();
+		// if (this.match(TokenType.RETURN)) return this.returnStatement();
+		// if (this.match(TokenType.LEFT_BRACE))
+		// 	return { type: "Block", statements: this.block() };
+	}
+
+	private printStatement(): Print {
+		const expression = this.expression();
+		this.consume(TokenType.SEMICOLON, "Expect ';' after value.");
+		return { type: "Print", expression };
+	}
+
+	private expressionStatement(): Stmt {
+		const expr = this.expression();
+		this.consume(TokenType.SEMICOLON, "Expect ';' after expression.");
+		return { type: "ExprStatement", expression: expr };
+	}
+
 	private declaration(): Stmt {
 		try {
 			if (this.match(TokenType.LET)) return this.letDeclaration();
-			if (this.match(TokenType.MUT)) return this.mutDeclaration();
+			// if (this.match(TokenType.MUT)) return this.mutDeclaration();
 			if (this.match(TokenType.FUNC)) return this.function("function");
 			return this.statement();
 		} catch (error) {
@@ -130,16 +148,6 @@ export class Parser {
 		this.consume(TokenType.LEFT_BRACE, `Expect '{' before ${kind} body.`);
 		const body = this.block();
 		return { type: "Function", name, params: parameters, body };
-	}
-
-	private statement(): Stmt {
-		if (this.match(TokenType.IF)) return this.ifStatement();
-		if (this.match(TokenType.WHILE)) return this.whileStatement();
-		if (this.match(TokenType.FOR)) return this.forStatement();
-		if (this.match(TokenType.RETURN)) return this.returnStatement();
-		if (this.match(TokenType.LEFT_BRACE))
-			return { type: "Block", statements: this.block() };
-		return this.expressionStatement();
 	}
 
 	private ifStatement(): Stmt {
@@ -200,24 +208,19 @@ export class Parser {
 		// return body;
 	}
 
-	private returnStatement(): Stmt {
-		const keyword = this.previous();
-		let value = null;
-		// if (!this.check(TokenType.SEMICOLON)) {
-		value = this.expression();
-		// }
-		return { type: "Return", keyword, value };
-	}
-
-	private expressionStatement(): Stmt {
-		const expr = this.expression();
-		return { type: "Expression", expression: expr };
-	}
+	// private returnStatement(): Stmt {
+	// 	const keyword = this.previous();
+	// 	let value = null;
+	// 	// if (!this.check(TokenType.SEMICOLON)) {
+	// 	value = this.expression();
+	// 	// }
+	// 	return { type: "Return", keyword, value };
+	// }
 
 	private block(): Stmt[] {
 		const statements: Stmt[] = [];
 		while (!this.check(TokenType.RIGHT_BRACE) && !this.isAtEnd()) {
-			statements.push(this.declaration());
+			// statements.push(this.declaration());
 		}
 		this.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.");
 		return statements;

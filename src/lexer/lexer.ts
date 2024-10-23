@@ -62,6 +62,8 @@ export enum TokenType {
 	// Special tokens
 	EOF = "EOF",
 	ERROR = "ERROR",
+	// Print statement
+	PRINT = "PRINT",
 }
 
 export class Token {
@@ -115,6 +117,7 @@ export class Lexer {
 		from: TokenType.FROM,
 		true: TokenType.TRUE,
 		false: TokenType.FALSE,
+		print: TokenType.PRINT,
 	};
 
 	constructor(source: string) {
@@ -167,6 +170,9 @@ export class Lexer {
 				break;
 			case ":":
 				this.addToken(TokenType.COLON);
+				break;
+			case ";":
+				this.addToken(TokenType.SEMICOLON);
 				break;
 			case "-":
 				if (this.match(">")) {
