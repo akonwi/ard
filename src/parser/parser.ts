@@ -104,13 +104,23 @@ export class Parser {
 
 	private statement(): Stmt {
 		if (this.match(TokenType.PRINT)) return this.printStatement();
+		if (this.match(TokenType.LEFT_BRACE))
+			return { type: "Block", statements: this.block() };
 		return this.expressionStatement();
 		// if (this.match(TokenType.IF)) return this.ifStatement();
 		// if (this.match(TokenType.WHILE)) return this.whileStatement();
 		// if (this.match(TokenType.FOR)) return this.forStatement();
 		// if (this.match(TokenType.RETURN)) return this.returnStatement();
-		// if (this.match(TokenType.LEFT_BRACE))
 		// 	return { type: "Block", statements: this.block() };
+	}
+
+	private block(): Stmt[] {
+		const statements: Stmt[] = [];
+		while (!this.check(TokenType.RIGHT_BRACE) && !this.isAtEnd()) {
+			statements.push(this.declaration());
+		}
+		this.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.");
+		return statements;
 	}
 
 	private printStatement(): Print {
@@ -235,15 +245,6 @@ export class Parser {
 	// 	// }
 	// 	return { type: "Return", keyword, value };
 	// }
-
-	private block(): Stmt[] {
-		const statements: Stmt[] = [];
-		while (!this.check(TokenType.RIGHT_BRACE) && !this.isAtEnd()) {
-			// statements.push(this.declaration());
-		}
-		this.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.");
-		return statements;
-	}
 
 	private or(): Expr {
 		let expr = this.and();

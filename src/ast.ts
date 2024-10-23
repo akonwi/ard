@@ -32,12 +32,12 @@ export type MutDecl = {
 	name: Token;
 	initializer: Expr;
 };
+export type Block = { type: "Block"; statements: Stmt[] };
+export type Stmt = Print | ExprStmt | MutDecl | Block;
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
-export type Stmt = Print | ExprStmt | MutDecl;
 // | { type: "Let"; name: Token; initializer: Expr | null }
 // | { type: "Mut"; name: Token; initializer: Expr | null }
-// | { type: "Block"; statements: Stmt[] }
 // | { type: "If"; condition: Expr; thenBranch: Stmt; elseBranch: Stmt | null }
 // | { type: "While"; condition: Expr; body: Stmt }
 // | { type: "Function"; name: Token; params: Token[]; body: Stmt[] }

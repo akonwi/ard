@@ -25,4 +25,18 @@ describe("javascript generator", () => {
 		).parse()!;
 		expect(generator.generate()).toEqual("let maths = 2 + 2;\nmaths = 5;");
 	});
+
+	test("generating blocks", () => {
+		const generator = new Generator();
+		generator.input = new Parser(
+			new Lexer(`{
+			  mut isInBlock = true;
+				print isInBlock;
+			}`).tokenize(),
+		).parse()!;
+		expect(generator.generate()).toEqual(`{
+let isInBlock = true;
+console.log(isInBlock);
+}`);
+	});
 });

@@ -4,7 +4,8 @@ program -> declaration* EOF;
 
 declaration -> mutDecl | statement;
 mutDecl -> "mut" IDENTIFIER ( "=" expression )? ";";
-statement -> exprStatement | printStatement ;
+statement -> exprStatement | printStatement | block ;
+block -> "{" declaration* "}"
 exprStatement -> expression ";" ;
 printStatement -> "print" expression ";" ;
 

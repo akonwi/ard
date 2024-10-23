@@ -23,6 +23,10 @@ export class Generator {
 				return `let ${stmt.name.lexeme} = ${this.generateExpr(
 					stmt.initializer,
 				)};`;
+			case "Block":
+				return `{\n${stmt.statements
+					.map((s) => this.generateStmt(s))
+					.join("\n")}\n}`;
 			default:
 				// @ts-expect-error - This should never happen
 				throw new Error("Unknown statement type: " + stmt.type);
@@ -41,7 +45,10 @@ export class Generator {
 				return this.generateLiteral(expr);
 			case "Assign":
 				return `${expr.name.lexeme} = ${this.generateExpr(expr.value)}`;
+			case "Variable":
+				return expr.token.lexeme;
 		}
+		// @ts-expect-error - This should never happen
 		throw new Error("Unknown expression type: " + expr.type);
 	}
 
