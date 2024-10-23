@@ -8,7 +8,9 @@ statement -> exprStatement | printStatement ;
 exprStatement -> expression ";" ;
 printStatement -> "print" expression ";" ;
 
-expression → equality ;
+expression → assignment ;
+assignment -> IDENTIFIER "=" expression
+    | equality ;
 equality -> comparison (( "==" | "!=" ) comparison)* ;
 comparison -> term (( ">" | ">=" | "<" | "<=" ) term)* ;
 term → factor (( "+" | "-") factor)* ;

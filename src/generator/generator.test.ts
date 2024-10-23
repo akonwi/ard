@@ -21,8 +21,8 @@ describe("javascript generator", () => {
 	test("generating a mut statement", () => {
 		const generator = new Generator();
 		generator.input = new Parser(
-			new Lexer("mut maths = 2 + 2;").tokenize(),
+			new Lexer(`mut maths = 2 + 2;maths = 5;`).tokenize(),
 		).parse()!;
-		expect(generator.generate()).toEqual("let maths = 2 + 2;");
+		expect(generator.generate()).toEqual("let maths = 2 + 2;\nmaths = 5;");
 	});
 });

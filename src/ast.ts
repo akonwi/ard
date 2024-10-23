@@ -15,7 +15,15 @@ export type Binary = {
 	right: Expr;
 };
 
-export type Expr = Literal | Grouping | Unary | Binary | Variable;
+/*
+ although assigning should technically be a statement,
+ i'm treating it as an expression for a few reasons:
+  * for precedence
+  * it's right associative like most expressions
+*/
+export type Assign = { type: "Assign"; name: Token; value: Expr };
+
+export type Expr = Literal | Grouping | Unary | Binary | Variable | Assign;
 
 export type Print = { type: "Print"; expression: Expr };
 export type ExprStmt = { type: "ExprStatement"; expression: Expr };
@@ -24,7 +32,6 @@ export type MutDecl = {
 	name: Token;
 	initializer: Expr;
 };
-// | { type: "Assign"; name: Token; value: Expr }
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 export type Stmt = Print | ExprStmt | MutDecl;

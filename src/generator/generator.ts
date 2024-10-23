@@ -39,8 +39,9 @@ export class Generator {
 				return `(${this.generateExpr(expr.expression)})`;
 			case "Literal":
 				return this.generateLiteral(expr);
+			case "Assign":
+				return `${expr.name.lexeme} = ${this.generateExpr(expr.value)}`;
 		}
-		// @ts-expect-error - This should never happen
 		throw new Error("Unknown expression type: " + expr.type);
 	}
 

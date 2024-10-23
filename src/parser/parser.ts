@@ -1,4 +1,4 @@
-import type { Expr, Print, Stmt } from "../ast";
+import type { Assign, Expr, Print, Stmt } from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 
 class ParseError extends Error {}
@@ -17,7 +17,20 @@ export class Parser {
 	}
 
 	private expression(): Expr {
-		return this.equality();
+		return this.assignment();
+	}
+
+	private assignment(): Expr {
+		const expr = this.equality();
+		if (this.match(TokenType.ASSIGN)) {
+			const equals = this.previous();
+			const value = this.assignment();
+			if (expr.type === "Variable") {
+				return { type: "Assign", name: expr.token, value };
+			}
+			this.error(equals, "Invalid assignment target.");
+		}
+		return expr;
 	}
 
 	private equality(): Expr {
