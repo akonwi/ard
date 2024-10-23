@@ -1,8 +1,7 @@
-// AST.ts
-
 import type { Token } from "./lexer/lexer";
 
 export type Literal = { type: "Literal"; token: Token; value: any };
+export type Variable = { type: "Variable"; token: Token };
 export type Grouping = { type: "Grouping"; expression: Expr };
 export type Unary = {
 	type: "Unary";
@@ -16,15 +15,19 @@ export type Binary = {
 	right: Expr;
 };
 
-export type Expr = Literal | Grouping | Unary | Binary;
+export type Expr = Literal | Grouping | Unary | Binary | Variable;
 
 export type Print = { type: "Print"; expression: Expr };
 export type ExprStmt = { type: "ExprStatement"; expression: Expr };
-// | { type: "Variable"; name: Token }
+export type MutDecl = {
+	type: "MutDecl";
+	name: Token;
+	initializer: Expr;
+};
 // | { type: "Assign"; name: Token; value: Expr }
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
-export type Stmt = Print | ExprStmt;
+export type Stmt = Print | ExprStmt | MutDecl;
 // | { type: "Let"; name: Token; initializer: Expr | null }
 // | { type: "Mut"; name: Token; initializer: Expr | null }
 // | { type: "Block"; statements: Stmt[] }

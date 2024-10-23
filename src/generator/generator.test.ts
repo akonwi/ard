@@ -17,4 +17,12 @@ describe("javascript generator", () => {
 		generator.input = new Parser(new Lexer("print 2 + 2;").tokenize()).parse()!;
 		expect(generator.generate()).toEqual("console.log(2 + 2);");
 	});
+
+	test("generating a mut statement", () => {
+		const generator = new Generator();
+		generator.input = new Parser(
+			new Lexer("mut maths = 2 + 2;").tokenize(),
+		).parse()!;
+		expect(generator.generate()).toEqual("let maths = 2 + 2;");
+	});
 });

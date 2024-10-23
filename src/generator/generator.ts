@@ -19,6 +19,10 @@ export class Generator {
 			// Add more cases for other statement types as needed
 			case "Print":
 				return `console.log(${this.generateExpr(stmt.expression)});`;
+			case "MutDecl":
+				return `let ${stmt.name.lexeme} = ${this.generateExpr(
+					stmt.initializer,
+				)};`;
 			default:
 				// @ts-expect-error - This should never happen
 				throw new Error("Unknown statement type: " + stmt.type);

@@ -11,7 +11,7 @@ export class Parser {
 	parse(): Stmt[] {
 		const statements: Stmt[] = [];
 		while (!this.isAtEnd()) {
-			statements.push(this.statement());
+			statements.push(this.declaration());
 		}
 		return statements;
 	}
@@ -76,6 +76,19 @@ export class Parser {
 		return this.primary();
 	}
 
+	private declaration(): Stmt {
+		try {
+			if (this.match(TokenType.MUT)) return this.mutDeclaration();
+			if (this.match(TokenType.LET)) return this.letDeclaration();
+			if (this.match(TokenType.FUNC)) return this.function("function");
+			return this.statement();
+		} catch (error) {
+			this.synchronize();
+			console.error("Encountered an error while parsing.", error);
+			throw error;
+		}
+	}
+
 	private statement(): Stmt {
 		if (this.match(TokenType.PRINT)) return this.printStatement();
 		return this.expressionStatement();
@@ -99,19 +112,6 @@ export class Parser {
 		return { type: "ExprStatement", expression: expr };
 	}
 
-	private declaration(): Stmt {
-		try {
-			if (this.match(TokenType.LET)) return this.letDeclaration();
-			// if (this.match(TokenType.MUT)) return this.mutDeclaration();
-			if (this.match(TokenType.FUNC)) return this.function("function");
-			return this.statement();
-		} catch (error) {
-			this.synchronize();
-			console.error("Encountered an error while parsing.", error);
-			throw error;
-		}
-	}
-
 	private letDeclaration(): Stmt {
 		const name = this.consume(TokenType.IDENTIFIER, "Expect variable name.");
 		let initializer = null;
@@ -126,8 +126,14 @@ export class Parser {
 		let initializer = null;
 		if (this.match(TokenType.ASSIGN)) {
 			initializer = this.expression();
+			this.consume(
+				TokenType.SEMICOLON,
+				"Expect ';' after variable declaration.",
+			);
+			return { type: "MutDecl", name, initializer };
+		} else {
+			throw this.error(this.peek(), "Expect variable initializer.");
 		}
-		return { type: "Mut", name, initializer };
 	}
 
 	private function(kind: string): Stmt {
@@ -270,9 +276,9 @@ export class Parser {
 				token,
 			};
 		}
-		// if (this.match(TokenType.IDENTIFIER)) {
-		// 	return { type: "Variable", name: this.previous() };
-		// }
+		if (this.match(TokenType.IDENTIFIER)) {
+			return { type: "Variable", token: this.previous() };
+		}
 		if (this.match(TokenType.LEFT_PAREN)) {
 			const expr = this.expression();
 			this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");

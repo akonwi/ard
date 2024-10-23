@@ -52,6 +52,33 @@ describe("Parser", () => {
 		]);
 	});
 
+	test("mut declarations", () => {
+		const input = 'mut name = "John";';
+		const parser = new Parser(new Lexer(input).tokenize());
+		const ast = parser.parse();
+		expect(ast).toEqual([
+			{
+				type: "MutDecl",
+				name: Token.init({
+					type: TokenType.IDENTIFIER,
+					lexeme: "name",
+					column: 5,
+					line: 1,
+				}),
+				initializer: {
+					type: "Literal",
+					token: Token.init({
+						type: TokenType.STRING,
+						lexeme: "John",
+						column: 12,
+						line: 1,
+					}),
+					value: "John",
+				},
+			},
+		]);
+	});
+
 	// describe.skip("generating ASTs", () => {
 	// 	test.skip("for a simple let declaration", () => {
 	// 		const input = "let x = 5";
