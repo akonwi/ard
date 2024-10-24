@@ -33,7 +33,13 @@ export type MutDecl = {
 	initializer: Expr;
 };
 export type Block = { type: "Block"; statements: Stmt[] };
-export type Stmt = Print | ExprStmt | MutDecl | Block;
+export type If = {
+	type: "If";
+	condition: Expr;
+	thenBranch: Stmt;
+	elseBranch: Stmt | null;
+};
+export type Stmt = Print | ExprStmt | MutDecl | Block | If;
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 // | { type: "Let"; name: Token; initializer: Expr | null }

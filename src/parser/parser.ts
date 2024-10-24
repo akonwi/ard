@@ -1,4 +1,4 @@
-import type { Assign, Expr, Print, Stmt } from "../ast";
+import type { Block, Expr, Print, Stmt } from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 
 class ParseError extends Error {}
@@ -97,30 +97,28 @@ export class Parser {
 			return this.statement();
 		} catch (error) {
 			this.synchronize();
-			console.error("Encountered an error while parsing.", error);
 			throw error;
 		}
 	}
 
 	private statement(): Stmt {
 		if (this.match(TokenType.PRINT)) return this.printStatement();
-		if (this.match(TokenType.LEFT_BRACE))
-			return { type: "Block", statements: this.block() };
+		if (this.match(TokenType.LEFT_BRACE)) return this.block();
+		if (this.match(TokenType.IF)) return this.ifStatement();
 		return this.expressionStatement();
-		// if (this.match(TokenType.IF)) return this.ifStatement();
 		// if (this.match(TokenType.WHILE)) return this.whileStatement();
 		// if (this.match(TokenType.FOR)) return this.forStatement();
 		// if (this.match(TokenType.RETURN)) return this.returnStatement();
 		// 	return { type: "Block", statements: this.block() };
 	}
 
-	private block(): Stmt[] {
+	private block(): Block {
 		const statements: Stmt[] = [];
 		while (!this.check(TokenType.RIGHT_BRACE) && !this.isAtEnd()) {
 			statements.push(this.declaration());
 		}
 		this.consume(TokenType.RIGHT_BRACE, "Expect '}' after block.");
-		return statements;
+		return { type: "Block", statements };
 	}
 
 	private printStatement(): Print {
@@ -159,6 +157,18 @@ export class Parser {
 		}
 	}
 
+	private ifStatement(): Stmt {
+		this.consume(TokenType.LEFT_PAREN, "Expect '(' after 'if'.");
+		const condition = this.expression();
+		this.consume(TokenType.RIGHT_PAREN, "Expect ')' after if condition.");
+		const thenBranch: Stmt = this.statement();
+		let elseBranch: Stmt | null = null;
+		if (this.match(TokenType.ELSE)) {
+			elseBranch = this.statement();
+		}
+		return { type: "If", condition, thenBranch, elseBranch };
+	}
+
 	private function(kind: string): Stmt {
 		const name = this.consume(TokenType.IDENTIFIER, `Expect ${kind} name.`);
 		this.consume(TokenType.LEFT_PAREN, `Expect '(' after ${kind} name.`);
@@ -177,18 +187,6 @@ export class Parser {
 		this.consume(TokenType.LEFT_BRACE, `Expect '{' before ${kind} body.`);
 		const body = this.block();
 		return { type: "Function", name, params: parameters, body };
-	}
-
-	private ifStatement(): Stmt {
-		this.consume(TokenType.LEFT_PAREN, "Expect '(' after 'if'.");
-		const condition = this.expression();
-		this.consume(TokenType.RIGHT_PAREN, "Expect ')' after if condition.");
-		const thenBranch = this.statement();
-		let elseBranch = null;
-		if (this.match(TokenType.ELSE)) {
-			elseBranch = this.statement();
-		}
-		return { type: "If", condition, thenBranch, elseBranch };
 	}
 
 	private whileStatement(): Stmt {
@@ -343,13 +341,13 @@ export class Parser {
 	}
 
 	private error(token: Token, message: string): ParseError {
-		if (token.type == TokenType.EOF) {
-			console.log(`Syntax error on line ${token.line}, at end: ${message}`);
-		} else {
-			console.log(
-				`Syntax error on line ${token.line}, at ${token.lexeme}: ${message}`,
-			);
-		}
+		// if (token.type == TokenType.EOF) {
+		// 	console.log(`Syntax error on line ${token.line}, at end: ${message}`);
+		// } else {
+		// 	console.log(
+		// 		`Syntax error on line ${token.line}, at ${token.lexeme}: ${message}`,
+		// 	);
+		// }
 		return new ParseError(
 			message + " at " + token.line + ":" + token.column + ".",
 		);

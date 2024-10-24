@@ -27,6 +27,14 @@ export class Generator {
 				return `{\n${stmt.statements
 					.map((s) => this.generateStmt(s))
 					.join("\n")}\n}`;
+			case "If":
+				let str = `if (${this.generateExpr(
+					stmt.condition,
+				)}) {\n\t${this.generateStmt(stmt.thenBranch)}\n}`;
+				if (stmt.elseBranch) {
+					str += ` else {\n\t${this.generateStmt(stmt.elseBranch)}\n}`;
+				}
+				return str;
 			default:
 				// @ts-expect-error - This should never happen
 				throw new Error("Unknown statement type: " + stmt.type);

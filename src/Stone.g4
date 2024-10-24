@@ -5,9 +5,10 @@ program -> declaration* EOF;
 declaration -> mutDecl | statement;
 mutDecl -> "mut" IDENTIFIER ( "=" expression )? ";";
 statement -> exprStatement | printStatement | block ;
-block -> "{" declaration* "}"
+block -> "{" declaration* "}" ;
 exprStatement -> expression ";" ;
 printStatement -> "print" expression ";" ;
+ifStatement -> "if" "(" expression ")" statement ( "else" statement )? ;
 
 expression → assignment ;
 assignment -> IDENTIFIER "=" expression

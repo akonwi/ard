@@ -39,4 +39,15 @@ let isInBlock = true;
 console.log(isInBlock);
 }`);
 	});
+
+	test.only("if ... {} else {}", () => {
+		const generator = new Generator();
+		debugger;
+		generator.input = new Parser(
+			new Lexer(`if (true) print "true";`).tokenize(),
+		).parse()!;
+		expect(generator.generate()).toEqual(
+			`if (true) {\n\tconsole.log("true");\n}`,
+		);
+	});
 });
