@@ -3,7 +3,8 @@ grammar Stone;
 program -> declaration* EOF;
 
 declaration -> mutDecl | statement;
-mutDecl -> "mut" IDENTIFIER ( "=" expression )? ";";
+mutDecl -> "mut" IDENTIFIER (":" type)? "=" expression ? (";")?;
+letDecl -> "let" IDENTIFIER (":" type)? "=" expression ? (";")?;
 statement -> exprStatement | printStatement | block ;
 block -> "{" declaration* "}" ;
 exprStatement -> expression ";" ;
@@ -24,6 +25,14 @@ unary → ( "-" | "!" ) unary
 primary -> "true" | "false" |
     | NUMBER | STRING |
     "(" expression ")"
+    | IDENTIFIER ;
+
+type ->
+    | "Int"
+    | "Double"
+    | "String"
+    | "Boolean"
+    | "Void"
     | IDENTIFIER ;
 
 

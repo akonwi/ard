@@ -43,11 +43,13 @@ export type ExprStmt = { type: "ExprStatement"; expression: Expr };
 export type MutDecl = {
 	type: "MutDecl";
 	name: Token;
+	_staticType: Token | null;
 	initializer: Expr;
 };
 export type LetDecl = {
 	type: "LetDecl";
 	name: Token;
+	_staticType: Token | null;
 	initializer: Expr;
 };
 export type Block = { type: "Block"; statements: Stmt[] };

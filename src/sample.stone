@@ -1,5 +1,5 @@
-mut name = "Alice"
-let age = 30; // semicolons to end statements are optional
+mut name: String = "Alice"
+let age: Int = 30; // semicolons to end statements are optional
 let boolean = true
 
 // func fizzBuzz() {

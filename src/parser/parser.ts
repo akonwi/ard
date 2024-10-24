@@ -136,12 +136,19 @@ export class Parser {
 	private letDeclaration(): Stmt {
 		const name = this.consume(TokenType.IDENTIFIER, "Expect variable name.");
 		let initializer: Expr | null = null;
+		let variableType: Token | null = null;
+		if (this.match(TokenType.COLON)) {
+			variableType = this.consume(
+				TokenType.IDENTIFIER,
+				"Expect type after ':'.",
+			);
+		}
 		if (this.match(TokenType.ASSIGN)) {
 			initializer = this.expression();
 			// semi-colon is optional
 			if (this.match(TokenType.SEMICOLON)) {
 			}
-			return { type: "LetDecl", name, initializer };
+			return { type: "LetDecl", name, initializer, _staticType: variableType };
 		}
 		throw this.error(this.peek(), "Expect variable initializer.");
 	}
@@ -149,12 +156,19 @@ export class Parser {
 	private mutDeclaration(): Stmt {
 		const name = this.consume(TokenType.IDENTIFIER, "Expect variable name.");
 		let initializer: Expr | null = null;
+		let variableType: Token | null = null;
+		if (this.match(TokenType.COLON)) {
+			variableType = this.consume(
+				TokenType.IDENTIFIER,
+				"Expect type after ':'.",
+			);
+		}
 		if (this.match(TokenType.ASSIGN)) {
 			initializer = this.expression();
 			// semi-colon is optional
 			if (this.match(TokenType.SEMICOLON)) {
 			}
-			return { type: "MutDecl", name, initializer };
+			return { type: "MutDecl", name, initializer, _staticType: variableType };
 		} else {
 			throw this.error(this.peek(), "Expect variable initializer.");
 		}
