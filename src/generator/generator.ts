@@ -2,6 +2,7 @@ import type { Binary, Expr, Literal, Stmt, Unary } from "../ast";
 
 export class Generator {
 	private statements: Stmt[] = [];
+	private indent = "";
 
 	set input(statements: Stmt[]) {
 		this.statements = statements;
@@ -23,10 +24,17 @@ export class Generator {
 				return `let ${stmt.name.lexeme} = ${this.generateExpr(
 					stmt.initializer,
 				)};`;
+			case "LetDecl":
+				return `const ${stmt.name.lexeme} = ${this.generateExpr(
+					stmt.initializer,
+				)};`;
 			case "Block":
-				return `{\n${stmt.statements
+				this.indent += "\t";
+				const block = stmt.statements
 					.map((s) => this.generateStmt(s))
-					.join("\n")}\n}`;
+					.join("\n");
+				this.indent = this.indent.slice(0, -1);
+				return `{\n${block}\n${this.indent}}`;
 			case "If":
 				let str = `if (${this.generateExpr(
 					stmt.condition,

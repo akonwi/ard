@@ -45,6 +45,11 @@ export type MutDecl = {
 	name: Token;
 	initializer: Expr;
 };
+export type LetDecl = {
+	type: "LetDecl";
+	name: Token;
+	initializer: Expr;
+};
 export type Block = { type: "Block"; statements: Stmt[] };
 export type If = {
 	type: "If";
@@ -52,7 +57,7 @@ export type If = {
 	thenBranch: Stmt;
 	elseBranch: Stmt | null;
 };
-export type Stmt = Print | ExprStmt | MutDecl | Block | If;
+export type Stmt = Print | ExprStmt | MutDecl | LetDecl | Block | If;
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 // | { type: "Let"; name: Token; initializer: Expr | null }
