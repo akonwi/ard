@@ -22,8 +22,21 @@ export type Binary = {
   * it's right associative like most expressions
 */
 export type Assign = { type: "Assign"; name: Token; value: Expr };
+export type Logical = {
+	type: "Logical";
+	left: Expr;
+	operator: Token;
+	right: Expr;
+};
 
-export type Expr = Literal | Grouping | Unary | Binary | Variable | Assign;
+export type Expr =
+	| Literal
+	| Grouping
+	| Unary
+	| Binary
+	| Variable
+	| Assign
+	| Logical;
 
 export type Print = { type: "Print"; expression: Expr };
 export type ExprStmt = { type: "ExprStatement"; expression: Expr };

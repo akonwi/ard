@@ -55,6 +55,11 @@ export class Generator {
 				return `${expr.name.lexeme} = ${this.generateExpr(expr.value)}`;
 			case "Variable":
 				return expr.token.lexeme;
+			case "Logical":
+				const operator = expr.operator.lexeme === "or" ? "||" : "&&";
+				return `${this.generateExpr(expr.left)} ${operator} ${this.generateExpr(
+					expr.right,
+				)}`;
 		}
 		// @ts-expect-error - This should never happen
 		throw new Error("Unknown expression type: " + expr.type);

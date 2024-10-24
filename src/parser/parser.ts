@@ -21,7 +21,7 @@ export class Parser {
 	}
 
 	private assignment(): Expr {
-		const expr = this.equality();
+		const expr = this.or();
 		if (this.match(TokenType.ASSIGN)) {
 			const equals = this.previous();
 			const value = this.assignment();
@@ -249,7 +249,7 @@ export class Parser {
 		while (this.match(TokenType.OR)) {
 			const operator = this.previous();
 			const right = this.and();
-			expr = { type: "Binary", left: expr, operator, right };
+			expr = { type: "Logical", left: expr, operator, right };
 		}
 		return expr;
 	}
@@ -259,7 +259,7 @@ export class Parser {
 		while (this.match(TokenType.AND)) {
 			const operator = this.previous();
 			const right = this.equality();
-			expr = { type: "Binary", left: expr, operator, right };
+			expr = { type: "Logical", left: expr, operator, right };
 		}
 		return expr;
 	}

@@ -12,7 +12,9 @@ ifStatement -> "if" "(" expression ")" statement ( "else" statement )? ;
 
 expression → assignment ;
 assignment -> IDENTIFIER "=" expression
-    | equality ;
+    | logic_or ;
+logic_or -> logic_and ( "or" logic_and )* ;
+logic_and -> equality ( "and" equality )* ;
 equality -> comparison (( "==" | "!=" ) comparison)* ;
 comparison -> term (( ">" | ">=" | "<" | "<=" ) term)* ;
 term → factor (( "+" | "-") factor)* ;

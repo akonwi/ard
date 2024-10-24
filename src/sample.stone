@@ -1,0 +1,89 @@
+func fizzBuzz() {
+  for let i in 1...5 {
+    if i % 3 == 0 {
+      console.log "fizz"
+    }
+    else if i % 5 == 0 {
+      console.log "buzz"
+    }
+    else {
+      console.log i
+    }
+  }
+}
+
+// Variable declarations
+let name: String = "Alice"
+var age = 30
+
+// Constants
+let PI = 3.14159
+
+// Function declaration
+func greet(person: String) -> String {
+    return "Hello, " + person + "!"
+}
+
+// Control flow
+if age >= 18 {
+    // optional parens in function calls with arguments
+    console.log "You are an adult"
+} else {
+    console.log("You are a minor")
+}
+
+// Loop
+for i in 1...5 {
+    console.log i
+}
+
+// Enum
+enum Status {
+    case active
+    case inactive
+    case pending
+}
+
+// Struct
+struct Person {
+    let name: String
+    var age: Int
+}
+
+// Optional type
+var optionalName: Option<String> = .some("Bob")
+
+// Error handling
+func riskyOperation() throws -> String {
+    if someCondition {
+        throw Error("Operation failed")
+    }
+    return "Success"
+}
+
+// Using 'else' for error handling
+let result = riskyOperation() else {
+    return "Failed to perform operation"
+}
+
+// Async function
+async func fetchData() -> String {
+    // implementation
+    return "This is data"
+}
+
+// Pattern matching
+match point {
+    case (0, 0) -> console.log("Origin")
+    case (x, 0) -> console.log("On x-axis at " + x)
+    case (0, y) -> console.log("On y-axis at " + y)
+    case (x, y) -> console.log("At (" + x + ", " + y + ")")
+}
+
+// Array
+let numbers = [1, 2, 3, 4, 5]
+
+// Function call
+let greeting = greet(person: name)
+
+console.log(greeting)

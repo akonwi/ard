@@ -40,14 +40,25 @@ console.log(isInBlock);
 }`);
 	});
 
-	test.only("if ... {} else {}", () => {
-		const generator = new Generator();
-		debugger;
-		generator.input = new Parser(
-			new Lexer(`if (true) print "true";`).tokenize(),
-		).parse()!;
-		expect(generator.generate()).toEqual(
-			`if (true) {\n\tconsole.log("true");\n}`,
-		);
+	describe("control flow", () => {
+		test("if conditions", () => {
+			const generator = new Generator();
+			generator.input = new Parser(
+				new Lexer(`if (true) print "true";`).tokenize(),
+			).parse()!;
+			expect(generator.generate()).toEqual(
+				`if (true) {\n\tconsole.log("true");\n}`,
+			);
+		});
+
+		test("logic", () => {
+			const generator = new Generator();
+			generator.input = new Parser(
+				new Lexer(`if (true or false) print "true";`).tokenize(),
+			).parse()!;
+			expect(generator.generate()).toEqual(
+				`if (true || false) {\n\tconsole.log("true");\n}`,
+			);
+		});
 	});
 });

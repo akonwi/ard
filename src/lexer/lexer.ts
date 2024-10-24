@@ -99,6 +99,8 @@ export class Lexer {
 		func: TokenType.FUNC,
 		return: TokenType.RETURN,
 		if: TokenType.IF,
+		and: TokenType.AND,
+		or: TokenType.OR,
 		else: TokenType.ELSE,
 		for: TokenType.FOR,
 		in: TokenType.IN,
@@ -211,14 +213,14 @@ export class Lexer {
 					this.match("=") ? TokenType.GREATER_EQUAL : TokenType.GREATER_THAN,
 				);
 				break;
-			case "&":
-				if (this.match("&")) this.addToken(TokenType.AND);
-				else this.addToken(TokenType.ERROR, "Unexpected character");
-				break;
-			case "|":
-				if (this.match("|")) this.addToken(TokenType.OR);
-				else this.addToken(TokenType.ERROR, "Unexpected character");
-				break;
+			// case "&":
+			// 	if (this.match("&")) this.addToken(TokenType.AND);
+			// 	else this.addToken(TokenType.ERROR, "Unexpected character");
+			// 	break;
+			// case "|":
+			// 	if (this.match("|")) this.addToken(TokenType.OR);
+			// 	else this.addToken(TokenType.ERROR, "Unexpected character");
+			// 	break;
 			case " ":
 			case "\r":
 			case "\t":
