@@ -3,6 +3,7 @@ program: declaration* EOF;
 declaration: mutDecl | letDecl | statement ;
 mutDecl: "mut" IDENTIFIER (":" type)? "=" expression ? (";")? ;
 letDecl: "let" IDENTIFIER (":" type)? "=" expression ? (";")? ;
+fnDecl: "fn" IDENTIFIER "(" (primary)? ")" block ;
 type ->
     | "Int"
     | "Float"
@@ -42,7 +43,7 @@ factor: unary (( "*" | "/" ) unary)* ;
 unary → ( "-" | "!" ) unary
     | primary ;
 primary: "true" | "false" |
-    | NUMBER | STRING |
+    | INTEGER | DOUBLE | STRING |
     "(" expression ")"
     | IDENTIFIER ;
 

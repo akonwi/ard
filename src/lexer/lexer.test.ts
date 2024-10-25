@@ -287,9 +287,10 @@ describe("Lexer", () => {
 
 	describe("functions", () => {
 		test("a simple function", () => {});
-		const input = `func greet(name: String) -> String {
-  return "Hello, " + name + "!"
-}`;
+		const input = `
+fn greet(name) {
+  "Hello, " + name + "!"
+}`.trim();
 		const tokens = new Lexer(input).tokenize();
 
 		expect(tokens).toEqual([
@@ -297,73 +298,55 @@ describe("Lexer", () => {
 				type: TokenType.FUNC,
 				line: 1,
 				column: 1,
-				lexeme: "func",
+				lexeme: "fn",
 			}),
 			Token.init({
 				type: TokenType.IDENTIFIER,
 				line: 1,
-				column: 6,
+				column: 4,
 				lexeme: "greet",
 			}),
 			Token.init({
 				type: TokenType.LEFT_PAREN,
 				line: 1,
-				column: 11,
+				column: 9,
 				lexeme: "(",
 			}),
 			Token.init({
 				type: TokenType.IDENTIFIER,
 				line: 1,
-				column: 12,
+				column: 10,
 				lexeme: "name",
-			}),
-			Token.init({
-				type: TokenType.COLON,
-				line: 1,
-				column: 16,
-				lexeme: ":",
-			}),
-			Token.init({
-				type: TokenType.IDENTIFIER,
-				line: 1,
-				column: 18,
-				lexeme: "String",
 			}),
 			Token.init({
 				type: TokenType.RIGHT_PAREN,
 				line: 1,
-				column: 24,
+				column: 14,
 				lexeme: ")",
 			}),
 			Token.init({
-				type: TokenType.ARROW,
-				line: 1,
-				column: 26,
-				lexeme: "->",
-			}),
-			Token.init({
-				type: TokenType.IDENTIFIER,
-				line: 1,
-				column: 29,
-				lexeme: "String",
-			}),
-			Token.init({
 				type: TokenType.LEFT_BRACE,
-				column: 36,
+				column: 16,
 				line: 1,
 				lexeme: "{",
 			}),
 			Token.init({
-				type: TokenType.RETURN,
-				line: 2,
 				column: 3,
-				lexeme: "return",
-			}),
-			Token.init({
-				column: 10,
 				line: 2,
 				type: TokenType.STRING,
 				lexeme: "Hello, ",
+			}),
+			Token.init({
+				column: 13,
+				line: 2,
+				type: TokenType.PLUS,
+				lexeme: "+",
+			}),
+			Token.init({
+				column: 15,
+				line: 2,
+				type: TokenType.IDENTIFIER,
+				lexeme: "name",
 			}),
 			Token.init({
 				column: 20,
@@ -373,18 +356,6 @@ describe("Lexer", () => {
 			}),
 			Token.init({
 				column: 22,
-				line: 2,
-				type: TokenType.IDENTIFIER,
-				lexeme: "name",
-			}),
-			Token.init({
-				column: 27,
-				line: 2,
-				type: TokenType.PLUS,
-				lexeme: "+",
-			}),
-			Token.init({
-				column: 29,
 				line: 2,
 				type: TokenType.STRING,
 				lexeme: "!",

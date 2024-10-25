@@ -99,7 +99,7 @@ export class Lexer {
 	private keywords: { [key: string]: TokenType } = {
 		let: TokenType.LET,
 		mut: TokenType.MUT,
-		func: TokenType.FUNC,
+		fn: TokenType.FUNC,
 		return: TokenType.RETURN,
 		if: TokenType.IF,
 		and: TokenType.AND,
