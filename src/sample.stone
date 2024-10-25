@@ -12,6 +12,17 @@ if age >= 18 {
   print "You are a minor"
 }
 
+mut count = 0
+while count <= 9 {
+  // TODO: += operator
+  age =+ 1
+}
+
+for i in 1...5 {
+  print i
+}
+
+
 
 // func fizzBuzz() {
 //   for let i in 1...5 {

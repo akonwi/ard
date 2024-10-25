@@ -39,12 +39,15 @@ export enum TokenType {
 	STAR = "MULTIPLY",
 	SLASH = "DIVIDE",
 	ASSIGN = "ASSIGN",
+	INCREMENT = "INCREMENT",
+	DECREMENT = "DECREMENT",
 	EQUAL = "EQUAL",
 	NOT_EQUAL = "NOT_EQUAL",
 	GREATER_THAN = "GREATER_THAN",
 	LESS_THAN = "LESS_THAN",
 	GREATER_EQUAL = "GREATER_EQUAL",
 	LESS_EQUAL = "LESS_EQUAL",
+	RANGE_DOTS = "RANGE_DOTS",
 
 	// Delimiters
 	LEFT_PAREN = "LEFT_PAREN",
@@ -167,9 +170,14 @@ export class Lexer {
 			case ",":
 				this.addToken(TokenType.COMMA);
 				break;
-			case ".":
-				this.addToken(TokenType.DOT);
+			case ".": {
+				if (this.match(".") && this.match(".")) {
+					this.addToken(TokenType.RANGE_DOTS);
+				} else {
+					this.addToken(TokenType.DOT);
+				}
 				break;
+			}
 			case ":":
 				this.addToken(TokenType.COLON);
 				break;
@@ -197,9 +205,22 @@ export class Lexer {
 					this.addToken(TokenType.SLASH);
 				}
 				break;
-			case "=":
-				this.addToken(this.match("=") ? TokenType.EQUAL : TokenType.ASSIGN);
+			case "=": {
+				if (this.match("=")) {
+					this.addToken(TokenType.EQUAL);
+					break;
+				}
+				if (this.match("+")) {
+					this.addToken(TokenType.INCREMENT);
+					break;
+				}
+				if (this.match("-")) {
+					this.addToken(TokenType.DECREMENT);
+					break;
+				}
+				this.addToken(TokenType.ASSIGN);
 				break;
+			}
 			case "!":
 				this.addToken(this.match("=") ? TokenType.NOT_EQUAL : TokenType.BANG);
 				break;

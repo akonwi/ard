@@ -48,6 +48,19 @@ export class Generator {
 					return ifStmt + ` else ${this.generateStmt(stmt.elseBranch)}`;
 				}
 				return ifStmt;
+			case "While": {
+				return `${this.indent}while (${this.generateExpr(
+					stmt.condition,
+				)}) ${this.generateStmt(stmt.body)}`;
+			}
+			case "ForIn": {
+				const { start, end } = stmt.range;
+				return `${this.indent}for (let ${stmt.cursor.lexeme} = ${Number(
+					start.lexeme,
+				)}; ${stmt.cursor.lexeme} <= ${Number(end.lexeme)}; ${
+					stmt.cursor.lexeme
+				}+=1) ${this.generateStmt(stmt.body)}`;
+			}
 			default:
 				// @ts-expect-error - This should never happen
 				throw new Error("Unknown statement type: " + stmt.type);
@@ -66,6 +79,10 @@ export class Generator {
 				return this.generateLiteral(expr);
 			case "Assign":
 				return `${expr.name.lexeme} = ${this.generateExpr(expr.value)}`;
+			case "Increment":
+				return `${expr.name.lexeme} += ${this.generateExpr(expr.value)}`;
+			case "Decrement":
+				return `${expr.name.lexeme} -= ${this.generateExpr(expr.value)}`;
 			case "Variable":
 				return expr.token.lexeme;
 			case "Logical":

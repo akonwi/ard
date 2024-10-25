@@ -1,4 +1,4 @@
-import type { Block, Expr, Print, Stmt } from "../ast";
+import type { Block, Expr, Print, RangeExpr, Stmt } from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 
 class ParseError extends Error {}
@@ -16,12 +16,38 @@ export class Parser {
 		return statements;
 	}
 
+	private debug(label?: string) {
+		console.log(label, {
+			current: this.peek(),
+			previous: this.previous(),
+			next: this.tokens[this.current + 1],
+		});
+	}
+
 	private expression(): Expr {
 		return this.assignment();
 	}
 
 	private assignment(): Expr {
 		const expr = this.or();
+
+		if (this.match(TokenType.INCREMENT)) {
+			const plus = this.previous();
+			const value = this.assignment();
+			if (expr.type === "Variable") {
+				return { type: "Increment", name: expr.token, value };
+			}
+			this.error(plus, "Invalid assignment target.");
+		}
+		if (this.match(TokenType.DECREMENT)) {
+			const plus = this.previous();
+			const value = this.assignment();
+			if (expr.type === "Variable") {
+				return { type: "Decrement", name: expr.token, value };
+			}
+			this.error(plus, "Invalid assignment target.");
+		}
+
 		if (this.match(TokenType.ASSIGN)) {
 			const equals = this.previous();
 			const value = this.assignment();
@@ -105,6 +131,8 @@ export class Parser {
 		if (this.match(TokenType.PRINT)) return this.printStatement();
 		if (this.match(TokenType.LEFT_BRACE)) return this.block();
 		if (this.match(TokenType.IF)) return this.ifStatement();
+		if (this.match(TokenType.WHILE)) return this.whileStatement();
+		if (this.match(TokenType.FOR)) return this.forStatement();
 		return this.expressionStatement();
 		// if (this.match(TokenType.WHILE)) return this.whileStatement();
 		// if (this.match(TokenType.FOR)) return this.forStatement();
@@ -129,7 +157,7 @@ export class Parser {
 
 	private expressionStatement(): Stmt {
 		const expr = this.expression();
-		this.consume(TokenType.SEMICOLON, "Expect ';' after expression.");
+		this.match(TokenType.SEMICOLON);
 		return { type: "ExprStatement", expression: expr };
 	}
 
@@ -176,12 +204,51 @@ export class Parser {
 
 	private ifStatement(): Stmt {
 		const condition = this.expression();
-		const thenBranch: Stmt = this.statement();
+		this.consume(TokenType.LEFT_BRACE, "Expect '{' after if condition.");
+		const thenBranch: Stmt = this.block();
 		let elseBranch: Stmt | null = null;
 		if (this.match(TokenType.ELSE)) {
-			elseBranch = this.statement();
+			this.consume(TokenType.LEFT_BRACE, "Expect '{' after else condition.");
+			elseBranch = this.block();
 		}
 		return { type: "If", condition, thenBranch, elseBranch };
+	}
+
+	private whileStatement(): Stmt {
+		const condition = this.expression();
+		this.consume(TokenType.LEFT_BRACE, "Expect '{' after while condition.");
+		const body = this.block();
+		return { type: "While", condition, body };
+	}
+
+	private forStatement(): Stmt {
+		const cursor = this.consume(
+			TokenType.IDENTIFIER,
+			"Expect cursor name after 'for'.",
+		);
+		this.consume(TokenType.IN, "Expect 'in' after cursor name.");
+		const range = this.rangeExpression();
+		this.consume(TokenType.LEFT_BRACE, "Expect '{' after 'for range'.");
+		const body = this.block();
+		return {
+			type: "ForIn",
+			cursor,
+			range,
+			body,
+		};
+	}
+
+	private rangeExpression(): RangeExpr {
+		const start = this.consume(
+			TokenType.INTEGER,
+			"Expect integer range after 'for'.",
+		);
+		this.consume(TokenType.RANGE_DOTS, "Expect integer range after 'for'.");
+		const end = this.consume(
+			TokenType.INTEGER,
+			"Expect integer range after 'for'.",
+		);
+		return { type: "RangeExpr", start, end };
 	}
 
 	private function(kind: string): Stmt {
@@ -202,52 +269,6 @@ export class Parser {
 		this.consume(TokenType.LEFT_BRACE, `Expect '{' before ${kind} body.`);
 		const body = this.block();
 		return { type: "Function", name, params: parameters, body };
-	}
-
-	private whileStatement(): Stmt {
-		this.consume(TokenType.LEFT_PAREN, "Expect '(' after 'while'.");
-		const condition = this.expression();
-		this.consume(TokenType.RIGHT_PAREN, "Expect ')' after condition.");
-		const body = this.statement();
-		return { type: "While", condition, body };
-	}
-
-	private forStatement(): Stmt {
-		throw new Error("For statement not implemented yet.");
-		// this.consume(TokenType.LEFT_PAREN, "Expect '(' after 'for'.");
-		// let initializer: Stmt | null;
-		// if (this.match(TokenType.COLON)) {
-		// 	initializer = null;
-		// } else if (this.match(TokenType.LET)) {
-		// 	initializer = this.letDeclaration();
-		// } else if (this.match(TokenType.MUT)) {
-		// 	initializer = this.mutDeclaration();
-		// } else {
-		// 	initializer = this.expressionStatement();
-		// }
-		// let condition: Expr | null = null;
-		// if (!this.check(TokenType.SEMICOLON)) {
-		// 	condition = this.expression();
-		// }
-		// this.consume(TokenType.SEMICOLON, "Expect ';' after loop condition.");
-		// let increment = null;
-		// if (!this.check(TokenType.RIGHT_PAREN)) {
-		// 	increment = this.expression();
-		// }
-		// this.consume(TokenType.RIGHT_PAREN, "Expect ')' after for clauses.");
-		// let body = this.statement();
-		// if (increment !== null) {
-		// 	body = {
-		// 		type: "Block",
-		// 		statements: [body, { type: "Expression", expression: increment }],
-		// 	};
-		// }
-		// if (condition === null) condition = { type: "Literal", value: true };
-		// body = { type: "While", condition, body };
-		// if (initializer !== null) {
-		// 	body = { type: "Block", statements: [initializer, body] };
-		// }
-		// return body;
 	}
 
 	// private returnStatement(): Stmt {

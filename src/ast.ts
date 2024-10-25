@@ -22,11 +22,18 @@ export type Binary = {
   * it's right associative like most expressions
 */
 export type Assign = { type: "Assign"; name: Token; value: Expr };
+export type Increment = { type: "Increment"; name: Token; value: Expr };
+export type Decrement = { type: "Decrement"; name: Token; value: Expr };
 export type Logical = {
 	type: "Logical";
 	left: Expr;
 	operator: Token;
 	right: Expr;
+};
+export type RangeExpr = {
+	type: "RangeExpr";
+	start: Token;
+	end: Token;
 };
 
 export type Expr =
@@ -36,7 +43,10 @@ export type Expr =
 	| Binary
 	| Variable
 	| Assign
-	| Logical;
+	| Increment
+	| Decrement
+	| Logical
+	| RangeExpr;
 
 export type Print = { type: "Print"; expression: Expr };
 export type ExprStmt = { type: "ExprStatement"; expression: Expr };
@@ -59,7 +69,26 @@ export type If = {
 	thenBranch: Stmt;
 	elseBranch: Stmt | null;
 };
-export type Stmt = Print | ExprStmt | MutDecl | LetDecl | Block | If;
+export type While = {
+	type: "While";
+	condition: Expr;
+	body: Stmt;
+};
+export type ForIn = {
+	type: "ForIn";
+	cursor: Token;
+	range: RangeExpr;
+	body: Stmt;
+};
+export type Stmt =
+	| Print
+	| ExprStmt
+	| MutDecl
+	| LetDecl
+	| Block
+	| If
+	| While
+	| ForIn;
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 // | { type: "Let"; name: Token; initializer: Expr | null }
