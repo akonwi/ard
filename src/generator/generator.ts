@@ -15,6 +15,9 @@ export class Generator {
 
 	private generateStmt(stmt: Stmt): string {
 		switch (stmt.type) {
+			case "BlankLine": {
+				return "";
+			}
 			case "ExprStatement":
 				return this.indent + this.generateExpr(stmt.expression) + ";";
 			case "Print":

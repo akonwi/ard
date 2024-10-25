@@ -1,7 +1,8 @@
 let count = 0;
 while (count <= 9) {
-	age += 1;
+	count += 1;
 }
+
 for (let i = 1; i <= 5; i+=1) {
 	console.log(i);
 }

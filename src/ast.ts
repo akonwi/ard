@@ -1,5 +1,6 @@
 import type { Token } from "./lexer/lexer";
 
+export type BlankLine = { type: "BlankLine" };
 export type Literal = { type: "Literal"; token: Token; value: any };
 export type Variable = { type: "Variable"; token: Token };
 export type Grouping = { type: "Grouping"; expression: Expr };
@@ -97,7 +98,8 @@ export type Stmt =
 	| If
 	| While
 	| ForIn
-	| Func;
+	| Func
+	| BlankLine;
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 // | { type: "Let"; name: Token; initializer: Expr | null }

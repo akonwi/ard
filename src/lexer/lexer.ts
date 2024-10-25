@@ -64,6 +64,7 @@ export enum TokenType {
 
 	// Special tokens
 	EOF = "EOF",
+	BLANK_LINE = "BLANK_LINE",
 	ERROR = "ERROR",
 	// Print statement
 	PRINT = "PRINT",
@@ -247,10 +248,25 @@ export class Lexer {
 			case "\t":
 				// Ignore whitespace.
 				break;
-			case "\n":
+			case "\n": {
+				// treat two consistent blanks as 1 empty
+				if (this.peek() === "\n") {
+					this.line++;
+					this.column = 1;
+					this.tokens.push(
+						Token.init({
+							type: TokenType.BLANK_LINE,
+							lexeme: "\n",
+							line: this.line,
+							column: this.column,
+						}),
+					);
+					break;
+				}
 				this.line++;
 				this.column = 1;
 				break;
+			}
 			case '"':
 				this.string();
 				break;

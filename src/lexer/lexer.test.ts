@@ -2,6 +2,61 @@ import { Lexer, Token, TokenType } from "./lexer";
 import { describe, it, expect, test } from "bun:test";
 
 describe("Lexer", () => {
+	describe("\\n", () => {
+		it("a single \\n is a line break", () => {
+			const lexer = new Lexer(`foo\nbar`);
+			expect(lexer.tokenize()).toEqual([
+				Token.init({
+					type: TokenType.IDENTIFIER,
+					line: 1,
+					column: 1,
+					lexeme: "foo",
+				}),
+				Token.init({
+					type: TokenType.IDENTIFIER,
+					line: 2,
+					column: 1,
+					lexeme: "bar",
+				}),
+				Token.init({
+					type: TokenType.EOF,
+					line: 2,
+					column: 4,
+					lexeme: "",
+				}),
+			]);
+		});
+
+		it("double \\n is an empty line", () => {
+			const lexer = new Lexer(`foo\n\nbar`);
+			expect(lexer.tokenize()).toEqual([
+				Token.init({
+					type: TokenType.IDENTIFIER,
+					line: 1,
+					column: 1,
+					lexeme: "foo",
+				}),
+				Token.init({
+					type: TokenType.BLANK_LINE,
+					line: 2,
+					column: 1,
+					lexeme: "\n",
+				}),
+				Token.init({
+					type: TokenType.IDENTIFIER,
+					line: 3,
+					column: 1,
+					lexeme: "bar",
+				}),
+				Token.init({
+					type: TokenType.EOF,
+					line: 3,
+					column: 4,
+					lexeme: "",
+				}),
+			]);
+		});
+	});
 	it("should tokenize a simple let declaration", () => {
 		const input = "let x = 5";
 		const lexer = new Lexer(input);

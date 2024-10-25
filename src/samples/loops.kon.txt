@@ -1,6 +1,6 @@
 mut count = 0
 while count <= 9 {
-  age =+ 1
+  count =+ 1
 }
 
 for i in 1...5 {

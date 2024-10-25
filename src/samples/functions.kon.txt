@@ -1,8 +1,8 @@
 fn greet(person) {
-		let msg = "Hello, " + person + "!"
-		return msg
+	let msg = "Hello, " + person + "!"
+	return msg
 }
 
 fn add(x, y) {
-    x + y
+  return x + y
 }

@@ -120,6 +120,7 @@ export class Parser {
 			if (this.match(TokenType.MUT)) return this.mutDeclaration();
 			if (this.match(TokenType.LET)) return this.letDeclaration();
 			if (this.match(TokenType.FUNC)) return this.function("function");
+			if (this.match(TokenType.BLANK_LINE)) return { type: "BlankLine" };
 			return this.statement();
 		} catch (error) {
 			this.synchronize();
