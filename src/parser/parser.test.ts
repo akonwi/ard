@@ -65,6 +65,7 @@ describe("Parser", () => {
 					column: 5,
 					line: 1,
 				}),
+				_staticType: null,
 				initializer: {
 					type: "Literal",
 					token: Token.init({

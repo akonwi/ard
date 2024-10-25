@@ -12,4 +12,3 @@ function compile(input: string): string {
 }
 
 const sample = fs.readFileSync(require.resolve("./sample.stone"), "utf-8");
-console.log(compile(sample));

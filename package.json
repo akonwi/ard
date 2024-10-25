@@ -1,14 +1,14 @@
 {
-  "name": "stone",
-  "version": "0.0.0",
-  "description": "the stone language compiler",
-  "main": "index.js",
-  "author": "akonwi",
-  "license": "MIT",
-  "scripts": {},
-  "devDependencies": {
-    "@types/bun": "^1.1.12",
-    "@types/node": "^22.7.7",
-    "typescript": "^5.6.3"
-  }
+	"name": "kon",
+	"version": "0.0.0",
+	"description": "the kon language compiler",
+	"main": "index.js",
+	"author": "akonwi",
+	"license": "MIT",
+	"scripts": {},
+	"devDependencies": {
+		"@types/bun": "^1.1.12",
+		"@types/node": "^22.7.7",
+		"typescript": "^5.6.3"
+	}
 }
