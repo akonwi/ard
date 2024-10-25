@@ -1,0 +1,5 @@
+if age >= 18 or has_served {
+  print "You are an adult"
+} else {
+  print "You are a minor"
+}

@@ -2,63 +2,31 @@ import { describe, expect, test } from "bun:test";
 import { Generator } from "./generator";
 import { Lexer } from "../lexer/lexer";
 import { Parser } from "../parser/parser";
+import controlFlowKon from "../samples/control-flow.kon.txt";
+import controlFlowJs from "../samples/control-flow.js.txt";
+import variablesKon from "../samples/variables.kon.txt";
+import variablesJs from "../samples/variables.js.txt";
+import mathKon from "../samples/math.kon.txt";
+import mathJs from "../samples/math.js.txt";
+import loopsKon from "../samples/loops.kon.txt";
+import loopsJs from "../samples/loops.js.txt";
+
+const generator = new Generator();
+
+function ast(input: string) {
+	const tree = new Parser(new Lexer(input).tokenize()).parse();
+	expect(tree).toBeDefined();
+	return tree;
+}
 
 describe("javascript generator", () => {
-	test("generating a JS expression", () => {
-		const generator = new Generator();
-		generator.input = new Parser(
-			new Lexer("1 + 2 + (2 * 3) - 4;").tokenize(),
-		).parse()!;
-		expect(generator.generate()).toEqual("1 + 2 + (2 * 3) - 4;");
-	});
-
-	test("generating a print expression", () => {
-		const generator = new Generator();
-		generator.input = new Parser(new Lexer("print 2 + 2;").tokenize()).parse()!;
-		expect(generator.generate()).toEqual("console.log(2 + 2);");
-	});
-
-	test("generating a mut statement", () => {
-		const generator = new Generator();
-		generator.input = new Parser(
-			new Lexer(`mut maths = 2 + 2;maths = 5;`).tokenize(),
-		).parse()!;
-		expect(generator.generate()).toEqual("let maths = 2 + 2;\nmaths = 5;");
-	});
-
-	test("generating blocks", () => {
-		const generator = new Generator();
-		generator.input = new Parser(
-			new Lexer(`{
-			  mut isInBlock = true;
-				print isInBlock;
-			}`).tokenize(),
-		).parse()!;
-		expect(generator.generate()).toEqual(`{
-let isInBlock = true;
-console.log(isInBlock);
-}`);
-	});
-
-	describe("control flow", () => {
-		test("if conditions", () => {
-			const generator = new Generator();
-			generator.input = new Parser(
-				new Lexer(`if (true) print "true";`).tokenize(),
-			).parse()!;
-			expect(generator.generate()).toEqual(
-				`if (true) {\n\tconsole.log("true");\n}`,
-			);
-		});
-
-		test("logic", () => {
-			const generator = new Generator();
-			generator.input = new Parser(
-				new Lexer(`if (true or false) print "true";`).tokenize(),
-			).parse()!;
-			expect(generator.generate()).toEqual(
-				`if (true || false) {\n\tconsole.log("true");\n}`,
-			);
-		});
+	test.each([
+		["variable declarations", variablesKon, variablesJs],
+		["control flow", controlFlowKon, controlFlowJs],
+		["arithmatic", mathKon, mathJs],
+		["loops", loopsKon, loopsJs],
+	])(`%s`, (_, kon, js) => {
+		generator.input = ast(kon);
+		expect(generator.generate()).toEqual(js.trim());
 	});
 });
