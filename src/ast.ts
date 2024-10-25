@@ -80,20 +80,27 @@ export type ForIn = {
 	range: RangeExpr;
 	body: Stmt;
 };
+export type Func = {
+	type: "Function";
+	name: Token;
+	params: Token[];
+	body: Block;
+};
+export type Return = { type: "Return"; keyword: Token; value: Expr | null };
 export type Stmt =
 	| Print
+	| Return
 	| ExprStmt
 	| MutDecl
 	| LetDecl
 	| Block
 	| If
 	| While
-	| ForIn;
+	| ForIn
+	| Func;
 // | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 // | { type: "Let"; name: Token; initializer: Expr | null }
 // | { type: "Mut"; name: Token; initializer: Expr | null }
 // | { type: "If"; condition: Expr; thenBranch: Stmt; elseBranch: Stmt | null }
 // | { type: "While"; condition: Expr; body: Stmt }
-// | { type: "Function"; name: Token; params: Token[]; body: Stmt[] }
-// | { type: "Return"; keyword: Token; value: Expr | null };

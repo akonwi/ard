@@ -1,4 +1,4 @@
-import type { Binary, Expr, Literal, Stmt, Unary } from "../ast";
+import type { Binary, Expr, Func, Literal, Stmt, Unary } from "../ast";
 
 export class Generator {
 	private statements: Stmt[] = [];
@@ -61,10 +61,25 @@ export class Generator {
 					stmt.cursor.lexeme
 				}+=1) ${this.generateStmt(stmt.body)}`;
 			}
+			case "Function": {
+				return this.generateFunction(stmt);
+			}
+			case "Return": {
+				return `${this.indent}return ${
+					stmt.value ? this.generateExpr(stmt.value) : ""
+				};`;
+			}
 			default:
 				// @ts-expect-error - This should never happen
 				throw new Error("Unknown statement type: " + stmt.type);
 		}
+	}
+
+	private generateFunction({ name, params: _params, body }: Func): string {
+		const params = _params.map((p) => p.lexeme).join(", ");
+		return `${this.indent}function ${
+			name.lexeme
+		}(${params}) ${this.generateStmt(body)}`;
 	}
 
 	private generateExpr(expr: Expr): string {

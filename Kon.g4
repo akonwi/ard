@@ -3,7 +3,7 @@ program: declaration* EOF;
 declaration: mutDecl | letDecl | statement ;
 mutDecl: "mut" IDENTIFIER (":" type)? "=" expression ? (";")? ;
 letDecl: "let" IDENTIFIER (":" type)? "=" expression ? (";")? ;
-fnDecl: "fn" IDENTIFIER "(" (primary)? ")" block ;
+fnDecl: "fn" IDENTIFIER "(" ( primary "," )? ")" block ;
 type ->
     | "Int"
     | "Float"
@@ -16,6 +16,7 @@ type ->
 statement:
     | exprStatement
     | printStatement
+    | returnStatement
     | ifStatement
     | whileStatement
     | forStatement
@@ -24,6 +25,7 @@ statement:
 block: "{" declaration* "}" ;
 exprStatement: expression ";" ;
 printStatement: "print" expression (";")? ;
+returnStatement: "return" expression (";")? ;
 ifStatement: "if" expression block ( "else" block )? ;
 whileStatement: "while" expression block ;
 forStatement: "for" IDENTIFIER "in" rangeExpression block ;

@@ -19,7 +19,7 @@ export class Parser {
 	private debug(label?: string) {
 		console.log(label, {
 			current: this.peek(),
-			previous: this.previous(),
+			previous: this.tokens[this.current - 1],
 			next: this.tokens[this.current + 1],
 		});
 	}
@@ -133,10 +133,9 @@ export class Parser {
 		if (this.match(TokenType.IF)) return this.ifStatement();
 		if (this.match(TokenType.WHILE)) return this.whileStatement();
 		if (this.match(TokenType.FOR)) return this.forStatement();
+		if (this.match(TokenType.RETURN)) return this.returnStatement();
 		return this.expressionStatement();
-		// if (this.match(TokenType.WHILE)) return this.whileStatement();
-		// if (this.match(TokenType.FOR)) return this.forStatement();
-		// if (this.match(TokenType.RETURN)) return this.returnStatement();
+		// TODO: immediately evaluated blocks
 		// 	return { type: "Block", statements: this.block() };
 	}
 
@@ -271,14 +270,15 @@ export class Parser {
 		return { type: "Function", name, params: parameters, body };
 	}
 
-	// private returnStatement(): Stmt {
-	// 	const keyword = this.previous();
-	// 	let value = null;
-	// 	// if (!this.check(TokenType.SEMICOLON)) {
-	// 	value = this.expression();
-	// 	// }
-	// 	return { type: "Return", keyword, value };
-	// }
+	private returnStatement(): Stmt {
+		const keyword = this.previous();
+		let value = null;
+		if (!this.check(TokenType.SEMICOLON)) {
+			value = this.expression();
+		}
+		this.match(TokenType.SEMICOLON);
+		return { type: "Return", keyword, value };
+	}
 
 	private or(): Expr {
 		let expr = this.and();
