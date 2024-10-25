@@ -91,7 +91,6 @@ export class Generator {
 					expr.right,
 				)}`;
 		}
-		// @ts-expect-error - This should never happen
 		throw new Error("Unknown expression type: " + expr.type);
 	}
 
