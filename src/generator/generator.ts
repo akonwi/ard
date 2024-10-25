@@ -16,33 +16,38 @@ export class Generator {
 	private generateStmt(stmt: Stmt): string {
 		switch (stmt.type) {
 			case "ExprStatement":
-				return this.generateExpr(stmt.expression) + ";";
-			// Add more cases for other statement types as needed
+				return this.indent + this.generateExpr(stmt.expression) + ";";
 			case "Print":
-				return `console.log(${this.generateExpr(stmt.expression)});`;
+				return (
+					this.indent + `console.log(${this.generateExpr(stmt.expression)});`
+				);
 			case "MutDecl":
-				return `let ${stmt.name.lexeme} = ${this.generateExpr(
-					stmt.initializer,
-				)};`;
+				return (
+					this.indent +
+					`let ${stmt.name.lexeme} = ${this.generateExpr(stmt.initializer)};`
+				);
 			case "LetDecl":
-				return `const ${stmt.name.lexeme} = ${this.generateExpr(
-					stmt.initializer,
-				)};`;
+				return (
+					this.indent +
+					`const ${stmt.name.lexeme} = ${this.generateExpr(stmt.initializer)};`
+				);
 			case "Block":
+				const prevIndent = this.indent;
 				this.indent += "\t";
 				const block = stmt.statements
 					.map((s) => this.generateStmt(s))
 					.join("\n");
-				this.indent = this.indent.slice(0, -1);
-				return `{\n${block}\n${this.indent}}`;
+				this.indent = prevIndent;
+				return `{\n${this.indent}${block}\n}`;
 			case "If":
-				let str = `if (${this.generateExpr(
+				const ifStmt = `${this.indent}if (${this.generateExpr(
 					stmt.condition,
-				)}) {\n\t${this.generateStmt(stmt.thenBranch)}\n}`;
+				)}) ${this.generateStmt(stmt.thenBranch)}`;
+
 				if (stmt.elseBranch) {
-					str += ` else {\n\t${this.generateStmt(stmt.elseBranch)}\n}`;
+					return ifStmt + ` else ${this.generateStmt(stmt.elseBranch)}`;
 				}
-				return str;
+				return ifStmt;
 			default:
 				// @ts-expect-error - This should never happen
 				throw new Error("Unknown statement type: " + stmt.type);

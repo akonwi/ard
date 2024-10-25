@@ -123,7 +123,7 @@ export class Parser {
 
 	private printStatement(): Print {
 		const expression = this.expression();
-		this.consume(TokenType.SEMICOLON, "Expect ';' after value.");
+		this.match(TokenType.SEMICOLON);
 		return { type: "Print", expression };
 	}
 
@@ -175,9 +175,7 @@ export class Parser {
 	}
 
 	private ifStatement(): Stmt {
-		this.consume(TokenType.LEFT_PAREN, "Expect '(' after 'if'.");
 		const condition = this.expression();
-		this.consume(TokenType.RIGHT_PAREN, "Expect ')' after if condition.");
 		const thenBranch: Stmt = this.statement();
 		let elseBranch: Stmt | null = null;
 		if (this.match(TokenType.ELSE)) {

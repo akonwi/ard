@@ -2,6 +2,17 @@ mut name: String = "Alice"
 let age: Int = 30; // semicolons to end statements are optional
 let boolean = true
 
+let multiplication = -123 * 45.67
+let addition = 1 + 1
+let big_maths = 1 + 2 - 2 * 3 / 4
+
+if age >= 18 {
+  print "You are an adult"
+} else {
+  print "You are a minor"
+}
+
+
 // func fizzBuzz() {
 //   for let i in 1...5 {
 //     if i % 3 == 0 {
