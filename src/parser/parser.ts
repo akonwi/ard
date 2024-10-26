@@ -37,15 +37,33 @@ export class Parser {
 	private expression(): Expr {
 		const expr = this.assignment();
 
-		if (this.match(TokenType.LEFT_PAREN) && this.match(TokenType.RIGHT_PAREN)) {
+		if (this.match(TokenType.LEFT_PAREN)) {
+			return this.call(expr);
+		}
+
+		return expr;
+	}
+
+	private call(callee: Expr): Expr {
+		if (this.match(TokenType.RIGHT_PAREN)) {
 			return {
 				type: "Call",
-				callee: expr,
+				callee,
 				arguments: [],
 			};
 		}
 
-		return expr;
+		const args: Expr[] = [];
+		do {
+			args.push(this.expression());
+		} while (this.match(TokenType.COMMA));
+		this.consume(TokenType.RIGHT_PAREN, "Expect ')' to end function call.");
+
+		return {
+			type: "Call",
+			callee,
+			arguments: args,
+		};
 	}
 
 	private assignment(): Expr {

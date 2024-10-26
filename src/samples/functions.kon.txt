@@ -9,6 +9,8 @@ fn greet(person) {
 	return msg
 }
 
+greet(person)
+
 fn add(x, y) {
   return x + y
 }

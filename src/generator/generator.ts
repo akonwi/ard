@@ -115,7 +115,8 @@ export class Generator {
 					expr.right,
 				)}`;
 			case "Call": {
-				return `${this.indent}${this.generateExpr(expr.callee)}()`;
+				const args = expr.arguments.map((a) => this.generateExpr(a)).join(", ");
+				return `${this.indent}${this.generateExpr(expr.callee)}(${args})`;
 			}
 		}
 		throw new Error("Unknown expression type: " + expr.type);

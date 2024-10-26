@@ -9,6 +9,8 @@ function greet(person) {
 	return msg;
 }
 
+greet(person);
+
 function add(x, y) {
 	return x + y;
 }
