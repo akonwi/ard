@@ -114,6 +114,9 @@ export class Generator {
 				return `${this.generateExpr(expr.left)} ${operator} ${this.generateExpr(
 					expr.right,
 				)}`;
+			case "Call": {
+				return `${this.indent}${this.generateExpr(expr.callee)}()`;
+			}
 		}
 		throw new Error("Unknown expression type: " + expr.type);
 	}

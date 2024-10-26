@@ -35,7 +35,17 @@ export class Parser {
 	}
 
 	private expression(): Expr {
-		return this.assignment();
+		const expr = this.assignment();
+
+		if (this.match(TokenType.LEFT_PAREN) && this.match(TokenType.RIGHT_PAREN)) {
+			return {
+				type: "Call",
+				callee: expr,
+				arguments: [],
+			};
+		}
+
+		return expr;
 	}
 
 	private assignment(): Expr {
@@ -436,18 +446,6 @@ export class Parser {
 			this.advance();
 		}
 	}
-
-	// private call(): Expr {
-	// 	let expr = this.primary();
-	// 	while (true) {
-	// 		if (this.match(TokenType.LEFT_PAREN)) {
-	// 			expr = this.finishCall(expr);
-	// 		} else {
-	// 			break;
-	// 		}
-	// 	}
-	// 	return expr;
-	// }
 
 	// private finishCall(callee: Expr): Expr {
 	// 	const args: Expr[] = [];

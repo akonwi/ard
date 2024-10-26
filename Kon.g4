@@ -31,7 +31,8 @@ whileStatement: "while" expression block ;
 forStatement: "for" IDENTIFIER "in" rangeExpression block ;
 rangeExpression: INTEGER "..." INTEGER ;
 
-expression → assignment ;
+expression → assignment | functionCall ;
+functionCall: IDENTIFIER "(" ")" | IDENTIFIER "(" ( atom "," )? ")"
 assignment: increment | decrement | IDENTIFIER "=" expression
     | logic_or ;
 increment: IDENTIFIER "=+" expression ;

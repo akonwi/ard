@@ -41,6 +41,12 @@ export type RangeExpr = {
 	end: Token;
 };
 
+export type FunctionCall = {
+	type: "Call";
+	callee: Expr;
+	arguments: Expr[];
+};
+
 export type Expr =
 	| Tangible
 	| Grouping
@@ -50,7 +56,8 @@ export type Expr =
 	| Increment
 	| Decrement
 	| Logical
-	| RangeExpr;
+	| RangeExpr
+	| FunctionCall;
 
 export type Print = { type: "Print"; expression: Expr };
 export type ExprStmt = { type: "ExprStatement"; expression: Expr };
@@ -103,7 +110,6 @@ export type Stmt =
 	| ForIn
 	| Func
 	| BlankLine;
-// | { type: "Call"; callee: Expr; paren: Token; arguments: Expr[] };
 
 // | { type: "Let"; name: Token; initializer: Expr | null }
 // | { type: "Mut"; name: Token; initializer: Expr | null }

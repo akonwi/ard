@@ -2,6 +2,8 @@ fn foobar() {
 	return
 }
 
+foobar()
+
 fn greet(person) {
 	let msg = "Hello, " + person + "!"
 	return msg
