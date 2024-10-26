@@ -1,3 +1,7 @@
+function foobar() {
+	return;
+}
+
 function greet(person) {
 	const msg = "Hello, " + person + "!";
 	return msg;

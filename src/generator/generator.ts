@@ -68,9 +68,13 @@ export class Generator {
 				return this.generateFunction(stmt);
 			}
 			case "Return": {
-				return `${this.indent}return ${
-					stmt.value ? this.generateExpr(stmt.value) : ""
-				};`;
+				let str = `${this.indent}return`;
+				if (stmt.value) {
+					str += ` ${this.generateExpr(stmt.value)};`;
+				} else {
+					str += ";";
+				}
+				return str;
 			}
 			default:
 				// @ts-expect-error - This should never happen

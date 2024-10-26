@@ -284,10 +284,12 @@ export class Parser {
 	private returnStatement(): Stmt {
 		const keyword = this.previous();
 		let value = null;
-		if (!this.check(TokenType.SEMICOLON)) {
+		if (
+			!this.check(TokenType.SEMICOLON) &&
+			!this.check(TokenType.RIGHT_BRACE)
+		) {
 			value = this.expression();
 		}
-		this.match(TokenType.SEMICOLON);
 		return { type: "Return", keyword, value };
 	}
 
