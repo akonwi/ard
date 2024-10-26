@@ -1,4 +1,14 @@
-import type { Block, Expr, Print, RangeExpr, Stmt } from "../ast";
+import type {
+	Block,
+	Expr,
+	ListLiteral,
+	Literal,
+	Print,
+	RangeExpr,
+	Stmt,
+	Tangible,
+	Variable,
+} from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 
 class ParseError extends Error {}
@@ -302,6 +312,15 @@ export class Parser {
 	}
 
 	private primary(): Expr {
+		if (this.match(TokenType.LEFT_PAREN)) {
+			const expr = this.expression();
+			this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
+			return { type: "Grouping", expression: expr };
+		}
+		return this.atom();
+	}
+
+	private atom(): Tangible {
 		if (this.match(TokenType.FALSE)) {
 			return { type: "Literal", value: false, token: this.previous() };
 		}
@@ -328,12 +347,19 @@ export class Parser {
 		if (this.match(TokenType.IDENTIFIER)) {
 			return { type: "Variable", token: this.previous() };
 		}
-		if (this.match(TokenType.LEFT_PAREN)) {
-			const expr = this.expression();
-			this.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
-			return { type: "Grouping", expression: expr };
+		return this.list();
+	}
+
+	private list(): ListLiteral {
+		this.consume(TokenType.LEFT_BRACKET, "Expect a '['.");
+		let items: Tangible[] = [];
+		if (!this.check(TokenType.RIGHT_BRACKET)) {
+			do {
+				items.push(this.atom());
+			} while (this.match(TokenType.COMMA));
 		}
-		throw this.error(this.peek(), "Expect expression");
+		this.consume(TokenType.RIGHT_BRACKET, "Expect a ']' to close the list.");
+		return { type: "List", items };
 	}
 
 	private match(...types: TokenType[]): boolean {

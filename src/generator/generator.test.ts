@@ -12,6 +12,8 @@ import loopsKon from "../samples/loops.kon.txt";
 import loopsJs from "../samples/loops.js.txt";
 import functionsKon from "../samples/functions.kon.txt";
 import functionsJs from "../samples/functions.js.txt";
+import collectionsKon from "../samples/collections.kon.txt";
+import collectionsJs from "../samples/collections.js.txt";
 
 const generator = new Generator();
 
@@ -28,6 +30,7 @@ describe("javascript generator", () => {
 		["arithmatic", mathKon, mathJs],
 		["loops", loopsKon, loopsJs],
 		["functions", functionsKon, functionsJs],
+		["collections", collectionsKon, collectionsJs],
 	])(`%s`, (_, kon, js) => {
 		generator.input = ast(kon);
 		expect(generator.generate()).toEqual(js.trim());

@@ -44,10 +44,12 @@ term → factor (( "+" | "-") factor)* ;
 factor: unary (( "*" | "/" ) unary)* ;
 unary → ( "-" | "!" ) unary
     | primary ;
-primary: "true" | "false" |
-    | INTEGER | DOUBLE | STRING |
-    "(" expression ")"
-    | IDENTIFIER ;
+primary: "(" expression ")" | atom ;
+atom:
+		| "true" | "false"
+    | INTEGER | DOUBLE | STRING
+    | IDENTIFIER | list ;
+list: "[" ( atom "," )* "]" ;
 
 // Tokens
 RANGE_DOTS: "." "." ".";

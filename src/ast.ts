@@ -1,8 +1,12 @@
 import type { Token } from "./lexer/lexer";
 
 export type BlankLine = { type: "BlankLine" };
+export type ListLiteral = { type: "List"; items: Tangible[] };
 export type Literal = { type: "Literal"; token: Token; value: any };
 export type Variable = { type: "Variable"; token: Token };
+
+export type Tangible = Literal | Variable | ListLiteral;
+
 export type Grouping = { type: "Grouping"; expression: Expr };
 export type Unary = {
 	type: "Unary";
@@ -38,11 +42,10 @@ export type RangeExpr = {
 };
 
 export type Expr =
-	| Literal
+	| Tangible
 	| Grouping
 	| Unary
 	| Binary
-	| Variable
 	| Assign
 	| Increment
 	| Decrement

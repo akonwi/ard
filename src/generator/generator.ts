@@ -101,6 +101,8 @@ export class Generator {
 				return `${expr.name.lexeme} += ${this.generateExpr(expr.value)}`;
 			case "Decrement":
 				return `${expr.name.lexeme} -= ${this.generateExpr(expr.value)}`;
+			case "List":
+				return `[${expr.items.map((expr) => this.generateExpr(expr))}]`;
 			case "Variable":
 				return expr.token.lexeme;
 			case "Logical":

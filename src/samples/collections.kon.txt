@@ -1,0 +1,2 @@
+let empty = []
+mut numbers = [1,2,3]
