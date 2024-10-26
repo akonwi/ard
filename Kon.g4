@@ -32,7 +32,7 @@ forStatement: "for" IDENTIFIER "in" rangeExpression block ;
 rangeExpression: INTEGER "..." INTEGER ;
 
 expression → assignment | functionCall ;
-functionCall: IDENTIFIER "(" ")" | IDENTIFIER "(" ( atom "," )? ")" ;
+functionCall: IDENTIFIER "(" ")" | IDENTIFIER "(" ( expression "," )* ")" | IDENTIFIER (expression ",")* ;
 assignment: increment | decrement | IDENTIFIER "=" expression
     | logic_or ;
 increment: IDENTIFIER "=+" expression ;

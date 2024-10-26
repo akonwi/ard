@@ -38,13 +38,17 @@ export class Parser {
 		const expr = this.assignment();
 
 		if (this.match(TokenType.LEFT_PAREN)) {
-			return this.call(expr);
+			return this.parenthesizedCall(expr);
 		}
+
+		try {
+			return this.openCall(expr);
+		} catch {}
 
 		return expr;
 	}
 
-	private call(callee: Expr): Expr {
+	private parenthesizedCall(callee: Expr): Expr {
 		if (this.match(TokenType.RIGHT_PAREN)) {
 			return {
 				type: "Call",
@@ -58,6 +62,19 @@ export class Parser {
 			args.push(this.expression());
 		} while (this.match(TokenType.COMMA));
 		this.consume(TokenType.RIGHT_PAREN, "Expect ')' to end function call.");
+
+		return {
+			type: "Call",
+			callee,
+			arguments: args,
+		};
+	}
+
+	private openCall(callee: Expr): Expr {
+		const args: Expr[] = [];
+		do {
+			args.push(this.expression());
+		} while (this.match(TokenType.COMMA));
 
 		return {
 			type: "Call",
