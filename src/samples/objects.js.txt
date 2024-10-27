@@ -1,0 +1,6 @@
+const empty = {};
+const person = {
+	name: "Jane",
+	age: 40,
+	missing: true
+};

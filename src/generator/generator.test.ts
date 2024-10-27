@@ -14,6 +14,8 @@ import functionsKon from "../samples/functions.kon.txt";
 import functionsJs from "../samples/functions.js.txt";
 import collectionsKon from "../samples/collections.kon.txt";
 import collectionsJs from "../samples/collections.js.txt";
+import objectsKon from "../samples/objects.kon.txt";
+import objectsJs from "../samples/objects.js.txt";
 
 const generator = new Generator();
 
@@ -31,6 +33,7 @@ describe("javascript generator", () => {
 		["loops", loopsKon, loopsJs],
 		["functions", functionsKon, functionsJs],
 		["collections", collectionsKon, collectionsJs],
+		["objects", objectsKon, objectsJs],
 	])(`%s`, (_, kon, js) => {
 		generator.input = ast(kon);
 		expect(generator.generate()).toEqual(js.trim());

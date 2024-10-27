@@ -2,10 +2,14 @@ import type { Token } from "./lexer/lexer";
 
 export type BlankLine = { type: "BlankLine" };
 export type ListLiteral = { type: "List"; items: Tangible[] };
+export type ObjectLiteral = {
+	type: "Object";
+	properties: Array<{ name: Token; value: Expr }>;
+};
 export type Literal = { type: "Literal"; token: Token; value: any };
 export type Variable = { type: "Variable"; token: Token };
 
-export type Tangible = Literal | Variable | ListLiteral;
+export type Tangible = Literal | Variable | ListLiteral | ObjectLiteral;
 
 export type Grouping = { type: "Grouping"; expression: Expr };
 export type Unary = {

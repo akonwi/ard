@@ -1,0 +1,6 @@
+let empty = {}
+let person = {
+	name: "Jane",
+	age: 40,
+	missing: true
+}

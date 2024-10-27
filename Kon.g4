@@ -49,8 +49,9 @@ primary: "(" expression ")" | atom ;
 atom:
 		| "true" | "false"
     | INTEGER | DOUBLE | STRING
-    | IDENTIFIER | list ;
+    | IDENTIFIER | list | object ;
 list: "[" ( atom "," )* "]" ;
+object: "{" ( IDENTIFIER ":" expression "," )* "}" ;
 
 // Tokens
 RANGE_DOTS: "." "." ".";

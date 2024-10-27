@@ -3,6 +3,7 @@ import type {
 	Expr,
 	ListLiteral,
 	Literal,
+	ObjectLiteral,
 	Print,
 	RangeExpr,
 	Stmt,
@@ -394,6 +395,14 @@ export class Parser {
 		if (this.match(TokenType.IDENTIFIER)) {
 			return { type: "Variable", token: this.previous() };
 		}
+		if (
+			this.check(TokenType.LEFT_BRACE) &&
+			(this.peekForward().type === TokenType.RIGHT_BRACE ||
+				(this.peekForward().type === TokenType.IDENTIFIER &&
+					this.peekForward(2).type === TokenType.COLON))
+		) {
+			return this.object();
+		}
 		return this.list();
 	}
 
@@ -407,6 +416,26 @@ export class Parser {
 		}
 		this.consume(TokenType.RIGHT_BRACKET, "Expect a ']' to close the list.");
 		return { type: "List", items };
+	}
+
+	private object(): ObjectLiteral {
+		this.consume(TokenType.LEFT_BRACE, "Expect a '{'.");
+		let properties: ObjectLiteral["properties"] = [];
+		if (!this.check(TokenType.RIGHT_BRACE)) {
+			do {
+				const name = this.consume(
+					TokenType.IDENTIFIER,
+					"Expect property name.",
+				);
+				this.consume(TokenType.COLON, "Expect ':' after property name.");
+				properties.push({
+					name,
+					value: this.expression(),
+				});
+			} while (this.match(TokenType.COMMA));
+		}
+		this.consume(TokenType.RIGHT_BRACE, "Expect a '}' to close the object.");
+		return { type: "Object", properties };
 	}
 
 	private match(...types: TokenType[]): boolean {
@@ -440,6 +469,12 @@ export class Parser {
 
 	private peek(): Token {
 		const token = this.tokens[this.current];
+		if (!token) throw new ParseError();
+		return token;
+	}
+
+	private peekForward(count = 1): Token {
+		const token = this.tokens[this.current + count];
 		if (!token) throw new ParseError();
 		return token;
 	}

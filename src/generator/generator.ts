@@ -107,6 +107,22 @@ export class Generator {
 				return `${expr.name.lexeme} -= ${this.generateExpr(expr.value)}`;
 			case "List":
 				return `[${expr.items.map((expr) => this.generateExpr(expr))}]`;
+			case "Object": {
+				let str = `${this.indent}{`;
+				if (expr.properties.length === 0) return str + "}";
+
+				let prevIndent = this.indent;
+				this.indent += "\n\t";
+				str += expr.properties
+					.map(
+						(p) =>
+							this.indent + p.name.lexeme + ": " + this.generateExpr(p.value),
+					)
+					.join(",");
+				this.indent = prevIndent;
+				str += this.indent + "\n}";
+				return str;
+			}
 			case "Variable":
 				return expr.token.lexeme;
 			case "Logical":
