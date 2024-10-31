@@ -6,6 +6,7 @@
 	"author": "akonwi",
 	"license": "MIT",
 	"scripts": {
+		"kon": "node src/run.js",
 		"test": "node --test",
 		"test:watch": "node --test --watch"
 	},
