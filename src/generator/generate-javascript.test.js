@@ -2,7 +2,7 @@
 const assert = require("node:assert");
 const { describe, test } = require("node:test");
 const fs = require("node:fs");
-const { generateJavascript } = require("./tree-sitter-generator");
+const { generateJavascript } = require("./generate-javascript");
 const { makeParser } = require("../parser/tree-sitter-parser");
 
 const parser = makeParser();
