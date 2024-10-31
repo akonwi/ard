@@ -22,7 +22,8 @@ function generateNode(node) {
 			let raw = generateNode(node.firstChild);
 			if (
 				node.firstChild.type !== "function_definition" &&
-				node.firstChild.type !== "while_loop"
+				node.firstChild.type !== "while_loop" &&
+				node.firstChild.type !== "if_statement"
 			)
 				raw += ";";
 			return raw;
@@ -120,7 +121,40 @@ function generateNode(node) {
 				throw new Error("Missing value at " + node.startPosition);
 			return `${generateNode(name)} ${generateCompoundAssignment(operator)} ${generateNode(value)}`;
 		}
+		case "if_statement": {
+			const condition = node.childForFieldName("condition");
+			if (condition == null)
+				throw new Error(
+					"Missing condition for if statement at " + node.startPosition,
+				);
+			const body = node.childForFieldName("body");
+			if (body == null)
+				throw new Error(
+					"Missing block for if statement at " + node.startPosition,
+				);
+			const elseNode = node.childForFieldName("else");
+			return (
+				`if (${generateNode(condition)}) ${generateBlock(body)}` +
+				(elseNode ? `${generateNode(elseNode)}` : "")
+			);
+		}
+		case "else_statement": {
+			const ifStatement = node.namedChildren.find(
+				(n) => n.type === "if_statement",
+			);
+			if (ifStatement != null) return ` else ${generateNode(ifStatement)}`;
+
+			const body = node.childForFieldName("body");
+			if (body == null)
+				throw new Error(
+					"Missing block for else statement at " + node.startPosition,
+				);
+			return ` else ${generateBlock(body)}`;
+		}
 		case "identifier": {
+			if (node.text === "print") {
+				return `console.log`;
+			}
 			return node.text;
 		}
 		case "primitive_value": {

@@ -11,6 +11,7 @@ const fixtures = [
 	{ fileName: "variables", label: "variable definitions" },
 	{ fileName: "functions", label: "function definitions and calls" },
 	{ fileName: "loops", label: "while loops" },
+	{ fileName: "control-flow", label: "if/else blocks" },
 ];
 
 describe("generating javascript", () => {
