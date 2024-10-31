@@ -1,0 +1,9 @@
+while count <= 9 {
+	count =+ 1
+}
+while is_true or count > 0 {
+	count =- 1
+}
+do while count > 0 {
+	count =- 1
+}

@@ -20,7 +20,11 @@ function generateNode(node) {
 			if (node.firstChild == null)
 				throw new Error("Empty statement at " + node.startPosition);
 			let raw = generateNode(node.firstChild);
-			if (node.firstChild.type !== "function_definition") raw += ";";
+			if (
+				node.firstChild.type !== "function_definition" &&
+				node.firstChild.type !== "while_loop"
+			)
+				raw += ";";
 			return raw;
 		}
 		case "variable_definition": {
@@ -51,7 +55,7 @@ function generateNode(node) {
 				throw new Error("Missing function parameters at " + node.startPosition);
 			if (body == null)
 				throw new Error("Missing function body at " + node.startPosition);
-			return `function ${nameNode.text}${generateNode(parameters)} ${generateNode(body)}`;
+			return `function ${nameNode.text}${generateNode(parameters)} ${generateBlock(body, true)}`;
 		}
 		case "parameters": {
 			return `(${node.namedChildren.map(generateNode).join(", ")})`;
@@ -61,17 +65,6 @@ function generateNode(node) {
 			if (name == null)
 				throw new Error("Missing parameter name at " + node.startPosition);
 			return `${name.text}`;
-		}
-		case "block": {
-			if (node.namedChildCount === 0) return "{}";
-			let raw = `{\n`;
-			node.namedChildren.forEach((child, index) => {
-				// return the result of the last statement
-				const isLast = index === node.namedChildren.length - 1;
-				raw += `\t${isLast ? "return " : ""}${generateNode(child)}\n`;
-			});
-			raw += "}";
-			return raw;
 		}
 		case "function_call": {
 			const target = node.childForFieldName("target");
@@ -89,6 +82,43 @@ function generateNode(node) {
 		}
 		case "paren_arguments": {
 			return `(${node.namedChildren.map(generateNode).join(", ")})`;
+		}
+		case "while_loop": {
+			const isDo = node.childForFieldName("do") != null;
+			const condition = node.childForFieldName("condition");
+			if (condition == null)
+				throw new Error("Missing condition at " + node.startPosition);
+			const body = node.childForFieldName("statement_block");
+			if (body == null)
+				throw new Error("Missing loop block at " + node.startPosition);
+			if (isDo) {
+				return `do ${generateBlock(body)} while (${generateNode(condition)});`;
+			}
+			return `while (${generateNode(condition)}) ${generateBlock(body)}`;
+		}
+		case "binary_expression": {
+			const left = node.childForFieldName("left");
+			const right = node.childForFieldName("right");
+			const operator = node.childForFieldName("operator");
+			if (left == null)
+				throw new Error("Missing left operand at " + node.startPosition);
+			if (right == null)
+				throw new Error("Missing right operand at " + node.startPosition);
+			if (operator == null)
+				throw new Error("Missing operator at " + node.startPosition);
+			return `${generateNode(left)} ${generateBinaryOperator(operator)} ${generateNode(right)}`;
+		}
+		case "compound_assignment": {
+			const name = node.childForFieldName("name");
+			const operator = node.childForFieldName("operator");
+			const value = node.childForFieldName("value");
+			if (name == null)
+				throw new Error("Missing target at " + node.startPosition);
+			if (operator == null)
+				throw new Error("Missing operator at " + node.startPosition);
+			if (value == null)
+				throw new Error("Missing value at " + node.startPosition);
+			return `${generateNode(name)} ${generateCompoundAssignment(operator)} ${generateNode(value)}`;
 		}
 		case "identifier": {
 			return node.text;
@@ -111,6 +141,45 @@ function generateNode(node) {
 			console.log(node.type);
 			return `/* Unimplemented syntax - ${node.type} */`;
 		}
+	}
+}
+
+/** @type {(node: Parser.SyntaxNode, isExpression?: boolean) => string} */
+function generateBlock(node, isExpression = false) {
+	if (node.namedChildCount === 0) return "{}";
+	let raw = `{\n`;
+	node.namedChildren.forEach((child, index) => {
+		// return the result of the last statement
+		const isLast = isExpression && index === node.namedChildren.length - 1;
+		raw += `\t${isLast ? "return " : ""}${generateNode(child)}\n`;
+	});
+	raw += "}";
+	return raw;
+}
+
+/** @type {(node: Parser.SyntaxNode, isExpression?: boolean) => string} */
+function generateCompoundAssignment(node) {
+	switch (node.grammarType) {
+		case "increment":
+			return "+=";
+		case "decrement":
+			return "-=";
+		default:
+			throw new Error(
+				"Unknown compound assignment operator: " + node.grammarType,
+			);
+	}
+}
+
+/** @type {(node: Parser.SyntaxNode) => string} */
+function generateBinaryOperator(node) {
+	switch (node.type) {
+		case "or":
+			return "||";
+		case "and":
+			return "&&";
+		default:
+			return node.text;
 	}
 }
 

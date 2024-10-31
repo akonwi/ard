@@ -1,0 +1,16 @@
+fn get_hello() {
+  "Hello, world!"
+}
+
+get_hello()
+
+fn greet(person: Str) Str {
+}
+
+greet("Alice")
+greet(get_hello())
+
+fn add(x: Num, y: Num) Num {
+}
+
+add(1, 2)

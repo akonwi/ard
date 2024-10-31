@@ -1,8 +1,0 @@
-mut count = 0
-while count <= 9 {
-  count =+ 1
-}
-
-for i in 1...5 {
-  print i
-}

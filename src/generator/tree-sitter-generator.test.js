@@ -21,6 +21,13 @@ const functionsKon = fs.readFileSync(
 const functionsJS = fs
 	.readFileSync(require.resolve("../samples/functions.js"), "utf8")
 	.trimEnd();
+const loopsKon = fs.readFileSync(
+	require.resolve("../samples/loops.kon"),
+	"utf8",
+);
+const loopsJS = fs
+	.readFileSync(require.resolve("../samples/loops.js"), "utf8")
+	.trimEnd();
 
 describe("generating javascript", () => {
 	test("variable definitions", () => {
@@ -33,5 +40,11 @@ describe("generating javascript", () => {
 		const tree = parser.parse(functionsKon);
 		const result = generateJavascript(tree);
 		assert.equal(result, functionsJS, "generated code does not match");
+	});
+
+	test("while loops", () => {
+		const tree = parser.parse(loopsKon);
+		const result = generateJavascript(tree);
+		assert.equal(result, loopsJS, "generated code does not match");
 	});
 });
