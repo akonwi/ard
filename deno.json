@@ -1,0 +1,8 @@
+{
+	"compilerOptions": {
+		"checkJs": true
+	},
+	"tasks": {
+		"kon": "deno run --allow-ffi --allow-env --allow-read src/run.ts"
+	}
+}

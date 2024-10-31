@@ -1,13 +1,10 @@
-// @ts-check
-const Parser = require("tree-sitter");
+import { type SyntaxNode, type Tree } from "tree-sitter";
 
-/** @type {(tree: Parser.Tree) => string} */
-function generateJavascript(tree) {
+export function generateJavascript(tree: Tree) {
 	return generateNode(tree.rootNode);
 }
 
-/** @type {(node: Parser.SyntaxNode) => string} */
-function generateNode(node) {
+function generateNode(node: SyntaxNode): string {
 	switch (node.type) {
 		case "program": {
 			return node.children.map(generateNode).join("\n");
@@ -56,7 +53,9 @@ function generateNode(node) {
 				throw new Error("Missing function parameters at " + node.startPosition);
 			if (body == null)
 				throw new Error("Missing function body at " + node.startPosition);
-			return `function ${nameNode.text}${generateNode(parameters)} ${generateBlock(body, true)}`;
+			return `function ${nameNode.text}${generateNode(
+				parameters,
+			)} ${generateBlock(body, true)}`;
 		}
 		case "parameters": {
 			return `(${node.namedChildren.map(generateNode).join(", ")})`;
@@ -107,7 +106,9 @@ function generateNode(node) {
 				throw new Error("Missing right operand at " + node.startPosition);
 			if (operator == null)
 				throw new Error("Missing operator at " + node.startPosition);
-			return `${generateNode(left)} ${generateBinaryOperator(operator)} ${generateNode(right)}`;
+			return `${generateNode(left)} ${generateBinaryOperator(
+				operator,
+			)} ${generateNode(right)}`;
 		}
 		case "reassignment": {
 			const name = node.childForFieldName("name");
@@ -128,7 +129,9 @@ function generateNode(node) {
 				throw new Error("Missing operator at " + node.startPosition);
 			if (value == null)
 				throw new Error("Missing value at " + node.startPosition);
-			return `${generateNode(name)} ${generateCompoundAssignment(operator)} ${generateNode(value)}`;
+			return `${generateNode(name)} ${generateCompoundAssignment(
+				operator,
+			)} ${generateNode(value)}`;
 		}
 		case "if_statement": {
 			const condition = node.childForFieldName("condition");
@@ -187,8 +190,7 @@ function generateNode(node) {
 	}
 }
 
-/** @type {(node: Parser.SyntaxNode, isExpression?: boolean) => string} */
-function generateBlock(node, isExpression = false) {
+function generateBlock(node: SyntaxNode, isExpression = false): string {
 	if (node.namedChildCount === 0) return "{}";
 	let raw = `{\n`;
 	node.namedChildren.forEach((child, index) => {
@@ -200,8 +202,7 @@ function generateBlock(node, isExpression = false) {
 	return raw;
 }
 
-/** @type {(node: Parser.SyntaxNode, isExpression?: boolean) => string} */
-function generateCompoundAssignment(node) {
+function generateCompoundAssignment(node: SyntaxNode): string {
 	switch (node.grammarType) {
 		case "increment":
 			return "+=";
@@ -214,8 +215,7 @@ function generateCompoundAssignment(node) {
 	}
 }
 
-/** @type {(node: Parser.SyntaxNode) => string} */
-function generateBinaryOperator(node) {
+function generateBinaryOperator(node: SyntaxNode): string {
 	switch (node.type) {
 		case "or":
 			return "||";
@@ -225,5 +225,3 @@ function generateBinaryOperator(node) {
 			return node.text;
 	}
 }
-
-module.exports = { generateJavascript };

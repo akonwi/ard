@@ -1,10 +1,8 @@
-const Parser = require("tree-sitter");
-const Kon = require("../../../tree-sitter-kon/bindings/node");
+import Parser from "tree-sitter";
+import Kon from "../../../tree-sitter-kon/bindings/node/index.cjs";
 
-module.exports = {
-	makeParser: () => {
-		const parser = new Parser();
-		parser.setLanguage(Kon);
-		return parser;
-	},
+export const makeParser = () => {
+	const parser = new Parser();
+	parser.setLanguage(Kon);
+	return parser;
 };
