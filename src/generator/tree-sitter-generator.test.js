@@ -7,44 +7,25 @@ const { makeParser } = require("../parser/tree-sitter-parser");
 
 const parser = makeParser();
 
-const variablesKon = fs.readFileSync(
-	require.resolve("../samples/variables.kon"),
-	"utf8",
-);
-const variablesJS = fs
-	.readFileSync(require.resolve("../samples/variables.js"), "utf8")
-	.trimEnd();
-const functionsKon = fs.readFileSync(
-	require.resolve("../samples/functions.kon"),
-	"utf8",
-);
-const functionsJS = fs
-	.readFileSync(require.resolve("../samples/functions.js"), "utf8")
-	.trimEnd();
-const loopsKon = fs.readFileSync(
-	require.resolve("../samples/loops.kon"),
-	"utf8",
-);
-const loopsJS = fs
-	.readFileSync(require.resolve("../samples/loops.js"), "utf8")
-	.trimEnd();
+const fixtures = [
+	{ fileName: "variables", label: "variable definitions" },
+	{ fileName: "functions", label: "function definitions and calls" },
+	{ fileName: "loops", label: "while loops" },
+];
 
 describe("generating javascript", () => {
-	test("variable definitions", () => {
-		const tree = parser.parse(variablesKon);
-		const result = generateJavascript(tree);
-		assert.equal(result, variablesJS, "generated code does not match");
-	});
-
-	test("function definitions and calls", () => {
-		const tree = parser.parse(functionsKon);
-		const result = generateJavascript(tree);
-		assert.equal(result, functionsJS, "generated code does not match");
-	});
-
-	test("while loops", () => {
-		const tree = parser.parse(loopsKon);
-		const result = generateJavascript(tree);
-		assert.equal(result, loopsJS, "generated code does not match");
+	fixtures.forEach(({ fileName, label }) => {
+		test(label, () => {
+			const kon = fs.readFileSync(
+				require.resolve(`../samples/${fileName}.kon`),
+				"utf8",
+			);
+			const js = fs
+				.readFileSync(require.resolve(`../samples/${fileName}.js`), "utf8")
+				.trimEnd();
+			const tree = parser.parse(kon);
+			const result = generateJavascript(tree);
+			assert.equal(result, js, "generated code does not match");
+		});
 	});
 });
