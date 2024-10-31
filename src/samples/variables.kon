@@ -1,0 +1,3 @@
+mut name: String = "Alice"
+let age: Num = 30
+let is_student: Bool = true

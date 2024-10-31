@@ -1,3 +1,0 @@
-mut name = "Alice"
-let age = 30;
-let boolean = true

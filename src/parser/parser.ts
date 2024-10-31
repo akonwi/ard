@@ -2,13 +2,11 @@ import type {
 	Block,
 	Expr,
 	ListLiteral,
-	Literal,
 	ObjectLiteral,
 	Print,
 	RangeExpr,
 	Stmt,
 	Tangible,
-	Variable,
 } from "../ast";
 import { TokenType, type Token } from "../lexer/lexer";
 

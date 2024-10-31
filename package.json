@@ -5,10 +5,16 @@
 	"main": "index.js",
 	"author": "akonwi",
 	"license": "MIT",
-	"scripts": {},
+	"scripts": {
+		"test": "node --test",
+		"test:watch": "node --test --watch"
+	},
 	"devDependencies": {
 		"@types/bun": "^1.1.12",
 		"@types/node": "^22.7.7",
 		"typescript": "^5.6.3"
+	},
+	"dependencies": {
+		"tree-sitter": "^0.22.0"
 	}
 }

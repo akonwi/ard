@@ -1,3 +1,3 @@
 let name = "Alice";
 const age = 30;
-const boolean = true;
+const is_student = true;
