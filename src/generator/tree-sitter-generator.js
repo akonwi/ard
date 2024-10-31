@@ -109,6 +109,15 @@ function generateNode(node) {
 				throw new Error("Missing operator at " + node.startPosition);
 			return `${generateNode(left)} ${generateBinaryOperator(operator)} ${generateNode(right)}`;
 		}
+		case "reassignment": {
+			const name = node.childForFieldName("name");
+			if (name == null)
+				throw new Error("Missing variable name at " + node.startPosition);
+			const value = node.childForFieldName("value");
+			if (value == null)
+				throw new Error("Missing value at " + node.startPosition);
+			return `${generateNode(name)} = ${generateNode(value)}`;
+		}
 		case "compound_assignment": {
 			const name = node.childForFieldName("name");
 			const operator = node.childForFieldName("operator");
