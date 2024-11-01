@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { makeParser } from "./parser/parser.ts";
 import { generateJavascript } from "./generator/generate-javascript.ts";
 
@@ -7,5 +6,5 @@ function compile(input: string): string {
 }
 
 const path = Deno.args.at(0) as string;
-const kon = compile(readFileSync(path, "utf8"));
+const kon = compile(Deno.readTextFileSync(path));
 eval(kon);
