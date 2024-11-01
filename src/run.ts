@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { makeParser } from "./parser/tree-sitter-parser.js";
+import { makeParser } from "./parser/tree-sitter-parser.ts";
 import { generateJavascript } from "./generator/generate-javascript.ts";
 
 function compile(input: string): string {

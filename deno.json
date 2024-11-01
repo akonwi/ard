@@ -3,6 +3,7 @@
 		"checkJs": true
 	},
 	"tasks": {
-		"kon": "deno run --allow-ffi --allow-env --allow-read src/run.ts"
+		"kon": "deno run --allow-ffi --allow-env --allow-read src/run.ts",
+		"test": "deno test --allow-ffi --allow-read"
 	}
 }
