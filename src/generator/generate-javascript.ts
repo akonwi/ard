@@ -114,6 +114,22 @@ function generateNode(node: SyntaxNode): string {
 				body,
 			)}`;
 		}
+		case "unary_expression": {
+			const operator = node.children.at(0);
+			const operand = node.children.at(1);
+			if (operator == null)
+				throw new Error("Missing unary operator at " + node.startPosition);
+			if (operand == null)
+				throw new Error("Missing unary operand at " + node.startPosition);
+			switch (operator.type) {
+				case "bang":
+					return `!${generateNode(operand)}`;
+				case "minus":
+					return `-${generateNode(operand)}`;
+				default:
+					throw new Error("Unrecognized unary operator: " + operator.text);
+			}
+		}
 		case "binary_expression": {
 			const left = node.childForFieldName("left");
 			const right = node.childForFieldName("right");
@@ -239,6 +255,10 @@ function generateBinaryOperator(node: SyntaxNode): string {
 			return "||";
 		case "and":
 			return "&&";
+		case "equal":
+			return "===";
+		case "not_equal":
+			return "!==";
 		default:
 			return node.text;
 	}

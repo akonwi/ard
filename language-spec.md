@@ -62,6 +62,19 @@ while condition {
 }
 ```
 
+### Iteration
+
+```kon
+for i in 1...10 {
+	print(i)
+}
+
+// idea for changing step size
+for i in 1...10 by 2 {
+	print(i)
+}
+```
+
 ## 2. Types
 
 ### Basic Types

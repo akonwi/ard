@@ -5,11 +5,12 @@ import { makeParser } from "../parser/parser.ts";
 
 const parser = makeParser();
 
-const fixtures = [
+const fixtures: Array<{ fileName: string; label: string }> = [
 	{ fileName: "variables", label: "variable definitions" },
 	{ fileName: "functions", label: "function definitions and calls" },
 	{ fileName: "loops", label: "while loops" },
 	{ fileName: "control-flow", label: "if/else blocks" },
+	{ fileName: "expressions", label: "various expressions" },
 ];
 
 fixtures.forEach(({ fileName, label }) => {
@@ -20,7 +21,7 @@ fixtures.forEach(({ fileName, label }) => {
 		() => {
 			const kon = Deno.readTextFileSync(`./src/samples/${fileName}.kon`);
 			const js = Deno.readTextFileSync(
-				path.resolve(`src/samples/${fileName}.js`),
+				path.resolve(`./src/samples/${fileName}.js`),
 			).trimEnd();
 			const tree = parser.parse(kon);
 			const result = generateJavascript(tree);
