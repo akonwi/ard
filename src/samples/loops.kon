@@ -13,3 +13,7 @@ do while count > 0 {
 for i in 1...10 {
 	print(i)
 }
+print("counting from 1 to count + 3")
+for i in 1...(count + 3) {
+	print(i)
+}

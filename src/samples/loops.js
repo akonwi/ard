@@ -13,3 +13,7 @@ do {
 for (let i = 1; i <= 10; i++) {
 	console.log(i);
 }
+console.log("counting from 1 to count + 3");
+for (let i = 1; i <= count + 3; i++) {
+	console.log(i);
+}

@@ -218,8 +218,8 @@ function generateNode(node: SyntaxNode): string {
 			return node.text;
 		}
 		default: {
-			console.log(node.type);
-			return `/* Unimplemented syntax - ${node.type} */`;
+			console.log(node);
+			return `/* Unimplemented syntax - ${node.grammarType} */`;
 		}
 	}
 }
@@ -264,13 +264,12 @@ function generateBinaryOperator(node: SyntaxNode): string {
 	}
 }
 
-function getForLoopRange(node: SyntaxNode): [number, number] {
-	const start = node.firstChild;
+function getForLoopRange(node: SyntaxNode): [string, string] {
+	const start = node.namedChild(0);
 	if (start == null)
 		throw new Error("Missing start of range at " + node.startPosition);
-	const end = node.lastChild;
+	const end = node.namedChild(2);
 	if (end == null)
 		throw new Error("Missing end of range at " + node.startPosition);
-
-	return [parseInt(start.text), parseInt(end.text)];
+	return [generateNode(start), generateNode(end)];
 }
