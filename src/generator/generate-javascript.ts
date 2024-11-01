@@ -20,7 +20,8 @@ function generateNode(node: SyntaxNode): string {
 			if (
 				node.firstChild.type !== "function_definition" &&
 				node.firstChild.type !== "while_loop" &&
-				node.firstChild.type !== "if_statement"
+				node.firstChild.type !== "if_statement" &&
+				node.firstChild.type !== "for_loop"
 			)
 				raw += ";";
 			return raw;
@@ -95,6 +96,23 @@ function generateNode(node: SyntaxNode): string {
 				return `do ${generateBlock(body)} while (${generateNode(condition)});`;
 			}
 			return `while (${generateNode(condition)}) ${generateBlock(body)}`;
+		}
+		case "for_loop": {
+			const cursor = node.childForFieldName("cursor");
+			if (cursor == null)
+				throw new Error("Missing cursor at " + node.startPosition);
+			const range = node.childForFieldName("range");
+			if (range == null)
+				throw new Error("Missing range at " + node.startPosition);
+			const body = node.childForFieldName("statement_block");
+			if (body == null)
+				throw new Error("Missing loop block at " + node.startPosition);
+
+			const cursorName = generateNode(cursor);
+			const [start, end] = getForLoopRange(range);
+			return `for (let ${cursorName} = ${start}; ${cursorName} <= ${end}; ${cursorName}++) ${generateBlock(
+				body,
+			)}`;
 		}
 		case "binary_expression": {
 			const left = node.childForFieldName("left");
@@ -224,4 +242,15 @@ function generateBinaryOperator(node: SyntaxNode): string {
 		default:
 			return node.text;
 	}
+}
+
+function getForLoopRange(node: SyntaxNode): [number, number] {
+	const start = node.firstChild;
+	if (start == null)
+		throw new Error("Missing start of range at " + node.startPosition);
+	const end = node.lastChild;
+	if (end == null)
+		throw new Error("Missing end of range at " + node.startPosition);
+
+	return [parseInt(start.text), parseInt(end.text)];
 }

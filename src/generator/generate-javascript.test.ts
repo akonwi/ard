@@ -1,7 +1,7 @@
 import { expect } from "jsr:@std/expect";
 import path from "node:path";
 import { generateJavascript } from "./generate-javascript.ts";
-import { makeParser } from "../parser/tree-sitter-parser.ts";
+import { makeParser } from "../parser/parser.ts";
 
 const parser = makeParser();
 
@@ -13,13 +13,18 @@ const fixtures = [
 ];
 
 fixtures.forEach(({ fileName, label }) => {
-	Deno.test(label, () => {
-		const kon = Deno.readTextFileSync(`./src/samples/${fileName}.kon`);
-		const js = Deno.readTextFileSync(
-			path.resolve(`src/samples/${fileName}.js`),
-		).trimEnd();
-		const tree = parser.parse(kon);
-		const result = generateJavascript(tree);
-		expect(result).toEqual(js);
-	});
+	Deno.test(
+		{
+			name: `generates JavaScript for ${label}`,
+		},
+		() => {
+			const kon = Deno.readTextFileSync(`./src/samples/${fileName}.kon`);
+			const js = Deno.readTextFileSync(
+				path.resolve(`src/samples/${fileName}.js`),
+			).trimEnd();
+			const tree = parser.parse(kon);
+			const result = generateJavascript(tree);
+			expect(result).toEqual(js);
+		},
+	);
 });

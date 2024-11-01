@@ -10,3 +10,6 @@ count = 3
 do while count > 0 {
 	count =- 1
 }
+for i in 1...10 {
+	print(i)
+}
