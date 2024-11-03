@@ -10,39 +10,10 @@ function generateNode(node: SyntaxNode): string {
 			return node.children.map(generateNode).join("\n");
 		}
 		case "statement": {
-			if (node.childCount > 1)
-				throw new Error(
-					"Multiple statements encountered at " + node.startPosition,
-				);
-			if (node.firstChild == null)
-				throw new Error("Empty statement at " + node.startPosition);
-			let raw = generateNode(node.firstChild);
-			if (
-				node.firstChild.type !== "function_definition" &&
-				node.firstChild.type !== "while_loop" &&
-				node.firstChild.type !== "if_statement" &&
-				node.firstChild.type !== "for_loop"
-			)
-				raw += ";";
-			return raw;
+			return generateStatement(node);
 		}
 		case "variable_definition": {
-			const binding = node.childForFieldName("binding");
-			if (!binding) {
-				throw new Error("Missing variable binding at " + node.startPosition);
-			}
-			const name = node.childForFieldName("name");
-			if (!name) {
-				throw new Error("Missing variable name at " + node.startPosition);
-			}
-			const value = node.childForFieldName("value");
-			if (!value) {
-				throw new Error(
-					"Variable definition is missing its value at: " + node.startPosition,
-				);
-			}
-			const letConst = binding.text === "mut" ? "let" : "const";
-			return `${letConst} ${name.text} = ${generateNode(value)}`;
+			return generateVariableDefinition(node);
 		}
 		case "function_definition": {
 			const nameNode = node.childForFieldName("name");
@@ -222,6 +193,52 @@ function generateNode(node: SyntaxNode): string {
 			return `/* Unimplemented syntax - ${node.grammarType} */`;
 		}
 	}
+}
+
+function generateStatement(node: SyntaxNode): string {
+	if (node.childCount > 1)
+		throw new Error("Multiple statements encountered at " + node.startPosition);
+	if (node.firstChild == null)
+		throw new Error("Empty statement at " + node.startPosition);
+	switch (node.firstChild.type) {
+		case "variable_definition":
+			return generateVariableDefinition(node.firstChild, { statement: true });
+		case "function_definition":
+		case "while_loop":
+		case "if_statement":
+		case "for_loop":
+			return generateNode(node.firstChild);
+		case "struct_definition":
+			return "";
+		default: {
+			return `${generateNode(node.firstChild)};`;
+		}
+	}
+}
+
+function generateVariableDefinition(
+	node: SyntaxNode,
+	options?: { statement?: boolean },
+): string {
+	const binding = node.childForFieldName("binding");
+	if (!binding) {
+		throw new Error("Missing variable binding at " + node.startPosition);
+	}
+	const name = node.childForFieldName("name");
+	if (!name) {
+		throw new Error("Missing variable name at " + node.startPosition);
+	}
+	const value = node.childForFieldName("value");
+	if (!value) {
+		throw new Error(
+			"Variable definition is missing its value at: " + node.startPosition,
+		);
+	}
+	const needsSemicolon = Boolean(options?.statement);
+	const letConst = binding.text === "mut" ? "let" : "const";
+	const raw = `${letConst} ${name.text} = ${generateNode(value)}`;
+	if (needsSemicolon) return raw + ";";
+	return raw;
 }
 
 function generateBlock(node: SyntaxNode, isExpression = false): string {

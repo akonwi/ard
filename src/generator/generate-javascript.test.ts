@@ -29,3 +29,8 @@ fixtures.forEach(({ fileName, label }) => {
 		},
 	);
 });
+
+Deno.test("struct definitions are stripped", () => {
+	const tree = parser.parse(`struct Point { x: Num, y: Num }`);
+	expect(generateJavascript(tree)).toEqual("");
+});
