@@ -1,20 +1,20 @@
 import type { Point, SyntaxNode, Tree, TreeCursor } from "tree-sitter";
 
-export type CheckError = {
-	point: Point;
-	type: "variable_type";
+export type Diagnostic = {
+	level: "error";
+	location: Point;
 	message: string;
 };
 
 export class Checker {
 	cursor: TreeCursor;
-	errors: CheckError[] = [];
+	errors: Diagnostic[] = [];
 
 	constructor(readonly tree: Tree) {
 		this.cursor = tree.walk();
 	}
 
-	check(): CheckError[] {
+	check(): Diagnostic[] {
 		// go through children
 		if (this.cursor.gotoFirstChild()) {
 			do {
@@ -25,7 +25,7 @@ export class Checker {
 		return this.errors;
 	}
 
-	private error(error: CheckError) {
+	private error(error: Diagnostic) {
 		this.errors.push(error);
 	}
 
@@ -64,8 +64,8 @@ export class Checker {
 				case "Str": {
 					if (value.firstChild?.type !== "string") {
 						this.error({
-							point: value.startPosition,
-							type: "variable_type",
+							location: value.startPosition,
+							level: "error",
 							message: `Expected a 'Str' but got '${getValueLabel(value)}'`,
 						});
 					}
@@ -74,8 +74,8 @@ export class Checker {
 				case "Num": {
 					if (value.firstChild?.type !== "number") {
 						this.error({
-							point: value.startPosition,
-							type: "variable_type",
+							location: value.startPosition,
+							level: "error",
 							message: `Expected a 'Num' but got '${getValueLabel(value)}'`,
 						});
 					}
@@ -84,8 +84,8 @@ export class Checker {
 				case "Bool": {
 					if (value.firstChild?.type !== "boolean") {
 						this.error({
-							point: value.startPosition,
-							type: "variable_type",
+							location: value.startPosition,
+							level: "error",
 							message: `Expected a 'Bool' but got '${getValueLabel(value)}'`,
 						});
 					}

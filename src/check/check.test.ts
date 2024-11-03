@@ -1,6 +1,6 @@
 import { expect } from "jsr:@std/expect";
 import { makeParser } from "../parser/parser.ts";
-import { Checker, type CheckError } from "./check.ts";
+import { Checker, type Diagnostic } from "./check.ts";
 
 const parser = makeParser();
 
@@ -13,16 +13,16 @@ let valid2 = "bar"`);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
 		{
-			point: { row: 1, column: 13 },
-			type: "variable_type",
+			location: { row: 1, column: 13 },
+			level: "error",
 			message: "Expected a 'Str' but got 'Num'",
 		},
 		{
-			point: { row: 2, column: 13 },
-			type: "variable_type",
+			location: { row: 2, column: 13 },
+			level: "error",
 			message: "Expected a 'Str' but got 'Bool'",
 		},
-	] satisfies CheckError[]);
+	] satisfies Diagnostic[]);
 });
 
 Deno.test("Incorrect primitive initializers when expecting a Num", () => {
@@ -34,16 +34,16 @@ let 6 = 6`);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
 		{
-			point: { row: 1, column: 13 },
-			type: "variable_type",
+			location: { row: 1, column: 13 },
+			level: "error",
 			message: "Expected a 'Num' but got 'Str'",
 		},
 		{
-			point: { row: 2, column: 13 },
-			type: "variable_type",
+			location: { row: 2, column: 13 },
+			level: "error",
 			message: "Expected a 'Num' but got 'Bool'",
 		},
-	] satisfies CheckError[]);
+	] satisfies Diagnostic[]);
 });
 
 Deno.test("Incorrect primitive initializers when expecting a Bool", () => {
@@ -55,19 +55,26 @@ let also_valid = false`);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
 		{
-			point: { row: 1, column: 14 },
-			type: "variable_type",
+			location: { row: 1, column: 14 },
+			level: "error",
 			message: "Expected a 'Bool' but got 'Str'",
 		},
 		{
-			point: { row: 2, column: 14 },
-			type: "variable_type",
+			location: { row: 2, column: 14 },
+			level: "error",
 			message: "Expected a 'Bool' but got 'Num'",
 		},
-	] satisfies CheckError[]);
+	] satisfies Diagnostic[]);
 });
 
 Deno.test.ignore(
 	"reserved keywords cannot be used as variable and method names",
+	() => {},
+);
+
+// todo: provide a std List implementation
+// until then, use checker to add syntactic sugar for ideal API
+Deno.test.ignore(
+	"mutable array methods aren't allowed on immutable arrays",
 	() => {},
 );
