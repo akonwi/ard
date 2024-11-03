@@ -1,4 +1,6 @@
-import { type SyntaxNode, type Tree } from "tree-sitter";
+import { type Point, type SyntaxNode, type Tree } from "tree-sitter";
+
+const pointToString = (point: Point) => `${point.row}:${point.column}`;
 
 export function generateJavascript(tree: Tree) {
 	return generateNode(tree.rootNode);
@@ -174,6 +176,9 @@ function generateNode(node: SyntaxNode): string {
 			}
 			return node.text;
 		}
+		case "list_value": {
+			return `[${node.namedChildren.map(generateNode).join(", ")}]`;
+		}
 		case "primitive_value": {
 			const child = node.firstChild;
 			if (!child) {
@@ -196,8 +201,11 @@ function generateNode(node: SyntaxNode): string {
 }
 
 function generateStatement(node: SyntaxNode): string {
-	if (node.childCount > 1)
-		throw new Error("Multiple statements encountered at " + node.startPosition);
+	if (node.childCount > 1) {
+		throw new Error(
+			"Multiple statements encountered at " + pointToString(node.startPosition),
+		);
+	}
 	if (node.firstChild == null)
 		throw new Error("Empty statement at " + node.startPosition);
 	switch (node.firstChild.type) {

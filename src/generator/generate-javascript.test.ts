@@ -34,3 +34,17 @@ Deno.test("struct definitions are stripped", () => {
 	const tree = parser.parse(`struct Point { x: Num, y: Num }`);
 	expect(generateJavascript(tree)).toEqual("");
 });
+
+Deno.test("list declarations", () => {
+	const emptyList = parser.parse(`let x: [Num] = []`);
+	expect(generateJavascript(emptyList)).toEqual("const x = [];");
+
+	const numbers = parser.parse(`let x: [Num] = [1,2,3]`);
+	expect(generateJavascript(numbers)).toEqual("const x = [1, 2, 3];");
+
+	const strings = parser.parse(`let x: [Num] = ["a", "b", "c"]`);
+	expect(generateJavascript(strings)).toEqual('const x = ["a", "b", "c"];');
+
+	const variables = parser.parse(`let x: [Num] = [a, b]`);
+	expect(generateJavascript(variables)).toEqual("const x = [a, b];");
+});
