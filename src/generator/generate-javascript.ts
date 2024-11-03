@@ -170,11 +170,35 @@ function generateNode(node: SyntaxNode): string {
 				);
 			return ` else ${generateBlock(body)}`;
 		}
+		case "member_access": {
+			return node.namedChildren.map((n) => generateNode(n)).join(".");
+		}
 		case "identifier": {
 			if (node.text === "print") {
 				return `console.log`;
 			}
 			return node.text;
+		}
+		case "struct_instance": {
+			const fields = node.namedChildren.slice(1);
+			if (fields.length === 0) return `{}`;
+			return (
+				"{\n" +
+				fields.map((n) => `\t${generateNode(n)}`).join(",\n") +
+				"\n" +
+				"}"
+			);
+		}
+		case "struct_prop_pair": {
+			const name = node.childForFieldName("name");
+			if (name == null)
+				throw new Error("Missing name at " + pointToString(node.startPosition));
+			const value = node.childForFieldName("value");
+			if (value == null)
+				throw new Error(
+					"Missing value at " + pointToString(node.startPosition),
+				);
+			return `${name.text}: ${generateNode(value)}`;
 		}
 		case "list_value": {
 			return `[${node.namedChildren.map(generateNode).join(", ")}]`;
@@ -194,7 +218,9 @@ function generateNode(node: SyntaxNode): string {
 			return node.text;
 		}
 		default: {
-			console.log(node);
+			console.log(node.grammarType, {
+				text: node.text,
+			});
 			return `/* Unimplemented syntax - ${node.grammarType} */`;
 		}
 	}

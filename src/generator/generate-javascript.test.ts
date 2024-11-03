@@ -35,6 +35,14 @@ Deno.test("struct definitions are stripped", () => {
 	expect(generateJavascript(tree)).toEqual("");
 });
 
+Deno.test("struct instances", () => {
+	const empty = parser.parse(`Point {}`);
+	expect(generateJavascript(empty)).toEqual("{};");
+	const withProps = parser.parse(`Point { x: 1, y: 20 }`);
+	const withPropsJs = generateJavascript(withProps).replaceAll(/[\n\t]/g, "");
+	expect(withPropsJs).toEqual("{x: 1,y: 20};");
+});
+
 Deno.test("list declarations", () => {
 	const emptyList = parser.parse(`let x: [Num] = []`);
 	expect(generateJavascript(emptyList)).toEqual("const x = [];");
@@ -47,4 +55,12 @@ Deno.test("list declarations", () => {
 
 	const variables = parser.parse(`let x: [Num] = [a, b]`);
 	expect(generateJavascript(variables)).toEqual("const x = [a, b];");
+});
+
+Deno.test("member access", () => {
+	const one_dot = parser.parse(`point.x`);
+	expect(generateJavascript(one_dot)).toEqual("point.x;");
+
+	const two_dots = parser.parse(`coord.point.x`);
+	expect(generateJavascript(two_dots)).toEqual("coord.point.x;");
 });
