@@ -31,6 +31,22 @@ class Variable {
 		readonly name: string,
 		readonly node: SyntaxNode,
 	) {}
+
+	get is_mutable(): boolean {
+		return this.node.childForFieldName("variable_binding")?.text === "mut";
+	}
+
+	get static_type(): string | null {
+		const type_declaration = this.node.namedChildren.find(
+			(n) => n.grammarType === "type_declaration",
+		);
+		if (!type_declaration) {
+			return null;
+		}
+		const type_node = type_declaration.childForFieldName("type");
+		if (!type_node) return null;
+		return type_node.grammarType;
+	}
 }
 
 class LexScope {
@@ -170,6 +186,40 @@ export class Checker {
 				});
 				return;
 			}
+
+			switch (variable.static_type) {
+				case "list_type": {
+					if (LIST_MEMBERS.has(member.text)) {
+						const signature = LIST_MEMBERS.get(member.text)!;
+						if (signature.mutates && !variable.is_mutable) {
+							this.error({
+								level: "error",
+								location: member.startPosition,
+								message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
+							});
+						}
+					} else {
+						this.error({
+							level: "error",
+							location: member.startPosition,
+							message: `Unknown member '${member.text}' for list type.`,
+						});
+					}
+					break;
+				}
+				case null: {
+					this.error({
+						level: "error",
+						location: target.startPosition,
+						message: `The type of '${target.text}' is unknown.`,
+					});
+					break;
+				}
+				default: {
+					console.log(`Unknown type: ${variable.static_type}`);
+					break;
+				}
+			}
 		}
 	}
 
@@ -187,3 +237,17 @@ export class Checker {
 		}
 	}
 }
+
+const LIST_MEMBERS = new Map<string, { callable: boolean; mutates: boolean }>([
+	["at", { mutates: false, callable: true }],
+	["concat", { mutates: false, callable: true }],
+	["copyWithin", { mutates: true, callable: true }],
+	["length", { mutates: false, callable: false }],
+	["pop", { mutates: true, callable: true }],
+	["push", { mutates: true, callable: true }],
+	["reverse", { mutates: true, callable: true }],
+	["shift", { mutates: true, callable: true }],
+	["slice", { mutates: false, callable: true }],
+	["sort", { mutates: true, callable: true }],
+	["splice", { mutates: true, callable: true }],
+]);

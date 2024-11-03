@@ -96,7 +96,17 @@ Deno.test("referencing undeclared variables", () => {
 
 // todo: provide a std List implementation
 // until then, use checker to add syntactic sugar for ideal API
-Deno.test.ignore(
-	"mutable array methods aren't allowed on immutable arrays",
-	() => {},
-);
+Deno.test("mutable Array methods aren't allowed on immutable arrays", () => {
+	const tree = parser.parse(`
+let list: [Num] = [5]
+list.push(6)
+`);
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			message: "Cannot mutate an immutable list. Use 'mut' to make it mutable.",
+			location: { row: 2, column: 5 },
+		} satisfies Diagnostic,
+	]);
+});
