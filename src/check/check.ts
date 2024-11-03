@@ -26,9 +26,21 @@ const RESERVED_KEYWORDS = new Set([
 	"enum",
 ]);
 
+class Variable {
+	constructor(
+		readonly name: string,
+		readonly node: SyntaxNode,
+	) {}
+}
+
+class LexScope {
+	readonly definitions: Map<string, Variable> = new Map();
+}
+
 export class Checker {
 	cursor: TreeCursor;
 	errors: Diagnostic[] = [];
+	scopes: LexScope[] = [new LexScope()];
 
 	constructor(readonly tree: Tree) {
 		this.cursor = tree.walk();
@@ -47,6 +59,11 @@ export class Checker {
 
 	private error(error: Diagnostic) {
 		this.errors.push(error);
+	}
+
+	private scope(): LexScope {
+		if (this.scopes.length === 0) throw new Error("No scope found");
+		return this.scopes.at(0)!;
 	}
 
 	// if a check can be done, do it and go back to the parent node
@@ -81,6 +98,7 @@ export class Checker {
 				}
 			};
 
+			// todo: require types until inference is implemented
 			switch (type.text) {
 				case "Str": {
 					if (value.firstChild?.type !== "string") {
@@ -112,11 +130,47 @@ export class Checker {
 					}
 				}
 			}
+
+			this.scope().definitions.set(name.text, new Variable(name.text, node));
+
 			this.cursor.gotoParent();
 			return;
 		}
 
+		if (node.type === "block") {
+			// todo: create a new scope
+		}
+
+		if (node.type === "member_access") {
+			this.visitMemberAccess(node);
+			return;
+		}
+
 		this.check();
+	}
+
+	private visitMemberAccess(node: SyntaxNode) {
+		const [target, member] = node.namedChildren;
+		if (!target || !member) {
+			this.error({
+				level: "error",
+				location: node.startPosition,
+				message: "Invalid member access.",
+			});
+			return;
+		}
+
+		if (target.grammarType === "identifier") {
+			const variable = this.scope().definitions.get(target.text);
+			if (!variable) {
+				this.error({
+					level: "error",
+					location: target.startPosition,
+					message: `Missing declaration for '${target.text}'.`,
+				});
+				return;
+			}
+		}
 	}
 
 	private validateIdentifier(node: SyntaxNode | null) {

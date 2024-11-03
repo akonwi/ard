@@ -82,6 +82,18 @@ Deno.test("reserved keywords cannot be used as variable names", () => {
 	]);
 });
 
+Deno.test("referencing undeclared variables", () => {
+	const tree = parser.parse(`foo.bar`);
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			message: "Missing declaration for 'foo'.",
+			location: { row: 0, column: 0 },
+		} satisfies Diagnostic,
+	]);
+});
+
 // todo: provide a std List implementation
 // until then, use checker to add syntactic sugar for ideal API
 Deno.test.ignore(
