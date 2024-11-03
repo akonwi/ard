@@ -1,10 +1,30 @@
 import type { Point, SyntaxNode, Tree, TreeCursor } from "tree-sitter";
 
+/*
+ * Lists
+ * length: Num
+ *
+ */
+
 export type Diagnostic = {
 	level: "error";
 	location: Point;
 	message: string;
 };
+
+const RESERVED_KEYWORDS = new Set([
+	"let",
+	"of",
+	"in",
+	"if",
+	"else",
+	"true",
+	"false",
+	"or",
+	"and",
+	"struct",
+	"enum",
+]);
 
 export class Checker {
 	cursor: TreeCursor;
@@ -34,6 +54,7 @@ export class Checker {
 	private visitNode(node: SyntaxNode) {
 		if (node.type === "variable_definition") {
 			const name = node.childForFieldName("name");
+			this.validateIdentifier(name);
 			const type = node.namedChildren
 				.find((n) => n.grammarType === "type_declaration")
 				?.childForFieldName("type");
@@ -96,5 +117,19 @@ export class Checker {
 		}
 
 		this.check();
+	}
+
+	private validateIdentifier(node: SyntaxNode | null) {
+		if (!node) {
+			return;
+		}
+
+		if (RESERVED_KEYWORDS.has(node.text)) {
+			this.error({
+				location: node.startPosition,
+				level: "error",
+				message: `'${node.text}' is a reserved keyword and cannot be used as a variable name`,
+			});
+		}
 	}
 }

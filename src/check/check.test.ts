@@ -67,10 +67,20 @@ let also_valid = false`);
 	] satisfies Diagnostic[]);
 });
 
-Deno.test.ignore(
-	"reserved keywords cannot be used as variable and method names",
-	() => {},
-);
+const of = () => {};
+
+Deno.test("reserved keywords cannot be used as variable names", () => {
+	const tree = parser.parse(`let let = 5`);
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			message:
+				"'let' is a reserved keyword and cannot be used as a variable name",
+			location: { row: 0, column: 4 },
+		} satisfies Diagnostic,
+	]);
+});
 
 // todo: provide a std List implementation
 // until then, use checker to add syntactic sugar for ideal API
