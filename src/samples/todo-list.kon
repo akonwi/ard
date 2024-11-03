@@ -3,11 +3,11 @@ struct Todo {
   completed: Bool
 }
 
-let list: [Todo] = [
+mut list: [Todo] = [
   Todo { title: "Buy milk", completed: false }
 ]
 
 list.push(Todo { title: "Buy eggs", completed: false })
 list.push(Todo { title: "Buy fruits", completed: false })
 
-print(list)
+print(list.length)

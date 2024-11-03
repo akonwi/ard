@@ -33,7 +33,7 @@ class Variable {
 	) {}
 
 	get is_mutable(): boolean {
-		return this.node.childForFieldName("variable_binding")?.text === "mut";
+		return this.node.childForFieldName("binding")?.text === "mut";
 	}
 
 	get static_type(): string | null {
@@ -85,89 +85,167 @@ export class Checker {
 	// if a check can be done, do it and go back to the parent node
 	// otherwise, continue to the next child
 	private visitNode(node: SyntaxNode) {
-		if (node.type === "variable_definition") {
-			const name = node.childForFieldName("name");
-			this.validateIdentifier(name);
-			const type = node.namedChildren
-				.find((n) => n.grammarType === "type_declaration")
-				?.childForFieldName("type");
-			const value = node.childForFieldName("value");
-			if (!(name && type && value)) {
+		switch (node.type) {
+			case "statement": {
+				this.check();
 				return;
 			}
+			case "variable_definition": {
+				const name = node.childForFieldName("name");
+				this.validateIdentifier(name);
+				const type = node.namedChildren
+					.find((n) => n.grammarType === "type_declaration")
+					?.childForFieldName("type");
+				const value = node.childForFieldName("value");
+				if (!(name && type && value)) {
+					return;
+				}
 
-			const getValueLabel = (value: SyntaxNode) => {
-				switch (value.type) {
-					case "primitive_value": {
-						const child = value.firstChild;
-						switch (child?.grammarType) {
-							case "number":
-								return "Num";
-							case "string":
-								return "Str";
-							case "boolean":
-								return "Bool";
-							default:
-								return "unknown";
+				const getValueLabel = (value: SyntaxNode) => {
+					switch (value.type) {
+						case "primitive_value": {
+							const child = value.firstChild;
+							switch (child?.grammarType) {
+								case "number":
+									return "Num";
+								case "string":
+									return "Str";
+								case "boolean":
+									return "Bool";
+								default:
+									return "unknown";
+							}
+						}
+					}
+				};
+
+				// todo: require types until inference is implemented
+				switch (type.text) {
+					case "Str": {
+						if (value.firstChild?.type !== "string") {
+							this.error({
+								location: value.startPosition,
+								level: "error",
+								message: `Expected a 'Str' but got '${getValueLabel(value)}'`,
+							});
+						}
+						break;
+					}
+					case "Num": {
+						if (value.firstChild?.type !== "number") {
+							this.error({
+								location: value.startPosition,
+								level: "error",
+								message: `Expected a 'Num' but got '${getValueLabel(value)}'`,
+							});
+						}
+						break;
+					}
+					case "Bool": {
+						if (value.firstChild?.type !== "boolean") {
+							this.error({
+								location: value.startPosition,
+								level: "error",
+								message: `Expected a 'Bool' but got '${getValueLabel(value)}'`,
+							});
 						}
 					}
 				}
-			};
 
-			// todo: require types until inference is implemented
-			switch (type.text) {
-				case "Str": {
-					if (value.firstChild?.type !== "string") {
-						this.error({
-							location: value.startPosition,
-							level: "error",
-							message: `Expected a 'Str' but got '${getValueLabel(value)}'`,
-						});
-					}
-					break;
-				}
-				case "Num": {
-					if (value.firstChild?.type !== "number") {
-						this.error({
-							location: value.startPosition,
-							level: "error",
-							message: `Expected a 'Num' but got '${getValueLabel(value)}'`,
-						});
-					}
-					break;
-				}
-				case "Bool": {
-					if (value.firstChild?.type !== "boolean") {
-						this.error({
-							location: value.startPosition,
-							level: "error",
-							message: `Expected a 'Bool' but got '${getValueLabel(value)}'`,
-						});
-					}
-				}
+				const variable = new Variable(name.text, node);
+				this.scope().definitions.set(name.text, variable);
+
+				this.cursor.gotoParent();
+				return;
 			}
+			case "member_access": {
+				this.visitMemberAccess(node);
+				return;
+			}
+			case "function_call": {
+				return this.visitFunctionCall(node);
+			}
+			default: {
+				console.debug("skipping node", { type: node.type });
+			}
+		}
 
-			this.scope().definitions.set(name.text, new Variable(name.text, node));
+		this.cursor.gotoParent();
+	}
 
-			this.cursor.gotoParent();
+	private visitFunctionCall(node: SyntaxNode) {
+		const [targetNode, args] = node.namedChildren;
+		if (!targetNode || !args) {
+			this.error({
+				level: "error",
+				location: node.startPosition,
+				message: "Invalid function call.",
+			});
 			return;
 		}
 
-		if (node.type === "block") {
-			// todo: create a new scope
-		}
+		let targetVariable = (() => {
+			switch (targetNode.grammarType) {
+				case "identifier": {
+					const variable = this.scope().definitions.get(targetNode.text);
+					if (!variable) {
+						this.error({
+							level: "error",
+							location: targetNode.startPosition,
+							message: `Missing declaration for '${targetNode.text}'.`,
+						});
+						return;
+					}
+					return variable;
+				}
+				case "member_access": {
+					const [target, member] = targetNode.namedChildren;
+				}
+				default:
+					return null;
+			}
+		})();
 
-		if (node.type === "member_access") {
-			this.visitMemberAccess(node);
-			return;
+		switch (targetVariable?.static_type) {
+			case "list_type": {
+				console.log("checking list member access");
+				if (LIST_MEMBERS.has(args.text)) {
+					const signature = LIST_MEMBERS.get(args.text)!;
+					if (signature.mutates && !targetVariable.is_mutable) {
+						this.error({
+							level: "error",
+							location: args.startPosition,
+							message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
+						});
+					}
+				} else {
+					this.error({
+						level: "error",
+						location: args.startPosition,
+						message: `Unknown member '${args.text}' for list type.`,
+					});
+				}
+				break;
+			}
+			case undefined:
+			case null: {
+				this.error({
+					level: "error",
+					location: targetNode.startPosition,
+					message: `The type of '${targetNode.text}' is unknown.`,
+				});
+				break;
+			}
+			default: {
+				console.log(`Unknown type: ${targetVariable?.static_type}`);
+				break;
+			}
 		}
-
-		this.check();
 	}
 
 	private visitMemberAccess(node: SyntaxNode) {
-		const [target, member] = node.namedChildren;
-		if (!target || !member) {
+		const [targetNode, memberNode] = node.namedChildren;
+		if (!targetNode || !memberNode) {
 			this.error({
 				level: "error",
 				location: node.startPosition,
@@ -176,42 +254,57 @@ export class Checker {
 			return;
 		}
 
-		if (target.grammarType === "identifier") {
-			const variable = this.scope().definitions.get(target.text);
+		if (targetNode.grammarType === "identifier") {
+			const variable = this.scope().definitions.get(targetNode.text);
 			if (!variable) {
 				this.error({
 					level: "error",
-					location: target.startPosition,
-					message: `Missing declaration for '${target.text}'.`,
+					location: targetNode.startPosition,
+					message: `Missing declaration for '${targetNode.text}'.`,
 				});
 				return;
 			}
 
 			switch (variable.static_type) {
 				case "list_type": {
-					if (LIST_MEMBERS.has(member.text)) {
-						const signature = LIST_MEMBERS.get(member.text)!;
-						if (signature.mutates && !variable.is_mutable) {
-							this.error({
-								level: "error",
-								location: member.startPosition,
-								message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-							});
+					switch (memberNode.type) {
+						case "function_call": {
+							const member = memberNode.childForFieldName("target")?.text!;
+							if (!member) {
+								return;
+							}
+							if (LIST_MEMBERS.has(member)) {
+								const signature = LIST_MEMBERS.get(member)!;
+								if (signature.mutates && !variable.is_mutable) {
+									this.error({
+										level: "error",
+										location: memberNode.startPosition,
+										message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
+									});
+								}
+								if (!signature.callable) {
+									this.error({
+										level: "error",
+										location: memberNode.startPosition,
+										message: `${variable.name}.${member} is not a callable function.`,
+									});
+								}
+							} else {
+								this.error({
+									level: "error",
+									location: memberNode.startPosition,
+									message: `Unknown member '${member}' for list type.`,
+								});
+							}
 						}
-					} else {
-						this.error({
-							level: "error",
-							location: member.startPosition,
-							message: `Unknown member '${member.text}' for list type.`,
-						});
 					}
 					break;
 				}
 				case null: {
 					this.error({
 						level: "error",
-						location: target.startPosition,
-						message: `The type of '${target.text}' is unknown.`,
+						location: targetNode.startPosition,
+						message: `The type of '${targetNode.text}' is unknown.`,
 					});
 					break;
 				}
