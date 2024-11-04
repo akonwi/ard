@@ -67,8 +67,6 @@ let also_valid = false`);
 	] satisfies Diagnostic[]);
 });
 
-const of = () => {};
-
 Deno.test("reserved keywords cannot be used as variable names", () => {
 	const tree = parser.parse(`let let = 5`);
 	const errors = new Checker(tree).check();

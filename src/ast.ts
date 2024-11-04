@@ -398,6 +398,8 @@ export interface MapValueNode extends NamedNodeBase {
 
 export interface MemberAccessNode extends NamedNodeBase {
   type: SyntaxType.MemberAccess;
+  memberNode: FunctionCallNode | IdentifierNode;
+  targetNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
 export interface ParamDefNode extends NamedNodeBase {

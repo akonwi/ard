@@ -1,19 +1,14 @@
-import type { Point, SyntaxNode, Tree, TreeCursor } from "tree-sitter";
+import type { Point, Tree, TreeCursor } from "tree-sitter";
 import {
 	SyntaxType,
 	type ExpressionNode,
+	type FunctionCallNode,
+	type MemberAccessNode,
 	type NamedNode,
-	type StatementNode,
 	type TypeDeclarationNode,
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
 } from "../ast.ts";
-
-/*
- * Lists
- * length: Num
- *
- */
 
 export type Diagnostic = {
 	level: "error";
@@ -34,12 +29,6 @@ const RESERVED_KEYWORDS = new Set([
 	"struct",
 	"enum",
 ]);
-
-const textToTokenType: Record<string, string> = {
-	Str: "string",
-	Num: "number",
-	Bool: "boolean",
-};
 
 const tokenTypeToText: Record<
 	SyntaxType.Boolean | SyntaxType.Number | SyntaxType.String,
@@ -69,7 +58,8 @@ class Variable {
 			case SyntaxType.PrimitiveType:
 				return type_declaration.text;
 			case SyntaxType.ListType:
-				return `[${type_declaration.innerNode.text}]`;
+				return SyntaxType.ListType;
+			// return `[${type_declaration.innerNode.text}]`;
 			case SyntaxType.MapType:
 				return `{${type_declaration.keyNode.text}: ${type_declaration.valueNode.text}}`;
 			default:
@@ -95,6 +85,9 @@ export class Checker {
 		// go through children
 		if (this.cursor.gotoFirstChild()) {
 			do {
+				console.debug(this.cursor.currentNode.type, {
+					text: this.cursor.currentNode.text,
+				});
 				const cursor = this.cursor as unknown as TypedTreeCursor;
 				switch (cursor.nodeType) {
 					case SyntaxType.Statement: {
@@ -105,8 +98,16 @@ export class Checker {
 						this.visitVariableDefinition(cursor.currentNode);
 						break;
 					}
+					case SyntaxType.FunctionCall: {
+						this.visitFunctionCall(cursor.currentNode);
+						break;
+					}
+					case SyntaxType.MemberAccess: {
+						this.visitMemberAccess(cursor.currentNode);
+						break;
+					}
 					default: {
-						this.visitNode(this.cursor.currentNode);
+						this.cursor.gotoParent();
 					}
 				}
 			} while (this.cursor.gotoNextSibling());
@@ -122,27 +123,6 @@ export class Checker {
 	private scope(): LexScope {
 		if (this.scopes.length === 0) throw new Error("No scope found");
 		return this.scopes.at(0)!;
-	}
-
-	private visitStatement(node: StatementNode) {}
-
-	// if a check can be done, do it and go back to the parent node
-	// otherwise, continue to the next child
-	private visitNode(node: SyntaxNode) {
-		switch (node.type as SyntaxType) {
-			case "member_access": {
-				this.visitMemberAccess(node);
-				return;
-			}
-			case "function_call": {
-				return this.visitFunctionCall(node);
-			}
-			default: {
-				console.debug("skipping node", { type: node.type });
-			}
-		}
-
-		this.cursor.gotoParent();
 	}
 
 	private visitVariableDefinition(node: VariableDefinitionNode) {
@@ -216,19 +196,10 @@ export class Checker {
 		}
 	}
 
-	private visitFunctionCall(node: SyntaxNode) {
-		const [targetNode, args] = node.namedChildren;
-		if (!targetNode || !args) {
-			this.error({
-				level: "error",
-				location: node.startPosition,
-				message: "Invalid function call.",
-			});
-			return;
-		}
-
-		let targetVariable = (() => {
-			switch (targetNode.grammarType) {
+	private visitFunctionCall(node: FunctionCallNode) {
+		const { targetNode, argumentsNode } = node;
+		const targetVariable = (() => {
+			switch (targetNode.type) {
 				case "identifier": {
 					const variable = this.scope().definitions.get(targetNode.text);
 					if (!variable) {
@@ -241,8 +212,9 @@ export class Checker {
 					}
 					return variable;
 				}
-				case "member_access": {
-					const [target, member] = targetNode.namedChildren;
+				case SyntaxType.Identifier: {
+					// TODO
+					return null;
 				}
 				default:
 					return null;
@@ -251,21 +223,20 @@ export class Checker {
 
 		switch (targetVariable?.static_type) {
 			case "list_type": {
-				console.log("checking list member access");
-				if (LIST_MEMBERS.has(args.text)) {
-					const signature = LIST_MEMBERS.get(args.text)!;
+				if (LIST_MEMBERS.has(argumentsNode.text)) {
+					const signature = LIST_MEMBERS.get(argumentsNode.text)!;
 					if (signature.mutates && !targetVariable.is_mutable) {
 						this.error({
 							level: "error",
-							location: args.startPosition,
+							location: argumentsNode.startPosition,
 							message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 						});
 					}
 				} else {
 					this.error({
 						level: "error",
-						location: args.startPosition,
-						message: `Unknown member '${args.text}' for list type.`,
+						location: argumentsNode.startPosition,
+						message: `Unknown member '${argumentsNode.text}' for list type.`,
 					});
 				}
 				break;
@@ -286,74 +257,70 @@ export class Checker {
 		}
 	}
 
-	private visitMemberAccess(node: SyntaxNode) {
-		const [targetNode, memberNode] = node.namedChildren;
-		if (!targetNode || !memberNode) {
-			this.error({
-				level: "error",
-				location: node.startPosition,
-				message: "Invalid member access.",
-			});
-			return;
-		}
+	private visitMemberAccess(node: MemberAccessNode) {
+		const { memberNode } = node;
+		const targetNode = node.targetNodes.filter((n) => n.isNamed).at(0);
+		if (targetNode == null) throw new Error("Invalid member access");
 
-		if (targetNode.grammarType === "identifier") {
-			const variable = this.scope().definitions.get(targetNode.text);
-			if (!variable) {
-				this.error({
-					level: "error",
-					location: targetNode.startPosition,
-					message: `Missing declaration for '${targetNode.text}'.`,
-				});
-				return;
-			}
-
-			switch (variable.static_type) {
-				case "list_type": {
-					switch (memberNode.type) {
-						case "function_call": {
-							const member = memberNode.childForFieldName("target")?.text!;
-							if (!member) {
-								return;
-							}
-							if (LIST_MEMBERS.has(member)) {
-								const signature = LIST_MEMBERS.get(member)!;
-								if (signature.mutates && !variable.is_mutable) {
-									this.error({
-										level: "error",
-										location: memberNode.startPosition,
-										message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-									});
-								}
-								if (!signature.callable) {
-									this.error({
-										level: "error",
-										location: memberNode.startPosition,
-										message: `${variable.name}.${member} is not a callable function.`,
-									});
-								}
-							} else {
-								this.error({
-									level: "error",
-									location: memberNode.startPosition,
-									message: `Unknown member '${member}' for list type.`,
-								});
-							}
-						}
-					}
-					break;
-				}
-				case null: {
+		switch (targetNode.type) {
+			case SyntaxType.Identifier: {
+				const variable = this.scope().definitions.get(targetNode.text);
+				if (!variable) {
 					this.error({
 						level: "error",
 						location: targetNode.startPosition,
-						message: `The type of '${targetNode.text}' is unknown.`,
+						message: `Missing declaration for '${targetNode.text}'.`,
 					});
-					break;
+					return;
 				}
-				default: {
-					console.log(`Unknown type: ${variable.static_type}`);
-					break;
+
+				switch (variable.static_type) {
+					case "list_type": {
+						switch (memberNode.type) {
+							case SyntaxType.FunctionCall: {
+								const member = memberNode.targetNode.text;
+								if (!member) {
+									return;
+								}
+								if (LIST_MEMBERS.has(member)) {
+									const signature = LIST_MEMBERS.get(member)!;
+									if (signature.mutates && !variable.is_mutable) {
+										this.error({
+											level: "error",
+											location: memberNode.startPosition,
+											message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
+										});
+									}
+									if (!signature.callable) {
+										this.error({
+											level: "error",
+											location: memberNode.startPosition,
+											message: `${variable.name}.${member} is not a callable function.`,
+										});
+									}
+								} else {
+									this.error({
+										level: "error",
+										location: memberNode.startPosition,
+										message: `Unknown member '${member}' for list type.`,
+									});
+								}
+							}
+						}
+						break;
+					}
+					case null: {
+						this.error({
+							level: "error",
+							location: targetNode.startPosition,
+							message: `The type of '${targetNode.text}' is unknown.`,
+						});
+						break;
+					}
+					default: {
+						console.log(`Unknown type: ${variable.static_type}`);
+						break;
+					}
 				}
 			}
 		}
