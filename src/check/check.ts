@@ -143,7 +143,11 @@ export class Checker {
 
 		const declared_type = this.getTypeFromTypeDefNode(typeNode);
 		const provided_type = this.getTypeFromExpressionNode(value);
-		if (declared_type !== provided_type) {
+		if (
+			declared_type !== provided_type &&
+			provided_type !== "unknown" &&
+			declared_type !== "unknown"
+		) {
 			this.error({
 				location: value.startPosition,
 				level: "error",
@@ -164,21 +168,26 @@ export class Checker {
 		switch (node.type) {
 			case SyntaxType.PrimitiveType:
 				return node.text;
-			// case "list_type": {
-			// 	const type = node.childForFieldName("inner")?.grammarType;
-			// 	if (!type) throw new Error("Invalid list type");
-			// 	switch (type) {
-			// 		case "identifier": {
-			// 			// todo: check that the type exists
-			// 			return node.text;
-			// 		}
-			// 		case "primitive_type": {
-			// 			return node.text;
-			// 		}
-			// 		default:
-			// 			return "unknown";
-			// 	}
-			// }
+			case SyntaxType.ListType: {
+				switch (node.innerNode.type) {
+					case "identifier": {
+						// check that the type exists
+						if (!this.scope().definitions.has(node.innerNode.text)) {
+							this.error({
+								level: "error",
+								location: node.innerNode.startPosition,
+								message: `Missing definition for type '${node.innerNode.text}'.`,
+							});
+						}
+						return node.text;
+					}
+					case "primitive_type": {
+						return node.text;
+					}
+					default:
+						return "unknown";
+				}
+			}
 			default:
 				return "unknown";
 		}

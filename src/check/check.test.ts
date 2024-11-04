@@ -109,7 +109,7 @@ list.push(6)
 	]);
 });
 
-Deno.test("cannot referencee undeclared types", () => {
+Deno.test("cannot reference undeclared types", () => {
 	const tree = parser.parse(`let x: [Todo] = []`);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
