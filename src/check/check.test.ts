@@ -110,3 +110,15 @@ list.push(6)
 		} satisfies Diagnostic,
 	]);
 });
+
+Deno.test("cannot referencee undeclared types", () => {
+	const tree = parser.parse(`let x: [Todo] = []`);
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			location: { row: 0, column: 8 },
+			message: "Missing definition for type 'Todo'.",
+		} satisfies Diagnostic,
+	]);
+});

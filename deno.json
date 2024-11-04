@@ -1,9 +1,10 @@
 {
-	"compilerOptions": {
-		"checkJs": true
-	},
-	"tasks": {
-		"kon": "deno run --allow-ffi --allow-env --allow-read src/run.ts",
-		"test": "deno test --allow-ffi --allow-read"
-	}
+  "compilerOptions": {
+    "checkJs": true
+  },
+  "tasks": {
+    "ast": "deno run --allow-write --allow-read src/gen-types.ts \"../tree-sitter-kon/src/node-types.json\" > src/ast.ts",
+    "kon": "deno run --allow-ffi --allow-env --allow-read src/run.ts",
+    "test": "deno test --allow-ffi --allow-read"
+  }
 }

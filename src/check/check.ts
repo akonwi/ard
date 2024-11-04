@@ -26,6 +26,18 @@ const RESERVED_KEYWORDS = new Set([
 	"enum",
 ]);
 
+const textToTokenType: Record<string, string> = {
+	Str: "string",
+	Num: "number",
+	Bool: "boolean",
+};
+
+const tokenTypeToText: Record<string, string> = {
+	string: "Str",
+	number: "Num",
+	boolean: "Bool",
+};
+
 class Variable {
 	constructor(
 		readonly name: string,
@@ -91,71 +103,7 @@ export class Checker {
 				return;
 			}
 			case "variable_definition": {
-				const name = node.childForFieldName("name");
-				this.validateIdentifier(name);
-				const type = node.namedChildren
-					.find((n) => n.grammarType === "type_declaration")
-					?.childForFieldName("type");
-				const value = node.childForFieldName("value");
-				if (!(name && type && value)) {
-					return;
-				}
-
-				const getValueLabel = (value: SyntaxNode) => {
-					switch (value.type) {
-						case "primitive_value": {
-							const child = value.firstChild;
-							switch (child?.grammarType) {
-								case "number":
-									return "Num";
-								case "string":
-									return "Str";
-								case "boolean":
-									return "Bool";
-								default:
-									return "unknown";
-							}
-						}
-					}
-				};
-
-				// todo: require types until inference is implemented
-				switch (type.text) {
-					case "Str": {
-						if (value.firstChild?.type !== "string") {
-							this.error({
-								location: value.startPosition,
-								level: "error",
-								message: `Expected a 'Str' but got '${getValueLabel(value)}'`,
-							});
-						}
-						break;
-					}
-					case "Num": {
-						if (value.firstChild?.type !== "number") {
-							this.error({
-								location: value.startPosition,
-								level: "error",
-								message: `Expected a 'Num' but got '${getValueLabel(value)}'`,
-							});
-						}
-						break;
-					}
-					case "Bool": {
-						if (value.firstChild?.type !== "boolean") {
-							this.error({
-								location: value.startPosition,
-								level: "error",
-								message: `Expected a 'Bool' but got '${getValueLabel(value)}'`,
-							});
-						}
-					}
-				}
-
-				const variable = new Variable(name.text, node);
-				this.scope().definitions.set(name.text, variable);
-
-				this.cursor.gotoParent();
+				this.visitVariableDefinition(node);
 				return;
 			}
 			case "member_access": {
@@ -171,6 +119,100 @@ export class Checker {
 		}
 
 		this.cursor.gotoParent();
+	}
+
+	private visitVariableDefinition(node: SyntaxNode) {
+		const name = node.childForFieldName("name");
+		this.validateIdentifier(name);
+
+		const typeNode = node.namedChildren
+			.find((n) => n.grammarType === "type_declaration")
+			?.childForFieldName("type");
+		// if (!type)
+		// 	this.error({
+		// 		level: "error",
+		// 		message: `Missing type declaration for variable ${name?.text ?? ""}.`,
+		// 		location: node.startPosition,
+		// 	});
+		const value = node.childForFieldName("value");
+		if (!(name && typeNode && value)) {
+			return;
+		}
+
+		const declared_type = this.getTypeFromTypeDefNode(typeNode);
+		const provided_type = this.getTypeFromValueNode(value);
+		if (declared_type !== provided_type) {
+			this.error({
+				location: value.startPosition,
+				level: "error",
+				message: `Expected a '${declared_type}' but got '${provided_type}'`,
+			});
+		}
+
+		const variable = new Variable(name.text, node);
+		this.scope().definitions.set(name.text, variable);
+
+		this.cursor.gotoParent();
+		return;
+	}
+
+	private visitVariableTypeDeclaration(node: SyntaxNode): string {
+		switch (node.grammarType) {
+			case "primitive_type":
+				return node.text;
+			case "list_type": {
+				const type = node.childForFieldName("inner")?.grammarType;
+				if (!type) throw new Error("Invalid list type");
+				switch (type) {
+					case "identifier": {
+						// todo: check that the type exists
+						return node.text;
+					}
+					case "primitive_type": {
+						return node.text;
+					}
+					default:
+						return "unknown";
+				}
+			}
+			default:
+				return "unknown";
+		}
+	}
+
+	private getTypeFromTypeDefNode(node: SyntaxNode): string {
+		switch (node.grammarType) {
+			case "primitive_type":
+				return node.text;
+			// case "list_type": {
+			// 	const type = node.childForFieldName("inner")?.grammarType;
+			// 	if (!type) throw new Error("Invalid list type");
+			// 	switch (type) {
+			// 		case "identifier": {
+			// 			// todo: check that the type exists
+			// 			return node.text;
+			// 		}
+			// 		case "primitive_type": {
+			// 			return node.text;
+			// 		}
+			// 		default:
+			// 			return "unknown";
+			// 	}
+			// }
+			default:
+				return "unknown";
+		}
+	}
+
+	private getTypeFromValueNode(node: SyntaxNode): string {
+		if (node.firstNamedChild?.type == null) return "unknown";
+		const tokenType = node.firstNamedChild!.type!;
+		const konType = tokenTypeToText[tokenType];
+		if (konType == null) {
+			console.debug("Unknown kon type for ", tokenType);
+			return "unknown";
+		}
+		return konType;
 	}
 
 	private visitFunctionCall(node: SyntaxNode) {
