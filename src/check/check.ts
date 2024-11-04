@@ -1,4 +1,13 @@
 import type { Point, SyntaxNode, Tree, TreeCursor } from "tree-sitter";
+import {
+	SyntaxType,
+	type ExpressionNode,
+	type NamedNode,
+	type StatementNode,
+	type TypeDeclarationNode,
+	type TypedTreeCursor,
+	type VariableDefinitionNode,
+} from "../ast.ts";
 
 /*
  * Lists
@@ -32,7 +41,10 @@ const textToTokenType: Record<string, string> = {
 	Bool: "boolean",
 };
 
-const tokenTypeToText: Record<string, string> = {
+const tokenTypeToText: Record<
+	SyntaxType.Boolean | SyntaxType.Number | SyntaxType.String,
+	string
+> = {
 	string: "Str",
 	number: "Num",
 	boolean: "Bool",
@@ -41,23 +53,28 @@ const tokenTypeToText: Record<string, string> = {
 class Variable {
 	constructor(
 		readonly name: string,
-		readonly node: SyntaxNode,
+		readonly node: VariableDefinitionNode,
 	) {}
 
 	get is_mutable(): boolean {
-		return this.node.childForFieldName("binding")?.text === "mut";
+		return this.node.bindingNode.text === "mut";
 	}
 
 	get static_type(): string | null {
-		const type_declaration = this.node.namedChildren.find(
-			(n) => n.grammarType === "type_declaration",
-		);
+		const type_declaration = this.node.typeNode?.typeNode;
 		if (!type_declaration) {
 			return null;
 		}
-		const type_node = type_declaration.childForFieldName("type");
-		if (!type_node) return null;
-		return type_node.grammarType;
+		switch (type_declaration.type) {
+			case SyntaxType.PrimitiveType:
+				return type_declaration.text;
+			case SyntaxType.ListType:
+				return `[${type_declaration.innerNode.text}]`;
+			case SyntaxType.MapType:
+				return `{${type_declaration.keyNode.text}: ${type_declaration.valueNode.text}}`;
+			default:
+				return null;
+		}
 	}
 }
 
@@ -78,7 +95,20 @@ export class Checker {
 		// go through children
 		if (this.cursor.gotoFirstChild()) {
 			do {
-				this.visitNode(this.cursor.currentNode);
+				const cursor = this.cursor as unknown as TypedTreeCursor;
+				switch (cursor.nodeType) {
+					case SyntaxType.Statement: {
+						this.check();
+						break;
+					}
+					case SyntaxType.VariableDefinition: {
+						this.visitVariableDefinition(cursor.currentNode);
+						break;
+					}
+					default: {
+						this.visitNode(this.cursor.currentNode);
+					}
+				}
 			} while (this.cursor.gotoNextSibling());
 		}
 
@@ -94,18 +124,12 @@ export class Checker {
 		return this.scopes.at(0)!;
 	}
 
+	private visitStatement(node: StatementNode) {}
+
 	// if a check can be done, do it and go back to the parent node
 	// otherwise, continue to the next child
 	private visitNode(node: SyntaxNode) {
-		switch (node.type) {
-			case "statement": {
-				this.check();
-				return;
-			}
-			case "variable_definition": {
-				this.visitVariableDefinition(node);
-				return;
-			}
+		switch (node.type as SyntaxType) {
 			case "member_access": {
 				this.visitMemberAccess(node);
 				return;
@@ -121,26 +145,24 @@ export class Checker {
 		this.cursor.gotoParent();
 	}
 
-	private visitVariableDefinition(node: SyntaxNode) {
-		const name = node.childForFieldName("name");
-		this.validateIdentifier(name);
+	private visitVariableDefinition(node: VariableDefinitionNode) {
+		const name = node.nameNode;
+		this.validateIdentifier(node.nameNode);
 
-		const typeNode = node.namedChildren
-			.find((n) => n.grammarType === "type_declaration")
-			?.childForFieldName("type");
+		const typeNode = node.typeNode?.typeNode;
 		// if (!type)
 		// 	this.error({
 		// 		level: "error",
 		// 		message: `Missing type declaration for variable ${name?.text ?? ""}.`,
 		// 		location: node.startPosition,
 		// 	});
-		const value = node.childForFieldName("value");
-		if (!(name && typeNode && value)) {
+		const value = node.valueNodes.filter((n) => n.isNamed).at(0);
+		if (!(typeNode && value)) {
 			return;
 		}
 
 		const declared_type = this.getTypeFromTypeDefNode(typeNode);
-		const provided_type = this.getTypeFromValueNode(value);
+		const provided_type = this.getTypeFromExpressionNode(value);
 		if (declared_type !== provided_type) {
 			this.error({
 				location: value.startPosition,
@@ -156,33 +178,11 @@ export class Checker {
 		return;
 	}
 
-	private visitVariableTypeDeclaration(node: SyntaxNode): string {
-		switch (node.grammarType) {
-			case "primitive_type":
-				return node.text;
-			case "list_type": {
-				const type = node.childForFieldName("inner")?.grammarType;
-				if (!type) throw new Error("Invalid list type");
-				switch (type) {
-					case "identifier": {
-						// todo: check that the type exists
-						return node.text;
-					}
-					case "primitive_type": {
-						return node.text;
-					}
-					default:
-						return "unknown";
-				}
-			}
-			default:
-				return "unknown";
-		}
-	}
-
-	private getTypeFromTypeDefNode(node: SyntaxNode): string {
-		switch (node.grammarType) {
-			case "primitive_type":
+	private getTypeFromTypeDefNode(
+		node: TypeDeclarationNode["typeNode"],
+	): string {
+		switch (node.type) {
+			case SyntaxType.PrimitiveType:
 				return node.text;
 			// case "list_type": {
 			// 	const type = node.childForFieldName("inner")?.grammarType;
@@ -204,15 +204,16 @@ export class Checker {
 		}
 	}
 
-	private getTypeFromValueNode(node: SyntaxNode): string {
-		if (node.firstNamedChild?.type == null) return "unknown";
-		const tokenType = node.firstNamedChild!.type!;
-		const konType = tokenTypeToText[tokenType];
-		if (konType == null) {
-			console.debug("Unknown kon type for ", tokenType);
-			return "unknown";
+	private getTypeFromExpressionNode(node: ExpressionNode): string {
+		switch (node.type) {
+			case SyntaxType.PrimitiveValue: {
+				// @ts-expect-error not supporting everything yet
+				return tokenTypeToText[node.primitiveNode.type] ?? "unknown";
+			}
+			default: {
+				return "unknown";
+			}
 		}
-		return konType;
 	}
 
 	private visitFunctionCall(node: SyntaxNode) {
@@ -358,11 +359,7 @@ export class Checker {
 		}
 	}
 
-	private validateIdentifier(node: SyntaxNode | null) {
-		if (!node) {
-			return;
-		}
-
+	private validateIdentifier(node: NamedNode) {
 		if (RESERVED_KEYWORDS.has(node.text)) {
 			this.error({
 				location: node.startPosition,

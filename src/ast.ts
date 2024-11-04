@@ -113,6 +113,16 @@ export interface ErrorNode extends NamedNodeBase {
     hasError(): true;
 }
 
+// This is a helper because expression is a hidden rule in the grammar
+export type ExpressionNode =
+	| BinaryExpressionNode
+	| UnaryExpressionNode
+	| PrimitiveValueNode
+	| FunctionCallNode
+	| IdentifierNode
+	| MemberAccessNode
+	| StructInstanceNode;
+
 export const enum SyntaxType {
   ERROR = "ERROR",
   BinaryExpression = "binary_expression",
@@ -410,6 +420,7 @@ export interface PrimitiveTypeNode extends NamedNodeBase {
 
 export interface PrimitiveValueNode extends NamedNodeBase {
   type: SyntaxType.PrimitiveValue;
+  primitiveNode: BooleanNode | ListValueNode | MapValueNode | NumberNode | StringNode;
 }
 
 export interface ProgramNode extends NamedNodeBase {
@@ -470,6 +481,7 @@ export interface VariableDefinitionNode extends NamedNodeBase {
   type: SyntaxType.VariableDefinition;
   bindingNode: VariableBindingNode;
   nameNode: IdentifierNode;
+  typeNode?: TypeDeclarationNode;
   valueNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
