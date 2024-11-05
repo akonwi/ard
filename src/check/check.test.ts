@@ -142,6 +142,7 @@ Deno.test("struct instantiation", () => {
 Todo {}
 Todo { title: "foo" }
 Todo { title: "foo", completed: true }
+Todo { title: 404, completed: "yes" }
 `);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
@@ -154,6 +155,16 @@ Todo { title: "foo", completed: true }
 			level: "error",
 			location: { row: 6, column: 0 },
 			message: "Missing fields for struct 'Todo': completed.",
+		},
+		{
+			level: "error",
+			location: { row: 8, column: 14 },
+			message: "Expected a 'Str' but got 'Num'",
+		},
+		{
+			level: "error",
+			location: { row: 8, column: 30 },
+			message: "Expected a 'Bool' but got 'Str'",
 		},
 	] satisfies Diagnostic[]);
 });

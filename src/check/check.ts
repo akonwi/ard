@@ -1,10 +1,14 @@
 import type { Point, Tree, TreeCursor } from "tree-sitter";
 import {
+	NumberNode,
+	StringNode,
 	SyntaxType,
+	type BooleanNode,
 	type ExpressionNode,
 	type FunctionCallNode,
 	type MemberAccessNode,
 	type NamedNode,
+	type PrimitiveValueNode,
 	type StructDefinitionNode,
 	type StructInstanceNode,
 	type SyntaxNode,
@@ -73,12 +77,12 @@ class Variable {
 }
 
 class StructDef {
-	// Map<field_name, field_type>
+	// Map<field_name, field_kon_type>
 	readonly fields: Map<string, string> = new Map();
 
 	constructor(readonly node: StructDefinitionNode) {
 		for (const field of this.node.fieldNodes) {
-			this.fields.set(field.nameNode.text, field.typeNode.type);
+			this.fields.set(field.nameNode.text, field.typeNode.text);
 		}
 	}
 
@@ -163,6 +167,21 @@ export class Checker {
 		for (const inputFieldNode of node.fieldNodes) {
 			const member_name = inputFieldNode.nameNode.text;
 			if (expected_fields.has(member_name)) {
+				const expected_type = expected_fields.get(member_name)!;
+				const provided_type = this.getTypeFromExpressionNode(
+					inputFieldNode.valueNode,
+				);
+				if (
+					expected_type !== provided_type &&
+					provided_type !== "unknown" &&
+					expected_type !== "unknown"
+				) {
+					this.error({
+						location: inputFieldNode.valueNode.startPosition,
+						level: "error",
+						message: `Expected a '${expected_type}' but got '${provided_type}'`,
+					});
+				}
 				received_fields.add(member_name);
 			}
 			if (!expected_fields.has(member_name)) {
@@ -260,8 +279,15 @@ export class Checker {
 		}
 	}
 
-	private getTypeFromExpressionNode(node: ExpressionNode): string {
+	private getTypeFromExpressionNode(
+		node: ExpressionNode | BooleanNode | NumberNode | StringNode,
+	): string {
 		switch (node.type) {
+			case SyntaxType.Boolean:
+			case SyntaxType.Number:
+			case SyntaxType.String: {
+				return tokenTypeToText[node.type];
+			}
 			case SyntaxType.PrimitiveValue: {
 				// @ts-expect-error not supporting everything yet
 				return tokenTypeToText[node.primitiveNode.type] ?? "unknown";
