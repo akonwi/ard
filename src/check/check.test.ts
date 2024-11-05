@@ -133,20 +133,29 @@ Deno.test("cannot reference undeclared types", () => {
 
 const STRUCT_DEF = `
 struct Todo {
-  title: Str
+  title: Str,
   completed: Bool
 }`;
 
 Deno.test("struct instantiation", () => {
-	const tree = parser.parse(`${STRUCT_DEF}\nTodo {}`);
+	const tree = parser.parse(`${STRUCT_DEF}
+Todo {}
+Todo { title: "foo" }
+Todo { title: "foo", completed: true }
+`);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
 		{
 			level: "error",
 			location: { row: 5, column: 0 },
-			message: "Cannot instantiate a 'Todo' without its fields.",
-		} satisfies Diagnostic,
-	]);
+			message: "Missing fields for struct 'Todo': title, completed.",
+		},
+		{
+			level: "error",
+			location: { row: 6, column: 0 },
+			message: "Missing fields for struct 'Todo': completed.",
+		},
+	] satisfies Diagnostic[]);
 });
 
 Deno.test.ignore("intialization list of structs", () => {

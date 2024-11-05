@@ -15,7 +15,7 @@ import {
 import console from "node:console";
 
 export type Diagnostic = {
-	level: "error";
+	level: "error" | "warning";
 	location: Point;
 	message: string;
 };
@@ -159,25 +159,36 @@ export class Checker {
 		}
 
 		const expected_fields = struct_def.fields;
-		if (expected_fields.size !== node.fieldNodes.length) {
-			this.error({
-				level: "error",
-				location: node.startPosition,
-				message: `Cannot instantiate a '${struct_name}' without its fields.`,
-			});
-			return;
-		}
-		// const members = node.memberNodes;
+		const received_fields = new Set<string>();
 		for (const inputFieldNode of node.fieldNodes) {
 			const member_name = inputFieldNode.nameNode.text;
-			// if (!expected_fields.has(member_name)) {
-			// 	this.error({
-			// 		level: "error",
-			// 		message: `Unknown field '${member_name}' in struct '${struct_name}'.`,
-			// 		location: inputFieldNode.startPosition,
-			// 	});
-			// 	continue;
-			// }
+			if (expected_fields.has(member_name)) {
+				received_fields.add(member_name);
+			}
+			if (!expected_fields.has(member_name)) {
+				this.error({
+					level: "warning",
+					message: `Struct '${struct_name}' does not have a field named ${member_name}.`,
+					location: inputFieldNode.startPosition,
+				});
+				continue;
+			}
+		}
+
+		const missing_field_names = new Set<string>();
+		for (const field of expected_fields.keys()) {
+			if (!received_fields.has(field)) {
+				missing_field_names.add(field);
+			}
+		}
+		if (missing_field_names.size > 0) {
+			this.error({
+				level: "error",
+				message: `Missing fields for struct '${struct_name}': ${Array.from(
+					missing_field_names,
+				).join(", ")}.`,
+				location: node.startPosition,
+			});
 		}
 	}
 
