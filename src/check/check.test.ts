@@ -110,6 +110,46 @@ list.push(6)
 });
 
 Deno.test("cannot reference undeclared types", () => {
+	const message = "Missing definition for type 'Todo'.";
+	const list = parser.parse(`let x: [Todo] = []`);
+	const errors = new Checker(list).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			location: { row: 0, column: 8 },
+			message,
+		} satisfies Diagnostic,
+	]);
+
+	const struct = parser.parse(`Todo {}`);
+	expect(new Checker(struct).check()).toEqual([
+		{
+			level: "error",
+			location: { row: 0, column: 0 },
+			message,
+		},
+	]);
+});
+
+const STRUCT_DEF = `
+struct Todo {
+  title: Str
+  completed: Bool
+}`;
+
+Deno.test("struct instantiation", () => {
+	const tree = parser.parse(`${STRUCT_DEF}\nTodo {}`);
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			location: { row: 5, column: 0 },
+			message: "Cannot instantiate a struct without initializing its fields.",
+		} satisfies Diagnostic,
+	]);
+});
+
+Deno.test.ignore("intialization list of structs", () => {
 	const tree = parser.parse(`let x: [Todo] = []`);
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([

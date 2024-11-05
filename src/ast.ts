@@ -131,7 +131,6 @@ export const enum SyntaxType {
   CompoundAssignment = "compound_assignment",
   ElseStatement = "else_statement",
   EnumDefinition = "enum_definition",
-  EnumStructVariant = "enum_struct_variant",
   EnumVariant = "enum_variant",
   ForLoop = "for_loop",
   FunctionCall = "function_call",
@@ -222,7 +221,6 @@ export type SyntaxNode =
   | CompoundAssignmentNode
   | ElseStatementNode
   | EnumDefinitionNode
-  | EnumStructVariantNode
   | EnumVariantNode
   | ForLoopNode
   | FunctionCallNode
@@ -253,60 +251,60 @@ export type SyntaxNode =
   | VariableBindingNode
   | VariableDefinitionNode
   | WhileLoopNode
-  | UnnamedNode<"\"">
-  | UnnamedNode<"(">
-  | UnnamedNode<")">
-  | UnnamedNode<",">
-  | UnnamedNode<".">
-  | UnnamedNode<":">
-  | UnnamedNode<"=">
-  | UnnamedNode<"Bool">
-  | UnnamedNode<"Num">
-  | UnnamedNode<"Str">
-  | UnnamedNode<"[">
-  | UnnamedNode<"]">
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
+  | null
   | AndNode
   | BangNode
   | DecrementNode
   | DivideNode
-  | UnnamedNode<"do">
-  | UnnamedNode<"else">
-  | UnnamedNode<"enum">
+  | null
+  | null
+  | null
   | EqualNode
-  | UnnamedNode<"false">
-  | UnnamedNode<"fn">
-  | UnnamedNode<"for">
+  | null
+  | null
+  | null
   | GreaterThanNode
   | GreaterThanOrEqualNode
   | IdentifierNode
-  | UnnamedNode<"if">
-  | UnnamedNode<"in">
+  | null
+  | null
   | InclusiveRangeNode
   | IncrementNode
   | LessThanNode
   | LessThanOrEqualNode
-  | UnnamedNode<"let">
+  | null
   | MinusNode
   | ModuloNode
   | MultiplyNode
-  | UnnamedNode<"mut">
+  | null
   | NotEqualNode
   | NumberNode
   | OrNode
   | PlusNode
-  | UnnamedNode<"struct">
-  | UnnamedNode<"true">
-  | UnnamedNode<"while">
-  | UnnamedNode<"{">
-  | UnnamedNode<"}">
+  | null
+  | null
+  | null
+  | null
+  | null
   | ErrorNode
   ;
 
 export interface BinaryExpressionNode extends NamedNodeBase {
   type: SyntaxType.BinaryExpression;
-  leftNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  leftNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
   operatorNode: AndNode | BangNode | DivideNode | EqualNode | GreaterThanNode | GreaterThanOrEqualNode | InclusiveRangeNode | LessThanNode | LessThanOrEqualNode | MinusNode | ModuloNode | MultiplyNode | NotEqualNode | OrNode | PlusNode;
-  rightNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  rightNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
 export interface BlockNode extends NamedNodeBase {
@@ -321,7 +319,7 @@ export interface CompoundAssignmentNode extends NamedNodeBase {
   type: SyntaxType.CompoundAssignment;
   nameNode: IdentifierNode;
   operatorNode: DecrementNode | IncrementNode;
-  valueNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  valueNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
 export interface ElseStatementNode extends NamedNodeBase {
@@ -334,19 +332,15 @@ export interface EnumDefinitionNode extends NamedNodeBase {
   nameNode: IdentifierNode;
 }
 
-export interface EnumStructVariantNode extends NamedNodeBase {
-  type: SyntaxType.EnumStructVariant;
-  nameNode: IdentifierNode;
-}
-
 export interface EnumVariantNode extends NamedNodeBase {
   type: SyntaxType.EnumVariant;
+  variantNode: IdentifierNode;
 }
 
 export interface ForLoopNode extends NamedNodeBase {
   type: SyntaxType.ForLoop;
   cursorNode: IdentifierNode;
-  rangeNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  rangeNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
   statement_blockNode: BlockNode;
 }
 
@@ -367,7 +361,7 @@ export interface FunctionDefinitionNode extends NamedNodeBase {
 export interface IfStatementNode extends NamedNodeBase {
   type: SyntaxType.IfStatement;
   bodyNode: BlockNode;
-  conditionNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  conditionNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
   elseNode?: ElseStatementNode;
 }
 
@@ -399,7 +393,7 @@ export interface MapValueNode extends NamedNodeBase {
 export interface MemberAccessNode extends NamedNodeBase {
   type: SyntaxType.MemberAccess;
   memberNode: FunctionCallNode | IdentifierNode;
-  targetNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  targetNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
 export interface ParamDefNode extends NamedNodeBase {
@@ -432,7 +426,7 @@ export interface ProgramNode extends NamedNodeBase {
 export interface ReassignmentNode extends NamedNodeBase {
   type: SyntaxType.Reassignment;
   nameNode: IdentifierNode;
-  valueNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  valueNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
 export interface ReturnTypeNode extends NamedNodeBase {
@@ -441,6 +435,7 @@ export interface ReturnTypeNode extends NamedNodeBase {
 
 export interface StatementNode extends NamedNodeBase {
   type: SyntaxType.Statement;
+  innerNodes: (BinaryExpressionNode | CompoundAssignmentNode | EnumDefinitionNode | ForLoopNode | FunctionCallNode | FunctionDefinitionNode | IdentifierNode | IfStatementNode | MemberAccessNode | PrimitiveValueNode | ReassignmentNode | StructDefinitionNode | StructInstanceNode | UnaryExpressionNode | VariableDefinitionNode | WhileLoopNode)[];
 }
 
 export interface StringNode extends NamedNodeBase {
@@ -449,10 +444,13 @@ export interface StringNode extends NamedNodeBase {
 
 export interface StructDefinitionNode extends NamedNodeBase {
   type: SyntaxType.StructDefinition;
+  fieldNodes: StructPropertyNode[];
+  nameNode: IdentifierNode;
 }
 
 export interface StructInstanceNode extends NamedNodeBase {
   type: SyntaxType.StructInstance;
+  fieldNodes: StructPropPairNode[];
   nameNode: IdentifierNode;
 }
 
@@ -464,6 +462,8 @@ export interface StructPropPairNode extends NamedNodeBase {
 
 export interface StructPropertyNode extends NamedNodeBase {
   type: SyntaxType.StructProperty;
+  nameNode: IdentifierNode;
+  typeNode: PrimitiveTypeNode;
 }
 
 export interface TypeDeclarationNode extends NamedNodeBase {
@@ -484,13 +484,13 @@ export interface VariableDefinitionNode extends NamedNodeBase {
   bindingNode: VariableBindingNode;
   nameNode: IdentifierNode;
   typeNode?: TypeDeclarationNode;
-  valueNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  valueNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
 }
 
 export interface WhileLoopNode extends NamedNodeBase {
   type: SyntaxType.WhileLoop;
-  conditionNodes: (UnnamedNode<"("> | UnnamedNode<")"> | BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
-  doNode?: UnnamedNode<"do">;
+  conditionNodes: (BinaryExpressionNode | FunctionCallNode | IdentifierNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode)[];
+  doNode?: UnnamedNode;
   statement_blockNode: BlockNode;
 }
 

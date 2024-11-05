@@ -5,10 +5,14 @@ import {
 	type FunctionCallNode,
 	type MemberAccessNode,
 	type NamedNode,
+	type StructDefinitionNode,
+	type StructInstanceNode,
+	type SyntaxNode,
 	type TypeDeclarationNode,
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
 } from "../ast.ts";
+import console from "node:console";
 
 export type Diagnostic = {
 	level: "error";
@@ -68,8 +72,28 @@ class Variable {
 	}
 }
 
+class StructDef {
+	// Map<field_name, field_type>
+	readonly fields: Map<string, string> = new Map();
+
+	constructor(readonly node: StructDefinitionNode) {
+		for (const field of this.node.fieldNodes) {
+			this.fields.set(field.nameNode.text, field.typeNode.type);
+		}
+	}
+
+	get name(): string {
+		return this.node.nameNode.text;
+	}
+
+	get static_type(): string {
+		return this.name;
+	}
+}
+
 class LexScope {
-	readonly definitions: Map<string, Variable> = new Map();
+	readonly variables: Map<string, Variable> = new Map();
+	readonly structs: Map<string, StructDef> = new Map();
 }
 
 export class Checker {
@@ -82,38 +106,30 @@ export class Checker {
 	}
 
 	check(): Diagnostic[] {
-		// go through children
-		if (this.cursor.gotoFirstChild()) {
-			do {
-				console.debug(this.cursor.currentNode.type, {
-					text: this.cursor.currentNode.text,
-				});
-				const cursor = this.cursor as unknown as TypedTreeCursor;
-				switch (cursor.nodeType) {
-					case SyntaxType.Statement: {
-						this.check();
-						break;
-					}
-					case SyntaxType.VariableDefinition: {
-						this.visitVariableDefinition(cursor.currentNode);
-						break;
-					}
-					case SyntaxType.FunctionCall: {
-						this.visitFunctionCall(cursor.currentNode);
-						break;
-					}
-					case SyntaxType.MemberAccess: {
-						this.visitMemberAccess(cursor.currentNode);
-						break;
-					}
-					default: {
-						this.cursor.gotoParent();
-					}
-				}
-			} while (this.cursor.gotoNextSibling());
-		}
-
+		const cursor = this.cursor as unknown as TypedTreeCursor;
+		this.visit(cursor.currentNode);
 		return this.errors;
+	}
+
+	visit(node: SyntaxNode) {
+		if (node === null) return;
+		const methodName = `visit${node.type
+			.split("_")
+			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+			.join("")}`;
+		console.log("visiting ", node.type);
+
+		// @ts-expect-error - dynamic method call
+		const method = this[methodName]?.bind(this);
+		if (method) {
+			return method(node);
+		}
+		console.debug(`No visit method for ${node.type}, going through children`);
+
+		for (const child of node.namedChildren) {
+			this.visit(child);
+		}
+		return;
 	}
 
 	private error(error: Diagnostic) {
@@ -125,7 +141,47 @@ export class Checker {
 		return this.scopes.at(0)!;
 	}
 
-	private visitVariableDefinition(node: VariableDefinitionNode) {
+	visitStructDefinition(node: StructDefinitionNode) {
+		const def = new StructDef(node);
+		this.scope().structs.set(def.name, def);
+	}
+
+	visitStructInstance(node: StructInstanceNode) {
+		const struct_name = node.nameNode.text;
+		const struct_def = this.scope().structs.get(struct_name);
+		if (!struct_def) {
+			this.error({
+				level: "error",
+				message: `Missing definition for type '${struct_name}'.`,
+				location: node.startPosition,
+			});
+			return;
+		}
+
+		const expected_fields = struct_def.fields;
+		if (expected_fields.size !== node.fieldNodes.length) {
+			this.error({
+				level: "error",
+				location: node.startPosition,
+				message: "Cannot instantiate a struct without initializing its fields.",
+			});
+			return;
+		}
+		// const members = node.memberNodes;
+		for (const inputFieldNode of node.fieldNodes) {
+			const member_name = inputFieldNode.nameNode.text;
+			// if (!expected_fields.has(member_name)) {
+			// 	this.error({
+			// 		level: "error",
+			// 		message: `Unknown field '${member_name}' in struct '${struct_name}'.`,
+			// 		location: inputFieldNode.startPosition,
+			// 	});
+			// 	continue;
+			// }
+		}
+	}
+
+	visitVariableDefinition(node: VariableDefinitionNode) {
 		const name = node.nameNode;
 		this.validateIdentifier(node.nameNode);
 
@@ -156,7 +212,7 @@ export class Checker {
 		}
 
 		const variable = new Variable(name.text, node);
-		this.scope().definitions.set(name.text, variable);
+		this.scope().variables.set(name.text, variable);
 
 		this.cursor.gotoParent();
 		return;
@@ -172,7 +228,7 @@ export class Checker {
 				switch (node.innerNode.type) {
 					case "identifier": {
 						// check that the type exists
-						if (!this.scope().definitions.has(node.innerNode.text)) {
+						if (!this.scope().variables.has(node.innerNode.text)) {
 							this.error({
 								level: "error",
 								location: node.innerNode.startPosition,
@@ -205,12 +261,12 @@ export class Checker {
 		}
 	}
 
-	private visitFunctionCall(node: FunctionCallNode) {
+	visitFunctionCall(node: FunctionCallNode) {
 		const { targetNode, argumentsNode } = node;
 		const targetVariable = (() => {
 			switch (targetNode.type) {
 				case "identifier": {
-					const variable = this.scope().definitions.get(targetNode.text);
+					const variable = this.scope().variables.get(targetNode.text);
 					if (!variable) {
 						this.error({
 							level: "error",
@@ -266,14 +322,14 @@ export class Checker {
 		}
 	}
 
-	private visitMemberAccess(node: MemberAccessNode) {
+	visitMemberAccess(node: MemberAccessNode) {
 		const { memberNode } = node;
 		const targetNode = node.targetNodes.filter((n) => n.isNamed).at(0);
 		if (targetNode == null) throw new Error("Invalid member access");
 
 		switch (targetNode.type) {
 			case SyntaxType.Identifier: {
-				const variable = this.scope().definitions.get(targetNode.text);
+				const variable = this.scope().variables.get(targetNode.text);
 				if (!variable) {
 					this.error({
 						level: "error",
@@ -335,7 +391,7 @@ export class Checker {
 		}
 	}
 
-	private validateIdentifier(node: NamedNode) {
+	validateIdentifier(node: NamedNode) {
 		if (RESERVED_KEYWORDS.has(node.text)) {
 			this.error({
 				location: node.startPosition,

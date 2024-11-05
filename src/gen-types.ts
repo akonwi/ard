@@ -111,9 +111,10 @@ function getTypeExprFromRef(ref: NodeTypeRef, index: IndexedData) {
 		return "ErrorNode";
 	}
 	if (!ref.named) {
-		let name = index.typeNames.get(ref.type);
-		let arg = name != null ? `SyntaxType.${name}` : JSON.stringify(ref.type);
-		return `UnnamedNode<${arg}>`;
+		// let name = index.typeNames.get(ref.type);
+		// let arg = name != null ? `SyntaxType.${name}` : JSON.stringify(ref.type);
+		// return `UnnamedNode<${arg}>`;
+		return null;
 	}
 	return getTypeNameFromString(ref.type);
 }
@@ -329,6 +330,7 @@ function generateInterfaceFromEntry(
 			let fieldName = field + "Node";
 			let type = children.types
 				.map((t) => getTypeExprFromRef(t, index))
+				.filter((n) => n != null)
 				.join(" | ");
 			if (type === "") {
 				type = "UnnamedNode";
