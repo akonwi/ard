@@ -1,14 +1,13 @@
 import type { Point, Tree, TreeCursor } from "tree-sitter";
 import {
-	NumberNode,
-	StringNode,
+	type NumberNode,
+	type StringNode,
 	SyntaxType,
 	type BooleanNode,
 	type ExpressionNode,
 	type FunctionCallNode,
 	type MemberAccessNode,
 	type NamedNode,
-	type PrimitiveValueNode,
 	type StructDefinitionNode,
 	type StructInstanceNode,
 	type SyntaxNode,
@@ -216,6 +215,7 @@ export class Checker {
 		this.validateIdentifier(node.nameNode);
 
 		const typeNode = node.typeNode?.typeNode;
+		// todo: type inference
 		// if (!type)
 		// 	this.error({
 		// 		level: "error",
@@ -291,6 +291,10 @@ export class Checker {
 			case SyntaxType.PrimitiveValue: {
 				// @ts-expect-error not supporting everything yet
 				return tokenTypeToText[node.primitiveNode.type] ?? "unknown";
+			}
+			case SyntaxType.StructInstance: {
+				this.visitStructInstance(node);
+				return node.nameNode.text;
 			}
 			default: {
 				return "unknown";

@@ -169,6 +169,21 @@ Todo { title: 404, completed: "yes" }
 	] satisfies Diagnostic[]);
 });
 
+Deno.test("assigning a struct to a variable", () => {
+	const tree = parser.parse(`${STRUCT_DEF}
+let invalid: Str = Todo { title: "foo", completed: true }
+let valid: Todo = Todo { title: "foo", completed: true }
+`);
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			location: { row: 5, column: 19 },
+			message: "Expected a 'Str' but got 'Todo'",
+		} satisfies Diagnostic,
+	]);
+});
+
 Deno.test.ignore("intialization list of structs", () => {
 	const tree = parser.parse(`let x: [Todo] = []`);
 	const errors = new Checker(tree).check();
