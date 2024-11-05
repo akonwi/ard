@@ -144,7 +144,7 @@ Deno.test("struct instantiation", () => {
 		{
 			level: "error",
 			location: { row: 5, column: 0 },
-			message: "Cannot instantiate a struct without initializing its fields.",
+			message: "Cannot instantiate a 'Todo' without its fields.",
 		} satisfies Diagnostic,
 	]);
 });

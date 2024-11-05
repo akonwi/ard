@@ -163,7 +163,7 @@ export class Checker {
 			this.error({
 				level: "error",
 				location: node.startPosition,
-				message: "Cannot instantiate a struct without initializing its fields.",
+				message: `Cannot instantiate a '${struct_name}' without its fields.`,
 			});
 			return;
 		}
