@@ -184,14 +184,24 @@ let valid: Todo = Todo { title: "foo", completed: true }
 	]);
 });
 
-Deno.test.ignore("intialization list of structs", () => {
-	const tree = parser.parse(`let x: [Todo] = []`);
+Deno.test.only("assigning a list of structs", () => {
+	const tree = parser.parse(`${STRUCT_DEF}
+let empty_valid: [Todo] = []
+let valid: [Todo] = [500, "try this"]
+`);
+
+	// let valid: [Todo] = [Todo { title: "foo", completed: true }]
 	const errors = new Checker(tree).check();
 	expect(errors).toEqual([
 		{
 			level: "error",
-			location: { row: 0, column: 8 },
-			message: "Missing definition for type 'Todo'.",
-		} satisfies Diagnostic,
-	]);
+			location: { row: 6, column: 20 },
+			message: "Expected a '[Todo]' and received a list containing 'Num'.",
+		},
+		// {
+		// 	level: "error",
+		// 	location: { row: 6, column: 8 },
+		// 	message: "Expected a 'Todo' but received a 'Str'.",
+		// },
+	] as Diagnostic[]);
 });

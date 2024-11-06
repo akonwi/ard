@@ -229,15 +229,15 @@ export class Checker {
 
 		const declared_type = this.getTypeFromTypeDefNode(typeNode);
 		const provided_type = this.getTypeFromExpressionNode(value);
-		if (
-			declared_type !== provided_type &&
-			provided_type !== "unknown" &&
-			declared_type !== "unknown"
-		) {
+		const assigment_error = this.validateCompatibility(
+			declared_type,
+			provided_type,
+		);
+		if (assigment_error != null) {
 			this.error({
 				location: value.startPosition,
 				level: "error",
-				message: `Expected a '${declared_type}' but got '${provided_type}'`,
+				message: assigment_error,
 			});
 		}
 
@@ -246,6 +246,28 @@ export class Checker {
 
 		this.cursor.gotoParent();
 		return;
+	}
+
+	private validateCompatibility(
+		expected: string,
+		received: string,
+	): string | null {
+		if (expected === received) {
+			return null;
+		}
+		if (expected === "unknown" || received === "unknown") {
+			return "Unable to determine type compatibility";
+		}
+		if (expected.startsWith("[") && expected.endsWith("]")) {
+			if (received === "[]") return null;
+			if (expected.slice(1, -1) !== received.slice(1, -1)) {
+				return `Expected a '${expected}' and received a list containing '${received.slice(
+					1,
+					-1,
+				)}'.`;
+			}
+		}
+		return null;
 	}
 
 	private getTypeFromTypeDefNode(
@@ -258,7 +280,10 @@ export class Checker {
 				switch (node.innerNode.type) {
 					case "identifier": {
 						// check that the type exists
-						if (!this.scope().variables.has(node.innerNode.text)) {
+						const declaration =
+							this.scope().variables.get(node.innerNode.text) ??
+							this.scope().structs.get(node.innerNode.text);
+						if (declaration == null) {
 							this.error({
 								level: "error",
 								location: node.innerNode.startPosition,
@@ -289,7 +314,41 @@ export class Checker {
 				return tokenTypeToText[node.type];
 			}
 			case SyntaxType.PrimitiveValue: {
-				// @ts-expect-error not supporting everything yet
+				if (node.primitiveNode.type === SyntaxType.ListValue) {
+					console.debug(
+						"checking assignment of a list value",
+						node.primitiveNode.namedChild(0)?.text,
+					);
+					const first = node.primitiveNode.namedChild(0);
+					if (first == null) return "[]";
+					if (first.type === SyntaxType.Identifier) {
+						const variable = this.scope().variables.get(
+							node.primitiveNode.text,
+						);
+						if (!variable) {
+							this.error({
+								level: "error",
+								location: node.primitiveNode.startPosition,
+								message: `Missing definition for variable '${node.primitiveNode.text}'.`,
+							});
+							return "[unknown]";
+						}
+						return `[${variable.static_type}]`;
+					}
+					switch (first.type) {
+						case SyntaxType.Boolean:
+							return "[Bool]";
+						case SyntaxType.Number:
+							return "[Num]";
+						case SyntaxType.String:
+							return "[Str]";
+					}
+					// if (first.type === )
+					return "[unknown]";
+				}
+				if (node.primitiveNode.type === SyntaxType.MapValue) {
+					return "unknown";
+				}
 				return tokenTypeToText[node.primitiveNode.type] ?? "unknown";
 			}
 			case SyntaxType.StructInstance: {
