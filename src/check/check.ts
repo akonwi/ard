@@ -15,6 +15,7 @@ import {
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
 	type PrintStatementNode,
+	type ReassignmentNode,
 } from "../ast.ts";
 import console from "node:console";
 
@@ -110,6 +111,12 @@ export class Checker {
 		this.cursor = tree.walk();
 	}
 
+	private debug(message: any, ...extra: any[]) {
+		if (Deno.env.get("NODE_ENV") === "test") {
+			console.debug(message, ...extra);
+		}
+	}
+
 	check(): Diagnostic[] {
 		const cursor = this.cursor as unknown as TypedTreeCursor;
 		this.visit(cursor.currentNode);
@@ -122,14 +129,14 @@ export class Checker {
 			.split("_")
 			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
 			.join("")}`;
-		console.log("visiting ", node.type);
+		this.debug("visiting ", node.type);
 
 		// @ts-expect-error - dynamic method call
 		const method = this[methodName]?.bind(this);
 		if (method) {
 			return method(node);
 		}
-		console.debug(`No visit method for ${node.type}, going through children`);
+		this.debug(`No visit method for ${node.type}, going through children`);
 
 		for (const child of node.namedChildren) {
 			this.visit(child);
@@ -137,8 +144,12 @@ export class Checker {
 		return;
 	}
 
-	private error(error: Diagnostic) {
-		this.errors.push(error);
+	private error(error: Omit<Diagnostic, "level">) {
+		this.errors.push({ ...error, level: "error" });
+	}
+
+	private warn(warning: Omit<Diagnostic, "level">) {
+		this.errors.push({ ...warning, level: "warning" });
 	}
 
 	private scope(): LexScope {
@@ -156,7 +167,6 @@ export class Checker {
 		const struct_def = this.scope().structs.get(struct_name);
 		if (!struct_def) {
 			this.error({
-				level: "error",
 				message: `Missing definition for type '${struct_name}'.`,
 				location: node.startPosition,
 			});
@@ -179,7 +189,7 @@ export class Checker {
 				) {
 					this.error({
 						location: inputFieldNode.valueNode.startPosition,
-						level: "error",
+
 						message: `Expected a '${expected_type}' but got '${provided_type}'`,
 					});
 				}
@@ -187,7 +197,6 @@ export class Checker {
 			}
 			if (!expected_fields.has(member_name)) {
 				this.error({
-					level: "warning",
 					message: `Struct '${struct_name}' does not have a field named ${member_name}.`,
 					location: inputFieldNode.startPosition,
 				});
@@ -203,7 +212,6 @@ export class Checker {
 		}
 		if (missing_field_names.size > 0) {
 			this.error({
-				level: "error",
 				message: `Missing fields for struct '${struct_name}': ${Array.from(
 					missing_field_names,
 				).join(", ")}.`,
@@ -220,12 +228,16 @@ export class Checker {
 		// todo: type inference
 		// if (!type)
 		// 	this.error({
-		// 		level: "error",
+		//
 		// 		message: `Missing type declaration for variable ${name?.text ?? ""}.`,
 		// 		location: node.startPosition,
 		// 	});
 		const value = node.valueNodes.filter((n) => n.isNamed).at(0);
 		if (!(typeNode && value)) {
+			// this.warn({
+			// 	message: "Missing type or value",
+			// 	location: node.startPosition,
+			// });
 			return;
 		}
 
@@ -238,7 +250,7 @@ export class Checker {
 		if (assigment_error != null) {
 			this.error({
 				location: value.startPosition,
-				level: "error",
+
 				message: assigment_error,
 			});
 		}
@@ -248,6 +260,26 @@ export class Checker {
 
 		this.cursor.gotoParent();
 		return;
+	}
+
+	visitReassignment(node: ReassignmentNode) {
+		const target = node.nameNode;
+		const variable = this.scope().variables.get(target.text);
+		if (variable == null) {
+			this.error({
+				message: `Variable '${target.text}' is not defined.`,
+				location: target.startPosition,
+			});
+			return;
+		}
+
+		if (!variable.is_mutable) {
+			this.error({
+				message: `Variable '${target.text}' is not mutable.`,
+				// use location of = operator
+				location: node.children.at(1)!.startPosition,
+			});
+		}
 	}
 
 	private validateCompatibility(
@@ -288,7 +320,6 @@ export class Checker {
 							this.scope().structs.get(node.innerNode.text);
 						if (declaration == null) {
 							this.error({
-								level: "error",
 								location: node.innerNode.startPosition,
 								message: `Missing definition for type '${node.innerNode.text}'.`,
 							});
@@ -325,7 +356,7 @@ export class Checker {
 						new Set(node.primitiveNode.namedChildren.map((c) => c?.type))
 							.size === 1;
 					if (!isConsistent) {
-						console.debug(
+						this.debug(
 							"checking assignment of a list value",
 							node.primitiveNode.namedChild(0)?.text,
 						);
@@ -338,7 +369,6 @@ export class Checker {
 						);
 						if (!variable) {
 							this.error({
-								level: "error",
 								location: node.primitiveNode.startPosition,
 								message: `Missing definition for variable '${node.primitiveNode.text}'.`,
 							});
@@ -355,14 +385,13 @@ export class Checker {
 							return "[Str]";
 					}
 					if (first.type === SyntaxType.StructInstance) {
-						console.debug(
+						this.debug(
 							"checking assignment of a struct instance",
 							first.nameNode.text,
 						);
 						const struct = this.scope().structs.get(first.nameNode.text);
 						if (!struct) {
 							this.error({
-								level: "error",
 								location: first.nameNode.startPosition,
 								message: `Missing definition for struct '${first.nameNode.text}'.`,
 							});
@@ -398,7 +427,6 @@ export class Checker {
 					const variable = this.scope().variables.get(targetNode.text);
 					if (!variable) {
 						this.error({
-							level: "error",
 							location: targetNode.startPosition,
 							message: `Missing declaration for '${targetNode.text}'.`,
 						});
@@ -417,14 +445,12 @@ export class Checker {
 					const signature = LIST_MEMBERS.get(argumentsNode.text)!;
 					if (signature.mutates && !targetVariable.is_mutable) {
 						this.error({
-							level: "error",
 							location: argumentsNode.startPosition,
 							message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 						});
 					}
 				} else {
 					this.error({
-						level: "error",
 						location: argumentsNode.startPosition,
 						message: `Unknown member '${argumentsNode.text}' for list type.`,
 					});
@@ -434,14 +460,13 @@ export class Checker {
 			case undefined:
 			case null: {
 				this.error({
-					level: "error",
 					location: targetNode.startPosition,
 					message: `The type of '${targetNode.text}' is unknown.`,
 				});
 				break;
 			}
 			default: {
-				console.log(`Unknown type: ${targetVariable?.static_type}`);
+				this.debug(`Unknown type: ${targetVariable?.static_type}`);
 				break;
 			}
 		}
@@ -457,7 +482,6 @@ export class Checker {
 				const variable = this.scope().variables.get(targetNode.text);
 				if (!variable) {
 					this.error({
-						level: "error",
 						location: targetNode.startPosition,
 						message: `Missing declaration for '${targetNode.text}'.`,
 					});
@@ -476,21 +500,18 @@ export class Checker {
 									const signature = LIST_MEMBERS.get(member)!;
 									if (signature.mutates && !variable.is_mutable) {
 										this.error({
-											level: "error",
 											location: memberNode.startPosition,
 											message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 										});
 									}
 									if (!signature.callable) {
 										this.error({
-											level: "error",
 											location: memberNode.startPosition,
 											message: `${variable.name}.${member} is not a callable function.`,
 										});
 									}
 								} else {
 									this.error({
-										level: "error",
 										location: memberNode.startPosition,
 										message: `Unknown member '${member}' for list type.`,
 									});
@@ -501,14 +522,13 @@ export class Checker {
 					}
 					case null: {
 						this.error({
-							level: "error",
 							location: targetNode.startPosition,
 							message: `The type of '${targetNode.text}' is unknown.`,
 						});
 						break;
 					}
 					default: {
-						console.log(`Unknown type: ${variable.static_type}`);
+						this.debug(`Unknown type: ${variable.static_type}`);
 						break;
 					}
 				}
@@ -520,7 +540,7 @@ export class Checker {
 		if (RESERVED_KEYWORDS.has(node.text)) {
 			this.error({
 				location: node.startPosition,
-				level: "error",
+
 				message: `'${node.text}' is a reserved keyword and cannot be used as a variable name`,
 			});
 		}

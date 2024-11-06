@@ -1,4 +1,4 @@
-mut count = 0
+let count = 0
 while count <= 9 {
 	count =+ 1
 }

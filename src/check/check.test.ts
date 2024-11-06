@@ -219,16 +219,16 @@ let valid: [Todo] = [Todo { title: "foo", completed: true }]
 
 Deno.test("variable reassignment", () => {
 	const tree = parser.parse(`
-let immutable = 5
+let immutable: Num = 5
 mut mutable: Str = "foo"
 
 immutable = immutable * 2
 `);
-	expect(new Checker(tree).check()).toEqual([
+	expectErrors(new Checker(tree).check(), [
 		{
 			level: "error",
-			location: { row: 5, column: 10 },
+			location: { row: 4, column: 10 },
 			message: "Cannot reassign to an immutable variable.",
 		},
-	] as Diagnostic[]);
+	]);
 });
