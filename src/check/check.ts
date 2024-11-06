@@ -14,7 +14,7 @@ import {
 	type TypeDeclarationNode,
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
-	PrintStatementNode,
+	type PrintStatementNode,
 } from "../ast.ts";
 import console from "node:console";
 
@@ -269,9 +269,10 @@ export class Checker {
 				)}'.`;
 			}
 		}
-		return null;
+		return `Expected '${expected}' and received '${received}'.`;
 	}
 
+	// return the kon type from the declaration
 	private getTypeFromTypeDefNode(
 		node: TypeDeclarationNode["typeNode"],
 	): string {

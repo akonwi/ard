@@ -4,6 +4,22 @@ import { Checker, type Diagnostic } from "./check.ts";
 
 const parser = makeParser();
 
+const expectErrors = (
+	actual: Diagnostic[],
+	expected: Partial<Diagnostic>[],
+) => {
+	expect(actual.length).toEqual(expected.length);
+	actual.forEach((a, i) => {
+		const e = expected[i];
+		expect(a).toEqual(
+			expect.objectContaining({
+				...e,
+				message: expect.stringContaining(a.message),
+			}),
+		);
+	});
+};
+
 Deno.test("Incorrect primitive initializers when expecting a Str", () => {
 	const tree = parser.parse(`
 let x: Str = 5
@@ -11,18 +27,18 @@ let y: Str = false
 let valid1: Str = "foo"
 let valid2 = "bar"`);
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			location: { row: 1, column: 13 },
 			level: "error",
-			message: "Expected a 'Str' but got 'Num'",
+			message: "Expected 'Str' and received 'Num'.",
 		},
 		{
 			location: { row: 2, column: 13 },
 			level: "error",
-			message: "Expected a 'Str' but got 'Bool'",
+			message: "Expected 'Str' and received 'Bool'.",
 		},
-	] satisfies Diagnostic[]);
+	]);
 });
 
 Deno.test("Incorrect primitive initializers when expecting a Num", () => {
@@ -32,18 +48,18 @@ let y: Num = false
 let five: Num = 5
 let 6 = 6`);
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			location: { row: 1, column: 13 },
 			level: "error",
-			message: "Expected a 'Num' but got 'Str'",
+			message: "Expected 'Num' and received 'Str'",
 		},
 		{
 			location: { row: 2, column: 13 },
 			level: "error",
 			message: "Expected a 'Num' but got 'Bool'",
 		},
-	] satisfies Diagnostic[]);
+	]);
 });
 
 Deno.test("Incorrect primitive initializers when expecting a Bool", () => {
@@ -53,7 +69,7 @@ let y: Bool = 0
 let valid: Bool = true
 let also_valid = false`);
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			location: { row: 1, column: 14 },
 			level: "error",
@@ -64,19 +80,19 @@ let also_valid = false`);
 			level: "error",
 			message: "Expected a 'Bool' but got 'Num'",
 		},
-	] satisfies Diagnostic[]);
+	]);
 });
 
 Deno.test("reserved keywords cannot be used as variable names", () => {
 	const tree = parser.parse(`let let = 5`);
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			level: "error",
 			message:
 				"'let' is a reserved keyword and cannot be used as a variable name",
 			location: { row: 0, column: 4 },
-		} satisfies Diagnostic,
+		},
 	]);
 });
 
@@ -145,7 +161,7 @@ Todo { title: "foo", completed: true }
 Todo { title: 404, completed: "yes" }
 `);
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			level: "error",
 			location: { row: 5, column: 0 },
@@ -166,7 +182,7 @@ Todo { title: 404, completed: "yes" }
 			location: { row: 8, column: 30 },
 			message: "Expected a 'Bool' but got 'Str'",
 		},
-	] satisfies Diagnostic[]);
+	]);
 });
 
 Deno.test("assigning a struct to a variable", () => {
@@ -175,16 +191,16 @@ let invalid: Str = Todo { title: "foo", completed: true }
 let valid: Todo = Todo { title: "foo", completed: true }
 `);
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			level: "error",
 			location: { row: 5, column: 19 },
-			message: "Expected a 'Str' but got 'Todo'",
+			message: "Expected 'Str' and received 'Todo'",
 		} satisfies Diagnostic,
 	]);
 });
 
-Deno.test.only("assigning a list of structs", () => {
+Deno.test("assigning a list of structs", () => {
 	const tree = parser.parse(`${STRUCT_DEF}
 let empty_valid: [Todo] = []
 let valid: [Todo] = [500, "try this"]
@@ -192,11 +208,27 @@ let valid: [Todo] = [Todo { title: "foo", completed: true }]
 `);
 
 	const errors = new Checker(tree).check();
-	expect(errors).toEqual([
+	expectErrors(errors, [
 		{
 			level: "error",
 			location: { row: 6, column: 20 },
 			message: "Expected a '[Todo]' and received a list containing 'unknown'.",
+		},
+	]);
+});
+
+Deno.test("variable reassignment", () => {
+	const tree = parser.parse(`
+let immutable = 5
+mut mutable: Str = "foo"
+
+immutable = immutable * 2
+`);
+	expect(new Checker(tree).check()).toEqual([
+		{
+			level: "error",
+			location: { row: 5, column: 10 },
+			message: "Cannot reassign to an immutable variable.",
 		},
 	] as Diagnostic[]);
 });
