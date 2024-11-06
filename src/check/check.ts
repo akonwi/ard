@@ -315,12 +315,20 @@ export class Checker {
 			}
 			case SyntaxType.PrimitiveValue: {
 				if (node.primitiveNode.type === SyntaxType.ListValue) {
-					console.debug(
-						"checking assignment of a list value",
-						node.primitiveNode.namedChild(0)?.text,
-					);
-					const first = node.primitiveNode.namedChild(0);
-					if (first == null) return "[]";
+					if (node.primitiveNode.namedChildren.length === 0) {
+						return "[]";
+					}
+					const isConsistent =
+						new Set(node.primitiveNode.namedChildren.map((c) => c?.type))
+							.size === 1;
+					if (!isConsistent) {
+						console.debug(
+							"checking assignment of a list value",
+							node.primitiveNode.namedChild(0)?.text,
+						);
+						return "[unknown]";
+					}
+					const first = node.primitiveNode.namedChild(0)!;
 					if (first.type === SyntaxType.Identifier) {
 						const variable = this.scope().variables.get(
 							node.primitiveNode.text,
@@ -343,7 +351,21 @@ export class Checker {
 						case SyntaxType.String:
 							return "[Str]";
 					}
-					// if (first.type === )
+					if (first.type === SyntaxType.StructInstance) {
+						console.debug(
+							"checking assignment of a struct instance",
+							first.nameNode.text,
+						);
+						const struct = this.scope().structs.get(first.nameNode.text);
+						if (!struct) {
+							this.error({
+								level: "error",
+								location: first.nameNode.startPosition,
+								message: `Missing definition for struct '${first.nameNode.text}'.`,
+							});
+						}
+						return `[${first.nameNode.text}]`;
+					}
 					return "[unknown]";
 				}
 				if (node.primitiveNode.type === SyntaxType.MapValue) {
