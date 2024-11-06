@@ -1,4 +1,5 @@
 import { type Point, type SyntaxNode, type Tree } from "tree-sitter";
+import { PrintStatementNode, SyntaxType } from "../ast.ts";
 
 const pointToString = (point: Point) => `${point.row}:${point.column}`;
 
@@ -170,13 +171,15 @@ function generateNode(node: SyntaxNode): string {
 				);
 			return ` else ${generateBlock(body)}`;
 		}
+		case SyntaxType.PrintStatement: {
+			const args = (node as unknown as PrintStatementNode).argumentsNode
+				.namedChildren;
+			return `console.log(${args.map(generateNode as any).join(", ")})`;
+		}
 		case "member_access": {
 			return node.namedChildren.map((n) => generateNode(n)).join(".");
 		}
 		case "identifier": {
-			if (node.text === "print") {
-				return `console.log`;
-			}
 			return node.text;
 		}
 		case "struct_instance": {

@@ -147,6 +147,7 @@ export const enum SyntaxType {
   ParenArguments = "paren_arguments",
   PrimitiveType = "primitive_type",
   PrimitiveValue = "primitive_value",
+  PrintStatement = "print_statement",
   Program = "program",
   Reassignment = "reassignment",
   ReturnType = "return_type",
@@ -205,6 +206,7 @@ export type UnnamedType =
   | "in"
   | "let"
   | "mut"
+  | "print"
   | "struct"
   | "true"
   | "while"
@@ -237,6 +239,7 @@ export type SyntaxNode =
   | ParenArgumentsNode
   | PrimitiveTypeNode
   | PrimitiveValueNode
+  | PrintStatementNode
   | ProgramNode
   | ReassignmentNode
   | ReturnTypeNode
@@ -292,6 +295,7 @@ export type SyntaxNode =
   | NumberNode
   | OrNode
   | PlusNode
+  | null
   | null
   | null
   | null
@@ -419,6 +423,11 @@ export interface PrimitiveValueNode extends NamedNodeBase {
   primitiveNode: BooleanNode | ListValueNode | MapValueNode | NumberNode | StringNode;
 }
 
+export interface PrintStatementNode extends NamedNodeBase {
+  type: SyntaxType.PrintStatement;
+  argumentsNode: ParenArgumentsNode;
+}
+
 export interface ProgramNode extends NamedNodeBase {
   type: SyntaxType.Program;
 }
@@ -435,7 +444,6 @@ export interface ReturnTypeNode extends NamedNodeBase {
 
 export interface StatementNode extends NamedNodeBase {
   type: SyntaxType.Statement;
-  innerNodes: (BinaryExpressionNode | CompoundAssignmentNode | EnumDefinitionNode | ForLoopNode | FunctionCallNode | FunctionDefinitionNode | IdentifierNode | IfStatementNode | MemberAccessNode | PrimitiveValueNode | ReassignmentNode | StructDefinitionNode | StructInstanceNode | UnaryExpressionNode | VariableDefinitionNode | WhileLoopNode)[];
 }
 
 export interface StringNode extends NamedNodeBase {

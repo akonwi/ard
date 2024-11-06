@@ -14,6 +14,7 @@ import {
 	type TypeDeclarationNode,
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
+	PrintStatementNode,
 } from "../ast.ts";
 import console from "node:console";
 
@@ -35,6 +36,7 @@ const RESERVED_KEYWORDS = new Set([
 	"and",
 	"struct",
 	"enum",
+	"print",
 ]);
 
 const tokenTypeToText: Record<
@@ -383,11 +385,15 @@ export class Checker {
 		}
 	}
 
+	visitPrintStatement(_: PrintStatementNode) {
+		// todo: validate that arguments are printable
+	}
+
 	visitFunctionCall(node: FunctionCallNode) {
 		const { targetNode, argumentsNode } = node;
 		const targetVariable = (() => {
 			switch (targetNode.type) {
-				case "identifier": {
+				case SyntaxType.Identifier: {
 					const variable = this.scope().variables.get(targetNode.text);
 					if (!variable) {
 						this.error({
@@ -398,10 +404,6 @@ export class Checker {
 						return;
 					}
 					return variable;
-				}
-				case SyntaxType.Identifier: {
-					// TODO
-					return null;
 				}
 				default:
 					return null;
