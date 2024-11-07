@@ -76,29 +76,6 @@ class Variable implements StaticType {
 	}
 }
 
-// class StructDef implements StaticType {
-// 	// Map<field_name, field_kon_type>
-// 	readonly fields: Map<string, string> = new Map();
-
-// 	constructor(readonly node: StructDefinitionNode) {
-// 		for (const field of this.node.fieldNodes) {
-// 			this.fields.set(field.nameNode.text, field.typeNode.text);
-// 		}
-// 	}
-
-// 	get name(): string {
-// 		return this.node.nameNode.text;
-// 	}
-
-// 	get static_type(): string {
-// 		return this.name;
-// 	}
-
-// 	get pretty() {
-// 		return this.name;
-// 	}
-// }
-
 class LexScope {
 	readonly variables: Map<string, Variable> = new Map();
 	readonly structs: Map<string, StructType> = new Map();
