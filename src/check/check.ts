@@ -190,7 +190,7 @@ export class Checker {
 					this.error({
 						location: inputFieldNode.valueNode.startPosition,
 
-						message: `Expected a '${expected_type}' but got '${provided_type}'`,
+						message: `Expected '${expected_type}' and received '${provided_type}'.`,
 					});
 				}
 				received_fields.add(member_name);
@@ -295,7 +295,7 @@ export class Checker {
 		if (expected.startsWith("[") && expected.endsWith("]")) {
 			if (received === "[]") return null;
 			if (expected.slice(1, -1) !== received.slice(1, -1)) {
-				return `Expected a '${expected}' and received a list containing '${received.slice(
+				return `Expected '${expected}' and received a list containing '${received.slice(
 					1,
 					-1,
 				)}'.`;

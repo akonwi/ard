@@ -8,16 +8,7 @@ const expectErrors = (
 	actual: Diagnostic[],
 	expected: Partial<Diagnostic>[],
 ) => {
-	expect(actual.length).toEqual(expected.length);
-	actual.forEach((a, i) => {
-		const e = expected[i];
-		expect(a).toEqual(
-			expect.objectContaining({
-				...e,
-				message: expect.stringContaining(a.message),
-			}),
-		);
-	});
+	expect(actual).toEqual(expected);
 };
 
 Deno.test("Incorrect primitive initializers when expecting a Str", () => {
@@ -52,12 +43,12 @@ let 6 = 6`);
 		{
 			location: { row: 1, column: 13 },
 			level: "error",
-			message: "Expected 'Num' and received 'Str'",
+			message: "Expected 'Num' and received 'Str'.",
 		},
 		{
 			location: { row: 2, column: 13 },
 			level: "error",
-			message: "Expected a 'Num' but got 'Bool'",
+			message: "Expected 'Num' and received 'Bool'.",
 		},
 	]);
 });
@@ -73,12 +64,12 @@ let also_valid = false`);
 		{
 			location: { row: 1, column: 14 },
 			level: "error",
-			message: "Expected a 'Bool' but got 'Str'",
+			message: "Expected 'Bool' and received 'Str'.",
 		},
 		{
 			location: { row: 2, column: 14 },
 			level: "error",
-			message: "Expected a 'Bool' but got 'Num'",
+			message: "Expected 'Bool' and received 'Num'.",
 		},
 	]);
 });
@@ -175,12 +166,12 @@ Todo { title: 404, completed: "yes" }
 		{
 			level: "error",
 			location: { row: 8, column: 14 },
-			message: "Expected a 'Str' but got 'Num'",
+			message: "Expected 'Str' and received 'Num'.",
 		},
 		{
 			level: "error",
 			location: { row: 8, column: 30 },
-			message: "Expected a 'Bool' but got 'Str'",
+			message: "Expected 'Bool' and received 'Str'.",
 		},
 	]);
 });
@@ -191,13 +182,13 @@ let invalid: Str = Todo { title: "foo", completed: true }
 let valid: Todo = Todo { title: "foo", completed: true }
 `);
 	const errors = new Checker(tree).check();
-	expectErrors(errors, [
+	expect(errors).toEqual([
 		{
 			level: "error",
 			location: { row: 5, column: 19 },
-			message: "Expected 'Str' and received 'Todo'",
-		} satisfies Diagnostic,
-	]);
+			message: "Expected 'Str' and received 'Todo'.",
+		},
+	] satisfies Diagnostic[]);
 });
 
 Deno.test("assigning a list of structs", () => {
@@ -208,11 +199,11 @@ let valid: [Todo] = [Todo { title: "foo", completed: true }]
 `);
 
 	const errors = new Checker(tree).check();
-	expectErrors(errors, [
+	expect(errors).toEqual([
 		{
 			level: "error",
 			location: { row: 6, column: 20 },
-			message: "Expected a '[Todo]' and received a list containing 'unknown'.",
+			message: "Expected '[Todo]' and received a list containing 'unknown'.",
 		},
 	]);
 });
@@ -224,11 +215,11 @@ mut mutable: Str = "foo"
 
 immutable = immutable * 2
 `);
-	expectErrors(new Checker(tree).check(), [
+	expect(new Checker(tree).check()).toEqual([
 		{
 			level: "error",
 			location: { row: 4, column: 10 },
-			message: "Cannot reassign to an immutable variable.",
+			message: "Variable 'immutable' is not mutable.",
 		},
 	]);
 });
