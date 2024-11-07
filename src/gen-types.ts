@@ -255,6 +255,8 @@ export type ExpressionNode =
 	| BinaryExpressionNode
 	| UnaryExpressionNode
 	| PrimitiveValueNode
+	| ListValueNode
+	| MapValueNode
 	| FunctionCallNode
 	| IdentifierNode
 	| MemberAccessNode

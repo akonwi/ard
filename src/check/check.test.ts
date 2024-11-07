@@ -1,6 +1,7 @@
 import { expect } from "jsr:@std/expect";
 import { makeParser } from "../parser/parser.ts";
 import { Checker, type Diagnostic } from "./check.ts";
+import { Bool, ListType, Num, Str } from "./kon-types.ts";
 
 const parser = makeParser();
 
@@ -203,7 +204,7 @@ let valid: [Todo] = [Todo { title: "foo", completed: true }]
 		{
 			level: "error",
 			location: { row: 6, column: 20 },
-			message: "Expected '[Todo]' and received a list containing 'unknown'.",
+			message: "Expected '[Todo]' and received '[Num]'.",
 		},
 	]);
 });
@@ -222,4 +223,21 @@ immutable = immutable * 2
 			message: "Variable 'immutable' is not mutable.",
 		},
 	]);
+});
+
+Deno.test("basic type inference", () => {
+	const tree = parser.parse(`
+let string = "foo"
+let number = 5
+let boolean = true
+let list = [1, 2, 3]
+`);
+	const checker = new Checker(tree);
+	expect(checker.check().length).toBe(0);
+	expect(checker.scopes[0]!.variables.get("string")?.static_type).toBe(Str);
+	expect(checker.scopes[0]!.variables.get("number")?.static_type).toBe(Num);
+	expect(checker.scopes[0]!.variables.get("boolean")?.static_type).toBe(Bool);
+	expect(checker.scopes[0]!.variables.get("list")?.static_type).toEqual(
+		new ListType(Num),
+	);
 });

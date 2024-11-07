@@ -1,8 +1,8 @@
-let count = 0
+mut count: Num = 0
 while count <= 9 {
 	count =+ 1
 }
-let is_true = false
+let is_true: Bool = false
 while is_true or count > 0 {
 	count =- 1
 }

@@ -18,6 +18,19 @@ import {
 	type ReassignmentNode,
 } from "../ast.ts";
 import console from "node:console";
+import {
+	areCompatible,
+	Bool,
+	EmptyList,
+	getStaticTypeForPrimitiveType,
+	getStaticTypeForPrimitiveValue,
+	ListType,
+	MapType,
+	Num,
+	Str,
+	StructType,
+	Unknown,
+} from "./kon-types.ts";
 
 export type Diagnostic = {
 	level: "error" | "warning";
@@ -40,66 +53,55 @@ const RESERVED_KEYWORDS = new Set([
 	"print",
 ]);
 
-const tokenTypeToText: Record<
-	SyntaxType.Boolean | SyntaxType.Number | SyntaxType.String,
-	string
-> = {
-	string: "Str",
-	number: "Num",
-	boolean: "Bool",
-};
+interface StaticType {
+	// identifier
+	name: string;
+	// used for display
+	pretty: string;
+}
 
-class Variable {
+class Variable implements StaticType {
 	constructor(
 		readonly name: string,
 		readonly node: VariableDefinitionNode,
+		readonly static_type: StaticType,
 	) {}
 
 	get is_mutable(): boolean {
 		return this.node.bindingNode.text === "mut";
 	}
 
-	get static_type(): string | null {
-		const type_declaration = this.node.typeNode?.typeNode;
-		if (!type_declaration) {
-			return null;
-		}
-		switch (type_declaration.type) {
-			case SyntaxType.PrimitiveType:
-				return type_declaration.text;
-			case SyntaxType.ListType:
-				return SyntaxType.ListType;
-			// return `[${type_declaration.innerNode.text}]`;
-			case SyntaxType.MapType:
-				return `{${type_declaration.keyNode.text}: ${type_declaration.valueNode.text}}`;
-			default:
-				return null;
-		}
+	get pretty() {
+		return this.static_type.pretty;
 	}
 }
 
-class StructDef {
-	// Map<field_name, field_kon_type>
-	readonly fields: Map<string, string> = new Map();
+// class StructDef implements StaticType {
+// 	// Map<field_name, field_kon_type>
+// 	readonly fields: Map<string, string> = new Map();
 
-	constructor(readonly node: StructDefinitionNode) {
-		for (const field of this.node.fieldNodes) {
-			this.fields.set(field.nameNode.text, field.typeNode.text);
-		}
-	}
+// 	constructor(readonly node: StructDefinitionNode) {
+// 		for (const field of this.node.fieldNodes) {
+// 			this.fields.set(field.nameNode.text, field.typeNode.text);
+// 		}
+// 	}
 
-	get name(): string {
-		return this.node.nameNode.text;
-	}
+// 	get name(): string {
+// 		return this.node.nameNode.text;
+// 	}
 
-	get static_type(): string {
-		return this.name;
-	}
-}
+// 	get static_type(): string {
+// 		return this.name;
+// 	}
+
+// 	get pretty() {
+// 		return this.name;
+// 	}
+// }
 
 class LexScope {
 	readonly variables: Map<string, Variable> = new Map();
-	readonly structs: Map<string, StructDef> = new Map();
+	readonly structs: Map<string, StructType> = new Map();
 }
 
 export class Checker {
@@ -158,11 +160,11 @@ export class Checker {
 	}
 
 	visitStructDefinition(node: StructDefinitionNode) {
-		const def = new StructDef(node);
+		const def = StructType.from(node);
 		this.scope().structs.set(def.name, def);
 	}
 
-	visitStructInstance(node: StructInstanceNode) {
+	visitStructInstance(node: StructInstanceNode): StructType | null {
 		const struct_name = node.nameNode.text;
 		const struct_def = this.scope().structs.get(struct_name);
 		if (!struct_def) {
@@ -170,7 +172,7 @@ export class Checker {
 				message: `Missing definition for type '${struct_name}'.`,
 				location: node.startPosition,
 			});
-			return;
+			return null;
 		}
 
 		const expected_fields = struct_def.fields;
@@ -182,19 +184,16 @@ export class Checker {
 				const provided_type = this.getTypeFromExpressionNode(
 					inputFieldNode.valueNode,
 				);
-				if (
-					expected_type !== provided_type &&
-					provided_type !== "unknown" &&
-					expected_type !== "unknown"
-				) {
+				if (!areCompatible(expected_type, provided_type)) {
 					this.error({
 						location: inputFieldNode.valueNode.startPosition,
 
-						message: `Expected '${expected_type}' and received '${provided_type}'.`,
+						message: `Expected '${expected_type.pretty}' and received '${provided_type.pretty}'.`,
 					});
 				}
 				received_fields.add(member_name);
 			}
+
 			if (!expected_fields.has(member_name)) {
 				this.error({
 					message: `Struct '${struct_name}' does not have a field named ${member_name}.`,
@@ -218,6 +217,7 @@ export class Checker {
 				location: node.startPosition,
 			});
 		}
+		return struct_def;
 	}
 
 	visitVariableDefinition(node: VariableDefinitionNode) {
@@ -225,24 +225,22 @@ export class Checker {
 		this.validateIdentifier(node.nameNode);
 
 		const typeNode = node.typeNode?.typeNode;
-		// todo: type inference
-		// if (!type)
-		// 	this.error({
-		//
-		// 		message: `Missing type declaration for variable ${name?.text ?? ""}.`,
-		// 		location: node.startPosition,
-		// 	});
 		const value = node.valueNodes.filter((n) => n.isNamed).at(0);
-		if (!(typeNode && value)) {
-			// this.warn({
-			// 	message: "Missing type or value",
-			// 	location: node.startPosition,
-			// });
+		if (value == null) {
+			// can't really get here because tree-sitter captures a situation like this as an error
+			this.error({
+				message: "Variables must be initialized",
+				location: node.startPosition,
+			});
 			return;
 		}
 
-		const declared_type = this.getTypeFromTypeDefNode(typeNode);
+		let declared_type = typeNode ? this.getTypeFromTypeDefNode(typeNode) : null;
 		const provided_type = this.getTypeFromExpressionNode(value);
+		if (declared_type === null) {
+			// lazy-ish inference
+			declared_type = provided_type;
+		}
 		const assigment_error = this.validateCompatibility(
 			declared_type,
 			provided_type,
@@ -255,10 +253,8 @@ export class Checker {
 			});
 		}
 
-		const variable = new Variable(name.text, node);
+		const variable = new Variable(name.text, node, declared_type);
 		this.scope().variables.set(name.text, variable);
-
-		this.cursor.gotoParent();
 		return;
 	}
 
@@ -283,37 +279,27 @@ export class Checker {
 	}
 
 	private validateCompatibility(
-		expected: string,
-		received: string,
+		expected: StaticType,
+		received: StaticType,
 	): string | null {
-		if (expected === received) {
+		const is_valid = areCompatible(expected, received);
+		if (is_valid) {
 			return null;
 		}
-		if (expected === "unknown" || received === "unknown") {
-			return "Unable to determine type compatibility";
-		}
-		if (expected.startsWith("[") && expected.endsWith("]")) {
-			if (received === "[]") return null;
-			if (expected.slice(1, -1) !== received.slice(1, -1)) {
-				return `Expected '${expected}' and received a list containing '${received.slice(
-					1,
-					-1,
-				)}'.`;
-			}
-		}
-		return `Expected '${expected}' and received '${received}'.`;
+		if (expected === Unknown || received === Unknown) return null;
+		return `Expected '${expected.pretty}' and received '${received.pretty}'.`;
 	}
 
 	// return the kon type from the declaration
 	private getTypeFromTypeDefNode(
 		node: TypeDeclarationNode["typeNode"],
-	): string {
+	): StaticType {
 		switch (node.type) {
 			case SyntaxType.PrimitiveType:
-				return node.text;
+				return getStaticTypeForPrimitiveType(node);
 			case SyntaxType.ListType: {
 				switch (node.innerNode.type) {
-					case "identifier": {
+					case SyntaxType.Identifier: {
 						// check that the type exists
 						const declaration =
 							this.scope().variables.get(node.innerNode.text) ??
@@ -323,94 +309,75 @@ export class Checker {
 								location: node.innerNode.startPosition,
 								message: `Missing definition for type '${node.innerNode.text}'.`,
 							});
+							return new ListType(Unknown);
 						}
-						return node.text;
+						return new ListType(declaration);
 					}
-					case "primitive_type": {
-						return node.text;
+					case SyntaxType.PrimitiveType: {
+						return new ListType(getStaticTypeForPrimitiveType(node.innerNode));
 					}
 					default:
-						return "unknown";
+						return Unknown;
 				}
 			}
 			default:
-				return "unknown";
+				return Unknown;
 		}
 	}
 
 	private getTypeFromExpressionNode(
 		node: ExpressionNode | BooleanNode | NumberNode | StringNode,
-	): string {
+	): StaticType {
 		switch (node.type) {
 			case SyntaxType.Boolean:
+				return Bool;
 			case SyntaxType.Number:
-			case SyntaxType.String: {
-				return tokenTypeToText[node.type];
-			}
+				return Num;
+			case SyntaxType.String:
+				return Str;
 			case SyntaxType.PrimitiveValue: {
-				if (node.primitiveNode.type === SyntaxType.ListValue) {
-					if (node.primitiveNode.namedChildren.length === 0) {
-						return "[]";
-					}
-					const isConsistent =
-						new Set(node.primitiveNode.namedChildren.map((c) => c?.type))
-							.size === 1;
-					if (!isConsistent) {
-						this.debug(
-							"checking assignment of a list value",
-							node.primitiveNode.namedChild(0)?.text,
-						);
-						return "[unknown]";
-					}
-					const first = node.primitiveNode.namedChild(0)!;
-					if (first.type === SyntaxType.Identifier) {
-						const variable = this.scope().variables.get(
-							node.primitiveNode.text,
-						);
-						if (!variable) {
+				return getStaticTypeForPrimitiveValue(node);
+			}
+			case SyntaxType.ListValue: {
+				if (node.innerNodes.length === 0) {
+					return EmptyList;
+				}
+				const first = node.innerNodes.at(0)!;
+				switch (first.type) {
+					case SyntaxType.Boolean:
+						return new ListType(Bool);
+					case SyntaxType.String:
+						return new ListType(Str);
+					case SyntaxType.Number:
+						return new ListType(Num);
+					// case SyntaxType.ListValue:
+					// 	return new ListType(this.getTypeFromExpressionNode(first));
+					// case SyntaxType.MapValue:
+					// 	return new ListType(this.getTypeFromExpressionNode(first));
+					case SyntaxType.StructInstance: {
+						const struct = this.visitStructInstance(first) ?? Unknown;
+						if (struct === Unknown) {
 							this.error({
-								location: node.primitiveNode.startPosition,
-								message: `Missing definition for variable '${node.primitiveNode.text}'.`,
-							});
-							return "[unknown]";
-						}
-						return `[${variable.static_type}]`;
-					}
-					switch (first.type) {
-						case SyntaxType.Boolean:
-							return "[Bool]";
-						case SyntaxType.Number:
-							return "[Num]";
-						case SyntaxType.String:
-							return "[Str]";
-					}
-					if (first.type === SyntaxType.StructInstance) {
-						this.debug(
-							"checking assignment of a struct instance",
-							first.nameNode.text,
-						);
-						const struct = this.scope().structs.get(first.nameNode.text);
-						if (!struct) {
-							this.error({
-								location: first.nameNode.startPosition,
-								message: `Missing definition for struct '${first.nameNode.text}'.`,
+								location: first.startPosition,
+								message: `Unknown struct`,
 							});
 						}
-						return `[${first.nameNode.text}]`;
+						return new ListType(struct);
 					}
-					return "[unknown]";
+					default: {
+						this.warn({
+							location: first.startPosition,
+							message: `Unknown type in list`,
+						});
+						return new ListType(Unknown);
+					}
 				}
-				if (node.primitiveNode.type === SyntaxType.MapValue) {
-					return "unknown";
-				}
-				return tokenTypeToText[node.primitiveNode.type] ?? "unknown";
 			}
 			case SyntaxType.StructInstance: {
-				this.visitStructInstance(node);
-				return node.nameNode.text;
+				return this.visitStructInstance(node) ?? Unknown;
 			}
 			default: {
-				return "unknown";
+				return Unknown;
 			}
 		}
 	}
@@ -439,27 +406,28 @@ export class Checker {
 			}
 		})();
 
-		switch (targetVariable?.static_type) {
-			case "list_type": {
-				if (LIST_MEMBERS.has(argumentsNode.text)) {
-					const signature = LIST_MEMBERS.get(argumentsNode.text)!;
-					if (signature.mutates && !targetVariable.is_mutable) {
-						this.error({
-							location: argumentsNode.startPosition,
-							message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-						});
-					}
-				} else {
+		if (targetVariable?.static_type instanceof ListType) {
+			if (LIST_MEMBERS.has(argumentsNode.text)) {
+				const signature = LIST_MEMBERS.get(argumentsNode.text)!;
+				if (signature.mutates && !targetVariable.is_mutable) {
 					this.error({
 						location: argumentsNode.startPosition,
-						message: `Unknown member '${argumentsNode.text}' for list type.`,
+						message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 					});
 				}
-				break;
+			} else {
+				this.error({
+					location: argumentsNode.startPosition,
+					message: `Unknown member '${argumentsNode.text}' for list type.`,
+				});
 			}
+			return;
+		}
+
+		switch (targetVariable?.static_type) {
 			case undefined:
 			case null: {
-				this.error({
+				this.warn({
 					location: targetNode.startPosition,
 					message: `The type of '${targetNode.text}' is unknown.`,
 				});
@@ -488,49 +456,48 @@ export class Checker {
 					return;
 				}
 
-				switch (variable.static_type) {
-					case "list_type": {
-						switch (memberNode.type) {
-							case SyntaxType.FunctionCall: {
-								const member = memberNode.targetNode.text;
-								if (!member) {
-									return;
-								}
-								if (LIST_MEMBERS.has(member)) {
-									const signature = LIST_MEMBERS.get(member)!;
-									if (signature.mutates && !variable.is_mutable) {
-										this.error({
-											location: memberNode.startPosition,
-											message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-										});
-									}
-									if (!signature.callable) {
-										this.error({
-											location: memberNode.startPosition,
-											message: `${variable.name}.${member} is not a callable function.`,
-										});
-									}
-								} else {
+				if (variable.static_type instanceof ListType) {
+					switch (memberNode.type) {
+						case SyntaxType.FunctionCall: {
+							const member = memberNode.targetNode.text;
+							if (!member) {
+								return;
+							}
+							if (LIST_MEMBERS.has(member)) {
+								const signature = LIST_MEMBERS.get(member)!;
+								if (signature.mutates && !variable.is_mutable) {
 									this.error({
 										location: memberNode.startPosition,
-										message: `Unknown member '${member}' for list type.`,
+										message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 									});
 								}
+								if (!signature.callable) {
+									this.error({
+										location: memberNode.startPosition,
+										message: `${variable.name}.${member} is not a callable function.`,
+									});
+								}
+							} else {
+								this.error({
+									location: memberNode.startPosition,
+									message: `Unknown member '${member}' for list type.`,
+								});
 							}
 						}
-						break;
 					}
-					case null: {
-						this.error({
-							location: targetNode.startPosition,
-							message: `The type of '${targetNode.text}' is unknown.`,
-						});
-						break;
-					}
-					default: {
-						this.debug(`Unknown type: ${variable.static_type}`);
-						break;
-					}
+					// 	break;
+					// }
+					// case null: {
+					// 	this.error({
+					// 		location: targetNode.startPosition,
+					// 		message: `The type of '${targetNode.text}' is unknown.`,
+					// 	});
+					// 	break;
+					// }
+					// default: {
+					// 	this.debug(`Unknown type: ${variable.static_type}`);
+					// 	break;
+					// }
 				}
 			}
 		}
