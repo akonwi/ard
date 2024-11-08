@@ -306,13 +306,33 @@ Deno.test("iterating over strings", () => {
 let string = "fizzbuzz"
 for char in string {}
 `);
-	expect(new Checker(over_string_variable).check()).toEqual([] as Diagnostic[]);
+	expect(new Checker(over_string_variable).check()).toEqual([]);
 });
 
 Deno.test("using a number as the range", () => {
 	const positive = parser.parse(`for i in 100 {}`);
-	expect(new Checker(positive).check()).toEqual([] as Diagnostic[]);
+	expect(new Checker(positive).check()).toEqual([]);
 
 	const negative_ascending = parser.parse(`for i in -20 {}`);
-	expect(new Checker(negative_ascending).check()).toEqual([] as Diagnostic[]);
+	expect(new Checker(negative_ascending).check()).toEqual([]);
+});
+
+Deno.test("string interpolation", () => {
+	const str_literal = parser.parse('"Hello, ${"world"}!"');
+	expect(new Checker(str_literal).check()).toEqual([]);
+
+	const num_literal = parser.parse('"Hello, ${100}!"');
+	expect(new Checker(num_literal).check()).toEqual([]);
+
+	const bool_literal = parser.parse('"Hello, ${true}!"');
+	expect(new Checker(bool_literal).check()).toEqual([]);
+
+	const undeclared_variable = parser.parse('"Hello, ${name}!"');
+	expect(new Checker(undeclared_variable).check()).toEqual([
+		{
+			level: "error",
+			location: { row: 0, column: 10 },
+			message: "Undeclared variable 'name'.",
+		},
+	] satisfies Diagnostic[]);
 });

@@ -145,6 +145,7 @@ export const enum SyntaxType {
   ReturnType = "return_type",
   Statement = "statement",
   String = "string",
+  StringInterpolation = "string_interpolation",
   StructDefinition = "struct_definition",
   StructInstance = "struct_instance",
   StructPropPair = "struct_prop_pair",
@@ -177,10 +178,12 @@ export const enum SyntaxType {
   Or = "or",
   Plus = "plus",
   Str = "str",
+  StringContent = "string_content",
 }
 
 export type UnnamedType =
   | "\""
+  | "${"
   | "("
   | ")"
   | ","
@@ -239,6 +242,7 @@ export type SyntaxNode =
   | ReturnTypeNode
   | StatementNode
   | StringNode
+  | StringInterpolationNode
   | StructDefinitionNode
   | StructInstanceNode
   | StructPropPairNode
@@ -248,6 +252,7 @@ export type SyntaxNode =
   | VariableBindingNode
   | VariableDefinitionNode
   | WhileLoopNode
+  | null
   | null
   | null
   | null
@@ -291,6 +296,7 @@ export type SyntaxNode =
   | PlusNode
   | null
   | StrNode
+  | StringContentNode
   | null
   | null
   | null
@@ -450,6 +456,12 @@ export interface StatementNode extends NamedNodeBase {
 
 export interface StringNode extends NamedNodeBase {
   type: SyntaxType.String;
+  chunkNodes: (StringContentNode | StringInterpolationNode)[];
+}
+
+export interface StringInterpolationNode extends NamedNodeBase {
+  type: SyntaxType.StringInterpolation;
+  expressionNode: ExpressionNode;
 }
 
 export interface StructDefinitionNode extends NamedNodeBase {
@@ -596,5 +608,9 @@ export interface PlusNode extends NamedNodeBase {
 
 export interface StrNode extends NamedNodeBase {
   type: SyntaxType.Str;
+}
+
+export interface StringContentNode extends NamedNodeBase {
+  type: SyntaxType.StringContent;
 }
 

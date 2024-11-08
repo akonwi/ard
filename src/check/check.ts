@@ -16,7 +16,10 @@ import {
 	type BinaryExpressionNode,
 	type StructPropPairNode,
 	type ForLoopNode,
-	UnaryExpressionNode,
+	type UnaryExpressionNode,
+	type StringNode,
+	StringContentNode,
+	StringInterpolationNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -33,6 +36,11 @@ import {
 	Unknown,
 } from "./kon-types.ts";
 
+/*
+todo: create interface for different types of diagnostics
+
+each diagnostic can generate its message
+*/
 export type Diagnostic = {
 	level: "error" | "warning";
 	location: Point;
@@ -41,6 +49,7 @@ export type Diagnostic = {
 
 const RESERVED_KEYWORDS = new Set([
 	"let",
+	"mut",
 	"of",
 	"in",
 	"if",
@@ -52,6 +61,8 @@ const RESERVED_KEYWORDS = new Set([
 	"struct",
 	"enum",
 	"print",
+	"while",
+	"do",
 ]);
 
 class Variable implements StaticType {
@@ -369,7 +380,7 @@ export class Checker {
 	}
 
 	visitForLoop(node: ForLoopNode) {
-		const { cursorNode, rangeNode } = node;
+		const { rangeNode } = node;
 		const range = this.visitExpressionNode(rangeNode);
 		if (!range.is_iterable) {
 			this.error({
@@ -596,6 +607,21 @@ export class Checker {
 			}
 		}
 		return left;
+	}
+
+	visitString(node: StringNode): StaticType {
+		for (const chunkNode of node.chunkNodes) {
+			this.visit(chunkNode);
+		}
+		return Str;
+	}
+
+	visitStringContent(_: StringContentNode): StaticType {
+		return Str;
+	}
+
+	visitStringInterpolation(node: StringInterpolationNode): StaticType {
+		return this.visitExpressionNode(node.expressionNode);
 	}
 
 	validateIdentifier(node: NamedNode) {

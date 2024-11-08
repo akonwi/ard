@@ -10,8 +10,7 @@ mut list: [Todo] = [
 list.push(Todo { title: "Buy eggs", completed: false })
 list.push(Todo { title: "Buy fruits", completed: false })
 
-print("number of items in list:")
-print(list.length)
+print("there are ${list.length} items in the list")
 
 print("incomplete items:")
 for todo in list {

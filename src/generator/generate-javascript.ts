@@ -160,9 +160,22 @@ function generateNode(node: SyntaxNode): string {
 			return generateNode(node.primitiveNode);
 		}
 		case SyntaxType.Number:
-		case SyntaxType.Boolean:
-		case SyntaxType.String: {
+		case SyntaxType.Boolean: {
 			return node.text;
+		}
+		case SyntaxType.String: {
+			return node.chunkNodes
+				.map((n) => {
+					if (n.type === SyntaxType.StringContent) {
+						return `"${n.text}"`;
+					} else {
+						return generateNode(n.expressionNode);
+					}
+				})
+				.join(" + ");
+		}
+		case SyntaxType.StringInterpolation: {
+			return "${" + generateNode(node.expressionNode) + "}";
 		}
 		case SyntaxType.StructDefinition: {
 			// could add struct literal as a comment block
