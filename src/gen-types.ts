@@ -250,17 +250,6 @@ export interface ErrorNode extends NamedNodeBase {
     hasError(): true;
 }
 
-// This is a helper because expression is a hidden rule in the grammar
-export type ExpressionNode =
-	| BinaryExpressionNode
-	| UnaryExpressionNode
-	| PrimitiveValueNode
-	| ListValueNode
-	| MapValueNode
-	| FunctionCallNode
-	| IdentifierNode
-	| MemberAccessNode
-	| StructInstanceNode;
 `);
 }
 

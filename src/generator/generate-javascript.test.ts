@@ -19,9 +19,9 @@ fixtures.forEach(({ fileName, label }) => {
 			name: `generates JavaScript for ${label}`,
 		},
 		() => {
-			const kon = Deno.readTextFileSync(`./src/samples/${fileName}.kon`);
+			const kon = Deno.readTextFileSync(`./samples/${fileName}.kon`);
 			const js = Deno.readTextFileSync(
-				path.resolve(`./src/samples/${fileName}.js`),
+				path.resolve(`./samples/${fileName}.js`),
 			).trimEnd();
 			const tree = parser.parse(kon);
 			const result = generateJavascript(tree);

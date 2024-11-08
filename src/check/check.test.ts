@@ -241,3 +241,36 @@ let list = [1, 2, 3]
 		new ListType(Num),
 	);
 });
+
+Deno.test("iterating", () => {
+	const valid_asc_range = parser.parse(`for i in 0...3 {}`);
+	expect(new Checker(valid_asc_range).check()).toEqual([]);
+	const invalid_range_end = parser.parse(`for i in 3...bar {}`);
+	expect(new Checker(invalid_range_end).check()).toEqual([
+		{
+			level: "error",
+			location: { row: 0, column: 13 },
+			message: "Undeclared variable 'bar'.",
+		},
+		{
+			level: "error",
+			location: { row: 0, column: 13 },
+			message: "A range must be between two numbers.",
+		},
+	] as Diagnostic[]);
+
+	const invalid_range_start = parser.parse(`for i in false...10 {}`);
+	expect(new Checker(invalid_range_start).check()).toEqual([
+		{
+			level: "error",
+			location: { row: 0, column: 9 },
+			message: "A range must be between two numbers.",
+		},
+	] as Diagnostic[]);
+
+	const valid_desc_range = parser.parse(`
+let x = 5
+for i in (x + 3)...0 {}
+`);
+	expect(new Checker(valid_desc_range).check()).toEqual([]);
+});

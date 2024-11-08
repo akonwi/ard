@@ -1,9 +1,6 @@
 import type { Point, Tree, TreeCursor } from "tree-sitter";
 import {
-	type NumberNode,
-	type StringNode,
 	SyntaxType,
-	type BooleanNode,
 	type ExpressionNode,
 	type FunctionCallNode,
 	type MemberAccessNode,
@@ -16,6 +13,8 @@ import {
 	type VariableDefinitionNode,
 	type PrintStatementNode,
 	type ReassignmentNode,
+	type BinaryExpressionNode,
+	type StructPropPairNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -25,7 +24,6 @@ import {
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
 	ListType,
-	MapType,
 	Num,
 	Str,
 	StructType,
@@ -158,9 +156,8 @@ export class Checker {
 			const member_name = inputFieldNode.nameNode.text;
 			if (expected_fields.has(member_name)) {
 				const expected_type = expected_fields.get(member_name)!;
-				const provided_type = this.getTypeFromExpressionNode(
-					inputFieldNode.valueNode,
-				);
+				const provided_type =
+					this.getTypeFromStructPropPairNode(inputFieldNode);
 				if (!areCompatible(expected_type, provided_type)) {
 					this.error({
 						location: inputFieldNode.valueNode.startPosition,
@@ -202,7 +199,7 @@ export class Checker {
 		this.validateIdentifier(node.nameNode);
 
 		const typeNode = node.typeNode?.typeNode;
-		const value = node.valueNodes.filter((n) => n.isNamed).at(0);
+		const value = node.valueNode;
 		if (value == null) {
 			// can't really get here because tree-sitter captures a situation like this as an error
 			this.error({
@@ -302,24 +299,19 @@ export class Checker {
 		}
 	}
 
-	private getTypeFromExpressionNode(
-		node: ExpressionNode | BooleanNode | NumberNode | StringNode,
-	): StaticType {
-		switch (node.type) {
-			case SyntaxType.Boolean:
-				return Bool;
-			case SyntaxType.Number:
-				return Num;
-			case SyntaxType.String:
-				return Str;
-			case SyntaxType.PrimitiveValue: {
-				return getStaticTypeForPrimitiveValue(node);
+	visitExpressionNode(node: ExpressionNode): StaticType {
+		const expr = node.exprNode;
+		switch (expr.type) {
+			case SyntaxType.Expression: {
+				return this.visitExpressionNode(expr);
 			}
+			case SyntaxType.PrimitiveValue:
+				return getStaticTypeForPrimitiveValue(expr);
 			case SyntaxType.ListValue: {
-				if (node.innerNodes.length === 0) {
+				if (expr.innerNodes.length === 0) {
 					return EmptyList;
 				}
-				const first = node.innerNodes.at(0)!;
+				const first = expr.innerNodes.at(0)!;
 				switch (first.type) {
 					case SyntaxType.Boolean:
 						return new ListType(Bool);
@@ -351,11 +343,84 @@ export class Checker {
 				}
 			}
 			case SyntaxType.StructInstance: {
-				return this.visitStructInstance(node) ?? Unknown;
+				return this.visitStructInstance(expr) ?? Unknown;
+			}
+			case SyntaxType.BinaryExpression: {
+				return this.visitBinaryExpression(expr);
+			}
+			case SyntaxType.Identifier: {
+				const variable = this.scope().variables.get(expr.text);
+				if (variable == null) {
+					this.error({
+						message: `Undeclared variable '${expr.text}'.`,
+						location: expr.startPosition,
+					});
+					return Unknown;
+				}
+				return variable.static_type;
 			}
 			default: {
 				return Unknown;
 			}
+		}
+	}
+
+	private getTypeFromExpressionNode(node: ExpressionNode): StaticType {
+		switch (node.exprNode.type) {
+			case SyntaxType.PrimitiveValue:
+				return getStaticTypeForPrimitiveValue(node.exprNode);
+			case SyntaxType.ListValue: {
+				if (node.exprNode.innerNodes.length === 0) {
+					return EmptyList;
+				}
+				const first = node.exprNode.innerNodes.at(0)!;
+				switch (first.type) {
+					case SyntaxType.Boolean:
+						return new ListType(Bool);
+					case SyntaxType.String:
+						return new ListType(Str);
+					case SyntaxType.Number:
+						return new ListType(Num);
+					// case SyntaxType.ListValue:
+					// 	return new ListType(this.getTypeFromExpressionNode(first));
+					// case SyntaxType.MapValue:
+					// 	return new ListType(this.getTypeFromExpressionNode(first));
+					case SyntaxType.StructInstance: {
+						const struct = this.visitStructInstance(first) ?? Unknown;
+						if (struct === Unknown) {
+							this.error({
+								location: first.startPosition,
+								message: `Unknown struct`,
+							});
+						}
+						return new ListType(struct);
+					}
+					default: {
+						this.warn({
+							location: first.startPosition,
+							message: `Unknown type in list`,
+						});
+						return new ListType(Unknown);
+					}
+				}
+			}
+			case SyntaxType.StructInstance: {
+				return this.visitStructInstance(node.exprNode) ?? Unknown;
+			}
+			default: {
+				return Unknown;
+			}
+		}
+	}
+
+	private getTypeFromStructPropPairNode(node: StructPropPairNode): StaticType {
+		switch (node.valueNode.type) {
+			case SyntaxType.Boolean:
+				return Bool;
+			case SyntaxType.String:
+				return Str;
+			case SyntaxType.Number:
+				return Num;
 		}
 	}
 
@@ -418,10 +483,7 @@ export class Checker {
 	}
 
 	visitMemberAccess(node: MemberAccessNode) {
-		const { memberNode } = node;
-		const targetNode = node.targetNodes.filter((n) => n.isNamed).at(0);
-		if (targetNode == null) throw new Error("Invalid member access");
-
+		const { targetNode, memberNode } = node;
 		switch (targetNode.type) {
 			case SyntaxType.Identifier: {
 				const variable = this.scope().variables.get(targetNode.text);
@@ -478,6 +540,44 @@ export class Checker {
 				}
 			}
 		}
+	}
+
+	visitBinaryExpression(node: BinaryExpressionNode): StaticType {
+		this.debug("visiting left of binary expression", node.leftNode.type);
+		const left = this.visitExpressionNode(node.leftNode);
+		const right = this.visitExpressionNode(node.rightNode);
+		this.debug(
+			`BinaryExpressionNode: ${left.pretty} ${node.operatorNode.type} ${right.pretty}`,
+		);
+		switch (node.operatorNode.type) {
+			case SyntaxType.InclusiveRange: {
+				const invalidStart = left !== Num;
+				const invalidEnd = right !== Num;
+				if (invalidStart || invalidEnd) {
+					this.error({
+						location: invalidStart
+							? node.leftNode.startPosition
+							: node.rightNode.startPosition,
+						message: "A range must be between two numbers.",
+					});
+				}
+				return Num;
+			}
+			case SyntaxType.Plus: {
+				const validLeft = left === Num;
+				const validRight = right === Num;
+				if (!(validLeft && validRight)) {
+					this.error({
+						location: validLeft
+							? node.rightNode.startPosition
+							: node.leftNode.startPosition,
+						message: "Addition is only supported between numbers.",
+					});
+				}
+				return Num;
+			}
+		}
+		return left;
 	}
 
 	validateIdentifier(node: NamedNode) {

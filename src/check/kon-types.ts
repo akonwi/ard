@@ -13,7 +13,7 @@ export interface StaticType {
 	pretty: string;
 }
 
-export class NumType implements StaticType {
+class NumType implements StaticType {
 	get name() {
 		return this.pretty;
 	}
@@ -22,7 +22,7 @@ export class NumType implements StaticType {
 	}
 }
 
-export class StrType implements StaticType {
+class StrType implements StaticType {
 	get name() {
 		return this.pretty;
 	}
@@ -31,7 +31,7 @@ export class StrType implements StaticType {
 	}
 }
 
-export class BoolType implements StaticType {
+class BoolType implements StaticType {
 	constructor() {}
 
 	get name() {
