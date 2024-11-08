@@ -28,6 +28,9 @@ function generateNode(node: SyntaxNode): string {
 		case SyntaxType.Program: {
 			return node.children.map(generateNode).join("\n");
 		}
+		case SyntaxType.Comment: {
+			return `${node.text}`;
+		}
 		case SyntaxType.Statement: {
 			if (node.firstNamedChild == null) return "";
 			const needsSemicolon = !SEMICOLON_EXCLUSIONS.has(
