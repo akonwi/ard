@@ -324,6 +324,7 @@ export interface CompoundAssignmentNode extends NamedNodeBase {
 export interface ElseStatementNode extends NamedNodeBase {
   type: SyntaxType.ElseStatement;
   bodyNode?: BlockNode;
+  ifNode?: IfStatementNode;
 }
 
 export interface EnumDefinitionNode extends NamedNodeBase {
@@ -343,9 +344,9 @@ export interface ExpressionNode extends NamedNodeBase {
 
 export interface ForLoopNode extends NamedNodeBase {
   type: SyntaxType.ForLoop;
+  bodyNode: BlockNode;
   cursorNode: IdentifierNode;
   rangeNode: ExpressionNode;
-  statement_blockNode: BlockNode;
 }
 
 export interface FunctionCallNode extends NamedNodeBase {
@@ -397,7 +398,7 @@ export interface MapValueNode extends NamedNodeBase {
 
 export interface MemberAccessNode extends NamedNodeBase {
   type: SyntaxType.MemberAccess;
-  memberNode: FunctionCallNode | IdentifierNode;
+  memberNode: FunctionCallNode | IdentifierNode | MemberAccessNode;
   targetNode: IdentifierNode;
 }
 
@@ -500,9 +501,9 @@ export interface VariableDefinitionNode extends NamedNodeBase {
 
 export interface WhileLoopNode extends NamedNodeBase {
   type: SyntaxType.WhileLoop;
+  bodyNode: BlockNode;
   conditionNode: ExpressionNode;
   doNode?: UnnamedNode;
-  statement_blockNode: BlockNode;
 }
 
 export interface AndNode extends NamedNodeBase {
