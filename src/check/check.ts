@@ -20,6 +20,7 @@ import {
 	type StringNode,
 	StringContentNode,
 	StringInterpolationNode,
+	type IdentifierNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -111,8 +112,9 @@ export class Checker {
 		return this.errors;
 	}
 
-	visit(node: SyntaxNode) {
-		if (node === null) return;
+	visit(node: SyntaxNode): StaticType {
+		// todo: eliminate nulls from the SyntaxNode union
+		if (node === null) return Unknown;
 		const methodName = `visit${node.type
 			.split("_")
 			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -129,7 +131,7 @@ export class Checker {
 		for (const child of node.namedChildren) {
 			this.visit(child);
 		}
-		return;
+		return Unknown;
 	}
 
 	private error(error: Omit<Diagnostic, "level">) {
@@ -366,12 +368,15 @@ export class Checker {
 				const variable = this.scope().variables.get(expr.text);
 				if (variable == null) {
 					this.error({
-						message: `Undeclared variable '${expr.text}'.`,
+						message: `Cannot find name '${expr.text}'.`,
 						location: expr.startPosition,
 					});
 					return Unknown;
 				}
 				return variable.static_type;
+			}
+			case SyntaxType.MemberAccess: {
+				return this.visitMemberAccess(expr);
 			}
 			default: {
 				return Unknown;
@@ -449,10 +454,6 @@ export class Checker {
 		}
 	}
 
-	visitPrintStatement(_: PrintStatementNode) {
-		// todo: validate that arguments are printable
-	}
-
 	visitFunctionCall(node: FunctionCallNode) {
 		const { targetNode, argumentsNode } = node;
 		const targetVariable = (() => {
@@ -462,7 +463,7 @@ export class Checker {
 					if (!variable) {
 						this.error({
 							location: targetNode.startPosition,
-							message: `Missing declaration for '${targetNode.text}'.`,
+							message: `Cannot find name '${targetNode.text}'.`,
 						});
 						return;
 					}
@@ -507,62 +508,133 @@ export class Checker {
 		}
 	}
 
-	visitMemberAccess(node: MemberAccessNode) {
+	visitIdentifier(node: IdentifierNode): Variable | null {
+		const name = node.text;
+		const variable = this.scope().variables.get(name);
+		if (!variable) {
+			this.error({
+				location: node.startPosition,
+				message: `Cannot find name '${name}'.`,
+			});
+			return null;
+		}
+
+		return variable;
+		// if (variable.static_type instanceof ListType) {
+		// 	switch (memberNode.type) {
+		// 		case SyntaxType.FunctionCall: {
+		// 			const member = memberNode.targetNode.text;
+		// 			if (!member) {
+		// 				return Unknown;
+		// 			}
+		// 			if (LIST_MEMBERS.has(member)) {
+		// 				const signature = LIST_MEMBERS.get(member)!;
+		// 				if (signature.mutates && !variable.is_mutable) {
+		// 					this.error({
+		// 						location: memberNode.startPosition,
+		// 						message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
+		// 					});
+		// 				}
+		// 				if (!signature.callable) {
+		// 					this.error({
+		// 						location: memberNode.startPosition,
+		// 						message: `${variable.name}.${member} is not a callable function.`,
+		// 					});
+		// 				}
+		// 				// todo: signatures for list functions
+		// 				return Unknown;
+		// 			} else {
+		// 				this.error({
+		// 					location: memberNode.startPosition,
+		// 					message: `Unsupported member '${member}' for list type.`,
+		// 				});
+		// 				return Unknown;
+		// 			}
+		// 		}
+		// 		case SyntaxType.Identifier: {
+		// 			const list_member = LIST_MEMBERS.get(memberNode.text);
+		// 			if (list_member == null) {
+		// 				this.error({
+		// 					location: memberNode.startPosition,
+		// 					message: `Property '${memberNode.text}' does not exist on List.`,
+		// 				});
+		// 			}
+		// 			return Unknown;
+		// 		}
+		// 	}
+		// 	return Unknown;
+		// 	// 	break;
+		// 	// }
+		// 	// case null: {
+		// 	// 	this.error({
+		// 	// 		location: targetNode.startPosition,
+		// 	// 		message: `The type of '${targetNode.text}' is unknown.`,
+		// 	// 	});
+		// 	// 	break;
+		// 	// }
+		// 	// default: {
+		// 	// 	this.debug(`Unknown type: ${variable.static_type}`);
+		// 	// 	break;
+		// 	// }
+		// }
+	}
+
+	visitMemberAccess(node: MemberAccessNode): StaticType {
 		const { targetNode, memberNode } = node;
 		switch (targetNode.type) {
 			case SyntaxType.Identifier: {
-				const variable = this.scope().variables.get(targetNode.text);
-				if (!variable) {
-					this.error({
-						location: targetNode.startPosition,
-						message: `Missing declaration for '${targetNode.text}'.`,
-					});
-					return;
-				}
+				const target = this.visitIdentifier(targetNode);
+				if (!target) return Unknown;
+				this.debug("checking member access", {
+					variable: target.name,
+					variableType: target.static_type.pretty,
+					member: memberNode.text,
+					memberRule: memberNode.type,
+					memberType: LIST_MEMBERS.get(memberNode.text),
+				});
 
-				if (variable.static_type instanceof ListType) {
-					switch (memberNode.type) {
-						case SyntaxType.FunctionCall: {
-							const member = memberNode.targetNode.text;
-							if (!member) {
-								return;
-							}
-							if (LIST_MEMBERS.has(member)) {
-								const signature = LIST_MEMBERS.get(member)!;
-								if (signature.mutates && !variable.is_mutable) {
-									this.error({
-										location: memberNode.startPosition,
-										message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-									});
-								}
-								if (!signature.callable) {
-									this.error({
-										location: memberNode.startPosition,
-										message: `${variable.name}.${member} is not a callable function.`,
-									});
-								}
-							} else {
+				switch (memberNode.type) {
+					case SyntaxType.FunctionCall: {
+						const member = memberNode.targetNode.text;
+						if (!member) {
+							return Unknown;
+						}
+						if (LIST_MEMBERS.has(member)) {
+							const signature = LIST_MEMBERS.get(member)!;
+							if (signature.mutates && !target.is_mutable) {
 								this.error({
 									location: memberNode.startPosition,
-									message: `Unknown member '${member}' for list type.`,
+									message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 								});
 							}
+							if (!signature.callable) {
+								this.error({
+									location: memberNode.startPosition,
+									message: `${target.name}.${member} is not a callable function.`,
+								});
+							}
+							// todo: signatures for list functions
+							return Unknown;
+						} else {
+							this.error({
+								location: memberNode.startPosition,
+								message: `Unsupported member '${member}' for list type.`,
+							});
+							return Unknown;
 						}
 					}
-					// 	break;
-					// }
-					// case null: {
-					// 	this.error({
-					// 		location: targetNode.startPosition,
-					// 		message: `The type of '${targetNode.text}' is unknown.`,
-					// 	});
-					// 	break;
-					// }
-					// default: {
-					// 	this.debug(`Unknown type: ${variable.static_type}`);
-					// 	break;
-					// }
+					case SyntaxType.Identifier: {
+						const list_member = LIST_MEMBERS.get(memberNode.text);
+						if (list_member == null) {
+							this.error({
+								location: memberNode.startPosition,
+								message: `Property '${memberNode.text}' does not exist on List.`,
+							});
+						}
+						return Unknown;
+					}
 				}
+				return Unknown;
 			}
 		}
 	}
@@ -621,7 +693,7 @@ export class Checker {
 	}
 
 	visitStringInterpolation(node: StringInterpolationNode): StaticType {
-		return this.visitExpressionNode(node.expressionNode);
+		return this.visit(node.expressionNode);
 	}
 
 	validateIdentifier(node: NamedNode) {
@@ -640,6 +712,7 @@ const LIST_MEMBERS = new Map<string, { callable: boolean; mutates: boolean }>([
 	["concat", { mutates: false, callable: true }],
 	["copyWithin", { mutates: true, callable: true }],
 	["length", { mutates: false, callable: false }],
+	["map", { mutates: false, callable: true }],
 	["pop", { mutates: true, callable: true }],
 	["push", { mutates: true, callable: true }],
 	["reverse", { mutates: true, callable: true }],

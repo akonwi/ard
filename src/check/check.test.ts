@@ -94,7 +94,7 @@ Deno.test("referencing undeclared variables", () => {
 	expect(errors).toEqual([
 		{
 			level: "error",
-			message: "Missing declaration for 'foo'.",
+			message: "Cannot find name 'foo'.",
 			location: { row: 0, column: 0 },
 		} satisfies Diagnostic,
 	]);
@@ -250,7 +250,7 @@ Deno.test("numeric ranges", () => {
 		{
 			level: "error",
 			location: { row: 0, column: 13 },
-			message: "Undeclared variable 'bar'.",
+			message: "Cannot find name 'bar'.",
 		},
 		{
 			level: "error",
@@ -332,7 +332,7 @@ Deno.test("string interpolation", () => {
 		{
 			level: "error",
 			location: { row: 0, column: 10 },
-			message: "Undeclared variable 'name'.",
+			message: "Cannot find name 'name'.",
 		},
 	] satisfies Diagnostic[]);
 });
