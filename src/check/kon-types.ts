@@ -1,6 +1,5 @@
 import {
 	SyntaxType,
-	type ListValueNode,
 	type PrimitiveTypeNode,
 	type PrimitiveValueNode,
 	type StructDefinitionNode,
@@ -11,6 +10,7 @@ export interface StaticType {
 	name: string;
 	// used for display
 	pretty: string;
+	is_iterable: boolean;
 }
 
 class NumType implements StaticType {
@@ -20,6 +20,10 @@ class NumType implements StaticType {
 	get pretty() {
 		return "Num";
 	}
+
+	get is_iterable() {
+		return true;
+	}
 }
 
 class StrType implements StaticType {
@@ -28,6 +32,10 @@ class StrType implements StaticType {
 	}
 	get pretty() {
 		return "Str";
+	}
+
+	get is_iterable() {
+		return true;
 	}
 }
 
@@ -40,6 +48,10 @@ class BoolType implements StaticType {
 	get pretty() {
 		return "Bool";
 	}
+
+	get is_iterable() {
+		return false;
+	}
 }
 
 export class ListType implements StaticType {
@@ -51,9 +63,17 @@ export class ListType implements StaticType {
 	get pretty() {
 		return `[${this.inner.pretty}]`;
 	}
+
+	get is_iterable() {
+		return true;
+	}
 }
 
-export const EmptyList: StaticType = { name: "EmptyList", pretty: "[]" };
+export const EmptyList: StaticType = {
+	name: "EmptyList",
+	pretty: "[]",
+	is_iterable: true,
+};
 
 export class MapType implements StaticType {
 	constructor(readonly value: StaticType) {}
@@ -64,6 +84,8 @@ export class MapType implements StaticType {
 	get pretty() {
 		return `[Str:${this.value.pretty}]`;
 	}
+
+	readonly is_iterable = true;
 }
 
 export class StructType implements StaticType {
@@ -90,12 +112,18 @@ export class StructType implements StaticType {
 	get pretty() {
 		return this.name;
 	}
+
+	readonly is_iterable = false;
 }
 
 export const Num = new NumType();
 export const Bool = new BoolType();
 export const Str = new StrType();
-export const Unknown: StaticType = { name: "unknown", pretty: "unknown" };
+export const Unknown: StaticType = {
+	name: "unknown",
+	pretty: "unknown",
+	is_iterable: false,
+};
 export function getStaticTypeForPrimitiveType(
 	node: PrimitiveTypeNode,
 ): StaticType {
@@ -129,4 +157,8 @@ export function areCompatible(a: StaticType, b: StaticType): boolean {
 	if (a === EmptyList && b instanceof ListType) return true;
 	if (a instanceof ListType && b === EmptyList) return true;
 	return a.pretty === b.pretty;
+}
+
+export function isIterable(type: StaticType): boolean {
+	return type.is_iterable === true;
 }

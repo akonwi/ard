@@ -482,6 +482,8 @@ export interface TypeDeclarationNode extends NamedNodeBase {
 
 export interface UnaryExpressionNode extends NamedNodeBase {
   type: SyntaxType.UnaryExpression;
+  operandNode: ExpressionNode;
+  operatorNode: BangNode | MinusNode;
 }
 
 export interface VariableBindingNode extends NamedNodeBase {

@@ -15,6 +15,8 @@ import {
 	type ReassignmentNode,
 	type BinaryExpressionNode,
 	type StructPropPairNode,
+	type ForLoopNode,
+	UnaryExpressionNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -25,6 +27,7 @@ import {
 	getStaticTypeForPrimitiveValue,
 	ListType,
 	Num,
+	type StaticType,
 	Str,
 	StructType,
 	Unknown,
@@ -51,13 +54,6 @@ const RESERVED_KEYWORDS = new Set([
 	"print",
 ]);
 
-interface StaticType {
-	// identifier
-	name: string;
-	// used for display
-	pretty: string;
-}
-
 class Variable implements StaticType {
 	constructor(
 		readonly name: string,
@@ -71,6 +67,10 @@ class Variable implements StaticType {
 
 	get pretty() {
 		return this.static_type.pretty;
+	}
+
+	get is_iterable() {
+		return this.static_type.is_iterable;
 	}
 }
 
@@ -345,6 +345,9 @@ export class Checker {
 			case SyntaxType.StructInstance: {
 				return this.visitStructInstance(expr) ?? Unknown;
 			}
+			case SyntaxType.UnaryExpression: {
+				return this.visitUnaryExpression(expr);
+			}
 			case SyntaxType.BinaryExpression: {
 				return this.visitBinaryExpression(expr);
 			}
@@ -362,6 +365,17 @@ export class Checker {
 			default: {
 				return Unknown;
 			}
+		}
+	}
+
+	visitForLoop(node: ForLoopNode) {
+		const { cursorNode, rangeNode } = node;
+		const range = this.visitExpressionNode(rangeNode);
+		if (!range.is_iterable) {
+			this.error({
+				message: `Cannot iterate over a '${range.pretty}'.`,
+				location: rangeNode.startPosition,
+			});
 		}
 	}
 
@@ -540,6 +554,10 @@ export class Checker {
 				}
 			}
 		}
+	}
+
+	visitUnaryExpression(node: UnaryExpressionNode): StaticType {
+		return this.visitExpressionNode(node.operandNode);
 	}
 
 	visitBinaryExpression(node: BinaryExpressionNode): StaticType {

@@ -242,7 +242,7 @@ let list = [1, 2, 3]
 	);
 });
 
-Deno.test("iterating", () => {
+Deno.test("numeric ranges", () => {
 	const valid_asc_range = parser.parse(`for i in 0...3 {}`);
 	expect(new Checker(valid_asc_range).check()).toEqual([]);
 	const invalid_range_end = parser.parse(`for i in 3...bar {}`);
@@ -273,4 +273,46 @@ let x = 5
 for i in (x + 3)...0 {}
 `);
 	expect(new Checker(valid_desc_range).check()).toEqual([]);
+});
+
+Deno.test("iterating over lists", () => {
+	const over_literal_list = parser.parse(`for i in [1, 2, 3] {}`);
+	expect(new Checker(over_literal_list).check()).toEqual([] as Diagnostic[]);
+
+	const over_list_variable = parser.parse(`
+let list = [1, 2, 3]
+for i in list {}
+`);
+	expect(new Checker(over_list_variable).check()).toEqual([] as Diagnostic[]);
+
+	const over_bool = parser.parse(`
+let not_iterable = true
+for i in not_iterable {}
+`);
+	expect(new Checker(over_bool).check()).toEqual([
+		{
+			level: "error",
+			location: { row: 2, column: 9 },
+			message: "Cannot iterate over a 'Bool'.",
+		},
+	] as Diagnostic[]);
+});
+
+Deno.test("iterating over strings", () => {
+	const over_string_literal = parser.parse(`for char in "fizzbuzz" {}`);
+	expect(new Checker(over_string_literal).check()).toEqual([] as Diagnostic[]);
+
+	const over_string_variable = parser.parse(`
+let string = "fizzbuzz"
+for char in string {}
+`);
+	expect(new Checker(over_string_variable).check()).toEqual([] as Diagnostic[]);
+});
+
+Deno.test("using a number as the range", () => {
+	const positive = parser.parse(`for i in 100 {}`);
+	expect(new Checker(positive).check()).toEqual([] as Diagnostic[]);
+
+	const negative_ascending = parser.parse(`for i in -20 {}`);
+	expect(new Checker(negative_ascending).check()).toEqual([] as Diagnostic[]);
 });
