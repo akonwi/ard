@@ -11,16 +11,17 @@ import {
 	type TypeDeclarationNode,
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
-	type PrintStatementNode,
 	type ReassignmentNode,
 	type BinaryExpressionNode,
 	type StructPropPairNode,
 	type ForLoopNode,
 	type UnaryExpressionNode,
 	type StringNode,
-	StringContentNode,
-	StringInterpolationNode,
+	type StringContentNode,
+	type StringInterpolationNode,
 	type IdentifierNode,
+	type BlockNode,
+	type WhileLoopNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -67,14 +68,18 @@ const RESERVED_KEYWORDS = new Set([
 ]);
 
 class Variable implements StaticType {
-	constructor(
-		readonly name: string,
-		readonly node: VariableDefinitionNode,
-		readonly static_type: StaticType,
-	) {}
+	readonly name: string;
+	readonly static_type: StaticType;
+	readonly is_mutable: boolean;
 
-	get is_mutable(): boolean {
-		return this.node.bindingNode.text === "mut";
+	constructor(input: {
+		name: string;
+		type: StaticType;
+		is_mutable?: boolean;
+	}) {
+		this.name = input.name;
+		this.static_type = input.type;
+		this.is_mutable = input.is_mutable ?? false;
 	}
 
 	get pretty() {
@@ -87,8 +92,32 @@ class Variable implements StaticType {
 }
 
 class LexScope {
-	readonly variables: Map<string, Variable> = new Map();
-	readonly structs: Map<string, StructType> = new Map();
+	private variables: Map<string, Variable> = new Map();
+	private structs: Map<string, StructType> = new Map();
+
+	constructor(readonly parent: LexScope | null = null) {}
+
+	addStruct(struct: StructType) {
+		this.structs.set(struct.name, struct);
+	}
+
+	addVariable(variable: Variable) {
+		this.variables.set(variable.name, variable);
+	}
+
+	getStruct(name: string): StructType | null {
+		const struct = this.structs.get(name);
+		if (struct) return struct;
+		if (this.parent) return this.parent.getStruct(name);
+		return null;
+	}
+
+	getVariable(name: string): Variable | null {
+		const variable = this.variables.get(name);
+		if (variable) return variable;
+		if (this.parent) return this.parent.getVariable(name);
+		return null;
+	}
 }
 
 export class Checker {
@@ -142,19 +171,22 @@ export class Checker {
 		this.errors.push({ ...warning, level: "warning" });
 	}
 
-	private scope(): LexScope {
-		if (this.scopes.length === 0) throw new Error("No scope found");
+	scope(): LexScope {
+		if (this.scopes.length === 0) {
+			this.scopes.push(new LexScope());
+		}
 		return this.scopes.at(0)!;
 	}
 
 	visitStructDefinition(node: StructDefinitionNode) {
 		const def = StructType.from(node);
-		this.scope().structs.set(def.name, def);
+		this.scope().addStruct(def);
 	}
 
 	visitStructInstance(node: StructInstanceNode): StructType | null {
 		const struct_name = node.nameNode.text;
-		const struct_def = this.scope().structs.get(struct_name);
+
+		const struct_def = this.scope().getStruct(struct_name);
 		if (!struct_def) {
 			this.error({
 				message: `Missing definition for type '${struct_name}'.`,
@@ -240,14 +272,20 @@ export class Checker {
 			});
 		}
 
-		const variable = new Variable(name.text, node, declared_type);
-		this.scope().variables.set(name.text, variable);
+		const variable = new Variable({
+			name: name.text,
+			type: declared_type,
+			is_mutable: node.bindingNode.text === "mut",
+		});
+
+		this.scope().addVariable(variable);
 		return;
 	}
 
 	visitReassignment(node: ReassignmentNode) {
 		const target = node.nameNode;
-		const variable = this.scope().variables.get(target.text);
+
+		const variable = this.scope().getVariable(target.text);
 		if (variable == null) {
 			this.error({
 				message: `Variable '${target.text}' is not defined.`,
@@ -288,9 +326,7 @@ export class Checker {
 				switch (node.innerNode.type) {
 					case SyntaxType.Identifier: {
 						// check that the type exists
-						const declaration =
-							this.scope().variables.get(node.innerNode.text) ??
-							this.scope().structs.get(node.innerNode.text);
+						const declaration = this.scope().getStruct(node.innerNode.text);
 						if (declaration == null) {
 							this.error({
 								location: node.innerNode.startPosition,
@@ -365,7 +401,7 @@ export class Checker {
 				return this.visitBinaryExpression(expr);
 			}
 			case SyntaxType.Identifier: {
-				const variable = this.scope().variables.get(expr.text);
+				const variable = this.scope().getVariable(expr.text);
 				if (variable == null) {
 					this.error({
 						message: `Cannot find name '${expr.text}'.`,
@@ -385,7 +421,7 @@ export class Checker {
 	}
 
 	visitForLoop(node: ForLoopNode) {
-		const { rangeNode } = node;
+		const { cursorNode, rangeNode, bodyNode } = node;
 		const range = this.visitExpressionNode(rangeNode);
 		if (!range.is_iterable) {
 			this.error({
@@ -393,7 +429,27 @@ export class Checker {
 				location: rangeNode.startPosition,
 			});
 		}
+		// infer the type of the cursor from the range
+		const cursor = new Variable({
+			name: cursorNode.text,
+			type: range instanceof ListType ? range.inner : range,
+		});
+		const new_scope = new LexScope(this.scope());
+		new_scope.addVariable(cursor);
+		this.scopes.unshift(new_scope);
+		this.visit(bodyNode);
+		this.scopes.shift();
 	}
+
+	visitWhileLoop(node: WhileLoopNode) {
+		const { bodyNode } = node;
+		const new_scope = new LexScope(this.scope());
+		this.scopes.unshift(new_scope);
+		this.visit(bodyNode);
+		this.scopes.shift();
+	}
+
+	// visitBlock(node: BlockNode) {}
 
 	private getTypeFromExpressionNode(node: ExpressionNode): StaticType {
 		switch (node.exprNode.type) {
@@ -459,7 +515,7 @@ export class Checker {
 		const targetVariable = (() => {
 			switch (targetNode.type) {
 				case SyntaxType.Identifier: {
-					const variable = this.scope().variables.get(targetNode.text);
+					const variable = this.scope().getVariable(targetNode.text);
 					if (!variable) {
 						this.error({
 							location: targetNode.startPosition,
@@ -510,7 +566,8 @@ export class Checker {
 
 	visitIdentifier(node: IdentifierNode): Variable | null {
 		const name = node.text;
-		const variable = this.scope().variables.get(name);
+
+		const variable = this.scope().getVariable(name);
 		if (!variable) {
 			this.error({
 				location: node.startPosition,

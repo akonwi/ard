@@ -234,10 +234,10 @@ let list = [1, 2, 3]
 `);
 	const checker = new Checker(tree);
 	expect(checker.check().length).toBe(0);
-	expect(checker.scopes[0]!.variables.get("string")?.static_type).toBe(Str);
-	expect(checker.scopes[0]!.variables.get("number")?.static_type).toBe(Num);
-	expect(checker.scopes[0]!.variables.get("boolean")?.static_type).toBe(Bool);
-	expect(checker.scopes[0]!.variables.get("list")?.static_type).toEqual(
+	expect(checker.scope().getVariable("string")?.static_type).toBe(Str);
+	expect(checker.scope().getVariable("number")?.static_type).toBe(Num);
+	expect(checker.scope().getVariable("boolean")?.static_type).toBe(Bool);
+	expect(checker.scope().getVariable("list")?.static_type).toEqual(
 		new ListType(Num),
 	);
 });
