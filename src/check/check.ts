@@ -585,13 +585,6 @@ export class Checker {
 			case SyntaxType.Identifier: {
 				const target = this.visitIdentifier(targetNode);
 				if (!target) return Unknown;
-				this.debug("checking member access", {
-					variable: target.name,
-					variableType: target.static_type.pretty,
-					member: memberNode.text,
-					memberRule: memberNode.type,
-					memberType: LIST_MEMBERS.get(memberNode.text),
-				});
 
 				switch (memberNode.type) {
 					case SyntaxType.FunctionCall: {
@@ -631,6 +624,7 @@ export class Checker {
 								message: `Property '${memberNode.text}' does not exist on List.`,
 							});
 						}
+						// handle signatures
 						return Unknown;
 					}
 				}
@@ -712,6 +706,7 @@ const LIST_MEMBERS = new Map<string, { callable: boolean; mutates: boolean }>([
 	["concat", { mutates: false, callable: true }],
 	["copyWithin", { mutates: true, callable: true }],
 	["length", { mutates: false, callable: false }],
+	["size", { mutates: false, callable: false }], // todo: alias for length
 	["map", { mutates: false, callable: true }],
 	["pop", { mutates: true, callable: true }],
 	["push", { mutates: true, callable: true }],
