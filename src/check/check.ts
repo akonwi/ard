@@ -31,6 +31,7 @@ import {
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
 	ListType,
+	MapType,
 	Num,
 	type StaticType,
 	Str,
@@ -334,7 +335,10 @@ export class Checker {
 							});
 							return new ListType(Unknown);
 						}
-						return new ListType(declaration);
+
+						const list = new ListType(declaration);
+						this.debug(`got ${list.inner.pretty}`);
+						return list;
 					}
 					case SyntaxType.PrimitiveType: {
 						return new ListType(getStaticTypeForPrimitiveType(node.innerNode));
@@ -429,10 +433,18 @@ export class Checker {
 				location: rangeNode.startPosition,
 			});
 		}
+		// @ts-ignore
+		this.debug(`range is ${range.pretty}`, {
+			instanceOfListType: range instanceof ListType,
+		});
 		// infer the type of the cursor from the range
 		const cursor = new Variable({
 			name: cursorNode.text,
 			type: range instanceof ListType ? range.inner : range,
+		});
+		this.debug(`cursor is ${cursor.pretty}`, {
+			name: cursor.name,
+			rangeInner: range instanceof ListType ? range.inner.pretty : null,
 		});
 		const new_scope = new LexScope(this.scope());
 		new_scope.addVariable(cursor);
@@ -638,56 +650,74 @@ export class Checker {
 
 	visitMemberAccess(node: MemberAccessNode): StaticType {
 		const { targetNode, memberNode } = node;
-		switch (targetNode.type) {
-			case SyntaxType.Identifier: {
-				const target = this.visitIdentifier(targetNode);
-				if (!target) return Unknown;
+		const target = this.scope().getVariable(targetNode.text);
+		if (!target) {
+			this.error({
+				location: targetNode.startPosition,
+				message: `Cannot find name '${targetNode.text}'.`,
+			});
+			return Unknown;
+		}
+		this.debug(`target is ${target.name} of type ${target?.pretty}`);
 
-				switch (memberNode.type) {
-					case SyntaxType.FunctionCall: {
-						const member = memberNode.targetNode.text;
-						if (!member) {
-							return Unknown;
-						}
-						if (LIST_MEMBERS.has(member)) {
-							const signature = LIST_MEMBERS.get(member)!;
-							if (signature.mutates && !target.is_mutable) {
-								this.error({
-									location: memberNode.startPosition,
-									message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-								});
-							}
-							if (!signature.callable) {
-								this.error({
-									location: memberNode.startPosition,
-									message: `${target.name}.${member} is not a callable function.`,
-								});
-							}
-							// todo: signatures for list functions
-							return Unknown;
-						} else {
-							this.error({
-								location: memberNode.startPosition,
-								message: `Unsupported member '${member}' for list type.`,
-							});
-							return Unknown;
-						}
+		if (target.static_type instanceof ListType) {
+			switch (memberNode.type) {
+				case SyntaxType.FunctionCall: {
+					const member = memberNode.targetNode.text;
+					if (!member) {
+						return Unknown;
 					}
-					case SyntaxType.Identifier: {
-						const list_member = LIST_MEMBERS.get(memberNode.text);
-						if (list_member == null) {
+					if (LIST_MEMBERS.has(member)) {
+						const signature = LIST_MEMBERS.get(member)!;
+						if (!signature.callable) {
 							this.error({
 								location: memberNode.startPosition,
-								message: `Property '${memberNode.text}' does not exist on List.`,
+								message: `${target.name}.${member} is not a callable function.`,
+							});
+							return Unknown;
+						}
+						if (signature.mutates && !target.is_mutable) {
+							this.error({
+								location: memberNode.startPosition,
+								message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
 							});
 						}
-						// handle signatures
+						// todo: signatures for list functions
+						return Unknown;
+					} else {
+						this.error({
+							location: memberNode.startPosition,
+							message: `Unsupported member '${member}' for list type.`,
+						});
 						return Unknown;
 					}
 				}
-				return Unknown;
+				case SyntaxType.Identifier: {
+					const list_member = LIST_MEMBERS.get(memberNode.text);
+					if (list_member == null) {
+						this.error({
+							location: memberNode.startPosition,
+							message: `Property '${memberNode.text}' does not exist on List.`,
+						});
+					}
+					// handle signatures
+					return Unknown;
+				}
 			}
 		}
+		if (target.static_type instanceof MapType) {
+			// todo: handle map members
+		}
+		if (target.static_type === Str) {
+			// todo: handle string members
+		}
+		if (target.static_type === Num) {
+			// todo: handle number members
+		}
+		if (target.static_type === Bool) {
+			// todo: handle bool members
+		}
+		return Unknown;
 	}
 
 	visitUnaryExpression(node: UnaryExpressionNode): StaticType {

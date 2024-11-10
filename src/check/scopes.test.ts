@@ -6,9 +6,15 @@ const parser = makeParser();
 
 Deno.test("variables can be referenced from nested scope", () => {
 	const for_loop = parser.parse(`
-mut name = "Alice"
-for i in 1...3 {
-  print(name)
+struct Todo {
+  title: Str,
+  completed: Bool
+}
+let list: [Todo] = []
+for todo in list {
+  if !todo.completed {
+    print(todo.title)
+  }
 }
 `);
 	expect(new Checker(for_loop).check()).toEqual([]);

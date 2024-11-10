@@ -14,7 +14,6 @@ print("there are ${list.length} items in the list")
 
 print("incomplete items:")
 for todo in list {
-  // todo: support nested scopes
   if !todo.completed {
     print(todo.title)
   }
