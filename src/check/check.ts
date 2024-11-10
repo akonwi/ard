@@ -30,11 +30,14 @@ import {
 	EmptyList,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
+	LIST_MEMBERS,
 	ListType,
+	MAP_MEMBERS,
 	MapType,
 	Num,
 	type StaticType,
 	Str,
+	STR_MEMBERS,
 	StructType,
 	Unknown,
 } from "./kon-types.ts";
@@ -706,16 +709,109 @@ export class Checker {
 			}
 		}
 		if (target.static_type instanceof MapType) {
-			// todo: handle map members
+			switch (memberNode.type) {
+				case SyntaxType.FunctionCall: {
+					const member = memberNode.targetNode.text;
+					if (!member) {
+						return Unknown;
+					}
+					if (MAP_MEMBERS.has(member)) {
+						const signature = MAP_MEMBERS.get(member)!;
+						if (!signature.callable) {
+							this.error({
+								location: memberNode.startPosition,
+								message: `${target.name}.${member} is not a callable function.`,
+							});
+							return Unknown;
+						}
+						if (signature.mutates && !target.is_mutable) {
+							this.error({
+								location: memberNode.startPosition,
+								message: `Cannot mutate an immutable Map. Use 'mut' to make it mutable.`,
+							});
+						}
+						// todo: signatures for list functions
+						return Unknown;
+					} else {
+						this.error({
+							location: memberNode.startPosition,
+							message: `Unsupported member '${member}' for Map.`,
+						});
+						return Unknown;
+					}
+				}
+				case SyntaxType.Identifier: {
+					const map_member = MAP_MEMBERS.get(memberNode.text);
+					if (map_member == null) {
+						this.error({
+							location: memberNode.startPosition,
+							message: `Property '${memberNode.text}' does not exist on Map.`,
+						});
+					}
+					// handle signatures
+					return Unknown;
+				}
+			}
 		}
 		if (target.static_type === Str) {
-			// todo: handle string members
+			switch (memberNode.type) {
+				case SyntaxType.FunctionCall: {
+					const member = memberNode.targetNode.text;
+					if (!member) {
+						return Unknown;
+					}
+					const signature = STR_MEMBERS.get(member);
+					if (signature != null) {
+						if (!signature.callable) {
+							this.error({
+								location: memberNode.startPosition,
+								message: `${member} is not a function`,
+							});
+							return Unknown;
+						}
+						if (signature.mutates && !target.is_mutable) {
+							this.error({
+								location: memberNode.startPosition,
+								message: `Cannot mutate an immutable Str. Use 'mut' to make it mutable.`,
+							});
+							return Unknown;
+						}
+					}
+					this.error({
+						location: memberNode.startPosition,
+						message: `Unsupported member '${member}' for Str type.`,
+					});
+					return Unknown;
+				}
+				case SyntaxType.Identifier: {
+					const str_member = STR_MEMBERS.get(memberNode.text);
+					if (str_member == null) {
+						this.error({
+							location: memberNode.startPosition,
+							message: `Property '${memberNode.text}' does not exist on Str.`,
+						});
+					}
+					// handle signatures
+					return Unknown;
+				}
+			}
 		}
 		if (target.static_type === Num) {
-			// todo: handle number members
+			this.error({
+				location: memberNode.startPosition,
+				message: "Num has no supported properties",
+			});
+			return Unknown;
 		}
 		if (target.static_type === Bool) {
-			// todo: handle bool members
+			this.error({
+				location: memberNode.startPosition,
+				message: "Bool has no supported properties",
+			});
+			return Unknown;
+		}
+		if (target.static_type instanceof StructType) {
+			// todo: check fields
 		}
 		return Unknown;
 	}
@@ -787,19 +883,3 @@ export class Checker {
 		}
 	}
 }
-
-const LIST_MEMBERS = new Map<string, { callable: boolean; mutates: boolean }>([
-	["at", { mutates: false, callable: true }],
-	["concat", { mutates: false, callable: true }],
-	["copyWithin", { mutates: true, callable: true }],
-	["length", { mutates: false, callable: false }],
-	["size", { mutates: false, callable: false }], // todo: alias for length
-	["map", { mutates: false, callable: true }],
-	["pop", { mutates: true, callable: true }],
-	["push", { mutates: true, callable: true }],
-	["reverse", { mutates: true, callable: true }],
-	["shift", { mutates: true, callable: true }],
-	["slice", { mutates: false, callable: true }],
-	["sort", { mutates: true, callable: true }],
-	["splice", { mutates: true, callable: true }],
-]);

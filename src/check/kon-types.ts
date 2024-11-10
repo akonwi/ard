@@ -5,6 +5,48 @@ import {
 	type StructDefinitionNode,
 } from "../ast.ts";
 
+export const LIST_MEMBERS = new Map<
+	string,
+	{ callable: boolean; mutates: boolean }
+>([
+	["at", { mutates: false, callable: true }],
+	["concat", { mutates: false, callable: true }],
+	["copyWithin", { mutates: true, callable: true }],
+	["length", { mutates: false, callable: false }],
+	["size", { mutates: false, callable: false }], // todo: alias for length
+	["map", { mutates: false, callable: true }],
+	["pop", { mutates: true, callable: true }],
+	["push", { mutates: true, callable: true }],
+	["reverse", { mutates: true, callable: true }],
+	["shift", { mutates: true, callable: true }],
+	["slice", { mutates: false, callable: true }],
+	["sort", { mutates: true, callable: true }],
+	["splice", { mutates: true, callable: true }],
+]);
+
+export const MAP_MEMBERS = new Map<
+	string,
+	{ callable: boolean; mutates: boolean }
+>([
+	["concat", { mutates: false, callable: true }],
+	["entries", { mutates: false, callable: true }],
+	["get", { mutates: false, callable: true }],
+	["keys", { mutates: false, callable: true }],
+	["length", { mutates: false, callable: false }],
+	["set", { mutates: true, callable: true }],
+	["size", { mutates: false, callable: false }], // todo: alias for length
+]);
+
+export const STR_MEMBERS = new Map<
+	string,
+	{ callable: boolean; mutates: boolean }
+>([
+	["at", { mutates: false, callable: true }],
+	["concat", { mutates: false, callable: true }],
+	["length", { mutates: false, callable: false }],
+	["size", { mutates: false, callable: false }], // todo: alias for length
+]);
+
 export interface StaticType {
 	// identifier
 	name: string;
