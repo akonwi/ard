@@ -20,7 +20,6 @@ import {
 	type StringContentNode,
 	type StringInterpolationNode,
 	type IdentifierNode,
-	type BlockNode,
 	type WhileLoopNode,
 } from "../ast.ts";
 import console from "node:console";
@@ -811,7 +810,20 @@ export class Checker {
 			return Unknown;
 		}
 		if (target.static_type instanceof StructType) {
-			// todo: check fields
+			switch (memberNode.type) {
+				case SyntaxType.Identifier: {
+					const member_name = memberNode.text;
+					const member_signature = target.static_type.fields.get(member_name);
+					if (member_signature == null) {
+						this.error({
+							location: memberNode.startPosition,
+							message: `Property '${member_name}' does not exist on type '${target.static_type.pretty}'`,
+						});
+						return Unknown;
+					}
+					return member_signature;
+				}
+			}
 		}
 		return Unknown;
 	}
