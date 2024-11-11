@@ -419,6 +419,7 @@ export interface ParametersNode extends NamedNodeBase {
 
 export interface ParenArgumentsNode extends NamedNodeBase {
   type: SyntaxType.ParenArguments;
+  argumentNodes: ExpressionNode[];
 }
 
 export interface PrimitiveTypeNode extends NamedNodeBase {

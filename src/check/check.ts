@@ -305,6 +305,19 @@ export class Checker {
 			};
 		});
 
+		const new_scope = new LexScope(this.scope());
+		for (const param of params) {
+			new_scope.addVariable(
+				new Variable({
+					name: param.name,
+					type: param.type,
+				}),
+			);
+		}
+		this.scopes.unshift(new_scope);
+		this.visit(bodyNode);
+		this.scopes.shift();
+
 		const def = new FunctionType({
 			name,
 			params,
@@ -550,56 +563,28 @@ export class Checker {
 		}
 	}
 
-	visitFunctionCall(node: FunctionCallNode) {
+	visitFunctionCall(node: FunctionCallNode, parent: Variable | null = null) {
 		const { targetNode, argumentsNode } = node;
-		const targetVariable = (() => {
-			switch (targetNode.type) {
-				case SyntaxType.Identifier: {
-					const variable = this.scope().getVariable(targetNode.text);
-					if (!variable) {
-						this.error({
-							location: targetNode.startPosition,
-							message: `Cannot find name '${targetNode.text}'.`,
-						});
-						return;
-					}
-					return variable;
-				}
-				default:
-					return null;
+		const name = targetNode.text;
+		if (parent == null) {
+			const signature = this.scope().getFunction(name);
+			if (signature == null) {
+				this.error({
+					location: node.startPosition,
+					message: `Cannot find name '${name}'`,
+				});
+				return Unknown;
 			}
-		})();
 
-		if (targetVariable?.static_type instanceof ListType) {
-			if (LIST_MEMBERS.has(argumentsNode.text)) {
-				const signature = LIST_MEMBERS.get(argumentsNode.text)!;
-				if (signature.mutates && !targetVariable.is_mutable) {
-					this.error({
-						location: argumentsNode.startPosition,
-						message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-					});
-				}
-			} else {
+			const args = argumentsNode.argumentNodes.map((n) =>
+				this.getTypeFromExpressionNode(n),
+			);
+			if (args.length !== signature.parameters.length) {
 				this.error({
 					location: argumentsNode.startPosition,
-					message: `Unknown member '${argumentsNode.text}' for list type.`,
+					message: `Expected ${signature.parameters.length} arguments and got ${args.length}`,
 				});
-			}
-			return;
-		}
-
-		switch (targetVariable?.static_type) {
-			case undefined:
-			case null: {
-				this.warn({
-					location: targetNode.startPosition,
-					message: `The type of '${targetNode.text}' is unknown.`,
-				});
-				break;
-			}
-			default: {
-				this.debug(`Unknown type: ${targetVariable?.static_type}`);
-				break;
+				return signature.return_type;
 			}
 		}
 	}
