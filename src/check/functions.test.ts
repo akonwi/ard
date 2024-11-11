@@ -41,6 +41,7 @@ Deno.test("Function calls should match the signature", () => {
 	const tree = parser.parse(`
 fn add(x: Num, y: Num) Num {}
 add(20)
+add(true, 5)
 `);
 	const checker = new Checker(tree);
 	const diagnostics = checker.check();
@@ -49,6 +50,12 @@ add(20)
 			location: { row: 2, column: 3 },
 			level: "error",
 			message: "Expected 2 arguments and got 1",
+		},
+		{
+			location: { row: 3, column: 4 },
+			level: "error",
+			message:
+				"Argument of type 'Bool' is not assignable to parameter of type 'Num'",
 		},
 	] as Diagnostic[]);
 });

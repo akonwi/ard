@@ -586,6 +586,16 @@ export class Checker {
 				});
 				return signature.return_type;
 			}
+
+			signature.parameters.forEach((param, index) => {
+				const arg = args[index];
+				if (arg && !areCompatible(param.type, arg)) {
+					this.error({
+						location: argumentsNode.argumentNodes[index]!.startPosition,
+						message: `Argument of type '${arg.pretty}' is not assignable to parameter of type '${param.type.pretty}'`,
+					});
+				}
+			});
 		}
 	}
 
