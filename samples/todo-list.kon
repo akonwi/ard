@@ -4,7 +4,7 @@ struct Todo {
 }
 
 mut list: [Todo] = [
-  Todo { title: "Buy milk", completed: false }
+  Todo { title: "Buy milk", completed: true }
 ]
 
 list.push(Todo { title: "Buy eggs", completed: false })

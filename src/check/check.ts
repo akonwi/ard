@@ -435,7 +435,6 @@ export class Checker {
 				location: rangeNode.startPosition,
 			});
 		}
-		// @ts-ignore
 		this.debug(`range is ${range.pretty}`, {
 			instanceOfListType: range instanceof ListType,
 		});
