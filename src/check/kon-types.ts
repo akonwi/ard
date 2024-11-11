@@ -158,6 +158,32 @@ export class StructType implements StaticType {
 	readonly is_iterable = false;
 }
 
+// could theoretically work for struct fields
+export type ParameterType = { name: string; type: StaticType };
+export class FunctionType implements StaticType {
+	readonly name: string;
+	readonly parameters: Array<ParameterType>;
+	readonly return_type: StaticType;
+
+	constructor(input: {
+		name: string;
+		params: ParameterType[];
+		return_type: StaticType;
+	}) {
+		this.name = input.name;
+		this.parameters = input.params;
+		this.return_type = input.return_type;
+	}
+
+	get pretty() {
+		return `() ${this.return_type.pretty}`;
+	}
+
+	get is_iterable() {
+		return false;
+	}
+}
+
 export const Num = new NumType();
 export const Bool = new BoolType();
 export const Str = new StrType();
@@ -166,6 +192,7 @@ export const Unknown: StaticType = {
 	pretty: "unknown",
 	is_iterable: false,
 };
+
 export function getStaticTypeForPrimitiveType(
 	node: PrimitiveTypeNode,
 ): StaticType {
@@ -180,6 +207,7 @@ export function getStaticTypeForPrimitiveType(
 			return Unknown;
 	}
 }
+
 export function getStaticTypeForPrimitiveValue(
 	node: Pick<PrimitiveValueNode, "primitiveNode">,
 ): StaticType {

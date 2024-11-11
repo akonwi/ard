@@ -1,0 +1,10 @@
+fn add(x: Num, y: Num) Num {
+    x + y
+}
+
+fn multiply(x: Num, y: Num) Num {
+    x * y
+}
+
+let result = add(multiply(3, 4), 5)
+print("Expected: 17, Got: ${result}")

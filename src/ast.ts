@@ -142,7 +142,6 @@ export const enum SyntaxType {
   PrintStatement = "print_statement",
   Program = "program",
   Reassignment = "reassignment",
-  ReturnType = "return_type",
   Statement = "statement",
   String = "string",
   StringInterpolation = "string_interpolation",
@@ -239,7 +238,6 @@ export type SyntaxNode =
   | PrintStatementNode
   | ProgramNode
   | ReassignmentNode
-  | ReturnTypeNode
   | StatementNode
   | StringNode
   | StringInterpolationNode
@@ -366,7 +364,7 @@ export interface FunctionDefinitionNode extends NamedNodeBase {
   bodyNode: BlockNode;
   nameNode: IdentifierNode;
   parametersNode: ParametersNode;
-  return_typeNode?: ReturnTypeNode;
+  returnNode: TypeDeclarationNode;
 }
 
 export interface IfStatementNode extends NamedNodeBase {
@@ -411,11 +409,12 @@ export interface MemberAccessNode extends NamedNodeBase {
 export interface ParamDefNode extends NamedNodeBase {
   type: SyntaxType.ParamDef;
   nameNode: IdentifierNode;
-  typeNode: PrimitiveTypeNode;
+  typeNode: TypeDeclarationNode;
 }
 
 export interface ParametersNode extends NamedNodeBase {
   type: SyntaxType.Parameters;
+  parameterNodes: ParamDefNode[];
 }
 
 export interface ParenArgumentsNode extends NamedNodeBase {
@@ -444,10 +443,6 @@ export interface ReassignmentNode extends NamedNodeBase {
   type: SyntaxType.Reassignment;
   nameNode: IdentifierNode;
   valueNode: ExpressionNode;
-}
-
-export interface ReturnTypeNode extends NamedNodeBase {
-  type: SyntaxType.ReturnType;
 }
 
 export interface StatementNode extends NamedNodeBase {

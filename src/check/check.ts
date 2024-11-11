@@ -8,7 +8,6 @@ import {
 	type StructDefinitionNode,
 	type StructInstanceNode,
 	type SyntaxNode,
-	type TypeDeclarationNode,
 	type TypedTreeCursor,
 	type VariableDefinitionNode,
 	type ReassignmentNode,
@@ -21,12 +20,15 @@ import {
 	type StringInterpolationNode,
 	type IdentifierNode,
 	type WhileLoopNode,
+	type FunctionDefinitionNode,
+	type TypeDeclarationNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
 	areCompatible,
 	Bool,
 	EmptyList,
+	FunctionType,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
 	LIST_MEMBERS,
@@ -97,6 +99,7 @@ class Variable implements StaticType {
 class LexScope {
 	private variables: Map<string, Variable> = new Map();
 	private structs: Map<string, StructType> = new Map();
+	private functions: Map<string, FunctionType> = new Map();
 
 	constructor(readonly parent: LexScope | null = null) {}
 
@@ -106,6 +109,10 @@ class LexScope {
 
 	addVariable(variable: Variable) {
 		this.variables.set(variable.name, variable);
+	}
+
+	addFunction(fn: FunctionType) {
+		this.functions.set(fn.name, fn);
 	}
 
 	getStruct(name: string): StructType | null {
@@ -120,6 +127,10 @@ class LexScope {
 		if (variable) return variable;
 		if (this.parent) return this.parent.getVariable(name);
 		return null;
+	}
+
+	getFunction(name: string): FunctionType | null {
+		return this.functions.get(name) ?? null;
 	}
 }
 
@@ -243,12 +254,10 @@ export class Checker {
 	}
 
 	visitVariableDefinition(node: VariableDefinitionNode) {
-		const name = node.nameNode;
-		this.validateIdentifier(node.nameNode);
+		const { bindingNode, nameNode, typeNode, valueNode } = node;
+		this.validateIdentifier(nameNode);
 
-		const typeNode = node.typeNode?.typeNode;
-		const value = node.valueNode;
-		if (value == null) {
+		if (valueNode == null) {
 			// can't really get here because tree-sitter captures a situation like this as an error
 			this.error({
 				message: "Variables must be initialized",
@@ -258,7 +267,7 @@ export class Checker {
 		}
 
 		let declared_type = typeNode ? this.getTypeFromTypeDefNode(typeNode) : null;
-		const provided_type = this.getTypeFromExpressionNode(value);
+		const provided_type = this.getTypeFromExpressionNode(valueNode);
 		if (declared_type === null) {
 			// lazy-ish inference
 			declared_type = provided_type;
@@ -269,20 +278,39 @@ export class Checker {
 		);
 		if (assigment_error != null) {
 			this.error({
-				location: value.startPosition,
+				location: valueNode.startPosition,
 
 				message: assigment_error,
 			});
 		}
 
 		const variable = new Variable({
-			name: name.text,
+			name: nameNode.text,
 			type: declared_type,
-			is_mutable: node.bindingNode.text === "mut",
+			is_mutable: bindingNode.text === "mut",
 		});
 
 		this.scope().addVariable(variable);
 		return;
+	}
+
+	visitFunctionDefinition(node: FunctionDefinitionNode) {
+		const { nameNode, parametersNode, bodyNode, returnNode } = node;
+		const name = nameNode.text;
+		const params = parametersNode.parameterNodes.map((n) => {
+			const { nameNode, typeNode } = n;
+			return {
+				name: nameNode.text,
+				type: this.getTypeFromTypeDefNode(typeNode),
+			};
+		});
+
+		const def = new FunctionType({
+			name,
+			params,
+			return_type: this.getTypeFromTypeDefNode(returnNode),
+		});
+		this.scope().addFunction(def);
 	}
 
 	visitReassignment(node: ReassignmentNode) {
@@ -319,9 +347,8 @@ export class Checker {
 	}
 
 	// return the kon type from the declaration
-	private getTypeFromTypeDefNode(
-		node: TypeDeclarationNode["typeNode"],
-	): StaticType {
+	private getTypeFromTypeDefNode(_node: TypeDeclarationNode): StaticType {
+		const node = _node.typeNode;
 		switch (node.type) {
 			case SyntaxType.PrimitiveType:
 				return getStaticTypeForPrimitiveType(node);
