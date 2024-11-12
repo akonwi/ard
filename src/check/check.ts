@@ -22,6 +22,7 @@ import {
 	type WhileLoopNode,
 	type FunctionDefinitionNode,
 	type TypeDeclarationNode,
+	type ParenArgumentsNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -36,6 +37,7 @@ import {
 	MAP_MEMBERS,
 	MapType,
 	Num,
+	type Signature,
 	type StaticType,
 	Str,
 	STR_MEMBERS,
@@ -605,46 +607,75 @@ export class Checker {
 
 		if (parent.static_type === Str) {
 			const signature = STR_MEMBERS.get(name);
-			if (signature == null) {
-				this.error({
-					location: node.startPosition,
-					message: `Property '${name}' does not exist on type '${parent.static_type.pretty}'`,
-				});
-				return Unknown;
-			}
-			if (!signature.callable) {
-				this.error({
-					location: node.startPosition,
-					message: `${parent.static_type.pretty}.${name} is not a callable function`,
-				});
-				return Unknown;
-			}
-			const args = argumentsNode.argumentNodes.map((n) =>
-				this.getTypeFromExpressionNode(n),
-			);
-			if (signature.parameters) {
-				if (args.length !== signature.parameters.length) {
-					this.error({
-						location: argumentsNode.startPosition,
-						message: `Expected ${signature.parameters.length} arguments and got ${args.length}`,
-					});
-					return signature.return_type ?? Unknown;
-				}
-
-				signature.parameters.forEach((param, index) => {
-					const arg = args[index];
-					if (arg && !areCompatible(param.type, arg)) {
-						this.error({
-							location: argumentsNode.argumentNodes[index]!.startPosition,
-							message: `Argument of type '${arg.pretty}' is not assignable to parameter of type '${param.type.pretty}'`,
-						});
-					}
-				});
-			}
-			return signature.return_type ?? Unknown;
+			return this.checkArgumentsForCall({
+				name,
+				parent,
+				signature,
+				node,
+			});
 		}
+		if (parent.static_type instanceof ListType) {
+			const signature = LIST_MEMBERS.get(name);
+			return this.checkArgumentsForCall({
+				name,
+				parent,
+				signature,
+				node,
+			});
+		}
+		// todo: map
+		this.error({
+			location: targetNode.startPosition,
+			message: `Type '${parent.static_type.pretty} has no method ${name}`,
+		});
 
 		return Unknown;
+	}
+
+	checkArgumentsForCall(input: {
+		node: FunctionCallNode;
+		parent: Variable;
+		name: string;
+		signature?: Signature;
+	}) {
+		const { name, signature, parent, node } = input;
+		if (signature == null) {
+			this.error({
+				location: node.startPosition,
+				message: `Property '${name}' does not exist on type '${parent.static_type.pretty}'`,
+			});
+			return Unknown;
+		}
+		if (!signature.callable) {
+			this.error({
+				location: node.startPosition,
+				message: `${parent.static_type.pretty}.${name} is not a callable function`,
+			});
+			return Unknown;
+		}
+		const args = node.argumentsNode.argumentNodes.map((n) =>
+			this.getTypeFromExpressionNode(n),
+		);
+		if (signature.parameters) {
+			if (args.length !== signature.parameters.length) {
+				this.error({
+					location: node.argumentsNode.startPosition,
+					message: `Expected ${signature.parameters.length} arguments and got ${args.length}`,
+				});
+				return signature.return_type ?? Unknown;
+			}
+
+			signature.parameters.forEach((param, index) => {
+				const arg = args[index];
+				if (arg && !areCompatible(param.type, arg)) {
+					this.error({
+						location: node.argumentsNode.argumentNodes[index]!.startPosition,
+						message: `Argument of type '${arg.pretty}' is not assignable to parameter of type '${param.type.pretty}'`,
+					});
+				}
+			});
+		}
+		return signature.return_type ?? Unknown;
 	}
 
 	visitIdentifier(node: IdentifierNode): Variable | null {

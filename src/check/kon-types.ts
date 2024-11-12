@@ -135,7 +135,7 @@ export function isIterable(type: StaticType): boolean {
 	return type.is_iterable === true;
 }
 
-type Signature = {
+export type Signature = {
 	mutates: boolean;
 	callable: boolean;
 	parameters?: ParameterType[];
