@@ -5,95 +5,12 @@ import {
 	type StructDefinitionNode,
 } from "../ast.ts";
 
-export const LIST_MEMBERS = new Map<
-	string,
-	{ callable: boolean; mutates: boolean }
->([
-	["at", { mutates: false, callable: true }],
-	["concat", { mutates: false, callable: true }],
-	["copyWithin", { mutates: true, callable: true }],
-	["length", { mutates: false, callable: false }],
-	["size", { mutates: false, callable: false }], // todo: alias for length
-	["map", { mutates: false, callable: true }],
-	["pop", { mutates: true, callable: true }],
-	["push", { mutates: true, callable: true }],
-	["reverse", { mutates: true, callable: true }],
-	["shift", { mutates: true, callable: true }],
-	["slice", { mutates: false, callable: true }],
-	["sort", { mutates: true, callable: true }],
-	["splice", { mutates: true, callable: true }],
-]);
-
-export const MAP_MEMBERS = new Map<
-	string,
-	{ callable: boolean; mutates: boolean }
->([
-	["concat", { mutates: false, callable: true }],
-	["entries", { mutates: false, callable: true }],
-	["get", { mutates: false, callable: true }],
-	["keys", { mutates: false, callable: true }],
-	["length", { mutates: false, callable: false }],
-	["set", { mutates: true, callable: true }],
-	["size", { mutates: false, callable: false }], // todo: alias for length
-]);
-
-export const STR_MEMBERS = new Map<
-	string,
-	{ callable: boolean; mutates: boolean }
->([
-	["at", { mutates: false, callable: true }],
-	["concat", { mutates: false, callable: true }],
-	["length", { mutates: false, callable: false }],
-	["size", { mutates: false, callable: false }], // todo: alias for length
-]);
-
 export interface StaticType {
 	// identifier
 	name: string;
 	// used for display
 	pretty: string;
 	is_iterable: boolean;
-}
-
-class NumType implements StaticType {
-	get name() {
-		return this.pretty;
-	}
-	get pretty() {
-		return "Num";
-	}
-
-	get is_iterable() {
-		return true;
-	}
-}
-
-class StrType implements StaticType {
-	get name() {
-		return this.pretty;
-	}
-	get pretty() {
-		return "Str";
-	}
-
-	get is_iterable() {
-		return true;
-	}
-}
-
-class BoolType implements StaticType {
-	constructor() {}
-
-	get name() {
-		return this.pretty;
-	}
-	get pretty() {
-		return "Bool";
-	}
-
-	get is_iterable() {
-		return false;
-	}
 }
 
 export class ListType implements StaticType {
@@ -157,36 +74,21 @@ export class StructType implements StaticType {
 
 	readonly is_iterable = false;
 }
-
-// could theoretically work for struct fields
-export type ParameterType = { name: string; type: StaticType };
-export class FunctionType implements StaticType {
-	readonly name: string;
-	readonly parameters: Array<ParameterType>;
-	readonly return_type: StaticType;
-
-	constructor(input: {
-		name: string;
-		params: ParameterType[];
-		return_type: StaticType;
-	}) {
-		this.name = input.name;
-		this.parameters = input.params;
-		this.return_type = input.return_type;
-	}
-
-	get pretty() {
-		return `() ${this.return_type.pretty}`;
-	}
-
-	get is_iterable() {
-		return false;
-	}
-}
-
-export const Num = new NumType();
-export const Bool = new BoolType();
-export const Str = new StrType();
+export const Num: StaticType = {
+	name: "number",
+	pretty: "Num",
+	is_iterable: true,
+} as const;
+export const Str: StaticType = {
+	name: "string",
+	pretty: "Str",
+	is_iterable: true,
+} as const;
+export const Bool: StaticType = {
+	name: "boolean",
+	pretty: "Bool",
+	is_iterable: false,
+} as const;
 export const Unknown: StaticType = {
 	name: "unknown",
 	pretty: "unknown",
@@ -231,4 +133,121 @@ export function areCompatible(a: StaticType, b: StaticType): boolean {
 
 export function isIterable(type: StaticType): boolean {
 	return type.is_iterable === true;
+}
+
+type Signature = {
+	mutates: boolean;
+	callable: boolean;
+	parameters?: ParameterType[];
+	return_type?: StaticType;
+};
+
+export const LIST_MEMBERS = new Map<string, Signature>([
+	[
+		"at",
+		{
+			mutates: false,
+			callable: true,
+			parameters: [{ name: "index", type: Num }],
+			return_type: Unknown,
+		},
+	],
+	[
+		"concat",
+		{
+			mutates: false,
+			callable: true,
+			parameters: [{ name: "list", type: EmptyList }],
+		},
+	],
+	["length", { mutates: false, callable: false, return_type: Num }],
+	["size", { mutates: false, callable: false, return_type: Num }], // todo: alias for length
+	// ["map", { mutates: false, callable: true }],
+	[
+		"pop",
+		{ mutates: true, callable: true, parameters: [], return_type: EmptyList },
+	],
+	[
+		"push",
+		{
+			mutates: true,
+			callable: true,
+			parameters: [{ name: "item", type: Unknown }],
+		},
+	],
+	["reverse", { mutates: true, callable: true }],
+]);
+
+export const MAP_MEMBERS = new Map<string, Signature>([
+	// ["entries", { mutates: false, callable: true }],
+	// ["get", { mutates: false, callable: true }],
+	[
+		"keys",
+		{
+			mutates: false,
+			callable: true,
+			parameters: [],
+			return_type: new ListType(Str),
+		},
+	],
+	["length", { mutates: false, callable: false, return_type: Num }],
+	// ["set", { mutates: true, callable: true }],
+	["size", { mutates: false, callable: false, return_type: Num }], // todo: alias for length
+]);
+
+export const STR_MEMBERS = new Map<string, Signature>([
+	[
+		"at",
+		{
+			mutates: false,
+			callable: true,
+			parameters: [{ name: "index", type: Num }],
+			return_type: Str,
+		},
+	],
+	[
+		"concat",
+		{
+			mutates: false,
+			callable: true,
+			parameters: [{ name: "string", type: Str }],
+			return_type: Str,
+		},
+	],
+	[
+		"length",
+		{ mutates: false, callable: false, parameters: [], return_type: Num },
+	],
+	[
+		"size",
+		{ mutates: false, callable: false, parameters: [], return_type: Num },
+	], // todo: alias for length
+]);
+
+// could theoretically work for struct fields
+export type ParameterType = { name: string; type: StaticType };
+export class FunctionType implements StaticType {
+	readonly name: string;
+	readonly parameters: Array<ParameterType>;
+	readonly return_type: StaticType;
+
+	constructor(input: {
+		name: string;
+		params: ParameterType[];
+		return_type: StaticType;
+	}) {
+		this.name = input.name;
+		this.parameters = input.params;
+		this.return_type = input.return_type;
+	}
+
+	get pretty() {
+		return `(${this.parameters.map((p) => p.name).join(", ")}) ${
+			this.return_type.pretty
+		}`;
+	}
+
+	get is_iterable() {
+		return false;
+	}
 }

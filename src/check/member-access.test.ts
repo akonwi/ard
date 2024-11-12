@@ -7,7 +7,6 @@ const parser = makeParser();
 const list_code = `
 let list: [Num] = [1, 2, 3]
 list.lenth
-list.map
 `;
 Deno.test("standard List interface", () => {
 	const diagnostics = new Checker(parser.parse(list_code)).check();

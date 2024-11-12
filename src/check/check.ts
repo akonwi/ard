@@ -563,10 +563,13 @@ export class Checker {
 		}
 	}
 
-	visitFunctionCall(node: FunctionCallNode, parent: Variable | null = null) {
+	visitFunctionCall(
+		node: FunctionCallNode,
+		parent: Variable | null = null,
+	): StaticType {
 		const { targetNode, argumentsNode } = node;
 		const name = targetNode.text;
-		if (parent == null) {
+		if (parent === null) {
 			const signature = this.scope().getFunction(name);
 			if (signature == null) {
 				this.error({
@@ -596,7 +599,52 @@ export class Checker {
 					});
 				}
 			});
+
+			return signature.return_type;
 		}
+
+		if (parent.static_type === Str) {
+			const signature = STR_MEMBERS.get(name);
+			if (signature == null) {
+				this.error({
+					location: node.startPosition,
+					message: `Property '${name}' does not exist on type '${parent.static_type.pretty}'`,
+				});
+				return Unknown;
+			}
+			if (!signature.callable) {
+				this.error({
+					location: node.startPosition,
+					message: `${parent.static_type.pretty}.${name} is not a callable function`,
+				});
+				return Unknown;
+			}
+			const args = argumentsNode.argumentNodes.map((n) =>
+				this.getTypeFromExpressionNode(n),
+			);
+			if (signature.parameters) {
+				if (args.length !== signature.parameters.length) {
+					this.error({
+						location: argumentsNode.startPosition,
+						message: `Expected ${signature.parameters.length} arguments and got ${args.length}`,
+					});
+					return signature.return_type ?? Unknown;
+				}
+
+				signature.parameters.forEach((param, index) => {
+					const arg = args[index];
+					if (arg && !areCompatible(param.type, arg)) {
+						this.error({
+							location: argumentsNode.argumentNodes[index]!.startPosition,
+							message: `Argument of type '${arg.pretty}' is not assignable to parameter of type '${param.type.pretty}'`,
+						});
+					}
+				});
+			}
+			return signature.return_type ?? Unknown;
+		}
+
+		return Unknown;
 	}
 
 	visitIdentifier(node: IdentifierNode): Variable | null {
@@ -776,32 +824,33 @@ export class Checker {
 		if (target.static_type === Str) {
 			switch (memberNode.type) {
 				case SyntaxType.FunctionCall: {
-					const member = memberNode.targetNode.text;
-					if (!member) {
-						return Unknown;
-					}
-					const signature = STR_MEMBERS.get(member);
-					if (signature != null) {
-						if (!signature.callable) {
-							this.error({
-								location: memberNode.startPosition,
-								message: `${member} is not a function`,
-							});
-							return Unknown;
-						}
-						if (signature.mutates && !target.is_mutable) {
-							this.error({
-								location: memberNode.startPosition,
-								message: `Cannot mutate an immutable Str. Use 'mut' to make it mutable.`,
-							});
-							return Unknown;
-						}
-					}
-					this.error({
-						location: memberNode.startPosition,
-						message: `Unsupported member '${member}' for Str type.`,
-					});
-					return Unknown;
+					return this.visitFunctionCall(memberNode, target);
+					// const member = memberNode.targetNode.text;
+					// if (!member) {
+					// 	return Unknown;
+					// }
+					// const signature = STR_MEMBERS.get(member);
+					// if (signature != null) {
+					// 	if (!signature.callable) {
+					// 		this.error({
+					// 			location: memberNode.startPosition,
+					// 			message: `${member} is not a function`,
+					// 		});
+					// 		return Unknown;
+					// 	}
+					// 	if (signature.mutates && !target.is_mutable) {
+					// 		this.error({
+					// 			location: memberNode.startPosition,
+					// 			message: `Cannot mutate an immutable Str. Use 'mut' to make it mutable.`,
+					// 		});
+					// 		return Unknown;
+					// 	}
+					// }
+					// this.error({
+					// 	location: memberNode.startPosition,
+					// 	message: `Unsupported member '${member}' for Str type.`,
+					// });
+					// return Unknown;
 				}
 				case SyntaxType.Identifier: {
 					const str_member = STR_MEMBERS.get(memberNode.text);

@@ -59,3 +59,33 @@ add(true, 5)
 		},
 	] as Diagnostic[]);
 });
+
+Deno.test("calling member functions should match the signature", () => {
+	const tree = parser.parse(`
+let string = "foobar"
+string.at()
+string.at("0")
+string.at(3)
+string.foo()
+`);
+	const checker = new Checker(tree);
+	const diagnostics = checker.check();
+	expect(diagnostics).toEqual([
+		{
+			location: { row: 2, column: 9 },
+			level: "error",
+			message: "Expected 1 arguments and got 0",
+		},
+		{
+			location: { row: 3, column: 10 },
+			level: "error",
+			message:
+				"Argument of type 'Str' is not assignable to parameter of type 'Num'",
+		},
+		{
+			location: { row: 5, column: 7 },
+			level: "error",
+			message: "Property 'foo' does not exist on type 'Str'",
+		},
+	] as Diagnostic[]);
+});
