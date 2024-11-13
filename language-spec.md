@@ -8,62 +8,68 @@ It combines features from JavaScript, Swift, and Go while introducing its own un
 Kon uses a clean, expressive syntax designed for readability and ease of use.
 Note: trying to follow Go's philosophy for readablity left to right, rather than usual Spiraling in C based syntax.
 
+### Built-in types
+- Str
+- Num
+- Bool
+- [Num] - List
+- [Str:Num] - Map
+- Void - non-existence
+  - can only be used to indicate a function does not return a value
+
 ### Variables and Constants
 
 - Use `let` for constants and `mut` for variables
-- Type inference is supported, but types can be explicitly declared
+- `let` variables cannot be reassigned or mutated
+- Variable types can be inferred or explicitly declared
 
 ```kon
-let name: String = "Alice"
-mut age = 30  // Type inferred as Int
+let name: Str = "Alice"
+mut age = 30
 ```
 
 ### Functions
 
 - Use `fn` keyword to define functions
-- Return type is specified after `->`
+- Return type is specified after the parameter list
 
 ```kon
-fn greet(person: String) -> String {
-    return "Hello, " + person + "!"
+fn greet(name: Str) Str {
+  return "Hello, ${name}!"
 }
 ```
-
-### WIP: Callbacks
-- could be a way to handle return values as an attached statement
-  - side-effecty, no control over when it's executed
-
-```kon
-greet name: "John" => (msg) {
-  print "Received $msg"
-}
-```
-
 
 ### Control Flow
 
 Kon supports common control flow structures:
 
 ```kon
-if condition {
-    // code
-} else if anotherCondition {
-    // code
+if some_condition {
+    // ...
+} else if another_condition {
+    // ...
 } else {
-    // code
+    // ...
 }
 
 for item in array {
-    // code
+  // ...
 }
 
+// check condition, then do block
 while condition {
-    // code
+  // ...
+}
+
+// do block, then check condition
+do while condition {
+  // ...
 }
 ```
 
 ### Iteration
 
+Numeric inclusive range:
 ```kon
 for i in 1...10 {
 	print(i)
@@ -74,27 +80,25 @@ for i in 1...10 by 2 {
 	print(i)
 }
 ```
+### TODO: Callbacks
+- could be a way to handle async return values as an attached statement
+  - side-effecty, no control over when it's executed
 
+```kon
+greet("John") => (msg) {
+  print "Received $msg"
+}
+```
 ## 2. Types
 
-### Basic Types
+### Structs
 
-- `Int`: Represents integer numbers
-- `Double`: Represents floating-point numbers
-- `String`: Represents textual data
-- `Boolean`: Represents true or false values
-- `Array<T>`: Represents an array of type T
-- `Any`: Represents any type, including functions and objects
-- `Void`: Represents the absence of a return value
-
-### Custom Types
-
-Use `struct` keyword to define custom types:
+Structs can be used to define objects with properties:
 
 ```kon
 struct Person {
-    let name: String
-    var age: Int
+  name: Str
+  age: Num
 }
 ```
 
@@ -104,34 +108,36 @@ Enums are used to define a type that can only have a specific set of values:
 
 ```kon
 enum Status {
-    case active
-    case inactive
-    case pending
+  active,
+  inactive,
+  pending
 }
 ```
 
 Enums can also have associated values:
 
 ```kon
-enum Result<T, E> {
-    case success(T)
-    case failure(E)
+enum Result {
+  success(Num),
+  failure(Str)
 }
 ```
 
 ### Optional Types
 
-Optional types are represented using the `Option<T>` enum:
+Optional types are represented using the built-in `Option` enum:
 
 ```kon
 enum Option<T> {
-    case some(T)
-    case none
+  some(T),
+  none
 }
 
-var optionalName: Option<String> = .some("Alice")
-optionalName = .none  // Valid
+mut maybe_name: Option<String> = Option::some("Alice")
+maybe_name = Option::none()
 ```
+
+#### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ## 3. Error Handling
 
