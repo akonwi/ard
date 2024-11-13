@@ -33,7 +33,6 @@ import {
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
 	ListType,
-	MAP_MEMBERS,
 	MapType,
 	Num,
 	type Signature,
@@ -722,14 +721,14 @@ export class Checker {
 			}
 		}
 		if (target.static_type instanceof MapType) {
+			const signature = target.static_type.properties.get(memberNode.text);
 			switch (memberNode.type) {
 				case SyntaxType.FunctionCall: {
 					const member = memberNode.targetNode.text;
 					if (!member) {
 						return Unknown;
 					}
-					if (MAP_MEMBERS.has(member)) {
-						const signature = MAP_MEMBERS.get(member)!;
+					if (signature) {
 						if (!signature.callable) {
 							this.error({
 								location: memberNode.startPosition,
@@ -754,15 +753,15 @@ export class Checker {
 					}
 				}
 				case SyntaxType.Identifier: {
-					const map_member = MAP_MEMBERS.get(memberNode.text);
-					if (map_member == null) {
+					if (signature == null) {
 						this.error({
 							location: memberNode.startPosition,
 							message: `Property '${memberNode.text}' does not exist on Map.`,
 						});
+						return Unknown;
 					}
 					// handle signatures
-					return Unknown;
+					return signature.return_type;
 				}
 			}
 		}

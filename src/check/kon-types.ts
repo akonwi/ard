@@ -108,7 +108,10 @@ export const EmptyList: StaticType = {
 };
 
 export class MapType implements StaticType {
-	constructor(readonly value: StaticType) {}
+	readonly properties: Map<string, Signature>;
+	constructor(readonly value: StaticType) {
+		this.properties = this._build();
+	}
 
 	get name() {
 		return this.pretty;
@@ -118,6 +121,44 @@ export class MapType implements StaticType {
 	}
 
 	readonly is_iterable = true;
+
+	_build() {
+		return new Map<string, Signature>([
+			// ["entries", { mutates: false, callable: true }],
+			[
+				"get",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [{ name: "key", type: Str }],
+					return_type: this.value,
+				},
+			],
+			[
+				"keys",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [],
+					return_type: new ListType(Str),
+				},
+			],
+			["length", { mutates: false, callable: false, return_type: Num }],
+			[
+				"set",
+				{
+					mutates: true,
+					callable: true,
+					parameters: [
+						{ name: "key", type: Str },
+						{ name: "value", type: this.value },
+					],
+					return_type: Void,
+				},
+			],
+			["size", { mutates: false, callable: false, return_type: Num }], // todo: alias for length
+		]);
+	}
 }
 
 export class StructType implements StaticType {
@@ -219,23 +260,6 @@ export type Signature = {
 	parameters?: ParameterType[];
 	return_type: StaticType;
 };
-
-export const MAP_MEMBERS = new Map<string, Signature>([
-	// ["entries", { mutates: false, callable: true }],
-	// ["get", { mutates: false, callable: true }],
-	[
-		"keys",
-		{
-			mutates: false,
-			callable: true,
-			parameters: [],
-			return_type: new ListType(Str),
-		},
-	],
-	["length", { mutates: false, callable: false, return_type: Num }],
-	// ["set", { mutates: true, callable: true }],
-	["size", { mutates: false, callable: false, return_type: Num }], // todo: alias for length
-]);
 
 export const STR_MEMBERS = new Map<string, Signature>([
 	[
