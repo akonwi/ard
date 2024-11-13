@@ -198,11 +198,50 @@ export const Num: StaticType = {
 	pretty: "Num",
 	is_iterable: true,
 } as const;
-export const Str: StaticType = {
-	name: "string",
-	pretty: "Str",
-	is_iterable: true,
-} as const;
+
+class StrType implements StaticType {
+	readonly name = "string";
+	readonly pretty = "Str";
+	readonly is_iterable = true;
+	readonly properties: Map<string, Signature>;
+
+	constructor() {
+		this.properties = this._build();
+	}
+
+	_build() {
+		return new Map<string, Signature>([
+			[
+				"at",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [{ name: "index", type: Num }],
+					return_type: this,
+				},
+			],
+			[
+				"concat",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [{ name: "string", type: this }],
+					return_type: this,
+				},
+			],
+			[
+				"length",
+				{ mutates: false, callable: false, parameters: [], return_type: Num },
+			],
+			[
+				"size",
+				{ mutates: false, callable: false, parameters: [], return_type: Num },
+			], // todo: alias for length
+		]);
+	}
+}
+
+export const Str = new StrType();
 export const Bool: StaticType = {
 	name: "boolean",
 	pretty: "Bool",
