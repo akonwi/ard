@@ -7,7 +7,9 @@ import {
 	Num,
 	Str,
 	StructType,
+	Void,
 	areCompatible,
+	type Signature,
 } from "./kon-types.ts";
 
 Deno.test("Compatibility checks against Str", () => {
@@ -44,6 +46,64 @@ Deno.test("Compatibility checks against [Bool]", () => {
 	expect(areCompatible(bool_list, new ListType(new ListType(Bool)))).toBe(
 		false,
 	);
+});
+
+Deno.test("Checking if a List can hold a type", () => {
+	const bool_list = new ListType(Bool);
+	expect(bool_list.can_hold(Bool)).toBe(true);
+	expect(bool_list.can_hold(Num)).toBe(false);
+	expect(bool_list.can_hold(Str)).toBe(false);
+	expect(bool_list.can_hold(Void)).toBe(false);
+	expect(bool_list.can_hold(EmptyList)).toBe(false);
+	expect(bool_list.can_hold(new ListType(Bool))).toBe(false);
+});
+
+Deno.test("List built-in API", () => {
+	const str_list = new ListType(Str);
+	expect(str_list.properties.get("at")).toEqual({
+		mutates: false,
+		callable: true,
+		parameters: [{ name: "index", type: Num }],
+		return_type: Str,
+	} as Signature);
+
+	const concat = str_list.properties.get("concat");
+	expect(concat?.mutates).toBe(false);
+	expect(concat?.parameters).toEqual([{ name: "list", type: str_list }]);
+	expect(concat?.return_type).toBe(str_list);
+
+	expect(str_list.properties.get("length")).toEqual({
+		mutates: false,
+		callable: false,
+		parameters: [],
+		return_type: Num,
+	} as Signature);
+	expect(str_list.properties.get("pop")).toEqual({
+		mutates: true,
+		callable: true,
+		parameters: [],
+		return_type: Str,
+	} as Signature);
+	expect(str_list.properties.get("push")).toEqual({
+		mutates: true,
+		callable: true,
+		parameters: [{ name: "item", type: Str }],
+		return_type: Num,
+	} as Signature);
+	expect(str_list.properties.get("shift")).toEqual({
+		mutates: true,
+		callable: true,
+		parameters: [],
+		return_type: Str,
+	} as Signature);
+	expect(str_list.properties.get("unshift")).toEqual({
+		mutates: true,
+		callable: true,
+		parameters: [{ name: "item", type: Str }],
+		return_type: Num,
+	} as Signature);
+
+	expect(new ListType(Bool).properties.get("at")?.return_type).toBe(Bool);
 });
 
 Deno.test("Compatibility checks against [Str:Num]", () => {

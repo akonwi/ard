@@ -111,7 +111,7 @@ list.push(6)
 	expect(errors).toEqual([
 		{
 			level: "error",
-			message: "Cannot mutate an immutable list. Use 'mut' to make it mutable.",
+			message: "Cannot mutate an immutable List",
 			location: { row: 2, column: 5 },
 		} satisfies Diagnostic,
 	]);

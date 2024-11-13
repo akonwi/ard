@@ -178,6 +178,7 @@ export const enum SyntaxType {
   Plus = "plus",
   Str = "str",
   StringContent = "string_content",
+  Void = "void",
 }
 
 export type UnnamedType =
@@ -297,6 +298,7 @@ export type SyntaxNode =
   | StringContentNode
   | null
   | null
+  | VoidNode
   | null
   | null
   | null
@@ -486,7 +488,7 @@ export interface StructPropertyNode extends NamedNodeBase {
 
 export interface TypeDeclarationNode extends NamedNodeBase {
   type: SyntaxType.TypeDeclaration;
-  typeNode: ListTypeNode | MapTypeNode | PrimitiveTypeNode;
+  typeNode: ListTypeNode | MapTypeNode | PrimitiveTypeNode | VoidNode;
 }
 
 export interface UnaryExpressionNode extends NamedNodeBase {
@@ -608,5 +610,9 @@ export interface StrNode extends NamedNodeBase {
 
 export interface StringContentNode extends NamedNodeBase {
   type: SyntaxType.StringContent;
+}
+
+export interface VoidNode extends NamedNodeBase {
+  type: SyntaxType.Void;
 }
 

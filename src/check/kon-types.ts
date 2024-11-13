@@ -14,7 +14,11 @@ export interface StaticType {
 }
 
 export class ListType implements StaticType {
-	constructor(readonly inner: StaticType) {}
+	readonly properties: Map<string, Signature>;
+
+	constructor(readonly inner: StaticType) {
+		this.properties = this._build();
+	}
 
 	get name() {
 		return this.pretty;
@@ -25,6 +29,75 @@ export class ListType implements StaticType {
 
 	get is_iterable() {
 		return true;
+	}
+
+	can_hold(other: StaticType): boolean {
+		return areCompatible(this.inner, other);
+	}
+
+	_build() {
+		return new Map<string, Signature>([
+			[
+				"at",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [{ name: "index", type: Num }],
+					return_type: this.inner,
+				},
+			],
+			[
+				"concat",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [{ name: "list", type: this }],
+					return_type: this,
+				},
+			],
+			[
+				"length",
+				{ mutates: false, callable: false, parameters: [], return_type: Num },
+			],
+			// ["map", { mutates: false, callable: true }],
+			[
+				"pop",
+				{
+					mutates: true,
+					callable: true,
+					parameters: [],
+					return_type: this.inner,
+				},
+			],
+			[
+				"push",
+				{
+					mutates: true,
+					callable: true,
+					parameters: [{ name: "item", type: this.inner }],
+					return_type: Num,
+				},
+			],
+			["size", { mutates: false, callable: false, return_type: Num }], // todo: alias for length
+			[
+				"shift",
+				{
+					mutates: true,
+					callable: true,
+					parameters: [],
+					return_type: this.inner,
+				},
+			],
+			[
+				"unshift",
+				{
+					mutates: true,
+					callable: true,
+					parameters: [{ name: "item", type: Str }],
+					return_type: Num,
+				},
+			],
+		]);
 	}
 }
 
@@ -74,6 +147,11 @@ export class StructType implements StaticType {
 
 	readonly is_iterable = false;
 }
+export const Void: StaticType = {
+	name: "void",
+	pretty: "Void",
+	is_iterable: false,
+};
 export const Num: StaticType = {
 	name: "number",
 	pretty: "Num",
@@ -139,44 +217,8 @@ export type Signature = {
 	mutates: boolean;
 	callable: boolean;
 	parameters?: ParameterType[];
-	return_type?: StaticType;
+	return_type: StaticType;
 };
-
-export const LIST_MEMBERS = new Map<string, Signature>([
-	[
-		"at",
-		{
-			mutates: false,
-			callable: true,
-			parameters: [{ name: "index", type: Num }],
-			return_type: Unknown,
-		},
-	],
-	[
-		"concat",
-		{
-			mutates: false,
-			callable: true,
-			parameters: [{ name: "list", type: EmptyList }],
-		},
-	],
-	["length", { mutates: false, callable: false, return_type: Num }],
-	["size", { mutates: false, callable: false, return_type: Num }], // todo: alias for length
-	// ["map", { mutates: false, callable: true }],
-	[
-		"pop",
-		{ mutates: true, callable: true, parameters: [], return_type: EmptyList },
-	],
-	[
-		"push",
-		{
-			mutates: true,
-			callable: true,
-			parameters: [{ name: "item", type: Unknown }],
-		},
-	],
-	["reverse", { mutates: true, callable: true }],
-]);
 
 export const MAP_MEMBERS = new Map<string, Signature>([
 	// ["entries", { mutates: false, callable: true }],

@@ -32,7 +32,6 @@ import {
 	FunctionType,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
-	LIST_MEMBERS,
 	ListType,
 	MAP_MEMBERS,
 	MapType,
@@ -72,6 +71,10 @@ const RESERVED_KEYWORDS = new Set([
 	"print",
 	"while",
 	"do",
+	"Void",
+	"Str",
+	"Num",
+	"Bool",
 ]);
 
 class Variable implements StaticType {
@@ -416,10 +419,6 @@ export class Checker {
 						return new ListType(Str);
 					case SyntaxType.Number:
 						return new ListType(Num);
-					// case SyntaxType.ListValue:
-					// 	return new ListType(this.getTypeFromExpressionNode(first));
-					// case SyntaxType.MapValue:
-					// 	return new ListType(this.getTypeFromExpressionNode(first));
 					case SyntaxType.StructInstance: {
 						const struct = this.visitStructInstance(first) ?? Unknown;
 						if (struct === Unknown) {
@@ -477,17 +476,10 @@ export class Checker {
 				location: rangeNode.startPosition,
 			});
 		}
-		this.debug(`range is ${range.pretty}`, {
-			instanceOfListType: range instanceof ListType,
-		});
 		// infer the type of the cursor from the range
 		const cursor = new Variable({
 			name: cursorNode.text,
 			type: range instanceof ListType ? range.inner : range,
-		});
-		this.debug(`cursor is ${cursor.pretty}`, {
-			name: cursor.name,
-			rangeInner: range instanceof ListType ? range.inner.pretty : null,
 		});
 		const new_scope = new LexScope(this.scope());
 		new_scope.addVariable(cursor);
@@ -503,8 +495,6 @@ export class Checker {
 		this.visit(bodyNode);
 		this.scopes.shift();
 	}
-
-	// visitBlock(node: BlockNode) {}
 
 	private getTypeFromExpressionNode(node: ExpressionNode): StaticType {
 		switch (node.exprNode.type) {
@@ -615,7 +605,7 @@ export class Checker {
 			});
 		}
 		if (parent.static_type instanceof ListType) {
-			const signature = LIST_MEMBERS.get(name);
+			const signature = parent.static_type.properties.get(name);
 			return this.checkArgumentsForCall({
 				name,
 				parent,
@@ -653,6 +643,14 @@ export class Checker {
 			});
 			return Unknown;
 		}
+		if (signature.mutates && !parent.is_mutable) {
+			this.error({
+				location: node.startPosition,
+				message: "Cannot mutate an immutable List",
+			});
+			return signature.return_type;
+		}
+
 		const args = node.argumentsNode.argumentNodes.map((n) =>
 			this.getTypeFromExpressionNode(n),
 		);
@@ -691,63 +689,6 @@ export class Checker {
 		}
 
 		return variable;
-		// if (variable.static_type instanceof ListType) {
-		// 	switch (memberNode.type) {
-		// 		case SyntaxType.FunctionCall: {
-		// 			const member = memberNode.targetNode.text;
-		// 			if (!member) {
-		// 				return Unknown;
-		// 			}
-		// 			if (LIST_MEMBERS.has(member)) {
-		// 				const signature = LIST_MEMBERS.get(member)!;
-		// 				if (signature.mutates && !variable.is_mutable) {
-		// 					this.error({
-		// 						location: memberNode.startPosition,
-		// 						message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-		// 					});
-		// 				}
-		// 				if (!signature.callable) {
-		// 					this.error({
-		// 						location: memberNode.startPosition,
-		// 						message: `${variable.name}.${member} is not a callable function.`,
-		// 					});
-		// 				}
-		// 				// todo: signatures for list functions
-		// 				return Unknown;
-		// 			} else {
-		// 				this.error({
-		// 					location: memberNode.startPosition,
-		// 					message: `Unsupported member '${member}' for list type.`,
-		// 				});
-		// 				return Unknown;
-		// 			}
-		// 		}
-		// 		case SyntaxType.Identifier: {
-		// 			const list_member = LIST_MEMBERS.get(memberNode.text);
-		// 			if (list_member == null) {
-		// 				this.error({
-		// 					location: memberNode.startPosition,
-		// 					message: `Property '${memberNode.text}' does not exist on List.`,
-		// 				});
-		// 			}
-		// 			return Unknown;
-		// 		}
-		// 	}
-		// 	return Unknown;
-		// 	// 	break;
-		// 	// }
-		// 	// case null: {
-		// 	// 	this.error({
-		// 	// 		location: targetNode.startPosition,
-		// 	// 		message: `The type of '${targetNode.text}' is unknown.`,
-		// 	// 	});
-		// 	// 	break;
-		// 	// }
-		// 	// default: {
-		// 	// 	this.debug(`Unknown type: ${variable.static_type}`);
-		// 	// 	break;
-		// 	// }
-		// }
 	}
 
 	visitMemberAccess(node: MemberAccessNode): StaticType {
@@ -763,40 +704,13 @@ export class Checker {
 		this.debug(`target is ${target.name} of type ${target?.pretty}`);
 
 		if (target.static_type instanceof ListType) {
+			const signature = target.static_type.properties.get(memberNode.text);
 			switch (memberNode.type) {
 				case SyntaxType.FunctionCall: {
-					const member = memberNode.targetNode.text;
-					if (!member) {
-						return Unknown;
-					}
-					if (LIST_MEMBERS.has(member)) {
-						const signature = LIST_MEMBERS.get(member)!;
-						if (!signature.callable) {
-							this.error({
-								location: memberNode.startPosition,
-								message: `${target.name}.${member} is not a callable function.`,
-							});
-							return Unknown;
-						}
-						if (signature.mutates && !target.is_mutable) {
-							this.error({
-								location: memberNode.startPosition,
-								message: `Cannot mutate an immutable list. Use 'mut' to make it mutable.`,
-							});
-						}
-						// todo: signatures for list functions
-						return Unknown;
-					} else {
-						this.error({
-							location: memberNode.startPosition,
-							message: `Unsupported member '${member}' for list type.`,
-						});
-						return Unknown;
-					}
+					return this.visitFunctionCall(memberNode, target);
 				}
 				case SyntaxType.Identifier: {
-					const list_member = LIST_MEMBERS.get(memberNode.text);
-					if (list_member == null) {
+					if (!signature) {
 						this.error({
 							location: memberNode.startPosition,
 							message: `Property '${memberNode.text}' does not exist on List.`,
@@ -856,32 +770,6 @@ export class Checker {
 			switch (memberNode.type) {
 				case SyntaxType.FunctionCall: {
 					return this.visitFunctionCall(memberNode, target);
-					// const member = memberNode.targetNode.text;
-					// if (!member) {
-					// 	return Unknown;
-					// }
-					// const signature = STR_MEMBERS.get(member);
-					// if (signature != null) {
-					// 	if (!signature.callable) {
-					// 		this.error({
-					// 			location: memberNode.startPosition,
-					// 			message: `${member} is not a function`,
-					// 		});
-					// 		return Unknown;
-					// 	}
-					// 	if (signature.mutates && !target.is_mutable) {
-					// 		this.error({
-					// 			location: memberNode.startPosition,
-					// 			message: `Cannot mutate an immutable Str. Use 'mut' to make it mutable.`,
-					// 		});
-					// 		return Unknown;
-					// 	}
-					// }
-					// this.error({
-					// 	location: memberNode.startPosition,
-					// 	message: `Unsupported member '${member}' for Str type.`,
-					// });
-					// return Unknown;
 				}
 				case SyntaxType.Identifier: {
 					const str_member = STR_MEMBERS.get(memberNode.text);
