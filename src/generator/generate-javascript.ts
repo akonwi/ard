@@ -182,8 +182,9 @@ function generateNode(node: SyntaxNode): string {
 		case SyntaxType.StringInterpolation: {
 			return "${" + generateNode(node.expressionNode) + "}";
 		}
+		case SyntaxType.EnumDefinition:
 		case SyntaxType.StructDefinition: {
-			// could add struct literal as a comment block
+			// could print in a comment block
 			return "";
 		}
 		default: {

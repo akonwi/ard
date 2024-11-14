@@ -23,12 +23,14 @@ import {
 	type FunctionDefinitionNode,
 	type TypeDeclarationNode,
 	type CompoundAssignmentNode,
+	EnumDefinitionNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
 	areCompatible,
 	Bool,
 	EmptyList,
+	EnumType,
 	FunctionType,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
@@ -103,9 +105,14 @@ class Variable implements StaticType {
 class LexScope {
 	private variables: Map<string, Variable> = new Map();
 	private structs: Map<string, StructType> = new Map();
+	private enums: Map<string, EnumType> = new Map();
 	private functions: Map<string, FunctionType> = new Map();
 
 	constructor(readonly parent: LexScope | null = null) {}
+
+	addEnum(e: EnumType) {
+		this.enums.set(e.name, e);
+	}
 
 	addStruct(struct: StructType) {
 		this.structs.set(struct.name, struct);
@@ -117,6 +124,13 @@ class LexScope {
 
 	addFunction(fn: FunctionType) {
 		this.functions.set(fn.name, fn);
+	}
+
+	getEnum(name: string): EnumType | null {
+		const e = this.enums.get(name);
+		if (e) return e;
+		if (this.parent) return this.parent.getEnum(name);
+		return null;
 	}
 
 	getStruct(name: string): StructType | null {
@@ -194,6 +208,14 @@ export class Checker {
 			this.scopes.push(new LexScope());
 		}
 		return this.scopes.at(0)!;
+	}
+
+	visitEnumDefinition(node: EnumDefinitionNode) {
+		const { nameNode, variantNodes } = node;
+
+		const variants = variantNodes.map((n) => n.variantNode.text);
+		const e_num = new EnumType(nameNode.text, variants);
+		this.scope().addEnum(e_num);
 	}
 
 	visitStructDefinition(node: StructDefinitionNode) {

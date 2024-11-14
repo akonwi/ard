@@ -144,6 +144,7 @@ export const enum SyntaxType {
   Program = "program",
   Reassignment = "reassignment",
   Statement = "statement",
+  StaticMemberAccess = "static_member_access",
   String = "string",
   StringInterpolation = "string_interpolation",
   StructDefinition = "struct_definition",
@@ -161,6 +162,7 @@ export const enum SyntaxType {
   Comment = "comment",
   Decrement = "decrement",
   Divide = "divide",
+  DoubleColon = "double_colon",
   Equal = "equal",
   GreaterThan = "greater_than",
   GreaterThanOrEqual = "greater_than_or_equal",
@@ -242,6 +244,7 @@ export type SyntaxNode =
   | ProgramNode
   | ReassignmentNode
   | StatementNode
+  | StaticMemberAccessNode
   | StringNode
   | StringInterpolationNode
   | StructDefinitionNode
@@ -270,6 +273,7 @@ export type SyntaxNode =
   | DecrementNode
   | DivideNode
   | null
+  | DoubleColonNode
   | null
   | null
   | EqualNode
@@ -338,6 +342,7 @@ export interface ElseStatementNode extends NamedNodeBase {
 export interface EnumDefinitionNode extends NamedNodeBase {
   type: SyntaxType.EnumDefinition;
   nameNode: IdentifierNode;
+  variantNodes: EnumVariantNode[];
 }
 
 export interface EnumVariantNode extends NamedNodeBase {
@@ -347,7 +352,7 @@ export interface EnumVariantNode extends NamedNodeBase {
 
 export interface ExpressionNode extends NamedNodeBase {
   type: SyntaxType.Expression;
-  exprNode: BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode;
+  exprNode: BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StaticMemberAccessNode | StructInstanceNode | UnaryExpressionNode;
 }
 
 export interface ForLoopNode extends NamedNodeBase {
@@ -459,6 +464,12 @@ export interface StatementNode extends NamedNodeBase {
   type: SyntaxType.Statement;
 }
 
+export interface StaticMemberAccessNode extends NamedNodeBase {
+  type: SyntaxType.StaticMemberAccess;
+  memberNode: FunctionCallNode | IdentifierNode | StaticMemberAccessNode;
+  targetNode: IdentifierNode;
+}
+
 export interface StringNode extends NamedNodeBase {
   type: SyntaxType.String;
   chunkNodes: (StringContentNode | StringInterpolationNode)[];
@@ -495,7 +506,7 @@ export interface StructPropertyNode extends NamedNodeBase {
 
 export interface TypeDeclarationNode extends NamedNodeBase {
   type: SyntaxType.TypeDeclaration;
-  typeNode: ListTypeNode | MapTypeNode | PrimitiveTypeNode | VoidNode;
+  typeNode: IdentifierNode | ListTypeNode | MapTypeNode | PrimitiveTypeNode | VoidNode;
 }
 
 export interface UnaryExpressionNode extends NamedNodeBase {
@@ -545,6 +556,10 @@ export interface DecrementNode extends NamedNodeBase {
 
 export interface DivideNode extends NamedNodeBase {
   type: SyntaxType.Divide;
+}
+
+export interface DoubleColonNode extends NamedNodeBase {
+  type: SyntaxType.DoubleColon;
 }
 
 export interface EqualNode extends NamedNodeBase {

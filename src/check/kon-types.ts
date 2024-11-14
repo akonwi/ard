@@ -13,6 +13,21 @@ export interface StaticType {
 	is_iterable: boolean;
 }
 
+export class EnumType implements StaticType {
+	readonly name: string;
+	readonly variants: string[];
+	readonly is_iterable = false;
+
+	constructor(name: string, variants: string[]) {
+		this.name = name;
+		this.variants = variants;
+	}
+
+	get pretty() {
+		return this.name;
+	}
+}
+
 export class ListType implements StaticType {
 	readonly properties: Map<string, Signature>;
 
