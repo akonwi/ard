@@ -9,7 +9,7 @@ let students: [Student] = [
     Student { name: "Charlie", grade: 88 }
 ]
 
-let sum = 0
+mut sum = 0
 for student in students {
     sum =+ student.grade
 }

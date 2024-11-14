@@ -3,6 +3,7 @@ import {
 	type BinaryExpressionNode,
 	type BlockNode,
 	type CompoundAssignmentNode,
+	type EnumDefinitionNode,
 	type ExpressionNode,
 	type SyntaxNode,
 	SyntaxType,
@@ -20,6 +21,7 @@ const SEMICOLON_EXCLUSIONS = new Set([
 	SyntaxType.FunctionDefinition,
 	SyntaxType.IfStatement,
 	SyntaxType.StructDefinition,
+	SyntaxType.EnumDefinition,
 ]);
 
 function generateNode(node: SyntaxNode): string {
@@ -141,6 +143,9 @@ function generateNode(node: SyntaxNode): string {
 				node.memberNode,
 			)}`;
 		}
+		case SyntaxType.StaticMemberAccess: {
+			return `${node.targetNode.text}.${node.memberNode.text}`;
+		}
 		case SyntaxType.Identifier: {
 			return node.text;
 		}
@@ -182,7 +187,9 @@ function generateNode(node: SyntaxNode): string {
 		case SyntaxType.StringInterpolation: {
 			return "${" + generateNode(node.expressionNode) + "}";
 		}
-		case SyntaxType.EnumDefinition:
+		case SyntaxType.EnumDefinition: {
+			return generateEnum(node);
+		}
 		case SyntaxType.StructDefinition: {
 			// could print in a comment block
 			return "";
@@ -191,7 +198,7 @@ function generateNode(node: SyntaxNode): string {
 			console.debug(node.type, {
 				text: node.text,
 			});
-			return `/* Unimplemented grammar - ${node.type} */`;
+			throw new Error(`Unimplemented grammar - ${node.type}`);
 		}
 	}
 }
@@ -263,3 +270,13 @@ function getForLoopRange(node: ExpressionNode): [string, string] | string {
 			return generateNode(exprNode);
 	}
 }
+
+const generateEnum = (node: EnumDefinitionNode) => {
+	const name = node.nameNode.text;
+	const variants = node.variantNodes
+		.map(
+			(v_node, index) => `  ${v_node.text}: Object.freeze({ index: ${index} })`,
+		)
+		.join(",\n");
+	return `const ${name} = Object.freeze({\n${variants}\n});`;
+};
