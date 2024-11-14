@@ -22,7 +22,6 @@ import {
 	type WhileLoopNode,
 	type FunctionDefinitionNode,
 	type TypeDeclarationNode,
-	type ParenArgumentsNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -401,8 +400,8 @@ export class Checker {
 	visitExpressionNode(node: ExpressionNode): StaticType {
 		const expr = node.exprNode;
 		switch (expr.type) {
-			case SyntaxType.Expression: {
-				return this.visitExpressionNode(expr);
+			case SyntaxType.ParenExpression: {
+				return this.visitExpressionNode(expr.exprNode);
 			}
 			case SyntaxType.PrimitiveValue:
 				return getStaticTypeForPrimitiveValue(expr);
