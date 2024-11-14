@@ -82,7 +82,9 @@ function generateNode(node: SyntaxNode): string {
 			const cursorName = generateNode(cursorNode);
 			const range = getForLoopRange(rangeNode);
 			if (typeof range === "string") {
-				return `for (let ${cursorName} of ${range}) ${generateBlock(bodyNode)}`;
+				return `for (const ${cursorName} of ${range}) ${generateBlock(
+					bodyNode,
+				)}`;
 			}
 			const [start, end] = range;
 			return `for (let ${cursorName} = ${start}; ${cursorName} <= ${end}; ${cursorName}++) ${generateBlock(

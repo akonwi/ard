@@ -215,11 +215,17 @@ let immutable: Num = 5
 mut mutable: Str = "foo"
 
 immutable = immutable * 2
+immutable =+ 5
 `);
 	expect(new Checker(tree).check()).toEqual([
 		{
 			level: "error",
 			location: { row: 4, column: 10 },
+			message: "Variable 'immutable' is not mutable.",
+		},
+		{
+			level: "error",
+			location: { row: 5, column: 10 },
 			message: "Variable 'immutable' is not mutable.",
 		},
 	]);

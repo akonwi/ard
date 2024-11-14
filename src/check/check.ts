@@ -22,6 +22,7 @@ import {
 	type WhileLoopNode,
 	type FunctionDefinitionNode,
 	type TypeDeclarationNode,
+	type CompoundAssignmentNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -346,6 +347,26 @@ export class Checker {
 				message: `Variable '${target.text}' is not mutable.`,
 				// use location of = operator
 				location: node.children.at(1)!.startPosition,
+			});
+		}
+	}
+
+	visitCompoundAssignment(node: CompoundAssignmentNode) {
+		const target = node.nameNode;
+
+		const variable = this.scope().getVariable(target.text);
+		if (variable == null) {
+			this.error({
+				message: `Variable '${target.text}' is not defined.`,
+				location: target.startPosition,
+			});
+			return;
+		}
+
+		if (!variable.is_mutable) {
+			this.error({
+				message: `Variable '${target.text}' is not mutable.`,
+				location: node.operatorNode.startPosition,
 			});
 		}
 	}

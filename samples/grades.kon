@@ -1,0 +1,17 @@
+struct Student {
+    name: Str,
+    grade: Num
+}
+
+let students: [Student] = [
+    Student { name: "Alice", grade: 95 },
+    Student { name: "Bob", grade: 82 },
+    Student { name: "Charlie", grade: 88 }
+]
+
+let sum = 0
+for student in students {
+    sum =+ student.grade
+}
+
+print("Class average is ${sum / students.length}")
