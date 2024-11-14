@@ -15,16 +15,37 @@ export interface StaticType {
 
 export class EnumType implements StaticType {
 	readonly name: string;
-	readonly variants: string[];
+	readonly variants = new Map<string, EnumVariant>();
 	readonly is_iterable = false;
 
 	constructor(name: string, variants: string[]) {
 		this.name = name;
-		this.variants = variants;
+		for (const variant of variants) {
+			this.variants.set(variant, new EnumVariant(variant, this));
+		}
+	}
+
+	variant(name: string) {
+		return this.variants.get(name);
 	}
 
 	get pretty() {
 		return this.name;
+	}
+}
+
+export class EnumVariant implements StaticType {
+	readonly name: string;
+	readonly parent: EnumType;
+	readonly is_iterable = false;
+
+	constructor(name: string, parent: EnumType) {
+		this.name = name;
+		this.parent = parent;
+	}
+
+	get pretty() {
+		return `${this.parent.pretty}::${this.name}`;
 	}
 }
 

@@ -24,6 +24,7 @@ import {
 	type TypeDeclarationNode,
 	type CompoundAssignmentNode,
 	EnumDefinitionNode,
+	type StaticMemberAccessNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -579,6 +580,9 @@ export class Checker {
 			case SyntaxType.StructInstance: {
 				return this.visitStructInstance(node.exprNode) ?? Unknown;
 			}
+			case SyntaxType.StaticMemberAccess: {
+				return this.visitStaticMemberAccess(node.exprNode);
+			}
 			default: {
 				return Unknown;
 			}
@@ -856,6 +860,39 @@ export class Checker {
 			}
 		}
 		return Unknown;
+	}
+
+	visitStaticMemberAccess(node: StaticMemberAccessNode): StaticType {
+		const { targetNode, memberNode } = node;
+		const e_num = this.scope().getEnum(targetNode.text);
+		if (e_num == null) {
+			this.error({
+				location: targetNode.startPosition,
+				message: `Cannot find name '${targetNode.text}'`,
+			});
+			return Unknown;
+		}
+
+		switch (memberNode.type) {
+			case SyntaxType.Identifier: {
+				const variant = e_num.variant(memberNode.text);
+				if (variant == null) {
+					this.error({
+						location: memberNode.startPosition,
+						message: `'${memberNode.text}' is not a valid '${e_num.name}' variant`,
+					});
+					return Unknown;
+				}
+
+				return e_num;
+			}
+			case SyntaxType.StaticMemberAccess: {
+				throw new Error("Unimplemented: chained static member access");
+			}
+			case SyntaxType.FunctionCall: {
+				throw new Error("Unimplemented: calling static functions");
+			}
+		}
 	}
 
 	visitUnaryExpression(node: UnaryExpressionNode): StaticType {
