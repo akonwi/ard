@@ -25,12 +25,16 @@ export class EnumType implements StaticType {
 		}
 	}
 
+	get pretty() {
+		return this.name;
+	}
+
 	variant(name: string) {
 		return this.variants.get(name);
 	}
 
-	get pretty() {
-		return this.name;
+	hasVariant(variant: EnumVariant): boolean {
+		return this.variants.has(variant.name);
 	}
 }
 
@@ -322,6 +326,8 @@ export function getStaticTypeForPrimitiveValue(
 export function areCompatible(a: StaticType, b: StaticType): boolean {
 	if (a === EmptyList && b instanceof ListType) return true;
 	if (a instanceof ListType && b === EmptyList) return true;
+	if (a instanceof EnumType && b instanceof EnumVariant) return a === b.parent;
+	if (a instanceof EnumVariant && b instanceof EnumType) return a.parent === b;
 	return a.pretty === b.pretty;
 }
 

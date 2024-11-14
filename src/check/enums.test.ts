@@ -1,7 +1,6 @@
 import { expect } from "jsr:@std/expect";
 import { makeParser } from "../parser/parser.ts";
 import { Checker, type Diagnostic } from "./check.ts";
-import { EnumType } from "./kon-types.ts";
 
 const parser = makeParser();
 
@@ -43,7 +42,7 @@ let favorite = Color::Red`);
 	expect(favorite?.static_type.name).toBe("Color");
 });
 
-Deno.test.ignore("Enum variables must be initialized correctly", () => {
+Deno.test("Enum variables must be initialized correctly", () => {
 	const tree = parser.parse(`
 enum Color {
   Red,
@@ -52,7 +51,7 @@ enum Color {
 }
 
 let favorite = Color::Red
-mut traffic_light: Color = Color.Green
+mut traffic_light: Color = Color::Green
 let invalid: Color = "foo"`);
 
 	const errors = new Checker(tree).check();
@@ -61,6 +60,40 @@ let invalid: Color = "foo"`);
 			level: "error",
 			location: { row: 9, column: 21 },
 			message: "Expected 'Color' and received 'Str'.",
+		},
+	] as Diagnostic[]);
+});
+
+Deno.test("Cannot reassign incorrectly to a bound variable", () => {
+	const tree = parser.parse(`
+enum Color {
+  Red,
+  Green,
+  Yellow
+}
+enum Place {
+  Home,
+  Office,
+  Beach
+}
+
+let favorite = Color::Red
+favorite = Color::Green
+
+mut traffic_light = Color::Green
+traffic_light = Place::Beach`);
+
+	const errors = new Checker(tree).check();
+	expect(errors).toEqual([
+		{
+			level: "error",
+			location: { row: 13, column: 9 },
+			message: "Variable 'favorite' is not mutable.",
+		},
+		{
+			level: "error",
+			location: { row: 16, column: 16 },
+			message: "Expected 'Color' and received 'Place'.",
 		},
 	] as Diagnostic[]);
 });

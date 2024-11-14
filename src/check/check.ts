@@ -306,7 +306,6 @@ export class Checker {
 		if (assigment_error != null) {
 			this.error({
 				location: valueNode.startPosition,
-
 				message: assigment_error,
 			});
 		}
@@ -372,6 +371,18 @@ export class Checker {
 				location: node.children.at(1)!.startPosition,
 			});
 		}
+
+		const provided_type = this.getTypeFromExpressionNode(node.valueNode);
+		const error = this.validateCompatibility(
+			variable.static_type,
+			provided_type,
+		);
+		if (error) {
+			this.error({
+				location: node.valueNode.startPosition,
+				message: error,
+			});
+		}
 	}
 
 	visitCompoundAssignment(node: CompoundAssignmentNode) {
@@ -402,7 +413,10 @@ export class Checker {
 		if (is_valid) {
 			return null;
 		}
-		if (expected === Unknown || received === Unknown) return null;
+		if (expected === Unknown || received === Unknown)
+			throw new Error(
+				`Unable to determine type compatibility: ${expected.pretty} and ${received.pretty}`,
+			);
 		return `Expected '${expected.pretty}' and received '${received.pretty}'.`;
 	}
 
@@ -435,6 +449,17 @@ export class Checker {
 					default:
 						return Unknown;
 				}
+			}
+			case SyntaxType.Identifier: {
+				const struct = this.scope().getStruct(node.text);
+				if (struct) {
+					return struct;
+				}
+				const e_num = this.scope().getEnum(node.text);
+				if (e_num) {
+					return e_num;
+				}
+				throw new Error(`Unexpected type declaration: ${node.text}`);
 			}
 			default:
 				return Unknown;
@@ -582,6 +607,9 @@ export class Checker {
 			}
 			case SyntaxType.StaticMemberAccess: {
 				return this.visitStaticMemberAccess(node.exprNode);
+			}
+			case SyntaxType.BinaryExpression: {
+				return this.visitBinaryExpression(node.exprNode);
 			}
 			default: {
 				return Unknown;

@@ -2,6 +2,7 @@ import { expect } from "jsr:@std/expect";
 import {
 	Bool,
 	EmptyList,
+	EnumType,
 	ListType,
 	MapType,
 	Num,
@@ -128,4 +129,14 @@ Deno.test("Compatibility checks against a struct", () => {
 	expect(areCompatible(person_struct, Str)).toBe(false);
 	expect(areCompatible(person_struct, new MapType(Str))).toBe(false);
 	expect(areCompatible(person_struct, new ListType(Bool))).toBe(false);
+});
+
+Deno.test("Compatibility checks for enums", () => {
+	const Color = new EnumType("Color", ["Red", "Green", "Blue"]);
+	const Level = new EnumType("Level", ["Junior", "Senior", "Lead"]);
+
+	expect(areCompatible(Color, Color)).toBe(true);
+	expect(areCompatible(Color, Level)).toBe(false);
+
+	expect(areCompatible(Color, Color.variant("Red")!)).toBe(true);
 });
