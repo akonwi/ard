@@ -64,3 +64,8 @@ Deno.test("member access", () => {
 	const two_dots = parser.parse(`coord.point.x`);
 	expect(generateJavascript(two_dots)).toEqual("coord.point.x;");
 });
+
+Deno.test("precedence in expressions", () => {
+	const tree = parser.parse(`(f - 32) * 5 / 9`);
+	expect(generateJavascript(tree)).toEqual("(f - 32) * 5 / 9;");
+});

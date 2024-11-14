@@ -41,6 +41,9 @@ function generateNode(node: SyntaxNode): string {
 		case SyntaxType.Expression: {
 			return generateNode(node.exprNode);
 		}
+		case SyntaxType.ParenExpression: {
+			return `(${generateNode(node.exprNode)})`;
+		}
 		case SyntaxType.VariableDefinition: {
 			return generateVariableDefinition(node, { statement: false });
 		}

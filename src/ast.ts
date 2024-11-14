@@ -137,6 +137,7 @@ export const enum SyntaxType {
   ParamDef = "param_def",
   Parameters = "parameters",
   ParenArguments = "paren_arguments",
+  ParenExpression = "paren_expression",
   PrimitiveType = "primitive_type",
   PrimitiveValue = "primitive_value",
   PrintStatement = "print_statement",
@@ -234,6 +235,7 @@ export type SyntaxNode =
   | ParamDefNode
   | ParametersNode
   | ParenArgumentsNode
+  | ParenExpressionNode
   | PrimitiveTypeNode
   | PrimitiveValueNode
   | PrintStatementNode
@@ -345,7 +347,7 @@ export interface EnumVariantNode extends NamedNodeBase {
 
 export interface ExpressionNode extends NamedNodeBase {
   type: SyntaxType.Expression;
-  exprNode: BinaryExpressionNode | ExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MemberAccessNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode;
+  exprNode: BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StructInstanceNode | UnaryExpressionNode;
 }
 
 export interface ForLoopNode extends NamedNodeBase {
@@ -422,6 +424,11 @@ export interface ParametersNode extends NamedNodeBase {
 export interface ParenArgumentsNode extends NamedNodeBase {
   type: SyntaxType.ParenArguments;
   argumentNodes: ExpressionNode[];
+}
+
+export interface ParenExpressionNode extends NamedNodeBase {
+  type: SyntaxType.ParenExpression;
+  exprNode: ExpressionNode;
 }
 
 export interface PrimitiveTypeNode extends NamedNodeBase {
