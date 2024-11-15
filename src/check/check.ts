@@ -23,7 +23,7 @@ import {
 	type FunctionDefinitionNode,
 	type TypeDeclarationNode,
 	type CompoundAssignmentNode,
-	EnumDefinitionNode,
+	type EnumDefinitionNode,
 	type StaticMemberAccessNode,
 } from "../ast.ts";
 import console from "node:console";
@@ -220,8 +220,37 @@ export class Checker {
 	}
 
 	visitStructDefinition(node: StructDefinitionNode) {
-		const def = StructType.from(node);
+		const fields = new Map<string, StaticType>();
+		for (const field of node.fieldNodes) {
+			let type: StaticType;
+			switch (field.typeNode.type) {
+				case SyntaxType.PrimitiveType: {
+					type = getStaticTypeForPrimitiveType(field.typeNode);
+					break;
+				}
+				case SyntaxType.Identifier: {
+					const struct = this.scope().getStruct(field.typeNode.text);
+					if (struct) {
+						type = struct;
+						break;
+					}
+					const enumType = this.scope().getEnum(field.typeNode.text);
+					if (enumType) {
+						type = enumType;
+						break;
+					}
+					this.error({
+						message: `Cannot find name '${field.typeNode.text}'`,
+						location: field.typeNode.startPosition,
+					});
+					return Unknown;
+				}
+			}
+			fields.set(field.nameNode.text, type);
+		}
+		const def = new StructType(node.nameNode.text, fields);
 		this.scope().addStruct(def);
+		return def;
 	}
 
 	visitStructInstance(node: StructInstanceNode): StructType | null {
@@ -235,6 +264,11 @@ export class Checker {
 			});
 			return null;
 		}
+
+		this.debug("creating struct", {
+			struct: struct_name,
+			fields: node.fieldNodes.map((f) => f.text),
+		});
 
 		const expected_fields = struct_def.fields;
 		const received_fields = new Set<string>();
@@ -270,6 +304,7 @@ export class Checker {
 			}
 		}
 		if (missing_field_names.size > 0) {
+			this.debug("missing fields", { missing_field_names, received_fields });
 			this.error({
 				message: `Missing fields for struct '${struct_name}': ${Array.from(
 					missing_field_names,
@@ -625,6 +660,8 @@ export class Checker {
 				return Str;
 			case SyntaxType.Number:
 				return Num;
+			case SyntaxType.StaticMemberAccess:
+				return this.visitStaticMemberAccess(node.valueNode);
 		}
 	}
 

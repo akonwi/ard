@@ -97,3 +97,25 @@ traffic_light = Place::Beach`);
 		},
 	] as Diagnostic[]);
 });
+
+Deno.test("Enums can be types of struct fields", () => {
+	const tree = parser.parse(`
+ enum Color {
+   Red,
+   Green,
+   Yellow
+ }
+
+struct Person {
+  favorite_color: Color
+}
+let joe = Person { favorite_color: Color::Red }
+`);
+
+	const checker = new Checker(tree);
+	const errors = checker.check();
+	expect(errors).toEqual([]);
+	expect(
+		checker.scope().getStruct("Person")?.fields.get("favorite_color")?.name,
+	).toBe("Color");
+});

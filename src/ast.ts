@@ -495,13 +495,13 @@ export interface StructInstanceNode extends NamedNodeBase {
 export interface StructPropPairNode extends NamedNodeBase {
   type: SyntaxType.StructPropPair;
   nameNode: IdentifierNode;
-  valueNode: BooleanNode | NumberNode | StringNode;
+  valueNode: BooleanNode | NumberNode | StaticMemberAccessNode | StringNode;
 }
 
 export interface StructPropertyNode extends NamedNodeBase {
   type: SyntaxType.StructProperty;
   nameNode: IdentifierNode;
-  typeNode: PrimitiveTypeNode;
+  typeNode: IdentifierNode | PrimitiveTypeNode;
 }
 
 export interface TypeDeclarationNode extends NamedNodeBase {

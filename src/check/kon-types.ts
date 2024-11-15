@@ -207,17 +207,6 @@ export class StructType implements StaticType {
 		readonly fields: Map<string, StaticType> = new Map(),
 	) {}
 
-	static from(node: StructDefinitionNode): StructType {
-		const fields = new Map<string, StaticType>();
-		for (const field of node.fieldNodes) {
-			fields.set(
-				field.nameNode.text,
-				getStaticTypeForPrimitiveType(field.typeNode),
-			);
-		}
-		return new StructType(node.nameNode.text, fields);
-	}
-
 	get static_type(): string {
 		return `${this.name}`;
 	}
