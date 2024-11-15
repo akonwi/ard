@@ -25,6 +25,8 @@ import {
 	type CompoundAssignmentNode,
 	type EnumDefinitionNode,
 	type StaticMemberAccessNode,
+	type MatchExpressionNode,
+	type MatchCaseNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -32,6 +34,7 @@ import {
 	Bool,
 	EmptyList,
 	EnumType,
+	EnumVariant,
 	FunctionType,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
@@ -44,6 +47,7 @@ import {
 	STR_MEMBERS,
 	StructType,
 	Unknown,
+	Void,
 } from "./kon-types.ts";
 
 /*
@@ -109,7 +113,19 @@ class LexScope {
 	private enums: Map<string, EnumType> = new Map();
 	private functions: Map<string, FunctionType> = new Map();
 
-	constructor(readonly parent: LexScope | null = null) {}
+	constructor(readonly parent: LexScope | null = null) {
+		if (parent == null) {
+			// add built-in functions
+			this.functions.set(
+				"print",
+				new FunctionType({
+					name: "print",
+					params: [{ name: "value", type: Str }],
+					return_type: Void,
+				}),
+			);
+		}
+	}
 
 	addEnum(e: EnumType) {
 		this.enums.set(e.name, e);
@@ -264,11 +280,6 @@ export class Checker {
 			});
 			return null;
 		}
-
-		this.debug("creating struct", {
-			struct: struct_name,
-			fields: node.fieldNodes.map((f) => f.text),
-		});
 
 		const expected_fields = struct_def.fields;
 		const received_fields = new Set<string>();
@@ -567,6 +578,62 @@ export class Checker {
 				return Unknown;
 			}
 		}
+	}
+
+	visitMatchExpression(node: MatchExpressionNode): StaticType {
+		const { exprNode, caseNodes } = node;
+		const expr = this.visitExpressionNode(exprNode);
+		if (expr instanceof EnumType) {
+			const cases = new Map<EnumVariant, StaticType>();
+			for (const n of caseNodes) {
+				const arm = this.visitMatchCaseForEnum(expr, n);
+				if (arm != null) {
+					cases.set(arm.variant, arm.result);
+				}
+			}
+
+			for (const variant of expr.variants.values()) {
+				if (!cases.has(variant)) {
+					this.error({
+						message: `Match must be exhaustive. Missing '${variant.name}'`,
+						location: node.startPosition,
+					});
+				}
+			}
+
+			const results = new Set(cases.values());
+			if (results.size > 1) {
+				this.error({
+					message: "Match expression cases must all return the same type",
+					location: node.startPosition,
+				});
+				return Unknown;
+			}
+
+			return results.values().next().value!;
+		}
+
+		throw new Error("Unsupported match expression: " + expr.pretty);
+	}
+
+	visitMatchCaseForEnum(
+		enumType: EnumType,
+		node: MatchCaseNode,
+	): {
+		variant: EnumVariant;
+		result: StaticType;
+	} | null {
+		const { patternNode, bodyNode } = node;
+		const variant = enumType.variant(patternNode.text);
+		if (variant == null) {
+			this.error({
+				message: `Unknown variant '${patternNode.text}`,
+				location: patternNode.startPosition,
+			});
+			return null;
+		}
+		const result = this.visit(bodyNode);
+		return { variant, result };
 	}
 
 	visitForLoop(node: ForLoopNode) {

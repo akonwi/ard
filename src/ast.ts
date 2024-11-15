@@ -133,6 +133,8 @@ export const enum SyntaxType {
   MapPair = "map_pair",
   MapType = "map_type",
   MapValue = "map_value",
+  MatchCase = "match_case",
+  MatchExpression = "match_expression",
   MemberAccess = "member_access",
   ParamDef = "param_def",
   Parameters = "parameters",
@@ -193,6 +195,7 @@ export type UnnamedType =
   | "."
   | ":"
   | "="
+  | "=>"
   | "["
   | "]"
   | "do"
@@ -204,6 +207,7 @@ export type UnnamedType =
   | "if"
   | "in"
   | "let"
+  | "match"
   | "mut"
   | "print"
   | "struct"
@@ -233,6 +237,8 @@ export type SyntaxNode =
   | MapPairNode
   | MapTypeNode
   | MapValueNode
+  | MatchCaseNode
+  | MatchExpressionNode
   | MemberAccessNode
   | ParamDefNode
   | ParametersNode
@@ -266,6 +272,7 @@ export type SyntaxNode =
   | null
   | null
   | null
+  | null
   | AndNode
   | BangNode
   | BoolNode
@@ -289,6 +296,7 @@ export type SyntaxNode =
   | IncrementNode
   | LessThanNode
   | LessThanOrEqualNode
+  | null
   | null
   | MinusNode
   | ModuloNode
@@ -352,7 +360,7 @@ export interface EnumVariantNode extends NamedNodeBase {
 
 export interface ExpressionNode extends NamedNodeBase {
   type: SyntaxType.Expression;
-  exprNode: BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StaticMemberAccessNode | StructInstanceNode | UnaryExpressionNode;
+  exprNode: BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MatchExpressionNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StaticMemberAccessNode | StructInstanceNode | UnaryExpressionNode;
 }
 
 export interface ForLoopNode extends NamedNodeBase {
@@ -407,6 +415,18 @@ export interface MapTypeNode extends NamedNodeBase {
 
 export interface MapValueNode extends NamedNodeBase {
   type: SyntaxType.MapValue;
+}
+
+export interface MatchCaseNode extends NamedNodeBase {
+  type: SyntaxType.MatchCase;
+  bodyNode: BlockNode | ExpressionNode;
+  patternNode: IdentifierNode;
+}
+
+export interface MatchExpressionNode extends NamedNodeBase {
+  type: SyntaxType.MatchExpression;
+  caseNodes: MatchCaseNode[];
+  exprNode: ExpressionNode;
 }
 
 export interface MemberAccessNode extends NamedNodeBase {
