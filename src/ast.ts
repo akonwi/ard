@@ -420,7 +420,7 @@ export interface MapValueNode extends NamedNodeBase {
 export interface MatchCaseNode extends NamedNodeBase {
   type: SyntaxType.MatchCase;
   bodyNode: BlockNode | ExpressionNode;
-  patternNode: IdentifierNode;
+  patternNode: StaticMemberAccessNode;
 }
 
 export interface MatchExpressionNode extends NamedNodeBase {

@@ -93,6 +93,35 @@ function generateNode(node: SyntaxNode): string {
 				bodyNode,
 			)}`;
 		}
+		case SyntaxType.MatchExpression: {
+			const { exprNode, caseNodes } = node;
+
+			return `(() => {
+		switch (${generateNode(exprNode)}) {
+${caseNodes.map(generateNode).join("\n")}
+    }
+  })()`;
+		}
+		case SyntaxType.MatchCase: {
+			const { patternNode, bodyNode } = node;
+			switch (bodyNode.type) {
+				case SyntaxType.Expression: {
+					return `\t\tcase ${generateNode(patternNode)}: return ${generateNode(
+						bodyNode,
+					)};`;
+				}
+				case SyntaxType.Block: {
+					return `\t\tcase ${generateNode(
+						patternNode,
+					)}: return (() => ${generateBlock(bodyNode, true)})();`;
+				}
+				default:
+					throw new Error("Unrecognized match case body: " + bodyNode);
+			}
+		}
+		case SyntaxType.Block: {
+			return generateBlock(node, true);
+		}
 		case SyntaxType.UnaryExpression: {
 			const { operatorNode, operandNode } = node;
 			switch (operatorNode.type) {

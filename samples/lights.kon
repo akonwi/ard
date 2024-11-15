@@ -1,0 +1,23 @@
+enum Color {
+  Red,
+  Yellow,
+  Green
+}
+
+mut light = Color::Red
+
+// todo: allow enums as parameters
+// todo: validate expected return with declared return type
+fn get_meaning() Num {
+  match light {
+    Color::Red => "Stop",
+    Color::Yellow => "Yield",
+    Color::Green => "Go"
+  }
+}
+
+print("The signal is ${get_meaning()}")
+light = Color::Green
+print("The signal is ${get_meaning()}")
+light = Color::Yellow
+print("The signal is ${get_meaning()}")

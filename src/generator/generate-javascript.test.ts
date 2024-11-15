@@ -69,3 +69,24 @@ Deno.test("precedence in expressions", () => {
 	const tree = parser.parse(`(f - 32) * 5 / 9`);
 	expect(generateJavascript(tree)).toEqual("(f - 32) * 5 / 9;");
 });
+
+// indentation is annoying
+// Deno.test("match expressions", () => {
+// 	const tree = parser.parse(`match color {
+//   Color::Red => "stop",
+//   Color::Green => {
+//     "go"
+//   },
+// }`);
+
+// 	expect(generateJavascript(tree)).toEqual(
+// 		`(() => {
+//   switch (color) {
+//     case Color.Red: return "stop";
+//     case Color.Green: return (() => {
+//       return "go";
+//     })();
+//   }
+// })();`.trim(),
+// 	);
+// });

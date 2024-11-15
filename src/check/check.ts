@@ -197,14 +197,12 @@ export class Checker {
 			.split("_")
 			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
 			.join("")}`;
-		this.debug("visiting ", node.type);
 
 		// @ts-expect-error - dynamic method call
 		const method = this[methodName]?.bind(this);
 		if (method) {
 			return method(node);
 		}
-		this.debug(`No visit method for ${node.type}, going through children`);
 
 		for (const child of node.namedChildren) {
 			this.visit(child);
@@ -315,7 +313,6 @@ export class Checker {
 			}
 		}
 		if (missing_field_names.size > 0) {
-			this.debug("missing fields", { missing_field_names, received_fields });
 			this.error({
 				message: `Missing fields for struct '${struct_name}': ${Array.from(
 					missing_field_names,
@@ -343,7 +340,10 @@ export class Checker {
 		const provided_type = this.getTypeFromExpressionNode(valueNode);
 		if (declared_type === null) {
 			// lazy-ish inference
-			declared_type = provided_type;
+			declared_type =
+				provided_type instanceof EnumVariant
+					? provided_type.parent
+					: provided_type;
 		}
 		const assigment_error = this.validateCompatibility(
 			declared_type,
@@ -486,7 +486,6 @@ export class Checker {
 						}
 
 						const list = new ListType(declaration);
-						this.debug(`got ${list.inner.pretty}`);
 						return list;
 					}
 					case SyntaxType.PrimitiveType: {
@@ -584,18 +583,18 @@ export class Checker {
 		const { exprNode, caseNodes } = node;
 		const expr = this.visitExpressionNode(exprNode);
 		if (expr instanceof EnumType) {
-			const cases = new Map<EnumVariant, StaticType>();
+			const cases = new Map<string, StaticType>();
 			for (const n of caseNodes) {
 				const arm = this.visitMatchCaseForEnum(expr, n);
 				if (arm != null) {
-					cases.set(arm.variant, arm.result);
+					cases.set(arm.variant.name, arm.result);
 				}
 			}
 
 			for (const variant of expr.variants.values()) {
-				if (!cases.has(variant)) {
+				if (!cases.has(variant.name)) {
 					this.error({
-						message: `Match must be exhaustive. Missing '${variant.name}'`,
+						message: `Match must be exhaustive. Missing '${variant.pretty}'`,
 						location: node.startPosition,
 					});
 				}
@@ -624,8 +623,12 @@ export class Checker {
 		result: StaticType;
 	} | null {
 		const { patternNode, bodyNode } = node;
-		const variant = enumType.variant(patternNode.text);
-		if (variant == null) {
+		const variant = this.visitStaticMemberAccess(patternNode);
+		if (
+			variant == null ||
+			!(variant instanceof EnumVariant) ||
+			!areCompatible(enumType, variant)
+		) {
 			this.error({
 				message: `Unknown variant '${patternNode.text}`,
 				location: patternNode.startPosition,
@@ -708,7 +711,13 @@ export class Checker {
 				return this.visitStructInstance(node.exprNode) ?? Unknown;
 			}
 			case SyntaxType.StaticMemberAccess: {
-				return this.visitStaticMemberAccess(node.exprNode);
+				const type = this.visitStaticMemberAccess(node.exprNode);
+				if (type == null)
+					throw new Error(
+						"Unable to resolve type of static member access: " +
+							node.exprNode.text,
+					);
+				return type;
 			}
 			case SyntaxType.BinaryExpression: {
 				return this.visitBinaryExpression(node.exprNode);
@@ -727,8 +736,14 @@ export class Checker {
 				return Str;
 			case SyntaxType.Number:
 				return Num;
-			case SyntaxType.StaticMemberAccess:
-				return this.visitStaticMemberAccess(node.valueNode);
+			case SyntaxType.StaticMemberAccess: {
+				const type = this.visitStaticMemberAccess(node.valueNode);
+				if (type == null)
+					throw new Error(
+						"Unable to resolve static member access: " + node.valueNode.text,
+					);
+				return type;
+			}
 		}
 	}
 
@@ -878,7 +893,6 @@ export class Checker {
 			});
 			return Unknown;
 		}
-		this.debug(`target is ${target.name} of type ${target?.pretty}`);
 
 		if (target.static_type instanceof ListType) {
 			const signature = target.static_type.properties.get(memberNode.text);
@@ -994,7 +1008,7 @@ export class Checker {
 		return Unknown;
 	}
 
-	visitStaticMemberAccess(node: StaticMemberAccessNode): StaticType {
+	visitStaticMemberAccess(node: StaticMemberAccessNode): EnumVariant | null {
 		const { targetNode, memberNode } = node;
 		const e_num = this.scope().getEnum(targetNode.text);
 		if (e_num == null) {
@@ -1002,7 +1016,7 @@ export class Checker {
 				location: targetNode.startPosition,
 				message: `Cannot find name '${targetNode.text}'`,
 			});
-			return Unknown;
+			return null;
 		}
 
 		switch (memberNode.type) {
@@ -1013,10 +1027,10 @@ export class Checker {
 						location: memberNode.startPosition,
 						message: `'${memberNode.text}' is not a valid '${e_num.name}' variant`,
 					});
-					return Unknown;
+					return null;
 				}
 
-				return e_num;
+				return variant;
 			}
 			case SyntaxType.StaticMemberAccess: {
 				throw new Error("Unimplemented: chained static member access");
@@ -1032,12 +1046,8 @@ export class Checker {
 	}
 
 	visitBinaryExpression(node: BinaryExpressionNode): StaticType {
-		this.debug("visiting left of binary expression", node.leftNode.type);
 		const left = this.visitExpressionNode(node.leftNode);
 		const right = this.visitExpressionNode(node.rightNode);
-		this.debug(
-			`BinaryExpressionNode: ${left.pretty} ${node.operatorNode.type} ${right.pretty}`,
-		);
 		switch (node.operatorNode.type) {
 			case SyntaxType.InclusiveRange: {
 				const invalidStart = left !== Num;

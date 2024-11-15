@@ -14,8 +14,8 @@ enum Color {
 
 let light = Color::Red
 match light {
-  Red => print("Stop"),
-  Green => print("Go")
+  Color::Red => print("Stop"),
+  Color::Green => print("Go")
 }
 `);
 
@@ -24,7 +24,7 @@ match light {
 		{
 			level: "error",
 			location: { row: 8, column: 0 },
-			message: "Match must be exhaustive. Missing 'Yellow'",
+			message: "Match must be exhaustive. Missing 'Color::Yellow'",
 		},
 	] as Diagnostic[]);
 });

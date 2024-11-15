@@ -93,7 +93,7 @@ traffic_light = Place::Beach`);
 		{
 			level: "error",
 			location: { row: 16, column: 16 },
-			message: "Expected 'Color' and received 'Place'.",
+			message: "Expected 'Color' and received 'Place::Beach'.",
 		},
 	] as Diagnostic[]);
 });
