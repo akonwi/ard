@@ -408,14 +408,16 @@ export class Variable implements StaticType {
 	}
 }
 
-export function get_cursor(type: StaticType): StaticType | null {
+// needed because Variable is a StaticType
+// TODO: variables should not implement StaticType
+export function get_cursor_type(type: StaticType): StaticType | null {
 	if (type.is_iterable === false) return null;
 
 	if (type instanceof ListType) {
 		return type.inner;
 	}
 	if (type instanceof Variable) {
-		return get_cursor(type.static_type);
+		return get_cursor_type(type.static_type);
 	}
 	return type;
 }

@@ -28,9 +28,8 @@ import {
 	type MatchExpressionNode,
 	type MatchCaseNode,
 	type BlockNode,
-	type StatementNode,
-	PrimitiveValueNode,
-	ListValueNode,
+	type PrimitiveValueNode,
+	type ListValueNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -40,7 +39,7 @@ import {
 	EnumType,
 	EnumVariant,
 	FunctionType,
-	get_cursor,
+	get_cursor_type,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
 	ListType,
@@ -375,7 +374,6 @@ export class Checker {
 		const actual_return = this.visit(bodyNode);
 		this.scopes.shift();
 
-		this.debug("actual_return", actual_return);
 		const return_mismatch = this.validateCompatibility(
 			def.return_type,
 			actual_return,
@@ -393,10 +391,6 @@ export class Checker {
 
 	visitBlock(node: BlockNode): StaticType {
 		const children = node.namedChildren.map((c) => this.visit(c));
-		this.debug("block children", {
-			children: node.namedChildren.map((c) => c?.type),
-			children_types: children.map((c) => c?.pretty),
-		});
 		return children.pop() ?? Void;
 	}
 
@@ -576,7 +570,7 @@ export class Checker {
 	visitForLoop(node: ForLoopNode) {
 		const { cursorNode, rangeNode, bodyNode } = node;
 		const iterable = this.visit(rangeNode);
-		const cursor_type = get_cursor(iterable);
+		const cursor_type = get_cursor_type(iterable);
 		if (!iterable.is_iterable || cursor_type == null) {
 			this.error({
 				message: `Cannot iterate over a '${iterable.pretty}'.`,
