@@ -29,6 +29,8 @@ import {
 	type MatchCaseNode,
 	type BlockNode,
 	type StatementNode,
+	PrimitiveValueNode,
+	ListValueNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -38,6 +40,7 @@ import {
 	EnumType,
 	EnumVariant,
 	FunctionType,
+	get_cursor,
 	getStaticTypeForPrimitiveType,
 	getStaticTypeForPrimitiveValue,
 	ListType,
@@ -49,6 +52,7 @@ import {
 	STR_MEMBERS,
 	StructType,
 	Unknown,
+	Variable,
 	Void,
 } from "./kon-types.ts";
 
@@ -84,30 +88,6 @@ const RESERVED_KEYWORDS = new Set([
 	"Num",
 	"Bool",
 ]);
-
-class Variable implements StaticType {
-	readonly name: string;
-	readonly static_type: StaticType;
-	readonly is_mutable: boolean;
-
-	constructor(input: {
-		name: string;
-		type: StaticType;
-		is_mutable?: boolean;
-	}) {
-		this.name = input.name;
-		this.static_type = input.type;
-		this.is_mutable = input.is_mutable ?? false;
-	}
-
-	get pretty() {
-		return this.static_type.pretty;
-	}
-
-	get is_iterable() {
-		return this.static_type.is_iterable;
-	}
-}
 
 class LexScope {
 	private variables: Map<string, Variable> = new Map();
@@ -533,79 +513,9 @@ export class Checker {
 		}
 	}
 
-	visitExpression(node: ExpressionNode): StaticType {
-		const expr = node.exprNode;
-		switch (expr.type) {
-			case SyntaxType.ParenExpression: {
-				return this.visitExpression(expr.exprNode);
-			}
-			case SyntaxType.PrimitiveValue:
-				return getStaticTypeForPrimitiveValue(expr);
-			case SyntaxType.ListValue: {
-				if (expr.innerNodes.length === 0) {
-					return EmptyList;
-				}
-				const first = expr.innerNodes.at(0)!;
-				switch (first.type) {
-					case SyntaxType.Boolean:
-						return new ListType(Bool);
-					case SyntaxType.String:
-						return new ListType(Str);
-					case SyntaxType.Number:
-						return new ListType(Num);
-					case SyntaxType.StructInstance: {
-						const struct = this.visitStructInstance(first) ?? Unknown;
-						if (struct === Unknown) {
-							this.error({
-								location: first.startPosition,
-								message: `Unknown struct`,
-							});
-						}
-						return new ListType(struct);
-					}
-					default: {
-						this.warn({
-							location: first.startPosition,
-							message: `Unknown type in list`,
-						});
-						return new ListType(Unknown);
-					}
-				}
-			}
-			case SyntaxType.StructInstance: {
-				return this.visitStructInstance(expr) ?? Unknown;
-			}
-			case SyntaxType.UnaryExpression: {
-				return this.visitUnaryExpression(expr);
-			}
-			case SyntaxType.BinaryExpression: {
-				return this.visitBinaryExpression(expr);
-			}
-			case SyntaxType.Identifier: {
-				const variable = this.scope().getVariable(expr.text);
-				if (variable == null) {
-					this.error({
-						message: `Cannot find name '${expr.text}'.`,
-						location: expr.startPosition,
-					});
-					return Unknown;
-				}
-				return variable.static_type;
-			}
-			case SyntaxType.MemberAccess: {
-				return this.visitMemberAccess(expr);
-			}
-			case SyntaxType.MatchExpression:
-				return this.visitMatchExpression(expr);
-			default: {
-				return Unknown;
-			}
-		}
-	}
-
 	visitMatchExpression(node: MatchExpressionNode): StaticType {
 		const { exprNode, caseNodes } = node;
-		const expr = this.visitExpression(exprNode);
+		const expr = this.visit(exprNode);
 		if (expr instanceof EnumType) {
 			const cases = new Map<string, StaticType>();
 			for (const n of caseNodes) {
@@ -665,17 +575,18 @@ export class Checker {
 
 	visitForLoop(node: ForLoopNode) {
 		const { cursorNode, rangeNode, bodyNode } = node;
-		const range = this.visitExpression(rangeNode);
-		if (!range.is_iterable) {
+		const iterable = this.visit(rangeNode);
+		const cursor_type = get_cursor(iterable);
+		if (!iterable.is_iterable || cursor_type == null) {
 			this.error({
-				message: `Cannot iterate over a '${range.pretty}'.`,
+				message: `Cannot iterate over a '${iterable.pretty}'.`,
 				location: rangeNode.startPosition,
 			});
 		}
 		// infer the type of the cursor from the range
 		const cursor = new Variable({
 			name: cursorNode.text,
-			type: range instanceof ListType ? range.inner : range,
+			type: cursor_type!,
 		});
 		const new_scope = new LexScope(this.scope());
 		new_scope.addVariable(cursor);
@@ -892,7 +803,7 @@ export class Checker {
 		return signature.return_type ?? Unknown;
 	}
 
-	visitIdentifier(node: IdentifierNode): Variable | null {
+	visitIdentifier(node: IdentifierNode): StaticType {
 		const name = node.text;
 
 		const variable = this.scope().getVariable(name);
@@ -901,10 +812,10 @@ export class Checker {
 				location: node.startPosition,
 				message: `Cannot find name '${name}'.`,
 			});
-			return null;
+			return Unknown;
 		}
 
-		return variable;
+		return variable.static_type;
 	}
 
 	visitMemberAccess(node: MemberAccessNode): StaticType {
@@ -1066,40 +977,122 @@ export class Checker {
 	}
 
 	visitUnaryExpression(node: UnaryExpressionNode): StaticType {
-		return this.visitExpression(node.operandNode);
+		return this.visit(node.operandNode);
 	}
 
 	visitBinaryExpression(node: BinaryExpressionNode): StaticType {
-		const left = this.visitExpression(node.leftNode);
-		const right = this.visitExpression(node.rightNode);
-		this.debug("visiting binary", {
-			left,
-			right,
-			operator: node.operatorNode.type,
-		});
+		const left = this.visit(node.leftNode);
+		const right = this.visit(node.rightNode);
 		switch (node.operatorNode.type) {
 			case SyntaxType.InclusiveRange: {
-				const invalidStart = left !== Num;
-				const invalidEnd = right !== Num;
-				if (invalidStart || invalidEnd) {
+				const nonNumNode = (() => {
+					if (!areCompatible(Num, left)) {
+						return node.leftNode;
+					}
+					if (!areCompatible(Num, right)) {
+						return node.rightNode;
+					}
+					return null;
+				})();
+				if (nonNumNode) {
 					this.error({
-						location: invalidStart
-							? node.leftNode.startPosition
-							: node.rightNode.startPosition,
+						location: nonNumNode.startPosition,
 						message: "A range must be between two numbers.",
 					});
 				}
 				return Num;
 			}
 			case SyntaxType.Plus: {
-				const validLeft = left === Num;
-				const validRight = right === Num;
-				if (!(validLeft && validRight)) {
+				const nonNumNode = (() => {
+					if (!areCompatible(Num, left)) {
+						return node.leftNode;
+					}
+					if (!areCompatible(Num, right)) {
+						return node.rightNode;
+					}
+					return null;
+				})();
+
+				if (nonNumNode != null) {
 					this.error({
-						location: validLeft
-							? node.rightNode.startPosition
-							: node.leftNode.startPosition,
+						location: nonNumNode.startPosition,
 						message: "Addition is only supported between numbers.",
+					});
+				}
+				return Num;
+			}
+			case SyntaxType.Multiply: {
+				const nonNumNode = (() => {
+					if (!areCompatible(Num, left)) {
+						return node.leftNode;
+					}
+					if (!areCompatible(Num, right)) {
+						return node.rightNode;
+					}
+					return null;
+				})();
+
+				if (nonNumNode != null) {
+					this.error({
+						location: nonNumNode.startPosition,
+						message: "Multiplication is only supported between numbers.",
+					});
+				}
+				return Num;
+			}
+			case SyntaxType.Minus: {
+				const nonNumNode = (() => {
+					if (!areCompatible(Num, left)) {
+						return node.leftNode;
+					}
+					if (!areCompatible(Num, right)) {
+						return node.rightNode;
+					}
+					return null;
+				})();
+
+				if (nonNumNode != null) {
+					this.error({
+						location: nonNumNode.startPosition,
+						message: "Subtraction is only supported between numbers.",
+					});
+				}
+				return Num;
+			}
+			case SyntaxType.Divide: {
+				const nonNumNode = (() => {
+					if (!areCompatible(Num, left)) {
+						return node.leftNode;
+					}
+					if (!areCompatible(Num, right)) {
+						return node.rightNode;
+					}
+					return null;
+				})();
+
+				if (nonNumNode != null) {
+					this.error({
+						location: nonNumNode.startPosition,
+						message: "Division is only supported between numbers.",
+					});
+				}
+				return Num;
+			}
+			case SyntaxType.Modulo: {
+				const nonNumNode = (() => {
+					if (!areCompatible(Num, left)) {
+						return node.leftNode;
+					}
+					if (!areCompatible(Num, right)) {
+						return node.rightNode;
+					}
+					return null;
+				})();
+
+				if (nonNumNode != null) {
+					this.error({
+						location: nonNumNode.startPosition,
+						message: "Modulus is only supported between numbers.",
 					});
 				}
 				return Num;
@@ -1109,6 +1102,33 @@ export class Checker {
 		throw new Error(
 			"Unable to determine binary expression result type: " + node.text,
 		);
+	}
+
+	visitListValue(node: ListValueNode): StaticType {
+		const { innerNodes } = node;
+		const elements = innerNodes.map((innerNode) => this.visit(innerNode));
+		if (elements.length === 0) return EmptyList;
+
+		if (elements.every((e) => !areCompatible(elements[0]!, e))) {
+			this.error({
+				location: node.startPosition,
+				message: "All elements in a list must be of the same type.",
+			});
+			return new ListType(Unknown);
+		}
+
+		return new ListType(elements[0]!);
+	}
+
+	visitPrimitiveValue(node: PrimitiveValueNode): StaticType {
+		switch (node.primitiveNode.type) {
+			case SyntaxType.Boolean:
+				return Bool;
+			case SyntaxType.Number:
+				return Num;
+			case SyntaxType.String:
+				return this.visitString(node.primitiveNode);
+		}
 	}
 
 	visitString(node: StringNode): StaticType {

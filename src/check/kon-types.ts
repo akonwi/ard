@@ -320,10 +320,6 @@ export function areCompatible(a: StaticType, b: StaticType): boolean {
 	return a.pretty === b.pretty;
 }
 
-export function isIterable(type: StaticType): boolean {
-	return type.is_iterable === true;
-}
-
 export type Signature = {
 	mutates: boolean;
 	callable: boolean;
@@ -386,4 +382,40 @@ export class FunctionType implements StaticType {
 	get is_iterable() {
 		return false;
 	}
+}
+
+export class Variable implements StaticType {
+	readonly name: string;
+	readonly static_type: StaticType;
+	readonly is_mutable: boolean;
+
+	constructor(input: {
+		name: string;
+		type: StaticType;
+		is_mutable?: boolean;
+	}) {
+		this.name = input.name;
+		this.static_type = input.type;
+		this.is_mutable = input.is_mutable ?? false;
+	}
+
+	get pretty() {
+		return this.static_type.pretty;
+	}
+
+	get is_iterable() {
+		return this.static_type.is_iterable;
+	}
+}
+
+export function get_cursor(type: StaticType): StaticType | null {
+	if (type.is_iterable === false) return null;
+
+	if (type instanceof ListType) {
+		return type.inner;
+	}
+	if (type instanceof Variable) {
+		return get_cursor(type.static_type);
+	}
+	return type;
 }

@@ -26,7 +26,7 @@ fn add(x: Num, y: Num) Num {
 	} satisfies Pick<FunctionType, "name" | "parameters" | "return_type">);
 });
 
-Deno.test.only("Function return type must match implementation", () => {
+Deno.test("Function return type must match implementation", () => {
 	const tree = parser.parse(`
 fn add(x: Num, y: Num) Str {
   x + y
@@ -56,7 +56,7 @@ Deno.test("Cannot call undeclared functions", () => {
 
 Deno.test("Function calls should match the signature", () => {
 	const tree = parser.parse(`
-fn add(x: Num, y: Num) Num {}
+fn add(x: Num, y: Num) Num { x + y }
 add(20)
 add(true, 5)
 `);
