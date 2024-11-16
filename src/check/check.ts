@@ -835,9 +835,9 @@ export class Checker {
 							location: memberNode.startPosition,
 							message: `Property '${memberNode.text}' does not exist on List.`,
 						});
+						return Unknown;
 					}
-					// handle signatures
-					return Unknown;
+					return signature.return_type;
 				}
 			}
 		}
