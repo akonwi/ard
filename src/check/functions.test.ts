@@ -26,6 +26,23 @@ fn add(x: Num, y: Num) Num {
 	} satisfies Pick<FunctionType, "name" | "parameters" | "return_type">);
 });
 
+Deno.test.only("Function return type must match implementation", () => {
+	const tree = parser.parse(`
+fn add(x: Num, y: Num) Str {
+  x + y
+}
+`);
+	const checker = new Checker(tree);
+	const diagnostics = checker.check();
+	expect(diagnostics).toEqual([
+		{
+			level: "error",
+			location: { row: 2, column: 2 },
+			message: "Expected 'Str' and received 'Num'.",
+		},
+	] as Diagnostic[]);
+});
+
 Deno.test("Cannot call undeclared functions", () => {
 	const tree = parser.parse(`add()`);
 	const checker = new Checker(tree);

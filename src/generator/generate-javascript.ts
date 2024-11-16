@@ -24,7 +24,9 @@ const SEMICOLON_EXCLUSIONS = new Set([
 	SyntaxType.EnumDefinition,
 ]);
 
-function generateNode(node: SyntaxNode): string {
+const makeIndent = (level: number) => "  ".repeat(level);
+
+function generateNode(node: SyntaxNode, indent_level = 0): string {
 	if (node == null) return "";
 	switch (node.type) {
 		case SyntaxType.Program: {

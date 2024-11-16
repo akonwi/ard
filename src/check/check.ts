@@ -27,6 +27,8 @@ import {
 	type StaticMemberAccessNode,
 	type MatchExpressionNode,
 	type MatchCaseNode,
+	type BlockNode,
+	type StatementNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -204,10 +206,7 @@ export class Checker {
 			return method(node);
 		}
 
-		for (const child of node.namedChildren) {
-			this.visit(child);
-		}
-		return Unknown;
+		return node.namedChildren.map((c) => this.visit(c)).pop() ?? Unknown;
 	}
 
 	private error(error: Omit<Diagnostic, "level">) {
@@ -377,6 +376,12 @@ export class Checker {
 			};
 		});
 
+		const def = new FunctionType({
+			name,
+			params,
+			return_type: this.getTypeFromTypeDefNode(returnNode),
+		});
+
 		const new_scope = new LexScope(this.scope());
 		for (const param of params) {
 			new_scope.addVariable(
@@ -387,15 +392,32 @@ export class Checker {
 			);
 		}
 		this.scopes.unshift(new_scope);
-		this.visit(bodyNode);
+		const actual_return = this.visit(bodyNode);
 		this.scopes.shift();
 
-		const def = new FunctionType({
-			name,
-			params,
-			return_type: this.getTypeFromTypeDefNode(returnNode),
-		});
+		this.debug("actual_return", actual_return);
+		const return_mismatch = this.validateCompatibility(
+			def.return_type,
+			actual_return,
+		);
+		if (return_mismatch) {
+			this.error({
+				location:
+					bodyNode.lastNamedChild?.startPosition ?? bodyNode.endPosition,
+				message: return_mismatch,
+			});
+		}
+
 		this.scope().addFunction(def);
+	}
+
+	visitBlock(node: BlockNode): StaticType {
+		const children = node.namedChildren.map((c) => this.visit(c));
+		this.debug("block children", {
+			children: node.namedChildren.map((c) => c?.type),
+			children_types: children.map((c) => c?.pretty),
+		});
+		return children.pop() ?? Void;
 	}
 
 	visitReassignment(node: ReassignmentNode) {
@@ -511,11 +533,11 @@ export class Checker {
 		}
 	}
 
-	visitExpressionNode(node: ExpressionNode): StaticType {
+	visitExpression(node: ExpressionNode): StaticType {
 		const expr = node.exprNode;
 		switch (expr.type) {
 			case SyntaxType.ParenExpression: {
-				return this.visitExpressionNode(expr.exprNode);
+				return this.visitExpression(expr.exprNode);
 			}
 			case SyntaxType.PrimitiveValue:
 				return getStaticTypeForPrimitiveValue(expr);
@@ -573,6 +595,8 @@ export class Checker {
 			case SyntaxType.MemberAccess: {
 				return this.visitMemberAccess(expr);
 			}
+			case SyntaxType.MatchExpression:
+				return this.visitMatchExpression(expr);
 			default: {
 				return Unknown;
 			}
@@ -581,7 +605,7 @@ export class Checker {
 
 	visitMatchExpression(node: MatchExpressionNode): StaticType {
 		const { exprNode, caseNodes } = node;
-		const expr = this.visitExpressionNode(exprNode);
+		const expr = this.visitExpression(exprNode);
 		if (expr instanceof EnumType) {
 			const cases = new Map<string, StaticType>();
 			for (const n of caseNodes) {
@@ -641,7 +665,7 @@ export class Checker {
 
 	visitForLoop(node: ForLoopNode) {
 		const { cursorNode, rangeNode, bodyNode } = node;
-		const range = this.visitExpressionNode(rangeNode);
+		const range = this.visitExpression(rangeNode);
 		if (!range.is_iterable) {
 			this.error({
 				message: `Cannot iterate over a '${range.pretty}'.`,
@@ -1042,12 +1066,17 @@ export class Checker {
 	}
 
 	visitUnaryExpression(node: UnaryExpressionNode): StaticType {
-		return this.visitExpressionNode(node.operandNode);
+		return this.visitExpression(node.operandNode);
 	}
 
 	visitBinaryExpression(node: BinaryExpressionNode): StaticType {
-		const left = this.visitExpressionNode(node.leftNode);
-		const right = this.visitExpressionNode(node.rightNode);
+		const left = this.visitExpression(node.leftNode);
+		const right = this.visitExpression(node.rightNode);
+		this.debug("visiting binary", {
+			left,
+			right,
+			operator: node.operatorNode.type,
+		});
 		switch (node.operatorNode.type) {
 			case SyntaxType.InclusiveRange: {
 				const invalidStart = left !== Num;
@@ -1076,7 +1105,10 @@ export class Checker {
 				return Num;
 			}
 		}
-		return left;
+		// return left;
+		throw new Error(
+			"Unable to determine binary expression result type: " + node.text,
+		);
 	}
 
 	visitString(node: StringNode): StaticType {
