@@ -30,6 +30,7 @@ import {
 	type BlockNode,
 	type PrimitiveValueNode,
 	type ListValueNode,
+	type AnonymousFunctionNode,
 } from "../ast.ts";
 import console from "node:console";
 import {
@@ -45,6 +46,7 @@ import {
 	ListType,
 	MapType,
 	Num,
+	type ParameterType,
 	type Signature,
 	type StaticType,
 	Str,
@@ -389,6 +391,115 @@ export class Checker {
 		this.scope().addFunction(def);
 	}
 
+	visitAnonymousFunction(
+		node: AnonymousFunctionNode,
+		expectedSignature?: StaticType,
+	): FunctionType {
+		const { parameterNodes, bodyNode, returnNode } = node;
+		const name = "none";
+		const params = parameterNodes.map((paramNode) => {
+			const { nameNode, typeNode } = paramNode;
+			return {
+				name: nameNode.text,
+				type: typeNode ? this.getTypeFromTypeDefNode(typeNode) : Unknown,
+			};
+		});
+
+		this.debug("visitAnonymousFunction", {
+			name,
+			params,
+			expectedSignature,
+		});
+
+		// assert that params match the expected signature
+		if (expectedSignature && expectedSignature instanceof FunctionType) {
+			if (params.length !== expectedSignature.parameters.length) {
+				this.error({
+					location: node.startPosition,
+					message: `Expected ${expectedSignature.parameters.length} parameters and received ${params.length}.`,
+				});
+				return new FunctionType({
+					name,
+					params,
+					return_type: expectedSignature.return_type,
+				});
+			}
+
+			const mismatched = expectedSignature.parameters.some((expected, i) => {
+				// infer from the expected signature
+				if (params[i]!.type === Unknown) {
+					params[i]!.type = expected.type;
+					return false;
+				}
+				if (!areCompatible(expected.type, params[i]!.type)) {
+					this.error({
+						location: node.startPosition,
+						message: `Expected parameter at ${i} to be of type ${
+							expected.type
+						} and received ${params[i]!.type}.`,
+					});
+					return true;
+				}
+				return false;
+			});
+			if (mismatched) {
+				return new FunctionType({
+					name,
+					params,
+					return_type: expectedSignature.return_type,
+				});
+			}
+		}
+
+		let return_type = returnNode
+			? this.getTypeFromTypeDefNode(returnNode)
+			: Unknown;
+
+		const new_scope = new LexScope(this.scope());
+		for (const param of params) {
+			new_scope.addVariable(
+				new Variable({
+					name: param.name,
+					type: param.type,
+				}),
+			);
+		}
+		this.scopes.unshift(new_scope);
+		const actual_return = this.visit(bodyNode);
+		this.scopes.shift();
+
+		this.debug("got anonymousFunction", {
+			name,
+			params,
+			return_type,
+			actual_return,
+		});
+
+		if (return_type === Unknown) {
+			return_type = actual_return;
+		}
+
+		const def = new FunctionType({
+			name,
+			params,
+			return_type,
+		});
+
+		const return_mismatch = this.validateCompatibility(
+			def.return_type,
+			actual_return,
+		);
+		if (return_mismatch) {
+			this.error({
+				location:
+					bodyNode.lastNamedChild?.startPosition ?? bodyNode.endPosition,
+				message: return_mismatch,
+			});
+		}
+
+		return def;
+	}
+
 	visitBlock(node: BlockNode): StaticType {
 		const children = node.namedChildren.map((c) => this.visit(c));
 		return children.pop() ?? Void;
@@ -651,6 +762,9 @@ export class Checker {
 			case SyntaxType.BinaryExpression: {
 				return this.visitBinaryExpression(node.exprNode);
 			}
+			case SyntaxType.AnonymousFunction: {
+				return this.visitAnonymousFunction(node.exprNode);
+			}
 			default: {
 				return Unknown;
 			}
@@ -772,9 +886,18 @@ export class Checker {
 			return signature.return_type;
 		}
 
-		const args = node.argumentsNode.argumentNodes.map((n) =>
-			this.getTypeFromExpressionNode(n),
-		);
+		const args = node.argumentsNode.argumentNodes.map((n, i) => {
+			if (n.exprNode.type === SyntaxType.AnonymousFunction) {
+				return this.visitAnonymousFunction(
+					n.exprNode,
+					signature.parameters?.[i].type,
+				);
+			}
+			return this.getTypeFromExpressionNode(n);
+		});
+		this.debug(`Checking arguments for ${parent.static_type.pretty}.${name}`, {
+			args: node.argumentsNode.namedChildren,
+		});
 		if (signature.parameters) {
 			if (args.length !== signature.parameters.length) {
 				this.error({
@@ -898,9 +1021,9 @@ export class Checker {
 							location: memberNode.startPosition,
 							message: `Property '${memberNode.text}' does not exist on Str.`,
 						});
+						return Unknown;
 					}
-					// handle signatures
-					return Unknown;
+					return str_member.return_type;
 				}
 			}
 		}

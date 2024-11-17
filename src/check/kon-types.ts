@@ -99,7 +99,24 @@ export class ListType implements StaticType {
 				"length",
 				{ mutates: false, callable: false, parameters: [], return_type: Num },
 			],
-			// ["map", { mutates: false, callable: true }],
+			[
+				"map",
+				{
+					mutates: false,
+					callable: true,
+					parameters: [
+						{
+							name: "callback",
+							type: new FunctionType({
+								name: "callback",
+								params: [{ name: "item", type: this.inner }],
+								return_type: this.inner,
+							}),
+						},
+					],
+					return_type: EmptyList,
+				},
+			],
 			[
 				"pop",
 				{
@@ -324,7 +341,7 @@ export type Signature = {
 	mutates: boolean;
 	callable: boolean;
 	parameters?: ParameterType[];
-	return_type: StaticType;
+	return_type: StaticType; // | (() => StaticType);
 };
 
 export const STR_MEMBERS = new Map<string, Signature>([
@@ -374,7 +391,7 @@ export class FunctionType implements StaticType {
 	}
 
 	get pretty() {
-		return `(${this.parameters.map((p) => p.name).join(", ")}) ${
+		return `(${this.parameters.map((p) => p.type.pretty).join(", ")}) ${
 			this.return_type.pretty
 		}`;
 	}

@@ -116,6 +116,8 @@ export interface ErrorNode extends NamedNodeBase {
 
 export const enum SyntaxType {
   ERROR = "ERROR",
+  AnonymousFunction = "anonymous_function",
+  AnonymousParameter = "anonymous_parameter",
   BinaryExpression = "binary_expression",
   Block = "block",
   Boolean = "boolean",
@@ -220,6 +222,8 @@ export type UnnamedType =
 export type TypeString = SyntaxType | UnnamedType;
 
 export type SyntaxNode = 
+  | AnonymousFunctionNode
+  | AnonymousParameterNode
   | BinaryExpressionNode
   | BlockNode
   | BooleanNode
@@ -319,6 +323,19 @@ export type SyntaxNode =
   | ErrorNode
   ;
 
+export interface AnonymousFunctionNode extends NamedNodeBase {
+  type: SyntaxType.AnonymousFunction;
+  bodyNode: BlockNode;
+  parameterNodes: AnonymousParameterNode[];
+  returnNode?: TypeDeclarationNode;
+}
+
+export interface AnonymousParameterNode extends NamedNodeBase {
+  type: SyntaxType.AnonymousParameter;
+  nameNode: IdentifierNode;
+  typeNode?: TypeDeclarationNode;
+}
+
 export interface BinaryExpressionNode extends NamedNodeBase {
   type: SyntaxType.BinaryExpression;
   leftNode: ExpressionNode;
@@ -360,7 +377,7 @@ export interface EnumVariantNode extends NamedNodeBase {
 
 export interface ExpressionNode extends NamedNodeBase {
   type: SyntaxType.Expression;
-  exprNode: BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MatchExpressionNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StaticMemberAccessNode | StructInstanceNode | UnaryExpressionNode;
+  exprNode: AnonymousFunctionNode | BinaryExpressionNode | FunctionCallNode | IdentifierNode | ListValueNode | MapValueNode | MatchExpressionNode | MemberAccessNode | ParenExpressionNode | PrimitiveValueNode | StaticMemberAccessNode | StructInstanceNode | UnaryExpressionNode;
 }
 
 export interface ForLoopNode extends NamedNodeBase {

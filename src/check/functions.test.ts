@@ -106,3 +106,19 @@ string.foo()
 		},
 	] as Diagnostic[]);
 });
+
+Deno.test("Anonymous functions as arguments", () => {
+	const tree = parser.parse(`
+let names = ["joe", "nick", "kevin"]
+names.map((name) Str { name.length })
+ `);
+	const checker = new Checker(tree);
+	const diagnostics = checker.check();
+	expect(diagnostics).toEqual([
+		{
+			level: "error",
+			location: { row: 2, column: 23 },
+			message: "Expected 'Str' and received 'Num'.",
+		},
+	] as Diagnostic[]);
+});
