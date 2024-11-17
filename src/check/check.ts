@@ -890,13 +890,10 @@ export class Checker {
 			if (n.exprNode.type === SyntaxType.AnonymousFunction) {
 				return this.visitAnonymousFunction(
 					n.exprNode,
-					signature.parameters?.[i].type,
+					signature.parameters?.[i]?.type,
 				);
 			}
 			return this.getTypeFromExpressionNode(n);
-		});
-		this.debug(`Checking arguments for ${parent.static_type.pretty}.${name}`, {
-			args: node.argumentsNode.namedChildren,
 		});
 		if (signature.parameters) {
 			if (args.length !== signature.parameters.length) {

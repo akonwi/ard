@@ -283,3 +283,12 @@ import { originalName: newName } from "filename"
 ```
 
 This specification provides an overview of the Kon language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
+
+### 7. Generics
+Generic types end with a `?`.
+
+```kon
+fn map(item: A?) Str {
+  "foo"
+}
+```

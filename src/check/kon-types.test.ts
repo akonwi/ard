@@ -3,6 +3,7 @@ import {
 	Bool,
 	EmptyList,
 	EnumType,
+	GenericType,
 	ListType,
 	MapType,
 	Num,
@@ -139,4 +140,32 @@ Deno.test("Compatibility checks for enums", () => {
 	expect(areCompatible(Color, Level)).toBe(false);
 
 	expect(areCompatible(Color, Color.variant("Red")!)).toBe(true);
+});
+
+Deno.test("Generics", () => {
+	const T = new GenericType("T");
+	expect(areCompatible(T, Num)).toBe(true);
+
+	T.fill(Str);
+	expect(areCompatible(T, Str)).toBe(true);
+	expect(areCompatible(T, Num)).toBe(false);
+});
+
+Deno.test("Generics in collections", () => {
+	const T = new GenericType("T");
+	const TList = new ListType(T);
+	const NumList = new ListType(Num);
+
+	expect(TList.can_hold(Num)).toBe(true);
+	expect(TList.can_hold(Str)).toBe(true);
+	expect(TList.can_hold(Bool)).toBe(true);
+	expect(areCompatible(TList, NumList)).toBe(true);
+	expect(areCompatible(TList, TList)).toBe(true);
+	expect(areCompatible(NumList, NumList)).toBe(true);
+
+	T.fill(Str);
+	expect(areCompatible(TList, NumList)).toBe(false);
+	expect(TList.can_hold(Str)).toBe(true);
+	expect(TList.can_hold(Num)).toBe(false);
+	expect(TList.can_hold(Bool)).toBe(false);
 });

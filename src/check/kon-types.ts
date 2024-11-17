@@ -2,7 +2,6 @@ import {
 	SyntaxType,
 	type PrimitiveTypeNode,
 	type PrimitiveValueNode,
-	type StructDefinitionNode,
 } from "../ast.ts";
 
 export interface StaticType {
@@ -75,7 +74,15 @@ export class ListType implements StaticType {
 		return areCompatible(this.inner, other);
 	}
 
+	compatible_with(other: StaticType): boolean {
+		if (!(other instanceof ListType)) return false;
+		return areCompatible(this.inner, other.inner);
+	}
+
 	_build() {
+		const is_unrefined =
+			this.inner instanceof GenericType && this.inner.is_open;
+
 		return new Map<string, Signature>([
 			[
 				"at",
@@ -293,6 +300,33 @@ export const Bool: StaticType = {
 	pretty: "Bool",
 	is_iterable: false,
 } as const;
+
+export class GenericType implements StaticType {
+	readonly name: string;
+	_inner: StaticType | null = null;
+
+	constructor(name: string) {
+		this.name = name;
+	}
+
+	fill(type: StaticType) {
+		this._inner = type;
+	}
+
+	get is_open() {
+		return this._inner === null;
+	}
+
+	get pretty() {
+		if (this._inner) return this._inner.pretty;
+		return "?";
+	}
+
+	get is_iterable() {
+		if (this._inner) return this._inner.is_iterable;
+		return false;
+	}
+}
 export const Unknown: StaticType = {
 	name: "unknown",
 	pretty: "unknown",
@@ -332,8 +366,14 @@ export function getStaticTypeForPrimitiveValue(
 export function areCompatible(a: StaticType, b: StaticType): boolean {
 	if (a === EmptyList && b instanceof ListType) return true;
 	if (a instanceof ListType && b === EmptyList) return true;
+	if (a instanceof ListType) {
+		return a.compatible_with(b);
+	}
 	if (a instanceof EnumType && b instanceof EnumVariant) return a === b.parent;
 	if (a instanceof EnumVariant && b instanceof EnumType) return a.parent === b;
+	if (a instanceof GenericType) {
+		if (a.is_open) return true;
+	}
 	return a.pretty === b.pretty;
 }
 

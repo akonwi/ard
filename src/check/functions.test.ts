@@ -111,6 +111,7 @@ Deno.test("Anonymous functions as arguments", () => {
 	const tree = parser.parse(`
 let names = ["joe", "nick", "kevin"]
 names.map((name) Str { name.length })
+names.map((name) { name.length })
  `);
 	const checker = new Checker(tree);
 	const diagnostics = checker.check();
