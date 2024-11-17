@@ -24,8 +24,6 @@ const SEMICOLON_EXCLUSIONS = new Set([
 	SyntaxType.EnumDefinition,
 ]);
 
-const makeIndent = (level: number) => "  ".repeat(level);
-
 function generateNode(node: SyntaxNode, indent_level = 0): string {
 	if (node == null) return "";
 	switch (node.type) {
@@ -62,6 +60,16 @@ function generateNode(node: SyntaxNode, indent_level = 0): string {
 		}
 		case SyntaxType.ParamDef: {
 			return `${node.nameNode.text}`;
+		}
+		case SyntaxType.AnonymousFunction: {
+			const { parameterNodes, bodyNode } = node;
+			const parameters = parameterNodes
+				.map((pNode) => {
+					const { nameNode } = pNode;
+					return nameNode.text;
+				})
+				.join(", ");
+			return `(${parameters}) => ${generateBlock(bodyNode, true)}`;
 		}
 		case SyntaxType.FunctionCall: {
 			const { targetNode, argumentsNode } = node;
