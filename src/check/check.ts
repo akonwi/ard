@@ -46,7 +46,6 @@ import {
 	ListType,
 	MapType,
 	Num,
-	type ParameterType,
 	type Signature,
 	type StaticType,
 	Str,

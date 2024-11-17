@@ -441,7 +441,7 @@ export class FunctionType implements StaticType {
 	}
 }
 
-export class Variable implements StaticType {
+export class Variable {
 	readonly name: string;
 	readonly static_type: StaticType;
 	readonly is_mutable: boolean;
@@ -454,14 +454,6 @@ export class Variable implements StaticType {
 		this.name = input.name;
 		this.static_type = input.type;
 		this.is_mutable = input.is_mutable ?? false;
-	}
-
-	get pretty() {
-		return this.static_type.pretty;
-	}
-
-	get is_iterable() {
-		return this.static_type.is_iterable;
 	}
 }
 
