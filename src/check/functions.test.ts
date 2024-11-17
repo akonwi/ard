@@ -112,6 +112,7 @@ Deno.test("Anonymous functions as arguments", () => {
 let names = ["joe", "nick", "kevin"]
 names.map((name) Str { name.length })
 names.map((name) { name.length })
+names.map((name: [Str]) { name.length })
  `);
 	const checker = new Checker(tree);
 	const diagnostics = checker.check();
@@ -120,6 +121,15 @@ names.map((name) { name.length })
 			level: "error",
 			location: { row: 2, column: 23 },
 			message: "Expected 'Str' and received 'Num'.",
+		},
+		{
+			level: "error",
+			location: {
+				column: 10,
+				row: 4,
+			},
+			message:
+				"Argument of type '([Str]) Num' is not assignable to parameter of type '(Str) Out?'",
 		},
 	] as Diagnostic[]);
 });

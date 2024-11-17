@@ -440,6 +440,10 @@ export function getStaticTypeForPrimitiveValue(
 }
 
 export function areCompatible(a: StaticType, b: StaticType): boolean {
+	if (a instanceof FunctionType) {
+		if (b instanceof FunctionType) return a.compatible_with(b);
+		return false;
+	}
 	if (a === EmptyList && b instanceof ListType) return true;
 	if (a instanceof ListType && b === EmptyList) return true;
 	if (a instanceof ListType) {
@@ -520,6 +524,15 @@ export class FunctionType implements StaticType {
 
 	get_property(_: string) {
 		return null;
+	}
+
+	compatible_with(other: FunctionType): boolean {
+		if (this.parameters.length !== other.parameters.length) return false;
+		const misMatchedParams = this.parameters.some((param, index) => {
+			return !areCompatible(param.type, other.parameters[index]!.type);
+		});
+		if (misMatchedParams) return false;
+		return areCompatible(this.return_type, other.return_type);
 	}
 }
 

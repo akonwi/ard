@@ -409,56 +409,20 @@ export class Checker {
 			};
 		});
 
-		this.debug("visitAnonymousFunction", {
-			name,
-			params,
-			expectedSignature,
-		});
-
-		// assert that params match the expected signature
-		if (expectedSignature && expectedSignature instanceof FunctionType) {
-			if (params.length !== expectedSignature.parameters.length) {
-				this.error({
-					location: node.startPosition,
-					message: `Expected ${expectedSignature.parameters.length} parameters and received ${params.length}.`,
-				});
-				return new FunctionType({
-					name,
-					params,
-					return_type: expectedSignature.return_type,
-				});
-			}
-
-			const mismatched = expectedSignature.parameters.some((expected, i) => {
-				// infer from the expected signature
-				if (params[i]!.type === Unknown) {
-					params[i]!.type = expected.type;
-					return false;
-				}
-				if (!areCompatible(expected.type, params[i]!.type)) {
-					this.error({
-						location: node.startPosition,
-						message: `Expected parameter at ${i} to be of type ${
-							expected.type
-						} and received ${params[i]!.type}.`,
-					});
-					return true;
-				}
-				return false;
-			});
-			if (mismatched) {
-				return new FunctionType({
-					name,
-					params,
-					return_type: expectedSignature.return_type,
-				});
-			}
-		}
-
 		let return_type = returnNode
 			? this.getTypeFromTypeDefNode(returnNode)
 			: Unknown;
 
+		// infer unspecified parameter types based on expected signature
+		if (expectedSignature && expectedSignature instanceof FunctionType) {
+			expectedSignature.parameters.forEach((expected, i) => {
+				if (params[i]!.type === Unknown) {
+					params[i]!.type = expected.type;
+				}
+			});
+		}
+
+		// create a new scope for the function body
 		const new_scope = new LexScope(this.scope());
 		for (const param of params) {
 			new_scope.addVariable(
@@ -472,13 +436,7 @@ export class Checker {
 		const actual_return = this.visit(bodyNode);
 		this.scopes.shift();
 
-		this.debug("got anonymousFunction", {
-			name,
-			params,
-			return_type,
-			actual_return,
-		});
-
+		// infer return type based on actual return type
 		if (return_type === Unknown) {
 			return_type = actual_return;
 		}
@@ -844,13 +802,14 @@ export class Checker {
 			});
 		}
 		if (parent.static_type instanceof ListType) {
-			const signature = parent.static_type.properties.get(name);
-			return this.checkArgumentsForCall({
-				name,
-				parent,
-				signature,
-				node,
-			});
+			const signature = parent.static_type.get_property(name);
+			if (signature != null)
+				return this.checkArgumentsForCall({
+					name,
+					parent,
+					signature,
+					node,
+				});
 		}
 		// todo: map
 		this.error({
@@ -948,7 +907,7 @@ export class Checker {
 		}
 
 		if (target.static_type instanceof ListType) {
-			const signature = target.static_type.properties.get(memberNode.text);
+			const signature = target.static_type.get_property(memberNode.text);
 			switch (memberNode.type) {
 				case SyntaxType.FunctionCall: {
 					return this.visitFunctionCall(memberNode, target);
@@ -966,7 +925,7 @@ export class Checker {
 			}
 		}
 		if (target.static_type instanceof MapType) {
-			const signature = target.static_type.properties.get(memberNode.text);
+			const signature = target.static_type.get_property(memberNode.text);
 			switch (memberNode.type) {
 				case SyntaxType.FunctionCall: {
 					const member = memberNode.targetNode.text;

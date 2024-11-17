@@ -3,6 +3,7 @@ import {
 	Bool,
 	EmptyList,
 	EnumType,
+	FunctionType,
 	GenericType,
 	ListType,
 	MapType,
@@ -176,4 +177,19 @@ Deno.test("Generics in collections", () => {
 	expect(TList.can_hold(Str)).toBe(true);
 	expect(TList.can_hold(Num)).toBe(false);
 	expect(TList.can_hold(Bool)).toBe(false);
+});
+
+Deno.test("Compatibility of functions", () => {
+	const mapFn = new FunctionType({
+		name: "map",
+		params: [{ name: "item", type: Str }],
+		return_type: new GenericType("T"),
+	});
+	const strToNum = new FunctionType({
+		name: "get_length",
+		params: [{ name: "string", type: Str }],
+		return_type: Num,
+	});
+
+	expect(areCompatible(mapFn, strToNum)).toBe(true);
 });
