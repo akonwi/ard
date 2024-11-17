@@ -116,6 +116,7 @@ let joe = Person { favorite_color: Color::Red }
 	const errors = checker.check();
 	expect(errors).toEqual([]);
 	expect(
-		checker.scope().getStruct("Person")?.fields.get("favorite_color")?.name,
+		checker.scope().getStruct("Person")?.fields.get("favorite_color")
+			?.return_type.name,
 	).toBe("Color");
 });

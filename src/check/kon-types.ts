@@ -10,6 +10,7 @@ export interface StaticType {
 	// used for display
 	pretty: string;
 	is_iterable: boolean;
+	get_property(name: string): Signature | null;
 }
 
 export class EnumType implements StaticType {
@@ -35,6 +36,10 @@ export class EnumType implements StaticType {
 	hasVariant(variant: EnumVariant): boolean {
 		return this.variants.has(variant.name);
 	}
+
+	get_property(_: string): Signature | null {
+		return null;
+	}
 }
 
 export class EnumVariant implements StaticType {
@@ -49,6 +54,10 @@ export class EnumVariant implements StaticType {
 
 	get pretty() {
 		return `${this.parent.pretty}::${this.name}`;
+	}
+
+	get_property(_: string): Signature | null {
+		return null;
 	}
 }
 
@@ -77,6 +86,10 @@ export class ListType implements StaticType {
 	compatible_with(other: StaticType): boolean {
 		if (!(other instanceof ListType)) return false;
 		return areCompatible(this.inner, other.inner);
+	}
+
+	get_property(name: string): Signature | null {
+		return this.properties.get(name) ?? null;
 	}
 
 	_build() {
@@ -169,6 +182,9 @@ export const EmptyList: StaticType = {
 	name: "EmptyList",
 	pretty: "[]",
 	is_iterable: true,
+	get_property(_: string): Signature | null {
+		return null;
+	},
 };
 
 export class MapType implements StaticType {
@@ -185,6 +201,10 @@ export class MapType implements StaticType {
 	}
 
 	readonly is_iterable = true;
+
+	get_property(name: string): Signature | null {
+		return this.properties.get(name) ?? null;
+	}
 
 	_build() {
 		return new Map<string, Signature>([
@@ -228,7 +248,7 @@ export class MapType implements StaticType {
 export class StructType implements StaticType {
 	constructor(
 		readonly name: string,
-		readonly fields: Map<string, StaticType> = new Map(),
+		readonly fields: Map<string, Signature> = new Map(),
 	) {}
 
 	get static_type(): string {
@@ -240,16 +260,26 @@ export class StructType implements StaticType {
 	}
 
 	readonly is_iterable = false;
+
+	get_property(name: string): Signature | null {
+		return this.fields.get(name) ?? null;
+	}
 }
 export const Void: StaticType = {
 	name: "void",
 	pretty: "Void",
 	is_iterable: false,
+	get_property(_: string) {
+		return null;
+	},
 };
 export const Num: StaticType = {
 	name: "number",
 	pretty: "Num",
 	is_iterable: true,
+	get_property(_: string) {
+		return null;
+	},
 } as const;
 
 class StrType implements StaticType {
@@ -260,6 +290,14 @@ class StrType implements StaticType {
 
 	constructor() {
 		this.properties = this._build();
+	}
+
+	get_property(name: string): Signature | null {
+		const property = this.properties.get(name);
+		if (!property) {
+			return null;
+		}
+		return property;
 	}
 
 	_build() {
@@ -299,6 +337,9 @@ export const Bool: StaticType = {
 	name: "boolean",
 	pretty: "Bool",
 	is_iterable: false,
+	get_property(_: string) {
+		return null;
+	},
 } as const;
 
 export class GenericType implements StaticType {
@@ -326,11 +367,19 @@ export class GenericType implements StaticType {
 		if (this._inner) return this._inner.is_iterable;
 		return false;
 	}
+
+	get_property(_: string) {
+		if (this._inner) return this._inner.get_property(_);
+		return null;
+	}
 }
 export const Unknown: StaticType = {
 	name: "unknown",
 	pretty: "unknown",
 	is_iterable: false,
+	get_property(_: string) {
+		return null;
+	},
 };
 
 export function getStaticTypeForPrimitiveType(
@@ -377,6 +426,8 @@ export function areCompatible(a: StaticType, b: StaticType): boolean {
 	return a.pretty === b.pretty;
 }
 
+// describes the signature of any property or function
+// this should really be a "union" of either a function or a property
 export type Signature = {
 	mutates: boolean;
 	callable: boolean;
@@ -438,6 +489,10 @@ export class FunctionType implements StaticType {
 
 	get is_iterable() {
 		return false;
+	}
+
+	get_property(_: string) {
+		return null;
 	}
 }
 

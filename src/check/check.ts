@@ -213,7 +213,7 @@ export class Checker {
 	}
 
 	visitStructDefinition(node: StructDefinitionNode) {
-		const fields = new Map<string, StaticType>();
+		const fields = new Map<string, Signature>();
 		for (const field of node.fieldNodes) {
 			let type: StaticType;
 			switch (field.typeNode.type) {
@@ -239,7 +239,12 @@ export class Checker {
 					return Unknown;
 				}
 			}
-			fields.set(field.nameNode.text, type);
+			fields.set(field.nameNode.text, {
+				mutates: false,
+				callable: false,
+				parameters: [],
+				return_type: type,
+			});
 		}
 		const def = new StructType(node.nameNode.text, fields);
 		this.scope().addStruct(def);
@@ -266,11 +271,11 @@ export class Checker {
 				const expected_type = expected_fields.get(member_name)!;
 				const provided_type =
 					this.getTypeFromStructPropPairNode(inputFieldNode);
-				if (!areCompatible(expected_type, provided_type)) {
+				if (!areCompatible(expected_type.return_type, provided_type)) {
 					this.error({
 						location: inputFieldNode.valueNode.startPosition,
 
-						message: `Expected '${expected_type.pretty}' and received '${provided_type.pretty}'.`,
+						message: `Expected '${expected_type.return_type.pretty}' and received '${provided_type.pretty}'.`,
 					});
 				}
 				received_fields.add(member_name);
@@ -1049,7 +1054,7 @@ export class Checker {
 						});
 						return Unknown;
 					}
-					return member_signature;
+					return member_signature.return_type;
 				}
 			}
 		}

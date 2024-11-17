@@ -62,12 +62,12 @@ Deno.test("Checking if a List can hold a type", () => {
 
 Deno.test("List built-in API", () => {
 	const str_list = new ListType(Str);
-	expect(str_list.properties.get("at")).toEqual({
+	expect(str_list.get_property("at")).toEqual({
 		mutates: false,
 		callable: true,
 		parameters: [{ name: "index", type: Num }],
 		return_type: Str,
-	} as Signature);
+	} satisfies Signature);
 
 	const concat = str_list.properties.get("concat");
 	expect(concat?.mutates).toBe(false);
