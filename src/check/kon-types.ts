@@ -89,7 +89,28 @@ export class ListType implements StaticType {
 	}
 
 	get_property(name: string): Signature | null {
-		return this.properties.get(name) ?? null;
+		switch (name) {
+			case "map": {
+				const Out = new GenericType("Out");
+				return {
+					mutates: false,
+					callable: true,
+					parameters: [
+						{
+							name: "callback",
+							type: new FunctionType({
+								name: "callback",
+								params: [{ name: "item", type: this.inner }],
+								return_type: Out,
+							}),
+						},
+					],
+					return_type: new ListType(Out),
+				};
+			}
+			default:
+				return this.properties.get(name) ?? null;
+		}
 	}
 
 	_build() {
@@ -293,13 +314,19 @@ class StrType implements StaticType {
 	}
 
 	get_property(name: string): Signature | null {
-		const property = this.properties.get(name);
-		if (!property) {
-			return null;
+		switch (name) {
+			default: {
+				const property = this.properties.get(name);
+				if (!property) {
+					return null;
+				}
+				return property;
+			}
 		}
-		return property;
 	}
 
+	// contains non-generic properties
+	// generic properties are created dynamically
 	_build() {
 		return new Map<string, Signature>([
 			[
@@ -360,7 +387,7 @@ export class GenericType implements StaticType {
 
 	get pretty() {
 		if (this._inner) return this._inner.pretty;
-		return "?";
+		return `${this.name}?`;
 	}
 
 	get is_iterable() {

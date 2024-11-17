@@ -105,6 +105,14 @@ Deno.test("List built-in API", () => {
 		return_type: Num,
 	} as Signature);
 
+	const map = str_list.get_property("map");
+	expect(map).toMatchObject({
+		mutates: false,
+		callable: true,
+	});
+	expect(map!.parameters![0]!.type.pretty).toBe(`(Str) Out?`);
+	expect(map?.return_type.pretty).toBe(`[Out?]`);
+
 	expect(new ListType(Bool).properties.get("at")?.return_type).toBe(Bool);
 });
 
