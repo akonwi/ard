@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/akonwi/kon/javascript"
 	tree_sitter_kon "github.com/akonwi/tree-sitter-kon/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -40,9 +41,9 @@ func main() {
 		}
 		parser := tree_sitter.NewParser()
 		parser.SetLanguage(language)
-		parser.Parse(sourceCode, nil)
+		tree := parser.Parse(sourceCode, nil)
 
-		fmt.Println("Successfully parsed the file")
+		fmt.Println(javascript.GenerateJS(sourceCode, tree))
 
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])

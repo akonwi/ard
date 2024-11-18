@@ -1,5 +1,7 @@
 github.com/akonwi/tree-sitter-kon v0.0.0-20241117224516-4c9660d7faf5 h1:2PO8ugUxqsJtCX391wEiiMZLaI5AoT//p1TZ62rK1No=
 github.com/akonwi/tree-sitter-kon v0.0.0-20241117224516-4c9660d7faf5/go.mod h1:L1SIiBWEZf8R5e/sOOst06H25crxgv1R3SLEoBIQgVs=
+github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
+github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/mattn/go-pointer v0.0.1 h1:n+XhsuGeVO6MEAp7xyEukFINEa+Quek5psIR/ylA6o0=
 github.com/mattn/go-pointer v0.0.1/go.mod h1:2zXcozF6qYGgmsG+SeTZz3oAbFLdD3OWqnUbNvJZAlc=
 github.com/tree-sitter/go-tree-sitter v0.24.0 h1:kRZb6aBNfcI/u0Qh8XEt3zjNVnmxTisDBN+kXK0xRYQ=
