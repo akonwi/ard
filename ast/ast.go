@@ -6,12 +6,21 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+type BaseNode struct {
+	TSNode *tree_sitter.Node
+}
+
+func (b *BaseNode) GetTSNode() *tree_sitter.Node {
+	return b.TSNode
+}
+
 type Node interface {
 	String() string
+	GetTSNode() *tree_sitter.Node
 }
 
 type Program struct {
-	Node
+	BaseNode
 	Statements []Statement
 }
 
@@ -26,7 +35,7 @@ type Expression interface {
 }
 
 type VariableDeclaration struct {
-	Node
+	BaseNode
 	Name    string
 	Mutable bool
 	Value   Expression
@@ -38,7 +47,7 @@ func (v *VariableDeclaration) String() string {
 }
 
 type StrLiteral struct {
-	Node
+	BaseNode
 	Value string
 }
 
@@ -48,7 +57,7 @@ func (s *StrLiteral) String() string {
 }
 
 type NumLiteral struct {
-	Node
+	BaseNode
 	Value string
 }
 
@@ -58,7 +67,7 @@ func (n *NumLiteral) String() string {
 }
 
 type BoolLiteral struct {
-	Node
+	BaseNode
 	Value bool
 }
 
@@ -82,6 +91,7 @@ func (p *Parser) text(node *tree_sitter.Node) string {
 func (p *Parser) Parse(tree *tree_sitter.Tree) (*Program, error) {
 	rootNode := tree.RootNode()
 	program := &Program{
+		BaseNode:   BaseNode{TSNode: rootNode},
 		Statements: []Statement{}}
 
 	for i := range rootNode.NamedChildCount() {
@@ -120,9 +130,10 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 		return nil, err
 	}
 	return &VariableDeclaration{
-		Mutable: isMutable,
-		Name:    name,
-		Value:   value,
+		BaseNode: BaseNode{TSNode: node},
+		Mutable:  isMutable,
+		Name:     name,
+		Value:    value,
 	}, nil
 }
 
@@ -141,13 +152,16 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	switch child.GrammarName() {
 	case "string":
 		return &StrLiteral{
-			Value: p.text(child)}, nil
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(child)}, nil
 	case "number":
 		return &NumLiteral{
-			Value: p.text(child)}, nil
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(child)}, nil
 	case "boolean":
 		return &BoolLiteral{
-			Value: p.text(child) == "true"}, nil
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(child) == "true"}, nil
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}

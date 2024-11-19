@@ -16,6 +16,12 @@ func init() {
 	treeSitterParser.SetLanguage(language)
 }
 
+var compareOptions = cmp.Options{
+	cmp.FilterPath(func(p cmp.Path) bool {
+		return p.Last().String() == ".BaseNode"
+	}, cmp.Ignore()),
+}
+
 func TestEmptyProgram(t *testing.T) {
 	sourceCode := []byte("")
 	tree := treeSitterParser.Parse(sourceCode, nil)
@@ -24,17 +30,16 @@ func TestEmptyProgram(t *testing.T) {
 		t.Fatalf("Error parsing tree: %v", err)
 	}
 
-	if diff := cmp.Diff(&Program{Statements: []Statement{}}, ast); diff != "" {
+	if diff := cmp.Diff(&Program{Statements: []Statement{}}, ast, compareOptions); diff != "" {
 		t.Errorf("AST does not match (-want +got):\n%s", diff)
 	}
 }
 
 func TestVariableDeclarations(t *testing.T) {
 	input := `
-                let name: Str = "Alice"
-                mut age: Num = 30
-                let is_student = true
-            `
+    let name: Str = "Alice"
+    mut age: Num = 30
+    let is_student = true`
 	expected := &Program{
 		Statements: []Statement{
 			&VariableDeclaration{
@@ -62,19 +67,12 @@ func TestVariableDeclarations(t *testing.T) {
 	}
 
 	tree := treeSitterParser.Parse([]byte(input), nil)
-	rootNode := tree.RootNode()
-
-	// Debug print
-	t.Logf("Root node type: %s", rootNode.GrammarName())
-	for i := range rootNode.ChildCount() {
-		t.Logf("Child %d: %s", i, rootNode.Child(i).GrammarName())
-	}
 	got, err := NewParser([]byte(input)).Parse(tree)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if diff := cmp.Diff(expected, got); diff != "" {
+	if diff := cmp.Diff(expected, got, compareOptions); diff != "" {
 		t.Errorf("AST mismatch (-want +got):\n%s", diff)
 	}
 }
