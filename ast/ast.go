@@ -46,12 +46,34 @@ func (v *VariableDeclaration) String() string {
 	return fmt.Sprintf("TODO")
 }
 
+type Parameter struct {
+	BaseNode
+	Name string
+}
+
+func (p *Parameter) String() string {
+	return p.Name
+}
+
+type FunctionDeclaration struct {
+	BaseNode
+	Name       string
+	Parameters []Parameter
+	Body       []Statement
+}
+
+func (f *FunctionDeclaration) StatementNode() {}
+func (f *FunctionDeclaration) String() string {
+	return fmt.Sprintf("(%s) ?", f.Name)
+}
+
 type StrLiteral struct {
 	BaseNode
 	Value string
 }
 
 func (s *StrLiteral) ExpressionNode() {}
+func (s *StrLiteral) StatementNode()  {}
 func (s *StrLiteral) String() string {
 	return s.Value
 }
@@ -62,6 +84,7 @@ type NumLiteral struct {
 }
 
 func (n *NumLiteral) ExpressionNode() {}
+func (n *NumLiteral) StatementNode()  {}
 func (n *NumLiteral) String() string {
 	return n.Value
 }
@@ -72,24 +95,26 @@ type BoolLiteral struct {
 }
 
 func (b *BoolLiteral) ExpressionNode() {}
+func (b *BoolLiteral) StatementNode()  {}
 func (b *BoolLiteral) String() string {
 	return fmt.Sprintf("%t", b.Value)
 }
 
 type Parser struct {
 	sourceCode []byte
+	tree       *tree_sitter.Tree
 }
 
-func NewParser(sourceCode []byte) *Parser {
-	return &Parser{sourceCode: sourceCode}
+func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
+	return &Parser{sourceCode: sourceCode, tree: tree}
 }
 
 func (p *Parser) text(node *tree_sitter.Node) string {
 	return string(p.sourceCode[node.StartByte():node.EndByte()])
 }
 
-func (p *Parser) Parse(tree *tree_sitter.Tree) (*Program, error) {
-	rootNode := tree.RootNode()
+func (p *Parser) Parse() (*Program, error) {
+	rootNode := p.tree.RootNode()
 	program := &Program{
 		BaseNode:   BaseNode{TSNode: rootNode},
 		Statements: []Statement{}}
@@ -109,13 +134,17 @@ func (p *Parser) Parse(tree *tree_sitter.Tree) (*Program, error) {
 
 func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 	child := node.NamedChild(0)
-	if child == nil {
-		println("statement child is nil")
-		return nil, fmt.Errorf("statement child is nil")
-	}
 	switch child.GrammarName() {
 	case "variable_definition":
 		return p.parseVariableDecl(child)
+	case "function_definition":
+		return p.parseFunctionDecl(child)
+	case "expression":
+		expr, err := p.parseExpression(child)
+		if err != nil {
+			return nil, err
+		}
+		return expr.(Statement), nil
 	default:
 		return nil, fmt.Errorf("Unhandled statement: %s", child.GrammarName())
 	}
@@ -135,6 +164,52 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 		Name:     name,
 		Value:    value,
 	}, nil
+}
+
+func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration, error) {
+	name := p.text(node.ChildByFieldName("name"))
+	parameters := p.parseParameters(
+		node.ChildByFieldName("parameters"))
+	body, err := p.parseBlock(node.ChildByFieldName("body"))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &FunctionDeclaration{
+		BaseNode:   BaseNode{TSNode: node},
+		Name:       name,
+		Parameters: parameters,
+		Body:       body,
+	}, nil
+}
+
+func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
+	parameterNodes := node.ChildrenByFieldName("parameter", p.tree.Walk())
+	parameters := []Parameter{}
+
+	for _, node := range parameterNodes {
+		parameters = append(parameters, Parameter{
+			BaseNode: BaseNode{TSNode: &node},
+			Name:     p.text(node.ChildByFieldName("name")),
+		})
+	}
+
+	return parameters
+}
+
+func (p *Parser) parseBlock(node *tree_sitter.Node) ([]Statement, error) {
+	statements := []Statement{}
+	for i := range node.NamedChildCount() {
+		stmt, err := p.parseStatement(node.NamedChild(i))
+		if err != nil {
+			return statements, err
+		}
+		if stmt != nil {
+			statements = append(statements, stmt)
+		}
+	}
+	return statements, nil
 }
 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
