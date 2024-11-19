@@ -3,6 +3,7 @@ package ast
 import (
 	"fmt"
 
+	checker "github.com/akonwi/kon/checker"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -12,6 +13,11 @@ type BaseNode struct {
 
 func (b *BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
+}
+
+type TypedNode interface {
+	Node
+	GetType() checker.Type
 }
 
 type Node interface {
@@ -32,13 +38,16 @@ type Statement interface {
 type Expression interface {
 	Node
 	ExpressionNode()
+	GetType() checker.Type
 }
 
 type VariableDeclaration struct {
 	BaseNode
-	Name    string
-	Mutable bool
-	Value   Expression
+	Name         string
+	Mutable      bool
+	Value        Expression
+	Type         checker.Type
+	InferredType checker.Type
 }
 
 func (v *VariableDeclaration) StatementNode() {}
@@ -49,6 +58,7 @@ func (v *VariableDeclaration) String() string {
 type Parameter struct {
 	BaseNode
 	Name string
+	Type checker.Type
 }
 
 func (p *Parameter) String() string {
@@ -59,7 +69,9 @@ type FunctionDeclaration struct {
 	BaseNode
 	Name       string
 	Parameters []Parameter
+	ReturnType checker.Type
 	Body       []Statement
+	Type       checker.FunctionType
 }
 
 func (f *FunctionDeclaration) StatementNode() {}
@@ -70,39 +82,56 @@ func (f *FunctionDeclaration) String() string {
 type StrLiteral struct {
 	BaseNode
 	Value string
+	Type  checker.Type
 }
 
+// impl interfaces
 func (s *StrLiteral) ExpressionNode() {}
 func (s *StrLiteral) StatementNode()  {}
 func (s *StrLiteral) String() string {
 	return s.Value
 }
+func (s *StrLiteral) GetType() checker.Type {
+	return checker.StrType
+}
 
 type NumLiteral struct {
 	BaseNode
 	Value string
+	Type  checker.Type
 }
 
+// impl interfaces
 func (n *NumLiteral) ExpressionNode() {}
 func (n *NumLiteral) StatementNode()  {}
 func (n *NumLiteral) String() string {
 	return n.Value
 }
+func (n *NumLiteral) GetType() checker.Type {
+	return checker.NumType
+}
 
 type BoolLiteral struct {
 	BaseNode
 	Value bool
+	Type  checker.Type
 }
 
+// impl interfaces
 func (b *BoolLiteral) ExpressionNode() {}
 func (b *BoolLiteral) StatementNode()  {}
 func (b *BoolLiteral) String() string {
 	return fmt.Sprintf("%t", b.Value)
 }
+func (b *BoolLiteral) GetType() checker.Type {
+	return checker.BoolType
+}
 
 type Parser struct {
 	sourceCode []byte
 	tree       *tree_sitter.Tree
+	scope      *checker.Scope
+	typeErrors []checker.Error
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
@@ -111,6 +140,11 @@ func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
 
 func (p *Parser) text(node *tree_sitter.Node) string {
 	return string(p.sourceCode[node.StartByte():node.EndByte()])
+}
+
+func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual checker.Type) {
+	msg := fmt.Sprintf("Type mismatch: expected %s, got %s", expected, actual)
+	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
 func (p *Parser) Parse() (*Program, error) {
@@ -153,17 +187,54 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration, error) {
 	isMutable := p.text(node.NamedChild(0)) == "mut"
 	name := p.text(node.NamedChild(1))
+	declaredType := p.resolveType(node.ChildByFieldName("type"))
 	value, err := p.parseExpression(node.ChildByFieldName("value"))
-
 	if err != nil {
 		return nil, err
 	}
+
+	inferredType := value.GetType()
+
+	if inferredType != declaredType {
+		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
+	}
+
 	return &VariableDeclaration{
-		BaseNode: BaseNode{TSNode: node},
-		Mutable:  isMutable,
-		Name:     name,
-		Value:    value,
+		BaseNode:     BaseNode{TSNode: node},
+		Mutable:      isMutable,
+		Name:         name,
+		Value:        value,
+		Type:         declaredType,
+		InferredType: inferredType,
 	}, nil
+}
+
+func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
+	if node == nil {
+		return nil
+	}
+
+	child := node.NamedChild(0)
+	switch child.GrammarName() {
+	case "primitive_type":
+		{
+			text := p.text(child)
+			switch text {
+			case "Str":
+				return checker.StrType
+			case "Num":
+				return checker.NumType
+			case "Bool":
+				return checker.BoolType
+			default:
+				panic(fmt.Errorf("Unresolved primitive type: %s", text))
+			}
+		}
+	case "void":
+		return checker.VoidType
+	default:
+		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
+	}
 }
 
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration, error) {
