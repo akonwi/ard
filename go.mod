@@ -2,6 +2,8 @@ module github.com/akonwi/kon
 
 go 1.23.1
 
+replace github.com/akonwi/tree-sitter-kon => ../tree-sitter-kon
+
 require github.com/tree-sitter/go-tree-sitter v0.24.0
 
 require (

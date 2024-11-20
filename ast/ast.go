@@ -195,7 +195,7 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 
 	inferredType := value.GetType()
 
-	if inferredType != declaredType {
+	if declaredType != nil && inferredType != declaredType {
 		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
 	}
 

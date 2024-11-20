@@ -90,6 +90,11 @@ func TestVariableTypeInference(t *testing.T) {
 		wantErrors []checker.Error
 	}{
 		{
+			name:       "Inferred type",
+			input:      `let name = "Alice"`,
+			wantErrors: []checker.Error{},
+		},
+		{
 			name:  "Str mismatch",
 			input: `let name: Str = false`,
 			wantErrors: []checker.Error{
