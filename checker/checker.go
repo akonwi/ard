@@ -86,11 +86,11 @@ func MakeError(msg string, node *tree_sitter.Node) Error {
 	// tree-sitter uses 0-based indexing, so make this human friendly
 	start := Position{
 		Line:   node.StartPosition().Row + 1,
-		Column: node.StartByte(),
+		Column: node.StartByte() + 1,
 	}
 	end := Position{
 		Line:   node.EndPosition().Row + 1,
-		Column: node.EndPosition().Column - 1,
+		Column: node.EndPosition().Column,
 	}
 	return Error{
 		Msg:   msg,

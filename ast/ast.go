@@ -79,6 +79,33 @@ func (f *FunctionDeclaration) String() string {
 	return fmt.Sprintf("(%s) ?", f.Name)
 }
 
+type Operator int
+
+const (
+	InvalidOp Operator = iota
+	Minus
+	Plus
+	Slash
+	Star
+	Bang
+)
+
+type UnaryExpression struct {
+	BaseNode
+	Operator Operator
+	Operand  Expression
+}
+
+// impl interfaces
+func (u *UnaryExpression) ExpressionNode() {}
+func (u *UnaryExpression) StatementNode()  {}
+func (u *UnaryExpression) String() string {
+	return fmt.Sprintf("(%v %v)", u.Operator, u.Operand)
+}
+func (u *UnaryExpression) GetType() checker.Type {
+	return u.Operand.GetType()
+}
+
 type StrLiteral struct {
 	BaseNode
 	Value string
@@ -135,7 +162,7 @@ type Parser struct {
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
-	return &Parser{sourceCode: sourceCode, tree: tree}
+	return &Parser{sourceCode: sourceCode, tree: tree, scope: checker.NewScope(nil)}
 }
 
 func (p *Parser) text(node *tree_sitter.Node) string {
@@ -144,6 +171,11 @@ func (p *Parser) text(node *tree_sitter.Node) string {
 
 func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual checker.Type) {
 	msg := fmt.Sprintf("Type mismatch: expected %s, got %s", expected, actual)
+	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+}
+
+func (p *Parser) operatorError(node *tree_sitter.Node, expected checker.Type) {
+	msg := fmt.Sprintf("The '%v' operator can only be used on '%v'", p.text(node), expected)
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
@@ -198,6 +230,13 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 	if declaredType != nil && inferredType != declaredType {
 		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
 	}
+
+	p.scope.Declare(checker.Symbol{
+		Mutable:  isMutable,
+		Name:     name,
+		Type:     declaredType,
+		Declared: true,
+	})
 
 	return &VariableDeclaration{
 		BaseNode:     BaseNode{TSNode: node},
@@ -309,6 +348,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	switch child.GrammarName() {
 	case "primitive_value":
 		return p.parsePrimitiveValue(child)
+	case "unary_expression":
+		return p.parseUnaryExpression(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
@@ -332,4 +373,41 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
+}
+
+func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error) {
+	operatorNode := node.ChildByFieldName("operator")
+	operandNode := node.ChildByFieldName("operand")
+
+	operator := InvalidOp
+	switch operatorNode.GrammarName() {
+	case "minus":
+		operator = Minus
+	case "bang":
+		operator = Bang
+	default:
+		return nil, fmt.Errorf("Unsupported unary operator: %v", operatorNode.GrammarName())
+	}
+
+	operand, err := p.parseExpression(operandNode)
+	if err != nil {
+		return nil, err
+	}
+
+	switch operator {
+	case Minus:
+		if operand.GetType() != checker.NumType {
+			p.operatorError(operatorNode, checker.NumType)
+		}
+	case Bang:
+		if operand.GetType() != checker.BoolType {
+			p.operatorError(operatorNode, checker.BoolType)
+		}
+	}
+
+	return &UnaryExpression{
+		BaseNode: BaseNode{TSNode: node},
+		Operator: operator,
+		Operand:  operand,
+	}, nil
 }
