@@ -241,16 +241,37 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 	name := p.text(node.ChildByFieldName("name"))
 	parameters := p.parseParameters(
 		node.ChildByFieldName("parameters"))
+	returnType := p.resolveType(node.ChildByFieldName("return"))
 	body, err := p.parseBlock(node.ChildByFieldName("body"))
 
 	if err != nil {
 		return nil, err
 	}
 
+	var inferredType checker.Type = checker.VoidType
+	var lastStatement Statement
+	if len(body) > 0 {
+		lastStatement = body[len(body)-1]
+		if expr, ok := lastStatement.(Expression); ok {
+			inferredType = expr.GetType()
+		}
+	}
+
+	if returnType == nil {
+		returnType = inferredType
+	} else if returnType != inferredType {
+		if lastStatement != nil {
+			p.typeMismatchError(lastStatement.GetTSNode(), returnType, inferredType)
+		} else {
+			p.typeMismatchError(node.ChildByFieldName("body"), returnType, inferredType)
+		}
+	}
+
 	return &FunctionDeclaration{
 		BaseNode:   BaseNode{TSNode: node},
 		Name:       name,
 		Parameters: parameters,
+		ReturnType: returnType,
 		Body:       body,
 	}, nil
 }
