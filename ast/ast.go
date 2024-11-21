@@ -83,11 +83,20 @@ type Operator int
 
 const (
 	InvalidOp Operator = iota
+	Bang
 	Minus
 	Plus
-	Slash
-	Star
-	Bang
+	Divide
+	Multiply
+	Modulo
+	GreaterThan
+	GreaterThanOrEqual
+	LessThan
+	LessThanOrEqual
+	Equal
+	NotEqual
+	And
+	Or
 )
 
 type UnaryExpression struct {
@@ -104,6 +113,21 @@ func (u *UnaryExpression) String() string {
 }
 func (u *UnaryExpression) GetType() checker.Type {
 	return u.Operand.GetType()
+}
+
+type BinaryExpression struct {
+	BaseNode
+	Operator    Operator
+	Left, Right Expression
+}
+
+func (b *BinaryExpression) ExpressionNode() {}
+func (b *BinaryExpression) StatementNode()  {}
+func (b *BinaryExpression) String() string {
+	return fmt.Sprintf("%v %v %v", b.Left, b.Operator, b.Right)
+}
+func (b *BinaryExpression) GetType() checker.Type {
+	return b.Left.GetType()
 }
 
 type StrLiteral struct {
@@ -174,8 +198,18 @@ func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual chec
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
-func (p *Parser) operatorError(node *tree_sitter.Node, expected checker.Type) {
+func (p *Parser) unaryOperatorError(node *tree_sitter.Node, expected checker.Type) {
 	msg := fmt.Sprintf("The '%v' operator can only be used on '%v'", p.text(node), expected)
+	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+}
+
+func (p *Parser) binaryOperatorError(node *tree_sitter.Node, operator string, expected checker.Type) {
+	msg := fmt.Sprintf("The '%v' operator can only be used between instances of '%v'", operator, expected)
+	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+}
+
+func (p *Parser) equalityOperatorError(node *tree_sitter.Node) {
+	msg := fmt.Sprintf("An equality operator can only be used between the 'Num', 'Str', or 'Bool'")
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
@@ -350,6 +384,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parsePrimitiveValue(child)
 	case "unary_expression":
 		return p.parseUnaryExpression(child)
+	case "binary_expression":
+		return p.parseBinaryExpression(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
@@ -371,7 +407,7 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(child) == "true"}, nil
 	default:
-		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
+		return nil, fmt.Errorf("Unhandled primitive node: %s", child.GrammarName())
 	}
 }
 
@@ -379,13 +415,8 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 	operatorNode := node.ChildByFieldName("operator")
 	operandNode := node.ChildByFieldName("operand")
 
-	operator := InvalidOp
-	switch operatorNode.GrammarName() {
-	case "minus":
-		operator = Minus
-	case "bang":
-		operator = Bang
-	default:
+	operator := resolveOperator(operatorNode)
+	if operator != Minus && operator != Bang {
 		return nil, fmt.Errorf("Unsupported unary operator: %v", operatorNode.GrammarName())
 	}
 
@@ -397,11 +428,11 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 	switch operator {
 	case Minus:
 		if operand.GetType() != checker.NumType {
-			p.operatorError(operatorNode, checker.NumType)
+			p.unaryOperatorError(operatorNode, checker.NumType)
 		}
 	case Bang:
 		if operand.GetType() != checker.BoolType {
-			p.operatorError(operatorNode, checker.BoolType)
+			p.unaryOperatorError(operatorNode, checker.BoolType)
 		}
 	}
 
@@ -409,5 +440,94 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 		BaseNode: BaseNode{TSNode: node},
 		Operator: operator,
 		Operand:  operand,
+	}, nil
+}
+
+func resolveOperator(node *tree_sitter.Node) Operator {
+	switch node.GrammarName() {
+	case "minus":
+		return Minus
+	case "bang":
+		return Bang
+	case "plus":
+		return Plus
+	case "divide":
+		return Divide
+	case "multiply":
+		return Multiply
+	case "modulo":
+		return Modulo
+	case "greater_than":
+		return GreaterThan
+	case "greater_than_or_equal":
+		return GreaterThanOrEqual
+	case "less_than":
+		return LessThan
+	case "less_than_or_equal":
+		return LessThanOrEqual
+	case "equal":
+		return Equal
+	case "not_equal":
+		return NotEqual
+	case "or":
+		return Or
+	case "and":
+		return And
+	default:
+		return InvalidOp
+	}
+}
+
+func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, error) {
+	leftNode := node.ChildByFieldName("left")
+	operatorNode := node.ChildByFieldName("operator")
+	rightNode := node.ChildByFieldName("right")
+
+	left, err := p.parseExpression(leftNode)
+	if err != nil {
+		return nil, err
+	}
+
+	operator := resolveOperator(operatorNode)
+	if operator == InvalidOp || operator == Bang {
+		return nil, fmt.Errorf("Unsupported operator: %v", operator)
+	}
+
+	right, err := p.parseExpression(rightNode)
+	if err != nil {
+		return nil, err
+	}
+
+	switch operator {
+	case Plus, Minus, Multiply, Divide, Modulo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
+		if left.GetType() != checker.NumType || right.GetType() != checker.NumType {
+			p.binaryOperatorError(node, p.text(operatorNode), checker.NumType)
+		}
+	case Equal, NotEqual:
+		if left.GetType() != right.GetType() {
+			p.equalityOperatorError(node)
+		}
+		// switch left.GetType() {
+		// case checker.NumType:
+		// case checker.BoolType:
+		// case checker.StrType:
+		// 	switch right.GetType() {
+		// 	case checker.NumType:
+		// 	case checker.BoolType:
+		// 	case checker.StrType:
+		// 		if left.GetType() != right.GetType() {
+		// 			p.equalityOperatorError(node)
+		// 		}
+		// 	}
+		// default:
+		// 	p.equalityOperatorError(node)
+		// }
+	}
+
+	return &BinaryExpression{
+		BaseNode: BaseNode{TSNode: node},
+		Left:     left,
+		Operator: operator,
+		Right:    right,
 	}, nil
 }
