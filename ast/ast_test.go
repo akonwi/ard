@@ -516,37 +516,25 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "- operator is only allowed on Num",
-			input: `30 - "f12"`,
+			name:  "Valid division",
+			input: `30 / 6`,
 			ast: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
-						Operator: Minus,
+						Operator: Divide,
 						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: &StrLiteral{
-							Value: `"f12"`,
+						Right: &NumLiteral{
+							Value: `6`,
 						},
 					},
 				},
 			},
-			errors: []checker.Error{
-				{
-					Msg: "The '-' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
-				},
-			},
+			errors: []checker.Error{},
 		},
 		{
-			name:  "/ operator is only allowed on Num",
+			name:  "Invalid division",
 			input: `30 / "f12"`,
 			ast: &Program{
 				Statements: []Statement{
@@ -576,7 +564,25 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "* operator is only allowed on Num",
+			name:  "Valid multiplication",
+			input: `30 * 10`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Multiply,
+						Left: &NumLiteral{
+							Value: `30`,
+						},
+						Right: &NumLiteral{
+							Value: `10`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid multiplication",
 			input: `30 * "f12"`,
 			ast: &Program{
 				Statements: []Statement{
@@ -606,7 +612,25 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "% operator is only allowed on Num",
+			name:  "Valid modulo",
+			input: `3 % 9`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Modulo,
+						Left: &NumLiteral{
+							Value: `3`,
+						},
+						Right: &NumLiteral{
+							Value: `9`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid modulo",
 			input: `30 % "f12"`,
 			ast: &Program{
 				Statements: []Statement{
@@ -636,7 +660,25 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "> operator is only allowed on Num",
+			name:  "Valid greater than",
+			input: `30 > 12`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: GreaterThan,
+						Left: &NumLiteral{
+							Value: `30`,
+						},
+						Right: &NumLiteral{
+							Value: `12`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid greater than",
 			input: `30 > "f12"`,
 			ast: &Program{
 				Statements: []Statement{
@@ -666,7 +708,25 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  ">= operator is only allowed on Num",
+			name:  "Valid greater than or equal",
+			input: `30 >= 12`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: GreaterThanOrEqual,
+						Left: &NumLiteral{
+							Value: `30`,
+						},
+						Right: &NumLiteral{
+							Value: `12`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid greater than or equal",
 			input: `30 >= "f12"`,
 			ast: &Program{
 				Statements: []Statement{
@@ -696,7 +756,25 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "< operator is only allowed on Num",
+			name:  "Valid less than",
+			input: `30 < 12`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: LessThan,
+						Left: &NumLiteral{
+							Value: `30`,
+						},
+						Right: &NumLiteral{
+							Value: `12`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid les than",
 			input: `30 < "f12"`,
 			ast: &Program{
 				Statements: []Statement{
@@ -726,8 +804,8 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "<= operator is only allowed on Num",
-			input: `30 <= "f12"`,
+			name:  "Valid less than or equal",
+			input: `30 <= 12`,
 			ast: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
@@ -735,8 +813,26 @@ func TestBinaryExpressions(t *testing.T) {
 						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: &StrLiteral{
-							Value: `"f12"`,
+						Right: &NumLiteral{
+							Value: `12`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid less than or equal",
+			input: `30 <= true`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: LessThanOrEqual,
+						Left: &NumLiteral{
+							Value: `30`,
+						},
+						Right: &BoolLiteral{
+							Value: true,
 						},
 					},
 				},
@@ -750,7 +846,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 					End: checker.Position{
 						Line:   1,
-						Column: 11,
+						Column: 10,
 					},
 				},
 			},
@@ -791,7 +887,7 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 			errors: []checker.Error{
 				{
-					Msg: "An equality operator can only be used between the 'Num', 'Str', or 'Bool'",
+					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 					Start: checker.Position{
 						Line:   1,
 						Column: 1,
@@ -820,6 +916,328 @@ func TestBinaryExpressions(t *testing.T) {
 				},
 			},
 			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid number equality checks",
+			input: `1 == "eleventy"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Equal,
+						Left: &NumLiteral{
+							Value: `1`,
+						},
+						Right: &StrLiteral{
+							Value: `"eleventy"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 15,
+					},
+				},
+			},
+		},
+		{
+			name:  "Valid boolean equality checks",
+			input: `true == false`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Equal,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &BoolLiteral{
+							Value: false,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid boolean equality checks",
+			input: `true == "eleventy"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Equal,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &StrLiteral{
+							Value: `"eleventy"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 18,
+					},
+				},
+			},
+		},
+
+		// Test cases for the '!=' operator
+		{
+			name:  "Valid string inequality checks",
+			input: `"Joe" != "Joe"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &StrLiteral{
+							Value: `"Joe"`,
+						},
+						Right: &StrLiteral{
+							Value: `"Joe"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid string inequality check",
+			input: `"Joe" != true`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &StrLiteral{
+							Value: `"Joe"`,
+						},
+						Right: &BoolLiteral{
+							Value: true,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 13,
+					},
+				},
+			},
+		},
+		{
+			name:  "Valid number inequality checks",
+			input: `1 != 1`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &NumLiteral{
+							Value: `1`,
+						},
+						Right: &NumLiteral{
+							Value: `1`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid number inequality checks",
+			input: `1 != "eleventy"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &NumLiteral{
+							Value: `1`,
+						},
+						Right: &StrLiteral{
+							Value: `"eleventy"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 15,
+					},
+				},
+			},
+		},
+		{
+			name:  "Valid boolean inequality checks",
+			input: `true != false`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &BoolLiteral{
+							Value: false,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid boolean inequality checks",
+			input: `true != "eleventy"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &StrLiteral{
+							Value: `"eleventy"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 18,
+					},
+				},
+			},
+		},
+
+		// logic operator checks
+		{
+			name:  "Valid use of 'and' operator",
+			input: `true and false`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: And,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &BoolLiteral{
+							Value: false,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Ivalid use of 'and' operator",
+			input: `true and "eleventy"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: And,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &StrLiteral{
+							Value: `"eleventy"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The 'and' operator can only be used between instances of 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 19,
+					},
+				},
+			},
+		},
+		{
+			name:  "Valid use of 'or' operator",
+			input: `true or false`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Or,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &BoolLiteral{
+							Value: false,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Ivalid use of 'or' operator",
+			input: `true or "eleventy"`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Or,
+						Left: &BoolLiteral{
+							Value: true,
+						},
+						Right: &StrLiteral{
+							Value: `"eleventy"`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{
+				{
+					Msg: "The 'or' operator can only be used between instances of 'Bool'",
+					Start: checker.Position{
+						Line:   1,
+						Column: 1,
+					},
+					End: checker.Position{
+						Line:   1,
+						Column: 18,
+					},
+				},
+			},
 		},
 	}
 

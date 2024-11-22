@@ -208,8 +208,13 @@ func (p *Parser) binaryOperatorError(node *tree_sitter.Node, operator string, ex
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
-func (p *Parser) equalityOperatorError(node *tree_sitter.Node) {
-	msg := fmt.Sprintf("An equality operator can only be used between the 'Num', 'Str', or 'Bool'")
+func (p *Parser) equalityOperatorError(node *tree_sitter.Node, operator string) {
+	msg := fmt.Sprintf("The '%v' operator can only be used between instances of 'Num', 'Str', or 'Bool'", operator)
+	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+}
+
+func (p *Parser) logicalOperatorError(node *tree_sitter.Node, operator string) {
+	msg := fmt.Sprintf("The '%v' operator can only be used between instances of 'Bool'", operator)
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
@@ -505,23 +510,12 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 		}
 	case Equal, NotEqual:
 		if left.GetType() != right.GetType() {
-			p.equalityOperatorError(node)
+			p.equalityOperatorError(node, p.text(operatorNode))
 		}
-		// switch left.GetType() {
-		// case checker.NumType:
-		// case checker.BoolType:
-		// case checker.StrType:
-		// 	switch right.GetType() {
-		// 	case checker.NumType:
-		// 	case checker.BoolType:
-		// 	case checker.StrType:
-		// 		if left.GetType() != right.GetType() {
-		// 			p.equalityOperatorError(node)
-		// 		}
-		// 	}
-		// default:
-		// 	p.equalityOperatorError(node)
-		// }
+	case And, Or:
+		if left.GetType() != checker.BoolType || right.GetType() != checker.BoolType {
+			p.logicalOperatorError(node, p.text(operatorNode))
+		}
 	}
 
 	return &BinaryExpression{
