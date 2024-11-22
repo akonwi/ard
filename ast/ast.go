@@ -97,6 +97,7 @@ const (
 	NotEqual
 	And
 	Or
+	Range
 )
 
 type UnaryExpression struct {
@@ -478,12 +479,15 @@ func resolveOperator(node *tree_sitter.Node) Operator {
 		return Or
 	case "and":
 		return And
+	case "inclusive_range":
+		return Range
 	default:
 		return InvalidOp
 	}
 }
 
 func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, error) {
+
 	leftNode := node.ChildByFieldName("left")
 	operatorNode := node.ChildByFieldName("operator")
 	rightNode := node.ChildByFieldName("right")
@@ -515,6 +519,11 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 	case And, Or:
 		if left.GetType() != checker.BoolType || right.GetType() != checker.BoolType {
 			p.logicalOperatorError(node, p.text(operatorNode))
+		}
+	case Range:
+		if left.GetType() != checker.NumType || right.GetType() != checker.NumType {
+			msg := "A range must be between two Num"
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, operatorNode))
 		}
 	}
 

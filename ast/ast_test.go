@@ -1239,6 +1239,54 @@ func TestBinaryExpressions(t *testing.T) {
 				},
 			},
 		},
+
+		// range operator
+		{
+			name:  "Valid use of range operator",
+			input: "1...10",
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Range,
+						Left: &NumLiteral{
+							Value: `1`,
+						},
+						Right: &NumLiteral{
+							Value: `10`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{},
+		},
+		{
+			name:  "Invalid use of range operator",
+			input: `"fizz"..10`,
+			ast: &Program{
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Range,
+						Left: &StrLiteral{
+							Value: `"fizz"`,
+						},
+						Right: &NumLiteral{
+							Value: `10`,
+						},
+					},
+				},
+			},
+			errors: []checker.Error{{
+				Msg: "A range must be between two Num",
+				Start: checker.Position{
+					Line:   1,
+					Column: 7,
+				},
+				End: checker.Position{
+					Line:   1,
+					Column: 8,
+				},
+			}},
+		},
 	}
 
 	for _, tt := range tests {
