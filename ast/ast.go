@@ -61,8 +61,9 @@ func (v *VariableDeclaration) String() string {
 
 type VariableAssignment struct {
 	BaseNode
-	Name  string
-	Value Expression
+	Name     string
+	Operator Operator
+	Value    Expression
 }
 
 // impl interfaces
@@ -101,7 +102,9 @@ const (
 	InvalidOp Operator = iota
 	Bang
 	Minus
+	Decrement
 	Plus
+	Increment
 	Divide
 	Multiply
 	Modulo
@@ -114,6 +117,7 @@ const (
 	And
 	Or
 	Range
+	Assign
 )
 
 type UnaryExpression struct {
@@ -340,9 +344,11 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 
 func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAssignment, error) {
 	nameNode := node.ChildByFieldName("name")
+	operatorNode := node.ChildByFieldName("operator")
 	valueNode := node.ChildByFieldName("value")
 
 	name := p.text(nameNode)
+	operator := resolveOperator(operatorNode)
 	symbol := p.scope.Lookup(name)
 
 	value, err := p.parseExpression(valueNode)
@@ -353,7 +359,7 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAss
 	if symbol == nil {
 		msg := fmt.Sprintf("Undefined: '%s'", name)
 		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: nameNode.Range()})
-		return &VariableAssignment{Name: name, Value: value}, nil
+		return &VariableAssignment{Name: name, Operator: operator, Value: value}, nil
 	}
 
 	if symbol.Mutable == false {
@@ -361,14 +367,23 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAss
 		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: nameNode.Range()})
 	}
 
-	if symbol.Type != value.GetType() {
-		msg := fmt.Sprintf("Expected a '%s' and received '%v'", symbol.Type, value.GetType())
-		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: valueNode.Range()})
+	switch operator {
+	case Assign:
+		if symbol.Type != value.GetType() {
+			msg := fmt.Sprintf("Expected a '%s' and received '%v'", symbol.Type, value.GetType())
+			p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: valueNode.Range()})
+		}
+	case Increment, Decrement:
+		if symbol.Type != checker.NumType || value.GetType() != checker.NumType {
+			msg := fmt.Sprintf("'%s' can only be used with 'Num'", p.text(operatorNode))
+			p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: valueNode.Range()})
+		}
 	}
 
 	return &VariableAssignment{
-		Name:  name,
-		Value: value,
+		Name:     name,
+		Operator: operator,
+		Value:    value,
 	}, nil
 }
 
@@ -507,18 +522,24 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 
 func resolveOperator(node *tree_sitter.Node) Operator {
 	switch node.GrammarName() {
+	case "=":
+		return Assign
 	case "minus":
 		return Minus
-	case "bang":
-		return Bang
+	case "decrement":
+		return Decrement
 	case "plus":
 		return Plus
+	case "increment":
+		return Increment
 	case "divide":
 		return Divide
 	case "multiply":
 		return Multiply
 	case "modulo":
 		return Modulo
+	case "bang":
+		return Bang
 	case "greater_than":
 		return GreaterThan
 	case "greater_than_or_equal":

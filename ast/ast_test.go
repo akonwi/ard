@@ -87,7 +87,8 @@ func TestVariableAssignment(t *testing.T) {
 						Value:        &StrLiteral{Value: `"Alice"`},
 					},
 					&VariableAssignment{
-						Name: "name",
+						Name:     "name",
+						Operator: Assign,
 						Value: &StrLiteral{
 							Value: `"Bob"`,
 						},
@@ -110,7 +111,8 @@ func TestVariableAssignment(t *testing.T) {
 						Value:        &StrLiteral{Value: `"Alice"`},
 					},
 					&VariableAssignment{
-						Name: "name",
+						Name:     "name",
+						Operator: Assign,
 						Value: &StrLiteral{
 							Value: `"Bob"`,
 						},
@@ -137,7 +139,8 @@ func TestVariableAssignment(t *testing.T) {
 						Value:        &StrLiteral{Value: `"Alice"`},
 					},
 					&VariableAssignment{
-						Name: "name",
+						Name:     "name",
+						Operator: Assign,
 						Value: &NumLiteral{
 							Value: `500`,
 						},
@@ -156,7 +159,8 @@ func TestVariableAssignment(t *testing.T) {
 			ast: &Program{
 				Statements: []Statement{
 					&VariableAssignment{
-						Name: "name",
+						Name:     "name",
+						Operator: Assign,
 						Value: &StrLiteral{
 							Value: `"Bob"`,
 						},
@@ -166,6 +170,138 @@ func TestVariableAssignment(t *testing.T) {
 			diagnostics: []checker.Error{
 				{
 					Msg: "Undefined: 'name'",
+				},
+			},
+		},
+		{
+			name: "Valid Num increment assignment",
+			input: `
+				mut count = 0
+				count =+ 2`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      true,
+						Name:         "count",
+						InferredType: checker.NumType,
+						Value:        &NumLiteral{Value: `0`},
+					},
+					&VariableAssignment{
+						Name:     "count",
+						Operator: Increment,
+						Value: &NumLiteral{
+							Value: `2`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{},
+		},
+		{
+			name: "Cannot increment an immutable variable",
+			input: `
+				let count = 0
+				count =+ 2`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      false,
+						Name:         "count",
+						InferredType: checker.NumType,
+						Value:        &NumLiteral{Value: `0`},
+					},
+					&VariableAssignment{
+						Name:     "count",
+						Operator: Increment,
+						Value: &NumLiteral{
+							Value: `2`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{
+				{
+					Msg: "'count' is not mutable",
+				},
+			},
+		},
+		{
+			name: "Valid decrement",
+			input: `
+				mut count = 0
+				count =- 2`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      true,
+						Name:         "count",
+						InferredType: checker.NumType,
+						Value:        &NumLiteral{Value: `0`},
+					},
+					&VariableAssignment{
+						Name:     "count",
+						Operator: Decrement,
+						Value: &NumLiteral{
+							Value: `2`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{},
+		},
+		{
+			name: "Invalid decrement",
+			input: `
+						mut name = "joe"
+						name =- 2`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      true,
+						Name:         "name",
+						InferredType: checker.StrType,
+						Value:        &StrLiteral{Value: `"joe"`},
+					},
+					&VariableAssignment{
+						Name:     "name",
+						Operator: Decrement,
+						Value: &NumLiteral{
+							Value: `2`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{
+				{
+					Msg: "'=-' can only be used with 'Num'",
+				},
+			},
+		},
+		{
+			name: "Cannot decrement an immutable variable",
+			input: `
+				let count = 0
+				count =- 2`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      false,
+						Name:         "count",
+						InferredType: checker.NumType,
+						Value:        &NumLiteral{Value: `0`},
+					},
+					&VariableAssignment{
+						Name:     "count",
+						Operator: Decrement,
+						Value: &NumLiteral{
+							Value: `2`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{
+				{
+					Msg: "'count' is not mutable",
 				},
 			},
 		},
