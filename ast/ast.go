@@ -52,8 +52,24 @@ type VariableDeclaration struct {
 
 func (v *VariableDeclaration) StatementNode() {}
 func (v *VariableDeclaration) String() string {
-	return fmt.Sprintf("TODO")
+	binding := "let"
+	if v.Mutable {
+		binding = "mut"
+	}
+	return fmt.Sprintf("%s %s: %s", binding, v.Name, v.Type)
 }
+
+type VariableAssignment struct {
+	BaseNode
+	Name  string
+	Value Expression
+}
+
+// impl interfaces
+func (v *VariableAssignment) String() string {
+	return fmt.Sprintf("%v = %s", v.Name, v.Value)
+}
+func (v *VariableAssignment) StatementNode() {}
 
 type Parameter struct {
 	BaseNode
@@ -243,6 +259,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 	switch child.GrammarName() {
 	case "variable_definition":
 		return p.parseVariableDecl(child)
+	case "reassignment":
+		return p.parseVariableReassignment(child)
 	case "function_definition":
 		return p.parseFunctionDecl(child)
 	case "expression":
@@ -271,10 +289,14 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
 	}
 
+	symbolType := declaredType
+	if declaredType == nil {
+		symbolType = inferredType
+	}
 	p.scope.Declare(checker.Symbol{
 		Mutable:  isMutable,
 		Name:     name,
-		Type:     declaredType,
+		Type:     symbolType,
 		Declared: true,
 	})
 
@@ -314,6 +336,40 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}
+}
+
+func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAssignment, error) {
+	nameNode := node.ChildByFieldName("name")
+	valueNode := node.ChildByFieldName("value")
+
+	name := p.text(nameNode)
+	symbol := p.scope.Lookup(name)
+
+	value, err := p.parseExpression(valueNode)
+	if err != nil {
+		return nil, err
+	}
+
+	if symbol == nil {
+		msg := fmt.Sprintf("Undefined: '%s'", name)
+		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: nameNode.Range()})
+		return &VariableAssignment{Name: name, Value: value}, nil
+	}
+
+	if symbol.Mutable == false {
+		msg := fmt.Sprintf("'%s' is not mutable", name)
+		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: nameNode.Range()})
+	}
+
+	if symbol.Type != value.GetType() {
+		msg := fmt.Sprintf("Expected a '%s' and received '%v'", symbol.Type, value.GetType())
+		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: valueNode.Range()})
+	}
+
+	return &VariableAssignment{
+		Name:  name,
+		Value: value,
+	}, nil
 }
 
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration, error) {

@@ -11,6 +11,11 @@ import (
 )
 
 var treeSitterParser *tree_sitter.Parser
+var compareOptions = cmp.Options{
+	cmp.FilterPath(func(p cmp.Path) bool {
+		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
+	}, cmp.Ignore()),
+}
 
 func init() {
 	language := tree_sitter.NewLanguage(tree_sitter_kon.Language())
@@ -61,10 +66,141 @@ func TestVariableDeclarations(t *testing.T) {
 	)
 }
 
-var compareOptions = cmp.Options{
-	cmp.FilterPath(func(p cmp.Path) bool {
-		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
-	}, cmp.Ignore()),
+func TestVariableAssignment(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		ast         *Program
+		diagnostics []checker.Error
+	}{
+		{
+			name: "Valid Str variable reassignment",
+			input: `
+				mut name = "Alice"
+				name = "Bob"`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      true,
+						Name:         "name",
+						InferredType: checker.StrType,
+						Value:        &StrLiteral{Value: `"Alice"`},
+					},
+					&VariableAssignment{
+						Name: "name",
+						Value: &StrLiteral{
+							Value: `"Bob"`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{},
+		},
+		{
+			name: "Immutable Str variable reassignment",
+			input: `
+				let name = "Alice"
+				name = "Bob"`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      false,
+						Name:         "name",
+						InferredType: checker.StrType,
+						Value:        &StrLiteral{Value: `"Alice"`},
+					},
+					&VariableAssignment{
+						Name: "name",
+						Value: &StrLiteral{
+							Value: `"Bob"`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{
+				{
+					Msg: "'name' is not mutable",
+				},
+			},
+		},
+		{
+			name: "Invalid Str variable reassignment",
+			input: `
+				mut name = "Alice"
+				name = 500`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      true,
+						Name:         "name",
+						InferredType: checker.StrType,
+						Value:        &StrLiteral{Value: `"Alice"`},
+					},
+					&VariableAssignment{
+						Name: "name",
+						Value: &NumLiteral{
+							Value: `500`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{
+				{
+					Msg: "Expected a 'Str' and received 'Num'",
+				},
+			},
+		},
+		{
+			name:  "Unknown variable reassignment",
+			input: `name = "Bob"`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableAssignment{
+						Name: "name",
+						Value: &StrLiteral{
+							Value: `"Bob"`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{
+				{
+					Msg: "Undefined: 'name'",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := treeSitterParser.Parse([]byte(tt.input), nil)
+			parser := NewParser([]byte(tt.input), tree)
+			ast, err := parser.Parse()
+			if err != nil && len(tt.diagnostics) == 0 {
+				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
+			}
+
+			// Compare the ASTs
+			diff := cmp.Diff(tt.ast, ast, compareOptions)
+			if diff != "" {
+				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
+			}
+
+			// Compare the errors
+			if len(parser.typeErrors) != len(tt.diagnostics) {
+				t.Fatalf(
+					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
+					len(tt.diagnostics),
+					parser.typeErrors,
+				)
+			}
+			for i, want := range tt.diagnostics {
+				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
+					t.Errorf("Error does not match (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
 }
 
 func assertAST(t *testing.T, input []byte, want *Program) {
