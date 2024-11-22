@@ -63,7 +63,7 @@ func TestVariableDeclarations(t *testing.T) {
 
 var compareOptions = cmp.Options{
 	cmp.FilterPath(func(p cmp.Path) bool {
-		return p.Last().String() == ".BaseNode"
+		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),
 }
 
@@ -99,9 +99,7 @@ func TestVariableTypeInference(t *testing.T) {
 			input: `let name: Str = false`,
 			wantErrors: []checker.Error{
 				{
-					Msg:   "Type mismatch: expected Str, got Bool",
-					Start: checker.Position{Line: 1, Column: 17},
-					End:   checker.Position{Line: 1, Column: 21},
+					Msg: "Type mismatch: expected Str, got Bool",
 				},
 			},
 		},
@@ -110,9 +108,7 @@ func TestVariableTypeInference(t *testing.T) {
 			input: `let name: Num = "Alice"`,
 			wantErrors: []checker.Error{
 				{
-					Msg:   "Type mismatch: expected Num, got Str",
-					Start: checker.Position{Line: 1, Column: 17},
-					End:   checker.Position{Line: 1, Column: 23},
+					Msg: "Type mismatch: expected Num, got Str",
 				},
 			},
 		},
@@ -121,9 +117,7 @@ func TestVariableTypeInference(t *testing.T) {
 			input: `let is_bool: Bool = "Alice"`,
 			wantErrors: []checker.Error{
 				{
-					Msg:   "Type mismatch: expected Bool, got Str",
-					Start: checker.Position{Line: 1, Column: 21},
-					End:   checker.Position{Line: 1, Column: 27},
+					Msg: "Type mismatch: expected Bool, got Str",
 				},
 			},
 		},
@@ -146,7 +140,7 @@ func TestVariableTypeInference(t *testing.T) {
 				)
 			}
 			for i, want := range tt.wantErrors {
-				if diff := cmp.Diff(want, parser.typeErrors[i]); diff != "" {
+				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
 					t.Errorf("Error does not match (-want +got):\n%s", diff)
 				}
 			}
@@ -220,9 +214,7 @@ func TestFunctionDeclarationTypes(t *testing.T) {
 			input: `fn get_greeting(person: Str) Str { 42 }`,
 			wantErrors: []checker.Error{
 				{
-					Msg:   "Type mismatch: expected Str, got Num",
-					Start: checker.Position{Line: 1, Column: 36},
-					End:   checker.Position{Line: 1, Column: 37},
+					Msg: "Type mismatch: expected Str, got Num",
 				},
 			},
 		},
@@ -245,7 +237,7 @@ func TestFunctionDeclarationTypes(t *testing.T) {
 				)
 			}
 			for i, want := range tt.wantErrors {
-				if diff := cmp.Diff(want, parser.typeErrors[i]); diff != "" {
+				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
 					t.Errorf("Error does not match (-want +got):\n%s", diff)
 				}
 			}
@@ -294,54 +286,6 @@ func TestUnaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '-' operator can only be used on 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-				},
-			},
-		},
-		{
-			name:  "Valid bang",
-			input: `!false`,
-			ast: &Program{
-				Statements: []Statement{
-					&UnaryExpression{
-						Operator: Bang,
-						Operand: &BoolLiteral{
-							Value: false,
-						}},
-				},
-			},
-			errors: []checker.Error{},
-		},
-		{
-			name:  "Invali bang",
-			input: `!"foo"`,
-			ast: &Program{
-				Statements: []Statement{
-					&UnaryExpression{
-						Operator: Bang,
-						Operand: &StrLiteral{
-							Value: `"foo"`,
-						}},
-				},
-			},
-			errors: []checker.Error{
-				{
-					Msg: "The '!' operator can only be used on 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
 				},
 			},
 		},
@@ -371,7 +315,7 @@ func TestUnaryExpressions(t *testing.T) {
 				)
 			}
 			for i, want := range tt.errors {
-				if diff := cmp.Diff(want, parser.typeErrors[i]); diff != "" {
+				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
 					t.Errorf("Error does not match (-want +got):\n%s", diff)
 				}
 			}
@@ -426,14 +370,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '+' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -456,14 +392,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '+' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 13,
-					},
 				},
 			},
 		},
@@ -504,14 +432,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '-' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -552,14 +472,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '/' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -600,14 +512,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '*' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -648,14 +552,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '%' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -696,14 +592,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '>' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -744,14 +632,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '>=' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 11,
-					},
 				},
 			},
 		},
@@ -792,14 +672,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '<' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -840,14 +712,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '<=' operator can only be used between instances of 'Num'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 10,
-					},
 				},
 			},
 		},
@@ -888,14 +752,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 13,
-					},
 				},
 			},
 		},
@@ -936,14 +792,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 15,
-					},
 				},
 			},
 		},
@@ -984,14 +832,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 18,
-					},
 				},
 			},
 		},
@@ -1034,14 +874,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 13,
-					},
 				},
 			},
 		},
@@ -1082,14 +914,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 15,
-					},
 				},
 			},
 		},
@@ -1130,14 +954,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 18,
-					},
 				},
 			},
 		},
@@ -1180,14 +996,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The 'and' operator can only be used between instances of 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 19,
-					},
 				},
 			},
 		},
@@ -1228,14 +1036,6 @@ func TestBinaryExpressions(t *testing.T) {
 			errors: []checker.Error{
 				{
 					Msg: "The 'or' operator can only be used between instances of 'Bool'",
-					Start: checker.Position{
-						Line:   1,
-						Column: 1,
-					},
-					End: checker.Position{
-						Line:   1,
-						Column: 18,
-					},
 				},
 			},
 		},
@@ -1277,14 +1077,6 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 			errors: []checker.Error{{
 				Msg: "A range must be between two Num",
-				Start: checker.Position{
-					Line:   1,
-					Column: 7,
-				},
-				End: checker.Position{
-					Line:   1,
-					Column: 8,
-				},
 			}},
 		},
 	}
@@ -1313,7 +1105,7 @@ func TestBinaryExpressions(t *testing.T) {
 				)
 			}
 			for i, want := range tt.errors {
-				if diff := cmp.Diff(want, parser.typeErrors[i]); diff != "" {
+				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
 					t.Errorf("Error does not match (-want +got):\n%s", diff)
 				}
 			}

@@ -74,27 +74,23 @@ func (s *Scope) Lookup(name string) *Symbol {
 }
 
 type Error struct {
-	Msg        string
-	Start, End Position
+	Msg   string
+	Range tree_sitter.Range
 }
 
-type Position struct {
-	Line, Column uint
-}
+// tree-sitter uses 0-based indexing, so make this human friendly when it's time to show it to humans
+// start := Position{
+// 	Line:   node.StartPosition().Row + 1,
+// 	Column: node.StartByte() + 1,
+// }
+// end := Position{
+// 	Line:   node.EndPosition().Row + 1,
+// 	Column: node.EndPosition().Column,
+// }
 
 func MakeError(msg string, node *tree_sitter.Node) Error {
-	// tree-sitter uses 0-based indexing, so make this human friendly
-	start := Position{
-		Line:   node.StartPosition().Row + 1,
-		Column: node.StartByte() + 1,
-	}
-	end := Position{
-		Line:   node.EndPosition().Row + 1,
-		Column: node.EndPosition().Column,
-	}
 	return Error{
 		Msg:   msg,
-		Start: start,
-		End:   end,
+		Range: node.Range(),
 	}
 }
