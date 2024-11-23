@@ -73,7 +73,7 @@ func (s *Scope) Lookup(name string) *Symbol {
 	return nil
 }
 
-type Error struct {
+type Diagnostic struct {
 	Msg   string
 	Range tree_sitter.Range
 }
@@ -88,8 +88,8 @@ type Error struct {
 // 	Column: node.EndPosition().Column,
 // }
 
-func MakeError(msg string, node *tree_sitter.Node) Error {
-	return Error{
+func MakeError(msg string, node *tree_sitter.Node) Diagnostic {
+	return Diagnostic{
 		Msg:   msg,
 		Range: node.Range(),
 	}

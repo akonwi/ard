@@ -203,7 +203,7 @@ type Parser struct {
 	sourceCode []byte
 	tree       *tree_sitter.Tree
 	scope      *checker.Scope
-	typeErrors []checker.Error
+	typeErrors []checker.Diagnostic
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
@@ -358,25 +358,25 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAss
 
 	if symbol == nil {
 		msg := fmt.Sprintf("Undefined: '%s'", name)
-		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: nameNode.Range()})
+		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
 		return &VariableAssignment{Name: name, Operator: operator, Value: value}, nil
 	}
 
 	if symbol.Mutable == false {
 		msg := fmt.Sprintf("'%s' is not mutable", name)
-		p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: nameNode.Range()})
+		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
 	}
 
 	switch operator {
 	case Assign:
 		if symbol.Type != value.GetType() {
 			msg := fmt.Sprintf("Expected a '%s' and received '%v'", symbol.Type, value.GetType())
-			p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: valueNode.Range()})
+			p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: valueNode.Range()})
 		}
 	case Increment, Decrement:
 		if symbol.Type != checker.NumType || value.GetType() != checker.NumType {
 			msg := fmt.Sprintf("'%s' can only be used with 'Num'", p.text(operatorNode))
-			p.typeErrors = append(p.typeErrors, checker.Error{Msg: msg, Range: valueNode.Range()})
+			p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: valueNode.Range()})
 		}
 	}
 

@@ -27,7 +27,7 @@ type test struct {
 	name        string
 	input       string
 	ast         *Program
-	diagnostics []checker.Error
+	diagnostics []checker.Diagnostic
 }
 
 func runTests(t *testing.T, tests []test) {
@@ -71,7 +71,7 @@ func TestEmptyProgram(t *testing.T) {
 			name:        "Empty program",
 			input:       "",
 			ast:         &Program{Statements: []Statement{}},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 	})
 }
@@ -115,7 +115,7 @@ func TestVariableDeclarations(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 	}
 
@@ -146,7 +146,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Immutable Str variable reassignment",
@@ -170,7 +170,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "'name' is not mutable",
 				},
@@ -198,7 +198,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "Expected a 'Str' and received 'Num'",
 				},
@@ -218,7 +218,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "Undefined: 'name'",
 				},
@@ -246,7 +246,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Cannot increment an immutable variable",
@@ -270,7 +270,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "'count' is not mutable",
 				},
@@ -298,7 +298,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Invalid decrement",
@@ -322,7 +322,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "'=-' can only be used with 'Num'",
 				},
@@ -350,7 +350,7 @@ func TestVariableAssignment(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "'count' is not mutable",
 				},
@@ -393,12 +393,12 @@ func TestVariableTypeInference(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Str mismatch",
 			input: `let name: Str = false`,
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "Type mismatch: expected Str, got Bool",
 				},
@@ -407,7 +407,7 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Num mismatch",
 			input: `let name: Num = "Alice"`,
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "Type mismatch: expected Num, got Str",
 				},
@@ -416,7 +416,7 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Bool mismatch",
 			input: `let is_bool: Bool = "Alice"`,
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "Type mismatch: expected Bool, got Str",
 				},
@@ -442,7 +442,7 @@ func TestFunctionDeclaration(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Inferred function return type",
@@ -461,7 +461,7 @@ func TestFunctionDeclaration(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Function with a parameter and declared return type",
@@ -486,7 +486,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function return must match declared return type",
 			input: `fn greet(person: Str) Str { }`,
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "Type mismatch: expected Str, got Void",
 				},
@@ -539,7 +539,7 @@ func TestUnaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid negation",
@@ -553,7 +553,7 @@ func TestUnaryExpressions(t *testing.T) {
 						}},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '-' operator can only be used on 'Num'",
 				},
@@ -585,7 +585,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid addition",
@@ -603,7 +603,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '+' operator can only be used between instances of 'Num'",
 				},
@@ -625,7 +625,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '+' operator can only be used between instances of 'Num'",
 				},
@@ -647,7 +647,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid subtraction",
@@ -665,7 +665,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '-' operator can only be used between instances of 'Num'",
 				},
@@ -687,7 +687,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid division",
@@ -705,7 +705,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '/' operator can only be used between instances of 'Num'",
 				},
@@ -727,7 +727,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid multiplication",
@@ -745,7 +745,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '*' operator can only be used between instances of 'Num'",
 				},
@@ -767,7 +767,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid modulo",
@@ -785,7 +785,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '%' operator can only be used between instances of 'Num'",
 				},
@@ -807,7 +807,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid greater than",
@@ -825,7 +825,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '>' operator can only be used between instances of 'Num'",
 				},
@@ -847,7 +847,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid greater than or equal",
@@ -865,7 +865,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '>=' operator can only be used between instances of 'Num'",
 				},
@@ -887,7 +887,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid les than",
@@ -905,7 +905,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '<' operator can only be used between instances of 'Num'",
 				},
@@ -927,7 +927,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid less than or equal",
@@ -945,7 +945,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '<=' operator can only be used between instances of 'Num'",
 				},
@@ -967,7 +967,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid string equality check",
@@ -985,7 +985,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1007,7 +1007,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid number equality checks",
@@ -1025,7 +1025,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1047,7 +1047,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid boolean equality checks",
@@ -1065,7 +1065,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1089,7 +1089,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid string inequality check",
@@ -1107,7 +1107,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1129,7 +1129,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid number inequality checks",
@@ -1147,7 +1147,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1169,7 +1169,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid boolean inequality checks",
@@ -1187,7 +1187,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1211,7 +1211,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Ivalid use of 'and' operator",
@@ -1229,7 +1229,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The 'and' operator can only be used between instances of 'Bool'",
 				},
@@ -1251,7 +1251,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Ivalid use of 'or' operator",
@@ -1269,7 +1269,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{
+			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The 'or' operator can only be used between instances of 'Bool'",
 				},
@@ -1293,11 +1293,11 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name:  "Invalid use of range operator",
-			input: `"fizz"..10`,
+			input: `"fizz"...10`,
 			ast: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
@@ -1311,7 +1311,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Error{{
+			diagnostics: []checker.Diagnostic{{
 				Msg: "A range must be between two Num",
 			}},
 		},
