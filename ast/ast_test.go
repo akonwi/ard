@@ -23,56 +23,107 @@ func init() {
 	treeSitterParser.SetLanguage(language)
 }
 
+type test struct {
+	name        string
+	input       string
+	ast         *Program
+	diagnostics []checker.Error
+}
+
+func runTests(t *testing.T, tests []test) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := treeSitterParser.Parse([]byte(tt.input), nil)
+			parser := NewParser([]byte(tt.input), tree)
+			ast, err := parser.Parse()
+			if err != nil && len(tt.diagnostics) == 0 {
+				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
+			}
+
+			// Compare the ASTs
+			if tt.ast != nil {
+				diff := cmp.Diff(tt.ast, ast, compareOptions)
+				if diff != "" {
+					t.Errorf("Built AST does not match (-want +got):\n%s", diff)
+				}
+			}
+
+			// Compare the errors
+			if len(parser.typeErrors) != len(tt.diagnostics) {
+				t.Fatalf(
+					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
+					len(tt.diagnostics),
+					parser.typeErrors,
+				)
+			}
+			for i, want := range tt.diagnostics {
+				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
+					t.Errorf("Error does not match (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
 func TestEmptyProgram(t *testing.T) {
-	assertAST(t, []byte(""), &Program{Statements: []Statement{}})
+	runTests(t, []test{
+		{
+			name:        "Empty program",
+			input:       "",
+			ast:         &Program{Statements: []Statement{}},
+			diagnostics: []checker.Error{},
+		},
+	})
 }
 
 func TestVariableDeclarations(t *testing.T) {
-	assertAST(t, []byte(`
-    let name: Str = "Alice"
-    mut age: Num = 30
-    let is_student: Bool = true`),
-		&Program{
-			Statements: []Statement{
-				&VariableDeclaration{
-					Name:         "name",
-					Mutable:      false,
-					Type:         checker.StrType,
-					InferredType: checker.StrType,
-					Value: &StrLiteral{
-						Value: `"Alice"`,
+	tests := []test{
+		{
+			name: "Valid variables",
+			input: `
+				let name: Str = "Alice"
+    		mut age: Num = 30
+      	let is_student: Bool = true`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:         "name",
+						Mutable:      false,
+						Type:         checker.StrType,
+						InferredType: checker.StrType,
+						Value: &StrLiteral{
+							Value: `"Alice"`,
+						},
 					},
-				},
-				&VariableDeclaration{
-					Name:         "age",
-					Mutable:      true,
-					Type:         checker.NumType,
-					InferredType: checker.NumType,
-					Value: &NumLiteral{
-						Value: "30",
+					&VariableDeclaration{
+						Name:         "age",
+						Mutable:      true,
+						Type:         checker.NumType,
+						InferredType: checker.NumType,
+						Value: &NumLiteral{
+							Value: "30",
+						},
 					},
-				},
-				&VariableDeclaration{
-					Name:         "is_student",
-					Mutable:      false,
-					Type:         checker.BoolType,
-					InferredType: checker.BoolType,
-					Value: &BoolLiteral{
-						Value: true,
+					&VariableDeclaration{
+						Name:         "is_student",
+						Mutable:      false,
+						Type:         checker.BoolType,
+						InferredType: checker.BoolType,
+						Value: &BoolLiteral{
+							Value: true,
+						},
 					},
 				},
 			},
+			diagnostics: []checker.Error{},
 		},
-	)
+	}
+
+	runTests(t, tests)
 }
 
 func TestVariableAssignment(t *testing.T) {
-	tests := []struct {
-		name        string
-		input       string
-		ast         *Program
-		diagnostics []checker.Error
-	}{
+	tests := []test{
 		{
 			name: "Valid Str variable reassignment",
 			input: `
@@ -307,36 +358,7 @@ func TestVariableAssignment(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tree := treeSitterParser.Parse([]byte(tt.input), nil)
-			parser := NewParser([]byte(tt.input), tree)
-			ast, err := parser.Parse()
-			if err != nil && len(tt.diagnostics) == 0 {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
-			}
-
-			// Compare the ASTs
-			diff := cmp.Diff(tt.ast, ast, compareOptions)
-			if diff != "" {
-				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
-			}
-
-			// Compare the errors
-			if len(parser.typeErrors) != len(tt.diagnostics) {
-				t.Fatalf(
-					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
-					len(tt.diagnostics),
-					parser.typeErrors,
-				)
-			}
-			for i, want := range tt.diagnostics {
-				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
-					t.Errorf("Error does not match (-want +got):\n%s", diff)
-				}
-			}
-		})
-	}
+	runTests(t, tests)
 }
 
 func assertAST(t *testing.T, input []byte, want *Program) {
@@ -354,22 +376,29 @@ func assertAST(t *testing.T, input []byte, want *Program) {
 	}
 }
 
-// this could be combined with the above tests
 func TestVariableTypeInference(t *testing.T) {
-	tests := []struct {
-		name       string
-		input      string
-		wantErrors []checker.Error
-	}{
+	tests := []test{
 		{
-			name:       "Inferred type",
-			input:      `let name = "Alice"`,
-			wantErrors: []checker.Error{},
+			name:  "Inferred type",
+			input: `let name = "Alice"`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      false,
+						Name:         "name",
+						InferredType: checker.StrType,
+						Value: &StrLiteral{
+							Value: `"Alice"`,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Str mismatch",
 			input: `let name: Str = false`,
-			wantErrors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "Type mismatch: expected Str, got Bool",
 				},
@@ -378,7 +407,7 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Num mismatch",
 			input: `let name: Num = "Alice"`,
-			wantErrors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "Type mismatch: expected Num, got Str",
 				},
@@ -387,7 +416,7 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Bool mismatch",
 			input: `let is_bool: Bool = "Alice"`,
-			wantErrors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "Type mismatch: expected Bool, got Str",
 				},
@@ -395,135 +424,104 @@ func TestVariableTypeInference(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tree := treeSitterParser.Parse([]byte(tt.input), nil)
-			parser := NewParser([]byte(tt.input), tree)
-			_, err := parser.Parse()
-			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
-			}
-
-			if len(parser.typeErrors) != len(tt.wantErrors) {
-				t.Errorf(
-					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
-					len(tt.wantErrors),
-					parser.typeErrors,
-				)
-			}
-			for i, want := range tt.wantErrors {
-				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
-					t.Errorf("Error does not match (-want +got):\n%s", diff)
-				}
-			}
-		})
-	}
+	runTests(t, tests)
 }
 
 func TestFunctionDeclaration(t *testing.T) {
-	assertAST(t, []byte(`
-		fn empty() {}
-		fn get_msg() {
-			"Hello, world!"
-		}
-		fn greet(person: Str) Str {
-		}
-		fn add(x: Num, y: Num) Num {
-		}
-	`), &Program{
-		Statements: []Statement{
-			&FunctionDeclaration{
-				Name:       "empty",
-				Parameters: []Parameter{},
-				ReturnType: checker.VoidType,
-				Body:       []Statement{},
-			},
-			&FunctionDeclaration{
-				Name:       "get_msg",
-				Parameters: []Parameter{},
-				ReturnType: checker.StrType,
-				Body: []Statement{
-					&StrLiteral{
-						Value: `"Hello, world!"`,
-					},
-				},
-			},
-			&FunctionDeclaration{
-				Name: "greet",
-				Parameters: []Parameter{
-					{
-						Name: "person",
-					},
-				},
-				ReturnType: checker.StrType,
-				Body:       []Statement{},
-			},
-			&FunctionDeclaration{
-				Name: "add",
-				Parameters: []Parameter{
-					{
-						Name: "x",
-					},
-					{
-						Name: "y",
-					},
-				},
-				ReturnType: checker.NumType,
-				Body:       []Statement{},
-			},
-		},
-	})
-}
-
-func TestFunctionDeclarationTypes(t *testing.T) {
-	tests := []struct {
-		name       string
-		input      string
-		wantErrors []checker.Error
-	}{
+	tests := []test{
 		{
-			name:  "Return type mismatch",
-			input: `fn get_greeting(person: Str) Str { 42 }`,
-			wantErrors: []checker.Error{
+			name:  "Empty function",
+			input: `fn empty() {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "empty",
+						Parameters: []Parameter{},
+						ReturnType: checker.VoidType,
+						Body:       []Statement{},
+					},
+				},
+			},
+			diagnostics: []checker.Error{},
+		},
+		{
+			name:  "Inferred function return type",
+			input: `fn get_msg() { "Hello, world!" }`,
+			ast: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "get_msg",
+						Parameters: []Parameter{},
+						ReturnType: checker.StrType,
+						Body: []Statement{
+							&StrLiteral{
+								Value: `"Hello, world!"`,
+							},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Error{},
+		},
+		{
+			name:  "Function with a parameter and declared return type",
+			input: `fn greet(person: Str) Str { "hello" }`,
+			ast: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "greet",
+						Parameters: []Parameter{
+							{
+								Name: "person",
+							},
+						},
+						ReturnType: checker.StrType,
+						Body: []Statement{
+							&StrLiteral{Value: `"hello"`},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Function return must match declared return type",
+			input: `fn greet(person: Str) Str { }`,
+			diagnostics: []checker.Error{
 				{
-					Msg: "Type mismatch: expected Str, got Num",
+					Msg: "Type mismatch: expected Str, got Void",
+				},
+			},
+		},
+		{
+			name:  "Function with two parameters",
+			input: `fn add(x: Num, y: Num) Num { 10 }`,
+			ast: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "add",
+						Parameters: []Parameter{
+							{
+								Name: "x",
+							},
+							{
+								Name: "y",
+							},
+						},
+						ReturnType: checker.NumType,
+						Body: []Statement{
+							&NumLiteral{Value: "10"},
+						},
+					},
 				},
 			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tree := treeSitterParser.Parse([]byte(tt.input), nil)
-			parser := NewParser([]byte(tt.input), tree)
-			_, err := parser.Parse()
-			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
-			}
-
-			if len(parser.typeErrors) != len(tt.wantErrors) {
-				t.Fatalf(
-					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
-					len(tt.wantErrors),
-					parser.typeErrors,
-				)
-			}
-			for i, want := range tt.wantErrors {
-				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
-					t.Errorf("Error does not match (-want +got):\n%s", diff)
-				}
-			}
-		})
-	}
+	runTests(t, tests)
 }
 
 func TestUnaryExpressions(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		ast    *Program
-		errors []checker.Error
-	}{
+	tests := []test{
 		{
 			name:  "Valid negation",
 			input: `let negative_number = -30`,
@@ -541,7 +539,7 @@ func TestUnaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid negation",
@@ -555,7 +553,7 @@ func TestUnaryExpressions(t *testing.T) {
 						}},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '-' operator can only be used on 'Num'",
 				},
@@ -563,45 +561,11 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tree := treeSitterParser.Parse([]byte(tt.input), nil)
-			parser := NewParser([]byte(tt.input), tree)
-			ast, err := parser.Parse()
-			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
-			}
-
-			// Compare the ASTs
-			diff := cmp.Diff(tt.ast, ast, compareOptions)
-			if diff != "" {
-				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
-			}
-
-			// Compare the errors
-			if len(parser.typeErrors) != len(tt.errors) {
-				t.Fatalf(
-					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
-					len(tt.errors),
-					parser.typeErrors,
-				)
-			}
-			for i, want := range tt.errors {
-				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
-					t.Errorf("Error does not match (-want +got):\n%s", diff)
-				}
-			}
-		})
-	}
+	runTests(t, tests)
 }
 
 func TestBinaryExpressions(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		ast    *Program
-		errors []checker.Error
-	}{
+	tests := []test{
 		{
 			name:  "Valid addition",
 			input: `-30 + 20`,
@@ -621,7 +585,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid addition",
@@ -639,7 +603,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '+' operator can only be used between instances of 'Num'",
 				},
@@ -661,7 +625,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '+' operator can only be used between instances of 'Num'",
 				},
@@ -683,7 +647,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid subtraction",
@@ -701,7 +665,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '-' operator can only be used between instances of 'Num'",
 				},
@@ -723,7 +687,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid division",
@@ -741,7 +705,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '/' operator can only be used between instances of 'Num'",
 				},
@@ -763,7 +727,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid multiplication",
@@ -781,7 +745,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '*' operator can only be used between instances of 'Num'",
 				},
@@ -803,7 +767,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid modulo",
@@ -821,7 +785,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '%' operator can only be used between instances of 'Num'",
 				},
@@ -843,7 +807,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid greater than",
@@ -861,7 +825,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '>' operator can only be used between instances of 'Num'",
 				},
@@ -883,7 +847,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid greater than or equal",
@@ -901,7 +865,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '>=' operator can only be used between instances of 'Num'",
 				},
@@ -923,7 +887,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid les than",
@@ -941,7 +905,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '<' operator can only be used between instances of 'Num'",
 				},
@@ -963,7 +927,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid less than or equal",
@@ -981,7 +945,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '<=' operator can only be used between instances of 'Num'",
 				},
@@ -1003,7 +967,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid string equality check",
@@ -1021,7 +985,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1043,7 +1007,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid number equality checks",
@@ -1061,7 +1025,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1083,7 +1047,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid boolean equality checks",
@@ -1101,7 +1065,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1125,7 +1089,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid string inequality check",
@@ -1143,7 +1107,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1165,7 +1129,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid number inequality checks",
@@ -1183,7 +1147,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1205,7 +1169,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Invalid boolean inequality checks",
@@ -1223,7 +1187,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
 				},
@@ -1247,7 +1211,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Ivalid use of 'and' operator",
@@ -1265,7 +1229,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The 'and' operator can only be used between instances of 'Bool'",
 				},
@@ -1287,7 +1251,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{},
+			diagnostics: []checker.Error{},
 		},
 		{
 			name:  "Ivalid use of 'or' operator",
@@ -1305,7 +1269,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{
+			diagnostics: []checker.Error{
 				{
 					Msg: "The 'or' operator can only be used between instances of 'Bool'",
 				},
@@ -1347,40 +1311,11 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			errors: []checker.Error{{
+			diagnostics: []checker.Error{{
 				Msg: "A range must be between two Num",
 			}},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tree := treeSitterParser.Parse([]byte(tt.input), nil)
-			parser := NewParser([]byte(tt.input), tree)
-			ast, err := parser.Parse()
-			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
-			}
-
-			// Compare the ASTs
-			diff := cmp.Diff(tt.ast, ast, compareOptions)
-			if diff != "" {
-				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
-			}
-
-			// Compare the errors
-			if len(parser.typeErrors) != len(tt.errors) {
-				t.Fatalf(
-					"There were a different number of errors than expected: wanted %v\n actual errors:\n%v",
-					len(tt.errors),
-					parser.typeErrors,
-				)
-			}
-			for i, want := range tt.errors {
-				if diff := cmp.Diff(want, parser.typeErrors[i], compareOptions); diff != "" {
-					t.Errorf("Error does not match (-want +got):\n%s", diff)
-				}
-			}
-		})
-	}
+	runTests(t, tests)
 }
