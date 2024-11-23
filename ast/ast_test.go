@@ -1319,3 +1319,70 @@ func TestBinaryExpressions(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestIdentifiers(t *testing.T) {
+	tests := []test{
+		{
+			name:  "referencing undefined variables",
+			input: "count <= 10",
+			diagnostics: []checker.Diagnostic{
+				{
+					Msg: "Undefined: 'count'",
+				},
+			},
+		},
+		{
+			name: "referencing known variables",
+			input: `
+				let count = 10
+		 		count <= 10`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      false,
+						Name:         "count",
+						Value:        &NumLiteral{Value: "10"},
+						InferredType: checker.NumType,
+					},
+					&BinaryExpression{
+						Left:     &Identifier{Name: "count", Type: checker.NumType},
+						Operator: LessThanOrEqual,
+						Right:    &NumLiteral{Value: "10"},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+// func TestWhileLoop(t *testing.T) {
+// 	tests := []test{
+// 		{
+// 			name: "valid while loop",
+// 			input: `
+// 				mut count = 0
+// 				while count <= 9 {
+// 					count =+ 1
+// 				}`,
+// 			ast: &Program{
+// 				Statements: []Statement{
+// 					&VariableDeclaration{
+// 						Mutable:      true,
+// 						Name:         "count",
+// 						InferredType: checker.NumType,
+// 						Value:        &NumLiteral{Value: "0"},
+// 					},
+// 					&WhileLoop{
+// 						Condition: &BinaryExpression{
+// 							Left: Expression,
+// 						},
+// 					},
+// 				},
+// 			},
+// 		},
+// 	}
+
+// 	runTests(t, tests)
+// }

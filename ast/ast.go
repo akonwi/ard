@@ -96,6 +96,17 @@ func (f *FunctionDeclaration) String() string {
 	return fmt.Sprintf("(%s) ?", f.Name)
 }
 
+type WhileLoop struct {
+	BaseNode
+	Condition Expression
+	Block     []Statement
+}
+
+func (w *WhileLoop) StatementNode() {}
+func (w *WhileLoop) String() string {
+	return "while"
+}
+
 type Operator int
 
 const (
@@ -149,6 +160,21 @@ func (b *BinaryExpression) String() string {
 }
 func (b *BinaryExpression) GetType() checker.Type {
 	return b.Left.GetType()
+}
+
+type Identifier struct {
+	BaseNode
+	Name string
+	Type checker.Type
+}
+
+func (i *Identifier) ExpressionNode() {}
+func (i *Identifier) StatementNode()  {}
+func (i *Identifier) String() string {
+	return fmt.Sprintf("Identifier(%s)", i.Name)
+}
+func (i *Identifier) GetType() checker.Type {
+	return i.Type
 }
 
 type StrLiteral struct {
@@ -267,6 +293,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return p.parseVariableReassignment(child)
 	case "function_definition":
 		return p.parseFunctionDecl(child)
+	case "while_loop":
+		return p.parseWhileLoop(child)
 	case "expression":
 		expr, err := p.parseExpression(child)
 		if err != nil {
@@ -454,11 +482,30 @@ func (p *Parser) parseBlock(node *tree_sitter.Node) ([]Statement, error) {
 	return statements, nil
 }
 
+func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
+	conditionNode := node.ChildByFieldName("condition")
+	// bodyNode := node.ChildByFieldName("body")
+
+	condition, err := p.parseExpression(conditionNode)
+	if err != nil {
+		return nil, err
+	}
+
+	if condition.GetType() != checker.BoolType {
+		msg := fmt.Sprintf("A while loop condition must be a 'Bool' expression")
+		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: conditionNode.Range()})
+	}
+
+	return nil, fmt.Errorf("Unimplemented")
+}
+
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "primitive_value":
 		return p.parsePrimitiveValue(child)
+	case "identifier":
+		return p.parseIdentifier(child)
 	case "unary_expression":
 		return p.parseUnaryExpression(child)
 	case "binary_expression":
@@ -466,6 +513,18 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
+}
+
+func (p *Parser) parseIdentifier(node *tree_sitter.Node) (*Identifier, error) {
+	name := p.text(node)
+	symbol := p.scope.Lookup(name)
+	if symbol == nil {
+		msg := fmt.Sprintf("Undefined: '%s'", name)
+		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+		return nil, fmt.Errorf(msg)
+	}
+
+	return &Identifier{Name: name, Type: symbol.Type}, nil
 }
 
 func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error) {
@@ -564,7 +623,6 @@ func resolveOperator(node *tree_sitter.Node) Operator {
 }
 
 func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, error) {
-
 	leftNode := node.ChildByFieldName("left")
 	operatorNode := node.ChildByFieldName("operator")
 	rightNode := node.ChildByFieldName("right")
