@@ -1279,7 +1279,7 @@ func TestBinaryExpressions(t *testing.T) {
 		// range operator
 		{
 			name:  "Valid use of range operator",
-			input: "1...10",
+			input: "1..10",
 			ast: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
@@ -1357,32 +1357,207 @@ func TestIdentifiers(t *testing.T) {
 	runTests(t, tests)
 }
 
-// func TestWhileLoop(t *testing.T) {
-// 	tests := []test{
-// 		{
-// 			name: "valid while loop",
-// 			input: `
-// 				mut count = 0
-// 				while count <= 9 {
-// 					count =+ 1
-// 				}`,
-// 			ast: &Program{
-// 				Statements: []Statement{
-// 					&VariableDeclaration{
-// 						Mutable:      true,
-// 						Name:         "count",
-// 						InferredType: checker.NumType,
-// 						Value:        &NumLiteral{Value: "0"},
-// 					},
-// 					&WhileLoop{
-// 						Condition: &BinaryExpression{
-// 							Left: Expression,
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+func TestWhileLoop(t *testing.T) {
+	tests := []test{
+		{
+			name: "valid while loop",
+			input: `
+				mut count = 0
+				while count <= 9 {
+					count =+ 1
+				}`,
+			ast: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      true,
+						Name:         "count",
+						InferredType: checker.NumType,
+						Value:        &NumLiteral{Value: "0"},
+					},
+					&WhileLoop{
+						Condition: &BinaryExpression{
+							Left:     &Identifier{Name: "count", Type: checker.NumType},
+							Operator: LessThanOrEqual,
+							Right:    &NumLiteral{Value: "9"},
+						},
+						Body: []Statement{
+							&VariableAssignment{
+								Name:     "count",
+								Operator: Increment,
+								Value:    &NumLiteral{Value: "1"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "With non-boolean condition",
+			input: `
+						while 9 - 7 {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&WhileLoop{
+						Condition: &BinaryExpression{
+							Left:     &NumLiteral{Value: "9"},
+							Operator: Minus,
+							Right:    &NumLiteral{Value: "7"},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Msg: "A while loop condition must be a 'Bool' expression"},
+			},
+		},
+	}
 
-// 	runTests(t, tests)
-// }
+	runTests(t, tests)
+}
+
+func TestIfAndElse(t *testing.T) {
+	tests := []test{
+		{
+			name:  "Valid if statement",
+			input: `if true {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
+						Body:      []Statement{},
+						Else:      nil,
+					},
+				},
+			},
+		},
+		{
+			name:  "Invalid condition expression",
+			input: `if 20 - 1 {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&IfStatement{
+						Condition: &BinaryExpression{
+							Left:     &NumLiteral{Value: "20"},
+							Operator: Minus,
+							Right:    &NumLiteral{Value: "1"},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{{Msg: "An if condition must be a 'Bool' expression"}},
+		},
+		{
+			name: "Valid if-else",
+			input: `
+				if true {}
+				else {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
+						Body:      []Statement{},
+						Else: &IfStatement{
+							Condition: nil,
+							Body:      []Statement{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Valid if-else if",
+			input: `
+				if true {}
+				else if false {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
+						Body:      []Statement{},
+						Else: &IfStatement{
+							Condition: &BoolLiteral{Value: false},
+							Body:      []Statement{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Valid if-else-if-else",
+			input: `
+				if true {}
+				else if false {}
+				else {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
+						Body:      []Statement{},
+						Else: &IfStatement{
+							Condition: &BoolLiteral{Value: false},
+							Body:      []Statement{},
+							Else: &IfStatement{
+								Condition: nil,
+								Body:      []Statement{},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestForLoops(t *testing.T) {
+	tests := []test{
+		{
+			name:  "Valid number range",
+			input: `for i in 1..10 {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&ForLoop{
+						Cursor: Identifier{Name: "i", Type: checker.NumType},
+						Iterable: &BinaryExpression{
+							Left:     &NumLiteral{Value: "1"},
+							Operator: Range,
+							Right:    &NumLiteral{Value: "10"},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name:  "Iterating over a string",
+			input: `for char in "foobar" {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&ForLoop{
+						Cursor: Identifier{Name: "char", Type: checker.StrType},
+						Iterable: &StrLiteral{
+							Value: `"foobar"`,
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name:  "Cannot iterate over a boolean",
+			input: `for wtf in true {}`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Msg: "Cannot iterate over a 'Bool'",
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}

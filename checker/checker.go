@@ -36,11 +36,6 @@ func (f FunctionType) String() string {
 	return fmt.Sprintf("(%v) %v", f.Parameters, f.ReturnType)
 }
 
-type Scope struct {
-	parent  *Scope
-	symbols map[string]Symbol
-}
-
 type Symbol struct {
 	Name     string
 	Type     Type
@@ -48,6 +43,14 @@ type Symbol struct {
 	Declared bool // what's the purpose of this?
 }
 
+type Scope struct {
+	parent  *Scope
+	symbols map[string]Symbol
+}
+
+func (s Scope) GetParent() *Scope {
+	return s.parent
+}
 func NewScope(parent *Scope) *Scope {
 	return &Scope{
 		parent:  parent,

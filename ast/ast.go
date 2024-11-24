@@ -99,12 +99,36 @@ func (f *FunctionDeclaration) String() string {
 type WhileLoop struct {
 	BaseNode
 	Condition Expression
-	Block     []Statement
+	Body      []Statement
 }
 
 func (w *WhileLoop) StatementNode() {}
 func (w *WhileLoop) String() string {
 	return "while"
+}
+
+type ForLoop struct {
+	BaseNode
+	Cursor   Identifier
+	Iterable Expression
+	Body     []Statement
+}
+
+func (f *ForLoop) StatementNode() {}
+func (f *ForLoop) String() string {
+	return "ForLoop"
+}
+
+type IfStatement struct {
+	BaseNode
+	Condition Expression
+	Body      []Statement
+	Else      Statement
+}
+
+func (i *IfStatement) StatementNode() {}
+func (i *IfStatement) String() string {
+	return "IfStatement"
 }
 
 type Operator int
@@ -159,7 +183,30 @@ func (b *BinaryExpression) String() string {
 	return fmt.Sprintf("%v %v %v", b.Left, b.Operator, b.Right)
 }
 func (b *BinaryExpression) GetType() checker.Type {
-	return b.Left.GetType()
+	switch b.Operator {
+	case Plus, Minus, Multiply, Divide, Modulo:
+		return checker.NumType
+	case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, Equal, NotEqual, And, Or:
+		return checker.BoolType
+	case Range:
+		return checker.NumType
+	default:
+		return nil
+	}
+}
+
+type RangeExpression struct {
+	BaseNode
+	Left, Right Expression
+}
+
+func (b *RangeExpression) ExpressionNode() {}
+func (b *RangeExpression) StatementNode()  {}
+func (b *RangeExpression) String() string {
+	return "RangeExpression"
+}
+func (b *RangeExpression) GetType() checker.Type {
+	return checker.NumType
 }
 
 type Identifier struct {
@@ -240,6 +287,16 @@ func (p *Parser) text(node *tree_sitter.Node) string {
 	return string(p.sourceCode[node.StartByte():node.EndByte()])
 }
 
+func (p *Parser) pushScope() *checker.Scope {
+	p.scope = checker.NewScope(p.scope)
+	return p.scope
+}
+
+func (p *Parser) popScope() *checker.Scope {
+	p.scope = p.scope.GetParent()
+	return p.scope
+}
+
 func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual checker.Type) {
 	msg := fmt.Sprintf("Type mismatch: expected %s, got %s", expected, actual)
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
@@ -295,6 +352,10 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return p.parseFunctionDecl(child)
 	case "while_loop":
 		return p.parseWhileLoop(child)
+	case "for_loop":
+		return p.parseForLoop(child)
+	case "if_statement":
+		return p.parseIfStatement(child)
 	case "expression":
 		expr, err := p.parseExpression(child)
 		if err != nil {
@@ -484,7 +545,7 @@ func (p *Parser) parseBlock(node *tree_sitter.Node) ([]Statement, error) {
 
 func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 	conditionNode := node.ChildByFieldName("condition")
-	// bodyNode := node.ChildByFieldName("body")
+	bodyNode := node.ChildByFieldName("body")
 
 	condition, err := p.parseExpression(conditionNode)
 	if err != nil {
@@ -496,7 +557,106 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: conditionNode.Range()})
 	}
 
-	return nil, fmt.Errorf("Unimplemented")
+	body, err := p.parseBlock(bodyNode)
+	if err != nil {
+		return nil, err
+	}
+
+	return &WhileLoop{
+		Condition: condition,
+		Body:      body,
+	}, nil
+}
+
+func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
+	cursorNode := node.ChildByFieldName("cursor")
+	rangeNode := node.ChildByFieldName("range")
+	bodyNode := node.ChildByFieldName("body")
+
+	iterable, err := p.parseExpression(rangeNode)
+	if err != nil {
+		return nil, err
+	}
+
+	iterableType := iterable.GetType()
+
+	switch iterableType {
+	case checker.NumType, checker.StrType:
+		_cursor := &Identifier{Name: p.text(cursorNode), Type: iterableType}
+		newScope := p.pushScope()
+		newScope.Declare(checker.Symbol{Name: _cursor.Name, Type: _cursor.Type})
+		body, err := p.parseBlock(bodyNode)
+		p.popScope()
+		if err != nil {
+			return nil, err
+		}
+		return &ForLoop{
+			Cursor:   *_cursor,
+			Iterable: iterable,
+			Body:     body,
+		}, nil
+	default:
+		msg := fmt.Sprintf("Cannot iterate over a '%s'", iterableType)
+		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: rangeNode.Range()})
+		return nil, fmt.Errorf(msg)
+	}
+}
+
+func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
+	conditionNode := node.ChildByFieldName("condition")
+	bodyNode := node.ChildByFieldName("body")
+	elseNode := node.ChildByFieldName("else")
+
+	condition, err := p.parseExpression(conditionNode)
+	if err != nil {
+		return nil, err
+	}
+
+	if condition.GetType() != checker.BoolType {
+		msg := fmt.Sprintf("An if condition must be a 'Bool' expression")
+		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: conditionNode.Range()})
+	}
+
+	body, err := p.parseBlock(bodyNode)
+	if err != nil {
+		return nil, err
+	}
+
+	if elseNode != nil {
+		clause, err := p.parseElseClause(elseNode)
+		if err != nil {
+			return nil, err
+		}
+		return &IfStatement{
+			BaseNode:  BaseNode{TSNode: node},
+			Condition: condition,
+			Body:      body,
+			Else:      clause,
+		}, nil
+	}
+
+	return &IfStatement{
+		BaseNode:  BaseNode{TSNode: node},
+		Condition: condition,
+		Body:      body,
+	}, nil
+}
+
+func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
+	ifNode := node.ChildByFieldName("if")
+	if ifNode != nil {
+		return p.parseIfStatement(ifNode)
+	}
+
+	bodyNode := node.ChildByFieldName("body")
+	body, err := p.parseBlock(bodyNode)
+	if err != nil {
+		return nil, err
+	}
+	return &IfStatement{
+		BaseNode: BaseNode{TSNode: node},
+		Body:     body,
+	}, nil
 }
 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
