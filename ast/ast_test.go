@@ -1561,3 +1561,53 @@ func TestForLoops(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestStructDefinition(t *testing.T) {
+	tests := []test{
+		{
+			name: "An empty struct",
+			input: `
+				struct Box {}`,
+			ast: &Program{
+				Statements: []Statement{
+					&StructDefinition{
+						Name:   "Box",
+						Fields: []StructField{},
+					},
+				},
+			},
+		},
+		{
+			name: "A valid struct",
+			input: `
+				struct Person {
+					name: Str,
+					age: Num,
+					employed: Bool
+				}`,
+			ast: &Program{
+				Statements: []Statement{
+					&StructDefinition{
+						Name: "Person",
+						Fields: []StructField{
+							{
+								Name: "name",
+								Type: checker.StrType,
+							},
+							{
+								Name: "age",
+								Type: checker.NumType,
+							},
+							{
+								Name: "employed",
+								Type: checker.BoolType,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}

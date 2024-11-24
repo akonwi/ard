@@ -96,6 +96,22 @@ func (f *FunctionDeclaration) String() string {
 	return fmt.Sprintf("(%s) ?", f.Name)
 }
 
+type StructDefinition struct {
+	BaseNode
+	Name   string
+	Fields []StructField
+}
+
+type StructField struct {
+	Name string
+	Type checker.Type
+}
+
+func (s *StructDefinition) StatementNode() {}
+func (s *StructDefinition) String() string {
+	return fmt.Sprintf("StructDefinition(%s)", s.Name)
+}
+
 type WhileLoop struct {
 	BaseNode
 	Condition Expression
@@ -356,6 +372,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return p.parseForLoop(child)
 	case "if_statement":
 		return p.parseIfStatement(child)
+	case "struct_definition":
+		return p.parseStructDefinition(child)
 	case "expression":
 		expr, err := p.parseExpression(child)
 		if err != nil {
@@ -659,6 +677,25 @@ func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
 	}, nil
 }
 
+func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error) {
+	nameNode := node.ChildByFieldName("name")
+	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
+
+	fields := []StructField{}
+	for _, fieldNode := range fieldNodes {
+		nameNode := fieldNode.ChildByFieldName("name")
+		name := p.text(nameNode)
+		typeNode := fieldNode.ChildByFieldName("type")
+		fieldType := p.resolveType(typeNode)
+		fields = append(fields, StructField{Name: name, Type: fieldType})
+	}
+
+	return &StructDefinition{
+		Name:   p.text(nameNode),
+		Fields: fields,
+	}, nil
+}
+
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	child := node.Child(0)
 	switch child.GrammarName() {
@@ -741,7 +778,7 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 
 func resolveOperator(node *tree_sitter.Node) Operator {
 	switch node.GrammarName() {
-	case "=":
+	case "assign":
 		return Assign
 	case "minus":
 		return Minus
