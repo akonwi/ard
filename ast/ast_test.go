@@ -1572,7 +1572,7 @@ func TestStructDefinition(t *testing.T) {
 				Statements: []Statement{
 					&StructDefinition{
 						Name:   "Box",
-						Fields: []StructField{},
+						Fields: map[string]checker.Type{},
 					},
 				},
 			},
@@ -1589,19 +1589,10 @@ func TestStructDefinition(t *testing.T) {
 				Statements: []Statement{
 					&StructDefinition{
 						Name: "Person",
-						Fields: []StructField{
-							{
-								Name: "name",
-								Type: checker.StrType,
-							},
-							{
-								Name: "age",
-								Type: checker.NumType,
-							},
-							{
-								Name: "employed",
-								Type: checker.BoolType,
-							},
+						Fields: map[string]checker.Type{
+							"name":     checker.StrType,
+							"age":      checker.NumType,
+							"employed": checker.BoolType,
 						},
 					},
 				},

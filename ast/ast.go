@@ -99,12 +99,7 @@ func (f *FunctionDeclaration) String() string {
 type StructDefinition struct {
 	BaseNode
 	Name   string
-	Fields []StructField
-}
-
-type StructField struct {
-	Name string
-	Type checker.Type
+	Fields map[string]checker.Type
 }
 
 func (s *StructDefinition) StatementNode() {}
@@ -681,19 +676,21 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 	nameNode := node.ChildByFieldName("name")
 	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
 
-	fields := []StructField{}
+	fields := make(map[string]checker.Type)
 	for _, fieldNode := range fieldNodes {
 		nameNode := fieldNode.ChildByFieldName("name")
 		name := p.text(nameNode)
 		typeNode := fieldNode.ChildByFieldName("type")
 		fieldType := p.resolveType(typeNode)
-		fields = append(fields, StructField{Name: name, Type: fieldType})
+		fields[name] = fieldType
 	}
 
-	return &StructDefinition{
+	strct := &StructDefinition{
 		Name:   p.text(nameNode),
 		Fields: fields,
-	}, nil
+	}
+	p.scope.DeclareStruct(checker.StructType{Name: strct.Name, Fields: strct.Fields})
+	return strct, nil
 }
 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {

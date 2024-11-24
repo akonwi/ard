@@ -14,7 +14,7 @@ type PrimitiveType struct {
 	Name string
 }
 
-// impl StaticType for PrimitiveType
+// impl Type for PrimitiveType
 func (p PrimitiveType) String() string {
 	return p.Name
 }
@@ -36,6 +36,15 @@ func (f FunctionType) String() string {
 	return fmt.Sprintf("(%v) %v", f.Parameters, f.ReturnType)
 }
 
+type StructType struct {
+	Name   string
+	Fields map[string]Type
+}
+
+func (s StructType) String() string {
+	return s.Name
+}
+
 type Symbol struct {
 	Name     string
 	Type     Type
@@ -46,6 +55,7 @@ type Symbol struct {
 type Scope struct {
 	parent  *Scope
 	symbols map[string]Symbol
+	structs map[string]StructType
 }
 
 func (s Scope) GetParent() *Scope {
@@ -55,6 +65,7 @@ func NewScope(parent *Scope) *Scope {
 	return &Scope{
 		parent:  parent,
 		symbols: make(map[string]Symbol),
+		structs: make(map[string]StructType),
 	}
 }
 
@@ -63,6 +74,14 @@ func (s *Scope) Declare(sym Symbol) error {
 		return fmt.Errorf("symbol %s already declared as %v", existing.Name, existing.Type)
 	}
 	s.symbols[sym.Name] = sym
+	return nil
+}
+
+func (s *Scope) DeclareStruct(strct StructType) error {
+	if existing, ok := s.structs[strct.Name]; ok {
+		return fmt.Errorf("struct %s is already defined", existing.Name)
+	}
+	s.structs[strct.Name] = strct
 	return nil
 }
 
