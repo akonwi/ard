@@ -49,7 +49,7 @@ func init() {
 type test struct {
 	name        string
 	input       string
-	ast         *Program
+	output      *Program
 	diagnostics []checker.Diagnostic
 }
 
@@ -64,8 +64,8 @@ func runTests(t *testing.T, tests []test) {
 			}
 
 			// Compare the ASTs
-			if tt.ast != nil {
-				diff := cmp.Diff(tt.ast, ast, compareOptions)
+			if tt.output != nil {
+				diff := cmp.Diff(tt.output, ast, compareOptions)
 				if diff != "" {
 					t.Errorf("Built AST does not match (-want +got):\n%s", diff)
 				}
@@ -93,7 +93,7 @@ func TestEmptyProgram(t *testing.T) {
 		{
 			name:        "Empty program",
 			input:       "",
-			ast:         &Program{Statements: []Statement{}},
+			output:      &Program{Statements: []Statement{}},
 			diagnostics: []checker.Diagnostic{},
 		},
 	})
@@ -107,7 +107,7 @@ func TestVariableDeclarations(t *testing.T) {
 				let name: Str = "Alice"
     		mut age: Num = 30
       	let is_student: Bool = true`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Name:         "name",
@@ -152,7 +152,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut name = "Alice"
 				name = "Bob"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      true,
@@ -176,7 +176,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				let name = "Alice"
 				name = "Bob"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      false,
@@ -204,7 +204,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut name = "Alice"
 				name = 500`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      true,
@@ -230,7 +230,7 @@ func TestVariableAssignment(t *testing.T) {
 		{
 			name:  "Unknown variable reassignment",
 			input: `name = "Bob"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableAssignment{
 						Name:     "name",
@@ -252,7 +252,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut count = 0
 				count =+ 2`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      true,
@@ -276,7 +276,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				let count = 0
 				count =+ 2`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      false,
@@ -304,7 +304,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut count = 0
 				count =- 2`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      true,
@@ -328,7 +328,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 						mut name = "joe"
 						name =- 2`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      true,
@@ -356,7 +356,7 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				let count = 0
 				count =- 2`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      false,
@@ -404,7 +404,7 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Inferred type",
 			input: `let name = "Alice"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      false,
@@ -455,7 +455,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Empty function",
 			input: `fn empty() {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&FunctionDeclaration{
 						Name:       "empty",
@@ -470,7 +470,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Inferred function return type",
 			input: `fn get_msg() { "Hello, world!" }`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&FunctionDeclaration{
 						Name:       "get_msg",
@@ -489,7 +489,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function with a parameter and declared return type",
 			input: `fn greet(person: Str) Str { "hello" }`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&FunctionDeclaration{
 						Name: "greet",
@@ -518,7 +518,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function with two parameters",
 			input: `fn add(x: Num, y: Num) Num { 10 }`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&FunctionDeclaration{
 						Name: "add",
@@ -548,7 +548,7 @@ func TestUnaryExpressions(t *testing.T) {
 		{
 			name:  "Valid negation",
 			input: `let negative_number = -30`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Name:         "negative_number",
@@ -567,7 +567,7 @@ func TestUnaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid negation",
 			input: `-false`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&UnaryExpression{
 						Operator: Minus,
@@ -592,7 +592,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid addition",
 			input: `-30 + 20`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Plus,
@@ -613,7 +613,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid addition",
 			input: `30 + "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Plus,
@@ -635,7 +635,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "+ operator is only allowed on Num",
 			input: `"foo" + "bar"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Plus,
@@ -657,7 +657,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid subtraction",
 			input: `30 - 12`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Minus,
@@ -675,7 +675,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid subtraction",
 			input: `30 - "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Minus,
@@ -697,7 +697,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid division",
 			input: `30 / 6`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Divide,
@@ -715,7 +715,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid division",
 			input: `30 / "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Divide,
@@ -737,7 +737,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid multiplication",
 			input: `30 * 10`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Multiply,
@@ -755,7 +755,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid multiplication",
 			input: `30 * "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Multiply,
@@ -777,7 +777,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid modulo",
 			input: `3 % 9`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Modulo,
@@ -795,7 +795,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid modulo",
 			input: `30 % "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Modulo,
@@ -817,7 +817,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid greater than",
 			input: `30 > 12`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: GreaterThan,
@@ -835,7 +835,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid greater than",
 			input: `30 > "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: GreaterThan,
@@ -857,7 +857,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid greater than or equal",
 			input: `30 >= 12`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: GreaterThanOrEqual,
@@ -875,7 +875,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid greater than or equal",
 			input: `30 >= "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: GreaterThanOrEqual,
@@ -897,7 +897,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid less than",
 			input: `30 < 12`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: LessThan,
@@ -915,7 +915,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid les than",
 			input: `30 < "f12"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: LessThan,
@@ -937,7 +937,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid less than or equal",
 			input: `30 <= 12`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: LessThanOrEqual,
@@ -955,7 +955,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid less than or equal",
 			input: `30 <= true`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: LessThanOrEqual,
@@ -977,7 +977,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid string equality checks",
 			input: `"Joe" == "Joe"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Equal,
@@ -995,7 +995,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid string equality check",
 			input: `"Joe" == true`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Equal,
@@ -1017,7 +1017,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid number equality checks",
 			input: `1 == 1`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Equal,
@@ -1035,7 +1035,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid number equality checks",
 			input: `1 == "eleventy"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Equal,
@@ -1057,7 +1057,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid boolean equality checks",
 			input: `true == false`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Equal,
@@ -1075,7 +1075,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid boolean equality checks",
 			input: `true == "eleventy"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Equal,
@@ -1099,7 +1099,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid string inequality checks",
 			input: `"Joe" != "Joe"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: NotEqual,
@@ -1117,7 +1117,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid string inequality check",
 			input: `"Joe" != true`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: NotEqual,
@@ -1139,7 +1139,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid number inequality checks",
 			input: `1 != 1`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: NotEqual,
@@ -1157,7 +1157,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid number inequality checks",
 			input: `1 != "eleventy"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: NotEqual,
@@ -1179,7 +1179,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid boolean inequality checks",
 			input: `true != false`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: NotEqual,
@@ -1197,7 +1197,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid boolean inequality checks",
 			input: `true != "eleventy"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: NotEqual,
@@ -1221,7 +1221,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid use of 'and' operator",
 			input: `true and false`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: And,
@@ -1239,7 +1239,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Ivalid use of 'and' operator",
 			input: `true and "eleventy"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: And,
@@ -1261,7 +1261,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid use of 'or' operator",
 			input: `true or false`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Or,
@@ -1279,7 +1279,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Ivalid use of 'or' operator",
 			input: `true or "eleventy"`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Or,
@@ -1303,7 +1303,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Valid use of range operator",
 			input: "1..10",
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Range,
@@ -1321,7 +1321,7 @@ func TestBinaryExpressions(t *testing.T) {
 		{
 			name:  "Invalid use of range operator",
 			input: `"fizz"...10`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&BinaryExpression{
 						Operator: Range,
@@ -1359,7 +1359,7 @@ func TestIdentifiers(t *testing.T) {
 			input: `
 				let count = 10
 		 		count <= 10`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      false,
@@ -1389,7 +1389,7 @@ func TestWhileLoop(t *testing.T) {
 				while count <= 9 {
 					count =+ 1
 				}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&VariableDeclaration{
 						Mutable:      true,
@@ -1418,7 +1418,7 @@ func TestWhileLoop(t *testing.T) {
 			name: "With non-boolean condition",
 			input: `
 						while 9 - 7 {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&WhileLoop{
 						Condition: &BinaryExpression{
@@ -1444,7 +1444,7 @@ func TestIfAndElse(t *testing.T) {
 		{
 			name:  "Valid if statement",
 			input: `if true {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&IfStatement{
 						Condition: &BoolLiteral{Value: true},
@@ -1457,7 +1457,7 @@ func TestIfAndElse(t *testing.T) {
 		{
 			name:  "Invalid condition expression",
 			input: `if 20 - 1 {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&IfStatement{
 						Condition: &BinaryExpression{
@@ -1476,7 +1476,7 @@ func TestIfAndElse(t *testing.T) {
 			input: `
 				if true {}
 				else {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&IfStatement{
 						Condition: &BoolLiteral{Value: true},
@@ -1494,7 +1494,7 @@ func TestIfAndElse(t *testing.T) {
 			input: `
 				if true {}
 				else if false {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&IfStatement{
 						Condition: &BoolLiteral{Value: true},
@@ -1513,7 +1513,7 @@ func TestIfAndElse(t *testing.T) {
 				if true {}
 				else if false {}
 				else {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&IfStatement{
 						Condition: &BoolLiteral{Value: true},
@@ -1540,7 +1540,7 @@ func TestForLoops(t *testing.T) {
 		{
 			name:  "Valid number range",
 			input: `for i in 1..10 {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&ForLoop{
 						Cursor: Identifier{Name: "i", Type: checker.NumType},
@@ -1558,7 +1558,7 @@ func TestForLoops(t *testing.T) {
 		{
 			name:  "Iterating over a string",
 			input: `for char in "foobar" {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&ForLoop{
 						Cursor: Identifier{Name: "char", Type: checker.StrType},
@@ -1591,7 +1591,7 @@ func TestStructDefinitions(t *testing.T) {
 			name: "An empty struct",
 			input: `
 				struct Box {}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Name:   "Box",
@@ -1608,7 +1608,7 @@ func TestStructDefinitions(t *testing.T) {
 					age: Num,
 					employed: Bool
 				}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Name: "Person",
@@ -1636,7 +1636,7 @@ func TestEnumDefinitions(t *testing.T) {
 				Green,
 				Yellow
 			}`,
-			ast: &Program{
+			output: &Program{
 				Statements: []Statement{
 					&EnumDefinition{
 						Name: "Color",
