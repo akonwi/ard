@@ -45,6 +45,15 @@ func (s StructType) String() string {
 	return s.Name
 }
 
+type EnumType struct {
+	Name     string
+	Variants map[string]int
+}
+
+func (e EnumType) String() string {
+	return e.Name
+}
+
 type Symbol struct {
 	Name     string
 	Type     Type
@@ -56,6 +65,7 @@ type Scope struct {
 	parent  *Scope
 	symbols map[string]Symbol
 	structs map[string]StructType
+	enums   map[string]EnumType
 }
 
 func (s Scope) GetParent() *Scope {
@@ -66,6 +76,7 @@ func NewScope(parent *Scope) *Scope {
 		parent:  parent,
 		symbols: make(map[string]Symbol),
 		structs: make(map[string]StructType),
+		enums:   make(map[string]EnumType),
 	}
 }
 
@@ -82,6 +93,14 @@ func (s *Scope) DeclareStruct(strct StructType) error {
 		return fmt.Errorf("struct %s is already defined", existing.Name)
 	}
 	s.structs[strct.Name] = strct
+	return nil
+}
+
+func (s *Scope) DeclareEnum(enum EnumType) error {
+	if existing, ok := s.enums[enum.Name]; ok {
+		return fmt.Errorf("enum %s is already defined", existing.Name)
+	}
+	s.enums[enum.Name] = enum
 	return nil
 }
 

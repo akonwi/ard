@@ -107,6 +107,17 @@ func (s *StructDefinition) String() string {
 	return fmt.Sprintf("StructDefinition(%s)", s.Name)
 }
 
+type EnumDefinition struct {
+	BaseNode
+	Name     string
+	Variants map[string]int
+}
+
+func (e *EnumDefinition) StatementNode() {}
+func (e *EnumDefinition) String() string {
+	return fmt.Sprintf("EnumDefinition(%s)", e.Name)
+}
+
 type WhileLoop struct {
 	BaseNode
 	Condition Expression
@@ -369,6 +380,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return p.parseIfStatement(child)
 	case "struct_definition":
 		return p.parseStructDefinition(child)
+	case "enum_definition":
+		return p.parseEnumDefinition(child)
 	case "expression":
 		expr, err := p.parseExpression(child)
 		if err != nil {
@@ -691,6 +704,26 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 	}
 	p.scope.DeclareStruct(checker.StructType{Name: strct.Name, Fields: strct.Fields})
 	return strct, nil
+}
+
+func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) {
+	nameNode := node.ChildByFieldName("name")
+	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
+
+	variants := make(map[string]int)
+	for i, variantNode := range variantNodes {
+		nameNode := variantNode.NamedChild(0)
+		name := p.text(nameNode)
+		variants[name] = i
+	}
+
+	enum := &EnumDefinition{
+		BaseNode: BaseNode{TSNode: node},
+		Name:     p.text(nameNode),
+		Variants: variants,
+	}
+	p.scope.DeclareEnum(checker.EnumType{Name: enum.Name, Variants: enum.Variants})
+	return enum, nil
 }
 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {

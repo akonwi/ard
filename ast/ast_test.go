@@ -15,6 +15,29 @@ var compareOptions = cmp.Options{
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),
+
+	cmp.Comparer(func(x, y map[string]checker.Type) bool {
+		if len(x) != len(y) {
+			return false
+		}
+		for k, v1 := range x {
+			if v2, ok := y[k]; !ok || v1 != v2 {
+				return false
+			}
+		}
+		return true
+	}),
+	cmp.Comparer(func(x, y map[string]int) bool {
+		if len(x) != len(y) {
+			return false
+		}
+		for k, v1 := range x {
+			if v2, ok := y[k]; !ok || v1 != v2 {
+				return false
+			}
+		}
+		return true
+	}),
 }
 
 func init() {
@@ -1562,7 +1585,7 @@ func TestForLoops(t *testing.T) {
 	runTests(t, tests)
 }
 
-func TestStructDefinition(t *testing.T) {
+func TestStructDefinitions(t *testing.T) {
 	tests := []test{
 		{
 			name: "An empty struct",
@@ -1597,6 +1620,35 @@ func TestStructDefinition(t *testing.T) {
 					},
 				},
 			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestEnumDefinitions(t *testing.T) {
+	tests := []test{
+		{
+			name: "Valid basic enum",
+			input: `
+			enum Color {
+				Red,
+				Green,
+				Yellow
+			}`,
+			ast: &Program{
+				Statements: []Statement{
+					&EnumDefinition{
+						Name: "Color",
+						Variants: map[string]int{
+							"Red":    0,
+							"Green":  1,
+							"Yellow": 2,
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
 		},
 	}
 
