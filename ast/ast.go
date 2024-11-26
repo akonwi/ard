@@ -472,7 +472,8 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 			}
 		}
 	case "list_type":
-		return &checker.ListType{ItemType: p.resolveType(child.ChildByFieldName("inner"))}
+		element_typeNode := child.ChildByFieldName("element_type")
+		return &checker.ListType{ItemType: p.resolveType(element_typeNode)}
 	case "void":
 		return checker.VoidType
 	default:
