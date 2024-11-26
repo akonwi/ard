@@ -54,6 +54,14 @@ func (e EnumType) String() string {
 	return e.Name
 }
 
+type ListType struct {
+	ItemType Type
+}
+
+func (l ListType) String() string {
+	return fmt.Sprintf("[%v]", l.ItemType)
+}
+
 type Symbol struct {
 	Name     string
 	Type     Type

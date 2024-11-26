@@ -294,6 +294,20 @@ func (b *BoolLiteral) GetType() checker.Type {
 	return checker.BoolType
 }
 
+type ListLiteral struct {
+	BaseNode
+	Type  checker.Type
+	Items []Expression
+}
+
+func (l *ListLiteral) ExpressionNode() {}
+func (l *ListLiteral) String() string {
+	return "ListLiteral"
+}
+func (l *ListLiteral) GetType() checker.Type {
+	return l.Type
+}
+
 type Parser struct {
 	sourceCode []byte
 	tree       *tree_sitter.Tree
@@ -404,7 +418,14 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 
 	inferredType := value.GetType()
 
-	if declaredType != nil && inferredType != declaredType {
+	if declaredType == nil && inferredType != nil {
+		if lt, ok := inferredType.(*checker.ListType); ok {
+			if lt.ItemType == nil {
+				msg := fmt.Sprintf("Empty lists need a declared type")
+				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			}
+		}
+	} else if declaredType != nil && inferredType.String() != declaredType.String() {
 		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
 	}
 
@@ -424,11 +445,12 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 		Mutable:      isMutable,
 		Name:         name,
 		Value:        value,
-		Type:         declaredType,
+		Type:         symbolType,
 		InferredType: inferredType,
 	}, nil
 }
 
+// use for resolving explicit type declarations
 func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 	if node == nil {
 		return nil
@@ -450,6 +472,8 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 				panic(fmt.Errorf("Unresolved primitive type: %s", text))
 			}
 		}
+	case "list_type":
+		return &checker.ListType{ItemType: p.resolveListElementType(child.ChildByFieldName("inner"))}
 	case "void":
 		return checker.VoidType
 	default:
@@ -731,6 +755,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	switch child.GrammarName() {
 	case "primitive_value":
 		return p.parsePrimitiveValue(child)
+	case "list_value":
+		return p.parseListValue(child)
 	case "identifier":
 		return p.parseIdentifier(child)
 	case "unary_expression":
@@ -772,6 +798,72 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	default:
 		return nil, fmt.Errorf("Unhandled primitive node: %s", child.GrammarName())
 	}
+}
+
+func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
+	innerNodes := node.ChildrenByFieldName("inner", p.tree.Walk())
+	items := make([]Expression, len(innerNodes))
+
+	var itemType checker.Type
+
+	for i, innerNode := range innerNodes {
+		item, err := p.parseListElement(&innerNode)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = item
+		if i == 0 {
+			itemType = item.GetType()
+		} else if itemType != item.GetType() {
+			msg := fmt.Sprintf("List elements must be of the same type")
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &innerNode))
+			break
+		}
+	}
+	listType := &checker.ListType{ItemType: itemType}
+
+	return &ListLiteral{
+		BaseNode: BaseNode{TSNode: node},
+		Type:     listType,
+		Items:    items,
+	}, nil
+}
+
+func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
+	switch node.GrammarName() {
+	case "string":
+		return &StrLiteral{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(node)}, nil
+	case "number":
+		return &NumLiteral{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(node)}, nil
+	case "boolean":
+		return &BoolLiteral{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(node) == "true"}, nil
+	default:
+		return nil, fmt.Errorf("Unhandled list element: %s", node.GrammarName())
+	}
+}
+
+func (p *Parser) resolveListElementType(node *tree_sitter.Node) checker.Type {
+	switch node.GrammarName() {
+	case "primitive_type":
+		{
+			child := node.Child(0)
+			switch child.GrammarName() {
+			case "str":
+				return checker.StrType
+			case "num":
+				return checker.NumType
+			case "bool":
+				return checker.BoolType
+			}
+		}
+	}
+	panic(fmt.Errorf("Unhandled list element type: %s", node.GrammarName()))
 }
 
 func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error) {
