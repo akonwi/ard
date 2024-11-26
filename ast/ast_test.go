@@ -454,21 +454,6 @@ func TestVariableAssignment(t *testing.T) {
 	runTests(t, tests)
 }
 
-func assertAST(t *testing.T, input []byte, want *Program) {
-	t.Helper()
-
-	tree := treeSitterParser.Parse(input, nil)
-	ast, err := NewParser(input, tree).Parse()
-	if err != nil {
-		t.Fatalf("Error parsing tree: %v", err)
-	}
-
-	diff := cmp.Diff(want, ast, compareOptions)
-	if diff != "" {
-		t.Errorf("Generated code does not match (-want +got):\n%s", diff)
-	}
-}
-
 func TestVariableTypeInference(t *testing.T) {
 	tests := []test{
 		{
