@@ -455,7 +455,6 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 	if node == nil {
 		return nil
 	}
-
 	child := node.NamedChild(0)
 	switch child.GrammarName() {
 	case "primitive_type":
@@ -473,7 +472,7 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 			}
 		}
 	case "list_type":
-		return &checker.ListType{ItemType: p.resolveListElementType(child.ChildByFieldName("inner"))}
+		return &checker.ListType{ItemType: p.resolveType(child.ChildByFieldName("inner"))}
 	case "void":
 		return checker.VoidType
 	default:
@@ -846,24 +845,6 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 	default:
 		return nil, fmt.Errorf("Unhandled list element: %s", node.GrammarName())
 	}
-}
-
-func (p *Parser) resolveListElementType(node *tree_sitter.Node) checker.Type {
-	switch node.GrammarName() {
-	case "primitive_type":
-		{
-			child := node.Child(0)
-			switch child.GrammarName() {
-			case "str":
-				return checker.StrType
-			case "num":
-				return checker.NumType
-			case "bool":
-				return checker.BoolType
-			}
-		}
-	}
-	panic(fmt.Errorf("Unhandled list element type: %s", node.GrammarName()))
 }
 
 func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error) {
