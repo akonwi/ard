@@ -8,6 +8,7 @@ import (
 
 type Type interface {
 	String() string
+	GetProperty(name string) Type
 }
 
 type PrimitiveType struct {
@@ -18,6 +19,25 @@ type PrimitiveType struct {
 func (p PrimitiveType) String() string {
 	return p.Name
 }
+func (p PrimitiveType) GetProperty(name string) Type {
+	switch name {
+	case "Str":
+		switch name {
+		case "size":
+			return NumType
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// func (p PrimitiveType) Equals(other Type) bool {
+// 	if otherPrim, ok := other.(PrimitiveType); ok {
+// 		return p.Name == otherPrim.Name
+// 	}
+// 	return false
+// }
 
 var (
 	StrType  = PrimitiveType{"Str"}
@@ -27,6 +47,7 @@ var (
 )
 
 type FunctionType struct {
+	Mutates    bool
 	Parameters []Type
 	ReturnType Type
 }
@@ -34,6 +55,24 @@ type FunctionType struct {
 // impl StaticType for FunctionType
 func (f FunctionType) String() string {
 	return fmt.Sprintf("(%v) %v", f.Parameters, f.ReturnType)
+}
+func (f FunctionType) GetProperty(name string) Type {
+	return nil
+}
+func (f FunctionType) Equals(other Type) bool {
+	return f.String() == other.String()
+	// if otherFunc, ok := other.(FunctionType); ok {
+	// 	if len(f.Parameters) != len(otherFunc.Parameters) {
+	// 		return false
+	// 	}
+	// 	for i, param := range f.Parameters {
+	// 		if !param.Equals(otherFunc.Parameters[i]) {
+	// 			return false
+	// 		}
+	// 	}
+	// 	return f.ReturnType.Equals(otherFunc.ReturnType)
+	// }
+	// return false
 }
 
 type StructType struct {
@@ -44,6 +83,12 @@ type StructType struct {
 func (s StructType) String() string {
 	return s.Name
 }
+func (s StructType) GetProperty(name string) Type {
+	if field, ok := s.Fields[name]; ok {
+		return field
+	}
+	return nil
+}
 
 type EnumType struct {
 	Name     string
@@ -53,6 +98,9 @@ type EnumType struct {
 func (e EnumType) String() string {
 	return e.Name
 }
+func (e EnumType) GetProperty(name string) Type {
+	return nil
+}
 
 type ListType struct {
 	ItemType Type
@@ -60,6 +108,14 @@ type ListType struct {
 
 func (l ListType) String() string {
 	return fmt.Sprintf("[%v]", l.ItemType)
+}
+func (l ListType) GetProperty(name string) Type {
+	switch name {
+	case "size":
+		return NumType
+	default:
+		return nil
+	}
 }
 
 type Symbol struct {
