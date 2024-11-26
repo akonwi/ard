@@ -801,12 +801,12 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 }
 
 func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
-	innerNodes := node.ChildrenByFieldName("inner", p.tree.Walk())
-	items := make([]Expression, len(innerNodes))
+	elementNodes := node.ChildrenByFieldName("element", p.tree.Walk())
+	items := make([]Expression, len(elementNodes))
 
 	var itemType checker.Type
 
-	for i, innerNode := range innerNodes {
+	for i, innerNode := range elementNodes {
 		item, err := p.parseListElement(&innerNode)
 		if err != nil {
 			return nil, err
