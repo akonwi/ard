@@ -475,6 +475,28 @@ func TestVariableTypeInference(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name:  "Inferred list",
+			input: `let list = ["foo", "bar"]`,
+			output: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:         "list",
+						Mutable:      false,
+						Type:         &checker.ListType{ItemType: checker.StrType},
+						InferredType: &checker.ListType{ItemType: checker.StrType},
+						Value: &ListLiteral{
+							Type: &checker.ListType{ItemType: checker.StrType},
+							Items: []Expression{
+								&StrLiteral{Value: `"foo"`},
+								&StrLiteral{Value: `"bar"`},
+							},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name:  "Str mismatch",
 			input: `let name: Str = false`,
 			diagnostics: []checker.Diagnostic{
