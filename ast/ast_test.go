@@ -1653,6 +1653,25 @@ func TestForLoops(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name:  "Iterating over a list",
+			input: `for num in [1, 2] {}`,
+			output: &Program{
+				Statements: []Statement{
+					&ForLoop{
+						Cursor: Identifier{Name: "num", Type: checker.NumType},
+						Iterable: &ListLiteral{
+							Type: &checker.ListType{ItemType: checker.NumType},
+							Items: []Expression{
+								&NumLiteral{Value: "1"},
+								&NumLiteral{Value: "2"},
+							},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name:  "Cannot iterate over a boolean",
 			input: `for wtf in true {}`,
 			diagnostics: []checker.Diagnostic{

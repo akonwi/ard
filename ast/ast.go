@@ -630,8 +630,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 
 	iterableType := iterable.GetType()
 
-	switch iterableType {
-	case checker.NumType, checker.StrType:
+	if iterableType == checker.NumType || iterableType == checker.StrType {
 		_cursor := &Identifier{Name: p.text(cursorNode), Type: iterableType}
 		newScope := p.pushScope()
 		newScope.Declare(checker.Symbol{Name: _cursor.Name, Type: _cursor.Type})
@@ -645,11 +644,27 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 			Iterable: iterable,
 			Body:     body,
 		}, nil
-	default:
-		msg := fmt.Sprintf("Cannot iterate over a '%s'", iterableType)
-		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: rangeNode.Range()})
-		return nil, fmt.Errorf(msg)
 	}
+
+	if _listType, ok := iterableType.(*checker.ListType); ok {
+		_cursor := &Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
+		newScope := p.pushScope()
+		newScope.Declare(checker.Symbol{Name: _cursor.Name, Type: _cursor.Type})
+		body, err := p.parseBlock(bodyNode)
+		p.popScope()
+		if err != nil {
+			return nil, err
+		}
+		return &ForLoop{
+			Cursor:   *_cursor,
+			Iterable: iterable,
+			Body:     body,
+		}, nil
+	}
+
+	msg := fmt.Sprintf("Cannot iterate over a '%s'", iterableType)
+	p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: rangeNode.Range()})
+	return nil, fmt.Errorf(msg)
 }
 
 func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
