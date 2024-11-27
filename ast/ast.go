@@ -927,22 +927,9 @@ func (p *Parser) parseMapEntry(node *tree_sitter.Node) (string, Expression, erro
 	keyNode := node.ChildByFieldName("key")
 	key := p.text(keyNode)
 	valueNode := node.ChildByFieldName("value")
-	var value Expression
-	switch valueNode.GrammarName() {
-	case "string":
-		value = &StrLiteral{
-			BaseNode: BaseNode{TSNode: node},
-			Value:    p.text(valueNode)}
-	case "number":
-		value = &NumLiteral{
-			BaseNode: BaseNode{TSNode: node},
-			Value:    p.text(valueNode)}
-	case "boolean":
-		value = &BoolLiteral{
-			BaseNode: BaseNode{TSNode: node},
-			Value:    p.text(valueNode) == "true"}
-	default:
-		return key, nil, fmt.Errorf("Unhandled primitive node: %s", valueNode.GrammarName())
+	value, err := p.parsePrimitiveValue(valueNode)
+	if err != nil {
+		return key, nil, err
 	}
 	return key, value, nil
 }
