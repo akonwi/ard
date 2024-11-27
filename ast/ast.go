@@ -43,11 +43,10 @@ type Expression interface {
 
 type VariableDeclaration struct {
 	BaseNode
-	Name         string
-	Mutable      bool
-	Value        Expression
-	Type         checker.Type
-	InferredType checker.Type
+	Name    string
+	Mutable bool
+	Value   Expression
+	Type    checker.Type
 }
 
 func (v *VariableDeclaration) StatementNode() {}
@@ -470,12 +469,11 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 	})
 
 	return &VariableDeclaration{
-		BaseNode:     BaseNode{TSNode: node},
-		Mutable:      isMutable,
-		Name:         name,
-		Value:        value,
-		Type:         symbolType,
-		InferredType: inferredType,
+		BaseNode: BaseNode{TSNode: node},
+		Mutable:  isMutable,
+		Name:     name,
+		Value:    value,
+		Type:     symbolType,
 	}, nil
 }
 
