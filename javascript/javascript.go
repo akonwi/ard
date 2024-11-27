@@ -51,6 +51,8 @@ func (g *jsGenerator) generateVariableDeclaration(node *tree_sitter.Node) {
 	g.writeLine("%s = %s", g.getText(*node.NamedChild(1)), g.generateExpression(node.ChildByFieldName("value")))
 }
 
+func (g *jsGenerator) generateFunctionDeclaration(node *tree_sitter.Node) {}
+
 func (g *jsGenerator) generateExpression(node *tree_sitter.Node) string {
 	return g.getText(*node.NamedChild(0))
 }
@@ -67,6 +69,8 @@ func GenerateJS(sourceCode []byte, tree *tree_sitter.Tree) string {
 		switch node.GrammarName() {
 		case "variable_definition":
 			generator.generateVariableDeclaration(node)
+		case "function_definition":
+			generator.generateFunctionDeclaration(node)
 		default:
 			{
 				for i := range node.ChildCount() {
