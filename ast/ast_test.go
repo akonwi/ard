@@ -163,9 +163,9 @@ func TestVariableDeclarations(t *testing.T) {
 						Mutable:      false,
 						Name:         "strings",
 						Type:         &checker.ListType{ItemType: checker.StrType},
-						InferredType: &checker.ListType{ItemType: checker.NumType},
+						InferredType: checker.ListType{ItemType: checker.NumType},
 						Value: &ListLiteral{
-							Type: &checker.ListType{ItemType: checker.NumType},
+							Type: checker.ListType{ItemType: checker.NumType},
 							Items: []Expression{
 								&NumLiteral{Value: "1"},
 								&NumLiteral{Value: "2"},
@@ -188,13 +188,70 @@ func TestVariableDeclarations(t *testing.T) {
 						Mutable:      false,
 						Name:         "numbers",
 						Type:         &checker.ListType{ItemType: checker.NumType},
-						InferredType: &checker.ListType{ItemType: checker.NumType},
+						InferredType: checker.ListType{ItemType: checker.NumType},
 						Value: &ListLiteral{
-							Type: &checker.ListType{ItemType: checker.NumType},
+							Type: checker.ListType{ItemType: checker.NumType},
 							Items: []Expression{
 								&NumLiteral{Value: "1"},
 								&NumLiteral{Value: "2"},
 								&NumLiteral{Value: "3"},
+							},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name:  "Valid empty map",
+			input: `mut entries: [Str:Num] = [:]`,
+			output: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable: true,
+						Name:    "entries",
+						Type: checker.MapType{
+							KeyType:   checker.StrType,
+							ValueType: checker.NumType,
+						},
+						InferredType: checker.MapType{
+							KeyType: checker.StrType,
+						},
+						Value: &MapLiteral{
+							Entries: map[StrLiteral]Expression{},
+							Type: checker.MapType{
+								KeyType: checker.StrType,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Valid map",
+			input: `mut name_to_counts: [Str:Num] = ["john":1, "jane":2, "jen":3]`,
+			output: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable: true,
+						Name:    "name_to_counts",
+						Type: checker.MapType{
+							KeyType:   checker.StrType,
+							ValueType: checker.NumType,
+						},
+						InferredType: checker.MapType{
+							KeyType:   checker.StrType,
+							ValueType: checker.NumType,
+						},
+						Value: &MapLiteral{
+							Entries: map[StrLiteral]Expression{
+								{Value: `"john"`}: &NumLiteral{Value: "1"},
+								{Value: `"jane"`}: &NumLiteral{Value: "2"},
+								{Value: `"jen"`}:  &NumLiteral{Value: "3"},
+							},
+							Type: checker.MapType{
+								KeyType:   checker.StrType,
+								ValueType: checker.NumType,
 							},
 						},
 					},
@@ -482,10 +539,10 @@ func TestVariableTypeInference(t *testing.T) {
 					&VariableDeclaration{
 						Name:         "list",
 						Mutable:      false,
-						Type:         &checker.ListType{ItemType: checker.StrType},
-						InferredType: &checker.ListType{ItemType: checker.StrType},
+						Type:         checker.ListType{ItemType: checker.StrType},
+						InferredType: checker.ListType{ItemType: checker.StrType},
 						Value: &ListLiteral{
-							Type: &checker.ListType{ItemType: checker.StrType},
+							Type: checker.ListType{ItemType: checker.StrType},
 							Items: []Expression{
 								&StrLiteral{Value: `"foo"`},
 								&StrLiteral{Value: `"bar"`},
@@ -495,6 +552,26 @@ func TestVariableTypeInference(t *testing.T) {
 				},
 			},
 			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name:  "Inferred map",
+			input: `let map = ["foo":3]`,
+			output: &Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable:      false,
+						Name:         "map",
+						Type:         checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
+						InferredType: checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
+						Value: &MapLiteral{
+							Entries: map[StrLiteral]Expression{
+								{Value: `"foo"`}: &NumLiteral{Value: "3"},
+							},
+							Type: checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
+						},
+					},
+				},
+			},
 		},
 		{
 			name:  "Str mismatch",
@@ -1660,7 +1737,7 @@ func TestForLoops(t *testing.T) {
 					&ForLoop{
 						Cursor: Identifier{Name: "num", Type: checker.NumType},
 						Iterable: &ListLiteral{
-							Type: &checker.ListType{ItemType: checker.NumType},
+							Type: checker.ListType{ItemType: checker.NumType},
 							Items: []Expression{
 								&NumLiteral{Value: "1"},
 								&NumLiteral{Value: "2"},

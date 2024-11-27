@@ -308,6 +308,20 @@ func (l *ListLiteral) GetType() checker.Type {
 	return l.Type
 }
 
+type MapLiteral struct {
+	BaseNode
+	Entries map[StrLiteral]Expression
+	Type    checker.Type
+}
+
+func (m *MapLiteral) ExpressionNode() {}
+func (m *MapLiteral) String() string {
+	return fmt.Sprintf("MapLiteral { %v }", m.Entries)
+}
+func (m *MapLiteral) GetType() checker.Type {
+	return m.Type
+}
+
 type Parser struct {
 	sourceCode []byte
 	tree       *tree_sitter.Tree
@@ -418,16 +432,31 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 
 	inferredType := value.GetType()
 
-	if declaredType == nil && inferredType != nil {
-		if lt, ok := inferredType.(*checker.ListType); ok {
+	if declaredType != nil {
+		if !declaredType.Equals(inferredType) {
+			p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
+		}
+	} else if inferredType == nil {
+		panic(fmt.Errorf("variable inferred type and declared type are nil"))
+	} else {
+		if lt, ok := inferredType.(checker.ListType); ok {
 			if lt.ItemType == nil {
 				msg := fmt.Sprintf("Empty lists need a declared type")
 				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 			}
 		}
-	} else if declaredType != nil && inferredType.String() != declaredType.String() {
-		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
 	}
+
+	// if declaredType == nil && inferredType != nil {
+	// 	if mt, ok := inferredType.(*checker.MapType); ok {
+	// 		if mt.KeyType == nil || mt.ValueType == nil {
+	// 			msg := fmt.Sprintf("Empty maps need a declared type")
+	// 			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	// 		}
+	// 	}
+	// } else if declaredType != nil && !declaredType.Equals(inferredType) {
+	// 	p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
+	// }
 
 	symbolType := declaredType
 	if declaredType == nil {
@@ -474,6 +503,12 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 	case "list_type":
 		element_typeNode := child.ChildByFieldName("element_type")
 		return &checker.ListType{ItemType: p.resolveType(element_typeNode)}
+	case "map_type":
+		valueNode := child.ChildByFieldName("value")
+		return checker.MapType{
+			KeyType:   checker.StrType,
+			ValueType: p.resolveType(valueNode),
+		}
 	case "void":
 		return checker.VoidType
 	default:
@@ -646,7 +681,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		}, nil
 	}
 
-	if _listType, ok := iterableType.(*checker.ListType); ok {
+	if _listType, ok := iterableType.(checker.ListType); ok {
 		_cursor := &Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
 		newScope := p.pushScope()
 		newScope.Declare(checker.Symbol{Name: _cursor.Name, Type: _cursor.Type})
@@ -772,6 +807,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parsePrimitiveValue(child)
 	case "list_value":
 		return p.parseListValue(child)
+	case "map_value":
+		return p.parseMapLiteral(child)
 	case "identifier":
 		return p.parseIdentifier(child)
 	case "unary_expression":
@@ -835,7 +872,7 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 			break
 		}
 	}
-	listType := &checker.ListType{ItemType: itemType}
+	listType := checker.ListType{ItemType: itemType}
 
 	return &ListLiteral{
 		BaseNode: BaseNode{TSNode: node},
@@ -861,6 +898,59 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 	default:
 		return nil, fmt.Errorf("Unhandled list element: %s", node.GrammarName())
 	}
+}
+
+func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
+	entryNodes := node.ChildrenByFieldName("entry", p.tree.Walk())
+	entries := make(map[StrLiteral]Expression)
+
+	var valueType checker.Type
+
+	for i, entryNode := range entryNodes {
+		key, value, err := p.parseMapEntry(&entryNode)
+		if err != nil {
+			return nil, err
+		}
+		entries[StrLiteral{Value: key}] = value
+		if i == 0 {
+			valueType = value.GetType()
+		} else if valueType != value.GetType() {
+			// msg := fmt.Sprintf("List elements must be of the same type")
+			// p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &entryNode))
+			break
+		}
+	}
+	mapType := checker.MapType{KeyType: checker.StrType, ValueType: valueType}
+
+	return &MapLiteral{
+		BaseNode: BaseNode{TSNode: node},
+		Type:     mapType,
+		Entries:  entries,
+	}, nil
+}
+
+func (p *Parser) parseMapEntry(node *tree_sitter.Node) (string, Expression, error) {
+	keyNode := node.ChildByFieldName("key")
+	key := p.text(keyNode)
+	valueNode := node.ChildByFieldName("value")
+	var value Expression
+	switch valueNode.GrammarName() {
+	case "string":
+		value = &StrLiteral{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(valueNode)}
+	case "number":
+		value = &NumLiteral{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(valueNode)}
+	case "boolean":
+		value = &BoolLiteral{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(valueNode) == "true"}
+	default:
+		return key, nil, fmt.Errorf("Unhandled primitive node: %s", valueNode.GrammarName())
+	}
+	return key, value, nil
 }
 
 func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error) {

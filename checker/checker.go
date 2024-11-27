@@ -9,6 +9,7 @@ import (
 type Type interface {
 	String() string
 	GetProperty(name string) Type
+	Equals(other Type) bool
 }
 
 type PrimitiveType struct {
@@ -32,12 +33,12 @@ func (p PrimitiveType) GetProperty(name string) Type {
 	return nil
 }
 
-// func (p PrimitiveType) Equals(other Type) bool {
-// 	if otherPrim, ok := other.(PrimitiveType); ok {
-// 		return p.Name == otherPrim.Name
-// 	}
-// 	return false
-// }
+func (p PrimitiveType) Equals(other Type) bool {
+	if otherPrimitive, ok := other.(PrimitiveType); ok {
+		return p.Name == otherPrimitive.Name
+	}
+	return false
+}
 
 var (
 	StrType  = PrimitiveType{"Str"}
@@ -89,6 +90,9 @@ func (s StructType) GetProperty(name string) Type {
 	}
 	return nil
 }
+func (s StructType) Equals(other Type) bool {
+	return s.String() == other.String()
+}
 
 type EnumType struct {
 	Name     string
@@ -101,13 +105,19 @@ func (e EnumType) String() string {
 func (e EnumType) GetProperty(name string) Type {
 	return nil
 }
+func (e EnumType) Equals(other Type) bool {
+	return e.String() == other.String()
+}
 
 type ListType struct {
 	ItemType Type
 }
 
 func (l ListType) String() string {
-	return fmt.Sprintf("[%v]", l.ItemType)
+	if l.ItemType == nil {
+		return "[?]"
+	}
+	return fmt.Sprintf("[%s]", l.ItemType)
 }
 func (l ListType) GetProperty(name string) Type {
 	switch name {
@@ -116,6 +126,55 @@ func (l ListType) GetProperty(name string) Type {
 	default:
 		return nil
 	}
+}
+func (l ListType) Equals(other Type) bool {
+	if otherList, ok := other.(ListType); ok {
+		// if either list is still open, then they are compatible
+		if l.ItemType == nil || otherList.ItemType == nil {
+			return true
+		}
+		return l.ItemType.Equals(otherList.ItemType)
+	}
+	return false
+}
+func MakeList(itemType Type) ListType {
+	return ListType{ItemType: itemType}
+}
+
+type MapType struct {
+	KeyType   Type
+	ValueType Type
+}
+
+func (m MapType) String() string {
+	value := "?"
+	if m.ValueType != nil {
+		value = m.ValueType.String()
+	}
+	return fmt.Sprintf("{%s:%s}", m.KeyType, value)
+}
+func (m MapType) GetProperty(name string) Type {
+	switch name {
+	case "size":
+		return NumType
+	default:
+		return nil
+	}
+}
+func (m MapType) Equals(other Type) bool {
+	if otherMap, ok := other.(MapType); ok {
+		if !m.KeyType.Equals(otherMap.KeyType) {
+			return false
+		}
+		if m.ValueType == nil || otherMap.ValueType == nil {
+			return true
+		}
+		return m.ValueType.Equals(otherMap.ValueType)
+	}
+	return false
+}
+func MakeMap(valueType Type) MapType {
+	return MapType{KeyType: StrType, ValueType: valueType}
 }
 
 type Symbol struct {
