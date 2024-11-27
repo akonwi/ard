@@ -444,18 +444,14 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 			}
 		}
-	}
 
-	// if declaredType == nil && inferredType != nil {
-	// 	if mt, ok := inferredType.(*checker.MapType); ok {
-	// 		if mt.KeyType == nil || mt.ValueType == nil {
-	// 			msg := fmt.Sprintf("Empty maps need a declared type")
-	// 			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
-	// 		}
-	// 	}
-	// } else if declaredType != nil && !declaredType.Equals(inferredType) {
-	// 	p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
-	// }
+		if mt, ok := inferredType.(checker.MapType); ok {
+			if mt.KeyType == nil || mt.ValueType == nil {
+				msg := fmt.Sprintf("Empty maps need a declared type")
+				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			}
+		}
+	}
 
 	symbolType := declaredType
 	if declaredType == nil {

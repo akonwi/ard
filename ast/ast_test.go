@@ -220,6 +220,11 @@ func TestVariableDeclarations(t *testing.T) {
 			},
 		},
 		{
+			name:        "Empty maps require explicit type",
+			input:       `mut entries = [:]`,
+			diagnostics: []checker.Diagnostic{{Msg: "Empty maps need a declared type"}},
+		},
+		{
 			name:  "Valid map",
 			input: `mut name_to_counts: [Str:Num] = ["john":1, "jane":2, "jen":3]`,
 			output: &Program{
