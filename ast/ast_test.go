@@ -1810,3 +1810,33 @@ func TestEnumDefinitions(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestEnums(t *testing.T) {
+	colorEnum := checker.EnumType{Name: "Color",
+		Variants: map[string]int{"Black": 0, "Grey": 1},
+	}
+	tests := []test{
+		{
+			name: "Valid enum variant access",
+			input: `
+			enum Color { Black, Grey }
+			Color::Black
+		`,
+			output: &Program{
+				Statements: []Statement{
+					&EnumDefinition{
+						Name:     "Color",
+						Variants: map[string]int{"Black": 0, "Grey": 1},
+					},
+					&MemberAccess{
+						Target:     Identifier{Name: "Color", Type: colorEnum},
+						AccessType: Static,
+						Member:     &Identifier{Name: "Black"},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}

@@ -152,6 +152,29 @@ func (i *IfStatement) String() string {
 	return "IfStatement"
 }
 
+type MemberAccessType string
+
+const (
+	Instance = "instance"
+	Static   = "static"
+)
+
+type MemberAccess struct {
+	BaseNode
+	Target     Identifier
+	AccessType MemberAccessType
+	Member     Expression
+}
+
+func (m MemberAccess) StatementNode()  {}
+func (m MemberAccess) ExpressionNode() {}
+func (m *MemberAccess) String() string {
+	return fmt.Sprintf("MemberAccess(%s-%s-%s)", m.Target.Name, m.AccessType, m.Member)
+}
+func (m *MemberAccess) GetType() checker.Type {
+	return m.Member.GetType()
+}
+
 type Operator int
 
 const (
@@ -458,10 +481,9 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 		symbolType = inferredType
 	}
 	p.scope.Declare(checker.Symbol{
-		Mutable:  isMutable,
-		Name:     name,
-		Type:     symbolType,
-		Declared: true,
+		Mutable: isMutable,
+		Name:    name,
+		Type:    symbolType,
 	})
 
 	return &VariableDeclaration{
@@ -790,7 +812,12 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 		Name:     p.text(nameNode),
 		Variants: variants,
 	}
-	p.scope.DeclareEnum(checker.EnumType{Name: enum.Name, Variants: enum.Variants})
+	enumType := checker.EnumType{Name: enum.Name, Variants: enum.Variants}
+	p.scope.Declare(checker.Symbol{
+		Mutable: false,
+		Name:    enum.Name,
+		Type:    enumType,
+	})
 	return enum, nil
 }
 
@@ -809,6 +836,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parseUnaryExpression(child)
 	case "binary_expression":
 		return p.parseBinaryExpression(child)
+	case "member_access":
+		return p.parseMemberAccess(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
@@ -1055,4 +1084,47 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 		Operator: operator,
 		Right:    right,
 	}, nil
+}
+
+func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
+	targetNode := node.ChildByFieldName("target")
+	operatorNode := node.ChildByFieldName("operator")
+	memberNode := node.ChildByFieldName("member")
+
+	target, err := p.parseIdentifier(targetNode)
+	if err != nil {
+		return nil, err
+	}
+
+	var accessType MemberAccessType
+	switch operatorNode.GrammarName() {
+	case "period":
+		accessType = Instance
+	case "double_colon":
+		accessType = Static
+	default:
+		panic(fmt.Errorf("Unexpected member access operator: %s", operatorNode.GrammarName()))
+	}
+
+	if enum, ok := target.GetType().(checker.EnumType); ok {
+		switch memberNode.GrammarName() {
+		case "identifier":
+			name := p.text(memberNode)
+			if accessType == Static {
+				if _, ok := enum.Variants[name]; ok {
+					return &MemberAccess{
+						Target:     *target,
+						AccessType: accessType,
+						Member:     &Identifier{Name: name},
+					}, nil
+				}
+			}
+			return nil, fmt.Errorf("Unsupported: instance members on enums")
+		default:
+			panic(fmt.Errorf("Unhandled member type: %s", memberNode.GrammarName()))
+		}
+	}
+
+	panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
+
 }
