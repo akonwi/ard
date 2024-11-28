@@ -1819,9 +1819,8 @@ func TestEnums(t *testing.T) {
 		{
 			name: "Valid enum variant access",
 			input: `
-			enum Color { Black, Grey }
-			Color::Black
-		`,
+				enum Color { Black, Grey }
+				Color::Black`,
 			output: &Program{
 				Statements: []Statement{
 					&EnumDefinition{
@@ -1831,7 +1830,38 @@ func TestEnums(t *testing.T) {
 					&MemberAccess{
 						Target:     Identifier{Name: "Color", Type: colorEnum},
 						AccessType: Static,
-						Member:     &Identifier{Name: "Black"},
+						Member:     &Identifier{Name: "Black", Type: colorEnum},
+					},
+				},
+			},
+		},
+		{
+			name: "Invalid enum variant access",
+			input: `
+					enum Color { Black, Grey }
+					Color::Blue`,
+			diagnostics: []checker.Diagnostic{{Msg: "'Blue' is not a variant of 'Color' enum"}},
+		},
+		{
+			name: "Assigning a variant to a variable",
+			input: `
+				enum Color { Black, Grey }
+				let favorite: Color = Color::Black`,
+			output: &Program{
+				Statements: []Statement{
+					&EnumDefinition{
+						Name:     "Color",
+						Variants: map[string]int{"Black": 0, "Grey": 1},
+					},
+					&VariableDeclaration{
+						Mutable: false,
+						Name:    "favorite",
+						Type:    colorEnum,
+						Value: &MemberAccess{
+							Target:     Identifier{Name: "Color", Type: colorEnum},
+							AccessType: Static,
+							Member:     &Identifier{Name: "Black", Type: colorEnum},
+						},
 					},
 				},
 			},

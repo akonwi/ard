@@ -527,6 +527,13 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 		}
 	case "void":
 		return checker.VoidType
+	case "identifier":
+		identifier := p.text(child)
+		symbol := p.scope.Lookup(identifier)
+		if symbol == nil {
+			panic(fmt.Sprintf("Undefined: '%s'", identifier))
+		}
+		return symbol.Type
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}
@@ -1115,9 +1122,12 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 					return &MemberAccess{
 						Target:     *target,
 						AccessType: accessType,
-						Member:     &Identifier{Name: name},
+						Member:     &Identifier{Name: name, Type: target.Type},
 					}, nil
 				}
+				msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, target.Name)
+				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+				return nil, fmt.Errorf(msg)
 			}
 			return nil, fmt.Errorf("Unsupported: instance members on enums")
 		default:
