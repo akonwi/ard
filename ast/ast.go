@@ -11,7 +11,7 @@ type BaseNode struct {
 	TSNode *tree_sitter.Node
 }
 
-func (b *BaseNode) GetTSNode() *tree_sitter.Node {
+func (b BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
 }
 
@@ -90,8 +90,8 @@ type FunctionDeclaration struct {
 	Type       checker.FunctionType
 }
 
-func (f *FunctionDeclaration) StatementNode() {}
-func (f *FunctionDeclaration) String() string {
+func (f FunctionDeclaration) StatementNode() {}
+func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("(%s) ?", f.Name)
 }
 
@@ -150,6 +150,22 @@ type IfStatement struct {
 func (i *IfStatement) StatementNode() {}
 func (i *IfStatement) String() string {
 	return "IfStatement"
+}
+
+type FunctionCall struct {
+	BaseNode
+	Name string
+	Args []Expression
+	Type checker.FunctionType
+}
+
+func (f FunctionCall) StatementNode()  {}
+func (f FunctionCall) ExpressionNode() {}
+func (f FunctionCall) String() string {
+	return fmt.Sprintf("FunctionCall(%s)", f.Name)
+}
+func (f FunctionCall) GetType() checker.Type {
+	return f.Type.ReturnType
 }
 
 type MemberAccessType string
@@ -614,6 +630,22 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 		}
 	}
 
+	parameterTypes := make([]checker.Type, len(parameters))
+	for i, param := range parameters {
+		parameterTypes[i] = param.Type
+	}
+	fnType := checker.FunctionType{
+		Mutates:    false,
+		Parameters: parameterTypes,
+		ReturnType: returnType,
+	}
+	symbol := checker.Symbol{
+		Mutable: false,
+		Name:    name,
+		Type:    fnType,
+	}
+	p.scope.Declare(symbol)
+
 	return &FunctionDeclaration{
 		BaseNode:   BaseNode{TSNode: node},
 		Name:       name,
@@ -845,6 +877,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parseBinaryExpression(child)
 	case "member_access":
 		return p.parseMemberAccess(child)
+	case "function_call":
+		return p.parseFunctionCall(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
@@ -854,12 +888,16 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (*Identifier, error) {
 	name := p.text(node)
 	symbol := p.scope.Lookup(name)
 	if symbol == nil {
-		msg := fmt.Sprintf("Undefined: '%s'", name)
-		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
-		return nil, fmt.Errorf(msg)
+		return nil, p.undefinedSymbolError(node)
 	}
 
 	return &Identifier{Name: name, Type: symbol.Type}, nil
+}
+
+func (p *Parser) undefinedSymbolError(node *tree_sitter.Node) error {
+	msg := fmt.Sprintf("Undefined: '%s'", p.text(node))
+	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	return fmt.Errorf(msg)
 }
 
 func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error) {
@@ -1136,5 +1174,44 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
+}
 
+func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
+	nameNode := node.ChildByFieldName("target")
+	symbol := p.scope.Lookup(p.text(nameNode))
+	if symbol == nil {
+		return nil, p.undefinedSymbolError(node)
+	}
+	fnType, ok := symbol.Type.(checker.FunctionType)
+	if !ok {
+		msg := fmt.Sprintf("'%s' is not a function", symbol.Name)
+		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+		return nil, fmt.Errorf(msg)
+	}
+
+	argsNode := node.ChildByFieldName("arguments")
+	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
+
+	fmt.Printf("argNode.len = %v, parameters.len = %v\n", len(argNodes), len(fnType.Parameters))
+	if len(argNodes) != len(fnType.Parameters) {
+		msg := fmt.Sprintf("Expected %d arguments, got %d", len(fnType.Parameters), len(argNodes))
+		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, argsNode))
+		return nil, fmt.Errorf(msg)
+	}
+
+	args := make([]Expression, len(argNodes))
+	for i, argNode := range argNodes {
+		arg, err := p.parseExpression(&argNode)
+		if err != nil {
+			return nil, err
+		}
+		args[i] = arg
+	}
+
+	return FunctionCall{
+		BaseNode: BaseNode{TSNode: node},
+		Name:     symbol.Name,
+		Args:     args,
+		Type:     fnType,
+	}, nil
 }

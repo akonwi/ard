@@ -1517,6 +1517,139 @@ func TestIdentifiers(t *testing.T) {
 	runTests(t, tests)
 }
 
+func testFunctionCalls(t *testing.T) {
+	get_name := checker.FunctionType{Mutates: false, Parameters: []checker.Type{}, ReturnType: checker.StrType}
+	greet := checker.FunctionType{
+		Mutates:    false,
+		Parameters: []checker.Type{checker.StrType},
+		ReturnType: checker.StrType,
+	}
+	tests := []test{
+		{
+			name: "Valid function call with no arguments",
+			input: `
+				fn get_name() Str { "name" }
+				get_name()`,
+			output: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "get_name",
+						Parameters: []Parameter{},
+						ReturnType: get_name.ReturnType,
+						Body:       []Statement{&StrLiteral{Value: `"name"`}},
+					},
+					FunctionCall{
+						Name: "get_name",
+						Args: []Expression{},
+						Type: get_name,
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Providing arguments when none are expected",
+			input: `
+				fn get_name() Str { "name" }
+				get_name("bo")
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Msg: "Expected 0 arguments, got 1"},
+			},
+		},
+		{
+			name: "Valid function call with one argument",
+			input: `
+				fn greet(name: Str) Str { "hello" }
+				greet("Alice")`,
+			output: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "greet",
+						Parameters: []Parameter{
+							{Name: "name"},
+						},
+						ReturnType: greet.ReturnType,
+						Body:       []Statement{&StrLiteral{Value: `"hello"`}},
+					},
+					FunctionCall{
+						Name: "greet",
+						Args: []Expression{
+							&StrLiteral{Value: `"Alice"`},
+						},
+						Type: greet,
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		// {
+		// 	name: "Valid function call with two arguments",
+		// 	input: `
+		// 		fn add(x: Num, y: Num) Num { 0 }
+		// 		add(1, 2)`,
+		// 	output: &Program{
+		// 		Statements: []Statement{
+		// 			&FunctionCall{
+		// 				Name: "add",
+		// 				Arguments: []Expression{
+		// 					&NumLiteral{Value: "1"},
+		// 					&NumLiteral{Value: "2"},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	diagnostics: []checker.Diagnostic{},
+		// },
+		// {
+		// 	name: "Wrong number of arguments",
+		// 	input: `
+		// 		fn greet(name: Str) Str { "hello" }
+		// 		greet("Alice", "Bob")`,
+		// 	output: &Program{
+		// 		Statements: []Statement{
+		// 			&FunctionCall{
+		// 				Name: "greet",
+		// 				Arguments: []Expression{
+		// 					&StrLiteral{Value: `"Alice"`},
+		// 					&StrLiteral{Value: `"Bob"`},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	diagnostics: []checker.Diagnostic{
+		// 		{
+		// 			Msg: "Function 'greet' expects 1 argument(s), got 2",
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "Wrong argument type",
+		// 	input: `
+		// 		fn add(x: Num, y: Num) Num { 0 }
+		// 		add("one", 2)`,
+		// 	output: &Program{
+		// 		Statements: []Statement{
+		// 			&FunctionCall{
+		// 				Name: "add",
+		// 				Arguments: []Expression{
+		// 					&StrLiteral{Value: `"one"`},
+		// 					&NumLiteral{Value: "2"},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	diagnostics: []checker.Diagnostic{
+		// 		{
+		// 			Msg: "Function 'add' expects argument of type 'Num', got 'Str'",
+		// 		},
+		// 	},
+		// },
+	}
+
+	runTests(t, tests)
+}
+
 func TestWhileLoop(t *testing.T) {
 	tests := []test{
 		{
@@ -1870,3 +2003,40 @@ func TestEnums(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+// func TestUsingStructs(t *testing.T) {
+// 	emptyStruct := checker.StructType{
+// 		Name:   "Box",
+// 		Fields: map[string]checker.Type{},
+// 	}
+// 	personStruct := checker.StructType{
+// 		Name: "Person",
+// 		Fields: map[string]checker.Type{
+// 			"name": checker.StrType,
+// 			"age":  checker.NumType,
+// 		},
+// 	}
+// 	tests := []test{
+// 		{
+// 			name: "Instantiating with ::new",
+// 			input: `
+// 				enum Box {}
+// 				Box::new()`,
+// 			output: &Program{
+// 				Statements: []Statement{
+// 					&StructDefinition{
+// 						Name:   "Box",
+// 						Fields: map[string]checker.Type{},
+// 					},
+// 					&MemberAccess{
+// 						Target:     Identifier{Name: "Box", Type: emptyStruct},
+// 						AccessType: Static,
+// 						Member:     &Identifier{Name: "new", Type: colorEnum},
+// 					},
+// 				},
+// 			},
+// 		},
+// 	}
+
+// 	runTests(t, tests)
+// }
