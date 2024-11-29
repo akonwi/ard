@@ -52,6 +52,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "person",
+								Type: checker.StrType,
 							},
 						},
 						ReturnType: checker.StrType,
@@ -81,9 +82,11 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "x",
+								Type: checker.NumType,
 							},
 							{
 								Name: "y",
+								Type: checker.NumType,
 							},
 						},
 						ReturnType: checker.NumType,

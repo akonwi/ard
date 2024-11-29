@@ -96,12 +96,11 @@ func (s StructDefinition) String() string {
 
 type EnumDefinition struct {
 	BaseNode
-	Name     string
-	Variants map[string]int
+	Type checker.EnumType
 }
 
 func (e EnumDefinition) String() string {
-	return fmt.Sprintf("EnumDefinition(%s)", e.Name)
+	return fmt.Sprintf("EnumDefinition(%s)", e.Type.Name)
 }
 
 type WhileLoop struct {
@@ -822,17 +821,13 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 		variants[name] = i
 	}
 
+	_type := checker.EnumType{Name: p.text(nameNode), Variants: variants}
+
 	enum := &EnumDefinition{
 		BaseNode: BaseNode{TSNode: node},
-		Name:     p.text(nameNode),
-		Variants: variants,
+		Type:     _type,
 	}
-	enumType := checker.EnumType{Name: enum.Name, Variants: enum.Variants}
-	p.scope.Declare(checker.Variable{
-		Mutable: false,
-		Name:    enum.Name,
-		Type:    enumType,
-	})
+	p.scope.Declare(_type)
 	return enum, nil
 }
 

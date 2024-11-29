@@ -120,6 +120,12 @@ func (e EnumType) GetProperty(name string) Type {
 func (e EnumType) Equals(other Type) bool {
 	return e.String() == other.String()
 }
+func (e EnumType) GetName() string {
+	return e.Name
+}
+func (e EnumType) GetType() Type {
+	return e
+}
 
 type ListType struct {
 	ItemType Type
