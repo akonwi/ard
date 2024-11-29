@@ -99,13 +99,28 @@ func TestFunctionDeclaration(t *testing.T) {
 	runTests(t, tests)
 }
 
-func testFunctionCalls(t *testing.T) {
-	get_name := checker.FunctionType{Mutates: false, Parameters: []checker.Type{}, ReturnType: checker.StrType}
+func TestFunctionCalls(t *testing.T) {
+	get_name := checker.FunctionType{
+		Name:       "get_name",
+		Mutates:    false,
+		Parameters: []checker.Type{},
+		ReturnType: checker.StrType,
+	}
 	greet := checker.FunctionType{
+		Name:       "greet",
 		Mutates:    false,
 		Parameters: []checker.Type{checker.StrType},
 		ReturnType: checker.StrType,
 	}
+	add := checker.FunctionType{
+		Name: "add",
+		Parameters: []checker.Type{
+			checker.NumType,
+			checker.NumType,
+		},
+		ReturnType: checker.NumType,
+	}
+
 	tests := []test{
 		{
 			name: "Valid function call with no arguments",
@@ -147,9 +162,9 @@ func testFunctionCalls(t *testing.T) {
 			output: &Program{
 				Statements: []Statement{
 					&FunctionDeclaration{
-						Name: "greet",
+						Name: greet.Name,
 						Parameters: []Parameter{
-							{Name: "name"},
+							{Name: "name", Type: checker.StrType},
 						},
 						ReturnType: greet.ReturnType,
 						Body:       []Statement{&StrLiteral{Value: `"hello"`}},
@@ -165,24 +180,40 @@ func testFunctionCalls(t *testing.T) {
 			},
 			diagnostics: []checker.Diagnostic{},
 		},
-		// {
-		// 	name: "Valid function call with two arguments",
-		// 	input: `
-		// 		fn add(x: Num, y: Num) Num { 0 }
-		// 		add(1, 2)`,
-		// 	output: &Program{
-		// 		Statements: []Statement{
-		// 			&FunctionCall{
-		// 				Name: "add",
-		// 				Arguments: []Expression{
-		// 					&NumLiteral{Value: "1"},
-		// 					&NumLiteral{Value: "2"},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	diagnostics: []checker.Diagnostic{},
-		// },
+		{
+			name: "Valid function call with two arguments",
+			input: `
+				fn add(x: Num, y: Num) Num { x + y }
+				add(1, 2)`,
+			output: &Program{
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: add.Name,
+						Parameters: []Parameter{
+							{Name: "x", Type: checker.NumType},
+							{Name: "y", Type: checker.NumType},
+						},
+						ReturnType: add.ReturnType,
+						Body: []Statement{
+							&BinaryExpression{
+								Left:     &Identifier{Name: "x", Type: checker.NumType},
+								Operator: Plus,
+								Right:    &Identifier{Name: "y", Type: checker.NumType},
+							},
+						},
+					},
+					FunctionCall{
+						Name: "add",
+						Args: []Expression{
+							&NumLiteral{Value: "1"},
+							&NumLiteral{Value: "2"},
+						},
+						Type: add,
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
 		// {
 		// 	name: "Wrong number of arguments",
 		// 	input: `

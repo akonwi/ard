@@ -48,12 +48,12 @@ var (
 )
 
 type FunctionType struct {
+	Name       string
 	Mutates    bool
 	Parameters []Type
 	ReturnType Type
 }
 
-// impl StaticType for FunctionType
 func (f FunctionType) String() string {
 	return fmt.Sprintf("(%v) %v", f.Parameters, f.ReturnType)
 }
@@ -74,6 +74,12 @@ func (f FunctionType) Equals(other Type) bool {
 	// 	return f.ReturnType.Equals(otherFunc.ReturnType)
 	// }
 	// return false
+}
+func (f FunctionType) GetName() string {
+	return f.Name
+}
+func (f FunctionType) GetType() Type {
+	return f
 }
 
 type StructType struct {

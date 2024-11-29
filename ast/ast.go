@@ -574,7 +574,21 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 	parameters := p.parseParameters(
 		node.ChildByFieldName("parameters"))
 	returnType := p.resolveType(node.ChildByFieldName("return"))
+
+	scope := p.pushScope()
+	parameterTypes := make([]checker.Type, len(parameters))
+	for i, param := range parameters {
+		parameterTypes[i] = param.Type
+		scope.Declare(checker.Variable{
+			Mutable: false,
+			Name:    param.Name,
+			Type:    param.Type,
+		})
+	}
+
 	body, err := p.parseBlock(node.ChildByFieldName("body"))
+
+	p.popScope()
 
 	if err != nil {
 		return nil, err
@@ -599,21 +613,13 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 		}
 	}
 
-	parameterTypes := make([]checker.Type, len(parameters))
-	for i, param := range parameters {
-		parameterTypes[i] = param.Type
-	}
 	fnType := checker.FunctionType{
+		Name:       name,
 		Mutates:    false,
 		Parameters: parameterTypes,
 		ReturnType: returnType,
 	}
-	symbol := checker.Variable{
-		Mutable: false,
-		Name:    name,
-		Type:    fnType,
-	}
-	p.scope.Declare(symbol)
+	p.scope.Declare(fnType)
 
 	return &FunctionDeclaration{
 		BaseNode:   BaseNode{TSNode: node},
@@ -632,6 +638,7 @@ func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
 		parameters = append(parameters, Parameter{
 			BaseNode: BaseNode{TSNode: &node},
 			Name:     p.text(node.ChildByFieldName("name")),
+			Type:     p.resolveType(node.ChildByFieldName("type")),
 		})
 	}
 
@@ -1161,7 +1168,6 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 	argsNode := node.ChildByFieldName("arguments")
 	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
 
-	fmt.Printf("argNode.len = %v, parameters.len = %v\n", len(argNodes), len(fnType.Parameters))
 	if len(argNodes) != len(fnType.Parameters) {
 		msg := fmt.Sprintf("Expected %d arguments, got %d", len(fnType.Parameters), len(argNodes))
 		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, argsNode))
