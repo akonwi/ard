@@ -7,6 +7,19 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+// statements do not produce values
+type Statement interface {
+	String() string
+	GetTSNode() *tree_sitter.Node
+}
+
+// expressions produce values
+type Expression interface {
+	Statement
+	GetType() checker.Type
+}
+
+// the base struct for all AST nodes
 type BaseNode struct {
 	TSNode *tree_sitter.Node
 }
@@ -15,30 +28,9 @@ func (b BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
 }
 
-type TypedNode interface {
-	Node
-	GetType() checker.Type
-}
-
-type Node interface {
-	String() string
-	GetTSNode() *tree_sitter.Node
-}
-
 type Program struct {
 	BaseNode
 	Statements []Statement
-}
-
-type Statement interface {
-	Node
-	StatementNode()
-}
-
-type Expression interface {
-	Node
-	ExpressionNode()
-	GetType() checker.Type
 }
 
 type VariableDeclaration struct {
@@ -46,11 +38,10 @@ type VariableDeclaration struct {
 	Name    string
 	Mutable bool
 	Value   Expression
-	Type    checker.Type
+	Type    checker.Type // the declared type
 }
 
-func (v *VariableDeclaration) StatementNode() {}
-func (v *VariableDeclaration) String() string {
+func (v VariableDeclaration) String() string {
 	binding := "let"
 	if v.Mutable {
 		binding = "mut"
@@ -66,10 +57,9 @@ type VariableAssignment struct {
 }
 
 // impl interfaces
-func (v *VariableAssignment) String() string {
+func (v VariableAssignment) String() string {
 	return fmt.Sprintf("%v = %s", v.Name, v.Value)
 }
-func (v *VariableAssignment) StatementNode() {}
 
 type Parameter struct {
 	BaseNode
@@ -77,7 +67,7 @@ type Parameter struct {
 	Type checker.Type
 }
 
-func (p *Parameter) String() string {
+func (p Parameter) String() string {
 	return p.Name
 }
 
@@ -90,7 +80,6 @@ type FunctionDeclaration struct {
 	Type       checker.FunctionType
 }
 
-func (f FunctionDeclaration) StatementNode() {}
 func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("(%s) ?", f.Name)
 }
@@ -101,8 +90,7 @@ type StructDefinition struct {
 	Fields map[string]checker.Type
 }
 
-func (s *StructDefinition) StatementNode() {}
-func (s *StructDefinition) String() string {
+func (s StructDefinition) String() string {
 	return fmt.Sprintf("StructDefinition(%s)", s.Name)
 }
 
@@ -112,8 +100,7 @@ type EnumDefinition struct {
 	Variants map[string]int
 }
 
-func (e *EnumDefinition) StatementNode() {}
-func (e *EnumDefinition) String() string {
+func (e EnumDefinition) String() string {
 	return fmt.Sprintf("EnumDefinition(%s)", e.Name)
 }
 
@@ -123,8 +110,7 @@ type WhileLoop struct {
 	Body      []Statement
 }
 
-func (w *WhileLoop) StatementNode() {}
-func (w *WhileLoop) String() string {
+func (w WhileLoop) String() string {
 	return "while"
 }
 
@@ -135,8 +121,7 @@ type ForLoop struct {
 	Body     []Statement
 }
 
-func (f *ForLoop) StatementNode() {}
-func (f *ForLoop) String() string {
+func (f ForLoop) String() string {
 	return "ForLoop"
 }
 
@@ -147,8 +132,7 @@ type IfStatement struct {
 	Else      Statement
 }
 
-func (i *IfStatement) StatementNode() {}
-func (i *IfStatement) String() string {
+func (i IfStatement) String() string {
 	return "IfStatement"
 }
 
@@ -159,8 +143,6 @@ type FunctionCall struct {
 	Type checker.FunctionType
 }
 
-func (f FunctionCall) StatementNode()  {}
-func (f FunctionCall) ExpressionNode() {}
 func (f FunctionCall) String() string {
 	return fmt.Sprintf("FunctionCall(%s)", f.Name)
 }
@@ -182,12 +164,10 @@ type MemberAccess struct {
 	Member     Expression
 }
 
-func (m MemberAccess) StatementNode()  {}
-func (m MemberAccess) ExpressionNode() {}
-func (m *MemberAccess) String() string {
+func (m MemberAccess) String() string {
 	return fmt.Sprintf("MemberAccess(%s-%s-%s)", m.Target.Name, m.AccessType, m.Member)
 }
-func (m *MemberAccess) GetType() checker.Type {
+func (m MemberAccess) GetType() checker.Type {
 	return m.Member.GetType()
 }
 
@@ -222,12 +202,10 @@ type UnaryExpression struct {
 }
 
 // impl interfaces
-func (u *UnaryExpression) ExpressionNode() {}
-func (u *UnaryExpression) StatementNode()  {}
-func (u *UnaryExpression) String() string {
+func (u UnaryExpression) String() string {
 	return fmt.Sprintf("(%v %v)", u.Operator, u.Operand)
 }
-func (u *UnaryExpression) GetType() checker.Type {
+func (u UnaryExpression) GetType() checker.Type {
 	return u.Operand.GetType()
 }
 
@@ -237,12 +215,10 @@ type BinaryExpression struct {
 	Left, Right Expression
 }
 
-func (b *BinaryExpression) ExpressionNode() {}
-func (b *BinaryExpression) StatementNode()  {}
-func (b *BinaryExpression) String() string {
+func (b BinaryExpression) String() string {
 	return fmt.Sprintf("%v %v %v", b.Left, b.Operator, b.Right)
 }
-func (b *BinaryExpression) GetType() checker.Type {
+func (b BinaryExpression) GetType() checker.Type {
 	switch b.Operator {
 	case Plus, Minus, Multiply, Divide, Modulo:
 		return checker.NumType
@@ -260,12 +236,10 @@ type RangeExpression struct {
 	Left, Right Expression
 }
 
-func (b *RangeExpression) ExpressionNode() {}
-func (b *RangeExpression) StatementNode()  {}
-func (b *RangeExpression) String() string {
+func (b RangeExpression) String() string {
 	return "RangeExpression"
 }
-func (b *RangeExpression) GetType() checker.Type {
+func (b RangeExpression) GetType() checker.Type {
 	return checker.NumType
 }
 
@@ -275,12 +249,10 @@ type Identifier struct {
 	Type checker.Type
 }
 
-func (i *Identifier) ExpressionNode() {}
-func (i *Identifier) StatementNode()  {}
-func (i *Identifier) String() string {
+func (i Identifier) String() string {
 	return fmt.Sprintf("Identifier(%s)", i.Name)
 }
-func (i *Identifier) GetType() checker.Type {
+func (i Identifier) GetType() checker.Type {
 	return i.Type
 }
 
@@ -290,13 +262,10 @@ type StrLiteral struct {
 	Type  checker.Type
 }
 
-// impl interfaces
-func (s *StrLiteral) ExpressionNode() {}
-func (s *StrLiteral) StatementNode()  {}
-func (s *StrLiteral) String() string {
+func (s StrLiteral) String() string {
 	return s.Value
 }
-func (s *StrLiteral) GetType() checker.Type {
+func (s StrLiteral) GetType() checker.Type {
 	return checker.StrType
 }
 
@@ -306,13 +275,10 @@ type NumLiteral struct {
 	Type  checker.Type
 }
 
-// impl interfaces
-func (n *NumLiteral) ExpressionNode() {}
-func (n *NumLiteral) StatementNode()  {}
-func (n *NumLiteral) String() string {
+func (n NumLiteral) String() string {
 	return n.Value
 }
-func (n *NumLiteral) GetType() checker.Type {
+func (n NumLiteral) GetType() checker.Type {
 	return checker.NumType
 }
 
@@ -323,12 +289,10 @@ type BoolLiteral struct {
 }
 
 // impl interfaces
-func (b *BoolLiteral) ExpressionNode() {}
-func (b *BoolLiteral) StatementNode()  {}
-func (b *BoolLiteral) String() string {
+func (b BoolLiteral) String() string {
 	return fmt.Sprintf("%t", b.Value)
 }
-func (b *BoolLiteral) GetType() checker.Type {
+func (b BoolLiteral) GetType() checker.Type {
 	return checker.BoolType
 }
 
@@ -338,11 +302,10 @@ type ListLiteral struct {
 	Items []Expression
 }
 
-func (l *ListLiteral) ExpressionNode() {}
-func (l *ListLiteral) String() string {
+func (l ListLiteral) String() string {
 	return "ListLiteral"
 }
-func (l *ListLiteral) GetType() checker.Type {
+func (l ListLiteral) GetType() checker.Type {
 	return l.Type
 }
 
@@ -352,11 +315,10 @@ type MapLiteral struct {
 	Type    checker.Type
 }
 
-func (m *MapLiteral) ExpressionNode() {}
-func (m *MapLiteral) String() string {
+func (m MapLiteral) String() string {
 	return fmt.Sprintf("MapLiteral { %v }", m.Entries)
 }
-func (m *MapLiteral) GetType() checker.Type {
+func (m MapLiteral) GetType() checker.Type {
 	return m.Type
 }
 
@@ -453,7 +415,7 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		return expr.(Statement), nil
+		return expr, nil
 	default:
 		return nil, fmt.Errorf("Unhandled statement: %s", child.GrammarName())
 	}
