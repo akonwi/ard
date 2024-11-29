@@ -93,6 +93,12 @@ func (s StructType) GetProperty(name string) Type {
 func (s StructType) Equals(other Type) bool {
 	return s.String() == other.String()
 }
+func (s StructType) GetName() string {
+	return s.Name
+}
+func (s StructType) GetType() Type {
+	return s
+}
 
 type EnumType struct {
 	Name     string
@@ -177,10 +183,22 @@ func MakeMap(valueType Type) MapType {
 	return MapType{KeyType: StrType, ValueType: valueType}
 }
 
-type Symbol struct {
+type Symbol interface {
+	GetName() string
+	GetType() Type
+}
+
+type Variable struct {
 	Name    string
 	Type    Type
 	Mutable bool
+}
+
+func (v Variable) GetName() string {
+	return v.Name
+}
+func (v Variable) GetType() Type {
+	return v.Type
 }
 
 type Scope struct {
@@ -201,24 +219,16 @@ func NewScope(parent *Scope) *Scope {
 }
 
 func (s *Scope) Declare(sym Symbol) error {
-	if existing, ok := s.symbols[sym.Name]; ok {
-		return fmt.Errorf("symbol %s already declared as %v", existing.Name, existing.Type)
+	if existing, ok := s.symbols[sym.GetName()]; ok {
+		return fmt.Errorf("symbol %s already declared as %v", existing.GetName(), existing.GetType())
 	}
-	s.symbols[sym.Name] = sym
+	s.symbols[sym.GetName()] = sym
 	return nil
 }
 
-func (s *Scope) DeclareStruct(strct StructType) error {
-	if existing, ok := s.structs[strct.Name]; ok {
-		return fmt.Errorf("struct %s is already defined", existing.Name)
-	}
-	s.structs[strct.Name] = strct
-	return nil
-}
-
-func (s *Scope) Lookup(name string) *Symbol {
+func (s *Scope) Lookup(name string) Symbol {
 	if sym, ok := s.symbols[name]; ok {
-		return &sym
+		return sym
 	}
 	if s.parent != nil {
 		return s.parent.Lookup(name)

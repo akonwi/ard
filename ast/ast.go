@@ -458,7 +458,7 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 	if declaredType == nil {
 		symbolType = inferredType
 	}
-	p.scope.Declare(checker.Symbol{
+	p.scope.Declare(checker.Variable{
 		Mutable: isMutable,
 		Name:    name,
 		Type:    symbolType,
@@ -511,7 +511,7 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 		if symbol == nil {
 			panic(fmt.Sprintf("Undefined: '%s'", identifier))
 		}
-		return symbol.Type
+		return symbol.GetType()
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}
@@ -537,19 +537,26 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAss
 		return &VariableAssignment{Name: name, Operator: operator, Value: value}, nil
 	}
 
-	if symbol.Mutable == false {
+	variable, ok := symbol.(checker.Variable)
+	if !ok {
+		msg := fmt.Sprintf("'%s' is not a variable", name)
+		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
+		return nil, fmt.Errorf(msg)
+	}
+
+	if variable.Mutable == false {
 		msg := fmt.Sprintf("'%s' is not mutable", name)
 		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
 	}
 
 	switch operator {
 	case Assign:
-		if symbol.Type != value.GetType() {
-			msg := fmt.Sprintf("Expected a '%s' and received '%v'", symbol.Type, value.GetType())
+		if !variable.GetType().Equals(value.GetType()) {
+			msg := fmt.Sprintf("Expected a '%s' and received '%v'", variable.GetType(), value.GetType())
 			p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: valueNode.Range()})
 		}
 	case Increment, Decrement:
-		if symbol.Type != checker.NumType || value.GetType() != checker.NumType {
+		if variable.GetType() != checker.NumType || value.GetType() != checker.NumType {
 			msg := fmt.Sprintf("'%s' can only be used with 'Num'", p.text(operatorNode))
 			p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: valueNode.Range()})
 		}
@@ -601,7 +608,7 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 		Parameters: parameterTypes,
 		ReturnType: returnType,
 	}
-	symbol := checker.Symbol{
+	symbol := checker.Variable{
 		Mutable: false,
 		Name:    name,
 		Type:    fnType,
@@ -685,7 +692,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 	if iterableType == checker.NumType || iterableType == checker.StrType {
 		_cursor := &Identifier{Name: p.text(cursorNode), Type: iterableType}
 		newScope := p.pushScope()
-		newScope.Declare(checker.Symbol{Name: _cursor.Name, Type: _cursor.Type})
+		newScope.Declare(checker.Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
 		body, err := p.parseBlock(bodyNode)
 		p.popScope()
 		if err != nil {
@@ -701,7 +708,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 	if _listType, ok := iterableType.(checker.ListType); ok {
 		_cursor := &Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
 		newScope := p.pushScope()
-		newScope.Declare(checker.Symbol{Name: _cursor.Name, Type: _cursor.Type})
+		newScope.Declare(checker.Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
 		body, err := p.parseBlock(bodyNode)
 		p.popScope()
 		if err != nil {
@@ -793,7 +800,7 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 		Name:   p.text(nameNode),
 		Fields: fields,
 	}
-	p.scope.DeclareStruct(checker.StructType{Name: strct.Name, Fields: strct.Fields})
+	p.scope.Declare(checker.StructType{Name: strct.Name, Fields: strct.Fields})
 	return strct, nil
 }
 
@@ -814,7 +821,7 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 		Variants: variants,
 	}
 	enumType := checker.EnumType{Name: enum.Name, Variants: enum.Variants}
-	p.scope.Declare(checker.Symbol{
+	p.scope.Declare(checker.Variable{
 		Mutable: false,
 		Name:    enum.Name,
 		Type:    enumType,
@@ -853,7 +860,7 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (*Identifier, error) {
 		return nil, p.undefinedSymbolError(node)
 	}
 
-	return &Identifier{Name: name, Type: symbol.Type}, nil
+	return &Identifier{Name: name, Type: symbol.GetType()}, nil
 }
 
 func (p *Parser) undefinedSymbolError(node *tree_sitter.Node) error {
@@ -1144,9 +1151,9 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 	if symbol == nil {
 		return nil, p.undefinedSymbolError(node)
 	}
-	fnType, ok := symbol.Type.(checker.FunctionType)
+	fnType, ok := symbol.GetType().(checker.FunctionType)
 	if !ok {
-		msg := fmt.Sprintf("'%s' is not a function", symbol.Name)
+		msg := fmt.Sprintf("'%s' is not a function", symbol.GetName())
 		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
 		return nil, fmt.Errorf(msg)
 	}
@@ -1172,7 +1179,7 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 
 	return FunctionCall{
 		BaseNode: BaseNode{TSNode: node},
-		Name:     symbol.Name,
+		Name:     symbol.GetName(),
 		Args:     args,
 		Type:     fnType,
 	}, nil
