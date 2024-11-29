@@ -214,50 +214,17 @@ func TestFunctionCalls(t *testing.T) {
 			},
 			diagnostics: []checker.Diagnostic{},
 		},
-		// {
-		// 	name: "Wrong number of arguments",
-		// 	input: `
-		// 		fn greet(name: Str) Str { "hello" }
-		// 		greet("Alice", "Bob")`,
-		// 	output: &Program{
-		// 		Statements: []Statement{
-		// 			&FunctionCall{
-		// 				Name: "greet",
-		// 				Arguments: []Expression{
-		// 					&StrLiteral{Value: `"Alice"`},
-		// 					&StrLiteral{Value: `"Bob"`},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	diagnostics: []checker.Diagnostic{
-		// 		{
-		// 			Msg: "Function 'greet' expects 1 argument(s), got 2",
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name: "Wrong argument type",
-		// 	input: `
-		// 		fn add(x: Num, y: Num) Num { 0 }
-		// 		add("one", 2)`,
-		// 	output: &Program{
-		// 		Statements: []Statement{
-		// 			&FunctionCall{
-		// 				Name: "add",
-		// 				Arguments: []Expression{
-		// 					&StrLiteral{Value: `"one"`},
-		// 					&NumLiteral{Value: "2"},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	diagnostics: []checker.Diagnostic{
-		// 		{
-		// 			Msg: "Function 'add' expects argument of type 'Num', got 'Str'",
-		// 		},
-		// 	},
-		// },
+		{
+			name: "Wrong argument type",
+			input: `
+				fn add(x: Num, y: Num) Num { x + y }
+				add(1, "two")`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Msg: "Type mismatch: expected Num, got Str",
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)

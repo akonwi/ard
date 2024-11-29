@@ -1158,8 +1158,8 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 	if symbol == nil {
 		return nil, p.undefinedSymbolError(node)
 	}
-	fnType, ok := symbol.GetType().(checker.FunctionType)
-	if !ok {
+	fnType, isFunction := symbol.GetType().(checker.FunctionType)
+	if !isFunction {
 		msg := fmt.Sprintf("'%s' is not a function", symbol.GetName())
 		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
 		return nil, fmt.Errorf(msg)
@@ -1179,6 +1179,10 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 		arg, err := p.parseExpression(&argNode)
 		if err != nil {
 			return nil, err
+		}
+		expectedType := fnType.Parameters[i]
+		if !expectedType.Equals(arg.GetType()) {
+			p.typeMismatchError(&argNode, expectedType, arg.GetType())
 		}
 		args[i] = arg
 	}
