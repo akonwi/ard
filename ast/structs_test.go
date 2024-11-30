@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"fmt"
 	"testing"
 
 	checker "github.com/akonwi/kon/checker"
@@ -54,33 +55,72 @@ func TestStructDefinitions(t *testing.T) {
 	runTests(t, tests)
 }
 
-func testUsingStructs(t *testing.T) {
+func TestUsingStructs(t *testing.T) {
 	emptyStruct := checker.StructType{
 		Name:   "Box",
 		Fields: map[string]checker.Type{},
 	}
-	// personStruct := checker.StructType{
-	// 	Name: "Person",
-	// 	Fields: map[string]checker.Type{
-	// 		"name": checker.StrType,
-	// 		"age":  checker.NumType,
-	// 	},
-	// }
+
+	personStructCode := `
+		struct Person {
+			name: Str,
+			age: Num,
+			employed: Bool
+		}`
+	personStruct := checker.StructType{
+		Name: "Person",
+		Fields: map[string]checker.Type{
+			"name":     checker.StrType,
+			"age":      checker.NumType,
+			"employed": checker.BoolType,
+		},
+	}
 	tests := []test{
 		{
 			name: "Instantiating a field-less struct",
 			input: `
-				enum Box {}
-				Box::new()`,
+				struct Box {}
+				Box{}`,
 			output: &Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Type: emptyStruct,
 					},
-					&MemberAccess{
-						Target:     Identifier{Name: "Box", Type: emptyStruct},
-						AccessType: Static,
-						Member:     &Identifier{Name: "new", Type: checker.FunctionType{}},
+					StructInstance{
+						Type:       emptyStruct,
+						Properties: map[string]Expression{},
+					},
+				},
+			},
+		},
+		{
+			name: "Instantiating with field errors",
+			input: fmt.Sprintf(`%s
+				Person { name: 23, employed: true, size: "xl"  }
+			`, personStructCode),
+			diagnostics: []checker.Diagnostic{
+				{Msg: "Type mismatch: expected Str, got Num"},
+				{Msg: "'size' is not a field of 'Person'"},
+				{Msg: "Missing field 'age' in struct 'Person'"},
+			},
+		},
+		{
+			name: "Correctly instantiating a struct with fields",
+			input: fmt.Sprintf(`%s
+				Person { name: "John", age: 23, employed: true }
+			`, personStructCode),
+			output: &Program{
+				Statements: []Statement{
+					&StructDefinition{
+						Type: personStruct,
+					},
+					StructInstance{
+						Type: personStruct,
+						Properties: map[string]Expression{
+							"name":     &StrLiteral{Value: `"John"`},
+							"age":      &NumLiteral{Value: "23"},
+							"employed": &BoolLiteral{Value: true},
+						},
 					},
 				},
 			},

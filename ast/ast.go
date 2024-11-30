@@ -93,6 +93,19 @@ func (s StructDefinition) String() string {
 	return fmt.Sprintf("StructDefinition(%s)", s.Type.Name)
 }
 
+type StructInstance struct {
+	BaseNode
+	Type       checker.StructType
+	Properties map[string]Expression
+}
+
+func (s StructInstance) String() string {
+	return fmt.Sprintf("StructInstance(%s)", s.Type.Name)
+}
+func (s StructInstance) GetType() checker.Type {
+	return s.Type
+}
+
 type EnumDefinition struct {
 	BaseNode
 	Type checker.EnumType
@@ -810,6 +823,65 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 	return strct, nil
 }
 
+func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error) {
+	nameNode := node.ChildByFieldName("name")
+	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
+
+	name := p.text(nameNode)
+	symbol := p.scope.Lookup(name)
+	if symbol == nil {
+		return nil, p.undefinedSymbolError(nameNode)
+	}
+
+	structType, ok := symbol.GetType().(checker.StructType)
+	if !ok {
+		msg := fmt.Sprintf("'%s' is not a struct", name)
+		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+		return nil, fmt.Errorf(msg)
+	}
+
+	receivedNames := make(map[string]int8)
+	properties := make(map[string]Expression)
+	for _, propertyNode := range fieldNodes {
+		nameNode := propertyNode.ChildByFieldName("name")
+		name := p.text(nameNode)
+
+		valueNode := propertyNode.ChildByFieldName("value")
+		value, err := p.parsePrimitiveValue(valueNode)
+		if err != nil {
+			return nil, err
+		}
+
+		expectedType, ok := structType.Fields[name]
+		if !ok {
+			msg := fmt.Sprintf("'%s' is not a field of '%s'", name, structType.Name)
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+			continue
+		}
+
+		fmt.Printf("want %v, got %v\n", expectedType, value)
+		if !expectedType.Equals(value.GetType()) {
+			p.typeMismatchError(&propertyNode, expectedType, value.GetType())
+		}
+
+		receivedNames[name] = 0
+		properties[name] = value
+	}
+
+	for name := range structType.Fields {
+		if _, ok := receivedNames[name]; !ok {
+			msg := fmt.Sprintf("Missing field '%s' in struct '%s'", name, structType.Name)
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+		}
+	}
+
+	return StructInstance{
+		BaseNode:   BaseNode{TSNode: node},
+		Type:       structType,
+		Properties: properties,
+	}, nil
+}
+
 func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) {
 	nameNode := node.ChildByFieldName("name")
 	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
@@ -850,6 +922,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parseMemberAccess(child)
 	case "function_call":
 		return p.parseFunctionCall(child)
+	case "struct_instance":
+		return p.parseStructInstance(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
