@@ -86,12 +86,11 @@ func (f FunctionDeclaration) String() string {
 
 type StructDefinition struct {
 	BaseNode
-	Name   string
-	Fields map[string]checker.Type
+	Type checker.StructType
 }
 
 func (s StructDefinition) String() string {
-	return fmt.Sprintf("StructDefinition(%s)", s.Name)
+	return fmt.Sprintf("StructDefinition(%s)", s.Type.Name)
 }
 
 type EnumDefinition struct {
@@ -802,11 +801,12 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 		fields[name] = fieldType
 	}
 
+	_type := checker.StructType{Name: p.text(nameNode), Fields: fields}
+	p.scope.Declare(_type)
+
 	strct := &StructDefinition{
-		Name:   p.text(nameNode),
-		Fields: fields,
+		Type: _type,
 	}
-	p.scope.Declare(checker.StructType{Name: strct.Name, Fields: strct.Fields})
 	return strct, nil
 }
 
