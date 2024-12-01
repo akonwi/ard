@@ -436,16 +436,16 @@ func (p *Parser) logicalOperatorError(node *tree_sitter.Node, operator string) {
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
-func (p *Parser) Parse() (*Program, error) {
+func (p *Parser) Parse() (Program, error) {
 	rootNode := p.tree.RootNode()
-	program := &Program{
+	program := Program{
 		BaseNode:   BaseNode{TSNode: rootNode},
 		Statements: []Statement{}}
 
 	for i := range rootNode.NamedChildCount() {
 		stmt, err := p.parseStatement(rootNode.NamedChild(i))
 		if err != nil {
-			return nil, err
+			return Program{}, err
 		}
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
@@ -485,13 +485,13 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 	}
 }
 
-func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration, error) {
+func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (VariableDeclaration, error) {
 	isMutable := p.text(node.NamedChild(0)) == "mut"
 	name := p.text(node.NamedChild(1))
 	declaredType := p.resolveType(node.ChildByFieldName("type"))
 	value, err := p.parseExpression(node.ChildByFieldName("value"))
 	if err != nil {
-		return nil, err
+		return VariableDeclaration{}, err
 	}
 
 	inferredType := value.GetType()
@@ -528,7 +528,7 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (*VariableDeclaration
 		Type:    symbolType,
 	})
 
-	return &VariableDeclaration{
+	return VariableDeclaration{
 		BaseNode: BaseNode{TSNode: node},
 		Mutable:  isMutable,
 		Name:     name,
@@ -581,7 +581,7 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 	}
 }
 
-func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAssignment, error) {
+func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssignment, error) {
 	nameNode := node.ChildByFieldName("name")
 	operatorNode := node.ChildByFieldName("operator")
 	valueNode := node.ChildByFieldName("value")
@@ -592,20 +592,20 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAss
 
 	value, err := p.parseExpression(valueNode)
 	if err != nil {
-		return nil, err
+		return VariableAssignment{}, err
 	}
 
 	if symbol == nil {
 		msg := fmt.Sprintf("Undefined: '%s'", name)
 		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
-		return &VariableAssignment{Name: name, Operator: operator, Value: value}, nil
+		return VariableAssignment{Name: name, Operator: operator, Value: value}, nil
 	}
 
 	variable, ok := symbol.(checker.Variable)
 	if !ok {
 		msg := fmt.Sprintf("'%s' is not a variable", name)
 		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
-		return nil, fmt.Errorf(msg)
+		return VariableAssignment{}, fmt.Errorf(msg)
 	}
 
 	if variable.Mutable == false {
@@ -626,14 +626,14 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (*VariableAss
 		}
 	}
 
-	return &VariableAssignment{
+	return VariableAssignment{
 		Name:     name,
 		Operator: operator,
 		Value:    value,
 	}, nil
 }
 
-func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration, error) {
+func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration, error) {
 	name := p.text(node.ChildByFieldName("name"))
 	parameters := p.parseParameters(
 		node.ChildByFieldName("parameters"))
@@ -655,7 +655,7 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 	p.popScope()
 
 	if err != nil {
-		return nil, err
+		return FunctionDeclaration{}, err
 	}
 
 	var inferredType checker.Type = checker.VoidType
@@ -685,7 +685,7 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (*FunctionDeclaration
 	}
 	p.scope.Declare(fnType)
 
-	return &FunctionDeclaration{
+	return FunctionDeclaration{
 		BaseNode:   BaseNode{TSNode: node},
 		Name:       name,
 		Parameters: parameters,
@@ -742,7 +742,7 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 		return nil, err
 	}
 
-	return &WhileLoop{
+	return WhileLoop{
 		Condition: condition,
 		Body:      body,
 	}, nil
@@ -761,7 +761,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 	iterableType := iterable.GetType()
 
 	if iterableType == checker.NumType || iterableType == checker.StrType {
-		_cursor := &Identifier{Name: p.text(cursorNode), Type: iterableType}
+		_cursor := Identifier{Name: p.text(cursorNode), Type: iterableType}
 		newScope := p.pushScope()
 		newScope.Declare(checker.Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
 		body, err := p.parseBlock(bodyNode)
@@ -769,15 +769,15 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ForLoop{
-			Cursor:   *_cursor,
+		return ForLoop{
+			Cursor:   _cursor,
 			Iterable: iterable,
 			Body:     body,
 		}, nil
 	}
 
 	if _listType, ok := iterableType.(checker.ListType); ok {
-		_cursor := &Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
+		_cursor := Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
 		newScope := p.pushScope()
 		newScope.Declare(checker.Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
 		body, err := p.parseBlock(bodyNode)
@@ -785,8 +785,8 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ForLoop{
-			Cursor:   *_cursor,
+		return ForLoop{
+			Cursor:   _cursor,
 			Iterable: iterable,
 			Body:     body,
 		}, nil
@@ -947,7 +947,7 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 
 	_type := checker.EnumType{Name: p.text(nameNode), Variants: variants}
 
-	enum := &EnumDefinition{
+	enum := EnumDefinition{
 		BaseNode: BaseNode{TSNode: node},
 		Type:     _type,
 	}
@@ -985,14 +985,14 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	}
 }
 
-func (p *Parser) parseIdentifier(node *tree_sitter.Node) (*Identifier, error) {
+func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 	name := p.text(node)
 	symbol := p.scope.Lookup(name)
 	if symbol == nil {
-		return nil, p.undefinedSymbolError(node)
+		return Identifier{}, p.undefinedSymbolError(node)
 	}
 
-	return &Identifier{Name: name, Type: symbol.GetType()}, nil
+	return Identifier{Name: name, Type: symbol.GetType()}, nil
 }
 
 func (p *Parser) undefinedSymbolError(node *tree_sitter.Node) error {
@@ -1005,15 +1005,15 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "string":
-		return &StrLiteral{
+		return StrLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(child)}, nil
 	case "number":
-		return &NumLiteral{
+		return NumLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(child)}, nil
 	case "boolean":
-		return &BoolLiteral{
+		return BoolLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(child) == "true"}, nil
 	default:
@@ -1043,7 +1043,7 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 	}
 	listType := checker.ListType{ItemType: itemType}
 
-	return &ListLiteral{
+	return ListLiteral{
 		BaseNode: BaseNode{TSNode: node},
 		Type:     listType,
 		Items:    items,
@@ -1053,15 +1053,15 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 	switch node.GrammarName() {
 	case "string":
-		return &StrLiteral{
+		return StrLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(node)}, nil
 	case "number":
-		return &NumLiteral{
+		return NumLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(node)}, nil
 	case "boolean":
-		return &BoolLiteral{
+		return BoolLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(node) == "true"}, nil
 	default:
@@ -1091,7 +1091,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	}
 	mapType := checker.MapType{KeyType: checker.StrType, ValueType: valueType}
 
-	return &MapLiteral{
+	return MapLiteral{
 		BaseNode: BaseNode{TSNode: node},
 		Type:     mapType,
 		Entries:  entries,
@@ -1134,7 +1134,7 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 		}
 	}
 
-	return &UnaryExpression{
+	return UnaryExpression{
 		BaseNode: BaseNode{TSNode: node},
 		Operator: operator,
 		Operand:  operand,
@@ -1224,7 +1224,7 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 		}
 	}
 
-	return &BinaryExpression{
+	return BinaryExpression{
 		BaseNode: BaseNode{TSNode: node},
 		Left:     left,
 		Operator: operator,
@@ -1260,10 +1260,10 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 			name := p.text(memberNode)
 			if accessType == Static {
 				if _, ok := enum.Variants[name]; ok {
-					return &MemberAccess{
-						Target:     *target,
+					return MemberAccess{
+						Target:     target,
 						AccessType: accessType,
-						Member:     &Identifier{Name: name, Type: target.Type},
+						Member:     Identifier{Name: name, Type: target.Type},
 					}, nil
 				}
 				msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, target.Name)
@@ -1282,7 +1282,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 			if accessType == Instance {
 				if fieldType, ok := structDef.Fields[name]; ok {
 					return MemberAccess{
-						Target:     *target,
+						Target:     target,
 						AccessType: accessType,
 						Member:     Identifier{Name: name, Type: fieldType},
 					}, nil
@@ -1388,13 +1388,13 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 				returnType = _body.GetType()
 			}
 
-			memberAccess := _case.(*MemberAccess)
+			memberAccess := _case.(MemberAccess)
 			cases = append(cases, MatchCase{
 				Pattern: memberAccess,
 				Body:    body,
 				Type:    returnType,
 			})
-			providedCases[memberAccess.Member.(*Identifier).Name] = 0
+			providedCases[memberAccess.Member.(Identifier).Name] = 0
 
 			if i == 0 {
 				resultType = returnType

@@ -14,29 +14,29 @@ func TestVariableDeclarations(t *testing.T) {
 				let name: Str = "Alice"
     		mut age: Num = 30
       	let is_student: Bool = true`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Name:    "name",
 						Mutable: false,
 						Type:    checker.StrType,
-						Value: &StrLiteral{
+						Value: StrLiteral{
 							Value: `"Alice"`,
 						},
 					},
-					&VariableDeclaration{
+					VariableDeclaration{
 						Name:    "age",
 						Mutable: true,
 						Type:    checker.NumType,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: "30",
 						},
 					},
-					&VariableDeclaration{
+					VariableDeclaration{
 						Name:    "is_student",
 						Mutable: false,
 						Type:    checker.BoolType,
-						Value: &BoolLiteral{
+						Value: BoolLiteral{
 							Value: true,
 						},
 					},
@@ -61,18 +61,18 @@ func TestVariableDeclarations(t *testing.T) {
 		{
 			name:  "List elements must match declared type",
 			input: `let strings: [Str] = [1, 2, 3]`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "strings",
 						Type:    &checker.ListType{ItemType: checker.StrType},
-						Value: &ListLiteral{
+						Value: ListLiteral{
 							Type: checker.ListType{ItemType: checker.NumType},
 							Items: []Expression{
-								&NumLiteral{Value: "1"},
-								&NumLiteral{Value: "2"},
-								&NumLiteral{Value: "3"},
+								NumLiteral{Value: "1"},
+								NumLiteral{Value: "2"},
+								NumLiteral{Value: "3"},
 							},
 						},
 					},
@@ -85,18 +85,18 @@ func TestVariableDeclarations(t *testing.T) {
 		{
 			name:  "Valid list",
 			input: `let numbers: [Num] = [1, 2, 3]`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "numbers",
 						Type:    &checker.ListType{ItemType: checker.NumType},
-						Value: &ListLiteral{
+						Value: ListLiteral{
 							Type: checker.ListType{ItemType: checker.NumType},
 							Items: []Expression{
-								&NumLiteral{Value: "1"},
-								&NumLiteral{Value: "2"},
-								&NumLiteral{Value: "3"},
+								NumLiteral{Value: "1"},
+								NumLiteral{Value: "2"},
+								NumLiteral{Value: "3"},
 							},
 						},
 					},
@@ -107,16 +107,16 @@ func TestVariableDeclarations(t *testing.T) {
 		{
 			name:  "Valid empty map",
 			input: `mut entries: [Str:Num] = [:]`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "entries",
 						Type: checker.MapType{
 							KeyType:   checker.StrType,
 							ValueType: checker.NumType,
 						},
-						Value: &MapLiteral{
+						Value: MapLiteral{
 							Entries: map[StrLiteral]Expression{},
 							Type: checker.MapType{
 								KeyType: checker.StrType,
@@ -134,20 +134,20 @@ func TestVariableDeclarations(t *testing.T) {
 		{
 			name:  "Valid map",
 			input: `mut name_to_counts: [Str:Num] = ["john":1, "jane":2, "jen":3]`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "name_to_counts",
 						Type: checker.MapType{
 							KeyType:   checker.StrType,
 							ValueType: checker.NumType,
 						},
-						Value: &MapLiteral{
+						Value: MapLiteral{
 							Entries: map[StrLiteral]Expression{
-								{Value: `"john"`}: &NumLiteral{Value: "1"},
-								{Value: `"jane"`}: &NumLiteral{Value: "2"},
-								{Value: `"jen"`}:  &NumLiteral{Value: "3"},
+								{Value: `"john"`}: NumLiteral{Value: "1"},
+								{Value: `"jane"`}: NumLiteral{Value: "2"},
+								{Value: `"jen"`}:  NumLiteral{Value: "3"},
 							},
 							Type: checker.MapType{
 								KeyType:   checker.StrType,
@@ -169,13 +169,13 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Inferred type",
 			input: `let name = "Alice"`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "name",
 						Type:    checker.StrType,
-						Value: &StrLiteral{
+						Value: StrLiteral{
 							Value: `"Alice"`,
 						},
 					},
@@ -186,17 +186,17 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Inferred list",
 			input: `let list = ["foo", "bar"]`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Name:    "list",
 						Mutable: false,
 						Type:    checker.ListType{ItemType: checker.StrType},
-						Value: &ListLiteral{
+						Value: ListLiteral{
 							Type: checker.ListType{ItemType: checker.StrType},
 							Items: []Expression{
-								&StrLiteral{Value: `"foo"`},
-								&StrLiteral{Value: `"bar"`},
+								StrLiteral{Value: `"foo"`},
+								StrLiteral{Value: `"bar"`},
 							},
 						},
 					},
@@ -207,15 +207,15 @@ func TestVariableTypeInference(t *testing.T) {
 		{
 			name:  "Inferred map",
 			input: `let map = ["foo":3]`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "map",
 						Type:    checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
-						Value: &MapLiteral{
+						Value: MapLiteral{
 							Entries: map[StrLiteral]Expression{
-								{Value: `"foo"`}: &NumLiteral{Value: "3"},
+								{Value: `"foo"`}: NumLiteral{Value: "3"},
 							},
 							Type: checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
 						},
@@ -262,18 +262,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut name = "Alice"
 				name = "Bob"`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "name",
 						Type:    checker.StrType,
-						Value:   &StrLiteral{Value: `"Alice"`},
+						Value:   StrLiteral{Value: `"Alice"`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "name",
 						Operator: Assign,
-						Value: &StrLiteral{
+						Value: StrLiteral{
 							Value: `"Bob"`,
 						},
 					},
@@ -286,18 +286,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				let name = "Alice"
 				name = "Bob"`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "name",
 						Type:    checker.StrType,
-						Value:   &StrLiteral{Value: `"Alice"`},
+						Value:   StrLiteral{Value: `"Alice"`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "name",
 						Operator: Assign,
-						Value: &StrLiteral{
+						Value: StrLiteral{
 							Value: `"Bob"`,
 						},
 					},
@@ -314,18 +314,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut name = "Alice"
 				name = 500`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "name",
 						Type:    checker.StrType,
-						Value:   &StrLiteral{Value: `"Alice"`},
+						Value:   StrLiteral{Value: `"Alice"`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "name",
 						Operator: Assign,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: `500`,
 						},
 					},
@@ -340,12 +340,12 @@ func TestVariableAssignment(t *testing.T) {
 		{
 			name:  "Unknown variable reassignment",
 			input: `name = "Bob"`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "name",
 						Operator: Assign,
-						Value: &StrLiteral{
+						Value: StrLiteral{
 							Value: `"Bob"`,
 						},
 					},
@@ -362,18 +362,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut count = 0
 				count =+ 2`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "count",
 						Type:    checker.NumType,
-						Value:   &NumLiteral{Value: `0`},
+						Value:   NumLiteral{Value: `0`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "count",
 						Operator: Increment,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: `2`,
 						},
 					},
@@ -386,18 +386,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				let count = 0
 				count =+ 2`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "count",
 						Type:    checker.NumType,
-						Value:   &NumLiteral{Value: `0`},
+						Value:   NumLiteral{Value: `0`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "count",
 						Operator: Increment,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: `2`,
 						},
 					},
@@ -414,18 +414,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				mut count = 0
 				count =- 2`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "count",
 						Type:    checker.NumType,
-						Value:   &NumLiteral{Value: `0`},
+						Value:   NumLiteral{Value: `0`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "count",
 						Operator: Decrement,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: `2`,
 						},
 					},
@@ -438,18 +438,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 						mut name = "joe"
 						name =- 2`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: true,
 						Name:    "name",
 						Type:    checker.StrType,
-						Value:   &StrLiteral{Value: `"joe"`},
+						Value:   StrLiteral{Value: `"joe"`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "name",
 						Operator: Decrement,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: `2`,
 						},
 					},
@@ -466,18 +466,18 @@ func TestVariableAssignment(t *testing.T) {
 			input: `
 				let count = 0
 				count =- 2`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "count",
 						Type:    checker.NumType,
-						Value:   &NumLiteral{Value: `0`},
+						Value:   NumLiteral{Value: `0`},
 					},
-					&VariableAssignment{
+					VariableAssignment{
 						Name:     "count",
 						Operator: Decrement,
-						Value: &NumLiteral{
+						Value: NumLiteral{
 							Value: `2`,
 						},
 					},

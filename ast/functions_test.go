@@ -11,9 +11,9 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Empty function",
 			input: `fn empty() {}`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name:       "empty",
 						Parameters: []Parameter{},
 						ReturnType: checker.VoidType,
@@ -26,14 +26,14 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Inferred function return type",
 			input: `fn get_msg() { "Hello, world!" }`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name:       "get_msg",
 						Parameters: []Parameter{},
 						ReturnType: checker.StrType,
 						Body: []Statement{
-							&StrLiteral{
+							StrLiteral{
 								Value: `"Hello, world!"`,
 							},
 						},
@@ -45,9 +45,9 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function with a parameter and declared return type",
 			input: `fn greet(person: Str) Str { "hello" }`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{
@@ -57,7 +57,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						},
 						ReturnType: checker.StrType,
 						Body: []Statement{
-							&StrLiteral{Value: `"hello"`},
+							StrLiteral{Value: `"hello"`},
 						},
 					},
 				},
@@ -75,9 +75,9 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function with two parameters",
 			input: `fn add(x: Num, y: Num) Num { 10 }`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
 							{
@@ -91,7 +91,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						},
 						ReturnType: checker.NumType,
 						Body: []Statement{
-							&NumLiteral{Value: "10"},
+							NumLiteral{Value: "10"},
 						},
 					},
 				},
@@ -130,13 +130,13 @@ func TestFunctionCalls(t *testing.T) {
 			input: `
 				fn get_name() Str { "name" }
 				get_name()`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name:       "get_name",
 						Parameters: []Parameter{},
 						ReturnType: get_name.ReturnType,
-						Body:       []Statement{&StrLiteral{Value: `"name"`}},
+						Body:       []Statement{StrLiteral{Value: `"name"`}},
 					},
 					FunctionCall{
 						Name: "get_name",
@@ -162,20 +162,20 @@ func TestFunctionCalls(t *testing.T) {
 			input: `
 				fn greet(name: Str) Str { "hello" }
 				greet("Alice")`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name: greet.Name,
 						Parameters: []Parameter{
 							{Name: "name", Type: checker.StrType},
 						},
 						ReturnType: greet.ReturnType,
-						Body:       []Statement{&StrLiteral{Value: `"hello"`}},
+						Body:       []Statement{StrLiteral{Value: `"hello"`}},
 					},
 					FunctionCall{
 						Name: "greet",
 						Args: []Expression{
-							&StrLiteral{Value: `"Alice"`},
+							StrLiteral{Value: `"Alice"`},
 						},
 						Type: greet,
 					},
@@ -188,9 +188,9 @@ func TestFunctionCalls(t *testing.T) {
 			input: `
 				fn add(x: Num, y: Num) Num { x + y }
 				add(1, 2)`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&FunctionDeclaration{
+					FunctionDeclaration{
 						Name: add.Name,
 						Parameters: []Parameter{
 							{Name: "x", Type: checker.NumType},
@@ -198,18 +198,18 @@ func TestFunctionCalls(t *testing.T) {
 						},
 						ReturnType: add.ReturnType,
 						Body: []Statement{
-							&BinaryExpression{
-								Left:     &Identifier{Name: "x", Type: checker.NumType},
+							BinaryExpression{
+								Left:     Identifier{Name: "x", Type: checker.NumType},
 								Operator: Plus,
-								Right:    &Identifier{Name: "y", Type: checker.NumType},
+								Right:    Identifier{Name: "y", Type: checker.NumType},
 							},
 						},
 					},
 					FunctionCall{
 						Name: "add",
 						Args: []Expression{
-							&NumLiteral{Value: "1"},
-							&NumLiteral{Value: "2"},
+							NumLiteral{Value: "1"},
+							NumLiteral{Value: "2"},
 						},
 						Type: add,
 					},

@@ -28,9 +28,9 @@ func TestEnumDefinitions(t *testing.T) {
 		{
 			name:  "Valid basic enum",
 			input: traffic_light_code,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&EnumDefinition{
+					EnumDefinition{
 						Type: traffic_light_enum,
 					},
 				},
@@ -52,15 +52,15 @@ func TestEnums(t *testing.T) {
 			input: `
 				enum Color { Black, Grey }
 				Color::Black`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&EnumDefinition{
+					EnumDefinition{
 						Type: colorEnum,
 					},
-					&MemberAccess{
+					MemberAccess{
 						Target:     Identifier{Name: "Color", Type: colorEnum},
 						AccessType: Static,
-						Member:     &Identifier{Name: "Black", Type: colorEnum},
+						Member:     Identifier{Name: "Black", Type: colorEnum},
 					},
 				},
 			},
@@ -77,19 +77,19 @@ func TestEnums(t *testing.T) {
 			input: `
 				enum Color { Black, Grey }
 				let favorite: Color = Color::Black`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&EnumDefinition{
+					EnumDefinition{
 						Type: colorEnum,
 					},
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "favorite",
 						Type:    colorEnum,
-						Value: &MemberAccess{
+						Value: MemberAccess{
 							Target:     Identifier{Name: "Color", Type: colorEnum},
 							AccessType: Static,
-							Member:     &Identifier{Name: "Black", Type: colorEnum},
+							Member:     Identifier{Name: "Black", Type: colorEnum},
 						},
 					},
 				},
@@ -136,49 +136,49 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Yellow => "Yield",
 					Color::Green => "Go"
 				}`, traffic_light_code),
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
-					&EnumDefinition{
+					EnumDefinition{
 						Type: traffic_light_enum,
 					},
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "light",
 						Type:    traffic_light_enum,
-						Value: &MemberAccess{
+						Value: MemberAccess{
 							Target:     Identifier{Name: "Color", Type: traffic_light_enum},
 							AccessType: Static,
-							Member:     &Identifier{Name: "Red", Type: traffic_light_enum},
+							Member:     Identifier{Name: "Red", Type: traffic_light_enum},
 						},
 					},
 					MatchExpression{
-						Subject: &Identifier{Name: "light", Type: traffic_light_enum},
+						Subject: Identifier{Name: "light", Type: traffic_light_enum},
 						Cases: []MatchCase{
 							{
-								Pattern: &MemberAccess{
+								Pattern: MemberAccess{
 									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
 									AccessType: Static,
-									Member:     &Identifier{Name: "Red", Type: traffic_light_enum},
+									Member:     Identifier{Name: "Red", Type: traffic_light_enum},
 								},
-								Body: []Statement{&StrLiteral{Value: `"Stop"`}},
+								Body: []Statement{StrLiteral{Value: `"Stop"`}},
 								Type: checker.StrType,
 							},
 							{
-								Pattern: &MemberAccess{
+								Pattern: MemberAccess{
 									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
 									AccessType: Static,
-									Member:     &Identifier{Name: "Yellow", Type: traffic_light_enum},
+									Member:     Identifier{Name: "Yellow", Type: traffic_light_enum},
 								},
-								Body: []Statement{&StrLiteral{Value: `"Yield"`}},
+								Body: []Statement{StrLiteral{Value: `"Yield"`}},
 								Type: checker.StrType,
 							},
 							{
-								Pattern: &MemberAccess{
+								Pattern: MemberAccess{
 									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
 									AccessType: Static,
-									Member:     &Identifier{Name: "Green", Type: traffic_light_enum},
+									Member:     Identifier{Name: "Green", Type: traffic_light_enum},
 								},
-								Body: []Statement{&StrLiteral{Value: `"Go"`}},
+								Body: []Statement{StrLiteral{Value: `"Go"`}},
 								Type: checker.StrType,
 							},
 						},

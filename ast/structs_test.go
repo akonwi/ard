@@ -26,7 +26,7 @@ func TestStructDefinitions(t *testing.T) {
 			name: "An empty struct",
 			input: `
 				struct Box {}`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Type: emptyStruct,
@@ -42,7 +42,7 @@ func TestStructDefinitions(t *testing.T) {
 					age: Num,
 					employed: Bool
 				}`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Type: personStruct,
@@ -81,7 +81,7 @@ func TestInstantiatingStructs(t *testing.T) {
 			input: `
 				struct Box {}
 				Box{}`,
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Type: emptyStruct,
@@ -109,7 +109,7 @@ func TestInstantiatingStructs(t *testing.T) {
 			input: fmt.Sprintf(`%s
 				Person { name: "John", age: 23, employed: true }
 			`, personStructCode),
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
 					&StructDefinition{
 						Type: personStruct,
@@ -117,9 +117,9 @@ func TestInstantiatingStructs(t *testing.T) {
 					StructInstance{
 						Type: personStruct,
 						Properties: map[string]Expression{
-							"name":     &StrLiteral{Value: `"John"`},
-							"age":      &NumLiteral{Value: "23"},
-							"employed": &BoolLiteral{Value: true},
+							"name":     StrLiteral{Value: `"John"`},
+							"age":      NumLiteral{Value: "23"},
+							"employed": BoolLiteral{Value: true},
 						},
 					},
 				},
@@ -153,19 +153,19 @@ func TestStructFieldAccess(t *testing.T) {
 				person.name
 				person.age
 				person.employed`, personStructCode),
-			output: &Program{
+			output: Program{
 				Statements: []Statement{
 					&StructDefinition{Type: personStruct},
-					&VariableDeclaration{
+					VariableDeclaration{
 						Mutable: false,
 						Name:    "person",
 						Type:    personStruct,
 						Value: StructInstance{
 							Type: personStruct,
 							Properties: map[string]Expression{
-								"name":     &StrLiteral{Value: `"Bobby"`},
-								"age":      &NumLiteral{Value: "12"},
-								"employed": &BoolLiteral{Value: false},
+								"name":     StrLiteral{Value: `"Bobby"`},
+								"age":      NumLiteral{Value: "12"},
+								"employed": BoolLiteral{Value: false},
 							},
 						},
 					},
