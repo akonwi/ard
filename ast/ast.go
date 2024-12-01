@@ -379,6 +379,28 @@ func (p *Parser) text(node *tree_sitter.Node) string {
 	return string(p.sourceCode[node.StartByte():node.EndByte()])
 }
 
+func (p *Parser) mustChild(node *tree_sitter.Node, name string) *tree_sitter.Node {
+	child := node.ChildByFieldName(name)
+	// if node.HasError() {
+	// 	panic(fmt.Errorf("Parsing error encountered: %s", p.text(node)))
+	// }
+	if child == nil {
+		panic(fmt.Errorf("Missing child: %s in `%s`", name, p.text(node)))
+	}
+	return child
+}
+
+func (p *Parser) mustChildren(node *tree_sitter.Node, name string) []tree_sitter.Node {
+	children := node.ChildrenByFieldName(name, p.tree.Walk())
+	// if node.HasError() {
+	// 	panic(fmt.Errorf("Parsing error encountered: %s", p.text(node)))
+	// }
+	if len(children) == 0 {
+		panic(fmt.Errorf("Missing children: %s in `%s`", name, p.text(node)))
+	}
+	return children
+}
+
 func (p *Parser) pushScope() *checker.Scope {
 	p.scope = checker.NewScope(p.scope)
 	return p.scope
@@ -1323,8 +1345,8 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 }
 
 func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error) {
-	expressionNode := node.ChildByFieldName("expr")
-	caseNodes := node.ChildrenByFieldName("case", p.tree.Walk())
+	expressionNode := p.mustChild(node, "expr")
+	caseNodes := p.mustChildren(node, "case")
 
 	expression, err := p.parseExpression(expressionNode)
 	if err != nil {
@@ -1339,13 +1361,13 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 		cases := make([]MatchCase, 0)
 		var resultType checker.Type = checker.VoidType
 		for i, caseNode := range caseNodes {
-			_case, err := p.parseMemberAccess(caseNode.ChildByFieldName("pattern"))
+			_case, err := p.parseMemberAccess(p.mustChild(&caseNode, "pattern"))
 			if err != nil {
 				return nil, err
 			}
 			var returnType checker.Type = checker.VoidType
 			var body = make([]Statement, 0)
-			bodyNode := caseNode.ChildByFieldName("body")
+			bodyNode := p.mustChild(&caseNode, "body")
 			if bodyNode.GrammarName() == "block" {
 				_body, err := p.parseBlock(bodyNode)
 				if err != nil {
