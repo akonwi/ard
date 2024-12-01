@@ -1,33 +1,37 @@
 package ast
 
 import (
+	"fmt"
 	"testing"
 
 	checker "github.com/akonwi/kon/checker"
 )
 
+var traffic_light_code = `
+enum Color {
+	Red,
+	Green,
+	Yellow
+}`
+
+var traffic_light_enum = checker.EnumType{
+	Name: "Color",
+	Variants: map[string]int{
+		"Red":    0,
+		"Green":  1,
+		"Yellow": 2,
+	},
+}
+
 func TestEnumDefinitions(t *testing.T) {
-	color_enum := checker.EnumType{
-		Name: "Color",
-		Variants: map[string]int{
-			"Red":    0,
-			"Green":  1,
-			"Yellow": 2,
-		},
-	}
 	tests := []test{
 		{
-			name: "Valid basic enum",
-			input: `
-			enum Color {
-				Red,
-				Green,
-				Yellow
-			}`,
+			name:  "Valid basic enum",
+			input: traffic_light_code,
 			output: &Program{
 				Statements: []Statement{
 					&EnumDefinition{
-						Type: color_enum,
+						Type: traffic_light_enum,
 					},
 				},
 			},
@@ -86,6 +90,97 @@ func TestEnums(t *testing.T) {
 							Target:     Identifier{Name: "Color", Type: colorEnum},
 							AccessType: Static,
 							Member:     &Identifier{Name: "Black", Type: colorEnum},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestMatchingOnEnums(t *testing.T) {
+	tests := []test{
+		{
+			name: "Matching must be exhaustive",
+			input: fmt.Sprintf(`%v
+				let light = Color::Red
+				match light {
+					Color::Red => "Stop",
+					Color::Yellow => "Yield"
+				}`, traffic_light_code),
+			diagnostics: []checker.Diagnostic{
+				{Msg: "Missing case for 'Color::Green'"},
+			},
+		},
+		{
+			name: "Each case must return the same type",
+			input: fmt.Sprintf(`%v
+				let light = Color::Red
+				match light {
+					Color::Red => "Stop",
+					Color::Yellow => "Yield",
+					Color::Green => 100
+				}`, traffic_light_code),
+			diagnostics: []checker.Diagnostic{
+				{Msg: "Type mismatch: expected Str, got Num"},
+			},
+		},
+		{
+			name: "Valid matching",
+			input: fmt.Sprintf(`%v
+				let light = Color::Red
+				match light {
+					Color::Red => "Stop",
+					Color::Yellow => "Yield",
+					Color::Green => "Go"
+				}`, traffic_light_code),
+			output: &Program{
+				Statements: []Statement{
+					&EnumDefinition{
+						Type: traffic_light_enum,
+					},
+					&VariableDeclaration{
+						Mutable: false,
+						Name:    "light",
+						Type:    traffic_light_enum,
+						Value: &MemberAccess{
+							Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+							AccessType: Static,
+							Member:     &Identifier{Name: "Red", Type: traffic_light_enum},
+						},
+					},
+					MatchExpression{
+						Subject: &Identifier{Name: "light", Type: traffic_light_enum},
+						Cases: []MatchCase{
+							{
+								Pattern: &MemberAccess{
+									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+									AccessType: Static,
+									Member:     &Identifier{Name: "Red", Type: traffic_light_enum},
+								},
+								Body: []Statement{&StrLiteral{Value: `"Stop"`}},
+								Type: checker.StrType,
+							},
+							{
+								Pattern: &MemberAccess{
+									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+									AccessType: Static,
+									Member:     &Identifier{Name: "Yellow", Type: traffic_light_enum},
+								},
+								Body: []Statement{&StrLiteral{Value: `"Yield"`}},
+								Type: checker.StrType,
+							},
+							{
+								Pattern: &MemberAccess{
+									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+									AccessType: Static,
+									Member:     &Identifier{Name: "Green", Type: traffic_light_enum},
+								},
+								Body: []Statement{&StrLiteral{Value: `"Go"`}},
+								Type: checker.StrType,
+							},
 						},
 					},
 				},

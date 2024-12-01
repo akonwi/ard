@@ -111,6 +111,10 @@ type EnumType struct {
 	Variants map[string]int
 }
 
+func (e EnumType) FormatVariant(variant string) string {
+	return fmt.Sprintf("%s::%s", e.Name, variant)
+}
+
 func (e EnumType) String() string {
 	return e.Name
 }

@@ -176,7 +176,11 @@ type MemberAccess struct {
 }
 
 func (m MemberAccess) String() string {
-	return fmt.Sprintf("MemberAccess(%s-%s-%s)", m.Target.Name, m.AccessType, m.Member)
+	operator := "."
+	if m.AccessType == Static {
+		operator = "::"
+	}
+	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target.Name, operator, m.Member)
 }
 func (m MemberAccess) GetType() checker.Type {
 	return m.Member.GetType()
@@ -330,6 +334,33 @@ func (m MapLiteral) String() string {
 	return fmt.Sprintf("MapLiteral { %v }", m.Entries)
 }
 func (m MapLiteral) GetType() checker.Type {
+	return m.Type
+}
+
+type MatchExpression struct {
+	BaseNode
+	Subject Expression
+	Cases   []MatchCase
+}
+
+func (m MatchExpression) String() string {
+	return fmt.Sprintf("MatchExpression(%s)", m.Subject)
+}
+func (m MatchExpression) GetType() checker.Type {
+	return m.Cases[0].GetType()
+}
+
+type MatchCase struct {
+	BaseNode
+	Pattern Expression
+	Body    []Statement
+	Type    checker.Type
+}
+
+func (m MatchCase) String() string {
+	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
+}
+func (m MatchCase) GetType() checker.Type {
 	return m.Type
 }
 
@@ -859,7 +890,6 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 			continue
 		}
 
-		fmt.Printf("want %v, got %v\n", expectedType, value)
 		if !expectedType.Equals(value.GetType()) {
 			p.typeMismatchError(&propertyNode, expectedType, value.GetType())
 		}
@@ -906,6 +936,8 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	child := node.Child(0)
 	switch child.GrammarName() {
+	case "paren_expression":
+		return p.parseExpression(child.ChildByFieldName("expr"))
 	case "primitive_value":
 		return p.parsePrimitiveValue(child)
 	case "list_value":
@@ -924,6 +956,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parseFunctionCall(child)
 	case "struct_instance":
 		return p.parseStructInstance(child)
+	case "match_expression":
+		return p.parseMatchExpression(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
@@ -1286,4 +1320,79 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
 		Args:     args,
 		Type:     fnType,
 	}, nil
+}
+
+func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error) {
+	expressionNode := node.ChildByFieldName("expr")
+	caseNodes := node.ChildrenByFieldName("case", p.tree.Walk())
+
+	expression, err := p.parseExpression(expressionNode)
+	if err != nil {
+		return nil, err
+	}
+
+	switch expression.GetType().(type) {
+	case checker.EnumType:
+		enum := expression.GetType().(checker.EnumType)
+
+		providedCases := make(map[string]int)
+		cases := make([]MatchCase, 0)
+		var resultType checker.Type = checker.VoidType
+		for i, caseNode := range caseNodes {
+			_case, err := p.parseMemberAccess(caseNode.ChildByFieldName("pattern"))
+			if err != nil {
+				return nil, err
+			}
+			var returnType checker.Type = checker.VoidType
+			var body = make([]Statement, 0)
+			bodyNode := caseNode.ChildByFieldName("body")
+			if bodyNode.GrammarName() == "block" {
+				_body, err := p.parseBlock(bodyNode)
+				if err != nil {
+					return nil, err
+				}
+				body = _body
+
+				last := body[len(body)-1]
+				if expr, ok := last.(Expression); ok {
+					returnType = expr.GetType()
+				}
+			} else if bodyNode.GrammarName() == "expression" {
+				_body, err := p.parseExpression(bodyNode)
+				if err != nil {
+					return nil, err
+				}
+				body = append(body, _body)
+				returnType = _body.GetType()
+			}
+
+			memberAccess := _case.(*MemberAccess)
+			cases = append(cases, MatchCase{
+				Pattern: memberAccess,
+				Body:    body,
+				Type:    returnType,
+			})
+			providedCases[memberAccess.Member.(*Identifier).Name] = 0
+
+			if i == 0 {
+				resultType = returnType
+			} else if resultType.Equals(returnType) == false {
+				p.typeMismatchError(&caseNode, resultType, returnType)
+			}
+		}
+		for variant := range enum.Variants {
+			if _, ok := providedCases[variant]; !ok {
+				msg := fmt.Sprintf("Missing case for '%s'", enum.FormatVariant(variant))
+				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			}
+		}
+
+		return MatchExpression{
+			BaseNode: BaseNode{TSNode: node},
+			Subject:  expression,
+			Cases:    cases,
+		}, nil
+	default:
+		panic(fmt.Sprintf("Unsupported subject type for match expression: %v", expression.GetType()))
+	}
 }
