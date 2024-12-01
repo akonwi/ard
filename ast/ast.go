@@ -1196,7 +1196,9 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		panic(fmt.Errorf("Unexpected member access operator: %s", operatorNode.GrammarName()))
 	}
 
-	if enum, ok := target.GetType().(checker.EnumType); ok {
+	switch target.GetType().(type) {
+	case checker.EnumType:
+		enum := target.GetType().(checker.EnumType)
 		switch memberNode.GrammarName() {
 		case "identifier":
 			name := p.text(memberNode)
@@ -1214,11 +1216,33 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 			}
 			return nil, fmt.Errorf("Unsupported: instance members on enums")
 		default:
-			panic(fmt.Errorf("Unhandled member type: %s", memberNode.GrammarName()))
+			panic(fmt.Errorf("Unhandled member type on enum: %s", memberNode.GrammarName()))
 		}
+	case checker.StructType:
+		structDef := target.GetType().(checker.StructType)
+		switch memberNode.GrammarName() {
+		case "identifier":
+			name := p.text(memberNode)
+			if accessType == Instance {
+				if fieldType, ok := structDef.Fields[name]; ok {
+					return MemberAccess{
+						Target:     *target,
+						AccessType: accessType,
+						Member:     Identifier{Name: name, Type: fieldType},
+					}, nil
+				} else {
+					msg := fmt.Sprintf("No field '%s' in '%s' struct", name, structDef.Name)
+					p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+					return nil, fmt.Errorf(msg)
+				}
+			}
+			panic("Unimplemented: static members on structs")
+		default:
+			panic(fmt.Errorf("Unhandled member type on struct: %s", memberNode.GrammarName()))
+		}
+	default:
+		panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
 	}
-
-	panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
 }
 
 func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {

@@ -55,7 +55,7 @@ func TestStructDefinitions(t *testing.T) {
 	runTests(t, tests)
 }
 
-func TestUsingStructs(t *testing.T) {
+func TestInstantiatingStructs(t *testing.T) {
 	emptyStruct := checker.StructType{
 		Name:   "Box",
 		Fields: map[string]checker.Type{},
@@ -123,6 +123,77 @@ func TestUsingStructs(t *testing.T) {
 						},
 					},
 				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestStructFieldAccess(t *testing.T) {
+	personStructCode := `
+		struct Person {
+			name: Str,
+			age: Num,
+			employed: Bool
+		}`
+	personStruct := checker.StructType{
+		Name: "Person",
+		Fields: map[string]checker.Type{
+			"name":     checker.StrType,
+			"age":      checker.NumType,
+			"employed": checker.BoolType,
+		},
+	}
+	tests := []test{
+		{
+			name: "Valid field access",
+			input: fmt.Sprintf(`%s
+				let person = Person { name: "Bobby", age: 12, employed: false }
+				person.name
+				person.age
+				person.employed`, personStructCode),
+			output: &Program{
+				Statements: []Statement{
+					&StructDefinition{Type: personStruct},
+					&VariableDeclaration{
+						Mutable: false,
+						Name:    "person",
+						Type:    personStruct,
+						Value: StructInstance{
+							Type: personStruct,
+							Properties: map[string]Expression{
+								"name":     &StrLiteral{Value: `"Bobby"`},
+								"age":      &NumLiteral{Value: "12"},
+								"employed": &BoolLiteral{Value: false},
+							},
+						},
+					},
+					MemberAccess{
+						Target:     Identifier{Name: "person", Type: personStruct},
+						AccessType: Instance,
+						Member:     Identifier{Name: "name", Type: checker.StrType},
+					},
+					MemberAccess{
+						Target:     Identifier{Name: "person", Type: personStruct},
+						AccessType: Instance,
+						Member:     Identifier{Name: "age", Type: checker.NumType},
+					},
+					MemberAccess{
+						Target:     Identifier{Name: "person", Type: personStruct},
+						AccessType: Instance,
+						Member:     Identifier{Name: "employed", Type: checker.BoolType},
+					},
+				},
+			},
+		},
+		{
+			name: "Accessing non-existent fields",
+			input: fmt.Sprintf(`%s
+				let person = Person { name: "Bobby", age: 12, employed: false }
+				person.foobar`, personStructCode),
+			diagnostics: []checker.Diagnostic{
+				{Msg: "No field 'foobar' in 'Person' struct"},
 			},
 		},
 	}

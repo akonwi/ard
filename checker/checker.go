@@ -88,7 +88,7 @@ type StructType struct {
 }
 
 func (s StructType) String() string {
-	return s.Name
+	return fmt.Sprintf("Struct(%s)", s.Name)
 }
 func (s StructType) GetProperty(name string) Type {
 	if field, ok := s.Fields[name]; ok {
