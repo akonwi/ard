@@ -145,6 +145,22 @@ func (l ListType) GetProperty(name string) Type {
 	switch name {
 	case "size":
 		return NumType
+	case "push":
+		// push is a function that takes an item of the same type as the list and returns the new size
+		return FunctionType{
+			Mutates:    true,
+			Name:       "push",
+			Parameters: []Type{l.ItemType},
+			ReturnType: NumType,
+		}
+	case "pop":
+		// pop is a function that takes no arguments and returns the last item in the list
+		return FunctionType{
+			Mutates:    true,
+			Name:       "pop",
+			Parameters: []Type{},
+			ReturnType: l.ItemType,
+		}
 	default:
 		return nil
 	}
@@ -226,8 +242,8 @@ type Scope struct {
 func (s Scope) GetParent() *Scope {
 	return s.parent
 }
-func NewScope(parent *Scope) *Scope {
-	return &Scope{
+func NewScope(parent *Scope) Scope {
+	return Scope{
 		parent:  parent,
 		symbols: make(map[string]Symbol),
 		structs: make(map[string]StructType),

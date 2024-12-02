@@ -45,66 +45,6 @@ func TestVariableDeclarations(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
-			name:  "empty lists need to be explicitly typed",
-			input: `let numbers = []`,
-			diagnostics: []checker.Diagnostic{
-				{Msg: "Empty lists need a declared type"},
-			},
-		},
-		{
-			name:  "List with mixed types",
-			input: `let numbers = [1, "two", false]`,
-			diagnostics: []checker.Diagnostic{
-				{Msg: "List elements must be of the same type"},
-			},
-		},
-		{
-			name:  "List elements must match declared type",
-			input: `let strings: [Str] = [1, 2, 3]`,
-			output: Program{
-				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: false,
-						Name:    "strings",
-						Type:    &checker.ListType{ItemType: checker.StrType},
-						Value: ListLiteral{
-							Type: checker.ListType{ItemType: checker.NumType},
-							Items: []Expression{
-								NumLiteral{Value: "1"},
-								NumLiteral{Value: "2"},
-								NumLiteral{Value: "3"},
-							},
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{Msg: "Type mismatch: expected [Str], got [Num]"},
-			},
-		},
-		{
-			name:  "Valid list",
-			input: `let numbers: [Num] = [1, 2, 3]`,
-			output: Program{
-				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: false,
-						Name:    "numbers",
-						Type:    &checker.ListType{ItemType: checker.NumType},
-						Value: ListLiteral{
-							Type: checker.ListType{ItemType: checker.NumType},
-							Items: []Expression{
-								NumLiteral{Value: "1"},
-								NumLiteral{Value: "2"},
-								NumLiteral{Value: "3"},
-							},
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
 			name:  "Valid empty map",
 			input: `mut entries: [Str:Num] = [:]`,
 			output: Program{

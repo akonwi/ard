@@ -372,7 +372,8 @@ type Parser struct {
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
-	return &Parser{sourceCode: sourceCode, tree: tree, scope: checker.NewScope(nil)}
+	scope := checker.NewScope(nil)
+	return &Parser{sourceCode: sourceCode, tree: tree, scope: &scope}
 }
 
 func (p *Parser) text(node *tree_sitter.Node) string {
@@ -402,7 +403,8 @@ func (p *Parser) mustChildren(node *tree_sitter.Node, name string) []tree_sitter
 }
 
 func (p *Parser) pushScope() *checker.Scope {
-	p.scope = checker.NewScope(p.scope)
+	new := checker.NewScope(p.scope)
+	p.scope = &new
 	return p.scope
 }
 
@@ -975,7 +977,7 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	case "member_access":
 		return p.parseMemberAccess(child)
 	case "function_call":
-		return p.parseFunctionCall(child)
+		return p.parseFunctionCall(child, nil)
 	case "struct_instance":
 		return p.parseStructInstance(child)
 	case "match_expression":
@@ -1296,51 +1298,137 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		default:
 			panic(fmt.Errorf("Unhandled member type on struct: %s", memberNode.GrammarName()))
 		}
+	case checker.ListType:
+		listType := target.GetType().(checker.ListType)
+		switch memberNode.GrammarName() {
+		case "identifier":
+			{
+				name := p.text(memberNode)
+				if accessType == Instance {
+					property := listType.GetProperty(name)
+					if property == nil {
+						msg := fmt.Sprintf("No property '%s' on List", name)
+						p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+						return nil, fmt.Errorf(msg)
+					}
+
+					return MemberAccess{
+						Target:     target,
+						AccessType: accessType,
+						Member:     Identifier{Name: name, Type: property},
+					}, nil
+				} else {
+					panic("Unimplemented: static members on List")
+				}
+			}
+		case "function_call":
+			call, err := p.parseFunctionCall(memberNode, &target)
+			if err != nil {
+				return nil, err
+			}
+
+			return MemberAccess{
+				Target:     target,
+				AccessType: accessType,
+				Member:     call,
+			}, nil
+		default:
+			panic(fmt.Errorf("Unhandled member type on list: %s", memberNode.GrammarName()))
+		}
 	default:
 		panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
 	}
 }
 
-func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (Expression, error) {
-	nameNode := node.ChildByFieldName("target")
-	symbol := p.scope.Lookup(p.text(nameNode))
+/* look for a function in scope */
+func (p *Parser) findFunction(name string) *checker.FunctionType {
+	symbol := p.scope.Lookup(name)
 	if symbol == nil {
-		return nil, p.undefinedSymbolError(node)
+		return nil
 	}
-	fnType, isFunction := symbol.GetType().(checker.FunctionType)
-	if !isFunction {
-		msg := fmt.Sprintf("'%s' is not a function", symbol.GetName())
-		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
-		return nil, fmt.Errorf(msg)
+	fnType, ok := symbol.GetType().(checker.FunctionType)
+	if !ok {
+		return nil
+	}
+	return &fnType
+}
+
+/* look for a method on a type */
+func (p *Parser) findMethod(subject checker.Type, name string) *checker.FunctionType {
+	switch subject.(type) {
+	case checker.ListType:
+		{
+			method := subject.(checker.ListType).GetProperty(name)
+			signature, ok := method.(checker.FunctionType)
+			if !ok {
+				return nil
+			}
+			return &signature
+		}
+	default:
+		panic(fmt.Errorf("Unhandled method call on %s", subject))
+	}
+}
+
+/*
+@target - when parsing a method call
+*/
+func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Identifier) (FunctionCall, error) {
+	targetNode := p.mustChild(node, "target")
+	var signature checker.FunctionType
+	if target == nil {
+		if fn := p.findFunction(p.text(targetNode)); fn != nil {
+			signature = *fn
+		} else {
+			return FunctionCall{}, p.undefinedSymbolError(node)
+		}
+	} else {
+		if method := p.findMethod(target.Type, p.text(targetNode)); method != nil {
+			signature = *method
+		} else {
+			msg := fmt.Sprintf("Method '%s' not found on %s", p.text(targetNode), target.Type)
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			return FunctionCall{}, fmt.Errorf(msg)
+		}
 	}
 
 	argsNode := node.ChildByFieldName("arguments")
 	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
 
-	if len(argNodes) != len(fnType.Parameters) {
-		msg := fmt.Sprintf("Expected %d arguments, got %d", len(fnType.Parameters), len(argNodes))
+	if len(argNodes) != len(signature.Parameters) {
+		msg := fmt.Sprintf("Expected %d arguments, got %d", len(signature.Parameters), len(argNodes))
 		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, argsNode))
-		return nil, fmt.Errorf(msg)
+		return FunctionCall{}, fmt.Errorf(msg)
 	}
 
 	args := make([]Expression, len(argNodes))
 	for i, argNode := range argNodes {
 		arg, err := p.parseExpression(&argNode)
 		if err != nil {
-			return nil, err
+			return FunctionCall{}, err
 		}
-		expectedType := fnType.Parameters[i]
+		expectedType := signature.Parameters[i]
 		if !expectedType.Equals(arg.GetType()) {
 			p.typeMismatchError(&argNode, expectedType, arg.GetType())
 		}
 		args[i] = arg
 	}
 
+	if signature.Mutates {
+		symbol := p.scope.Lookup(target.Name)
+		if v, ok := symbol.(checker.Variable); ok {
+			if v.Mutable == false {
+				msg := fmt.Sprintf("Cannot mutate an immutable list")
+				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			}
+		}
+	}
+
 	return FunctionCall{
 		BaseNode: BaseNode{TSNode: node},
-		Name:     symbol.GetName(),
+		Name:     signature.GetName(),
 		Args:     args,
-		Type:     fnType,
+		Type:     signature,
 	}, nil
 }
 
