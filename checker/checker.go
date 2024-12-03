@@ -131,6 +131,36 @@ func (e EnumType) GetType() Type {
 	return e
 }
 
+type GenericType struct {
+	inner *Type
+	name  string
+}
+
+func (g GenericType) String() string {
+	return fmt.Sprintf("%s?", g.name)
+}
+func (g GenericType) GetType() Type {
+	if g.inner == nil {
+		return g
+	}
+	return *g.inner
+}
+func (g GenericType) Equals(other Type) bool {
+	if g.inner == nil {
+		return true
+	}
+	return (*g.inner).Equals(other)
+}
+func (g GenericType) GetProperty(name string) Type {
+	if g.inner == nil {
+		return nil
+	}
+	return (*g.inner).GetProperty(name)
+}
+func (g *GenericType) Fill(inner Type) {
+	g.inner = &inner
+}
+
 type ListType struct {
 	ItemType Type
 }
@@ -143,24 +173,41 @@ func (l ListType) String() string {
 }
 func (l ListType) GetProperty(name string) Type {
 	switch name {
-	case "size":
-		return NumType
-	case "push":
-		// push is a function that takes an item of the same type as the list and returns the new size
+	case "map":
+		outType := GenericType{name: "Out"}
 		return FunctionType{
-			Mutates:    true,
-			Name:       "push",
-			Parameters: []Type{l.ItemType},
-			ReturnType: NumType,
+			Mutates: false,
+			Name:    "map",
+			Parameters: []Type{
+				FunctionType{
+					Name:       "callback",
+					Parameters: []Type{l.ItemType},
+					ReturnType: outType,
+				},
+			},
+			// List probably needs to use a pointer to the inner type
+			ReturnType: MakeList(outType),
 		}
 	case "pop":
 		// pop is a function that takes no arguments and returns the last item in the list
+		// (Item?) Num
 		return FunctionType{
 			Mutates:    true,
 			Name:       "pop",
 			Parameters: []Type{},
 			ReturnType: l.ItemType,
 		}
+	case "push":
+		// push is a function that takes an item of the same type as the list and returns the new size
+		// () Item?
+		return FunctionType{
+			Mutates:    true,
+			Name:       "push",
+			Parameters: []Type{l.ItemType},
+			ReturnType: NumType,
+		}
+	case "size":
+		return NumType
 	default:
 		return nil
 	}

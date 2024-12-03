@@ -1,6 +1,11 @@
 package checker
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+)
 
 func TestNumEquality(t *testing.T) {
 	if NumType.Equals(StrType) {
@@ -99,5 +104,58 @@ func TestEnumEquality(t *testing.T) {
 	}
 	if colorEnum.Equals(placeEnum) {
 		t.Errorf("%s != %s", colorEnum, placeEnum)
+	}
+}
+
+func TestGenerics(t *testing.T) {
+	Foo := GenericType{name: "T"}
+	if !Foo.Equals(NumType) {
+		t.Errorf("T? == Num")
+	}
+
+	Foo.Fill(StrType)
+	if !Foo.Equals(StrType) {
+		t.Errorf("Str == Str")
+	}
+}
+
+func TestListApi(t *testing.T) {
+	str_list := MakeList(StrType)
+
+	map_method := str_list.GetProperty("map").(FunctionType)
+	expectedMap := FunctionType{
+		Name:       "map",
+		Mutates:    false,
+		Parameters: []Type{FunctionType{Name: "callback", Parameters: []Type{StrType}, ReturnType: GenericType{name: "Out"}}},
+		ReturnType: MakeList(GenericType{name: "Out"}),
+	}
+	if diff := cmp.Diff(expectedMap, map_method, cmpopts.IgnoreUnexported(GenericType{})); diff != "" {
+		t.Errorf("List.map signature does not match (-want +got):\n%s", diff)
+	}
+
+	pop_method := str_list.GetProperty("pop").(FunctionType)
+	expectedPop := FunctionType{
+		Name:       "pop",
+		Mutates:    true,
+		Parameters: []Type{},
+		ReturnType: str_list.ItemType,
+	}
+	if diff := cmp.Diff(expectedPop, pop_method); diff != "" {
+		t.Errorf("List.pop signature does not match (-want +got):\n%s", diff)
+	}
+
+	push_method := str_list.GetProperty("push").(FunctionType)
+	expectedPush := FunctionType{
+		Name:       "push",
+		Mutates:    true,
+		Parameters: []Type{str_list.ItemType},
+		ReturnType: NumType,
+	}
+	if diff := cmp.Diff(expectedPush, push_method); diff != "" {
+		t.Errorf("List.push signature does not match (-want +got):\n%s", diff)
+	}
+
+	if str_list.GetProperty("size") != NumType {
+		t.Errorf("List.size should be Num")
 	}
 }
