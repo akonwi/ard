@@ -306,6 +306,18 @@ func (s StrLiteral) GetType() checker.Type {
 	return checker.StrType
 }
 
+type InterpolatedStr struct {
+	BaseNode
+	Chunks []Expression
+}
+
+func (i InterpolatedStr) String() string {
+	return "InterpolatedStr"
+}
+func (i InterpolatedStr) GetType() checker.Type {
+	return checker.StrType
+}
+
 type NumLiteral struct {
 	BaseNode
 	Value string
@@ -1031,9 +1043,30 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "string":
-		return StrLiteral{
+		chunkNodes := p.mustChildren(child, "chunk")
+		if len(chunkNodes) == 1 {
+			return StrLiteral{
+				BaseNode: BaseNode{TSNode: node},
+				Value:    p.text(child)}, nil
+		}
+
+		chunks := make([]Expression, len(chunkNodes))
+		for i, chunkNode := range chunkNodes {
+			fmt.Printf("chunkNode: %v\n", chunkNode.GrammarName())
+			if chunkNode.GrammarName() == "string_content" {
+				chunks[i] = StrLiteral{BaseNode: BaseNode{TSNode: &chunkNode}, Value: p.text(&chunkNode)}
+			} else {
+				chunk, err := p.parseExpression(p.mustChild(&chunkNode, "expression"))
+				if err != nil {
+					return nil, err
+				}
+				chunks[i] = chunk
+			}
+		}
+		return InterpolatedStr{
 			BaseNode: BaseNode{TSNode: node},
-			Value:    p.text(child)}, nil
+			Chunks:   chunks,
+		}, nil
 	case "number":
 		return NumLiteral{
 			BaseNode: BaseNode{TSNode: node},

@@ -358,3 +358,32 @@ func TestForLoops(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestInterpolatedStrings(t *testing.T) {
+	tests := []test{
+		{
+			name: "Interpolated string",
+			input: `
+			let name = "world"
+			"Hello, {{name}}"`,
+			output: Program{
+				Statements: []Statement{
+					VariableDeclaration{
+						Mutable: false,
+						Name:    "name",
+						Type:    checker.StrType,
+						Value:   StrLiteral{Value: `"world"`},
+					},
+					InterpolatedStr{
+						Chunks: []Expression{
+							StrLiteral{Value: "Hello, "},
+							Identifier{Name: "name", Type: checker.StrType},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
