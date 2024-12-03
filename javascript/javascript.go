@@ -4,17 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
+	"github.com/akonwi/kon/ast"
 )
 
 type jsGenerator struct {
 	builder     strings.Builder
 	indentLevel int
-	sourceCode  []byte
-}
-
-func (g *jsGenerator) getText(node tree_sitter.Node) string {
-	return string(g.sourceCode[node.StartByte():node.EndByte()])
 }
 
 func (g *jsGenerator) indent() {
@@ -41,46 +36,97 @@ func (g *jsGenerator) writeLine(line string, args ...interface{}) {
 	g.builder.WriteString("\n")
 }
 
-func (g *jsGenerator) generateVariableDeclaration(node *tree_sitter.Node) {
-	if g.getText(*node.NamedChild(0)) == "mut" {
+func (g *jsGenerator) generateVariableDeclaration(decl ast.VariableDeclaration) {
+	if decl.Mutable {
 		g.write("let ")
 	} else {
 		g.write("const ")
 	}
 
-	g.writeLine("%s = %s", g.getText(*node.NamedChild(1)), g.generateExpression(node.ChildByFieldName("value")))
+	g.write("%s = ", decl.Name)
+	g.generateExpression(decl.Value)
+	g.writeLine("")
 }
 
-func (g *jsGenerator) generateFunctionDeclaration(node *tree_sitter.Node) {}
+func (g *jsGenerator) generateFunctionDeclaration(decl ast.FunctionDeclaration) {
+	g.write("function %s", decl.Name)
+	g.write("(")
+	for i, param := range decl.Parameters {
+		if i > 0 {
+			g.write(", ")
+		}
+		g.write("%s", param.Name)
+	}
+	g.write(") ")
 
-func (g *jsGenerator) generateExpression(node *tree_sitter.Node) string {
-	return g.getText(*node.NamedChild(0))
+	if len(decl.Body) == 0 {
+		g.writeLine("{}")
+	}
 }
 
-func GenerateJS(sourceCode []byte, tree *tree_sitter.Tree) string {
+func resolveOperator(operator ast.Operator) string {
+	switch operator {
+	case ast.Assign:
+		return "="
+	case ast.Increment:
+		return "+="
+	case ast.Decrement:
+		return "-="
+	case ast.Multiply:
+		return "*"
+	case ast.Divide:
+		return "/"
+	case ast.Plus:
+		return "+"
+	case ast.Minus:
+		return "-"
+	default:
+		panic(fmt.Errorf("Unresolved operator: %v", operator))
+	}
+}
+
+func (g *jsGenerator) generateVariableAssignment(assignment ast.VariableAssignment) {
+	g.write("%s %s ", assignment.Name, resolveOperator(assignment.Operator))
+	g.generateExpression(assignment.Value)
+}
+
+func (g *jsGenerator) generateStatement(statement ast.Statement) {
+	switch statement.(type) {
+	case ast.VariableDeclaration:
+		g.generateVariableDeclaration(statement.(ast.VariableDeclaration))
+	case ast.VariableAssignment:
+		g.generateVariableAssignment(statement.(ast.VariableAssignment))
+	case ast.FunctionDeclaration:
+		g.generateFunctionDeclaration(statement.(ast.FunctionDeclaration))
+	default:
+		{
+			panic(fmt.Errorf("Unhandled statement node: %s\n", statement))
+		}
+	}
+}
+
+func (g *jsGenerator) generateExpression(expr ast.Expression) {
+	switch expr.(type) {
+	case ast.StrLiteral:
+		g.write(expr.(ast.StrLiteral).Value)
+	case ast.NumLiteral:
+		g.write(expr.(ast.NumLiteral).Value)
+	case ast.BoolLiteral:
+		g.write("%v", expr.(ast.BoolLiteral).Value)
+	default:
+		panic(fmt.Errorf("Unhandled expression node: %s\n", expr))
+	}
+}
+
+func GenerateJS(program ast.Program) string {
 	generator := jsGenerator{
-		sourceCode:  sourceCode,
 		builder:     strings.Builder{},
 		indentLevel: 0,
 	}
 
-	var generate func(node *tree_sitter.Node)
-	generate = func(node *tree_sitter.Node) {
-		switch node.GrammarName() {
-		case "variable_definition":
-			generator.generateVariableDeclaration(node)
-		case "function_definition":
-			generator.generateFunctionDeclaration(node)
-		default:
-			{
-				for i := range node.ChildCount() {
-					generate(node.Child(i))
-				}
-			}
-		}
+	for _, statement := range program.Statements {
+		generator.generateStatement(statement)
 	}
-
-	generate(tree.RootNode())
 
 	return generator.builder.String()
 }

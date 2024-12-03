@@ -405,6 +405,10 @@ type Parser struct {
 	typeErrors []checker.Diagnostic
 }
 
+func (p *Parser) GetDiagnostics() []checker.Diagnostic {
+	return p.typeErrors
+}
+
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
 	scope := checker.NewScope(nil)
 	return &Parser{sourceCode: sourceCode, tree: tree, scope: &scope}

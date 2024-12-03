@@ -1,24 +1,22 @@
 package javascript
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/akonwi/kon/ast"
 	tree_sitter_kon "github.com/akonwi/tree-sitter-kon/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-var language *tree_sitter.Language
-var parser *tree_sitter.Parser
+var treeSitterParser *tree_sitter.Parser
 
-func getParser() *tree_sitter.Parser {
-	if language == nil {
-		language = tree_sitter.NewLanguage(tree_sitter_kon.Language())
-		parser = tree_sitter.NewParser()
-		parser.SetLanguage(language)
-	}
-	return parser
+func init() {
+	language := tree_sitter.NewLanguage(tree_sitter_kon.Language())
+	treeSitterParser = tree_sitter.NewParser()
+	treeSitterParser.SetLanguage(language)
 }
 
 func assertEquality(t *testing.T, got, want string) {
@@ -29,29 +27,88 @@ func assertEquality(t *testing.T, got, want string) {
 	}
 }
 
-func testVariableDeclaration(t *testing.T) {
-	sourceCode := []byte(`
-mut name: String = "Alice"
-let age: Num = 30
-let is_student = true`)
-
-	tree := getParser().Parse(sourceCode, nil)
-	js := GenerateJS(sourceCode, tree)
-	assertEquality(t, js, strings.TrimLeft(`
-let name = "Alice"
-const age = 30
-const is_student = true
-`, "\n"))
+type test struct {
+	name, input, output string
 }
 
-func testFunctionDeclaration(t *testing.T) {
-	sourceCode := []byte(`
-fn get_hello() {
- "Hello, world!"
-}`)
-	js := GenerateJS(sourceCode, getParser().Parse(sourceCode, nil))
-	assertEquality(t, js, strings.TrimLeft(`
-function get_hello() {
-	return "Hello, world!"
-}`, "\n"))
+func runTests(t *testing.T, tests []test) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := treeSitterParser.Parse([]byte(tt.input), nil)
+			parser := ast.NewParser([]byte(tt.input), tree)
+			ast, err := parser.Parse()
+			if err != nil {
+				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
+			}
+
+			js := GenerateJS(ast)
+
+			if diff := cmp.Diff(tt.output, js, cmp.Transformer("SpaceRemover", strings.TrimSpace)); diff != "" {
+				t.Errorf("Generated javascript does not match (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestVariableDeclaration(t *testing.T) {
+	tests := []test{
+		{
+			name:   "mutable string",
+			input:  `mut explicit: Str = "Alice"`,
+			output: `let explicit = "Alice"`,
+		},
+		{
+			name:   "immutable string",
+			input:  `let explicit = "Alice"`,
+			output: `const explicit = "Alice"`,
+		},
+		{
+			name:   "mutable number",
+			input:  `mut power = 200`,
+			output: `let power = 200`,
+		},
+		{
+			name:   "immutable number",
+			input:  `let power = 200`,
+			output: `const power = 200`,
+		},
+		{
+			name:   "mutable boolean",
+			input:  `mut is_valid = true`,
+			output: `let is_valid = true`,
+		},
+		{
+			name:   "immutable boolean",
+			input:  `let is_valid = false`,
+			output: `const is_valid = false`,
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestVariableAssignment(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "string assignment",
+			input: `
+mut name = "Alice"
+name = "Bob"`,
+			output: `
+let name = "Alice"
+name = "Bob"`,
+		},
+	})
+}
+
+func TestFunctionDeclaration(t *testing.T) {
+	tests := []test{
+		{
+			name:   "noop",
+			input:  `fn noop() {}`,
+			output: "function noop() {}",
+		},
+	}
+
+	runTests(t, tests)
 }

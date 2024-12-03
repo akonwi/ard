@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/akonwi/kon/ast"
 	"github.com/akonwi/kon/javascript"
 	tree_sitter_kon "github.com/akonwi/tree-sitter-kon/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -43,7 +44,27 @@ func main() {
 		parser.SetLanguage(language)
 		tree := parser.Parse(sourceCode, nil)
 
-		fmt.Println(javascript.GenerateJS(sourceCode, tree))
+		astParser := ast.NewParser(sourceCode, tree)
+		ast, err := astParser.Parse()
+		if err != nil {
+			fmt.Printf("Error parsing tree: %v\n", err)
+			os.Exit(1)
+			return
+		}
+		diagnostics := astParser.GetDiagnostics()
+		if len(diagnostics) > 0 {
+			for _, diagnostic := range diagnostics {
+				fmt.Printf(
+					"[%d, %d] %s",
+					diagnostic.Range.StartPoint.Row,
+					diagnostic.Range.StartPoint.Column,
+					diagnostic.Msg,
+				)
+			}
+			os.Exit(1)
+		}
+
+		fmt.Println(javascript.GenerateJS(ast))
 
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
