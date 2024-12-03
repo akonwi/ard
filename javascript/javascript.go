@@ -2,6 +2,7 @@ package javascript
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/akonwi/kon/ast"
@@ -55,12 +56,24 @@ func (g *jsGenerator) generateFunctionDeclaration(decl ast.FunctionDeclaration) 
 		if i > 0 {
 			g.write(", ")
 		}
-		g.write("%s", param.Name)
+		g.write(param.Name)
 	}
 	g.write(") ")
 
 	if len(decl.Body) == 0 {
 		g.writeLine("{}")
+	} else {
+		g.writeLine("{")
+		g.indent()
+		for i, statement := range decl.Body {
+			if i < len(decl.Body)-1 {
+				g.write("return ")
+			}
+			g.generateStatement(statement)
+			g.writeLine("")
+		}
+		g.dedent()
+		g.writeLine("}")
 	}
 }
 
@@ -100,21 +113,39 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 		g.generateFunctionDeclaration(statement.(ast.FunctionDeclaration))
 	default:
 		{
-			panic(fmt.Errorf("Unhandled statement node: %s\n", statement))
+			if expr, ok := statement.(ast.Expression); ok {
+				g.generateExpression(expr)
+			} else {
+				panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))
+			}
 		}
 	}
 }
 
 func (g *jsGenerator) generateExpression(expr ast.Expression) {
 	switch expr.(type) {
+	case ast.InterpolatedStr:
+		g.write("`")
+		for _, chunk := range expr.(ast.InterpolatedStr).Chunks {
+			if _, ok := chunk.(ast.StrLiteral); ok {
+				g.write(chunk.(ast.StrLiteral).Value)
+			} else {
+				g.write("${")
+				g.generateExpression(chunk)
+				g.write("}")
+			}
+		}
+		g.write("`")
 	case ast.StrLiteral:
 		g.write(expr.(ast.StrLiteral).Value)
 	case ast.NumLiteral:
 		g.write(expr.(ast.NumLiteral).Value)
 	case ast.BoolLiteral:
 		g.write("%v", expr.(ast.BoolLiteral).Value)
+	case ast.Identifier:
+		g.write("%s", expr.(ast.Identifier).Name)
 	default:
-		panic(fmt.Errorf("Unhandled expression node: %s\n", expr))
+		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}
 }
 

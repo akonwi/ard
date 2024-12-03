@@ -101,6 +101,32 @@ name = "Bob"`,
 	})
 }
 
+func TestExpressions(t *testing.T) {
+	tests := []test{
+		{
+			name: "identifier",
+			input: `
+let x = 42
+let y = x`,
+			output: `
+const x = 42
+const y = x`,
+		},
+		{
+			name:   "raw string",
+			input:  `"foobar"`,
+			output: `"foobar"`,
+		},
+		{
+			name:   "interpolated string",
+			input:  `"foobar {{ 42 }}"`,
+			output: "`foobar ${42}`",
+		},
+	}
+
+	runTests(t, tests)
+}
+
 func TestFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{
@@ -108,6 +134,24 @@ func TestFunctionDeclaration(t *testing.T) {
 			input:  `fn noop() {}`,
 			output: "function noop() {}",
 		},
+		{
+			name:   "with parameters",
+			input:  `fn add(x: Num, y: Num) {}`,
+			output: "function add(x, y) {}",
+		},
+		{
+			name:   "with return type",
+			input:  `fn add(x: Num, y: Num) Num {}`,
+			output: "function add(x, y) {}",
+		},
+		// 		{
+		// 			name:  "single statement body: return is implicit",
+		// 			input: `fn add(x: Num, y: Num) Num { 42 }`,
+		// 			output: `
+		// function add(x, y) {
+		// 	return 42
+		// }`,
+		// 		},
 	}
 
 	runTests(t, tests)
