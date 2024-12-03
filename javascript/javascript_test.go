@@ -122,6 +122,16 @@ const y = x`,
 			input:  `"foobar {{ 42 }}"`,
 			output: "`foobar ${42}`",
 		},
+		{
+			name:   "list literal",
+			input:  `[1, 2, 3]`,
+			output: `[1, 2, 3]`,
+		},
+		{
+			name:   "map literal",
+			input:  `["jane": 1, "joe": 2]`,
+			output: `new Map([["jane", 1], ["joe", 2]])`,
+		},
 	}
 
 	runTests(t, tests)

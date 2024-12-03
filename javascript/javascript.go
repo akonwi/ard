@@ -142,6 +142,30 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		g.write(expr.(ast.NumLiteral).Value)
 	case ast.BoolLiteral:
 		g.write("%v", expr.(ast.BoolLiteral).Value)
+	case ast.ListLiteral:
+		g.write("[")
+		for i, item := range expr.(ast.ListLiteral).Items {
+			if i > 0 {
+				g.write(", ")
+			}
+			g.generateExpression(item)
+		}
+		g.write("]")
+	case ast.MapLiteral:
+		g.write("new Map([")
+		i := 0
+		for key, value := range expr.(ast.MapLiteral).Entries {
+			if i > 0 {
+				g.write(", ")
+			} else {
+				i++
+			}
+			g.write("[")
+			g.write(`%s, `, key)
+			g.generateExpression(value)
+			g.write("]")
+		}
+		g.write("])")
 	case ast.Identifier:
 		g.write("%s", expr.(ast.Identifier).Name)
 	default:
