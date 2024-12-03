@@ -250,27 +250,40 @@ func TestAnonymousFunctions(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	name: "Anonymous function with a parameter",
-		// 	input: `fn(name: Str) { "Hello, " + name }`,
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			AnonymousFunction{
-		// 				Parameters: []Parameter{
-		// 					{Name: "name", Type: checker.StrType},
-		// 				},
-		// 				ReturnType: checker.StrType,
-		// 				Body: []Statement{
-		// 					BinaryExpression{
-		// 						Left:     StrLiteral{Value: `"Hello, "`},
-		// 						Operator: Plus,
-		// 						Right:    Identifier{Name: "name", Type: checker.StrType},
-		// 					},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// },
+		{
+			name:  "Anonymous function with a parameter",
+			input: `(name: Str) { "Hello, name!" }`,
+			output: Program{
+				Statements: []Statement{
+					AnonymousFunction{
+						Parameters: []Parameter{
+							{Name: "name", Type: checker.StrType},
+						},
+						ReturnType: checker.StrType,
+						Body: []Statement{
+							StrLiteral{Value: `"Hello, name!"`},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Anonymous function with a parameter",
+			input: `(name: Str) { "Hello, name!" }`,
+			output: Program{
+				Statements: []Statement{
+					AnonymousFunction{
+						Parameters: []Parameter{
+							{Name: "name", Type: checker.StrType},
+						},
+						ReturnType: checker.StrType,
+						Body: []Statement{
+							StrLiteral{Value: `"Hello, name!"`},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)

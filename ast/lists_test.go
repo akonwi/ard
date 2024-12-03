@@ -136,6 +136,16 @@ func TestListApi(t *testing.T) {
 				{Msg: "Cannot mutate an immutable list"},
 			},
 		},
+		{
+			name: ".map callback must have correct signature",
+			input: `
+				let list = [1,2,3]
+				list.map((num: Str) { "foobar" })
+				list.map((num) { "string" })`,
+			diagnostics: []checker.Diagnostic{
+				{Msg: "Type mismatch: expected (Num) Out?, got (Str) Str"},
+			},
+		},
 	}
 
 	runTests(t, tests)

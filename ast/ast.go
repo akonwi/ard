@@ -1432,8 +1432,10 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Identifier) (
 			return FunctionCall{}, err
 		}
 		expectedType := signature.Parameters[i]
-		if !expectedType.Equals(arg.GetType()) {
-			p.typeMismatchError(&argNode, expectedType, arg.GetType())
+		resolvedArg := coerceArgIfNecessary(arg, expectedType)
+
+		if !expectedType.Equals(resolvedArg) {
+			p.typeMismatchError(&argNode, expectedType, resolvedArg)
 		}
 		args[i] = arg
 	}
@@ -1454,6 +1456,45 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Identifier) (
 		Args:     args,
 		Type:     signature,
 	}, nil
+}
+
+// if @arg is an anonymous function and @expectedType is a function
+// it returns the generics coerced with the expected type.
+//
+// otherwise it returns the type of the argument
+func coerceArgIfNecessary(arg Expression, expectedType checker.Type) checker.Type {
+	anon, ok := arg.(AnonymousFunction)
+	if !ok {
+		return arg.GetType()
+	}
+
+	anonSignature := anon.GetType().(checker.FunctionType)
+
+	signature, ok := expectedType.(checker.FunctionType)
+	if !ok {
+		return arg.GetType()
+	}
+
+	params := make([]checker.Type, len(anon.Parameters))
+	for i, param := range anonSignature.Parameters {
+		if _, isGeneric := param.(checker.GenericType); isGeneric {
+			params[i] = signature.Parameters[i]
+		} else {
+			params[i] = param
+		}
+	}
+
+	returnType := anon.ReturnType
+	if _, isGeneric := returnType.(checker.GenericType); isGeneric {
+		returnType = signature.ReturnType
+	}
+
+	return checker.FunctionType{
+		Mutates:    false,
+		Name:       anonSignature.Name,
+		Parameters: params,
+		ReturnType: returnType,
+	}
 }
 
 func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error) {
@@ -1538,7 +1579,9 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 		name := p.text(p.mustChild(&paramNode, "name"))
 		var _type checker.Type
 		typeNode := paramNode.ChildByFieldName("type")
-		if typeNode != nil {
+		if typeNode == nil {
+			_type = checker.GenericType{}
+		} else {
 			_type = p.resolveType(typeNode)
 		}
 		parameters[i] = Parameter{

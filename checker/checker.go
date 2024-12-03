@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"strings"
 
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -55,7 +56,14 @@ type FunctionType struct {
 }
 
 func (f FunctionType) String() string {
-	return fmt.Sprintf("(%v) %v", f.Parameters, f.ReturnType)
+	params := strings.Builder{}
+	for i, param := range f.Parameters {
+		if i > 0 {
+			params.WriteString(", ")
+		}
+		params.WriteString(param.String())
+	}
+	return fmt.Sprintf("(%v) %v", params.String(), f.ReturnType)
 }
 func (f FunctionType) GetProperty(name string) Type {
 	return nil
