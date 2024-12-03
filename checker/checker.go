@@ -61,19 +61,18 @@ func (f FunctionType) GetProperty(name string) Type {
 	return nil
 }
 func (f FunctionType) Equals(other Type) bool {
-	return f.String() == other.String()
-	// if otherFunc, ok := other.(FunctionType); ok {
-	// 	if len(f.Parameters) != len(otherFunc.Parameters) {
-	// 		return false
-	// 	}
-	// 	for i, param := range f.Parameters {
-	// 		if !param.Equals(otherFunc.Parameters[i]) {
-	// 			return false
-	// 		}
-	// 	}
-	// 	return f.ReturnType.Equals(otherFunc.ReturnType)
-	// }
-	// return false
+	if otherFunc, ok := other.(FunctionType); ok {
+		if len(f.Parameters) != len(otherFunc.Parameters) {
+			return false
+		}
+		for i, param := range f.Parameters {
+			if !param.Equals(otherFunc.Parameters[i]) {
+				return false
+			}
+		}
+		return f.ReturnType.Equals(otherFunc.ReturnType)
+	}
+	return false
 }
 func (f FunctionType) GetName() string {
 	return f.Name

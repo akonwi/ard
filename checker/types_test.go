@@ -107,6 +107,32 @@ func TestEnumEquality(t *testing.T) {
 	}
 }
 
+func TestFunctionCompatibility(t *testing.T) {
+	map_num_fn := FunctionType{
+		Name:       "map",
+		Parameters: []Type{NumType},
+		ReturnType: GenericType{name: "Out"},
+	}
+	num_to_str_fn := FunctionType{
+		Name:       "num_to_str",
+		Parameters: []Type{NumType},
+		ReturnType: StrType,
+	}
+	str_str_to_bool_fn := FunctionType{
+		Name:       "str_str_to_bool",
+		Parameters: []Type{StrType, StrType},
+		ReturnType: BoolType,
+	}
+
+	if !map_num_fn.Equals(num_to_str_fn) {
+		t.Errorf("Expected (Num) Out? == (Num) to be true")
+	}
+
+	if map_num_fn.Equals(str_str_to_bool_fn) {
+		t.Errorf("Expected (Num) Out? != (Str, Str) Bool")
+	}
+}
+
 func TestGenerics(t *testing.T) {
 	Foo := GenericType{name: "T"}
 	if !Foo.Equals(NumType) {

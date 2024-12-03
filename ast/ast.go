@@ -84,6 +84,28 @@ func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("(%s) ?", f.Name)
 }
 
+type AnonymousFunction struct {
+	BaseNode
+	Parameters []Parameter
+	ReturnType checker.Type
+	Body       []Statement
+}
+
+func (a AnonymousFunction) String() string {
+	return fmt.Sprintf("AnonymousFunction(%s)", a.GetType())
+}
+func (a AnonymousFunction) GetType() checker.Type {
+	parameterTypes := make([]checker.Type, len(a.Parameters))
+	for i, param := range a.Parameters {
+		parameterTypes[i] = param.Type
+	}
+	return checker.FunctionType{
+		Mutates:    false,
+		Parameters: parameterTypes,
+		ReturnType: a.ReturnType,
+	}
+}
+
 type StructDefinition struct {
 	BaseNode
 	Type checker.StructType
@@ -982,6 +1004,8 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 		return p.parseStructInstance(child)
 	case "match_expression":
 		return p.parseMatchExpression(child)
+	case "anonymous_function":
+		return p.parseAnonymousFunction(child)
 	default:
 		return nil, fmt.Errorf("Unhandled expression: %s", child.GrammarName())
 	}
@@ -1505,4 +1529,51 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 	default:
 		panic(fmt.Sprintf("Unsupported subject type for match expression: %v", expression.GetType()))
 	}
+}
+
+func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFunction, error) {
+	parameterNodes := node.ChildrenByFieldName("parameter", p.tree.Walk())
+	parameters := make([]Parameter, len(parameterNodes))
+	for i, paramNode := range parameterNodes {
+		name := p.text(p.mustChild(&paramNode, "name"))
+		var _type checker.Type
+		typeNode := paramNode.ChildByFieldName("type")
+		if typeNode != nil {
+			_type = p.resolveType(typeNode)
+		}
+		parameters[i] = Parameter{
+			BaseNode: BaseNode{TSNode: &paramNode},
+			Name:     name,
+			Type:     _type,
+		}
+	}
+
+	scope := p.pushScope()
+	for _, param := range parameters {
+		scope.Declare(checker.Variable{
+			Mutable: false,
+			Name:    param.Name,
+			Type:    param.Type,
+		})
+	}
+	body, err := p.parseBlock(p.mustChild(node, "body"))
+	if err != nil {
+		return AnonymousFunction{}, err
+	}
+	p.popScope()
+
+	var returnType checker.Type = checker.VoidType
+	if len(body) > 0 {
+		last := body[len(body)-1]
+		if expr, ok := last.(Expression); ok {
+			returnType = expr.GetType()
+		}
+	}
+
+	return AnonymousFunction{
+		BaseNode:   BaseNode{TSNode: node},
+		Parameters: parameters,
+		Body:       body,
+		ReturnType: returnType,
+	}, nil
 }
