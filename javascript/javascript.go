@@ -168,6 +168,17 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		g.write("])")
 	case ast.Identifier:
 		g.write("%s", expr.(ast.Identifier).Name)
+	case ast.BinaryExpression:
+		binary := expr.(ast.BinaryExpression)
+		if binary.HasPrecedence {
+			g.write("(")
+		}
+		g.generateExpression(binary.Left)
+		g.write(" %s ", resolveOperator(binary.Operator))
+		g.generateExpression(binary.Right)
+		if binary.HasPrecedence {
+			g.write(")")
+		}
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}

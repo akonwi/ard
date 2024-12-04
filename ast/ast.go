@@ -81,7 +81,7 @@ type FunctionDeclaration struct {
 }
 
 func (f FunctionDeclaration) String() string {
-	return fmt.Sprintf("(%s) ?", f.Name)
+	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType)
 }
 
 type AnonymousFunction struct {
@@ -248,8 +248,9 @@ func (u UnaryExpression) GetType() checker.Type {
 
 type BinaryExpression struct {
 	BaseNode
-	Operator    Operator
-	Left, Right Expression
+	Operator      Operator
+	Left, Right   Expression
+	HasPrecedence bool
 }
 
 func (b BinaryExpression) String() string {
@@ -675,8 +676,7 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration, error) {
 	name := p.text(node.ChildByFieldName("name"))
-	parameters := p.parseParameters(
-		node.ChildByFieldName("parameters"))
+	parameters := p.parseParameters(node.ChildByFieldName("parameters"))
 	returnType := p.resolveType(node.ChildByFieldName("return"))
 
 	scope := p.pushScope()
@@ -735,6 +735,9 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 }
 
 func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
+	if node.HasError() {
+		panic(fmt.Errorf("Error parsing function parameters: %s", p.text(node)))
+	}
 	parameterNodes := node.ChildrenByFieldName("parameter", p.tree.Walk())
 	parameters := []Parameter{}
 
@@ -999,7 +1002,15 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "paren_expression":
-		return p.parseExpression(child.ChildByFieldName("expr"))
+		expr, err := p.parseExpression(child.ChildByFieldName("expr"))
+		if err != nil {
+			return nil, err
+		}
+		if binary, ok := expr.(BinaryExpression); ok {
+			binary.HasPrecedence = true
+			return binary, nil
+		}
+		return expr, nil
 	case "primitive_value":
 		return p.parsePrimitiveValue(child)
 	case "list_value":

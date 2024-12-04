@@ -132,6 +132,11 @@ const y = x`,
 			input:  `["jane": 1, "joe": 2]`,
 			output: `new Map([["jane", 1], ["joe", 2]])`,
 		},
+		{
+			name:   "binary: arithmatic",
+			input:  `(70 - 32) * 5 / 9`,
+			output: `(70 - 32) * 5 / 9`,
+		},
 	}
 
 	runTests(t, tests)

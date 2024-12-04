@@ -814,9 +814,11 @@ func TestParenthesizedExpressions(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					BinaryExpression{
-						Operator: Multiply,
+						HasPrecedence: false,
+						Operator:      Multiply,
 						Left: BinaryExpression{
-							Operator: Plus,
+							HasPrecedence: true,
+							Operator:      Plus,
 							Left: NumLiteral{
 								Value: `30`,
 							},
@@ -835,25 +837,6 @@ func TestParenthesizedExpressions(t *testing.T) {
 		{
 			name:  "Invalid parenthesized expression",
 			input: `30 + (20 * "fizz")`,
-			output: Program{
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Plus,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: BinaryExpression{
-							Operator: Multiply,
-							Left: NumLiteral{
-								Value: `20`,
-							},
-							Right: StrLiteral{
-								Value: `"fizz"`,
-							},
-						},
-					},
-				},
-			},
 			diagnostics: []checker.Diagnostic{
 				{
 					Msg: "The '*' operator can only be used between instances of 'Num'",
