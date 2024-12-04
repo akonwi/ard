@@ -38,6 +38,7 @@ func (g *jsGenerator) writeLine(line string, args ...interface{}) {
 }
 
 func (g *jsGenerator) generateVariableDeclaration(decl ast.VariableDeclaration) {
+	g.writeIndent()
 	if decl.Mutable {
 		g.write("let ")
 	} else {
@@ -46,10 +47,11 @@ func (g *jsGenerator) generateVariableDeclaration(decl ast.VariableDeclaration) 
 
 	g.write("%s = ", decl.Name)
 	g.generateExpression(decl.Value)
-	g.writeLine("")
+	g.write("\n")
 }
 
 func (g *jsGenerator) generateFunctionDeclaration(decl ast.FunctionDeclaration) {
+	g.writeIndent()
 	g.write("function %s", decl.Name)
 	g.write("(")
 	for i, param := range decl.Parameters {
@@ -61,16 +63,22 @@ func (g *jsGenerator) generateFunctionDeclaration(decl ast.FunctionDeclaration) 
 	g.write(") ")
 
 	if len(decl.Body) == 0 {
-		g.writeLine("{}")
+		g.write("{}\n")
 	} else {
 		g.writeLine("{")
 		g.indent()
 		for i, statement := range decl.Body {
-			if i < len(decl.Body)-1 {
-				g.write("return ")
+			if i == len(decl.Body)-1 {
+				if expr, ok := statement.(ast.Expression); ok {
+					g.writeIndent()
+					g.write("return ")
+					g.generateExpression(expr)
+					g.write("\n")
+					continue
+				}
+			} else {
+				g.generateStatement(statement)
 			}
-			g.generateStatement(statement)
-			g.writeLine("")
 		}
 		g.dedent()
 		g.writeLine("}")
@@ -134,6 +142,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {
+				g.writeIndent()
 				g.generateExpression(expr)
 			} else {
 				panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))

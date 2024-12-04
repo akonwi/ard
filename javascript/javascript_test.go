@@ -258,14 +258,27 @@ func TestFunctionDeclaration(t *testing.T) {
 			input:  `fn add(x: Num, y: Num) Num {}`,
 			output: "function add(x, y) {}",
 		},
-		// 		{
-		// 			name:  "single statement body: return is implicit",
-		// 			input: `fn add(x: Num, y: Num) Num { 42 }`,
-		// 			output: `
-		// function add(x, y) {
-		// 	return 42
-		// }`,
-		// 		},
+		{
+			name:  "single statement body: return is implicit",
+			input: `fn add(x: Num, y: Num) Num { x + y }`,
+			output: `
+function add(x, y) {
+  return x + y
+}`,
+		},
+		{
+			name: "the last statement is the return statement",
+			input: `
+fn add(x: Num, y: Num) Num {
+  let result = x + y
+	result
+}`,
+			output: `
+function add(x, y) {
+  const result = x + y
+  return result
+}`,
+		},
 	}
 
 	runTests(t, tests)
