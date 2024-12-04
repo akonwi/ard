@@ -85,6 +85,40 @@ func (g *jsGenerator) generateFunctionDeclaration(decl ast.FunctionDeclaration) 
 	}
 }
 
+func (g *jsGenerator) generateAnonymousFunction(decl ast.AnonymousFunction) {
+	g.write("(")
+	for i, param := range decl.Parameters {
+		if i > 0 {
+			g.write(", ")
+		}
+		g.write(param.Name)
+	}
+	g.write(") => {")
+
+	if len(decl.Body) == 0 {
+		g.write("}")
+		return
+	}
+
+	g.write("\n")
+	g.indent()
+	for i, statement := range decl.Body {
+		if i == len(decl.Body)-1 {
+			if expr, ok := statement.(ast.Expression); ok {
+				g.writeIndent()
+				g.write("return ")
+				g.generateExpression(expr)
+				g.write("\n")
+				continue
+			}
+		} else {
+			g.generateStatement(statement)
+		}
+	}
+	g.dedent()
+	g.write("}")
+}
+
 func resolveOperator(operator ast.Operator) string {
 	switch operator {
 	case ast.Assign:
@@ -212,6 +246,8 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		unary := expr.(ast.UnaryExpression)
 		g.write("%s", resolveOperator(unary.Operator))
 		g.generateExpression(unary.Operand)
+	case ast.AnonymousFunction:
+		g.generateAnonymousFunction(expr.(ast.AnonymousFunction))
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}

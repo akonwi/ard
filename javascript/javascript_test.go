@@ -50,57 +50,6 @@ func runTests(t *testing.T, tests []test) {
 	}
 }
 
-func TestVariableDeclaration(t *testing.T) {
-	tests := []test{
-		{
-			name:   "mutable string",
-			input:  `mut explicit: Str = "Alice"`,
-			output: `let explicit = "Alice"`,
-		},
-		{
-			name:   "immutable string",
-			input:  `let explicit = "Alice"`,
-			output: `const explicit = "Alice"`,
-		},
-		{
-			name:   "mutable number",
-			input:  `mut power = 200`,
-			output: `let power = 200`,
-		},
-		{
-			name:   "immutable number",
-			input:  `let power = 200`,
-			output: `const power = 200`,
-		},
-		{
-			name:   "mutable boolean",
-			input:  `mut is_valid = true`,
-			output: `let is_valid = true`,
-		},
-		{
-			name:   "immutable boolean",
-			input:  `let is_valid = false`,
-			output: `const is_valid = false`,
-		},
-	}
-
-	runTests(t, tests)
-}
-
-func TestVariableAssignment(t *testing.T) {
-	runTests(t, []test{
-		{
-			name: "string assignment",
-			input: `
-mut name = "Alice"
-name = "Bob"`,
-			output: `
-let name = "Alice"
-name = "Bob"`,
-		},
-	})
-}
-
 func TestLiteralExpressions(t *testing.T) {
 	tests := []test{
 		{
@@ -282,4 +231,75 @@ function add(x, y) {
 	}
 
 	runTests(t, tests)
+}
+
+func TestAnonymousFunctions(t *testing.T) {
+	tests := []test{
+		{
+			name:   "noop",
+			input:  `() {}`,
+			output: `() => {}`,
+		},
+		{
+			name:  "with parameters and body",
+			input: `(one, two) { one / two }`,
+			output: `
+(one, two) => {
+  return one / two
+}`,
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestVariableDeclaration(t *testing.T) {
+	tests := []test{
+		{
+			name:   "mutable string",
+			input:  `mut explicit: Str = "Alice"`,
+			output: `let explicit = "Alice"`,
+		},
+		{
+			name:   "immutable string",
+			input:  `let explicit = "Alice"`,
+			output: `const explicit = "Alice"`,
+		},
+		{
+			name:   "mutable number",
+			input:  `mut power = 200`,
+			output: `let power = 200`,
+		},
+		{
+			name:   "immutable number",
+			input:  `let power = 200`,
+			output: `const power = 200`,
+		},
+		{
+			name:   "mutable boolean",
+			input:  `mut is_valid = true`,
+			output: `let is_valid = true`,
+		},
+		{
+			name:   "immutable boolean",
+			input:  `let is_valid = false`,
+			output: `const is_valid = false`,
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestVariableAssignment(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "string assignment",
+			input: `
+mut name = "Alice"
+name = "Bob"`,
+			output: `
+let name = "Alice"
+name = "Bob"`,
+		},
+	})
 }
