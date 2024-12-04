@@ -101,7 +101,7 @@ name = "Bob"`,
 	})
 }
 
-func TestExpressions(t *testing.T) {
+func TestLiteralExpressions(t *testing.T) {
 	tests := []test{
 		{
 			name: "identifier",
@@ -123,6 +123,16 @@ const y = x`,
 			output: "`foobar ${42}`",
 		},
 		{
+			name:   "number",
+			input:  `42`,
+			output: `42`,
+		},
+		{
+			name:   "booleans",
+			input:  `false`,
+			output: `false`,
+		},
+		{
 			name:   "list literal",
 			input:  `[1, 2, 3]`,
 			output: `[1, 2, 3]`,
@@ -132,10 +142,99 @@ const y = x`,
 			input:  `["jane": 1, "joe": 2]`,
 			output: `new Map([["jane", 1], ["joe", 2]])`,
 		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestBinaryExpressions(t *testing.T) {
+	tests := []test{
 		{
-			name:   "binary: arithmatic",
+			name:   "addition",
+			input:  `42 + 20`,
+			output: `42 + 20`,
+		},
+		{
+			name:   "subtraction",
+			input:  `42 - 20`,
+			output: `42 - 20`,
+		},
+		{
+			name:   "multiplication",
+			input:  `42 * 20`,
+			output: `42 * 20`,
+		},
+		{
+			name:   "division",
+			input:  `42 / 2`,
+			output: `42 / 2`,
+		},
+		{
+			name:   "modulo",
+			input:  `42 % 2`,
+			output: `42 % 2`,
+		},
+		{
+			name:   "math with precedence",
 			input:  `(70 - 32) * 5 / 9`,
 			output: `(70 - 32) * 5 / 9`,
+		},
+		{
+			name:   "equality",
+			input:  `42 == 42`,
+			output: `42 === 42`,
+		},
+		{
+			name:   "inequality",
+			input:  `42 != 42`,
+			output: `42 !== 42`,
+		},
+		{
+			name:   "logical or",
+			input:  `true or false`,
+			output: `true || false`,
+		},
+		{
+			name:   "logical and",
+			input:  `true and false`,
+			output: `true && false`,
+		},
+		{
+			name:   "less than",
+			input:  `20 < 100`,
+			output: `20 < 100`,
+		},
+		{
+			name:   "less than or equal",
+			input:  `20 <= 100`,
+			output: `20 <= 100`,
+		},
+		{
+			name:   "greater than",
+			input:  `20 > 100`,
+			output: `20 > 100`,
+		},
+		{
+			name:   "greater than or equal",
+			input:  `20 >= 100`,
+			output: `20 >= 100`,
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestUnaryExpressions(t *testing.T) {
+	tests := []test{
+		{
+			name:   "numeric negation",
+			input:  `-42`,
+			output: `-42`,
+		},
+		{
+			name:   "boolean negation",
+			input:  `!true`,
+			output: `!true`,
 		},
 	}
 

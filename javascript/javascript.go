@@ -81,6 +81,10 @@ func resolveOperator(operator ast.Operator) string {
 	switch operator {
 	case ast.Assign:
 		return "="
+	case ast.Equal:
+		return "==="
+	case ast.NotEqual:
+		return "!=="
 	case ast.Increment:
 		return "+="
 	case ast.Decrement:
@@ -93,6 +97,22 @@ func resolveOperator(operator ast.Operator) string {
 		return "+"
 	case ast.Minus:
 		return "-"
+	case ast.Modulo:
+		return "%"
+	case ast.Or:
+		return "||"
+	case ast.And:
+		return "&&"
+	case ast.LessThan:
+		return "<"
+	case ast.LessThanOrEqual:
+		return "<="
+	case ast.GreaterThan:
+		return ">"
+	case ast.GreaterThanOrEqual:
+		return ">="
+	case ast.Bang:
+		return "!"
 	default:
 		panic(fmt.Errorf("Unresolved operator: %v", operator))
 	}
@@ -179,6 +199,10 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		if binary.HasPrecedence {
 			g.write(")")
 		}
+	case ast.UnaryExpression:
+		unary := expr.(ast.UnaryExpression)
+		g.write("%s", resolveOperator(unary.Operator))
+		g.generateExpression(unary.Operand)
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}
