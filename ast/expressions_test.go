@@ -768,12 +768,11 @@ func TestBinaryExpressions(t *testing.T) {
 			input: "1..10",
 			output: Program{
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: Range,
-						Left: NumLiteral{
+					RangeExpression{
+						Start: NumLiteral{
 							Value: `1`,
 						},
-						Right: NumLiteral{
+						End: NumLiteral{
 							Value: `10`,
 						},
 					},
@@ -786,12 +785,11 @@ func TestBinaryExpressions(t *testing.T) {
 			input: `"fizz"...10`,
 			output: Program{
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: Range,
-						Left: StrLiteral{
+					RangeExpression{
+						Start: StrLiteral{
 							Value: `"fizz"`,
 						},
-						Right: NumLiteral{
+						End: NumLiteral{
 							Value: `10`,
 						},
 					},

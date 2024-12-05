@@ -363,3 +363,43 @@ while (true) {
 		},
 	})
 }
+
+func TestForLoops(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "looping over a number",
+			input: `for i in 10 { i }`,
+			output: `
+for (let i = 0; i < 10; i++) {
+  i
+}`,
+		},
+		{
+			name:  "looping over a range",
+			input: `for num in 0..10 { num }`,
+			output: `
+for (let num = 0; num < 10; num++) {
+  num
+}`,
+		},
+		{
+			name:  "looping over an array",
+			input: `for name in ["jane", "joe"] { name }`,
+			output: `
+for (const name of ["jane", "joe"]) {
+  name
+}`,
+		},
+		{
+			name: "looping over a string",
+			input: `
+let msg = "hello world"
+for char in msg { char }`,
+			output: `
+const msg = "hello world"
+for (const char of msg) {
+  char
+}`,
+		},
+	})
+}

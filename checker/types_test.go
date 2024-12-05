@@ -97,8 +97,8 @@ func TestMapEquality(t *testing.T) {
 }
 
 func TestEnumEquality(t *testing.T) {
-	colorEnum := EnumType{Name: "Color", Variants: map[string]int{"Red": 0, "Green": 1}}
-	placeEnum := EnumType{Name: "Place", Variants: map[string]int{"Office": 0, "Home": 1}}
+	colorEnum := EnumType{Name: "Color", Variants: []string{"Red", "Green"}}
+	placeEnum := EnumType{Name: "Place", Variants: []string{"Office", "Home"}}
 	if !colorEnum.Equals(colorEnum) {
 		t.Errorf("%s == %s", colorEnum, colorEnum)
 	}

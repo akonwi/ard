@@ -299,10 +299,9 @@ func TestForLoops(t *testing.T) {
 				Statements: []Statement{
 					ForLoop{
 						Cursor: Identifier{Name: "i", Type: checker.NumType},
-						Iterable: BinaryExpression{
-							Left:     NumLiteral{Value: "1"},
-							Operator: Range,
-							Right:    NumLiteral{Value: "10"},
+						Iterable: RangeExpression{
+							Start: NumLiteral{Value: "1"},
+							End:   NumLiteral{Value: "10"},
 						},
 						Body: []Statement{},
 					},

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/kon/ast"
+	"github.com/akonwi/kon/checker"
 )
 
 type jsGenerator struct {
@@ -192,6 +193,59 @@ func (g *jsGenerator) generateWhileLoop(loop ast.WhileLoop) {
 	g.write("}\n")
 }
 
+func (g *jsGenerator) generateForLoop(loop ast.ForLoop) {
+	if rangeExpr, ok := loop.Iterable.(ast.RangeExpression); ok {
+		g.writeIndent()
+		g.write("for (let %s = ", loop.Cursor.Name)
+		g.generateExpression(rangeExpr.Start)
+		g.write("; ")
+		g.write("%s < ", loop.Cursor.Name)
+		g.generateExpression(rangeExpr.End)
+		g.write("; ")
+		g.write("%s++) {\n", loop.Cursor.Name)
+		goto print_body_and_close
+	}
+
+	if primitive, ok := loop.Iterable.GetType().(checker.PrimitiveType); ok {
+		if primitive == checker.BoolType {
+			panic("Cannot iterate over a boolean")
+		}
+
+		g.writeIndent()
+		if primitive == checker.StrType {
+			g.write("for (const %s of ", loop.Cursor.Name)
+			g.generateExpression(loop.Iterable)
+			g.write(") {\n")
+		} else {
+			g.write("for (let %s = 0", loop.Cursor.Name)
+			g.write("; %s < ", loop.Cursor.Name)
+			g.generateExpression(loop.Iterable)
+			g.write("; %s++) {\n", loop.Cursor.Name)
+		}
+		goto print_body_and_close
+	}
+
+	if _, ok := loop.Iterable.GetType().(checker.ListType); ok {
+		g.writeIndent()
+		g.write("for (const %s of ", loop.Cursor.Name)
+		g.generateExpression(loop.Iterable)
+		g.write(") {\n")
+
+		goto print_body_and_close
+	}
+
+	panic(fmt.Errorf("Cannot loop over %s", loop.Iterable))
+
+print_body_and_close:
+	g.indent()
+	for _, statement := range loop.Body {
+		g.generateStatement(statement)
+	}
+	g.dedent()
+	g.writeIndent()
+	g.writeLine("}")
+}
+
 func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
@@ -205,6 +259,8 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 		g.generateEnumDefinition(statement.(ast.EnumDefinition))
 	case ast.WhileLoop:
 		g.generateWhileLoop(statement.(ast.WhileLoop))
+	case ast.ForLoop:
+		g.generateForLoop(statement.(ast.ForLoop))
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {

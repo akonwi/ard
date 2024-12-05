@@ -115,7 +115,16 @@ func (s StructType) GetType() Type {
 
 type EnumType struct {
 	Name     string
-	Variants map[string]int
+	Variants []string
+}
+
+func (e EnumType) HasVariant(variant string) bool {
+	for _, v := range e.Variants {
+		if v == variant {
+			return true
+		}
+	}
+	return false
 }
 
 func (e EnumType) FormatVariant(variant string) string {

@@ -276,7 +276,7 @@ func (b BinaryExpression) GetType() checker.Type {
 
 type RangeExpression struct {
 	BaseNode
-	Left, Right Expression
+	Start, End Expression
 }
 
 func (b RangeExpression) String() string {
@@ -1325,6 +1325,14 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 			msg := "A range must be between two Num"
 			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, operatorNode))
 		}
+	}
+
+	if operator == Range {
+		return RangeExpression{
+			BaseNode: BaseNode{TSNode: node},
+			Start:    left,
+			End:      right,
+		}, nil
 	}
 
 	return BinaryExpression{
