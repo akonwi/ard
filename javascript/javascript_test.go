@@ -335,3 +335,18 @@ Person{ name: "Joe", age: 42, employed: true }`,
 		},
 	})
 }
+
+func TestEnums(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "basic enum",
+			input: `enum Color { Red, Green, Yellow }`,
+			output: `
+const Color = Object.freeze({
+  Red: Object.freeze({ index: 0 }),
+  Green: Object.freeze({ index: 1 }),
+  Yellow: Object.freeze({ index: 2 })
+})`,
+		},
+	})
+}

@@ -166,6 +166,20 @@ func (g *jsGenerator) generateVariableAssignment(assignment ast.VariableAssignme
 	g.write("\n")
 }
 
+func (g *jsGenerator) generateEnumDefinition(enum ast.EnumDefinition) {
+	g.write("const %s = Object.freeze({\n", enum.Type.Name)
+	g.indent()
+	for name, index := range enum.Type.Variants {
+		if index > 0 {
+			g.write(",\n")
+		}
+		g.writeIndent()
+		g.write("%s: Object.freeze({ index: %d })", name, index)
+	}
+	g.dedent()
+	g.write("\n})")
+}
+
 func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
@@ -175,6 +189,8 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 		g.generateVariableAssignment(statement.(ast.VariableAssignment))
 	case ast.FunctionDeclaration:
 		g.generateFunctionDeclaration(statement.(ast.FunctionDeclaration))
+	case ast.EnumDefinition:
+		g.generateEnumDefinition(statement.(ast.EnumDefinition))
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {
