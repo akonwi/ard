@@ -16,10 +16,10 @@ enum Color {
 
 var traffic_light_enum = checker.EnumType{
 	Name: "Color",
-	Variants: map[string]int{
-		"Red":    0,
-		"Green":  1,
-		"Yellow": 2,
+	Variants: []string{
+		"Red",
+		"Green",
+		"Yellow",
 	},
 }
 
@@ -44,7 +44,7 @@ func TestEnumDefinitions(t *testing.T) {
 
 func TestEnums(t *testing.T) {
 	colorEnum := checker.EnumType{Name: "Color",
-		Variants: map[string]int{"Black": 0, "Grey": 1},
+		Variants: []string{"Black", "Grey"},
 	}
 	tests := []test{
 		{

@@ -169,7 +169,7 @@ func (g *jsGenerator) generateVariableAssignment(assignment ast.VariableAssignme
 func (g *jsGenerator) generateEnumDefinition(enum ast.EnumDefinition) {
 	g.write("const %s = Object.freeze({\n", enum.Type.Name)
 	g.indent()
-	for name, index := range enum.Type.Variants {
+	for index, name := range enum.Type.Variants {
 		if index > 0 {
 			g.write(",\n")
 		}

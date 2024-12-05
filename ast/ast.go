@@ -995,11 +995,18 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 	nameNode := node.ChildByFieldName("name")
 	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
 
-	variants := make(map[string]int)
+	variants := make([]string, len(variantNodes))
+	names := make(map[string]int8)
 	for i, variantNode := range variantNodes {
 		nameNode := variantNode.NamedChild(0)
 		name := p.text(nameNode)
-		variants[name] = i
+		if _, ok := names[name]; ok {
+			msg := fmt.Sprintf("Duplicate variant '%s'", name)
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+		} else {
+			names[name] = 0
+		}
+		variants[i] = name
 	}
 
 	_type := checker.EnumType{Name: p.text(nameNode), Variants: variants}
@@ -1355,7 +1362,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		case "identifier":
 			name := p.text(memberNode)
 			if accessType == Static {
-				if _, ok := enum.Variants[name]; ok {
+				if ok := enum.HasVariant(name); ok {
 					return MemberAccess{
 						Target:     target,
 						AccessType: accessType,
@@ -1625,7 +1632,7 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 				p.typeMismatchError(&caseNode, resultType, returnType)
 			}
 		}
-		for variant := range enum.Variants {
+		for _, variant := range enum.Variants {
 			if _, ok := providedCases[variant]; !ok {
 				msg := fmt.Sprintf("Missing case for '%s'", enum.FormatVariant(variant))
 				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
