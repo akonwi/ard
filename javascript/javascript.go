@@ -180,6 +180,18 @@ func (g *jsGenerator) generateEnumDefinition(enum ast.EnumDefinition) {
 	g.write("\n})")
 }
 
+func (g *jsGenerator) generateWhileLoop(loop ast.WhileLoop) {
+	g.write("while (")
+	g.generateExpression(loop.Condition)
+	g.write(") {\n")
+	g.indent()
+	for _, statement := range loop.Body {
+		g.generateStatement(statement)
+	}
+	g.dedent()
+	g.write("}\n")
+}
+
 func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
@@ -191,11 +203,14 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 		g.generateFunctionDeclaration(statement.(ast.FunctionDeclaration))
 	case ast.EnumDefinition:
 		g.generateEnumDefinition(statement.(ast.EnumDefinition))
+	case ast.WhileLoop:
+		g.generateWhileLoop(statement.(ast.WhileLoop))
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {
 				g.writeIndent()
 				g.generateExpression(expr)
+				g.write("\n")
 			} else {
 				panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))
 			}

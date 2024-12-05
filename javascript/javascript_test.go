@@ -350,3 +350,16 @@ const Color = Object.freeze({
 		},
 	})
 }
+
+func TestWhileLoops(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "basic while loop",
+			input: `while true { 20 }`,
+			output: `
+while (true) {
+  20
+}`,
+		},
+	})
+}
