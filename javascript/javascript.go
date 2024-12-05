@@ -236,16 +236,13 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		g.write("]")
 	case ast.MapLiteral:
 		g.write("new Map([")
-		i := 0
-		for key, value := range expr.(ast.MapLiteral).Entries {
+		for i, entry := range expr.(ast.MapLiteral).Entries {
 			if i > 0 {
 				g.write(", ")
-			} else {
-				i++
 			}
 			g.write("[")
-			g.write(`%s, `, key)
-			g.generateExpression(value)
+			g.write(`%s, `, entry.Key)
+			g.generateExpression(entry.Value)
 			g.write("]")
 		}
 		g.write("])")

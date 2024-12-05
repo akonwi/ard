@@ -57,7 +57,7 @@ func TestVariableDeclarations(t *testing.T) {
 							ValueType: checker.NumType,
 						},
 						Value: MapLiteral{
-							Entries: map[StrLiteral]Expression{},
+							Entries: []MapEntry{},
 							Type: checker.MapType{
 								KeyType: checker.StrType,
 							},
@@ -84,10 +84,10 @@ func TestVariableDeclarations(t *testing.T) {
 							ValueType: checker.NumType,
 						},
 						Value: MapLiteral{
-							Entries: map[StrLiteral]Expression{
-								{Value: `"john"`}: NumLiteral{Value: "1"},
-								{Value: `"jane"`}: NumLiteral{Value: "2"},
-								{Value: `"jen"`}:  NumLiteral{Value: "3"},
+							Entries: []MapEntry{
+								{Key: `"john"`, Value: NumLiteral{Value: "1"}},
+								{Key: `"jane"`, Value: NumLiteral{Value: "2"}},
+								{Key: `"jen"`, Value: NumLiteral{Value: "3"}},
 							},
 							Type: checker.MapType{
 								KeyType:   checker.StrType,
@@ -154,8 +154,8 @@ func TestVariableTypeInference(t *testing.T) {
 						Name:    "map",
 						Type:    checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
 						Value: MapLiteral{
-							Entries: map[StrLiteral]Expression{
-								{Value: `"foo"`}: NumLiteral{Value: "3"},
+							Entries: []MapEntry{
+								{Key: `"foo"`, Value: NumLiteral{Value: "3"}},
 							},
 							Type: checker.MapType{KeyType: checker.StrType, ValueType: checker.NumType},
 						},

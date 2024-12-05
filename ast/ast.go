@@ -364,9 +364,14 @@ func (l ListLiteral) GetType() checker.Type {
 	return l.Type
 }
 
+type MapEntry struct {
+	Key   string
+	Value Expression
+}
+
 type MapLiteral struct {
 	BaseNode
-	Entries map[StrLiteral]Expression
+	Entries []MapEntry
 	Type    checker.Type
 }
 
@@ -1154,16 +1159,23 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 
 func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	entryNodes := node.ChildrenByFieldName("entry", p.tree.Walk())
-	entries := make(map[StrLiteral]Expression)
+	entries := make([]MapEntry, len(entryNodes))
 
 	var valueType checker.Type
 
+	receivedKeys := make(map[string]int, len(entryNodes))
 	for i, entryNode := range entryNodes {
 		key, value, err := p.parseMapEntry(&entryNode)
 		if err != nil {
 			return nil, err
 		}
-		entries[StrLiteral{Value: key}] = value
+		if _, ok := receivedKeys[key]; ok {
+			msg := fmt.Sprintf("Duplicate key '%s' in map", key)
+			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &entryNode))
+		} else {
+			receivedKeys[key] = 0
+		}
+
 		if i == 0 {
 			valueType = value.GetType()
 		} else if valueType != value.GetType() {
@@ -1171,6 +1183,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 			// p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &entryNode))
 			break
 		}
+		entries[i] = MapEntry{Key: key, Value: value}
 	}
 	mapType := checker.MapType{KeyType: checker.StrType, ValueType: valueType}
 
