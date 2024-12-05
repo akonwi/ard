@@ -115,10 +115,15 @@ func (s StructDefinition) String() string {
 	return fmt.Sprintf("StructDefinition(%s)", s.Type.Name)
 }
 
+type StructValue struct {
+	Name  string
+	Value Expression
+}
+
 type StructInstance struct {
 	BaseNode
 	Type       checker.StructType
-	Properties map[string]Expression
+	Properties []StructValue
 }
 
 func (s StructInstance) String() string {
@@ -937,8 +942,8 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 	}
 
 	receivedNames := make(map[string]int8)
-	properties := make(map[string]Expression)
-	for _, propertyNode := range fieldNodes {
+	properties := make([]StructValue, len(fieldNodes))
+	for i, propertyNode := range fieldNodes {
 		nameNode := propertyNode.ChildByFieldName("name")
 		name := p.text(nameNode)
 
@@ -959,8 +964,12 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 			p.typeMismatchError(&propertyNode, expectedType, value.GetType())
 		}
 
-		receivedNames[name] = 0
-		properties[name] = value
+		if _, ok := receivedNames[name]; ok {
+			p.typeErrors = append(p.typeErrors, checker.MakeError(fmt.Sprintf("Duplicate field '%s' in struct '%s'", name, structType.Name), nameNode))
+		} else {
+			receivedNames[name] = 0
+		}
+		properties[i] = StructValue{Name: name, Value: value}
 	}
 
 	for name := range structType.Fields {

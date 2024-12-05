@@ -190,16 +190,15 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 func (g *jsGenerator) generateStructInstance(instance ast.StructInstance) {
 	g.write("{")
 	if len(instance.Properties) > 0 {
-		i := 0
 		g.write(" ")
-		for key, value := range instance.Properties {
+		for i, entry := range instance.Properties {
 			if i > 0 {
 				g.write(", ")
 			} else {
 				i++
 			}
-			g.write("%s: ", key)
-			g.generateExpression(value)
+			g.write("%s: ", entry.Name)
+			g.generateExpression(entry.Value)
 		}
 		g.write(" ")
 	}

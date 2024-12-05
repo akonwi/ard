@@ -88,7 +88,7 @@ func TestInstantiatingStructs(t *testing.T) {
 					},
 					StructInstance{
 						Type:       emptyStruct,
-						Properties: map[string]Expression{},
+						Properties: []StructValue{},
 					},
 				},
 			},
@@ -116,10 +116,10 @@ func TestInstantiatingStructs(t *testing.T) {
 					},
 					StructInstance{
 						Type: personStruct,
-						Properties: map[string]Expression{
-							"name":     StrLiteral{Value: `"John"`},
-							"age":      NumLiteral{Value: "23"},
-							"employed": BoolLiteral{Value: true},
+						Properties: []StructValue{
+							{Name: "name", Value: StrLiteral{Value: `"John"`}},
+							{Name: "age", Value: NumLiteral{Value: "23"}},
+							{Name: "employed", Value: BoolLiteral{Value: true}},
 						},
 					},
 				},
@@ -162,10 +162,10 @@ func TestStructFieldAccess(t *testing.T) {
 						Type:    personStruct,
 						Value: StructInstance{
 							Type: personStruct,
-							Properties: map[string]Expression{
-								"name":     StrLiteral{Value: `"Bobby"`},
-								"age":      NumLiteral{Value: "12"},
-								"employed": BoolLiteral{Value: false},
+							Properties: []StructValue{
+								{Name: "name", Value: StrLiteral{Value: `"Bobby"`}},
+								{Name: "age", Value: NumLiteral{Value: "12"}},
+								{Name: "employed", Value: BoolLiteral{Value: false}},
 							},
 						},
 					},
