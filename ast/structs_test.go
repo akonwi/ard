@@ -28,7 +28,7 @@ func TestStructDefinitions(t *testing.T) {
 				struct Box {}`,
 			output: Program{
 				Statements: []Statement{
-					&StructDefinition{
+					StructDefinition{
 						Type: emptyStruct,
 					},
 				},
@@ -44,7 +44,7 @@ func TestStructDefinitions(t *testing.T) {
 				}`,
 			output: Program{
 				Statements: []Statement{
-					&StructDefinition{
+					StructDefinition{
 						Type: personStruct,
 					},
 				},
@@ -83,7 +83,7 @@ func TestInstantiatingStructs(t *testing.T) {
 				Box{}`,
 			output: Program{
 				Statements: []Statement{
-					&StructDefinition{
+					StructDefinition{
 						Type: emptyStruct,
 					},
 					StructInstance{
@@ -111,7 +111,7 @@ func TestInstantiatingStructs(t *testing.T) {
 			`, personStructCode),
 			output: Program{
 				Statements: []Statement{
-					&StructDefinition{
+					StructDefinition{
 						Type: personStruct,
 					},
 					StructInstance{
@@ -155,7 +155,7 @@ func TestStructFieldAccess(t *testing.T) {
 				person.employed`, personStructCode),
 			output: Program{
 				Statements: []Statement{
-					&StructDefinition{Type: personStruct},
+					StructDefinition{Type: personStruct},
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "person",

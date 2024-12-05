@@ -163,10 +163,12 @@ func resolveOperator(operator ast.Operator) string {
 func (g *jsGenerator) generateVariableAssignment(assignment ast.VariableAssignment) {
 	g.write("%s %s ", assignment.Name, resolveOperator(assignment.Operator))
 	g.generateExpression(assignment.Value)
+	g.write("\n")
 }
 
 func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	switch statement.(type) {
+	case ast.StructDefinition: // skipped
 	case ast.VariableDeclaration:
 		g.generateVariableDeclaration(statement.(ast.VariableDeclaration))
 	case ast.VariableAssignment:
@@ -183,6 +185,25 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 			}
 		}
 	}
+}
+
+func (g *jsGenerator) generateStructInstance(instance ast.StructInstance) {
+	g.write("{")
+	if len(instance.Properties) > 0 {
+		i := 0
+		g.write(" ")
+		for key, value := range instance.Properties {
+			if i > 0 {
+				g.write(", ")
+			} else {
+				i++
+			}
+			g.write("%s: ", key)
+			g.generateExpression(value)
+		}
+		g.write(" ")
+	}
+	g.write("}")
 }
 
 func (g *jsGenerator) generateExpression(expr ast.Expression) {
@@ -248,6 +269,8 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		g.generateExpression(unary.Operand)
 	case ast.AnonymousFunction:
 		g.generateAnonymousFunction(expr.(ast.AnonymousFunction))
+	case ast.StructInstance:
+		g.generateStructInstance(expr.(ast.StructInstance))
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}

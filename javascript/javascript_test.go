@@ -301,5 +301,37 @@ name = "Bob"`,
 let name = "Alice"
 name = "Bob"`,
 		},
+		{
+			name: "compound assignment",
+			input: `
+mut x = 10
+x =+ 5
+x =- 5`,
+			output: `
+let x = 10
+x += 5
+x -= 5`,
+		},
+	})
+}
+
+func TestStructs(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "empty struct",
+			input: `
+struct Foo {}
+let a_foo = Foo{}`,
+			output: `
+const a_foo = {}`,
+		},
+		{
+			name: "full struct",
+			input: `
+struct Person { name: Str, age: Num, employed: Bool }
+Person{ name: "Joe", age: 42, employed: true }`,
+			output: `
+{ name: "Joe", age: 42, employed: true }`,
+		},
 	})
 }

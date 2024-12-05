@@ -913,7 +913,7 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 	_type := checker.StructType{Name: p.text(nameNode), Fields: fields}
 	p.scope.Declare(_type)
 
-	strct := &StructDefinition{
+	strct := StructDefinition{
 		Type: _type,
 	}
 	return strct, nil
