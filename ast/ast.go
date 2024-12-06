@@ -1083,7 +1083,7 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 		if len(chunkNodes) == 1 && chunkNodes[0].GrammarName() == "string_content" {
 			return StrLiteral{
 				BaseNode: BaseNode{TSNode: node},
-				Value:    p.text(&chunkNodes[0])}, nil
+				Value:    p.text(node)}, nil
 		}
 
 		chunks := make([]Expression, len(chunkNodes))

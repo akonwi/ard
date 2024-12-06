@@ -24,8 +24,12 @@ func (g *jsGenerator) dedent() {
 	}
 }
 
+func (g jsGenerator) getIndent() string {
+	return strings.Repeat("  ", g.indentLevel)
+}
+
 func (g *jsGenerator) writeIndent() {
-	g.builder.WriteString(strings.Repeat("  ", g.indentLevel))
+	g.builder.WriteString(g.getIndent())
 }
 
 func (g *jsGenerator) write(format string, args ...interface{}) {
@@ -39,61 +43,33 @@ func (g *jsGenerator) writeLine(line string, args ...interface{}) {
 }
 
 func (g *jsGenerator) generateVariableDeclaration(decl ast.VariableDeclaration) {
-	g.writeIndent()
+	binding := "const"
 	if decl.Mutable {
-		g.write("let ")
-	} else {
-		g.write("const ")
+		binding = "let"
 	}
-
-	g.write("%s = ", decl.Name)
-	g.generateExpression(decl.Value)
-	g.write("\n")
+	g.writeLine("%s %s = %s", binding, decl.Name, toJSExpression(decl.Value))
 }
 
 func (g *jsGenerator) generateFunctionDeclaration(decl ast.FunctionDeclaration) {
-	g.writeIndent()
-	g.write("function %s", decl.Name)
-	g.write("(")
+	params := make([]string, len(decl.Parameters))
 	for i, param := range decl.Parameters {
-		if i > 0 {
-			g.write(", ")
-		}
-		g.write(param.Name)
+		params[i] = param.Name
 	}
-	g.write(") ")
-
-	if len(decl.Body) == 0 {
-		g.write("{}\n")
-	} else {
-		g.writeLine("{")
-		g.indent()
-		for i, statement := range decl.Body {
-			if i == len(decl.Body)-1 {
-				if expr, ok := statement.(ast.Expression); ok {
-					g.writeIndent()
-					g.write("return ")
-					g.generateExpression(expr)
-					g.write("\n")
-					continue
-				}
-			} else {
-				g.generateStatement(statement)
-			}
-		}
-		g.dedent()
-		g.writeLine("}")
+	g.writeLine("function %s(%s) {", decl.Name, strings.Join(params, ", "))
+	g.indent()
+	for i, statement := range decl.Body {
+		g.generateStatement(statement, i == len(decl.Body)-1)
 	}
+	g.dedent()
+	g.writeLine("}")
 }
 
 func (g *jsGenerator) generateAnonymousFunction(decl ast.AnonymousFunction) {
-	g.write("(")
+	params := make([]string, len(decl.Parameters))
 	for i, param := range decl.Parameters {
-		if i > 0 {
-			g.write(", ")
-		}
-		g.write(param.Name)
+		params[i] = param.Name
 	}
+	g.write("(")
 	g.write(") => {")
 
 	if len(decl.Body) == 0 {
@@ -104,17 +80,7 @@ func (g *jsGenerator) generateAnonymousFunction(decl ast.AnonymousFunction) {
 	g.write("\n")
 	g.indent()
 	for i, statement := range decl.Body {
-		if i == len(decl.Body)-1 {
-			if expr, ok := statement.(ast.Expression); ok {
-				g.writeIndent()
-				g.write("return ")
-				g.generateExpression(expr)
-				g.write("\n")
-				continue
-			}
-		} else {
-			g.generateStatement(statement)
-		}
+		g.generateStatement(statement, i == len(decl.Body)-1)
 	}
 	g.dedent()
 	g.write("}")
@@ -141,7 +107,7 @@ func resolveOperator(operator ast.Operator) string {
 	case ast.Minus:
 		return "-"
 	case ast.Modulo:
-		return "%"
+		return "%%"
 	case ast.Or:
 		return "||"
 	case ast.And:
@@ -162,9 +128,7 @@ func resolveOperator(operator ast.Operator) string {
 }
 
 func (g *jsGenerator) generateVariableAssignment(assignment ast.VariableAssignment) {
-	g.write("%s %s ", assignment.Name, resolveOperator(assignment.Operator))
-	g.generateExpression(assignment.Value)
-	g.write("\n")
+	g.writeLine("%s %s %s", assignment.Name, resolveOperator(assignment.Operator), toJSExpression(assignment.Value))
 }
 
 func (g *jsGenerator) generateEnumDefinition(enum ast.EnumDefinition) {
@@ -182,9 +146,7 @@ func (g *jsGenerator) generateEnumDefinition(enum ast.EnumDefinition) {
 }
 
 func (g *jsGenerator) generateWhileLoop(loop ast.WhileLoop) {
-	g.write("while (")
-	g.generateExpression(loop.Condition)
-	g.write(") {\n")
+	g.writeLine("while (%s) {", toJSExpression(loop.Condition))
 	g.indent()
 	for _, statement := range loop.Body {
 		g.generateStatement(statement)
@@ -195,14 +157,14 @@ func (g *jsGenerator) generateWhileLoop(loop ast.WhileLoop) {
 
 func (g *jsGenerator) generateForLoop(loop ast.ForLoop) {
 	if rangeExpr, ok := loop.Iterable.(ast.RangeExpression); ok {
-		g.writeIndent()
-		g.write("for (let %s = ", loop.Cursor.Name)
-		g.generateExpression(rangeExpr.Start)
-		g.write("; ")
-		g.write("%s < ", loop.Cursor.Name)
-		g.generateExpression(rangeExpr.End)
-		g.write("; ")
-		g.write("%s++) {\n", loop.Cursor.Name)
+		g.writeLine(
+			"for (let %s = %s; %s < %s; %s++) {",
+			loop.Cursor.Name,
+			toJSExpression(rangeExpr.Start),
+			loop.Cursor.Name,
+			toJSExpression(rangeExpr.End),
+			loop.Cursor.Name,
+		)
 		goto print_body_and_close
 	}
 
@@ -213,24 +175,21 @@ func (g *jsGenerator) generateForLoop(loop ast.ForLoop) {
 
 		g.writeIndent()
 		if primitive == checker.StrType {
-			g.write("for (const %s of ", loop.Cursor.Name)
-			g.generateExpression(loop.Iterable)
-			g.write(") {\n")
+			g.writeLine("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable))
 		} else {
-			g.write("for (let %s = 0", loop.Cursor.Name)
-			g.write("; %s < ", loop.Cursor.Name)
-			g.generateExpression(loop.Iterable)
-			g.write("; %s++) {\n", loop.Cursor.Name)
+			g.writeLine(
+				"for (let %s = 0; %s < %s; %s++) {",
+				loop.Cursor.Name,
+				loop.Cursor.Name,
+				toJSExpression(loop.Iterable),
+				loop.Cursor.Name,
+			)
 		}
 		goto print_body_and_close
 	}
 
 	if _, ok := loop.Iterable.GetType().(checker.ListType); ok {
-		g.writeIndent()
-		g.write("for (const %s of ", loop.Cursor.Name)
-		g.generateExpression(loop.Iterable)
-		g.write(") {\n")
-
+		g.writeLine("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable))
 		goto print_body_and_close
 	}
 
@@ -250,12 +209,9 @@ func (g *jsGenerator) generateIfStatement(stmt ast.IfStatement) {
 	// if stmt.condition, build the 'if' statement
 	// otherwise build the block following the 'else'
 	if stmt.Condition != nil {
-		g.writeIndent()
-		g.write("if (")
-		g.generateExpression(stmt.Condition)
-		g.write(") {\n")
+		g.writeLine("if (%s) {", toJSExpression(stmt.Condition))
 	} else {
-		g.write("{\n")
+		g.writeLine("{")
 	}
 
 	g.indent()
@@ -273,7 +229,8 @@ func (g *jsGenerator) generateIfStatement(stmt ast.IfStatement) {
 	}
 }
 
-func (g *jsGenerator) generateStatement(statement ast.Statement) {
+func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bool) {
+	isReturn := len(_isReturn) > 0 && _isReturn[0]
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
 	case ast.VariableDeclaration:
@@ -293,9 +250,12 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {
-				g.writeIndent()
-				g.generateExpression(expr, true)
-				g.write("\n")
+				js := toJSExpression(expr, true)
+				if isReturn {
+					g.writeLine("return %s", js)
+				} else {
+					g.writeLine(js)
+				}
 			} else {
 				panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))
 			}
@@ -303,44 +263,8 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	}
 }
 
-func (g *jsGenerator) generateStructInstance(instance ast.StructInstance) {
-	g.write("{")
-	if len(instance.Properties) > 0 {
-		g.write(" ")
-		for i, entry := range instance.Properties {
-			if i > 0 {
-				g.write(", ")
-			} else {
-				i++
-			}
-			g.write("%s: ", entry.Name)
-			g.generateExpression(entry.Value)
-		}
-		g.write(" ")
-	}
-	g.write("}")
-}
-
-func (g *jsGenerator) generateFunctionCall(call ast.FunctionCall) {
-	g.write("%s(", call.Name)
-	for i, arg := range call.Args {
-		if i > 0 {
-			g.write(", ")
-		}
-		g.generateExpression(arg)
-	}
-	g.write(")")
-}
-
-func (g *jsGenerator) generateMemberAccess(expr ast.MemberAccess) {
-	jsExpr := convertToJS(expr)
-	g.generateExpression(jsExpr.Target)
-	g.write(".")
-	g.generateExpression(jsExpr.Member)
-}
-
 // rather than futzing with the AST, use a custom Str class JS built-in
-func convertToJS(expr ast.MemberAccess) ast.MemberAccess {
+func getJsMemberAccess(expr ast.MemberAccess) ast.MemberAccess {
 	if expr.Target.GetType().String() == checker.StrType.String() {
 		if expr.Member.(ast.Identifier).Name == "size" {
 			return ast.MemberAccess{
@@ -354,46 +278,13 @@ func convertToJS(expr ast.MemberAccess) ast.MemberAccess {
 	return expr
 }
 
-func (g *jsGenerator) generateMatchExpression(expr ast.MatchExpression) {
-	g.write("(() => {\n")
-	g.indent()
-	for _, arm := range expr.Cases {
-		g.writeIndent()
-		g.write("if (")
-		g.generateExpression(expr.Subject)
-		g.write(" === ")
-		g.generateExpression(arm.Pattern)
-		g.write(") {\n")
-
-		g.indent()
-		for i, statement := range arm.Body {
-			if i == len(arm.Body)-1 {
-				if expr, ok := statement.(ast.Expression); ok {
-					g.writeIndent()
-					g.write("return ")
-					g.generateExpression(expr)
-					g.write("\n")
-					continue
-				}
-			} else {
-				g.generateStatement(statement)
-			}
-		}
-		g.dedent()
-		g.writeLine("}")
-	}
-	g.dedent()
-	g.write("})()")
-}
-
 func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bool) {
-	isStatement := len(_isStatement) > 0 && _isStatement[0]
 	switch expr.(type) {
 	case ast.InterpolatedStr:
 		g.write("`")
 		for _, chunk := range expr.(ast.InterpolatedStr).Chunks {
 			if _, ok := chunk.(ast.StrLiteral); ok {
-				g.write(chunk.(ast.StrLiteral).Value)
+				g.generateExpression(chunk.(ast.StrLiteral))
 			} else {
 				g.write("${")
 				g.generateExpression(chunk)
@@ -402,7 +293,7 @@ func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bo
 		}
 		g.write("`")
 	case ast.StrLiteral:
-		g.write(expr.(ast.StrLiteral).Value)
+		g.write(toJSExpression(expr))
 	case ast.NumLiteral:
 		g.write(expr.(ast.NumLiteral).Value)
 	case ast.BoolLiteral:
@@ -443,31 +334,9 @@ func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bo
 		}
 	case ast.UnaryExpression:
 		unary := expr.(ast.UnaryExpression)
-		g.write("%s", resolveOperator(unary.Operator))
-		g.generateExpression(unary.Operand)
+		g.write("%s%s", resolveOperator(unary.Operator), toJSExpression(unary.Operand))
 	case ast.AnonymousFunction:
 		g.generateAnonymousFunction(expr.(ast.AnonymousFunction))
-	case ast.StructInstance:
-		g.generateStructInstance(expr.(ast.StructInstance))
-	case ast.FunctionCall:
-		if isStatement {
-			g.writeIndent()
-			g.generateFunctionCall(expr.(ast.FunctionCall))
-			// add a semicolon to avoid parsing errors if the next statement begins with a (
-			g.write(";\n")
-		} else {
-			g.generateFunctionCall(expr.(ast.FunctionCall))
-		}
-	case ast.MatchExpression:
-		if isStatement {
-			g.writeIndent()
-			g.generateMatchExpression(expr.(ast.MatchExpression))
-			g.write(";\n")
-		} else {
-			g.generateMatchExpression(expr.(ast.MatchExpression))
-		}
-	case ast.MemberAccess:
-		g.generateMemberAccess(expr.(ast.MemberAccess))
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}
@@ -484,4 +353,123 @@ func GenerateJS(program ast.Program) string {
 	}
 
 	return generator.builder.String()
+}
+
+func toJSExpression(node ast.Expression, _isStatement ...bool) string {
+	isStatement := len(_isStatement) > 0 && _isStatement[0]
+	switch node.(type) {
+	case ast.Identifier:
+		return node.(ast.Identifier).Name
+	case ast.StrLiteral:
+		return node.(ast.StrLiteral).Value
+	case ast.InterpolatedStr:
+		return interpolationToJs(node.(ast.InterpolatedStr))
+	case ast.NumLiteral:
+		return node.(ast.NumLiteral).Value
+	case ast.BoolLiteral:
+		return fmt.Sprintf("%v", node.(ast.BoolLiteral).Value)
+	case ast.ListLiteral:
+		return listLiteralToJs(node.(ast.ListLiteral))
+	case ast.MapLiteral:
+		return mapLiteralToJs(node.(ast.MapLiteral))
+	case ast.BinaryExpression:
+		binary := node.(ast.BinaryExpression)
+		lhs := toJSExpression(binary.Left)
+		op := resolveOperator(binary.Operator)
+		rhs := toJSExpression(binary.Right)
+		if binary.HasPrecedence {
+			return "(" + lhs + " " + op + " " + rhs + ")"
+		}
+		return lhs + " " + op + " " + rhs
+	case ast.UnaryExpression:
+		unary := node.(ast.UnaryExpression)
+		return resolveOperator(unary.Operator) + toJSExpression(unary.Operand)
+	case ast.AnonymousFunction:
+		fn := node.(ast.AnonymousFunction)
+		params := make([]string, len(fn.Parameters))
+		for i, param := range fn.Parameters {
+			params[i] = param.Name
+		}
+		generator := jsGenerator{}
+		generator.indent()
+		for i, statement := range fn.Body {
+			generator.generateStatement(statement, i == len(fn.Body)-1)
+		}
+		generator.dedent()
+		return fmt.Sprintf("(%s) => {\n%s}", strings.Join(params, ", "), generator.builder.String())
+	case ast.StructInstance:
+		instance := node.(ast.StructInstance)
+		props := make([]string, len(instance.Properties))
+		for i, entry := range instance.Properties {
+			props[i] = fmt.Sprintf("%s: %s", entry.Name, toJSExpression(entry.Value))
+		}
+		return fmt.Sprintf("{%s}", strings.Join(props, ", "))
+	case ast.FunctionCall:
+		call := node.(ast.FunctionCall)
+		args := make([]string, len(call.Args))
+		for i, arg := range call.Args {
+			args[i] = toJSExpression(arg)
+		}
+		result := fmt.Sprintf("%s(%s)", call.Name, strings.Join(args, ", "))
+		if isStatement {
+			result += ";"
+		}
+		return result
+	case ast.MemberAccess:
+		expr := node.(ast.MemberAccess)
+		jsExpr := getJsMemberAccess(expr)
+		return fmt.Sprintf("%s.%s", toJSExpression(jsExpr.Target), toJSExpression(jsExpr.Member))
+	case ast.MatchExpression:
+		return matchExprToJs(node.(ast.MatchExpression), isStatement)
+	default:
+		return node.String()
+	}
+}
+
+func interpolationToJs(str ast.InterpolatedStr) string {
+	output := "`"
+	for _, chunk := range str.Chunks {
+		if _, ok := chunk.(ast.StrLiteral); ok {
+			output += chunk.(ast.StrLiteral).Value
+		} else {
+			output += fmt.Sprintf("${%s}", toJSExpression(chunk))
+		}
+	}
+	return output + "`"
+}
+
+func listLiteralToJs(list ast.ListLiteral) string {
+	items := make([]string, len(list.Items))
+	for i, item := range list.Items {
+		items[i] = toJSExpression(item)
+	}
+	return fmt.Sprintf("[%s]", strings.Join(items, ", "))
+}
+
+func mapLiteralToJs(m ast.MapLiteral) string {
+	entries := make([]string, len(m.Entries))
+	for i, entry := range m.Entries {
+		entries[i] = fmt.Sprintf(`[%s, %s]`, entry.Key, toJSExpression(entry.Value))
+	}
+	return fmt.Sprintf("new Map([%s])", strings.Join(entries, ", "))
+}
+
+func matchExprToJs(expr ast.MatchExpression, isStatement bool) string {
+	g := jsGenerator{}
+	g.indent()
+	for _, arm := range expr.Cases {
+		g.writeLine("if (%s === %s) {", toJSExpression(expr.Subject), toJSExpression(arm.Pattern))
+		g.indent()
+		for i, statement := range arm.Body {
+			g.generateStatement(statement, i == len(arm.Body)-1)
+		}
+		g.dedent()
+		g.writeLine("}")
+	}
+	g.indent()
+	result := fmt.Sprintf("(() => {\n%s})()", g.builder.String())
+	if isStatement {
+		result += ";"
+	}
+	return result
 }

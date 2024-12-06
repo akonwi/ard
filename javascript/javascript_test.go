@@ -71,10 +71,10 @@ const y = x`,
 			input: `
 "foobar {{ 42 }}"
 let num = 42
-print("num is {{ num }}")`,
+"num is {{ num }}"`,
 			output: "`foobar ${42}`\n" +
 				"const num = 42\n" +
-				"print(`num is ${num}`);",
+				"`num is ${num}`",
 		},
 		{
 			name:   "number",
@@ -195,67 +195,29 @@ func TestUnaryExpressions(t *testing.T) {
 	runTests(t, tests)
 }
 
-func TestFunctionDeclaration(t *testing.T) {
-	tests := []test{
+func TestVariableAssignment(t *testing.T) {
+	runTests(t, []test{
 		{
-			name:   "noop",
-			input:  `fn noop() {}`,
-			output: "function noop() {}",
-		},
-		{
-			name:   "with parameters",
-			input:  `fn add(x: Num, y: Num) {}`,
-			output: "function add(x, y) {}",
-		},
-		{
-			name:   "with return type",
-			input:  `fn add(x: Num, y: Num) Num {}`,
-			output: "function add(x, y) {}",
-		},
-		{
-			name:  "single statement body: return is implicit",
-			input: `fn add(x: Num, y: Num) Num { x + y }`,
-			output: `
-function add(x, y) {
-  return x + y
-}`,
-		},
-		{
-			name: "the last statement is the return statement",
+			name: "string assignment",
 			input: `
-fn add(x: Num, y: Num) Num {
-  let result = x + y
-	result
-}`,
+mut name = "Alice"
+name = "Bob"`,
 			output: `
-function add(x, y) {
-  const result = x + y
-  return result
-}`,
-		},
-	}
-
-	runTests(t, tests)
-}
-
-func TestAnonymousFunctions(t *testing.T) {
-	tests := []test{
-		{
-			name:   "noop",
-			input:  `() {}`,
-			output: `() => {}`,
+let name = "Alice"
+name = "Bob"`,
 		},
 		{
-			name:  "with parameters and body",
-			input: `(one, two) { one / two }`,
+			name: "compound assignment",
+			input: `
+mut x = 10
+x =+ 5
+x =- 5`,
 			output: `
-(one, two) => {
-  return one / two
-}`,
+let x = 10
+x += 5
+x -= 5`,
 		},
-	}
-
-	runTests(t, tests)
+	})
 }
 
 func TestVariableDeclaration(t *testing.T) {
@@ -295,29 +257,107 @@ func TestVariableDeclaration(t *testing.T) {
 	runTests(t, tests)
 }
 
-func TestVariableAssignment(t *testing.T) {
+func TestFunctionCalls(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "string assignment",
+			name: "no arguments",
 			input: `
-mut name = "Alice"
-name = "Bob"`,
+fn get_msg() {
+  "hello"
+}
+get_msg()`,
 			output: `
-let name = "Alice"
-name = "Bob"`,
+function get_msg() {
+  return "hello"
+}
+get_msg();
+`,
 		},
 		{
-			name: "compound assignment",
+			name: "with arguments",
 			input: `
-mut x = 10
-x =+ 5
-x =- 5`,
+fn add(x: Num, y: Num) Num { x + y }
+add(1, 2)`,
 			output: `
-let x = 10
-x += 5
-x -= 5`,
+function add(x, y) {
+  return x + y
+}
+add(1, 2);`,
 		},
 	})
+}
+
+func TestStringMembers(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:   "Str.size -> String.length",
+			input:  `"foo".size`,
+			output: `"foo".length`,
+		},
+	})
+}
+
+func TestFunctionDeclaration(t *testing.T) {
+	tests := []test{
+		{
+			name:   "noop",
+			input:  "fn noop() {\n}",
+			output: "function noop() {\n}",
+		},
+		{
+			name:   "with parameters",
+			input:  "fn add(x: Num, y: Num) {\n}",
+			output: "function add(x, y) {\n}",
+		},
+		{
+			name:   "with return type",
+			input:  "fn add(x: Num, y: Num) Num {\n}",
+			output: "function add(x, y) {\n}",
+		},
+		{
+			name:  "single statement body: return is implicit",
+			input: `fn add(x: Num, y: Num) Num { x + y }`,
+			output: `
+function add(x, y) {
+  return x + y
+}`,
+		},
+		{
+			name: "the last statement is the return statement",
+			input: `
+fn add(x: Num, y: Num) Num {
+  let result = x + y
+	result
+}`,
+			output: `
+function add(x, y) {
+  const result = x + y
+  return result
+}`,
+		},
+	}
+
+	runTests(t, tests)
+}
+
+func TestAnonymousFunctions(t *testing.T) {
+	tests := []test{
+		{
+			name:   "noop",
+			input:  "() {\n}",
+			output: "() => {\n}",
+		},
+		{
+			name:  "with parameters and body",
+			input: `(one, two) { one / two }`,
+			output: `
+(one, two) => {
+  return one / two
+}`,
+		},
+	}
+
+	runTests(t, tests)
 }
 
 func TestStructs(t *testing.T) {
@@ -336,7 +376,7 @@ const a_foo = {}`,
 struct Person { name: Str, age: Num, employed: Bool }
 Person{ name: "Joe", age: 42, employed: true }`,
 			output: `
-{ name: "Joe", age: 42, employed: true }`,
+{name: "Joe", age: 42, employed: true}`,
 		},
 	})
 }
@@ -456,46 +496,6 @@ if (false) {
 } else if (true) {
   20
 }`,
-		},
-	})
-}
-
-func TestFunctionCalls(t *testing.T) {
-	runTests(t, []test{
-		{
-			name: "no arguments",
-			input: `
-fn get_msg() {
-  "hello"
-}
-get_msg()`,
-			output: `
-function get_msg() {
-  return "hello"
-}
-get_msg();
-`,
-		},
-		{
-			name: "with arguments",
-			input: `
-fn add(x: Num, y: Num) Num { x + y }
-add(1, 2)`,
-			output: `
-function add(x, y) {
-  return x + y
-}
-add(1, 2);`,
-		},
-	})
-}
-
-func TestStringMembers(t *testing.T) {
-	runTests(t, []test{
-		{
-			name:   "Str.size -> String.length",
-			input:  `"foo".size`,
-			output: `"foo".length`,
 		},
 	})
 }
