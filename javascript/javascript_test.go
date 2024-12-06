@@ -494,3 +494,32 @@ func TestStringMembers(t *testing.T) {
 		},
 	})
 }
+
+func TestMatchExpressions(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "matching on enums",
+			input: `
+enum Sign { Positive, Negative }
+let value = Sign::Positive
+match value {
+	Sign::Positive => "+",
+	Sign::Negative => "-"
+}`,
+			output: `
+const Sign = Object.freeze({
+  Positive: Object.freeze({ index: 0 }),
+  Negative: Object.freeze({ index: 1 })
+})
+const value = Sign.Positive
+(() => {
+  if (value === Sign.Positive) {
+    return "+"
+  }
+  if (value === Sign.Negative) {
+    return "-"
+  }
+})();`,
+		},
+	})
+}

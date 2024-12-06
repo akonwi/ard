@@ -178,7 +178,7 @@ func (g *jsGenerator) generateEnumDefinition(enum ast.EnumDefinition) {
 		g.write("%s: Object.freeze({ index: %d })", name, index)
 	}
 	g.dedent()
-	g.write("\n})")
+	g.write("\n})\n")
 }
 
 func (g *jsGenerator) generateWhileLoop(loop ast.WhileLoop) {
@@ -354,6 +354,38 @@ func convertToJS(expr ast.MemberAccess) ast.MemberAccess {
 	return expr
 }
 
+func (g *jsGenerator) generateMatchExpression(expr ast.MatchExpression) {
+	g.write("(() => {\n")
+	g.indent()
+	for _, arm := range expr.Cases {
+		g.writeIndent()
+		g.write("if (")
+		g.generateExpression(expr.Subject)
+		g.write(" === ")
+		g.generateExpression(arm.Pattern)
+		g.write(") {\n")
+
+		g.indent()
+		for i, statement := range arm.Body {
+			if i == len(arm.Body)-1 {
+				if expr, ok := statement.(ast.Expression); ok {
+					g.writeIndent()
+					g.write("return ")
+					g.generateExpression(expr)
+					g.write("\n")
+					continue
+				}
+			} else {
+				g.generateStatement(statement)
+			}
+		}
+		g.dedent()
+		g.writeLine("}")
+	}
+	g.dedent()
+	g.write("})()")
+}
+
 func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bool) {
 	isStatement := len(_isStatement) > 0 && _isStatement[0]
 	switch expr.(type) {
@@ -425,6 +457,14 @@ func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bo
 			g.write(";\n")
 		} else {
 			g.generateFunctionCall(expr.(ast.FunctionCall))
+		}
+	case ast.MatchExpression:
+		if isStatement {
+			g.writeIndent()
+			g.generateMatchExpression(expr.(ast.MatchExpression))
+			g.write(";\n")
+		} else {
+			g.generateMatchExpression(expr.(ast.MatchExpression))
 		}
 	case ast.MemberAccess:
 		g.generateMemberAccess(expr.(ast.MemberAccess))
