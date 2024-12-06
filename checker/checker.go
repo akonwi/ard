@@ -296,6 +296,10 @@ func (v Variable) GetType() Type {
 	return v.Type
 }
 
+type ScopeOptions struct {
+	IsTop bool
+}
+
 type Scope struct {
 	parent  *Scope
 	symbols map[string]Symbol
@@ -305,12 +309,22 @@ type Scope struct {
 func (s Scope) GetParent() *Scope {
 	return s.parent
 }
-func NewScope(parent *Scope) Scope {
-	return Scope{
+func NewScope(parent *Scope, options ScopeOptions) Scope {
+	scope := Scope{
 		parent:  parent,
 		symbols: make(map[string]Symbol),
 		structs: make(map[string]StructType),
 	}
+	if options.IsTop {
+		scope.Declare(FunctionType{
+			Name: "print",
+			Parameters: []Type{
+				StrType,
+			},
+			ReturnType: VoidType,
+		})
+	}
+	return scope
 }
 
 func (s *Scope) Declare(sym Symbol) error {

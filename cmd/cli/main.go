@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/akonwi/kon/ast"
 	"github.com/akonwi/kon/javascript"
@@ -28,10 +30,10 @@ func main() {
 			os.Exit(1)
 		}
 
-		filepath := buildCmd.Arg(0)
-		sourceCode, err := os.ReadFile(filepath)
+		inputPath := buildCmd.Arg(0)
+		sourceCode, err := os.ReadFile(inputPath)
 		if err != nil {
-			fmt.Printf("Error reading file %s - %v\n", filepath, err)
+			fmt.Printf("Error reading file %s - %v\n", inputPath, err)
 			os.Exit(1)
 		}
 
@@ -64,7 +66,25 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Println(javascript.GenerateJS(ast))
+		jsSource := javascript.GenerateJS(ast)
+
+		buildDir := "./build"
+		err = os.MkdirAll(buildDir, 0755)
+		if err != nil {
+			fmt.Printf("Error creating build directory: %v\n", err)
+			os.Exit(1)
+		}
+
+		filename := filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath))) + ".js"
+		outputPath := filepath.Join(buildDir, filename)
+
+		err = os.WriteFile(outputPath, []byte(jsSource), 0644)
+		if err != nil {
+			fmt.Printf("Error writing file %s - %v\n", outputPath, err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Successfully built to %s\n", outputPath)
 
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])

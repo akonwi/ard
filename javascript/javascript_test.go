@@ -67,9 +67,14 @@ const y = x`,
 			output: `"foobar"`,
 		},
 		{
-			name:   "interpolated string",
-			input:  `"foobar {{ 42 }}"`,
-			output: "`foobar ${42}`",
+			name: "interpolated strings",
+			input: `
+"foobar {{ 42 }}"
+let num = 42
+print("num is {{ num }}")`,
+			output: "`foobar ${42}`\n" +
+				"const num = 42\n" +
+				"print(`num is ${num}`);",
 		},
 		{
 			name:   "number",

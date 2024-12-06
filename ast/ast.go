@@ -421,7 +421,7 @@ func (p *Parser) GetDiagnostics() []checker.Diagnostic {
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
-	scope := checker.NewScope(nil)
+	scope := checker.NewScope(nil, checker.ScopeOptions{IsTop: true})
 	return &Parser{sourceCode: sourceCode, tree: tree, scope: &scope}
 }
 
@@ -452,7 +452,7 @@ func (p *Parser) mustChildren(node *tree_sitter.Node, name string) []tree_sitter
 }
 
 func (p *Parser) pushScope() *checker.Scope {
-	new := checker.NewScope(p.scope)
+	new := checker.NewScope(p.scope, checker.ScopeOptions{})
 	p.scope = &new
 	return p.scope
 }
@@ -1080,10 +1080,10 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	switch child.GrammarName() {
 	case "string":
 		chunkNodes := p.mustChildren(child, "chunk")
-		if len(chunkNodes) == 1 {
+		if len(chunkNodes) == 1 && chunkNodes[0].GrammarName() == "string_content" {
 			return StrLiteral{
 				BaseNode: BaseNode{TSNode: node},
-				Value:    p.text(child)}, nil
+				Value:    p.text(&chunkNodes[0])}, nil
 		}
 
 		chunks := make([]Expression, len(chunkNodes))
