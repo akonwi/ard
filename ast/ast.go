@@ -1088,7 +1088,6 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 
 		chunks := make([]Expression, len(chunkNodes))
 		for i, chunkNode := range chunkNodes {
-			fmt.Printf("chunkNode: %v\n", chunkNode.GrammarName())
 			if chunkNode.GrammarName() == "string_content" {
 				chunks[i] = StrLiteral{BaseNode: BaseNode{TSNode: &chunkNode}, Value: p.text(&chunkNode)}
 			} else {
