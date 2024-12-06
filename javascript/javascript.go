@@ -294,7 +294,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 		{
 			if expr, ok := statement.(ast.Expression); ok {
 				g.writeIndent()
-				g.generateExpression(expr)
+				g.generateExpression(expr, true)
 				g.write("\n")
 			} else {
 				panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))
@@ -321,7 +321,19 @@ func (g *jsGenerator) generateStructInstance(instance ast.StructInstance) {
 	g.write("}")
 }
 
-func (g *jsGenerator) generateExpression(expr ast.Expression) {
+func (g *jsGenerator) generateFunctionCall(call ast.FunctionCall) {
+	g.write("%s(", call.Name)
+	for i, arg := range call.Args {
+		if i > 0 {
+			g.write(", ")
+		}
+		g.generateExpression(arg)
+	}
+	g.write(")")
+}
+
+func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bool) {
+	isStatement := len(_isStatement) > 0 && _isStatement[0]
 	switch expr.(type) {
 	case ast.InterpolatedStr:
 		g.write("`")
@@ -383,6 +395,15 @@ func (g *jsGenerator) generateExpression(expr ast.Expression) {
 		g.generateAnonymousFunction(expr.(ast.AnonymousFunction))
 	case ast.StructInstance:
 		g.generateStructInstance(expr.(ast.StructInstance))
+	case ast.FunctionCall:
+		if isStatement {
+			g.writeIndent()
+			g.generateFunctionCall(expr.(ast.FunctionCall))
+			// add a semicolon to avoid parsing errors if the next statement begins with a (
+			g.write(";\n")
+		} else {
+			g.generateFunctionCall(expr.(ast.FunctionCall))
+		}
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}

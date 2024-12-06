@@ -454,3 +454,33 @@ if (false) {
 		},
 	})
 }
+
+func TestFunctionCalls(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "no arguments",
+			input: `
+fn get_msg() {
+  "hello"
+}
+get_msg()`,
+			output: `
+function get_msg() {
+  return "hello"
+}
+get_msg();
+`,
+		},
+		{
+			name: "with arguments",
+			input: `
+fn add(x: Num, y: Num) Num { x + y }
+add(1, 2)`,
+			output: `
+function add(x, y) {
+  return x + y
+}
+add(1, 2);`,
+		},
+	})
+}
