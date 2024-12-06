@@ -33,6 +33,15 @@ type Program struct {
 	Statements []Statement
 }
 
+type Comment struct {
+	BaseNode
+	Value string
+}
+
+func (c Comment) String() string {
+	return fmt.Sprintf("Comment(%s)", c.Value)
+}
+
 type VariableDeclaration struct {
 	BaseNode
 	Name    string
@@ -531,6 +540,11 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 			return nil, err
 		}
 		return expr, nil
+	case "comment":
+		return Comment{
+			BaseNode: BaseNode{TSNode: node},
+			Value:    p.text(node),
+		}, nil
 	default:
 		return nil, fmt.Errorf("Unhandled statement: %s", child.GrammarName())
 	}

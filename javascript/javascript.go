@@ -210,7 +210,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 				g.generateStatement(statement)
 			}
 			g.dedent()
-			g.write("}")
+			g.write("%s}", g.getIndent())
 
 			if stmt.Else != nil {
 				g.write(" else ")
@@ -219,6 +219,8 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 				g.write("\n")
 			}
 		}
+	case ast.Comment:
+		g.writeLine(statement.(ast.Comment).Value)
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {
@@ -250,6 +252,14 @@ func getJsMemberAccess(expr ast.MemberAccess) ast.MemberAccess {
 	return expr
 }
 
+func getJsFunctionCall(call ast.FunctionCall) ast.FunctionCall {
+	if call.Name == "print" {
+		call.Name = "console.log"
+	}
+
+	return call
+}
+
 func GenerateJS(program ast.Program) string {
 	generator := jsGenerator{
 		builder:     strings.Builder{},
@@ -260,7 +270,7 @@ func GenerateJS(program ast.Program) string {
 		generator.generateStatement(statement)
 	}
 
-	return generator.builder.String()
+	return strings.ReplaceAll(generator.builder.String(), "%%", "%")
 }
 
 func toJSExpression(node ast.Expression, _isStatement ...bool) string {
@@ -338,7 +348,7 @@ func toJSExpression(node ast.Expression, _isStatement ...bool) string {
 		}
 		return fmt.Sprintf("{%s}", strings.Join(props, ", "))
 	case ast.FunctionCall:
-		call := node.(ast.FunctionCall)
+		call := getJsFunctionCall(node.(ast.FunctionCall))
 		args := make([]string, len(call.Args))
 		for i, arg := range call.Args {
 			args[i] = toJSExpression(arg)

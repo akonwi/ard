@@ -386,3 +386,17 @@ func TestInterpolatedStrings(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestComments(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Single line comment",
+			input: "// this is a comment",
+			output: Program{
+				Statements: []Statement{
+					Comment{Value: "// this is a comment"},
+				},
+			},
+		},
+	})
+}

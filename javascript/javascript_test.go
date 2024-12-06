@@ -50,6 +50,16 @@ func runTests(t *testing.T, tests []test) {
 	}
 }
 
+func TestComments(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:   "single line comment",
+			input:  "// this is a comment",
+			output: "// this is a comment",
+		},
+	})
+}
+
 func TestLiteralExpressions(t *testing.T) {
 	tests := []test{
 		{
