@@ -484,3 +484,13 @@ add(1, 2);`,
 		},
 	})
 }
+
+func TestStringMembers(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:   "Str.size -> String.length",
+			input:  `"foo".size`,
+			output: `"foo".length`,
+		},
+	})
+}

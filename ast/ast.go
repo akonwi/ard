@@ -197,7 +197,7 @@ const (
 
 type MemberAccess struct {
 	BaseNode
-	Target     Identifier
+	Target     Expression
 	AccessType MemberAccessType
 	Member     Expression
 }
@@ -207,7 +207,7 @@ func (m MemberAccess) String() string {
 	if m.AccessType == Static {
 		operator = "::"
 	}
-	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target.Name, operator, m.Member)
+	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target, operator, m.Member)
 }
 func (m MemberAccess) GetType() checker.Type {
 	return m.Member.GetType()
@@ -1344,11 +1344,11 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 }
 
 func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
-	targetNode := node.ChildByFieldName("target")
+	targetNode := p.mustChild(node, "target")
 	operatorNode := node.ChildByFieldName("operator")
 	memberNode := node.ChildByFieldName("member")
 
-	target, err := p.parseIdentifier(targetNode)
+	target, err := p.parseExpression(targetNode)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,10 +1374,10 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 					return MemberAccess{
 						Target:     target,
 						AccessType: accessType,
-						Member:     Identifier{Name: name, Type: target.Type},
+						Member:     Identifier{Name: name, Type: target.GetType()},
 					}, nil
 				}
-				msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, target.Name)
+				msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, enum.Name)
 				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
 				return nil, fmt.Errorf(msg)
 			}
@@ -1444,6 +1444,37 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		default:
 			panic(fmt.Errorf("Unhandled member type on list: %s", memberNode.GrammarName()))
 		}
+	case checker.PrimitiveType:
+		prim := target.GetType().(checker.PrimitiveType)
+		if prim.Name != "Str" {
+			return MemberAccess{
+				Target:     target,
+				AccessType: accessType,
+			}, nil
+		}
+
+		switch memberNode.GrammarName() {
+		case "identifier":
+			name := p.text(memberNode)
+			if accessType == Instance {
+				property := prim.GetProperty(name)
+				if property == nil {
+					msg := fmt.Sprintf("No property '%s' on %s", name, prim.Name)
+					p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+					return nil, fmt.Errorf(msg)
+				}
+
+				return MemberAccess{
+					Target:     target,
+					AccessType: accessType,
+					Member:     Identifier{Name: name, Type: property},
+				}, nil
+			} else {
+				panic("Unimplemented: static members on Str")
+			}
+		default:
+			panic(fmt.Errorf("Unhandled member type on Str: %s", memberNode.GrammarName()))
+		}
 	default:
 		panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
 	}
@@ -1482,7 +1513,7 @@ func (p *Parser) findMethod(subject checker.Type, name string) *checker.Function
 /*
 @target - when parsing a method call
 */
-func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Identifier) (FunctionCall, error) {
+func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (FunctionCall, error) {
 	targetNode := p.mustChild(node, "target")
 	var signature checker.FunctionType
 	if target == nil {
@@ -1492,10 +1523,10 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Identifier) (
 			return FunctionCall{}, p.undefinedSymbolError(node)
 		}
 	} else {
-		if method := p.findMethod(target.Type, p.text(targetNode)); method != nil {
+		if method := p.findMethod((*target).GetType(), p.text(targetNode)); method != nil {
 			signature = *method
 		} else {
-			msg := fmt.Sprintf("Method '%s' not found on %s", p.text(targetNode), target.Type)
+			msg := fmt.Sprintf("Method '%s' not found on %s", p.text(targetNode), (*target).GetType())
 			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 			return FunctionCall{}, fmt.Errorf(msg)
 		}
@@ -1526,11 +1557,13 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Identifier) (
 	}
 
 	if signature.Mutates {
-		symbol := p.scope.Lookup(target.Name)
-		if v, ok := symbol.(checker.Variable); ok {
-			if v.Mutable == false {
-				msg := fmt.Sprintf("Cannot mutate an immutable list")
-				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+		if identifier, is_identifier := (*target).(Identifier); is_identifier {
+			symbol := p.scope.Lookup(identifier.Name)
+			if v, ok := symbol.(checker.Variable); ok {
+				if v.Mutable == false {
+					msg := fmt.Sprintf("Cannot mutate an immutable list")
+					p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+				}
 			}
 		}
 	}

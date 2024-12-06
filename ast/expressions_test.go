@@ -845,3 +845,26 @@ func TestParenthesizedExpressions(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestMemberAccess(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "on string literals",
+			input: `"string".size`,
+			output: Program{
+				Statements: []Statement{
+					MemberAccess{
+						Target: StrLiteral{
+							Value: `"string"`,
+						},
+						AccessType: Instance,
+						Member: Identifier{
+							Name: "size",
+							Type: checker.NumType,
+						},
+					},
+				},
+			},
+		},
+	})
+}

@@ -332,6 +332,28 @@ func (g *jsGenerator) generateFunctionCall(call ast.FunctionCall) {
 	g.write(")")
 }
 
+func (g *jsGenerator) generateMemberAccess(expr ast.MemberAccess) {
+	jsExpr := convertToJS(expr)
+	g.generateExpression(jsExpr.Target)
+	g.write(".")
+	g.generateExpression(jsExpr.Member)
+}
+
+// rather than futzing with the AST, use a custom Str class JS built-in
+func convertToJS(expr ast.MemberAccess) ast.MemberAccess {
+	if expr.Target.GetType().String() == checker.StrType.String() {
+		if expr.Member.(ast.Identifier).Name == "size" {
+			return ast.MemberAccess{
+				Target:     expr.Target,
+				AccessType: expr.AccessType,
+				Member:     ast.Identifier{Name: "length", Type: expr.Member.GetType()},
+			}
+		}
+	}
+
+	return expr
+}
+
 func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bool) {
 	isStatement := len(_isStatement) > 0 && _isStatement[0]
 	switch expr.(type) {
@@ -404,6 +426,8 @@ func (g *jsGenerator) generateExpression(expr ast.Expression, _isStatement ...bo
 		} else {
 			g.generateFunctionCall(expr.(ast.FunctionCall))
 		}
+	case ast.MemberAccess:
+		g.generateMemberAccess(expr.(ast.MemberAccess))
 	default:
 		panic(fmt.Errorf("Unhandled expression node: [%s] - %s\n", reflect.TypeOf(expr), expr))
 	}

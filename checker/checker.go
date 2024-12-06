@@ -22,7 +22,7 @@ func (p PrimitiveType) String() string {
 	return p.Name
 }
 func (p PrimitiveType) GetProperty(name string) Type {
-	switch name {
+	switch p.Name {
 	case "Str":
 		switch name {
 		case "size":
