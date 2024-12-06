@@ -403,3 +403,54 @@ for (const char of msg) {
 		},
 	})
 }
+
+func TestIfStatements(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "simple conditions",
+			input: `if true { 42 }`,
+			output: `
+if (true) {
+  42
+}`,
+		},
+		{
+			name:  "complex conditions",
+			input: `if 42 > 20 and false { 42 }`,
+			output: `
+if (42 > 20 && false) {
+  42
+}`,
+		},
+		{
+			name: "if-else",
+			input: `
+if false {
+  42
+} else {
+  20
+}`,
+			output: `
+if (false) {
+  42
+} else {
+  20
+}`,
+		},
+		{
+			name: "if-else if",
+			input: `
+if false {
+  42
+} else if true {
+  20
+}`,
+			output: `
+if (false) {
+  42
+} else if (true) {
+  20
+}`,
+		},
+	})
+}

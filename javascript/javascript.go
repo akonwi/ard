@@ -246,6 +246,33 @@ print_body_and_close:
 	g.writeLine("}")
 }
 
+func (g *jsGenerator) generateIfStatement(stmt ast.IfStatement) {
+	// if stmt.condition, build the 'if' statement
+	// otherwise build the block following the 'else'
+	if stmt.Condition != nil {
+		g.writeIndent()
+		g.write("if (")
+		g.generateExpression(stmt.Condition)
+		g.write(") {\n")
+	} else {
+		g.write("{\n")
+	}
+
+	g.indent()
+	for _, statement := range stmt.Body {
+		g.generateStatement(statement)
+	}
+	g.dedent()
+	g.write("}")
+
+	if stmt.Else != nil {
+		g.write(" else ")
+		g.generateStatement(stmt.Else)
+	} else {
+		g.write("\n")
+	}
+}
+
 func (g *jsGenerator) generateStatement(statement ast.Statement) {
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
@@ -261,6 +288,8 @@ func (g *jsGenerator) generateStatement(statement ast.Statement) {
 		g.generateWhileLoop(statement.(ast.WhileLoop))
 	case ast.ForLoop:
 		g.generateForLoop(statement.(ast.ForLoop))
+	case ast.IfStatement:
+		g.generateIfStatement(statement.(ast.IfStatement))
 	default:
 		{
 			if expr, ok := statement.(ast.Expression); ok {

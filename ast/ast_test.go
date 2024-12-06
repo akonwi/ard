@@ -201,7 +201,7 @@ func TestIfAndElse(t *testing.T) {
 			input: `if true {}`,
 			output: Program{
 				Statements: []Statement{
-					&IfStatement{
+					IfStatement{
 						Condition: BoolLiteral{Value: true},
 						Body:      []Statement{},
 						Else:      nil,
@@ -214,7 +214,7 @@ func TestIfAndElse(t *testing.T) {
 			input: `if 20 - 1 {}`,
 			output: Program{
 				Statements: []Statement{
-					&IfStatement{
+					IfStatement{
 						Condition: BinaryExpression{
 							Left:     NumLiteral{Value: "20"},
 							Operator: Minus,
@@ -233,10 +233,10 @@ func TestIfAndElse(t *testing.T) {
 				else {}`,
 			output: Program{
 				Statements: []Statement{
-					&IfStatement{
+					IfStatement{
 						Condition: BoolLiteral{Value: true},
 						Body:      []Statement{},
-						Else: &IfStatement{
+						Else: IfStatement{
 							Condition: nil,
 							Body:      []Statement{},
 						},
@@ -251,10 +251,10 @@ func TestIfAndElse(t *testing.T) {
 				else if false {}`,
 			output: Program{
 				Statements: []Statement{
-					&IfStatement{
+					IfStatement{
 						Condition: BoolLiteral{Value: true},
 						Body:      []Statement{},
-						Else: &IfStatement{
+						Else: IfStatement{
 							Condition: BoolLiteral{Value: false},
 							Body:      []Statement{},
 						},
@@ -270,13 +270,13 @@ func TestIfAndElse(t *testing.T) {
 				else {}`,
 			output: Program{
 				Statements: []Statement{
-					&IfStatement{
+					IfStatement{
 						Condition: BoolLiteral{Value: true},
 						Body:      []Statement{},
-						Else: &IfStatement{
+						Else: IfStatement{
 							Condition: BoolLiteral{Value: false},
 							Body:      []Statement{},
-							Else: &IfStatement{
+							Else: IfStatement{
 								Condition: nil,
 								Body:      []Statement{},
 							},
