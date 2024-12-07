@@ -1,4 +1,4 @@
-module github.com/akonwi/kon
+module github.com/akonwi/ard
 
 go 1.23.1
 

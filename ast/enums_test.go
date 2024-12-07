@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	checker "github.com/akonwi/kon/checker"
+	checker "github.com/akonwi/ard/checker"
 )
 
 var traffic_light_code = `

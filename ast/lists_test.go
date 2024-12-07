@@ -3,7 +3,7 @@ package ast
 import (
 	"testing"
 
-	checker "github.com/akonwi/kon/checker"
+	checker "github.com/akonwi/ard/checker"
 )
 
 func TestVariables(t *testing.T) {

@@ -3,7 +3,7 @@ package ast
 import (
 	"fmt"
 
-	checker "github.com/akonwi/kon/checker"
+	checker "github.com/akonwi/ard/checker"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 

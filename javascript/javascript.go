@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/akonwi/kon/ast"
-	"github.com/akonwi/kon/checker"
+	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/checker"
 )
 
 // helper to hold string + indent state
