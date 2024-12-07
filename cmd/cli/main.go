@@ -9,8 +9,7 @@ import (
 
 	"github.com/akonwi/kon/ast"
 	"github.com/akonwi/kon/javascript"
-	tree_sitter_kon "github.com/akonwi/tree-sitter-kon/bindings/go"
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
+	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 )
 
 func main() {
@@ -37,14 +36,11 @@ func main() {
 			os.Exit(1)
 		}
 
-		language := tree_sitter.NewLanguage(tree_sitter_kon.Language())
-		if language == nil {
-			fmt.Println("Error loading Kon grammar")
+		tree, err := ts_ard.Parse(sourceCode)
+		if err != nil {
+			fmt.Println("Error parsing source code with tree-sitter")
 			os.Exit(1)
 		}
-		parser := tree_sitter.NewParser()
-		parser.SetLanguage(language)
-		tree := parser.Parse(sourceCode, nil)
 
 		astParser := ast.NewParser(sourceCode, tree)
 		ast, err := astParser.Parse()

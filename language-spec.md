@@ -1,11 +1,11 @@
-# Kon Language Specification
+# Ard Language Specification
 
-Kon is a modern, statically-typed programming language designed for clarity, safety, and expressiveness.
+Ard is a modern, statically-typed programming language designed for clarity, safety, and ease.
 It combines features from JavaScript, Swift, and Go while introducing its own unique characteristics.
 
 ## 1. Basic Syntax
 
-Kon uses a clean, expressive syntax designed for readability and ease of use.
+Ard uses a clean, expressive syntax designed for readability and ease of use.
 Note: trying to follow Go's philosophy for readablity left to right, rather than usual Spiraling in C based syntax.
 
 ### Built-in types
@@ -23,7 +23,7 @@ Note: trying to follow Go's philosophy for readablity left to right, rather than
 - `let` variables cannot be reassigned or mutated
 - Variable types can be inferred or explicitly declared
 
-```kon
+```ard
 let name: Str = "Alice"
 mut age = 30
 ```
@@ -33,7 +33,7 @@ mut age = 30
 - Use `fn` keyword to define functions
 - Return type is specified after the parameter list
 
-```kon
+```ard
 fn greet(name: Str) Str {
   return "Hello, ${name}!"
 }
@@ -41,9 +41,9 @@ fn greet(name: Str) Str {
 
 ### Control Flow
 
-Kon supports common control flow structures:
+Ard supports common control flow structures:
 
-```kon
+```ard
 if some_condition {
     // ...
 } else if another_condition {
@@ -70,7 +70,7 @@ do while condition {
 ### Iteration
 
 Numeric inclusive range:
-```kon
+```ard
 for i in 1...10 {
 	print(i)
 }
@@ -84,7 +84,7 @@ for i in 1...10 by 2 {
 - could be a way to handle async return values as an attached statement
   - side-effecty, no control over when it's executed
 
-```kon
+```ard
 greet("John") => (msg) {
   print "Received $msg"
 }
@@ -95,7 +95,7 @@ greet("John") => (msg) {
 
 Structs can be used to define objects with properties:
 
-```kon
+```ard
 struct Person {
   name: Str
   age: Num
@@ -106,7 +106,7 @@ struct Person {
 
 Enums are used to define a type that can only have a specific set of values:
 
-```kon
+```ard
 enum Status {
   active,
   inactive,
@@ -116,7 +116,7 @@ enum Status {
 
 Enums can also have associated values:
 
-```kon
+```ard
 enum Result {
   success(Num),
   failure(Str)
@@ -127,7 +127,7 @@ enum Result {
 
 Optional types are represented using the built-in `Option` enum:
 
-```kon
+```ard
 enum Option<T> {
   some(T),
   none
@@ -141,13 +141,13 @@ maybe_name = Option::none()
 
 ## 3. Error Handling
 
-Kon uses a unique error handling mechanism centered around the `else` keyword.
+Ard uses a unique error handling mechanism centered around the `else` keyword.
 
 ### Throwing Functions
 
 Functions that can throw errors must be marked with `throws` in their signature:
 
-```kon
+```ard
 func riskyOperation() throws -> String {
     if someCondition {
         throw Error("Operation failed")
@@ -162,7 +162,7 @@ The `else` keyword is used after potentially throwing operations to handle error
 
 1. Early Return or Throw Block:
 
-```kon
+```ard
 func processData() -> String {
     let data = riskyOperation() else {
         return "Failed to process data"
@@ -173,7 +173,7 @@ func processData() -> String {
 
 2. Fallback Value:
 
-```kon
+```ard
 let username: String = getUserName() else "Anonymous"
 ```
 
@@ -181,7 +181,7 @@ let username: String = getUserName() else "Anonymous"
 
 The `try` keyword is used to propagate errors up the call stack:
 
-```kon
+```ard
 func performOperation() throws {
     let result = try riskyOperation()
     console.log(result)
@@ -190,19 +190,19 @@ func performOperation() throws {
 
 The `try?` operator can be used to convert a throwing expression to an optional:
 
-```kon
+```ard
 let result: String? = try? riskyOperation()
 ```
 
 ## 4. Asynchronous Programming
 
-Kon uses the `async` and `await` keywords for handling asynchronous operations.
+Ard uses the `async` and `await` keywords for handling asynchronous operations.
 
 ### Async Functions
 
 Async functions are declared using the `async` keyword:
 
-```kon
+```ard
 async func fetchData() -> String {
     // implementation
 }
@@ -212,7 +212,7 @@ async func fetchData() -> String {
 
 The `await` keyword signifies a JavaScript Promise. All `await` expressions require an `else` block for error handling, unless used with `try await` or `try? await`.
 
-```kon
+```ard
 async func getData() -> String {
     let data = await fetchData() else {
         return "Failed to fetch data"
@@ -228,9 +228,9 @@ async func riskyGet() throws -> String {
 
 ## 5. Pattern Matching
 
-Kon supports pattern matching using the `match` expression:
+Ard supports pattern matching using the `match` expression:
 
-```kon
+```ard
 match value {
     case pattern1 -> expression1
     case pattern2 -> expression2
@@ -240,7 +240,7 @@ match value {
 
 Example:
 
-```kon
+```ard
 match point {
     case (0, 0) -> "Origin"
     case (x, 0) -> "On x-axis at " + x
@@ -253,11 +253,11 @@ match point {
 
 ### Module Definition and Exports
 
-In Kon, every file is implicitly a module. By default, all declarations in a file are exported and available to other modules.
+In Ard, every file is implicitly a module. By default, all declarations in a file are exported and available to other modules.
 
 Use the `internal` keyword before any declaration to make it private to the module:
 
-```kon
+```ard
 internal let secretKey = "1234567890"
 internal func helperFunction() {
     // This function is only available within this module
@@ -266,28 +266,28 @@ internal func helperFunction() {
 
 ### Import Syntax and Mechanisms
 
-Kon uses the `import` keyword to bring declarations from other files into the current scope.
+Ard uses the `import` keyword to bring declarations from other files into the current scope.
 
 Basic import syntax:
 
-```kon
+```ard
 import { functionName, TypeName } from "filename"
 ```
 
-The compiler will look for a file named `filename.kon` in the same directory as the current file.
+The compiler will look for a file named `filename.ard` in the same directory as the current file.
 
 Renaming imports:
 
-```kon
+```ard
 import { originalName: newName } from "filename"
 ```
 
-This specification provides an overview of the Kon language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
+This specification provides an overview of the Ard language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
 
 ### 7. Generics
 Generic types end with a `?`.
 
-```kon
+```ard
 fn map(item: A?) Str {
   "foo"
 }

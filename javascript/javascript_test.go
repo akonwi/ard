@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/kon/ast"
-	tree_sitter_kon "github.com/akonwi/tree-sitter-kon/bindings/go"
+	tree_sitter_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -14,9 +14,11 @@ import (
 var treeSitterParser *tree_sitter.Parser
 
 func init() {
-	language := tree_sitter.NewLanguage(tree_sitter_kon.Language())
-	treeSitterParser = tree_sitter.NewParser()
-	treeSitterParser.SetLanguage(language)
+	ts, err := tree_sitter_ard.MakeParser()
+	if err != nil {
+		panic(err)
+	}
+	treeSitterParser = ts
 }
 
 func assertEquality(t *testing.T, got, want string) {

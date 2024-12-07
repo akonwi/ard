@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/akonwi/kon/checker"
-	tree_sitter_kon "github.com/akonwi/tree-sitter-kon/bindings/go"
+	tree_sitter_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-var treeSitterParser *tree_sitter.Parser
+var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
@@ -41,9 +41,11 @@ var compareOptions = cmp.Options{
 }
 
 func init() {
-	language := tree_sitter.NewLanguage(tree_sitter_kon.Language())
-	treeSitterParser = tree_sitter.NewParser()
-	treeSitterParser.SetLanguage(language)
+	_tsParser, err := tree_sitter_ard.MakeParser()
+	if err != nil {
+		panic(err)
+	}
+	tsParser = _tsParser
 }
 
 type test struct {
@@ -56,7 +58,7 @@ type test struct {
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tree := treeSitterParser.Parse([]byte(tt.input), nil)
+			tree := tsParser.Parse([]byte(tt.input), nil)
 			parser := NewParser([]byte(tt.input), tree)
 			ast, err := parser.Parse()
 			if err != nil && len(tt.diagnostics) == 0 {
