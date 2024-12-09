@@ -9,39 +9,8 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-// helper to hold string + indent state
-// useful for keeping multiline strings pretty
 type jsGenerator struct {
-	builder     strings.Builder
-	indentLevel int
-}
-
-func (g *jsGenerator) indent() {
-	g.indentLevel++
-}
-
-func (g *jsGenerator) dedent() {
-	if g.indentLevel > 0 {
-		g.indentLevel--
-	}
-}
-
-func (g jsGenerator) getIndent() string {
-	return strings.Repeat("  ", g.indentLevel)
-}
-
-func (g *jsGenerator) writeIndent() {
-	g.builder.WriteString(g.getIndent())
-}
-
-func (g *jsGenerator) write(format string, args ...interface{}) {
-	g.builder.WriteString(fmt.Sprintf(format, args...))
-}
-
-func (g *jsGenerator) writeLine(line string, args ...interface{}) {
-	g.writeIndent()
-	g.builder.WriteString(fmt.Sprintf(line, args...))
-	g.builder.WriteString("\n")
+	doc ast.Document
 }
 
 func resolveOperator(operator ast.Operator) string {
@@ -85,7 +54,7 @@ func resolveOperator(operator ast.Operator) string {
 	}
 }
 
-func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bool) {
+func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bool) ast.Document {
 	isReturn := len(_isReturn) > 0 && _isReturn[0]
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
@@ -95,66 +64,67 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 		if decl.Mutable {
 			binding = "let"
 		}
-		g.writeLine("%s %s = %s", binding, decl.Name, toJSExpression(decl.Value))
+		return ast.MakeDoc(fmt.Sprintf("%s %s = %s", binding, decl.Name, toJSExpression(decl.Value)))
 	case ast.VariableAssignment:
 		assignment := statement.(ast.VariableAssignment)
-		g.writeLine(
+		return ast.MakeDoc(fmt.Sprintf(
 			"%s %s %s",
 			assignment.Name,
 			resolveOperator(assignment.Operator),
 			toJSExpression(assignment.Value),
-		)
+		))
 	case ast.FunctionDeclaration:
 		decl := statement.(ast.FunctionDeclaration)
 		params := make([]string, len(decl.Parameters))
 		for i, param := range decl.Parameters {
 			params[i] = param.Name
 		}
-		g.writeLine("function %s(%s) {", decl.Name, strings.Join(params, ", "))
-		g.indent()
+		doc := ast.MakeDoc(fmt.Sprintf("function %s(%s) {", decl.Name, strings.Join(params, ", ")))
 		for i, statement := range decl.Body {
-			g.generateStatement(statement, i == len(decl.Body)-1)
+			doc.Nest(g.generateStatement(statement, i == len(decl.Body)-1))
 		}
-		g.dedent()
-		g.writeLine("}")
+		doc.Line("}")
+		return doc
 	case ast.EnumDefinition:
 		{
 			enum := statement.(ast.EnumDefinition)
-			g.write("const %s = Object.freeze({\n", enum.Type.Name)
-			g.indent()
+			doc := ast.MakeDoc(fmt.Sprintf("const %s = Object.freeze({", enum.Type.Name))
+			doc.Indent()
 			for index, name := range enum.Type.Variants {
-				if index > 0 {
-					g.write(",\n")
+				content := fmt.Sprintf("%s: %d", name, index)
+				if index < len(enum.Type.Variants)-1 {
+					content += ","
 				}
-				g.writeIndent()
-				g.write("%s: Object.freeze({ index: %d })", name, index)
+				doc.Line(content)
 			}
-			g.dedent()
-			g.write("\n})\n")
+			doc.Dedent()
+			doc.Line("})")
+			return doc
 		}
 	case ast.WhileLoop:
 		{
 			loop := statement.(ast.WhileLoop)
-			g.writeLine("while (%s) {", toJSExpression(loop.Condition))
-			g.indent()
+			doc := ast.MakeDoc(fmt.Sprintf("while (%s) {", toJSExpression(loop.Condition)))
 			for _, statement := range loop.Body {
-				g.generateStatement(statement)
+				doc.Nest(g.generateStatement(statement))
 			}
-			g.dedent()
-			g.write("}\n")
+			doc.Line("}")
+			return doc
 		}
 	case ast.ForLoop:
 		{
+			doc := ast.MakeDoc("")
 			loop := statement.(ast.ForLoop)
 			if rangeExpr, ok := loop.Iterable.(ast.RangeExpression); ok {
-				g.writeLine(
-					"for (let %s = %s; %s < %s; %s++) {",
-					loop.Cursor.Name,
-					toJSExpression(rangeExpr.Start),
-					loop.Cursor.Name,
-					toJSExpression(rangeExpr.End),
-					loop.Cursor.Name,
-				)
+				doc.Line(
+					fmt.Sprintf(
+						"for (let %s = %s; %s < %s; %s++) {",
+						loop.Cursor.Name,
+						toJSExpression(rangeExpr.Start),
+						loop.Cursor.Name,
+						toJSExpression(rangeExpr.End),
+						loop.Cursor.Name,
+					))
 				goto print_body_and_close
 			}
 
@@ -163,78 +133,95 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 					panic("Cannot iterate over a boolean")
 				}
 
-				g.writeIndent()
 				if primitive == checker.StrType {
-					g.writeLine("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable))
+					doc.Line(fmt.Sprintf("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable)))
 				} else {
-					g.writeLine(
-						"for (let %s = 0; %s < %s; %s++) {",
-						loop.Cursor.Name,
-						loop.Cursor.Name,
-						toJSExpression(loop.Iterable),
-						loop.Cursor.Name,
+					doc.Line(
+						fmt.Sprintf(
+							"for (let %s = 0; %s < %s; %s++) {",
+							loop.Cursor.Name,
+							loop.Cursor.Name,
+							toJSExpression(loop.Iterable),
+							loop.Cursor.Name,
+						),
 					)
 				}
 				goto print_body_and_close
 			}
 
 			if _, ok := loop.Iterable.GetType().(checker.ListType); ok {
-				g.writeLine("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable))
+				doc.Line(fmt.Sprintf("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable)))
 				goto print_body_and_close
 			}
 
 			panic(fmt.Errorf("Cannot loop over %s", loop.Iterable))
 
 		print_body_and_close:
-			g.indent()
 			for _, statement := range loop.Body {
-				g.generateStatement(statement)
+				doc.Nest(g.generateStatement(statement))
 			}
-			g.dedent()
-			g.writeIndent()
-			g.writeLine("}")
+			doc.Line("}")
+			return doc
 		}
 	case ast.IfStatement:
 		{
+			doc := ast.MakeDoc("")
 			stmt := statement.(ast.IfStatement)
-			// if stmt.condition, build the 'if' statement
-			// otherwise build the block following the 'else'
 			if stmt.Condition != nil {
-				g.writeLine("if (%s) {", toJSExpression(stmt.Condition))
+				doc.Line(fmt.Sprintf("if (%s) {", toJSExpression(stmt.Condition)))
 			} else {
-				g.writeLine("{")
+				start := stmt.TSNode.StartPosition()
+				panic(fmt.Errorf("[%d:%d] Condition is required for if statement", start.Row, start.Column))
 			}
 
-			g.indent()
 			for _, statement := range stmt.Body {
-				g.generateStatement(statement)
+				doc.Nest(g.generateStatement(statement))
 			}
-			g.dedent()
-			g.write("%s}", g.getIndent())
 
 			if stmt.Else != nil {
-				g.write(" else ")
-				g.generateStatement(stmt.Else)
+				doc.Append(g.generateElseStatement(stmt.Else.(ast.IfStatement)))
 			} else {
-				g.write("\n")
+				doc.Line("}")
 			}
+
+			return doc
 		}
 	case ast.Comment:
-		g.writeLine(statement.(ast.Comment).Value)
+		return ast.MakeDoc(statement.(ast.Comment).Value)
 	default:
-		{
-			if expr, ok := statement.(ast.Expression); ok {
-				js := toJSExpression(expr, true)
-				if isReturn {
-					g.writeLine("return %s", js)
-				} else {
-					g.writeLine(js)
-				}
+		if expr, ok := statement.(ast.Expression); ok {
+			js := toJSExpression(expr, true)
+			if isReturn {
+				return ast.MakeDoc("return " + js)
 			} else {
-				panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))
+				return ast.MakeDoc(js)
 			}
 		}
+		panic(fmt.Errorf("Unhandled statement node: [%s] - %s\n", reflect.TypeOf(statement), statement))
 	}
+	return ast.MakeDoc("")
+}
+
+func (g *jsGenerator) generateElseStatement(stmt ast.IfStatement) ast.Document {
+	doc := ast.MakeDoc("")
+	if stmt.Condition != nil {
+		doc.Line(fmt.Sprintf("} else if (%s) {", toJSExpression(stmt.Condition)))
+	} else {
+		doc.Line("} else {")
+	}
+
+	body := ast.MakeDoc("")
+	for _, statement := range stmt.Body {
+		body.Append(g.generateStatement(statement))
+	}
+
+	doc.Nest(body)
+	if stmt.Else != nil {
+		doc.Append(g.generateElseStatement(stmt.Else.(ast.IfStatement)))
+	} else {
+		doc.Line("}")
+	}
+	return doc
 }
 
 // rather than futzing with the AST to avoid adding runtime models
@@ -262,15 +249,14 @@ func getJsFunctionCall(call ast.FunctionCall) ast.FunctionCall {
 
 func GenerateJS(program ast.Program) string {
 	generator := jsGenerator{
-		builder:     strings.Builder{},
-		indentLevel: 0,
+		doc: ast.MakeDoc(""),
 	}
 
 	for _, statement := range program.Statements {
-		generator.generateStatement(statement)
+		generator.doc.Append(generator.generateStatement(statement))
 	}
 
-	return strings.ReplaceAll(generator.builder.String(), "%%", "%")
+	return strings.ReplaceAll(generator.doc.String(), "%%", "%")
 }
 
 func toJSExpression(node ast.Expression, _isStatement ...bool) string {
@@ -333,13 +319,12 @@ func toJSExpression(node ast.Expression, _isStatement ...bool) string {
 		for i, param := range fn.Parameters {
 			params[i] = param.Name
 		}
-		generator := jsGenerator{}
-		generator.indent()
+		doc := ast.MakeDoc(fmt.Sprintf("(%s) => {", strings.Join(params, ", ")))
 		for i, statement := range fn.Body {
-			generator.generateStatement(statement, i == len(fn.Body)-1)
+			doc.Nest((&jsGenerator{}).generateStatement(statement, i == len(fn.Body)-1))
 		}
-		generator.dedent()
-		return fmt.Sprintf("(%s) => {\n%s}", strings.Join(params, ", "), generator.builder.String())
+		doc.Line("}")
+		return doc.String()
 	case ast.StructInstance:
 		instance := node.(ast.StructInstance)
 		props := make([]string, len(instance.Properties))
@@ -365,23 +350,27 @@ func toJSExpression(node ast.Expression, _isStatement ...bool) string {
 	case ast.MatchExpression:
 		{
 			expr := node.(ast.MatchExpression)
-			g := jsGenerator{}
-			g.indent()
+			armsDoc := ast.MakeDoc("")
 			for _, arm := range expr.Cases {
-				g.writeLine("if (%s === %s) {", toJSExpression(expr.Subject), toJSExpression(arm.Pattern))
-				g.indent()
+				armsDoc.Line(
+					fmt.Sprintf(
+						"if (%s === %s) {",
+						toJSExpression(expr.Subject),
+						toJSExpression(arm.Pattern),
+					))
+
 				for i, statement := range arm.Body {
-					g.generateStatement(statement, i == len(arm.Body)-1)
+					armsDoc.Nest((&jsGenerator{}).generateStatement(statement, i == len(arm.Body)-1))
 				}
-				g.dedent()
-				g.writeLine("}")
+				armsDoc.Line("}")
 			}
-			g.indent()
-			result := fmt.Sprintf("(() => {\n%s})()", g.builder.String())
+			iife := ast.MakeDoc("(() => {")
+			iife.Nest(armsDoc)
+			iife.Line("})()")
 			if isStatement {
-				result += ";"
+				return iife.String() + ";"
 			}
-			return result
+			return iife.String()
 		}
 	default:
 		return node.String()

@@ -68,10 +68,10 @@ func TestLiteralExpressions(t *testing.T) {
 			name: "identifier",
 			input: `
 let x = 42
-let y = x`,
+x`,
 			output: `
 const x = 42
-const y = x`,
+x`,
 		},
 		{
 			name:   "raw string",
@@ -400,9 +400,9 @@ func TestEnums(t *testing.T) {
 			input: `enum Color { Red, Green, Yellow }`,
 			output: `
 const Color = Object.freeze({
-  Red: Object.freeze({ index: 0 }),
-  Green: Object.freeze({ index: 1 }),
-  Yellow: Object.freeze({ index: 2 })
+  Red: 0,
+  Green: 1,
+  Yellow: 2
 })`,
 		},
 	})
@@ -509,6 +509,25 @@ if (false) {
   20
 }`,
 		},
+		{
+			name: "nested if conditions",
+			input: `
+for num in 1...10 {
+  if num % 3 == 0 { print("Fizz") }
+  else if num % 5 == 0 { print("Buzz") }
+  else { print("num") }
+}`,
+			output: `
+for (let num = 1; num < 10; num++) {
+  if (num % 3 === 0) {
+    console.log("Fizz");
+  } else if (num % 5 === 0) {
+    console.log("Buzz");
+  } else {
+    console.log("num");
+  }
+}`,
+		},
 	})
 }
 
@@ -525,8 +544,8 @@ match value {
 }`,
 			output: `
 const Sign = Object.freeze({
-  Positive: Object.freeze({ index: 0 }),
-  Negative: Object.freeze({ index: 1 })
+  Positive: 0,
+  Negative: 1
 })
 const value = Sign.Positive
 (() => {
