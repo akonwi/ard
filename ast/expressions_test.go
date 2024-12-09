@@ -782,7 +782,7 @@ func TestBinaryExpressions(t *testing.T) {
 		},
 		{
 			name:  "Invalid use of range operator",
-			input: `"fizz"...10`,
+			input: `"fizz"..10`,
 			output: Program{
 				Statements: []Statement{
 					RangeExpression{

@@ -1301,6 +1301,19 @@ func resolveOperator(node *tree_sitter.Node) Operator {
 }
 
 func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, error) {
+	if node.ChildCount() != 3 {
+		// TODO: extract this into a helper function
+		for _, child := range node.Children(p.tree.Walk()) {
+			if child.IsError() {
+				point := child.Range().StartPoint
+				panic(fmt.Errorf(
+					"[%d, %d] Unexpected character: '%s'",
+					point.Row,
+					point.Column,
+					p.text(&child)))
+			}
+		}
+	}
 	leftNode := node.ChildByFieldName("left")
 	operatorNode := node.ChildByFieldName("operator")
 	rightNode := node.ChildByFieldName("right")
