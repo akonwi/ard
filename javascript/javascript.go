@@ -220,7 +220,7 @@ func generateElseStatement(stmt ast.IfStatement) ast.Document {
 	return doc
 }
 
-// rather than futzing with the AST to avoid adding runtime models
+// futzing with the AST to avoid adding runtime models
 func getJsMemberAccess(expr ast.MemberAccess) ast.MemberAccess {
 	if expr.Target.GetType().String() == checker.StrType.String() {
 		if expr.Member.(ast.Identifier).Name == "size" {
