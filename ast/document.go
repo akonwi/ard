@@ -31,19 +31,22 @@ func (d Document) indentation() string {
 	return strings.Repeat(" ", d.indentLevel*2)
 }
 
-func (d *Document) Indent() {
+func (d *Document) Indent() *Document {
 	d.indentLevel++
+	return d
 }
 
-func (d *Document) Dedent() {
+func (d *Document) Dedent() *Document {
 	d.indentLevel--
+	return d
 }
 
-func (d *Document) Line(line string) {
+func (d *Document) Line(line string) *Document {
 	d.lines = append(d.lines, d.indentation()+line)
+	return d
 }
 
-func (d *Document) Nest(doc Document) {
+func (d *Document) Nest(doc Document) *Document {
 	d.Indent()
 	for i, line := range doc.lines {
 		// skip trailing empties
@@ -53,10 +56,12 @@ func (d *Document) Nest(doc Document) {
 		d.lines = append(d.lines, d.indentation()+line)
 	}
 	d.Dedent()
+	return d
 }
 
-func (d *Document) Append(doc Document) {
+func (d *Document) Append(doc Document) *Document {
 	for _, line := range doc.lines {
 		d.lines = append(d.lines, line)
 	}
+	return d
 }
