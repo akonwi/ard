@@ -9,10 +9,6 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-type jsGenerator struct {
-	doc ast.Document
-}
-
 func resolveOperator(operator ast.Operator) string {
 	switch operator {
 	case ast.Assign:
@@ -54,7 +50,7 @@ func resolveOperator(operator ast.Operator) string {
 	}
 }
 
-func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bool) ast.Document {
+func generateStatement(statement ast.Statement, _isReturn ...bool) ast.Document {
 	isReturn := len(_isReturn) > 0 && _isReturn[0]
 	switch statement.(type) {
 	case ast.StructDefinition: // skipped
@@ -81,7 +77,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 		}
 		doc := ast.MakeDoc(fmt.Sprintf("function %s(%s) {", decl.Name, strings.Join(params, ", ")))
 		for i, statement := range decl.Body {
-			doc.Nest(g.generateStatement(statement, i == len(decl.Body)-1))
+			doc.Nest(generateStatement(statement, i == len(decl.Body)-1))
 		}
 		doc.Line("}")
 		return doc
@@ -106,7 +102,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 			loop := statement.(ast.WhileLoop)
 			doc := ast.MakeDoc(fmt.Sprintf("while (%s) {", toJSExpression(loop.Condition)))
 			for _, statement := range loop.Body {
-				doc.Nest(g.generateStatement(statement))
+				doc.Nest(generateStatement(statement))
 			}
 			doc.Line("}")
 			return doc
@@ -158,7 +154,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 
 		print_body_and_close:
 			for _, statement := range loop.Body {
-				doc.Nest(g.generateStatement(statement))
+				doc.Nest(generateStatement(statement))
 			}
 			doc.Line("}")
 			return doc
@@ -175,11 +171,11 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 			}
 
 			for _, statement := range stmt.Body {
-				doc.Nest(g.generateStatement(statement))
+				doc.Nest(generateStatement(statement))
 			}
 
 			if stmt.Else != nil {
-				doc.Append(g.generateElseStatement(stmt.Else.(ast.IfStatement)))
+				doc.Append(generateElseStatement(stmt.Else.(ast.IfStatement)))
 			} else {
 				doc.Line("}")
 			}
@@ -202,7 +198,7 @@ func (g *jsGenerator) generateStatement(statement ast.Statement, _isReturn ...bo
 	return ast.MakeDoc("")
 }
 
-func (g *jsGenerator) generateElseStatement(stmt ast.IfStatement) ast.Document {
+func generateElseStatement(stmt ast.IfStatement) ast.Document {
 	doc := ast.MakeDoc("")
 	if stmt.Condition != nil {
 		doc.Line(fmt.Sprintf("} else if (%s) {", toJSExpression(stmt.Condition)))
@@ -212,12 +208,12 @@ func (g *jsGenerator) generateElseStatement(stmt ast.IfStatement) ast.Document {
 
 	body := ast.MakeDoc("")
 	for _, statement := range stmt.Body {
-		body.Append(g.generateStatement(statement))
+		body.Append(generateStatement(statement))
 	}
 
 	doc.Nest(body)
 	if stmt.Else != nil {
-		doc.Append(g.generateElseStatement(stmt.Else.(ast.IfStatement)))
+		doc.Append(generateElseStatement(stmt.Else.(ast.IfStatement)))
 	} else {
 		doc.Line("}")
 	}
@@ -248,15 +244,12 @@ func getJsFunctionCall(call ast.FunctionCall) ast.FunctionCall {
 }
 
 func GenerateJS(program ast.Program) string {
-	generator := jsGenerator{
-		doc: ast.MakeDoc(""),
-	}
-
+	doc := ast.MakeDoc("")
 	for _, statement := range program.Statements {
-		generator.doc.Append(generator.generateStatement(statement))
+		doc.Append(generateStatement(statement))
 	}
 
-	return strings.ReplaceAll(generator.doc.String(), "%%", "%")
+	return strings.ReplaceAll(doc.String(), "%%", "%")
 }
 
 func toJSExpression(node ast.Expression, _isStatement ...bool) string {
@@ -321,7 +314,7 @@ func toJSExpression(node ast.Expression, _isStatement ...bool) string {
 		}
 		doc := ast.MakeDoc(fmt.Sprintf("(%s) => {", strings.Join(params, ", ")))
 		for i, statement := range fn.Body {
-			doc.Nest((&jsGenerator{}).generateStatement(statement, i == len(fn.Body)-1))
+			doc.Nest(generateStatement(statement, i == len(fn.Body)-1))
 		}
 		doc.Line("}")
 		return doc.String()
@@ -360,7 +353,7 @@ func toJSExpression(node ast.Expression, _isStatement ...bool) string {
 					))
 
 				for i, statement := range arm.Body {
-					armsDoc.Nest((&jsGenerator{}).generateStatement(statement, i == len(arm.Body)-1))
+					armsDoc.Nest(generateStatement(statement, i == len(arm.Body)-1))
 				}
 				armsDoc.Line("}")
 			}
