@@ -512,7 +512,7 @@ if (false) {
 		{
 			name: "nested if conditions",
 			input: `
-for num in 1...10 {
+for num in 1..10 {
   if num % 3 == 0 { print("Fizz") }
   else if num % 5 == 0 { print("Buzz") }
   else { print("num") }
