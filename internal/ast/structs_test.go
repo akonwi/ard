@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/internal/checker"
 )
 
 func TestStructDefinitions(t *testing.T) {

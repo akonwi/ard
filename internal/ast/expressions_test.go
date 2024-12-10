@@ -3,7 +3,7 @@ package ast
 import (
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/internal/checker"
 )
 
 func TestUnaryExpressions(t *testing.T) {

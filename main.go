@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/akonwi/ard/ast"
-	"github.com/akonwi/ard/javascript"
+	"github.com/akonwi/ard/internal/ast"
+	"github.com/akonwi/ard/internal/javascript"
 	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 )
 
