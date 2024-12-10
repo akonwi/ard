@@ -31,22 +31,15 @@ func (b BaseNode) GetTSNode() *tree_sitter.Node {
 
 type Package struct {
 	BaseNode
-	Path  string
-	Alias string
+	Symbol checker.Package
 }
 
-func (p Package) Name() string {
-	if p.Alias != "" {
-		return p.Alias
+func (p Package) String() string {
+	if p.Symbol.Alias != "" {
+		return p.Symbol.Alias
+	} else {
+		return p.Symbol.Name
 	}
-	parts := strings.Split(p.Path, "/")
-	var name string
-	if len(parts) == 1 {
-		name = parts[0]
-	}
-	name = parts[len(parts)-1]
-
-	return strings.ReplaceAll(name, "-", "_")
 }
 
 type Program struct {
@@ -575,12 +568,26 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Package, error) {
 	aliasNode := node.ChildByFieldName("alias")
 
 	path := p.text(pathNode)
-	alias := ""
+	var name, alias string
 	if aliasNode != nil {
 		alias = p.text(aliasNode)
 	}
+	parts := strings.Split(path, "/")
+	if len(parts) == 1 {
+		name = parts[0]
+	} else {
+		name = parts[len(parts)-1]
+	}
+	name = strings.ReplaceAll(name, "-", "_")
 
-	return Package{Path: path, Alias: alias}, nil
+	return Package{
+		BaseNode: BaseNode{TSNode: node},
+		Symbol: checker.Package{
+			Path:  path,
+			Name:  name,
+			Alias: alias,
+		},
+	}, nil
 }
 
 func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {

@@ -107,25 +107,30 @@ func TestImportStatements(t *testing.T) {
 		{
 			name: "importing modules",
 			input: `
-use fmt
 use io/fs
 use github.com/google/go-cmp/cmp
 use github.com/tree-sitter/go-tree-sitter as ts`,
 			output: Program{
 				Imports: []Package{
 					{
-						Path: "fmt",
+						Symbol: checker.Package{
+							Path: "fmt",
+							Name: "fmt",
+						},
 					},
-					{
+					{Symbol: checker.Package{
 						Path: "io/fs",
-					},
-					{
+						Name: "fs",
+					}},
+					{Symbol: checker.Package{
 						Path: "github.com/google/go-cmp/cmp",
-					},
-					{
+						Name: "cmp",
+					}},
+					{Symbol: checker.Package{
 						Path:  "github.com/tree-sitter/go-tree-sitter",
+						Name:  "go_tree_sitter",
 						Alias: "ts",
-					},
+					}},
 				},
 				Statements: []Statement{},
 			},

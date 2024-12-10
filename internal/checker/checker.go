@@ -296,6 +296,18 @@ func (v Variable) GetType() Type {
 	return v.Type
 }
 
+type Package struct {
+	Name    string
+	Path    string
+	Alias   string
+	symbols map[string]Symbol
+}
+
+func (p Package) GetSymbol(name string) (Symbol, bool) {
+	sym, ok := p.symbols[name]
+	return sym, ok
+}
+
 type ScopeOptions struct {
 	IsTop bool
 }
