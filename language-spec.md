@@ -3,6 +3,25 @@
 Ard is a modern, statically-typed programming language designed for clarity, safety, and ease.
 It combines features from JavaScript, Swift, and Go while introducing its own unique characteristics.
 
+## Goals
+
+- **Readability**: Ard code should be easy to read and understand.
+- **Simple**: There should be one obvious way to do things.
+- **Safety**: The compiler should catch errors at compile time.
+- **Reliable**: Compiles to Go, so it should be fast and efficient, and portable.
+
+## Todos
+
+- [] methods on structs
+- [] catch-all pattern for matches
+- [] match on booleans
+- [] matching on numbers
+- [] matching on strings?
+- [] tuples
+- [] Type Union
+- [] built-in Option: `Option-Str`
+- [] Allow Num as map keys
+
 ## 1. Basic Syntax
 
 Ard uses a clean, expressive syntax designed for readability and ease of use.
@@ -35,7 +54,7 @@ mut age = 30
 
 ```ard
 fn greet(name: Str) Str {
-  return "Hello, ${name}!"
+  return "Hello, {{name}}!"
 }
 ```
 
@@ -60,23 +79,18 @@ for item in array {
 while condition {
   // ...
 }
-
-// do block, then check condition
-do while condition {
-  // ...
-}
 ```
 
 ### Iteration
 
 Numeric inclusive range:
 ```ard
-for i in 1...10 {
+for i in 1..10 {
 	print(i)
 }
 
 // idea for changing step size
-for i in 1...10 by 2 {
+for mut i = 1; i < 10; i =+2; {
 	print(i)
 }
 ```
