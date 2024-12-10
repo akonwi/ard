@@ -27,6 +27,7 @@ func TestStructDefinitions(t *testing.T) {
 			input: `
 				struct Box {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					StructDefinition{
 						Type: emptyStruct,
@@ -43,6 +44,7 @@ func TestStructDefinitions(t *testing.T) {
 					employed: Bool
 				}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					StructDefinition{
 						Type: personStruct,
@@ -82,6 +84,7 @@ func TestInstantiatingStructs(t *testing.T) {
 				struct Box {}
 				Box{}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					StructDefinition{
 						Type: emptyStruct,
@@ -110,6 +113,7 @@ func TestInstantiatingStructs(t *testing.T) {
 				Person { name: "John", age: 23, employed: true }
 			`, personStructCode),
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					StructDefinition{
 						Type: personStruct,
@@ -154,6 +158,7 @@ func TestStructFieldAccess(t *testing.T) {
 				person.age
 				person.employed`, personStructCode),
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					StructDefinition{Type: personStruct},
 					VariableDeclaration{

@@ -26,6 +26,7 @@ func TestVariables(t *testing.T) {
 			name:  "List elements must match declared type",
 			input: `let strings: [Str] = [1, 2, 3]`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -50,6 +51,7 @@ func TestVariables(t *testing.T) {
 			name:  "Valid list",
 			input: `let numbers: [Num] = [1, 2, 3]`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -97,6 +99,7 @@ func TestListApi(t *testing.T) {
 				mut list = [1,2,3]
 				list.size`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					list_decl,
 					MemberAccess{
@@ -113,6 +116,7 @@ func TestListApi(t *testing.T) {
 				mut list = [1,2,3]
 				list.push(4)`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					list_decl,
 					MemberAccess{

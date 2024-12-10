@@ -12,6 +12,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			name:  "Empty function",
 			input: `fn empty() {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name:       "empty",
@@ -27,6 +28,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			name:  "Inferred function return type",
 			input: `fn get_msg() { "Hello, world!" }`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name:       "get_msg",
@@ -46,6 +48,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			name:  "Function with a parameter and declared return type",
 			input: `fn greet(person: Str) Str { "hello" }`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: "greet",
@@ -76,6 +79,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			name:  "Function with two parameters",
 			input: `fn add(x: Num, y: Num) Num { 10 }`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: "add",
@@ -131,6 +135,7 @@ func TestFunctionCalls(t *testing.T) {
 				fn get_name() Str { "name" }
 				get_name()`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name:       "get_name",
@@ -163,6 +168,7 @@ func TestFunctionCalls(t *testing.T) {
 				fn greet(name: Str) Str { "hello" }
 				greet("Alice")`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: greet.Name,
@@ -189,6 +195,7 @@ func TestFunctionCalls(t *testing.T) {
 				fn add(x: Num, y: Num) Num { x + y }
 				add(1, 2)`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: add.Name,
@@ -239,6 +246,7 @@ func TestAnonymousFunctions(t *testing.T) {
 			name:  "Anonymous function",
 			input: `() { "Hello, world!" }`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{},
@@ -254,6 +262,7 @@ func TestAnonymousFunctions(t *testing.T) {
 			name:  "Anonymous function with a parameter",
 			input: `(name: Str) { "Hello, name!" }`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{
@@ -271,6 +280,7 @@ func TestAnonymousFunctions(t *testing.T) {
 			name:  "Anonymous function with a parameter",
 			input: `(name: Str) { "Hello, name!" }`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{

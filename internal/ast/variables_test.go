@@ -15,6 +15,7 @@ func TestVariableDeclarations(t *testing.T) {
     		mut age: Num = 30
       	let is_student: Bool = true`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Name:    "name",
@@ -48,6 +49,7 @@ func TestVariableDeclarations(t *testing.T) {
 			name:  "Valid empty map",
 			input: `mut entries: [Str:Num] = [:]`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -75,6 +77,7 @@ func TestVariableDeclarations(t *testing.T) {
 			name:  "Valid map",
 			input: `mut name_to_counts: [Str:Num] = ["john":1, "jane":2, "jen":3]`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -110,6 +113,7 @@ func TestVariableTypeInference(t *testing.T) {
 			name:  "Inferred type",
 			input: `let name = "Alice"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -127,6 +131,7 @@ func TestVariableTypeInference(t *testing.T) {
 			name:  "Inferred list",
 			input: `let list = ["foo", "bar"]`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Name:    "list",
@@ -148,6 +153,7 @@ func TestVariableTypeInference(t *testing.T) {
 			name:  "Inferred map",
 			input: `let map = ["foo":3]`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -203,6 +209,7 @@ func TestVariableAssignment(t *testing.T) {
 				mut name = "Alice"
 				name = "Bob"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -227,6 +234,7 @@ func TestVariableAssignment(t *testing.T) {
 				let name = "Alice"
 				name = "Bob"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -255,6 +263,7 @@ func TestVariableAssignment(t *testing.T) {
 				mut name = "Alice"
 				name = 500`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -281,6 +290,7 @@ func TestVariableAssignment(t *testing.T) {
 			name:  "Unknown variable reassignment",
 			input: `name = "Bob"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableAssignment{
 						Name:     "name",
@@ -303,6 +313,7 @@ func TestVariableAssignment(t *testing.T) {
 				mut count = 0
 				count =+ 2`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -327,6 +338,7 @@ func TestVariableAssignment(t *testing.T) {
 				let count = 0
 				count =+ 2`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -355,6 +367,7 @@ func TestVariableAssignment(t *testing.T) {
 				mut count = 0
 				count =- 2`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -379,6 +392,7 @@ func TestVariableAssignment(t *testing.T) {
 						mut name = "joe"
 						name =- 2`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -407,6 +421,7 @@ func TestVariableAssignment(t *testing.T) {
 				let count = 0
 				count =- 2`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,

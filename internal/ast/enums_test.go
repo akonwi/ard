@@ -29,6 +29,7 @@ func TestEnumDefinitions(t *testing.T) {
 			name:  "Valid basic enum",
 			input: traffic_light_code,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: traffic_light_enum,
@@ -53,6 +54,7 @@ func TestEnums(t *testing.T) {
 				enum Color { Black, Grey }
 				Color::Black`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: colorEnum,
@@ -78,6 +80,7 @@ func TestEnums(t *testing.T) {
 				enum Color { Black, Grey }
 				let favorite: Color = Color::Black`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: colorEnum,
@@ -137,6 +140,7 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Green => "Go"
 				}`, traffic_light_code),
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: traffic_light_enum,

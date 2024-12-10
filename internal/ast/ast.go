@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/akonwi/ard/internal/checker"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -28,8 +29,29 @@ func (b BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
 }
 
+type Package struct {
+	BaseNode
+	Path  string
+	Alias string
+}
+
+func (p Package) Name() string {
+	if p.Alias != "" {
+		return p.Alias
+	}
+	parts := strings.Split(p.Path, "/")
+	var name string
+	if len(parts) == 1 {
+		name = parts[0]
+	}
+	name = parts[len(parts)-1]
+
+	return strings.ReplaceAll(name, "-", "_")
+}
+
 type Program struct {
 	BaseNode
+	Imports    []Package
 	Statements []Statement
 }
 
@@ -496,23 +518,69 @@ func (p *Parser) logicalOperatorError(node *tree_sitter.Node, operator string) {
 	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
 }
 
+// i might regret this
+func (p *Parser) sweepForError(node *tree_sitter.Node, minChildren int) error {
+	if int(node.ChildCount()) != minChildren {
+		for _, child := range node.Children(p.tree.Walk()) {
+			if child.IsError() {
+				point := child.Range().StartPoint
+				return fmt.Errorf(
+					"[%d, %d] Unexpected character: '%s'",
+					point.Row,
+					point.Column,
+					p.text(&child))
+			}
+		}
+	}
+	return nil
+}
+
 func (p *Parser) Parse() (Program, error) {
 	rootNode := p.tree.RootNode()
-	program := Program{
+	program := &Program{
 		BaseNode:   BaseNode{TSNode: rootNode},
-		Statements: []Statement{}}
+		Imports:    []Package{},
+		Statements: []Statement{},
+	}
 
 	for i := range rootNode.NamedChildCount() {
-		stmt, err := p.parseStatement(rootNode.NamedChild(i))
-		if err != nil {
-			return Program{}, err
-		}
-		if stmt != nil {
-			program.Statements = append(program.Statements, stmt)
+		switch rootNode.NamedChild(i).GrammarName() {
+		case "statement":
+			stmt, err := p.parseStatement(rootNode.NamedChild(i))
+			if err != nil {
+				return *program, err
+			}
+			if stmt != nil {
+				program.Statements = append(program.Statements, stmt)
+			}
+		case "import":
+			imp, err := p.parseImport(rootNode.NamedChild(i))
+			if err != nil {
+				return *program, err
+			}
+			program.Imports = append(program.Imports, imp)
 		}
 	}
 
-	return program, nil
+	return *program, nil
+}
+
+func (p *Parser) parseImport(node *tree_sitter.Node) (Package, error) {
+	err := p.sweepForError(node, 2)
+	if err != nil {
+		return Package{}, err
+	}
+
+	pathNode := p.mustChild(node, "path")
+	aliasNode := node.ChildByFieldName("alias")
+
+	path := p.text(pathNode)
+	alias := ""
+	if aliasNode != nil {
+		alias = p.text(aliasNode)
+	}
+
+	return Package{Path: path, Alias: alias}, nil
 }
 
 func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {

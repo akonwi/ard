@@ -12,6 +12,7 @@ func TestUnaryExpressions(t *testing.T) {
 			name:  "Valid negation",
 			input: `let negative_number = -30`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Name:    "negative_number",
@@ -31,6 +32,7 @@ func TestUnaryExpressions(t *testing.T) {
 			name:  "Invalid negation",
 			input: `-false`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					UnaryExpression{
 						Operator: Minus,
@@ -56,6 +58,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid addition",
 			input: `-30 + 20`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Plus,
@@ -77,6 +80,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid addition",
 			input: `30 + "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Plus,
@@ -99,6 +103,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "+ operator is only allowed on Num",
 			input: `"foo" + "bar"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Plus,
@@ -121,6 +126,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid subtraction",
 			input: `30 - 12`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Minus,
@@ -139,6 +145,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid subtraction",
 			input: `30 - "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Minus,
@@ -161,6 +168,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid division",
 			input: `30 / 6`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Divide,
@@ -179,6 +187,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid division",
 			input: `30 / "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Divide,
@@ -201,6 +210,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid multiplication",
 			input: `30 * 10`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Multiply,
@@ -219,6 +229,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid multiplication",
 			input: `30 * "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Multiply,
@@ -241,6 +252,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid modulo",
 			input: `3 % 9`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Modulo,
@@ -259,6 +271,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid modulo",
 			input: `30 % "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Modulo,
@@ -281,6 +294,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid greater than",
 			input: `30 > 12`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: GreaterThan,
@@ -299,6 +313,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid greater than",
 			input: `30 > "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: GreaterThan,
@@ -321,6 +336,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid greater than or equal",
 			input: `30 >= 12`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: GreaterThanOrEqual,
@@ -339,6 +355,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid greater than or equal",
 			input: `30 >= "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: GreaterThanOrEqual,
@@ -361,6 +378,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid less than",
 			input: `30 < 12`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThan,
@@ -379,6 +397,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid les than",
 			input: `30 < "f12"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThan,
@@ -401,6 +420,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid less than or equal",
 			input: `30 <= 12`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThanOrEqual,
@@ -419,6 +439,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid less than or equal",
 			input: `30 <= true`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThanOrEqual,
@@ -441,6 +462,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid string equality checks",
 			input: `"Joe" == "Joe"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -459,6 +481,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid string equality check",
 			input: `"Joe" == true`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -481,6 +504,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid number equality checks",
 			input: `1 == 1`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -499,6 +523,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid number equality checks",
 			input: `1 == "eleventy"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -521,6 +546,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid boolean equality checks",
 			input: `true == false`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -539,6 +565,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid boolean equality checks",
 			input: `true == "eleventy"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -563,6 +590,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid string inequality checks",
 			input: `"Joe" != "Joe"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -581,6 +609,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid string inequality check",
 			input: `"Joe" != true`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -603,6 +632,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid number inequality checks",
 			input: `1 != 1`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -621,6 +651,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid number inequality checks",
 			input: `1 != "eleventy"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -643,6 +674,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid boolean inequality checks",
 			input: `true != false`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -661,6 +693,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid boolean inequality checks",
 			input: `true != "eleventy"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -685,6 +718,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid use of 'and' operator",
 			input: `true and false`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: And,
@@ -703,6 +737,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Ivalid use of 'and' operator",
 			input: `true and "eleventy"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: And,
@@ -725,6 +760,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid use of 'or' operator",
 			input: `true or false`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Or,
@@ -743,6 +779,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Ivalid use of 'or' operator",
 			input: `true or "eleventy"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Or,
@@ -767,6 +804,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid use of range operator",
 			input: "1..10",
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					RangeExpression{
 						Start: NumLiteral{
@@ -784,6 +822,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Invalid use of range operator",
 			input: `"fizz"..10`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					RangeExpression{
 						Start: StrLiteral{
@@ -810,6 +849,7 @@ func TestParenthesizedExpressions(t *testing.T) {
 			name:  "Valid parenthesized expression",
 			input: `(30 + 20) * 2`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					BinaryExpression{
 						HasPrecedence: false,
@@ -852,6 +892,7 @@ func TestMemberAccess(t *testing.T) {
 			name:  "on string literals",
 			input: `"string".size`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					MemberAccess{
 						Target: StrLiteral{

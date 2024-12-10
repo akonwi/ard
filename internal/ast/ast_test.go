@@ -92,10 +92,43 @@ func runTests(t *testing.T, tests []test) {
 func TestEmptyProgram(t *testing.T) {
 	runTests(t, []test{
 		{
-			name:        "Empty program",
-			input:       "",
-			output:      Program{Statements: []Statement{}},
+			name:  "Empty program",
+			input: "",
+			output: Program{
+				Imports:    []Package{},
+				Statements: []Statement{}},
 			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
+func TestImportStatements(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "importing modules",
+			input: `
+use fmt
+use io/fs
+use github.com/google/go-cmp/cmp
+use github.com/tree-sitter/go-tree-sitter as ts`,
+			output: Program{
+				Imports: []Package{
+					{
+						Path: "fmt",
+					},
+					{
+						Path: "io/fs",
+					},
+					{
+						Path: "github.com/google/go-cmp/cmp",
+					},
+					{
+						Path:  "github.com/tree-sitter/go-tree-sitter",
+						Alias: "ts",
+					},
+				},
+				Statements: []Statement{},
+			},
 		},
 	})
 }
@@ -117,6 +150,7 @@ func TestIdentifiers(t *testing.T) {
 				let count = 10
 		 		count <= 10`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -147,6 +181,7 @@ func TestWhileLoop(t *testing.T) {
 					count =+ 1
 				}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
@@ -176,6 +211,7 @@ func TestWhileLoop(t *testing.T) {
 			input: `
 						while 9 - 7 {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					WhileLoop{
 						Condition: BinaryExpression{
@@ -202,6 +238,7 @@ func TestIfAndElse(t *testing.T) {
 			name:  "Valid if statement",
 			input: `if true {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -215,6 +252,7 @@ func TestIfAndElse(t *testing.T) {
 			name:  "Invalid condition expression",
 			input: `if 20 - 1 {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BinaryExpression{
@@ -234,6 +272,7 @@ func TestIfAndElse(t *testing.T) {
 				if true {}
 				else {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -252,6 +291,7 @@ func TestIfAndElse(t *testing.T) {
 				if true {}
 				else if false {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -271,6 +311,7 @@ func TestIfAndElse(t *testing.T) {
 				else if false {}
 				else {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -298,6 +339,7 @@ func TestForLoops(t *testing.T) {
 			name:  "Valid number range",
 			input: `for i in 1..10 {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					ForLoop{
 						Cursor: Identifier{Name: "i", Type: checker.NumType},
@@ -315,6 +357,7 @@ func TestForLoops(t *testing.T) {
 			name:  "Iterating over a string",
 			input: `for char in "foobar" {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					ForLoop{
 						Cursor: Identifier{Name: "char", Type: checker.StrType},
@@ -331,6 +374,7 @@ func TestForLoops(t *testing.T) {
 			name:  "Iterating over a list",
 			input: `for num in [1, 2] {}`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					ForLoop{
 						Cursor: Identifier{Name: "num", Type: checker.NumType},
@@ -368,6 +412,7 @@ func TestInterpolatedStrings(t *testing.T) {
 			let name = "world"
 			"Hello, {{name}}"`,
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
@@ -395,6 +440,7 @@ func TestComments(t *testing.T) {
 			name:  "Single line comment",
 			input: "// this is a comment",
 			output: Program{
+				Imports: []Package{},
 				Statements: []Statement{
 					Comment{Value: "// this is a comment"},
 				},
