@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/akonwi/ard/internal/checker"
 	tree_sitter_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -16,7 +15,7 @@ var compareOptions = cmp.Options{
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),
 
-	cmp.Comparer(func(x, y map[string]checker.Type) bool {
+	cmp.Comparer(func(x, y map[string]Type) bool {
 		if len(x) != len(y) {
 			return false
 		}
@@ -52,7 +51,7 @@ type test struct {
 	name        string
 	input       string
 	output      Program
-	diagnostics []checker.Diagnostic
+	diagnostics []Diagnostic
 }
 
 func runTests(t *testing.T, tests []test) {
@@ -95,9 +94,9 @@ func TestEmptyProgram(t *testing.T) {
 			name:  "Empty program",
 			input: "",
 			output: Program{
-				Imports:    []Package{},
+				Imports:    []Import{},
 				Statements: []Statement{}},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 	})
 }
@@ -109,28 +108,31 @@ func TestImportStatements(t *testing.T) {
 			input: `
 use io/fs
 use github.com/google/go-cmp/cmp
-use github.com/tree-sitter/go-tree-sitter as ts`,
+use github.com/tree-sitter/go-tree-sitter as ts
+use github.com/tree-sitter/tree-sitter
+`,
 			output: Program{
-				Imports: []Package{
+				Imports: []Import{
 					{
-						Symbol: checker.Package{
-							Path: "fmt",
-							Name: "fmt",
-						},
+						Path: "fmt",
+						Name: "fmt",
 					},
-					{Symbol: checker.Package{
+					{
 						Path: "io/fs",
 						Name: "fs",
-					}},
-					{Symbol: checker.Package{
+					},
+					{
 						Path: "github.com/google/go-cmp/cmp",
 						Name: "cmp",
-					}},
-					{Symbol: checker.Package{
-						Path:  "github.com/tree-sitter/go-tree-sitter",
-						Name:  "go_tree_sitter",
-						Alias: "ts",
-					}},
+					},
+					{
+						Path: "github.com/tree-sitter/go-tree-sitter",
+						Name: "ts",
+					},
+					{
+						Path: "github.com/tree-sitter/tree-sitter",
+						Name: "tree_sitter",
+					},
 				},
 				Statements: []Statement{},
 			},
@@ -143,7 +145,7 @@ func TestIdentifiers(t *testing.T) {
 		{
 			name:  "referencing undefined variables",
 			input: "count <= 10",
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{
 					Msg: "Undefined: 'count'",
 				},
@@ -155,16 +157,16 @@ func TestIdentifiers(t *testing.T) {
 				let count = 10
 		 		count <= 10`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "count",
 						Value:   NumLiteral{Value: "10"},
-						Type:    checker.NumType,
+						Type:    NumberType{},
 					},
 					BinaryExpression{
-						Left:     Identifier{Name: "count", Type: checker.NumType},
+						Left:     Identifier{Name: "count", Type: NumType},
 						Operator: LessThanOrEqual,
 						Right:    NumLiteral{Value: "10"},
 					},
@@ -186,17 +188,17 @@ func TestWhileLoop(t *testing.T) {
 					count =+ 1
 				}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: true,
 						Name:    "count",
-						Type:    checker.NumType,
+						Type:    NumberType{},
 						Value:   NumLiteral{Value: "0"},
 					},
 					WhileLoop{
 						Condition: BinaryExpression{
-							Left:     Identifier{Name: "count", Type: checker.NumType},
+							Left:     Identifier{Name: "count", Type: NumType},
 							Operator: LessThanOrEqual,
 							Right:    NumLiteral{Value: "9"},
 						},
@@ -216,7 +218,7 @@ func TestWhileLoop(t *testing.T) {
 			input: `
 						while 9 - 7 {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					WhileLoop{
 						Condition: BinaryExpression{
@@ -228,7 +230,7 @@ func TestWhileLoop(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{Msg: "A while loop condition must be a 'Bool' expression"},
 			},
 		},
@@ -243,7 +245,7 @@ func TestIfAndElse(t *testing.T) {
 			name:  "Valid if statement",
 			input: `if true {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -257,7 +259,7 @@ func TestIfAndElse(t *testing.T) {
 			name:  "Invalid condition expression",
 			input: `if 20 - 1 {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BinaryExpression{
@@ -269,7 +271,7 @@ func TestIfAndElse(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{{Msg: "An if condition must be a 'Bool' expression"}},
+			diagnostics: []Diagnostic{{Msg: "An if condition must be a 'Bool' expression"}},
 		},
 		{
 			name: "Valid if-else",
@@ -277,7 +279,7 @@ func TestIfAndElse(t *testing.T) {
 				if true {}
 				else {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -296,7 +298,7 @@ func TestIfAndElse(t *testing.T) {
 				if true {}
 				else if false {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -316,7 +318,7 @@ func TestIfAndElse(t *testing.T) {
 				else if false {}
 				else {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					IfStatement{
 						Condition: BoolLiteral{Value: true},
@@ -344,10 +346,10 @@ func TestForLoops(t *testing.T) {
 			name:  "Valid number range",
 			input: `for i in 1..10 {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					ForLoop{
-						Cursor: Identifier{Name: "i", Type: checker.NumType},
+						Cursor: Identifier{Name: "i", Type: NumType},
 						Iterable: RangeExpression{
 							Start: NumLiteral{Value: "1"},
 							End:   NumLiteral{Value: "10"},
@@ -356,16 +358,16 @@ func TestForLoops(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Iterating over a string",
 			input: `for char in "foobar" {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					ForLoop{
-						Cursor: Identifier{Name: "char", Type: checker.StrType},
+						Cursor: Identifier{Name: "char", Type: StrType},
 						Iterable: StrLiteral{
 							Value: `"foobar"`,
 						},
@@ -373,18 +375,18 @@ func TestForLoops(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Iterating over a list",
 			input: `for num in [1, 2] {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					ForLoop{
-						Cursor: Identifier{Name: "num", Type: checker.NumType},
+						Cursor: Identifier{Name: "num", Type: NumType},
 						Iterable: ListLiteral{
-							Type: checker.ListType{ItemType: checker.NumType},
+							Type: ListType{ItemType: NumType},
 							Items: []Expression{
 								NumLiteral{Value: "1"},
 								NumLiteral{Value: "2"},
@@ -398,7 +400,7 @@ func TestForLoops(t *testing.T) {
 		{
 			name:  "Cannot iterate over a boolean",
 			input: `for wtf in true {}`,
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{
 					Msg: "Cannot iterate over a 'Bool'",
 				},
@@ -417,18 +419,18 @@ func TestInterpolatedStrings(t *testing.T) {
 			let name = "world"
 			"Hello, {{name}}"`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "name",
-						Type:    checker.StrType,
+						Type:    StringType{},
 						Value:   StrLiteral{Value: `"world"`},
 					},
 					InterpolatedStr{
 						Chunks: []Expression{
 							StrLiteral{Value: "Hello, "},
-							Identifier{Name: "name", Type: checker.StrType},
+							Identifier{Name: "name", Type: StrType},
 						},
 					},
 				},
@@ -445,7 +447,7 @@ func TestComments(t *testing.T) {
 			name:  "Single line comment",
 			input: "// this is a comment",
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					Comment{Value: "// this is a comment"},
 				},

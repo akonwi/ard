@@ -2,8 +2,6 @@ package ast
 
 import (
 	"testing"
-
-	"github.com/akonwi/ard/internal/checker"
 )
 
 func TestUnaryExpressions(t *testing.T) {
@@ -12,12 +10,12 @@ func TestUnaryExpressions(t *testing.T) {
 			name:  "Valid negation",
 			input: `let negative_number = -30`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Name:    "negative_number",
 						Mutable: false,
-						Type:    checker.NumType,
+						Type:    NumberType{},
 						Value: UnaryExpression{
 							Operator: Minus,
 							Operand: NumLiteral{
@@ -26,26 +24,7 @@ func TestUnaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid negation",
-			input: `-false`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					UnaryExpression{
-						Operator: Minus,
-						Operand: BoolLiteral{
-							Value: false,
-						}},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '-' operator can only be used on 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -58,7 +37,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid addition",
 			input: `-30 + 20`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Plus,
@@ -74,59 +53,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid addition",
-			input: `30 + "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Plus,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '+' operator can only be used between instances of 'Num'",
-				},
-			},
-		},
-		{
-			name:  "+ operator is only allowed on Num",
-			input: `"foo" + "bar"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Plus,
-						Left: StrLiteral{
-							Value: `"foo"`,
-						},
-						Right: StrLiteral{
-							Value: `"bar"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '+' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid subtraction",
 			input: `30 - 12`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Minus,
@@ -139,36 +72,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid subtraction",
-			input: `30 - "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Minus,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '-' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid division",
 			input: `30 / 6`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Divide,
@@ -181,36 +91,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid division",
-			input: `30 / "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Divide,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '/' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid multiplication",
 			input: `30 * 10`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Multiply,
@@ -223,36 +110,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid multiplication",
-			input: `30 * "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Multiply,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '*' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid modulo",
 			input: `3 % 9`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Modulo,
@@ -265,36 +129,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid modulo",
-			input: `30 % "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Modulo,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '%' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid greater than",
 			input: `30 > 12`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: GreaterThan,
@@ -307,78 +148,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid greater than",
-			input: `30 > "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: GreaterThan,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '>' operator can only be used between instances of 'Num'",
-				},
-			},
-		},
-		{
-			name:  "Valid greater than or equal",
-			input: `30 >= 12`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: GreaterThanOrEqual,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: NumLiteral{
-							Value: `12`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid greater than or equal",
-			input: `30 >= "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: GreaterThanOrEqual,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '>=' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid less than",
 			input: `30 < 12`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThan,
@@ -391,36 +167,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid les than",
-			input: `30 < "f12"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: LessThan,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: StrLiteral{
-							Value: `"f12"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '<' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid less than or equal",
 			input: `30 <= 12`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThanOrEqual,
@@ -433,36 +186,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid less than or equal",
-			input: `30 <= true`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: LessThanOrEqual,
-						Left: NumLiteral{
-							Value: `30`,
-						},
-						Right: BoolLiteral{
-							Value: true,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '<=' operator can only be used between instances of 'Num'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid string equality checks",
 			input: `"Joe" == "Joe"`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -475,36 +205,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid string equality check",
-			input: `"Joe" == true`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Equal,
-						Left: StrLiteral{
-							Value: `"Joe"`,
-						},
-						Right: BoolLiteral{
-							Value: true,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid number equality checks",
 			input: `1 == 1`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -517,36 +224,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid number equality checks",
-			input: `1 == "eleventy"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Equal,
-						Left: NumLiteral{
-							Value: `1`,
-						},
-						Right: StrLiteral{
-							Value: `"eleventy"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid boolean equality checks",
 			input: `true == false`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
@@ -559,30 +243,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid boolean equality checks",
-			input: `true == "eleventy"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Equal,
-						Left: BoolLiteral{
-							Value: true,
-						},
-						Right: StrLiteral{
-							Value: `"eleventy"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '==' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 
 		// Test cases for the '!=' operator
@@ -590,7 +251,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid string inequality checks",
 			input: `"Joe" != "Joe"`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -603,36 +264,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid string inequality check",
-			input: `"Joe" != true`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: StrLiteral{
-							Value: `"Joe"`,
-						},
-						Right: BoolLiteral{
-							Value: true,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid number inequality checks",
 			input: `1 != 1`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -645,36 +283,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid number inequality checks",
-			input: `1 != "eleventy"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: NumLiteral{
-							Value: `1`,
-						},
-						Right: StrLiteral{
-							Value: `"eleventy"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid boolean inequality checks",
 			input: `true != false`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
@@ -687,38 +302,14 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
-		{
-			name:  "Invalid boolean inequality checks",
-			input: `true != "eleventy"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: BoolLiteral{
-							Value: true,
-						},
-						Right: StrLiteral{
-							Value: `"eleventy"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The '!=' operator can only be used between instances of 'Num', 'Str', or 'Bool'",
-				},
-			},
-		},
-
 		// logic operator checks
 		{
 			name:  "Valid use of 'and' operator",
 			input: `true and false`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: And,
@@ -731,36 +322,13 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Ivalid use of 'and' operator",
-			input: `true and "eleventy"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: And,
-						Left: BoolLiteral{
-							Value: true,
-						},
-						Right: StrLiteral{
-							Value: `"eleventy"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The 'and' operator can only be used between instances of 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid use of 'or' operator",
 			input: `true or false`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Or,
@@ -773,30 +341,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Ivalid use of 'or' operator",
-			input: `true or "eleventy"`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					BinaryExpression{
-						Operator: Or,
-						Left: BoolLiteral{
-							Value: true,
-						},
-						Right: StrLiteral{
-							Value: `"eleventy"`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{
-					Msg: "The 'or' operator can only be used between instances of 'Bool'",
-				},
-			},
+			diagnostics: []Diagnostic{},
 		},
 
 		// range operator
@@ -804,7 +349,7 @@ func TestBinaryExpressions(t *testing.T) {
 			name:  "Valid use of range operator",
 			input: "1..10",
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					RangeExpression{
 						Start: NumLiteral{
@@ -816,27 +361,7 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name:  "Invalid use of range operator",
-			input: `"fizz"..10`,
-			output: Program{
-				Imports: []Package{},
-				Statements: []Statement{
-					RangeExpression{
-						Start: StrLiteral{
-							Value: `"fizz"`,
-						},
-						End: NumLiteral{
-							Value: `10`,
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{{
-				Msg: "A range must be between two Num",
-			}},
+			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -849,7 +374,7 @@ func TestParenthesizedExpressions(t *testing.T) {
 			name:  "Valid parenthesized expression",
 			input: `(30 + 20) * 2`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					BinaryExpression{
 						HasPrecedence: false,
@@ -870,12 +395,12 @@ func TestParenthesizedExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Invalid parenthesized expression",
 			input: `30 + (20 * "fizz")`,
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{
 					Msg: "The '*' operator can only be used between instances of 'Num'",
 				},
@@ -892,7 +417,7 @@ func TestMemberAccess(t *testing.T) {
 			name:  "on string literals",
 			input: `"string".size`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					MemberAccess{
 						Target: StrLiteral{
@@ -901,7 +426,7 @@ func TestMemberAccess(t *testing.T) {
 						AccessType: Instance,
 						Member: Identifier{
 							Name: "size",
-							Type: checker.NumType,
+							Type: NumType,
 						},
 					},
 				},

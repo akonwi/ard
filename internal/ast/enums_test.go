@@ -3,8 +3,6 @@ package ast
 import (
 	"fmt"
 	"testing"
-
-	"github.com/akonwi/ard/internal/checker"
 )
 
 var traffic_light_code = `
@@ -14,7 +12,7 @@ enum Color {
 	Yellow
 }`
 
-var traffic_light_enum = checker.EnumType{
+var traffic_light_enum = EnumType{
 	Name: "Color",
 	Variants: []string{
 		"Red",
@@ -29,14 +27,14 @@ func TestEnumDefinitions(t *testing.T) {
 			name:  "Valid basic enum",
 			input: traffic_light_code,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: traffic_light_enum,
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -44,7 +42,7 @@ func TestEnumDefinitions(t *testing.T) {
 }
 
 func TestEnums(t *testing.T) {
-	colorEnum := checker.EnumType{Name: "Color",
+	colorEnum := EnumType{Name: "Color",
 		Variants: []string{"Black", "Grey"},
 	}
 	tests := []test{
@@ -54,7 +52,7 @@ func TestEnums(t *testing.T) {
 				enum Color { Black, Grey }
 				Color::Black`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: colorEnum,
@@ -72,7 +70,7 @@ func TestEnums(t *testing.T) {
 			input: `
 					enum Color { Black, Grey }
 					Color::Blue`,
-			diagnostics: []checker.Diagnostic{{Msg: "'Blue' is not a variant of 'Color' enum"}},
+			diagnostics: []Diagnostic{{Msg: "'Blue' is not a variant of 'Color' enum"}},
 		},
 		{
 			name: "Assigning a variant to a variable",
@@ -80,7 +78,7 @@ func TestEnums(t *testing.T) {
 				enum Color { Black, Grey }
 				let favorite: Color = Color::Black`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: colorEnum,
@@ -88,7 +86,7 @@ func TestEnums(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "favorite",
-						Type:    colorEnum,
+						Type:    CustomType{Name: "Color"},
 						Value: MemberAccess{
 							Target:     Identifier{Name: "Color", Type: colorEnum},
 							AccessType: Static,
@@ -113,7 +111,7 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Red => "Stop",
 					Color::Yellow => "Yield"
 				}`, traffic_light_code),
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{Msg: "Missing case for 'Color::Green'"},
 			},
 		},
@@ -126,7 +124,7 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Yellow => "Yield",
 					Color::Green => 100
 				}`, traffic_light_code),
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{Msg: "Type mismatch: expected Str, got Num"},
 			},
 		},
@@ -140,7 +138,7 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Green => "Go"
 				}`, traffic_light_code),
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
 						Type: traffic_light_enum,
@@ -148,7 +146,7 @@ func TestMatchingOnEnums(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "light",
-						Type:    traffic_light_enum,
+						Type:    CustomType{Name: "Color"},
 						Value: MemberAccess{
 							Target:     Identifier{Name: "Color", Type: traffic_light_enum},
 							AccessType: Static,
@@ -165,7 +163,7 @@ func TestMatchingOnEnums(t *testing.T) {
 									Member:     Identifier{Name: "Red", Type: traffic_light_enum},
 								},
 								Body: []Statement{StrLiteral{Value: `"Stop"`}},
-								Type: checker.StrType,
+								Type: StrType,
 							},
 							{
 								Pattern: MemberAccess{
@@ -174,7 +172,7 @@ func TestMatchingOnEnums(t *testing.T) {
 									Member:     Identifier{Name: "Yellow", Type: traffic_light_enum},
 								},
 								Body: []Statement{StrLiteral{Value: `"Yield"`}},
-								Type: checker.StrType,
+								Type: StrType,
 							},
 							{
 								Pattern: MemberAccess{
@@ -183,7 +181,7 @@ func TestMatchingOnEnums(t *testing.T) {
 									Member:     Identifier{Name: "Green", Type: traffic_light_enum},
 								},
 								Body: []Statement{StrLiteral{Value: `"Go"`}},
-								Type: checker.StrType,
+								Type: StrType,
 							},
 						},
 					},

@@ -2,403 +2,339 @@ package checker
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
+	"github.com/akonwi/ard/internal/ast"
+	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
-type Type interface {
-	String() string
-	GetProperty(name string) Type
-	Equals(other Type) bool
-}
+type DiagnosticKind string
 
-type PrimitiveType struct {
-	Name string
-}
-
-// impl Type for PrimitiveType
-func (p PrimitiveType) String() string {
-	return p.Name
-}
-func (p PrimitiveType) GetProperty(name string) Type {
-	switch p.Name {
-	case "Str":
-		switch name {
-		case "size":
-			return NumType
-		default:
-			return nil
-		}
-	}
-	return nil
-}
-
-func (p PrimitiveType) Equals(other Type) bool {
-	if otherPrimitive, ok := other.(PrimitiveType); ok {
-		return p.Name == otherPrimitive.Name
-	}
-	return false
-}
-
-var (
-	StrType  = PrimitiveType{"Str"}
-	NumType  = PrimitiveType{"Num"}
-	BoolType = PrimitiveType{"Bool"}
-	VoidType = PrimitiveType{"Void"}
+const (
+	Error DiagnosticKind = "error"
+	Warn  DiagnosticKind = "warn"
 )
 
-type FunctionType struct {
-	Name       string
-	Mutates    bool
-	Parameters []Type
-	ReturnType Type
+type Diagnostic struct {
+	Kind    DiagnosticKind
+	Message string
 }
 
-func (f FunctionType) String() string {
-	params := strings.Builder{}
-	for i, param := range f.Parameters {
-		if i > 0 {
-			params.WriteString(", ")
-		}
-		params.WriteString(param.String())
-	}
-	return fmt.Sprintf("(%v) %v", params.String(), f.ReturnType)
+type Program struct {
+	Imports    map[string]Package
+	Statements []Statement
 }
-func (f FunctionType) GetProperty(name string) Type {
-	return nil
-}
-func (f FunctionType) Equals(other Type) bool {
-	if otherFunc, ok := other.(FunctionType); ok {
-		if len(f.Parameters) != len(otherFunc.Parameters) {
-			return false
-		}
-		for i, param := range f.Parameters {
-			if !param.Equals(otherFunc.Parameters[i]) {
-				return false
-			}
-		}
-		return f.ReturnType.Equals(otherFunc.ReturnType)
-	}
-	return false
-}
-func (f FunctionType) GetName() string {
-	return f.Name
-}
-func (f FunctionType) GetType() Type {
-	return f
+type Package struct {
+	Path string
 }
 
-type StructType struct {
-	Name   string
-	Fields map[string]Type
-}
-
-func (s StructType) String() string {
-	return fmt.Sprintf("Struct(%s)", s.Name)
-}
-func (s StructType) GetProperty(name string) Type {
-	if field, ok := s.Fields[name]; ok {
-		return field
-	}
-	return nil
-}
-func (s StructType) Equals(other Type) bool {
-	return s.String() == other.String()
-}
-func (s StructType) GetName() string {
-	return s.Name
-}
-func (s StructType) GetType() Type {
-	return s
-}
-
-type EnumType struct {
-	Name     string
-	Variants []string
-}
-
-func (e EnumType) HasVariant(variant string) bool {
-	for _, v := range e.Variants {
-		if v == variant {
-			return true
-		}
-	}
-	return false
-}
-
-func (e EnumType) FormatVariant(variant string) string {
-	return fmt.Sprintf("%s::%s", e.Name, variant)
-}
-
-func (e EnumType) String() string {
-	return e.Name
-}
-func (e EnumType) GetProperty(name string) Type {
-	return nil
-}
-func (e EnumType) Equals(other Type) bool {
-	return e.String() == other.String()
-}
-func (e EnumType) GetName() string {
-	return e.Name
-}
-func (e EnumType) GetType() Type {
-	return e
-}
-
-type GenericType struct {
-	inner *Type
-	name  string
-}
-
-func (g GenericType) String() string {
-	return fmt.Sprintf("%s?", g.name)
-}
-func (g GenericType) GetType() Type {
-	if g.inner == nil {
-		return g
-	}
-	return *g.inner
-}
-func (g GenericType) Equals(other Type) bool {
-	if g.inner == nil {
-		return true
-	}
-	return (*g.inner).Equals(other)
-}
-func (g GenericType) GetProperty(name string) Type {
-	if g.inner == nil {
-		return nil
-	}
-	return (*g.inner).GetProperty(name)
-}
-func (g *GenericType) Fill(inner Type) {
-	g.inner = &inner
-}
-
-type ListType struct {
-	ItemType Type
-}
-
-func (l ListType) String() string {
-	if l.ItemType == nil {
-		return "[?]"
-	}
-	return fmt.Sprintf("[%s]", l.ItemType)
-}
-func (l ListType) GetProperty(name string) Type {
-	switch name {
-	case "map":
-		outType := GenericType{name: "Out"}
-		return FunctionType{
-			Mutates: false,
-			Name:    "map",
-			Parameters: []Type{
-				FunctionType{
-					Name:       "callback",
-					Parameters: []Type{l.ItemType},
-					ReturnType: outType,
-				},
-			},
-			// List probably needs to use a pointer to the inner type
-			ReturnType: MakeList(outType),
-		}
-	case "pop":
-		// pop is a function that takes no arguments and returns the last item in the list
-		// (Item?) Num
-		return FunctionType{
-			Mutates:    true,
-			Name:       "pop",
-			Parameters: []Type{},
-			ReturnType: l.ItemType,
-		}
-	case "push":
-		// push is a function that takes an item of the same type as the list and returns the new size
-		// () Item?
-		return FunctionType{
-			Mutates:    true,
-			Name:       "push",
-			Parameters: []Type{l.ItemType},
-			ReturnType: NumType,
-		}
-	case "size":
-		return NumType
-	default:
-		return nil
-	}
-}
-func (l ListType) Equals(other Type) bool {
-	if otherList, ok := other.(ListType); ok {
-		// if either list is still open, then they are compatible
-		if l.ItemType == nil || otherList.ItemType == nil {
-			return true
-		}
-		return l.ItemType.Equals(otherList.ItemType)
-	}
-	return false
-}
-func MakeList(itemType Type) ListType {
-	return ListType{ItemType: itemType}
-}
-
-type MapType struct {
-	KeyType   Type
-	ValueType Type
-}
-
-func (m MapType) String() string {
-	value := "?"
-	if m.ValueType != nil {
-		value = m.ValueType.String()
-	}
-	return fmt.Sprintf("{%s:%s}", m.KeyType, value)
-}
-func (m MapType) GetProperty(name string) Type {
-	switch name {
-	case "size":
-		return NumType
-	default:
-		return nil
-	}
-}
-func (m MapType) Equals(other Type) bool {
-	if otherMap, ok := other.(MapType); ok {
-		if !m.KeyType.Equals(otherMap.KeyType) {
-			return false
-		}
-		if m.ValueType == nil || otherMap.ValueType == nil {
-			return true
-		}
-		return m.ValueType.Equals(otherMap.ValueType)
-	}
-	return false
-}
-func MakeMap(valueType Type) MapType {
-	return MapType{KeyType: StrType, ValueType: valueType}
-}
-
-type Symbol interface {
-	GetName() string
+// Expressions produce something, therefore they have a Type
+type Expression interface {
 	GetType() Type
 }
 
-type Variable struct {
-	Name    string
-	Type    Type
-	Mutable bool
+type StrLiteral struct {
+	Value string
 }
 
-func (v Variable) GetName() string {
-	return v.Name
-}
-func (v Variable) GetType() Type {
-	return v.Type
+func (s StrLiteral) GetType() Type {
+	return Str{}
 }
 
-type Package struct {
+type NumLiteral struct {
+	Value int
+}
+
+func (n NumLiteral) GetType() Type {
+	return Num{}
+}
+
+type BoolLiteral struct {
+	Value bool
+}
+
+func (b BoolLiteral) GetType() Type {
+	return Bool{}
+}
+
+type Negation struct {
+	Value Expression
+}
+
+func (n Negation) GetType() Type {
+	return Num{}
+}
+
+type Not struct {
+	Value Expression
+}
+
+func (n Not) GetType() Type {
+	return Bool{}
+}
+
+type BinaryOperator string
+
+const (
+	Add                BinaryOperator = "+"
+	Sub                               = "-"
+	Div                               = "/"
+	Mul                               = "*"
+	Mod                               = "%"
+	Equal                             = "=="
+	NotEqual                          = "!="
+	GreaterThan                       = ">"
+	GreaterThanOrEqual                = ">="
+	LessThan                          = "<"
+	LessThanOrEqual                   = "<="
+	And                               = "and"
+	Or                                = "or"
+)
+
+type BinaryExpr struct {
+	Op    BinaryOperator
+	Left  Expression
+	Right Expression
+}
+
+func (b BinaryExpr) GetType() Type {
+	return b.Left.GetType()
+}
+
+// Statements don't produce anything
+type Statement interface{}
+
+type VariableBinding struct {
 	Name  string
-	Path  string
-	Alias string
+	Value Expression
 }
 
-func (p Package) String() string {
-	return p.Name
+type VariableAssignment struct {
+	Name  string
+	Value Expression
 }
-func (p Package) GetName() string {
-	if p.Alias != "" {
-		return p.Alias
+
+// tree-sitter uses 0 based positioning
+func startPointString(node *ts.Node) string {
+	pos := node.StartPosition()
+	return fmt.Sprintf("[%d:%d]", pos.Row+1, pos.Column+1)
+}
+
+type checker struct {
+	diagnostics []Diagnostic
+	imports     map[string]Package
+	scope       scope
+}
+
+func (c *checker) addDiagnostic(d Diagnostic) {
+	c.diagnostics = append(c.diagnostics, d)
+}
+
+func Check(program ast.Program) (Program, []Diagnostic) {
+	checker := checker{
+		diagnostics: []Diagnostic{},
+		imports:     map[string]Package{},
+		scope:       NewScope(),
 	}
-	return p.Name
-}
-func (p Package) GetType() Type {
-	return nil
-}
-func (p Package) GetSymbol(name string) Symbol {
-	if p.Path == "std/io" {
-		return std_io[name]
+	statements := []Statement{}
+
+	for _, imp := range program.Imports {
+		if _, ok := checker.imports[imp.Name]; !ok {
+			checker.imports[imp.Name] = Package{Path: imp.Path}
+		} else {
+			checker.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Duplicate package name: %s", startPointString(imp.TSNode), imp.Name),
+			})
+		}
 	}
-	return nil
-}
 
-type ScopeOptions struct {
-	IsTop bool
-}
-
-type Scope struct {
-	parent   *Scope
-	symbols  map[string]Symbol
-	structs  map[string]StructType
-	packages map[string]Package
-}
-
-func (s Scope) GetParent() *Scope {
-	return s.parent
-}
-func NewScope(parent *Scope, options ScopeOptions) Scope {
-	scope := Scope{
-		parent:  parent,
-		symbols: make(map[string]Symbol),
-		structs: make(map[string]StructType),
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case ast.StrLiteral:
+			expr := checker.checkExpression(s)
+			statements = append(statements, expr)
+		case ast.NumLiteral:
+			expr := checker.checkExpression(s)
+			statements = append(statements, expr)
+		case ast.BoolLiteral:
+			expr := checker.checkExpression(s)
+			statements = append(statements, expr)
+		case ast.UnaryExpression:
+			expr := checker.checkExpression(s)
+			statements = append(statements, expr)
+		case ast.VariableDeclaration:
+			value := checker.checkExpression(s.Value)
+			if s.Type != nil {
+				declared := resolveDeclaredType(s.Type)
+				if !declared.Is(value.GetType()) {
+					checker.addDiagnostic(Diagnostic{
+						Kind:    Error,
+						Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), declared, value.GetType()),
+					})
+				}
+			}
+			statements = append(statements, VariableBinding{Name: s.Name, Value: value})
+			checker.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
+		case ast.VariableAssignment:
+			variable, ok := checker.scope.findVariable(s.Name)
+			if !ok {
+				checker.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s Undefined: %s", startPointString(s.GetTSNode()), s.Name),
+				})
+				continue
+			}
+			if !variable.mut {
+				checker.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s Immutable variable: %s", startPointString(s.GetTSNode()), s.Name),
+				})
+				continue
+			}
+			value := checker.checkExpression(s.Value)
+			if !variable._type.Is(value.GetType()) {
+				checker.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), variable._type, s.Value.GetType()),
+				})
+				continue
+			}
+			statements = append(statements, VariableAssignment{Name: s.Name, Value: value})
+		case ast.BinaryExpression:
+			expr := checker.checkExpression(s)
+			statements = append(statements, expr)
+		default:
+			panic(fmt.Sprintf("Unhandled statement: %T", s))
+		}
 	}
-	if options.IsTop {
-		scope.Declare(FunctionType{
-			Name: "print",
-			Parameters: []Type{
-				StrType,
-			},
-			ReturnType: VoidType,
-		})
-	}
-	return scope
+
+	return Program{
+		Imports:    checker.imports,
+		Statements: statements,
+	}, checker.diagnostics
 }
 
-func (s *Scope) Declare(sym Symbol) error {
-	if existing, ok := s.symbols[sym.GetName()]; ok {
-		return fmt.Errorf("symbol %s already declared as %v", existing.GetName(), existing.GetType())
+func (c *checker) checkExpression(expr ast.Expression) Expression {
+	switch e := expr.(type) {
+	case ast.StrLiteral:
+		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
+	case ast.NumLiteral:
+		value, err := strconv.Atoi(e.Value)
+		if err != nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Invalid number: %s", startPointString(e.TSNode), e.Value),
+			})
+			return nil
+		}
+		return NumLiteral{Value: value}
+	case ast.BoolLiteral:
+		return BoolLiteral{Value: e.Value}
+	case ast.UnaryExpression:
+		expr := c.checkExpression(e.Operand)
+		switch e.Operator {
+		case ast.Minus:
+			if !expr.GetType().Is(Num{}) {
+				c.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s The '-' operator can only be used on numbers", startPointString(e.Operand.GetTSNode())),
+				})
+				return nil
+			}
+			return Negation{Value: expr}
+		case ast.Bang:
+			if !expr.GetType().Is(Bool{}) {
+				c.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s The '!' operator can only be used on booleans", startPointString(e.Operand.GetTSNode())),
+				})
+				return nil
+			}
+			return Not{Value: expr}
+		}
+		panic(fmt.Sprintf("Unhandled unary operator: %d", e.Operator))
+	case ast.BinaryExpression:
+		left := c.checkExpression(e.Left)
+		right := c.checkExpression(e.Right)
+		operator := c.resolveBinaryOperator(e.Operator)
+
+		diagnostic := Diagnostic{
+			Kind: Error,
+			Message: fmt.Sprintf(
+				"%s Invalid operation: %s %s %s",
+				startPointString(e.GetTSNode()),
+				left.GetType(),
+				operator,
+				right.GetType()),
+		}
+		switch operator {
+		case And, Or:
+			if !left.GetType().Is(Bool{}) || !right.GetType().Is(Bool{}) {
+				c.addDiagnostic(diagnostic)
+				return nil
+			}
+		case Equal, NotEqual:
+			if (left.GetType() != Num{}) && (left.GetType() != Bool{}) && (left.GetType() != Str{}) {
+				c.addDiagnostic(diagnostic)
+				return nil
+			}
+		default:
+			if !left.GetType().Is(Num{}) || !right.GetType().Is(Num{}) {
+				c.addDiagnostic(diagnostic)
+				return nil
+			}
+		}
+
+		return BinaryExpr{Op: operator, Left: left, Right: right}
+	default:
+		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
-	s.symbols[sym.GetName()] = sym
-	return nil
 }
 
-func (s *Scope) Lookup(name string) Symbol {
-	if sym, ok := s.symbols[name]; ok {
-		return sym
-	}
-	if s.parent != nil {
-		return s.parent.Lookup(name)
-	}
-	return nil
-}
-
-type Diagnostic struct {
-	Msg   string
-	Range tree_sitter.Range
-}
-
-// tree-sitter uses 0-based indexing, so make this human friendly when it's time to show it to humans
-// start := Position{
-// 	Line:   node.StartPosition().Row + 1,
-// 	Column: node.StartByte() + 1,
-// }
-// end := Position{
-// 	Line:   node.EndPosition().Row + 1,
-// 	Column: node.EndPosition().Column,
-// }
-
-func MakeError(msg string, node *tree_sitter.Node) Diagnostic {
-	return Diagnostic{
-		Msg:   msg,
-		Range: node.Range(),
+func resolveDeclaredType(t ast.DeclaredType) Type {
+	switch t.(type) {
+	case ast.StringType:
+		return Str{}
+	case ast.NumberType:
+		return Num{}
+	case ast.BooleanType:
+		return Bool{}
+	default:
+		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}
 }
 
-var std_io = map[string]Symbol{
-	"print": FunctionType{
-		Name: "print",
-		Parameters: []Type{
-			StrType,
-		},
-		ReturnType: VoidType,
-	},
+func (c *checker) resolveBinaryOperator(op ast.Operator) BinaryOperator {
+	switch op {
+	case ast.Plus:
+		return Add
+	case ast.Minus:
+		return Sub
+	case ast.Multiply:
+		return Mul
+	case ast.Divide:
+		return Div
+	case ast.Modulo:
+		return Mod
+	case ast.Equal:
+		return Equal
+	case ast.NotEqual:
+		return NotEqual
+	case ast.GreaterThan:
+		return GreaterThan
+	case ast.GreaterThanOrEqual:
+		return GreaterThanOrEqual
+	case ast.LessThan:
+		return LessThan
+	case ast.LessThanOrEqual:
+		return LessThanOrEqual
+	case ast.And:
+		return And
+	case ast.Or:
+		return Or
+	default:
+		panic(fmt.Sprintf("Unsupported binary operator: %d", op))
+	}
 }

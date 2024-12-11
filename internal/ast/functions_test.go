@@ -2,8 +2,6 @@ package ast
 
 import (
 	"testing"
-
-	"github.com/akonwi/ard/internal/checker"
 )
 
 func TestFunctionDeclaration(t *testing.T) {
@@ -12,28 +10,28 @@ func TestFunctionDeclaration(t *testing.T) {
 			name:  "Empty function",
 			input: `fn empty() {}`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name:       "empty",
 						Parameters: []Parameter{},
-						ReturnType: checker.VoidType,
+						ReturnType: VoidType,
 						Body:       []Statement{},
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Inferred function return type",
 			input: `fn get_msg() { "Hello, world!" }`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name:       "get_msg",
 						Parameters: []Parameter{},
-						ReturnType: checker.StrType,
+						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{
 								Value: `"Hello, world!"`,
@@ -42,23 +40,23 @@ func TestFunctionDeclaration(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Function with a parameter and declared return type",
 			input: `fn greet(person: Str) Str { "hello" }`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{
 								Name: "person",
-								Type: checker.StrType,
+								Type: StrType,
 							},
 						},
-						ReturnType: checker.StrType,
+						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"hello"`},
 						},
@@ -69,7 +67,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function return must match declared return type",
 			input: `fn greet(person: Str) Str { }`,
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{
 					Msg: "Type mismatch: expected Str, got Void",
 				},
@@ -79,21 +77,21 @@ func TestFunctionDeclaration(t *testing.T) {
 			name:  "Function with two parameters",
 			input: `fn add(x: Num, y: Num) Num { 10 }`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
 							{
 								Name: "x",
-								Type: checker.NumType,
+								Type: NumType,
 							},
 							{
 								Name: "y",
-								Type: checker.NumType,
+								Type: NumType,
 							},
 						},
-						ReturnType: checker.NumType,
+						ReturnType: NumType,
 						Body: []Statement{
 							NumLiteral{Value: "10"},
 						},
@@ -107,25 +105,25 @@ func TestFunctionDeclaration(t *testing.T) {
 }
 
 func TestFunctionCalls(t *testing.T) {
-	get_name := checker.FunctionType{
+	get_name := FunctionType{
 		Name:       "get_name",
 		Mutates:    false,
-		Parameters: []checker.Type{},
-		ReturnType: checker.StrType,
+		Parameters: []Type{},
+		ReturnType: StrType,
 	}
-	greet := checker.FunctionType{
+	greet := FunctionType{
 		Name:       "greet",
 		Mutates:    false,
-		Parameters: []checker.Type{checker.StrType},
-		ReturnType: checker.StrType,
+		Parameters: []Type{StrType},
+		ReturnType: StrType,
 	}
-	add := checker.FunctionType{
+	add := FunctionType{
 		Name: "add",
-		Parameters: []checker.Type{
-			checker.NumType,
-			checker.NumType,
+		Parameters: []Type{
+			NumType,
+			NumType,
 		},
-		ReturnType: checker.NumType,
+		ReturnType: NumType,
 	}
 
 	tests := []test{
@@ -135,7 +133,7 @@ func TestFunctionCalls(t *testing.T) {
 				fn get_name() Str { "name" }
 				get_name()`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name:       "get_name",
@@ -150,7 +148,7 @@ func TestFunctionCalls(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name: "Providing arguments when none are expected",
@@ -158,7 +156,7 @@ func TestFunctionCalls(t *testing.T) {
 				fn get_name() Str { "name" }
 				get_name("bo")
 			`,
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{Msg: "Expected 0 arguments, got 1"},
 			},
 		},
@@ -168,12 +166,12 @@ func TestFunctionCalls(t *testing.T) {
 				fn greet(name: Str) Str { "hello" }
 				greet("Alice")`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: greet.Name,
 						Parameters: []Parameter{
-							{Name: "name", Type: checker.StrType},
+							{Name: "name", Type: StrType},
 						},
 						ReturnType: greet.ReturnType,
 						Body:       []Statement{StrLiteral{Value: `"hello"`}},
@@ -187,7 +185,7 @@ func TestFunctionCalls(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name: "Valid function call with two arguments",
@@ -195,20 +193,20 @@ func TestFunctionCalls(t *testing.T) {
 				fn add(x: Num, y: Num) Num { x + y }
 				add(1, 2)`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
 						Name: add.Name,
 						Parameters: []Parameter{
-							{Name: "x", Type: checker.NumType},
-							{Name: "y", Type: checker.NumType},
+							{Name: "x", Type: NumType},
+							{Name: "y", Type: NumType},
 						},
 						ReturnType: add.ReturnType,
 						Body: []Statement{
 							BinaryExpression{
-								Left:     Identifier{Name: "x", Type: checker.NumType},
+								Left:     Identifier{Name: "x", Type: NumType},
 								Operator: Plus,
-								Right:    Identifier{Name: "y", Type: checker.NumType},
+								Right:    Identifier{Name: "y", Type: NumType},
 							},
 						},
 					},
@@ -222,14 +220,14 @@ func TestFunctionCalls(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []Diagnostic{},
 		},
 		{
 			name: "Wrong argument type",
 			input: `
 				fn add(x: Num, y: Num) Num { x + y }
 				add(1, "two")`,
-			diagnostics: []checker.Diagnostic{
+			diagnostics: []Diagnostic{
 				{
 					Msg: "Type mismatch: expected Num, got Str",
 				},
@@ -246,11 +244,11 @@ func TestAnonymousFunctions(t *testing.T) {
 			name:  "Anonymous function",
 			input: `() { "Hello, world!" }`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{},
-						ReturnType: checker.StrType,
+						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"Hello, world!"`},
 						},
@@ -262,13 +260,13 @@ func TestAnonymousFunctions(t *testing.T) {
 			name:  "Anonymous function with a parameter",
 			input: `(name: Str) { "Hello, name!" }`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: checker.StrType},
+							{Name: "name", Type: StrType},
 						},
-						ReturnType: checker.StrType,
+						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"Hello, name!"`},
 						},
@@ -280,13 +278,13 @@ func TestAnonymousFunctions(t *testing.T) {
 			name:  "Anonymous function with a parameter",
 			input: `(name: Str) { "Hello, name!" }`,
 			output: Program{
-				Imports: []Package{},
+				Imports: []Import{},
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: checker.StrType},
+							{Name: "name", Type: StrType},
 						},
-						ReturnType: checker.StrType,
+						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"Hello, name!"`},
 						},

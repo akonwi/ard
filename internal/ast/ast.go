@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/akonwi/ard/internal/checker"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -18,7 +17,7 @@ type Statement interface {
 // expressions produce values
 type Expression interface {
 	Statement
-	GetType() checker.Type
+	GetType() Type
 }
 
 // the base struct for all AST nodes
@@ -30,22 +29,19 @@ func (b BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
 }
 
-type Package struct {
+type Import struct {
 	BaseNode
-	Symbol checker.Package
+	Path string
+	Name string
 }
 
-func (p Package) String() string {
-	if p.Symbol.Alias != "" {
-		return p.Symbol.Alias
-	} else {
-		return p.Symbol.Name
-	}
+func (p Import) String() string {
+	return p.Name
 }
 
 type Program struct {
 	BaseNode
-	Imports    []Package
+	Imports    []Import
 	Statements []Statement
 }
 
@@ -63,7 +59,72 @@ type VariableDeclaration struct {
 	Name    string
 	Mutable bool
 	Value   Expression
-	Type    checker.Type // the declared type
+	Type    DeclaredType
+}
+
+type DeclaredType interface {
+	GetTSNode() *tree_sitter.Node
+	GetName() string
+}
+
+type Void struct {
+	BaseNode
+}
+
+func (v Void) GetName() string {
+	return "Void"
+}
+
+type StringType struct {
+	BaseNode
+}
+
+func (s StringType) GetName() string {
+	return "String"
+}
+
+type NumberType struct {
+	BaseNode
+}
+
+func (s NumberType) GetName() string {
+	return "Number"
+}
+
+type BooleanType struct {
+	BaseNode
+}
+
+func (s BooleanType) GetName() string {
+	return "Boolean"
+}
+
+type List struct {
+	BaseNode
+	Element DeclaredType
+}
+
+func (s List) GetName() string {
+	return "List"
+}
+
+type Map struct {
+	BaseNode
+	Key   DeclaredType
+	Value DeclaredType
+}
+
+func (s Map) GetName() string {
+	return "Map"
+}
+
+type CustomType struct {
+	BaseNode
+	Name string
+}
+
+func (u CustomType) GetName() string {
+	return u.Name
 }
 
 func (v VariableDeclaration) String() string {
@@ -89,7 +150,7 @@ func (v VariableAssignment) String() string {
 type Parameter struct {
 	BaseNode
 	Name string
-	Type checker.Type
+	Type Type
 }
 
 func (p Parameter) String() string {
@@ -100,9 +161,9 @@ type FunctionDeclaration struct {
 	BaseNode
 	Name       string
 	Parameters []Parameter
-	ReturnType checker.Type
+	ReturnType Type
 	Body       []Statement
-	Type       checker.FunctionType
+	Type       FunctionType
 }
 
 func (f FunctionDeclaration) String() string {
@@ -112,19 +173,19 @@ func (f FunctionDeclaration) String() string {
 type AnonymousFunction struct {
 	BaseNode
 	Parameters []Parameter
-	ReturnType checker.Type
+	ReturnType Type
 	Body       []Statement
 }
 
 func (a AnonymousFunction) String() string {
 	return fmt.Sprintf("AnonymousFunction(%s)", a.GetType())
 }
-func (a AnonymousFunction) GetType() checker.Type {
-	parameterTypes := make([]checker.Type, len(a.Parameters))
+func (a AnonymousFunction) GetType() Type {
+	parameterTypes := make([]Type, len(a.Parameters))
 	for i, param := range a.Parameters {
 		parameterTypes[i] = param.Type
 	}
-	return checker.FunctionType{
+	return FunctionType{
 		Mutates:    false,
 		Parameters: parameterTypes,
 		ReturnType: a.ReturnType,
@@ -133,7 +194,7 @@ func (a AnonymousFunction) GetType() checker.Type {
 
 type StructDefinition struct {
 	BaseNode
-	Type checker.StructType
+	Type StructType
 }
 
 func (s StructDefinition) String() string {
@@ -147,20 +208,20 @@ type StructValue struct {
 
 type StructInstance struct {
 	BaseNode
-	Type       checker.StructType
+	Type       StructType
 	Properties []StructValue
 }
 
 func (s StructInstance) String() string {
 	return fmt.Sprintf("StructInstance(%s)", s.Type.Name)
 }
-func (s StructInstance) GetType() checker.Type {
+func (s StructInstance) GetType() Type {
 	return s.Type
 }
 
 type EnumDefinition struct {
 	BaseNode
-	Type checker.EnumType
+	Type EnumType
 }
 
 func (e EnumDefinition) String() string {
@@ -203,13 +264,13 @@ type FunctionCall struct {
 	BaseNode
 	Name string
 	Args []Expression
-	Type checker.FunctionType
+	Type FunctionType
 }
 
 func (f FunctionCall) String() string {
 	return fmt.Sprintf("FunctionCall(%s)", f.Name)
 }
-func (f FunctionCall) GetType() checker.Type {
+func (f FunctionCall) GetType() Type {
 	return f.Type.ReturnType
 }
 
@@ -234,7 +295,7 @@ func (m MemberAccess) String() string {
 	}
 	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target, operator, m.Member)
 }
-func (m MemberAccess) GetType() checker.Type {
+func (m MemberAccess) GetType() Type {
 	return m.Member.GetType()
 }
 
@@ -272,7 +333,7 @@ type UnaryExpression struct {
 func (u UnaryExpression) String() string {
 	return fmt.Sprintf("(%v %v)", u.Operator, u.Operand)
 }
-func (u UnaryExpression) GetType() checker.Type {
+func (u UnaryExpression) GetType() Type {
 	return u.Operand.GetType()
 }
 
@@ -286,14 +347,14 @@ type BinaryExpression struct {
 func (b BinaryExpression) String() string {
 	return fmt.Sprintf("%v %v %v", b.Left, b.Operator, b.Right)
 }
-func (b BinaryExpression) GetType() checker.Type {
+func (b BinaryExpression) GetType() Type {
 	switch b.Operator {
 	case Plus, Minus, Multiply, Divide, Modulo:
-		return checker.NumType
+		return NumType
 	case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, Equal, NotEqual, And, Or:
-		return checker.BoolType
+		return BoolType
 	case Range:
-		return checker.NumType
+		return NumType
 	default:
 		return nil
 	}
@@ -307,35 +368,35 @@ type RangeExpression struct {
 func (b RangeExpression) String() string {
 	return "RangeExpression"
 }
-func (b RangeExpression) GetType() checker.Type {
-	return checker.NumType
+func (b RangeExpression) GetType() Type {
+	return NumType
 }
 
 type Identifier struct {
 	BaseNode
 	Name   string
-	Type   checker.Type
-	symbol checker.Symbol
+	Type   Type
+	symbol Symbol
 }
 
 func (i Identifier) String() string {
 	return fmt.Sprintf("Identifier(%s)", i.Name)
 }
-func (i Identifier) GetType() checker.Type {
+func (i Identifier) GetType() Type {
 	return i.Type
 }
 
 type StrLiteral struct {
 	BaseNode
 	Value string
-	Type  checker.Type
+	Type  Type
 }
 
 func (s StrLiteral) String() string {
 	return s.Value
 }
-func (s StrLiteral) GetType() checker.Type {
-	return checker.StrType
+func (s StrLiteral) GetType() Type {
+	return StrType
 }
 
 type InterpolatedStr struct {
@@ -346,47 +407,47 @@ type InterpolatedStr struct {
 func (i InterpolatedStr) String() string {
 	return "InterpolatedStr"
 }
-func (i InterpolatedStr) GetType() checker.Type {
-	return checker.StrType
+func (i InterpolatedStr) GetType() Type {
+	return StrType
 }
 
 type NumLiteral struct {
 	BaseNode
 	Value string
-	Type  checker.Type
+	Type  Type
 }
 
 func (n NumLiteral) String() string {
 	return n.Value
 }
-func (n NumLiteral) GetType() checker.Type {
-	return checker.NumType
+func (n NumLiteral) GetType() Type {
+	return NumType
 }
 
 type BoolLiteral struct {
 	BaseNode
 	Value bool
-	Type  checker.Type
+	Type  Type
 }
 
 // impl interfaces
 func (b BoolLiteral) String() string {
 	return fmt.Sprintf("%t", b.Value)
 }
-func (b BoolLiteral) GetType() checker.Type {
-	return checker.BoolType
+func (b BoolLiteral) GetType() Type {
+	return BoolType
 }
 
 type ListLiteral struct {
 	BaseNode
-	Type  checker.Type
+	Type  Type
 	Items []Expression
 }
 
 func (l ListLiteral) String() string {
 	return "ListLiteral"
 }
-func (l ListLiteral) GetType() checker.Type {
+func (l ListLiteral) GetType() Type {
 	return l.Type
 }
 
@@ -398,13 +459,13 @@ type MapEntry struct {
 type MapLiteral struct {
 	BaseNode
 	Entries []MapEntry
-	Type    checker.Type
+	Type    Type
 }
 
 func (m MapLiteral) String() string {
 	return fmt.Sprintf("MapLiteral { %v }", m.Entries)
 }
-func (m MapLiteral) GetType() checker.Type {
+func (m MapLiteral) GetType() Type {
 	return m.Type
 }
 
@@ -417,7 +478,7 @@ type MatchExpression struct {
 func (m MatchExpression) String() string {
 	return fmt.Sprintf("MatchExpression(%s)", m.Subject)
 }
-func (m MatchExpression) GetType() checker.Type {
+func (m MatchExpression) GetType() Type {
 	return m.Cases[0].GetType()
 }
 
@@ -425,29 +486,29 @@ type MatchCase struct {
 	BaseNode
 	Pattern Expression
 	Body    []Statement
-	Type    checker.Type
+	Type    Type
 }
 
 func (m MatchCase) String() string {
 	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
 }
-func (m MatchCase) GetType() checker.Type {
+func (m MatchCase) GetType() Type {
 	return m.Type
 }
 
 type Parser struct {
 	sourceCode []byte
 	tree       *tree_sitter.Tree
-	scope      *checker.Scope
-	typeErrors []checker.Diagnostic
+	scope      *Scope
+	typeErrors []Diagnostic
 }
 
-func (p *Parser) GetDiagnostics() []checker.Diagnostic {
+func (p *Parser) GetDiagnostics() []Diagnostic {
 	return p.typeErrors
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
-	scope := checker.NewScope(nil, checker.ScopeOptions{IsTop: true})
+	scope := NewScope(nil, ScopeOptions{IsTop: true})
 	return &Parser{sourceCode: sourceCode, tree: tree, scope: &scope}
 }
 
@@ -477,40 +538,40 @@ func (p *Parser) mustChildren(node *tree_sitter.Node, name string) []tree_sitter
 	return children
 }
 
-func (p *Parser) pushScope() *checker.Scope {
-	new := checker.NewScope(p.scope, checker.ScopeOptions{})
+func (p *Parser) pushScope() *Scope {
+	new := NewScope(p.scope, ScopeOptions{})
 	p.scope = &new
 	return p.scope
 }
 
-func (p *Parser) popScope() *checker.Scope {
+func (p *Parser) popScope() *Scope {
 	p.scope = p.scope.GetParent()
 	return p.scope
 }
 
-func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual checker.Type) {
+func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual Type) {
 	msg := fmt.Sprintf("Type mismatch: expected %s, got %s", expected, actual)
-	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 }
 
-func (p *Parser) unaryOperatorError(node *tree_sitter.Node, expected checker.Type) {
+func (p *Parser) unaryOperatorError(node *tree_sitter.Node, expected Type) {
 	msg := fmt.Sprintf("The '%v' operator can only be used on '%v'", p.text(node), expected)
-	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 }
 
-func (p *Parser) binaryOperatorError(node *tree_sitter.Node, operator string, expected checker.Type) {
+func (p *Parser) binaryOperatorError(node *tree_sitter.Node, operator string, expected Type) {
 	msg := fmt.Sprintf("The '%v' operator can only be used between instances of '%v'", operator, expected)
-	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 }
 
 func (p *Parser) equalityOperatorError(node *tree_sitter.Node, operator string) {
 	msg := fmt.Sprintf("The '%v' operator can only be used between instances of 'Num', 'Str', or 'Bool'", operator)
-	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 }
 
 func (p *Parser) logicalOperatorError(node *tree_sitter.Node, operator string) {
 	msg := fmt.Sprintf("The '%v' operator can only be used between instances of 'Bool'", operator)
-	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 }
 
 // i might regret this
@@ -534,7 +595,7 @@ func (p *Parser) Parse() (Program, error) {
 	rootNode := p.tree.RootNode()
 	program := &Program{
 		BaseNode:   BaseNode{TSNode: rootNode},
-		Imports:    []Package{},
+		Imports:    []Import{},
 		Statements: []Statement{},
 	}
 
@@ -560,10 +621,10 @@ func (p *Parser) Parse() (Program, error) {
 	return *program, nil
 }
 
-func (p *Parser) parseImport(node *tree_sitter.Node) (Package, error) {
+func (p *Parser) parseImport(node *tree_sitter.Node) (Import, error) {
 	err := p.sweepForError(node, 2)
 	if err != nil {
-		return Package{}, err
+		return Import{}, err
 	}
 
 	pathNode := p.mustChild(node, "path")
@@ -572,17 +633,18 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Package, error) {
 	path := p.text(pathNode)
 	var name, alias string
 	if aliasNode != nil {
-		alias = p.text(aliasNode)
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) == 1 {
-		name = parts[0]
+		name = p.text(aliasNode)
 	} else {
-		name = parts[len(parts)-1]
+		parts := strings.Split(path, "/")
+		if len(parts) == 1 {
+			name = parts[0]
+		} else {
+			name = parts[len(parts)-1]
+		}
+		name = strings.ReplaceAll(name, "-", "_")
 	}
-	name = strings.ReplaceAll(name, "-", "_")
 
-	symbol := checker.Package{
+	symbol := Package{
 		Path:  path,
 		Name:  name,
 		Alias: alias,
@@ -590,9 +652,10 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Package, error) {
 
 	p.scope.Declare(symbol)
 
-	return Package{
+	return Import{
 		BaseNode: BaseNode{TSNode: node},
-		Symbol:   symbol,
+		Name:     name,
+		Path:     path,
 	}, nil
 }
 
@@ -640,51 +703,51 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (VariableDeclaration,
 		return VariableDeclaration{}, err
 	}
 
-	inferredType := value.GetType()
+	// inferredType := value.GetType()
 
-	if declaredType != nil {
-		if !declaredType.Equals(inferredType) {
-			p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
-		}
-	} else if inferredType == nil {
-		panic(fmt.Errorf("variable inferred type and declared type are nil"))
-	} else {
-		if lt, ok := inferredType.(checker.ListType); ok {
-			if lt.ItemType == nil {
-				msg := fmt.Sprintf("Empty lists need a declared type")
-				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
-			}
-		}
+	// if declaredType != nil {
+	// 	if !declaredType.Equals(inferredType) {
+	// 		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
+	// 	}
+	// } else if inferredType == nil {
+	// 	panic(fmt.Errorf("variable inferred type and declared type are nil"))
+	// } else {
+	// 	if lt, ok := inferredType.(ListType); ok {
+	// 		if lt.ItemType == nil {
+	// 			msg := fmt.Sprintf("Empty lists need a declared type")
+	// 			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
+	// 		}
+	// 	}
 
-		if mt, ok := inferredType.(checker.MapType); ok {
-			if mt.KeyType == nil || mt.ValueType == nil {
-				msg := fmt.Sprintf("Empty maps need a declared type")
-				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
-			}
-		}
-	}
+	// 	if mt, ok := inferredType.(MapType); ok {
+	// 		if mt.KeyType == nil || mt.ValueType == nil {
+	// 			msg := fmt.Sprintf("Empty maps need a declared type")
+	// 			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
+	// 		}
+	// 	}
+	// }
 
-	symbolType := declaredType
-	if declaredType == nil {
-		symbolType = inferredType
-	}
-	p.scope.Declare(checker.Variable{
-		Mutable: isMutable,
-		Name:    name,
-		Type:    symbolType,
-	})
+	// symbolType := declaredType
+	// if declaredType == nil {
+	// 	symbolType = inferredType
+	// }
+	// p.scope.Declare(Variable{
+	// 	Mutable: isMutable,
+	// 	Name:    name,
+	// 	Type:    symbolType,
+	// })
 
 	return VariableDeclaration{
 		BaseNode: BaseNode{TSNode: node},
 		Mutable:  isMutable,
 		Name:     name,
 		Value:    value,
-		Type:     symbolType,
+		Type:     declaredType,
 	}, nil
 }
 
 // use for resolving explicit type declarations
-func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
+func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 	if node == nil {
 		return nil
 	}
@@ -695,33 +758,28 @@ func (p *Parser) resolveType(node *tree_sitter.Node) checker.Type {
 			text := p.text(child)
 			switch text {
 			case "Str":
-				return checker.StrType
+				return StringType{BaseNode: BaseNode{TSNode: child}}
 			case "Num":
-				return checker.NumType
+				return NumberType{BaseNode: BaseNode{TSNode: child}}
 			case "Bool":
-				return checker.BoolType
+				return BooleanType{BaseNode: BaseNode{TSNode: child}}
 			default:
 				panic(fmt.Errorf("Unresolved primitive type: %s", text))
 			}
 		}
 	case "list_type":
-		element_typeNode := child.ChildByFieldName("element_type")
-		return &checker.ListType{ItemType: p.resolveType(element_typeNode)}
+		element_typeNode := p.mustChild(child, "element_type")
+		return List{BaseNode: BaseNode{TSNode: child}, Element: p.resolveType(element_typeNode)}
 	case "map_type":
-		valueNode := child.ChildByFieldName("value")
-		return checker.MapType{
-			KeyType:   checker.StrType,
-			ValueType: p.resolveType(valueNode),
+		valueNode := p.mustChild(child, "value")
+		return Map{
+			Key:   StringType{BaseNode: BaseNode{TSNode: child}},
+			Value: p.resolveType(valueNode),
 		}
 	case "void":
-		return checker.VoidType
+		return Void{BaseNode: BaseNode{TSNode: child}}
 	case "identifier":
-		identifier := p.text(child)
-		symbol := p.scope.Lookup(identifier)
-		if symbol == nil {
-			panic(fmt.Sprintf("Undefined: '%s'", identifier))
-		}
-		return symbol.GetType()
+		return CustomType{BaseNode: BaseNode{TSNode: child}, Name: p.text(child)}
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}
@@ -734,45 +792,27 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 
 	name := p.text(nameNode)
 	operator := resolveOperator(operatorNode)
-	symbol := p.scope.Lookup(name)
 
 	value, err := p.parseExpression(valueNode)
 	if err != nil {
 		return VariableAssignment{}, err
 	}
 
-	if symbol == nil {
-		msg := fmt.Sprintf("Undefined: '%s'", name)
-		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
-		return VariableAssignment{Name: name, Operator: operator, Value: value}, nil
-	}
-
-	variable, ok := symbol.(checker.Variable)
-	if !ok {
-		msg := fmt.Sprintf("'%s' is not a variable", name)
-		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
-		return VariableAssignment{}, fmt.Errorf(msg)
-	}
-
-	if variable.Mutable == false {
-		msg := fmt.Sprintf("'%s' is not mutable", name)
-		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: nameNode.Range()})
-	}
-
-	switch operator {
-	case Assign:
-		if !variable.GetType().Equals(value.GetType()) {
-			msg := fmt.Sprintf("Expected a '%s' and received '%v'", variable.GetType(), value.GetType())
-			p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: valueNode.Range()})
-		}
-	case Increment, Decrement:
-		if variable.GetType() != checker.NumType || value.GetType() != checker.NumType {
-			msg := fmt.Sprintf("'%s' can only be used with 'Num'", p.text(operatorNode))
-			p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: valueNode.Range()})
-		}
-	}
+	// switch operator {
+	// case Assign:
+	// 	if !variable.GetType().Equals(value.GetType()) {
+	// 		msg := fmt.Sprintf("Expected a '%s' and received '%v'", variable.GetType(), value.GetType())
+	// 		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: valueNode.Range()})
+	// 	}
+	// case Increment, Decrement:
+	// 	if variable.GetType() != NumType || value.GetType() != NumType {
+	// 		msg := fmt.Sprintf("'%s' can only be used with 'Num'", p.text(operatorNode))
+	// 		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: valueNode.Range()})
+	// 	}
+	// }
 
 	return VariableAssignment{
+		BaseNode: BaseNode{TSNode: node},
 		Name:     name,
 		Operator: operator,
 		Value:    value,
@@ -782,13 +822,13 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration, error) {
 	name := p.text(node.ChildByFieldName("name"))
 	parameters := p.parseParameters(node.ChildByFieldName("parameters"))
-	returnType := p.resolveType(node.ChildByFieldName("return"))
+	// returnType := p.resolveType(node.ChildByFieldName("return"))
 
 	scope := p.pushScope()
-	parameterTypes := make([]checker.Type, len(parameters))
+	parameterTypes := make([]Type, len(parameters))
 	for i, param := range parameters {
 		parameterTypes[i] = param.Type
-		scope.Declare(checker.Variable{
+		scope.Declare(Variable{
 			Mutable: false,
 			Name:    param.Name,
 			Type:    param.Type,
@@ -803,30 +843,30 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 		return FunctionDeclaration{}, err
 	}
 
-	var inferredType checker.Type = checker.VoidType
-	var lastStatement Statement
-	if len(body) > 0 {
-		lastStatement = body[len(body)-1]
-		if expr, ok := lastStatement.(Expression); ok {
-			inferredType = expr.GetType()
-		}
-	}
+	// var inferredType Type = VoidType
+	// var lastStatement Statement
+	// if len(body) > 0 {
+	// 	lastStatement = body[len(body)-1]
+	// 	if expr, ok := lastStatement.(Expression); ok {
+	// 		inferredType = expr.GetType()
+	// 	}
+	// }
 
-	if returnType == nil {
-		returnType = inferredType
-	} else if returnType != inferredType {
-		if lastStatement != nil {
-			p.typeMismatchError(lastStatement.GetTSNode(), returnType, inferredType)
-		} else {
-			p.typeMismatchError(node.ChildByFieldName("body"), returnType, inferredType)
-		}
-	}
+	// if returnType == nil {
+	// 	returnType = inferredType
+	// } else if returnType != inferredType {
+	// 	if lastStatement != nil {
+	// 		p.typeMismatchError(lastStatement.GetTSNode(), returnType, inferredType)
+	// 	} else {
+	// 		p.typeMismatchError(node.ChildByFieldName("body"), returnType, inferredType)
+	// 	}
+	// }
 
-	fnType := checker.FunctionType{
+	fnType := FunctionType{
 		Name:       name,
 		Mutates:    false,
 		Parameters: parameterTypes,
-		ReturnType: returnType,
+		// ReturnType: returnType,
 	}
 	p.scope.Declare(fnType)
 
@@ -834,8 +874,8 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 		BaseNode:   BaseNode{TSNode: node},
 		Name:       name,
 		Parameters: parameters,
-		ReturnType: returnType,
-		Body:       body,
+		// ReturnType: returnType,
+		Body: body,
 	}, nil
 }
 
@@ -850,7 +890,7 @@ func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
 		parameters = append(parameters, Parameter{
 			BaseNode: BaseNode{TSNode: &node},
 			Name:     p.text(node.ChildByFieldName("name")),
-			Type:     p.resolveType(node.ChildByFieldName("type")),
+			// Type:     p.resolveType(node.ChildByFieldName("type")),
 		})
 	}
 
@@ -880,9 +920,9 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 		return nil, err
 	}
 
-	if condition.GetType() != checker.BoolType {
+	if condition.GetType() != BoolType {
 		msg := fmt.Sprintf("A while loop condition must be a 'Bool' expression")
-		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: conditionNode.Range()})
+		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: conditionNode.Range()})
 	}
 
 	body, err := p.parseBlock(bodyNode)
@@ -908,10 +948,10 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 
 	iterableType := iterable.GetType()
 
-	if iterableType == checker.NumType || iterableType == checker.StrType {
+	if iterableType == NumType || iterableType == StrType {
 		_cursor := Identifier{Name: p.text(cursorNode), Type: iterableType}
 		newScope := p.pushScope()
-		newScope.Declare(checker.Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
+		newScope.Declare(Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
 		body, err := p.parseBlock(bodyNode)
 		p.popScope()
 		if err != nil {
@@ -924,10 +964,10 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		}, nil
 	}
 
-	if _listType, ok := iterableType.(checker.ListType); ok {
+	if _listType, ok := iterableType.(ListType); ok {
 		_cursor := Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
 		newScope := p.pushScope()
-		newScope.Declare(checker.Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
+		newScope.Declare(Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
 		body, err := p.parseBlock(bodyNode)
 		p.popScope()
 		if err != nil {
@@ -941,7 +981,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 	}
 
 	msg := fmt.Sprintf("Cannot iterate over a '%s'", iterableType)
-	p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: rangeNode.Range()})
+	p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: rangeNode.Range()})
 	return nil, fmt.Errorf(msg)
 }
 
@@ -955,9 +995,9 @@ func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
 		return nil, err
 	}
 
-	if condition.GetType() != checker.BoolType {
+	if condition.GetType() != BoolType {
 		msg := fmt.Sprintf("An if condition must be a 'Bool' expression")
-		p.typeErrors = append(p.typeErrors, checker.Diagnostic{Msg: msg, Range: conditionNode.Range()})
+		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: conditionNode.Range()})
 	}
 
 	body, err := p.parseBlock(bodyNode)
@@ -1004,18 +1044,18 @@ func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
 
 func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error) {
 	nameNode := node.ChildByFieldName("name")
-	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
+	// fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
 
-	fields := make(map[string]checker.Type)
-	for _, fieldNode := range fieldNodes {
-		nameNode := fieldNode.ChildByFieldName("name")
-		name := p.text(nameNode)
-		typeNode := fieldNode.ChildByFieldName("type")
-		fieldType := p.resolveType(typeNode)
-		fields[name] = fieldType
-	}
+	fields := make(map[string]Type)
+	// for _, fieldNode := range fieldNodes {
+	// nameNode := fieldNode.ChildByFieldName("name")
+	// name := p.text(nameNode)
+	// typeNode := fieldNode.ChildByFieldName("type")
+	// fieldType := p.resolveType(typeNode)
+	// fields[name] = fieldType
+	// }
 
-	_type := checker.StructType{Name: p.text(nameNode), Fields: fields}
+	_type := StructType{Name: p.text(nameNode), Fields: fields}
 	p.scope.Declare(_type)
 
 	strct := StructDefinition{
@@ -1034,10 +1074,10 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 		return nil, p.undefinedSymbolError(nameNode)
 	}
 
-	structType, ok := symbol.GetType().(checker.StructType)
+	structType, ok := symbol.GetType().(StructType)
 	if !ok {
 		msg := fmt.Sprintf("'%s' is not a struct", name)
-		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+		p.typeErrors = append(p.typeErrors, MakeError(msg, nameNode))
 		return nil, fmt.Errorf(msg)
 	}
 
@@ -1056,7 +1096,7 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 		expectedType, ok := structType.Fields[name]
 		if !ok {
 			msg := fmt.Sprintf("'%s' is not a field of '%s'", name, structType.Name)
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, nameNode))
 			continue
 		}
 
@@ -1065,7 +1105,7 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 		}
 
 		if _, ok := receivedNames[name]; ok {
-			p.typeErrors = append(p.typeErrors, checker.MakeError(fmt.Sprintf("Duplicate field '%s' in struct '%s'", name, structType.Name), nameNode))
+			p.typeErrors = append(p.typeErrors, MakeError(fmt.Sprintf("Duplicate field '%s' in struct '%s'", name, structType.Name), nameNode))
 		} else {
 			receivedNames[name] = 0
 		}
@@ -1075,7 +1115,7 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 	for name := range structType.Fields {
 		if _, ok := receivedNames[name]; !ok {
 			msg := fmt.Sprintf("Missing field '%s' in struct '%s'", name, structType.Name)
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 		}
 	}
 
@@ -1097,14 +1137,14 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 		name := p.text(nameNode)
 		if _, ok := names[name]; ok {
 			msg := fmt.Sprintf("Duplicate variant '%s'", name)
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, nameNode))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, nameNode))
 		} else {
 			names[name] = 0
 		}
 		variants[i] = name
 	}
 
-	_type := checker.EnumType{Name: p.text(nameNode), Variants: variants}
+	_type := EnumType{Name: p.text(nameNode), Variants: variants}
 
 	enum := EnumDefinition{
 		BaseNode: BaseNode{TSNode: node},
@@ -1170,7 +1210,7 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 
 func (p *Parser) undefinedSymbolError(node *tree_sitter.Node) error {
 	msg := fmt.Sprintf("Undefined: '%s'", p.text(node))
-	p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 	return fmt.Errorf(msg)
 }
 
@@ -1218,7 +1258,7 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 	elementNodes := node.ChildrenByFieldName("element", p.tree.Walk())
 	items := make([]Expression, len(elementNodes))
 
-	var itemType checker.Type
+	var itemType Type
 
 	for i, innerNode := range elementNodes {
 		item, err := p.parseListElement(&innerNode)
@@ -1230,11 +1270,11 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 			itemType = item.GetType()
 		} else if itemType != item.GetType() {
 			msg := fmt.Sprintf("List elements must be of the same type")
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &innerNode))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, &innerNode))
 			break
 		}
 	}
-	listType := checker.ListType{ItemType: itemType}
+	listType := ListType{ItemType: itemType}
 
 	return ListLiteral{
 		BaseNode: BaseNode{TSNode: node},
@@ -1266,7 +1306,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	entryNodes := node.ChildrenByFieldName("entry", p.tree.Walk())
 	entries := make([]MapEntry, len(entryNodes))
 
-	var valueType checker.Type
+	var valueType Type
 
 	receivedKeys := make(map[string]int, len(entryNodes))
 	for i, entryNode := range entryNodes {
@@ -1276,7 +1316,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 		}
 		if _, ok := receivedKeys[key]; ok {
 			msg := fmt.Sprintf("Duplicate key '%s' in map", key)
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &entryNode))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, &entryNode))
 		} else {
 			receivedKeys[key] = 0
 		}
@@ -1285,12 +1325,12 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 			valueType = value.GetType()
 		} else if valueType != value.GetType() {
 			// msg := fmt.Sprintf("List elements must be of the same type")
-			// p.typeErrors = append(p.typeErrors, checker.MakeError(msg, &entryNode))
+			// p.typeErrors = append(p.typeErrors, MakeError(msg, &entryNode))
 			break
 		}
 		entries[i] = MapEntry{Key: key, Value: value}
 	}
-	mapType := checker.MapType{KeyType: checker.StrType, ValueType: valueType}
+	mapType := MapType{KeyType: StrType, ValueType: valueType}
 
 	return MapLiteral{
 		BaseNode: BaseNode{TSNode: node},
@@ -1326,12 +1366,12 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 
 	switch operator {
 	case Minus:
-		if operand.GetType() != checker.NumType {
-			p.unaryOperatorError(operatorNode, checker.NumType)
+		if operand.GetType() != NumType {
+			p.unaryOperatorError(operatorNode, NumType)
 		}
 	case Bang:
-		if operand.GetType() != checker.BoolType {
-			p.unaryOperatorError(operatorNode, checker.BoolType)
+		if operand.GetType() != BoolType {
+			p.unaryOperatorError(operatorNode, BoolType)
 		}
 	}
 
@@ -1420,21 +1460,21 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 
 	switch operator {
 	case Plus, Minus, Multiply, Divide, Modulo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-		if left.GetType() != checker.NumType || right.GetType() != checker.NumType {
-			p.binaryOperatorError(node, p.text(operatorNode), checker.NumType)
+		if left.GetType() != NumType || right.GetType() != NumType {
+			p.binaryOperatorError(node, p.text(operatorNode), NumType)
 		}
 	case Equal, NotEqual:
 		if left.GetType() != right.GetType() {
 			p.equalityOperatorError(node, p.text(operatorNode))
 		}
 	case And, Or:
-		if left.GetType() != checker.BoolType || right.GetType() != checker.BoolType {
+		if left.GetType() != BoolType || right.GetType() != BoolType {
 			p.logicalOperatorError(node, p.text(operatorNode))
 		}
 	case Range:
-		if left.GetType() != checker.NumType || right.GetType() != checker.NumType {
+		if left.GetType() != NumType || right.GetType() != NumType {
 			msg := "A range must be between two Num"
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, operatorNode))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, operatorNode))
 		}
 	}
 
@@ -1475,8 +1515,8 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	switch target.GetType().(type) {
-	case checker.EnumType:
-		enum := target.GetType().(checker.EnumType)
+	case EnumType:
+		enum := target.GetType().(EnumType)
 		switch memberNode.GrammarName() {
 		case "identifier":
 			name := p.text(memberNode)
@@ -1489,15 +1529,15 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 					}, nil
 				}
 				msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, enum.Name)
-				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+				p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
 				return nil, fmt.Errorf(msg)
 			}
 			return nil, fmt.Errorf("Unsupported: instance members on enums")
 		default:
 			panic(fmt.Errorf("Unhandled member type on enum: %s", memberNode.GrammarName()))
 		}
-	case checker.StructType:
-		structDef := target.GetType().(checker.StructType)
+	case StructType:
+		structDef := target.GetType().(StructType)
 		switch memberNode.GrammarName() {
 		case "identifier":
 			name := p.text(memberNode)
@@ -1510,7 +1550,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 					}, nil
 				} else {
 					msg := fmt.Sprintf("No field '%s' in '%s' struct", name, structDef.Name)
-					p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+					p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
 					return nil, fmt.Errorf(msg)
 				}
 			}
@@ -1518,8 +1558,8 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		default:
 			panic(fmt.Errorf("Unhandled member type on struct: %s", memberNode.GrammarName()))
 		}
-	case checker.ListType:
-		listType := target.GetType().(checker.ListType)
+	case ListType:
+		listType := target.GetType().(ListType)
 		switch memberNode.GrammarName() {
 		case "identifier":
 			{
@@ -1528,7 +1568,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 					property := listType.GetProperty(name)
 					if property == nil {
 						msg := fmt.Sprintf("No property '%s' on List", name)
-						p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+						p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
 						return nil, fmt.Errorf(msg)
 					}
 
@@ -1555,8 +1595,8 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		default:
 			panic(fmt.Errorf("Unhandled member type on list: %s", memberNode.GrammarName()))
 		}
-	case checker.PrimitiveType:
-		prim := target.GetType().(checker.PrimitiveType)
+	case PrimitiveType:
+		prim := target.GetType().(PrimitiveType)
 		if prim.Name != "Str" {
 			return MemberAccess{
 				Target:     target,
@@ -1571,7 +1611,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 				property := prim.GetProperty(name)
 				if property == nil {
 					msg := fmt.Sprintf("No property '%s' on %s", name, prim.Name)
-					p.typeErrors = append(p.typeErrors, checker.MakeError(msg, memberNode))
+					p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
 					return nil, fmt.Errorf(msg)
 				}
 
@@ -1591,7 +1631,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		if !ok {
 			return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
 		}
-		pkg, ok := identifier.symbol.(checker.Package)
+		pkg, ok := identifier.symbol.(Package)
 		if !ok {
 			return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
 		}
@@ -1618,12 +1658,12 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 }
 
 /* look for a function in scope */
-func (p *Parser) findFunction(name string) *checker.FunctionType {
+func (p *Parser) findFunction(name string) *FunctionType {
 	symbol := p.scope.Lookup(name)
 	if symbol == nil {
 		return nil
 	}
-	fnType, ok := symbol.GetType().(checker.FunctionType)
+	fnType, ok := symbol.GetType().(FunctionType)
 	if !ok {
 		return nil
 	}
@@ -1631,12 +1671,12 @@ func (p *Parser) findFunction(name string) *checker.FunctionType {
 }
 
 /* look for a method on a type */
-func (p *Parser) findMethod(subject checker.Type, name string) *checker.FunctionType {
+func (p *Parser) findMethod(subject Type, name string) *FunctionType {
 	switch subject.(type) {
-	case checker.ListType:
+	case ListType:
 		{
-			method := subject.(checker.ListType).GetProperty(name)
-			signature, ok := method.(checker.FunctionType)
+			method := subject.(ListType).GetProperty(name)
+			signature, ok := method.(FunctionType)
 			if !ok {
 				return nil
 			}
@@ -1652,7 +1692,7 @@ func (p *Parser) findMethod(subject checker.Type, name string) *checker.Function
 */
 func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (FunctionCall, error) {
 	targetNode := p.mustChild(node, "target")
-	var signature checker.FunctionType
+	var signature FunctionType
 	if target == nil {
 		if fn := p.findFunction(p.text(targetNode)); fn != nil {
 			signature = *fn
@@ -1664,7 +1704,7 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (
 			signature = *method
 		} else {
 			msg := fmt.Sprintf("Method '%s' not found on %s", p.text(targetNode), (*target).GetType())
-			p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 			return FunctionCall{}, fmt.Errorf(msg)
 		}
 	}
@@ -1674,7 +1714,7 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (
 
 	if len(argNodes) != len(signature.Parameters) {
 		msg := fmt.Sprintf("Expected %d arguments, got %d", len(signature.Parameters), len(argNodes))
-		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, argsNode))
+		p.typeErrors = append(p.typeErrors, MakeError(msg, argsNode))
 		return FunctionCall{}, fmt.Errorf(msg)
 	}
 
@@ -1696,10 +1736,10 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (
 	if signature.Mutates {
 		if identifier, is_identifier := (*target).(Identifier); is_identifier {
 			symbol := p.scope.Lookup(identifier.Name)
-			if v, ok := symbol.(checker.Variable); ok {
+			if v, ok := symbol.(Variable); ok {
 				if v.Mutable == false {
 					msg := fmt.Sprintf("Cannot mutate an immutable list")
-					p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+					p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 				}
 			}
 		}
@@ -1713,22 +1753,22 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (
 	}, nil
 }
 
-func (p *Parser) parsePackageFunctionCall(node *tree_sitter.Node, pkg checker.Package) (FunctionCall, error) {
+func (p *Parser) parsePackageFunctionCall(node *tree_sitter.Node, pkg Package) (FunctionCall, error) {
 	targetNode := p.mustChild(node, "target")
 	symbol := pkg.GetSymbol(p.text(targetNode))
 	if symbol == nil {
 		msg := fmt.Sprintf("Undefined: %s.%s", pkg.GetName(), p.text(targetNode))
-		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+		p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 		return FunctionCall{}, fmt.Errorf(msg)
 	}
-	signature := symbol.(checker.FunctionType)
+	signature := symbol.(FunctionType)
 
 	argsNode := node.ChildByFieldName("arguments")
 	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
 
 	if len(argNodes) != len(signature.Parameters) {
 		msg := fmt.Sprintf("Expected %d arguments, got %d", len(signature.Parameters), len(argNodes))
-		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, argsNode))
+		p.typeErrors = append(p.typeErrors, MakeError(msg, argsNode))
 		return FunctionCall{}, fmt.Errorf(msg)
 	}
 
@@ -1759,22 +1799,22 @@ func (p *Parser) parsePackageFunctionCall(node *tree_sitter.Node, pkg checker.Pa
 // it returns the generics coerced with the expected type.
 //
 // otherwise it returns the type of the argument
-func coerceArgIfNecessary(arg Expression, expectedType checker.Type) checker.Type {
+func coerceArgIfNecessary(arg Expression, expectedType Type) Type {
 	anon, ok := arg.(AnonymousFunction)
 	if !ok {
 		return arg.GetType()
 	}
 
-	anonSignature := anon.GetType().(checker.FunctionType)
+	anonSignature := anon.GetType().(FunctionType)
 
-	signature, ok := expectedType.(checker.FunctionType)
+	signature, ok := expectedType.(FunctionType)
 	if !ok {
 		return arg.GetType()
 	}
 
-	params := make([]checker.Type, len(anon.Parameters))
+	params := make([]Type, len(anon.Parameters))
 	for i, param := range anonSignature.Parameters {
-		if _, isGeneric := param.(checker.GenericType); isGeneric {
+		if _, isGeneric := param.(GenericType); isGeneric {
 			params[i] = signature.Parameters[i]
 		} else {
 			params[i] = param
@@ -1782,11 +1822,11 @@ func coerceArgIfNecessary(arg Expression, expectedType checker.Type) checker.Typ
 	}
 
 	returnType := anon.ReturnType
-	if _, isGeneric := returnType.(checker.GenericType); isGeneric {
+	if _, isGeneric := returnType.(GenericType); isGeneric {
 		returnType = signature.ReturnType
 	}
 
-	return checker.FunctionType{
+	return FunctionType{
 		Mutates:    false,
 		Name:       anonSignature.Name,
 		Parameters: params,
@@ -1804,18 +1844,18 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 	}
 
 	switch expression.GetType().(type) {
-	case checker.EnumType:
-		enum := expression.GetType().(checker.EnumType)
+	case EnumType:
+		enum := expression.GetType().(EnumType)
 
 		providedCases := make(map[string]int)
 		cases := make([]MatchCase, 0)
-		var resultType checker.Type = checker.VoidType
+		var resultType Type = VoidType
 		for i, caseNode := range caseNodes {
 			_case, err := p.parseMemberAccess(p.mustChild(&caseNode, "pattern"))
 			if err != nil {
 				return nil, err
 			}
-			var returnType checker.Type = checker.VoidType
+			var returnType Type = VoidType
 			var body = make([]Statement, 0)
 			bodyNode := p.mustChild(&caseNode, "body")
 			if bodyNode.GrammarName() == "block" {
@@ -1855,7 +1895,7 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 		for _, variant := range enum.Variants {
 			if _, ok := providedCases[variant]; !ok {
 				msg := fmt.Sprintf("Missing case for '%s'", enum.FormatVariant(variant))
-				p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+				p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 			}
 		}
 
@@ -1874,13 +1914,13 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 	parameters := make([]Parameter, len(parameterNodes))
 	for i, paramNode := range parameterNodes {
 		name := p.text(p.mustChild(&paramNode, "name"))
-		var _type checker.Type
-		typeNode := paramNode.ChildByFieldName("type")
-		if typeNode == nil {
-			_type = checker.GenericType{}
-		} else {
-			_type = p.resolveType(typeNode)
-		}
+		var _type Type
+		// typeNode := paramNode.ChildByFieldName("type")
+		// if typeNode == nil {
+		// 	_type = GenericType{}
+		// } else {
+		// 	// _type = p.resolveType(typeNode)
+		// }
 		parameters[i] = Parameter{
 			BaseNode: BaseNode{TSNode: &paramNode},
 			Name:     name,
@@ -1890,7 +1930,7 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 
 	scope := p.pushScope()
 	for _, param := range parameters {
-		scope.Declare(checker.Variable{
+		scope.Declare(Variable{
 			Mutable: false,
 			Name:    param.Name,
 			Type:    param.Type,
@@ -1902,7 +1942,7 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 	}
 	p.popScope()
 
-	var returnType checker.Type = checker.VoidType
+	var returnType Type = VoidType
 	if len(body) > 0 {
 		last := body[len(body)-1]
 		if expr, ok := last.(Expression); ok {

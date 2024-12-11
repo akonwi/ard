@@ -129,7 +129,7 @@ func generateStatement(statement ast.Statement, _isReturn ...bool) ast.Document 
 					panic("Cannot iterate over a boolean")
 				}
 
-				if primitive == checker.StrType {
+				if primitive == checker.Str {
 					doc.Line(fmt.Sprintf("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable)))
 				} else {
 					doc.Line(
@@ -222,7 +222,7 @@ func generateElseStatement(stmt ast.IfStatement) ast.Document {
 
 // futzing with the AST to avoid adding runtime models
 func getJsMemberAccess(expr ast.MemberAccess) ast.MemberAccess {
-	if expr.Target.GetType().String() == checker.StrType.String() {
+	if expr.Target.GetType().String() == checker.Str.String() {
 		if expr.Member.(ast.Identifier).Name == "size" {
 			return ast.MemberAccess{
 				Target:     expr.Target,
