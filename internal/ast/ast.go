@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -312,8 +313,9 @@ func (b RangeExpression) GetType() checker.Type {
 
 type Identifier struct {
 	BaseNode
-	Name string
-	Type checker.Type
+	Name   string
+	Type   checker.Type
+	symbol checker.Symbol
 }
 
 func (i Identifier) String() string {
@@ -580,13 +582,17 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Package, error) {
 	}
 	name = strings.ReplaceAll(name, "-", "_")
 
+	symbol := checker.Package{
+		Path:  path,
+		Name:  name,
+		Alias: alias,
+	}
+
+	p.scope.Declare(symbol)
+
 	return Package{
 		BaseNode: BaseNode{TSNode: node},
-		Symbol: checker.Package{
-			Path:  path,
-			Name:  name,
-			Alias: alias,
-		},
+		Symbol:   symbol,
 	}, nil
 }
 
@@ -1155,7 +1161,11 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 		return Identifier{}, p.undefinedSymbolError(node)
 	}
 
-	return Identifier{Name: name, Type: symbol.GetType()}, nil
+	return Identifier{
+		Name:   name,
+		Type:   symbol.GetType(),
+		symbol: symbol,
+	}, nil
 }
 
 func (p *Parser) undefinedSymbolError(node *tree_sitter.Node) error {
@@ -1576,6 +1586,32 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		default:
 			panic(fmt.Errorf("Unhandled member type on Str: %s", memberNode.GrammarName()))
 		}
+	case nil: // check if it's a package
+		identifier, ok := target.(Identifier)
+		if !ok {
+			return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
+		}
+		pkg, ok := identifier.symbol.(checker.Package)
+		if !ok {
+			return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
+		}
+		if accessType == Static {
+			return nil, errors.New("Unimplemented: static members on packages")
+		}
+		switch memberNode.GrammarName() {
+		case "function_call":
+			member, err := p.parsePackageFunctionCall(memberNode, pkg)
+			if err != nil {
+				return nil, err
+			}
+			return MemberAccess{
+				Target:     target,
+				AccessType: Instance,
+				Member:     member,
+			}, nil
+		}
+		panic(fmt.Errorf("Unimplemented member type on packages: %s", memberNode.GrammarName()))
+
 	default:
 		panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
 	}
@@ -1667,6 +1703,48 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (
 				}
 			}
 		}
+	}
+
+	return FunctionCall{
+		BaseNode: BaseNode{TSNode: node},
+		Name:     signature.GetName(),
+		Args:     args,
+		Type:     signature,
+	}, nil
+}
+
+func (p *Parser) parsePackageFunctionCall(node *tree_sitter.Node, pkg checker.Package) (FunctionCall, error) {
+	targetNode := p.mustChild(node, "target")
+	symbol := pkg.GetSymbol(p.text(targetNode))
+	if symbol == nil {
+		msg := fmt.Sprintf("Undefined: %s.%s", pkg.GetName(), p.text(targetNode))
+		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, node))
+		return FunctionCall{}, fmt.Errorf(msg)
+	}
+	signature := symbol.(checker.FunctionType)
+
+	argsNode := node.ChildByFieldName("arguments")
+	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
+
+	if len(argNodes) != len(signature.Parameters) {
+		msg := fmt.Sprintf("Expected %d arguments, got %d", len(signature.Parameters), len(argNodes))
+		p.typeErrors = append(p.typeErrors, checker.MakeError(msg, argsNode))
+		return FunctionCall{}, fmt.Errorf(msg)
+	}
+
+	args := make([]Expression, len(argNodes))
+	for i, argNode := range argNodes {
+		arg, err := p.parseExpression(&argNode)
+		if err != nil {
+			return FunctionCall{}, err
+		}
+		expectedType := signature.Parameters[i]
+		resolvedArg := coerceArgIfNecessary(arg, expectedType)
+
+		if !expectedType.Equals(resolvedArg) {
+			p.typeMismatchError(&argNode, expectedType, resolvedArg)
+		}
+		args[i] = arg
 	}
 
 	return FunctionCall{

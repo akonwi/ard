@@ -297,15 +297,28 @@ func (v Variable) GetType() Type {
 }
 
 type Package struct {
-	Name    string
-	Path    string
-	Alias   string
-	symbols map[string]Symbol
+	Name  string
+	Path  string
+	Alias string
 }
 
-func (p Package) GetSymbol(name string) (Symbol, bool) {
-	sym, ok := p.symbols[name]
-	return sym, ok
+func (p Package) String() string {
+	return p.Name
+}
+func (p Package) GetName() string {
+	if p.Alias != "" {
+		return p.Alias
+	}
+	return p.Name
+}
+func (p Package) GetType() Type {
+	return nil
+}
+func (p Package) GetSymbol(name string) Symbol {
+	if p.Path == "std/io" {
+		return std_io[name]
+	}
+	return nil
 }
 
 type ScopeOptions struct {
@@ -313,9 +326,10 @@ type ScopeOptions struct {
 }
 
 type Scope struct {
-	parent  *Scope
-	symbols map[string]Symbol
-	structs map[string]StructType
+	parent   *Scope
+	symbols  map[string]Symbol
+	structs  map[string]StructType
+	packages map[string]Package
 }
 
 func (s Scope) GetParent() *Scope {
@@ -377,4 +391,14 @@ func MakeError(msg string, node *tree_sitter.Node) Diagnostic {
 		Msg:   msg,
 		Range: node.Range(),
 	}
+}
+
+var std_io = map[string]Symbol{
+	"print": FunctionType{
+		Name: "print",
+		Parameters: []Type{
+			StrType,
+		},
+		ReturnType: VoidType,
+	},
 }
