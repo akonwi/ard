@@ -215,7 +215,7 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 			if !variable._type.Is(value.GetType()) {
 				checker.addDiagnostic(Diagnostic{
 					Kind:    Error,
-					Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), variable._type, s.Value.GetType()),
+					Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), variable._type, value.GetType()),
 				})
 				continue
 			}

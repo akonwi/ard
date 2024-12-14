@@ -15,12 +15,10 @@ func TestFunctionDeclaration(t *testing.T) {
 					FunctionDeclaration{
 						Name:       "empty",
 						Parameters: []Parameter{},
-						ReturnType: VoidType,
 						Body:       []Statement{},
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Inferred function return type",
@@ -31,7 +29,6 @@ func TestFunctionDeclaration(t *testing.T) {
 					FunctionDeclaration{
 						Name:       "get_msg",
 						Parameters: []Parameter{},
-						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{
 								Value: `"Hello, world!"`,
@@ -40,7 +37,6 @@ func TestFunctionDeclaration(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Function with a parameter and declared return type",
@@ -53,10 +49,10 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "person",
-								Type: StrType,
+								Type: StringType{},
 							},
 						},
-						ReturnType: StrType,
+						ReturnType: StringType{},
 						Body: []Statement{
 							StrLiteral{Value: `"hello"`},
 						},
@@ -67,11 +63,6 @@ func TestFunctionDeclaration(t *testing.T) {
 		{
 			name:  "Function return must match declared return type",
 			input: `fn greet(person: Str) Str { }`,
-			diagnostics: []Diagnostic{
-				{
-					Msg: "Type mismatch: expected Str, got Void",
-				},
-			},
 		},
 		{
 			name:  "Function with two parameters",
@@ -84,14 +75,14 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "x",
-								Type: NumType,
+								Type: NumberType{},
 							},
 							{
 								Name: "y",
-								Type: NumType,
+								Type: NumberType{},
 							},
 						},
-						ReturnType: NumType,
+						ReturnType: NumberType{},
 						Body: []Statement{
 							NumLiteral{Value: "10"},
 						},
@@ -105,27 +96,6 @@ func TestFunctionDeclaration(t *testing.T) {
 }
 
 func TestFunctionCalls(t *testing.T) {
-	get_name := FunctionType{
-		Name:       "get_name",
-		Mutates:    false,
-		Parameters: []Type{},
-		ReturnType: StrType,
-	}
-	greet := FunctionType{
-		Name:       "greet",
-		Mutates:    false,
-		Parameters: []Type{StrType},
-		ReturnType: StrType,
-	}
-	add := FunctionType{
-		Name: "add",
-		Parameters: []Type{
-			NumType,
-			NumType,
-		},
-		ReturnType: NumType,
-	}
-
 	tests := []test{
 		{
 			name: "Valid function call with no arguments",
@@ -138,17 +108,15 @@ func TestFunctionCalls(t *testing.T) {
 					FunctionDeclaration{
 						Name:       "get_name",
 						Parameters: []Parameter{},
-						ReturnType: get_name.ReturnType,
+						ReturnType: StringType{},
 						Body:       []Statement{StrLiteral{Value: `"name"`}},
 					},
 					FunctionCall{
 						Name: "get_name",
 						Args: []Expression{},
-						Type: get_name,
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name: "Providing arguments when none are expected",
@@ -156,9 +124,6 @@ func TestFunctionCalls(t *testing.T) {
 				fn get_name() Str { "name" }
 				get_name("bo")
 			`,
-			diagnostics: []Diagnostic{
-				{Msg: "Expected 0 arguments, got 1"},
-			},
 		},
 		{
 			name: "Valid function call with one argument",
@@ -169,11 +134,11 @@ func TestFunctionCalls(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
-						Name: greet.Name,
+						Name: "greet",
 						Parameters: []Parameter{
-							{Name: "name", Type: StrType},
+							{Name: "name", Type: StringType{}},
 						},
-						ReturnType: greet.ReturnType,
+						ReturnType: StringType{},
 						Body:       []Statement{StrLiteral{Value: `"hello"`}},
 					},
 					FunctionCall{
@@ -181,11 +146,9 @@ func TestFunctionCalls(t *testing.T) {
 						Args: []Expression{
 							StrLiteral{Value: `"Alice"`},
 						},
-						Type: greet,
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name: "Valid function call with two arguments",
@@ -196,12 +159,12 @@ func TestFunctionCalls(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					FunctionDeclaration{
-						Name: add.Name,
+						Name: "add",
 						Parameters: []Parameter{
-							{Name: "x", Type: NumType},
-							{Name: "y", Type: NumType},
+							{Name: "x", Type: NumberType{}},
+							{Name: "y", Type: NumberType{}},
 						},
-						ReturnType: add.ReturnType,
+						ReturnType: NumberType{},
 						Body: []Statement{
 							BinaryExpression{
 								Left:     Identifier{Name: "x", Type: NumType},
@@ -216,22 +179,15 @@ func TestFunctionCalls(t *testing.T) {
 							NumLiteral{Value: "1"},
 							NumLiteral{Value: "2"},
 						},
-						Type: add,
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name: "Wrong argument type",
 			input: `
 				fn add(x: Num, y: Num) Num { x + y }
 				add(1, "two")`,
-			diagnostics: []Diagnostic{
-				{
-					Msg: "Type mismatch: expected Num, got Str",
-				},
-			},
 		},
 	}
 
@@ -248,7 +204,6 @@ func TestAnonymousFunctions(t *testing.T) {
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{},
-						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"Hello, world!"`},
 						},
@@ -264,9 +219,8 @@ func TestAnonymousFunctions(t *testing.T) {
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: StrType},
+							{Name: "name", Type: StringType{}},
 						},
-						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"Hello, name!"`},
 						},
@@ -282,9 +236,8 @@ func TestAnonymousFunctions(t *testing.T) {
 				Statements: []Statement{
 					AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: StrType},
+							{Name: "name", Type: StringType{}},
 						},
-						ReturnType: StrType,
 						Body: []Statement{
 							StrLiteral{Value: `"Hello, name!"`},
 						},

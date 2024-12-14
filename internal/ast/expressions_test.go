@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -15,7 +16,6 @@ func TestUnaryExpressions(t *testing.T) {
 					VariableDeclaration{
 						Name:    "negative_number",
 						Mutable: false,
-						Type:    NumberType{},
 						Value: UnaryExpression{
 							Operator: Minus,
 							Operand: NumLiteral{
@@ -24,7 +24,6 @@ func TestUnaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -53,7 +52,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid subtraction",
@@ -72,7 +70,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid division",
@@ -91,7 +88,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid multiplication",
@@ -110,7 +106,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid modulo",
@@ -129,7 +124,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid greater than",
@@ -148,7 +142,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid less than",
@@ -167,7 +160,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid less than or equal",
@@ -186,7 +178,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid string equality checks",
@@ -205,7 +196,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid number equality checks",
@@ -224,7 +214,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid boolean equality checks",
@@ -243,7 +232,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 
 		// Test cases for the '!=' operator
@@ -264,7 +252,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid number inequality checks",
@@ -283,7 +270,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid boolean inequality checks",
@@ -302,7 +288,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		// logic operator checks
 		{
@@ -322,7 +307,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid use of 'or' operator",
@@ -341,7 +325,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 
 		// range operator
@@ -361,7 +344,6 @@ func TestBinaryExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -395,16 +377,10 @@ func TestParenthesizedExpressions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Invalid parenthesized expression",
 			input: `30 + (20 * "fizz")`,
-			diagnostics: []Diagnostic{
-				{
-					Msg: "The '*' operator can only be used between instances of 'Num'",
-				},
-			},
 		},
 	}
 
@@ -414,8 +390,14 @@ func TestParenthesizedExpressions(t *testing.T) {
 func TestMemberAccess(t *testing.T) {
 	runTests(t, []test{
 		{
-			name:  "on string literals",
-			input: `"string".size`,
+			name: "Accessing instance members",
+			input: strings.Join([]string{
+				`"string".size`,
+				`"string".at(0)`,
+				`some_string.size`,
+				`some_string.at(0)`,
+				"name.take(3).size",
+			}, "\n"),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -426,8 +408,64 @@ func TestMemberAccess(t *testing.T) {
 						AccessType: Instance,
 						Member: Identifier{
 							Name: "size",
-							Type: NumType,
 						},
+					},
+					MemberAccess{
+						Target: StrLiteral{
+							Value: `"string"`,
+						},
+						AccessType: Instance,
+						Member: FunctionCall{
+							Name: "at",
+							Args: []Expression{NumLiteral{Value: "0"}},
+						},
+					},
+					MemberAccess{
+						Target: Identifier{
+							Name: "some_string",
+						},
+						AccessType: Instance,
+						Member: Identifier{
+							Name: "size",
+						},
+					},
+					MemberAccess{
+						Target: Identifier{
+							Name: "some_string",
+						},
+						AccessType: Instance,
+						Member: FunctionCall{
+							Name: "at",
+							Args: []Expression{NumLiteral{Value: "0"}},
+						},
+					},
+					MemberAccess{
+						Target: MemberAccess{
+							Target: Identifier{
+								Name: "name",
+							},
+							AccessType: Instance,
+							Member: FunctionCall{
+								Name: "take",
+								Args: []Expression{NumLiteral{Value: "3"}},
+							},
+						},
+						AccessType: Instance,
+						Member:     Identifier{Name: "size"},
+					},
+				},
+			},
+		},
+		{
+			name:  "Accessing static members",
+			input: strings.Join([]string{"Color::blue"}, "\n"),
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					MemberAccess{
+						Target:     Identifier{Name: "Color"},
+						AccessType: Static,
+						Member:     Identifier{Name: "blue"},
 					},
 				},
 			},

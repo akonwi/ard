@@ -34,7 +34,6 @@ func TestEnumDefinitions(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -70,7 +69,6 @@ func TestEnums(t *testing.T) {
 			input: `
 					enum Color { Black, Grey }
 					Color::Blue`,
-			diagnostics: []Diagnostic{{Msg: "'Blue' is not a variant of 'Color' enum"}},
 		},
 		{
 			name: "Assigning a variant to a variable",
@@ -111,9 +109,6 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Red => "Stop",
 					Color::Yellow => "Yield"
 				}`, traffic_light_code),
-			diagnostics: []Diagnostic{
-				{Msg: "Missing case for 'Color::Green'"},
-			},
 		},
 		{
 			name: "Each case must return the same type",
@@ -124,9 +119,6 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Yellow => "Yield",
 					Color::Green => 100
 				}`, traffic_light_code),
-			diagnostics: []Diagnostic{
-				{Msg: "Type mismatch: expected Str, got Num"},
-			},
 		},
 		{
 			name: "Valid matching",

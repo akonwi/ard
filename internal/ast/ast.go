@@ -16,7 +16,6 @@ type Statement interface {
 // expressions produce values
 type Expression interface {
 	Statement
-	GetType() Type
 }
 
 // the base struct for all AST nodes
@@ -149,7 +148,7 @@ func (v VariableAssignment) String() string {
 type Parameter struct {
 	BaseNode
 	Name string
-	Type Type
+	Type DeclaredType
 }
 
 func (p Parameter) String() string {
@@ -160,7 +159,7 @@ type FunctionDeclaration struct {
 	BaseNode
 	Name       string
 	Parameters []Parameter
-	ReturnType Type
+	ReturnType DeclaredType
 	Body       []Statement
 	Type       FunctionType
 }
@@ -172,23 +171,12 @@ func (f FunctionDeclaration) String() string {
 type AnonymousFunction struct {
 	BaseNode
 	Parameters []Parameter
-	ReturnType Type
+	ReturnType DeclaredType
 	Body       []Statement
 }
 
 func (a AnonymousFunction) String() string {
-	return fmt.Sprintf("AnonymousFunction(%s)", a.GetType())
-}
-func (a AnonymousFunction) GetType() Type {
-	parameterTypes := make([]Type, len(a.Parameters))
-	for i, param := range a.Parameters {
-		parameterTypes[i] = param.Type
-	}
-	return FunctionType{
-		Mutates:    false,
-		Parameters: parameterTypes,
-		ReturnType: a.ReturnType,
-	}
+	return fmt.Sprintf("AnonymousFunction")
 }
 
 type StructDefinition struct {
@@ -214,9 +202,6 @@ type StructInstance struct {
 func (s StructInstance) String() string {
 	return fmt.Sprintf("StructInstance(%s)", s.Type.Name)
 }
-func (s StructInstance) GetType() Type {
-	return s.Type
-}
 
 type EnumDefinition struct {
 	BaseNode
@@ -237,6 +222,18 @@ func (w WhileLoop) String() string {
 	return "while"
 }
 
+type RangeLoop struct {
+	BaseNode
+	Cursor Identifier
+	Start  Expression
+	End    Expression
+	Body   []Statement
+}
+
+func (r RangeLoop) String() string {
+	return fmt.Sprintf("for range %s..%s", r.Start, r.End)
+}
+
 type ForLoop struct {
 	BaseNode
 	Cursor   Identifier
@@ -245,7 +242,7 @@ type ForLoop struct {
 }
 
 func (f ForLoop) String() string {
-	return "ForLoop"
+	return fmt.Sprintf("for %s", f.Iterable)
 }
 
 type IfStatement struct {
@@ -269,9 +266,6 @@ type FunctionCall struct {
 func (f FunctionCall) String() string {
 	return fmt.Sprintf("FunctionCall(%s)", f.Name)
 }
-func (f FunctionCall) GetType() Type {
-	return f.Type.ReturnType
-}
 
 type MemberAccessType string
 
@@ -293,9 +287,6 @@ func (m MemberAccess) String() string {
 		operator = "::"
 	}
 	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target, operator, m.Member)
-}
-func (m MemberAccess) GetType() Type {
-	return m.Member.GetType()
 }
 
 type Operator int
@@ -332,9 +323,6 @@ type UnaryExpression struct {
 func (u UnaryExpression) String() string {
 	return fmt.Sprintf("(%v %v)", u.Operator, u.Operand)
 }
-func (u UnaryExpression) GetType() Type {
-	return u.Operand.GetType()
-}
 
 type BinaryExpression struct {
 	BaseNode
@@ -346,18 +334,6 @@ type BinaryExpression struct {
 func (b BinaryExpression) String() string {
 	return fmt.Sprintf("%v %v %v", b.Left, b.Operator, b.Right)
 }
-func (b BinaryExpression) GetType() Type {
-	switch b.Operator {
-	case Plus, Minus, Multiply, Divide, Modulo:
-		return NumType
-	case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, Equal, NotEqual, And, Or:
-		return BoolType
-	case Range:
-		return NumType
-	default:
-		return nil
-	}
-}
 
 type RangeExpression struct {
 	BaseNode
@@ -366,9 +342,6 @@ type RangeExpression struct {
 
 func (b RangeExpression) String() string {
 	return "RangeExpression"
-}
-func (b RangeExpression) GetType() Type {
-	return NumType
 }
 
 type Identifier struct {
@@ -381,9 +354,6 @@ type Identifier struct {
 func (i Identifier) String() string {
 	return fmt.Sprintf("Identifier(%s)", i.Name)
 }
-func (i Identifier) GetType() Type {
-	return i.Type
-}
 
 type StrLiteral struct {
 	BaseNode
@@ -394,9 +364,6 @@ type StrLiteral struct {
 func (s StrLiteral) String() string {
 	return s.Value
 }
-func (s StrLiteral) GetType() Type {
-	return StrType
-}
 
 type InterpolatedStr struct {
 	BaseNode
@@ -405,9 +372,6 @@ type InterpolatedStr struct {
 
 func (i InterpolatedStr) String() string {
 	return "InterpolatedStr"
-}
-func (i InterpolatedStr) GetType() Type {
-	return StrType
 }
 
 type NumLiteral struct {
@@ -418,9 +382,6 @@ type NumLiteral struct {
 
 func (n NumLiteral) String() string {
 	return n.Value
-}
-func (n NumLiteral) GetType() Type {
-	return NumType
 }
 
 type BoolLiteral struct {
@@ -433,9 +394,6 @@ type BoolLiteral struct {
 func (b BoolLiteral) String() string {
 	return fmt.Sprintf("%t", b.Value)
 }
-func (b BoolLiteral) GetType() Type {
-	return BoolType
-}
 
 type ListLiteral struct {
 	BaseNode
@@ -445,9 +403,6 @@ type ListLiteral struct {
 
 func (l ListLiteral) String() string {
 	return "ListLiteral"
-}
-func (l ListLiteral) GetType() Type {
-	return l.Type
 }
 
 type MapEntry struct {
@@ -464,9 +419,6 @@ type MapLiteral struct {
 func (m MapLiteral) String() string {
 	return fmt.Sprintf("MapLiteral { %v }", m.Entries)
 }
-func (m MapLiteral) GetType() Type {
-	return m.Type
-}
 
 type MatchExpression struct {
 	BaseNode
@@ -476,9 +428,6 @@ type MatchExpression struct {
 
 func (m MatchExpression) String() string {
 	return fmt.Sprintf("MatchExpression(%s)", m.Subject)
-}
-func (m MatchExpression) GetType() Type {
-	return m.Cases[0].GetType()
 }
 
 type MatchCase struct {
@@ -491,24 +440,14 @@ type MatchCase struct {
 func (m MatchCase) String() string {
 	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
 }
-func (m MatchCase) GetType() Type {
-	return m.Type
-}
 
 type Parser struct {
 	sourceCode []byte
 	tree       *tree_sitter.Tree
-	scope      *Scope
-	typeErrors []Diagnostic
-}
-
-func (p *Parser) GetDiagnostics() []Diagnostic {
-	return p.typeErrors
 }
 
 func NewParser(sourceCode []byte, tree *tree_sitter.Tree) *Parser {
-	scope := NewScope(nil, ScopeOptions{IsTop: true})
-	return &Parser{sourceCode: sourceCode, tree: tree, scope: &scope}
+	return &Parser{sourceCode: sourceCode, tree: tree}
 }
 
 func (p *Parser) text(node *tree_sitter.Node) string {
@@ -535,42 +474,6 @@ func (p *Parser) mustChildren(node *tree_sitter.Node, name string) []tree_sitter
 		panic(fmt.Errorf("Missing children: %s in `%s`", name, p.text(node)))
 	}
 	return children
-}
-
-func (p *Parser) pushScope() *Scope {
-	new := NewScope(p.scope, ScopeOptions{})
-	p.scope = &new
-	return p.scope
-}
-
-func (p *Parser) popScope() *Scope {
-	p.scope = p.scope.GetParent()
-	return p.scope
-}
-
-func (p *Parser) typeMismatchError(node *tree_sitter.Node, expected, actual Type) {
-	msg := fmt.Sprintf("Type mismatch: expected %s, got %s", expected, actual)
-	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-}
-
-func (p *Parser) unaryOperatorError(node *tree_sitter.Node, expected Type) {
-	msg := fmt.Sprintf("The '%v' operator can only be used on '%v'", p.text(node), expected)
-	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-}
-
-func (p *Parser) binaryOperatorError(node *tree_sitter.Node, operator string, expected Type) {
-	msg := fmt.Sprintf("The '%v' operator can only be used between instances of '%v'", operator, expected)
-	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-}
-
-func (p *Parser) equalityOperatorError(node *tree_sitter.Node, operator string) {
-	msg := fmt.Sprintf("The '%v' operator can only be used between instances of 'Num', 'Str', or 'Bool'", operator)
-	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-}
-
-func (p *Parser) logicalOperatorError(node *tree_sitter.Node, operator string) {
-	msg := fmt.Sprintf("The '%v' operator can only be used between instances of 'Bool'", operator)
-	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
 }
 
 // i might regret this
@@ -630,7 +533,7 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Import, error) {
 	aliasNode := node.ChildByFieldName("alias")
 
 	path := p.text(pathNode)
-	var name, alias string
+	var name string
 	if aliasNode != nil {
 		name = p.text(aliasNode)
 	} else {
@@ -642,14 +545,6 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Import, error) {
 		}
 		name = strings.ReplaceAll(name, "-", "_")
 	}
-
-	symbol := Package{
-		Path:  path,
-		Name:  name,
-		Alias: alias,
-	}
-
-	p.scope.Declare(symbol)
 
 	return Import{
 		BaseNode: BaseNode{TSNode: node},
@@ -701,40 +596,6 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (VariableDeclaration,
 	if err != nil {
 		return VariableDeclaration{}, err
 	}
-
-	// inferredType := value.GetType()
-
-	// if declaredType != nil {
-	// 	if !declaredType.Equals(inferredType) {
-	// 		p.typeMismatchError(node.ChildByFieldName("value"), declaredType, inferredType)
-	// 	}
-	// } else if inferredType == nil {
-	// 	panic(fmt.Errorf("variable inferred type and declared type are nil"))
-	// } else {
-	// 	if lt, ok := inferredType.(ListType); ok {
-	// 		if lt.ItemType == nil {
-	// 			msg := fmt.Sprintf("Empty lists need a declared type")
-	// 			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-	// 		}
-	// 	}
-
-	// 	if mt, ok := inferredType.(MapType); ok {
-	// 		if mt.KeyType == nil || mt.ValueType == nil {
-	// 			msg := fmt.Sprintf("Empty maps need a declared type")
-	// 			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-	// 		}
-	// 	}
-	// }
-
-	// symbolType := declaredType
-	// if declaredType == nil {
-	// 	symbolType = inferredType
-	// }
-	// p.scope.Declare(Variable{
-	// 	Mutable: isMutable,
-	// 	Name:    name,
-	// 	Type:    symbolType,
-	// })
 
 	return VariableDeclaration{
 		BaseNode: BaseNode{TSNode: node},
@@ -797,19 +658,6 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 		return VariableAssignment{}, err
 	}
 
-	// switch operator {
-	// case Assign:
-	// 	if !variable.GetType().Equals(value.GetType()) {
-	// 		msg := fmt.Sprintf("Expected a '%s' and received '%v'", variable.GetType(), value.GetType())
-	// 		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: valueNode.Range()})
-	// 	}
-	// case Increment, Decrement:
-	// 	if variable.GetType() != NumType || value.GetType() != NumType {
-	// 		msg := fmt.Sprintf("'%s' can only be used with 'Num'", p.text(operatorNode))
-	// 		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: valueNode.Range()})
-	// 	}
-	// }
-
 	return VariableAssignment{
 		BaseNode: BaseNode{TSNode: node},
 		Name:     name,
@@ -823,51 +671,16 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 	parameters := p.parseParameters(node.ChildByFieldName("parameters"))
 	// returnType := p.resolveType(node.ChildByFieldName("return"))
 
-	scope := p.pushScope()
-	parameterTypes := make([]Type, len(parameters))
-	for i, param := range parameters {
-		parameterTypes[i] = param.Type
-		scope.Declare(Variable{
-			Mutable: false,
-			Name:    param.Name,
-			Type:    param.Type,
-		})
-	}
+	// parameterTypes := make([]Type, len(parameters))
+	// for i, param := range parameters {
+	// 	parameterTypes[i] = param.Type
+	// }
 
 	body, err := p.parseBlock(node.ChildByFieldName("body"))
-
-	p.popScope()
 
 	if err != nil {
 		return FunctionDeclaration{}, err
 	}
-
-	// var inferredType Type = VoidType
-	// var lastStatement Statement
-	// if len(body) > 0 {
-	// 	lastStatement = body[len(body)-1]
-	// 	if expr, ok := lastStatement.(Expression); ok {
-	// 		inferredType = expr.GetType()
-	// 	}
-	// }
-
-	// if returnType == nil {
-	// 	returnType = inferredType
-	// } else if returnType != inferredType {
-	// 	if lastStatement != nil {
-	// 		p.typeMismatchError(lastStatement.GetTSNode(), returnType, inferredType)
-	// 	} else {
-	// 		p.typeMismatchError(node.ChildByFieldName("body"), returnType, inferredType)
-	// 	}
-	// }
-
-	fnType := FunctionType{
-		Name:       name,
-		Mutates:    false,
-		Parameters: parameterTypes,
-		// ReturnType: returnType,
-	}
-	p.scope.Declare(fnType)
 
 	return FunctionDeclaration{
 		BaseNode:   BaseNode{TSNode: node},
@@ -919,11 +732,6 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 		return nil, err
 	}
 
-	if condition.GetType() != BoolType {
-		msg := fmt.Sprintf("A while loop condition must be a 'Bool' expression")
-		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: conditionNode.Range()})
-	}
-
 	body, err := p.parseBlock(bodyNode)
 	if err != nil {
 		return nil, err
@@ -936,52 +744,37 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
-	cursorNode := node.ChildByFieldName("cursor")
-	rangeNode := node.ChildByFieldName("range")
-	bodyNode := node.ChildByFieldName("body")
+	cursorNode := p.mustChild(node, "cursor")
 
+	rangeNode := node.ChildByFieldName("range")
 	iterable, err := p.parseExpression(rangeNode)
 	if err != nil {
 		return nil, err
 	}
 
-	iterableType := iterable.GetType()
+	bodyNode := node.ChildByFieldName("body")
+	body, err := p.parseBlock(bodyNode)
 
-	if iterableType == NumType || iterableType == StrType {
-		_cursor := Identifier{Name: p.text(cursorNode), Type: iterableType}
-		newScope := p.pushScope()
-		newScope.Declare(Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
-		body, err := p.parseBlock(bodyNode)
-		p.popScope()
+	if r, ok := iterable.(RangeExpression); ok {
 		if err != nil {
 			return nil, err
 		}
-		return ForLoop{
-			Cursor:   _cursor,
-			Iterable: iterable,
+
+		return RangeLoop{
+			BaseNode: BaseNode{TSNode: node},
+			Cursor:   Identifier{Name: p.text(cursorNode)},
+			Start:    r.Start,
+			End:      r.End,
 			Body:     body,
 		}, nil
 	}
 
-	if _listType, ok := iterableType.(ListType); ok {
-		_cursor := Identifier{Name: p.text(cursorNode), Type: _listType.ItemType}
-		newScope := p.pushScope()
-		newScope.Declare(Variable{Mutable: false, Name: _cursor.Name, Type: _cursor.Type})
-		body, err := p.parseBlock(bodyNode)
-		p.popScope()
-		if err != nil {
-			return nil, err
-		}
-		return ForLoop{
-			Cursor:   _cursor,
-			Iterable: iterable,
-			Body:     body,
-		}, nil
-	}
-
-	msg := fmt.Sprintf("Cannot iterate over a '%s'", iterableType)
-	p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: rangeNode.Range()})
-	return nil, fmt.Errorf(msg)
+	return ForLoop{
+		BaseNode: BaseNode{TSNode: node},
+		Cursor:   Identifier{Name: p.text(cursorNode)},
+		Iterable: iterable,
+		Body:     body,
+	}, nil
 }
 
 func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
@@ -992,11 +785,6 @@ func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
 	condition, err := p.parseExpression(conditionNode)
 	if err != nil {
 		return nil, err
-	}
-
-	if condition.GetType() != BoolType {
-		msg := fmt.Sprintf("An if condition must be a 'Bool' expression")
-		p.typeErrors = append(p.typeErrors, Diagnostic{Msg: msg, Range: conditionNode.Range()})
 	}
 
 	body, err := p.parseBlock(bodyNode)
@@ -1055,7 +843,6 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 	// }
 
 	_type := StructType{Name: p.text(nameNode), Fields: fields}
-	p.scope.Declare(_type)
 
 	strct := StructDefinition{
 		Type: _type,
@@ -1064,23 +851,10 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 }
 
 func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error) {
-	nameNode := node.ChildByFieldName("name")
+	// nameNode := node.ChildByFieldName("name")
 	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
+	// name := p.text(nameNode)
 
-	name := p.text(nameNode)
-	symbol := p.scope.Lookup(name)
-	if symbol == nil {
-		return nil, p.undefinedSymbolError(nameNode)
-	}
-
-	structType, ok := symbol.GetType().(StructType)
-	if !ok {
-		msg := fmt.Sprintf("'%s' is not a struct", name)
-		p.typeErrors = append(p.typeErrors, MakeError(msg, nameNode))
-		return nil, fmt.Errorf(msg)
-	}
-
-	receivedNames := make(map[string]int8)
 	properties := make([]StructValue, len(fieldNodes))
 	for i, propertyNode := range fieldNodes {
 		nameNode := propertyNode.ChildByFieldName("name")
@@ -1092,41 +866,17 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 			return nil, err
 		}
 
-		expectedType, ok := structType.Fields[name]
-		if !ok {
-			msg := fmt.Sprintf("'%s' is not a field of '%s'", name, structType.Name)
-			p.typeErrors = append(p.typeErrors, MakeError(msg, nameNode))
-			continue
-		}
-
-		if !expectedType.Equals(value.GetType()) {
-			p.typeMismatchError(&propertyNode, expectedType, value.GetType())
-		}
-
-		if _, ok := receivedNames[name]; ok {
-			p.typeErrors = append(p.typeErrors, MakeError(fmt.Sprintf("Duplicate field '%s' in struct '%s'", name, structType.Name), nameNode))
-		} else {
-			receivedNames[name] = 0
-		}
 		properties[i] = StructValue{Name: name, Value: value}
-	}
-
-	for name := range structType.Fields {
-		if _, ok := receivedNames[name]; !ok {
-			msg := fmt.Sprintf("Missing field '%s' in struct '%s'", name, structType.Name)
-			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-		}
 	}
 
 	return StructInstance{
 		BaseNode:   BaseNode{TSNode: node},
-		Type:       structType,
 		Properties: properties,
 	}, nil
 }
 
 func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) {
-	nameNode := node.ChildByFieldName("name")
+	// nameNode := node.ChildByFieldName("name")
 	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
 
 	variants := make([]string, len(variantNodes))
@@ -1134,22 +884,13 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 	for i, variantNode := range variantNodes {
 		nameNode := variantNode.NamedChild(0)
 		name := p.text(nameNode)
-		if _, ok := names[name]; ok {
-			msg := fmt.Sprintf("Duplicate variant '%s'", name)
-			p.typeErrors = append(p.typeErrors, MakeError(msg, nameNode))
-		} else {
-			names[name] = 0
-		}
+		names[name] = 0
 		variants[i] = name
 	}
 
-	_type := EnumType{Name: p.text(nameNode), Variants: variants}
-
 	enum := EnumDefinition{
 		BaseNode: BaseNode{TSNode: node},
-		Type:     _type,
 	}
-	p.scope.Declare(_type)
 	return enum, nil
 }
 
@@ -1181,7 +922,7 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	case "member_access":
 		return p.parseMemberAccess(child)
 	case "function_call":
-		return p.parseFunctionCall(child, nil)
+		return p.parseFunctionCall(child)
 	case "struct_instance":
 		return p.parseStructInstance(child)
 	case "match_expression":
@@ -1199,12 +940,6 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 	return Identifier{
 		Name: name,
 	}, nil
-}
-
-func (p *Parser) undefinedSymbolError(node *tree_sitter.Node) error {
-	msg := fmt.Sprintf("Undefined: '%s'", p.text(node))
-	p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-	return fmt.Errorf(msg)
 }
 
 func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error) {
@@ -1251,27 +986,16 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 	elementNodes := node.ChildrenByFieldName("element", p.tree.Walk())
 	items := make([]Expression, len(elementNodes))
 
-	var itemType Type
-
 	for i, innerNode := range elementNodes {
 		item, err := p.parseListElement(&innerNode)
 		if err != nil {
 			return nil, err
 		}
 		items[i] = item
-		if i == 0 {
-			itemType = item.GetType()
-		} else if itemType != item.GetType() {
-			msg := fmt.Sprintf("List elements must be of the same type")
-			p.typeErrors = append(p.typeErrors, MakeError(msg, &innerNode))
-			break
-		}
 	}
-	listType := ListType{ItemType: itemType}
 
 	return ListLiteral{
 		BaseNode: BaseNode{TSNode: node},
-		Type:     listType,
 		Items:    items,
 	}, nil
 }
@@ -1299,35 +1023,18 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	entryNodes := node.ChildrenByFieldName("entry", p.tree.Walk())
 	entries := make([]MapEntry, len(entryNodes))
 
-	var valueType Type
-
 	receivedKeys := make(map[string]int, len(entryNodes))
 	for i, entryNode := range entryNodes {
 		key, value, err := p.parseMapEntry(&entryNode)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := receivedKeys[key]; ok {
-			msg := fmt.Sprintf("Duplicate key '%s' in map", key)
-			p.typeErrors = append(p.typeErrors, MakeError(msg, &entryNode))
-		} else {
-			receivedKeys[key] = 0
-		}
-
-		if i == 0 {
-			valueType = value.GetType()
-		} else if valueType != value.GetType() {
-			// msg := fmt.Sprintf("List elements must be of the same type")
-			// p.typeErrors = append(p.typeErrors, MakeError(msg, &entryNode))
-			break
-		}
+		receivedKeys[key] = 0
 		entries[i] = MapEntry{Key: key, Value: value}
 	}
-	mapType := MapType{KeyType: StrType, ValueType: valueType}
 
 	return MapLiteral{
 		BaseNode: BaseNode{TSNode: node},
-		Type:     mapType,
 		Entries:  entries,
 	}, nil
 }
@@ -1355,17 +1062,6 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 	operand, err := p.parseExpression(operandNode)
 	if err != nil {
 		return nil, err
-	}
-
-	switch operator {
-	case Minus:
-		if operand.GetType() != NumType {
-			p.unaryOperatorError(operatorNode, NumType)
-		}
-	case Bang:
-		if operand.GetType() != BoolType {
-			p.unaryOperatorError(operatorNode, BoolType)
-		}
 	}
 
 	return UnaryExpression{
@@ -1451,26 +1147,6 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 		return nil, err
 	}
 
-	switch operator {
-	case Plus, Minus, Multiply, Divide, Modulo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-		if left.GetType() != NumType || right.GetType() != NumType {
-			p.binaryOperatorError(node, p.text(operatorNode), NumType)
-		}
-	case Equal, NotEqual:
-		if left.GetType() != right.GetType() {
-			p.equalityOperatorError(node, p.text(operatorNode))
-		}
-	case And, Or:
-		if left.GetType() != BoolType || right.GetType() != BoolType {
-			p.logicalOperatorError(node, p.text(operatorNode))
-		}
-	case Range:
-		if left.GetType() != NumType || right.GetType() != NumType {
-			msg := "A range must be between two Num"
-			p.typeErrors = append(p.typeErrors, MakeError(msg, operatorNode))
-		}
-	}
-
 	if operator == Range {
 		return RangeExpression{
 			BaseNode: BaseNode{TSNode: node},
@@ -1489,14 +1165,12 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 
 func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	targetNode := p.mustChild(node, "target")
-	operatorNode := node.ChildByFieldName("operator")
-	memberNode := node.ChildByFieldName("member")
-
 	target, err := p.parseExpression(targetNode)
 	if err != nil {
 		return nil, err
 	}
 
+	operatorNode := p.mustChild(node, "operator")
 	var accessType MemberAccessType
 	switch operatorNode.GrammarName() {
 	case "period":
@@ -1507,183 +1181,189 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		panic(fmt.Errorf("Unexpected member access operator: %s", operatorNode.GrammarName()))
 	}
 
-	switch target.GetType().(type) {
-	case EnumType:
-		enum := target.GetType().(EnumType)
-		switch memberNode.GrammarName() {
-		case "identifier":
-			name := p.text(memberNode)
-			if accessType == Static {
-				if ok := enum.HasVariant(name); ok {
-					return MemberAccess{
-						Target:     target,
-						AccessType: accessType,
-						Member:     Identifier{Name: name, Type: target.GetType()},
-					}, nil
-				}
-				msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, enum.Name)
-				p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-				return nil, fmt.Errorf(msg)
-			}
-			return nil, fmt.Errorf("Unsupported: instance members on enums")
-		default:
-			panic(fmt.Errorf("Unhandled member type on enum: %s", memberNode.GrammarName()))
+	memberNode := p.mustChild(node, "member")
+	var member Expression
+	name := memberNode.GrammarName()
+	switch name {
+	case "identifier":
+		member = Identifier{Name: p.text(memberNode)}
+	case "function_call":
+		call, err := p.parseFunctionCall(memberNode)
+		if err != nil {
+			return nil, err
 		}
-	case StructType:
-		structDef := target.GetType().(StructType)
-		switch memberNode.GrammarName() {
-		case "identifier":
-			name := p.text(memberNode)
-			if accessType == Instance {
-				if fieldType, ok := structDef.Fields[name]; ok {
-					return MemberAccess{
-						Target:     target,
-						AccessType: accessType,
-						Member:     Identifier{Name: name, Type: fieldType},
-					}, nil
-				} else {
-					msg := fmt.Sprintf("No field '%s' in '%s' struct", name, structDef.Name)
-					p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-					return nil, fmt.Errorf(msg)
-				}
-			}
-			panic("Unimplemented: static members on structs")
-		default:
-			panic(fmt.Errorf("Unhandled member type on struct: %s", memberNode.GrammarName()))
-		}
-	case ListType:
-		listType := target.GetType().(ListType)
-		switch memberNode.GrammarName() {
-		case "identifier":
-			{
-				name := p.text(memberNode)
-				if accessType == Instance {
-					property := listType.GetProperty(name)
-					if property == nil {
-						msg := fmt.Sprintf("No property '%s' on List", name)
-						p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-						return nil, fmt.Errorf(msg)
-					}
-
-					return MemberAccess{
-						Target:     target,
-						AccessType: accessType,
-						Member:     Identifier{Name: name, Type: property},
-					}, nil
-				} else {
-					panic("Unimplemented: static members on List")
-				}
-			}
-		case "function_call":
-			call, err := p.parseFunctionCall(memberNode, &target)
-			if err != nil {
-				return nil, err
-			}
-
-			return MemberAccess{
-				Target:     target,
-				AccessType: accessType,
-				Member:     call,
-			}, nil
-		default:
-			panic(fmt.Errorf("Unhandled member type on list: %s", memberNode.GrammarName()))
-		}
-	case PrimitiveType:
-		prim := target.GetType().(PrimitiveType)
-		if prim.Name != "Str" {
-			return MemberAccess{
-				Target:     target,
-				AccessType: accessType,
-			}, nil
-		}
-
-		switch memberNode.GrammarName() {
-		case "identifier":
-			name := p.text(memberNode)
-			if accessType == Instance {
-				property := prim.GetProperty(name)
-				if property == nil {
-					msg := fmt.Sprintf("No property '%s' on %s", name, prim.Name)
-					p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-					return nil, fmt.Errorf(msg)
-				}
-
-				return MemberAccess{
-					Target:     target,
-					AccessType: accessType,
-					Member: Identifier{
-						BaseNode: BaseNode{TSNode: memberNode},
-						Name:     name,
-						Type:     property,
-					},
-				}, nil
-			} else {
-				panic("Unimplemented: static members on Str")
-			}
-		default:
-			panic(fmt.Errorf("Unhandled member type on Str: %s", memberNode.GrammarName()))
-		}
-	case nil: // check if it's a package
-		// identifier, ok := target.(Identifier)
-		// if !ok {
-		// 	return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
-		// }
-		// pkg, ok := identifier.symbol.(Package)
-		// // if !ok {
-		// // 	return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
-		// // }
-		// if accessType == Static {
-		// 	return nil, errors.New("Unimplemented: static members on packages")
-		// }
-		switch memberNode.GrammarName() {
-		case "function_call":
-			member, err := p.parseFunctionCall(memberNode, nil)
-			if err != nil {
-				return nil, err
-			}
-			return MemberAccess{
-				Target:     target,
-				AccessType: Instance,
-				Member:     member,
-			}, nil
-		case "identifier":
-			id, err := p.parseIdentifier(memberNode)
-			if err != nil {
-				return nil, err
-			}
-			return MemberAccess{
-				Target:     target,
-				AccessType: accessType,
-				Member:     id,
-			}, nil
-		default:
-			expr, err := p.parseExpression(memberNode)
-			if err != nil {
-				return nil, err
-			}
-			return MemberAccess{
-				Target:     target,
-				AccessType: accessType,
-				Member:     expr,
-			}, nil
-		}
-
-	default:
-		panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
+		member = call
 	}
-}
 
-/* look for a function in scope */
-func (p *Parser) findFunction(name string) *FunctionType {
-	symbol := p.scope.Lookup(name)
-	if symbol == nil {
-		return nil
-	}
-	fnType, ok := symbol.GetType().(FunctionType)
-	if !ok {
-		return nil
-	}
-	return &fnType
+	return MemberAccess{
+		Target:     target,
+		AccessType: accessType,
+		Member:     member,
+	}, nil
+
+	// switch target.GetType().(type) {
+	// case EnumType:
+	// 	enum := target.GetType().(EnumType)
+	// 	switch memberNode.GrammarName() {
+	// 	case "identifier":
+	// 		name := p.text(memberNode)
+	// 		if accessType == Static {
+	// 			if ok := enum.HasVariant(name); ok {
+	// 				return MemberAccess{
+	// 					Target:     target,
+	// 					AccessType: accessType,
+	// 					Member:     Identifier{Name: name},
+	// 				}, nil
+	// 			}
+	// 			msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, enum.Name)
+	// 			p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
+	// 			return nil, fmt.Errorf(msg)
+	// 		}
+	// 		return nil, fmt.Errorf("Unsupported: instance members on enums")
+	// 	default:
+	// 		panic(fmt.Errorf("Unhandled member type on enum: %s", memberNode.GrammarName()))
+	// 	}
+	// case StructType:
+	// 	structDef := target.GetType().(StructType)
+	// 	switch memberNode.GrammarName() {
+	// 	case "identifier":
+	// 		name := p.text(memberNode)
+	// 		if accessType == Instance {
+	// 			if _, ok := structDef.Fields[name]; ok {
+	// 				return MemberAccess{
+	// 					Target:     target,
+	// 					AccessType: accessType,
+	// 					Member:     Identifier{Name: name},
+	// 				}, nil
+	// 			} else {
+	// 				msg := fmt.Sprintf("No field '%s' in '%s' struct", name, structDef.Name)
+	// 				p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
+	// 				return nil, fmt.Errorf(msg)
+	// 			}
+	// 		}
+	// 		panic("Unimplemented: static members on structs")
+	// 	default:
+	// 		panic(fmt.Errorf("Unhandled member type on struct: %s", memberNode.GrammarName()))
+	// 	}
+	// case ListType:
+	// 	listType := target.GetType().(ListType)
+	// 	switch memberNode.GrammarName() {
+	// 	case "identifier":
+	// 		{
+	// 			name := p.text(memberNode)
+	// 			if accessType == Instance {
+	// 				property := listType.GetProperty(name)
+	// 				if property == nil {
+	// 					msg := fmt.Sprintf("No property '%s' on List", name)
+	// 					p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
+	// 					return nil, fmt.Errorf(msg)
+	// 				}
+
+	// 				return MemberAccess{
+	// 					Target:     target,
+	// 					AccessType: accessType,
+	// 					Member:     Identifier{Name: name},
+	// 				}, nil
+	// 			} else {
+	// 				panic("Unimplemented: static members on List")
+	// 			}
+	// 		}
+	// 	case "function_call":
+	// 		call, err := p.parseFunctionCall(memberNode, &target)
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+
+	// 		return MemberAccess{
+	// 			Target:     target,
+	// 			AccessType: accessType,
+	// 			Member:     call,
+	// 		}, nil
+	// 	default:
+	// 		panic(fmt.Errorf("Unhandled member type on list: %s", memberNode.GrammarName()))
+	// 	}
+	// case PrimitiveType:
+	// 	prim := target.GetType().(PrimitiveType)
+	// 	if prim.Name != "Str" {
+	// 		return MemberAccess{
+	// 			Target:     target,
+	// 			AccessType: accessType,
+	// 		}, nil
+	// 	}
+
+	// 	switch memberNode.GrammarName() {
+	// 	case "identifier":
+	// 		name := p.text(memberNode)
+	// 		if accessType == Instance {
+	// 			property := prim.GetProperty(name)
+	// 			if property == nil {
+	// 				msg := fmt.Sprintf("No property '%s' on %s", name, prim.Name)
+	// 				p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
+	// 				return nil, fmt.Errorf(msg)
+	// 			}
+
+	// 			return MemberAccess{
+	// 				Target:     target,
+	// 				AccessType: accessType,
+	// 				Member: Identifier{
+	// 					BaseNode: BaseNode{TSNode: memberNode},
+	// 					Name:     name,
+	// 				},
+	// 			}, nil
+	// 		} else {
+	// 			panic("Unimplemented: static members on Str")
+	// 		}
+	// 	default:
+	// 		panic(fmt.Errorf("Unhandled member type on Str: %s", memberNode.GrammarName()))
+	// 	}
+	// case nil: // check if it's a package
+	// 	// identifier, ok := target.(Identifier)
+	// 	// if !ok {
+	// 	// 	return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
+	// 	// }
+	// 	// pkg, ok := identifier.symbol.(Package)
+	// 	// // if !ok {
+	// 	// // 	return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
+	// 	// // }
+	// 	// if accessType == Static {
+	// 	// 	return nil, errors.New("Unimplemented: static members on packages")
+	// 	// }
+	// 	switch memberNode.GrammarName() {
+	// 	case "function_call":
+	// 		member, err := p.parseFunctionCall(memberNode, nil)
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+	// 		return MemberAccess{
+	// 			Target:     target,
+	// 			AccessType: Instance,
+	// 			Member:     member,
+	// 		}, nil
+	// 	case "identifier":
+	// 		id, err := p.parseIdentifier(memberNode)
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+	// 		return MemberAccess{
+	// 			Target:     target,
+	// 			AccessType: accessType,
+	// 			Member:     id,
+	// 		}, nil
+	// 	default:
+	// 		expr, err := p.parseExpression(memberNode)
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+	// 		return MemberAccess{
+	// 			Target:     target,
+	// 			AccessType: accessType,
+	// 			Member:     expr,
+	// 		}, nil
+	// 	}
+
+	// default:
+	// 	panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
+	// }
 }
 
 /* look for a method on a type */
@@ -1706,33 +1386,11 @@ func (p *Parser) findMethod(subject Type, name string) *FunctionType {
 /*
 @target - when parsing a method call
 */
-func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (FunctionCall, error) {
+func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (FunctionCall, error) {
 	targetNode := p.mustChild(node, "target")
-	var signature FunctionType
-	if target == nil {
-		if fn := p.findFunction(p.text(targetNode)); fn != nil {
-			signature = *fn
-		} else {
-			return FunctionCall{}, p.undefinedSymbolError(node)
-		}
-	} else {
-		if method := p.findMethod((*target).GetType(), p.text(targetNode)); method != nil {
-			signature = *method
-		} else {
-			msg := fmt.Sprintf("Method '%s' not found on %s", p.text(targetNode), (*target).GetType())
-			p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-			return FunctionCall{}, fmt.Errorf(msg)
-		}
-	}
 
 	argsNode := node.ChildByFieldName("arguments")
 	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
-
-	if len(argNodes) != len(signature.Parameters) {
-		msg := fmt.Sprintf("Expected %d arguments, got %d", len(signature.Parameters), len(argNodes))
-		p.typeErrors = append(p.typeErrors, MakeError(msg, argsNode))
-		return FunctionCall{}, fmt.Errorf(msg)
-	}
 
 	args := make([]Expression, len(argNodes))
 	for i, argNode := range argNodes {
@@ -1740,230 +1398,50 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node, target *Expression) (
 		if err != nil {
 			return FunctionCall{}, err
 		}
-		expectedType := signature.Parameters[i]
-		resolvedArg := coerceArgIfNecessary(arg, expectedType)
 
-		if !expectedType.Equals(resolvedArg) {
-			p.typeMismatchError(&argNode, expectedType, resolvedArg)
-		}
-		args[i] = arg
-	}
-
-	if signature.Mutates {
-		if identifier, is_identifier := (*target).(Identifier); is_identifier {
-			symbol := p.scope.Lookup(identifier.Name)
-			if v, ok := symbol.(Variable); ok {
-				if v.Mutable == false {
-					msg := fmt.Sprintf("Cannot mutate an immutable list")
-					p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-				}
-			}
-		}
-	}
-
-	return FunctionCall{
-		BaseNode: BaseNode{TSNode: node},
-		Name:     signature.GetName(),
-		Args:     args,
-		Type:     signature,
-	}, nil
-}
-
-func (p *Parser) parsePackageFunctionCall(node *tree_sitter.Node, pkg Package) (FunctionCall, error) {
-	targetNode := p.mustChild(node, "target")
-	symbol := pkg.GetSymbol(p.text(targetNode))
-	if symbol == nil {
-		msg := fmt.Sprintf("Undefined: %s.%s", pkg.GetName(), p.text(targetNode))
-		p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-		return FunctionCall{}, fmt.Errorf(msg)
-	}
-	signature := symbol.(FunctionType)
-
-	argsNode := node.ChildByFieldName("arguments")
-	argNodes := argsNode.ChildrenByFieldName("argument", p.tree.Walk())
-
-	if len(argNodes) != len(signature.Parameters) {
-		msg := fmt.Sprintf("Expected %d arguments, got %d", len(signature.Parameters), len(argNodes))
-		p.typeErrors = append(p.typeErrors, MakeError(msg, argsNode))
-		return FunctionCall{}, fmt.Errorf(msg)
-	}
-
-	args := make([]Expression, len(argNodes))
-	for i, argNode := range argNodes {
-		arg, err := p.parseExpression(&argNode)
-		if err != nil {
-			return FunctionCall{}, err
-		}
-		expectedType := signature.Parameters[i]
-		resolvedArg := coerceArgIfNecessary(arg, expectedType)
-
-		if !expectedType.Equals(resolvedArg) {
-			p.typeMismatchError(&argNode, expectedType, resolvedArg)
-		}
 		args[i] = arg
 	}
 
 	return FunctionCall{
 		BaseNode: BaseNode{TSNode: node},
-		Name:     signature.GetName(),
+		Name:     p.text(targetNode),
 		Args:     args,
-		Type:     signature,
 	}, nil
-}
-
-// if @arg is an anonymous function and @expectedType is a function
-// it returns the generics coerced with the expected type.
-//
-// otherwise it returns the type of the argument
-func coerceArgIfNecessary(arg Expression, expectedType Type) Type {
-	anon, ok := arg.(AnonymousFunction)
-	if !ok {
-		return arg.GetType()
-	}
-
-	anonSignature := anon.GetType().(FunctionType)
-
-	signature, ok := expectedType.(FunctionType)
-	if !ok {
-		return arg.GetType()
-	}
-
-	params := make([]Type, len(anon.Parameters))
-	for i, param := range anonSignature.Parameters {
-		if _, isGeneric := param.(GenericType); isGeneric {
-			params[i] = signature.Parameters[i]
-		} else {
-			params[i] = param
-		}
-	}
-
-	returnType := anon.ReturnType
-	if _, isGeneric := returnType.(GenericType); isGeneric {
-		returnType = signature.ReturnType
-	}
-
-	return FunctionType{
-		Mutates:    false,
-		Name:       anonSignature.Name,
-		Parameters: params,
-		ReturnType: returnType,
-	}
 }
 
 func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error) {
 	expressionNode := p.mustChild(node, "expr")
-	caseNodes := p.mustChildren(node, "case")
+	// caseNodes := p.mustChildren(node, "case")
 
 	expression, err := p.parseExpression(expressionNode)
 	if err != nil {
 		return nil, err
 	}
+	cases := make([]MatchCase, 0)
 
-	switch expression.GetType().(type) {
-	case EnumType:
-		enum := expression.GetType().(EnumType)
-
-		providedCases := make(map[string]int)
-		cases := make([]MatchCase, 0)
-		var resultType Type = VoidType
-		for i, caseNode := range caseNodes {
-			_case, err := p.parseMemberAccess(p.mustChild(&caseNode, "pattern"))
-			if err != nil {
-				return nil, err
-			}
-			var returnType Type = VoidType
-			var body = make([]Statement, 0)
-			bodyNode := p.mustChild(&caseNode, "body")
-			if bodyNode.GrammarName() == "block" {
-				_body, err := p.parseBlock(bodyNode)
-				if err != nil {
-					return nil, err
-				}
-				body = _body
-
-				last := body[len(body)-1]
-				if expr, ok := last.(Expression); ok {
-					returnType = expr.GetType()
-				}
-			} else if bodyNode.GrammarName() == "expression" {
-				_body, err := p.parseExpression(bodyNode)
-				if err != nil {
-					return nil, err
-				}
-				body = append(body, _body)
-				returnType = _body.GetType()
-			}
-
-			memberAccess := _case.(MemberAccess)
-			cases = append(cases, MatchCase{
-				Pattern: memberAccess,
-				Body:    body,
-				Type:    returnType,
-			})
-			providedCases[memberAccess.Member.(Identifier).Name] = 0
-
-			if i == 0 {
-				resultType = returnType
-			} else if resultType.Equals(returnType) == false {
-				p.typeMismatchError(&caseNode, resultType, returnType)
-			}
-		}
-		for _, variant := range enum.Variants {
-			if _, ok := providedCases[variant]; !ok {
-				msg := fmt.Sprintf("Missing case for '%s'", enum.FormatVariant(variant))
-				p.typeErrors = append(p.typeErrors, MakeError(msg, node))
-			}
-		}
-
-		return MatchExpression{
-			BaseNode: BaseNode{TSNode: node},
-			Subject:  expression,
-			Cases:    cases,
-		}, nil
-	default:
-		panic(fmt.Sprintf("Unsupported subject type for match expression: %v", expression.GetType()))
-	}
+	return MatchExpression{
+		BaseNode: BaseNode{TSNode: node},
+		Subject:  expression,
+		Cases:    cases,
+	}, nil
 }
 
 func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFunction, error) {
 	parameterNodes := node.ChildrenByFieldName("parameter", p.tree.Walk())
+	returnNode := node.ChildByFieldName("return")
+	returnType := p.resolveType(returnNode)
 	parameters := make([]Parameter, len(parameterNodes))
 	for i, paramNode := range parameterNodes {
 		name := p.text(p.mustChild(&paramNode, "name"))
-		var _type Type
-		// typeNode := paramNode.ChildByFieldName("type")
-		// if typeNode == nil {
-		// 	_type = GenericType{}
-		// } else {
-		// 	// _type = p.resolveType(typeNode)
-		// }
 		parameters[i] = Parameter{
 			BaseNode: BaseNode{TSNode: &paramNode},
 			Name:     name,
-			Type:     _type,
 		}
 	}
 
-	scope := p.pushScope()
-	for _, param := range parameters {
-		scope.Declare(Variable{
-			Mutable: false,
-			Name:    param.Name,
-			Type:    param.Type,
-		})
-	}
 	body, err := p.parseBlock(p.mustChild(node, "body"))
 	if err != nil {
 		return AnonymousFunction{}, err
-	}
-	p.popScope()
-
-	var returnType Type = VoidType
-	if len(body) > 0 {
-		last := body[len(body)-1]
-		if expr, ok := last.(Expression); ok {
-			returnType = expr.GetType()
-		}
 	}
 
 	return AnonymousFunction{

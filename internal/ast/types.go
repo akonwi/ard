@@ -3,8 +3,6 @@ package ast
 import (
 	"fmt"
 	"strings"
-
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 type Type interface {
@@ -311,70 +309,6 @@ func (p Package) GetName() string {
 	}
 	return p.Name
 }
-func (p Package) GetType() Type {
-	return nil
-}
-func (p Package) GetSymbol(name string) Symbol {
-	if p.Path == "std/io" {
-		return std_io[name]
-	}
-	return nil
-}
-
-type ScopeOptions struct {
-	IsTop bool
-}
-
-type Scope struct {
-	parent   *Scope
-	symbols  map[string]Symbol
-	structs  map[string]StructType
-	packages map[string]Import
-}
-
-func (s Scope) GetParent() *Scope {
-	return s.parent
-}
-func NewScope(parent *Scope, options ScopeOptions) Scope {
-	scope := Scope{
-		parent:  parent,
-		symbols: make(map[string]Symbol),
-		structs: make(map[string]StructType),
-	}
-	if options.IsTop {
-		scope.Declare(FunctionType{
-			Name: "print",
-			Parameters: []Type{
-				StrType,
-			},
-			ReturnType: VoidType,
-		})
-	}
-	return scope
-}
-
-func (s *Scope) Declare(sym Symbol) error {
-	if existing, ok := s.symbols[sym.GetName()]; ok {
-		return fmt.Errorf("symbol %s already declared as %v", existing.GetName(), existing.GetType())
-	}
-	s.symbols[sym.GetName()] = sym
-	return nil
-}
-
-func (s *Scope) Lookup(name string) Symbol {
-	if sym, ok := s.symbols[name]; ok {
-		return sym
-	}
-	if s.parent != nil {
-		return s.parent.Lookup(name)
-	}
-	return nil
-}
-
-type Diagnostic struct {
-	Msg   string
-	Range tree_sitter.Range
-}
 
 // tree-sitter uses 0-based indexing, so make this human friendly when it's time to show it to humans
 // start := Position{
@@ -385,13 +319,6 @@ type Diagnostic struct {
 // 	Line:   node.EndPosition().Row + 1,
 // 	Column: node.EndPosition().Column,
 // }
-
-func MakeError(msg string, node *tree_sitter.Node) Diagnostic {
-	return Diagnostic{
-		Msg:   msg,
-		Range: node.Range(),
-	}
-}
 
 var std_io = map[string]Symbol{
 	"print": FunctionType{

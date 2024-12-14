@@ -41,7 +41,6 @@ func TestVariableDeclarations(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 		{
 			name:  "Valid empty map",
@@ -69,7 +68,6 @@ func TestVariableDeclarations(t *testing.T) {
 		// {
 		// 	name:        "Empty maps require explicit type",
 		// 	input:       `mut entries = [:]`,
-		// 	diagnostics: []Diagnostic{{Msg: "Empty maps need a declared type"}},
 		// },
 		{
 			name:  "Valid map",
@@ -98,7 +96,6 @@ func TestVariableDeclarations(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -123,7 +120,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{},
 // 		},
 // 		{
 // 			name:  "Inferred list",
@@ -145,7 +141,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{},
 // 		},
 // 		{
 // 			name:  "Inferred map",
@@ -170,29 +165,14 @@ func TestVariableDeclarations(t *testing.T) {
 // 		// {
 // 		// 	name:  "Str mismatch",
 // 		// 	input: `let name: Str = false`,
-// 		// 	diagnostics: []Diagnostic{
-// 		// 		{
-// 		// 			Msg: "Type mismatch: expected Str, got Bool",
-// 		// 		},
-// 		// 	},
 // 		// },
 // 		// {
 // 		// 	name:  "Num mismatch",
 // 		// 	input: `let name: Num = "Alice"`,
-// 		// 	diagnostics: []Diagnostic{
-// 		// 		{
-// 		// 			Msg: "Type mismatch: expected Num, got Str",
-// 		// 		},
-// 		// 	},
 // 		// },
 // 		// {
 // 		// 	name:  "Bool mismatch",
 // 		// 	input: `let is_bool: Bool = "Alice"`,
-// 		// 	diagnostics: []Diagnostic{
-// 		// 		{
-// 		// 			Msg: "Type mismatch: expected Bool, got Str",
-// 		// 		},
-// 		// 	},
 // 		// },
 // 	}
 
@@ -223,7 +203,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{},
 // 		},
 // 		{
 // 			name: "Immutable Str variable reassignment",
@@ -246,11 +225,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 							Value: `"Bob"`,
 // 						},
 // 					},
-// 				},
-// 			},
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Msg: "'name' is not mutable",
 // 				},
 // 			},
 // 		},
@@ -277,11 +251,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Msg: "Expected a 'Str' and received 'Num'",
-// 				},
-// 			},
 // 		},
 // 		{
 // 			name:  "Unknown variable reassignment",
@@ -296,11 +265,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 							Value: `"Bob"`,
 // 						},
 // 					},
-// 				},
-// 			},
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Msg: "Undefined: 'name'",
 // 				},
 // 			},
 // 		},
@@ -327,7 +291,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{},
 // 		},
 // 		{
 // 			name: "Cannot increment an immutable variable",
@@ -350,11 +313,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 							Value: `2`,
 // 						},
 // 					},
-// 				},
-// 			},
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Msg: "'count' is not mutable",
 // 				},
 // 			},
 // 		},
@@ -381,7 +339,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{},
 // 		},
 // 		{
 // 			name: "Invalid decrement",
@@ -406,11 +363,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 					},
 // 				},
 // 			},
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Msg: "'=-' can only be used with 'Num'",
-// 				},
-// 			},
 // 		},
 // 		{
 // 			name: "Cannot decrement an immutable variable",
@@ -433,11 +385,6 @@ func TestVariableDeclarations(t *testing.T) {
 // 							Value: `2`,
 // 						},
 // 					},
-// 				},
-// 			},
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Msg: "'count' is not mutable",
 // 				},
 // 			},
 // 		},

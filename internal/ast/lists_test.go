@@ -9,16 +9,10 @@ func TestVariables(t *testing.T) {
 		{
 			name:  "empty lists need to be explicitly typed",
 			input: `let numbers = []`,
-			diagnostics: []Diagnostic{
-				{Msg: "Empty lists need a declared type"},
-			},
 		},
 		{
 			name:  "List with mixed types",
 			input: `let numbers = [1, "two", false]`,
-			diagnostics: []Diagnostic{
-				{Msg: "List elements must be of the same type"},
-			},
 		},
 		{
 			name:  "List elements must match declared type",
@@ -40,9 +34,6 @@ func TestVariables(t *testing.T) {
 						},
 					},
 				},
-			},
-			diagnostics: []Diagnostic{
-				{Msg: "Type mismatch: expected [Str], got [Num]"},
 			},
 		},
 		{
@@ -66,7 +57,6 @@ func TestVariables(t *testing.T) {
 					},
 				},
 			},
-			diagnostics: []Diagnostic{},
 		},
 	}
 
@@ -134,9 +124,6 @@ func TestVariables(t *testing.T) {
 // 			input: `
 // 						let list = [1,2,3]
 // 						list.pop()`,
-// 			diagnostics: []Diagnostic{
-// 				{Msg: "Cannot mutate an immutable list"},
-// 			},
 // 		},
 // 		{
 // 			name: ".map callback must have correct signature",
@@ -144,9 +131,6 @@ func TestVariables(t *testing.T) {
 // 				let list = [1,2,3]
 // 				list.map((num: Str) { "foobar" })
 // 				list.map((num) { "string" })`,
-// 			diagnostics: []Diagnostic{
-// 				{Msg: "Type mismatch: expected (Num) Out?, got (Str) Str"},
-// 			},
 // 		},
 // 	}
 
