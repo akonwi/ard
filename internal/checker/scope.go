@@ -44,3 +44,7 @@ func (s scope) findVariable(name string) (variable, bool) {
 	}
 	return variable{}, false
 }
+
+func (s scope) find(name string) symbol {
+	return s.symbols[name]
+}

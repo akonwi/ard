@@ -102,6 +102,24 @@ func (b BinaryExpr) GetType() Type {
 	return b.Left.GetType()
 }
 
+type Identifier struct {
+	Name   string
+	symbol symbol
+}
+
+type InstanceProperty struct {
+	Subject  Expression
+	Property Expression
+}
+
+func (i InstanceProperty) GetType() Type {
+	return i.Property.GetType()
+}
+
+func (i Identifier) GetType() Type {
+	return i.symbol.GetType()
+}
+
 // Statements don't produce anything
 type Statement interface{}
 
@@ -205,6 +223,9 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 		case ast.BinaryExpression:
 			expr := checker.checkExpression(s)
 			statements = append(statements, expr)
+		case ast.MemberAccess:
+			expr := checker.checkExpression(s)
+			statements = append(statements, expr)
 		default:
 			panic(fmt.Sprintf("Unhandled statement: %T", s))
 		}
@@ -218,6 +239,16 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 
 func (c *checker) checkExpression(expr ast.Expression) Expression {
 	switch e := expr.(type) {
+	case ast.Identifier:
+		v, ok := c.scope.findVariable(e.Name)
+		if !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name),
+			})
+			return nil
+		}
+		return Identifier{Name: e.Name, symbol: v}
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
 	case ast.NumLiteral:
@@ -232,6 +263,16 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return NumLiteral{Value: value}
 	case ast.BoolLiteral:
 		return BoolLiteral{Value: e.Value}
+	case ast.MemberAccess:
+		subject := c.checkExpression(e.Target)
+		switch e.AccessType {
+		case ast.Instance:
+			return c.checkInstanceProperty(subject, e.Member)
+		case ast.Static:
+			panic("Static member access not yet implemented")
+		default:
+			panic("unreachable")
+		}
 	case ast.UnaryExpression:
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
@@ -290,6 +331,31 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return BinaryExpr{Op: operator, Left: left, Right: right}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
+	}
+}
+
+func (c *checker) checkInstanceProperty(subject Expression, member ast.Expression) Expression {
+	switch m := member.(type) {
+	case ast.Identifier:
+		sig := subject.GetType().GetProperty(m.Name)
+		if sig == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Undefined: %s.%s", startPointString(m.GetTSNode()), m, m.Name),
+			})
+			return nil
+		}
+		return InstanceProperty{
+			Subject: subject,
+			Property: Identifier{
+				Name: m.Name,
+				symbol: variable{
+					name:  m.Name,
+					_type: sig,
+				}},
+		}
+	default:
+		panic(fmt.Errorf("Unhandled instance access for %T", m))
 	}
 }
 

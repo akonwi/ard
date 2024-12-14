@@ -1,7 +1,6 @@
 package ast
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -1196,15 +1195,9 @@ func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 
 func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 	name := p.text(node)
-	symbol := p.scope.Lookup(name)
-	if symbol == nil {
-		return Identifier{}, p.undefinedSymbolError(node)
-	}
 
 	return Identifier{
-		Name:   name,
-		Type:   symbol.GetType(),
-		symbol: symbol,
+		Name: name,
 	}, nil
 }
 
@@ -1618,7 +1611,11 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 				return MemberAccess{
 					Target:     target,
 					AccessType: accessType,
-					Member:     Identifier{Name: name, Type: property},
+					Member: Identifier{
+						BaseNode: BaseNode{TSNode: memberNode},
+						Name:     name,
+						Type:     property,
+					},
 				}, nil
 			} else {
 				panic("Unimplemented: static members on Str")
@@ -1627,20 +1624,20 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 			panic(fmt.Errorf("Unhandled member type on Str: %s", memberNode.GrammarName()))
 		}
 	case nil: // check if it's a package
-		identifier, ok := target.(Identifier)
-		if !ok {
-			return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
-		}
-		pkg, ok := identifier.symbol.(Package)
-		if !ok {
-			return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
-		}
-		if accessType == Static {
-			return nil, errors.New("Unimplemented: static members on packages")
-		}
+		// identifier, ok := target.(Identifier)
+		// if !ok {
+		// 	return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
+		// }
+		// pkg, ok := identifier.symbol.(Package)
+		// // if !ok {
+		// // 	return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
+		// // }
+		// if accessType == Static {
+		// 	return nil, errors.New("Unimplemented: static members on packages")
+		// }
 		switch memberNode.GrammarName() {
 		case "function_call":
-			member, err := p.parsePackageFunctionCall(memberNode, pkg)
+			member, err := p.parseFunctionCall(memberNode, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -1649,8 +1646,27 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 				AccessType: Instance,
 				Member:     member,
 			}, nil
+		case "identifier":
+			id, err := p.parseIdentifier(memberNode)
+			if err != nil {
+				return nil, err
+			}
+			return MemberAccess{
+				Target:     target,
+				AccessType: accessType,
+				Member:     id,
+			}, nil
+		default:
+			expr, err := p.parseExpression(memberNode)
+			if err != nil {
+				return nil, err
+			}
+			return MemberAccess{
+				Target:     target,
+				AccessType: accessType,
+				Member:     expr,
+			}, nil
 		}
-		panic(fmt.Errorf("Unimplemented member type on packages: %s", memberNode.GrammarName()))
 
 	default:
 		panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))

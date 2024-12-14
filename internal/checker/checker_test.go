@@ -31,6 +31,7 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
+	cmpopts.IgnoreUnexported(Identifier{}),
 }
 
 func run(t *testing.T, tests []test) {
@@ -45,12 +46,12 @@ func run(t *testing.T, tests []test) {
 			}
 			program, diagnostics := Check(ast)
 			if len(tt.output.Imports) > 0 {
-				if diff := cmp.Diff(tt.output.Imports, program.Imports); diff != "" {
+				if diff := cmp.Diff(tt.output.Imports, program.Imports, compareOptions); diff != "" {
 					t.Errorf("Program imports mismatch (-want +got):\n%s", diff)
 				}
 			}
 			if len(tt.output.Statements) > 0 {
-				if diff := cmp.Diff(tt.output.Statements, program.Statements); diff != "" {
+				if diff := cmp.Diff(tt.output.Statements, program.Statements, compareOptions); diff != "" {
 					t.Errorf("Program statements mismatch (-want +got):\n%s", diff)
 				}
 			}
@@ -126,10 +127,11 @@ func TestVariables(t *testing.T) {
 	run(t, []test{
 		{
 			name: "Declared types",
-			input: `
-let name: Str = "Alice"
-let age: Num = 32
-let is_student: Bool = true`,
+			input: strings.Join([]string{
+				`let name: Str = "Alice"`,
+				"let age: Num = 32",
+				"let is_student: Bool = true`",
+			}, "\n"),
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
@@ -149,29 +151,30 @@ let is_student: Bool = true`,
 		},
 		{
 			name: "Actual types should match declarations",
-			input: `
-let name: Str = "Alice"
-let age: Num = "32"
-let is_student: Bool = true`,
+			input: strings.Join([]string{
+				`let name: Str = "Alice"`,
+				`let age: Num = "32"`,
+				`let is_student: Bool = true`,
+			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[3:16] Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "[2:16] Type mismatch: Expected Num, got Str"},
 			},
 		},
 		{
 			name: "Only mutable variables can be reassigned",
-			input: `
-let name: Str = "Alice"
-name = "Bob"
-mut other_name = "Bob"
-other_name = "joe"`,
+			input: strings.Join([]string{
+				`let name: Str = "Alice"`,
+				`name = "Bob"`,
+				`mut other_name = "Bob"`,
+				`other_name = "joe"`,
+			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[3:1] Immutable variable: name"},
+				{Kind: Error, Message: "[2:1] Immutable variable: name"},
 			},
 		},
 		{
-			name: "Reassigning types must match",
-			input: `mut name = "Bob"
-name = 0`,
+			name:  "Reassigning types must match",
+			input: `mut name = "Bob"` + "\n" + `name = 0`,
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "[2:8] Type mismatch: Expected Str, got Num"},
 			},
@@ -184,14 +187,51 @@ name = 0`,
 			},
 		},
 		{
-			name: "Valid reassigments",
-			input: `
-mut count = 0
-count = 1`,
+			name:  "Valid reassigments",
+			input: `mut count = 0` + "\n" + `count = 1`,
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{Name: "count", Value: NumLiteral{Value: 0}},
 					VariableAssignment{Name: "count", Value: NumLiteral{Value: 1}},
+				},
+			},
+		},
+		{
+			name:  "Using variables",
+			input: `let string_1 = "Hello"` + "\n" + `let string_2 = string_1`,
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "string_1", Value: StrLiteral{Value: "Hello"}},
+					VariableBinding{Name: "string_2", Value: Identifier{Name: "string_1"}},
+				},
+			},
+		},
+	})
+}
+
+func TestMemberAccess(t *testing.T) {
+	run(t, []test{
+		{
+			name: "valid instance members",
+			input: strings.Join([]string{
+				`"foobar".size`,
+				`let name = "Alice"`,
+				`name.size`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					InstanceProperty{
+						Subject:  StrLiteral{Value: "foobar"},
+						Property: Identifier{Name: "size"},
+					},
+					VariableBinding{
+						Name:  "name",
+						Value: StrLiteral{Value: "Alice"},
+					},
+					InstanceProperty{
+						Subject:  Identifier{Name: "name"},
+						Property: Identifier{Name: "size"},
+					},
 				},
 			},
 		},

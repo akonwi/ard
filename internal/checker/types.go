@@ -19,7 +19,12 @@ func (s Str) String() string {
 	return "Str"
 }
 func (s Str) GetProperty(name string) Type {
-	return nil
+	switch name {
+	case "size":
+		return Num{}
+	default:
+		return nil
+	}
 }
 func (s Str) Is(other Type) bool {
 	return s.String() == other.String()
