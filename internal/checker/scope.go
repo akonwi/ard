@@ -20,10 +20,12 @@ func (v variable) GetType() Type {
 
 type scope struct {
 	symbols map[string]symbol
+	parent  *scope
 }
 
-func NewScope() scope {
+func newScope(parent *scope) scope {
 	return scope{
+		parent:  parent,
 		symbols: map[string]symbol{},
 	}
 }
@@ -42,9 +44,20 @@ func (s scope) findVariable(name string) (variable, bool) {
 			return variable, ok
 		}
 	}
+	if s.parent != nil {
+		return s.parent.findVariable(name)
+	}
 	return variable{}, false
 }
 
 func (s scope) find(name string) symbol {
-	return s.symbols[name]
+	sym := s.symbols[name]
+	if sym != nil {
+		return sym
+	}
+
+	if s.parent != nil {
+		return s.parent.find(name)
+	}
+	return nil
 }

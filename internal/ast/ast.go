@@ -1186,7 +1186,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	name := memberNode.GrammarName()
 	switch name {
 	case "identifier":
-		member = Identifier{Name: p.text(memberNode)}
+		member = Identifier{Name: p.text(memberNode), BaseNode: BaseNode{TSNode: memberNode}}
 	case "function_call":
 		call, err := p.parseFunctionCall(memberNode)
 		if err != nil {
@@ -1196,6 +1196,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	return MemberAccess{
+		BaseNode:   BaseNode{TSNode: node},
 		Target:     target,
 		AccessType: accessType,
 		Member:     member,

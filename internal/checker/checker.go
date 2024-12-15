@@ -38,6 +38,9 @@ type StrLiteral struct {
 	Value string
 }
 
+func (s StrLiteral) String() string {
+	return `"` + s.Value + `"`
+}
 func (s StrLiteral) GetType() Type {
 	return Str{}
 }
@@ -99,12 +102,21 @@ type BinaryExpr struct {
 }
 
 func (b BinaryExpr) GetType() Type {
-	return b.Left.GetType()
+	switch b.Op {
+	case Add, Sub, Div, Mul, Mod:
+		return Num{}
+	default:
+		return Bool{}
+	}
 }
 
 type Identifier struct {
 	Name   string
 	symbol symbol
+}
+
+func (i Identifier) String() string {
+	return i.Name
 }
 
 type InstanceProperty struct {
@@ -133,6 +145,12 @@ type VariableAssignment struct {
 	Value Expression
 }
 
+type IfStatement struct {
+	Condition Expression
+	Body      []Statement
+	Else      Statement
+}
+
 // tree-sitter uses 0 based positioning
 func startPointString(node *ts.Node) string {
 	pos := node.StartPosition()
@@ -153,7 +171,7 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 	checker := checker{
 		diagnostics: []Diagnostic{},
 		imports:     map[string]Package{},
-		scope:       NewScope(),
+		scope:       newScope(nil),
 	}
 	statements := []Statement{}
 
@@ -169,65 +187,9 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 	}
 
 	for _, stmt := range program.Statements {
-		switch s := stmt.(type) {
-		case ast.StrLiteral:
-			expr := checker.checkExpression(s)
-			statements = append(statements, expr)
-		case ast.NumLiteral:
-			expr := checker.checkExpression(s)
-			statements = append(statements, expr)
-		case ast.BoolLiteral:
-			expr := checker.checkExpression(s)
-			statements = append(statements, expr)
-		case ast.UnaryExpression:
-			expr := checker.checkExpression(s)
-			statements = append(statements, expr)
-		case ast.VariableDeclaration:
-			value := checker.checkExpression(s.Value)
-			if s.Type != nil {
-				declared := resolveDeclaredType(s.Type)
-				if !declared.Is(value.GetType()) {
-					checker.addDiagnostic(Diagnostic{
-						Kind:    Error,
-						Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), declared, value.GetType()),
-					})
-				}
-			}
-			statements = append(statements, VariableBinding{Name: s.Name, Value: value})
-			checker.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
-		case ast.VariableAssignment:
-			variable, ok := checker.scope.findVariable(s.Name)
-			if !ok {
-				checker.addDiagnostic(Diagnostic{
-					Kind:    Error,
-					Message: fmt.Sprintf("%s Undefined: %s", startPointString(s.GetTSNode()), s.Name),
-				})
-				continue
-			}
-			if !variable.mut {
-				checker.addDiagnostic(Diagnostic{
-					Kind:    Error,
-					Message: fmt.Sprintf("%s Immutable variable: %s", startPointString(s.GetTSNode()), s.Name),
-				})
-				continue
-			}
-			value := checker.checkExpression(s.Value)
-			if !variable._type.Is(value.GetType()) {
-				checker.addDiagnostic(Diagnostic{
-					Kind:    Error,
-					Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), variable._type, value.GetType()),
-				})
-				continue
-			}
-			statements = append(statements, VariableAssignment{Name: s.Name, Value: value})
-		case ast.BinaryExpression:
-			expr := checker.checkExpression(s)
-			statements = append(statements, expr)
-		case ast.MemberAccess:
-			expr := checker.checkExpression(s)
-			statements = append(statements, expr)
-		default:
-			panic(fmt.Sprintf("Unhandled statement: %T", s))
+		statement := checker.checkStatement(stmt)
+		if statement != nil {
+			statements = append(statements, statement)
 		}
 	}
 
@@ -235,6 +197,83 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 		Imports:    checker.imports,
 		Statements: statements,
 	}, checker.diagnostics
+}
+
+func (c *checker) checkStatement(stmt ast.Statement) Statement {
+	switch s := stmt.(type) {
+	case ast.VariableDeclaration:
+		value := c.checkExpression(s.Value)
+		if s.Type != nil {
+			declared := resolveDeclaredType(s.Type)
+			if !declared.Is(value.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), declared, value.GetType()),
+				})
+			}
+		}
+		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
+		return VariableBinding{Name: s.Name, Value: value}
+	case ast.VariableAssignment:
+		variable, ok := c.scope.findVariable(s.Name)
+		if !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Undefined: %s", startPointString(s.GetTSNode()), s.Name),
+			})
+			return nil
+		}
+		if !variable.mut {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Immutable variable: %s", startPointString(s.GetTSNode()), s.Name),
+			})
+			return nil
+		}
+		value := c.checkExpression(s.Value)
+		if !variable._type.Is(value.GetType()) {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), variable._type, value.GetType()),
+			})
+			return nil
+		}
+		return VariableAssignment{Name: s.Name, Value: value}
+	case ast.IfStatement:
+		var condition Expression
+		if s.Condition != nil {
+			condition = c.checkExpression(s.Condition)
+			if condition.GetType() != (Bool{}) {
+				c.addDiagnostic(Diagnostic{
+					Kind:    Error,
+					Message: fmt.Sprintf("%s If conditions must be boolean expressions", startPointString(s.Condition.GetTSNode())),
+				})
+			}
+		}
+
+		body := c.checkBlock(s.Body)
+
+		var elseClause Statement = nil
+		if s.Else != nil {
+			elseClause = c.checkStatement(s.Else)
+		}
+		return IfStatement{Condition: condition, Body: body, Else: elseClause}
+	default:
+		return c.checkExpression(s)
+	}
+}
+
+func (c *checker) checkBlock(block []ast.Statement) []Statement {
+	scope := &c.scope
+	new_scope := newScope(scope)
+	c.scope = new_scope
+	defer func() { c.scope = *scope }()
+
+	statements := make([]Statement, len(block))
+	for i, stmt := range block {
+		statements[i] = c.checkStatement(stmt)
+	}
+	return statements
 }
 
 func (c *checker) checkExpression(expr ast.Expression) Expression {
@@ -341,7 +380,7 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		if sig == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:    Error,
-				Message: fmt.Sprintf("%s Undefined: %s.%s", startPointString(m.GetTSNode()), m, m.Name),
+				Message: fmt.Sprintf("%s Undefined: %s.%s", startPointString(m.GetTSNode()), subject, m.Name),
 			})
 			return nil
 		}

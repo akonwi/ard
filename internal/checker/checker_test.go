@@ -235,6 +235,18 @@ func TestMemberAccess(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Undefined instance members",
+			input: strings.Join([]string{
+				`"foo".length`,
+				`let name = "joe"`,
+				`name.len`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:7] Undefined: \"foo\".length"},
+				{Kind: Error, Message: "[3:6] Undefined: name.len"},
+			},
+		},
 	})
 }
 
@@ -439,6 +451,168 @@ func TestParenthesizedExpressions(t *testing.T) {
 							Op:    And,
 							Left:  BoolLiteral{Value: true},
 							Right: BoolLiteral{Value: false},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestIfStatements(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Simple if statement",
+			input: strings.Join([]string{
+				`let is_on = true`,
+				`if is_on {
+				  let foo = "bar"
+				}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					IfStatement{
+						Condition: Identifier{Name: "is_on"},
+						Body: []Statement{
+							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "The condition expression must be a boolean",
+			input: strings.Join([]string{
+				`if 20 {
+				  let foo = "bar"
+				}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:4] If conditions must be boolean expressions"},
+			},
+		},
+		{
+			name: "Compound conditions",
+			input: strings.Join([]string{
+				`let is_on = true`,
+				`if is_on and 100 > 30 {
+				  let foo = "bar"
+				}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					IfStatement{
+						Condition: BinaryExpr{
+							Op:   And,
+							Left: Identifier{Name: "is_on"},
+							Right: BinaryExpr{
+								Op:    GreaterThan,
+								Left:  NumLiteral{Value: 100},
+								Right: NumLiteral{Value: 30},
+							},
+						},
+						Body: []Statement{
+							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "With else clause",
+			input: strings.Join([]string{
+				`let is_on = true`,
+				`if is_on {
+				  let foo = "bar"
+				} else {
+				  let foo = "baz"
+				}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					IfStatement{
+						Condition: Identifier{Name: "is_on"},
+						Body: []Statement{
+							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+						},
+						Else: IfStatement{
+							Body: []Statement{
+								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "With else-if clause",
+			input: strings.Join([]string{
+				`let is_on = true`,
+				`if is_on {
+				  let foo = "bar"
+				} else if 1 > 2 {
+				  let foo = "baz"
+				}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					IfStatement{
+						Condition: Identifier{Name: "is_on"},
+						Body: []Statement{
+							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+						},
+						Else: IfStatement{
+							Condition: BinaryExpr{
+								Op:    GreaterThan,
+								Left:  NumLiteral{Value: 1},
+								Right: NumLiteral{Value: 2},
+							},
+							Body: []Statement{
+								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "if-else-if-else",
+			input: strings.Join([]string{
+				`let is_on = true`,
+				`if is_on {
+				  let foo = "bar"
+				} else if 1 > 2 {
+				  let foo = "baz"
+				} else {
+					let foo = "qux"
+				}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					IfStatement{
+						Condition: Identifier{Name: "is_on"},
+						Body: []Statement{
+							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+						},
+						Else: IfStatement{
+							Condition: BinaryExpr{
+								Op:    GreaterThan,
+								Left:  NumLiteral{Value: 1},
+								Right: NumLiteral{Value: 2},
+							},
+							Body: []Statement{
+								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
+							},
+							Else: IfStatement{
+								Body: []Statement{
+									VariableBinding{Name: "foo", Value: StrLiteral{Value: "qux"}},
+								},
+							},
 						},
 					},
 				},
