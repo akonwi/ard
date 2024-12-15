@@ -69,10 +69,11 @@ func TestImports(t *testing.T) {
 	run(t, []test{
 		{
 			name: "importing modules",
-			input: `
-use io/fs
-use github.com/google/go-cmp/cmp
-use github.com/tree-sitter/tree-sitter as ts`,
+			input: strings.Join([]string{
+				`use io/fs`,
+				`use github.com/google/go-cmp/cmp`,
+				`use github.com/tree-sitter/tree-sitter as ts`,
+			}, "\n"),
 			output: Program{
 				Imports: map[string]Package{
 					"fs": {
@@ -89,8 +90,10 @@ use github.com/tree-sitter/tree-sitter as ts`,
 		},
 		{
 			name: "name collisions are caught",
-			input: `use std/fs
-use my/files as fs`,
+			input: strings.Join([]string{
+				`use std/fs`,
+				`use my/files as fs`,
+			}, "\n"),
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "[2:1] Duplicate package name: fs"},
 			},
@@ -102,10 +105,11 @@ func TestLiterals(t *testing.T) {
 	run(t, []test{
 		{
 			name: "primitive literals",
-			input: `
-"hello"
-42
-false`,
+			input: strings.Join([]string{
+				`"hello"`,
+				"42",
+				"false",
+			}, "\n"),
 			output: Program{
 				Statements: []Statement{
 					StrLiteral{
