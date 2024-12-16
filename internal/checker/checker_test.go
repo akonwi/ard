@@ -56,7 +56,7 @@ func run(t *testing.T, tests []test) {
 				}
 			}
 
-			if len(tt.diagnostics) > 0 {
+			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {
 				if diff := cmp.Diff(tt.diagnostics, diagnostics, compareOptions); diff != "" {
 					t.Errorf("Diagnostics mismatch (-want +got):\n%s", diff)
 				}
@@ -620,6 +620,100 @@ func TestIfStatements(t *testing.T) {
 						},
 					},
 				},
+			},
+		},
+	})
+}
+
+func TestForLoops(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Iterating over a range",
+			input: strings.Join([]string{
+				`mut count = 0`,
+				`for i in 1..10 {`,
+				`  count = count + i`,
+				`}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "count", Value: NumLiteral{Value: 0}},
+					ForRange{
+						Cursor: Identifier{Name: "i"},
+						Start:  NumLiteral{Value: 1},
+						End:    NumLiteral{Value: 10},
+						Body: []Statement{
+							VariableAssignment{
+								Name: "count",
+								Value: BinaryExpr{
+									Op:    Add,
+									Left:  Identifier{Name: "count"},
+									Right: Identifier{Name: "i"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "The range must be between numbers",
+			input: strings.Join([]string{
+				`mut count = 0`,
+				`for i in 1..true {`,
+				`  count = count + i`,
+				`}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[2:10] Invalid range: Num..Bool"},
+			},
+		},
+		{
+			name: "Iterating over a string",
+			input: strings.Join([]string{
+				`let string = "hello"`,
+				`for c in string {`,
+				`  c`,
+				`}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "string", Value: StrLiteral{Value: "hello"}},
+					ForIn{
+						Cursor:   Identifier{Name: "c"},
+						Iterable: Identifier{Name: "string"},
+						Body: []Statement{
+							Identifier{Name: "c"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Iterating up to a number, is sugar for 0..n",
+			input: strings.Join([]string{
+				`for i in 20 {`,
+				`  i`,
+				`}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					ForRange{
+						Cursor: Identifier{Name: "i"},
+						Start:  NumLiteral{Value: 0},
+						End:    NumLiteral{Value: 20},
+						Body: []Statement{
+							Identifier{Name: "i"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Cannot iterate over a boolean",
+			input: `for b in false {}`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:10] Cannot iterate over a Bool"},
 			},
 		},
 	})

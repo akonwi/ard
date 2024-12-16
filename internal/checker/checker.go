@@ -151,6 +151,19 @@ type IfStatement struct {
 	Else      Statement
 }
 
+type ForRange struct {
+	Cursor Identifier
+	Start  Expression
+	End    Expression
+	Body   []Statement
+}
+
+type ForIn struct {
+	Cursor   Identifier
+	Iterable Expression
+	Body     []Statement
+}
+
 // tree-sitter uses 0 based positioning
 func startPointString(node *ts.Node) string {
 	pos := node.StartPosition()
@@ -160,7 +173,7 @@ func startPointString(node *ts.Node) string {
 type checker struct {
 	diagnostics []Diagnostic
 	imports     map[string]Package
-	scope       scope
+	scope       *scope
 }
 
 func (c *checker) addDiagnostic(d Diagnostic) {
@@ -251,23 +264,77 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 		}
 
-		body := c.checkBlock(s.Body)
+		body := c.checkBlock(s.Body, nil)
 
 		var elseClause Statement = nil
 		if s.Else != nil {
 			elseClause = c.checkStatement(s.Else)
 		}
 		return IfStatement{Condition: condition, Body: body, Else: elseClause}
+	case ast.Comment:
+		return nil
+	case ast.RangeLoop:
+		cursor := variable{name: s.Cursor.Name, mut: false, _type: Num{}}
+		start := c.checkExpression(s.Start)
+		end := c.checkExpression(s.End)
+
+		startType := start.GetType()
+		endType := end.GetType()
+		if !startType.Is(Num{}) || !endType.Is(Num{}) {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Invalid range: %s..%s", startPointString(s.Start.GetTSNode()), startType, endType),
+			})
+			return nil
+		}
+		body := c.checkBlock(s.Body, cursor)
+		return ForRange{
+			Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
+			Start:  start,
+			End:    end,
+			Body:   body,
+		}
+	case ast.ForLoop:
+		iterable := c.checkExpression(s.Iterable)
+		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
+		body := c.checkBlock(s.Body, cursor)
+
+		switch iterable.GetType().(type) {
+		case Num:
+			return ForRange{
+				Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
+				Start:  NumLiteral{Value: 0},
+				End:    iterable,
+				Body:   body,
+			}
+		case Str:
+			return ForIn{
+				Cursor:   Identifier{Name: s.Cursor.Name, symbol: cursor},
+				Iterable: iterable,
+				Body:     body,
+			}
+		case Bool:
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Cannot iterate over a Bool", startPointString(s.Iterable.GetTSNode())),
+			})
+			return nil
+		default:
+			panic(fmt.Sprintf("Unhandled iterable type: %T", iterable.GetType()))
+		}
 	default:
 		return c.checkExpression(s)
 	}
 }
 
-func (c *checker) checkBlock(block []ast.Statement) []Statement {
-	scope := &c.scope
-	new_scope := newScope(scope)
+func (c *checker) checkBlock(block []ast.Statement, cursor symbol) []Statement {
+	new_scope := newScope(c.scope)
 	c.scope = new_scope
-	defer func() { c.scope = *scope }()
+	defer func() { c.scope = new_scope.parent }()
+
+	if cursor != nil {
+		c.scope.addVariable(cursor.(variable))
+	}
 
 	statements := make([]Statement, len(block))
 	for i, stmt := range block {

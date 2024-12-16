@@ -23,8 +23,8 @@ type scope struct {
 	parent  *scope
 }
 
-func newScope(parent *scope) scope {
-	return scope{
+func newScope(parent *scope) *scope {
+	return &scope{
 		parent:  parent,
 		symbols: map[string]symbol{},
 	}
