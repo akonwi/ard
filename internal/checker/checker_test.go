@@ -124,6 +124,27 @@ func TestLiterals(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "interpolated strings",
+			input: strings.Join([]string{
+				`let name = "world"`,
+				`"Hello, {{name}}"`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Name:  "name",
+						Value: StrLiteral{Value: "world"},
+					},
+					InterpolatedStr{
+						Parts: []Expression{
+							StrLiteral{Value: "Hello, "},
+							Identifier{Name: "name"},
+						},
+					},
+				},
+			},
+		},
 	})
 }
 

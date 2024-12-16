@@ -132,6 +132,14 @@ func (i Identifier) GetType() Type {
 	return i.symbol.GetType()
 }
 
+type InterpolatedStr struct {
+	Parts []Expression
+}
+
+func (i InterpolatedStr) GetType() Type {
+	return Str{}
+}
+
 // Statements don't produce anything
 type Statement interface{}
 
@@ -435,6 +443,12 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 
 		return BinaryExpr{Op: operator, Left: left, Right: right}
+	case ast.InterpolatedStr:
+		parts := make([]Expression, len(e.Chunks))
+		for i, chunk := range e.Chunks {
+			parts[i] = c.checkExpression(chunk)
+		}
+		return InterpolatedStr{Parts: parts}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
