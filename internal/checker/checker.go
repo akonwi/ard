@@ -172,6 +172,11 @@ type ForIn struct {
 	Body     []Statement
 }
 
+type WhileLoop struct {
+	Condition Expression
+	Body      []Statement
+}
+
 // tree-sitter uses 0 based positioning
 func startPointString(node *ts.Node) string {
 	pos := node.StartPosition()
@@ -329,6 +334,20 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		default:
 			panic(fmt.Sprintf("Unhandled iterable type: %T", iterable.GetType()))
+		}
+	case ast.WhileLoop:
+		condition := c.checkExpression(s.Condition)
+		if condition.GetType() != (Bool{}) {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s While conditions must be boolean expressions", startPointString(s.Condition.GetTSNode())),
+			})
+		}
+
+		body := c.checkBlock(s.Body, nil)
+		return WhileLoop{
+			Condition: condition,
+			Body:      body,
 		}
 	default:
 		return c.checkExpression(s)

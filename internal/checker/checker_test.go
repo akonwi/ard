@@ -739,3 +739,39 @@ func TestForLoops(t *testing.T) {
 		},
 	})
 }
+
+func TestWhileLoops(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Simple condition",
+			input: strings.Join([]string{
+				`mut count = 10`,
+				`while count > 0 {`,
+				`  count = count - 1`,
+				`}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{Name: "count", Value: NumLiteral{Value: 10}},
+					WhileLoop{
+						Condition: BinaryExpr{
+							Op:    GreaterThan,
+							Left:  Identifier{Name: "count"},
+							Right: NumLiteral{Value: 0},
+						},
+						Body: []Statement{
+							VariableAssignment{
+								Name: "count",
+								Value: BinaryExpr{
+									Op:    Sub,
+									Left:  Identifier{Name: "count"},
+									Right: NumLiteral{Value: 1},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
