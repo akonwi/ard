@@ -669,7 +669,7 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration, error) {
 	name := p.text(node.ChildByFieldName("name"))
 	parameters := p.parseParameters(node.ChildByFieldName("parameters"))
-	// returnType := p.resolveType(node.ChildByFieldName("return"))
+	returnType := p.resolveType(node.ChildByFieldName("return"))
 
 	// parameterTypes := make([]Type, len(parameters))
 	// for i, param := range parameters {
@@ -686,8 +686,8 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 		BaseNode:   BaseNode{TSNode: node},
 		Name:       name,
 		Parameters: parameters,
-		// ReturnType: returnType,
-		Body: body,
+		ReturnType: returnType,
+		Body:       body,
 	}, nil
 }
 

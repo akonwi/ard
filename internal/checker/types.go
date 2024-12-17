@@ -13,6 +13,18 @@ func areSameType(a, b Type) bool {
 	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }
 
+type Void struct{}
+
+func (v Void) String() string {
+	return "Void"
+}
+func (v Void) GetProperty(name string) Type {
+	return nil
+}
+func (v Void) Is(other Type) bool {
+	return v.String() == other.String()
+}
+
 type Str struct{}
 
 func (s Str) String() string {

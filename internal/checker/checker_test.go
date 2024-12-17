@@ -775,3 +775,68 @@ func TestWhileLoops(t *testing.T) {
 		},
 	})
 }
+
+func TestFunctions(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Empty function",
+			input: `fn noop() {}` + "\n" + `noop()`,
+			output: Program{
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name: "noop",
+						Body: []Statement{},
+					},
+					FunctionCall{
+						Name:    "noop",
+						Args:    []Expression{},
+						Returns: nil,
+					},
+				},
+			},
+		},
+		{
+			name: "Inferred return type",
+			input: strings.Join([]string{
+				`fn get_msg() { "Hello, world!" }`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name: "get_msg",
+						Body: []Statement{
+							StrLiteral{Value: "Hello, world!"},
+						},
+						Return: Str{},
+					},
+				},
+			},
+		},
+		{
+			name: "Explicit return type",
+			input: strings.Join([]string{
+				`fn get_msg() Str { "Hello, world!" }`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name: "get_msg",
+						Body: []Statement{
+							StrLiteral{Value: "Hello, world!"},
+						},
+						Return: Str{},
+					},
+				},
+			},
+		},
+		{
+			name: "Implementation should match declared return type",
+			input: strings.Join([]string{
+				`fn get_msg() Str { 200 }`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:14] Type mismatch: Expected Str, got Num"},
+			},
+		},
+	})
+}

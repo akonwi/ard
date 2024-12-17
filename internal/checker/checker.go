@@ -177,6 +177,22 @@ type WhileLoop struct {
 	Body      []Statement
 }
 
+type FunctionDeclaration struct {
+	Name   string
+	Body   []Statement
+	Return Type
+}
+
+type FunctionCall struct {
+	Name    string
+	Args    []Expression
+	Returns Type
+}
+
+func (f FunctionCall) GetType() Type {
+	return f.Returns
+}
+
 // tree-sitter uses 0 based positioning
 func startPointString(node *ts.Node) string {
 	pos := node.StartPosition()
@@ -339,8 +355,11 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		condition := c.checkExpression(s.Condition)
 		if condition.GetType() != (Bool{}) {
 			c.addDiagnostic(Diagnostic{
-				Kind:    Error,
-				Message: fmt.Sprintf("%s While conditions must be boolean expressions", startPointString(s.Condition.GetTSNode())),
+				Kind: Error,
+				Message: fmt.Sprintf(
+					"%s While conditions must be boolean expressions",
+					startPointString(s.Condition.GetTSNode()),
+				),
 			})
 		}
 
@@ -348,6 +367,31 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		return WhileLoop{
 			Condition: condition,
 			Body:      body,
+		}
+	case ast.FunctionDeclaration:
+		declaredReturnType := resolveDeclaredType(s.ReturnType)
+		body := c.checkBlock(s.Body, nil)
+		var returnType Type = nil
+		if len(body) > 0 {
+			if expr, ok := body[len(body)-1].(Expression); ok {
+				returnType = expr.GetType()
+				// TODO: if declared type is Void, ignore actual return
+				if declaredReturnType != nil && !declaredReturnType.Is(returnType) {
+					c.addDiagnostic(Diagnostic{
+						Kind: Error,
+						Message: fmt.Sprintf(
+							"%s Type mismatch: Expected %s, got %s",
+							startPointString(s.ReturnType.GetTSNode()),
+							declaredReturnType,
+							returnType),
+					})
+				}
+			}
+		}
+		return FunctionDeclaration{
+			Name:   s.Name,
+			Body:   body,
+			Return: returnType,
 		}
 	default:
 		return c.checkExpression(s)
@@ -468,6 +512,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			parts[i] = c.checkExpression(chunk)
 		}
 		return InterpolatedStr{Parts: parts}
+	case ast.FunctionCall:
+		return FunctionCall{Name: e.Name, Args: []Expression{}}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
@@ -499,6 +545,10 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 }
 
 func resolveDeclaredType(t ast.DeclaredType) Type {
+	if t == nil {
+		return nil
+	}
+
 	switch t.(type) {
 	case ast.StringType:
 		return Str{}
@@ -506,6 +556,8 @@ func resolveDeclaredType(t ast.DeclaredType) Type {
 		return Num{}
 	case ast.BooleanType:
 		return Bool{}
+	case ast.Void:
+		return Void{}
 	default:
 		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}
