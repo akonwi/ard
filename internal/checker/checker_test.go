@@ -31,7 +31,7 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreUnexported(Identifier{}),
+	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}),
 }
 
 func run(t *testing.T, tests []test) {
@@ -789,9 +789,8 @@ func TestFunctions(t *testing.T) {
 						Body:       []Statement{},
 					},
 					FunctionCall{
-						Name:    "noop",
-						Args:    []Expression{},
-						Returns: nil,
+						Name: "noop",
+						Args: []Expression{},
 					},
 				},
 			},
@@ -800,6 +799,7 @@ func TestFunctions(t *testing.T) {
 			name: "Return type is inferred",
 			input: strings.Join([]string{
 				`fn get_msg() { "Hello, world!" }`,
+				`let msg: Str = get_msg()`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -811,6 +811,12 @@ func TestFunctions(t *testing.T) {
 						},
 						Return: Str{},
 					},
+					VariableBinding{
+						Name: "msg",
+						Value: FunctionCall{
+							Name: "get_msg",
+							Args: []Expression{},
+						}},
 				},
 			},
 		},
@@ -845,6 +851,7 @@ func TestFunctions(t *testing.T) {
 			name: "Function with parameters",
 			input: strings.Join([]string{
 				`fn greet(person: Str) { "hello {{person}}" }`,
+				`greet("joe")`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -863,7 +870,26 @@ func TestFunctions(t *testing.T) {
 							},
 						},
 					},
+					FunctionCall{
+						Name: "greet",
+						Args: []Expression{StrLiteral{Value: "joe"}},
+					},
 				},
+			},
+		},
+		{
+			name: "Function calls must have correct arguments",
+			input: strings.Join([]string{
+				`fn greet(person: Str) { "hello {{person}}" }`,
+				`greet(101)`,
+				`fn add(a: Num, b: Num) { a + b }`,
+				`add(2)`,
+				`add(1, "two")`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[2:7] Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "[4:1] Incorrect number of arguments: Expected 2, got 1"},
+				{Kind: Error, Message: "[5:8] Type mismatch: Expected Num, got Str"},
 			},
 		},
 	})

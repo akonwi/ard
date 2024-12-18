@@ -18,6 +18,19 @@ func (v variable) GetType() Type {
 	return v._type
 }
 
+type function struct {
+	name       string
+	parameters []variable
+	returns    Type
+}
+
+func (f function) GetName() string {
+	return f.name
+}
+func (f function) GetType() Type {
+	return f.returns
+}
+
 type scope struct {
 	symbols map[string]symbol
 	parent  *scope
@@ -28,6 +41,14 @@ func newScope(parent *scope) *scope {
 		parent:  parent,
 		symbols: map[string]symbol{},
 	}
+}
+
+func (s *scope) declare(sym symbol) bool {
+	if _, ok := s.symbols[sym.GetName()]; ok {
+		return false
+	}
+	s.symbols[sym.GetName()] = sym
+	return true
 }
 
 func (s *scope) addVariable(v variable) bool {

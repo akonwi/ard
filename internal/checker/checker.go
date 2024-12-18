@@ -190,13 +190,13 @@ type FunctionDeclaration struct {
 }
 
 type FunctionCall struct {
-	Name    string
-	Args    []Expression
-	Returns Type
+	Name   string
+	Args   []Expression
+	symbol function
 }
 
 func (f FunctionCall) GetType() Type {
-	return f.Returns
+	return f.symbol.returns
 }
 
 // tree-sitter uses 0 based positioning
@@ -382,7 +382,6 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				Name: p.Name,
 				Type: resolveDeclaredType(p.Type),
 			}
-			fmt.Printf("Parameter: %s\n", parameters[i].Type)
 			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
 		}
 
@@ -405,6 +404,15 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				}
 			}
 		}
+
+		fn := function{
+			name:       s.Name,
+			parameters: blockVariables,
+			returns:    returnType,
+		}
+
+		c.scope.declare(fn)
+
 		return FunctionDeclaration{
 			Name:       s.Name,
 			Parameters: parameters,
@@ -531,7 +539,42 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		return InterpolatedStr{Parts: parts}
 	case ast.FunctionCall:
-		return FunctionCall{Name: e.Name, Args: []Expression{}}
+		sym := c.scope.find(e.Name)
+		if sym == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name),
+			})
+			return nil
+		}
+		fn, ok := sym.(function)
+		if !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Not a function: %s", startPointString(e.GetTSNode()), e.Name),
+			})
+			return nil
+		}
+
+		args := make([]Expression, len(e.Args))
+		if len(e.Args) != len(fn.parameters) {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Incorrect number of arguments: Expected %d, got %d", startPointString(e.GetTSNode()), len(fn.parameters), len(e.Args)),
+			})
+		} else {
+			for i, arg := range e.Args {
+				args[i] = c.checkExpression(arg)
+				if !fn.parameters[i]._type.Is(args[i].GetType()) {
+					c.addDiagnostic(Diagnostic{
+						Kind:    Error,
+						Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, args[i].GetType()),
+					})
+				}
+			}
+		}
+
+		return FunctionCall{Name: e.Name, Args: args, symbol: fn}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
