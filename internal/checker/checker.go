@@ -177,10 +177,16 @@ type WhileLoop struct {
 	Body      []Statement
 }
 
+type Parameter struct {
+	Name string
+	Type Type
+}
+
 type FunctionDeclaration struct {
-	Name   string
-	Body   []Statement
-	Return Type
+	Name       string
+	Parameters []Parameter
+	Body       []Statement
+	Return     Type
 }
 
 type FunctionCall struct {
@@ -293,7 +299,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 		}
 
-		body := c.checkBlock(s.Body, nil)
+		body := c.checkBlock(s.Body, []variable{})
 
 		var elseClause Statement = nil
 		if s.Else != nil {
@@ -316,7 +322,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
-		body := c.checkBlock(s.Body, cursor)
+		body := c.checkBlock(s.Body, []variable{cursor})
 		return ForRange{
 			Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
 			Start:  start,
@@ -326,7 +332,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	case ast.ForLoop:
 		iterable := c.checkExpression(s.Iterable)
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
-		body := c.checkBlock(s.Body, cursor)
+		body := c.checkBlock(s.Body, []variable{cursor})
 
 		switch iterable.GetType().(type) {
 		case Num:
@@ -363,14 +369,25 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 		}
 
-		body := c.checkBlock(s.Body, nil)
+		body := c.checkBlock(s.Body, []variable{})
 		return WhileLoop{
 			Condition: condition,
 			Body:      body,
 		}
 	case ast.FunctionDeclaration:
+		parameters := make([]Parameter, len(s.Parameters))
+		blockVariables := make([]variable, len(s.Parameters))
+		for i, p := range s.Parameters {
+			parameters[i] = Parameter{
+				Name: p.Name,
+				Type: resolveDeclaredType(p.Type),
+			}
+			fmt.Printf("Parameter: %s\n", parameters[i].Type)
+			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
+		}
+
 		declaredReturnType := resolveDeclaredType(s.ReturnType)
-		body := c.checkBlock(s.Body, nil)
+		body := c.checkBlock(s.Body, blockVariables)
 		var returnType Type = nil
 		if len(body) > 0 {
 			if expr, ok := body[len(body)-1].(Expression); ok {
@@ -389,22 +406,23 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 		}
 		return FunctionDeclaration{
-			Name:   s.Name,
-			Body:   body,
-			Return: returnType,
+			Name:       s.Name,
+			Parameters: parameters,
+			Body:       body,
+			Return:     returnType,
 		}
 	default:
 		return c.checkExpression(s)
 	}
 }
 
-func (c *checker) checkBlock(block []ast.Statement, cursor symbol) []Statement {
+func (c *checker) checkBlock(block []ast.Statement, variables []variable) []Statement {
 	new_scope := newScope(c.scope)
 	c.scope = new_scope
 	defer func() { c.scope = new_scope.parent }()
 
-	if cursor != nil {
-		c.scope.addVariable(cursor.(variable))
+	for _, variable := range variables {
+		c.scope.addVariable(variable)
 	}
 
 	statements := make([]Statement, len(block))

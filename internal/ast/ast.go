@@ -702,7 +702,7 @@ func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
 		parameters = append(parameters, Parameter{
 			BaseNode: BaseNode{TSNode: &node},
 			Name:     p.text(node.ChildByFieldName("name")),
-			// Type:     p.resolveType(node.ChildByFieldName("type")),
+			Type:     p.resolveType(node.ChildByFieldName("type")),
 		})
 	}
 

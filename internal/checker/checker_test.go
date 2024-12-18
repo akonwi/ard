@@ -784,8 +784,9 @@ func TestFunctions(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					FunctionDeclaration{
-						Name: "noop",
-						Body: []Statement{},
+						Name:       "noop",
+						Parameters: []Parameter{},
+						Body:       []Statement{},
 					},
 					FunctionCall{
 						Name:    "noop",
@@ -796,14 +797,15 @@ func TestFunctions(t *testing.T) {
 			},
 		},
 		{
-			name: "Inferred return type",
+			name: "Return type is inferred",
 			input: strings.Join([]string{
 				`fn get_msg() { "Hello, world!" }`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
 					FunctionDeclaration{
-						Name: "get_msg",
+						Name:       "get_msg",
+						Parameters: []Parameter{},
 						Body: []Statement{
 							StrLiteral{Value: "Hello, world!"},
 						},
@@ -820,7 +822,8 @@ func TestFunctions(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					FunctionDeclaration{
-						Name: "get_msg",
+						Name:       "get_msg",
+						Parameters: []Parameter{},
 						Body: []Statement{
 							StrLiteral{Value: "Hello, world!"},
 						},
@@ -836,6 +839,31 @@ func TestFunctions(t *testing.T) {
 			}, "\n"),
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "[1:14] Type mismatch: Expected Str, got Num"},
+			},
+		},
+		{
+			name: "Function with parameters",
+			input: strings.Join([]string{
+				`fn greet(person: Str) { "hello {{person}}" }`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name: "greet",
+						Parameters: []Parameter{
+							{Name: "person", Type: Str{}},
+						},
+						Return: Str{},
+						Body: []Statement{
+							InterpolatedStr{
+								Parts: []Expression{
+									StrLiteral{Value: "hello "},
+									Identifier{Name: "person"},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	})
