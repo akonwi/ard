@@ -69,6 +69,7 @@ func (b Bool) Is(other Type) bool {
 	return b.String() == other.String()
 }
 
+// also doubles as a symbol in scope
 type function struct {
 	name       string
 	parameters []variable

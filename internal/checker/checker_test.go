@@ -896,6 +896,7 @@ func TestFunctions(t *testing.T) {
 			name: "Anonymous functions",
 			input: strings.Join([]string{
 				`let add = (a: Num, b: Num) { a + b }`,
+				`let eight: Num = add(3, 5)`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -915,6 +916,10 @@ func TestFunctions(t *testing.T) {
 								},
 							},
 						},
+					},
+					VariableBinding{
+						Name:  "eight",
+						Value: FunctionCall{Name: "add", Args: []Expression{NumLiteral{Value: 3}, NumLiteral{Value: 5}}},
 					},
 				},
 			},

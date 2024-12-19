@@ -569,7 +569,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			})
 			return nil
 		}
-		fn, ok := sym.(function)
+		fn, ok := sym.asFunction()
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:    Error,

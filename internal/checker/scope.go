@@ -3,6 +3,7 @@ package checker
 type symbol interface {
 	GetName() string
 	GetType() Type
+	asFunction() (function, bool)
 }
 
 type variable struct {
@@ -17,12 +18,21 @@ func (v variable) GetName() string {
 func (v variable) GetType() Type {
 	return v._type
 }
+func (v variable) asFunction() (function, bool) {
+	if fn, ok := v._type.(function); ok {
+		return fn, ok
+	}
+	return function{}, false
+}
 
 func (f function) GetName() string {
 	return f.name
 }
 func (f function) GetType() Type {
 	return f.returns
+}
+func (f function) asFunction() (function, bool) {
+	return f, true
 }
 
 type scope struct {
