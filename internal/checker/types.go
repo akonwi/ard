@@ -1,6 +1,9 @@
 package checker
 
-import "reflect"
+import (
+	"reflect"
+	"strings"
+)
 
 // A static type, must be printable, have properties, and be comparable
 type Type interface {
@@ -64,4 +67,24 @@ func (b Bool) GetProperty(name string) Type {
 }
 func (b Bool) Is(other Type) bool {
 	return b.String() == other.String()
+}
+
+type function struct {
+	name       string
+	parameters []variable
+	returns    Type
+}
+
+func (f function) String() string {
+	params := make([]string, len(f.parameters))
+	for i, p := range f.parameters {
+		params[i] = p.GetName()
+	}
+	return f.name + "(" + strings.Join(params, ",") + f.returns.String()
+}
+func (f function) GetProperty(name string) Type {
+	return nil
+}
+func (f function) Is(other Type) bool {
+	return f.String() == other.String()
 }

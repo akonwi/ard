@@ -1437,6 +1437,7 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 		parameters[i] = Parameter{
 			BaseNode: BaseNode{TSNode: &paramNode},
 			Name:     name,
+			Type:     p.resolveType(p.mustChild(&paramNode, "type")),
 		}
 	}
 

@@ -892,5 +892,32 @@ func TestFunctions(t *testing.T) {
 				{Kind: Error, Message: "[5:8] Type mismatch: Expected Num, got Str"},
 			},
 		},
+		{
+			name: "Anonymous functions",
+			input: strings.Join([]string{
+				`let add = (a: Num, b: Num) { a + b }`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Name: "add",
+						Value: FunctionLiteral{
+							Parameters: []Parameter{
+								{Name: "a", Type: Num{}},
+								{Name: "b", Type: Num{}},
+							},
+							Return: Num{},
+							Body: []Statement{
+								BinaryExpr{
+									Op:    Add,
+									Left:  Identifier{Name: "a"},
+									Right: Identifier{Name: "b"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	})
 }

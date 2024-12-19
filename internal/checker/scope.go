@@ -18,12 +18,6 @@ func (v variable) GetType() Type {
 	return v._type
 }
 
-type function struct {
-	name       string
-	parameters []variable
-	returns    Type
-}
-
 func (f function) GetName() string {
 	return f.name
 }

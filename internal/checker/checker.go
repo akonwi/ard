@@ -140,6 +140,28 @@ func (i InterpolatedStr) GetType() Type {
 	return Str{}
 }
 
+type FunctionLiteral struct {
+	Parameters []Parameter
+	Return     Type
+	Body       []Statement
+}
+
+func (f FunctionLiteral) GetType() Type {
+	params := make([]variable, len(f.Parameters))
+	for i, p := range f.Parameters {
+		params[i] = variable{
+			name:  p.Name,
+			mut:   false,
+			_type: p.Type,
+		}
+	}
+	return function{
+		name:       "",
+		parameters: params,
+		returns:    f.Return,
+	}
+}
+
 // Statements don't produce anything
 type Statement interface{}
 
@@ -575,6 +597,40 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 
 		return FunctionCall{Name: e.Name, Args: args, symbol: fn}
+	case ast.AnonymousFunction:
+		parameters := make([]Parameter, len(e.Parameters))
+		blockVariables := make([]variable, len(e.Parameters))
+		for i, p := range e.Parameters {
+			parameters[i] = Parameter{
+				Name: p.Name,
+				Type: resolveDeclaredType(p.Type),
+			}
+			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
+		}
+		declaredReturnType := resolveDeclaredType(e.ReturnType)
+		body := c.checkBlock(e.Body, blockVariables)
+		var returnType Type = nil
+		if len(body) > 0 {
+			if expr, ok := body[len(body)-1].(Expression); ok {
+				returnType = expr.GetType()
+				// TODO: if declared type is Void, ignore actual return
+				if declaredReturnType != nil && !declaredReturnType.Is(returnType) {
+					c.addDiagnostic(Diagnostic{
+						Kind: Error,
+						Message: fmt.Sprintf(
+							"%s Type mismatch: Expected %s, got %s",
+							startPointString(e.ReturnType.GetTSNode()),
+							declaredReturnType,
+							returnType),
+					})
+				}
+			}
+		}
+		return FunctionLiteral{
+			Parameters: parameters,
+			Return:     returnType,
+			Body:       body,
+		}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
