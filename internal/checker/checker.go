@@ -25,8 +25,45 @@ type Program struct {
 	Imports    map[string]Package
 	Statements []Statement
 }
+
+// doubles as a symbol
 type Package struct {
+	name string
 	Path string
+}
+
+// Package impl symbol
+func (p Package) GetName() string {
+	return p.name
+}
+func (p Package) GetType() Type {
+	return p
+}
+func (p Package) asFunction() (function, bool) {
+	return function{}, false
+}
+
+// Package impl Type
+func (p Package) String() string {
+	return "package " + p.name + " " + p.Path
+}
+func (p Package) GetProperty(name string) Type {
+	if p.Path == "std/io" {
+		switch name {
+		case "print":
+			return function{
+				name:       name,
+				parameters: []variable{{name: "string", mut: false, _type: Str{}}},
+				returns:    Void{},
+			}
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+func (p Package) Is(other Type) bool {
+	return p.String() == other.String()
 }
 
 // Expressions produce something, therefore they have a Type
@@ -247,7 +284,9 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 
 	for _, imp := range program.Imports {
 		if _, ok := checker.imports[imp.Name]; !ok {
-			checker.imports[imp.Name] = Package{Path: imp.Path}
+			pkg := Package{Path: imp.Path, name: imp.Name}
+			checker.imports[imp.Name] = pkg
+			checker.scope.declare(pkg)
 		} else {
 			checker.addDiagnostic(Diagnostic{
 				Kind:    Error,
@@ -285,7 +324,15 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
 		return VariableBinding{Name: s.Name, Value: value}
 	case ast.VariableAssignment:
-		variable, ok := c.scope.findVariable(s.Name)
+		symbol := c.scope.find(s.Name)
+		if symbol == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Undefined: %s", startPointString(s.GetTSNode()), s.Name),
+			})
+			return nil
+		}
+		variable, ok := symbol.(variable)
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:    Error,
@@ -465,15 +512,15 @@ func (c *checker) checkBlock(block []ast.Statement, variables []variable) []Stat
 func (c *checker) checkExpression(expr ast.Expression) Expression {
 	switch e := expr.(type) {
 	case ast.Identifier:
-		v, ok := c.scope.findVariable(e.Name)
-		if !ok {
+		sym := c.scope.find(e.Name)
+		if sym == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:    Error,
 				Message: fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name),
 			})
 			return nil
 		}
-		return Identifier{Name: e.Name, symbol: v}
+		return Identifier{Name: e.Name, symbol: sym}
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
 	case ast.NumLiteral:
@@ -655,6 +702,45 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 					name:  m.Name,
 					_type: sig,
 				}},
+		}
+	case ast.FunctionCall:
+		sig := subject.GetType().GetProperty(m.Name)
+		if sig == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Undefined: %s.%s", startPointString(m.GetTSNode()), subject, m.Name),
+			})
+			return nil
+		}
+		fn, ok := sig.(function)
+		if !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Not a function: %s", startPointString(m.GetTSNode()), m.Name),
+			})
+			return nil
+		}
+		args := make([]Expression, len(m.Args))
+		if len(m.Args) != len(fn.parameters) {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf("%s Incorrect number of arguments: Expected %d, got %d", startPointString(m.GetTSNode()), len(fn.parameters), len(m.Args)),
+			})
+		} else {
+			for i, arg := range m.Args {
+				args[i] = c.checkExpression(arg)
+				if !fn.parameters[i]._type.Is(args[i].GetType()) {
+					c.addDiagnostic(Diagnostic{
+						Kind:    Error,
+						Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, args[i].GetType()),
+					})
+				}
+			}
+		}
+
+		return InstanceProperty{
+			Subject:  subject,
+			Property: FunctionCall{Name: m.Name, Args: args, symbol: fn},
 		}
 	default:
 		panic(fmt.Errorf("Unhandled instance access for %T", m))

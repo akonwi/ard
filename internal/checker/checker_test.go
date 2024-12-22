@@ -31,7 +31,7 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}),
+	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}, Package{}),
 }
 
 func run(t *testing.T, tests []test) {
@@ -920,6 +920,36 @@ func TestFunctions(t *testing.T) {
 					VariableBinding{
 						Name:  "eight",
 						Value: FunctionCall{Name: "add", Args: []Expression{NumLiteral{Value: 3}, NumLiteral{Value: 5}}},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestCallingPackageMethods(t *testing.T) {
+	run(t, []test{
+		{
+			name: "io.print",
+			input: strings.Join([]string{
+				`use std/io`,
+				`io.print("Hello World")`,
+			}, "\n"),
+			output: Program{
+				Imports: map[string]Package{
+					"io": {
+						Path: "std/io",
+					},
+				},
+				Statements: []Statement{
+					InstanceProperty{
+						Subject: Identifier{Name: "io"},
+						Property: FunctionCall{
+							Name: "print",
+							Args: []Expression{
+								StrLiteral{Value: "Hello World"},
+							},
+						},
 					},
 				},
 			},
