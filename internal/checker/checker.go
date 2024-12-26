@@ -169,6 +169,15 @@ func (i Identifier) GetType() Type {
 	return i.symbol.GetType()
 }
 
+type PackageAccess struct {
+	Package  Package
+	Property Expression
+}
+
+func (p PackageAccess) GetType() Type {
+	return p.Property.GetType()
+}
+
 type InterpolatedStr struct {
 	Parts []Expression
 }
@@ -205,6 +214,7 @@ type Statement interface{}
 type VariableBinding struct {
 	Name  string
 	Value Expression
+	Mut   bool
 }
 
 type VariableAssignment struct {
@@ -322,7 +332,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 		}
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
-		return VariableBinding{Name: s.Name, Value: value}
+		return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
 	case ast.VariableAssignment:
 		symbol := c.scope.find(s.Name)
 		if symbol == nil {
@@ -735,6 +745,13 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 						Message: fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, args[i].GetType()),
 					})
 				}
+			}
+		}
+
+		if pkg, ok := subject.GetType().(Package); ok {
+			return PackageAccess{
+				Package:  pkg,
+				Property: FunctionCall{Name: m.Name, Args: args, symbol: fn},
 			}
 		}
 

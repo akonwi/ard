@@ -133,6 +133,7 @@ func TestLiterals(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
+						Mut:   false,
 						Name:  "name",
 						Value: StrLiteral{Value: "world"},
 					},
@@ -160,14 +161,17 @@ func TestVariables(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
+						Mut:   false,
 						Name:  "name",
 						Value: StrLiteral{Value: "Alice"},
 					},
 					VariableBinding{
+						Mut:   false,
 						Name:  "age",
 						Value: NumLiteral{Value: 32},
 					},
 					VariableBinding{
+						Mut:   false,
 						Name:  "is_student",
 						Value: BoolLiteral{Value: true},
 					},
@@ -216,7 +220,7 @@ func TestVariables(t *testing.T) {
 			input: `mut count = 0` + "\n" + `count = 1`,
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "count", Value: NumLiteral{Value: 0}},
+					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 0}},
 					VariableAssignment{Name: "count", Value: NumLiteral{Value: 1}},
 				},
 			},
@@ -250,6 +254,7 @@ func TestMemberAccess(t *testing.T) {
 						Property: Identifier{Name: "size"},
 					},
 					VariableBinding{
+						Mut:   false,
 						Name:  "name",
 						Value: StrLiteral{Value: "Alice"},
 					},
@@ -420,6 +425,7 @@ func TestBooleanOperations(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
+						Mut:  false,
 						Name: "never",
 						Value: BinaryExpr{
 							Op:    And,
@@ -428,6 +434,7 @@ func TestBooleanOperations(t *testing.T) {
 						},
 					},
 					VariableBinding{
+						Mut:  false,
 						Name: "always",
 						Value: BinaryExpr{
 							Op:    Or,
@@ -496,11 +503,11 @@ func TestIfStatements(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					VariableBinding{Mut: false, Name: "is_on", Value: BoolLiteral{Value: true}},
 					IfStatement{
 						Condition: Identifier{Name: "is_on"},
 						Body: []Statement{
-							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+							VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "bar"}},
 						},
 					},
 				},
@@ -527,7 +534,7 @@ func TestIfStatements(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					VariableBinding{Mut: false, Name: "is_on", Value: BoolLiteral{Value: true}},
 					IfStatement{
 						Condition: BinaryExpr{
 							Op:   And,
@@ -539,7 +546,7 @@ func TestIfStatements(t *testing.T) {
 							},
 						},
 						Body: []Statement{
-							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+							VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "bar"}},
 						},
 					},
 				},
@@ -557,15 +564,15 @@ func TestIfStatements(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					VariableBinding{Mut: false, Name: "is_on", Value: BoolLiteral{Value: true}},
 					IfStatement{
 						Condition: Identifier{Name: "is_on"},
 						Body: []Statement{
-							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+							VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "bar"}},
 						},
 						Else: IfStatement{
 							Body: []Statement{
-								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
+								VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "baz"}},
 							},
 						},
 					},
@@ -584,11 +591,11 @@ func TestIfStatements(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					VariableBinding{Mut: false, Name: "is_on", Value: BoolLiteral{Value: true}},
 					IfStatement{
 						Condition: Identifier{Name: "is_on"},
 						Body: []Statement{
-							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+							VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "bar"}},
 						},
 						Else: IfStatement{
 							Condition: BinaryExpr{
@@ -597,7 +604,7 @@ func TestIfStatements(t *testing.T) {
 								Right: NumLiteral{Value: 2},
 							},
 							Body: []Statement{
-								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
+								VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "baz"}},
 							},
 						},
 					},
@@ -618,11 +625,11 @@ func TestIfStatements(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
+					VariableBinding{Mut: false, Name: "is_on", Value: BoolLiteral{Value: true}},
 					IfStatement{
 						Condition: Identifier{Name: "is_on"},
 						Body: []Statement{
-							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
+							VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "bar"}},
 						},
 						Else: IfStatement{
 							Condition: BinaryExpr{
@@ -631,11 +638,11 @@ func TestIfStatements(t *testing.T) {
 								Right: NumLiteral{Value: 2},
 							},
 							Body: []Statement{
-								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
+								VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "baz"}},
 							},
 							Else: IfStatement{
 								Body: []Statement{
-									VariableBinding{Name: "foo", Value: StrLiteral{Value: "qux"}},
+									VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "qux"}},
 								},
 							},
 						},
@@ -658,7 +665,7 @@ func TestForLoops(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "count", Value: NumLiteral{Value: 0}},
+					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 0}},
 					ForRange{
 						Cursor: Identifier{Name: "i"},
 						Start:  NumLiteral{Value: 1},
@@ -699,7 +706,7 @@ func TestForLoops(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "string", Value: StrLiteral{Value: "hello"}},
+					VariableBinding{Mut: false, Name: "string", Value: StrLiteral{Value: "hello"}},
 					ForIn{
 						Cursor:   Identifier{Name: "c"},
 						Iterable: Identifier{Name: "string"},
@@ -752,7 +759,7 @@ func TestWhileLoops(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Name: "count", Value: NumLiteral{Value: 10}},
+					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 10}},
 					WhileLoop{
 						Condition: BinaryExpr{
 							Op:    GreaterThan,
@@ -812,6 +819,7 @@ func TestFunctions(t *testing.T) {
 						Return: Str{},
 					},
 					VariableBinding{
+						Mut:  false,
 						Name: "msg",
 						Value: FunctionCall{
 							Name: "get_msg",
@@ -901,6 +909,7 @@ func TestFunctions(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
+						Mut:  false,
 						Name: "add",
 						Value: FunctionLiteral{
 							Parameters: []Parameter{
@@ -918,6 +927,7 @@ func TestFunctions(t *testing.T) {
 						},
 					},
 					VariableBinding{
+						Mut:   false,
 						Name:  "eight",
 						Value: FunctionCall{Name: "add", Args: []Expression{NumLiteral{Value: 3}, NumLiteral{Value: 5}}},
 					},
@@ -942,8 +952,8 @@ func TestCallingPackageMethods(t *testing.T) {
 					},
 				},
 				Statements: []Statement{
-					InstanceProperty{
-						Subject: Identifier{Name: "io"},
+					PackageAccess{
+						Package: Package{Path: "std/io"},
 						Property: FunctionCall{
 							Name: "print",
 							Args: []Expression{
