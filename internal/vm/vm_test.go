@@ -74,7 +74,7 @@ func TestPrinting(t *testing.T) {
 	}
 }
 
-func TestVariables(t *testing.T) {
+func TestBindingVariables(t *testing.T) {
 	for want := range []any{
 		"Alice",
 		40,
@@ -86,6 +86,87 @@ func TestVariables(t *testing.T) {
 		}, "\n"))
 		if res != want {
 			t.Fatalf("Expected %v, got %v", want, res)
+		}
+	}
+}
+
+func TestReassigningVariables(t *testing.T) {
+	res := run(t, strings.Join([]string{
+		`mut val = 1`,
+		`val = 2`,
+		`val = 3`,
+		`val`,
+	}, "\n"))
+	if res != 3 {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+}
+
+func TestMemberAccess(t *testing.T) {
+	res := run(t, `"foobar".size`)
+	if res != 6 {
+		t.Fatalf("Expected 6, got %v", res)
+	}
+}
+
+func TestUnaryExpressions(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		want  any
+	}{
+		{`!true`, false},
+		{`!false`, true},
+		{`-10`, -10},
+	} {
+		res := run(t, test.input)
+		if res != test.want {
+			t.Fatalf("Expected %v, got %v", test.want, res)
+		}
+	}
+}
+
+func TestNumberOperations(t *testing.T) {
+	tests := []struct {
+		input string
+		want  any
+	}{
+		{input: `30 + 12`, want: 42},
+		{input: `30 - 2`, want: 28},
+		{input: `30 * 2`, want: 60},
+		{input: `30 / 2`, want: 15},
+		{input: `30 % 2`, want: 30 % 2},
+		{input: `30 > 2`, want: true},
+		{input: `30 >= 2`, want: true},
+		{input: `30 < 2`, want: false},
+		{input: `30 <= 2`, want: false},
+		{input: `30 <= 30`, want: true},
+	}
+
+	for _, test := range tests {
+		if res := run(t, test.input); res != test.want {
+			t.Errorf("%s = %v but got %v", test.input, test.want, res)
+		}
+	}
+}
+
+func TestEquality(t *testing.T) {
+	tests := []struct {
+		input string
+		want  any
+	}{
+		{input: `30 == 30`, want: true},
+		{input: `1 == 10`, want: false},
+		{input: `30 != 30`, want: false},
+		{input: `1 != 10`, want: true},
+		{input: `true == false`, want: false},
+		{input: `true != false`, want: true},
+		{input: `"hello" == "world"`, want: false},
+		{input: `"hello" != "world"`, want: true},
+	}
+
+	for _, test := range tests {
+		if res := run(t, test.input); res != test.want {
+			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
 }
