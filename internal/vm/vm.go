@@ -166,6 +166,14 @@ func (vm VM) evalExpression(expr checker.Expression) any {
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
 			return left != right
+		case checker.And:
+			left := vm.evalExpression(e.Left).(bool)
+			right := vm.evalExpression(e.Right).(bool)
+			return left && right
+		case checker.Or:
+			left := vm.evalExpression(e.Left).(bool)
+			right := vm.evalExpression(e.Right).(bool)
+			return left || right
 		default:
 			panic(fmt.Sprintf("Unimplemented binary op: %v", e.Op))
 		}

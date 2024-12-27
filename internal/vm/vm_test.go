@@ -170,3 +170,35 @@ func TestEquality(t *testing.T) {
 		}
 	}
 }
+
+func TestBooleanOperations(t *testing.T) {
+	tests := []struct {
+		input string
+		want  any
+	}{
+		{input: `true and false`, want: false},
+		{input: `true or false`, want: true},
+	}
+
+	for _, test := range tests {
+		if res := run(t, test.input); res != test.want {
+			t.Errorf("%s = %v but got %v", test.input, test.want, res)
+		}
+	}
+}
+
+func TestArithmatic(t *testing.T) {
+	tests := []struct {
+		input string
+		want  any
+	}{
+		{input: `(30 + 20) * 4`, want: 200},
+		{input: `30 + (20 * 4)`, want: 110},
+	}
+
+	for _, test := range tests {
+		if res := run(t, test.input); res != test.want {
+			t.Errorf("%s = %v but got %v", test.input, test.want, res)
+		}
+	}
+}
