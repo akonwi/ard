@@ -64,6 +64,17 @@ func (vm *VM) evalStatement(stmt checker.Statement) {
 		} else if s.Else != nil {
 			vm.evalStatement(s.Else)
 		}
+	case checker.ForRange:
+		vm.pushScope()
+		cursor := &variable{false, nil}
+		vm.scope.variables[s.Cursor.Name] = cursor
+		for i := vm.evalExpression(s.Start).(int); i < vm.evalExpression(s.End).(int); i++ {
+			cursor.value = i
+			for _, statement := range s.Body {
+				vm.evalStatement(statement)
+			}
+		}
+		vm.popScope()
 	default:
 		expr, ok := s.(checker.Expression)
 		if !ok {

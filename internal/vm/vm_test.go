@@ -236,3 +236,15 @@ func TestIfStatements(t *testing.T) {
 		t.Fatalf(`Expected "else", got %v`, res)
 	}
 }
+
+func TestForLoops(t *testing.T) {
+	res := run(t, `
+		mut sum = 0
+		for i in 1..5 {
+			sum = sum + i
+		}
+		sum`)
+	if res != 10 {
+		t.Fatalf("Expected 15, got %v", res)
+	}
+}
