@@ -244,7 +244,27 @@ func TestForLoops(t *testing.T) {
 			sum = sum + i
 		}
 		sum`)
-	if res != 10 {
+	if res != 15 {
 		t.Fatalf("Expected 15, got %v", res)
+	}
+
+	res = run(t, `
+		mut sum = 0
+		for i in 5 {
+			sum = sum + i
+		}
+		sum`)
+	if res != 15 {
+		t.Fatalf("Expected 15, got %v", res)
+	}
+
+	res = run(t, `
+		mut res = ""
+		for c in "hello" {
+			res = "{{c}}{{res}}"
+		}
+		res == "olleh"`)
+	if res != true {
+		t.Fatalf("Expected true, got %v", res)
 	}
 }

@@ -68,10 +68,25 @@ func (vm *VM) evalStatement(stmt checker.Statement) {
 		vm.pushScope()
 		cursor := &variable{false, nil}
 		vm.scope.variables[s.Cursor.Name] = cursor
-		for i := vm.evalExpression(s.Start).(int); i < vm.evalExpression(s.End).(int); i++ {
+		for i := vm.evalExpression(s.Start).(int); i <= vm.evalExpression(s.End).(int); i++ {
 			cursor.value = i
 			for _, statement := range s.Body {
 				vm.evalStatement(statement)
+			}
+		}
+		vm.popScope()
+	case checker.ForIn:
+		vm.pushScope()
+		cursor := &variable{false, nil}
+		vm.scope.variables[s.Cursor.Name] = cursor
+		iterable := vm.evalExpression(s.Iterable)
+		switch iter := iterable.(type) {
+		case string:
+			for _, item := range iter {
+				cursor.value = string(item)
+				for _, statement := range s.Body {
+					vm.evalStatement(statement)
+				}
 			}
 		}
 		vm.popScope()
