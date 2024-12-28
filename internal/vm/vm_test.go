@@ -202,3 +202,37 @@ func TestArithmatic(t *testing.T) {
 		}
 	}
 }
+
+func TestIfStatements(t *testing.T) {
+	res := run(t, `
+		let is_on = true
+		mut result = 0
+		if is_on {
+			result = 1
+		}
+		result`)
+	if res != 1 {
+		t.Fatalf("Expected 1, got %v", res)
+	}
+
+	res = run(t, `
+		let is_on = false
+		mut result = ""
+		if is_on { result = "on" }
+		else { result = "off" }
+		result`)
+	if res != "off" {
+		t.Fatalf(`Expected "off", got %v`, res)
+	}
+
+	res = run(t, `
+		let is_on = false
+		mut result = ""
+		if is_on { result = "then" }
+		else if result.size > 0 { result = "else if" }
+		else { result = "else" }
+		result`)
+	if res != "else" {
+		t.Fatalf(`Expected "else", got %v`, res)
+	}
+}

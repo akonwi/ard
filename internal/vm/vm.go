@@ -15,7 +15,15 @@ type VM struct {
 }
 
 func New(program *checker.Program) *VM {
-	return &VM{program: program, scope: newScope()}
+	return &VM{program: program, scope: newScope(nil)}
+}
+
+func (vm *VM) pushScope() {
+	vm.scope = newScope(vm.scope)
+}
+
+func (vm *VM) popScope() {
+	vm.scope = vm.scope.parent
 }
 
 func (vm *VM) Run() (any, error) {
@@ -26,7 +34,7 @@ func (vm *VM) Run() (any, error) {
 }
 
 func (vm *VM) addVariable(mut bool, name string, value any) {
-	vm.scope.variables[name] = variable{mut, value}
+	vm.scope.variables[name] = &variable{mut, value}
 }
 
 func (vm *VM) evalStatement(stmt checker.Statement) {
@@ -41,6 +49,20 @@ func (vm *VM) evalStatement(stmt checker.Statement) {
 			vm.doIO(s.Property)
 		default:
 			panic(fmt.Sprintf("Unimplemented package: %s", s.Package.Path))
+		}
+	case checker.IfStatement:
+		var condition bool = true
+		if s.Condition != nil {
+			condition = vm.evalExpression(s.Condition).(bool)
+		}
+		if condition {
+			vm.pushScope()
+			for _, statement := range s.Body {
+				vm.evalStatement(statement)
+			}
+			vm.popScope()
+		} else if s.Else != nil {
+			vm.evalStatement(s.Else)
 		}
 	default:
 		expr, ok := s.(checker.Expression)
@@ -59,8 +81,10 @@ func (vm *VM) evalVariableBinding(binding checker.VariableBinding) {
 
 func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 	value := vm.evalExpression(assignment.Value)
-	vm.scope.variables[assignment.Name] = variable{true, value}
-	vm.result = value
+	if variable, ok := vm.scope.getVariable(assignment.Name); ok {
+		(*variable).value = value
+		vm.result = value
+	}
 }
 
 func (vm VM) doIO(expr checker.Expression) any {
@@ -110,7 +134,10 @@ func (vm VM) evalExpression(expr checker.Expression) any {
 	case checker.BoolLiteral:
 		return e.Value
 	case checker.Identifier:
-		return vm.scope.variables[e.Name].value
+		if v, ok := vm.scope.getVariable(e.Name); ok {
+			return v.value
+		}
+		panic(fmt.Sprintf("Variable not found: %s", e.Name))
 	case checker.Not:
 		val := vm.evalExpression(e.Value)
 		return !val.(bool)

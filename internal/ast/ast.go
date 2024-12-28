@@ -946,7 +946,7 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "string":
-		chunkNodes := p.mustChildren(child, "chunk")
+		chunkNodes := child.ChildrenByFieldName("chunk", p.tree.Walk())
 		if len(chunkNodes) == 1 && chunkNodes[0].GrammarName() == "string_content" {
 			return StrLiteral{
 				BaseNode: BaseNode{TSNode: node},
