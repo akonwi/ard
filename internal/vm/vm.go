@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/internal/checker"
@@ -305,6 +306,20 @@ func (vm VM) evalProperty(i any, prop checker.Expression) any {
 			return len(i.(string))
 		default:
 			panic(fmt.Errorf("Unimplemented property: Str.%v", propName))
+		}
+	case reflect.Int:
+		switch propName {
+		case "as_str":
+			return strconv.Itoa(i.(int))
+		default:
+			panic(fmt.Errorf("Unimplemented property: Num.%v", propName))
+		}
+	case reflect.Bool:
+		switch propName {
+		case "as_str":
+			return strconv.FormatBool(i.(bool))
+		default:
+			panic(fmt.Errorf("Unimplemented property: Bool.%v", propName))
 		}
 	default:
 		return nil

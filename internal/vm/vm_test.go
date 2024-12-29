@@ -67,7 +67,10 @@ func TestPrinting(t *testing.T) {
 	buf.ReadFrom(r)
 	got := buf.String()
 
-	for _, want := range []string{"Hello, World!", "Hello, Ard!"} {
+	for _, want := range []string{
+		"Hello, World!",
+		"Hello, Ard!",
+	} {
 		if strings.Contains(got, want) == false {
 			t.Errorf("Expected \"%s\", got %s", want, got)
 		}
@@ -332,5 +335,16 @@ func TestFunctions(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestNumApi(t *testing.T) {
+	if res := run(t, `100.as_str`); res != "100" {
+		t.Errorf(`Expected "100", got %v`, res)
+	}
+}
+
+func TestBoolApi(t *testing.T) {
+	if res := run(t, `true.as_str`); res != "true" {
+		t.Errorf(`Expected "true", got %v`, res)
+	}
 }

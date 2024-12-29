@@ -51,7 +51,12 @@ func (n Num) String() string {
 	return "Num"
 }
 func (n Num) GetProperty(name string) Type {
-	return nil
+	switch name {
+	case "as_str":
+		return Str{}
+	default:
+		return nil
+	}
 }
 func (n Num) Is(other Type) bool {
 	return n.String() == other.String()
@@ -63,7 +68,12 @@ func (b Bool) String() string {
 	return "Bool"
 }
 func (b Bool) GetProperty(name string) Type {
-	return nil
+	switch name {
+	case "as_str":
+		return Str{}
+	default:
+		return nil
+	}
 }
 func (b Bool) Is(other Type) bool {
 	return b.String() == other.String()

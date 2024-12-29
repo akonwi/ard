@@ -31,7 +31,7 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}, Package{}),
+	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}, Package{}, Diagnostic{}),
 }
 
 func run(t *testing.T, tests []test) {
