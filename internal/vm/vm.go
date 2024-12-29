@@ -34,15 +34,17 @@ func (vm *VM) Run() (any, error) {
 }
 
 func (vm *VM) addVariable(mut bool, name string, value any) {
-	vm.scope.variables[name] = &variable{mut, value}
+	vm.scope.bindings[name] = &binding{mut, value, false}
 }
 
-func (vm *VM) evalStatement(stmt checker.Statement) {
+func (vm *VM) evalStatement(stmt checker.Statement) any {
 	switch s := stmt.(type) {
 	case checker.VariableBinding:
 		vm.evalVariableBinding(s)
 	case checker.VariableAssignment:
 		vm.evalVariableAssignment(s)
+	case checker.FunctionDeclaration:
+		vm.evalFunctionDefinition(s)
 	case checker.PackageAccess:
 		switch s.Package.Path {
 		case "std/io":
@@ -66,8 +68,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) {
 		}
 	case checker.ForRange:
 		vm.pushScope()
-		cursor := &variable{false, nil}
-		vm.scope.variables[s.Cursor.Name] = cursor
+		cursor := &binding{false, nil, false}
+		vm.scope.bindings[s.Cursor.Name] = cursor
 		for i := vm.evalExpression(s.Start).(int); i <= vm.evalExpression(s.End).(int); i++ {
 			cursor.value = i
 			for _, statement := range s.Body {
@@ -77,8 +79,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) {
 		vm.popScope()
 	case checker.ForIn:
 		vm.pushScope()
-		cursor := &variable{false, nil}
-		vm.scope.variables[s.Cursor.Name] = cursor
+		cursor := &binding{false, nil, false}
+		vm.scope.bindings[s.Cursor.Name] = cursor
 		iterable := vm.evalExpression(s.Iterable)
 		switch iter := iterable.(type) {
 		case string:
@@ -90,26 +92,57 @@ func (vm *VM) evalStatement(stmt checker.Statement) {
 			}
 		}
 		vm.popScope()
+	case checker.WhileLoop:
+		for vm.evalExpression(s.Condition).(bool) {
+			vm.pushScope()
+			for _, statement := range s.Body {
+				vm.evalStatement(statement)
+			}
+			vm.popScope()
+		}
 	default:
 		expr, ok := s.(checker.Expression)
 		if !ok {
 			panic(fmt.Sprintf("Unimplemented statement: %T", s))
 		}
 		vm.result = vm.evalExpression(expr)
+		return vm.result
 	}
+
+	return nil
 }
 
-func (vm *VM) evalVariableBinding(binding checker.VariableBinding) {
-	value := vm.evalExpression(binding.Value)
-	vm.addVariable(binding.Mut, binding.Name, value)
+func (vm *VM) evalVariableBinding(_binding checker.VariableBinding) {
+	value := vm.evalExpression(_binding.Value)
+	_, callable := value.(func(args ...any) any)
+	vm.scope.bindings[_binding.Name] = &binding{false, value, callable}
 	vm.result = value
 }
 
 func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 	value := vm.evalExpression(assignment.Value)
-	if variable, ok := vm.scope.getVariable(assignment.Name); ok {
+	if variable, ok := vm.scope.get(assignment.Name); ok {
 		(*variable).value = value
 		vm.result = value
+	}
+}
+
+func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
+	vm.scope.bindings[fn.Name] = &binding{
+		mut:      false,
+		callable: true,
+		value: func(args ...any) any {
+			vm.pushScope()
+			for i, arg := range args {
+				vm.addVariable(false, fn.Parameters[i].Name, arg)
+			}
+			var result any
+			for _, statement := range fn.Body {
+				result = vm.evalStatement(statement)
+			}
+			vm.popScope()
+			return result
+		},
 	}
 }
 
@@ -160,7 +193,7 @@ func (vm VM) evalExpression(expr checker.Expression) any {
 	case checker.BoolLiteral:
 		return e.Value
 	case checker.Identifier:
-		if v, ok := vm.scope.getVariable(e.Name); ok {
+		if v, ok := vm.scope.get(e.Name); ok {
 			return v.value
 		}
 		panic(fmt.Sprintf("Variable not found: %s", e.Name))
@@ -229,6 +262,28 @@ func (vm VM) evalExpression(expr checker.Expression) any {
 			return left || right
 		default:
 			panic(fmt.Sprintf("Unimplemented binary op: %v", e.Op))
+		}
+	case checker.FunctionCall:
+		if fn, ok := vm.scope.getFunction(e.Name); ok {
+			args := make([]any, len(e.Args))
+			for i, arg := range e.Args {
+				args[i] = vm.evalExpression(arg)
+			}
+			return fn(args...)
+		}
+		panic(fmt.Sprintf("Function not found: %s", e.Name))
+	case checker.FunctionLiteral:
+		return func(args ...any) any {
+			vm.pushScope()
+			for i, arg := range args {
+				vm.addVariable(false, e.Parameters[i].Name, arg)
+			}
+			var result any
+			for _, statement := range e.Body {
+				result = vm.evalStatement(statement)
+			}
+			vm.popScope()
+			return result
 		}
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))

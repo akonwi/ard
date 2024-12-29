@@ -268,3 +268,69 @@ func TestForLoops(t *testing.T) {
 		t.Fatalf("Expected true, got %v", res)
 	}
 }
+
+func TestWhileLoops(t *testing.T) {
+	input := `
+		mut count = 5
+		while count > 0 {
+			count = count - 1
+		}
+		count == 0`
+
+	if res := run(t, input); res != true {
+		t.Errorf("Expected true but got %v", res)
+	}
+}
+
+func TestFunctions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  any
+	}{
+		{
+			name: "noop function",
+			input: `
+				fn noop() {}
+				noop()`,
+			want: nil,
+		},
+		{
+			name: "returning with no args",
+			input: `
+				fn get_msg() { "Hello" }
+				get_msg()`,
+			want: "Hello",
+		},
+		{
+			name: "one arg",
+			input: `
+				fn greet(name: Str) { "Hello, {{name}}!" }
+				greet("Alice")`,
+			want: "Hello, Alice!",
+		},
+		{
+			name: "multiple args",
+			input: `
+				fn add(a: Num, b: Num) { a + b }
+				add(1, 2)`,
+			want: 3,
+		},
+		{
+			name: "first class functions",
+			input: `
+			let sub = (a: Num, b: Num) { a - b }
+			sub(30, 8)`,
+			want: 22,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if res := run(t, test.input); res != test.want {
+				t.Errorf("Expected %v, got %v", test.want, res)
+			}
+		})
+	}
+
+}

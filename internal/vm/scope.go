@@ -1,26 +1,37 @@
 package vm
 
-type variable struct {
-	mut   bool
-	value any
+type binding struct {
+	mut      bool
+	value    any
+	callable bool
 }
 
+type function func(args ...any) any
+
 type scope struct {
-	parent    *scope
-	variables map[string]*variable
+	parent   *scope
+	bindings map[string]*binding
 }
 
 func newScope(parent *scope) *scope {
 	return &scope{
-		parent:    parent,
-		variables: make(map[string]*variable),
+		parent:   parent,
+		bindings: make(map[string]*binding),
 	}
 }
 
-func (s scope) getVariable(name string) (*variable, bool) {
-	v, ok := s.variables[name]
+func (s scope) get(name string) (*binding, bool) {
+	v, ok := s.bindings[name]
 	if !ok && s.parent != nil {
-		return s.parent.getVariable(name)
+		return s.parent.get(name)
 	}
 	return v, ok
+}
+
+func (s scope) getFunction(name string) (function, bool) {
+	if b, ok := s.get(name); ok && b.callable {
+		// can't cast w/ .(function) because function is a type alias not interface
+		return b.value.(func(args ...any) any), true
+	}
+	return nil, false
 }
