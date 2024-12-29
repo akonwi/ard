@@ -4,11 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/akonwi/ard/internal/ast"
-	"github.com/akonwi/ard/internal/javascript"
+	"github.com/akonwi/ard/internal/checker"
+	"github.com/akonwi/ard/internal/vm"
 	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 )
 
@@ -21,7 +20,7 @@ func main() {
 	}
 
 	switch os.Args[1] {
-	case "build":
+	case "run":
 		buildCmd.Parse(os.Args[2:])
 
 		if buildCmd.NArg() < 1 {
@@ -49,38 +48,20 @@ func main() {
 			os.Exit(1)
 			return
 		}
-		diagnostics := astParser.GetDiagnostics()
+
+		program, diagnostics := checker.Check(ast)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
-				fmt.Printf(
-					"[%d, %d] %s",
-					diagnostic.Range.StartPoint.Row,
-					diagnostic.Range.StartPoint.Column,
-					diagnostic.Msg,
-				)
+				fmt.Println(diagnostic.Message)
 			}
 			os.Exit(1)
 		}
 
-		jsSource := javascript.GenerateJS(ast)
-
-		buildDir := "./build"
-		err = os.MkdirAll(buildDir, 0755)
-		if err != nil {
-			fmt.Printf("Error creating build directory: %v\n", err)
+		vm := vm.New(&program)
+		if _, err := vm.Run(); err != nil {
+			fmt.Printf("Runtime error: %v\n", err)
 			os.Exit(1)
 		}
-
-		filename := filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath))) + ".js"
-		outputPath := filepath.Join(buildDir, filename)
-
-		err = os.WriteFile(outputPath, []byte(jsSource), 0644)
-		if err != nil {
-			fmt.Printf("Error writing file %s - %v\n", outputPath, err)
-			os.Exit(1)
-		}
-
-		fmt.Printf("Successfully built to %s\n", outputPath)
 
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
