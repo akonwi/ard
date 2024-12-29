@@ -1,7 +1,0 @@
-true == false
-true != false
-mut num: Num = -1
-num = num + 5
-
-let name = "John"
-"Hello, ${name}!"

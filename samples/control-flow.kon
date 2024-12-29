@@ -1,7 +1,0 @@
-if age >= 18 or has_served {
-  print("You are an adult")
-} else if in_college {
-  print("You are a young adult")
-} else {
-  print("You are a minor")
-}
