@@ -264,6 +264,22 @@ type FunctionDeclaration struct {
 	Return     Type
 }
 
+func (f FunctionDeclaration) GetType() Type {
+	params := make([]variable, len(f.Parameters))
+	for i, p := range f.Parameters {
+		params[i] = variable{
+			name:  p.Name,
+			mut:   false,
+			_type: p.Type,
+		}
+	}
+	return function{
+		name:       f.Name,
+		parameters: params,
+		returns:    f.Return,
+	}
+}
+
 type FunctionCall struct {
 	Name   string
 	Args   []Expression

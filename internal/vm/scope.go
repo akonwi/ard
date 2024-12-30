@@ -2,11 +2,11 @@ package vm
 
 type binding struct {
 	mut      bool
-	value    any
+	value    object
 	callable bool
 }
 
-type function func(args ...any) any
+type function func(args ...object) object
 
 type scope struct {
 	parent   *scope
@@ -31,7 +31,7 @@ func (s scope) get(name string) (*binding, bool) {
 func (s scope) getFunction(name string) (function, bool) {
 	if b, ok := s.get(name); ok && b.callable {
 		// can't cast w/ .(function) because function is a type alias not interface
-		return b.value.(func(args ...any) any), true
+		return b.value.raw.(func(args ...object) object), true
 	}
 	return nil, false
 }

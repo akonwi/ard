@@ -13,6 +13,12 @@ import (
 	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 )
 
+type test struct {
+	name  string
+	input string
+	want  any
+}
+
 func parse(t *testing.T, input string) ast.Program {
 	t.Helper()
 	ts, err := ts_ard.MakeParser()
@@ -102,13 +108,6 @@ func TestReassigningVariables(t *testing.T) {
 	}, "\n"))
 	if res != 3 {
 		t.Fatalf("Expected 3, got %v", res)
-	}
-}
-
-func TestMemberAccess(t *testing.T) {
-	res := run(t, `"foobar".size`)
-	if res != 6 {
-		t.Fatalf("Expected 6, got %v", res)
 	}
 }
 
@@ -207,36 +206,53 @@ func TestArithmatic(t *testing.T) {
 }
 
 func TestIfStatements(t *testing.T) {
-	res := run(t, `
-		let is_on = true
-		mut result = 0
-		if is_on {
-			result = 1
-		}
-		result`)
-	if res != 1 {
-		t.Fatalf("Expected 1, got %v", res)
+	tests := []struct {
+		name  string
+		input string
+		want  any
+	}{
+		{
+			name: "Simple if",
+			input: `
+				let is_on = true
+				mut result = 0
+				if is_on {
+					result = 1
+				}
+				result`,
+			want: 1,
+		},
+		{
+			name: "if-else",
+			input: `
+				let is_on = false
+				mut result = ""
+				if is_on { result = "on" }
+				else { result = "off" }
+				result`,
+			want: "off",
+		},
+		{
+			name: "if-(else if)-else",
+			input: `
+				let is_on = false
+				mut result = ""
+				if is_on { result = "then" }
+				else if result.size > 0 { result = "else if" }
+				else { result = "else" }
+				result`,
+			want: "else",
+		},
 	}
 
-	res = run(t, `
-		let is_on = false
-		mut result = ""
-		if is_on { result = "on" }
-		else { result = "off" }
-		result`)
-	if res != "off" {
-		t.Fatalf(`Expected "off", got %v`, res)
-	}
-
-	res = run(t, `
-		let is_on = false
-		mut result = ""
-		if is_on { result = "then" }
-		else if result.size > 0 { result = "else if" }
-		else { result = "else" }
-		result`)
-	if res != "else" {
-		t.Fatalf(`Expected "else", got %v`, res)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := run(t, test.input)
+			if res != test.want {
+				t.Logf("Expected %v, got %v", test.want, res)
+				t.Fail()
+			}
+		})
 	}
 }
 
@@ -286,11 +302,7 @@ func TestWhileLoops(t *testing.T) {
 }
 
 func TestFunctions(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  any
-	}{
+	tests := []test{
 		{
 			name: "noop function",
 			input: `
@@ -346,5 +358,12 @@ func TestNumApi(t *testing.T) {
 func TestBoolApi(t *testing.T) {
 	if res := run(t, `true.as_str`); res != "true" {
 		t.Errorf(`Expected "true", got %v`, res)
+	}
+}
+
+func TestStrApi(t *testing.T) {
+	res := run(t, `"foobar".size`)
+	if res != 6 {
+		t.Fatalf("Expected 6, got %v", res)
 	}
 }

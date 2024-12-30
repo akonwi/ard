@@ -12,7 +12,7 @@ import (
 type VM struct {
 	program *checker.Program
 	scope   *scope
-	result  any
+	result  object
 }
 
 func New(program *checker.Program) *VM {
@@ -31,14 +31,14 @@ func (vm *VM) Run() (any, error) {
 	for _, statement := range vm.program.Statements {
 		vm.evalStatement(statement)
 	}
-	return vm.result, nil
+	return vm.result.raw, nil
 }
 
-func (vm *VM) addVariable(mut bool, name string, value any) {
+func (vm *VM) addVariable(mut bool, name string, value object) {
 	vm.scope.bindings[name] = &binding{mut, value, false}
 }
 
-func (vm *VM) evalStatement(stmt checker.Statement) any {
+func (vm *VM) evalStatement(stmt checker.Statement) object {
 	switch s := stmt.(type) {
 	case checker.VariableBinding:
 		vm.evalVariableBinding(s)
@@ -56,7 +56,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) any {
 	case checker.IfStatement:
 		var condition bool = true
 		if s.Condition != nil {
-			condition = vm.evalExpression(s.Condition).(bool)
+			condition = vm.evalExpression(s.Condition).raw.(bool)
 		}
 		if condition {
 			vm.pushScope()
@@ -69,10 +69,10 @@ func (vm *VM) evalStatement(stmt checker.Statement) any {
 		}
 	case checker.ForRange:
 		vm.pushScope()
-		cursor := &binding{false, nil, false}
+		cursor := &binding{false, object{}, false}
 		vm.scope.bindings[s.Cursor.Name] = cursor
-		for i := vm.evalExpression(s.Start).(int); i <= vm.evalExpression(s.End).(int); i++ {
-			cursor.value = i
+		for i := vm.evalExpression(s.Start).raw.(int); i <= vm.evalExpression(s.End).raw.(int); i++ {
+			cursor.value = object{i, checker.Num{}}
 			for _, statement := range s.Body {
 				vm.evalStatement(statement)
 			}
@@ -80,13 +80,13 @@ func (vm *VM) evalStatement(stmt checker.Statement) any {
 		vm.popScope()
 	case checker.ForIn:
 		vm.pushScope()
-		cursor := &binding{false, nil, false}
+		cursor := &binding{false, object{}, false}
 		vm.scope.bindings[s.Cursor.Name] = cursor
-		iterable := vm.evalExpression(s.Iterable)
+		iterable := vm.evalExpression(s.Iterable).raw
 		switch iter := iterable.(type) {
 		case string:
 			for _, item := range iter {
-				cursor.value = string(item)
+				cursor.value = object{string(item), checker.Str{}}
 				for _, statement := range s.Body {
 					vm.evalStatement(statement)
 				}
@@ -94,7 +94,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) any {
 		}
 		vm.popScope()
 	case checker.WhileLoop:
-		for vm.evalExpression(s.Condition).(bool) {
+		for vm.evalExpression(s.Condition).raw.(bool) {
 			vm.pushScope()
 			for _, statement := range s.Body {
 				vm.evalStatement(statement)
@@ -110,12 +110,13 @@ func (vm *VM) evalStatement(stmt checker.Statement) any {
 		return vm.result
 	}
 
-	return nil
+	return object{}
 }
 
 func (vm *VM) evalVariableBinding(_binding checker.VariableBinding) {
 	value := vm.evalExpression(_binding.Value)
-	_, callable := value.(func(args ...any) any)
+	// todo: callable could be determined by casting value._type to checker.function
+	_, callable := value.raw.(func(args ...object) object)
 	vm.scope.bindings[_binding.Name] = &binding{false, value, callable}
 	vm.result = value
 }
@@ -132,17 +133,20 @@ func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
 	vm.scope.bindings[fn.Name] = &binding{
 		mut:      false,
 		callable: true,
-		value: func(args ...any) any {
-			vm.pushScope()
-			for i, arg := range args {
-				vm.addVariable(false, fn.Parameters[i].Name, arg)
-			}
-			var result any
-			for _, statement := range fn.Body {
-				result = vm.evalStatement(statement)
-			}
-			vm.popScope()
-			return result
+		value: object{
+			raw: func(args ...object) object {
+				vm.pushScope()
+				for i, arg := range args {
+					vm.addVariable(false, fn.Parameters[i].Name, arg)
+				}
+				result := object{}
+				for _, statement := range fn.Body {
+					result = vm.evalStatement(statement)
+				}
+				vm.popScope()
+				return result
+			},
+			_type: fn.GetType(),
 		},
 	}
 }
@@ -160,7 +164,7 @@ func (vm VM) doIO(expr checker.Expression) any {
 		switch e.Name {
 		case "print":
 			arg := vm.evalExpression(e.Args[0])
-			string, ok := arg.(string)
+			string, ok := arg.raw.(string)
 			if !ok {
 				panic(fmt.Sprintf("Expected string, got %T", arg))
 			}
@@ -174,25 +178,30 @@ func (vm VM) doIO(expr checker.Expression) any {
 	return nil
 }
 
-func (vm VM) evalExpression(expr checker.Expression) any {
+type object struct {
+	raw   any
+	_type checker.Type
+}
+
+func (vm VM) evalExpression(expr checker.Expression) object {
 	switch e := expr.(type) {
 	case checker.StrLiteral:
-		return e.Value
+		return object{e.Value, expr.GetType()}
 	case checker.InterpolatedStr:
 		builder := strings.Builder{}
 		for _, part := range e.Parts {
-			expr := vm.evalExpression(part)
-			if str, ok := expr.(string); ok {
+			obj := vm.evalExpression(part)
+			if str, ok := obj.raw.(string); ok {
 				builder.WriteString(str)
 			} else {
-				panic(fmt.Sprintf("Expected string, got %T", expr))
+				panic(fmt.Sprintf("Expected string, got %s", expr.GetType()))
 			}
 		}
-		return builder.String()
+		return object{builder.String(), checker.Str{}}
 	case checker.NumLiteral:
-		return e.Value
+		return object{e.Value, e.GetType()}
 	case checker.BoolLiteral:
-		return e.Value
+		return object{e.Value, e.GetType()}
 	case checker.Identifier:
 		if v, ok := vm.scope.get(e.Name); ok {
 			return v.value
@@ -200,73 +209,75 @@ func (vm VM) evalExpression(expr checker.Expression) any {
 		panic(fmt.Sprintf("Variable not found: %s", e.Name))
 	case checker.Not:
 		val := vm.evalExpression(e.Value)
-		return !val.(bool)
+		val.raw = !val.raw.(bool)
+		return val
 	case checker.Negation:
 		val := vm.evalExpression(e.Value)
-		return -(val.(int))
+		val.raw = -val.raw.(int)
+		return val
 	case checker.InstanceProperty:
 		i := vm.evalExpression(e.Subject)
 		return vm.evalProperty(i, e.Property)
 	case checker.BinaryExpr:
 		switch e.Op {
 		case checker.Add:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left + right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) + right.raw.(int), left._type}
 		case checker.Sub:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left - right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) - right.raw.(int), left._type}
 		case checker.Mul:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left * right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) * right.raw.(int), left._type}
 		case checker.Div:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left / right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) / right.raw.(int), left._type}
 		case checker.Mod:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left % right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) % right.raw.(int), left._type}
 		case checker.GreaterThan:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left > right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) > right.raw.(int), left._type}
 		case checker.GreaterThanOrEqual:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left >= right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) >= right.raw.(int), left._type}
 		case checker.LessThan:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left < right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) < right.raw.(int), left._type}
 		case checker.LessThanOrEqual:
-			left := vm.evalExpression(e.Left).(int)
-			right := vm.evalExpression(e.Right).(int)
-			return left <= right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(int) <= right.raw.(int), left._type}
 		case checker.Equal:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return left == right
+			return object{left == right, left._type}
 		case checker.NotEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return left != right
+			return object{left != right, left._type}
 		case checker.And:
-			left := vm.evalExpression(e.Left).(bool)
-			right := vm.evalExpression(e.Right).(bool)
-			return left && right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(bool) && right.raw.(bool), left._type}
 		case checker.Or:
-			left := vm.evalExpression(e.Left).(bool)
-			right := vm.evalExpression(e.Right).(bool)
-			return left || right
+			left := vm.evalExpression(e.Left)
+			right := vm.evalExpression(e.Right)
+			return object{left.raw.(bool) || right.raw.(bool), left._type}
 		default:
 			panic(fmt.Sprintf("Unimplemented binary op: %v", e.Op))
 		}
 	case checker.FunctionCall:
 		if fn, ok := vm.scope.getFunction(e.Name); ok {
-			args := make([]any, len(e.Args))
+			args := make([]object, len(e.Args))
 			for i, arg := range e.Args {
 				args[i] = vm.evalExpression(arg)
 			}
@@ -274,54 +285,53 @@ func (vm VM) evalExpression(expr checker.Expression) any {
 		}
 		panic(fmt.Sprintf("Function not found: %s", e.Name))
 	case checker.FunctionLiteral:
-		return func(args ...any) any {
-			vm.pushScope()
-			for i, arg := range args {
-				vm.addVariable(false, e.Parameters[i].Name, arg)
-			}
-			var result any
-			for _, statement := range e.Body {
-				result = vm.evalStatement(statement)
-			}
-			vm.popScope()
-			return result
+		return object{
+			raw: func(args ...object) object {
+				vm.pushScope()
+				for i, arg := range args {
+					vm.addVariable(false, e.Parameters[i].Name, arg)
+				}
+				var result object
+				for _, statement := range e.Body {
+					result = vm.evalStatement(statement)
+				}
+				vm.popScope()
+				return result
+			},
+			_type: e.GetType(),
 		}
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))
 	}
 }
 
-func (vm VM) evalProperty(i any, prop checker.Expression) any {
-	if i == nil {
-		panic(fmt.Errorf("Cannot access property on nil: nil.%v", prop))
-	}
-
+func (vm VM) evalProperty(i object, prop checker.Expression) object {
 	// TODO: InstanceProperty.Property should only be an Identifier
 	propName := prop.(checker.Identifier).Name
 
-	switch i_type := reflect.TypeOf(i); i_type.Kind() {
+	switch i_type := reflect.TypeOf(i.raw); i_type.Kind() {
 	case reflect.String:
 		switch propName {
 		case "size":
-			return len(i.(string))
+			return object{len(i.raw.(string)), checker.Num{}}
 		default:
 			panic(fmt.Errorf("Unimplemented property: Str.%v", propName))
 		}
 	case reflect.Int:
 		switch propName {
 		case "as_str":
-			return strconv.Itoa(i.(int))
+			return object{strconv.Itoa(i.raw.(int)), checker.Str{}}
 		default:
 			panic(fmt.Errorf("Unimplemented property: Num.%v", propName))
 		}
 	case reflect.Bool:
 		switch propName {
 		case "as_str":
-			return strconv.FormatBool(i.(bool))
+			return object{strconv.FormatBool(i.raw.(bool)), checker.Str{}}
 		default:
 			panic(fmt.Errorf("Unimplemented property: Bool.%v", propName))
 		}
 	default:
-		return nil
+		return object{nil, checker.Void{}}
 	}
 }
