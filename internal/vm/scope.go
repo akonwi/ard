@@ -2,7 +2,7 @@ package vm
 
 type binding struct {
 	mut      bool
-	value    object
+	value    *object
 	callable bool
 }
 

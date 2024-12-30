@@ -393,3 +393,30 @@ func TestStrApi(t *testing.T) {
 		t.Fatalf("Expected 6, got %v", res)
 	}
 }
+
+func TestListApi(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "List::size",
+			input: "[1,2,3].size",
+			want:  3,
+		},
+		{
+			name: "List::push",
+			input: `
+				mut list = [1,2,3]
+				list.push(4)
+			  list.size`,
+			want: 4,
+		},
+		//// todo: requires Option type
+		// {
+		// 	name: "List::at",
+		// 	input: `
+		// 		mut list = [1,2,3]
+		// 		list.push(4)
+		// 	  list.at(3)`,
+		// 	want: 4,
+		// },
+	})
+}

@@ -8,19 +8,8 @@ It combines features from JavaScript, Swift, and Go while introducing its own un
 - **Readability**: Ard code should be easy to read and understand.
 - **Simple**: There should be one obvious way to do things.
 - **Safety**: The compiler should catch errors at compile time.
-- **Reliable**: Compiles to Go, so it should be fast and efficient, and portable.
-
-## Todos
-
-- [] methods on structs
-- [] catch-all pattern for matches
-- [] match on booleans
-- [] matching on numbers
-- [] matching on strings?
-- [] tuples
-- [] Type Union
-- [] built-in Option: `Option-Str`
-- [] Allow Num as map keys
+- **Reliable**: Runtime is in Go, so it's fast and efficient.
+  - [Future] Compiles to Go for portability.
 
 ## 1. Basic Syntax
 
@@ -34,7 +23,7 @@ Note: trying to follow Go's philosophy for readablity left to right, rather than
 - [Num] - List
 - [Str:Num] - Map
 - Void - non-existence
-  - can only be used to indicate a function does not return a value
+  - can only be used to discard a function's return value
 
 ### Variables and Constants
 
@@ -86,12 +75,12 @@ while condition {
 Numeric inclusive range:
 ```ard
 for i in 1..10 {
-	print(i)
+	io.print(i)
 }
 
-// idea for changing step size
+// todo: more traditional for loop
 for mut i = 1; i < 10; i =+2; {
-	print(i)
+	io.print(i)
 }
 ```
 ### TODO: Callbacks
