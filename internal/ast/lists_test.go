@@ -7,14 +7,6 @@ import (
 func TestVariables(t *testing.T) {
 	tests := []test{
 		{
-			name:  "empty lists need to be explicitly typed",
-			input: `let numbers = []`,
-		},
-		{
-			name:  "List with mixed types",
-			input: `let numbers = [1, "two", false]`,
-		},
-		{
 			name:  "List elements must match declared type",
 			input: `let strings: [Str] = [1, 2, 3]`,
 			output: Program{

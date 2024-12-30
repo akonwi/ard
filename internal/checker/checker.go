@@ -104,6 +104,15 @@ func (b BoolLiteral) GetType() Type {
 	return Bool{}
 }
 
+type ListLiteral struct {
+	Elements []Expression
+	_type    List
+}
+
+func (l ListLiteral) GetType() Type {
+	return l._type
+}
+
 type Negation struct {
 	Value Expression
 }
@@ -345,17 +354,28 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	switch s := stmt.(type) {
 	case ast.VariableDeclaration:
 		value := c.checkExpression(s.Value)
+		var _type Type
 		if s.Type != nil {
-			declared := resolveDeclaredType(s.Type)
-			if !declared.Is(value.GetType()) {
+			_type := resolveDeclaredType(s.Type)
+			if !_type.Is(value.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), declared, value.GetType()),
+					Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), _type, value.GetType()),
 					location: s.Value.GetTSNode().Range(),
 				})
 			}
+		} else if list, isList := value.GetType().(List); isList && list.element == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("%s Empty lists need an explicit type", startPointString(s.Value.GetTSNode())),
+				location: s.Value.GetTSNode().Range(),
+			})
+			return nil
+		} else {
+			_type = value.GetType()
 		}
-		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
+
+		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: _type})
 		return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
 	case ast.VariableAssignment:
 		symbol := c.scope.find(s.Name)
@@ -441,7 +461,10 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	case ast.ForLoop:
 		iterable := c.checkExpression(s.Iterable)
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
-		body := c.checkBlock(s.Body, []variable{cursor})
+		// getBody func allows lazy evaluation so that cursor can be updated within the switch below
+		getBody := func() []Statement {
+			return c.checkBlock(s.Body, []variable{cursor})
+		}
 
 		switch iterable.GetType().(type) {
 		case Num:
@@ -449,13 +472,13 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
 				Start:  NumLiteral{Value: 0},
 				End:    iterable,
-				Body:   body,
+				Body:   getBody(),
 			}
 		case Str:
 			return ForIn{
 				Cursor:   Identifier{Name: s.Cursor.Name, symbol: cursor},
 				Iterable: iterable,
-				Body:     body,
+				Body:     getBody(),
 			}
 		case Bool:
 			c.addDiagnostic(Diagnostic{
@@ -464,6 +487,14 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				location: s.Iterable.GetTSNode().Range(),
 			})
 			return nil
+		case List:
+			listType := iterable.GetType().(List)
+			cursor._type = listType.element
+			return ForIn{
+				Cursor:   Identifier{Name: s.Cursor.Name, symbol: cursor},
+				Iterable: iterable,
+				Body:     getBody(),
+			}
 		default:
 			panic(fmt.Sprintf("Unhandled iterable type: %T", iterable.GetType()))
 		}
@@ -731,6 +762,29 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			Return:     returnType,
 			Body:       body,
 		}
+	case ast.ListLiteral:
+		if len(e.Items) == 0 {
+			return ListLiteral{}
+		}
+		var elementType Type
+		elements := make([]Expression, len(e.Items))
+		for i, item := range e.Items {
+			elements[i] = c.checkExpression(item)
+			_type := elements[i].GetType()
+			if i == 0 {
+				elementType = _type
+			} else if !_type.Is(elementType) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					location: item.GetTSNode().Range(),
+					Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(item.GetTSNode()), elementType, _type),
+				})
+			}
+		}
+		return ListLiteral{
+			Elements: elements,
+			_type:    List{element: elementType},
+		}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
@@ -817,7 +871,7 @@ func resolveDeclaredType(t ast.DeclaredType) Type {
 		return nil
 	}
 
-	switch t.(type) {
+	switch tt := t.(type) {
 	case ast.StringType:
 		return Str{}
 	case ast.NumberType:
@@ -826,6 +880,10 @@ func resolveDeclaredType(t ast.DeclaredType) Type {
 		return Bool{}
 	case ast.Void:
 		return Void{}
+	case ast.List:
+		return List{
+			element: resolveDeclaredType(tt.Element),
+		}
 	default:
 		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}

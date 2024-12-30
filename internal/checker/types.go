@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -91,11 +92,45 @@ func (f function) String() string {
 	for i, p := range f.parameters {
 		params[i] = p.GetName()
 	}
-	return f.name + "(" + strings.Join(params, ",") + f.returns.String()
+	return f.name + "(" + strings.Join(params, ",") + ") " + f.returns.String()
 }
 func (f function) GetProperty(name string) Type {
 	return nil
 }
 func (f function) Is(other Type) bool {
 	return f.String() == other.String()
+}
+
+type List struct {
+	element Type
+}
+
+func (l List) String() string {
+	return fmt.Sprintf("[%s]", l.element)
+}
+
+func (l List) GetProperty(name string) Type {
+	switch name {
+	case "size":
+		return Num{}
+	case "push":
+		return function{
+			name:       "push",
+			parameters: []variable{{name: "item", _type: l.element}},
+			returns:    Num{},
+		}
+	default:
+		return nil
+	}
+}
+
+func (l List) Is(other Type) bool {
+	if otherList, ok := other.(List); ok {
+		// if either list is still open, then they are compatible
+		if l.element == nil || otherList.element == nil {
+			return true
+		}
+		return l.element.Is(otherList.element)
+	}
+	return false
 }

@@ -31,7 +31,7 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}, Package{}, Diagnostic{}),
+	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}, Package{}, Diagnostic{}, ListLiteral{}),
 }
 
 func run(t *testing.T, tests []test) {
@@ -738,6 +738,25 @@ func TestForLoops(t *testing.T) {
 			},
 		},
 		{
+			name: "Iterating over a list",
+			input: strings.Join([]string{
+				`for i in [1,2,3] {}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					ForIn{
+						Cursor: Identifier{Name: "i"},
+						Iterable: ListLiteral{
+							Elements: []Expression{
+								NumLiteral{Value: 1},
+								NumLiteral{Value: 2},
+								NumLiteral{Value: 3},
+							}},
+					},
+				},
+			},
+		},
+		{
 			name:  "Cannot iterate over a boolean",
 			input: `for b in false {}`,
 			diagnostics: []Diagnostic{
@@ -960,6 +979,70 @@ func TestCallingPackageMethods(t *testing.T) {
 								StrLiteral{Value: "Hello World"},
 							},
 						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestLists(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Empty list",
+			input: `let empty: [Num] = []`,
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Mut:   false,
+						Name:  "empty",
+						Value: ListLiteral{},
+					},
+				},
+			},
+		},
+		{
+			name:  "Empty lists must have declared type",
+			input: `let empty = []`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:13] Empty lists need an explicit type"},
+			},
+		},
+		{
+			name:  "Lists cannot have mixed types",
+			input: `let numbers = [1, "two", false]`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:19] Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "[1:26] Type mismatch: Expected Num, got Bool"},
+			},
+		},
+		{
+			name:  "A valid list",
+			input: `[1,2,3]`,
+			output: Program{
+				Statements: []Statement{
+					ListLiteral{
+						Elements: []Expression{
+							NumLiteral{Value: 1},
+							NumLiteral{Value: 2},
+							NumLiteral{Value: 3},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "List API",
+			input: strings.Join([]string{
+				`[1].size`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					InstanceProperty{
+						Subject: ListLiteral{
+							Elements: []Expression{NumLiteral{Value: 1}},
+						},
+						Property: Identifier{Name: "size"},
 					},
 				},
 			},

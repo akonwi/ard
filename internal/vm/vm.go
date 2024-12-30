@@ -81,15 +81,24 @@ func (vm *VM) evalStatement(stmt checker.Statement) object {
 		vm.pushScope()
 		cursor := &binding{false, object{}, false}
 		vm.scope.bindings[s.Cursor.Name] = cursor
-		iterable := vm.evalExpression(s.Iterable).raw
-		switch iter := iterable.(type) {
-		case string:
-			for _, item := range iter {
+		iterable := vm.evalExpression(s.Iterable)
+		switch iterable._type.(type) {
+		case checker.Str:
+			for _, item := range iterable.raw.(string) {
 				cursor.value = object{string(item), checker.Str{}}
 				for _, statement := range s.Body {
 					vm.evalStatement(statement)
 				}
 			}
+		case checker.List:
+			for _, item := range iterable.raw.([]object) {
+				cursor.value = item
+				for _, statement := range s.Body {
+					vm.evalStatement(statement)
+				}
+			}
+		default:
+			panic(fmt.Errorf("Unimplemented iterable type: %v", iterable._type))
 		}
 		vm.popScope()
 	case checker.WhileLoop:
@@ -202,6 +211,12 @@ func (vm VM) evalExpression(expr checker.Expression) object {
 		return object{e.Value, e.GetType()}
 	case checker.BoolLiteral:
 		return object{e.Value, e.GetType()}
+	case checker.ListLiteral:
+		list := make([]object, len(e.Elements))
+		for i, elem := range e.Elements {
+			list[i] = vm.evalExpression(elem)
+		}
+		return object{list, e.GetType()}
 	case checker.Identifier:
 		if v, ok := vm.scope.get(e.Name); ok {
 			return v.value

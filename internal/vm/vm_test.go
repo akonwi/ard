@@ -48,6 +48,18 @@ func run(t *testing.T, input string) any {
 	return res
 }
 
+func runTests(t *testing.T, tests []test) {
+	t.Helper()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if res := run(t, test.input); test.want != res {
+				t.Logf("Expected %v, got %v", test.want, res)
+				t.Fail()
+			}
+		})
+	}
+}
+
 func TestEmptyProgram(t *testing.T) {
 	res := run(t, "")
 	if res != nil {
@@ -257,35 +269,49 @@ func TestIfStatements(t *testing.T) {
 }
 
 func TestForLoops(t *testing.T) {
-	res := run(t, `
-		mut sum = 0
-		for i in 1..5 {
-			sum = sum + i
-		}
-		sum`)
-	if res != 15 {
-		t.Fatalf("Expected 15, got %v", res)
-	}
-
-	res = run(t, `
-		mut sum = 0
-		for i in 5 {
-			sum = sum + i
-		}
-		sum`)
-	if res != 15 {
-		t.Fatalf("Expected 15, got %v", res)
-	}
-
-	res = run(t, `
-		mut res = ""
-		for c in "hello" {
-			res = "{{c}}{{res}}"
-		}
-		res == "olleh"`)
-	if res != true {
-		t.Fatalf("Expected true, got %v", res)
-	}
+	runTests(t, []test{
+		{
+			name: "loop over numeric range",
+			input: `
+					mut sum = 0
+					for i in 1..5 {
+						sum = sum + i
+					}
+					sum`,
+			want: 15,
+		},
+		{
+			name: "loop over a number",
+			input: `
+				mut sum = 0
+				for i in 5 {
+					sum = sum + i
+				}
+				sum`,
+			want: 15,
+		},
+		{
+			name: "looping over a string",
+			input: `
+				mut res = ""
+				for c in "hello" {
+					res = "{{c}}{{res}}"
+				}
+				res`,
+			want: "olleh",
+		},
+		{
+			name: "looping over a list",
+			input: `
+				mut sum = 0
+				for n in [1,2,3,4,5] {
+					sum = sum + n
+				}
+				sum
+			`,
+			want: 15,
+		},
+	})
 }
 
 func TestWhileLoops(t *testing.T) {
