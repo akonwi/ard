@@ -2,7 +2,6 @@ package vm
 
 import (
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -164,6 +163,7 @@ func (vm VM) doIO(expr checker.Expression) any {
 		switch e.Name {
 		case "print":
 			arg := vm.evalExpression(e.Args[0])
+			// todo: check if arg has as_str method
 			string, ok := arg.raw.(string)
 			if !ok {
 				panic(fmt.Sprintf("Expected string, got %T", arg))
@@ -309,22 +309,22 @@ func (vm VM) evalProperty(i object, prop checker.Expression) object {
 	// TODO: InstanceProperty.Property should only be an Identifier
 	propName := prop.(checker.Identifier).Name
 
-	switch i_type := reflect.TypeOf(i.raw); i_type.Kind() {
-	case reflect.String:
+	switch i._type.(type) {
+	case checker.Str:
 		switch propName {
 		case "size":
 			return object{len(i.raw.(string)), checker.Num{}}
 		default:
 			panic(fmt.Errorf("Unimplemented property: Str.%v", propName))
 		}
-	case reflect.Int:
+	case checker.Num:
 		switch propName {
 		case "as_str":
 			return object{strconv.Itoa(i.raw.(int)), checker.Str{}}
 		default:
 			panic(fmt.Errorf("Unimplemented property: Num.%v", propName))
 		}
-	case reflect.Bool:
+	case checker.Bool:
 		switch propName {
 		case "as_str":
 			return object{strconv.FormatBool(i.raw.(bool)), checker.Str{}}
