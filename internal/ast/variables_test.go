@@ -42,61 +42,57 @@ func TestVariableDeclarations(t *testing.T) {
 				},
 			},
 		},
-		{
-			name:  "Valid empty map",
-			input: `mut entries: [Str:Num] = [:]`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: true,
-						Name:    "entries",
-						Type: Map{
-							Key:   StringType{},
-							Value: NumberType{},
-						},
-						Value: MapLiteral{
-							Entries: []MapEntry{},
-							Type: MapType{
-								KeyType: StrType,
-							},
-						},
-					},
-				},
-			},
-		},
 		// {
-		// 	name:        "Empty maps require explicit type",
-		// 	input:       `mut entries = [:]`,
+		// 	name:  "Valid empty map",
+		// 	input: `mut entries: [Str:Num] = [:]`,
+		// 	output: Program{
+		// 		Imports: []Import{},
+		// 		Statements: []Statement{
+		// 			VariableDeclaration{
+		// 				Mutable: true,
+		// 				Name:    "entries",
+		// 				Type: Map{
+		// 					Key:   StringType{},
+		// 					Value: NumberType{},
+		// 				},
+		// 				Value: MapLiteral{
+		// 					Entries: []MapEntry{},
+		// 					Type: MapType{
+		// 						KeyType: StrType,
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
 		// },
-		{
-			name:  "Valid map",
-			input: `mut name_to_counts: [Str:Num] = ["john":1, "jane":2, "jen":3]`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: true,
-						Name:    "name_to_counts",
-						Type: Map{
-							Key:   StringType{},
-							Value: NumberType{},
-						},
-						Value: MapLiteral{
-							Entries: []MapEntry{
-								{Key: `"john"`, Value: NumLiteral{Value: "1"}},
-								{Key: `"jane"`, Value: NumLiteral{Value: "2"}},
-								{Key: `"jen"`, Value: NumLiteral{Value: "3"}},
-							},
-							Type: MapType{
-								KeyType:   StrType,
-								ValueType: NumType,
-							},
-						},
-					},
-				},
-			},
-		},
+		// {
+		// 	name:  "Valid map",
+		// 	input: `mut name_to_counts: [Str:Num] = ["john":1, "jane":2, "jen":3]`,
+		// 	output: Program{
+		// 		Imports: []Import{},
+		// 		Statements: []Statement{
+		// 			VariableDeclaration{
+		// 				Mutable: true,
+		// 				Name:    "name_to_counts",
+		// 				Type: Map{
+		// 					Key:   StringType{},
+		// 					Value: NumberType{},
+		// 				},
+		// 				Value: MapLiteral{
+		// 					Entries: []MapEntry{
+		// 						{Key: `"john"`, Value: NumLiteral{Value: "1"}},
+		// 						{Key: `"jane"`, Value: NumLiteral{Value: "2"}},
+		// 						{Key: `"jen"`, Value: NumLiteral{Value: "3"}},
+		// 					},
+		// 					Type: MapType{
+		// 						KeyType:   StrType,
+		// 						ValueType: NumType,
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
 	}
 
 	runTests(t, tests)

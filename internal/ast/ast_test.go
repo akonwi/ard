@@ -407,3 +407,23 @@ func TestComments(t *testing.T) {
 		},
 	})
 }
+
+func testTuples(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Tuples",
+			input: `let tuple: (Num,Bool) = (1,true)`,
+			output: Program{
+				Statements: []Statement{
+					VariableDeclaration{
+						Mutable: false,
+						Name:    "tuple",
+						Type: TupleType{
+							Items: []DeclaredType{NumberType{}, BooleanType{}},
+						},
+					},
+				},
+			},
+		},
+	})
+}

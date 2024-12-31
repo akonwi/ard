@@ -167,9 +167,9 @@ func TestFunctionCalls(t *testing.T) {
 						ReturnType: NumberType{},
 						Body: []Statement{
 							BinaryExpression{
-								Left:     Identifier{Name: "x", Type: NumType},
+								Left:     Identifier{Name: "x"},
 								Operator: Plus,
-								Right:    Identifier{Name: "y", Type: NumType},
+								Right:    Identifier{Name: "y"},
 							},
 						},
 					},

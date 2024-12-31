@@ -354,15 +354,17 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	switch s := stmt.(type) {
 	case ast.VariableDeclaration:
 		value := c.checkExpression(s.Value)
-		var _type Type
+		var _type Type = Void{}
+		// get declared type if it exists
 		if s.Type != nil {
 			_type := resolveDeclaredType(s.Type)
-			if !_type.Is(value.GetType()) {
+			if _type.Is(value.GetType()) == false {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), _type, value.GetType()),
 					location: s.Value.GetTSNode().Range(),
 				})
+				return nil
 			}
 		} else if list, isList := value.GetType().(List); isList && list.element == nil {
 			c.addDiagnostic(Diagnostic{
@@ -371,7 +373,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				location: s.Value.GetTSNode().Range(),
 			})
 			return nil
-		} else {
+		}
+		// if no declared type, use the type of the value
+		if _type == (Void{}) {
 			_type = value.GetType()
 		}
 

@@ -30,7 +30,7 @@ func TestEnumDefinitions(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Type: traffic_light_enum,
+						Name: "Color",
 					},
 				},
 			},
@@ -54,12 +54,12 @@ func TestEnums(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Type: colorEnum,
+						Name: "Color",
 					},
 					MemberAccess{
-						Target:     Identifier{Name: "Color", Type: colorEnum},
+						Target:     Identifier{Name: "Color"},
 						AccessType: Static,
-						Member:     Identifier{Name: "Black", Type: colorEnum},
+						Member:     Identifier{Name: "Black"},
 					},
 				},
 			},
@@ -79,7 +79,7 @@ func TestEnums(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Type: colorEnum,
+						Name: "Color",
 					},
 					VariableDeclaration{
 						Mutable: false,
@@ -133,7 +133,7 @@ func TestMatchingOnEnums(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Type: traffic_light_enum,
+						Name: "Color",
 					},
 					VariableDeclaration{
 						Mutable: false,

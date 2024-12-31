@@ -17,7 +17,6 @@ func TestVariables(t *testing.T) {
 						Name:    "strings",
 						Type:    List{Element: StringType{}},
 						Value: ListLiteral{
-							Type: ListType{ItemType: NumType},
 							Items: []Expression{
 								NumLiteral{Value: "1"},
 								NumLiteral{Value: "2"},
@@ -39,7 +38,6 @@ func TestVariables(t *testing.T) {
 						Name:    "numbers",
 						Type:    List{Element: NumberType{}},
 						Value: ListLiteral{
-							Type: ListType{ItemType: NumType},
 							Items: []Expression{
 								NumLiteral{Value: "1"},
 								NumLiteral{Value: "2"},

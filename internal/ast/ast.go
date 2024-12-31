@@ -106,6 +106,15 @@ func (s List) GetName() string {
 	return "List"
 }
 
+type TupleType struct {
+	BaseNode
+	Items []DeclaredType
+}
+
+func (s TupleType) GetName() string {
+	return "Tuple"
+}
+
 type Map struct {
 	BaseNode
 	Key   DeclaredType
@@ -205,11 +214,11 @@ func (s StructInstance) String() string {
 
 type EnumDefinition struct {
 	BaseNode
-	Type EnumType
+	Name string
 }
 
 func (e EnumDefinition) String() string {
-	return fmt.Sprintf("EnumDefinition(%s)", e.Type.Name)
+	return fmt.Sprintf("EnumDefinition(%s)", e.Name)
 }
 
 type WhileLoop struct {
@@ -640,6 +649,13 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 		return Void{BaseNode: BaseNode{TSNode: child}}
 	case "identifier":
 		return CustomType{BaseNode: BaseNode{TSNode: child}, Name: p.text(child)}
+	case "tuple_type":
+		itemNodes := p.mustChildren(child, "type")
+		items := make([]DeclaredType, len(itemNodes))
+		for i, itemNode := range itemNodes {
+			items[i] = p.resolveType(&itemNode)
+		}
+		return TupleType{BaseNode: BaseNode{TSNode: child}, Items: items}
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}
@@ -876,7 +892,7 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 }
 
 func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) {
-	// nameNode := node.ChildByFieldName("name")
+	nameNode := p.mustChild(node, "name")
 	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
 
 	variants := make([]string, len(variantNodes))
@@ -890,6 +906,7 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 
 	enum := EnumDefinition{
 		BaseNode: BaseNode{TSNode: node},
+		Name:     p.text(nameNode),
 	}
 	return enum, nil
 }
