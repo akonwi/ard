@@ -1051,3 +1051,67 @@ func TestLists(t *testing.T) {
 		},
 	})
 }
+
+func testTuples(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Valid tuples",
+			input: `let money: [Num, Str] = [200, "USD"]`,
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Mut:   false,
+						Name:  "money",
+						Value: TupleLiteral{},
+					},
+				},
+			},
+		},
+		{
+			name:  "Empty lists must have declared type",
+			input: `let empty = []`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:13] Empty lists need an explicit type"},
+			},
+		},
+		{
+			name:  "Lists cannot have mixed types",
+			input: `let numbers = [1, "two", false]`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[1:19] Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "[1:26] Type mismatch: Expected Num, got Bool"},
+			},
+		},
+		{
+			name:  "A valid list",
+			input: `[1,2,3]`,
+			output: Program{
+				Statements: []Statement{
+					ListLiteral{
+						Elements: []Expression{
+							NumLiteral{Value: 1},
+							NumLiteral{Value: 2},
+							NumLiteral{Value: 3},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "List API",
+			input: strings.Join([]string{
+				`[1].size`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					InstanceProperty{
+						Subject: ListLiteral{
+							Elements: []Expression{NumLiteral{Value: 1}},
+						},
+						Property: Identifier{Name: "size"},
+					},
+				},
+			},
+		},
+	})
+}

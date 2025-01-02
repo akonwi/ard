@@ -650,7 +650,7 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 	case "identifier":
 		return CustomType{BaseNode: BaseNode{TSNode: child}, Name: p.text(child)}
 	case "tuple_type":
-		itemNodes := p.mustChildren(child, "type")
+		itemNodes := p.mustChildren(child, "element_type")
 		items := make([]DeclaredType, len(itemNodes))
 		for i, itemNode := range itemNodes {
 			items[i] = p.resolveType(&itemNode)

@@ -36,3 +36,39 @@ func TestListAPI(t *testing.T) {
 		t.Fatalf("List::push should be %s, got %s", expected, push)
 	}
 }
+
+func TestListType(t *testing.T) {
+	strList := makeList(Str{})
+	numList := makeList(Num{})
+	if !strList.Is(strList) {
+		t.Errorf("[Str] == [Str]")
+	}
+	if !numList.Is(makeList(Num{})) {
+		t.Errorf("[Num] == [Num]")
+	}
+	if strList.Is(numList) {
+		t.Errorf("[Str] != [Num]")
+	}
+	if !strList.Is(makeList(nil)) {
+		t.Errorf("[Str] == [?]")
+	}
+	if strList.Is(makeList(Bool{})) {
+		t.Errorf("[Str] != [Bool]")
+	}
+}
+
+func TestGenerics(t *testing.T) {
+	Foo := Generic{name: "T"}
+	if !Foo.Is(Num{}) {
+		t.Errorf("T? == Num")
+	}
+
+	Foo.Fill(Str{})
+	if !Foo.Is(Str{}) {
+		t.Errorf("Str == Str")
+	}
+
+	if Foo.Is(Num{}) {
+		t.Errorf("Str != Num")
+	}
+}
