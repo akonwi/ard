@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/akonwi/ard/ast"
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/internal/ast"
+	"github.com/akonwi/ard/internal/checker"
 )
 
 func resolveOperator(operator ast.Operator) string {
@@ -129,7 +129,7 @@ func generateStatement(statement ast.Statement, _isReturn ...bool) ast.Document 
 					panic("Cannot iterate over a boolean")
 				}
 
-				if primitive == checker.StrType {
+				if primitive == checker.Str {
 					doc.Line(fmt.Sprintf("for (const %s of %s) {", loop.Cursor.Name, toJSExpression(loop.Iterable)))
 				} else {
 					doc.Line(
@@ -220,9 +220,9 @@ func generateElseStatement(stmt ast.IfStatement) ast.Document {
 	return doc
 }
 
-// rather than futzing with the AST to avoid adding runtime models
+// futzing with the AST to avoid adding runtime models
 func getJsMemberAccess(expr ast.MemberAccess) ast.MemberAccess {
-	if expr.Target.GetType().String() == checker.StrType.String() {
+	if expr.Target.GetType().String() == checker.Str.String() {
 		if expr.Member.(ast.Identifier).Name == "size" {
 			return ast.MemberAccess{
 				Target:     expr.Target,

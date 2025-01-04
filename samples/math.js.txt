@@ -1,3 +1,0 @@
-const multiplication = -123 * 45.67;
-const addition = 1 + 1;
-const big_maths = 1 + 2 - 2 * 3 / 4;

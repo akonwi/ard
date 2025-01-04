@@ -1,4 +1,4 @@
-package checker
+package ast
 
 import (
 	"testing"
@@ -61,26 +61,6 @@ func TestBoolEquality(t *testing.T) {
 	}
 }
 
-func TestListEquality(t *testing.T) {
-	strList := MakeList(StrType)
-	numList := MakeList(NumType)
-	if !strList.Equals(strList) {
-		t.Errorf("[Str] == [Str]")
-	}
-	if !numList.Equals(MakeList(NumType)) {
-		t.Errorf("[Num] == [Num]")
-	}
-	if strList.Equals(numList) {
-		t.Errorf("[Str] != [Num]")
-	}
-	if !strList.Equals(MakeList(nil)) {
-		t.Errorf("[Str] == [?]")
-	}
-	if strList.Equals(MakeList(BoolType)) {
-		t.Errorf("[Str] != [Bool]")
-	}
-}
-
 func TestMapEquality(t *testing.T) {
 	strToNumMap := MakeMap(NumType)
 	strToStrMap := MakeMap(StrType)
@@ -130,18 +110,6 @@ func TestFunctionCompatibility(t *testing.T) {
 
 	if map_num_fn.Equals(str_str_to_bool_fn) {
 		t.Errorf("Expected (Num) Out? != (Str, Str) Bool")
-	}
-}
-
-func TestGenerics(t *testing.T) {
-	Foo := GenericType{name: "T"}
-	if !Foo.Equals(NumType) {
-		t.Errorf("T? == Num")
-	}
-
-	Foo.Fill(StrType)
-	if !Foo.Equals(StrType) {
-		t.Errorf("Str == Str")
 	}
 }
 

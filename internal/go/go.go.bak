@@ -1,0 +1,95 @@
+package interpreter
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+
+	"github.com/akonwi/ard/internal/ast"
+	"github.com/akonwi/ard/internal/checker"
+)
+
+func generateStatement(statement ast.Statement) ast.Document {
+	switch statement.(type) {
+	case ast.Comment:
+		return ast.MakeDoc(statement.(ast.Comment).Value)
+	case ast.VariableDeclaration:
+		decl := statement.(ast.VariableDeclaration)
+		return ast.MakeDoc(fmt.Sprintf("%s := %s", decl.Name, genExpression(decl.Value)))
+	case ast.Identifier:
+		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
+	case ast.StrLiteral:
+		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
+	case ast.NumLiteral:
+		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
+	case ast.BoolLiteral:
+		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
+	case ast.InterpolatedStr:
+		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
+	}
+	panic(fmt.Errorf("Unresolved statement: %v", reflect.TypeOf(statement)))
+}
+
+func asReturn(doc ast.Document) ast.Document {
+	return ast.MakeDoc(fmt.Sprintf("return %s", doc.String()))
+}
+
+func genExpression(expr ast.Expression) string {
+	switch expr.(type) {
+	case ast.Identifier:
+		return expr.(ast.Identifier).Name
+	case ast.StrLiteral:
+		return expr.(ast.StrLiteral).Value
+	case ast.NumLiteral:
+		return expr.(ast.NumLiteral).Value
+	case ast.BoolLiteral:
+		val := expr.(ast.BoolLiteral).Value
+		if val {
+			return "true"
+		} else {
+			return "false"
+		}
+	case ast.InterpolatedStr:
+		str := expr.(ast.InterpolatedStr)
+		args := []string{}
+		sb := strings.Builder{}
+		sb.WriteString("fmt.Sprintf(\"")
+		for _, chunk := range str.Chunks {
+			if _, ok := chunk.(ast.StrLiteral); ok {
+				sb.WriteString(chunk.(ast.StrLiteral).Value)
+			} else {
+				e := chunk.GetType()
+				sb.WriteString(resolveFormatVerb(e))
+				args = append(args, genExpression(chunk))
+			}
+		}
+		sb.WriteString("\", " + strings.Join(args, ",") + ")")
+		return sb.String()
+	default:
+		panic(fmt.Errorf("Unresolved expression: %v", reflect.TypeOf(expr)))
+	}
+}
+
+func resolveFormatVerb(_type checker.Type) string {
+	switch _type.(type) {
+	case checker.PrimitiveType:
+		switch _type.(checker.PrimitiveType).Name {
+		case "Num":
+			return "%d"
+		case "Bool":
+			return "%t"
+		case "Str":
+			return "%s"
+		}
+	}
+	return "%v"
+}
+
+func GenerateGo(program *ast.Program) string {
+	doc := ast.MakeDoc("")
+	for i := range len(program.Statements) {
+		doc.Append(generateStatement(program.Statements[i]))
+	}
+
+	return strings.ReplaceAll(doc.String(), "%%", "%")
+}

@@ -3,6 +3,14 @@
 Ard is a modern, statically-typed programming language designed for clarity, safety, and ease.
 It combines features from JavaScript, Swift, and Go while introducing its own unique characteristics.
 
+## Goals
+
+- **Readability**: Ard code should be easy to read and understand.
+- **Simple**: There should be one obvious way to do things.
+- **Safety**: The compiler should catch errors at compile time.
+- **Reliable**: Runtime is in Go, so it's fast and efficient.
+  - [Future] Compiles to Go for portability.
+
 ## 1. Basic Syntax
 
 Ard uses a clean, expressive syntax designed for readability and ease of use.
@@ -15,7 +23,7 @@ Note: trying to follow Go's philosophy for readablity left to right, rather than
 - [Num] - List
 - [Str:Num] - Map
 - Void - non-existence
-  - can only be used to indicate a function does not return a value
+  - can only be used to discard a function's return value
 
 ### Variables and Constants
 
@@ -35,7 +43,7 @@ mut age = 30
 
 ```ard
 fn greet(name: Str) Str {
-  return "Hello, ${name}!"
+  return "Hello, {{name}}!"
 }
 ```
 
@@ -60,24 +68,19 @@ for item in array {
 while condition {
   // ...
 }
-
-// do block, then check condition
-do while condition {
-  // ...
-}
 ```
 
 ### Iteration
 
 Numeric inclusive range:
 ```ard
-for i in 1...10 {
-	print(i)
+for i in 1..10 {
+	io.print(i)
 }
 
-// idea for changing step size
-for i in 1...10 by 2 {
-	print(i)
+// todo: more traditional for loop
+for mut i = 1; i < 10; i =+2; {
+	io.print(i)
 }
 ```
 ### TODO: Callbacks
@@ -104,7 +107,9 @@ struct Person {
 
 ### Enums
 
-Enums are used to define a type that can only have a specific set of values:
+Enums are used to enumerate a specific set of values.
+They are simply labeled numbers.
+They cannot have associated values.
 
 ```ard
 enum Status {
@@ -114,26 +119,24 @@ enum Status {
 }
 ```
 
-Enums can also have associated values:
+The static operator (`::`) is used to cccess variants. For example:
+The static operator avoids naming conflicts between the variants and instance properties on the enum.
 
 ```ard
-enum Result {
-  success(Num),
-  failure(Str)
-}
+Status::inactive
 ```
 
 ### Optional Types
 
-Optional types are represented using the built-in `Option` enum:
+Optional types are represented using the built-in `Option`:
 
 ```ard
-enum Option<T> {
-  some(T),
+Option {
+  some(T?),
   none
 }
 
-mut maybe_name: Option<String> = Option::some("Alice")
+mut maybe_name: Option<Str> = Option::some("Alice")
 maybe_name = Option::none()
 ```
 

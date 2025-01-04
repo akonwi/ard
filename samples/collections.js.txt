@@ -1,2 +1,0 @@
-const empty = [];
-let numbers = [1,2,3];

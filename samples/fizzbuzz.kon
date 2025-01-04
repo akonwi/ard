@@ -1,5 +1,7 @@
+use std/io
+
 for num in 1..10 {
-  if num % 3 == 0 { print("Fizz") }
-  else if num % 5 == 0 { print("Buzz") }
-  else { print("{{num}}") }
+  if num % 3 == 0 { io.print("Fizz") }
+  else if num % 5 == 0 { io.print("Buzz") }
+  else { io.print(num.as_str) }
 }
