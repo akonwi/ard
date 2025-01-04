@@ -214,7 +214,8 @@ func (s StructInstance) String() string {
 
 type EnumDefinition struct {
 	BaseNode
-	Name string
+	Name     string
+	Variants []string
 }
 
 func (e EnumDefinition) String() string {
@@ -296,6 +297,16 @@ func (m MemberAccess) String() string {
 		operator = "::"
 	}
 	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target, operator, m.Member)
+}
+
+type EnumAccess struct {
+	BaseNode
+	Enum    Identifier
+	Variant Identifier
+}
+
+func (m EnumAccess) String() string {
+	return fmt.Sprintf("EnumAccess(%s::%s)", m.Enum, m.Variant)
 }
 
 type Operator int
@@ -895,6 +906,16 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 	nameNode := p.mustChild(node, "name")
 	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
 
+	if node.HasError() {
+		if len(p.text(&variantNodes[0])) == 0 {
+			return EnumDefinition{
+				BaseNode: BaseNode{TSNode: node},
+				Name:     p.text(nameNode),
+			}, nil
+		}
+		panic(fmt.Errorf("Parsing error encountered: %s", p.text(node)))
+	}
+
 	variants := make([]string, len(variantNodes))
 	names := make(map[string]int8)
 	for i, variantNode := range variantNodes {
@@ -907,6 +928,7 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 	enum := EnumDefinition{
 		BaseNode: BaseNode{TSNode: node},
 		Name:     p.text(nameNode),
+		Variants: variants,
 	}
 	return enum, nil
 }
@@ -914,6 +936,8 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
 	child := node.Child(0)
 	switch child.GrammarName() {
+	case "expression":
+		return p.parseExpression(child)
 	case "paren_expression":
 		expr, err := p.parseExpression(child.ChildByFieldName("expr"))
 		if err != nil {
@@ -1429,18 +1453,54 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (FunctionCall, error)
 
 func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error) {
 	expressionNode := p.mustChild(node, "expr")
-	// caseNodes := p.mustChildren(node, "case")
+	caseNodes := p.mustChildren(node, "case")
 
 	expression, err := p.parseExpression(expressionNode)
 	if err != nil {
 		return nil, err
 	}
-	cases := make([]MatchCase, 0)
+	cases := make([]MatchCase, len(caseNodes))
+
+	for i, caseNode := range caseNodes {
+		c, err := p.parseMatchCase(&caseNode)
+		if err != nil {
+			return nil, err
+		}
+		cases[i] = c
+	}
 
 	return MatchExpression{
 		BaseNode: BaseNode{TSNode: node},
 		Subject:  expression,
 		Cases:    cases,
+	}, nil
+}
+
+func (p *Parser) parseMatchCase(node *tree_sitter.Node) (MatchCase, error) {
+	patternNode := p.mustChild(node, "pattern")
+	pattern, err := p.parseMemberAccess(patternNode)
+	if err != nil {
+		return MatchCase{}, err
+	}
+
+	bodyNode := p.mustChild(node, "body")
+	body := []Statement{}
+	if bodyNode.GrammarName() == "block" {
+		body, err = p.parseBlock(bodyNode)
+		if err != nil {
+			return MatchCase{}, err
+		}
+	} else {
+		exp, err := p.parseExpression(bodyNode)
+		if err != nil {
+			return MatchCase{}, err
+		}
+		body = []Statement{exp}
+	}
+
+	return MatchCase{
+		Pattern: pattern,
+		Body:    body,
 	}, nil
 }
 

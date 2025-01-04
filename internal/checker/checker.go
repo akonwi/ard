@@ -298,6 +298,10 @@ func (f FunctionDeclaration) GetType() Type {
 	}
 }
 
+func (e Enum) GetType() Type {
+	return e
+}
+
 type FunctionCall struct {
 	Name   string
 	Args   []Expression
@@ -366,7 +370,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		var _type Type = Void{}
 		// get declared type if it exists
 		if s.Type != nil {
-			_type := resolveDeclaredType(s.Type)
+			_type := c.resolveDeclaredType(s.Type)
 			if _type.Is(value.GetType()) == false {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
@@ -535,12 +539,12 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		for i, p := range s.Parameters {
 			parameters[i] = Parameter{
 				Name: p.Name,
-				Type: resolveDeclaredType(p.Type),
+				Type: c.resolveDeclaredType(p.Type),
 			}
 			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
 		}
 
-		declaredReturnType := resolveDeclaredType(s.ReturnType)
+		declaredReturnType := c.resolveDeclaredType(s.ReturnType)
 		body := c.checkBlock(s.Body, blockVariables)
 		var returnType Type = nil
 		if len(body) > 0 {
@@ -575,6 +579,31 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			Body:       body,
 			Return:     returnType,
 		}
+	case ast.EnumDefinition:
+		if len(s.Variants) == 0 {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("%s Enums must have at least one variant", startPointString(s.GetTSNode())),
+				location: s.GetTSNode().Range(),
+			})
+		}
+		uniqueVariants := map[string]bool{}
+		for _, variant := range s.Variants {
+			if _, ok := uniqueVariants[variant]; ok {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("%s Duplicate variant: %s", startPointString(s.GetTSNode()), variant),
+					location: s.GetTSNode().Range(),
+				})
+			}
+			uniqueVariants[variant] = true
+		}
+		enum := Enum{
+			Name:     s.Name,
+			Variants: s.Variants,
+		}
+		c.scope.declare(enum)
+		return enum
 	default:
 		return c.checkExpression(s)
 	}
@@ -630,7 +659,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		case ast.Instance:
 			return c.checkInstanceProperty(subject, e.Member)
 		case ast.Static:
-			panic("Static member access not yet implemented")
+			return c.checkStaticProperty(subject, e.Member)
 		default:
 			panic("unreachable")
 		}
@@ -746,11 +775,11 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		for i, p := range e.Parameters {
 			parameters[i] = Parameter{
 				Name: p.Name,
-				Type: resolveDeclaredType(p.Type),
+				Type: c.resolveDeclaredType(p.Type),
 			}
 			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
 		}
-		declaredReturnType := resolveDeclaredType(e.ReturnType)
+		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
 		body := c.checkBlock(e.Body, blockVariables)
 		var returnType Type = nil
 		if len(body) > 0 {
@@ -879,7 +908,35 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 	}
 }
 
-func resolveDeclaredType(t ast.DeclaredType) Type {
+func (c *checker) checkStaticProperty(subject Expression, member ast.Expression) Expression {
+	switch s := subject.GetType().(type) {
+	case Enum:
+		for i, variant := range s.Variants {
+			if variant == member.(ast.Identifier).Name {
+				return EnumVariant{
+					Enum:    s.Name,
+					Variant: variant,
+					Value:   i,
+				}
+			}
+		}
+
+		c.addDiagnostic(Diagnostic{
+			Kind: Error,
+			Message: fmt.Sprintf(
+				"%s Undefined: %s::%s",
+				startPointString(member.GetTSNode()),
+				subject,
+				member.(ast.Identifier).Name),
+			location: member.GetTSNode().Range(),
+		})
+		return nil
+	default:
+		panic(fmt.Sprintf("Unsupported static access for %T", s))
+	}
+}
+
+func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 	if t == nil {
 		return nil
 	}
@@ -895,8 +952,19 @@ func resolveDeclaredType(t ast.DeclaredType) Type {
 		return Void{}
 	case ast.List:
 		return List{
-			element: resolveDeclaredType(tt.Element),
+			element: c.resolveDeclaredType(tt.Element),
 		}
+	case ast.CustomType:
+		name := c.scope.find(tt.GetName())
+		custom, isType := name.(Type)
+		if !isType {
+			c.addDiagnostic(Diagnostic{
+				Kind:    Error,
+				Message: fmt.Sprintf(`%s Undefined: %s`, startPointString(tt.GetTSNode()), name),
+			})
+			return nil
+		}
+		return custom
 	default:
 		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}

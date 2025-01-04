@@ -107,7 +107,9 @@ struct Person {
 
 ### Enums
 
-Enums are used to define a type that can only have a specific set of values:
+Enums are used to enumerate a specific set of values.
+They are simply labeled numbers.
+They cannot have associated values.
 
 ```ard
 enum Status {
@@ -117,26 +119,24 @@ enum Status {
 }
 ```
 
-Enums can also have associated values:
+The static operator (`::`) is used to cccess variants. For example:
+The static operator avoids naming conflicts between the variants and instance properties on the enum.
 
 ```ard
-enum Result {
-  success(Num),
-  failure(Str)
-}
+Status::inactive
 ```
 
 ### Optional Types
 
-Optional types are represented using the built-in `Option` enum:
+Optional types are represented using the built-in `Option`:
 
 ```ard
-enum Option<T> {
-  some(T),
+Option {
+  some(T?),
   none
 }
 
-mut maybe_name: Option<String> = Option::some("Alice")
+mut maybe_name: Option<Str> = Option::some("Alice")
 maybe_name = Option::none()
 ```
 

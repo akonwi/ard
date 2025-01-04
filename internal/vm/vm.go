@@ -52,6 +52,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		default:
 			panic(fmt.Sprintf("Unimplemented package: %s", s.Package.Path))
 		}
+	case checker.Enum:
+		vm.scope.addEnum(s)
 	case checker.IfStatement:
 		var condition bool = true
 		if s.Condition != nil {
@@ -319,6 +321,8 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 			},
 			_type: e.GetType(),
 		}
+	case checker.EnumVariant:
+		return &object{e.Value, e}
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))
 	}

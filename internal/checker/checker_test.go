@@ -1115,3 +1115,86 @@ func testTuples(t *testing.T) {
 		},
 	})
 }
+
+func TestEnums(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Valid enum definition",
+			input: `
+				enum Color {
+					Red,
+					Yellow,
+					Green
+				}
+			`,
+			output: Program{
+				Statements: []Statement{
+					Enum{
+						Name:     "Color",
+						Variants: []string{"Red", "Yellow", "Green"},
+					},
+				},
+			},
+		},
+		{
+			name:  "Enums must have at least one variant",
+			input: `enum Color {}`,
+			diagnostics: []Diagnostic{
+				{
+					Kind:    Error,
+					Message: "[1:1] Enums must have at least one variant",
+				},
+			},
+		},
+		{
+			name: "Variants must be unique",
+			input: strings.Join([]string{
+				`enum Color {`,
+				`  Blue,`,
+				`  Green,`,
+				`  Blue`,
+				`}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{
+					Kind:    Error,
+					Message: "[1:1] Duplicate variant: Blue",
+				},
+			},
+		},
+		{
+			name: "Referencing a variant",
+			input: strings.Join([]string{
+				`enum Color {`,
+				`  blue,`,
+				`  green,`,
+				`  purple`,
+				`}`,
+				`Color::onyx`,
+				`Color.green`,
+				`let choice: Color = Color::green`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					Enum{
+						Name:     "Color",
+						Variants: []string{"blue", "green", "purple"},
+					},
+					VariableBinding{
+						Mut:  false,
+						Name: "choice",
+						Value: EnumVariant{
+							Enum:    "Color",
+							Variant: "green",
+							Value:   1,
+						},
+					},
+				},
+			},
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "[6:8] Undefined: Color::onyx"},
+				{Kind: Error, Message: "[7:7] Undefined: Color.green"},
+			},
+		},
+	})
+}

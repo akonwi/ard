@@ -5,32 +5,30 @@ import (
 	"testing"
 )
 
-var traffic_light_code = `
+var colorCode = `
 enum Color {
 	Red,
 	Green,
 	Yellow
 }`
 
-var traffic_light_enum = EnumType{
-	Name: "Color",
-	Variants: []string{
-		"Red",
-		"Green",
-		"Yellow",
-	},
+var colorVariants = []string{
+	"Red",
+	"Green",
+	"Yellow",
 }
 
 func TestEnumDefinitions(t *testing.T) {
 	tests := []test{
 		{
 			name:  "Valid basic enum",
-			input: traffic_light_code,
+			input: colorCode,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Name: "Color",
+						Name:     "Color",
+						Variants: []string{"Red", "Green", "Yellow"},
 					},
 				},
 			},
@@ -41,54 +39,45 @@ func TestEnumDefinitions(t *testing.T) {
 }
 
 func TestEnums(t *testing.T) {
-	colorEnum := EnumType{Name: "Color",
-		Variants: []string{"Black", "Grey"},
-	}
 	tests := []test{
 		{
 			name: "Valid enum variant access",
-			input: `
-				enum Color { Black, Grey }
-				Color::Black`,
+			input: fmt.Sprintf(`%s
+				Color::Red`, colorCode),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Name: "Color",
+						Name:     "Color",
+						Variants: colorVariants,
 					},
 					MemberAccess{
 						Target:     Identifier{Name: "Color"},
 						AccessType: Static,
-						Member:     Identifier{Name: "Black"},
+						Member:     Identifier{Name: "Red"},
 					},
 				},
 			},
 		},
 		{
-			name: "Invalid enum variant access",
-			input: `
-					enum Color { Black, Grey }
-					Color::Blue`,
-		},
-		{
 			name: "Assigning a variant to a variable",
-			input: `
-				enum Color { Black, Grey }
-				let favorite: Color = Color::Black`,
+			input: fmt.Sprintf(`%s
+				let favorite: Color = Color::Green`, colorCode),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Name: "Color",
+						Name:     "Color",
+						Variants: colorVariants,
 					},
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "favorite",
 						Type:    CustomType{Name: "Color"},
 						Value: MemberAccess{
-							Target:     Identifier{Name: "Color", Type: colorEnum},
+							Target:     Identifier{Name: "Color"},
 							AccessType: Static,
-							Member:     Identifier{Name: "Black", Type: colorEnum},
+							Member:     Identifier{Name: "Green"},
 						},
 					},
 				},
@@ -101,25 +90,25 @@ func TestEnums(t *testing.T) {
 
 func TestMatchingOnEnums(t *testing.T) {
 	tests := []test{
-		{
-			name: "Matching must be exhaustive",
-			input: fmt.Sprintf(`%v
-				let light = Color::Red
-				match light {
-					Color::Red => "Stop",
-					Color::Yellow => "Yield"
-				}`, traffic_light_code),
-		},
-		{
-			name: "Each case must return the same type",
-			input: fmt.Sprintf(`%v
-				let light = Color::Red
-				match light {
-					Color::Red => "Stop",
-					Color::Yellow => "Yield",
-					Color::Green => 100
-				}`, traffic_light_code),
-		},
+		// {
+		// 	name: "Matching must be exhaustive",
+		// 	input: fmt.Sprintf(`%v
+		// 		let light = Color::Red
+		// 		match light {
+		// 			Color::Red => "Stop",
+		// 			Color::Yellow => "Yield"
+		// 		}`, traffic_light_code),
+		// },
+		// {
+		// 	name: "Each case must return the same type",
+		// 	input: fmt.Sprintf(`%v
+		// 		let light = Color::Red
+		// 		match light {
+		// 			Color::Red => "Stop",
+		// 			Color::Yellow => "Yield",
+		// 			Color::Green => 100
+		// 		}`, traffic_light_code),
+		// },
 		{
 			name: "Valid matching",
 			input: fmt.Sprintf(`%v
@@ -128,52 +117,49 @@ func TestMatchingOnEnums(t *testing.T) {
 					Color::Red => "Stop",
 					Color::Yellow => "Yield",
 					Color::Green => "Go"
-				}`, traffic_light_code),
+				}`, colorCode),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					EnumDefinition{
-						Name: "Color",
+						Name:     "Color",
+						Variants: colorVariants,
 					},
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "light",
-						Type:    CustomType{Name: "Color"},
 						Value: MemberAccess{
-							Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+							Target:     Identifier{Name: "Color"},
 							AccessType: Static,
-							Member:     Identifier{Name: "Red", Type: traffic_light_enum},
+							Member:     Identifier{Name: "Red"},
 						},
 					},
 					MatchExpression{
-						Subject: Identifier{Name: "light", Type: traffic_light_enum},
+						Subject: Identifier{Name: "light"},
 						Cases: []MatchCase{
 							{
 								Pattern: MemberAccess{
-									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+									Target:     Identifier{Name: "Color"},
 									AccessType: Static,
-									Member:     Identifier{Name: "Red", Type: traffic_light_enum},
+									Member:     Identifier{Name: "Red"},
 								},
 								Body: []Statement{StrLiteral{Value: `"Stop"`}},
-								Type: StrType,
 							},
 							{
 								Pattern: MemberAccess{
-									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+									Target:     Identifier{Name: "Color"},
 									AccessType: Static,
-									Member:     Identifier{Name: "Yellow", Type: traffic_light_enum},
+									Member:     Identifier{Name: "Yellow"},
 								},
 								Body: []Statement{StrLiteral{Value: `"Yield"`}},
-								Type: StrType,
 							},
 							{
 								Pattern: MemberAccess{
-									Target:     Identifier{Name: "Color", Type: traffic_light_enum},
+									Target:     Identifier{Name: "Color"},
 									AccessType: Static,
-									Member:     Identifier{Name: "Green", Type: traffic_light_enum},
+									Member:     Identifier{Name: "Green"},
 								},
 								Body: []Statement{StrLiteral{Value: `"Go"`}},
-								Type: StrType,
 							},
 						},
 					},

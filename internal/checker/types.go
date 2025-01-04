@@ -139,6 +139,85 @@ func makeList(element Type) List {
 	return List{element: element}
 }
 
+type Enum struct {
+	Name     string
+	Variants []string
+}
+
+// impl Type interface
+func (e Enum) String() string {
+	return e.Name
+}
+func (e Enum) Is(other Type) bool {
+	if otherEnum, isEnum := other.(Enum); isEnum {
+		if len(e.Variants) != len(otherEnum.Variants) {
+			return false
+		}
+
+		for i, v := range otherEnum.Variants {
+			if e.Variants[i] != v {
+				return false
+			}
+		}
+		return true
+	}
+
+	if variant, isVariant := other.(EnumVariant); isVariant {
+		return e.Name == variant.Enum
+	}
+
+	return false
+}
+func (e Enum) GetProperty(name string) Type {
+	return nil
+}
+
+// impl Static interface
+func (e Enum) GetStatic(name string) Type {
+	for _, v := range e.Variants {
+		if v == name {
+			return Num{}
+		}
+	}
+	return nil
+}
+
+// impl symbol interface
+func (e Enum) GetName() string {
+	return e.Name
+}
+func (e Enum) asFunction() (function, bool) {
+	return function{}, false
+}
+
+type EnumVariant struct {
+	Enum    string
+	Variant string
+	Value   int
+}
+
+// impl Type interface
+func (e EnumVariant) String() string {
+	return e.Enum
+}
+func (e EnumVariant) Is(other Type) bool {
+	if otherVariant, ok := other.(EnumVariant); ok {
+		return e.Enum == otherVariant.Enum && e.Variant == otherVariant.Variant
+	}
+	if enum, ok := other.(Enum); ok {
+		return e.Enum == enum.Name
+	}
+	return false
+}
+func (e EnumVariant) GetProperty(name string) Type {
+	return nil
+}
+
+// impl Expression interface
+func (e EnumVariant) GetType() Type {
+	return e
+}
+
 type Tuple struct {
 	elements []Type
 }

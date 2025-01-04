@@ -420,3 +420,29 @@ func TestListApi(t *testing.T) {
 		// },
 	})
 }
+
+func TestEnums(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Enum usage",
+			input: `
+				enum Direction {
+					Up, Down, Left, Right
+				}
+				let dir: Direction = Direction::Right
+				dir`,
+			want: 3,
+		},
+	})
+}
+
+// func TestOptions(t *testing.T) {
+// 	runTests(t, []test{
+// 		{
+// 			name: "Option usage",
+// 			input: `
+// 				let maybe = option()
+// 			`,
+// 		},
+// 	})
+// }
