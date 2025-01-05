@@ -111,8 +111,6 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			}
 			vm.popScope()
 		}
-	case nil: // empty statement (e.g. a comment)
-		return nil
 	default:
 		expr, ok := s.(checker.Expression)
 		if !ok {

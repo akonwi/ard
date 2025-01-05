@@ -633,9 +633,12 @@ func (c *checker) checkBlock(block []ast.Statement, variables []variable) []Stat
 		c.scope.addVariable(variable)
 	}
 
-	statements := make([]Statement, len(block))
-	for i, stmt := range block {
-		statements[i] = c.checkStatement(stmt)
+	statements := []Statement{}
+	for _, s := range block {
+		stmt := c.checkStatement(s)
+		if stmt != nil {
+			statements = append(statements, stmt)
+		}
 	}
 	return statements
 }
