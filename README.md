@@ -14,3 +14,6 @@
 - [] traditional for-loop
 - [] concurrency (Task?)
 - [] remove `:` from type declarations
+- [] trailing commas (lists, structs, maps, matches)
+- [] fn return type is required otherwise, it's a void function
+- [] methods on enums?

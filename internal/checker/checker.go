@@ -846,19 +846,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		subject := c.checkExpression(e.Subject)
 		cases := make([]MatchCase, len(e.Cases))
 
-		sym := c.scope.find(subject.GetType().(EnumVariant).Enum)
-		if sym == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind: Error,
-				Message: fmt.Sprintf(
-					"%s Undefined: %s",
-					startPointString(e.Subject.GetTSNode()),
-					subject.GetType().(EnumVariant).Enum),
-				location: e.Subject.GetTSNode().Range(),
-			})
-			return nil
-		}
-		enum := sym.(Enum)
+		enum := subject.GetType().(Enum)
 
 		expectedCases := map[string]bool{}
 		for _, variant := range enum.Variants {
@@ -1012,14 +1000,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 func (c *checker) checkStaticProperty(subject Expression, member ast.Expression) Expression {
 	switch s := subject.GetType().(type) {
 	case Enum:
-		for i, variant := range s.Variants {
-			if variant == member.(ast.Identifier).Name {
-				return EnumVariant{
-					Enum:    s.Name,
-					Variant: variant,
-					Value:   i,
-				}
-			}
+		if variant, ok := s.GetVariant(member.(ast.Identifier).Name); ok {
+			return variant
 		}
 
 		c.addDiagnostic(Diagnostic{

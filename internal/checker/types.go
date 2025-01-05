@@ -161,25 +161,19 @@ func (e Enum) Is(other Type) bool {
 		}
 		return true
 	}
-
-	if variant, isVariant := other.(EnumVariant); isVariant {
-		return e.Name == variant.Enum
-	}
-
 	return false
 }
 func (e Enum) GetProperty(name string) Type {
 	return nil
 }
 
-// impl Static interface
-func (e Enum) GetStatic(name string) Type {
-	for _, v := range e.Variants {
+func (e Enum) GetVariant(name string) (EnumVariant, bool) {
+	for i, v := range e.Variants {
 		if v == name {
-			return Num{}
+			return EnumVariant{enum: &e, Enum: e.Name, Variant: name, Value: i}, true
 		}
 	}
-	return nil
+	return EnumVariant{}, false
 }
 
 // impl symbol interface
@@ -191,6 +185,7 @@ func (e Enum) asFunction() (function, bool) {
 }
 
 type EnumVariant struct {
+	enum    *Enum
 	Enum    string
 	Variant string
 	Value   int
@@ -200,22 +195,10 @@ type EnumVariant struct {
 func (e EnumVariant) String() string {
 	return e.Enum + "::" + e.Variant
 }
-func (e EnumVariant) Is(other Type) bool {
-	if otherVariant, ok := other.(EnumVariant); ok {
-		return e.Enum == otherVariant.Enum && e.Variant == otherVariant.Variant
-	}
-	if enum, ok := other.(Enum); ok {
-		return e.Enum == enum.Name
-	}
-	return false
-}
-func (e EnumVariant) GetProperty(name string) Type {
-	return nil
-}
 
 // impl Expression interface
 func (e EnumVariant) GetType() Type {
-	return e
+	return *e.enum
 }
 
 type Tuple struct {

@@ -72,3 +72,15 @@ func TestGenerics(t *testing.T) {
 		t.Errorf("Str != Num")
 	}
 }
+
+func TestEnumTypes(t *testing.T) {
+	Kind := Enum{Name: "Kind", Variants: []string{"Good", "Bad"}}
+	good, _ := Kind.GetVariant("Good")
+
+	if good.GetType().String() != Kind.String() {
+		t.Errorf("%s is %s, got %s", good, Kind, good.GetType())
+	}
+	if !Kind.Is(good.GetType()) {
+		t.Errorf("%s allows %s", Kind, good.GetType())
+	}
+}

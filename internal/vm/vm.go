@@ -111,6 +111,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			}
 			vm.popScope()
 		}
+	case nil: // empty statement (e.g. a comment)
+		return nil
 	default:
 		expr, ok := s.(checker.Expression)
 		if !ok {
@@ -193,6 +195,14 @@ func (vm VM) doIO(expr checker.Expression) any {
 type object struct {
 	raw   any
 	_type checker.Type
+}
+
+func (o object) String() string {
+	return fmt.Sprintf("%v:%s", o.raw, o._type)
+}
+
+func (o object) equals(other object) bool {
+	return o.raw == other.raw && o._type.Is(other._type)
 }
 
 func (vm VM) evalExpression(expr checker.Expression) *object {
@@ -322,7 +332,9 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 			_type: e.GetType(),
 		}
 	case checker.EnumVariant:
-		return &object{e.Value, e}
+		return &object{e.Value, e.GetType()}
+	case checker.MatchExpr:
+		return vm.evalMatch(e)
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))
 	}
@@ -387,4 +399,31 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	default:
 		return &object{nil, checker.Void{}}
 	}
+}
+
+func (vm VM) evalMatch(match checker.MatchExpr) *object {
+	subj := vm.evalExpression(match.Subject)
+	for _, arm := range match.Cases {
+		if res, isMatch := vm.evalMatchCase(subj, arm); isMatch {
+			return res
+		}
+	}
+	panic(fmt.Sprintf("No match found for %s", subj))
+}
+
+func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) {
+	if subj.equals(*vm.evalExpression(arm.Pattern)) {
+		return vm.evalBlock(arm.Body), true
+	}
+	return nil, false
+}
+
+func (vm VM) evalBlock(block []checker.Statement) *object {
+	vm.pushScope()
+	var result *object
+	for _, stmt := range block {
+		result = vm.evalStatement(stmt)
+	}
+	vm.popScope()
+	return result
 }

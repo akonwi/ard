@@ -37,7 +37,9 @@ var compareOptions = cmp.Options{
 		Package{},
 		Diagnostic{},
 		ListLiteral{},
-		MatchCase{}),
+		MatchCase{},
+		EnumVariant{},
+	),
 }
 
 func run(t *testing.T, tests []test) {

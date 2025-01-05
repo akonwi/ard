@@ -1,3 +1,5 @@
+use std/io
+
 enum Color {
   Red,
   Yellow,
@@ -7,11 +9,12 @@ enum Color {
 fn get_meaning(light: Color) Str {
   match light {
     Color::Red => "Stop",
-    Color::Yellow => "Yield",
+    Color::Yellow => {
+      // the value can also be returned from a block
+      "Yield"
+    },
     Color::Green => "Go"
   }
 }
 
-print("The signal is ${get_meaning(Color::Red)}")
-print("The signal is ${get_meaning(Color::Green)}")
-print("The signal is ${get_meaning(Color::Yellow)}")
+io.print("Yellow means {{get_meaning(Color::Yellow)}}")
