@@ -537,6 +537,8 @@ func (p *Parser) Parse() (Program, error) {
 				return *program, err
 			}
 			program.Imports = append(program.Imports, imp)
+		default:
+			panic(fmt.Errorf("Unhandled root node: %s", rootNode.NamedChild(i).GrammarName()))
 		}
 	}
 

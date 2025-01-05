@@ -232,6 +232,21 @@ func (f FunctionLiteral) GetType() Type {
 	}
 }
 
+type MatchCase struct {
+	Pattern Expression
+	Body    []Statement
+	_type   Type
+}
+
+type MatchExpr struct {
+	Subject Expression
+	Cases   []MatchCase
+}
+
+func (m MatchExpr) GetType() Type {
+	return m.Cases[0]._type
+}
+
 // Statements don't produce anything
 type Statement interface{}
 
@@ -826,6 +841,92 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return ListLiteral{
 			Elements: elements,
 			_type:    List{element: elementType},
+		}
+	case ast.MatchExpression:
+		subject := c.checkExpression(e.Subject)
+		cases := make([]MatchCase, len(e.Cases))
+
+		sym := c.scope.find(subject.GetType().(EnumVariant).Enum)
+		if sym == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind: Error,
+				Message: fmt.Sprintf(
+					"%s Undefined: %s",
+					startPointString(e.Subject.GetTSNode()),
+					subject.GetType().(EnumVariant).Enum),
+				location: e.Subject.GetTSNode().Range(),
+			})
+			return nil
+		}
+		enum := sym.(Enum)
+
+		expectedCases := map[string]bool{}
+		for _, variant := range enum.Variants {
+			expectedCases[variant] = false
+		}
+
+		var _type Type = Void{}
+		for i, arm := range e.Cases {
+			pattern := c.checkExpression(arm.Pattern)
+			variant := pattern.(EnumVariant)
+			isDone, ok := expectedCases[variant.Variant]
+			if !ok {
+				panic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("%s Invalid variant: %s", startPointString(arm.Pattern.GetTSNode()), variant.Variant),
+					location: arm.Pattern.GetTSNode().Range(),
+				})
+			}
+			if isDone {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("%s Duplicate case: %s", startPointString(arm.Pattern.GetTSNode()), variant),
+					location: arm.Pattern.GetTSNode().Range(),
+				})
+				return nil
+			}
+			expectedCases[variant.Variant] = true
+
+			body := c.checkBlock(arm.Body, []variable{})
+			if i == 0 {
+				_type = body[len(body)-1].(Expression).GetType()
+			} else if !body[len(body)-1].(Expression).GetType().Is(_type) {
+				c.addDiagnostic(Diagnostic{
+					Kind: Error,
+					Message: fmt.Sprintf(
+						"%s Type mismatch: Expected %s, got %s",
+						startPointString(arm.Body[0].GetTSNode()), _type, body[len(body)-1].(Expression).GetType()),
+					location: arm.Body[len(arm.Body)-1].GetTSNode().Range(),
+				})
+			}
+			cases[i] = MatchCase{
+				Pattern: pattern,
+				Body:    body,
+				_type:   _type,
+			}
+		}
+
+		nonExhaustive := false
+		for variant, isDone := range expectedCases {
+			if !isDone {
+				nonExhaustive = true
+				c.addDiagnostic(Diagnostic{
+					Kind: Error,
+					Message: fmt.Sprintf(
+						"%s Incomplete match: missing case for '%s'",
+						startPointString(e.GetTSNode()), enum.Name+"::"+variant),
+					location: e.GetTSNode().Range(),
+				})
+			}
+		}
+
+		if nonExhaustive {
+			return nil
+		}
+
+		return MatchExpr{
+			Subject: subject,
+			Cases:   cases,
 		}
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))

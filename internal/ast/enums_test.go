@@ -90,25 +90,6 @@ func TestEnums(t *testing.T) {
 
 func TestMatchingOnEnums(t *testing.T) {
 	tests := []test{
-		// {
-		// 	name: "Matching must be exhaustive",
-		// 	input: fmt.Sprintf(`%v
-		// 		let light = Color::Red
-		// 		match light {
-		// 			Color::Red => "Stop",
-		// 			Color::Yellow => "Yield"
-		// 		}`, traffic_light_code),
-		// },
-		// {
-		// 	name: "Each case must return the same type",
-		// 	input: fmt.Sprintf(`%v
-		// 		let light = Color::Red
-		// 		match light {
-		// 			Color::Red => "Stop",
-		// 			Color::Yellow => "Yield",
-		// 			Color::Green => 100
-		// 		}`, traffic_light_code),
-		// },
 		{
 			name: "Valid matching",
 			input: fmt.Sprintf(`%v

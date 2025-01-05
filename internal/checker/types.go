@@ -198,7 +198,7 @@ type EnumVariant struct {
 
 // impl Type interface
 func (e EnumVariant) String() string {
-	return e.Enum
+	return e.Enum + "::" + e.Variant
 }
 func (e EnumVariant) Is(other Type) bool {
 	if otherVariant, ok := other.(EnumVariant); ok {

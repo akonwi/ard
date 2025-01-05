@@ -36,8 +36,8 @@ func (f function) asFunction() (function, bool) {
 }
 
 type scope struct {
-	symbols map[string]symbol
 	parent  *scope
+	symbols map[string]symbol
 }
 
 func newScope(parent *scope) *scope {

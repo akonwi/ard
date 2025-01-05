@@ -31,7 +31,13 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreUnexported(Identifier{}, FunctionCall{}, Package{}, Diagnostic{}, ListLiteral{}),
+	cmpopts.IgnoreUnexported(
+		Identifier{},
+		FunctionCall{},
+		Package{},
+		Diagnostic{},
+		ListLiteral{},
+		MatchCase{}),
 }
 
 func run(t *testing.T, tests []test) {
@@ -42,23 +48,22 @@ func run(t *testing.T, tests []test) {
 			parser := ast.NewParser(source, tree)
 			ast, err := parser.Parse()
 			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing input: %v", err))
+				t.Fatalf("Error parsing input: %v", err)
 			}
 			program, diagnostics := Check(ast)
+			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {
+				if diff := cmp.Diff(tt.diagnostics, diagnostics, compareOptions); diff != "" {
+					t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
+				}
+			}
 			if len(tt.output.Imports) > 0 {
 				if diff := cmp.Diff(tt.output.Imports, program.Imports, compareOptions); diff != "" {
-					t.Errorf("Program imports mismatch (-want +got):\n%s", diff)
+					t.Fatalf("Program imports mismatch (-want +got):\n%s", diff)
 				}
 			}
 			if len(tt.output.Statements) > 0 {
 				if diff := cmp.Diff(tt.output.Statements, program.Statements, compareOptions); diff != "" {
-					t.Errorf("Program statements mismatch (-want +got):\n%s", diff)
-				}
-			}
-
-			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {
-				if diff := cmp.Diff(tt.diagnostics, diagnostics, compareOptions); diff != "" {
-					t.Errorf("Diagnostics mismatch (-want +got):\n%s", diff)
+					t.Fatalf("Program statements mismatch (-want +got):\n%s", diff)
 				}
 			}
 		})
@@ -156,7 +161,7 @@ func TestVariables(t *testing.T) {
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
 				"let age: Num = 32",
-				"let is_student: Bool = true`",
+				"let is_student: Bool = true",
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -1194,6 +1199,122 @@ func TestEnums(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "[6:8] Undefined: Color::onyx"},
 				{Kind: Error, Message: "[7:7] Undefined: Color.green"},
+			},
+		},
+	})
+}
+
+func TestMatchingOnEnums(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Matching on enums",
+			input: strings.Join([]string{
+				`enum Direction { up, down }`,
+				`let dir = Direction::down`,
+				"match dir {",
+				`  Direction::up => "north",`,
+				`  Direction::down => "south"`,
+				`}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					Enum{
+						Name:     "Direction",
+						Variants: []string{"up", "down"},
+					},
+					VariableBinding{
+						Mut:   false,
+						Name:  "dir",
+						Value: EnumVariant{Enum: "Direction", Variant: "down", Value: 1},
+					},
+					MatchExpr{
+						Subject: Identifier{
+							Name: "dir",
+						},
+						Cases: []MatchCase{
+							{
+								Pattern: EnumVariant{
+									Enum:    "Direction",
+									Variant: "up",
+									Value:   0,
+								},
+								Body: []Statement{
+									StrLiteral{Value: "north"},
+								},
+							},
+							{
+								Pattern: EnumVariant{
+									Enum:    "Direction",
+									Variant: "down",
+									Value:   1,
+								},
+								Body: []Statement{
+									StrLiteral{Value: "south"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Matching on enums should be exhaustive",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{
+					Kind:    Error,
+					Message: "[3:1] Incomplete match: missing case for 'Direction::left'",
+				},
+				{
+					Kind:    Error,
+					Message: "[3:1] Incomplete match: missing case for 'Direction::right'",
+				},
+			},
+		},
+		{
+			name: "Duplicate cases are caught",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south",`,
+				`  Direction::left => "west",`,
+				`  Direction::down => "south",`,
+				`  Direction::right => "east"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{
+					Kind:    Error,
+					Message: "[7:3] Duplicate case: Direction::down",
+				},
+			},
+		},
+		{
+			name: "Each case must return the same type",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south",`,
+				`  Direction::left => false,`,
+				`  Direction::right => "east"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{
+					Kind:    Error,
+					Message: "[6:22] Type mismatch: Expected Str, got Bool",
+				},
 			},
 		},
 	})
