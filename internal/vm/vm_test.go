@@ -453,6 +453,22 @@ func TestEnums(t *testing.T) {
 	})
 }
 
+func TestStructs(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Struct usage",
+			input: `
+				struct Point {
+					x: Num,
+					y: Num,
+				}
+				let p = Point { x: 10, y: 20 }
+				p.x`,
+			want: 10,
+		},
+	})
+}
+
 // func TestOptions(t *testing.T) {
 // 	runTests(t, []test{
 // 		{

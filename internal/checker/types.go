@@ -191,7 +191,6 @@ type EnumVariant struct {
 	Value   int
 }
 
-// impl Type interface
 func (e EnumVariant) String() string {
 	return e.Enum + "::" + e.Variant
 }
@@ -199,6 +198,48 @@ func (e EnumVariant) String() string {
 // impl Expression interface
 func (e EnumVariant) GetType() Type {
 	return *e.enum
+}
+
+type Struct struct {
+	Name   string
+	Fields map[string]Type
+}
+
+// impl Type interface
+func (s Struct) String() string {
+	return s.Name
+}
+
+func (s Struct) GetProperty(name string) Type {
+	return s.Fields[name]
+}
+func (s Struct) Is(other Type) bool {
+	otherStruct, ok := other.(Struct)
+	if !ok {
+		return false
+	}
+	if s.Name != otherStruct.Name {
+		return false
+	}
+	if len(s.Fields) != len(otherStruct.Fields) {
+		return false
+	}
+	for k, v := range s.Fields {
+		if ov, ok := otherStruct.Fields[k]; !ok || !v.Is(ov) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s Struct) GetName() string {
+	return s.String()
+}
+func (s Struct) GetType() Type {
+	return s
+}
+func (s Struct) asFunction() (function, bool) {
+	return function{}, false
 }
 
 type Tuple struct {

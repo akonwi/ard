@@ -113,6 +113,16 @@ func (l ListLiteral) GetType() Type {
 	return l._type
 }
 
+type StructInstance struct {
+	Name   string
+	Fields map[string]Expression
+	_type  Struct
+}
+
+func (s StructInstance) GetType() Type {
+	return s._type
+}
+
 type TupleLiteral struct {
 	Elements []Expression
 	// _type    List
@@ -619,6 +629,30 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 		c.scope.declare(enum)
 		return enum
+	case ast.StructDefinition:
+		fields := map[string]Type{}
+		for _, field := range s.Fields {
+			name := field.Name.Name
+			if _, ok := fields[name]; ok {
+				c.addDiagnostic(Diagnostic{
+					Kind: Error,
+					Message: fmt.Sprintf(
+						"%s Duplicate field: %s",
+						startPointString(field.Name.TSNode),
+						name),
+					location: field.Name.TSNode.Range(),
+				})
+			} else {
+				fields[name] = c.resolveDeclaredType(field.Type)
+			}
+		}
+
+		strct := Struct{
+			Name:   s.Name.Name,
+			Fields: fields,
+		}
+		c.scope.declare(strct)
+		return strct
 	default:
 		return c.checkExpression(s)
 	}
@@ -919,6 +953,48 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			Subject: subject,
 			Cases:   cases,
 		}
+	case ast.StructInstance:
+		sym := c.scope.find(e.Name.Name)
+		if sym == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name.Name),
+				location: e.TSNode.Range(),
+			})
+			return nil
+		}
+
+		_struct := sym.(Struct)
+
+		fields := map[string]Expression{}
+		for _, field := range e.Properties {
+			if _struct.GetProperty(field.Name.Name) == nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					location: field.Name.TSNode.Range(),
+					Message:  fmt.Sprintf("%s Unknown field: %s", startPointString(field.Name.TSNode), field.Name.Name),
+				})
+			} else {
+				fields[field.Name.Name] = c.checkExpression(field.Value)
+			}
+		}
+
+		for name, _ := range _struct.Fields {
+			if _, ok := fields[name]; !ok {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					location: e.TSNode.Range(),
+					Message:  fmt.Sprintf("%s Missing field: %s", startPointString(e.GetTSNode()), name),
+				})
+			}
+		}
+
+		instance := StructInstance{
+			Name:   e.Name.Name,
+			Fields: fields,
+			_type:  sym.GetType().(Struct),
+		}
+		return instance
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}

@@ -1,131 +1,103 @@
 package ast
 
-// func TestStructDefinitions(t *testing.T) {
-// 	emptyStruct := StructType{
-// 		Name:   "Box",
-// 		Fields: map[string]Type{},
-// 	}
-// 	personStruct := StructType{
-// 		Name: "Person",
-// 		Fields: map[string]Type{
-// 			"name":     StrType,
-// 			"age":      NumType,
-// 			"employed": BoolType,
-// 		},
-// 	}
+import (
+	"fmt"
+	"testing"
+)
 
-// 	tests := []test{
-// 		{
-// 			name: "An empty struct",
-// 			input: `
-// 				struct Box {}`,
-// 			output: Program{
-// 				Imports: []Import{},
-// 				Statements: []Statement{
-// 					StructDefinition{
-// 						Type: emptyStruct,
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "A valid struct",
-// 			input: `
-// 				struct Person {
-// 					name: Str,
-// 					age: Num,
-// 					employed: Bool
-// 				}`,
-// 			output: Program{
-// 				Imports: []Import{},
-// 				Statements: []Statement{
-// 					StructDefinition{
-// 						Type: personStruct,
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+var personStructCode = `
+struct Person {
+	name: Str,
+	age: Num,
+	employed: Bool
+}`
 
-// 	runTests(t, tests)
-// }
+var personStruct = StructDefinition{
+	Name: Identifier{Name: "Person"},
+	Fields: []StructField{
+		{Identifier{Name: "name"}, StringType{}},
+		{Identifier{Name: "age"}, NumberType{}},
+		{Identifier{Name: "employed"}, BooleanType{}},
+	},
+}
 
-// func TestInstantiatingStructs(t *testing.T) {
-// 	emptyStruct := StructType{
-// 		Name:   "Box",
-// 		Fields: map[string]Type{},
-// 	}
+func TestStructDefinitions(t *testing.T) {
+	tests := []test{
+		{
+			name: "An empty struct",
+			input: `
+				struct Box {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					StructDefinition{
+						Name:   Identifier{Name: "Box"},
+						Fields: []StructField{},
+					},
+				},
+			},
+		},
+		{
+			name:  "A struct with properties",
+			input: personStructCode,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					personStruct,
+				},
+			},
+		},
+	}
 
-// 	personStructCode := `
-// 		struct Person {
-// 			name: Str,
-// 			age: Num,
-// 			employed: Bool
-// 		}`
-// 	personStruct := StructType{
-// 		Name: "Person",
-// 		Fields: map[string]Type{
-// 			"name":     StrType,
-// 			"age":      NumType,
-// 			"employed": BoolType,
-// 		},
-// 	}
-// 	tests := []test{
-// 		{
-// 			name: "Instantiating a field-less struct",
-// 			input: `
-// 				struct Box {}
-// 				Box{}`,
-// 			output: Program{
-// 				Imports: []Import{},
-// 				Statements: []Statement{
-// 					StructDefinition{
-// 						Type: emptyStruct,
-// 					},
-// 					StructInstance{
-// 						Type:       emptyStruct,
-// 						Properties: []StructValue{},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Instantiating with field errors",
-// 			input: fmt.Sprintf(`%s
-// 				Person { name: 23, employed: true, size: "xl"  }
-// 			`, personStructCode),
-// 			diagnostics: []Diagnostic{
-// 				{Msg: "Type mismatch: expected Str, got Num"},
-// 				{Msg: "'size' is not a field of 'Person'"},
-// 				{Msg: "Missing field 'age' in struct 'Person'"},
-// 			},
-// 		},
-// 		{
-// 			name: "Correctly instantiating a struct with fields",
-// 			input: fmt.Sprintf(`%s
-// 				Person { name: "John", age: 23, employed: true }
-// 			`, personStructCode),
-// 			output: Program{
-// 				Imports: []Import{},
-// 				Statements: []Statement{
-// 					StructDefinition{
-// 						Type: personStruct,
-// 					},
-// 					StructInstance{
-// 						Type: personStruct,
-// 						Properties: []StructValue{
-// 							{Name: "name", Value: StrLiteral{Value: `"John"`}},
-// 							{Name: "age", Value: NumLiteral{Value: "23"}},
-// 							{Name: "employed", Value: BoolLiteral{Value: true}},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+	runTests(t, tests)
+}
 
-// 	runTests(t, tests)
-// }
+func TestStructStuff(t *testing.T) {
+	tests := []test{
+		{
+			name: "Instantiating a field-less struct",
+			input: `
+				struct Box {}
+				Box{}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					StructDefinition{
+						Name:   Identifier{Name: "Box"},
+						Fields: []StructField{},
+					},
+					StructInstance{
+						Name:       Identifier{Name: "Box"},
+						Properties: []StructValue{},
+					},
+				},
+			},
+		},
+		{
+			name: "Correctly instantiating a struct with fields",
+			input: fmt.Sprintf(`%s
+				Person { name: "John", age: 23, employed: true }
+			`, personStructCode),
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					personStruct,
+					StructInstance{
+						Name: Identifier{Name: "Person"},
+						Properties: []StructValue{
+							{Name: Identifier{Name: "name"},
+								Value: StrLiteral{Value: `"John"`}},
+							{Name: Identifier{Name: "age"}, Value: NumLiteral{Value: "23"}},
+							{Name: Identifier{Name: "employed"}, Value: BoolLiteral{Value: true}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
 
 // func TestStructFieldAccess(t *testing.T) {
 // 	personStructCode := `

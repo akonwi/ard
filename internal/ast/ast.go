@@ -23,6 +23,7 @@ type BaseNode struct {
 	TSNode *tree_sitter.Node
 }
 
+// replace this with GetRange(), GetStart(), GetEnd()
 func (b BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
 }
@@ -190,26 +191,33 @@ func (a AnonymousFunction) String() string {
 
 type StructDefinition struct {
 	BaseNode
-	Type StructType
+	Name   Identifier
+	Fields []StructField
+}
+
+type StructField struct {
+	Name Identifier
+	Type DeclaredType
 }
 
 func (s StructDefinition) String() string {
-	return fmt.Sprintf("StructDefinition(%s)", s.Type.Name)
+	return fmt.Sprintf("StructDefinition(%s)", s.Name)
 }
 
 type StructValue struct {
-	Name  string
+	BaseNode
+	Name  Identifier
 	Value Expression
 }
 
 type StructInstance struct {
 	BaseNode
-	Type       StructType
+	Name       Identifier
 	Properties []StructValue
 }
 
 func (s StructInstance) String() string {
-	return fmt.Sprintf("StructInstance(%s)", s.Type.Name)
+	return fmt.Sprintf("StructInstance(%s)", s.Name)
 }
 
 type EnumDefinition struct {
@@ -860,29 +868,30 @@ func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
 
 func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error) {
 	nameNode := node.ChildByFieldName("name")
-	// fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
+	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
 
-	fields := make(map[string]Type)
-	// for _, fieldNode := range fieldNodes {
-	// nameNode := fieldNode.ChildByFieldName("name")
-	// name := p.text(nameNode)
-	// typeNode := fieldNode.ChildByFieldName("type")
-	// fieldType := p.resolveType(typeNode)
-	// fields[name] = fieldType
-	// }
-
-	_type := StructType{Name: p.text(nameNode), Fields: fields}
+	fields := make([]StructField, len(fieldNodes))
+	for i, fieldNode := range fieldNodes {
+		nameNode := fieldNode.ChildByFieldName("name")
+		name := p.text(nameNode)
+		typeNode := fieldNode.ChildByFieldName("type")
+		fields[i] = StructField{
+			Name: Identifier{BaseNode: BaseNode{nameNode}, Name: name},
+			Type: p.resolveType(typeNode),
+		}
+	}
 
 	strct := StructDefinition{
-		Type: _type,
+		BaseNode: BaseNode{node},
+		Name:     Identifier{BaseNode: BaseNode{nameNode}, Name: p.text(nameNode)},
+		Fields:   fields,
 	}
 	return strct, nil
 }
 
 func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error) {
-	// nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name")
 	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
-	// name := p.text(nameNode)
 
 	properties := make([]StructValue, len(fieldNodes))
 	for i, propertyNode := range fieldNodes {
@@ -895,11 +904,16 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 			return nil, err
 		}
 
-		properties[i] = StructValue{Name: name, Value: value}
+		properties[i] = StructValue{
+			BaseNode: BaseNode{TSNode: &propertyNode},
+			Name:     Identifier{BaseNode: BaseNode{nameNode}, Name: name},
+			Value:    value,
+		}
 	}
 
 	return StructInstance{
 		BaseNode:   BaseNode{TSNode: node},
+		Name:       Identifier{BaseNode: BaseNode{nameNode}, Name: p.text(nameNode)},
 		Properties: properties,
 	}, nil
 }

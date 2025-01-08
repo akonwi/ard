@@ -54,6 +54,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		}
 	case checker.Enum:
 		vm.scope.addEnum(s)
+	case checker.Struct:
+		vm.scope.addStruct(s)
 	case checker.IfStatement:
 		var condition bool = true
 		if s.Condition != nil {
@@ -333,6 +335,16 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 		return &object{e.Value, e.GetType()}
 	case checker.MatchExpr:
 		return vm.evalMatch(e)
+	case checker.StructInstance:
+		sym, ok := vm.scope.getStruct(e.Name)
+		if !ok {
+			panic(fmt.Sprintf("Struct not found: %s", e.Name))
+		}
+		fields := make(map[string]*object)
+		for name, value := range e.Fields {
+			fields[name] = vm.evalExpression(value)
+		}
+		return &object{fields, sym}
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))
 	}
@@ -374,6 +386,11 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 		default:
 			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 		}
+	case checker.Struct:
+		if field, ok := i.raw.(map[string]*object)[propName]; ok {
+			return field
+		}
+		panic(fmt.Sprintf("Field not found: %s", propName))
 	default:
 		return &object{nil, checker.Void{}}
 	}
