@@ -1071,6 +1071,8 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 		return BoolLiteral{
 			BaseNode: BaseNode{TSNode: node},
 			Value:    p.text(node) == "true"}, nil
+	case "struct_instance":
+		return p.parseStructInstance(node)
 	default:
 		return nil, fmt.Errorf("Unhandled list element: %s", node.GrammarName())
 	}
