@@ -3,6 +3,7 @@ use std/io
 fn fib(n: Num) Num {
   mut result = n
   if n > 1 {
+    // recursion!
     result = fib(n - 2) + fib(n - 1)
   }
   result
