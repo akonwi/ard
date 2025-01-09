@@ -823,6 +823,7 @@ func TestFunctions(t *testing.T) {
 						Name:       "noop",
 						Parameters: []Parameter{},
 						Body:       []Statement{},
+						Return:     Void{},
 					},
 					FunctionCall{
 						Name: "noop",
@@ -832,10 +833,38 @@ func TestFunctions(t *testing.T) {
 			},
 		},
 		{
-			name: "Return type is inferred",
+			name: "Return type is not inferred",
 			input: strings.Join([]string{
 				`fn get_msg() { "Hello, world!" }`,
-				`let msg: Str = get_msg()`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name:       "get_msg",
+						Parameters: []Parameter{},
+						Body: []Statement{
+							StrLiteral{Value: "Hello, world!"},
+						},
+						Return: Void{},
+					},
+				},
+			},
+		},
+		{
+			name: "Can't use return value of non-returning function",
+			input: strings.Join([]string{
+				`fn get_msg() { "Hello, world!" }`,
+				`let msg = get_msg()`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: fmt.Sprintf("[2:11] Cannot assign a void value")},
+			},
+		},
+		{
+			name: "Explicit return type",
+			input: strings.Join([]string{
+				`fn get_msg() Str { "Hello, world!" }`,
+				`let msg = get_msg()`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -858,24 +887,6 @@ func TestFunctions(t *testing.T) {
 			},
 		},
 		{
-			name: "Explicit return type",
-			input: strings.Join([]string{
-				`fn get_msg() Str { "Hello, world!" }`,
-			}, "\n"),
-			output: Program{
-				Statements: []Statement{
-					FunctionDeclaration{
-						Name:       "get_msg",
-						Parameters: []Parameter{},
-						Body: []Statement{
-							StrLiteral{Value: "Hello, world!"},
-						},
-						Return: Str{},
-					},
-				},
-			},
-		},
-		{
 			name: "Implementation should match declared return type",
 			input: strings.Join([]string{
 				`fn get_msg() Str { 200 }`,
@@ -887,7 +898,7 @@ func TestFunctions(t *testing.T) {
 		{
 			name: "Function with parameters",
 			input: strings.Join([]string{
-				`fn greet(person: Str) { "hello {{person}}" }`,
+				`fn greet(person: Str) Str { "hello {{person}}" }`,
 				`greet("joe")`,
 			}, "\n"),
 			output: Program{
@@ -932,7 +943,7 @@ func TestFunctions(t *testing.T) {
 		{
 			name: "Anonymous functions",
 			input: strings.Join([]string{
-				`let add = (a: Num, b: Num) { a + b }`,
+				`let add = (a: Num, b: Num) Num { a + b }`,
 				`let eight: Num = add(3, 5)`,
 			}, "\n"),
 			output: Program{

@@ -23,7 +23,7 @@ Note: trying to follow Go's philosophy for readablity left to right, rather than
 - [Num] - List
 - [Str:Num] - Map
 - Void - non-existence
-  - can only be used to discard a function's return value
+  - only used to discard a function's return value
 
 ### Variables and Constants
 
@@ -40,6 +40,7 @@ mut age = 30
 
 - Use `fn` keyword to define functions
 - Return type is specified after the parameter list
+  - Return types are required. Without a return type, the function returns `Void`
 
 ```ard
 fn greet(name: Str) Str {

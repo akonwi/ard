@@ -413,8 +413,14 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		}
 		// if no declared type, use the type of the value
-		if _type == (Void{}) {
+		if _type == (Void{}) && value.GetType() != _type {
 			_type = value.GetType()
+		} else {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: s.Value.GetTSNode().Range(),
+				Message:  fmt.Sprintf("%s Cannot assign a void value", startPointString(s.Value.GetTSNode())),
+			})
 		}
 
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: _type})
@@ -571,19 +577,18 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 
 		declaredReturnType := c.resolveDeclaredType(s.ReturnType)
 		body := c.checkBlock(s.Body, blockVariables)
-		var returnType Type = nil
-		if len(body) > 0 {
+		if len(body) > 0 && !declaredReturnType.Is(Void{}) {
 			if expr, ok := body[len(body)-1].(Expression); ok {
-				returnType = expr.GetType()
+				returnedType := expr.GetType()
 				// TODO: if declared type is Void, ignore actual return
-				if declaredReturnType != nil && !declaredReturnType.Is(returnType) {
+				if !declaredReturnType.Is(returnedType) {
 					c.addDiagnostic(Diagnostic{
 						Kind: Error,
 						Message: fmt.Sprintf(
 							"%s Type mismatch: Expected %s, got %s",
 							startPointString(s.ReturnType.GetTSNode()),
 							declaredReturnType,
-							returnType),
+							returnedType),
 						location: s.ReturnType.GetTSNode().Range(),
 					})
 				}
@@ -593,7 +598,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		fn := function{
 			name:       s.Name,
 			parameters: blockVariables,
-			returns:    returnType,
+			returns:    declaredReturnType,
 		}
 
 		c.scope.declare(fn)
@@ -602,7 +607,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			Name:       s.Name,
 			Parameters: parameters,
 			Body:       body,
-			Return:     returnType,
+			Return:     declaredReturnType,
 		}
 	case ast.EnumDefinition:
 		if len(s.Variants) == 0 {
@@ -833,12 +838,10 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
 		body := c.checkBlock(e.Body, blockVariables)
-		var returnType Type = nil
-		if len(body) > 0 {
+		if len(body) > 0 && !declaredReturnType.Is(Void{}) {
 			if expr, ok := body[len(body)-1].(Expression); ok {
-				returnType = expr.GetType()
-				// TODO: if declared type is Void, ignore actual return
-				if declaredReturnType != nil && !declaredReturnType.Is(returnType) {
+				returnType := expr.GetType()
+				if !declaredReturnType.Is(returnType) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						location: e.ReturnType.GetTSNode().Range(),
@@ -853,7 +856,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		return FunctionLiteral{
 			Parameters: parameters,
-			Return:     returnType,
+			Return:     declaredReturnType,
 			Body:       body,
 		}
 	case ast.ListLiteral:
@@ -1100,7 +1103,7 @@ func (c *checker) checkStaticProperty(subject Expression, member ast.Expression)
 
 func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 	if t == nil {
-		return nil
+		return Void{}
 	}
 
 	switch tt := t.(type) {
