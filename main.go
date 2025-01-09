@@ -52,7 +52,7 @@ func main() {
 		program, diagnostics := checker.Check(ast)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
-				fmt.Println(diagnostic.Message)
+				fmt.Println(diagnostic)
 			}
 			os.Exit(1)
 		}

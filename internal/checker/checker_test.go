@@ -194,7 +194,7 @@ func TestVariables(t *testing.T) {
 				`let is_student: Bool = true`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[2:16] Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
 			},
 		},
 		{
@@ -206,21 +206,21 @@ func TestVariables(t *testing.T) {
 				`other_name = "joe"`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[2:1] Immutable variable: name"},
+				{Kind: Error, Message: "Immutable variable: name"},
 			},
 		},
 		{
 			name:  "Reassigning types must match",
 			input: `mut name = "Bob"` + "\n" + `name = 0`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[2:8] Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
 			},
 		},
 		{
 			name:  "Cannot reassign undeclared variables",
 			input: `name = "Bob"`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:1] Undefined: name"},
+				{Kind: Error, Message: "Undefined: name"},
 			},
 		},
 		{
@@ -281,8 +281,8 @@ func TestMemberAccess(t *testing.T) {
 				`name.len`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:7] Undefined: \"foo\".length"},
-				{Kind: Error, Message: "[3:6] Undefined: name.len"},
+				{Kind: Error, Message: "Undefined: \"foo\".length"},
+				{Kind: Error, Message: "Undefined: name.len"},
 			},
 		},
 	})
@@ -305,7 +305,7 @@ func TestUnaryExpressions(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "[1:2] The '-' operator can only be used on numbers",
+					Message: "The '-' operator can only be used on numbers",
 				},
 			},
 		},
@@ -322,7 +322,7 @@ func TestUnaryExpressions(t *testing.T) {
 			name:  "Bang operator must be on booleans",
 			input: `!"string"`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:2] The '!' operator can only be used on booleans"},
+				{Kind: Error, Message: "The '!' operator can only be used on booleans"},
 			},
 		},
 	})
@@ -367,7 +367,7 @@ func TestNumberOperations(t *testing.T) {
 				name:  c.name + " with wrong types",
 				input: fmt.Sprintf("1 %s true", c.op),
 				diagnostics: []Diagnostic{
-					{Kind: Error, Message: fmt.Sprintf("[1:1] Invalid operation: Num %s Bool", c.op)},
+					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Num %s Bool", c.op)},
 				},
 			})
 	}
@@ -529,7 +529,7 @@ func TestIfStatements(t *testing.T) {
 				}`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:4] If conditions must be boolean expressions"},
+				{Kind: Error, Message: "If conditions must be boolean expressions"},
 			},
 		},
 		{
@@ -701,7 +701,7 @@ func TestForLoops(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[2:10] Invalid range: Num..Bool"},
+				{Kind: Error, Message: "Invalid range: Num..Bool"},
 			},
 		},
 		{
@@ -770,7 +770,7 @@ func TestForLoops(t *testing.T) {
 			name:  "Cannot iterate over a boolean",
 			input: `for b in false {}`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:10] Cannot iterate over a Bool"},
+				{Kind: Error, Message: "Cannot iterate over a Bool"},
 			},
 		},
 	})
@@ -857,7 +857,7 @@ func TestFunctions(t *testing.T) {
 				`let msg = get_msg()`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: fmt.Sprintf("[2:11] Cannot assign a void value")},
+				{Kind: Error, Message: fmt.Sprintf("Cannot assign a void value")},
 			},
 		},
 		{
@@ -892,7 +892,7 @@ func TestFunctions(t *testing.T) {
 				`fn get_msg() Str { 200 }`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:14] Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
 			},
 		},
 		{
@@ -935,9 +935,9 @@ func TestFunctions(t *testing.T) {
 				`add(1, "two")`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[2:7] Type mismatch: Expected Str, got Num"},
-				{Kind: Error, Message: "[4:1] Incorrect number of arguments: Expected 2, got 1"},
-				{Kind: Error, Message: "[5:8] Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
 			},
 		},
 		{
@@ -1026,15 +1026,15 @@ func TestLists(t *testing.T) {
 			name:  "Empty lists must have declared type",
 			input: `let empty = []`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:13] Empty lists need an explicit type"},
+				{Kind: Error, Message: "Empty lists need an explicit type"},
 			},
 		},
 		{
 			name:  "Lists cannot have mixed types",
 			input: `let numbers = [1, "two", false]`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:19] Type mismatch: Expected Num, got Str"},
-				{Kind: Error, Message: "[1:26] Type mismatch: Expected Num, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Bool"},
 			},
 		},
 		{
@@ -1097,8 +1097,8 @@ func testTuples(t *testing.T) {
 			name:  "Lists cannot have mixed types",
 			input: `let numbers = [1, "two", false]`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[1:19] Type mismatch: Expected Num, got Str"},
-				{Kind: Error, Message: "[1:26] Type mismatch: Expected Num, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Bool"},
 			},
 		},
 		{
@@ -1161,7 +1161,7 @@ func TestEnums(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "[1:1] Enums must have at least one variant",
+					Message: "Enums must have at least one variant",
 				},
 			},
 		},
@@ -1177,7 +1177,7 @@ func TestEnums(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "[1:1] Duplicate variant: Blue",
+					Message: "Duplicate variant: Blue",
 				},
 			},
 		},
@@ -1211,8 +1211,8 @@ func TestEnums(t *testing.T) {
 				},
 			},
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[6:8] Undefined: Color::onyx"},
-				{Kind: Error, Message: "[7:7] Undefined: Color.green"},
+				{Kind: Error, Message: "Undefined: Color::onyx"},
+				{Kind: Error, Message: "Undefined: Color.green"},
 			},
 		},
 	})
@@ -1284,11 +1284,11 @@ func TestMatchingOnEnums(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "[3:1] Incomplete match: missing case for 'Direction::left'",
+					Message: "Incomplete match: missing case for 'Direction::left'",
 				},
 				{
 					Kind:    Error,
-					Message: "[3:1] Incomplete match: missing case for 'Direction::right'",
+					Message: "Incomplete match: missing case for 'Direction::right'",
 				},
 			},
 		},
@@ -1308,7 +1308,7 @@ func TestMatchingOnEnums(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "[7:3] Duplicate case: Direction::down",
+					Message: "Duplicate case: Direction::down",
 				},
 			},
 		},
@@ -1327,7 +1327,7 @@ func TestMatchingOnEnums(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "[6:22] Type mismatch: Expected Str, got Bool",
+					Message: "Type mismatch: Expected Str, got Bool",
 				},
 			},
 		},
@@ -1370,7 +1370,7 @@ func TestStructs(t *testing.T) {
 				"}",
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[3:3] Duplicate field: height"},
+				{Kind: Error, Message: "Duplicate field: height"},
 			},
 		},
 		{
@@ -1407,8 +1407,8 @@ func TestStructs(t *testing.T) {
 				`Person{ color: "blue", name: "Alice", age: 30, employed: true }`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[6:1] Missing field: employed"},
-				{Kind: Error, Message: "[7:9] Unknown field: color"},
+				{Kind: Error, Message: "Missing field: employed"},
+				{Kind: Error, Message: "Unknown field: color"},
 			},
 		},
 		{
@@ -1418,7 +1418,7 @@ func TestStructs(t *testing.T) {
 				`p.height`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "[7:3] Undefined: p.height"},
+				{Kind: Error, Message: "Undefined: p.height"},
 			},
 		},
 	})

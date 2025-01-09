@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/internal/ast"
-	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
 type DiagnosticKind string
@@ -19,12 +18,11 @@ const (
 type Diagnostic struct {
 	Kind     DiagnosticKind
 	Message  string
-	location ts.Range
+	location ast.Location
 }
 
 func (d Diagnostic) String() string {
-	pos := d.location.StartPoint
-	return fmt.Sprintf("[%d:%d] %s", pos.Row+1, pos.Column+1, d.Message)
+	return fmt.Sprintf("%s %s", d.location.Start, d.Message)
 }
 
 type Program struct {
@@ -337,12 +335,6 @@ func (f FunctionCall) GetType() Type {
 	return f.symbol.returns
 }
 
-// tree-sitter uses 0 based positioning
-func startPointString(node *ts.Node) string {
-	pos := node.StartPosition()
-	return fmt.Sprintf("[%d:%d]", pos.Row+1, pos.Column+1)
-}
-
 type checker struct {
 	diagnostics []Diagnostic
 	imports     map[string]Package
@@ -369,8 +361,8 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 		} else {
 			checker.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Duplicate package name: %s", startPointString(imp.TSNode), imp.Name),
-				location: imp.TSNode.Range(),
+				Message:  fmt.Sprintf("%s Duplicate package name: %s", imp.GetLocation().Start, imp.Name),
+				location: imp.GetLocation(),
 			})
 		}
 	}
@@ -399,16 +391,16 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			if _type.Is(value.GetType()) == false {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), _type, value.GetType()),
-					location: s.Value.GetTSNode().Range(),
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", _type, value.GetType()),
+					location: s.Value.GetLocation(),
 				})
 				return nil
 			}
 		} else if list, isList := value.GetType().(List); isList && list.element == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Empty lists need an explicit type", startPointString(s.Value.GetTSNode())),
-				location: s.Value.GetTSNode().Range(),
+				Message:  "Empty lists need an explicit type",
+				location: s.Value.GetLocation(),
 			})
 			return nil
 		}
@@ -418,8 +410,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		} else {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				location: s.Value.GetTSNode().Range(),
-				Message:  fmt.Sprintf("%s Cannot assign a void value", startPointString(s.Value.GetTSNode())),
+				location: s.Value.GetLocation(),
+				Message:  "Cannot assign a void value",
 			})
 		}
 
@@ -430,8 +422,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if symbol == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s", startPointString(s.GetTSNode()), s.Name),
-				location: s.TSNode.Range(),
+				Message:  fmt.Sprintf("Undefined: %s", s.Name),
+				location: s.GetLocation(),
 			})
 			return nil
 		}
@@ -439,16 +431,16 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s", startPointString(s.GetTSNode()), s.Name),
-				location: s.TSNode.Range(),
+				Message:  fmt.Sprintf("Undefined: %s", s.Name),
+				location: s.GetLocation(),
 			})
 			return nil
 		}
 		if !variable.mut {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Immutable variable: %s", startPointString(s.GetTSNode()), s.Name),
-				location: s.TSNode.Range(),
+				Message:  fmt.Sprintf("Immutable variable: %s", s.Name),
+				location: s.GetLocation(),
 			})
 			return nil
 		}
@@ -456,8 +448,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if !variable._type.Is(value.GetType()) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(s.Value.GetTSNode()), variable._type, value.GetType()),
-				location: s.Value.GetTSNode().Range(),
+				Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", variable._type, value.GetType()),
+				location: s.Value.GetLocation(),
 			})
 			return nil
 		}
@@ -469,8 +461,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			if condition.GetType() != (Bool{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s If conditions must be boolean expressions", startPointString(s.Condition.GetTSNode())),
-					location: s.Condition.GetTSNode().Range(),
+					Message:  "If conditions must be boolean expressions",
+					location: s.Condition.GetLocation(),
 				})
 			}
 		}
@@ -494,8 +486,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if !startType.Is(Num{}) || !endType.Is(Num{}) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Invalid range: %s..%s", startPointString(s.Start.GetTSNode()), startType, endType),
-				location: s.Start.GetTSNode().Range(),
+				Message:  fmt.Sprintf("Invalid range: %s..%s", startType, endType),
+				location: s.Start.GetLocation(),
 			})
 			return nil
 		}
@@ -531,8 +523,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		case Bool:
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Cannot iterate over a Bool", startPointString(s.Iterable.GetTSNode())),
-				location: s.Iterable.GetTSNode().Range(),
+				Message:  "Cannot iterate over a Bool",
+				location: s.Iterable.GetLocation(),
 			})
 			return nil
 		case List:
@@ -550,12 +542,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		condition := c.checkExpression(s.Condition)
 		if condition.GetType() != (Bool{}) {
 			c.addDiagnostic(Diagnostic{
-				Kind: Error,
-				Message: fmt.Sprintf(
-					"%s While conditions must be boolean expressions",
-					startPointString(s.Condition.GetTSNode()),
-				),
-				location: s.Condition.GetTSNode().Range(),
+				Kind:     Error,
+				Message:  "While conditions must be boolean expressions",
+				location: s.Condition.GetLocation(),
 			})
 		}
 
@@ -587,16 +576,14 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if len(body) > 0 && !declaredReturnType.Is(Void{}) {
 			if expr, ok := body[len(body)-1].(Expression); ok {
 				returnedType := expr.GetType()
-				// TODO: if declared type is Void, ignore actual return
 				if !declaredReturnType.Is(returnedType) {
 					c.addDiagnostic(Diagnostic{
 						Kind: Error,
 						Message: fmt.Sprintf(
-							"%s Type mismatch: Expected %s, got %s",
-							startPointString(s.ReturnType.GetTSNode()),
+							"Type mismatch: Expected %s, got %s",
 							declaredReturnType,
 							returnedType),
-						location: s.ReturnType.GetTSNode().Range(),
+						location: s.ReturnType.GetLocation(),
 					})
 				}
 			}
@@ -612,8 +599,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if len(s.Variants) == 0 {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Enums must have at least one variant", startPointString(s.GetTSNode())),
-				location: s.GetTSNode().Range(),
+				Message:  "Enums must have at least one variant",
+				location: s.GetLocation(),
 			})
 		}
 		uniqueVariants := map[string]bool{}
@@ -621,8 +608,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			if _, ok := uniqueVariants[variant]; ok {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s Duplicate variant: %s", startPointString(s.GetTSNode()), variant),
-					location: s.GetTSNode().Range(),
+					Message:  fmt.Sprintf("Duplicate variant: %s", variant),
+					location: s.GetLocation(),
 				})
 			}
 			uniqueVariants[variant] = true
@@ -639,12 +626,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			name := field.Name.Name
 			if _, ok := fields[name]; ok {
 				c.addDiagnostic(Diagnostic{
-					Kind: Error,
-					Message: fmt.Sprintf(
-						"%s Duplicate field: %s",
-						startPointString(field.Name.TSNode),
-						name),
-					location: field.Name.TSNode.Range(),
+					Kind:     Error,
+					Message:  fmt.Sprintf("Duplicate field: %s", name),
+					location: field.Name.GetLocation(),
 				})
 			} else {
 				fields[name] = c.resolveDeclaredType(field.Type)
@@ -688,8 +672,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		if sym == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name),
-				location: e.GetTSNode().Range(),
+				Message:  fmt.Sprintf("Undefined: %s", e.Name),
+				location: e.GetLocation(),
 			})
 			return nil
 		}
@@ -704,8 +688,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		if err != nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Invalid number: %s", startPointString(e.TSNode), e.Value),
-				location: e.TSNode.Range(),
+				Message:  fmt.Sprintf("Invalid number: %s", e.Value),
+				location: e.GetLocation(),
 			})
 			return nil
 		}
@@ -729,8 +713,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			if !expr.GetType().Is(Num{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s The '-' operator can only be used on numbers", startPointString(e.Operand.GetTSNode())),
-					location: e.Operand.GetTSNode().Range(),
+					Message:  "The '-' operator can only be used on numbers",
+					location: e.Operand.GetLocation(),
 				})
 				return nil
 			}
@@ -739,8 +723,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			if !expr.GetType().Is(Bool{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s The '!' operator can only be used on booleans", startPointString(e.Operand.GetTSNode())),
-					location: e.Operand.GetTSNode().Range(),
+					Message:  "The '!' operator can only be used on booleans",
+					location: e.Operand.GetLocation(),
 				})
 				return nil
 			}
@@ -754,10 +738,9 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 
 		diagnostic := Diagnostic{
 			Kind:     Error,
-			location: e.TSNode.Range(),
+			location: e.GetLocation(),
 			Message: fmt.Sprintf(
-				"%s Invalid operation: %s %s %s",
-				startPointString(e.GetTSNode()),
+				"Invalid operation: %s %s %s",
 				left.GetType(),
 				operator,
 				right.GetType()),
@@ -792,8 +775,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		if sym == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name),
-				location: e.TSNode.Range(),
+				Message:  fmt.Sprintf("Undefined: %s", e.Name),
+				location: e.GetLocation(),
 			})
 			return nil
 		}
@@ -801,8 +784,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Not a function: %s", startPointString(e.GetTSNode()), e.Name),
-				location: e.TSNode.Range(),
+				Message:  fmt.Sprintf("Not a function: %s", e.Name),
+				location: e.GetLocation(),
 			})
 			return nil
 		}
@@ -811,8 +794,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		if len(e.Args) != len(fn.parameters) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Incorrect number of arguments: Expected %d, got %d", startPointString(e.GetTSNode()), len(fn.parameters), len(e.Args)),
-				location: e.TSNode.Range(),
+				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(e.Args)),
+				location: e.GetLocation(),
 			})
 		} else {
 			for i, arg := range e.Args {
@@ -820,8 +803,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				if expr != nil && !fn.parameters[i]._type.Is(expr.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
-						Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, expr.GetType()),
-						location: arg.GetTSNode().Range(),
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, expr.GetType()),
+						location: arg.GetLocation(),
 					})
 				} else {
 					args[i] = expr
@@ -848,10 +831,9 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				if !declaredReturnType.Is(returnType) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
-						location: e.ReturnType.GetTSNode().Range(),
+						location: e.ReturnType.GetLocation(),
 						Message: fmt.Sprintf(
-							"%s Type mismatch: Expected %s, got %s",
-							startPointString(e.ReturnType.GetTSNode()),
+							"Type mismatch: Expected %s, got %s",
 							declaredReturnType,
 							returnType),
 					})
@@ -877,8 +859,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			} else if !_type.Is(elementType) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					location: item.GetTSNode().Range(),
-					Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(item.GetTSNode()), elementType, _type),
+					location: item.GetLocation(),
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", elementType, _type),
 				})
 			}
 		}
@@ -905,15 +887,15 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			if !ok {
 				panic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s Invalid variant: %s", startPointString(arm.Pattern.GetTSNode()), variant.Variant),
-					location: arm.Pattern.GetTSNode().Range(),
+					Message:  fmt.Sprintf("Invalid variant: %s", variant.Variant),
+					location: arm.Pattern.GetLocation(),
 				})
 			}
 			if isDone {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("%s Duplicate case: %s", startPointString(arm.Pattern.GetTSNode()), variant),
-					location: arm.Pattern.GetTSNode().Range(),
+					Message:  fmt.Sprintf("Duplicate case: %s", variant),
+					location: arm.Pattern.GetLocation(),
 				})
 				return nil
 			}
@@ -926,9 +908,10 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				c.addDiagnostic(Diagnostic{
 					Kind: Error,
 					Message: fmt.Sprintf(
-						"%s Type mismatch: Expected %s, got %s",
-						startPointString(arm.Body[0].GetTSNode()), _type, body[len(body)-1].(Expression).GetType()),
-					location: arm.Body[len(arm.Body)-1].GetTSNode().Range(),
+						"Type mismatch: Expected %s, got %s",
+						_type,
+						body[len(body)-1].(Expression).GetType()),
+					location: arm.Body[len(arm.Body)-1].GetLocation(),
 				})
 			}
 			cases[i] = MatchCase{
@@ -945,9 +928,9 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				c.addDiagnostic(Diagnostic{
 					Kind: Error,
 					Message: fmt.Sprintf(
-						"%s Incomplete match: missing case for '%s'",
-						startPointString(e.GetTSNode()), enum.Name+"::"+variant),
-					location: e.GetTSNode().Range(),
+						"Incomplete match: missing case for '%s'",
+						enum.Name+"::"+variant),
+					location: e.GetLocation(),
 				})
 			}
 		}
@@ -965,8 +948,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		if sym == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s", startPointString(e.GetTSNode()), e.Name.Name),
-				location: e.TSNode.Range(),
+				Message:  fmt.Sprintf("Undefined: %s", e.Name.Name),
+				location: e.GetLocation(),
 			})
 			return nil
 		}
@@ -978,20 +961,20 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			if _struct.GetProperty(field.Name.Name) == nil {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					location: field.Name.TSNode.Range(),
-					Message:  fmt.Sprintf("%s Unknown field: %s", startPointString(field.Name.TSNode), field.Name.Name),
+					location: field.Name.GetLocation(),
+					Message:  fmt.Sprintf("Unknown field: %s", field.Name.Name),
 				})
 			} else {
 				fields[field.Name.Name] = c.checkExpression(field.Value)
 			}
 		}
 
-		for name, _ := range _struct.Fields {
+		for name := range _struct.Fields {
 			if _, ok := fields[name]; !ok {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					location: e.TSNode.Range(),
-					Message:  fmt.Sprintf("%s Missing field: %s", startPointString(e.GetTSNode()), name),
+					location: e.GetLocation(),
+					Message:  fmt.Sprintf("Missing field: %s", name),
 				})
 			}
 		}
@@ -1014,8 +997,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		if sig == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s.%s", startPointString(m.GetTSNode()), subject, m.Name),
-				location: m.TSNode.Range(),
+				Message:  fmt.Sprintf("Undefined: %s.%s", subject, m.Name),
+				location: m.GetLocation(),
 			})
 			return nil
 		}
@@ -1033,8 +1016,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		if sig == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Undefined: %s.%s", startPointString(m.GetTSNode()), subject, m.Name),
-				location: m.TSNode.Range(),
+				Message:  fmt.Sprintf("Undefined: %s.%s", subject, m.Name),
+				location: m.GetLocation(),
 			})
 			return nil
 		}
@@ -1042,8 +1025,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Not a function: %s", startPointString(m.GetTSNode()), m.Name),
-				location: m.TSNode.Range(),
+				Message:  fmt.Sprintf("Not a function: %s", m.Name),
+				location: m.GetLocation(),
 			})
 			return nil
 		}
@@ -1051,8 +1034,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		if len(m.Args) != len(fn.parameters) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Incorrect number of arguments: Expected %d, got %d", startPointString(m.GetTSNode()), len(fn.parameters), len(m.Args)),
-				location: m.TSNode.Range(),
+				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(m.Args)),
+				location: m.GetLocation(),
 			})
 		} else {
 			for i, arg := range m.Args {
@@ -1060,8 +1043,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 				if !fn.parameters[i]._type.Is(args[i].GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
-						Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, args[i].GetType()),
-						location: arg.GetTSNode().Range(),
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),
+						location: arg.GetLocation(),
 					})
 				}
 			}
@@ -1093,11 +1076,10 @@ func (c *checker) checkStaticProperty(subject Expression, member ast.Expression)
 		c.addDiagnostic(Diagnostic{
 			Kind: Error,
 			Message: fmt.Sprintf(
-				"%s Undefined: %s::%s",
-				startPointString(member.GetTSNode()),
+				"Undefined: %s::%s",
 				subject,
 				member.(ast.Identifier).Name),
-			location: member.GetTSNode().Range(),
+			location: member.GetLocation(),
 		})
 		return nil
 	default:
@@ -1129,7 +1111,7 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 		if !isType {
 			c.addDiagnostic(Diagnostic{
 				Kind:    Error,
-				Message: fmt.Sprintf(`%s Undefined: %s`, startPointString(tt.GetTSNode()), name),
+				Message: fmt.Sprintf(`Undefined: %s`, name),
 			})
 			return nil
 		}

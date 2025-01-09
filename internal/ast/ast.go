@@ -10,7 +10,7 @@ import (
 // statements do not produce values
 type Statement interface {
 	String() string
-	GetTSNode() *tree_sitter.Node
+	GetLocation() Location
 }
 
 // expressions produce values
@@ -20,16 +20,11 @@ type Expression interface {
 
 // the base struct for all AST nodes
 type BaseNode struct {
-	TSNode *tree_sitter.Node
+	tsNode *tree_sitter.Node
 }
 
 func makeBaseNode(node *tree_sitter.Node) BaseNode {
-	return BaseNode{TSNode: node}
-}
-
-// replace this with GetRange(), GetStart(), GetEnd()
-func (b BaseNode) GetTSNode() *tree_sitter.Node {
-	return b.TSNode
+	return BaseNode{tsNode: node}
 }
 
 type Point struct {
@@ -51,8 +46,9 @@ func (l Location) String() string {
 }
 
 func (b BaseNode) GetLocation() Location {
-	_range := b.TSNode.Range()
+	_range := b.tsNode.Range()
 	return Location{
+		// tree-sitter start positions are 0-indexed
 		Start: Point{Row: _range.StartPoint.Row + 1, Col: _range.StartPoint.Column + 1},
 		End:   Point{Row: _range.EndPoint.Row, Col: _range.EndPoint.Column},
 	}
@@ -92,8 +88,8 @@ type VariableDeclaration struct {
 }
 
 type DeclaredType interface {
-	GetTSNode() *tree_sitter.Node
 	GetName() string
+	GetLocation() Location
 }
 
 type Void struct {
@@ -554,7 +550,7 @@ func (p *Parser) sweepForError(node *tree_sitter.Node, minChildren int) error {
 func (p *Parser) Parse() (Program, error) {
 	rootNode := p.tree.RootNode()
 	program := &Program{
-		BaseNode:   BaseNode{TSNode: rootNode},
+		BaseNode:   BaseNode{tsNode: rootNode},
 		Imports:    []Import{},
 		Statements: []Statement{},
 	}
@@ -607,7 +603,7 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Import, error) {
 	}
 
 	return Import{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Name:     name,
 		Path:     path,
 	}, nil
@@ -640,7 +636,7 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return expr, nil
 	case "comment":
 		return Comment{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node),
 		}, nil
 	default:
@@ -658,7 +654,7 @@ func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (VariableDeclaration,
 	}
 
 	return VariableDeclaration{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Mutable:  isMutable,
 		Name:     name,
 		Value:    value,
@@ -678,35 +674,35 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 			text := p.text(child)
 			switch text {
 			case "Str":
-				return StringType{BaseNode: BaseNode{TSNode: child}}
+				return StringType{BaseNode: BaseNode{tsNode: child}}
 			case "Num":
-				return NumberType{BaseNode: BaseNode{TSNode: child}}
+				return NumberType{BaseNode: BaseNode{tsNode: child}}
 			case "Bool":
-				return BooleanType{BaseNode: BaseNode{TSNode: child}}
+				return BooleanType{BaseNode: BaseNode{tsNode: child}}
 			default:
 				panic(fmt.Errorf("Unresolved primitive type: %s", text))
 			}
 		}
 	case "list_type":
 		element_typeNode := p.mustChild(child, "element_type")
-		return List{BaseNode: BaseNode{TSNode: child}, Element: p.resolveType(element_typeNode)}
+		return List{BaseNode: BaseNode{tsNode: child}, Element: p.resolveType(element_typeNode)}
 	case "map_type":
 		valueNode := p.mustChild(child, "value")
 		return Map{
-			Key:   StringType{BaseNode: BaseNode{TSNode: child}},
+			Key:   StringType{BaseNode: BaseNode{tsNode: child}},
 			Value: p.resolveType(valueNode),
 		}
 	case "void":
-		return Void{BaseNode: BaseNode{TSNode: child}}
+		return Void{BaseNode: BaseNode{tsNode: child}}
 	case "identifier":
-		return CustomType{BaseNode: BaseNode{TSNode: child}, Name: p.text(child)}
+		return CustomType{BaseNode: BaseNode{tsNode: child}, Name: p.text(child)}
 	case "tuple_type":
 		itemNodes := p.mustChildren(child, "element_type")
 		items := make([]DeclaredType, len(itemNodes))
 		for i, itemNode := range itemNodes {
 			items[i] = p.resolveType(&itemNode)
 		}
-		return TupleType{BaseNode: BaseNode{TSNode: child}, Items: items}
+		return TupleType{BaseNode: BaseNode{tsNode: child}, Items: items}
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}
@@ -726,7 +722,7 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 	}
 
 	return VariableAssignment{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: makeBaseNode(node),
 		Name:     name,
 		Operator: operator,
 		Value:    value,
@@ -750,7 +746,7 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 	}
 
 	return FunctionDeclaration{
-		BaseNode:   BaseNode{TSNode: node},
+		BaseNode:   BaseNode{tsNode: node},
 		Name:       name,
 		Parameters: parameters,
 		ReturnType: returnType,
@@ -767,7 +763,7 @@ func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
 
 	for _, node := range parameterNodes {
 		parameters = append(parameters, Parameter{
-			BaseNode: BaseNode{TSNode: &node},
+			BaseNode: BaseNode{tsNode: &node},
 			Name:     p.text(node.ChildByFieldName("name")),
 			Type:     p.resolveType(node.ChildByFieldName("type")),
 		})
@@ -828,7 +824,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		}
 
 		return RangeLoop{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Cursor:   Identifier{BaseNode: makeBaseNode(cursorNode), Name: p.text(cursorNode)},
 			Start:    r.Start,
 			End:      r.End,
@@ -837,7 +833,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 	}
 
 	return ForLoop{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Cursor:   Identifier{BaseNode: makeBaseNode(cursorNode), Name: p.text(cursorNode)},
 		Iterable: iterable,
 		Body:     body,
@@ -865,7 +861,7 @@ func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
 			return nil, err
 		}
 		return IfStatement{
-			BaseNode:  BaseNode{TSNode: node},
+			BaseNode:  BaseNode{tsNode: node},
 			Condition: condition,
 			Body:      body,
 			Else:      clause,
@@ -873,7 +869,7 @@ func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
 	}
 
 	return IfStatement{
-		BaseNode:  BaseNode{TSNode: node},
+		BaseNode:  BaseNode{tsNode: node},
 		Condition: condition,
 		Body:      body,
 	}, nil
@@ -891,7 +887,7 @@ func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
 		return nil, err
 	}
 	return IfStatement{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Body:     body,
 	}, nil
 }
@@ -935,14 +931,14 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 		}
 
 		properties[i] = StructValue{
-			BaseNode: BaseNode{TSNode: &propertyNode},
+			BaseNode: BaseNode{tsNode: &propertyNode},
 			Name:     Identifier{BaseNode: makeBaseNode(nameNode), Name: name},
 			Value:    value,
 		}
 	}
 
 	return StructInstance{
-		BaseNode:   BaseNode{TSNode: node},
+		BaseNode:   BaseNode{tsNode: node},
 		Name:       Identifier{BaseNode: makeBaseNode(nameNode), Name: p.text(nameNode)},
 		Properties: properties,
 	}, nil
@@ -955,7 +951,7 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 	if node.HasError() {
 		if len(p.text(&variantNodes[0])) == 0 {
 			return EnumDefinition{
-				BaseNode: BaseNode{TSNode: node},
+				BaseNode: BaseNode{tsNode: node},
 				Name:     p.text(nameNode),
 			}, nil
 		}
@@ -972,7 +968,7 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 	}
 
 	enum := EnumDefinition{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Name:     p.text(nameNode),
 		Variants: variants,
 	}
@@ -1037,14 +1033,14 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 		chunkNodes := child.ChildrenByFieldName("chunk", p.tree.Walk())
 		if len(chunkNodes) == 1 && chunkNodes[0].GrammarName() == "string_content" {
 			return StrLiteral{
-				BaseNode: BaseNode{TSNode: node},
+				BaseNode: BaseNode{tsNode: node},
 				Value:    p.text(node)}, nil
 		}
 
 		chunks := make([]Expression, len(chunkNodes))
 		for i, chunkNode := range chunkNodes {
 			if chunkNode.GrammarName() == "string_content" {
-				chunks[i] = StrLiteral{BaseNode: BaseNode{TSNode: &chunkNode}, Value: p.text(&chunkNode)}
+				chunks[i] = StrLiteral{BaseNode: BaseNode{tsNode: &chunkNode}, Value: p.text(&chunkNode)}
 			} else {
 				chunk, err := p.parseExpression(p.mustChild(&chunkNode, "expression"))
 				if err != nil {
@@ -1054,16 +1050,16 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 			}
 		}
 		return InterpolatedStr{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Chunks:   chunks,
 		}, nil
 	case "number":
 		return NumLiteral{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(child)}, nil
 	case "boolean":
 		return BoolLiteral{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(child) == "true"}, nil
 	default:
 		return nil, fmt.Errorf("Unhandled primitive node: %s", child.GrammarName())
@@ -1083,7 +1079,7 @@ func (p *Parser) parseListValue(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	return ListLiteral{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Items:    items,
 	}, nil
 }
@@ -1092,15 +1088,15 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 	switch node.GrammarName() {
 	case "string":
 		return StrLiteral{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node)}, nil
 	case "number":
 		return NumLiteral{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node)}, nil
 	case "boolean":
 		return BoolLiteral{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node) == "true"}, nil
 	case "struct_instance":
 		return p.parseStructInstance(node)
@@ -1124,7 +1120,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	return MapLiteral{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Entries:  entries,
 	}, nil
 }
@@ -1155,7 +1151,7 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 	}
 
 	return UnaryExpression{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Operator: operator,
 		Operand:  operand,
 	}, nil
@@ -1239,14 +1235,14 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 
 	if operator == Range {
 		return RangeExpression{
-			BaseNode: BaseNode{TSNode: node},
+			BaseNode: BaseNode{tsNode: node},
 			Start:    left,
 			End:      right,
 		}, nil
 	}
 
 	return BinaryExpression{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Left:     left,
 		Operator: operator,
 		Right:    right,
@@ -1330,7 +1326,7 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (FunctionCall, error)
 	}
 
 	return FunctionCall{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Name:     p.text(targetNode),
 		Args:     args,
 	}, nil
@@ -1355,7 +1351,7 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 	}
 
 	return MatchExpression{
-		BaseNode: BaseNode{TSNode: node},
+		BaseNode: BaseNode{tsNode: node},
 		Subject:  expression,
 		Cases:    cases,
 	}, nil
@@ -1397,7 +1393,7 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 	for i, paramNode := range parameterNodes {
 		name := p.text(p.mustChild(&paramNode, "name"))
 		parameters[i] = Parameter{
-			BaseNode: BaseNode{TSNode: &paramNode},
+			BaseNode: BaseNode{tsNode: &paramNode},
 			Name:     name,
 			Type:     p.resolveType(p.mustChild(&paramNode, "type")),
 		}
@@ -1409,7 +1405,7 @@ func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFuncti
 	}
 
 	return AnonymousFunction{
-		BaseNode:   BaseNode{TSNode: node},
+		BaseNode:   BaseNode{tsNode: node},
 		Parameters: parameters,
 		Body:       body,
 		ReturnType: returnType,
