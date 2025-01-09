@@ -3,6 +3,7 @@
 ## TODO
 
 - [] methods on structs
+- [] if-else as expressions
 - [] catch-all pattern for matches
 - [] match on booleans
 - [] matching on numbers
