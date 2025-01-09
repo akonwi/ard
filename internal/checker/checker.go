@@ -576,6 +576,13 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 
 		declaredReturnType := c.resolveDeclaredType(s.ReturnType)
+		fn := function{
+			name:       s.Name,
+			parameters: blockVariables,
+			returns:    declaredReturnType,
+		}
+		c.scope.declare(fn)
+
 		body := c.checkBlock(s.Body, blockVariables)
 		if len(body) > 0 && !declaredReturnType.Is(Void{}) {
 			if expr, ok := body[len(body)-1].(Expression); ok {
@@ -594,14 +601,6 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				}
 			}
 		}
-
-		fn := function{
-			name:       s.Name,
-			parameters: blockVariables,
-			returns:    declaredReturnType,
-		}
-
-		c.scope.declare(fn)
 
 		return FunctionDeclaration{
 			Name:       s.Name,

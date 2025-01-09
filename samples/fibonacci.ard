@@ -1,13 +1,14 @@
 use std/io
 
-fn fib(n: Num) {
-  if n <= 1 {
-    n
-  } else {
-    fib(n - 2) + fib(n - 1)
+fn fib(n: Num) Num {
+  mut result = n
+  if n > 1 {
+    result = fib(n - 2) + fib(n - 1)
   }
+  result
 }
 
 for n in 20 {
-  io.print("fib({{i.as_str}}) = {{fib(i).as_str}}")
+  let result = fib(n)
+  io.print("fib({{n.as_str}}) = {{result.as_str}}")
 }
