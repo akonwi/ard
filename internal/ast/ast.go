@@ -23,9 +23,39 @@ type BaseNode struct {
 	TSNode *tree_sitter.Node
 }
 
+func makeBaseNode(node *tree_sitter.Node) BaseNode {
+	return BaseNode{TSNode: node}
+}
+
 // replace this with GetRange(), GetStart(), GetEnd()
 func (b BaseNode) GetTSNode() *tree_sitter.Node {
 	return b.TSNode
+}
+
+type Point struct {
+	Row uint
+	Col uint
+}
+
+func (p Point) String() string {
+	return fmt.Sprintf("[%d:%d]", p.Row, p.Col)
+}
+
+type Location struct {
+	Start Point
+	End   Point
+}
+
+func (l Location) String() string {
+	return l.Start.String() + "-" + l.End.String()
+}
+
+func (b BaseNode) GetLocation() Location {
+	_range := b.TSNode.Range()
+	return Location{
+		Start: Point{Row: _range.StartPoint.Row + 1, Col: _range.StartPoint.Column + 1},
+		End:   Point{Row: _range.EndPoint.Row, Col: _range.EndPoint.Column},
+	}
 }
 
 type Import struct {
@@ -799,7 +829,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 
 		return RangeLoop{
 			BaseNode: BaseNode{TSNode: node},
-			Cursor:   Identifier{Name: p.text(cursorNode)},
+			Cursor:   Identifier{BaseNode: makeBaseNode(cursorNode), Name: p.text(cursorNode)},
 			Start:    r.Start,
 			End:      r.End,
 			Body:     body,
@@ -808,7 +838,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 
 	return ForLoop{
 		BaseNode: BaseNode{TSNode: node},
-		Cursor:   Identifier{Name: p.text(cursorNode)},
+		Cursor:   Identifier{BaseNode: makeBaseNode(cursorNode), Name: p.text(cursorNode)},
 		Iterable: iterable,
 		Body:     body,
 	}, nil
@@ -876,14 +906,14 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 		name := p.text(nameNode)
 		typeNode := fieldNode.ChildByFieldName("type")
 		fields[i] = StructField{
-			Name: Identifier{BaseNode: BaseNode{nameNode}, Name: name},
+			Name: Identifier{BaseNode: makeBaseNode(nameNode), Name: name},
 			Type: p.resolveType(typeNode),
 		}
 	}
 
 	strct := StructDefinition{
 		BaseNode: BaseNode{node},
-		Name:     Identifier{BaseNode: BaseNode{nameNode}, Name: p.text(nameNode)},
+		Name:     Identifier{BaseNode: makeBaseNode(nameNode), Name: p.text(nameNode)},
 		Fields:   fields,
 	}
 	return strct, nil
@@ -906,14 +936,14 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 
 		properties[i] = StructValue{
 			BaseNode: BaseNode{TSNode: &propertyNode},
-			Name:     Identifier{BaseNode: BaseNode{nameNode}, Name: name},
+			Name:     Identifier{BaseNode: makeBaseNode(nameNode), Name: name},
 			Value:    value,
 		}
 	}
 
 	return StructInstance{
 		BaseNode:   BaseNode{TSNode: node},
-		Name:       Identifier{BaseNode: BaseNode{nameNode}, Name: p.text(nameNode)},
+		Name:       Identifier{BaseNode: makeBaseNode(nameNode), Name: p.text(nameNode)},
 		Properties: properties,
 	}, nil
 }
@@ -995,7 +1025,8 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 	name := p.text(node)
 
 	return Identifier{
-		Name: name,
+		BaseNode: makeBaseNode(node),
+		Name:     name,
 	}, nil
 }
 
@@ -1245,7 +1276,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	name := memberNode.GrammarName()
 	switch name {
 	case "identifier":
-		member = Identifier{Name: p.text(memberNode), BaseNode: BaseNode{TSNode: memberNode}}
+		member = Identifier{Name: p.text(memberNode), BaseNode: makeBaseNode(memberNode)}
 	case "function_call":
 		call, err := p.parseFunctionCall(memberNode)
 		if err != nil {
@@ -1255,175 +1286,11 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	return MemberAccess{
-		BaseNode:   BaseNode{TSNode: node},
+		BaseNode:   makeBaseNode(node),
 		Target:     target,
 		AccessType: accessType,
 		Member:     member,
 	}, nil
-
-	// switch target.GetType().(type) {
-	// case EnumType:
-	// 	enum := target.GetType().(EnumType)
-	// 	switch memberNode.GrammarName() {
-	// 	case "identifier":
-	// 		name := p.text(memberNode)
-	// 		if accessType == Static {
-	// 			if ok := enum.HasVariant(name); ok {
-	// 				return MemberAccess{
-	// 					Target:     target,
-	// 					AccessType: accessType,
-	// 					Member:     Identifier{Name: name},
-	// 				}, nil
-	// 			}
-	// 			msg := fmt.Sprintf("'%s' is not a variant of '%s' enum", name, enum.Name)
-	// 			p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-	// 			return nil, fmt.Errorf(msg)
-	// 		}
-	// 		return nil, fmt.Errorf("Unsupported: instance members on enums")
-	// 	default:
-	// 		panic(fmt.Errorf("Unhandled member type on enum: %s", memberNode.GrammarName()))
-	// 	}
-	// case StructType:
-	// 	structDef := target.GetType().(StructType)
-	// 	switch memberNode.GrammarName() {
-	// 	case "identifier":
-	// 		name := p.text(memberNode)
-	// 		if accessType == Instance {
-	// 			if _, ok := structDef.Fields[name]; ok {
-	// 				return MemberAccess{
-	// 					Target:     target,
-	// 					AccessType: accessType,
-	// 					Member:     Identifier{Name: name},
-	// 				}, nil
-	// 			} else {
-	// 				msg := fmt.Sprintf("No field '%s' in '%s' struct", name, structDef.Name)
-	// 				p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-	// 				return nil, fmt.Errorf(msg)
-	// 			}
-	// 		}
-	// 		panic("Unimplemented: static members on structs")
-	// 	default:
-	// 		panic(fmt.Errorf("Unhandled member type on struct: %s", memberNode.GrammarName()))
-	// 	}
-	// case ListType:
-	// 	listType := target.GetType().(ListType)
-	// 	switch memberNode.GrammarName() {
-	// 	case "identifier":
-	// 		{
-	// 			name := p.text(memberNode)
-	// 			if accessType == Instance {
-	// 				property := listType.GetProperty(name)
-	// 				if property == nil {
-	// 					msg := fmt.Sprintf("No property '%s' on List", name)
-	// 					p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-	// 					return nil, fmt.Errorf(msg)
-	// 				}
-
-	// 				return MemberAccess{
-	// 					Target:     target,
-	// 					AccessType: accessType,
-	// 					Member:     Identifier{Name: name},
-	// 				}, nil
-	// 			} else {
-	// 				panic("Unimplemented: static members on List")
-	// 			}
-	// 		}
-	// 	case "function_call":
-	// 		call, err := p.parseFunctionCall(memberNode, &target)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-
-	// 		return MemberAccess{
-	// 			Target:     target,
-	// 			AccessType: accessType,
-	// 			Member:     call,
-	// 		}, nil
-	// 	default:
-	// 		panic(fmt.Errorf("Unhandled member type on list: %s", memberNode.GrammarName()))
-	// 	}
-	// case PrimitiveType:
-	// 	prim := target.GetType().(PrimitiveType)
-	// 	if prim.Name != "Str" {
-	// 		return MemberAccess{
-	// 			Target:     target,
-	// 			AccessType: accessType,
-	// 		}, nil
-	// 	}
-
-	// 	switch memberNode.GrammarName() {
-	// 	case "identifier":
-	// 		name := p.text(memberNode)
-	// 		if accessType == Instance {
-	// 			property := prim.GetProperty(name)
-	// 			if property == nil {
-	// 				msg := fmt.Sprintf("No property '%s' on %s", name, prim.Name)
-	// 				p.typeErrors = append(p.typeErrors, MakeError(msg, memberNode))
-	// 				return nil, fmt.Errorf(msg)
-	// 			}
-
-	// 			return MemberAccess{
-	// 				Target:     target,
-	// 				AccessType: accessType,
-	// 				Member: Identifier{
-	// 					BaseNode: BaseNode{TSNode: memberNode},
-	// 					Name:     name,
-	// 				},
-	// 			}, nil
-	// 		} else {
-	// 			panic("Unimplemented: static members on Str")
-	// 		}
-	// 	default:
-	// 		panic(fmt.Errorf("Unhandled member type on Str: %s", memberNode.GrammarName()))
-	// 	}
-	// case nil: // check if it's a package
-	// 	// identifier, ok := target.(Identifier)
-	// 	// if !ok {
-	// 	// 	return nil, fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType())
-	// 	// }
-	// 	// pkg, ok := identifier.symbol.(Package)
-	// 	// // if !ok {
-	// 	// // 	return nil, fmt.Errorf("Expected '%s' to be package reference", identifier.Name)
-	// 	// // }
-	// 	// if accessType == Static {
-	// 	// 	return nil, errors.New("Unimplemented: static members on packages")
-	// 	// }
-	// 	switch memberNode.GrammarName() {
-	// 	case "function_call":
-	// 		member, err := p.parseFunctionCall(memberNode, nil)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		return MemberAccess{
-	// 			Target:     target,
-	// 			AccessType: Instance,
-	// 			Member:     member,
-	// 		}, nil
-	// 	case "identifier":
-	// 		id, err := p.parseIdentifier(memberNode)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		return MemberAccess{
-	// 			Target:     target,
-	// 			AccessType: accessType,
-	// 			Member:     id,
-	// 		}, nil
-	// 	default:
-	// 		expr, err := p.parseExpression(memberNode)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		return MemberAccess{
-	// 			Target:     target,
-	// 			AccessType: accessType,
-	// 			Member:     expr,
-	// 		}, nil
-	// 	}
-
-	// default:
-	// 	panic(fmt.Errorf("Unhandled target type for MemberAccess: %s", target.GetType()))
-	// }
 }
 
 /* look for a method on a type */

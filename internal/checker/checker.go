@@ -693,7 +693,10 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			})
 			return nil
 		}
-		return Identifier{Name: e.Name, symbol: sym}
+		return Identifier{
+			Name:   e.Name,
+			symbol: sym,
+		}
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
 	case ast.NumLiteral:
@@ -813,13 +816,15 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			})
 		} else {
 			for i, arg := range e.Args {
-				args[i] = c.checkExpression(arg)
-				if !fn.parameters[i]._type.Is(args[i].GetType()) {
+				expr := c.checkExpression(arg)
+				if expr != nil && !fn.parameters[i]._type.Is(expr.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
-						Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, args[i].GetType()),
+						Message:  fmt.Sprintf("%s Type mismatch: Expected %s, got %s", startPointString(arg.GetTSNode()), fn.parameters[i]._type, expr.GetType()),
 						location: arg.GetTSNode().Range(),
 					})
+				} else {
+					args[i] = expr
 				}
 			}
 		}
