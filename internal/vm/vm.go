@@ -226,6 +226,9 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 		}
 		return &object{list, e.GetType()}
 	case checker.Identifier:
+		if e.Name == "_" {
+			return &object{nil, checker.Void{}}
+		}
 		if v, ok := vm.scope.get(e.Name); ok {
 			return v.value
 		}
@@ -418,18 +421,29 @@ func (vm VM) evalMatch(match checker.MatchExpr) *object {
 			return res
 		}
 	}
+	if match.CatchAll.Body != nil {
+		variables := make(map[string]binding)
+		if id, ok := match.CatchAll.Pattern.(checker.Identifier); ok {
+			variables[id.Name] = binding{false, subj, false}
+		}
+		return vm.evalBlock(match.CatchAll.Body, variables)
+	}
 	panic(fmt.Sprintf("No match found for %s", subj))
 }
 
 func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) {
 	if subj.equals(*vm.evalExpression(arm.Pattern)) {
-		return vm.evalBlock(arm.Body), true
+		return vm.evalBlock(arm.Body, nil), true
 	}
 	return nil, false
 }
 
-func (vm VM) evalBlock(block []checker.Statement) *object {
+func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding) *object {
 	vm.pushScope()
+	for name, variable := range variables {
+		vm.scope.bindings[name] = &variable
+	}
+
 	var result *object
 	for _, stmt := range block {
 		result = vm.evalStatement(stmt)

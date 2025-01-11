@@ -1388,6 +1388,64 @@ func TestMatchingOnEnums(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "A catch-all case can be provided",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south",`,
+				`  _ => "lateral"`,
+				`}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					Enum{
+						Name:     "Direction",
+						Variants: []string{"up", "down", "left", "right"},
+					},
+					VariableBinding{
+						Mut:   false,
+						Name:  "dir",
+						Value: EnumVariant{Enum: "Direction", Variant: "down", Value: 1},
+					},
+					MatchExpr{
+						Subject: Identifier{
+							Name: "dir",
+						},
+						Cases: []MatchCase{
+							{
+								Pattern: EnumVariant{
+									Enum:    "Direction",
+									Variant: "up",
+									Value:   0,
+								},
+								Body: []Statement{
+									StrLiteral{Value: "north"},
+								},
+							},
+							{
+								Pattern: EnumVariant{
+									Enum:    "Direction",
+									Variant: "down",
+									Value:   1,
+								},
+								Body: []Statement{
+									StrLiteral{Value: "south"},
+								},
+							},
+						},
+						CatchAll: MatchCase{
+							Pattern: nil,
+							Body: []Statement{
+								StrLiteral{Value: "lateral"},
+							},
+						},
+					},
+				},
+			},
+		},
 	})
 }
 

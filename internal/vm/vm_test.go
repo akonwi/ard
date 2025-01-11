@@ -450,6 +450,20 @@ func TestEnums(t *testing.T) {
 				}`,
 			want: "East",
 		},
+		{
+			name: "Catch all",
+			input: `
+				enum Direction {
+					Up, Down, Left, Right
+				}
+				let dir: Direction = Direction::Right
+				match dir {
+					Direction::Up => "North",
+					Direction::Down => "South",
+					_ => "skip"
+				}`,
+			want: "skip",
+		},
 	})
 }
 

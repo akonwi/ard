@@ -13,7 +13,7 @@ fn get_meaning(light: Color) Str {
       // the value can also be returned from a block
       "Yield"
     },
-    Color::Green => "Go"
+    _ => "Go"
   }
 }
 

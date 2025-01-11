@@ -2,8 +2,8 @@
 
 ## TODO
 
-- [] built-in optional: `Option-Str`
 - [] catch-all pattern for matches
+- [] built-in optional: `Option-Str`
 - [] matching on numbers
 - [] methods on structs
 - [] matching on strings?
@@ -19,4 +19,4 @@
   - fails: `if !a.b { }`
   - works: `if !(a.b) { }`
 - [] replace `!` with `not`
-- [] tuples
+- [] tuples?

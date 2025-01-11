@@ -1373,6 +1373,12 @@ func (p *Parser) parseMatchCase(node *tree_sitter.Node) (MatchCase, error) {
 			return MatchCase{}, err
 		}
 		pattern = p
+	case "identifier":
+		p, err := p.parseIdentifier(patternNode)
+		if err != nil {
+			return MatchCase{}, err
+		}
+		pattern = p
 	default:
 		panic(fmt.Errorf("Unhandled match pattern grammar: %s", patternNode.GrammarName()))
 	}

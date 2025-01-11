@@ -247,8 +247,9 @@ type MatchCase struct {
 }
 
 type MatchExpr struct {
-	Subject Expression
-	Cases   []MatchCase
+	Subject  Expression
+	Cases    []MatchCase
+	CatchAll MatchCase
 }
 
 func (m MatchExpr) GetType() Type {
@@ -948,36 +949,61 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 }
 
 func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, enum Enum) Expression {
-	cases := make([]MatchCase, len(expr.Cases))
-
 	expectedCases := map[string]bool{}
 	for _, variant := range enum.Variants {
 		expectedCases[variant] = false
 	}
 
+	var pattern Expression
+	var hasCatchAll bool = false
+	cases := make([]MatchCase, len(expr.Cases))
+
 	var _type Type = Void{}
 	for i, arm := range expr.Cases {
-		pattern := c.checkExpression(arm.Pattern)
-		variant := pattern.(EnumVariant)
-		isDone, ok := expectedCases[variant.Variant]
-		if !ok {
-			panic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Invalid variant: %s", variant.Variant),
-				location: arm.Pattern.GetLocation(),
-			})
-		}
-		if isDone {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Duplicate case: %s", variant),
-				location: arm.Pattern.GetLocation(),
-			})
-			return nil
-		}
-		expectedCases[variant.Variant] = true
+		variables := []variable{}
 
-		block := c.checkBlock(arm.Body, []variable{})
+		if id, ok := arm.Pattern.(ast.Identifier); ok {
+			if i != len(expr.Cases)-1 {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Catch-all case must be last",
+					location: arm.Pattern.GetLocation(),
+				})
+				return nil
+			}
+			pattern = nil
+			if id.Name != "_" {
+				variables = append(variables, variable{
+					name:  id.Name,
+					mut:   false,
+					_type: enum,
+				})
+				pattern = Identifier{Name: id.Name, symbol: variables[0]}
+			}
+			hasCatchAll = true
+		} else {
+			pattern = c.checkExpression(arm.Pattern)
+			variant := pattern.(EnumVariant)
+			isDupe, ok := expectedCases[variant.Variant]
+			if !ok {
+				panic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Invalid variant: %s", variant.Variant),
+					location: arm.Pattern.GetLocation(),
+				})
+			}
+			if isDupe {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Duplicate case: %s", variant),
+					location: arm.Pattern.GetLocation(),
+				})
+				return nil
+			}
+			expectedCases[variant.Variant] = true
+		}
+
+		block := c.checkBlock(arm.Body, variables)
 		if i == 0 {
 			_type = block.result
 		} else if !block.result.Is(_type) {
@@ -990,24 +1016,27 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 				location: arm.Body[len(arm.Body)-1].GetLocation(),
 			})
 		}
-		cases[i] = MatchCase{
+		_case := MatchCase{
 			Pattern: pattern,
 			Body:    block.Body,
 			_type:   _type,
 		}
+		cases[i] = _case
 	}
 
 	nonExhaustive := false
-	for variant, isDone := range expectedCases {
-		if !isDone {
-			nonExhaustive = true
-			c.addDiagnostic(Diagnostic{
-				Kind: Error,
-				Message: fmt.Sprintf(
-					"Incomplete match: missing case for '%s'",
-					enum.Name+"::"+variant),
-				location: expr.GetLocation(),
-			})
+	if !hasCatchAll {
+		for variant, isDone := range expectedCases {
+			if !isDone {
+				nonExhaustive = true
+				c.addDiagnostic(Diagnostic{
+					Kind: Error,
+					Message: fmt.Sprintf(
+						"Incomplete match: missing case for '%s'",
+						enum.Name+"::"+variant),
+					location: expr.GetLocation(),
+				})
+			}
 		}
 	}
 
@@ -1015,9 +1044,16 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 		return nil
 	}
 
+	var catchAll MatchCase
+	if hasCatchAll {
+		catchAll = cases[len(cases)-1]
+		cases = cases[:len(cases)-1]
+	}
+
 	return MatchExpr{
-		Subject: subject,
-		Cases:   cases,
+		Subject:  subject,
+		Cases:    cases,
+		CatchAll: catchAll,
 	}
 }
 
