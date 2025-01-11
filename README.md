@@ -2,12 +2,11 @@
 
 ## TODO
 
-- [] match on booleans
-- [] catch-all pattern for matches
-- [] methods on structs
-- [] matching on numbers
-- [] matching on strings?
 - [] built-in optional: `Option-Str`
+- [] catch-all pattern for matches
+- [] matching on numbers
+- [] methods on structs
+- [] matching on strings?
 - [] Type Union
 - [] Allow Num as map keys
 - [] traditional for-loop
