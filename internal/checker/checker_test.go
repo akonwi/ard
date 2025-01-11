@@ -40,6 +40,7 @@ var compareOptions = cmp.Options{
 		MatchCase{},
 		EnumVariant{},
 		StructInstance{},
+		IfStatement{},
 	),
 }
 

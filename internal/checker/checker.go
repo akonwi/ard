@@ -335,6 +335,11 @@ func (f FunctionCall) GetType() Type {
 	return f.symbol.returns
 }
 
+type Block struct {
+	Body   []Statement
+	result Type
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	imports     map[string]Package
@@ -467,13 +472,13 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 		}
 
-		body := c.checkBlock(s.Body, []variable{})
+		block := c.checkBlock(s.Body, []variable{})
 
 		var elseClause Statement = nil
 		if s.Else != nil {
 			elseClause = c.checkStatement(s.Else)
 		}
-		return IfStatement{Condition: condition, Body: body, Else: elseClause}
+		return IfStatement{Condition: condition, Body: block.Body, Else: elseClause}
 	case ast.Comment:
 		return nil
 	case ast.RangeLoop:
@@ -491,19 +496,19 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
-		body := c.checkBlock(s.Body, []variable{cursor})
+		block := c.checkBlock(s.Body, []variable{cursor})
 		return ForRange{
 			Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
 			Start:  start,
 			End:    end,
-			Body:   body,
+			Body:   block.Body,
 		}
 	case ast.ForLoop:
 		iterable := c.checkExpression(s.Iterable)
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
 		// getBody func allows lazy evaluation so that cursor can be updated within the switch below
 		getBody := func() []Statement {
-			return c.checkBlock(s.Body, []variable{cursor})
+			return c.checkBlock(s.Body, []variable{cursor}).Body
 		}
 
 		switch iterable.GetType().(type) {
@@ -548,10 +553,10 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 		}
 
-		body := c.checkBlock(s.Body, []variable{})
+		block := c.checkBlock(s.Body, []variable{})
 		return WhileLoop{
 			Condition: condition,
-			Body:      body,
+			Body:      block.Body,
 		}
 	case ast.FunctionDeclaration:
 		parameters := make([]Parameter, len(s.Parameters))
@@ -572,27 +577,22 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 		c.scope.declare(fn)
 
-		body := c.checkBlock(s.Body, blockVariables)
-		if len(body) > 0 && !declaredReturnType.Is(Void{}) {
-			if expr, ok := body[len(body)-1].(Expression); ok {
-				returnedType := expr.GetType()
-				if !declaredReturnType.Is(returnedType) {
-					c.addDiagnostic(Diagnostic{
-						Kind: Error,
-						Message: fmt.Sprintf(
-							"Type mismatch: Expected %s, got %s",
-							declaredReturnType,
-							returnedType),
-						location: s.ReturnType.GetLocation(),
-					})
-				}
-			}
+		block := c.checkBlock(s.Body, blockVariables)
+		if !declaredReturnType.Is(Void{}) && !declaredReturnType.Is(block.result) {
+			c.addDiagnostic(Diagnostic{
+				Kind: Error,
+				Message: fmt.Sprintf(
+					"Type mismatch: Expected %s, got %s",
+					declaredReturnType,
+					block.result),
+				location: s.ReturnType.GetLocation(),
+			})
 		}
 
 		return FunctionDeclaration{
 			Name:       s.Name,
 			Parameters: parameters,
-			Body:       body,
+			Body:       block.Body,
 			Return:     declaredReturnType,
 		}
 	case ast.EnumDefinition:
@@ -646,7 +646,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	}
 }
 
-func (c *checker) checkBlock(block []ast.Statement, variables []variable) []Statement {
+func (c *checker) checkBlock(block []ast.Statement, variables []variable) Block {
 	new_scope := newScope(c.scope)
 	c.scope = new_scope
 	defer func() { c.scope = new_scope.parent }()
@@ -655,14 +655,18 @@ func (c *checker) checkBlock(block []ast.Statement, variables []variable) []Stat
 		c.scope.addVariable(variable)
 	}
 
+	var result Type = Void{}
 	statements := []Statement{}
 	for _, s := range block {
 		stmt := c.checkStatement(s)
 		if stmt != nil {
 			statements = append(statements, stmt)
+			if expr, ok := stmt.(Expression); ok {
+				result = expr.GetType()
+			}
 		}
 	}
-	return statements
+	return Block{Body: statements, result: result}
 }
 
 func (c *checker) checkExpression(expr ast.Expression) Expression {
@@ -834,26 +838,23 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
 		}
 		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
-		body := c.checkBlock(e.Body, blockVariables)
-		if len(body) > 0 && !declaredReturnType.Is(Void{}) {
-			if expr, ok := body[len(body)-1].(Expression); ok {
-				returnType := expr.GetType()
-				if !declaredReturnType.Is(returnType) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						location: e.ReturnType.GetLocation(),
-						Message: fmt.Sprintf(
-							"Type mismatch: Expected %s, got %s",
-							declaredReturnType,
-							returnType),
-					})
-				}
+		block := c.checkBlock(e.Body, blockVariables)
+		if !declaredReturnType.Is(Void{}) {
+			if !declaredReturnType.Is(block.result) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					location: e.ReturnType.GetLocation(),
+					Message: fmt.Sprintf(
+						"Type mismatch: Expected %s, got %s",
+						declaredReturnType,
+						block.result),
+				})
 			}
 		}
 		return FunctionLiteral{
 			Parameters: parameters,
 			Return:     declaredReturnType,
-			Body:       body,
+			Body:       block.Body,
 		}
 	case ast.ListLiteral:
 		if len(e.Items) == 0 {
@@ -911,22 +912,22 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			}
 			expectedCases[variant.Variant] = true
 
-			body := c.checkBlock(arm.Body, []variable{})
+			block := c.checkBlock(arm.Body, []variable{})
 			if i == 0 {
-				_type = body[len(body)-1].(Expression).GetType()
-			} else if !body[len(body)-1].(Expression).GetType().Is(_type) {
+				_type = block.result
+			} else if !block.result.Is(_type) {
 				c.addDiagnostic(Diagnostic{
 					Kind: Error,
 					Message: fmt.Sprintf(
 						"Type mismatch: Expected %s, got %s",
 						_type,
-						body[len(body)-1].(Expression).GetType()),
+						block.result),
 					location: arm.Body[len(arm.Body)-1].GetLocation(),
 				})
 			}
 			cases[i] = MatchCase{
 				Pattern: pattern,
-				Body:    body,
+				Body:    block.Body,
 				_type:   _type,
 			}
 		}
