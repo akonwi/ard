@@ -266,37 +266,37 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 		case checker.GreaterThan:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) > right.raw.(int), left._type}
+			return &object{left.raw.(int) > right.raw.(int), e.GetType()}
 		case checker.GreaterThanOrEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) >= right.raw.(int), left._type}
+			return &object{left.raw.(int) >= right.raw.(int), e.GetType()}
 		case checker.LessThan:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) < right.raw.(int), left._type}
+			return &object{left.raw.(int) < right.raw.(int), e.GetType()}
 		case checker.LessThanOrEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) <= right.raw.(int), left._type}
+			return &object{left.raw.(int) <= right.raw.(int), e.GetType()}
 
 		// for equality, compare the entire objects, so that types are considered
 		case checker.Equal:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{*(left) == *(right), left._type}
+			return &object{*(left) == *(right), e.GetType()}
 		case checker.NotEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{*(left) != *(right), left._type}
+			return &object{*(left) != *(right), e.GetType()}
 		case checker.And:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(bool) && right.raw.(bool), left._type}
+			return &object{left.raw.(bool) && right.raw.(bool), e.GetType()}
 		case checker.Or:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(bool) || right.raw.(bool), left._type}
+			return &object{left.raw.(bool) || right.raw.(bool), e.GetType()}
 		default:
 			panic(fmt.Sprintf("Unimplemented binary op: %v", e.Op))
 		}

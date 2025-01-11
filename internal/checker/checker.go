@@ -760,6 +760,11 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
+		case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
+			if !left.GetType().Is(Num{}) || !right.GetType().Is(Num{}) {
+				c.addDiagnostic(diagnostic)
+				return nil
+			}
 		default:
 			if !left.GetType().Is(Num{}) || !right.GetType().Is(Num{}) {
 				c.addDiagnostic(diagnostic)
@@ -881,79 +886,20 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 	case ast.MatchExpression:
 		subject := c.checkExpression(e.Subject)
-		cases := make([]MatchCase, len(e.Cases))
-
-		enum := subject.GetType().(Enum)
-
-		expectedCases := map[string]bool{}
-		for _, variant := range enum.Variants {
-			expectedCases[variant] = false
-		}
-
-		var _type Type = Void{}
-		for i, arm := range e.Cases {
-			pattern := c.checkExpression(arm.Pattern)
-			variant := pattern.(EnumVariant)
-			isDone, ok := expectedCases[variant.Variant]
-			if !ok {
-				panic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Invalid variant: %s", variant.Variant),
-					location: arm.Pattern.GetLocation(),
-				})
-			}
-			if isDone {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Duplicate case: %s", variant),
-					location: arm.Pattern.GetLocation(),
-				})
-				return nil
-			}
-			expectedCases[variant.Variant] = true
-
-			block := c.checkBlock(arm.Body, []variable{})
-			if i == 0 {
-				_type = block.result
-			} else if !block.result.Is(_type) {
-				c.addDiagnostic(Diagnostic{
-					Kind: Error,
-					Message: fmt.Sprintf(
-						"Type mismatch: Expected %s, got %s",
-						_type,
-						block.result),
-					location: arm.Body[len(arm.Body)-1].GetLocation(),
-				})
-			}
-			cases[i] = MatchCase{
-				Pattern: pattern,
-				Body:    block.Body,
-				_type:   _type,
-			}
-		}
-
-		nonExhaustive := false
-		for variant, isDone := range expectedCases {
-			if !isDone {
-				nonExhaustive = true
-				c.addDiagnostic(Diagnostic{
-					Kind: Error,
-					Message: fmt.Sprintf(
-						"Incomplete match: missing case for '%s'",
-						enum.Name+"::"+variant),
-					location: e.GetLocation(),
-				})
-			}
-		}
-
-		if nonExhaustive {
+		switch sub := subject.GetType().(type) {
+		case Enum:
+			return c.checkEnumMatch(e, subject, sub)
+		case Bool:
+			return c.checkBoolMatch(e, subject)
+		default:
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: e.GetLocation(),
+				Message:  fmt.Sprintf("Cannot match on %s", sub),
+			})
 			return nil
 		}
 
-		return MatchExpr{
-			Subject: subject,
-			Cases:   cases,
-		}
 	case ast.StructInstance:
 		sym := c.scope.find(e.Name.Name)
 		if sym == nil {
@@ -998,6 +944,162 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return instance
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
+	}
+}
+
+func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, enum Enum) Expression {
+	cases := make([]MatchCase, len(expr.Cases))
+
+	expectedCases := map[string]bool{}
+	for _, variant := range enum.Variants {
+		expectedCases[variant] = false
+	}
+
+	var _type Type = Void{}
+	for i, arm := range expr.Cases {
+		pattern := c.checkExpression(arm.Pattern)
+		variant := pattern.(EnumVariant)
+		isDone, ok := expectedCases[variant.Variant]
+		if !ok {
+			panic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Invalid variant: %s", variant.Variant),
+				location: arm.Pattern.GetLocation(),
+			})
+		}
+		if isDone {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Duplicate case: %s", variant),
+				location: arm.Pattern.GetLocation(),
+			})
+			return nil
+		}
+		expectedCases[variant.Variant] = true
+
+		block := c.checkBlock(arm.Body, []variable{})
+		if i == 0 {
+			_type = block.result
+		} else if !block.result.Is(_type) {
+			c.addDiagnostic(Diagnostic{
+				Kind: Error,
+				Message: fmt.Sprintf(
+					"Type mismatch: Expected %s, got %s",
+					_type,
+					block.result),
+				location: arm.Body[len(arm.Body)-1].GetLocation(),
+			})
+		}
+		cases[i] = MatchCase{
+			Pattern: pattern,
+			Body:    block.Body,
+			_type:   _type,
+		}
+	}
+
+	nonExhaustive := false
+	for variant, isDone := range expectedCases {
+		if !isDone {
+			nonExhaustive = true
+			c.addDiagnostic(Diagnostic{
+				Kind: Error,
+				Message: fmt.Sprintf(
+					"Incomplete match: missing case for '%s'",
+					enum.Name+"::"+variant),
+				location: expr.GetLocation(),
+			})
+		}
+	}
+
+	if nonExhaustive {
+		return nil
+	}
+
+	return MatchExpr{
+		Subject: subject,
+		Cases:   cases,
+	}
+}
+
+func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) Expression {
+	var trueCase MatchCase
+	var falseCase MatchCase
+
+	var result Type = Void{}
+	for i, arm := range expr.Cases {
+		pattern := c.checkExpression(arm.Pattern)
+		if _, isLiteral := pattern.(BoolLiteral); !isLiteral {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  "Expected either `true` or `false`",
+				location: arm.Pattern.GetLocation(),
+			})
+			return nil
+		}
+
+		block := c.checkBlock(arm.Body, []variable{})
+
+		if pattern.(BoolLiteral).Value {
+			if trueCase.Body != nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Duplicate case: 'true'",
+					location: arm.Pattern.GetLocation(),
+				})
+			} else {
+				trueCase = MatchCase{
+					Pattern: pattern,
+					Body:    block.Body,
+					_type:   block.result,
+				}
+			}
+		} else {
+			if falseCase.Body != nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Duplicate case: 'false'",
+					location: arm.Pattern.GetLocation(),
+				})
+			} else {
+				falseCase = MatchCase{
+					Pattern: pattern,
+					Body:    block.Body,
+					_type:   block.result,
+				}
+			}
+		}
+
+		if i == 0 {
+			result = block.result
+		} else {
+			if !block.result.Is(result) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					location: arm.GetLocation(),
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, block.result),
+				})
+			}
+		}
+	}
+
+	var missingCase string
+	if trueCase.Body == nil {
+		missingCase = "true"
+	} else if falseCase.Body == nil {
+		missingCase = "false"
+	}
+
+	if missingCase != "" {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			location: expr.GetLocation(),
+			Message:  fmt.Sprintf("Incomplete match: Missing case for '%s'", missingCase),
+		})
+	}
+
+	return MatchExpr{
+		Subject: subject,
+		Cases:   []MatchCase{trueCase, falseCase},
 	}
 }
 

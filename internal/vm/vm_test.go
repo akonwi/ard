@@ -469,6 +469,21 @@ func TestStructs(t *testing.T) {
 	})
 }
 
+func TestMatchingOnBooleans(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Matching on booleans",
+			input: `
+				let is_on = true
+				match is_on {
+					true => "on",
+					false => "off"
+				}`,
+			want: "on",
+		},
+	})
+}
+
 // func TestOptions(t *testing.T) {
 // 	runTests(t, []test{
 // 		{

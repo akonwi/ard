@@ -1033,14 +1033,14 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 		chunkNodes := child.ChildrenByFieldName("chunk", p.tree.Walk())
 		if len(chunkNodes) == 1 && chunkNodes[0].GrammarName() == "string_content" {
 			return StrLiteral{
-				BaseNode: BaseNode{tsNode: node},
+				BaseNode: makeBaseNode(node),
 				Value:    p.text(node)}, nil
 		}
 
 		chunks := make([]Expression, len(chunkNodes))
 		for i, chunkNode := range chunkNodes {
 			if chunkNode.GrammarName() == "string_content" {
-				chunks[i] = StrLiteral{BaseNode: BaseNode{tsNode: &chunkNode}, Value: p.text(&chunkNode)}
+				chunks[i] = StrLiteral{BaseNode: makeBaseNode(&chunkNode), Value: p.text(&chunkNode)}
 			} else {
 				chunk, err := p.parseExpression(p.mustChild(&chunkNode, "expression"))
 				if err != nil {
@@ -1050,16 +1050,16 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 			}
 		}
 		return InterpolatedStr{
-			BaseNode: BaseNode{tsNode: node},
+			BaseNode: makeBaseNode(node),
 			Chunks:   chunks,
 		}, nil
 	case "number":
 		return NumLiteral{
-			BaseNode: BaseNode{tsNode: node},
+			BaseNode: makeBaseNode(node),
 			Value:    p.text(child)}, nil
 	case "boolean":
 		return BoolLiteral{
-			BaseNode: BaseNode{tsNode: node},
+			BaseNode: makeBaseNode(node),
 			Value:    p.text(child) == "true"}, nil
 	default:
 		return nil, fmt.Errorf("Unhandled primitive node: %s", child.GrammarName())
@@ -1359,18 +1359,32 @@ func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error
 
 func (p *Parser) parseMatchCase(node *tree_sitter.Node) (MatchCase, error) {
 	patternNode := p.mustChild(node, "pattern")
-	pattern, err := p.parseMemberAccess(patternNode)
-	if err != nil {
-		return MatchCase{}, err
+	var pattern Expression
+	switch patternNode.GrammarName() {
+	case "member_access":
+		p, err := p.parseMemberAccess(patternNode)
+		if err != nil {
+			return MatchCase{}, err
+		}
+		pattern = p
+	case "primitive_value":
+		p, err := p.parsePrimitiveValue(patternNode)
+		if err != nil {
+			return MatchCase{}, err
+		}
+		pattern = p
+	default:
+		panic(fmt.Errorf("Unhandled match pattern grammar: %s", patternNode.GrammarName()))
 	}
 
 	bodyNode := p.mustChild(node, "body")
 	body := []Statement{}
 	if bodyNode.GrammarName() == "block" {
-		body, err = p.parseBlock(bodyNode)
+		b, err := p.parseBlock(bodyNode)
 		if err != nil {
 			return MatchCase{}, err
 		}
+		body = b
 	} else {
 		exp, err := p.parseExpression(bodyNode)
 		if err != nil {
@@ -1380,8 +1394,9 @@ func (p *Parser) parseMatchCase(node *tree_sitter.Node) (MatchCase, error) {
 	}
 
 	return MatchCase{
-		Pattern: pattern,
-		Body:    body,
+		BaseNode: makeBaseNode(node),
+		Pattern:  pattern,
+		Body:     body,
 	}, nil
 }
 

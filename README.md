@@ -2,10 +2,9 @@
 
 ## TODO
 
-- [] if-else as expressions
-- [] methods on structs
-- [] catch-all pattern for matches
 - [] match on booleans
+- [] catch-all pattern for matches
+- [] methods on structs
 - [] matching on numbers
 - [] matching on strings?
 - [] built-in optional: `Option-Str`

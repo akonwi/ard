@@ -1,12 +1,10 @@
 use std/io
 
 fn fib(n: Num) Num {
-  mut result = n
-  if n > 1 {
-    // recursion!
-    result = fib(n - 2) + fib(n - 1)
+  match (n <= 1) {
+    true => n,
+    false => fib(n - 2) + fib(n - 1)
   }
-  result
 }
 
 for n in 20 {
