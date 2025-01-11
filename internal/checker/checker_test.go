@@ -137,6 +137,8 @@ func TestLiterals(t *testing.T) {
 			input: strings.Join([]string{
 				`let name = "world"`,
 				`"Hello, {{name}}"`,
+				`let num = 3`,
+				`"Hello, {{num}}"`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -151,7 +153,21 @@ func TestLiterals(t *testing.T) {
 							Identifier{Name: "name"},
 						},
 					},
+					VariableBinding{
+						Mut:   false,
+						Name:  "num",
+						Value: NumLiteral{Value: 3},
+					},
+					InterpolatedStr{
+						Parts: []Expression{
+							StrLiteral{Value: "Hello, "},
+							nil,
+						},
+					},
 				},
+			},
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
 			},
 		},
 	})
@@ -771,6 +787,46 @@ func TestForLoops(t *testing.T) {
 			input: `for b in false {}`,
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "Cannot iterate over a Bool"},
+			},
+		},
+		{
+			name: "Iterating over a list of structs",
+			input: strings.Join([]string{
+				`struct Shape { height: Num, width: Num }`,
+				`for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
+			}, "\n"),
+			output: Program{
+				Statements: []Statement{
+					Struct{
+						Name: "Shape",
+						Fields: map[string]Type{
+							"height": Num{},
+							"width":  Num{},
+						},
+					},
+					ForIn{
+						Cursor: Identifier{Name: "shape"},
+						Iterable: ListLiteral{
+							Elements: []Expression{
+								StructInstance{
+									Name: "Shape",
+									Fields: map[string]Expression{
+										"height": NumLiteral{Value: 1},
+										"width":  NumLiteral{Value: 2},
+									},
+								},
+								StructInstance{
+									Name: "Shape",
+									Fields: map[string]Expression{
+										"height": NumLiteral{Value: 2},
+										"width":  NumLiteral{Value: 2},
+									},
+								},
+							},
+						},
+						Body: []Statement{},
+					},
+				},
 			},
 		},
 	})

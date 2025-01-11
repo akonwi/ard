@@ -95,8 +95,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 				}
 			}
 		case checker.List:
-			for _, item := range iterable.raw.([]object) {
-				cursor.value = &item
+			for _, item := range iterable.raw.([]*object) {
+				cursor.value = item
 				for _, statement := range s.Body {
 					vm.evalStatement(statement)
 				}
@@ -171,18 +171,13 @@ func (vm VM) doIO(expr checker.Expression) any {
 	// 	print.Func.Call([]reflect.Value{reflect.ValueOf("Hello, World)")})
 	// }
 
-	io := IO{}
 	switch e := expr.(type) {
 	case checker.FunctionCall:
 		switch e.Name {
 		case "print":
 			arg := vm.evalExpression(e.Args[0])
-			// todo: check if arg has as_str method
-			string, ok := arg.raw.(string)
-			if !ok {
-				panic(fmt.Sprintf("Expected string, got %T", arg))
-			}
-			io.print(string)
+			string := arg.raw.(string)
+			fmt.Println(string)
 		default:
 			return nil
 		}
@@ -216,7 +211,7 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 			if str, ok := obj.raw.(string); ok {
 				builder.WriteString(str)
 			} else {
-				panic(fmt.Sprintf("Expected string, got %s", expr.GetType()))
+				panic(fmt.Sprintf("Expected Str, got %s", obj))
 			}
 		}
 		return &object{builder.String(), checker.Str{}}
@@ -225,9 +220,9 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 	case checker.BoolLiteral:
 		return &object{e.Value, e.GetType()}
 	case checker.ListLiteral:
-		list := make([]object, len(e.Elements))
+		list := make([]*object, len(e.Elements))
 		for i, elem := range e.Elements {
-			list[i] = *vm.evalExpression(elem)
+			list[i] = vm.evalExpression(elem)
 		}
 		return &object{list, e.GetType()}
 	case checker.Identifier:
@@ -382,7 +377,7 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 	case checker.List:
 		switch propName {
 		case "size":
-			return &object{len(i.raw.([]object)), checker.Num{}}
+			return &object{len(i.raw.([]*object)), checker.Num{}}
 		default:
 			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 		}
@@ -401,9 +396,9 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	case checker.List:
 		switch fn.Name {
 		case "push":
-			if list, ok := o.raw.([]object); ok {
+			if list, ok := o.raw.([]*object); ok {
 				item := vm.evalExpression(fn.Args[0])
-				o.raw = append(list, *item)
+				o.raw = append(list, item)
 				return &object{len(list), checker.Num{}}
 			}
 			panic(fmt.Sprintf("Expected list, got %T", o.raw))

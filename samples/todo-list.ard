@@ -1,20 +1,28 @@
+use std/io
+
 struct Todo {
   title: Str,
   completed: Bool
 }
 
+fn render(list: [Todo]) {
+  for todo in list {
+    mut box = "[ ]"
+    if (todo.completed) {
+      box = "[x]"
+    }
+    io.print("{{box}} {{todo.title}}")
+  }
+}
+
 mut list: [Todo] = [
   Todo { title: "Buy milk", completed: true }
 ]
+render(list)
 
+io.print("adding 2 items")
 list.push(Todo { title: "Buy eggs", completed: false })
 list.push(Todo { title: "Buy fruits", completed: false })
 
-print("there are ${list.length} items in the list")
-
-print("incomplete items:")
-for todo in list {
-  if !todo.completed {
-    print(todo.title)
-  }
-}
+io.print("there are now {{list.size.as_str}} items in the list")
+render(list)

@@ -767,7 +767,17 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 	case ast.InterpolatedStr:
 		parts := make([]Expression, len(e.Chunks))
 		for i, chunk := range e.Chunks {
-			parts[i] = c.checkExpression(chunk)
+			part := c.checkExpression(chunk)
+			// todo: check if part has as_str
+			if part.GetType() != (Str{}) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),
+					location: chunk.GetLocation(),
+				})
+			} else {
+				parts[i] = part
+			}
 		}
 		return InterpolatedStr{Parts: parts}
 	case ast.FunctionCall:
