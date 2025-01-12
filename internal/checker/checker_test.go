@@ -1544,6 +1544,19 @@ func TestMatchingOnBooleans(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Cannot use a catch-all case",
+			input: strings.Join([]string{
+				`let is_big = "foo".size > 20`,
+				`match is_big {`,
+				`  true => "big",`,
+				`  _ => "smol"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Catch-all case is not allowed for boolean matches"},
+			},
+		},
 	})
 }
 

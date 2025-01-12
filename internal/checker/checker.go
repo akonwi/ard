@@ -1063,7 +1063,16 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 
 	var result Type = Void{}
 	for i, arm := range expr.Cases {
+		if _, isIdentifier := arm.Pattern.(ast.Identifier); isIdentifier {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: arm.Pattern.GetLocation(),
+				Message:  "Catch-all case is not allowed for boolean matches",
+			})
+			return nil
+		}
 		pattern := c.checkExpression(arm.Pattern)
+
 		if _, isLiteral := pattern.(BoolLiteral); !isLiteral {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
