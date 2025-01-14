@@ -197,7 +197,6 @@ type FunctionDeclaration struct {
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
-	Type       FunctionType
 }
 
 func (f FunctionDeclaration) String() string {
@@ -304,7 +303,6 @@ type FunctionCall struct {
 	BaseNode
 	Name string
 	Args []Expression
-	Type FunctionType
 }
 
 func (f FunctionCall) String() string {
@@ -400,9 +398,7 @@ func (b RangeExpression) String() string {
 
 type Identifier struct {
 	BaseNode
-	Name   string
-	Type   Type
-	symbol Symbol
+	Name string
 }
 
 func (i Identifier) String() string {
@@ -412,7 +408,6 @@ func (i Identifier) String() string {
 type StrLiteral struct {
 	BaseNode
 	Value string
-	Type  Type
 }
 
 func (s StrLiteral) String() string {
@@ -431,7 +426,6 @@ func (i InterpolatedStr) String() string {
 type NumLiteral struct {
 	BaseNode
 	Value string
-	Type  Type
 }
 
 func (n NumLiteral) String() string {
@@ -441,7 +435,6 @@ func (n NumLiteral) String() string {
 type BoolLiteral struct {
 	BaseNode
 	Value bool
-	Type  Type
 }
 
 // impl interfaces
@@ -451,7 +444,6 @@ func (b BoolLiteral) String() string {
 
 type ListLiteral struct {
 	BaseNode
-	Type  Type
 	Items []Expression
 }
 
@@ -467,7 +459,6 @@ type MapEntry struct {
 type MapLiteral struct {
 	BaseNode
 	Entries []MapEntry
-	Type    Type
 }
 
 func (m MapLiteral) String() string {
@@ -488,7 +479,6 @@ type MatchCase struct {
 	BaseNode
 	Pattern Expression
 	Body    []Statement
-	Type    Type
 }
 
 func (m MatchCase) String() string {
@@ -1287,23 +1277,6 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 		AccessType: accessType,
 		Member:     member,
 	}, nil
-}
-
-/* look for a method on a type */
-func (p *Parser) findMethod(subject Type, name string) *FunctionType {
-	switch subject.(type) {
-	case ListType:
-		{
-			method := subject.(ListType).GetProperty(name)
-			signature, ok := method.(FunctionType)
-			if !ok {
-				return nil
-			}
-			return &signature
-		}
-	default:
-		panic(fmt.Errorf("Unhandled method call on %s", subject))
-	}
 }
 
 /*

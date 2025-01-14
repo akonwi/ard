@@ -18,17 +18,6 @@ var compareOptions = cmp.Options{
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),
 
-	cmp.Comparer(func(x, y map[string]Type) bool {
-		if len(x) != len(y) {
-			return false
-		}
-		for k, v1 := range x {
-			if v2, ok := y[k]; !ok || v1 != v2 {
-				return false
-			}
-		}
-		return true
-	}),
 	cmp.Comparer(func(x, y map[string]int) bool {
 		if len(x) != len(y) {
 			return false
