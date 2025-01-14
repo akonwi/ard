@@ -2,9 +2,7 @@
 
 ## TODO
 
-- [] catch-all pattern for matches
 - [] built-in optional: `Option-Str`
-- [] matching on numbers
 - [] methods on structs
 - [] matching on strings?
 - [] Type Union
@@ -20,3 +18,4 @@
   - works: `if !(a.b) { }`
 - [] replace `!` with `not`
 - [] tuples?
+- [] matching on numbers
