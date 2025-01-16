@@ -89,6 +89,7 @@ type VariableDeclaration struct {
 
 type DeclaredType interface {
 	GetName() string
+	IsOptional() bool
 	GetLocation() Location
 }
 
@@ -100,8 +101,17 @@ func (v Void) GetName() string {
 	return "Void"
 }
 
+func (v Void) IsOptional() bool {
+	return false
+}
+
 type StringType struct {
 	BaseNode
+	optional bool
+}
+
+func (v StringType) IsOptional() bool {
+	return v.optional
 }
 
 func (s StringType) GetName() string {
@@ -110,55 +120,85 @@ func (s StringType) GetName() string {
 
 type NumberType struct {
 	BaseNode
+	optional bool
 }
 
 func (s NumberType) GetName() string {
 	return "Number"
 }
 
+func (v NumberType) IsOptional() bool {
+	return v.optional
+}
+
 type BooleanType struct {
 	BaseNode
+	optional bool
 }
 
 func (s BooleanType) GetName() string {
 	return "Boolean"
 }
 
+func (v BooleanType) IsOptional() bool {
+	return v.optional
+}
+
 type List struct {
 	BaseNode
-	Element DeclaredType
+	Element  DeclaredType
+	optional bool
 }
 
 func (s List) GetName() string {
 	return "List"
 }
 
+func (v List) IsOptional() bool {
+	return v.optional
+}
+
 type TupleType struct {
 	BaseNode
-	Items []DeclaredType
+	Items    []DeclaredType
+	optional bool
 }
 
 func (s TupleType) GetName() string {
 	return "Tuple"
 }
 
+func (v TupleType) IsOptional() bool {
+	return v.optional
+}
+
 type Map struct {
 	BaseNode
-	Key   DeclaredType
-	Value DeclaredType
+	Key      DeclaredType
+	Value    DeclaredType
+	optional bool
 }
 
 func (s Map) GetName() string {
 	return "Map"
 }
 
+func (v Map) IsOptional() bool {
+	return v.optional
+}
+
 type CustomType struct {
 	BaseNode
-	Name string
+	Name     string
+	optional bool
 }
 
 func (u CustomType) GetName() string {
 	return u.Name
+}
+
+func (u CustomType) IsOptional() bool {
+	return u.optional
 }
 
 func (v VariableDeclaration) String() string {
@@ -658,41 +698,43 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 		return nil
 	}
 	child := node.NamedChild(0)
+	optional := node.ChildByFieldName("optional") != nil
 	switch child.GrammarName() {
 	case "primitive_type":
 		{
 			text := p.text(child)
 			switch text {
 			case "Str":
-				return StringType{BaseNode: BaseNode{tsNode: child}}
+				return StringType{makeBaseNode(child), optional}
 			case "Num":
-				return NumberType{BaseNode: BaseNode{tsNode: child}}
+				return NumberType{makeBaseNode(child), optional}
 			case "Bool":
-				return BooleanType{BaseNode: BaseNode{tsNode: child}}
+				return BooleanType{makeBaseNode(child), optional}
 			default:
 				panic(fmt.Errorf("Unresolved primitive type: %s", text))
 			}
 		}
 	case "list_type":
 		element_typeNode := p.mustChild(child, "element_type")
-		return List{BaseNode: BaseNode{tsNode: child}, Element: p.resolveType(element_typeNode)}
+		return List{BaseNode: makeBaseNode(child), Element: p.resolveType(element_typeNode), optional: optional}
 	case "map_type":
 		valueNode := p.mustChild(child, "value")
 		return Map{
-			Key:   StringType{BaseNode: BaseNode{tsNode: child}},
-			Value: p.resolveType(valueNode),
+			Key:      StringType{BaseNode: makeBaseNode(child)},
+			Value:    p.resolveType(valueNode),
+			optional: optional,
 		}
 	case "void":
-		return Void{BaseNode: BaseNode{tsNode: child}}
+		return Void{makeBaseNode(child)}
 	case "identifier":
-		return CustomType{BaseNode: BaseNode{tsNode: child}, Name: p.text(child)}
+		return CustomType{makeBaseNode(child), p.text(child), optional}
 	case "tuple_type":
 		itemNodes := p.mustChildren(child, "element_type")
 		items := make([]DeclaredType, len(itemNodes))
 		for i, itemNode := range itemNodes {
 			items[i] = p.resolveType(&itemNode)
 		}
-		return TupleType{BaseNode: BaseNode{tsNode: child}, Items: items}
+		return TupleType{makeBaseNode(child), items, optional}
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}

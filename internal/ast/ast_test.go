@@ -13,7 +13,15 @@ import (
 
 var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
-	cmpopts.IgnoreUnexported(Identifier{}),
+	cmpopts.IgnoreUnexported(
+		Identifier{},
+		NumberType{},
+		StringType{},
+		BooleanType{},
+		TupleType{},
+		List{},
+		Map{},
+		CustomType{}),
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),

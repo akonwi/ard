@@ -64,6 +64,18 @@ func (p Package) GetProperty(name string) Type {
 			return nil
 		}
 	}
+	if p.Path == "ard/option" {
+		switch name {
+		case "make":
+			return function{
+				name:       name,
+				parameters: []variable{},
+				returns:    Option{},
+			}
+		default:
+			return nil
+		}
+	}
 	return nil
 }
 func (p Package) Is(other Type) bool {
@@ -393,7 +405,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		var _type Type = Void{}
 		// get declared type if it exists
 		if s.Type != nil {
-			_type := c.resolveDeclaredType(s.Type)
+			_type = c.resolveDeclaredType(s.Type)
 			if _type.Is(value.GetType()) == false {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
@@ -410,10 +422,12 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
+
 		// if no declared type, use the type of the value
-		if _type == (Void{}) && value.GetType() != _type {
+		if _type.Is(Void{}) {
 			_type = value.GetType()
-		} else {
+		}
+		if _type.Is(Void{}) || _type == nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				location: s.Value.GetLocation(),
@@ -892,6 +906,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return c.checkEnumMatch(e, subject, sub)
 		case Bool:
 			return c.checkBoolMatch(e, subject)
+		case Option:
+			return c.checkOptionMatch(e, subject)
 		default:
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -1148,6 +1164,90 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 	}
 }
 
+func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression) Expression {
+	var someCase MatchCase
+	var emptyCase MatchCase
+
+	for _, arm := range expr.Cases {
+		id, isIdentifier := arm.Pattern.(ast.Identifier)
+		if !isIdentifier {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: arm.Pattern.GetLocation(),
+				Message:  "Pattern must be either a variable name for the value or _ for the empty case",
+			})
+			return nil
+		}
+
+		if id.Name != "_" {
+			if someCase.Body != nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Duplicate case: happy path",
+					location: arm.Pattern.GetLocation(),
+				})
+			} else {
+				block := c.checkBlock(arm.Body, []variable{{name: id.Name, mut: false, _type: subject.GetType().(Option).inner}})
+				someCase = MatchCase{
+					Pattern: Identifier{Name: id.Name},
+					Body:    block.Body,
+					_type:   block.result,
+				}
+			}
+		} else {
+			if emptyCase.Body != nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Duplicate case: empty path",
+					location: arm.Pattern.GetLocation(),
+				})
+			} else {
+				block := c.checkBlock(arm.Body, []variable{})
+				emptyCase = MatchCase{
+					Pattern: nil,
+					Body:    block.Body,
+					_type:   block.result,
+				}
+			}
+		}
+	}
+
+	var result Type = Void{}
+	for i, arm := range []MatchCase{someCase, emptyCase} {
+		if i == 0 {
+			result = arm._type
+		} else {
+			if !arm._type.Is(result) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					location: expr.Cases[i].GetLocation(),
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, arm._type),
+				})
+			}
+		}
+	}
+
+	var missingCase string
+	if someCase.Body == nil {
+		missingCase = "happy path"
+	} else if emptyCase.Body == nil {
+		missingCase = "empty path"
+	}
+
+	if missingCase != "" {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			location: expr.GetLocation(),
+			Message:  fmt.Sprintf("Incomplete match: Missing case for '%s'", missingCase),
+		})
+	}
+
+	return MatchExpr{
+		Subject: subject,
+		Cases:   []MatchCase{someCase, emptyCase},
+	}
+}
+
 func (c *checker) checkInstanceProperty(subject Expression, member ast.Expression) Expression {
 	switch m := member.(type) {
 	case ast.Identifier:
@@ -1250,17 +1350,18 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 		return Void{}
 	}
 
+	var _type Type
 	switch tt := t.(type) {
 	case ast.StringType:
-		return Str{}
+		_type = Str{}
 	case ast.NumberType:
-		return Num{}
+		_type = Num{}
 	case ast.BooleanType:
-		return Bool{}
+		_type = Bool{}
 	case ast.Void:
-		return Void{}
+		_type = Void{}
 	case ast.List:
-		return List{
+		_type = List{
 			element: c.resolveDeclaredType(tt.Element),
 		}
 	case ast.CustomType:
@@ -1273,10 +1374,15 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 			})
 			return nil
 		}
-		return custom
+		_type = custom
 	default:
 		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}
+
+	if t.IsOptional() {
+		return Option{_type}
+	}
+	return _type
 }
 
 func (c *checker) resolveBinaryOperator(op ast.Operator) BinaryOperator {

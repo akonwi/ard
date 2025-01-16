@@ -1,0 +1,10 @@
+use std/io
+use ard/option
+
+mut name: Str? = option.make()
+name.set("Akonwi")
+
+match name {
+  n => io.print("name is: {{n}}"),
+  _ => io.print("no name")
+}

@@ -271,26 +271,45 @@ func (l Tuple) Is(other Type) bool {
 	return l.String() == other.String()
 }
 
-type Generic struct {
+type Option struct {
 	inner Type
-	name  string
 }
 
-func (g Generic) String() string {
-	return fmt.Sprintf("%s?", g.name)
+func (g Option) GetInnerType() Type {
+	return g.inner
 }
-func (g Generic) Is(other Type) bool {
+func (g Option) String() string {
 	if g.inner == nil {
-		return true
+		return "??"
 	}
-	return g.inner.Is(other)
+	return g.inner.String() + "?"
 }
-func (g Generic) GetProperty(name string) Type {
-	if g.inner == nil {
+func (g Option) Is(other Type) bool {
+	if otherOption, ok := other.(Option); ok {
+		if g.inner == nil || otherOption.inner == nil {
+			return true
+		}
+		return g.inner.Is(otherOption.inner)
+	}
+	return false
+}
+func (g Option) GetProperty(name string) Type {
+	switch name {
+	case "set":
+		return function{
+			name: "set",
+			parameters: []variable{
+				{name: "value", _type: g.inner},
+			},
+			returns: Void{},
+		}
+	case "empty":
+		return function{
+			name:       name,
+			parameters: []variable{},
+			returns:    Void{},
+		}
+	default:
 		return nil
 	}
-	return (g.inner).GetProperty(name)
-}
-func (g *Generic) Fill(inner Type) {
-	g.inner = inner
 }

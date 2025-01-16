@@ -1649,3 +1649,127 @@ func TestStructs(t *testing.T) {
 		},
 	})
 }
+
+func TestOptionals(t *testing.T) {
+	optionPkg := Package{Path: "ard/option"}
+	run(t, []test{
+		{
+			name: "Declaring an empty optional",
+			input: `
+				use ard/option
+				mut name: Str? = option.make()`,
+			output: Program{
+				Imports: map[string]Package{
+					"option": optionPkg,
+				},
+				Statements: []Statement{
+					VariableBinding{
+						Mut:  true,
+						Name: "name",
+						Value: PackageAccess{
+							Package:  optionPkg,
+							Property: FunctionCall{Name: "make", Args: []Expression{}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Updating an optional",
+			input: `
+				use ard/option
+				mut name: Str? = option.make()
+				name.set("Bob")
+				name = "Alice"
+				name.empty()`,
+			output: Program{
+				Imports: map[string]Package{
+					"option": optionPkg,
+				},
+				Statements: []Statement{
+					VariableBinding{
+						Mut:  true,
+						Name: "name",
+						Value: PackageAccess{
+							Package:  optionPkg,
+							Property: FunctionCall{Name: "make", Args: []Expression{}},
+						},
+					},
+					InstanceProperty{
+						Subject:  Identifier{Name: "name"},
+						Property: FunctionCall{Name: "set", Args: []Expression{StrLiteral{Value: "Bob"}}},
+					},
+					InstanceProperty{
+						Subject:  Identifier{Name: "name"},
+						Property: FunctionCall{Name: "empty", Args: []Expression{}},
+					},
+				},
+			},
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Type mismatch: Expected Str?, got Str"},
+			},
+		},
+		{
+			name: "Matching an optional",
+			input: `
+				use std/io
+				use ard/option
+
+				mut name: Str? = option.make()
+				name.set("Bob")
+				match name {
+				  it => io.print("name is {{it}}"),
+					_ => io.print("no name ):")
+				}`,
+			output: Program{
+				Imports: map[string]Package{
+					"io":     {Path: "std/io"},
+					"option": optionPkg,
+				},
+				Statements: []Statement{
+					VariableBinding{
+						Mut:  true,
+						Name: "name",
+						Value: PackageAccess{
+							Package:  optionPkg,
+							Property: FunctionCall{Name: "make", Args: []Expression{}},
+						},
+					},
+					InstanceProperty{
+						Subject:  Identifier{Name: "name"},
+						Property: FunctionCall{Name: "set", Args: []Expression{StrLiteral{Value: "Bob"}}},
+					},
+					MatchExpr{
+						Subject: Identifier{Name: "name"},
+						Cases: []MatchCase{
+							{
+								Pattern: Identifier{Name: "it"},
+								Body: []Statement{
+									PackageAccess{
+										Package: Package{Path: "std/io"},
+										Property: FunctionCall{
+											Name: "print",
+											Args: []Expression{
+												InterpolatedStr{Parts: []Expression{StrLiteral{Value: "name is "}, Identifier{Name: "it"}}}}},
+									},
+								},
+							},
+							{
+								Pattern: nil,
+								Body: []Statement{
+									PackageAccess{
+										Package: Package{Path: "std/io"},
+										Property: FunctionCall{
+											Name: "print",
+											Args: []Expression{StrLiteral{Value: "no name ):"}},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}

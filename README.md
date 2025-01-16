@@ -6,6 +6,7 @@
 - [] methods on structs
 - [] matching on strings?
 - [] Type Union
+- [] maps
 - [] Allow Num as map keys
 - [] traditional for-loop
 - [] concurrency (Task?)
