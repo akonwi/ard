@@ -2,12 +2,10 @@
 
 ## TODO
 
-- [] catch-all pattern for matches
-- [] built-in optional: `Option-Str`
-- [] matching on numbers
 - [] methods on structs
 - [] matching on strings?
 - [] Type Union
+- [] maps
 - [] Allow Num as map keys
 - [] traditional for-loop
 - [] concurrency (Task?)
@@ -20,3 +18,4 @@
   - works: `if !(a.b) { }`
 - [] replace `!` with `not`
 - [] tuples?
+- [] matching on numbers

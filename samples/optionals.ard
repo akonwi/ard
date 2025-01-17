@@ -1,0 +1,14 @@
+use std/io
+use ard/option
+
+// a declared optional needs to be explicitly typed
+mut name: Str? = option.make()
+
+// update the value
+name.some("Akonwi")
+
+// read the value
+match name {
+  n => io.print("name is: {{n}}"),
+  _ => io.print("no name")
+}

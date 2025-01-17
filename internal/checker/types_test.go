@@ -2,6 +2,29 @@ package checker
 
 import "testing"
 
+func TestTypeEquality(t *testing.T) {
+	type test struct {
+		a    Type
+		b    Type
+		want bool
+	}
+
+	tests := []test{
+		{Num{}, Num{}, true},
+		{Num{}, Str{}, false},
+		{Num{}, Bool{}, false},
+		{Num{}, List{Num{}}, false},
+		{Num{}, Option{Num{}}, false},
+		{Option{}, Option{Num{}}, true},
+		{Option{Num{}}, Option{}, true},
+	}
+	for _, tt := range tests {
+		if res := tt.a.Is(tt.b); res != tt.want {
+			t.Errorf("%s == %s: want %v, got %v", tt.a, tt.b, tt.want, res)
+		}
+	}
+}
+
 func TestStrAPI(t *testing.T) {
 	size := Str{}.GetProperty("size")
 	if size != (Num{}) {
@@ -54,22 +77,6 @@ func TestListType(t *testing.T) {
 	}
 	if strList.Is(makeList(Bool{})) {
 		t.Errorf("[Str] != [Bool]")
-	}
-}
-
-func TestGenerics(t *testing.T) {
-	Foo := Generic{name: "T"}
-	if !Foo.Is(Num{}) {
-		t.Errorf("T? == Num")
-	}
-
-	Foo.Fill(Str{})
-	if !Foo.Is(Str{}) {
-		t.Errorf("Str == Str")
-	}
-
-	if Foo.Is(Num{}) {
-		t.Errorf("Str != Num")
 	}
 }
 

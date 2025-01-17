@@ -45,13 +45,6 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		vm.evalVariableAssignment(s)
 	case checker.FunctionDeclaration:
 		vm.evalFunctionDefinition(s)
-	case checker.PackageAccess:
-		switch s.Package.Path {
-		case "std/io":
-			vm.doIO(s.Property)
-		default:
-			panic(fmt.Sprintf("Unimplemented package: %s", s.Package.Path))
-		}
 	case checker.Enum:
 		vm.scope.addEnum(s)
 	case checker.Struct:
@@ -164,7 +157,7 @@ func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
 	}
 }
 
-func (vm VM) doIO(expr checker.Expression) any {
+func (vm VM) doIO(expr checker.Expression) *object {
 	// TODO: use this for 3rd party packages
 	// iiio := reflect.TypeFor[IO]()
 	// if print, ok := iiio.MethodByName("print"); ok {
@@ -178,13 +171,13 @@ func (vm VM) doIO(expr checker.Expression) any {
 			arg := vm.evalExpression(e.Args[0])
 			string := arg.raw.(string)
 			fmt.Println(string)
+			return &object{nil, checker.Void{}}
 		default:
-			return nil
+			return &object{nil, checker.Void{}}
 		}
 	default:
 		panic(fmt.Sprintf("Unimplemented io property: %T", e))
 	}
-	return nil
 }
 
 type object struct {
@@ -200,7 +193,7 @@ func (o object) equals(other object) bool {
 	return o.raw == other.raw && o._type.Is(other._type)
 }
 
-func (vm VM) evalExpression(expr checker.Expression) *object {
+func (vm *VM) evalExpression(expr checker.Expression) *object {
 	switch e := expr.(type) {
 	case checker.StrLiteral:
 		return &object{e.Value, expr.GetType()}
@@ -333,6 +326,8 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 		return &object{e.Value, e.GetType()}
 	case checker.MatchExpr:
 		return vm.evalMatch(e)
+	case checker.OptionMatch:
+		return vm.matchOption(e)
 	case checker.StructInstance:
 		sym, ok := vm.scope.getStruct(e.Name)
 		if !ok {
@@ -343,6 +338,16 @@ func (vm VM) evalExpression(expr checker.Expression) *object {
 			fields[name] = vm.evalExpression(value)
 		}
 		return &object{fields, sym}
+
+	case checker.PackageAccess:
+		switch e.Package.Path {
+		case "std/io":
+			return vm.doIO(e.Property)
+		case "ard/option":
+			return vm.callInOptionPackage(e.Property)
+		default:
+			panic(fmt.Sprintf("Unimplemented package: %s", e.Package.Path))
+		}
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))
 	}
@@ -409,13 +414,42 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			panic(fmt.Sprintf("Unimplemented method: %s.%s", o._type, fn.Name))
 		}
 
+	case checker.Option:
+		switch fn.Name {
+		case "some":
+			o.raw = vm.evalExpression(fn.Args[0]).raw
+			return &object{nil, checker.Void{}}
+		case "none":
+			o.raw = nil
+			return &object{nil, checker.Void{}}
+		default:
+			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
+		}
 	default:
-		return &object{nil, checker.Void{}}
+		panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
+		// return &object{nil, checker.Void{}}
 	}
 }
 
 func (vm VM) evalMatch(match checker.MatchExpr) *object {
 	subj := vm.evalExpression(match.Subject)
+	if subj._type.Is(checker.Option{}) {
+		for _, arm := range match.Cases {
+			inner := subj.raw
+			if arm.Pattern == nil {
+				if inner == nil {
+					return vm.evalBlock(arm.Body, nil)
+				}
+			} else if arm.Pattern.(checker.Identifier).Name != "_" {
+				if inner != nil {
+					return vm.evalBlock(arm.Body, map[string]binding{
+						arm.Pattern.(checker.Identifier).Name: {false, &object{inner, subj._type}, false},
+					})
+				}
+			}
+		}
+	}
+
 	for _, arm := range match.Cases {
 		if res, isMatch := vm.evalMatchCase(subj, arm); isMatch {
 			return res
@@ -436,6 +470,19 @@ func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) 
 		return vm.evalBlock(arm.Body, nil), true
 	}
 	return nil, false
+}
+
+func (vm VM) matchOption(match checker.OptionMatch) *object {
+	subj := vm.evalExpression(match.Subject)
+	if subj.raw == nil {
+		return vm.evalBlock(match.None.Body, nil)
+	}
+	bindingName := match.Some.Pattern.(checker.Identifier).Name
+	it := binding{false, subj, false}
+	return vm.evalBlock(
+		match.Some.Body,
+		map[string]binding{bindingName: it},
+	)
 }
 
 func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding) *object {
