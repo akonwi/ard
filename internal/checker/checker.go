@@ -268,6 +268,16 @@ func (m MatchExpr) GetType() Type {
 	return m.Cases[0]._type
 }
 
+type OptionMatch struct {
+	Subject Expression
+	None    Block
+	Some    MatchCase
+}
+
+func (o OptionMatch) GetType() Type {
+	return o.Some._type
+}
+
 // Statements don't produce anything
 type Statement interface{}
 
@@ -1164,10 +1174,11 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 	}
 }
 
-func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression) Expression {
+func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression) OptionMatch {
 	var someCase MatchCase
-	var emptyCase MatchCase
+	var noneCase Block
 
+	var result Type = nil
 	for _, arm := range expr.Cases {
 		id, isIdentifier := arm.Pattern.(ast.Identifier)
 		if !isIdentifier {
@@ -1176,10 +1187,31 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 				location: arm.Pattern.GetLocation(),
 				Message:  "Pattern must be either a variable name for the value or _ for the empty case",
 			})
-			return nil
+			return OptionMatch{}
 		}
 
-		if id.Name != "_" {
+		if id.Name == "_" {
+			if noneCase.Body != nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Duplicate case: empty path",
+					location: arm.Pattern.GetLocation(),
+				})
+				continue
+			}
+			noneCase = c.checkBlock(arm.Body, []variable{})
+			if result == nil {
+				result = noneCase.result
+			} else {
+				if !noneCase.result.Is(result) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						location: arm.GetLocation(),
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, noneCase.result),
+					})
+				}
+			}
+		} else {
 			if someCase.Body != nil {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
@@ -1193,36 +1225,18 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 					Body:    block.Body,
 					_type:   block.result,
 				}
-			}
-		} else {
-			if emptyCase.Body != nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Duplicate case: empty path",
-					location: arm.Pattern.GetLocation(),
-				})
-			} else {
-				block := c.checkBlock(arm.Body, []variable{})
-				emptyCase = MatchCase{
-					Pattern: nil,
-					Body:    block.Body,
-					_type:   block.result,
-				}
-			}
-		}
-	}
 
-	var result Type = Void{}
-	for i, arm := range []MatchCase{someCase, emptyCase} {
-		if i == 0 {
-			result = arm._type
-		} else {
-			if !arm._type.Is(result) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					location: expr.Cases[i].GetLocation(),
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, arm._type),
-				})
+				if result == nil {
+					result = block.result
+				} else {
+					if !block.result.Is(result) {
+						c.addDiagnostic(Diagnostic{
+							Kind:     Error,
+							location: arm.GetLocation(),
+							Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, noneCase.result),
+						})
+					}
+				}
 			}
 		}
 	}
@@ -1230,7 +1244,7 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 	var missingCase string
 	if someCase.Body == nil {
 		missingCase = "happy path"
-	} else if emptyCase.Body == nil {
+	} else if noneCase.Body == nil {
 		missingCase = "empty path"
 	}
 
@@ -1242,9 +1256,10 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 		})
 	}
 
-	return MatchExpr{
+	return OptionMatch{
 		Subject: subject,
-		Cases:   []MatchCase{someCase, emptyCase},
+		None:    noneCase,
+		Some:    someCase,
 	}
 }
 

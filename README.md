@@ -2,7 +2,6 @@
 
 ## TODO
 
-- [] built-in optional: `Option-Str`
 - [] methods on structs
 - [] matching on strings?
 - [] Type Union

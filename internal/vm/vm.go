@@ -326,6 +326,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		return &object{e.Value, e.GetType()}
 	case checker.MatchExpr:
 		return vm.evalMatch(e)
+	case checker.OptionMatch:
+		return vm.matchOption(e)
 	case checker.StructInstance:
 		sym, ok := vm.scope.getStruct(e.Name)
 		if !ok {
@@ -414,11 +416,14 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 
 	case checker.Option:
 		switch fn.Name {
-		case "set":
+		case "some":
 			o.raw = vm.evalExpression(fn.Args[0]).raw
 			return &object{nil, checker.Void{}}
+		case "none":
+			o.raw = nil
+			return &object{nil, checker.Void{}}
 		default:
-			panic(fmt.Sprintf("Uknown method: %s.%s", o._type, fn.Name))
+			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
 	default:
 		panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
@@ -465,6 +470,19 @@ func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) 
 		return vm.evalBlock(arm.Body, nil), true
 	}
 	return nil, false
+}
+
+func (vm VM) matchOption(match checker.OptionMatch) *object {
+	subj := vm.evalExpression(match.Subject)
+	if subj.raw == nil {
+		return vm.evalBlock(match.None.Body, nil)
+	}
+	bindingName := match.Some.Pattern.(checker.Identifier).Name
+	it := binding{false, subj, false}
+	return vm.evalBlock(
+		match.Some.Body,
+		map[string]binding{bindingName: it},
+	)
 }
 
 func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding) *object {

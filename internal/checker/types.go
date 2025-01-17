@@ -295,15 +295,15 @@ func (g Option) Is(other Type) bool {
 }
 func (g Option) GetProperty(name string) Type {
 	switch name {
-	case "set":
+	case "some":
 		return function{
-			name: "set",
+			name: "some",
 			parameters: []variable{
 				{name: "value", _type: g.inner},
 			},
 			returns: Void{},
 		}
-	case "empty":
+	case "none":
 		return function{
 			name:       name,
 			parameters: []variable{},

@@ -38,6 +38,7 @@ var compareOptions = cmp.Options{
 		Diagnostic{},
 		ListLiteral{},
 		MatchCase{},
+		Block{},
 		EnumVariant{},
 		StructInstance{},
 		IfStatement{},
@@ -1679,9 +1680,9 @@ func TestOptionals(t *testing.T) {
 			input: `
 				use ard/option
 				mut name: Str? = option.make()
-				name.set("Bob")
+				name.some("Bob")
 				name = "Alice"
-				name.empty()`,
+				name.none()`,
 			output: Program{
 				Imports: map[string]Package{
 					"option": optionPkg,
@@ -1697,11 +1698,11 @@ func TestOptionals(t *testing.T) {
 					},
 					InstanceProperty{
 						Subject:  Identifier{Name: "name"},
-						Property: FunctionCall{Name: "set", Args: []Expression{StrLiteral{Value: "Bob"}}},
+						Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
 					},
 					InstanceProperty{
 						Subject:  Identifier{Name: "name"},
-						Property: FunctionCall{Name: "empty", Args: []Expression{}},
+						Property: FunctionCall{Name: "none", Args: []Expression{}},
 					},
 				},
 			},
@@ -1716,7 +1717,7 @@ func TestOptionals(t *testing.T) {
 				use ard/option
 
 				mut name: Str? = option.make()
-				name.set("Bob")
+				name.some("Bob")
 				match name {
 				  it => io.print("name is {{it}}"),
 					_ => io.print("no name ):")
@@ -1737,32 +1738,29 @@ func TestOptionals(t *testing.T) {
 					},
 					InstanceProperty{
 						Subject:  Identifier{Name: "name"},
-						Property: FunctionCall{Name: "set", Args: []Expression{StrLiteral{Value: "Bob"}}},
+						Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
 					},
-					MatchExpr{
+					OptionMatch{
 						Subject: Identifier{Name: "name"},
-						Cases: []MatchCase{
-							{
-								Pattern: Identifier{Name: "it"},
-								Body: []Statement{
-									PackageAccess{
-										Package: Package{Path: "std/io"},
-										Property: FunctionCall{
-											Name: "print",
-											Args: []Expression{
-												InterpolatedStr{Parts: []Expression{StrLiteral{Value: "name is "}, Identifier{Name: "it"}}}}},
-									},
+						Some: MatchCase{
+							Pattern: Identifier{Name: "it"},
+							Body: []Statement{
+								PackageAccess{
+									Package: Package{Path: "std/io"},
+									Property: FunctionCall{
+										Name: "print",
+										Args: []Expression{
+											InterpolatedStr{Parts: []Expression{StrLiteral{Value: "name is "}, Identifier{Name: "it"}}}}},
 								},
 							},
-							{
-								Pattern: nil,
-								Body: []Statement{
-									PackageAccess{
-										Package: Package{Path: "std/io"},
-										Property: FunctionCall{
-											Name: "print",
-											Args: []Expression{StrLiteral{Value: "no name ):"}},
-										},
+						},
+						None: Block{
+							Body: []Statement{
+								PackageAccess{
+									Package: Package{Path: "std/io"},
+									Property: FunctionCall{
+										Name: "print",
+										Args: []Expression{StrLiteral{Value: "no name ):"}},
 									},
 								},
 							},
