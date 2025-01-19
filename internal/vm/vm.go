@@ -327,7 +327,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 	case checker.BoolMatch:
 		return vm.matchBool(e)
 	case checker.EnumMatch:
-		return vm.machEnum(e)
+		return vm.matchEnum(e)
 	case checker.OptionMatch:
 		return vm.matchOption(e)
 	case checker.StructInstance:
@@ -442,14 +442,7 @@ func (vm VM) matchBool(match checker.BoolMatch) *object {
 	return vm.evalBlock(match.False.Body, nil)
 }
 
-func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) {
-	if subj.equals(*vm.evalExpression(arm.Pattern)) {
-		return vm.evalBlock(arm.Body, nil), true
-	}
-	return nil, false
-}
-
-func (vm VM) machEnum(match checker.EnumMatch) *object {
+func (vm VM) matchEnum(match checker.EnumMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for value, arm := range match.Cases {
 		if subj.raw == value {
