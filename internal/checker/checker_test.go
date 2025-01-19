@@ -1455,22 +1455,18 @@ func TestMatchingOnBooleans(t *testing.T) {
 							Right: NumLiteral{Value: 20},
 						},
 					},
-					MatchExpr{
+					BoolMatch{
 						Subject: Identifier{
 							Name: "is_big",
 						},
-						Cases: []MatchCase{
-							{
-								Pattern: BoolLiteral{Value: true},
-								Body: []Statement{
-									StrLiteral{Value: "big"},
-								},
+						True: Block{
+							Body: []Statement{
+								StrLiteral{Value: "big"},
 							},
-							{
-								Pattern: BoolLiteral{Value: false},
-								Body: []Statement{
-									StrLiteral{Value: "smol"},
-								},
+						},
+						False: Block{
+							Body: []Statement{
+								StrLiteral{Value: "smol"},
 							},
 						},
 					},

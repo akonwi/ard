@@ -324,8 +324,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		}
 	case checker.EnumVariant:
 		return &object{e.Value, e.GetType()}
-	case checker.MatchExpr:
-		return vm.evalMatch(e)
+	case checker.BoolMatch:
+		return vm.matchBool(e)
 	case checker.EnumMatch:
 		return vm.machEnum(e)
 	case checker.OptionMatch:
@@ -433,38 +433,13 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	}
 }
 
-func (vm VM) evalMatch(match checker.MatchExpr) *object {
+func (vm VM) matchBool(match checker.BoolMatch) *object {
 	subj := vm.evalExpression(match.Subject)
-	if subj._type.Is(checker.Option{}) {
-		for _, arm := range match.Cases {
-			inner := subj.raw
-			if arm.Pattern == nil {
-				if inner == nil {
-					return vm.evalBlock(arm.Body, nil)
-				}
-			} else if arm.Pattern.(checker.Identifier).Name != "_" {
-				if inner != nil {
-					return vm.evalBlock(arm.Body, map[string]binding{
-						arm.Pattern.(checker.Identifier).Name: {false, &object{inner, subj._type}, false},
-					})
-				}
-			}
-		}
-	}
 
-	for _, arm := range match.Cases {
-		if res, isMatch := vm.evalMatchCase(subj, arm); isMatch {
-			return res
-		}
+	if subj.raw == true {
+		return vm.evalBlock(match.True.Body, nil)
 	}
-	if match.CatchAll.Body != nil {
-		variables := make(map[string]binding)
-		if id, ok := match.CatchAll.Pattern.(checker.Identifier); ok {
-			variables[id.Name] = binding{false, subj, false}
-		}
-		return vm.evalBlock(match.CatchAll.Body, variables)
-	}
-	panic(fmt.Sprintf("No match found for %s", subj))
+	return vm.evalBlock(match.False.Body, nil)
 }
 
 func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) {

@@ -258,14 +258,14 @@ type MatchCase struct {
 	_type   Type
 }
 
-type MatchExpr struct {
-	Subject  Expression
-	Cases    []MatchCase
-	CatchAll MatchCase
+type BoolMatch struct {
+	Subject Expression
+	True    Block
+	False   Block
 }
 
-func (m MatchExpr) GetType() Type {
-	return m.Cases[0]._type
+func (m BoolMatch) GetType() Type {
+	return m.True.result
 }
 
 type EnumMatch struct {
@@ -1083,8 +1083,8 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 }
 
 func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) Expression {
-	var trueCase MatchCase
-	var falseCase MatchCase
+	var trueCase Block
+	var falseCase Block
 
 	var result Type = Void{}
 	for i, arm := range expr.Cases {
@@ -1117,11 +1117,7 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 					location: arm.Pattern.GetLocation(),
 				})
 			} else {
-				trueCase = MatchCase{
-					Pattern: pattern,
-					Body:    block.Body,
-					_type:   block.result,
-				}
+				trueCase = block
 			}
 		} else {
 			if falseCase.Body != nil {
@@ -1131,11 +1127,7 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 					location: arm.Pattern.GetLocation(),
 				})
 			} else {
-				falseCase = MatchCase{
-					Pattern: pattern,
-					Body:    block.Body,
-					_type:   block.result,
-				}
+				falseCase = block
 			}
 		}
 
@@ -1167,9 +1159,10 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 		})
 	}
 
-	return MatchExpr{
+	return BoolMatch{
 		Subject: subject,
-		Cases:   []MatchCase{trueCase, falseCase},
+		True:    trueCase,
+		False:   falseCase,
 	}
 }
 
