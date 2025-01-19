@@ -1,4 +1,4 @@
-use std/io
+use ard/io
 
 mut numbers: [Num] = []
 io.print("numbers.size = {{numbers.size}}")

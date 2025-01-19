@@ -1,4 +1,4 @@
-use std/io
+use ard/io
 use ard/option
 
 // a declared optional needs to be explicitly typed

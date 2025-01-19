@@ -1,4 +1,4 @@
-use std/io
+use ard/io
 
 mut name: Str = "Alice"
 io.print("name = {{name}}")

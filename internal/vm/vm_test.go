@@ -73,7 +73,7 @@ func TestPrinting(t *testing.T) {
 	os.Stdout = w
 
 	run(t, strings.Join([]string{
-		`use std/io`,
+		`use ard/io`,
 		`io.print("Hello, World!")`,
 		`io.print("Hello, {{"Ard"}}!")`,
 	}, "\n"))

@@ -1040,18 +1040,18 @@ func TestCallingPackageMethods(t *testing.T) {
 		{
 			name: "io.print",
 			input: strings.Join([]string{
-				`use std/io`,
+				`use ard/io`,
 				`io.print("Hello World")`,
 			}, "\n"),
 			output: Program{
 				Imports: map[string]Package{
 					"io": {
-						Path: "std/io",
+						Path: "ard/io",
 					},
 				},
 				Statements: []Statement{
 					PackageAccess{
-						Package: Package{Path: "std/io"},
+						Package: Package{Path: "ard/io"},
 						Property: FunctionCall{
 							Name: "print",
 							Args: []Expression{
@@ -1689,7 +1689,7 @@ func TestOptionals(t *testing.T) {
 		{
 			name: "Matching an optional",
 			input: `
-				use std/io
+				use ard/io
 				use ard/option
 
 				mut name: Str? = option.make()
@@ -1700,7 +1700,7 @@ func TestOptionals(t *testing.T) {
 				}`,
 			output: Program{
 				Imports: map[string]Package{
-					"io":     {Path: "std/io"},
+					"io":     {Path: "ard/io"},
 					"option": optionPkg,
 				},
 				Statements: []Statement{
@@ -1722,7 +1722,7 @@ func TestOptionals(t *testing.T) {
 							Pattern: Identifier{Name: "it"},
 							Body: []Statement{
 								PackageAccess{
-									Package: Package{Path: "std/io"},
+									Package: Package{Path: "ard/io"},
 									Property: FunctionCall{
 										Name: "print",
 										Args: []Expression{
@@ -1733,7 +1733,7 @@ func TestOptionals(t *testing.T) {
 						None: Block{
 							Body: []Statement{
 								PackageAccess{
-									Package: Package{Path: "std/io"},
+									Package: Package{Path: "ard/io"},
 									Property: FunctionCall{
 										Name: "print",
 										Args: []Expression{StrLiteral{Value: "no name ):"}},

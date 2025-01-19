@@ -1,4 +1,4 @@
-use std/io
+use ard/io
 
 enum Color {
   Red,

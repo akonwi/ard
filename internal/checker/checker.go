@@ -52,7 +52,7 @@ func (p Package) String() string {
 	return "package " + p.name + " " + p.Path
 }
 func (p Package) GetProperty(name string) Type {
-	if p.Path == "std/io" {
+	if p.Path == "ard/io" {
 		switch name {
 		case "print":
 			return function{

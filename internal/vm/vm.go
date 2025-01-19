@@ -343,7 +343,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 
 	case checker.PackageAccess:
 		switch e.Package.Path {
-		case "std/io":
+		case "ard/io":
 			return vm.doIO(e.Property)
 		case "ard/option":
 			return vm.callInOptionPackage(e.Property)

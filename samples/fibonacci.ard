@@ -1,4 +1,4 @@
-use std/io
+use ard/io
 
 fn fib(n: Num) Num {
   match (n <= 1) {
