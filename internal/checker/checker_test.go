@@ -1299,27 +1299,17 @@ func TestMatchingOnEnums(t *testing.T) {
 						Name:  "dir",
 						Value: EnumVariant{Enum: "Direction", Variant: "down", Value: 1},
 					},
-					MatchExpr{
+					EnumMatch{
 						Subject: Identifier{
 							Name: "dir",
 						},
-						Cases: []MatchCase{
+						Cases: []Block{
 							{
-								Pattern: EnumVariant{
-									Enum:    "Direction",
-									Variant: "up",
-									Value:   0,
-								},
 								Body: []Statement{
 									StrLiteral{Value: "north"},
 								},
 							},
 							{
-								Pattern: EnumVariant{
-									Enum:    "Direction",
-									Variant: "down",
-									Value:   1,
-								},
 								Body: []Statement{
 									StrLiteral{Value: "south"},
 								},
@@ -1411,27 +1401,17 @@ func TestMatchingOnEnums(t *testing.T) {
 						Name:  "dir",
 						Value: EnumVariant{Enum: "Direction", Variant: "down", Value: 1},
 					},
-					MatchExpr{
+					EnumMatch{
 						Subject: Identifier{
 							Name: "dir",
 						},
-						Cases: []MatchCase{
+						Cases: []Block{
 							{
-								Pattern: EnumVariant{
-									Enum:    "Direction",
-									Variant: "up",
-									Value:   0,
-								},
 								Body: []Statement{
 									StrLiteral{Value: "north"},
 								},
 							},
 							{
-								Pattern: EnumVariant{
-									Enum:    "Direction",
-									Variant: "down",
-									Value:   1,
-								},
 								Body: []Statement{
 									StrLiteral{Value: "south"},
 								},

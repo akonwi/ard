@@ -326,6 +326,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		return &object{e.Value, e.GetType()}
 	case checker.MatchExpr:
 		return vm.evalMatch(e)
+	case checker.EnumMatch:
+		return vm.machEnum(e)
 	case checker.OptionMatch:
 		return vm.matchOption(e)
 	case checker.StructInstance:
@@ -470,6 +472,24 @@ func (vm VM) evalMatchCase(subj *object, arm checker.MatchCase) (*object, bool) 
 		return vm.evalBlock(arm.Body, nil), true
 	}
 	return nil, false
+}
+
+func (vm VM) machEnum(match checker.EnumMatch) *object {
+	subj := vm.evalExpression(match.Subject)
+	for value, arm := range match.Cases {
+		if subj.raw == value {
+			return vm.evalBlock(arm.Body, nil)
+		}
+	}
+
+	if match.CatchAll.Body != nil {
+		variables := map[string]binding{}
+		if id, ok := match.CatchAll.Pattern.(checker.Identifier); ok {
+			variables[id.Name] = binding{false, subj, false}
+		}
+		return vm.evalBlock(match.CatchAll.Body, variables)
+	}
+	panic(fmt.Sprintf("No match found for %s", subj))
 }
 
 func (vm VM) matchOption(match checker.OptionMatch) *object {
