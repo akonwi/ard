@@ -11,19 +11,10 @@ It combines features from JavaScript, Swift, and Go while introducing its own un
 - **Reliable**: Runtime is in Go, so it's fast and efficient.
   - [Future] Compiles to Go for portability.
 
-## 1. Basic Syntax
+## Basic Syntax
 
 Ard uses a clean, expressive syntax designed for readability and ease of use.
 Note: trying to follow Go's philosophy for readablity left to right, rather than usual Spiraling in C based syntax.
-
-### Built-in types
-- Str
-- Num
-- Bool
-- [Num] - List
-- [Str:Num] - Map
-- Void - non-existence
-  - only used to discard a function's return value
 
 ### Variables and Constants
 
@@ -94,6 +85,17 @@ for fruit in fruits {
   io.print(fruit)
 }
 ```
+## Types
+
+### Built-in types
+- Str
+- Num
+- Bool
+- [Num] - List
+- [Str:Num] - Map
+- Void - non-existence
+  - only used to ignore a function's return value
+
 ### Structs
 
 Structs can be used to define a collection of arbitrary data types, i.e. objects:
@@ -171,6 +173,7 @@ match maybe_name {
   _ => "Hello, stranger"
 }
 ```
+#### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ### TODO: Callbacks
 - could be a way to handle async return values as an attached statement
@@ -181,8 +184,6 @@ greet("John") => (msg) {
   print "Received $msg"
 }
 ```
-## 2. Types
-#### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ## 3. Error Handling
 
