@@ -41,10 +41,11 @@ mut age = 30
 - Use `fn` keyword to define functions
 - Return type is specified after the parameter list
   - Return types are required. Without a return type, the function returns `Void`
+- There is no return keyword. The last expression is the returned value
 
 ```ard
 fn greet(name: Str) Str {
-  return "Hello, {{name}}!"
+  "Hello, {{name}}!"
 }
 ```
 
@@ -69,6 +70,12 @@ for item in array {
 while condition {
   // ...
 }
+
+// match expressions, similar to a switch statements
+let string = match some_bool {
+  true => "It's true"
+  false => "It's false"
+}
 ```
 
 ### Iteration
@@ -76,34 +83,48 @@ while condition {
 Numeric inclusive range:
 ```ard
 for i in 1..10 {
-	io.print(i)
-}
-
-// todo: more traditional for loop
-for mut i = 1; i < 10; i =+2; {
-	io.print(i)
+	io.print(i) // 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 }
 ```
-### TODO: Callbacks
-- could be a way to handle async return values as an attached statement
-  - side-effecty, no control over when it's executed
 
+Iterating over a list:
 ```ard
-greet("John") => (msg) {
-  print "Received $msg"
+let fruits = ["apple", "banana", "cherry"]
+for fruit in fruits {
+  io.print(fruit)
 }
 ```
-## 2. Types
-
 ### Structs
 
-Structs can be used to define objects with properties:
+Structs can be used to define a collection of arbitrary data types, i.e. objects:
 
 ```ard
 struct Person {
   name: Str
   age: Num
 }
+
+let person = Person {
+  name: "Alton",
+  age: 30
+}
+person.name // "Alton"
+```
+
+Structs can have methods. Use a `impl` block to define methods on a struct:
+
+```ard
+impl (p: Person) {
+  fn get_intro() Str {
+    "My name is {{p.name}}"
+  }
+
+  fn greet(other: Person) Str {
+    "Hello, {{other.name}}"
+  }
+}
+
+person.get_intro() // "My name is Alton"
 ```
 
 ### Enums
@@ -120,27 +141,47 @@ enum Status {
 }
 ```
 
-The static operator (`::`) is used to cccess variants. For example:
+The static operator (`::`) is used to cccess variants.
 The static operator avoids naming conflicts between the variants and instance properties on the enum.
 
+Enum values can be used in match expressions to handle different cases:
 ```ard
-Status::inactive
+let status = Status::inactive
+match status {
+  Status::active => "Active",
+  Status::inactive => "Inactive",
+  Status::pending => "Pending"
+}
 ```
 
 ### Optional Types
 
-Optional types are represented using the built-in `Option`:
+Optional types are represented using the `Option` type from the standard libary.
+An optional type can either have a value (`some`) or be empty (`none`).
 
 ```ard
-Option {
-  some(T?),
-  none
-}
+use ard/option
 
-mut maybe_name: Option<Str> = Option::some("Alice")
-maybe_name = Option::none()
+mut maybe_name: Str? = option.make()
+maybe_name.some("Joe")
+maybe_name.none()
+
+match maybe_name {
+  n => "Hello, {{n}}",
+  _ => "Hello, stranger"
+}
 ```
 
+### TODO: Callbacks
+- could be a way to handle async return values as an attached statement
+  - side-effecty, no control over when it's executed
+
+```ard
+greet("John") => (msg) {
+  print "Received $msg"
+}
+```
+## 2. Types
 #### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ## 3. Error Handling
