@@ -158,7 +158,7 @@ match status {
 
 ### Optional Types
 
-Optional types are represented using the `Option` type from the standard libary.
+Optional type declarations end with `?` and can be created using the `ard/option` package from the standard library.
 An optional type can either have a value (`some`) or be empty (`none`).
 
 ```ard
@@ -329,12 +329,3 @@ import { originalName: newName } from "filename"
 ```
 
 This specification provides an overview of the Ard language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
-
-### 7. Generics
-Generic types end with a `?`.
-
-```ard
-fn map(item: A?) Str {
-  "foo"
-}
-```
