@@ -412,6 +412,10 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 				return &object{len(list), checker.Num{}}
 			}
 			panic(fmt.Sprintf("Expected list, got %T", o.raw))
+		case "at":
+			list := o.raw.([]*object)
+			index := vm.evalExpression(fn.Args[0]).raw.(int)
+			return list[index]
 		default:
 			panic(fmt.Sprintf("Unimplemented method: %s.%s", o._type, fn.Name))
 		}

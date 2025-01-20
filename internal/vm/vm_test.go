@@ -409,15 +409,14 @@ func TestListApi(t *testing.T) {
 			  list.size`,
 			want: 4,
 		},
-		//// todo: requires Option type
-		// {
-		// 	name: "List::at",
-		// 	input: `
-		// 		mut list = [1,2,3]
-		// 		list.push(4)
-		// 	  list.at(3)`,
-		// 	want: 4,
-		// },
+		{
+			name: "List::at",
+			input: `
+				mut list = [1,2,3]
+				list.push(4)
+			  list.at(3)`,
+			want: 4,
+		},
 	})
 }
 

@@ -105,6 +105,10 @@ type List struct {
 	element Type
 }
 
+func (l List) GetElementType() Type {
+	return l.element
+}
+
 func (l List) String() string {
 	return fmt.Sprintf("[%s]", l.element)
 }
@@ -118,6 +122,12 @@ func (l List) GetProperty(name string) Type {
 			name:       "push",
 			parameters: []variable{{name: "item", _type: l.element}},
 			returns:    Num{},
+		}
+	case "at":
+		return function{
+			name:       "at",
+			parameters: []variable{{name: "index", _type: Num{}}},
+			returns:    Option{l.element},
 		}
 	default:
 		return nil

@@ -6,7 +6,6 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] matching on strings?
 - [ ] Type Union
 - [ ] maps
 - [ ] Allow Num as map keys
@@ -27,3 +26,4 @@ Checkout the [language spec](./language-spec.md)
 - [ ] replace `!` with `not`
 - [ ] tuples?
 - [ ] matching on numbers
+- [ ] matching on strings?

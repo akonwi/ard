@@ -1,14 +1,20 @@
 use ard/io
 
 mut numbers: [Num] = []
-io.print("numbers.size = {{numbers.size}}")
+io.print("numbers.size = {{numbers.size.as_str}}")
 
 io.print("adding numbers from 0 to 10")
 for i in 0..10 {
   numbers.push(i)
 }
 
-io.print("numbers.size = {{numbers.size}}")
+io.print("numbers.size = {{numbers.size.as_str}}")
 for n in numbers {
   io.print(n.as_str)
+}
+
+io.print("finding 7th element")
+match numbers.at(6) {
+  n => io.print(n.as_str),
+  _ => io.print("got nothing")
 }
