@@ -801,7 +801,7 @@ func TestForLoops(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					Struct{
+					&Struct{
 						Name: "Shape",
 						Fields: map[string]Type{
 							"height": Num{},

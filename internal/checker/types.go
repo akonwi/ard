@@ -208,7 +208,7 @@ type Struct struct {
 }
 
 // impl Type interface
-func (s Struct) String() string {
+func (s *Struct) String() string {
 	return s.Name
 }
 
@@ -233,8 +233,8 @@ func (s Struct) GetInstanceId() string {
 	return s.selfName
 }
 
-func (s Struct) Is(other Type) bool {
-	otherStruct, ok := other.(Struct)
+func (s *Struct) Is(other Type) bool {
+	otherStruct, ok := other.(*Struct)
 	if !ok {
 		return false
 	}
@@ -256,7 +256,7 @@ func (s Struct) GetName() string {
 	return s.String()
 }
 func (s Struct) GetType() Type {
-	return s
+	return &s
 }
 func (s Struct) asFunction() (function, bool) {
 	return function{}, false

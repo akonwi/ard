@@ -126,7 +126,7 @@ func (l ListLiteral) GetType() Type {
 type StructInstance struct {
 	Name   string
 	Fields map[string]Expression
-	_type  Struct
+	_type  *Struct
 }
 
 func (s StructInstance) GetType() Type {
@@ -467,7 +467,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
-		variable, ok := symbol.(variable)
+		variable, ok := (*symbol).(variable)
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -670,16 +670,23 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 		}
 
-		strct := Struct{
+		strct := &Struct{
 			Name:    s.Name.Name,
 			Fields:  fields,
 			methods: map[string]FunctionDeclaration{},
 		}
-		c.scope.declare(strct)
+		if ok := c.scope.declareStruct(strct); !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Duplicate struct declaration: %s", s.Name.Name),
+				location: s.Name.GetLocation(),
+			})
+			return nil
+		}
 		return strct
 	case ast.ImplBlock:
-		sym := c.scope.find(s.Self.Type.GetName())
-		if sym == nil {
+		_struct, ok := c.scope.getStruct(s.Self.Type.GetName())
+		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Undefined: %s", s.Self.Type.GetName()),
@@ -688,7 +695,6 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		}
 
-		_struct := sym.(Struct)
 		new_scope := newScope(c.scope)
 		c.scope = new_scope
 		defer func() { c.scope = new_scope.parent }()
@@ -742,7 +748,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		return Identifier{
 			Name:   e.Name,
-			symbol: sym,
+			symbol: *sym,
 		}
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
@@ -858,7 +864,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			})
 			return nil
 		}
-		fn, ok := sym.asFunction()
+		fn, ok := (*sym).asFunction()
 		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -962,8 +968,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 
 	case ast.StructInstance:
-		sym := c.scope.find(e.Name.Name)
-		if sym == nil {
+		_struct, ok := c.scope.getStruct(e.Name.Name)
+		if !ok {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Undefined: %s", e.Name.Name),
@@ -971,8 +977,6 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			})
 			return nil
 		}
-
-		_struct := sym.(Struct)
 
 		fields := map[string]Expression{}
 		for _, field := range e.Properties {
@@ -1000,7 +1004,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		instance := StructInstance{
 			Name:   e.Name.Name,
 			Fields: fields,
-			_type:  sym.GetType().(Struct),
+			_type:  _struct,
 		}
 		return instance
 	default:
@@ -1396,16 +1400,20 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 			element: c.resolveDeclaredType(tt.Element),
 		}
 	case ast.CustomType:
-		name := c.scope.find(tt.GetName())
-		custom, isType := name.(Type)
-		if !isType {
-			c.addDiagnostic(Diagnostic{
-				Kind:    Error,
-				Message: fmt.Sprintf(`Undefined: %s`, name),
-			})
-			return nil
+		if name := c.scope.find(tt.GetName()); name != nil {
+			if custom, isType := (*name).(Type); isType {
+				_type = custom
+				break
+			}
 		}
-		_type = custom
+		if _struct, ok := c.scope.getStruct(tt.GetName()); ok {
+			_type = _struct
+			break
+		}
+		c.addDiagnostic(Diagnostic{
+			Kind:    Error,
+			Message: fmt.Sprintf(`Undefined: %s`, tt.GetName()),
+		})
 	default:
 		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}

@@ -972,7 +972,6 @@ func (p *Parser) parseImplBlock(node *tree_sitter.Node) (Statement, error) {
 	defNodes := bodyNode.NamedChildren(node.Walk())
 	methods := make([]FunctionDeclaration, len(defNodes))
 	for i := range defNodes {
-		fmt.Printf("parsing defNode: %s\n", (&defNodes[i]).GrammarName())
 		stmt, err := p.parseStatement(&defNodes[i])
 		if err != nil {
 			return nil, err

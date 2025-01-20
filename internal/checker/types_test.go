@@ -9,11 +9,14 @@ func TestTypeEquality(t *testing.T) {
 		want bool
 	}
 
+	Shape := Struct{Name: "Shape", Fields: map[string]Type{"height": Num{}, "width": Num{}}}
+
 	tests := []test{
 		{Num{}, Num{}, true},
 		{Num{}, Str{}, false},
 		{Num{}, Bool{}, false},
 		{Num{}, List{Num{}}, false},
+		{List{&Shape}, List{&Shape}, true},
 		{Num{}, Option{Num{}}, false},
 		{Option{}, Option{Num{}}, true},
 		{Option{Num{}}, Option{}, true},

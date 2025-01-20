@@ -14,7 +14,7 @@ func TestStructs(t *testing.T) {
 		"  employed: Bool",
 		"}",
 	}, "\n")
-	personStruct := Struct{
+	personStruct := &Struct{
 		Name: "Person",
 		Fields: map[string]Type{
 			"name":     Str{},
@@ -115,7 +115,7 @@ func TestMethods(t *testing.T) {
 				}`, shapeCode),
 			output: Program{
 				Statements: []Statement{
-					Struct{
+					&Struct{
 						Name: "Shape",
 						Fields: map[string]Type{
 							"width":  Num{},

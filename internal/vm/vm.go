@@ -47,7 +47,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		vm.evalFunctionDefinition(s)
 	case checker.Enum:
 		vm.scope.addEnum(s)
-	case checker.Struct:
+	case *checker.Struct:
 		vm.scope.addStruct(s)
 	case checker.IfStatement:
 		var condition bool = true
@@ -391,7 +391,7 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 		default:
 			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 		}
-	case checker.Struct:
+	case *checker.Struct:
 		if field, ok := i.raw.(map[string]*object)[propName]; ok {
 			return field
 		}
@@ -426,13 +426,13 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		default:
 			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
-	case checker.Struct:
+	case *checker.Struct:
 		method, ok := t.GetMethod(fn.Name)
 		if !ok {
 			panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
 		}
 		args := map[string]binding{
-			"self": {false, o, false},
+			t.GetInstanceId(): {false, o, false},
 		}
 		for i, param := range method.Parameters {
 			args[param.Name] = binding{false, vm.evalExpression(fn.Args[i]), false}

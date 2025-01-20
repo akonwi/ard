@@ -14,7 +14,7 @@ type scope struct {
 	parent   *scope
 	bindings map[string]*binding
 	enums    map[string]checker.Enum
-	structs  map[string]checker.Struct
+	structs  map[string]*checker.Struct
 }
 
 func newScope(parent *scope) *scope {
@@ -22,7 +22,7 @@ func newScope(parent *scope) *scope {
 		parent:   parent,
 		bindings: make(map[string]*binding),
 		enums:    make(map[string]checker.Enum),
-		structs:  make(map[string]checker.Struct),
+		structs:  make(map[string]*checker.Struct),
 	}
 }
 
@@ -38,11 +38,11 @@ func (s scope) getEnum(name string) (checker.Enum, bool) {
 	return v, ok
 }
 
-func (s scope) addStruct(strct checker.Struct) {
+func (s scope) addStruct(strct *checker.Struct) {
 	s.structs[strct.Name] = strct
 }
 
-func (s scope) getStruct(name string) (checker.Struct, bool) {
+func (s scope) getStruct(name string) (*checker.Struct, bool) {
 	v, ok := s.structs[name]
 	if !ok && s.parent != nil {
 		return s.parent.getStruct(name)
