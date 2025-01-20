@@ -30,6 +30,5 @@ render(list)
 io.print("adding 2 items")
 list.push(Todo { title: "Buy eggs", completed: false })
 list.push(Todo { title: "Buy fruits", completed: false })
-
-io.print("there are now {{list.size.as_str}} items in the list")
+io.print("------")
 render(list)
