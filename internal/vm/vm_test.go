@@ -476,9 +476,16 @@ func TestStructs(t *testing.T) {
 					x: Num,
 					y: Num,
 				}
+
+				impl (p: Point) {
+					fn print() Str {
+						"{{p.x.as_str}},{{p.y.as_str}}"
+					}
+				}
+
 				let p = Point { x: 10, y: 20 }
-				p.x`,
-			want: 10,
+				p.print()`,
+			want: "10,20",
 		},
 	})
 }

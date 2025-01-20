@@ -671,11 +671,35 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 
 		strct := Struct{
-			Name:   s.Name.Name,
-			Fields: fields,
+			Name:    s.Name.Name,
+			Fields:  fields,
+			methods: map[string]FunctionDeclaration{},
 		}
 		c.scope.declare(strct)
 		return strct
+	case ast.ImplBlock:
+		sym := c.scope.find(s.Self.Type.GetName())
+		if sym == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Undefined: %s", s.Self.Type.GetName()),
+				location: s.GetLocation(),
+			})
+			return nil
+		}
+
+		_struct := sym.(Struct)
+		new_scope := newScope(c.scope)
+		c.scope = new_scope
+		defer func() { c.scope = new_scope.parent }()
+		new_scope.declare(variable{name: s.Self.Name, mut: false, _type: _struct})
+
+		for _, method := range s.Methods {
+			stmt := c.checkStatement(method)
+			meth := stmt.(FunctionDeclaration)
+			_struct.addMethod(s.Self.Name, meth)
+		}
+		return nil
 	default:
 		return c.checkExpression(s)
 	}

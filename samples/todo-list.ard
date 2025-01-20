@@ -5,13 +5,20 @@ struct Todo {
   completed: Bool
 }
 
-fn render(list: [Todo]) {
-  for todo in list {
-    mut box = "[ ]"
-    if (todo.completed) {
-      box = "[x]"
+impl (self: Todo) {
+  fn get_str() Str {
+    let box = match (self.completed) {
+      true => "[x]",
+      false => "[ ]"
     }
-    io.print("{{box}} {{todo.title}}")
+    "{{box}} {{self.title}}"
+  }
+}
+
+fn render(list: [Todo]) {
+  io.print("Todo List:")
+  for todo in list {
+    io.print(todo.get_str())
   }
 }
 

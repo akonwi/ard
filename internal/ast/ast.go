@@ -269,6 +269,16 @@ func (s StructDefinition) String() string {
 	return fmt.Sprintf("StructDefinition(%s)", s.Name)
 }
 
+type ImplBlock struct {
+	BaseNode
+	Self    Parameter
+	Methods []FunctionDeclaration
+}
+
+func (i ImplBlock) String() string {
+	return fmt.Sprintf("ImplBlock(%s)", i.Self)
+}
+
 type StructValue struct {
 	BaseNode
 	Name  Identifier
@@ -656,6 +666,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return p.parseIfStatement(child)
 	case "struct_definition":
 		return p.parseStructDefinition(child)
+	case "implements_definition":
+		return p.parseImplBlock(child)
 	case "enum_definition":
 		return p.parseEnumDefinition(child)
 	case "expression":
@@ -762,7 +774,7 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 }
 
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration, error) {
-	name := p.text(node.ChildByFieldName("name"))
+	name := p.text(p.mustChild(node, "name"))
 	parameters := p.parseParameters(node.ChildByFieldName("parameters"))
 	returnType := p.resolveType(node.ChildByFieldName("return"))
 
@@ -945,6 +957,38 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 		Fields:   fields,
 	}
 	return strct, nil
+}
+
+func (p *Parser) parseImplBlock(node *tree_sitter.Node) (Statement, error) {
+	if node.HasError() {
+		return nil, fmt.Errorf("Parsing error encountered in impl block: %s", p.text(node))
+	}
+
+	params := p.parseParameters(node.NamedChild(0))
+	if len(params) != 1 {
+		return nil, fmt.Errorf("Expected 1 parameter in impl block, got: %d", len(params))
+	}
+	bodyNode := node.NamedChild(1)
+	defNodes := bodyNode.NamedChildren(node.Walk())
+	methods := make([]FunctionDeclaration, len(defNodes))
+	for i := range defNodes {
+		fmt.Printf("parsing defNode: %s\n", (&defNodes[i]).GrammarName())
+		stmt, err := p.parseStatement(&defNodes[i])
+		if err != nil {
+			return nil, err
+		}
+		def, ok := stmt.(FunctionDeclaration)
+		if !ok {
+			return nil, fmt.Errorf("Expected function declaration, got: %s", stmt)
+		}
+		methods[i] = def
+	}
+
+	return ImplBlock{
+		BaseNode: makeBaseNode(node),
+		Self:     params[0],
+		Methods:  methods,
+	}, nil
 }
 
 func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error) {

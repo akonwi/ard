@@ -47,12 +47,65 @@ func TestStructDefinitions(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Method definitions",
+			input: `
+				struct Shape {
+					height: Num,
+					width: Num
+				}
+				impl (s: Shape) {
+					fn area() Num {
+						s.height * s.width
+					}
+				}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					StructDefinition{
+						Name: Identifier{Name: "Shape"},
+						Fields: []StructField{
+							{Identifier{Name: "height"}, NumberType{}},
+							{Identifier{Name: "width"}, NumberType{}},
+						},
+					},
+					ImplBlock{
+						Self: Parameter{
+							Name: "s",
+							Type: CustomType{Name: "Shape"},
+						},
+						Methods: []FunctionDeclaration{
+							{
+								Name:       "area",
+								Parameters: []Parameter{},
+								ReturnType: NumberType{},
+								Body: []Statement{
+									BinaryExpression{
+										Operator: Multiply,
+										Left: MemberAccess{
+											Target:     Identifier{Name: "s"},
+											AccessType: Instance,
+											Member:     Identifier{Name: "height"},
+										},
+										Right: MemberAccess{
+											Target:     Identifier{Name: "s"},
+											AccessType: Instance,
+											Member:     Identifier{Name: "width"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)
 }
 
-func TestStructStuff(t *testing.T) {
+func TestUsingStructs(t *testing.T) {
 	tests := []test{
 		{
 			name: "Instantiating a field-less struct",
@@ -98,75 +151,3 @@ func TestStructStuff(t *testing.T) {
 
 	runTests(t, tests)
 }
-
-// func TestStructFieldAccess(t *testing.T) {
-// 	personStructCode := `
-// 		struct Person {
-// 			name: Str,
-// 			age: Num,
-// 			employed: Bool
-// 		}`
-// 	personStruct := StructType{
-// 		Name: "Person",
-// 		Fields: map[string]Type{
-// 			"name":     StrType,
-// 			"age":      NumType,
-// 			"employed": BoolType,
-// 		},
-// 	}
-// 	tests := []test{
-// 		{
-// 			name: "Valid field access",
-// 			input: fmt.Sprintf(`%s
-// 				let person = Person { name: "Bobby", age: 12, employed: false }
-// 				person.name
-// 				person.age
-// 				person.employed`, personStructCode),
-// 			output: Program{
-// 				Imports: []Import{},
-// 				Statements: []Statement{
-// 					StructDefinition{Type: personStruct},
-// 					VariableDeclaration{
-// 						Mutable: false,
-// 						Name:    "person",
-// 						Type:    personStruct,
-// 						Value: StructInstance{
-// 							Type: personStruct,
-// 							Properties: []StructValue{
-// 								{Name: "name", Value: StrLiteral{Value: `"Bobby"`}},
-// 								{Name: "age", Value: NumLiteral{Value: "12"}},
-// 								{Name: "employed", Value: BoolLiteral{Value: false}},
-// 							},
-// 						},
-// 					},
-// 					MemberAccess{
-// 						Target:     Identifier{Name: "person", Type: personStruct},
-// 						AccessType: Instance,
-// 						Member:     Identifier{Name: "name", Type: StrType},
-// 					},
-// 					MemberAccess{
-// 						Target:     Identifier{Name: "person", Type: personStruct},
-// 						AccessType: Instance,
-// 						Member:     Identifier{Name: "age", Type: NumType},
-// 					},
-// 					MemberAccess{
-// 						Target:     Identifier{Name: "person", Type: personStruct},
-// 						AccessType: Instance,
-// 						Member:     Identifier{Name: "employed", Type: BoolType},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Accessing non-existent fields",
-// 			input: fmt.Sprintf(`%s
-// 				let person = Person { name: "Bobby", age: 12, employed: false }
-// 				person.foobar`, personStructCode),
-// 			diagnostics: []Diagnostic{
-// 				{Msg: "No field 'foobar' in 'Person' struct"},
-// 			},
-// 		},
-// 	}
-
-// 	runTests(t, tests)
-// }

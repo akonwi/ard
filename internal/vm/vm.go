@@ -402,7 +402,7 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 }
 
 func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
-	switch o._type.(type) {
+	switch t := o._type.(type) {
 	case checker.List:
 		switch fn.Name {
 		case "push":
@@ -415,7 +415,6 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		default:
 			panic(fmt.Sprintf("Unimplemented method: %s.%s", o._type, fn.Name))
 		}
-
 	case checker.Option:
 		switch fn.Name {
 		case "some":
@@ -427,6 +426,18 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		default:
 			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
+	case checker.Struct:
+		method, ok := t.GetMethod(fn.Name)
+		if !ok {
+			panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
+		}
+		args := map[string]binding{
+			"self": {false, o, false},
+		}
+		for i, param := range method.Parameters {
+			args[param.Name] = binding{false, vm.evalExpression(fn.Args[i]), false}
+		}
+		return vm.evalBlock(method.Body, args)
 	default:
 		panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		// return &object{nil, checker.Void{}}

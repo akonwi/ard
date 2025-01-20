@@ -201,8 +201,10 @@ func (e EnumVariant) GetType() Type {
 }
 
 type Struct struct {
-	Name   string
-	Fields map[string]Type
+	Name     string
+	Fields   map[string]Type
+	methods  map[string]FunctionDeclaration
+	selfName string
 }
 
 // impl Type interface
@@ -211,8 +213,26 @@ func (s Struct) String() string {
 }
 
 func (s Struct) GetProperty(name string) Type {
-	return s.Fields[name]
+	if field, ok := s.Fields[name]; ok {
+		return field
+	}
+	if method := s.methods[name]; method.Name != "" {
+		return method.GetType()
+	}
+	return nil
 }
+func (s *Struct) addMethod(id string, method FunctionDeclaration) {
+	s.selfName = id
+	s.methods[method.Name] = method
+}
+func (s Struct) GetMethod(name string) (FunctionDeclaration, bool) {
+	method, ok := s.methods[name]
+	return method, ok
+}
+func (s Struct) GetInstanceId() string {
+	return s.selfName
+}
+
 func (s Struct) Is(other Type) bool {
 	otherStruct, ok := other.(Struct)
 	if !ok {
