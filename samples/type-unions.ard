@@ -22,8 +22,7 @@ fn fmt_area(shape: Shape) Str {
 let sq = Square { size: 10 }
 let cir = Circle { radius: 5 }
 
-// TODO: allow identifiers in lists
-// let shapes: [Shape] = [sq, cir]
-// for shape in shapes {
-  io.print("{{get_name(sq)}} area: {{fmt_area(sq)}}")
-// }
+let shapes: [Shape] = [sq, cir]
+for shape in shapes {
+  io.print("{{get_name(shape)}} area: {{fmt_area(shape)}}")
+}

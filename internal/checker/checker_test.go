@@ -1077,7 +1077,7 @@ func TestLists(t *testing.T) {
 					VariableBinding{
 						Mut:   false,
 						Name:  "empty",
-						Value: ListLiteral{},
+						Value: ListLiteral{Elements: []Expression{}},
 					},
 				},
 			},
@@ -1157,8 +1157,8 @@ func testTuples(t *testing.T) {
 			name:  "Lists cannot have mixed types",
 			input: `let numbers = [1, "two", false]`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Str at index 1"},
+				{Kind: Error, Message: "Type mismatch: Expected Num, got Bool at index 2"},
 			},
 		},
 		{
@@ -1668,7 +1668,8 @@ func TestTypeUnions(t *testing.T) {
 				type Alias = Bool
 			  type Printable = Num|Str
 				let a: Printable = "foo"
-				let b: Alias = true`,
+				let b: Alias = true
+				let list: [Printable] = [1, "two", 3]`,
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
@@ -1680,6 +1681,17 @@ func TestTypeUnions(t *testing.T) {
 						Mut:   false,
 						Name:  "b",
 						Value: BoolLiteral{Value: true},
+					},
+					VariableBinding{
+						Mut:  false,
+						Name: "list",
+						Value: ListLiteral{
+							Elements: []Expression{
+								NumLiteral{Value: 1},
+								StrLiteral{Value: "two"},
+								NumLiteral{Value: 3},
+							},
+						},
 					},
 				},
 			},

@@ -434,40 +434,39 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	switch s := stmt.(type) {
 	case ast.VariableDeclaration:
-		value := c.checkExpression(s.Value)
+		var value Expression
 		var _type Type = Void{}
-		// get declared type if it exists
-		if s.Type != nil {
+		if literal, isList := s.Value.(ast.ListLiteral); isList && s.Type != nil {
 			_type = c.resolveDeclaredType(s.Type)
-			if _type.Is(value.GetType()) == false {
+			value = c.checkList(literal, _type)
+		} else {
+			value = c.checkExpression(s.Value)
+			// get declared type if it exists
+			if s.Type != nil {
+				_type = c.resolveDeclaredType(s.Type)
+				if _type.Is(value.GetType()) == false {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", _type, value.GetType()),
+						location: s.Value.GetLocation(),
+					})
+					return nil
+				}
+			}
+
+			// TODO: we've already checked for type mismatches at this point,
+			// if this is not declared as option, we can safely use the value's type
+			// but for now, we'll just use the value's type when inference is necessary
+			if _type.Is(Void{}) {
+				_type = value.GetType()
+			}
+			if _type.Is(Void{}) || _type == nil {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", _type, value.GetType()),
 					location: s.Value.GetLocation(),
+					Message:  "Cannot assign a void value",
 				})
-				return nil
 			}
-		} else if list, isList := value.GetType().(List); isList && list.element == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  "Empty lists need an explicit type",
-				location: s.Value.GetLocation(),
-			})
-			return nil
-		}
-
-		// TODO: we've already checked for type mismatches at this point,
-		// if this is not declared as option, we can safely use the value's type
-		// but for now, we'll just use the value's type when inference is necessary
-		if _type.Is(Void{}) {
-			_type = value.GetType()
-		}
-		if _type.Is(Void{}) || _type == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: s.Value.GetLocation(),
-				Message:  "Cannot assign a void value",
-			})
 		}
 
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: _type})
@@ -950,28 +949,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			Body:       block.Body,
 		}
 	case ast.ListLiteral:
-		if len(e.Items) == 0 {
-			return ListLiteral{}
-		}
-		var elementType Type
-		elements := make([]Expression, len(e.Items))
-		for i, item := range e.Items {
-			elements[i] = c.checkExpression(item)
-			_type := elements[i].GetType()
-			if i == 0 {
-				elementType = _type
-			} else if !_type.Is(elementType) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					location: item.GetLocation(),
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", elementType, _type),
-				})
-			}
-		}
-		return ListLiteral{
-			Elements: elements,
-			_type:    List{element: elementType},
-		}
+		return c.checkList(e, nil)
 	case ast.MatchExpression:
 		subject := c.checkExpression(e.Subject)
 		switch sub := subject.GetType().(type) {
@@ -1034,6 +1012,56 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return instance
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
+	}
+}
+
+func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression {
+	if declaredType != nil {
+		elements := make([]Expression, len(expr.Items))
+		for i, item := range expr.Items {
+			element := c.checkExpression(item)
+			if !declaredType.(List).element.Is(element.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredType, element.GetType()),
+					location: item.GetLocation(),
+				})
+			}
+			elements[i] = element
+		}
+
+		return ListLiteral{
+			Elements: elements,
+			_type:    declaredType.(List),
+		}
+	}
+
+	if len(expr.Items) == 0 {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  "Empty lists need an explicit type",
+			location: expr.GetLocation(),
+		})
+		return ListLiteral{}
+	}
+	var elementType Type
+	elements := make([]Expression, len(expr.Items))
+	for i, item := range expr.Items {
+		elements[i] = c.checkExpression(item)
+		_type := elements[i].GetType()
+		if i == 0 {
+			elementType = _type
+		} else if !_type.Is(elementType) {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: item.GetLocation(),
+				Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", elementType, _type),
+			})
+		}
+	}
+	return ListLiteral{
+		Elements: elements,
+		_type:    List{element: elementType},
 	}
 }
 

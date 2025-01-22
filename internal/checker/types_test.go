@@ -23,6 +23,8 @@ func TestTypeEquality(t *testing.T) {
 		{Option{Num{}}, Option{}, true},
 		{NumOrStr, Num{}, true},
 		{NumOrStr, Bool{}, false},
+		{NumOrStr, NumOrStr, true},
+		{List{NumOrStr}, List{NumOrStr}, true},
 	}
 	for _, tt := range tests {
 		if res := tt.a.Is(tt.b); res != tt.want {

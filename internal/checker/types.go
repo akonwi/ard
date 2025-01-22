@@ -140,7 +140,7 @@ func (l List) Is(other Type) bool {
 		if l.element == nil || otherList.element == nil {
 			return true
 		}
-		return l.element.Is(otherList.element)
+		return l.element.String() == otherList.element.String()
 	}
 	return false
 }
@@ -369,6 +369,17 @@ func (u Union) GetProperty(name string) Type {
 	return nil
 }
 func (u Union) Is(other Type) bool {
+	if otherUnion, ok := other.(Union); ok {
+		if len(u.types) != len(otherUnion.types) {
+			return false
+		}
+		for i, t := range u.types {
+			if !t.Is(otherUnion.types[i]) {
+				return false
+			}
+		}
+		return true
+	}
 	for _, t := range u.types {
 		if t.Is(other) {
 			return true
