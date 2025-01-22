@@ -1,9 +1,7 @@
 package vm
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -156,34 +154,6 @@ func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
 			},
 			_type: fn.GetType(),
 		},
-	}
-}
-
-func (vm VM) doIO(expr checker.Expression) *object {
-	// TODO: use this for 3rd party packages
-	// iiio := reflect.TypeFor[IO]()
-	// if print, ok := iiio.MethodByName("print"); ok {
-	// 	print.Func.Call([]reflect.Value{reflect.ValueOf("Hello, World)")})
-	// }
-
-	switch e := expr.(type) {
-	case checker.FunctionCall:
-		switch e.Name {
-		case "print":
-			arg := vm.evalExpression(e.Args[0])
-			string := arg.raw.(string)
-			fmt.Println(string)
-			return &object{nil, checker.Void{}}
-
-		case "read_line":
-			scanner := bufio.NewScanner(os.Stdin)
-			scanner.Scan()
-			return &object{scanner.Text(), checker.Str{}}
-		default:
-			return &object{nil, checker.Void{}}
-		}
-	default:
-		panic(fmt.Sprintf("Unimplemented io property: %T", e))
 	}
 }
 
@@ -353,9 +323,9 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 	case checker.PackageAccess:
 		switch e.Package.Path {
 		case "ard/io":
-			return vm.doIO(e.Property)
+			return vm.invokeIO(e.Property)
 		case "ard/option":
-			return vm.callInOptionPackage(e.Property)
+			return vm.invokeOption(e.Property)
 		default:
 			panic(fmt.Sprintf("Unimplemented package: %s", e.Package.Path))
 		}

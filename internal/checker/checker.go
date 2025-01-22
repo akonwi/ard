@@ -65,7 +65,7 @@ func (p Package) GetProperty(name string) Type {
 			return function{
 				name:       name,
 				parameters: []variable{},
-				returns:    Option{Str{}},
+				returns:    Str{},
 			}
 
 		default:
