@@ -388,10 +388,19 @@ func TestBoolApi(t *testing.T) {
 }
 
 func TestStrApi(t *testing.T) {
-	res := run(t, `"foobar".size`)
-	if res != 6 {
-		t.Fatalf("Expected 6, got %v", res)
+	tests := []test{
+		{
+			name:  "Str.size",
+			input: `"foobar".size`,
+			want:  6,
+		},
+		{
+			name:  "Str.is_empty",
+			input: `"".is_empty`,
+			want:  true,
+		},
 	}
+	runTests(t, tests)
 }
 
 func TestListApi(t *testing.T) {

@@ -38,6 +38,8 @@ func (s Str) GetProperty(name string) Type {
 	switch name {
 	case "size":
 		return Num{}
+	case "is_empty":
+		return Bool{}
 	default:
 		return nil
 	}

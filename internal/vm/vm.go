@@ -343,25 +343,28 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 
 	switch i._type.(type) {
 	case checker.Str:
+		raw := i.raw.(string)
 		switch propName {
 		case "size":
-			return &object{len(i.raw.(string)), checker.Num{}}
+			return &object{len(raw), checker.Num{}}
+		case "is_empty":
+			return &object{len(raw) == 0, checker.Bool{}}
 		default:
-			panic(fmt.Errorf("Unimplemented property: Str.%v", propName))
+			panic(fmt.Errorf("Undefined property: Str.%v", propName))
 		}
 	case checker.Num:
 		switch propName {
 		case "as_str":
 			return &object{strconv.Itoa(i.raw.(int)), checker.Str{}}
 		default:
-			panic(fmt.Errorf("Unimplemented property: Num.%v", propName))
+			panic(fmt.Errorf("Undefined property: Num.%v", propName))
 		}
 	case checker.Bool:
 		switch propName {
 		case "as_str":
 			return &object{strconv.FormatBool(i.raw.(bool)), checker.Str{}}
 		default:
-			panic(fmt.Errorf("Unimplemented property: Bool.%v", propName))
+			panic(fmt.Errorf("Undefined property: Bool.%v", propName))
 		}
 	case checker.List:
 		switch propName {

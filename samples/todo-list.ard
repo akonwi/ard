@@ -31,11 +31,11 @@ while running {
   render(list)
   io.print("What's your next todo?")
   let title = io.read_line()
-  if title.size > 0 {
+  if (title.is_empty) {
+    running = false
+  } else {
     let todo = Todo { title: title, completed: false }
     list.push(todo)
     io.print("------")
-  } else {
-    running = false
   }
 }
