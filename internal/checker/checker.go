@@ -207,6 +207,9 @@ type Identifier struct {
 func (i Identifier) String() string {
 	return i.Name
 }
+func (i Identifier) GetType() Type {
+	return i.symbol.GetType()
+}
 
 type InstanceProperty struct {
 	Subject  Expression
@@ -215,10 +218,6 @@ type InstanceProperty struct {
 
 func (i InstanceProperty) GetType() Type {
 	return i.Property.GetType()
-}
-
-func (i Identifier) GetType() Type {
-	return i.symbol.GetType()
 }
 
 type PackageAccess struct {
