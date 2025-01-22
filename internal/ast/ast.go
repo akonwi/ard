@@ -1023,7 +1023,7 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 		name := p.text(nameNode)
 
 		valueNode := propertyNode.ChildByFieldName("value")
-		value, err := p.parsePrimitiveValue(valueNode)
+		value, err := p.parseExpression(valueNode)
 		if err != nil {
 			return nil, err
 		}

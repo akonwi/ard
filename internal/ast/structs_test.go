@@ -129,18 +129,24 @@ func TestUsingStructs(t *testing.T) {
 		{
 			name: "Correctly instantiating a struct with fields",
 			input: fmt.Sprintf(`%s
-				Person { name: "John", age: 23, employed: true }
+				let age = 23
+				Person { name: "John", age: age, employed: true }
 			`, personStructCode),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					personStruct,
+					VariableDeclaration{
+						Mutable: false,
+						Name:    "age",
+						Value:   NumLiteral{Value: "23"},
+					},
 					StructInstance{
 						Name: Identifier{Name: "Person"},
 						Properties: []StructValue{
 							{Name: Identifier{Name: "name"},
 								Value: StrLiteral{Value: `"John"`}},
-							{Name: Identifier{Name: "age"}, Value: NumLiteral{Value: "23"}},
+							{Name: Identifier{Name: "age"}, Value: Identifier{Name: "age"}},
 							{Name: Identifier{Name: "employed"}, Value: BoolLiteral{Value: true}},
 						},
 					},
