@@ -1198,6 +1198,11 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 			Value:    p.text(node) == "true"}, nil
 	case "struct_instance":
 		return p.parseStructInstance(node)
+	case "identifier":
+		return Identifier{
+			BaseNode: makeBaseNode(node),
+			Name:     p.text(node),
+		}, nil
 	default:
 		return nil, fmt.Errorf("Unhandled list element: %s", node.GrammarName())
 	}

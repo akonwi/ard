@@ -28,11 +28,18 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
-			name:  "Valid list",
-			input: `let numbers: [Num] = [1, 2, 3]`,
+			name: "Valid list",
+			input: `
+				let four = 4
+				let numbers: [Num] = [1, 2, 3, four]`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
+					VariableDeclaration{
+						Mutable: false,
+						Name:    "four",
+						Value:   NumLiteral{Value: "4"},
+					},
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "numbers",
@@ -42,6 +49,7 @@ func TestVariables(t *testing.T) {
 								NumLiteral{Value: "1"},
 								NumLiteral{Value: "2"},
 								NumLiteral{Value: "3"},
+								Identifier{Name: "four"},
 							},
 						},
 					},
