@@ -6,7 +6,6 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] Type Union
 - [ ] Proper type compatibility checks. Is() is not the same as Type.Allows()
 - [ ] maps
 - [ ] Allow Num as map keys

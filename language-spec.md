@@ -173,6 +173,28 @@ match maybe_name {
   _ => "Hello, stranger"
 }
 ```
+
+### Type Unions
+
+Type unions are used to define a type that can be one of several types.
+
+```ard
+type Printable = Str | Num
+let value: Printable = "Hello"
+let stuff: [Printable] = ["Hello", 42]
+```
+
+To do conditional logic on a value of a type union, use a match expression and within each case, the value is bound to a variable called `it`:
+
+```ard
+for item in stuff {
+  match item {
+    Str => io.print("String: {{it}}"),
+    Num => io.print("Number: {{it.as_str}}")
+  }
+}
+```
+
 #### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ### TODO: Callbacks
