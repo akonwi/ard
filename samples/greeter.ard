@@ -1,6 +1,0 @@
-use ard/io
-
-io.print("What's your name?")
-io.print("----")
-let name: Str = io.read_line()
-io.print("Hello, {{name}}!")
