@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -172,6 +174,11 @@ func (vm VM) doIO(expr checker.Expression) *object {
 			string := arg.raw.(string)
 			fmt.Println(string)
 			return &object{nil, checker.Void{}}
+
+		case "read_line":
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			return &object{scanner.Text(), checker.Str{}}
 		default:
 			return &object{nil, checker.Void{}}
 		}

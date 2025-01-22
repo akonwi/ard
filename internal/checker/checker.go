@@ -60,6 +60,14 @@ func (p Package) GetProperty(name string) Type {
 				parameters: []variable{{name: "string", mut: false, _type: Str{}}},
 				returns:    Void{},
 			}
+
+		case "read_line":
+			return function{
+				name:       name,
+				parameters: []variable{},
+				returns:    Option{Str{}},
+			}
+
 		default:
 			return nil
 		}

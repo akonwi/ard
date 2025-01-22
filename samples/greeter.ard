@@ -1,0 +1,10 @@
+use ard/io
+
+io.print("What's your name?")
+io.print("----")
+let name: Str? = io.read_line()
+
+match name {
+  n => io.print("Hello, {{n}}!"),
+  _ => io.print("I didn't catch your name.")
+}
