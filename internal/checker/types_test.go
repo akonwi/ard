@@ -10,6 +10,7 @@ func TestTypeEquality(t *testing.T) {
 	}
 
 	Shape := Struct{Name: "Shape", Fields: map[string]Type{"height": Num{}, "width": Num{}}}
+	NumOrStr := Union{name: "NumOrStr", types: []Type{Num{}, Str{}}}
 
 	tests := []test{
 		{Num{}, Num{}, true},
@@ -20,6 +21,8 @@ func TestTypeEquality(t *testing.T) {
 		{Num{}, Option{Num{}}, false},
 		{Option{}, Option{Num{}}, true},
 		{Option{Num{}}, Option{}, true},
+		{NumOrStr, Num{}, true},
+		{NumOrStr, Bool{}, false},
 	}
 	for _, tt := range tests {
 		if res := tt.a.Is(tt.b); res != tt.want {

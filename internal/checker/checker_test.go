@@ -1659,3 +1659,68 @@ func TestOptionals(t *testing.T) {
 		},
 	})
 }
+
+func TestTypeUnions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Valid type union",
+			input: `
+				type Alias = Bool
+			  type Printable = Num|Str
+				let a: Printable = "foo"
+				let b: Alias = true`,
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Mut:   false,
+						Name:  "a",
+						Value: StrLiteral{Value: "foo"},
+					},
+					VariableBinding{
+						Mut:   false,
+						Name:  "b",
+						Value: BoolLiteral{Value: true},
+					},
+				},
+			},
+		},
+		{
+			name: "Errors when types don't match",
+			input: `
+					  type Printable = Num|Str
+						fn print(p: Printable) {}
+						print(true)`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Type mismatch: Expected Num|Str, got Bool"},
+			},
+		},
+		{
+			name: "Matching behavior on type unions",
+			input: `
+				type Printable = Num|Str|Bool
+				let a: Printable = "foo"
+				match a {
+				  Num => "number",
+					Str => "string",
+					_ => "other"
+				}`,
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Mut:   false,
+						Name:  "a",
+						Value: StrLiteral{Value: "foo"},
+					},
+					UnionMatch{
+						Subject: Identifier{Name: "a"},
+						Cases: map[Type]Block{
+							Num{}: {Body: []Statement{StrLiteral{Value: "number"}}},
+							Str{}: {Body: []Statement{StrLiteral{Value: "string"}}},
+						},
+						CatchAll: Block{Body: []Statement{StrLiteral{Value: "other"}}},
+					},
+				},
+			},
+		},
+	})
+}

@@ -343,3 +343,44 @@ func (g Option) GetProperty(name string) Type {
 		return nil
 	}
 }
+
+type Union struct {
+	name  string
+	types []Type
+}
+
+func (u Union) GetName() string {
+	return u.name
+}
+func (u Union) GetType() Type {
+	return u
+}
+func (u Union) asFunction() (function, bool) {
+	return function{}, false
+}
+func (u Union) String() string {
+	types := make([]string, len(u.types))
+	for i, t := range u.types {
+		types[i] = t.String()
+	}
+	return fmt.Sprintf("%s", strings.Join(types, "|"))
+}
+func (u Union) GetProperty(name string) Type {
+	return nil
+}
+func (u Union) Is(other Type) bool {
+	for _, t := range u.types {
+		if t.Is(other) {
+			return true
+		}
+	}
+	return false
+}
+func (u Union) getFor(string string) Type {
+	for _, t := range u.types {
+		if t.String() == string {
+			return t
+		}
+	}
+	return nil
+}

@@ -144,6 +144,16 @@ func (v BooleanType) IsOptional() bool {
 	return v.optional
 }
 
+type TypeDeclaration struct {
+	BaseNode
+	Name Identifier
+	Type []DeclaredType
+}
+
+func (t TypeDeclaration) String() string {
+	return fmt.Sprintf("TypeDeclaration(%s)", t.Name)
+}
+
 type List struct {
 	BaseNode
 	Element  DeclaredType
@@ -680,6 +690,19 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return Comment{
 			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node),
+		}, nil
+	case "type_declaration":
+		nameNode := p.mustChild(child, "name")
+		name := p.text(nameNode)
+		types := []DeclaredType{}
+		for _, n := range child.NamedChild(2).NamedChildren(p.tree.Walk()) {
+			types = append(types, p.resolveType(&n))
+		}
+
+		return TypeDeclaration{
+			BaseNode: makeBaseNode(child),
+			Name:     Identifier{BaseNode: makeBaseNode(nameNode), Name: name},
+			Type:     types,
 		}, nil
 	default:
 		return nil, fmt.Errorf("Unhandled statement: %s", child.GrammarName())

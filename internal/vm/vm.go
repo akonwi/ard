@@ -330,6 +330,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		return vm.matchEnum(e)
 	case checker.OptionMatch:
 		return vm.matchOption(e)
+	case checker.UnionMatch:
+		return vm.matchUnion(e)
 	case checker.StructInstance:
 		sym, ok := vm.scope.getStruct(e.Name)
 		if !ok {
@@ -486,6 +488,21 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 		match.Some.Body,
 		map[string]binding{bindingName: it},
 	)
+}
+
+func (vm VM) matchUnion(match checker.UnionMatch) *object {
+	subj := vm.evalExpression(match.Subject)
+	for expected_type, arm := range match.Cases {
+		if subj._type.Is(expected_type) {
+			return vm.evalBlock(arm.Body, map[string]binding{
+				"it": {false, subj, false},
+			})
+		}
+	}
+	if match.CatchAll.Body != nil {
+		return vm.evalBlock(match.CatchAll.Body, map[string]binding{})
+	}
+	panic(fmt.Sprintf("No match found for %s", subj))
 }
 
 func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding) *object {

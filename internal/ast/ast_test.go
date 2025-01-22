@@ -428,3 +428,21 @@ func TestTuples(t *testing.T) {
 		},
 	})
 }
+
+func TestTypeUnion(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Type union",
+			input: `type Value = Num | Bool`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					TypeDeclaration{
+						Name: Identifier{Name: "Value"},
+						Type: []DeclaredType{NumberType{}, BooleanType{}},
+					},
+				},
+			},
+		},
+	})
+}

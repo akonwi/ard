@@ -504,13 +504,24 @@ func TestMatchingOnBooleans(t *testing.T) {
 	})
 }
 
-// func TestOptions(t *testing.T) {
-// 	runTests(t, []test{
-// 		{
-// 			name: "Option usage",
-// 			input: `
-// 				let maybe = option()
-// 			`,
-// 		},
-// 	})
-// }
+func TestUnions(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Using unions",
+			input: `
+				type Printable = Str | Num | Bool
+				fn print(p: Printable) Str {
+				  match p {
+					  Str => it,
+						Num => it.as_str,
+						_ => {
+						  "boolean value"
+						}
+					}
+				}
+				print(true)
+			`,
+			want: "boolean value",
+		},
+	})
+}

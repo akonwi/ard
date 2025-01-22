@@ -288,6 +288,19 @@ func (o OptionMatch) GetType() Type {
 	return o.Some._type
 }
 
+type UnionMatch struct {
+	Subject  Expression
+	Cases    map[Type]Block
+	CatchAll Block
+}
+
+func (u UnionMatch) GetType() Type {
+	for _, block := range u.Cases {
+		return block.result
+	}
+	panic("unreachable")
+}
+
 // Statements don't produce anything
 type Statement interface{}
 
@@ -443,7 +456,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		}
 
-		// if no declared type, use the type of the value
+		// TODO: we've already checked for type mismatches at this point,
+		// if this is not declared as option, we can safely use the value's type
+		// but for now, we'll just use the value's type when inference is necessary
 		if _type.Is(Void{}) {
 			_type = value.GetType()
 		}
@@ -706,6 +721,14 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			_struct.addMethod(s.Self.Name, meth)
 		}
 		return nil
+	case ast.TypeDeclaration:
+		types := make([]Type, len(s.Type))
+		for i, t := range s.Type {
+			types[i] = c.resolveDeclaredType(t)
+		}
+		union := Union{name: s.Name.Name, types: types}
+		c.scope.declare(union)
+		return nil
 	default:
 		return c.checkExpression(s)
 	}
@@ -958,6 +981,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return c.checkBoolMatch(e, subject)
 		case Option:
 			return c.checkOptionMatch(e, subject)
+		case Union:
+			return c.checkUnionMatch(e, subject)
 		default:
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -1280,6 +1305,73 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 		Subject: subject,
 		None:    noneCase,
 		Some:    someCase,
+	}
+}
+
+func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) UnionMatch {
+	cases := map[Type]Block{}
+	var catchAll Block
+
+	var result Type = nil
+	for i, arm := range expr.Cases {
+		id, isIdentifier := arm.Pattern.(ast.Identifier)
+		if !isIdentifier {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: arm.Pattern.GetLocation(),
+				Message:  "Pattern must be a type",
+			})
+			return UnionMatch{}
+		}
+
+		if id.Name == "_" {
+			if i != len(expr.Cases)-1 {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Catch-all case must be last",
+					location: arm.Pattern.GetLocation(),
+				})
+				return UnionMatch{}
+			}
+			catchAll = c.checkBlock(arm.Body, []variable{})
+			continue
+		}
+
+		union := subject.GetType().(Union)
+		if it_type := union.getFor(id.Name); it_type == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Unexpected: %s is not in %s", id.Name, union),
+				location: arm.Pattern.GetLocation(),
+			})
+			return UnionMatch{}
+		} else {
+			block := c.checkBlock(
+				arm.Body,
+				[]variable{
+					{name: "it", mut: false, _type: it_type},
+				},
+			)
+			cases[it_type] = block
+			if result == nil {
+				result = block.result
+			} else {
+				if !result.Is(block.result) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						location: arm.GetLocation(),
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, block.result),
+					})
+				}
+			}
+		}
+
+	}
+
+	return UnionMatch{
+		Subject:  subject,
+		Cases:    cases,
+		CatchAll: catchAll,
 	}
 }
 

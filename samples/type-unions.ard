@@ -1,0 +1,29 @@
+use ard/io
+
+struct Square { size: Num }
+struct Circle { radius: Num }
+
+type Shape = Square | Circle
+
+fn get_name(shape: Shape) Str {
+  match shape {
+    Square => "Square",
+    Circle => "Circle"
+  }
+}
+
+fn fmt_area(shape: Shape) Str {
+  match shape {
+    Square => it.size.as_str,
+    Circle => it.radius.as_str
+  }
+}
+
+let sq = Square { size: 10 }
+let cir = Circle { radius: 5 }
+
+// TODO: allow identifiers in lists
+// let shapes: [Shape] = [sq, cir]
+// for shape in shapes {
+  io.print("{{get_name(sq)}} area: {{fmt_area(sq)}}")
+// }
