@@ -10,7 +10,7 @@ import (
 type Type interface {
 	String() string
 	GetProperty(name string) Type
-	Is(other Type) bool
+	Matches(other Type) bool
 }
 
 func areSameType(a, b Type) bool {
@@ -25,8 +25,8 @@ func (v Void) String() string {
 func (v Void) GetProperty(name string) Type {
 	return nil
 }
-func (v Void) Is(other Type) bool {
-	return v.String() == other.String()
+func (v Void) Matches(other Type) bool {
+	return areSameType(v, other)
 }
 
 type Str struct{}
@@ -44,7 +44,7 @@ func (s Str) GetProperty(name string) Type {
 		return nil
 	}
 }
-func (s Str) Is(other Type) bool {
+func (s Str) Matches(other Type) bool {
 	return s.String() == other.String()
 }
 
@@ -61,7 +61,7 @@ func (n Num) GetProperty(name string) Type {
 		return nil
 	}
 }
-func (n Num) Is(other Type) bool {
+func (n Num) Matches(other Type) bool {
 	return n.String() == other.String()
 }
 
@@ -78,7 +78,7 @@ func (b Bool) GetProperty(name string) Type {
 		return nil
 	}
 }
-func (b Bool) Is(other Type) bool {
+func (b Bool) Matches(other Type) bool {
 	return b.String() == other.String()
 }
 
@@ -99,7 +99,7 @@ func (f function) String() string {
 func (f function) GetProperty(name string) Type {
 	return nil
 }
-func (f function) Is(other Type) bool {
+func (f function) Matches(other Type) bool {
 	return f.String() == other.String()
 }
 
@@ -112,6 +112,9 @@ func (l List) GetElementType() Type {
 }
 
 func (l List) String() string {
+	if l.element == nil {
+		return "[?]"
+	}
 	return fmt.Sprintf("[%s]", l.element)
 }
 
@@ -136,19 +139,15 @@ func (l List) GetProperty(name string) Type {
 	}
 }
 
-func (l List) Is(other Type) bool {
+func (l List) Matches(other Type) bool {
 	if otherList, ok := other.(List); ok {
 		// if either list is still open, then they are compatible
 		if l.element == nil || otherList.element == nil {
 			return true
 		}
-		return l.element.String() == otherList.element.String()
+		return l.element.Matches(otherList.element)
 	}
 	return false
-}
-
-func makeList(element Type) List {
-	return List{element: element}
 }
 
 type Enum struct {
@@ -160,7 +159,7 @@ type Enum struct {
 func (e Enum) String() string {
 	return e.Name
 }
-func (e Enum) Is(other Type) bool {
+func (e Enum) Matches(other Type) bool {
 	if otherEnum, isEnum := other.(Enum); isEnum {
 		if len(e.Variants) != len(otherEnum.Variants) {
 			return false
@@ -245,7 +244,7 @@ func (s Struct) GetInstanceId() string {
 	return s.selfName
 }
 
-func (s *Struct) Is(other Type) bool {
+func (s *Struct) Matches(other Type) bool {
 	otherStruct, ok := other.(*Struct)
 	if !ok {
 		return false
@@ -256,8 +255,8 @@ func (s *Struct) Is(other Type) bool {
 	if len(s.Fields) != len(otherStruct.Fields) {
 		return false
 	}
-	for k, v := range s.Fields {
-		if ov, ok := otherStruct.Fields[k]; !ok || !v.Is(ov) {
+	for field, fieldType := range s.Fields {
+		if otherField, ok := otherStruct.Fields[field]; !ok || !fieldType.Matches(otherField) {
 			return false
 		}
 	}
@@ -316,12 +315,12 @@ func (g Option) String() string {
 	}
 	return g.inner.String() + "?"
 }
-func (g Option) Is(other Type) bool {
+func (g Option) Matches(other Type) bool {
 	if otherOption, ok := other.(Option); ok {
 		if g.inner == nil || otherOption.inner == nil {
 			return true
 		}
-		return g.inner.Is(otherOption.inner)
+		return g.inner.Matches(otherOption.inner)
 	}
 	return false
 }
@@ -370,20 +369,20 @@ func (u Union) String() string {
 func (u Union) GetProperty(name string) Type {
 	return nil
 }
-func (u Union) Is(other Type) bool {
+func (u Union) Matches(other Type) bool {
 	if otherUnion, ok := other.(Union); ok {
 		if len(u.types) != len(otherUnion.types) {
 			return false
 		}
 		for i, t := range u.types {
-			if !t.Is(otherUnion.types[i]) {
+			if !t.Matches(otherUnion.types[i]) {
 				return false
 			}
 		}
 		return true
 	}
 	for _, t := range u.types {
-		if t.Is(other) {
+		if t.Matches(other) {
 			return true
 		}
 	}

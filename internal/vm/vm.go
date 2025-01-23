@@ -167,7 +167,7 @@ func (o object) String() string {
 }
 
 func (o object) equals(other object) bool {
-	return o.raw == other.raw && o._type.Is(other._type)
+	return o.raw == other.raw && o._type.Matches(other._type)
 }
 
 func (vm *VM) evalExpression(expr checker.Expression) *object {
@@ -473,7 +473,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 func (vm VM) matchUnion(match checker.UnionMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for expected_type, arm := range match.Cases {
-		if subj._type.Is(expected_type) {
+		if subj._type.Matches(expected_type) {
 			return vm.evalBlock(arm.Body, map[string]binding{
 				"it": {false, subj, false},
 			})

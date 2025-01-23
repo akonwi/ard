@@ -2,7 +2,7 @@ package checker
 
 import "testing"
 
-func TestTypeEquality(t *testing.T) {
+func TestTypeMatching(t *testing.T) {
 	type test struct {
 		a    Type
 		b    Type
@@ -27,7 +27,7 @@ func TestTypeEquality(t *testing.T) {
 		{List{NumOrStr}, List{NumOrStr}, true},
 	}
 	for _, tt := range tests {
-		if res := tt.a.Is(tt.b); res != tt.want {
+		if res := tt.a.Matches(tt.b); res != tt.want {
 			t.Errorf("%s == %s: want %v, got %v", tt.a, tt.b, tt.want, res)
 		}
 	}
@@ -63,27 +63,27 @@ func TestListAPI(t *testing.T) {
 
 	push := list.GetProperty("push")
 	expected := function{name: "push", parameters: []variable{{name: "item", _type: list.element}}, returns: Num{}}
-	if !push.Is(expected) {
+	if !push.Matches(expected) {
 		t.Fatalf("List::push should be %s, got %s", expected, push)
 	}
 }
 
 func TestListType(t *testing.T) {
-	strList := makeList(Str{})
-	numList := makeList(Num{})
-	if !strList.Is(strList) {
+	strList := List{Str{}}
+	numList := List{Num{}}
+	if !strList.Matches(strList) {
 		t.Errorf("[Str] == [Str]")
 	}
-	if !numList.Is(makeList(Num{})) {
+	if !numList.Matches(List{Num{}}) {
 		t.Errorf("[Num] == [Num]")
 	}
-	if strList.Is(numList) {
+	if strList.Matches(numList) {
 		t.Errorf("[Str] != [Num]")
 	}
-	if !strList.Is(makeList(nil)) {
+	if !strList.Matches(List{nil}) {
 		t.Errorf("[Str] == [?]")
 	}
-	if strList.Is(makeList(Bool{})) {
+	if strList.Matches(List{Bool{}}) {
 		t.Errorf("[Str] != [Bool]")
 	}
 }
@@ -95,7 +95,7 @@ func TestEnumTypes(t *testing.T) {
 	if good.GetType().String() != Kind.String() {
 		t.Errorf("%s is %s, got %s", good, Kind, good.GetType())
 	}
-	if !Kind.Is(good.GetType()) {
+	if !Kind.Matches(good.GetType()) {
 		t.Errorf("%s allows %s", Kind, good.GetType())
 	}
 }

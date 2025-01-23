@@ -86,7 +86,7 @@ func (p Package) GetProperty(name string) Type {
 	}
 	return nil
 }
-func (p Package) Is(other Type) bool {
+func (p Package) Matches(other Type) bool {
 	return p.String() == other.String()
 }
 
@@ -451,7 +451,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			// get declared type if it exists
 			if s.Type != nil {
 				_type = c.resolveDeclaredType(s.Type)
-				if _type.Is(value.GetType()) == false {
+				if _type.Matches(value.GetType()) == false {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", _type, value.GetType()),
@@ -464,10 +464,10 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			// TODO: we've already checked for type mismatches at this point,
 			// if this is not declared as option, we can safely use the value's type
 			// but for now, we'll just use the value's type when inference is necessary
-			if _type.Is(Void{}) {
+			if _type.Matches(Void{}) {
 				_type = value.GetType()
 			}
-			if _type.Is(Void{}) || _type == nil {
+			if _type.Matches(Void{}) || _type == nil {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					location: s.Value.GetLocation(),
@@ -506,7 +506,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		}
 		value := c.checkExpression(s.Value)
-		if !variable._type.Is(value.GetType()) {
+		if !variable._type.Matches(value.GetType()) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", variable._type, value.GetType()),
@@ -544,7 +544,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 
 		startType := start.GetType()
 		endType := end.GetType()
-		if !startType.Is(Num{}) || !endType.Is(Num{}) {
+		if !startType.Matches(Num{}) || !endType.Matches(Num{}) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Invalid range: %s..%s", startType, endType),
@@ -634,7 +634,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		c.scope.declare(fn)
 
 		block := c.checkBlock(s.Body, blockVariables)
-		if !declaredReturnType.Is(Void{}) && !declaredReturnType.Is(block.result) {
+		if !declaredReturnType.Matches(Void{}) && !declaredReturnType.Matches(block.result) {
 			c.addDiagnostic(Diagnostic{
 				Kind: Error,
 				Message: fmt.Sprintf(
@@ -808,7 +808,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
 		case ast.Minus:
-			if !expr.GetType().Is(Num{}) {
+			if !expr.GetType().Matches(Num{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "The '-' operator can only be used on numbers",
@@ -818,7 +818,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			}
 			return Negation{Value: expr}
 		case ast.Bang:
-			if !expr.GetType().Is(Bool{}) {
+			if !expr.GetType().Matches(Bool{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "The '!' operator can only be used on booleans",
@@ -845,7 +845,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		switch operator {
 		case And, Or:
-			if !left.GetType().Is(Bool{}) || !right.GetType().Is(Bool{}) {
+			if !left.GetType().Matches(Bool{}) || !right.GetType().Matches(Bool{}) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
@@ -855,12 +855,12 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				return nil
 			}
 		case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-			if !left.GetType().Is(Num{}) || !right.GetType().Is(Num{}) {
+			if !left.GetType().Matches(Num{}) || !right.GetType().Matches(Num{}) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
 		default:
-			if !left.GetType().Is(Num{}) || !right.GetType().Is(Num{}) {
+			if !left.GetType().Matches(Num{}) || !right.GetType().Matches(Num{}) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
@@ -913,7 +913,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		} else {
 			for i, arg := range e.Args {
 				expr := c.checkExpression(arg)
-				if expr != nil && !fn.parameters[i]._type.Is(expr.GetType()) {
+				if expr != nil && !fn.parameters[i]._type.Matches(expr.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, expr.GetType()),
@@ -938,8 +938,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
 		block := c.checkBlock(e.Body, blockVariables)
-		if !declaredReturnType.Is(Void{}) {
-			if !declaredReturnType.Is(block.result) {
+		if !declaredReturnType.Matches(Void{}) {
+			if !declaredReturnType.Matches(block.result) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					location: e.ReturnType.GetLocation(),
@@ -1027,7 +1027,7 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 		elements := make([]Expression, len(expr.Items))
 		for i, item := range expr.Items {
 			element := c.checkExpression(item)
-			if !declaredType.(List).element.Is(element.GetType()) {
+			if !declaredType.(List).element.Matches(element.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredType, element.GetType()),
@@ -1058,7 +1058,7 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 		_type := elements[i].GetType()
 		if i == 0 {
 			elementType = _type
-		} else if !_type.Is(elementType) {
+		} else if !_type.Matches(elementType) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				location: item.GetLocation(),
@@ -1123,7 +1123,7 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 		block := c.checkBlock(arm.Body, variables)
 		if i == 0 {
 			_type = block.result
-		} else if !block.result.Is(_type) {
+		} else if !block.result.Matches(_type) {
 			c.addDiagnostic(Diagnostic{
 				Kind: Error,
 				Message: fmt.Sprintf(
@@ -1222,7 +1222,7 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 		if i == 0 {
 			result = block.result
 		} else {
-			if !block.result.Is(result) {
+			if !block.result.Matches(result) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					location: arm.GetLocation(),
@@ -1283,7 +1283,7 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 			if result == nil {
 				result = noneCase.result
 			} else {
-				if !noneCase.result.Is(result) {
+				if !noneCase.result.Matches(result) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						location: arm.GetLocation(),
@@ -1309,7 +1309,7 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 				if result == nil {
 					result = block.result
 				} else {
-					if !block.result.Is(result) {
+					if !block.result.Matches(result) {
 						c.addDiagnostic(Diagnostic{
 							Kind:     Error,
 							location: arm.GetLocation(),
@@ -1391,7 +1391,7 @@ func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) 
 			if result == nil {
 				result = block.result
 			} else {
-				if !result.Is(block.result) {
+				if !result.Matches(block.result) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						location: arm.GetLocation(),
@@ -1460,7 +1460,7 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		} else {
 			for i, arg := range m.Args {
 				args[i] = c.checkExpression(arg)
-				if !fn.parameters[i]._type.Is(args[i].GetType()) {
+				if !fn.parameters[i]._type.Matches(args[i].GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),

@@ -6,7 +6,7 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] Proper type compatibility checks. Is() is not the same as Type.Allows()
+- [ ] error handling
 - [ ] maps
 - [ ] Allow Num as map keys
 - [ ] traditional for-loop
@@ -27,3 +27,5 @@ Checkout the [language spec](./language-spec.md)
 - [ ] tuples?
 - [ ] matching on numbers
 - [ ] matching on strings?
+- [ ] loops as expressions
+  - `let doubled: [Num] = for i in 1..10 { i * 2 }`
