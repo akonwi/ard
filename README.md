@@ -24,7 +24,6 @@ Checkout the [language spec](./language-spec.md)
   - fails: `if !a.b { }`
   - works: `if !(a.b) { }`
 - [ ] replace `!` with `not`
-- [ ] tuples?
 - [ ] matching on numbers
 - [ ] matching on strings?
 - [ ] loops as expressions

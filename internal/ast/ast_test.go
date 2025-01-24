@@ -18,7 +18,6 @@ var compareOptions = cmp.Options{
 		NumberType{},
 		StringType{},
 		BooleanType{},
-		TupleType{},
 		List{},
 		Map{},
 		CustomType{}),
@@ -399,30 +398,6 @@ func TestComments(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					Comment{Value: "// this is a comment"},
-				},
-			},
-		},
-	})
-}
-
-func TestTuples(t *testing.T) {
-	runTests(t, []test{
-		{
-			name:  "Tuples",
-			input: `let tuple: [Num,Bool] = [1,true]`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: false,
-						Name:    "tuple",
-						Type: TupleType{
-							Items: []DeclaredType{NumberType{}, BooleanType{}},
-						},
-						Value: ListLiteral{
-							Items: []Expression{NumLiteral{Value: "1"}, BoolLiteral{Value: true}},
-						},
-					},
 				},
 			},
 		},

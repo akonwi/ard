@@ -273,35 +273,6 @@ func (s Struct) asFunction() (function, bool) {
 	return function{}, false
 }
 
-type Tuple struct {
-	elements []Type
-}
-
-func (l Tuple) String() string {
-	elements := make([]string, len(l.elements))
-	for i, it := range l.elements {
-		elements[i] = it.String()
-	}
-	return fmt.Sprintf("[%s]", strings.Join(elements, ","))
-}
-
-func (l Tuple) GetProperty(name string) Type {
-	switch name {
-	case "$0":
-		return l.elements[0]
-	case "$1":
-		return l.elements[1]
-	case "$2":
-		return l.elements[2]
-	default:
-		return nil
-	}
-}
-
-func (l Tuple) Is(other Type) bool {
-	return l.String() == other.String()
-}
-
 type Option struct {
 	inner Type
 }

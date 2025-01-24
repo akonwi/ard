@@ -168,20 +168,6 @@ func (v List) IsOptional() bool {
 	return v.optional
 }
 
-type TupleType struct {
-	BaseNode
-	Items    []DeclaredType
-	optional bool
-}
-
-func (s TupleType) GetName() string {
-	return "Tuple"
-}
-
-func (v TupleType) IsOptional() bool {
-	return v.optional
-}
-
 type Map struct {
 	BaseNode
 	Key      DeclaredType
@@ -763,13 +749,6 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 		return Void{makeBaseNode(child)}
 	case "identifier":
 		return CustomType{makeBaseNode(child), p.text(child), optional}
-	case "tuple_type":
-		itemNodes := p.mustChildren(child, "element_type")
-		items := make([]DeclaredType, len(itemNodes))
-		for i, itemNode := range itemNodes {
-			items[i] = p.resolveType(&itemNode)
-		}
-		return TupleType{makeBaseNode(child), items, optional}
 	default:
 		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
 	}

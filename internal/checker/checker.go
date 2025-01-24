@@ -141,15 +141,6 @@ func (s StructInstance) GetType() Type {
 	return s._type
 }
 
-type TupleLiteral struct {
-	Elements []Expression
-	// _type    List
-}
-
-func (l TupleLiteral) GetType() Type {
-	return nil
-}
-
 type Negation struct {
 	Value Expression
 }
