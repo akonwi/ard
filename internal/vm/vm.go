@@ -320,6 +320,12 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		}
 		return &object{fields, sym}
 
+	case checker.MapLiteral:
+		entries := make(map[object]*object)
+		for key, value := range e.Entries {
+			entries[*vm.evalExpression(key)] = vm.evalExpression(value)
+		}
+		return &object{entries, e.GetType()}
 	case checker.PackageAccess:
 		switch e.Package.Path {
 		case "ard/io":
@@ -373,6 +379,13 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 		default:
 			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 		}
+	case checker.Map:
+		switch propName {
+		case "size":
+			return &object{len(i.raw.(map[object]*object)), checker.Num{}}
+		default:
+			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
+		}
 	case *checker.Struct:
 		if field, ok := i.raw.(map[string]*object)[propName]; ok {
 			return field
@@ -401,6 +414,32 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		default:
 			panic(fmt.Sprintf("Unimplemented method: %s.%s", o._type, fn.Name))
 		}
+
+	case checker.Map:
+		m := o.raw.(map[object]*object)
+		switch fn.Name {
+		case "set":
+			key := vm.evalExpression(fn.Args[0])
+			val := vm.evalExpression(fn.Args[1])
+			m[*key] = val
+			return &object{nil, checker.Void{}}
+		case "get":
+			key := vm.evalExpression(fn.Args[0])
+			if val, ok := m[*key]; ok {
+				return &object{val.raw, val._type}
+			}
+			return &object{nil, fn.GetType().(checker.Option).GetInnerType()}
+		case "drop":
+			key := vm.evalExpression(fn.Args[0])
+			delete(m, *key)
+			return &object{nil, checker.Void{}}
+		case "has":
+			key := vm.evalExpression(fn.Args[0])
+			return &object{m[*key] != nil, checker.Bool{}}
+		default:
+			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
+		}
+
 	case checker.Option:
 		switch fn.Name {
 		case "some":
@@ -462,6 +501,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 	if subj.raw == nil {
 		return vm.evalBlock(match.None.Body, nil)
 	}
+
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
 	it := binding{false, subj, false}
 	return vm.evalBlock(

@@ -182,6 +182,18 @@ func (m Map) GetProperty(name string) Type {
 			parameters: []variable{{name: "key", _type: m.key}},
 			returns:    Option{m.value},
 		}
+	case "drop":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "key", _type: m.key}},
+			returns:    Void{},
+		}
+	case "has":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "key", _type: m.key}},
+			returns:    Bool{},
+		}
 	default:
 		return nil
 	}

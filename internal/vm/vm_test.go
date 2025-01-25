@@ -429,6 +429,70 @@ func TestListApi(t *testing.T) {
 	})
 }
 
+func TestMapApi(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Map::size",
+			input: `
+				let ages = ["Alice":40, "Bob":30]
+				let jobs: [Str:Num] = [:]
+				ages.size + jobs.size`,
+			want: 2,
+		},
+		{
+			name: "Map::get reads entries",
+			input: `
+				let ages = ["Alice":40, "Bob":30]
+				match ages.get("Alice") {
+				  age => "Alice is {{age.as_str}}",
+					_ => "Not found"
+				}`,
+			want: "Alice is 40",
+		},
+		{
+			name: "Map::set adds entries",
+			input: `
+				let ages = ["Alice":40, "Bob":30]
+				ages.set("Charlie", 25)
+				ages.set("Joe", 1)
+				ages.size`,
+			want: 4,
+		},
+		{
+			name: "Map::set updates entries",
+			input: `
+				let ages = ["Alice":40, "Bob":30]
+				ages.set("Bob", 31)
+				match ages.get("Bob") {
+				  age => "Bob is {{age.as_str}}",
+					_ => "Not found"
+				}`,
+			want: "Bob is 31",
+		},
+		{
+			name: "Map::drop removes entries",
+			input: `
+				let ages = ["Alice":40, "Bob":30]
+				ages.drop("Alice")
+				match ages.get("Alice") {
+				  age => age,
+					_ => 0
+				}`,
+			want: 0,
+		},
+		{
+			name: "Map::has returns whether an entry exists",
+			input: `
+				let ages = ["Alice":40, "Bob":30]
+				let has_alice = ages.has("Alice").as_str
+				let has_charlie = ages.has("Charlie").as_str
+				"{{has_alice}},{{has_charlie}}"
+				`,
+			want: "true,false",
+		},
+	})
+}
+
 func TestEnums(t *testing.T) {
 	runTests(t, []test{
 		{
