@@ -150,6 +150,50 @@ func (l List) Matches(other Type) bool {
 	return false
 }
 
+type Map struct {
+	key   Type
+	value Type
+}
+
+func (m Map) GetTypes() (Type, Type) {
+	return m.key, m.value
+}
+
+func (m Map) String() string {
+	return fmt.Sprintf("[%s:%s]", m.key, m.value)
+}
+
+func (m Map) GetProperty(name string) Type {
+	switch name {
+	case "size":
+		return Num{}
+	case "set":
+		return function{
+			name: name,
+			parameters: []variable{
+				{name: "key", _type: m.key},
+				{name: "val", _type: m.value},
+			},
+			returns: Void{},
+		}
+	case "get":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "key", _type: m.key}},
+			returns:    Option{m.value},
+		}
+	default:
+		return nil
+	}
+}
+
+func (m Map) Matches(other Type) bool {
+	if otherMap, ok := other.(Map); ok {
+		return m.key.Matches(otherMap.key) && m.value.Matches(otherMap.value)
+	}
+	return false
+}
+
 type Enum struct {
 	Name     string
 	Variants []string

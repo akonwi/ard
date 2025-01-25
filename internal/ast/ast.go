@@ -498,7 +498,7 @@ func (l ListLiteral) String() string {
 }
 
 type MapEntry struct {
-	Key   string
+	Key   Expression
 	Value Expression
 }
 
@@ -739,9 +739,10 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 		element_typeNode := p.mustChild(child, "element_type")
 		return List{BaseNode: makeBaseNode(child), Element: p.resolveType(element_typeNode), optional: optional}
 	case "map_type":
+		keyNode := p.mustChild(child, "key")
 		valueNode := p.mustChild(child, "value")
 		return Map{
-			Key:      StringType{BaseNode: makeBaseNode(child)},
+			Key:      p.resolveType(keyNode),
 			Value:    p.resolveType(valueNode),
 			optional: optional,
 		}
@@ -750,7 +751,7 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 	case "identifier":
 		return CustomType{makeBaseNode(child), p.text(child), optional}
 	default:
-		panic(fmt.Errorf("Unresolved type: %v", child.GrammarName()))
+		panic(fmt.Errorf("Couldn't resolve type for grammar name: %v", child.GrammarName()))
 	}
 }
 
@@ -1191,7 +1192,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	entryNodes := node.ChildrenByFieldName("entry", p.tree.Walk())
 	entries := make([]MapEntry, len(entryNodes))
 
-	receivedKeys := make(map[string]int, len(entryNodes))
+	receivedKeys := make(map[Expression]int, len(entryNodes))
 	for i, entryNode := range entryNodes {
 		key, value, err := p.parseMapEntry(&entryNode)
 		if err != nil {
@@ -1207,9 +1208,12 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 	}, nil
 }
 
-func (p *Parser) parseMapEntry(node *tree_sitter.Node) (string, Expression, error) {
+func (p *Parser) parseMapEntry(node *tree_sitter.Node) (Expression, Expression, error) {
 	keyNode := node.ChildByFieldName("key")
-	key := p.text(keyNode)
+	key, err := p.parsePrimitiveValue(keyNode)
+	if err != nil {
+		return nil, nil, err
+	}
 	valueNode := node.ChildByFieldName("value")
 	value, err := p.parsePrimitiveValue(valueNode)
 	if err != nil {

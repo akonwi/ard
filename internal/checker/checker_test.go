@@ -37,6 +37,7 @@ var compareOptions = cmp.Options{
 		Package{},
 		Diagnostic{},
 		ListLiteral{},
+		MapLiteral{},
 		MatchCase{},
 		Block{},
 		EnumVariant{},

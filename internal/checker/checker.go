@@ -131,6 +131,15 @@ func (l ListLiteral) GetType() Type {
 	return l._type
 }
 
+type MapLiteral struct {
+	Entries map[Expression]Expression
+	_type   Map
+}
+
+func (m MapLiteral) GetType() Type {
+	return m._type
+}
+
 type StructInstance struct {
 	Name   string
 	Fields map[string]Expression
@@ -437,6 +446,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		if literal, isList := s.Value.(ast.ListLiteral); isList && s.Type != nil {
 			_type = c.resolveDeclaredType(s.Type)
 			value = c.checkList(literal, _type)
+		} else if _map, isMap := s.Value.(ast.MapLiteral); isMap && s.Type != nil {
+			_type = c.resolveDeclaredType(s.Type)
+			value = c.checkMap(_map, _type)
 		} else {
 			value = c.checkExpression(s.Value)
 			// get declared type if it exists
@@ -1008,6 +1020,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			_type:  _struct,
 		}
 		return instance
+	case ast.MapLiteral:
+		return c.checkMap(e, nil)
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
 	}
@@ -1042,6 +1056,7 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 		})
 		return ListLiteral{}
 	}
+
 	var elementType Type
 	elements := make([]Expression, len(expr.Items))
 	for i, item := range expr.Items {
@@ -1060,6 +1075,74 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 	return ListLiteral{
 		Elements: elements,
 		_type:    List{element: elementType},
+	}
+}
+
+func (c *checker) checkMap(expr ast.MapLiteral, declaredType Type) Expression {
+	entries := map[Expression]Expression{}
+	if declaredType != nil {
+		for _, entry := range expr.Entries {
+			key := c.checkExpression(entry.Key)
+			value := c.checkExpression(entry.Value)
+			declaredKeyType := declaredType.(Map).key
+			declaredValType := declaredType.(Map).value
+			if !declaredKeyType.Matches(key.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredKeyType, key.GetType()),
+					location: entry.Key.GetLocation(),
+				})
+			}
+			if !declaredValType.Matches(value.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredValType, value.GetType()),
+					location: entry.Value.GetLocation(),
+				})
+			}
+			entries[key] = value
+		}
+
+		return MapLiteral{
+			Entries: entries,
+			_type:   declaredType.(Map),
+		}
+	}
+
+	if len(expr.Entries) == 0 {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  "Empty maps need an explicit type",
+			location: expr.GetLocation(),
+		})
+		return MapLiteral{}
+	}
+
+	var keyType Type = Void{}
+	var valType Type = Void{}
+	for i, entry := range expr.Entries {
+		key := c.checkExpression(entry.Key)
+		value := c.checkExpression(entry.Value)
+		if i == 0 {
+			keyType = key.GetType()
+			valType = value.GetType()
+		} else {
+			if !keyType.Matches(key.GetType()) || !valType.Matches(value.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Map error: All entries must have the same type",
+					location: expr.GetLocation(),
+				})
+				return MapLiteral{}
+			}
+		}
+
+		entries[key] = value
+	}
+
+	return MapLiteral{
+		Entries: entries,
+		_type:   Map{key: keyType, value: valType},
 	}
 }
 
@@ -1516,6 +1599,11 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 	case ast.List:
 		_type = List{
 			element: c.resolveDeclaredType(tt.Element),
+		}
+	case ast.Map:
+		_type = Map{
+			key:   c.resolveDeclaredType(tt.Key),
+			value: c.resolveDeclaredType(tt.Value),
 		}
 	case ast.CustomType:
 		if name := c.scope.find(tt.GetName()); name != nil {
