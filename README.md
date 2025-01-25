@@ -6,9 +6,6 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] error handling
-- [ ] maps
-- [ ] Allow Num as map keys
 - [ ] traditional for-loop
   ```ard
   for mut i = 1; i < 10; i =+2; {
@@ -28,3 +25,4 @@ Checkout the [language spec](./language-spec.md)
 - [ ] matching on strings?
 - [ ] loops as expressions
   - `let doubled: [Num] = for i in 1..10 { i * 2 }`
+- [ ] error handling
