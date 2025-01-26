@@ -20,6 +20,7 @@ fn is_board_full() Bool {
   for cell in board {
     if cell.is_empty == true {
       full = false
+      break
     }
   }
   full

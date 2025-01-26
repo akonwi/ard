@@ -6,6 +6,7 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
+- [ ] matching on strings?
 - [ ] traditional for-loop
   ```ard
   for mut i = 1; i < 10; i =+2; {
@@ -22,7 +23,6 @@ Checkout the [language spec](./language-spec.md)
   - fails: `if !a.b { }`
   - works: `if !(a.b) { }`
 - [ ] matching on numbers
-- [ ] matching on strings?
 - [ ] loops as expressions
   - `let doubled: [Num] = for i in 1..10 { i * 2 }`
 - [ ] concurrency (Task?)
