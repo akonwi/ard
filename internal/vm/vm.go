@@ -64,47 +64,32 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			vm.evalStatement(s.Else)
 		}
 	case checker.ForRange:
-		vm.pushScope()
-		cursor := &binding{false, &object{}, false}
-		vm.scope.bindings[s.Cursor.Name] = cursor
 		for i := vm.evalExpression(s.Start).raw.(int); i <= vm.evalExpression(s.End).raw.(int); i++ {
-			cursor.value = &object{i, checker.Num{}}
-			for _, statement := range s.Body {
-				vm.evalStatement(statement)
-			}
+			cursor := binding{false, &object{i, checker.Num{}}, false}
+			variables := map[string]binding{s.Cursor.Name: cursor}
+			vm.evalBlock(s.Body, variables)
 		}
-		vm.popScope()
 	case checker.ForIn:
-		vm.pushScope()
-		cursor := &binding{false, &object{}, false}
-		vm.scope.bindings[s.Cursor.Name] = cursor
 		iterable := vm.evalExpression(s.Iterable)
 		switch iterable._type.(type) {
 		case checker.Str:
 			for _, item := range iterable.raw.(string) {
-				cursor.value = &object{string(item), checker.Str{}}
-				for _, statement := range s.Body {
-					vm.evalStatement(statement)
-				}
+				cursor := binding{false, &object{string(item), checker.Str{}}, false}
+				variables := map[string]binding{s.Cursor.Name: cursor}
+				vm.evalBlock(s.Body, variables)
 			}
 		case checker.List:
 			for _, item := range iterable.raw.([]*object) {
-				cursor.value = item
-				for _, statement := range s.Body {
-					vm.evalStatement(statement)
-				}
+				cursor := binding{false, item, false}
+				variables := map[string]binding{s.Cursor.Name: cursor}
+				vm.evalBlock(s.Body, variables)
 			}
 		default:
-			panic(fmt.Errorf("Unimplemented iterable type: %v", iterable._type))
+			panic(fmt.Errorf("Unexpected iterable type: %v", iterable._type))
 		}
-		vm.popScope()
 	case checker.WhileLoop:
 		for vm.evalExpression(s.Condition).raw.(bool) {
-			vm.pushScope()
-			for _, statement := range s.Body {
-				vm.evalStatement(statement)
-			}
-			vm.popScope()
+			vm.evalBlock(s.Body, map[string]binding{})
 		}
 	default:
 		expr, ok := s.(checker.Expression)
