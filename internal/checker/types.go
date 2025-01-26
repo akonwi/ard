@@ -134,6 +134,15 @@ func (l List) GetProperty(name string) Type {
 			parameters: []variable{{name: "index", _type: Num{}}},
 			returns:    Option{l.element},
 		}
+	case "set":
+		return function{
+			name: name,
+			parameters: []variable{
+				{name: "index", _type: Num{}},
+				{name: "value", _type: l.element},
+			},
+			returns: Bool{},
+		}
 	default:
 		return nil
 	}

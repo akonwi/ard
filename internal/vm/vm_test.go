@@ -426,6 +426,14 @@ func TestListApi(t *testing.T) {
 			  list.at(3)`,
 			want: 4,
 		},
+		{
+			name: "List::set updates the list at the specified index",
+			input: `
+				mut list = [1,2,3]
+				list.set(1, 10)
+				list.at(1)`,
+			want: 10,
+		},
 	})
 }
 

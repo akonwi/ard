@@ -509,6 +509,10 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		}
 		value := c.checkExpression(s.Value)
+		// if value is nil, it means there was an error in the expression
+		if value == nil {
+			return nil
+		}
 		if !variable._type.Matches(value.GetType()) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -875,7 +879,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
 			// todo: check if part has as_str
-			if part.GetType() != (Str{}) {
+			if part.GetType() != (Str{}) && !part.GetType().Matches(Option{Str{}}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),

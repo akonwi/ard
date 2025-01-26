@@ -399,18 +399,27 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	switch t := o._type.(type) {
 	case checker.List:
+		list, ok := o.raw.([]*object)
+		if !ok {
+			panic(fmt.Sprintf("Expected list, got %T", o.raw))
+		}
 		switch fn.Name {
 		case "push":
-			if list, ok := o.raw.([]*object); ok {
-				item := vm.evalExpression(fn.Args[0])
-				o.raw = append(list, item)
-				return &object{len(list), checker.Num{}}
-			}
-			panic(fmt.Sprintf("Expected list, got %T", o.raw))
+			item := vm.evalExpression(fn.Args[0])
+			o.raw = append(list, item)
+			return &object{len(list), checker.Num{}}
 		case "at":
-			list := o.raw.([]*object)
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
 			return list[index]
+		case "set":
+			result := &object{false, checker.Bool{}}
+			index := vm.evalExpression(fn.Args[0]).raw.(int)
+			if index >= len(list) {
+				return result
+			}
+			list[index] = vm.evalExpression(fn.Args[1])
+			result.raw = true
+			return result
 		default:
 			panic(fmt.Sprintf("Unimplemented method: %s.%s", o._type, fn.Name))
 		}
