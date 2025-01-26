@@ -1,6 +1,8 @@
 package vm
 
-import "github.com/akonwi/ard/internal/checker"
+import (
+	"github.com/akonwi/ard/internal/checker"
+)
 
 type binding struct {
 	mut      bool
@@ -11,10 +13,12 @@ type binding struct {
 type function func(args ...object) object
 
 type scope struct {
-	parent   *scope
-	bindings map[string]*binding
-	enums    map[string]checker.Enum
-	structs  map[string]*checker.Struct
+	parent    *scope
+	bindings  map[string]*binding
+	enums     map[string]checker.Enum
+	structs   map[string]*checker.Struct
+	breakable bool
+	broken    bool
 }
 
 func newScope(parent *scope) *scope {
@@ -64,4 +68,22 @@ func (s scope) getFunction(name string) (function, bool) {
 		return b.value.raw.(func(args ...object) object), true
 	}
 	return nil, false
+}
+
+func (s *scope) _break() {
+	if s.breakable {
+		s.broken = true
+	} else if s.parent != nil {
+		s.parent._break()
+	}
+}
+
+func (s *scope) isBroken() bool {
+	if s.broken {
+		return true
+	}
+	if s.parent != nil {
+		return s.parent.isBroken()
+	}
+	return false
 }

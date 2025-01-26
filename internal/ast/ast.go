@@ -70,6 +70,12 @@ type Program struct {
 	Statements []Statement
 }
 
+type Break struct{ BaseNode }
+
+func (b Break) String() string {
+	return "break"
+}
+
 type Comment struct {
 	BaseNode
 	Value string
@@ -677,6 +683,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node),
 		}, nil
+	case "break":
+		return Break{BaseNode: BaseNode{tsNode: node}}, nil
 	case "type_declaration":
 		nameNode := p.mustChild(child, "name")
 		name := p.text(nameNode)

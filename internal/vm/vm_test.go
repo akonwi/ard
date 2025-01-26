@@ -327,6 +327,24 @@ func TestWhileLoops(t *testing.T) {
 	}
 }
 
+func TestBreakStatement(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "break out of loop",
+			input: `
+			  mut count = 5
+				while count > 0 {
+				  count = count - 1
+					if count == 3 {
+					  break
+					}
+				}
+				count`,
+			want: 3,
+		},
+	})
+}
+
 func TestFunctions(t *testing.T) {
 	tests := []test{
 		{

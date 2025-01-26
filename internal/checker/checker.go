@@ -322,6 +322,8 @@ type VariableAssignment struct {
 	Value Expression
 }
 
+type Break struct{}
+
 type IfStatement struct {
 	Condition Expression
 	Body      []Statement
@@ -544,6 +546,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		return IfStatement{Condition: condition, Body: block.Body, Else: elseClause}
 	case ast.Comment:
 		return nil
+	case ast.Break:
+		return Break{}
 	case ast.RangeLoop:
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: Num{}}
 		start := c.checkExpression(s.Start)

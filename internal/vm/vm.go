@@ -39,6 +39,9 @@ func (vm *VM) addVariable(mut bool, name string, value *object) {
 
 func (vm *VM) evalStatement(stmt checker.Statement) *object {
 	switch s := stmt.(type) {
+	case checker.Break:
+		vm.scope._break()
+		return nil
 	case checker.VariableBinding:
 		vm.evalVariableBinding(s)
 	case checker.VariableAssignment:
@@ -67,7 +70,9 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		for i := vm.evalExpression(s.Start).raw.(int); i <= vm.evalExpression(s.End).raw.(int); i++ {
 			cursor := binding{false, &object{i, checker.Num{}}, false}
 			variables := map[string]binding{s.Cursor.Name: cursor}
-			vm.evalBlock(s.Body, variables)
+			if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
+				break
+			}
 		}
 	case checker.ForIn:
 		iterable := vm.evalExpression(s.Iterable)
@@ -76,21 +81,27 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			for _, item := range iterable.raw.(string) {
 				cursor := binding{false, &object{string(item), checker.Str{}}, false}
 				variables := map[string]binding{s.Cursor.Name: cursor}
-				vm.evalBlock(s.Body, variables)
+				if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
+					break
+				}
 			}
 		case checker.List:
 			for _, item := range iterable.raw.([]*object) {
 				cursor := binding{false, item, false}
 				variables := map[string]binding{s.Cursor.Name: cursor}
-				vm.evalBlock(s.Body, variables)
+				if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
+					break
+				}
 			}
 		default:
 			panic(fmt.Errorf("Unexpected iterable type: %v", iterable._type))
 		}
 	case checker.WhileLoop:
-		for vm.evalExpression(s.Condition).raw.(bool) {
-			vm.evalBlock(s.Body, map[string]binding{})
+		vm.scope.breakable = true
+		for vm.evalExpression(s.Condition).raw.(bool) && !vm.scope.isBroken() {
+			vm.evalBlock(s.Body, map[string]binding{}, false)
 		}
+		vm.scope.breakable = false
 	default:
 		expr, ok := s.(checker.Expression)
 		if !ok {
@@ -456,7 +467,8 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		for i, param := range method.Parameters {
 			args[param.Name] = binding{false, vm.evalExpression(fn.Args[i]), false}
 		}
-		return vm.evalBlock(method.Body, args)
+		res, _ := vm.evalBlock(method.Body, args, false)
+		return res
 	default:
 		panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		// return &object{nil, checker.Void{}}
@@ -467,16 +479,19 @@ func (vm VM) matchBool(match checker.BoolMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 
 	if subj.raw == true {
-		return vm.evalBlock(match.True.Body, nil)
+		res, _ := vm.evalBlock(match.True.Body, nil, false)
+		return res
 	}
-	return vm.evalBlock(match.False.Body, nil)
+	res, _ := vm.evalBlock(match.False.Body, nil, false)
+	return res
 }
 
 func (vm VM) matchEnum(match checker.EnumMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for value, arm := range match.Cases {
 		if subj.raw == value {
-			return vm.evalBlock(arm.Body, nil)
+			res, _ := vm.evalBlock(arm.Body, nil, false)
+			return res
 		}
 	}
 
@@ -485,7 +500,8 @@ func (vm VM) matchEnum(match checker.EnumMatch) *object {
 		if id, ok := match.CatchAll.Pattern.(checker.Identifier); ok {
 			variables[id.Name] = binding{false, subj, false}
 		}
-		return vm.evalBlock(match.CatchAll.Body, variables)
+		res, _ := vm.evalBlock(match.CatchAll.Body, variables, false)
+		return res
 	}
 	panic(fmt.Sprintf("No match found for %s", subj))
 }
@@ -493,34 +509,48 @@ func (vm VM) matchEnum(match checker.EnumMatch) *object {
 func (vm VM) matchOption(match checker.OptionMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	if subj.raw == nil {
-		return vm.evalBlock(match.None.Body, nil)
+		res, _ := vm.evalBlock(match.None.Body, nil, false)
+		return res
 	}
 
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
 	it := binding{false, subj, false}
-	return vm.evalBlock(
+	res, _ := vm.evalBlock(
 		match.Some.Body,
 		map[string]binding{bindingName: it},
+		false,
 	)
+	return res
 }
 
 func (vm VM) matchUnion(match checker.UnionMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for expected_type, arm := range match.Cases {
 		if subj._type.Matches(expected_type) {
-			return vm.evalBlock(arm.Body, map[string]binding{
-				"it": {false, subj, false},
-			})
+			res, _ := vm.evalBlock(
+				arm.Body,
+				map[string]binding{
+					"it": {false, subj, false},
+				},
+				false,
+			)
+			return res
 		}
 	}
 	if match.CatchAll.Body != nil {
-		return vm.evalBlock(match.CatchAll.Body, map[string]binding{})
+		res, _ := vm.evalBlock(match.CatchAll.Body, map[string]binding{}, false)
+		return res
 	}
 	panic(fmt.Sprintf("No match found for %s", subj))
 }
 
-func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding) *object {
+func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding, breakable bool) (*object, bool) {
 	vm.pushScope()
+	defer vm.popScope()
+
+	if breakable {
+		vm.scope.breakable = true
+	}
 	for name, variable := range variables {
 		vm.scope.bindings[name] = &variable
 	}
@@ -528,7 +558,9 @@ func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding) 
 	var result *object
 	for _, stmt := range block {
 		result = vm.evalStatement(stmt)
+		if vm.scope.isBroken() {
+			return result, true
+		}
 	}
-	vm.popScope()
-	return result
+	return result, false
 }
