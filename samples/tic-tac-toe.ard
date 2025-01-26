@@ -1,0 +1,146 @@
+use ard/io
+
+let board = ["","","","","","","","",""]
+
+let players = ["X", "O"]
+
+io.print("Starting Game")
+io.print("---------------")
+
+fn draw_board() {
+  io.print("{{board.at(0)}} | {{board.at(1)}} | {{board.at(2)}}")
+  io.print("-------")
+  io.print("{{board.at(3)}} | {{board.at(4)}} | {{board.at(5)}}")
+  io.print("-------")
+  io.print("{{board.at(6)}} | {{board.at(7)}} | {{board.at(8)}}")
+}
+
+fn is_board_full() Bool {
+  mut full = true
+  for cell in board {
+    if cell.is_empty == true {
+      full = false
+    }
+  }
+  full
+}
+
+fn read_move(player: Str) Num {
+  io.print("Enter a number between 1 and 9")
+  io.print("---------------")
+
+  let input = io.read_line()
+  mut pos = -1
+  if input == "1" {
+    pos = 0
+  } else if input == "2" {
+    pos = 1
+  } else if input == "3" {
+    pos = 2
+  } else if input == "4" {
+    pos = 3
+  } else if input == "5" {
+    pos = 4
+  } else if input == "6" {
+    pos = 5
+  } else if input == "7" {
+    pos = 6
+  } else if input == "8" {
+    pos = 7
+  } else if input == "9" {
+    pos = 8
+  }
+  pos
+}
+
+fn is_played(pos: Num) Bool {
+  match board.at(pos) {
+    s => s.is_empty == false,
+    _ => false
+  }
+}
+
+fn find_winner() Str {
+  mut winner = ""
+  if board.at(0) == board.at(1) and board.at(0) == board.at(2) {
+    winner = match board.at(0) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(3) == board.at(4) and board.at(3) == board.at(5) {
+    winner = match board.at(3) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(6) == board.at(7) and board.at(6) == board.at(8) {
+    winner = match board.at(6) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(0) == board.at(3) and board.at(0) == board.at(6) {
+    winner = match board.at(0) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(1) == board.at(4) and board.at(1) == board.at(7) {
+    winner = match board.at(1) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(2) == board.at(5) and board.at(2) == board.at(8) {
+    winner = match board.at(2) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(0) == board.at(4) and board.at(0) == board.at(8) {
+    winner = match board.at(0) {
+      s => s,
+      _ => ""
+    }
+  } else if board.at(2) == board.at(4) and board.at(2) == board.at(6) {
+    winner = match board.at(2) {
+      s => s,
+      _ => ""
+    }
+  }
+
+  winner
+}
+
+mut finished = false
+draw_board()
+while (finished == false) {
+  for player in players {
+    io.print("Player {{player}}: Your move")
+    mut move = read_move(player)
+    while move < 0 {
+      io.print("Invalid move")
+      move = read_move(player)
+    }
+    while (is_played(move)) {
+      io.print("Position already played")
+      move = read_move(player)
+    }
+
+    board.set(move, player)
+    io.print("---------------")
+    io.print("Player {{player}} played")
+    io.print("---------------")
+    draw_board()
+    io.print("---------------")
+
+    // check for a winner
+    let winner = find_winner()
+    if winner.is_empty == false {
+      io.print("Player {{winner}} wins!")
+      finished = true
+      break
+    }
+  }
+
+
+  if is_board_full() {
+    io.print("Game Over! It's a draw")
+    finished = true
+  }
+}
