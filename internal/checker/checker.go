@@ -857,7 +857,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				return nil
 			}
 		case Equal, NotEqual:
-			if (left.GetType() != Num{}) && (left.GetType() != Bool{}) && (left.GetType() != Str{}) {
+			if !areComparable(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}

@@ -432,3 +432,14 @@ func (u Union) getFor(string string) Type {
 	}
 	return nil
 }
+
+func areComparable(a, b Type) bool {
+	if a.Matches(Num{}) || a.Matches(Str{}) || a.Matches(Bool{}) {
+		return a.Matches(b)
+	}
+	if a.Matches(Option{}) {
+		return a.Matches(b) || a.(Option).inner.Matches(b)
+	}
+
+	return false
+}
