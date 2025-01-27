@@ -13,6 +13,10 @@ type Type interface {
 	Matches(other Type) bool
 }
 
+type Static interface {
+	GetStaticProperty(name string) Type
+}
+
 func areSameType(a, b Type) bool {
 	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }
@@ -63,6 +67,18 @@ func (n Num) GetProperty(name string) Type {
 }
 func (n Num) Matches(other Type) bool {
 	return n.String() == other.String()
+}
+func (n Num) GetStaticProperty(name string) Type {
+	switch name {
+	case "from_str":
+		return function{
+			name:       "from_str",
+			parameters: []variable{{name: "str", _type: Str{}}},
+			returns:    Option{Num{}},
+		}
+	default:
+		return nil
+	}
 }
 
 type Bool struct{}
@@ -252,6 +268,13 @@ func (e Enum) GetVariant(name string) (EnumVariant, bool) {
 	return EnumVariant{}, false
 }
 
+func (e Enum) GetStaticProperty(name string) Type {
+	if _, ok := e.GetVariant(name); ok {
+		return e
+	}
+	return nil
+}
+
 // impl symbol interface
 func (e Enum) GetName() string {
 	return e.Name
@@ -340,6 +363,10 @@ func (s Struct) asFunction() (function, bool) {
 
 type Option struct {
 	inner Type
+}
+
+func MakeOption(inner Type) Option {
+	return Option{inner: inner}
 }
 
 func (g Option) GetInnerType() Type {

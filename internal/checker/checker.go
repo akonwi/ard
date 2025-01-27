@@ -220,6 +220,15 @@ func (i InstanceProperty) GetType() Type {
 	return i.Property.GetType()
 }
 
+type StaticFunctionCall struct {
+	Subject  Static
+	Function FunctionCall
+}
+
+func (s StaticFunctionCall) GetType() Type {
+	return s.Function.GetType()
+}
+
 type PackageAccess struct {
 	Package  Package
 	Property Expression
@@ -806,11 +815,12 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 	case ast.BoolLiteral:
 		return BoolLiteral{Value: e.Value}
 	case ast.MemberAccess:
-		subject := c.checkExpression(e.Target)
 		switch e.AccessType {
 		case ast.Instance:
+			subject := c.checkExpression(e.Target)
 			return c.checkInstanceProperty(subject, e.Member)
 		case ast.Static:
+			subject := c.checkStaticExpression(e.Target)
 			return c.checkStaticProperty(subject, e.Member)
 		default:
 			panic("unreachable")
@@ -1032,6 +1042,32 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return c.checkMap(e, nil)
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
+	}
+}
+
+func (c *checker) checkStaticExpression(expr ast.Expression) Static {
+	switch e := expr.(type) {
+	case ast.Identifier:
+		if e.Name == "Num" {
+			return Num{}
+		}
+
+		sym := c.scope.find(e.Name)
+		if sym == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Undefined: %s", e.Name),
+				location: e.GetLocation(),
+			})
+			return nil
+		}
+
+		if enum, ok := (*sym).(Enum); ok {
+			return enum
+		}
+		return nil
+	default:
+		panic(fmt.Sprintf("Unhandled static expression: %T", e))
 	}
 }
 
@@ -1568,8 +1604,8 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 	}
 }
 
-func (c *checker) checkStaticProperty(subject Expression, member ast.Expression) Expression {
-	switch s := subject.GetType().(type) {
+func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Expression {
+	switch s := subject.(type) {
 	case Enum:
 		if variant, ok := s.GetVariant(member.(ast.Identifier).Name); ok {
 			return variant
@@ -1584,9 +1620,64 @@ func (c *checker) checkStaticProperty(subject Expression, member ast.Expression)
 			location: member.GetLocation(),
 		})
 		return nil
+
+	case Num:
+		switch m := member.(type) {
+		case ast.Identifier:
+			panic(fmt.Sprintf("Undefined Num::%s", m))
+		case ast.FunctionCall:
+			prop := s.GetStaticProperty(m.Name)
+			if prop == nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Undefined: Num::%s", m.Name),
+					location: m.GetLocation(),
+				})
+				return nil
+			}
+			fn, ok := prop.(function)
+			if !ok {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Not a function: Num::%s", m.Name),
+					location: m.GetLocation(),
+				})
+				return nil
+			}
+
+			if len(m.Args) != len(fn.parameters) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(m.Args)),
+					location: m.GetLocation(),
+				})
+				return nil
+			}
+
+			args := make([]Expression, len(m.Args))
+			for i, param := range fn.parameters {
+				arg := c.checkExpression(m.Args[i])
+				if !param._type.Matches(arg.GetType()) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
+						location: m.Args[i].GetLocation(),
+					})
+					return nil
+				} else {
+					args[i] = arg
+				}
+			}
+
+			return StaticFunctionCall{
+				Subject:  s,
+				Function: FunctionCall{Name: m.Name, Args: args, symbol: fn},
+			}
+		}
 	default:
 		panic(fmt.Sprintf("Unsupported static access for %T", s))
 	}
+	panic("unreachable")
 }
 
 func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {

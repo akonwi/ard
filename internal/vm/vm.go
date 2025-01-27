@@ -279,6 +279,23 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			return &result
 		}
 		panic(fmt.Sprintf("Function not found: %s", e.Name))
+	case checker.StaticFunctionCall:
+		args := make([]object, len(e.Function.Args))
+		for i, arg := range e.Function.Args {
+			args[i] = *vm.evalExpression(arg)
+		}
+		switch e.Subject.(type) {
+		case checker.Num:
+			switch e.Function.Name {
+			case "from_str":
+				res := &object{nil, checker.MakeOption(checker.Num{})}
+				if num, err := strconv.Atoi(args[0].raw.(string)); err == nil {
+					res.raw = num
+				}
+				return res
+			}
+		}
+		panic(fmt.Sprintf("Function not found: %s", e.Function.Name))
 	case checker.FunctionLiteral:
 		return &object{
 			raw: func(args ...object) object {

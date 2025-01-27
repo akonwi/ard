@@ -394,9 +394,18 @@ func TestFunctions(t *testing.T) {
 }
 
 func TestNumApi(t *testing.T) {
-	if res := run(t, `100.as_str`); res != "100" {
-		t.Errorf(`Expected "100", got %v`, res)
-	}
+	runTests(t, []test{
+		{
+			name:  ".as_str returns the string representation of a number",
+			input: `100.as_str`,
+			want:  "100",
+		},
+		{
+			name:  "::from_str parses a string into a number",
+			input: `Num::from_str("100")`,
+			want:  100,
+		},
+	})
 }
 
 func TestBoolApi(t *testing.T) {
