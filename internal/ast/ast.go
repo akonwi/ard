@@ -329,14 +329,14 @@ func (r RangeLoop) String() string {
 	return fmt.Sprintf("for range %s..%s", r.Start, r.End)
 }
 
-type ForLoop struct {
+type ForInLoop struct {
 	BaseNode
 	Cursor   Identifier
 	Iterable Expression
 	Body     []Statement
 }
 
-func (f ForLoop) String() string {
+func (f ForInLoop) String() string {
 	return fmt.Sprintf("for %s", f.Iterable)
 }
 
@@ -662,7 +662,7 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 		return p.parseFunctionDecl(child)
 	case "while_loop":
 		return p.parseWhileLoop(child)
-	case "for_loop":
+	case "for_in_loop":
 		return p.parseForLoop(child)
 	case "if_statement":
 		return p.parseIfStatement(child)
@@ -887,7 +887,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		}, nil
 	}
 
-	return ForLoop{
+	return ForInLoop{
 		BaseNode: BaseNode{tsNode: node},
 		Cursor:   Identifier{BaseNode: makeBaseNode(cursorNode), Name: p.text(cursorNode)},
 		Iterable: iterable,

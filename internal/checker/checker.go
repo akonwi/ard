@@ -579,7 +579,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			End:    end,
 			Body:   block.Body,
 		}
-	case ast.ForLoop:
+	case ast.ForInLoop:
 		iterable := c.checkExpression(s.Iterable)
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
 		// getBody func allows lazy evaluation so that cursor can be updated within the switch below
