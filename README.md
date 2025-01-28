@@ -6,12 +6,6 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] traditional for-loop
-  ```ard
-  for mut i = 1; i < 10; i =+2; {
-    io.print(i)
-  }
-  ```
 - [ ] remove `:` from type declarations
 - [ ] trailing commas (lists, structs, maps, matches)
 - [ ] fn return type is required otherwise, it's a void function

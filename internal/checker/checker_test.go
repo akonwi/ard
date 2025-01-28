@@ -834,6 +834,31 @@ func TestForLoops(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Traditional for loop",
+			input: `for mut i = 0; i < 10; i =+ 1 {}`,
+			output: Program{
+				Statements: []Statement{
+					ForLoop{
+						Init: VariableBinding{Mut: true, Name: "i", Value: NumLiteral{Value: 0}},
+						Condition: BinaryExpr{
+							Op:    LessThan,
+							Left:  Identifier{Name: "i"},
+							Right: NumLiteral{Value: 10},
+						},
+						Step: VariableAssignment{
+							Name: "i",
+							Value: BinaryExpr{
+								Op:    Add,
+								Left:  Identifier{Name: "i"},
+								Right: NumLiteral{Value: 1},
+							},
+						},
+						Body: Block{Body: []Statement{}},
+					},
+				},
+			},
+		},
 	})
 }
 

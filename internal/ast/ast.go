@@ -340,6 +340,18 @@ func (f ForInLoop) String() string {
 	return fmt.Sprintf("for %s", f.Iterable)
 }
 
+type ForLoop struct {
+	BaseNode
+	Init        VariableDeclaration
+	Condition   Expression
+	Incrementer Statement
+	Body        []Statement
+}
+
+func (f ForLoop) String() string {
+	return fmt.Sprintf("for %s", f.Init)
+}
+
 type IfStatement struct {
 	BaseNode
 	Condition Expression
@@ -663,6 +675,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 	case "while_loop":
 		return p.parseWhileLoop(child)
 	case "for_in_loop":
+		return p.parseForInLoop(child)
+	case "for_loop":
 		return p.parseForLoop(child)
 	case "if_statement":
 		return p.parseIfStatement(child)
@@ -861,7 +875,7 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 	}, nil
 }
 
-func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
+func (p *Parser) parseForInLoop(node *tree_sitter.Node) (Statement, error) {
 	cursorNode := p.mustChild(node, "cursor")
 
 	rangeNode := node.ChildByFieldName("range")
@@ -892,6 +906,44 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 		Cursor:   Identifier{BaseNode: makeBaseNode(cursorNode), Name: p.text(cursorNode)},
 		Iterable: iterable,
 		Body:     body,
+	}, nil
+}
+
+func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
+	if node.HasError() {
+		return nil, fmt.Errorf("Parsing error encountered in for loop: %s", p.text(node))
+	}
+
+	cursorNode := p.mustChild(node, "cursor")
+	cursor, err := p.parseVariableDecl(cursorNode)
+	if err != nil {
+		return nil, err
+	}
+
+	conditionNode := p.mustChild(node, "condition")
+	condition, err := p.parseExpression(conditionNode)
+	if err != nil {
+		return nil, err
+	}
+
+	incrementerNode := p.mustChild(node, "step")
+	incrementer, err := p.parseStatement(incrementerNode)
+	if err != nil {
+		return nil, err
+	}
+
+	bodyNode := p.mustChild(node, "body")
+	body, err := p.parseBlock(bodyNode)
+	if err != nil {
+		return nil, err
+	}
+
+	return ForLoop{
+		BaseNode:    BaseNode{tsNode: node},
+		Init:        cursor,
+		Condition:   condition,
+		Incrementer: incrementer,
+		Body:        body,
 	}, nil
 }
 

@@ -360,6 +360,38 @@ func TestForInLoops(t *testing.T) {
 	runTests(t, tests)
 }
 
+func TestForLoops(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "For loop",
+			input: `for mut i = 0; i < 10; i =+ 1 {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					ForLoop{
+						Init: VariableDeclaration{
+							Mutable: true,
+							Name:    "i",
+							Value:   NumLiteral{Value: "0"},
+						},
+						Condition: BinaryExpression{
+							Operator: LessThan,
+							Left:     Identifier{Name: "i"},
+							Right:    NumLiteral{Value: "10"},
+						},
+						Incrementer: VariableAssignment{
+							Name:     "i",
+							Operator: Increment,
+							Value:    NumLiteral{Value: "1"},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestInterpolatedStrings(t *testing.T) {
 	tests := []test{
 		{

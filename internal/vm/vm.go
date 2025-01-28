@@ -96,6 +96,18 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		default:
 			panic(fmt.Errorf("Unexpected iterable type: %v", iterable._type))
 		}
+
+	case checker.ForLoop:
+		vm.pushScope()
+		vm.scope.breakable = true
+		defer vm.popScope()
+
+		for vm.evalStatement(s.Init); vm.evalExpression(s.Condition).raw.(bool); vm.evalStatement(s.Step) {
+			if _, breaks := vm.evalBlock(s.Body.Body, map[string]binding{}, true); breaks {
+				break
+			}
+		}
+
 	case checker.WhileLoop:
 		vm.scope.breakable = true
 		for vm.evalExpression(s.Condition).raw.(bool) && !vm.scope.isBroken() {

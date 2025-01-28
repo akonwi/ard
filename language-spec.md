@@ -27,6 +27,18 @@ let name: Str = "Alice"
 mut age = 30
 ```
 
+#### Increment/Decrement short hand
+
+The syntax for this is slightly different from other languages.
+Rather than '+=' or '-=', in Ard, the `=` comes first (left to right readability)
+
+```ard
+age =+ 1
+age =- 2
+```
+
+There is no `++` or `--`.
+
 ### Functions
 
 - Use `fn` keyword to define functions
@@ -70,6 +82,14 @@ let string = match some_bool {
 ```
 
 ### Iteration
+
+C style for loop:
+
+```ard
+for mut i = 0; i <= 5; i =+1 {
+  io.print(i.as_str)
+}
+```
 
 Numeric inclusive range:
 ```ard

@@ -352,6 +352,13 @@ type ForIn struct {
 	Body     []Statement
 }
 
+type ForLoop struct {
+	Init      VariableBinding
+	Condition Expression
+	Step      Statement
+	Body      Block
+}
+
 type WhileLoop struct {
 	Condition Expression
 	Body      []Statement
@@ -519,11 +526,38 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
+
 		value := c.checkExpression(s.Value)
 		// if value is nil, it means there was an error in the expression
 		if value == nil {
 			return nil
 		}
+
+		if s.Operator == ast.Increment || s.Operator == ast.Decrement {
+			if !variable._type.Matches(Num{}) || !value.GetType().Matches(Num{}) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Increment and decrement operators can only be used on numbers",
+					location: s.GetLocation(),
+				})
+				return nil
+			}
+
+			var operator BinaryOperator
+			if s.Operator == ast.Increment {
+				operator = Add
+			} else {
+				operator = Sub
+			}
+
+			value = BinaryExpr{
+				Op:    operator,
+				Left:  Identifier{Name: s.Name, symbol: variable},
+				Right: c.checkExpression(s.Value),
+			}
+			return VariableAssignment{Name: s.Name, Value: value}
+		}
+
 		if !variable._type.Matches(value.GetType()) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -619,6 +653,26 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		default:
 			panic(fmt.Sprintf("Unhandled iterable type: %T", iterable.GetType()))
 		}
+
+	case ast.ForLoop:
+		// todo: this is a redundant scope
+		new_scope := newScope(c.scope)
+		c.scope = new_scope
+		defer func() { c.scope = new_scope.parent }()
+
+		init := c.checkStatement(s.Init).(VariableBinding)
+		condition := c.checkExpression(s.Condition)
+		step := c.checkStatement(s.Incrementer)
+
+		block := c.checkBlock(s.Body, []variable{})
+
+		return ForLoop{
+			Init:      init,
+			Condition: condition,
+			Step:      step,
+			Body:      block,
+		}
+
 	case ast.WhileLoop:
 		condition := c.checkExpression(s.Condition)
 		if condition.GetType() != (Bool{}) {
