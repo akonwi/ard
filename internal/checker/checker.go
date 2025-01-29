@@ -892,11 +892,11 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				return nil
 			}
 			return Negation{Value: expr}
-		case ast.Bang:
+		case ast.Not:
 			if !expr.GetType().Matches(Bool{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  "The '!' operator can only be used on booleans",
+					Message:  "The 'not' keyword can only be used on booleans",
 					location: e.Operand.GetLocation(),
 				})
 				return nil

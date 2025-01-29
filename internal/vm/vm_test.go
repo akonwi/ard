@@ -128,8 +128,8 @@ func TestUnaryExpressions(t *testing.T) {
 		input string
 		want  any
 	}{
-		{`!true`, false},
-		{`!false`, true},
+		{`not true`, false},
+		{`not false`, true},
 		{`-10`, -10},
 	} {
 		res := run(t, test.input)

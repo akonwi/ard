@@ -332,7 +332,7 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 		{
 			name:  "Boolean negation",
-			input: `!true`,
+			input: `not true`,
 			output: Program{
 				Statements: []Statement{
 					Not{Value: BoolLiteral{Value: true}},
@@ -341,9 +341,9 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 		{
 			name:  "Bang operator must be on booleans",
-			input: `!"string"`,
+			input: `not "string"`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "The '!' operator can only be used on booleans"},
+				{Kind: Error, Message: "The 'not' keyword can only be used on booleans"},
 			},
 		},
 	})

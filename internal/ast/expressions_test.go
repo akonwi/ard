@@ -8,7 +8,7 @@ import (
 func TestUnaryExpressions(t *testing.T) {
 	tests := []test{
 		{
-			name:  "Valid negation",
+			name:  "Valid numeric negation",
 			input: `let negative_number = -30`,
 			output: Program{
 				Imports: []Import{},
@@ -21,6 +21,25 @@ func TestUnaryExpressions(t *testing.T) {
 							Operand: NumLiteral{
 								Value: `30`,
 							}},
+					},
+				},
+			},
+		},
+		{
+			name:  "Valid boolean negation",
+			input: `let nope = not true`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					VariableDeclaration{
+						Name:    "nope",
+						Mutable: false,
+						Value: UnaryExpression{
+							Operator: Not,
+							Operand: BoolLiteral{
+								Value: true,
+							},
+						},
 					},
 				},
 			},

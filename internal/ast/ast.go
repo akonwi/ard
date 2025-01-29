@@ -412,6 +412,7 @@ const (
 	Equal
 	NotEqual
 	And
+	Not
 	Or
 	Range
 	Assign
@@ -1273,7 +1274,7 @@ func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error
 	operandNode := node.ChildByFieldName("operand")
 
 	operator := resolveOperator(operatorNode)
-	if operator != Minus && operator != Bang {
+	if operator != Minus && operator != Not {
 		return nil, fmt.Errorf("Unsupported unary operator: %v", operatorNode.GrammarName())
 	}
 
@@ -1325,6 +1326,8 @@ func resolveOperator(node *tree_sitter.Node) Operator {
 		return Or
 	case "and":
 		return And
+	case "not":
+		return Not
 	case "inclusive_range":
 		return Range
 	default:
@@ -1356,7 +1359,7 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 	}
 
 	operator := resolveOperator(operatorNode)
-	if operator == InvalidOp || operator == Bang {
+	if operator == InvalidOp || operator == Not {
 		return nil, fmt.Errorf("Unsupported operator: %v", operator)
 	}
 

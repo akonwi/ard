@@ -6,8 +6,6 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] fn return type is required otherwise, it's a void function
-- [ ] replace `!` with `not`
 - [ ] proper mutability checks
 - [ ] methods on enums?
 - [ ] using unary + member_access in if conditions shouldn't require parens
