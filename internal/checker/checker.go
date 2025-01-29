@@ -1747,8 +1747,6 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 		_type = Num{}
 	case ast.BooleanType:
 		_type = Bool{}
-	case ast.Void:
-		_type = Void{}
 	case ast.List:
 		_type = List{
 			element: c.resolveDeclaredType(tt.Element),

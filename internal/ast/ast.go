@@ -99,18 +99,6 @@ type DeclaredType interface {
 	GetLocation() Location
 }
 
-type Void struct {
-	BaseNode
-}
-
-func (v Void) GetName() string {
-	return "Void"
-}
-
-func (v Void) IsOptional() bool {
-	return false
-}
-
 type StringType struct {
 	BaseNode
 	optional bool
@@ -768,8 +756,6 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 			Value:    p.resolveType(valueNode),
 			optional: optional,
 		}
-	case "void":
-		return Void{makeBaseNode(child)}
 	case "identifier":
 		return CustomType{makeBaseNode(child), p.text(child), optional}
 	default:
