@@ -6,8 +6,6 @@ Checkout the [language spec](./language-spec.md)
 
 ## TODO
 
-- [ ] remove `:` from type declarations
-- [ ] trailing commas (lists, structs, maps, matches)
 - [ ] fn return type is required otherwise, it's a void function
 - [ ] replace `!` with `not`
 - [ ] proper mutability checks

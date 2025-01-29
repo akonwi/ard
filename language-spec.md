@@ -43,7 +43,7 @@ There is no `++` or `--`.
 
 - Use `fn` keyword to define functions
 - Return type is specified after the parameter list
-  - Return types are required. Without a return type, the function returns `Void`
+  - Return types are required. Without a return type, the function return is `Void` and ignored
 - There is no return keyword. The last expression is the returned value
 
 ```ard
@@ -113,8 +113,6 @@ for fruit in fruits {
 - Bool
 - [Num] - List
 - [Str:Num] - Map
-- Void - non-existence
-  - only used to ignore a function's return value
 
 ### Structs
 
