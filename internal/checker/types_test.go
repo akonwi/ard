@@ -2,7 +2,7 @@ package checker
 
 import "testing"
 
-func TestTypeMatching(t *testing.T) {
+func TestCoherenceChecks(t *testing.T) {
 	type test struct {
 		a    Type
 		b    Type
@@ -27,7 +27,7 @@ func TestTypeMatching(t *testing.T) {
 		{List{NumOrStr}, List{NumOrStr}, true},
 	}
 	for _, tt := range tests {
-		if res := tt.a.Matches(tt.b); res != tt.want {
+		if res := AreCoherent(tt.a, tt.b); res != tt.want {
 			t.Errorf("%s == %s: want %v, got %v", tt.a, tt.b, tt.want, res)
 		}
 	}

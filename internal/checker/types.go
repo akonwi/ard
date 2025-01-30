@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -17,8 +16,21 @@ type Static interface {
 	GetStaticProperty(name string) Type
 }
 
-func areSameType(a, b Type) bool {
-	return reflect.TypeOf(a) == reflect.TypeOf(b)
+// todo: rename to areCoherent
+func AreCoherent(a, b Type) bool {
+	if a.String() == b.String() {
+		return true
+	}
+
+	if aOption, ok := a.(Option); ok {
+		return aOption.Matches(b)
+	}
+
+	if aUnion, ok := a.(Union); ok {
+		return aUnion.Matches(b)
+	}
+
+	return false
 }
 
 type Void struct{}
@@ -30,7 +42,7 @@ func (v Void) GetProperty(name string) Type {
 	return nil
 }
 func (v Void) Matches(other Type) bool {
-	return areSameType(v, other)
+	return AreCoherent(v, other)
 }
 
 type Str struct{}
