@@ -17,7 +17,11 @@ func TestCoherenceChecks(t *testing.T) {
 		{Num{}, Str{}, false},
 		{Num{}, Bool{}, false},
 		{Num{}, List{Num{}}, false},
+		{List{}, Str{}, false},
 		{List{&Shape}, List{&Shape}, true},
+		{List{Str{}}, List{Str{}}, true},
+		{List{Num{}}, List{Num{}}, true},
+		{List{Num{}}, List{Str{}}, false},
 		{Num{}, Option{Num{}}, false},
 		{Option{}, Option{Num{}}, true},
 		{Option{Num{}}, Option{}, true},
@@ -63,28 +67,8 @@ func TestListAPI(t *testing.T) {
 
 	push := list.GetProperty("push")
 	expected := function{name: "push", parameters: []variable{{name: "item", _type: list.element}}, returns: Num{}}
-	if !push.matches(expected) {
+	if !AreCoherent(expected, push) {
 		t.Fatalf("List::push should be %s, got %s", expected, push)
-	}
-}
-
-func TestListType(t *testing.T) {
-	strList := List{Str{}}
-	numList := List{Num{}}
-	if !strList.matches(strList) {
-		t.Errorf("[Str] == [Str]")
-	}
-	if !numList.matches(List{Num{}}) {
-		t.Errorf("[Num] == [Num]")
-	}
-	if strList.matches(numList) {
-		t.Errorf("[Str] != [Num]")
-	}
-	if !strList.matches(List{nil}) {
-		t.Errorf("[Str] == [?]")
-	}
-	if strList.matches(List{Bool{}}) {
-		t.Errorf("[Str] != [Bool]")
 	}
 }
 
@@ -95,7 +79,7 @@ func TestEnumTypes(t *testing.T) {
 	if good.GetType().String() != Kind.String() {
 		t.Errorf("%s is %s, got %s", good, Kind, good.GetType())
 	}
-	if !Kind.matches(good.GetType()) {
-		t.Errorf("%s allows %s", Kind, good.GetType())
+	if !AreCoherent(Kind, good.GetType()) {
+		t.Errorf("%s should allow %s", Kind, good.GetType())
 	}
 }

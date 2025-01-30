@@ -5,11 +5,10 @@ import (
 	"strings"
 )
 
-// A static type, must be printable, have properties, and be comparable
+// A static type, must be printable, have properties
 type Type interface {
 	String() string
 	GetProperty(name string) Type
-	matches(other Type) bool
 }
 
 type Static interface {
@@ -20,19 +19,51 @@ type Static interface {
 check if a and b are coherent, i.e. they are the same type or one can be used as the other
 */
 func AreCoherent(a, b Type) bool {
-	if a == nil || b == nil {
-		return false
+	if a == nil && b == nil {
+		return true
 	}
+
 	if a.String() == b.String() {
 		return true
 	}
 
+	if aList, ok := a.(List); ok {
+		if bList, ok := b.(List); ok {
+			return AreCoherent(aList.element, bList.element)
+		}
+		return false
+	}
+
+	if aMap, ok := a.(Map); ok {
+		if bMap, ok := b.(Map); ok {
+			return AreCoherent(aMap.key, bMap.key) && AreCoherent(aMap.value, bMap.value)
+		}
+		return false
+	}
+
 	if aOption, ok := a.(Option); ok {
-		return aOption.matches(b)
+		if bOption, ok := b.(Option); ok {
+			if aOption.inner == nil || bOption.inner == nil {
+				return true
+			}
+			return AreCoherent(aOption.inner, bOption.inner)
+		}
+		return false
 	}
 
 	if aUnion, ok := a.(Union); ok {
-		return aUnion.matches(b)
+		if bUnion, ok := b.(Union); ok {
+			if len(aUnion.types) != len(bUnion.types) {
+				return false
+			}
+			for i, t := range aUnion.types {
+				if !AreCoherent(aUnion.types[i], t) {
+					return false
+				}
+			}
+			return true
+		}
+		return aUnion.allows(b)
 	}
 
 	return false
@@ -54,9 +85,6 @@ func (v Void) String() string {
 func (v Void) GetProperty(name string) Type {
 	return nil
 }
-func (v Void) matches(other Type) bool {
-	return AreCoherent(v, other)
-}
 
 type Str struct{}
 
@@ -73,9 +101,6 @@ func (s Str) GetProperty(name string) Type {
 		return nil
 	}
 }
-func (s Str) matches(other Type) bool {
-	return s.String() == other.String()
-}
 
 type Num struct{}
 
@@ -89,9 +114,6 @@ func (n Num) GetProperty(name string) Type {
 	default:
 		return nil
 	}
-}
-func (n Num) matches(other Type) bool {
-	return n.String() == other.String()
 }
 func (n Num) GetStaticProperty(name string) Type {
 	switch name {
@@ -119,9 +141,6 @@ func (b Bool) GetProperty(name string) Type {
 		return nil
 	}
 }
-func (b Bool) matches(other Type) bool {
-	return b.String() == other.String()
-}
 
 // also doubles as a symbol in scope
 type function struct {
@@ -139,9 +158,6 @@ func (f function) String() string {
 }
 func (f function) GetProperty(name string) Type {
 	return nil
-}
-func (f function) matches(other Type) bool {
-	return f.String() == other.String()
 }
 
 type List struct {
@@ -187,17 +203,6 @@ func (l List) GetProperty(name string) Type {
 	default:
 		return nil
 	}
-}
-
-func (l List) matches(other Type) bool {
-	if otherList, ok := other.(List); ok {
-		// if either list is still open, then they are compatible
-		if l.element == nil || otherList.element == nil {
-			return true
-		}
-		return l.element.matches(otherList.element)
-	}
-	return false
 }
 
 type Map struct {
@@ -249,13 +254,6 @@ func (m Map) GetProperty(name string) Type {
 	}
 }
 
-func (m Map) matches(other Type) bool {
-	if otherMap, ok := other.(Map); ok {
-		return m.key.matches(otherMap.key) && m.value.matches(otherMap.value)
-	}
-	return false
-}
-
 type Enum struct {
 	Name     string
 	Variants []string
@@ -264,21 +262,6 @@ type Enum struct {
 // impl Type interface
 func (e Enum) String() string {
 	return e.Name
-}
-func (e Enum) matches(other Type) bool {
-	if otherEnum, isEnum := other.(Enum); isEnum {
-		if len(e.Variants) != len(otherEnum.Variants) {
-			return false
-		}
-
-		for i, v := range otherEnum.Variants {
-			if e.Variants[i] != v {
-				return false
-			}
-		}
-		return true
-	}
-	return false
 }
 func (e Enum) GetProperty(name string) Type {
 	return nil
@@ -357,25 +340,6 @@ func (s Struct) GetInstanceId() string {
 	return s.selfName
 }
 
-func (s *Struct) matches(other Type) bool {
-	otherStruct, ok := other.(*Struct)
-	if !ok {
-		return false
-	}
-	if s.Name != otherStruct.Name {
-		return false
-	}
-	if len(s.Fields) != len(otherStruct.Fields) {
-		return false
-	}
-	for field, fieldType := range s.Fields {
-		if otherField, ok := otherStruct.Fields[field]; !ok || !fieldType.matches(otherField) {
-			return false
-		}
-	}
-	return true
-}
-
 func (s Struct) GetName() string {
 	return s.String()
 }
@@ -403,15 +367,7 @@ func (g Option) String() string {
 	}
 	return g.inner.String() + "?"
 }
-func (g Option) matches(other Type) bool {
-	if otherOption, ok := other.(Option); ok {
-		if g.inner == nil || otherOption.inner == nil {
-			return true
-		}
-		return g.inner.matches(otherOption.inner)
-	}
-	return false
-}
+
 func (g Option) GetProperty(name string) Type {
 	switch name {
 	case "some":
@@ -420,7 +376,7 @@ func (g Option) GetProperty(name string) Type {
 			parameters: []variable{
 				{name: "value", _type: g.inner},
 			},
-			returns: Void{},
+			returns: g,
 		}
 	case "none":
 		return function{
@@ -457,20 +413,9 @@ func (u Union) String() string {
 func (u Union) GetProperty(name string) Type {
 	return nil
 }
-func (u Union) matches(other Type) bool {
-	if otherUnion, ok := other.(Union); ok {
-		if len(u.types) != len(otherUnion.types) {
-			return false
-		}
-		for i, t := range u.types {
-			if !t.matches(otherUnion.types[i]) {
-				return false
-			}
-		}
-		return true
-	}
+func (u Union) allows(other Type) bool {
 	for _, t := range u.types {
-		if t.matches(other) {
+		if AreCoherent(t, other) {
 			return true
 		}
 	}
@@ -486,11 +431,16 @@ func (u Union) getFor(string string) Type {
 }
 
 func areComparable(a, b Type) bool {
-	if a.matches(Num{}) || a.matches(Str{}) || a.matches(Bool{}) {
-		return a.matches(b)
+	_, aIsNum := a.(Num)
+	_, aIsStr := a.(Str)
+	_, aIsBool := a.(Bool)
+	if aIsBool || aIsNum || aIsStr {
+		return AreCoherent(a, b)
 	}
-	if a.matches(Option{}) {
-		return a.matches(b) || a.(Option).inner.matches(b)
+
+	_, aIsOption := a.(Option)
+	if aIsOption {
+		return AreCoherent(a, b)
 	}
 
 	return false
