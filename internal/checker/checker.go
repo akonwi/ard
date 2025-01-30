@@ -74,7 +74,7 @@ func (p Package) GetProperty(name string) Type {
 	}
 	if p.Path == "ard/option" {
 		switch name {
-		case "make":
+		case "none":
 			return function{
 				name:       name,
 				parameters: []variable{},

@@ -182,7 +182,7 @@ An optional type can either have a value (`some`) or be empty (`none`).
 ```ard
 use ard/option
 
-mut maybe_name: Str? = option.make()
+mut maybe_name: Str? = option.none()
 maybe_name.some("Joe")
 maybe_name.none()
 

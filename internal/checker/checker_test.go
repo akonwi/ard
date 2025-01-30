@@ -1505,10 +1505,10 @@ func TestOptionals(t *testing.T) {
 	optionPkg := Package{Path: "ard/option"}
 	run(t, []test{
 		{
-			name: "Declaring an empty optional",
+			name: "Declaring optionals",
 			input: `
 				use ard/option
-				mut name: Str? = option.make()`,
+				mut name: Str? = option.none()`,
 			output: Program{
 				Imports: map[string]Package{
 					"option": optionPkg,
@@ -1519,7 +1519,7 @@ func TestOptionals(t *testing.T) {
 						Name: "name",
 						Value: PackageAccess{
 							Package:  optionPkg,
-							Property: FunctionCall{Name: "make", Args: []Expression{}},
+							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
 				},
@@ -1529,7 +1529,7 @@ func TestOptionals(t *testing.T) {
 			name: "Updating an optional",
 			input: `
 				use ard/option
-				mut name: Str? = option.make()
+				mut name: Str? = option.none()
 				name.some("Bob")
 				name = "Alice"
 				name.none()`,
@@ -1543,7 +1543,7 @@ func TestOptionals(t *testing.T) {
 						Name: "name",
 						Value: PackageAccess{
 							Package:  optionPkg,
-							Property: FunctionCall{Name: "make", Args: []Expression{}},
+							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
 					InstanceProperty{
@@ -1566,7 +1566,7 @@ func TestOptionals(t *testing.T) {
 				use ard/io
 				use ard/option
 
-				mut name: Str? = option.make()
+				mut name: Str? = option.none()
 				name.some("Bob")
 				match name {
 				  it => io.print("name is {{it}}"),
@@ -1583,7 +1583,7 @@ func TestOptionals(t *testing.T) {
 						Name: "name",
 						Value: PackageAccess{
 							Package:  optionPkg,
-							Property: FunctionCall{Name: "make", Args: []Expression{}},
+							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
 					InstanceProperty{

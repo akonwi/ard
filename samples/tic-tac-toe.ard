@@ -1,4 +1,5 @@
 use ard/io
+use ard/option
 
 struct Board {
   cells: [Str]
