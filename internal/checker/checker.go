@@ -955,7 +955,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
 			// todo: String trait
-			if !AreCoherent(part.GetType(), Str{}) {
+			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), Option{Str{}}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),

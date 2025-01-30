@@ -13,6 +13,8 @@ func (vm *VM) invokeOption(expr checker.Expression) *object {
 		switch e.Name {
 		case "none":
 			return &object{nil, option}
+		case "some":
+			return &object{vm.evalExpression(e.Args[0]).raw, e.GetType()}
 		default:
 			panic(fmt.Sprintf("Undefined option.%s", e.Name))
 		}

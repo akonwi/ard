@@ -23,6 +23,23 @@ func AreCoherent(a, b Type) bool {
 		return true
 	}
 
+	if aOption, ok := a.(Option); ok {
+		if bOption, ok := b.(Option); ok {
+			if aOption.inner == nil || bOption.inner == nil {
+				return true
+			}
+			return AreCoherent(aOption.inner, bOption.inner)
+		}
+		return false
+	}
+
+	if aAny, ok := a.(Any); ok {
+		return aAny.refine(b)
+	}
+	if bAny, ok := b.(Any); ok {
+		return bAny.refine(a)
+	}
+
 	if a.String() == b.String() {
 		return true
 	}
@@ -41,16 +58,6 @@ func AreCoherent(a, b Type) bool {
 		return false
 	}
 
-	if aOption, ok := a.(Option); ok {
-		if bOption, ok := b.(Option); ok {
-			if aOption.inner == nil || bOption.inner == nil {
-				return true
-			}
-			return AreCoherent(aOption.inner, bOption.inner)
-		}
-		return false
-	}
-
 	if aUnion, ok := a.(Union); ok {
 		if bUnion, ok := b.(Union); ok {
 			if len(aUnion.types) != len(bUnion.types) {
@@ -64,13 +71,6 @@ func AreCoherent(a, b Type) bool {
 			return true
 		}
 		return aUnion.allows(b)
-	}
-
-	if aAny, ok := a.(Any); ok {
-		return aAny.refine(b)
-	}
-	if bAny, ok := b.(Any); ok {
-		return bAny.refine(a)
 	}
 
 	return false
@@ -377,19 +377,11 @@ func (g Option) String() string {
 
 func (g Option) GetProperty(name string) Type {
 	switch name {
-	case "some":
-		return function{
-			name: "some",
-			parameters: []variable{
-				{name: "value", _type: g.inner},
-			},
-			returns: g,
-		}
-	case "none":
+	case "or":
 		return function{
 			name:       name,
-			parameters: []variable{},
-			returns:    Void{},
+			parameters: []variable{{name: "default", _type: g.inner}},
+			returns:    g.inner,
 		}
 	default:
 		return nil

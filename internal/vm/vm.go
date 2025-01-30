@@ -476,12 +476,11 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 
 	case checker.Option:
 		switch fn.Name {
-		case "some":
-			o.raw = vm.evalExpression(fn.Args[0]).raw
-			return &object{nil, checker.Void{}}
-		case "none":
-			o.raw = nil
-			return &object{nil, checker.Void{}}
+		case "or":
+			if o.raw != nil {
+				return &object{o.raw, t.GetInnerType()}
+			}
+			return vm.evalExpression(fn.Args[0])
 		default:
 			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
