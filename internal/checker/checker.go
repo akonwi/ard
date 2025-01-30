@@ -86,7 +86,7 @@ func (p Package) GetProperty(name string) Type {
 	}
 	return nil
 }
-func (p Package) Matches(other Type) bool {
+func (p Package) matches(other Type) bool {
 	return p.String() == other.String()
 }
 
@@ -472,7 +472,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			// get declared type if it exists
 			if s.Type != nil {
 				_type = c.resolveDeclaredType(s.Type)
-				if _type.Matches(value.GetType()) == false {
+				if !AreCoherent(_type, value.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", _type, value.GetType()),
@@ -485,10 +485,11 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			// TODO: we've already checked for type mismatches at this point,
 			// if this is not declared as option, we can safely use the value's type
 			// but for now, we'll just use the value's type when inference is necessary
-			if _type.Matches(Void{}) {
+			if IsVoid(_type) {
 				_type = value.GetType()
 			}
-			if _type.Matches(Void{}) || _type == nil {
+			// if it's still void, there's a problem
+			if IsVoid(_type) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					location: s.Value.GetLocation(),
@@ -534,7 +535,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 
 		if s.Operator == ast.Increment || s.Operator == ast.Decrement {
-			if !variable._type.Matches(Num{}) || !value.GetType().Matches(Num{}) {
+			if !AreCoherent(variable._type, Num{}) || !AreCoherent(value.GetType(), Num{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "Increment and decrement operators can only be used on numbers",
@@ -558,7 +559,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return VariableAssignment{Name: s.Name, Value: value}
 		}
 
-		if !variable._type.Matches(value.GetType()) {
+		if !AreCoherent(variable._type, value.GetType()) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", variable._type, value.GetType()),
@@ -598,7 +599,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 
 		startType := start.GetType()
 		endType := end.GetType()
-		if !startType.Matches(Num{}) || !endType.Matches(Num{}) {
+		if !AreCoherent(startType, Num{}) || !AreCoherent(startType, endType) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Invalid range: %s..%s", startType, endType),
@@ -708,7 +709,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		c.scope.declare(fn)
 
 		block := c.checkBlock(s.Body, blockVariables)
-		if !declaredReturnType.Matches(Void{}) && !declaredReturnType.Matches(block.result) {
+		if _, isVoid := declaredReturnType.(Void); !isVoid && !AreCoherent(declaredReturnType, block.result) {
 			c.addDiagnostic(Diagnostic{
 				Kind: Error,
 				Message: fmt.Sprintf(
@@ -883,7 +884,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
 		case ast.Minus:
-			if !expr.GetType().Matches(Num{}) {
+			if !AreCoherent(expr.GetType(), Num{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "The '-' operator can only be used on numbers",
@@ -893,7 +894,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			}
 			return Negation{Value: expr}
 		case ast.Not:
-			if !expr.GetType().Matches(Bool{}) {
+			if !AreCoherent(expr.GetType(), Bool{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "The 'not' keyword can only be used on booleans",
@@ -920,7 +921,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		switch operator {
 		case And, Or:
-			if !left.GetType().Matches(Bool{}) || !right.GetType().Matches(Bool{}) {
+			if !AreCoherent(left.GetType(), Bool{}) || !AreCoherent(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
@@ -930,12 +931,12 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				return nil
 			}
 		case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-			if !left.GetType().Matches(Num{}) || !right.GetType().Matches(Num{}) {
+			if !AreCoherent(left.GetType(), Num{}) || !AreCoherent(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
 		default:
-			if !left.GetType().Matches(Num{}) || !right.GetType().Matches(Num{}) {
+			if !AreCoherent(left.GetType(), Num{}) || !AreCoherent(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
@@ -946,8 +947,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		parts := make([]Expression, len(e.Chunks))
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
-			// todo: check if part has as_str
-			if part.GetType() != (Str{}) && !part.GetType().Matches(Option{Str{}}) {
+			// todo: String trait
+			if !AreCoherent(part.GetType(), Str{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),
@@ -988,7 +989,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		} else {
 			for i, arg := range e.Args {
 				expr := c.checkExpression(arg)
-				if expr != nil && !fn.parameters[i]._type.Matches(expr.GetType()) {
+				if !AreCoherent(fn.parameters[i]._type, expr.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, expr.GetType()),
@@ -1013,8 +1014,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
 		block := c.checkBlock(e.Body, blockVariables)
-		if !declaredReturnType.Matches(Void{}) {
-			if !declaredReturnType.Matches(block.result) {
+		if !IsVoid(declaredReturnType) {
+			if !AreCoherent(declaredReturnType, block.result) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					location: e.ReturnType.GetLocation(),
@@ -1130,7 +1131,7 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 		elements := make([]Expression, len(expr.Items))
 		for i, item := range expr.Items {
 			element := c.checkExpression(item)
-			if !declaredType.(List).element.Matches(element.GetType()) {
+			if !AreCoherent(declaredType.(List).element, element.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredType, element.GetType()),
@@ -1162,7 +1163,7 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 		_type := elements[i].GetType()
 		if i == 0 {
 			elementType = _type
-		} else if !_type.Matches(elementType) {
+		} else if !AreCoherent(_type, elementType) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				location: item.GetLocation(),
@@ -1184,14 +1185,14 @@ func (c *checker) checkMap(expr ast.MapLiteral, declaredType Type) Expression {
 			value := c.checkExpression(entry.Value)
 			declaredKeyType := declaredType.(Map).key
 			declaredValType := declaredType.(Map).value
-			if !declaredKeyType.Matches(key.GetType()) {
+			if !AreCoherent(declaredKeyType, key.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredKeyType, key.GetType()),
 					location: entry.Key.GetLocation(),
 				})
 			}
-			if !declaredValType.Matches(value.GetType()) {
+			if !AreCoherent(declaredValType, value.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredValType, value.GetType()),
@@ -1225,7 +1226,7 @@ func (c *checker) checkMap(expr ast.MapLiteral, declaredType Type) Expression {
 			keyType = key.GetType()
 			valType = value.GetType()
 		} else {
-			if !keyType.Matches(key.GetType()) || !valType.Matches(value.GetType()) {
+			if !AreCoherent(keyType, key.GetType()) || !AreCoherent(valType, value.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "Map error: All entries must have the same type",
@@ -1295,7 +1296,7 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 		block := c.checkBlock(arm.Body, variables)
 		if i == 0 {
 			_type = block.result
-		} else if !block.result.Matches(_type) {
+		} else if !AreCoherent(block.result, _type) {
 			c.addDiagnostic(Diagnostic{
 				Kind: Error,
 				Message: fmt.Sprintf(
@@ -1394,7 +1395,7 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 		if i == 0 {
 			result = block.result
 		} else {
-			if !block.result.Matches(result) {
+			if !AreCoherent(block.result, result) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					location: arm.GetLocation(),
@@ -1455,7 +1456,7 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 			if result == nil {
 				result = noneCase.result
 			} else {
-				if !noneCase.result.Matches(result) {
+				if !AreCoherent(noneCase.result, result) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						location: arm.GetLocation(),
@@ -1481,7 +1482,7 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 				if result == nil {
 					result = block.result
 				} else {
-					if !block.result.Matches(result) {
+					if !AreCoherent(block.result, result) {
 						c.addDiagnostic(Diagnostic{
 							Kind:     Error,
 							location: arm.GetLocation(),
@@ -1563,7 +1564,7 @@ func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) 
 			if result == nil {
 				result = block.result
 			} else {
-				if !result.Matches(block.result) {
+				if !AreCoherent(result, block.result) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						location: arm.GetLocation(),
@@ -1632,7 +1633,7 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 		} else {
 			for i, arg := range m.Args {
 				args[i] = c.checkExpression(arg)
-				if !fn.parameters[i]._type.Matches(args[i].GetType()) {
+				if !AreCoherent(fn.parameters[i]._type, args[i].GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),
@@ -1711,7 +1712,7 @@ func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Exp
 			args := make([]Expression, len(m.Args))
 			for i, param := range fn.parameters {
 				arg := c.checkExpression(m.Args[i])
-				if !param._type.Matches(arg.GetType()) {
+				if !AreCoherent(param._type, arg.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),

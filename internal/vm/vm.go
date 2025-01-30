@@ -175,7 +175,7 @@ func (o object) String() string {
 }
 
 func (o object) equals(other object) bool {
-	return o.raw == other.raw && o._type.Matches(other._type)
+	return o.raw == other.raw && checker.AreCoherent(o._type, other._type)
 }
 
 func (vm *VM) evalExpression(expr checker.Expression) *object {
@@ -555,7 +555,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 func (vm VM) matchUnion(match checker.UnionMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for expected_type, arm := range match.Cases {
-		if subj._type.Matches(expected_type) {
+		if checker.AreCoherent(subj._type, expected_type) {
 			res, _ := vm.evalBlock(
 				arm.Body,
 				map[string]binding{

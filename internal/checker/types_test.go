@@ -63,7 +63,7 @@ func TestListAPI(t *testing.T) {
 
 	push := list.GetProperty("push")
 	expected := function{name: "push", parameters: []variable{{name: "item", _type: list.element}}, returns: Num{}}
-	if !push.Matches(expected) {
+	if !push.matches(expected) {
 		t.Fatalf("List::push should be %s, got %s", expected, push)
 	}
 }
@@ -71,19 +71,19 @@ func TestListAPI(t *testing.T) {
 func TestListType(t *testing.T) {
 	strList := List{Str{}}
 	numList := List{Num{}}
-	if !strList.Matches(strList) {
+	if !strList.matches(strList) {
 		t.Errorf("[Str] == [Str]")
 	}
-	if !numList.Matches(List{Num{}}) {
+	if !numList.matches(List{Num{}}) {
 		t.Errorf("[Num] == [Num]")
 	}
-	if strList.Matches(numList) {
+	if strList.matches(numList) {
 		t.Errorf("[Str] != [Num]")
 	}
-	if !strList.Matches(List{nil}) {
+	if !strList.matches(List{nil}) {
 		t.Errorf("[Str] == [?]")
 	}
-	if strList.Matches(List{Bool{}}) {
+	if strList.matches(List{Bool{}}) {
 		t.Errorf("[Str] != [Bool]")
 	}
 }
@@ -95,7 +95,7 @@ func TestEnumTypes(t *testing.T) {
 	if good.GetType().String() != Kind.String() {
 		t.Errorf("%s is %s, got %s", good, Kind, good.GetType())
 	}
-	if !Kind.Matches(good.GetType()) {
+	if !Kind.matches(good.GetType()) {
 		t.Errorf("%s allows %s", Kind, good.GetType())
 	}
 }
