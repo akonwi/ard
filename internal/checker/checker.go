@@ -80,6 +80,13 @@ func (p Package) GetProperty(name string) Type {
 				parameters: []variable{},
 				returns:    Option{},
 			}
+		case "some":
+			any := Any{}
+			return function{
+				name:       name,
+				parameters: []variable{{name: "value", mut: false, _type: any}},
+				returns:    Option{any},
+			}
 		default:
 			return nil
 		}

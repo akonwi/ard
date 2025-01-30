@@ -1508,7 +1508,8 @@ func TestOptionals(t *testing.T) {
 			name: "Declaring optionals",
 			input: `
 				use ard/option
-				mut name: Str? = option.none()`,
+				mut name: Str? = option.none()
+				mut name2 = option.some("Bob")`,
 			output: Program{
 				Imports: map[string]Package{
 					"option": optionPkg,
@@ -1522,6 +1523,14 @@ func TestOptionals(t *testing.T) {
 							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
+					VariableBinding{
+						Mut:  true,
+						Name: "name2",
+						Value: PackageAccess{
+							Package:  optionPkg,
+							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
+						},
+					},
 				},
 			},
 		},
@@ -1529,7 +1538,7 @@ func TestOptionals(t *testing.T) {
 			name: "Updating an optional",
 			input: `
 				use ard/option
-				mut name: Str? = option.none()
+				mut name: Str? = option.some("Joe")
 				name.some("Bob")
 				name = "Alice"
 				name.none()`,
@@ -1543,7 +1552,7 @@ func TestOptionals(t *testing.T) {
 						Name: "name",
 						Value: PackageAccess{
 							Package:  optionPkg,
-							Property: FunctionCall{Name: "none", Args: []Expression{}},
+							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Joe"}}},
 						},
 					},
 					InstanceProperty{
@@ -1567,7 +1576,6 @@ func TestOptionals(t *testing.T) {
 				use ard/option
 
 				mut name: Str? = option.none()
-				name.some("Bob")
 				match name {
 				  it => io.print("name is {{it}}"),
 					_ => io.print("no name ):")
@@ -1585,10 +1593,6 @@ func TestOptionals(t *testing.T) {
 							Package:  optionPkg,
 							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
-					},
-					InstanceProperty{
-						Subject:  Identifier{Name: "name"},
-						Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
 					},
 					OptionMatch{
 						Subject: Identifier{Name: "name"},

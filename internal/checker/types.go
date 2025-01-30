@@ -66,6 +66,13 @@ func AreCoherent(a, b Type) bool {
 		return aUnion.allows(b)
 	}
 
+	if aAny, ok := a.(Any); ok {
+		return aAny.refine(b)
+	}
+	if bAny, ok := b.(Any); ok {
+		return bAny.refine(a)
+	}
+
 	return false
 }
 
@@ -428,6 +435,39 @@ func (u Union) getFor(string string) Type {
 		}
 	}
 	return nil
+}
+
+/*
+Any is like a wildcard that initially is coherent with any type.
+Once it passes coherence with another concrete type, it becomes that type.
+*/
+type Any struct {
+	inner Type
+}
+
+func (a Any) String() string {
+	if a.inner == nil {
+		return "Any"
+	}
+	return a.inner.String()
+}
+
+func (a Any) GetProperty(name string) Type {
+	if a.inner == nil {
+		return nil
+	}
+	return a.GetProperty(name)
+}
+
+func (a *Any) refine(t Type) bool {
+	if a.inner != nil {
+		return AreCoherent(a.inner, t)
+	}
+	if t == nil {
+		return true
+	}
+	a.inner = t
+	return true
 }
 
 func areComparable(a, b Type) bool {

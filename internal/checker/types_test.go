@@ -29,6 +29,11 @@ func TestCoherenceChecks(t *testing.T) {
 		{NumOrStr, Bool{}, false},
 		{NumOrStr, NumOrStr, true},
 		{List{NumOrStr}, List{NumOrStr}, true},
+		{Any{}, Any{}, true},
+		{Any{}, Num{}, true},
+		{Num{}, Any{}, true},
+		{Num{}, Any{Str{}}, false},
+		{Any{Str{}}, Num{}, false},
 	}
 	for _, tt := range tests {
 		if res := AreCoherent(tt.a, tt.b); res != tt.want {
