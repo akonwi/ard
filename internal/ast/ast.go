@@ -213,8 +213,9 @@ func (v VariableAssignment) String() string {
 
 type Parameter struct {
 	BaseNode
-	Name string
-	Type DeclaredType
+	Name    string
+	Type    DeclaredType
+	Mutable bool
 }
 
 func (p Parameter) String() string {
@@ -818,10 +819,12 @@ func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
 	parameters := []Parameter{}
 
 	for _, node := range parameterNodes {
+		bindingNode := node.ChildByFieldName("binding")
 		parameters = append(parameters, Parameter{
 			BaseNode: BaseNode{tsNode: &node},
 			Name:     p.text(node.ChildByFieldName("name")),
 			Type:     p.resolveType(node.ChildByFieldName("type")),
+			Mutable:  bindingNode != nil,
 		})
 	}
 

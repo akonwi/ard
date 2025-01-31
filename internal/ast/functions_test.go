@@ -21,7 +21,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
-			name:  "Inferred function return type",
+			name:  "Non-returning function",
 			input: `fn get_msg() { "Hello, world!" }`,
 			output: Program{
 				Imports: []Import{},
@@ -61,10 +61,6 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
-			name:  "Function return must match declared return type",
-			input: `fn greet(person: Str) Str { }`,
-		},
-		{
 			name:  "Function with two parameters",
 			input: `fn add(x: Num, y: Num) Num { 10 }`,
 			output: Program{
@@ -86,6 +82,27 @@ func TestFunctionDeclaration(t *testing.T) {
 						Body: []Statement{
 							NumLiteral{Value: "10"},
 						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Mutable parameter",
+			input: `fn greet(mut person: Str) Str { }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name: "greet",
+						Parameters: []Parameter{
+							{
+								Name:    "person",
+								Type:    StringType{},
+								Mutable: true,
+							},
+						},
+						ReturnType: StringType{},
+						Body:       []Statement{},
 					},
 				},
 			},
