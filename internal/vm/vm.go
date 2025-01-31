@@ -120,7 +120,9 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			panic(fmt.Sprintf("Unimplemented statement: %T", s))
 		}
 		result := vm.evalExpression(expr)
-		vm.result = *result
+		if result != nil {
+			vm.result = *result
+		}
 		return result
 	}
 
@@ -188,8 +190,6 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			obj := vm.evalExpression(part)
 			if str, ok := obj.raw.(string); ok {
 				builder.WriteString(str)
-			} else {
-				panic(fmt.Sprintf("Expected Str, got %s", obj))
 			}
 		}
 		return &object{builder.String(), checker.Str{}}
@@ -435,7 +435,11 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			return &object{len(list), checker.Num{}}
 		case "at":
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
-			return list[index]
+			val := list[index]
+			if val == nil {
+				return &object{val, checker.MakeOption(t.GetElementType())}
+			}
+			return &object{val.raw, checker.MakeOption(t.GetElementType())}
 		case "set":
 			result := &object{false, checker.Bool{}}
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
