@@ -2,7 +2,7 @@ use ard/io
 use ard/option
 
 // a declared optional needs to be explicitly typed
-mut name: Str? = option.make()
+mut name: Str? = option.none()
 
 // update the value
 name.some("Akonwi")

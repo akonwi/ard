@@ -2,7 +2,7 @@ package checker
 
 import "testing"
 
-func TestTypeMatching(t *testing.T) {
+func TestCoherenceChecks(t *testing.T) {
 	type test struct {
 		a    Type
 		b    Type
@@ -17,7 +17,11 @@ func TestTypeMatching(t *testing.T) {
 		{Num{}, Str{}, false},
 		{Num{}, Bool{}, false},
 		{Num{}, List{Num{}}, false},
+		{List{}, Str{}, false},
 		{List{&Shape}, List{&Shape}, true},
+		{List{Str{}}, List{Str{}}, true},
+		{List{Num{}}, List{Num{}}, true},
+		{List{Num{}}, List{Str{}}, false},
 		{Num{}, Option{Num{}}, false},
 		{Option{}, Option{Num{}}, true},
 		{Option{Num{}}, Option{}, true},
@@ -25,9 +29,14 @@ func TestTypeMatching(t *testing.T) {
 		{NumOrStr, Bool{}, false},
 		{NumOrStr, NumOrStr, true},
 		{List{NumOrStr}, List{NumOrStr}, true},
+		{Any{}, Any{}, true},
+		{Any{}, Num{}, true},
+		{Num{}, Any{}, true},
+		{Num{}, Any{Str{}}, false},
+		{Any{Str{}}, Num{}, false},
 	}
 	for _, tt := range tests {
-		if res := tt.a.Matches(tt.b); res != tt.want {
+		if res := AreCoherent(tt.a, tt.b); res != tt.want {
 			t.Errorf("%s == %s: want %v, got %v", tt.a, tt.b, tt.want, res)
 		}
 	}
@@ -63,28 +72,8 @@ func TestListAPI(t *testing.T) {
 
 	push := list.GetProperty("push")
 	expected := function{name: "push", parameters: []variable{{name: "item", _type: list.element}}, returns: Num{}}
-	if !push.Matches(expected) {
+	if !AreCoherent(expected, push) {
 		t.Fatalf("List::push should be %s, got %s", expected, push)
-	}
-}
-
-func TestListType(t *testing.T) {
-	strList := List{Str{}}
-	numList := List{Num{}}
-	if !strList.Matches(strList) {
-		t.Errorf("[Str] == [Str]")
-	}
-	if !numList.Matches(List{Num{}}) {
-		t.Errorf("[Num] == [Num]")
-	}
-	if strList.Matches(numList) {
-		t.Errorf("[Str] != [Num]")
-	}
-	if !strList.Matches(List{nil}) {
-		t.Errorf("[Str] == [?]")
-	}
-	if strList.Matches(List{Bool{}}) {
-		t.Errorf("[Str] != [Bool]")
 	}
 }
 
@@ -95,7 +84,7 @@ func TestEnumTypes(t *testing.T) {
 	if good.GetType().String() != Kind.String() {
 		t.Errorf("%s is %s, got %s", good, Kind, good.GetType())
 	}
-	if !Kind.Matches(good.GetType()) {
-		t.Errorf("%s allows %s", Kind, good.GetType())
+	if !AreCoherent(Kind, good.GetType()) {
+		t.Errorf("%s should allow %s", Kind, good.GetType())
 	}
 }

@@ -120,7 +120,9 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			panic(fmt.Sprintf("Unimplemented statement: %T", s))
 		}
 		result := vm.evalExpression(expr)
-		vm.result = *result
+		if result != nil {
+			vm.result = *result
+		}
 		return result
 	}
 
@@ -175,7 +177,7 @@ func (o object) String() string {
 }
 
 func (o object) equals(other object) bool {
-	return o.raw == other.raw && o._type.Matches(other._type)
+	return o.raw == other.raw && checker.AreCoherent(o._type, other._type)
 }
 
 func (vm *VM) evalExpression(expr checker.Expression) *object {
@@ -188,8 +190,6 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			obj := vm.evalExpression(part)
 			if str, ok := obj.raw.(string); ok {
 				builder.WriteString(str)
-			} else {
-				panic(fmt.Sprintf("Expected Str, got %s", obj))
 			}
 		}
 		return &object{builder.String(), checker.Str{}}
@@ -435,7 +435,11 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			return &object{len(list), checker.Num{}}
 		case "at":
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
-			return list[index]
+			val := list[index]
+			if val == nil {
+				return &object{val, checker.MakeOption(t.GetElementType())}
+			}
+			return &object{val.raw, checker.MakeOption(t.GetElementType())}
 		case "set":
 			result := &object{false, checker.Bool{}}
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
@@ -476,12 +480,11 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 
 	case checker.Option:
 		switch fn.Name {
-		case "some":
-			o.raw = vm.evalExpression(fn.Args[0]).raw
-			return &object{nil, checker.Void{}}
-		case "none":
-			o.raw = nil
-			return &object{nil, checker.Void{}}
+		case "or":
+			if o.raw != nil {
+				return &object{o.raw, t.GetInnerType()}
+			}
+			return vm.evalExpression(fn.Args[0])
 		default:
 			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
@@ -555,7 +558,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 func (vm VM) matchUnion(match checker.UnionMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for expected_type, arm := range match.Cases {
-		if subj._type.Matches(expected_type) {
+		if checker.AreCoherent(subj._type, expected_type) {
 			res, _ := vm.evalBlock(
 				arm.Body,
 				map[string]binding{
