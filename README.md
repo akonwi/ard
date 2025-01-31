@@ -191,8 +191,7 @@ An optional type can either have a value (`some`) or be empty (`none`).
 use ard/option
 
 mut maybe_name: Str? = option.none()
-maybe_name.some("Joe")
-maybe_name.none()
+maybe_name = option.some("Joe")
 
 match maybe_name {
   n => "Hello, {{n}}",
