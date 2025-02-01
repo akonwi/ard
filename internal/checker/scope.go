@@ -7,9 +7,10 @@ type symbol interface {
 }
 
 type variable struct {
-	name  string
-	mut   bool
-	_type Type
+	name    string
+	mut     bool
+	isParam bool
+	_type   Type
 }
 
 func (v variable) GetName() string {

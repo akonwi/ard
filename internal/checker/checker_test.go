@@ -1012,18 +1012,50 @@ func TestFunctions(t *testing.T) {
 			},
 		},
 		{
+			name:  "Mutable parameters",
+			input: `fn change(mut person: Str) { }`,
+			output: Program{
+				Statements: []Statement{
+					FunctionDeclaration{
+						Name: "change",
+						Parameters: []Parameter{
+							{Name: "person", Type: Str{}, Mutable: true},
+						},
+						Return: Void{},
+						Body:   []Statement{},
+					},
+				},
+			},
+		},
+		{
+			name: "Even mutable parameters cannot be reassigned",
+			input: `
+				fn change(person: Str) {
+					person = "joe"
+				}`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Cannot assign to parameter: person"},
+			},
+		},
+		{
 			name: "Function calls must have correct arguments",
-			input: strings.Join([]string{
-				`fn greet(person: Str) { "hello {{person}}" }`,
-				`greet(101)`,
-				`fn add(a: Num, b: Num) { a + b }`,
-				`add(2)`,
-				`add(1, "two")`,
-			}, "\n"),
+			input: `
+				fn greet(person: Str) { "hello {{person}}" }
+				greet(101)
+				fn add(a: Num, b: Num) { a + b }
+				add(2)
+				add(1, "two")
+				fn change(mut person: Str) { }
+				mut john = "john"
+				let james = "james"
+				change("joe")
+				change(john)
+				change(james)`,
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
 				{Kind: Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
 				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected mutable Str, got Str"},
 			},
 		},
 		{

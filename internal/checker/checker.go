@@ -372,8 +372,9 @@ type WhileLoop struct {
 }
 
 type Parameter struct {
-	Name string
-	Type Type
+	Name    string
+	Type    Type
+	Mutable bool
 }
 
 type FunctionDeclaration struct {
@@ -416,6 +417,13 @@ func (f FunctionCall) GetType() Type {
 type Block struct {
 	Body   []Statement
 	result Type
+}
+
+func isMutable(expr Expression) bool {
+	if id, ok := expr.(Identifier); ok {
+		return id.symbol.(variable).mut
+	}
+	return true
 }
 
 type checker struct {
@@ -526,7 +534,14 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
-		if !variable.mut {
+		if variable.isParam {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Cannot assign to parameter: %s", s.Name),
+				location: s.GetLocation(),
+			})
+			return nil
+		} else if !variable.mut {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Immutable variable: %s", s.Name),
@@ -701,10 +716,11 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		blockVariables := make([]variable, len(s.Parameters))
 		for i, p := range s.Parameters {
 			parameters[i] = Parameter{
-				Name: p.Name,
-				Type: c.resolveDeclaredType(p.Type),
+				Name:    p.Name,
+				Type:    c.resolveDeclaredType(p.Type),
+				Mutable: p.Mutable,
 			}
-			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
+			blockVariables[i] = variable{name: p.Name, mut: p.Mutable, isParam: true, _type: parameters[i].Type}
 		}
 
 		declaredReturnType := c.resolveDeclaredType(s.ReturnType)
@@ -1003,7 +1019,15 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 						location: arg.GetLocation(),
 					})
 				} else {
-					args[i] = expr
+					if fn.parameters[i].mut && !isMutable(expr) {
+						c.addDiagnostic(Diagnostic{
+							Kind:     Error,
+							Message:  fmt.Sprintf("Type mismatch: Expected mutable %s, got %s", fn.parameters[i]._type, expr.GetType()),
+							location: arg.GetLocation(),
+						})
+					} else {
+						args[i] = expr
+					}
 				}
 			}
 		}
@@ -1646,6 +1670,14 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),
 						location: arg.GetLocation(),
 					})
+				} else {
+					if fn.parameters[i].mut && !isMutable(args[i]) {
+						c.addDiagnostic(Diagnostic{
+							Kind:     Error,
+							Message:  fmt.Sprintf("Type mismatch: Expected mutable %s, got %s", fn.parameters[i]._type, args[i].GetType()),
+							location: arg.GetLocation(),
+						})
+					}
 				}
 			}
 		}
