@@ -410,7 +410,7 @@ func TestMapApi(t *testing.T) {
 		{
 			name: "Map::set adds entries",
 			input: `
-				let ages = ["Alice":40, "Bob":30]
+				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Charlie", 25)
 				ages.set("Joe", 1)
 				ages.size`,
@@ -419,7 +419,7 @@ func TestMapApi(t *testing.T) {
 		{
 			name: "Map::set updates entries",
 			input: `
-				let ages = ["Alice":40, "Bob":30]
+				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Bob", 31)
 				match ages.get("Bob") {
 				  age => "Bob is {{age.as_str}}",
@@ -430,7 +430,7 @@ func TestMapApi(t *testing.T) {
 		{
 			name: "Map::drop removes entries",
 			input: `
-				let ages = ["Alice":40, "Bob":30]
+				mut ages = ["Alice":40, "Bob":30]
 				ages.drop("Alice")
 				match ages.get("Alice") {
 				  age => age,

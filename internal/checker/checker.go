@@ -1654,6 +1654,16 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Expressio
 			})
 			return nil
 		}
+
+		if fn.mutates && !isMutable(subject) {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subject, m.Name),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+
 		args := make([]Expression, len(m.Args))
 		if len(m.Args) != len(fn.parameters) {
 			c.addDiagnostic(Diagnostic{

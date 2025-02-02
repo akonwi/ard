@@ -154,6 +154,7 @@ type function struct {
 	name       string
 	parameters []variable
 	returns    Type
+	mutates    bool
 }
 
 func (f function) String() string {
@@ -189,6 +190,7 @@ func (l List) GetProperty(name string) Type {
 	case "push":
 		return function{
 			name:       "push",
+			mutates:    true,
 			parameters: []variable{{name: "item", _type: l.element}},
 			returns:    Num{},
 		}
@@ -200,7 +202,8 @@ func (l List) GetProperty(name string) Type {
 		}
 	case "set":
 		return function{
-			name: name,
+			name:    name,
+			mutates: true,
 			parameters: []variable{
 				{name: "index", _type: Num{}},
 				{name: "value", _type: l.element},
@@ -231,7 +234,8 @@ func (m Map) GetProperty(name string) Type {
 		return Num{}
 	case "set":
 		return function{
-			name: name,
+			name:    name,
+			mutates: true,
 			parameters: []variable{
 				{name: "key", _type: m.key},
 				{name: "val", _type: m.value},
@@ -249,6 +253,7 @@ func (m Map) GetProperty(name string) Type {
 			name:       name,
 			parameters: []variable{{name: "key", _type: m.key}},
 			returns:    Void{},
+			mutates:    true,
 		}
 	case "has":
 		return function{

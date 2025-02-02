@@ -1186,6 +1186,15 @@ func TestLists(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "An immutable list cannot be changed",
+			input: `
+			  let list = [1,2,3]
+				list.push(4)`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
+			},
+		},
 	})
 }
 
