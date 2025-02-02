@@ -14,8 +14,8 @@ fn get_name(shape: Shape) Str {
 
 fn fmt_area(shape: Shape) Str {
   match shape {
-    Square => it.size.as_str,
-    Circle => it.radius.as_str
+    Square => it.size.to_str(),
+    Circle => it.radius.to_str()
   }
 }
 

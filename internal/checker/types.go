@@ -119,8 +119,11 @@ func (n Num) String() string {
 }
 func (n Num) GetProperty(name string) Type {
 	switch name {
-	case "as_str":
-		return Str{}
+	case "to_str":
+		return function{
+			name:    name,
+			returns: Str{},
+		}
 	default:
 		return nil
 	}
@@ -145,8 +148,11 @@ func (b Bool) String() string {
 }
 func (b Bool) GetProperty(name string) Type {
 	switch name {
-	case "as_str":
-		return Str{}
+	case "to_str":
+		return function{
+			name:    name,
+			returns: Str{},
+		}
 	default:
 		return nil
 	}

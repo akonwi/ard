@@ -95,7 +95,7 @@ C style for loop:
 
 ```ard
 for mut i = 0; i <= 5; i =+1 {
-  io.print(i.as_str)
+  io.print(i.to_str())
 }
 ```
 
@@ -215,7 +215,7 @@ To do conditional logic on a value of a type union, use a match expression and w
 for item in stuff {
   match item {
     Str => io.print("String: {{it}}"),
-    Num => io.print("Number: {{it.as_str}}")
+    Num => io.print("Number: {{it.to_str()}}")
   }
 }
 ```

@@ -9,5 +9,5 @@ fn fib(n: Num) Num {
 
 for n in 20 {
   let result = fib(n)
-  io.print("fib({{n.as_str}}) = {{result.as_str}}")
+  io.print("fib({{n.to_str()}}) = {{result.to_str()}}")
 }

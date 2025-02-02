@@ -11,7 +11,7 @@ func TestForLoop(t *testing.T) {
 				// sum even numbers
 				mut sum = 0
 				for mut even = 0; even <= 10; even =+ 2 {
-					io.print(even.as_str)
+					io.print(even.to_str())
 				  sum =+ even
 				}
 				sum`,

@@ -51,16 +51,18 @@ func TestStrAPI(t *testing.T) {
 }
 
 func TestNumAPI(t *testing.T) {
-	as_str := Num{}.GetProperty("as_str")
-	if as_str != (Str{}) {
-		t.Fatalf("Num::as_str should be Str, got %s", as_str)
+	want := function{name: "to_str", parameters: []variable{}, returns: Str{}}
+	as_str := Num{}.GetProperty("to_str")
+	if !AreCoherent(want, as_str) {
+		t.Fatalf("Num::to_str() should be %s, got %s", want, as_str)
 	}
 }
 
 func TestBoolAPI(t *testing.T) {
-	as_str := Bool{}.GetProperty("as_str")
-	if as_str != (Str{}) {
-		t.Fatalf("Bool::as_str should be Str, got %s", as_str)
+	want := function{name: "to_str", parameters: []variable{}, returns: Str{}}
+	to_str := Bool{}.GetProperty("to_str")
+	if !AreCoherent(want, to_str) {
+		t.Fatalf("Bool::to_str() should be %s, got %s", want, to_str)
 	}
 }
 

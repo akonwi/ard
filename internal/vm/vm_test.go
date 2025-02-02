@@ -319,8 +319,8 @@ func TestFunctions(t *testing.T) {
 func TestNumApi(t *testing.T) {
 	runTests(t, []test{
 		{
-			name:  ".as_str returns the string representation of a number",
-			input: `100.as_str`,
+			name:  ".to_str() returns the string representation of a number",
+			input: `100.to_str()`,
 			want:  "100",
 		},
 		{
@@ -332,7 +332,7 @@ func TestNumApi(t *testing.T) {
 }
 
 func TestBoolApi(t *testing.T) {
-	if res := run(t, `true.as_str`); res != "true" {
+	if res := run(t, `true.to_str()`); res != "true" {
 		t.Errorf(`Expected "true", got %v`, res)
 	}
 }
@@ -402,7 +402,7 @@ func TestMapApi(t *testing.T) {
 			input: `
 				let ages = ["Alice":40, "Bob":30]
 				match ages.get("Alice") {
-				  age => "Alice is {{age.as_str}}",
+				  age => "Alice is {{age.to_str()}}",
 					_ => "Not found"
 				}`,
 			want: "Alice is 40",
@@ -422,7 +422,7 @@ func TestMapApi(t *testing.T) {
 				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Bob", 31)
 				match ages.get("Bob") {
-				  age => "Bob is {{age.as_str}}",
+				  age => "Bob is {{age.to_str()}}",
 					_ => "Not found"
 				}`,
 			want: "Bob is 31",
@@ -442,8 +442,8 @@ func TestMapApi(t *testing.T) {
 			name: "Map::has returns whether an entry exists",
 			input: `
 				let ages = ["Alice":40, "Bob":30]
-				let has_alice = ages.has("Alice").as_str
-				let has_charlie = ages.has("Charlie").as_str
+				let has_alice = ages.has("Alice").to_str()
+				let has_charlie = ages.has("Charlie").to_str()
 				"{{has_alice}},{{has_charlie}}"
 				`,
 			want: "true,false",
@@ -509,7 +509,7 @@ func TestStructs(t *testing.T) {
 
 				impl (p: Point) {
 					fn print() Str {
-						"{{p.x.as_str}},{{p.y.as_str}}"
+						"{{p.x.to_str()}},{{p.y.to_str()}}"
 					}
 				}
 
@@ -544,7 +544,7 @@ func TestUnions(t *testing.T) {
 				fn print(p: Printable) Str {
 				  match p {
 					  Str => it,
-						Num => it.as_str,
+						Num => it.to_str(),
 						_ => {
 						  "boolean value"
 						}

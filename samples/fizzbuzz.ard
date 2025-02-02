@@ -3,5 +3,5 @@ use ard/io
 for num in 1..10 {
   if num % 3 == 0 { io.print("Fizz") }
   else if num % 5 == 0 { io.print("Buzz") }
-  else { io.print(num.as_str) }
+  else { io.print(num.to_str()) }
 }

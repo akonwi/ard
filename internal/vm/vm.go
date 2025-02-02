@@ -383,15 +383,11 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 		}
 	case checker.Num:
 		switch propName {
-		case "as_str":
-			return &object{strconv.Itoa(i.raw.(int)), checker.Str{}}
 		default:
 			panic(fmt.Errorf("Undefined property: Num.%v", propName))
 		}
 	case checker.Bool:
 		switch propName {
-		case "as_str":
-			return &object{strconv.FormatBool(i.raw.(bool)), checker.Str{}}
 		default:
 			panic(fmt.Errorf("Undefined property: Bool.%v", propName))
 		}
@@ -427,6 +423,16 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			return &object{len(o.raw.(string)), checker.Num{}}
 		}
 		panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
+	case checker.Num:
+		switch fn.Name {
+		case "to_str":
+			return &object{strconv.Itoa(o.raw.(int)), checker.Str{}}
+		}
+	case checker.Bool:
+		switch fn.Name {
+		case "to_str":
+			return &object{strconv.FormatBool(o.raw.(bool)), checker.Str{}}
+		}
 	case checker.List:
 		list, ok := o.raw.([]*object)
 		if !ok {
@@ -505,10 +511,8 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		}
 		res, _ := vm.evalBlock(method.Body, args, false)
 		return res
-	default:
-		panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
-		// return &object{nil, checker.Void{}}
 	}
+	panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 }
 
 func (vm VM) matchBool(match checker.BoolMatch) *object {
