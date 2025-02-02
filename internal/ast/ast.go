@@ -984,8 +984,9 @@ func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
 		return nil, err
 	}
 	return IfStatement{
-		BaseNode: BaseNode{tsNode: node},
-		Body:     body,
+		Condition: nil,
+		BaseNode:  BaseNode{tsNode: node},
+		Body:      body,
 	}, nil
 }
 

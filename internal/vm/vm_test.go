@@ -250,7 +250,7 @@ func TestIfStatements(t *testing.T) {
 				let is_on = false
 				mut result = ""
 				if is_on { result = "then" }
-				else if result.size > 0 { result = "else if" }
+				else if result.size() > 0 { result = "else if" }
 				else { result = "else" }
 				result`,
 			want: "else",
@@ -340,8 +340,8 @@ func TestBoolApi(t *testing.T) {
 func TestStrApi(t *testing.T) {
 	tests := []test{
 		{
-			name:  "Str.size",
-			input: `"foobar".size`,
+			name:  "Str.size()",
+			input: `"foobar".size()`,
 			want:  6,
 		},
 		{

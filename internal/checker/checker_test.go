@@ -1440,7 +1440,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 		{
 			name: "Matching on booleans",
 			input: strings.Join([]string{
-				`let is_big = "foo".size > 20`,
+				`let is_big = "foo".size() > 20`,
 				`match is_big {`,
 				`  true => "big",`,
 				`  false => "smol"`,
@@ -1455,7 +1455,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 							Op: GreaterThan,
 							Left: InstanceProperty{
 								Subject:  StrLiteral{Value: "foo"},
-								Property: Identifier{Name: "size"},
+								Property: FunctionCall{Name: "size", Args: []Expression{}},
 							},
 							Right: NumLiteral{Value: 20},
 						},
@@ -1481,7 +1481,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 		{
 			name: "Matching on booleans should be exhaustive",
 			input: strings.Join([]string{
-				`let is_big = "foo".size > 20`,
+				`let is_big = "foo".size() > 20`,
 				`match is_big {`,
 				`  true => "big",`,
 				`}`,
@@ -1496,7 +1496,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 		{
 			name: "Duplicate cases are caught",
 			input: strings.Join([]string{
-				`let is_big = "foo".size > 20`,
+				`let is_big = "foo".size() > 20`,
 				`match is_big {`,
 				`  true => "big",`,
 				`  true => "big",`,
@@ -1513,7 +1513,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 		{
 			name: "Each case must return the same type",
 			input: strings.Join([]string{
-				`let is_big = "foo".size > 20`,
+				`let is_big = "foo".size() > 20`,
 				`match is_big {`,
 				`  true => "big",`,
 				`  false => 21,`,
@@ -1529,7 +1529,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 		{
 			name: "Cannot use a catch-all case",
 			input: strings.Join([]string{
-				`let is_big = "foo".size > 20`,
+				`let is_big = "foo".size() > 20`,
 				`match is_big {`,
 				`  true => "big",`,
 				`  _ => "smol"`,

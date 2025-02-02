@@ -43,9 +43,10 @@ func TestCoherenceChecks(t *testing.T) {
 }
 
 func TestStrAPI(t *testing.T) {
+	want := function{name: "size", parameters: []variable{}, returns: Num{}}
 	size := Str{}.GetProperty("size")
-	if size != (Num{}) {
-		t.Fatalf("Str::size should be Num, got %s", size)
+	if !AreCoherent(want, size) {
+		t.Fatalf("Str::size() should be %s, got %s", want, size)
 	}
 }
 

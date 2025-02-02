@@ -376,8 +376,6 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 	case checker.Str:
 		raw := i.raw.(string)
 		switch propName {
-		case "size":
-			return &object{len(raw), checker.Num{}}
 		case "is_empty":
 			return &object{len(raw) == 0, checker.Bool{}}
 		default:
@@ -423,6 +421,12 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 
 func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	switch t := o._type.(type) {
+	case checker.Str:
+		switch fn.Name {
+		case "size":
+			return &object{len(o.raw.(string)), checker.Num{}}
+		}
+		panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
 	case checker.List:
 		list, ok := o.raw.([]*object)
 		if !ok {

@@ -101,7 +101,10 @@ func (s Str) String() string {
 func (s Str) GetProperty(name string) Type {
 	switch name {
 	case "size":
-		return Num{}
+		return function{
+			name:    name,
+			returns: Num{},
+		}
 	case "is_empty":
 		return Bool{}
 	default:
