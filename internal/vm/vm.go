@@ -390,12 +390,7 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 			panic(fmt.Errorf("Undefined property: Bool.%v", propName))
 		}
 	case checker.List:
-		switch propName {
-		case "size":
-			return &object{len(i.raw.([]*object)), checker.Num{}}
-		default:
-			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
-		}
+		panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 	case checker.Map:
 	case *checker.Struct:
 		if field, ok := i.raw.(map[string]*object)[propName]; ok {
@@ -433,6 +428,8 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			panic(fmt.Sprintf("Expected list, got %T", o.raw))
 		}
 		switch fn.Name {
+		case "size":
+			return &object{len(list), checker.Num{}}
 		case "push":
 			item := vm.evalExpression(fn.Args[0])
 			o.raw = append(list, item)
@@ -470,9 +467,9 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		case "get":
 			key := vm.evalExpression(fn.Args[0])
 			if val, ok := m[*key]; ok {
-				return &object{val.raw, val._type}
+				return &object{val.raw, fn.GetType()}
 			}
-			return &object{nil, fn.GetType().(checker.Option).GetInnerType()}
+			return &object{nil, fn.GetType()}
 		case "drop":
 			key := vm.evalExpression(fn.Args[0])
 			delete(m, *key)
@@ -551,6 +548,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
 	it := binding{false, subj, false}
+	it.value = &object{subj.raw, subj._type.(checker.Option).GetInnerType()}
 	res, _ := vm.evalBlock(
 		match.Some.Body,
 		map[string]binding{bindingName: it},

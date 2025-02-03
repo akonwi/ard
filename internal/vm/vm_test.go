@@ -357,7 +357,7 @@ func TestListApi(t *testing.T) {
 	runTests(t, []test{
 		{
 			name:  "List::size",
-			input: "[1,2,3].size",
+			input: "[1,2,3].size()",
 			want:  3,
 		},
 		{
@@ -365,7 +365,7 @@ func TestListApi(t *testing.T) {
 			input: `
 				mut list = [1,2,3]
 				list.push(4)
-			  list.size`,
+			  list.size()`,
 			want: 4,
 		},
 		{
