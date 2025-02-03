@@ -67,16 +67,16 @@ func TestBoolAPI(t *testing.T) {
 }
 
 func TestListAPI(t *testing.T) {
-	list := List{element: Num{}}
-	size := list.GetProperty("size")
-	if size != (Num{}) {
-		t.Fatalf("List::size should be Num, got %s", size)
+	want := function{name: "size", parameters: []variable{}, returns: Num{}}
+	size := (List{element: Num{}}).GetProperty("size")
+	if !AreCoherent(want, size) {
+		t.Fatalf("List::size should be %s, got %s", want, size)
 	}
 
-	push := list.GetProperty("push")
-	expected := function{name: "push", parameters: []variable{{name: "item", _type: list.element}}, returns: Num{}}
-	if !AreCoherent(expected, push) {
-		t.Fatalf("List::push should be %s, got %s", expected, push)
+	push := (List{element: Num{}}).GetProperty("push")
+	want = function{name: "push", parameters: []variable{{name: "item", _type: Num{}}}, returns: Num{}}
+	if !AreCoherent(want, push) {
+		t.Fatalf("List::push should be %s, got %s", want, push)
 	}
 }
 

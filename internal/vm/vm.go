@@ -374,10 +374,8 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 
 	switch i._type.(type) {
 	case checker.Str:
-		raw := i.raw.(string)
+		// raw := i.raw.(string)
 		switch propName {
-		case "is_empty":
-			return &object{len(raw) == 0, checker.Bool{}}
 		default:
 			panic(fmt.Errorf("Undefined property: Str.%v", propName))
 		}
@@ -399,28 +397,24 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 		}
 	case checker.Map:
-		switch propName {
-		case "size":
-			return &object{len(i.raw.(map[object]*object)), checker.Num{}}
-		default:
-			panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
-		}
 	case *checker.Struct:
 		if field, ok := i.raw.(map[string]*object)[propName]; ok {
 			return field
 		}
 		panic(fmt.Sprintf("Field not found: %s", propName))
-	default:
-		return &object{nil, checker.Void{}}
 	}
+	panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
 }
 
 func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	switch t := o._type.(type) {
 	case checker.Str:
+		str := o.raw.(string)
 		switch fn.Name {
 		case "size":
-			return &object{len(o.raw.(string)), checker.Num{}}
+			return &object{len(str), checker.Num{}}
+		case "is_empty":
+			return &object{len(str) == 0, checker.Bool{}}
 		}
 		panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
 	case checker.Num:
@@ -466,6 +460,8 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 	case checker.Map:
 		m := o.raw.(map[object]*object)
 		switch fn.Name {
+		case "size":
+			return &object{len(m), checker.Num{}}
 		case "set":
 			key := vm.evalExpression(fn.Args[0])
 			val := vm.evalExpression(fn.Args[1])

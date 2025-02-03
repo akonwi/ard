@@ -346,7 +346,7 @@ func TestStrApi(t *testing.T) {
 		},
 		{
 			name:  "Str.is_empty",
-			input: `"".is_empty`,
+			input: `"".is_empty()`,
 			want:  true,
 		},
 	}
@@ -394,7 +394,7 @@ func TestMapApi(t *testing.T) {
 			input: `
 				let ages = ["Alice":40, "Bob":30]
 				let jobs: [Str:Num] = [:]
-				ages.size + jobs.size`,
+				ages.size() + jobs.size()`,
 			want: 2,
 		},
 		{
@@ -413,7 +413,7 @@ func TestMapApi(t *testing.T) {
 				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Charlie", 25)
 				ages.set("Joe", 1)
-				ages.size`,
+				ages.size()`,
 			want: 4,
 		},
 		{

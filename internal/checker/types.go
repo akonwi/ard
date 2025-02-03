@@ -106,7 +106,7 @@ func (s Str) GetProperty(name string) Type {
 			returns: Num{},
 		}
 	case "is_empty":
-		return Bool{}
+		return function{name: name, returns: Bool{}}
 	default:
 		return nil
 	}
@@ -195,7 +195,10 @@ func (l List) String() string {
 func (l List) GetProperty(name string) Type {
 	switch name {
 	case "size":
-		return Num{}
+		return function{
+			name:    name,
+			returns: Num{},
+		}
 	case "push":
 		return function{
 			name:       "push",
@@ -240,7 +243,10 @@ func (m Map) String() string {
 func (m Map) GetProperty(name string) Type {
 	switch name {
 	case "size":
-		return Num{}
+		return function{
+			name:    name,
+			returns: Num{},
+		}
 	case "set":
 		return function{
 			name:    name,
