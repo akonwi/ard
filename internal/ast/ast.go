@@ -201,14 +201,14 @@ func (v VariableDeclaration) String() string {
 
 type VariableAssignment struct {
 	BaseNode
-	Name     string
+	Target   Expression
 	Operator Operator
 	Value    Expression
 }
 
 // impl interfaces
 func (v VariableAssignment) String() string {
-	return fmt.Sprintf("%v = %s", v.Name, v.Value)
+	return fmt.Sprintf("%v = %s", v.Target, v.Value)
 }
 
 type Parameter struct {
@@ -766,11 +766,20 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 }
 
 func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssignment, error) {
-	nameNode := node.ChildByFieldName("name")
+	targetNode := p.mustChild(node, "target")
 	operatorNode := node.ChildByFieldName("operator")
 	valueNode := node.ChildByFieldName("value")
 
-	name := p.text(nameNode)
+	var target Expression
+	if targetNode.GrammarName() == "identifier" {
+		target = Identifier{BaseNode: makeBaseNode(targetNode), Name: p.text(targetNode)}
+	} else {
+		member, err := p.parseMemberAccess(targetNode)
+		if err != nil {
+			return VariableAssignment{}, err
+		}
+		target = member
+	}
 	operator := resolveOperator(operatorNode)
 
 	value, err := p.parseExpression(valueNode)
@@ -780,7 +789,7 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 
 	return VariableAssignment{
 		BaseNode: makeBaseNode(node),
-		Name:     name,
+		Target:   target,
 		Operator: operator,
 		Value:    value,
 	}, nil

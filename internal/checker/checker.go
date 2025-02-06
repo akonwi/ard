@@ -334,8 +334,8 @@ type VariableBinding struct {
 }
 
 type VariableAssignment struct {
-	Name  string
-	Value Expression
+	Target Expression
+	Value  Expression
 }
 
 type Break struct{}
@@ -516,80 +516,86 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: _type})
 		return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
 	case ast.VariableAssignment:
-		symbol := c.scope.find(s.Name)
-		if symbol == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", s.Name),
-				location: s.GetLocation(),
-			})
-			return nil
-		}
-		variable, ok := (*symbol).(variable)
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", s.Name),
-				location: s.GetLocation(),
-			})
-			return nil
-		}
-		if variable.isParam {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Cannot assign to parameter: %s", s.Name),
-				location: s.GetLocation(),
-			})
-			return nil
-		} else if !variable.mut {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Immutable variable: %s", s.Name),
-				location: s.GetLocation(),
-			})
-			return nil
-		}
-
-		value := c.checkExpression(s.Value)
-		// if value is nil, it means there was an error in the expression
-		if value == nil {
-			return nil
-		}
-
-		if s.Operator == ast.Increment || s.Operator == ast.Decrement {
-			if !AreCoherent(variable._type, Num{}) || !AreCoherent(value.GetType(), Num{}) {
+		switch target := s.Target.(type) {
+		case ast.Identifier:
+			symbol := c.scope.find(target.Name)
+			if symbol == nil {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  "Increment and decrement operators can only be used on numbers",
+					Message:  fmt.Sprintf("Undefined: %s", target.Name),
 					location: s.GetLocation(),
 				})
 				return nil
 			}
 
-			var operator BinaryOperator
-			if s.Operator == ast.Increment {
-				operator = Add
-			} else {
-				operator = Sub
+			variable, ok := (*symbol).(variable)
+			if !ok {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Undefined: %s", target.Name),
+					location: s.GetLocation(),
+				})
+				return nil
+			}
+			if variable.isParam {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Cannot assign to parameter: %s", target.Name),
+					location: s.GetLocation(),
+				})
+				return nil
+			} else if !variable.mut {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Immutable variable: %s", target.Name),
+					location: s.GetLocation(),
+				})
+				return nil
 			}
 
-			value = BinaryExpr{
-				Op:    operator,
-				Left:  Identifier{Name: s.Name, symbol: variable},
-				Right: c.checkExpression(s.Value),
+			value := c.checkExpression(s.Value)
+			// if value is nil, it means there was an error in the expression
+			if value == nil {
+				return nil
 			}
-			return VariableAssignment{Name: s.Name, Value: value}
-		}
 
-		if !AreCoherent(variable._type, value.GetType()) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", variable._type, value.GetType()),
-				location: s.Value.GetLocation(),
-			})
+			if s.Operator == ast.Increment || s.Operator == ast.Decrement {
+				if !AreCoherent(variable._type, Num{}) || !AreCoherent(value.GetType(), Num{}) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  "Increment and decrement operators can only be used on numbers",
+						location: s.GetLocation(),
+					})
+					return nil
+				}
+
+				var operator BinaryOperator
+				if s.Operator == ast.Increment {
+					operator = Add
+				} else {
+					operator = Sub
+				}
+
+				value = BinaryExpr{
+					Op:    operator,
+					Left:  Identifier{Name: target.Name, symbol: variable},
+					Right: c.checkExpression(s.Value),
+				}
+				return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
+			}
+
+			if !AreCoherent(variable._type, value.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", variable._type, value.GetType()),
+					location: s.Value.GetLocation(),
+				})
+				return nil
+			}
+			return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
+		default:
 			return nil
 		}
-		return VariableAssignment{Name: s.Name, Value: value}
 	case ast.IfStatement:
 		var condition Expression
 		if s.Condition != nil {

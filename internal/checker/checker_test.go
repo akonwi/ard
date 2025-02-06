@@ -250,7 +250,7 @@ func TestVariables(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 0}},
-					VariableAssignment{Name: "count", Value: NumLiteral{Value: 1}},
+					VariableAssignment{Target: Identifier{Name: "count"}, Value: NumLiteral{Value: 1}},
 				},
 			},
 		},
@@ -701,7 +701,7 @@ func TestForLoops(t *testing.T) {
 						End:    NumLiteral{Value: 10},
 						Body: []Statement{
 							VariableAssignment{
-								Name: "count",
+								Target: Identifier{Name: "count"},
 								Value: BinaryExpr{
 									Op:    Add,
 									Left:  Identifier{Name: "count"},
@@ -847,7 +847,7 @@ func TestForLoops(t *testing.T) {
 							Right: NumLiteral{Value: 10},
 						},
 						Step: VariableAssignment{
-							Name: "i",
+							Target: Identifier{Name: "i"},
 							Value: BinaryExpr{
 								Op:    Add,
 								Left:  Identifier{Name: "i"},
@@ -883,7 +883,7 @@ func TestWhileLoops(t *testing.T) {
 						},
 						Body: []Statement{
 							VariableAssignment{
-								Name: "count",
+								Target: Identifier{Name: "count"},
 								Value: BinaryExpr{
 									Op:    Sub,
 									Left:  Identifier{Name: "count"},
@@ -1597,14 +1597,14 @@ func TestOptionals(t *testing.T) {
 						},
 					},
 					VariableAssignment{
-						Name: "name",
+						Target: Identifier{Name: "name"},
 						Value: PackageAccess{
 							Package:  optionPkg,
 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
 						},
 					},
 					VariableAssignment{
-						Name: "name",
+						Target: Identifier{Name: "name"},
 						Value: PackageAccess{
 							Package:  optionPkg,
 							Property: FunctionCall{Name: "none", Args: []Expression{}},

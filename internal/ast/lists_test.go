@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestVariables(t *testing.T) {
+func TestListVariables(t *testing.T) {
 	tests := []test{
 		{
 			name:  "List elements must match declared type",

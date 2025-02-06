@@ -138,10 +138,15 @@ func (vm *VM) evalVariableBinding(_binding checker.VariableBinding) {
 }
 
 func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
-	value := vm.evalExpression(assignment.Value)
-	if variable, ok := vm.scope.get(assignment.Name); ok {
-		(*variable).value = value
-		vm.result = *value
+	switch target := assignment.Target.(type) {
+	case checker.Identifier:
+		value := vm.evalExpression(assignment.Value)
+		if variable, ok := vm.scope.get(target.Name); ok {
+			(*variable).value = value
+			vm.result = *value
+		}
+	default:
+		panic(fmt.Sprintf("Unimplemented assignment target: %T", target))
 	}
 }
 

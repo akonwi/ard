@@ -171,7 +171,7 @@ func TestWhileLoop(t *testing.T) {
 						},
 						Body: []Statement{
 							VariableAssignment{
-								Name:     "count",
+								Target:   Identifier{Name: "count"},
 								Operator: Increment,
 								Value:    NumLiteral{Value: "1"},
 							},
@@ -380,7 +380,7 @@ func TestForLoops(t *testing.T) {
 							Right:    NumLiteral{Value: "10"},
 						},
 						Incrementer: VariableAssignment{
-							Name:     "i",
+							Target:   Identifier{Name: "i"},
 							Operator: Increment,
 							Value:    NumLiteral{Value: "1"},
 						},

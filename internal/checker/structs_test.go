@@ -93,6 +93,33 @@ func TestStructs(t *testing.T) {
 				{Kind: Error, Message: "Undefined: p.height"},
 			},
 		},
+		{},
+	})
+}
+
+func testMutatingMembers(t *testing.T) {
+	shapeStructInput := `struct Shape { width: Num, height: Num }`
+	Shape := &Struct{
+		Name: "Shape",
+		Fields: map[string]Type{
+			"width":  Num{},
+			"height": Num{},
+		},
+	}
+
+	run(t, []test{
+		{
+			name: "A literal struct instance can be mutated",
+			input: shapeStructInput + `
+			  (Shape{ width: 10, height: 20 }).width = 30
+			`,
+			output: Program{
+				Statements: []Statement{
+					Shape,
+					VariableAssignment{},
+				},
+			},
+		},
 	})
 }
 
