@@ -153,6 +153,23 @@ func TestUsingStructs(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Referencing fields",
+			input: `
+				p.age
+				p.employed = false`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					MemberAccess{Target: Identifier{Name: "p"}, AccessType: Instance, Member: Identifier{Name: "age"}},
+					VariableAssignment{
+						Target:   MemberAccess{Target: Identifier{Name: "p"}, AccessType: Instance, Member: Identifier{Name: "employed"}},
+						Operator: Assign,
+						Value:    BoolLiteral{Value: false},
+					},
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)
