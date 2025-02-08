@@ -145,6 +145,10 @@ func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 			(*variable).value = value
 			vm.result = *value
 		}
+	case checker.InstanceProperty:
+		subject := vm.evalExpression(target.Subject)
+		raw := subject.raw.(map[string]*object)
+		raw[target.Property.(checker.Identifier).Name] = vm.evalExpression(assignment.Value)
 	default:
 		panic(fmt.Sprintf("Unimplemented assignment target: %T", target))
 	}

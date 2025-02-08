@@ -1,6 +1,10 @@
 ## TODO
 
 - [ ] proper mutability checks
+  - [x] reassigning immutables
+  - [x] reassigning struct members
+  - [ ] instance methods
+  - [ ] mut impl blocks
 - [ ] methods on enums?
 - [ ] using unary + member_access in if conditions shouldn't require parens
   - fails: `if !a.b { }`

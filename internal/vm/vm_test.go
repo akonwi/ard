@@ -517,6 +517,18 @@ func TestStructs(t *testing.T) {
 				p.print()`,
 			want: "10,20",
 		},
+		{
+			name: "Reassigning struct properties",
+			input: `
+				struct Point {
+					x: Num,
+					y: Num,
+				}
+				mut p = Point { x: 10, y: 20 }
+				p.x = 30
+				p.x`,
+			want: 30,
+		},
 	})
 }
 
