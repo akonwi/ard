@@ -423,6 +423,9 @@ func isMutable(expr Expression) bool {
 	if id, ok := expr.(Identifier); ok {
 		return id.symbol.(variable).mut
 	}
+	if prop, ok := expr.(InstanceProperty); ok {
+		return isMutable(prop.Subject)
+	}
 	return true
 }
 
@@ -593,6 +596,28 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 				return nil
 			}
 			return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
+
+		case ast.MemberAccess:
+			subject := c.checkExpression(target)
+			if !isMutable(subject) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  "Cannot reassign in immutables",
+					location: target.GetLocation(),
+				})
+				return nil
+			}
+			value := c.checkExpression(s.Value)
+
+			if !AreCoherent(subject.GetType(), value.GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", subject.GetType(), value.GetType()),
+					location: s.Value.GetLocation(),
+				})
+				return nil
+			}
+			return VariableAssignment{Target: subject, Value: value}
 		default:
 			return nil
 		}

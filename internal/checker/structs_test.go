@@ -93,31 +93,40 @@ func TestStructs(t *testing.T) {
 				{Kind: Error, Message: "Undefined: p.height"},
 			},
 		},
-		{},
-	})
-}
-
-func testMutatingMembers(t *testing.T) {
-	shapeStructInput := `struct Shape { width: Num, height: Num }`
-	Shape := &Struct{
-		Name: "Shape",
-		Fields: map[string]Type{
-			"width":  Num{},
-			"height": Num{},
-		},
-	}
-
-	run(t, []test{
 		{
-			name: "A literal struct instance can be mutated",
-			input: shapeStructInput + `
-			  (Shape{ width: 10, height: 20 }).width = 30
-			`,
+			name: "Can reassign to properties",
+			input: fmt.Sprintf(`%s
+				mut p = Person{name: "Alice", age: 30, employed: true}
+				p.age = 31`, personStructInput),
 			output: Program{
 				Statements: []Statement{
-					Shape,
-					VariableAssignment{},
+					personStruct,
+					VariableBinding{
+						Mut:  true,
+						Name: "p",
+						Value: StructInstance{
+							Name: "Person",
+							Fields: map[string]Expression{
+								"name":     StrLiteral{Value: "Alice"},
+								"age":      NumLiteral{Value: 30},
+								"employed": BoolLiteral{Value: true},
+							},
+						},
+					},
+					VariableAssignment{
+						Target: InstanceProperty{Subject: Identifier{Name: "p"}, Property: Identifier{Name: "age"}},
+						Value:  NumLiteral{Value: 31},
+					},
 				},
+			},
+		},
+		{
+			name: "Can't reassign to properties of immutable structs",
+			input: fmt.Sprintf(`%s
+						let p = Person{name: "Alice", age: 30, employed: true}
+						p.age = 31`, personStructInput),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Cannot reassign in immutables"},
 			},
 		},
 	})
