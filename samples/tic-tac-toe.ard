@@ -5,6 +5,12 @@ struct Board {
   cells: [Str]
 }
 
+impl (mut b: Board) {
+  fn play(player: Str, pos: Num) {
+    b.cells.set(pos, player)
+  }
+}
+
 impl (b: Board) {
   fn is_full() Bool {
     mut full = true
@@ -30,10 +36,6 @@ impl (b: Board) {
       s => s.is_empty(),
       _ => false
     }
-  }
-
-  fn play(player: Str, pos: Num) {
-    b.cells.set(pos, player)
   }
 
   fn get_winner() Str? {
@@ -94,7 +96,7 @@ fn read_move(player: Str) Num {
   }
 }
 
-let board = Board{ cells: ["","","","","","","","",""] }
+mut board = Board{ cells: ["","","","","","","","",""] }
 
 let players = ["X", "O"]
 
