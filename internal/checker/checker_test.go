@@ -45,6 +45,7 @@ var compareOptions = cmp.Options{
 		IfStatement{},
 		Struct{},
 		function{},
+		FunctionDeclaration{},
 	),
 }
 

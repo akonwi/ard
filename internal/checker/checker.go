@@ -382,6 +382,7 @@ type FunctionDeclaration struct {
 	Parameters []Parameter
 	Body       []Statement
 	Return     Type
+	mutates    bool
 }
 
 func (f FunctionDeclaration) GetType() Type {
@@ -397,6 +398,7 @@ func (f FunctionDeclaration) GetType() Type {
 		name:       f.Name,
 		parameters: params,
 		returns:    f.Return,
+		mutates:    f.mutates,
 	}
 }
 
@@ -848,11 +850,12 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		new_scope := newScope(c.scope)
 		c.scope = new_scope
 		defer func() { c.scope = new_scope.parent }()
-		new_scope.declare(variable{name: s.Self.Name, mut: false, _type: _struct})
+		new_scope.declare(variable{name: s.Self.Name, mut: s.Self.Mutable, _type: _struct})
 
 		for _, method := range s.Methods {
 			stmt := c.checkStatement(method)
 			meth := stmt.(FunctionDeclaration)
+			meth.mutates = s.Self.Mutable
 			_struct.addMethod(s.Self.Name, meth)
 		}
 		return nil

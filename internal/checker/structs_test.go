@@ -161,5 +161,37 @@ func TestMethods(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "The instance can't be mutated in a non-mutable impl block",
+			input: fmt.Sprintf(
+				`%s
+				impl (self: Shape) {
+				  fn resize(h: Num, w: Num) {
+						self.width = w
+						self.height = h
+					}
+				}`, shapeCode),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Cannot reassign in immutables"},
+				{Kind: Error, Message: "Cannot reassign in immutables"},
+			},
+		},
+		{
+			name: "A mutable impl block",
+			input: fmt.Sprintf(
+				`%s
+				impl (mut self: Shape) {
+				  fn resize(width: Num, height: Num) {
+						self.width = width
+						self.height = height
+					}
+				}
+
+				let square = Shape{width: 5, height: 5}
+				square.resize(8,8)`, shapeCode),
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
+			},
+		},
 	})
 }
