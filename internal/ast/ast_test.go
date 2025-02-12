@@ -15,7 +15,7 @@ var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		Identifier{},
-		NumberType{},
+		IntType{},
 		StringType{},
 		BooleanType{},
 		List{},
@@ -440,13 +440,13 @@ func TestTypeUnion(t *testing.T) {
 	runTests(t, []test{
 		{
 			name:  "Type union",
-			input: `type Value = Num | Bool`,
+			input: `type Value = Int | Bool`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					TypeDeclaration{
 						Name: Identifier{Name: "Value"},
-						Type: []DeclaredType{NumberType{}, BooleanType{}},
+						Type: []DeclaredType{IntType{}, BooleanType{}},
 					},
 				},
 			},

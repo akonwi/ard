@@ -294,14 +294,14 @@ func TestFunctions(t *testing.T) {
 		{
 			name: "multiple args",
 			input: `
-				fn add(a: Num, b: Num) { a + b }
+				fn add(a: Int, b: Int) { a + b }
 				add(1, 2)`,
 			want: 3,
 		},
 		{
 			name: "first class functions",
 			input: `
-			let sub = (a: Num, b: Num) { a - b }
+			let sub = (a: Int, b: Int) { a - b }
 			sub(30, 8)`,
 			want: 22,
 		},
@@ -325,7 +325,7 @@ func TestNumApi(t *testing.T) {
 		},
 		{
 			name:  "::from_str parses a string into a number",
-			input: `Num::from_str("100")`,
+			input: `Int::from_str("100")`,
 			want:  100,
 		},
 	})
@@ -393,7 +393,7 @@ func TestMapApi(t *testing.T) {
 			name: "Map::size",
 			input: `
 				let ages = ["Alice":40, "Bob":30]
-				let jobs: [Str:Num] = [:]
+				let jobs: [Str:Int] = [:]
 				ages.size() + jobs.size()`,
 			want: 2,
 		},
@@ -503,8 +503,8 @@ func TestStructs(t *testing.T) {
 			name: "Struct usage",
 			input: `
 				struct Point {
-					x: Num,
-					y: Num,
+					x: Int,
+					y: Int,
 				}
 
 				impl (p: Point) {
@@ -521,8 +521,8 @@ func TestStructs(t *testing.T) {
 			name: "Reassigning struct properties",
 			input: `
 				struct Point {
-					x: Num,
-					y: Num,
+					x: Int,
+					y: Int,
 				}
 				mut p = Point { x: 10, y: 20 }
 				p.x = 30
@@ -552,11 +552,11 @@ func TestUnions(t *testing.T) {
 		{
 			name: "Using unions",
 			input: `
-				type Printable = Str | Num | Bool
+				type Printable = Str | Int | Bool
 				fn print(p: Printable) Str {
 				  match p {
 					  Str => it,
-						Num => it.to_str(),
+						Int => it.to_str(),
 						_ => {
 						  "boolean value"
 						}

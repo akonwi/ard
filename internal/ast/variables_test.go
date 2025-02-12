@@ -10,7 +10,7 @@ func TestVariables(t *testing.T) {
 			name: "Declaring variables",
 			input: `
 				let name: Str = "Alice"
-    		mut age: Num = 30
+    		mut age: Int = 30
       	let is_student: Bool = true`,
 			output: Program{
 				Imports: []Import{},
@@ -26,7 +26,7 @@ func TestVariables(t *testing.T) {
 					VariableDeclaration{
 						Name:    "age",
 						Mutable: true,
-						Type:    NumberType{},
+						Type:    IntType{},
 						Value: NumLiteral{
 							Value: "30",
 						},

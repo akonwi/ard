@@ -103,7 +103,7 @@ func (s Str) GetProperty(name string) Type {
 	case "size":
 		return function{
 			name:    name,
-			returns: Num{},
+			returns: Int{},
 		}
 	case "is_empty":
 		return function{name: name, returns: Bool{}}
@@ -112,12 +112,12 @@ func (s Str) GetProperty(name string) Type {
 	}
 }
 
-type Num struct{}
+type Int struct{}
 
-func (n Num) String() string {
-	return "Num"
+func (n Int) String() string {
+	return "Int"
 }
-func (n Num) GetProperty(name string) Type {
+func (n Int) GetProperty(name string) Type {
 	switch name {
 	case "to_str":
 		return function{
@@ -128,13 +128,13 @@ func (n Num) GetProperty(name string) Type {
 		return nil
 	}
 }
-func (n Num) GetStaticProperty(name string) Type {
+func (n Int) GetStaticProperty(name string) Type {
 	switch name {
 	case "from_str":
 		return function{
 			name:       "from_str",
 			parameters: []variable{{name: "str", _type: Str{}}},
-			returns:    Option{Num{}},
+			returns:    Option{Int{}},
 		}
 	default:
 		return nil
@@ -197,19 +197,19 @@ func (l List) GetProperty(name string) Type {
 	case "size":
 		return function{
 			name:    name,
-			returns: Num{},
+			returns: Int{},
 		}
 	case "push":
 		return function{
 			name:       "push",
 			mutates:    true,
 			parameters: []variable{{name: "item", _type: l.element}},
-			returns:    Num{},
+			returns:    Int{},
 		}
 	case "at":
 		return function{
 			name:       "at",
-			parameters: []variable{{name: "index", _type: Num{}}},
+			parameters: []variable{{name: "index", _type: Int{}}},
 			returns:    Option{l.element},
 		}
 	case "set":
@@ -217,7 +217,7 @@ func (l List) GetProperty(name string) Type {
 			name:    name,
 			mutates: true,
 			parameters: []variable{
-				{name: "index", _type: Num{}},
+				{name: "index", _type: Int{}},
 				{name: "value", _type: l.element},
 			},
 			returns: Bool{},
@@ -245,7 +245,7 @@ func (m Map) GetProperty(name string) Type {
 	case "size":
 		return function{
 			name:    name,
-			returns: Num{},
+			returns: Int{},
 		}
 	case "set":
 		return function{
@@ -483,7 +483,7 @@ func (a *Any) refine(t Type) bool {
 }
 
 func areComparable(a, b Type) bool {
-	_, aIsNum := a.(Num)
+	_, aIsNum := a.(Int)
 	_, aIsStr := a.(Str)
 	_, aIsBool := a.(Bool)
 	if aIsBool || aIsNum || aIsStr {

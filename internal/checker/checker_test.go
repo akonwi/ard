@@ -173,7 +173,7 @@ func TestLiterals(t *testing.T) {
 				},
 			},
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 	})
@@ -185,7 +185,7 @@ func TestVariables(t *testing.T) {
 			name: "Declared types",
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
-				"let age: Num = 32",
+				"let age: Int = 32",
 				"let is_student: Bool = true",
 			}, "\n"),
 			output: Program{
@@ -212,11 +212,11 @@ func TestVariables(t *testing.T) {
 			name: "Actual types should match declarations",
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
-				`let age: Num = "32"`,
+				`let age: Int = "32"`,
 				`let is_student: Bool = true`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
 			},
 		},
 		{
@@ -235,7 +235,7 @@ func TestVariables(t *testing.T) {
 			name:  "Reassigning types must match",
 			input: `mut name = "Bob"` + "\n" + `name = 0`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 		{
@@ -389,7 +389,7 @@ func TestNumberOperations(t *testing.T) {
 				name:  c.name + " with wrong types",
 				input: fmt.Sprintf("1 %s true", c.op),
 				diagnostics: []Diagnostic{
-					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Num %s Bool", c.op)},
+					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Int %s Bool", c.op)},
 				},
 			})
 	}
@@ -723,7 +723,7 @@ func TestForLoops(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Invalid range: Num..Bool"},
+				{Kind: Error, Message: "Invalid range: Int..Bool"},
 			},
 		},
 		{
@@ -798,7 +798,7 @@ func TestForLoops(t *testing.T) {
 		{
 			name: "Iterating over a list of structs",
 			input: strings.Join([]string{
-				`struct Shape { height: Num, width: Num }`,
+				`struct Shape { height: Int, width: Int }`,
 				`for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
 			}, "\n"),
 			output: Program{
@@ -806,8 +806,8 @@ func TestForLoops(t *testing.T) {
 					&Struct{
 						Name: "Shape",
 						Fields: map[string]Type{
-							"height": Num{},
-							"width":  Num{},
+							"height": Int{},
+							"width":  Int{},
 						},
 					},
 					ForIn{
@@ -979,7 +979,7 @@ func TestFunctions(t *testing.T) {
 				`fn get_msg() Str { 200 }`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 		{
@@ -1043,7 +1043,7 @@ func TestFunctions(t *testing.T) {
 			input: `
 				fn greet(person: Str) { "hello {{person}}" }
 				greet(101)
-				fn add(a: Num, b: Num) { a + b }
+				fn add(a: Int, b: Int) { a + b }
 				add(2)
 				add(1, "two")
 				fn change(mut person: Str) { }
@@ -1053,17 +1053,17 @@ func TestFunctions(t *testing.T) {
 				change(john)
 				change(james)`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 				{Kind: Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
 				{Kind: Error, Message: "Type mismatch: Expected mutable Str, got Str"},
 			},
 		},
 		{
 			name: "Anonymous functions",
 			input: strings.Join([]string{
-				`let add = (a: Num, b: Num) Num { a + b }`,
-				`let eight: Num = add(3, 5)`,
+				`let add = (a: Int, b: Int) Int { a + b }`,
+				`let eight: Int = add(3, 5)`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -1072,10 +1072,10 @@ func TestFunctions(t *testing.T) {
 						Name: "add",
 						Value: FunctionLiteral{
 							Parameters: []Parameter{
-								{Name: "a", Type: Num{}},
-								{Name: "b", Type: Num{}},
+								{Name: "a", Type: Int{}},
+								{Name: "b", Type: Int{}},
 							},
-							Return: Num{},
+							Return: Int{},
 							Body: []Statement{
 								BinaryExpr{
 									Op:    Add,
@@ -1130,7 +1130,7 @@ func TestLists(t *testing.T) {
 	run(t, []test{
 		{
 			name:  "Empty list",
-			input: `let empty: [Num] = []`,
+			input: `let empty: [Int] = []`,
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
@@ -1152,8 +1152,8 @@ func TestLists(t *testing.T) {
 			name:  "Lists cannot have mixed types",
 			input: `let numbers = [1, "two", false]`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Bool"},
 			},
 		},
 		{
@@ -1523,7 +1523,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "Type mismatch: Expected Str, got Num",
+					Message: "Type mismatch: Expected Str, got Int",
 				},
 			},
 		},
@@ -1702,7 +1702,7 @@ func TestTypeUnions(t *testing.T) {
 			name: "Valid type union",
 			input: `
 				type Alias = Bool
-			  type Printable = Num|Str
+			  type Printable = Int|Str
 				let a: Printable = "foo"
 				let b: Alias = true
 				let list: [Printable] = [1, "two", 3]`,
@@ -1735,20 +1735,20 @@ func TestTypeUnions(t *testing.T) {
 		{
 			name: "Errors when types don't match",
 			input: `
-					  type Printable = Num|Str
+					  type Printable = Int|Str
 						fn print(p: Printable) {}
 						print(true)`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num|Str, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Int|Str, got Bool"},
 			},
 		},
 		{
 			name: "Matching behavior on type unions",
 			input: `
-				type Printable = Num|Str|Bool
+				type Printable = Int|Str|Bool
 				let a: Printable = "foo"
 				match a {
-				  Num => "number",
+				  Int => "number",
 					Str => "string",
 					_ => "other"
 				}`,
@@ -1762,7 +1762,7 @@ func TestTypeUnions(t *testing.T) {
 					UnionMatch{
 						Subject: Identifier{Name: "a"},
 						Cases: map[Type]Block{
-							Num{}: {Body: []Statement{StrLiteral{Value: "number"}}},
+							Int{}: {Body: []Statement{StrLiteral{Value: "number"}}},
 							Str{}: {Body: []Statement{StrLiteral{Value: "string"}}},
 						},
 						CatchAll: Block{Body: []Statement{StrLiteral{Value: "other"}}},

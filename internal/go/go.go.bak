@@ -74,7 +74,7 @@ func resolveFormatVerb(_type checker.Type) string {
 	switch _type.(type) {
 	case checker.PrimitiveType:
 		switch _type.(checker.PrimitiveType).Name {
-		case "Num":
+		case "Int":
 			return "%d"
 		case "Bool":
 			return "%t"

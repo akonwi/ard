@@ -6,7 +6,7 @@ struct Board {
 }
 
 impl (mut b: Board) {
-  fn play(player: Str, pos: Num) {
+  fn play(player: Str, pos: Int) {
     b.cells.set(pos, player)
   }
 }
@@ -31,7 +31,7 @@ impl (b: Board) {
     io.print("{{b.cells.at(6)}} | {{b.cells.at(7)}} | {{b.cells.at(8)}}")
   }
 
-  fn can_play(pos: Num) Bool {
+  fn can_play(pos: Int) Bool {
     match b.cells.at(pos) {
       s => s.is_empty(),
       _ => false
@@ -82,11 +82,11 @@ impl (b: Board) {
   }
 }
 
-fn read_move(player: Str) Num {
+fn read_move(player: Str) Int {
   io.print("Enter a number between 1 and 9")
   io.print("---------------")
 
-  let input = match Num::from_str(io.read_line()) {
+  let input = match Int::from_str(io.read_line()) {
     n => n,
     _ => -1
   }

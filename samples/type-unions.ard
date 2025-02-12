@@ -1,7 +1,7 @@
 use ard/io
 
-struct Square { size: Num }
-struct Circle { radius: Num }
+struct Square { size: Int }
+struct Circle { radius: Int }
 
 type Shape = Square | Circle
 

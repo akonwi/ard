@@ -1,6 +1,6 @@
 use ard/io
 
-fn fib(n: Num) Num {
+fn fib(n: Int) Int {
   match (n <= 1) {
     true => n,
     false => fib(n - 2) + fib(n - 1)

@@ -288,7 +288,7 @@ get_msg();
 		{
 			name: "with arguments",
 			input: `
-fn add(x: Num, y: Num) Num { x + y }
+fn add(x: Int, y: Int) Int { x + y }
 add(1, 2)`,
 			output: `
 function add(x, y) {
@@ -318,17 +318,17 @@ func TestFunctionDeclaration(t *testing.T) {
 		},
 		{
 			name:   "with parameters",
-			input:  "fn add(x: Num, y: Num) {\n}",
+			input:  "fn add(x: Int, y: Int) {\n}",
 			output: "function add(x, y) {\n}",
 		},
 		{
 			name:   "with return type",
-			input:  "fn add(x: Num, y: Num) Num {\n}",
+			input:  "fn add(x: Int, y: Int) Int {\n}",
 			output: "function add(x, y) {\n}",
 		},
 		{
 			name:  "single statement body: return is implicit",
-			input: `fn add(x: Num, y: Num) Num { x + y }`,
+			input: `fn add(x: Int, y: Int) Int { x + y }`,
 			output: `
 function add(x, y) {
   return x + y
@@ -337,7 +337,7 @@ function add(x, y) {
 		{
 			name: "the last statement is the return statement",
 			input: `
-fn add(x: Num, y: Num) Num {
+fn add(x: Int, y: Int) Int {
   let result = x + y
 	result
 }`,
@@ -385,7 +385,7 @@ const a_foo = {}`,
 		{
 			name: "full struct",
 			input: `
-struct Person { name: Str, age: Num, employed: Bool }
+struct Person { name: Str, age: Int, employed: Bool }
 Person{ name: "Joe", age: 42, employed: true }`,
 			output: `
 {name: "Joe", age: 42, employed: true}`,

@@ -112,16 +112,16 @@ func (s StringType) GetName() string {
 	return "String"
 }
 
-type NumberType struct {
+type IntType struct {
 	BaseNode
 	optional bool
 }
 
-func (s NumberType) GetName() string {
+func (s IntType) GetName() string {
 	return "Number"
 }
 
-func (v NumberType) IsOptional() bool {
+func (v IntType) IsOptional() bool {
 	return v.optional
 }
 
@@ -739,8 +739,8 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 			switch text {
 			case "Str":
 				return StringType{makeBaseNode(child), optional}
-			case "Num":
-				return NumberType{makeBaseNode(child), optional}
+			case "Int":
+				return IntType{makeBaseNode(child), optional}
 			case "Bool":
 				return BooleanType{makeBaseNode(child), optional}
 			default:

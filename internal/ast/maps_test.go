@@ -7,8 +7,8 @@ func TestMaps(t *testing.T) {
 		{
 			name: "Instantiating maps",
 			input: `
-				let empty: [Str:Num] = [:]
-			  let num_to_str: [Num:Str] = [1: "one", 2: "two", 3: "three"]
+				let empty: [Str:Int] = [:]
+			  let num_to_str: [Int:Str] = [1: "one", 2: "two", 3: "three"]
 				`,
 			output: Program{
 				Imports: []Import{},
@@ -16,7 +16,7 @@ func TestMaps(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "empty",
-						Type:    Map{Key: StringType{}, Value: NumberType{}},
+						Type:    Map{Key: StringType{}, Value: IntType{}},
 						Value: MapLiteral{
 							Entries: []MapEntry{},
 						},
@@ -24,7 +24,7 @@ func TestMaps(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "num_to_str",
-						Type:    Map{Key: NumberType{}, Value: StringType{}},
+						Type:    Map{Key: IntType{}, Value: StringType{}},
 						Value: MapLiteral{
 							Entries: []MapEntry{
 								{Key: NumLiteral{Value: "1"}, Value: StrLiteral{Value: `"one"`}},

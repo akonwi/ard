@@ -2,7 +2,7 @@ use ard/io
 
 struct Student {
   name: Str,
-  grade: Num
+  grade: Int
 }
 
 let students: [Student] = [
