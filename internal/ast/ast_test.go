@@ -15,7 +15,7 @@ var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		Identifier{},
-		NumberType{},
+		IntType{},
 		StringType{},
 		BooleanType{},
 		List{},
@@ -137,12 +137,12 @@ func TestIdentifiers(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "count",
-						Value:   NumLiteral{Value: "10"},
+						Value:   IntLiteral{Value: "10"},
 					},
 					BinaryExpression{
 						Left:     Identifier{Name: "count"},
 						Operator: LessThanOrEqual,
-						Right:    NumLiteral{Value: "10"},
+						Right:    IntLiteral{Value: "10"},
 					},
 				},
 			},
@@ -167,13 +167,13 @@ func TestWhileLoop(t *testing.T) {
 						Condition: BinaryExpression{
 							Left:     Identifier{Name: "count"},
 							Operator: LessThanOrEqual,
-							Right:    NumLiteral{Value: "9"},
+							Right:    IntLiteral{Value: "9"},
 						},
 						Body: []Statement{
 							VariableAssignment{
 								Target:   Identifier{Name: "count"},
 								Operator: Increment,
-								Value:    NumLiteral{Value: "1"},
+								Value:    IntLiteral{Value: "1"},
 							},
 						},
 					},
@@ -189,9 +189,9 @@ func TestWhileLoop(t *testing.T) {
 				Statements: []Statement{
 					WhileLoop{
 						Condition: BinaryExpression{
-							Left:     NumLiteral{Value: "9"},
+							Left:     IntLiteral{Value: "9"},
 							Operator: Minus,
-							Right:    NumLiteral{Value: "7"},
+							Right:    IntLiteral{Value: "7"},
 						},
 						Body: []Statement{},
 					},
@@ -227,9 +227,9 @@ func TestIfAndElse(t *testing.T) {
 				Statements: []Statement{
 					IfStatement{
 						Condition: BinaryExpression{
-							Left:     NumLiteral{Value: "20"},
+							Left:     IntLiteral{Value: "20"},
 							Operator: Minus,
-							Right:    NumLiteral{Value: "1"},
+							Right:    IntLiteral{Value: "1"},
 						},
 						Body: []Statement{},
 					},
@@ -313,8 +313,8 @@ func TestForInLoops(t *testing.T) {
 				Statements: []Statement{
 					RangeLoop{
 						Cursor: Identifier{Name: "i"},
-						Start:  NumLiteral{Value: "1"},
-						End:    NumLiteral{Value: "10"},
+						Start:  IntLiteral{Value: "1"},
+						End:    IntLiteral{Value: "10"},
 						Body:   []Statement{},
 					},
 				},
@@ -346,8 +346,8 @@ func TestForInLoops(t *testing.T) {
 						Cursor: Identifier{Name: "num"},
 						Iterable: ListLiteral{
 							Items: []Expression{
-								NumLiteral{Value: "1"},
-								NumLiteral{Value: "2"},
+								IntLiteral{Value: "1"},
+								IntLiteral{Value: "2"},
 							},
 						},
 						Body: []Statement{},
@@ -372,17 +372,17 @@ func TestForLoops(t *testing.T) {
 						Init: VariableDeclaration{
 							Mutable: true,
 							Name:    "i",
-							Value:   NumLiteral{Value: "0"},
+							Value:   IntLiteral{Value: "0"},
 						},
 						Condition: BinaryExpression{
 							Operator: LessThan,
 							Left:     Identifier{Name: "i"},
-							Right:    NumLiteral{Value: "10"},
+							Right:    IntLiteral{Value: "10"},
 						},
 						Incrementer: VariableAssignment{
 							Target:   Identifier{Name: "i"},
 							Operator: Increment,
-							Value:    NumLiteral{Value: "1"},
+							Value:    IntLiteral{Value: "1"},
 						},
 						Body: []Statement{},
 					},
@@ -440,13 +440,13 @@ func TestTypeUnion(t *testing.T) {
 	runTests(t, []test{
 		{
 			name:  "Type union",
-			input: `type Value = Num | Bool`,
+			input: `type Value = Int | Bool`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					TypeDeclaration{
 						Name: Identifier{Name: "Value"},
-						Type: []DeclaredType{NumberType{}, BooleanType{}},
+						Type: []DeclaredType{IntType{}, BooleanType{}},
 					},
 				},
 			},

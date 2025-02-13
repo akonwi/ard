@@ -129,7 +129,7 @@ func TestLiterals(t *testing.T) {
 					StrLiteral{
 						Value: "hello",
 					},
-					NumLiteral{
+					IntLiteral{
 						Value: 42,
 					},
 					BoolLiteral{
@@ -162,7 +162,7 @@ func TestLiterals(t *testing.T) {
 					VariableBinding{
 						Mut:   false,
 						Name:  "num",
-						Value: NumLiteral{Value: 3},
+						Value: IntLiteral{Value: 3},
 					},
 					InterpolatedStr{
 						Parts: []Expression{
@@ -173,7 +173,7 @@ func TestLiterals(t *testing.T) {
 				},
 			},
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 	})
@@ -185,7 +185,7 @@ func TestVariables(t *testing.T) {
 			name: "Declared types",
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
-				"let age: Num = 32",
+				"let age: Int = 32",
 				"let is_student: Bool = true",
 			}, "\n"),
 			output: Program{
@@ -198,7 +198,7 @@ func TestVariables(t *testing.T) {
 					VariableBinding{
 						Mut:   false,
 						Name:  "age",
-						Value: NumLiteral{Value: 32},
+						Value: IntLiteral{Value: 32},
 					},
 					VariableBinding{
 						Mut:   false,
@@ -212,11 +212,11 @@ func TestVariables(t *testing.T) {
 			name: "Actual types should match declarations",
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
-				`let age: Num = "32"`,
+				`let age: Int = "32"`,
 				`let is_student: Bool = true`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
 			},
 		},
 		{
@@ -235,7 +235,7 @@ func TestVariables(t *testing.T) {
 			name:  "Reassigning types must match",
 			input: `mut name = "Bob"` + "\n" + `name = 0`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 		{
@@ -250,8 +250,8 @@ func TestVariables(t *testing.T) {
 			input: `mut count = 0` + "\n" + `count = 1`,
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 0}},
-					VariableAssignment{Target: Identifier{Name: "count"}, Value: NumLiteral{Value: 1}},
+					VariableBinding{Mut: true, Name: "count", Value: IntLiteral{Value: 0}},
+					VariableAssignment{Target: Identifier{Name: "count"}, Value: IntLiteral{Value: 1}},
 				},
 			},
 		},
@@ -317,7 +317,7 @@ func TestUnaryExpressions(t *testing.T) {
 			input: `-10`,
 			output: Program{
 				Statements: []Statement{
-					Negation{Value: NumLiteral{Value: 10}},
+					Negation{Value: IntLiteral{Value: 10}},
 				},
 			},
 		},
@@ -374,13 +374,13 @@ func TestNumberOperations(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpr{
 						Op:    c.op,
-						Left:  NumLiteral{Value: 1},
-						Right: NumLiteral{Value: 2},
+						Left:  IntLiteral{Value: 1},
+						Right: IntLiteral{Value: 2},
 					},
 					BinaryExpr{
 						Op:    c.op,
-						Left:  NumLiteral{Value: 3},
-						Right: Negation{Value: NumLiteral{Value: 4}},
+						Left:  IntLiteral{Value: 3},
+						Right: Negation{Value: IntLiteral{Value: 4}},
 					},
 				},
 			},
@@ -389,7 +389,7 @@ func TestNumberOperations(t *testing.T) {
 				name:  c.name + " with wrong types",
 				input: fmt.Sprintf("1 %s true", c.op),
 				diagnostics: []Diagnostic{
-					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Num %s Bool", c.op)},
+					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Int %s Bool", c.op)},
 				},
 			})
 	}
@@ -413,13 +413,13 @@ func TestEqualityComparisons(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpr{
 						Op:    Equal,
-						Left:  NumLiteral{Value: 1},
-						Right: NumLiteral{Value: 2},
+						Left:  IntLiteral{Value: 1},
+						Right: IntLiteral{Value: 2},
 					},
 					BinaryExpr{
 						Op:    NotEqual,
-						Left:  NumLiteral{Value: 1},
-						Right: NumLiteral{Value: 2},
+						Left:  IntLiteral{Value: 1},
+						Right: IntLiteral{Value: 2},
 					},
 					BinaryExpr{
 						Op:    Equal,
@@ -489,10 +489,10 @@ func TestParenthesizedExpressions(t *testing.T) {
 						Op: Mul,
 						Left: BinaryExpr{
 							Op:    Add,
-							Left:  NumLiteral{Value: 30},
-							Right: NumLiteral{Value: 20},
+							Left:  IntLiteral{Value: 30},
+							Right: IntLiteral{Value: 20},
 						},
-						Right: NumLiteral{Value: 4},
+						Right: IntLiteral{Value: 4},
 					},
 				},
 			},
@@ -571,8 +571,8 @@ func TestIfStatements(t *testing.T) {
 							Left: Identifier{Name: "is_on"},
 							Right: BinaryExpr{
 								Op:    GreaterThan,
-								Left:  NumLiteral{Value: 100},
-								Right: NumLiteral{Value: 30},
+								Left:  IntLiteral{Value: 100},
+								Right: IntLiteral{Value: 30},
 							},
 						},
 						Body: []Statement{
@@ -630,8 +630,8 @@ func TestIfStatements(t *testing.T) {
 						Else: IfStatement{
 							Condition: BinaryExpr{
 								Op:    GreaterThan,
-								Left:  NumLiteral{Value: 1},
-								Right: NumLiteral{Value: 2},
+								Left:  IntLiteral{Value: 1},
+								Right: IntLiteral{Value: 2},
 							},
 							Body: []Statement{
 								VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "baz"}},
@@ -664,8 +664,8 @@ func TestIfStatements(t *testing.T) {
 						Else: IfStatement{
 							Condition: BinaryExpr{
 								Op:    GreaterThan,
-								Left:  NumLiteral{Value: 1},
-								Right: NumLiteral{Value: 2},
+								Left:  IntLiteral{Value: 1},
+								Right: IntLiteral{Value: 2},
 							},
 							Body: []Statement{
 								VariableBinding{Mut: false, Name: "foo", Value: StrLiteral{Value: "baz"}},
@@ -695,11 +695,11 @@ func TestForLoops(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 0}},
+					VariableBinding{Mut: true, Name: "count", Value: IntLiteral{Value: 0}},
 					ForRange{
 						Cursor: Identifier{Name: "i"},
-						Start:  NumLiteral{Value: 1},
-						End:    NumLiteral{Value: 10},
+						Start:  IntLiteral{Value: 1},
+						End:    IntLiteral{Value: 10},
 						Body: []Statement{
 							VariableAssignment{
 								Target: Identifier{Name: "count"},
@@ -723,7 +723,7 @@ func TestForLoops(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Invalid range: Num..Bool"},
+				{Kind: Error, Message: "Invalid range: Int..Bool"},
 			},
 		},
 		{
@@ -758,8 +758,8 @@ func TestForLoops(t *testing.T) {
 				Statements: []Statement{
 					ForRange{
 						Cursor: Identifier{Name: "i"},
-						Start:  NumLiteral{Value: 0},
-						End:    NumLiteral{Value: 20},
+						Start:  IntLiteral{Value: 0},
+						End:    IntLiteral{Value: 20},
 						Body: []Statement{
 							Identifier{Name: "i"},
 						},
@@ -778,9 +778,9 @@ func TestForLoops(t *testing.T) {
 						Cursor: Identifier{Name: "i"},
 						Iterable: ListLiteral{
 							Elements: []Expression{
-								NumLiteral{Value: 1},
-								NumLiteral{Value: 2},
-								NumLiteral{Value: 3},
+								IntLiteral{Value: 1},
+								IntLiteral{Value: 2},
+								IntLiteral{Value: 3},
 							},
 						},
 						Body: []Statement{},
@@ -798,7 +798,7 @@ func TestForLoops(t *testing.T) {
 		{
 			name: "Iterating over a list of structs",
 			input: strings.Join([]string{
-				`struct Shape { height: Num, width: Num }`,
+				`struct Shape { height: Int, width: Int }`,
 				`for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
 			}, "\n"),
 			output: Program{
@@ -806,8 +806,8 @@ func TestForLoops(t *testing.T) {
 					&Struct{
 						Name: "Shape",
 						Fields: map[string]Type{
-							"height": Num{},
-							"width":  Num{},
+							"height": Int{},
+							"width":  Int{},
 						},
 					},
 					ForIn{
@@ -817,15 +817,15 @@ func TestForLoops(t *testing.T) {
 								StructInstance{
 									Name: "Shape",
 									Fields: map[string]Expression{
-										"height": NumLiteral{Value: 1},
-										"width":  NumLiteral{Value: 2},
+										"height": IntLiteral{Value: 1},
+										"width":  IntLiteral{Value: 2},
 									},
 								},
 								StructInstance{
 									Name: "Shape",
 									Fields: map[string]Expression{
-										"height": NumLiteral{Value: 2},
-										"width":  NumLiteral{Value: 2},
+										"height": IntLiteral{Value: 2},
+										"width":  IntLiteral{Value: 2},
 									},
 								},
 							},
@@ -841,18 +841,18 @@ func TestForLoops(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					ForLoop{
-						Init: VariableBinding{Mut: true, Name: "i", Value: NumLiteral{Value: 0}},
+						Init: VariableBinding{Mut: true, Name: "i", Value: IntLiteral{Value: 0}},
 						Condition: BinaryExpr{
 							Op:    LessThan,
 							Left:  Identifier{Name: "i"},
-							Right: NumLiteral{Value: 10},
+							Right: IntLiteral{Value: 10},
 						},
 						Step: VariableAssignment{
 							Target: Identifier{Name: "i"},
 							Value: BinaryExpr{
 								Op:    Add,
 								Left:  Identifier{Name: "i"},
-								Right: NumLiteral{Value: 1},
+								Right: IntLiteral{Value: 1},
 							},
 						},
 						Body: Block{Body: []Statement{}},
@@ -875,12 +875,12 @@ func TestWhileLoops(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
-					VariableBinding{Mut: true, Name: "count", Value: NumLiteral{Value: 10}},
+					VariableBinding{Mut: true, Name: "count", Value: IntLiteral{Value: 10}},
 					WhileLoop{
 						Condition: BinaryExpr{
 							Op:    GreaterThan,
 							Left:  Identifier{Name: "count"},
-							Right: NumLiteral{Value: 0},
+							Right: IntLiteral{Value: 0},
 						},
 						Body: []Statement{
 							VariableAssignment{
@@ -888,7 +888,7 @@ func TestWhileLoops(t *testing.T) {
 								Value: BinaryExpr{
 									Op:    Sub,
 									Left:  Identifier{Name: "count"},
-									Right: NumLiteral{Value: 1},
+									Right: IntLiteral{Value: 1},
 								},
 							},
 						},
@@ -979,7 +979,7 @@ func TestFunctions(t *testing.T) {
 				`fn get_msg() Str { 200 }`,
 			}, "\n"),
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 		{
@@ -1043,7 +1043,7 @@ func TestFunctions(t *testing.T) {
 			input: `
 				fn greet(person: Str) { "hello {{person}}" }
 				greet(101)
-				fn add(a: Num, b: Num) { a + b }
+				fn add(a: Int, b: Int) { a + b }
 				add(2)
 				add(1, "two")
 				fn change(mut person: Str) { }
@@ -1053,17 +1053,17 @@ func TestFunctions(t *testing.T) {
 				change(john)
 				change(james)`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Str, got Num"},
+				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
 				{Kind: Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
 				{Kind: Error, Message: "Type mismatch: Expected mutable Str, got Str"},
 			},
 		},
 		{
 			name: "Anonymous functions",
 			input: strings.Join([]string{
-				`let add = (a: Num, b: Num) Num { a + b }`,
-				`let eight: Num = add(3, 5)`,
+				`let add = (a: Int, b: Int) Int { a + b }`,
+				`let eight: Int = add(3, 5)`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -1072,10 +1072,10 @@ func TestFunctions(t *testing.T) {
 						Name: "add",
 						Value: FunctionLiteral{
 							Parameters: []Parameter{
-								{Name: "a", Type: Num{}},
-								{Name: "b", Type: Num{}},
+								{Name: "a", Type: Int{}},
+								{Name: "b", Type: Int{}},
 							},
-							Return: Num{},
+							Return: Int{},
 							Body: []Statement{
 								BinaryExpr{
 									Op:    Add,
@@ -1088,7 +1088,7 @@ func TestFunctions(t *testing.T) {
 					VariableBinding{
 						Mut:   false,
 						Name:  "eight",
-						Value: FunctionCall{Name: "add", Args: []Expression{NumLiteral{Value: 3}, NumLiteral{Value: 5}}},
+						Value: FunctionCall{Name: "add", Args: []Expression{IntLiteral{Value: 3}, IntLiteral{Value: 5}}},
 					},
 				},
 			},
@@ -1130,7 +1130,7 @@ func TestLists(t *testing.T) {
 	run(t, []test{
 		{
 			name:  "Empty list",
-			input: `let empty: [Num] = []`,
+			input: `let empty: [Int] = []`,
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
@@ -1152,8 +1152,8 @@ func TestLists(t *testing.T) {
 			name:  "Lists cannot have mixed types",
 			input: `let numbers = [1, "two", false]`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Str"},
-				{Kind: Error, Message: "Type mismatch: Expected Num, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
+				{Kind: Error, Message: "Type mismatch: Expected Int, got Bool"},
 			},
 		},
 		{
@@ -1163,9 +1163,9 @@ func TestLists(t *testing.T) {
 				Statements: []Statement{
 					ListLiteral{
 						Elements: []Expression{
-							NumLiteral{Value: 1},
-							NumLiteral{Value: 2},
-							NumLiteral{Value: 3},
+							IntLiteral{Value: 1},
+							IntLiteral{Value: 2},
+							IntLiteral{Value: 3},
 						},
 					},
 				},
@@ -1180,7 +1180,7 @@ func TestLists(t *testing.T) {
 				Statements: []Statement{
 					InstanceProperty{
 						Subject: ListLiteral{
-							Elements: []Expression{NumLiteral{Value: 1}},
+							Elements: []Expression{IntLiteral{Value: 1}},
 						},
 						Property: Identifier{Name: "size"},
 					},
@@ -1458,7 +1458,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 								Subject:  StrLiteral{Value: "foo"},
 								Property: FunctionCall{Name: "size", Args: []Expression{}},
 							},
-							Right: NumLiteral{Value: 20},
+							Right: IntLiteral{Value: 20},
 						},
 					},
 					BoolMatch{
@@ -1523,7 +1523,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 			diagnostics: []Diagnostic{
 				{
 					Kind:    Error,
-					Message: "Type mismatch: Expected Str, got Num",
+					Message: "Type mismatch: Expected Str, got Int",
 				},
 			},
 		},
@@ -1702,7 +1702,7 @@ func TestTypeUnions(t *testing.T) {
 			name: "Valid type union",
 			input: `
 				type Alias = Bool
-			  type Printable = Num|Str
+			  type Printable = Int|Str
 				let a: Printable = "foo"
 				let b: Alias = true
 				let list: [Printable] = [1, "two", 3]`,
@@ -1723,9 +1723,9 @@ func TestTypeUnions(t *testing.T) {
 						Name: "list",
 						Value: ListLiteral{
 							Elements: []Expression{
-								NumLiteral{Value: 1},
+								IntLiteral{Value: 1},
 								StrLiteral{Value: "two"},
-								NumLiteral{Value: 3},
+								IntLiteral{Value: 3},
 							},
 						},
 					},
@@ -1735,20 +1735,20 @@ func TestTypeUnions(t *testing.T) {
 		{
 			name: "Errors when types don't match",
 			input: `
-					  type Printable = Num|Str
+					  type Printable = Int|Str
 						fn print(p: Printable) {}
 						print(true)`,
 			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Type mismatch: Expected Num|Str, got Bool"},
+				{Kind: Error, Message: "Type mismatch: Expected Int|Str, got Bool"},
 			},
 		},
 		{
 			name: "Matching behavior on type unions",
 			input: `
-				type Printable = Num|Str|Bool
+				type Printable = Int|Str|Bool
 				let a: Printable = "foo"
 				match a {
-				  Num => "number",
+				  Int => "number",
 					Str => "string",
 					_ => "other"
 				}`,
@@ -1762,7 +1762,7 @@ func TestTypeUnions(t *testing.T) {
 					UnionMatch{
 						Subject: Identifier{Name: "a"},
 						Cases: map[Type]Block{
-							Num{}: {Body: []Statement{StrLiteral{Value: "number"}}},
+							Int{}: {Body: []Statement{StrLiteral{Value: "number"}}},
 							Str{}: {Body: []Statement{StrLiteral{Value: "string"}}},
 						},
 						CatchAll: Block{Body: []Statement{StrLiteral{Value: "other"}}},

@@ -68,7 +68,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		}
 	case checker.ForRange:
 		for i := vm.evalExpression(s.Start).raw.(int); i <= vm.evalExpression(s.End).raw.(int); i++ {
-			cursor := binding{false, &object{i, checker.Num{}}, false}
+			cursor := binding{false, &object{i, checker.Int{}}, false}
 			variables := map[string]binding{s.Cursor.Name: cursor}
 			if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 				break
@@ -202,7 +202,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			}
 		}
 		return &object{builder.String(), checker.Str{}}
-	case checker.NumLiteral:
+	case checker.IntLiteral:
 		return &object{e.Value, e.GetType()}
 	case checker.BoolLiteral:
 		return &object{e.Value, e.GetType()}
@@ -306,10 +306,10 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			args[i] = *vm.evalExpression(arg)
 		}
 		switch e.Subject.(type) {
-		case checker.Num:
+		case checker.Int:
 			switch e.Function.Name {
 			case "from_str":
-				res := &object{nil, checker.MakeOption(checker.Num{})}
+				res := &object{nil, checker.MakeOption(checker.Int{})}
 				if num, err := strconv.Atoi(args[0].raw.(string)); err == nil {
 					res.raw = num
 				}
@@ -388,10 +388,10 @@ func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
 		default:
 			panic(fmt.Errorf("Undefined property: Str.%v", propName))
 		}
-	case checker.Num:
+	case checker.Int:
 		switch propName {
 		default:
-			panic(fmt.Errorf("Undefined property: Num.%v", propName))
+			panic(fmt.Errorf("Undefined property: Int.%v", propName))
 		}
 	case checker.Bool:
 		switch propName {
@@ -416,12 +416,12 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		str := o.raw.(string)
 		switch fn.Name {
 		case "size":
-			return &object{len(str), checker.Num{}}
+			return &object{len(str), checker.Int{}}
 		case "is_empty":
 			return &object{len(str) == 0, checker.Bool{}}
 		}
 		panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
-	case checker.Num:
+	case checker.Int:
 		switch fn.Name {
 		case "to_str":
 			return &object{strconv.Itoa(o.raw.(int)), checker.Str{}}
@@ -438,11 +438,11 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		}
 		switch fn.Name {
 		case "size":
-			return &object{len(list), checker.Num{}}
+			return &object{len(list), checker.Int{}}
 		case "push":
 			item := vm.evalExpression(fn.Args[0])
 			o.raw = append(list, item)
-			return &object{len(list), checker.Num{}}
+			return &object{len(list), checker.Int{}}
 		case "at":
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
 			val := list[index]
@@ -467,7 +467,7 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		m := o.raw.(map[object]*object)
 		switch fn.Name {
 		case "size":
-			return &object{len(m), checker.Num{}}
+			return &object{len(m), checker.Int{}}
 		case "set":
 			key := vm.evalExpression(fn.Args[0])
 			val := vm.evalExpression(fn.Args[1])

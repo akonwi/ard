@@ -1,6 +1,6 @@
 use ard/io
 
-mut numbers: [Num] = []
+mut numbers: [Int] = []
 io.print("numbers.size = {{numbers.size().to_str()}}")
 
 io.print("adding numbers from 0 to 10")

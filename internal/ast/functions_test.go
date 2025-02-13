@@ -62,7 +62,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		},
 		{
 			name:  "Function with two parameters",
-			input: `fn add(x: Num, y: Num) Num { 10 }`,
+			input: `fn add(x: Int, y: Int) Int { 10 }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -71,16 +71,16 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "x",
-								Type: NumberType{},
+								Type: IntType{},
 							},
 							{
 								Name: "y",
-								Type: NumberType{},
+								Type: IntType{},
 							},
 						},
-						ReturnType: NumberType{},
+						ReturnType: IntType{},
 						Body: []Statement{
-							NumLiteral{Value: "10"},
+							IntLiteral{Value: "10"},
 						},
 					},
 				},
@@ -170,7 +170,7 @@ func TestFunctionCalls(t *testing.T) {
 		{
 			name: "Valid function call with two arguments",
 			input: `
-				fn add(x: Num, y: Num) Num { x + y }
+				fn add(x: Int, y: Int) Int { x + y }
 				add(1, 2)`,
 			output: Program{
 				Imports: []Import{},
@@ -178,10 +178,10 @@ func TestFunctionCalls(t *testing.T) {
 					FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
-							{Name: "x", Type: NumberType{}},
-							{Name: "y", Type: NumberType{}},
+							{Name: "x", Type: IntType{}},
+							{Name: "y", Type: IntType{}},
 						},
-						ReturnType: NumberType{},
+						ReturnType: IntType{},
 						Body: []Statement{
 							BinaryExpression{
 								Left:     Identifier{Name: "x"},
@@ -193,8 +193,8 @@ func TestFunctionCalls(t *testing.T) {
 					FunctionCall{
 						Name: "add",
 						Args: []Expression{
-							NumLiteral{Value: "1"},
-							NumLiteral{Value: "2"},
+							IntLiteral{Value: "1"},
+							IntLiteral{Value: "2"},
 						},
 					},
 				},
@@ -203,7 +203,7 @@ func TestFunctionCalls(t *testing.T) {
 		{
 			name: "Wrong argument type",
 			input: `
-				fn add(x: Num, y: Num) Num { x + y }
+				fn add(x: Int, y: Int) Int { x + y }
 				add(1, "two")`,
 		},
 	}

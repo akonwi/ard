@@ -20,7 +20,7 @@ func generateStatement(statement ast.Statement) ast.Document {
 		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
 	case ast.StrLiteral:
 		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
-	case ast.NumLiteral:
+	case ast.IntLiteral:
 		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
 	case ast.BoolLiteral:
 		return ast.MakeDoc("_ := " + genExpression(statement.(ast.Expression)))
@@ -40,8 +40,8 @@ func genExpression(expr ast.Expression) string {
 		return expr.(ast.Identifier).Name
 	case ast.StrLiteral:
 		return expr.(ast.StrLiteral).Value
-	case ast.NumLiteral:
-		return expr.(ast.NumLiteral).Value
+	case ast.IntLiteral:
+		return expr.(ast.IntLiteral).Value
 	case ast.BoolLiteral:
 		val := expr.(ast.BoolLiteral).Value
 		if val {
@@ -74,7 +74,7 @@ func resolveFormatVerb(_type checker.Type) string {
 	switch _type.(type) {
 	case checker.PrimitiveType:
 		switch _type.(checker.PrimitiveType).Name {
-		case "Num":
+		case "Int":
 			return "%d"
 		case "Bool":
 			return "%t"

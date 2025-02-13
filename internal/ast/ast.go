@@ -112,16 +112,16 @@ func (s StringType) GetName() string {
 	return "String"
 }
 
-type NumberType struct {
+type IntType struct {
 	BaseNode
 	optional bool
 }
 
-func (s NumberType) GetName() string {
-	return "Number"
+func (s IntType) GetName() string {
+	return "Int"
 }
 
-func (v NumberType) IsOptional() bool {
+func (v IntType) IsOptional() bool {
 	return v.optional
 }
 
@@ -477,12 +477,12 @@ func (i InterpolatedStr) String() string {
 	return "InterpolatedStr"
 }
 
-type NumLiteral struct {
+type IntLiteral struct {
 	BaseNode
 	Value string
 }
 
-func (n NumLiteral) String() string {
+func (n IntLiteral) String() string {
 	return n.Value
 }
 
@@ -739,8 +739,8 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 			switch text {
 			case "Str":
 				return StringType{makeBaseNode(child), optional}
-			case "Num":
-				return NumberType{makeBaseNode(child), optional}
+			case "Int":
+				return IntType{makeBaseNode(child), optional}
 			case "Bool":
 				return BooleanType{makeBaseNode(child), optional}
 			default:
@@ -1192,7 +1192,7 @@ func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error)
 			Chunks:   chunks,
 		}, nil
 	case "number":
-		return NumLiteral{
+		return IntLiteral{
 			BaseNode: makeBaseNode(node),
 			Value:    p.text(child)}, nil
 	case "boolean":
@@ -1229,7 +1229,7 @@ func (p *Parser) parseListElement(node *tree_sitter.Node) (Expression, error) {
 			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node)}, nil
 	case "number":
-		return NumLiteral{
+		return IntLiteral{
 			BaseNode: BaseNode{tsNode: node},
 			Value:    p.text(node)}, nil
 	case "boolean":

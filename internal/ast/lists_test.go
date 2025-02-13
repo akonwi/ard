@@ -18,9 +18,9 @@ func TestListVariables(t *testing.T) {
 						Type:    List{Element: StringType{}},
 						Value: ListLiteral{
 							Items: []Expression{
-								NumLiteral{Value: "1"},
-								NumLiteral{Value: "2"},
-								NumLiteral{Value: "3"},
+								IntLiteral{Value: "1"},
+								IntLiteral{Value: "2"},
+								IntLiteral{Value: "3"},
 							},
 						},
 					},
@@ -31,24 +31,24 @@ func TestListVariables(t *testing.T) {
 			name: "Valid list",
 			input: `
 				let four = 4
-				let numbers: [Num] = [1, 2, 3, four]`,
+				let numbers: [Int] = [1, 2, 3, four]`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "four",
-						Value:   NumLiteral{Value: "4"},
+						Value:   IntLiteral{Value: "4"},
 					},
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "numbers",
-						Type:    List{Element: NumberType{}},
+						Type:    List{Element: IntType{}},
 						Value: ListLiteral{
 							Items: []Expression{
-								NumLiteral{Value: "1"},
-								NumLiteral{Value: "2"},
-								NumLiteral{Value: "3"},
+								IntLiteral{Value: "1"},
+								IntLiteral{Value: "2"},
+								IntLiteral{Value: "3"},
 								Identifier{Name: "four"},
 							},
 						},
@@ -71,9 +71,9 @@ func TestListVariables(t *testing.T) {
 // 		Value: ListLiteral{
 // 			Type: numList,
 // 			Items: []Expression{
-// 				NumLiteral{Value: "1"},
-// 				NumLiteral{Value: "2"},
-// 				NumLiteral{Value: "3"},
+// 				IntLiteral{Value: "1"},
+// 				IntLiteral{Value: "2"},
+// 				IntLiteral{Value: "3"},
 // 			},
 // 		},
 // 	}
@@ -110,7 +110,7 @@ func TestListVariables(t *testing.T) {
 // 						AccessType: Instance,
 // 						Member: FunctionCall{
 // 							Name: "push",
-// 							Args: []Expression{NumLiteral{Value: "4"}},
+// 							Args: []Expression{IntLiteral{Value: "4"}},
 // 							Type: push_method,
 // 						},
 // 					},

@@ -8,7 +8,7 @@ import (
 var personStructCode = `
 struct Person {
 	name: Str,
-	age: Num,
+	age: Int,
 	employed: Bool
 }`
 
@@ -16,7 +16,7 @@ var personStruct = StructDefinition{
 	Name: Identifier{Name: "Person"},
 	Fields: []StructField{
 		{Identifier{Name: "name"}, StringType{}},
-		{Identifier{Name: "age"}, NumberType{}},
+		{Identifier{Name: "age"}, IntType{}},
 		{Identifier{Name: "employed"}, BooleanType{}},
 	},
 }
@@ -51,11 +51,11 @@ func TestStructDefinitions(t *testing.T) {
 			name: "Method definitions",
 			input: `
 				struct Shape {
-					height: Num,
-					width: Num
+					height: Int,
+					width: Int
 				}
 				impl (s: Shape) {
-					fn area() Num {
+					fn area() Int {
 						s.height * s.width
 					}
 				}`,
@@ -65,8 +65,8 @@ func TestStructDefinitions(t *testing.T) {
 					StructDefinition{
 						Name: Identifier{Name: "Shape"},
 						Fields: []StructField{
-							{Identifier{Name: "height"}, NumberType{}},
-							{Identifier{Name: "width"}, NumberType{}},
+							{Identifier{Name: "height"}, IntType{}},
+							{Identifier{Name: "width"}, IntType{}},
 						},
 					},
 					ImplBlock{
@@ -78,7 +78,7 @@ func TestStructDefinitions(t *testing.T) {
 							{
 								Name:       "area",
 								Parameters: []Parameter{},
-								ReturnType: NumberType{},
+								ReturnType: IntType{},
 								Body: []Statement{
 									BinaryExpression{
 										Operator: Multiply,
@@ -139,7 +139,7 @@ func TestUsingStructs(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "age",
-						Value:   NumLiteral{Value: "23"},
+						Value:   IntLiteral{Value: "23"},
 					},
 					StructInstance{
 						Name: Identifier{Name: "Person"},

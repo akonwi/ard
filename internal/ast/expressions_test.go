@@ -18,7 +18,7 @@ func TestUnaryExpressions(t *testing.T) {
 						Mutable: false,
 						Value: UnaryExpression{
 							Operator: Minus,
-							Operand: NumLiteral{
+							Operand: IntLiteral{
 								Value: `30`,
 							}},
 					},
@@ -61,11 +61,11 @@ func TestBinaryExpressions(t *testing.T) {
 						Operator: Plus,
 						Left: UnaryExpression{
 							Operator: Minus,
-							Operand: NumLiteral{
+							Operand: IntLiteral{
 								Value: `30`,
 							},
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: "20",
 						},
 					},
@@ -80,10 +80,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Minus,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `12`,
 						},
 					},
@@ -98,10 +98,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Divide,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `6`,
 						},
 					},
@@ -116,10 +116,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Multiply,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `10`,
 						},
 					},
@@ -134,10 +134,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Modulo,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `3`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `9`,
 						},
 					},
@@ -152,10 +152,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: GreaterThan,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `12`,
 						},
 					},
@@ -170,10 +170,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThan,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `12`,
 						},
 					},
@@ -188,10 +188,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: LessThanOrEqual,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `12`,
 						},
 					},
@@ -224,10 +224,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: Equal,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `1`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `1`,
 						},
 					},
@@ -280,10 +280,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Statements: []Statement{
 					BinaryExpression{
 						Operator: NotEqual,
-						Left: NumLiteral{
+						Left: IntLiteral{
 							Value: `1`,
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `1`,
 						},
 					},
@@ -354,10 +354,10 @@ func TestBinaryExpressions(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					RangeExpression{
-						Start: NumLiteral{
+						Start: IntLiteral{
 							Value: `1`,
 						},
-						End: NumLiteral{
+						End: IntLiteral{
 							Value: `10`,
 						},
 					},
@@ -383,14 +383,14 @@ func TestParenthesizedExpressions(t *testing.T) {
 						Left: BinaryExpression{
 							HasPrecedence: true,
 							Operator:      Plus,
-							Left: NumLiteral{
+							Left: IntLiteral{
 								Value: `30`,
 							},
-							Right: NumLiteral{
+							Right: IntLiteral{
 								Value: `20`,
 							},
 						},
-						Right: NumLiteral{
+						Right: IntLiteral{
 							Value: `2`,
 						},
 					},
@@ -436,7 +436,7 @@ func TestMemberAccess(t *testing.T) {
 						AccessType: Instance,
 						Member: FunctionCall{
 							Name: "at",
-							Args: []Expression{NumLiteral{Value: "0"}},
+							Args: []Expression{IntLiteral{Value: "0"}},
 						},
 					},
 					MemberAccess{
@@ -455,7 +455,7 @@ func TestMemberAccess(t *testing.T) {
 						AccessType: Instance,
 						Member: FunctionCall{
 							Name: "at",
-							Args: []Expression{NumLiteral{Value: "0"}},
+							Args: []Expression{IntLiteral{Value: "0"}},
 						},
 					},
 					MemberAccess{
@@ -466,7 +466,7 @@ func TestMemberAccess(t *testing.T) {
 							AccessType: Instance,
 							Member: FunctionCall{
 								Name: "take",
-								Args: []Expression{NumLiteral{Value: "3"}},
+								Args: []Expression{IntLiteral{Value: "3"}},
 							},
 						},
 						AccessType: Instance,

@@ -9,31 +9,31 @@ func TestCoherenceChecks(t *testing.T) {
 		want bool
 	}
 
-	Shape := Struct{Name: "Shape", Fields: map[string]Type{"height": Num{}, "width": Num{}}}
-	NumOrStr := Union{name: "NumOrStr", types: []Type{Num{}, Str{}}}
+	Shape := Struct{Name: "Shape", Fields: map[string]Type{"height": Int{}, "width": Int{}}}
+	NumOrStr := Union{name: "NumOrStr", types: []Type{Int{}, Str{}}}
 
 	tests := []test{
-		{Num{}, Num{}, true},
-		{Num{}, Str{}, false},
-		{Num{}, Bool{}, false},
-		{Num{}, List{Num{}}, false},
+		{Int{}, Int{}, true},
+		{Int{}, Str{}, false},
+		{Int{}, Bool{}, false},
+		{Int{}, List{Int{}}, false},
 		{List{}, Str{}, false},
 		{List{&Shape}, List{&Shape}, true},
 		{List{Str{}}, List{Str{}}, true},
-		{List{Num{}}, List{Num{}}, true},
-		{List{Num{}}, List{Str{}}, false},
-		{Num{}, Option{Num{}}, false},
-		{Option{}, Option{Num{}}, true},
-		{Option{Num{}}, Option{}, true},
-		{NumOrStr, Num{}, true},
+		{List{Int{}}, List{Int{}}, true},
+		{List{Int{}}, List{Str{}}, false},
+		{Int{}, Option{Int{}}, false},
+		{Option{}, Option{Int{}}, true},
+		{Option{Int{}}, Option{}, true},
+		{NumOrStr, Int{}, true},
 		{NumOrStr, Bool{}, false},
 		{NumOrStr, NumOrStr, true},
 		{List{NumOrStr}, List{NumOrStr}, true},
 		{Any{}, Any{}, true},
-		{Any{}, Num{}, true},
-		{Num{}, Any{}, true},
-		{Num{}, Any{Str{}}, false},
-		{Any{Str{}}, Num{}, false},
+		{Any{}, Int{}, true},
+		{Int{}, Any{}, true},
+		{Int{}, Any{Str{}}, false},
+		{Any{Str{}}, Int{}, false},
 	}
 	for _, tt := range tests {
 		if res := AreCoherent(tt.a, tt.b); res != tt.want {
@@ -43,7 +43,7 @@ func TestCoherenceChecks(t *testing.T) {
 }
 
 func TestStrAPI(t *testing.T) {
-	want := function{name: "size", parameters: []variable{}, returns: Num{}}
+	want := function{name: "size", parameters: []variable{}, returns: Int{}}
 	size := Str{}.GetProperty("size")
 	if !AreCoherent(want, size) {
 		t.Fatalf("Str::size() should be %s, got %s", want, size)
@@ -52,9 +52,9 @@ func TestStrAPI(t *testing.T) {
 
 func TestNumAPI(t *testing.T) {
 	want := function{name: "to_str", parameters: []variable{}, returns: Str{}}
-	as_str := Num{}.GetProperty("to_str")
+	as_str := Int{}.GetProperty("to_str")
 	if !AreCoherent(want, as_str) {
-		t.Fatalf("Num::to_str() should be %s, got %s", want, as_str)
+		t.Fatalf("Int::to_str() should be %s, got %s", want, as_str)
 	}
 }
 
@@ -67,14 +67,14 @@ func TestBoolAPI(t *testing.T) {
 }
 
 func TestListAPI(t *testing.T) {
-	want := function{name: "size", parameters: []variable{}, returns: Num{}}
-	size := (List{element: Num{}}).GetProperty("size")
+	want := function{name: "size", parameters: []variable{}, returns: Int{}}
+	size := (List{element: Int{}}).GetProperty("size")
 	if !AreCoherent(want, size) {
 		t.Fatalf("List::size should be %s, got %s", want, size)
 	}
 
-	push := (List{element: Num{}}).GetProperty("push")
-	want = function{name: "push", parameters: []variable{{name: "item", _type: Num{}}}, returns: Num{}}
+	push := (List{element: Int{}}).GetProperty("push")
+	want = function{name: "push", parameters: []variable{{name: "item", _type: Int{}}}, returns: Int{}}
 	if !AreCoherent(want, push) {
 		t.Fatalf("List::push should be %s, got %s", want, push)
 	}

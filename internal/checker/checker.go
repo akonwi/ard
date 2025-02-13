@@ -113,12 +113,12 @@ func (s StrLiteral) GetType() Type {
 	return Str{}
 }
 
-type NumLiteral struct {
+type IntLiteral struct {
 	Value int
 }
 
-func (n NumLiteral) GetType() Type {
-	return Num{}
+func (n IntLiteral) GetType() Type {
+	return Int{}
 }
 
 type BoolLiteral struct {
@@ -162,7 +162,7 @@ type Negation struct {
 }
 
 func (n Negation) GetType() Type {
-	return Num{}
+	return Int{}
 }
 
 type Not struct {
@@ -200,7 +200,7 @@ type BinaryExpr struct {
 func (b BinaryExpr) GetType() Type {
 	switch b.Op {
 	case Add, Sub, Div, Mul, Mod:
-		return Num{}
+		return Int{}
 	default:
 		return Bool{}
 	}
@@ -565,7 +565,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 
 			if s.Operator == ast.Increment || s.Operator == ast.Decrement {
-				if !AreCoherent(variable._type, Num{}) || !AreCoherent(value.GetType(), Num{}) {
+				if !AreCoherent(variable._type, Int{}) || !AreCoherent(value.GetType(), Int{}) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
 						Message:  "Increment and decrement operators can only be used on numbers",
@@ -648,13 +648,13 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	case ast.Break:
 		return Break{}
 	case ast.RangeLoop:
-		cursor := variable{name: s.Cursor.Name, mut: false, _type: Num{}}
+		cursor := variable{name: s.Cursor.Name, mut: false, _type: Int{}}
 		start := c.checkExpression(s.Start)
 		end := c.checkExpression(s.End)
 
 		startType := start.GetType()
 		endType := end.GetType()
-		if !AreCoherent(startType, Num{}) || !AreCoherent(startType, endType) {
+		if !AreCoherent(startType, Int{}) || !AreCoherent(startType, endType) {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Invalid range: %s..%s", startType, endType),
@@ -678,10 +678,10 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 
 		switch iterable.GetType().(type) {
-		case Num:
+		case Int:
 			return ForRange{
 				Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
-				Start:  NumLiteral{Value: 0},
+				Start:  IntLiteral{Value: 0},
 				End:    iterable,
 				Body:   getBody(),
 			}
@@ -913,7 +913,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
-	case ast.NumLiteral:
+	case ast.IntLiteral:
 		value, err := strconv.Atoi(e.Value)
 		if err != nil {
 			c.addDiagnostic(Diagnostic{
@@ -923,7 +923,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			})
 			return nil
 		}
-		return NumLiteral{Value: value}
+		return IntLiteral{Value: value}
 	case ast.BoolLiteral:
 		return BoolLiteral{Value: e.Value}
 	case ast.MemberAccess:
@@ -941,7 +941,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
 		case ast.Minus:
-			if !AreCoherent(expr.GetType(), Num{}) {
+			if !AreCoherent(expr.GetType(), Int{}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "The '-' operator can only be used on numbers",
@@ -988,12 +988,12 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				return nil
 			}
 		case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-			if !AreCoherent(left.GetType(), Num{}) || !AreCoherent(left.GetType(), right.GetType()) {
+			if !AreCoherent(left.GetType(), Int{}) || !AreCoherent(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
 		default:
-			if !AreCoherent(left.GetType(), Num{}) || !AreCoherent(left.GetType(), right.GetType()) {
+			if !AreCoherent(left.GetType(), Int{}) || !AreCoherent(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
@@ -1168,8 +1168,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 func (c *checker) checkStaticExpression(expr ast.Expression) Static {
 	switch e := expr.(type) {
 	case ast.Identifier:
-		if e.Name == "Num" {
-			return Num{}
+		if e.Name == "Int" {
+			return Int{}
 		}
 
 		sym := c.scope.find(e.Name)
@@ -1759,16 +1759,16 @@ func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Exp
 		})
 		return nil
 
-	case Num:
+	case Int:
 		switch m := member.(type) {
 		case ast.Identifier:
-			panic(fmt.Sprintf("Undefined Num::%s", m))
+			panic(fmt.Sprintf("Undefined Int::%s", m))
 		case ast.FunctionCall:
 			prop := s.GetStaticProperty(m.Name)
 			if prop == nil {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("Undefined: Num::%s", m.Name),
+					Message:  fmt.Sprintf("Undefined: Int::%s", m.Name),
 					location: m.GetLocation(),
 				})
 				return nil
@@ -1777,7 +1777,7 @@ func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Exp
 			if !ok {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("Not a function: Num::%s", m.Name),
+					Message:  fmt.Sprintf("Not a function: Int::%s", m.Name),
 					location: m.GetLocation(),
 				})
 				return nil
@@ -1827,8 +1827,8 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 	switch tt := t.(type) {
 	case ast.StringType:
 		_type = Str{}
-	case ast.NumberType:
-		_type = Num{}
+	case ast.IntType:
+		_type = Int{}
 	case ast.BooleanType:
 		_type = Bool{}
 	case ast.List:

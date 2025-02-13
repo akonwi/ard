@@ -10,7 +10,7 @@ func TestStructs(t *testing.T) {
 	personStructInput := strings.Join([]string{
 		"struct Person {",
 		"  name: Str,",
-		"  age: Num,",
+		"  age: Int,",
 		"  employed: Bool",
 		"}",
 	}, "\n")
@@ -18,7 +18,7 @@ func TestStructs(t *testing.T) {
 		Name: "Person",
 		Fields: map[string]Type{
 			"name":     Str{},
-			"age":      Num{},
+			"age":      Int{},
 			"employed": Bool{},
 		},
 	}
@@ -38,7 +38,7 @@ func TestStructs(t *testing.T) {
 			input: strings.Join([]string{
 				"struct Rect {",
 				"  height: Str,",
-				"  height: Num",
+				"  height: Int",
 				"}",
 			}, "\n"),
 			diagnostics: []Diagnostic{
@@ -60,7 +60,7 @@ func TestStructs(t *testing.T) {
 							Name: "Person",
 							Fields: map[string]Expression{
 								"name":     StrLiteral{Value: "Alice"},
-								"age":      NumLiteral{Value: 30},
+								"age":      IntLiteral{Value: 30},
 								"employed": BoolLiteral{Value: true},
 							},
 						},
@@ -108,14 +108,14 @@ func TestStructs(t *testing.T) {
 							Name: "Person",
 							Fields: map[string]Expression{
 								"name":     StrLiteral{Value: "Alice"},
-								"age":      NumLiteral{Value: 30},
+								"age":      IntLiteral{Value: 30},
 								"employed": BoolLiteral{Value: true},
 							},
 						},
 					},
 					VariableAssignment{
 						Target: InstanceProperty{Subject: Identifier{Name: "p"}, Property: Identifier{Name: "age"}},
-						Value:  NumLiteral{Value: 31},
+						Value:  IntLiteral{Value: 31},
 					},
 				},
 			},
@@ -135,8 +135,8 @@ func TestStructs(t *testing.T) {
 func TestMethods(t *testing.T) {
 	shapeCode := strings.Join([]string{
 		"struct Shape {",
-		"  width: Num,",
-		"  height: Num",
+		"  width: Int,",
+		"  height: Int",
 		"}",
 	}, "\n")
 	run(t, []test{
@@ -145,7 +145,7 @@ func TestMethods(t *testing.T) {
 			input: fmt.Sprintf(
 				`%s
 				impl (self: Shape) {
-				  fn get_area() Num {
+				  fn get_area() Int {
 						self.width * self.height
 					}
 				}`, shapeCode),
@@ -154,8 +154,8 @@ func TestMethods(t *testing.T) {
 					&Struct{
 						Name: "Shape",
 						Fields: map[string]Type{
-							"width":  Num{},
-							"height": Num{},
+							"width":  Int{},
+							"height": Int{},
 						},
 					},
 				},
@@ -166,7 +166,7 @@ func TestMethods(t *testing.T) {
 			input: fmt.Sprintf(
 				`%s
 				impl (self: Shape) {
-				  fn resize(h: Num, w: Num) {
+				  fn resize(h: Int, w: Int) {
 						self.width = w
 						self.height = h
 					}
@@ -181,7 +181,7 @@ func TestMethods(t *testing.T) {
 			input: fmt.Sprintf(
 				`%s
 				impl (mut self: Shape) {
-				  fn resize(width: Num, height: Num) {
+				  fn resize(width: Int, height: Int) {
 						self.width = width
 						self.height = height
 					}

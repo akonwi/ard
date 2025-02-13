@@ -272,8 +272,8 @@ func toJSExpression(node ast.Expression, _isStatement ...bool) string {
 			}
 			return output + "`"
 		}
-	case ast.NumLiteral:
-		return node.(ast.NumLiteral).Value
+	case ast.IntLiteral:
+		return node.(ast.IntLiteral).Value
 	case ast.BoolLiteral:
 		return fmt.Sprintf("%v", node.(ast.BoolLiteral).Value)
 	case ast.ListLiteral:
