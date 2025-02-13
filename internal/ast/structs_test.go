@@ -139,7 +139,7 @@ func TestUsingStructs(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "age",
-						Value:   IntLiteral{Value: "23"},
+						Value:   NumLiteral{Value: "23"},
 					},
 					StructInstance{
 						Name: Identifier{Name: "Person"},

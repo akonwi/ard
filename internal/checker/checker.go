@@ -913,7 +913,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
-	case ast.IntLiteral:
+	case ast.NumLiteral:
 		value, err := strconv.Atoi(e.Value)
 		if err != nil {
 			c.addDiagnostic(Diagnostic{

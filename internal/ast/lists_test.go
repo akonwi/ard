@@ -18,9 +18,9 @@ func TestListVariables(t *testing.T) {
 						Type:    List{Element: StringType{}},
 						Value: ListLiteral{
 							Items: []Expression{
-								IntLiteral{Value: "1"},
-								IntLiteral{Value: "2"},
-								IntLiteral{Value: "3"},
+								NumLiteral{Value: "1"},
+								NumLiteral{Value: "2"},
+								NumLiteral{Value: "3"},
 							},
 						},
 					},
@@ -38,7 +38,7 @@ func TestListVariables(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "four",
-						Value:   IntLiteral{Value: "4"},
+						Value:   NumLiteral{Value: "4"},
 					},
 					VariableDeclaration{
 						Mutable: false,
@@ -46,9 +46,9 @@ func TestListVariables(t *testing.T) {
 						Type:    List{Element: IntType{}},
 						Value: ListLiteral{
 							Items: []Expression{
-								IntLiteral{Value: "1"},
-								IntLiteral{Value: "2"},
-								IntLiteral{Value: "3"},
+								NumLiteral{Value: "1"},
+								NumLiteral{Value: "2"},
+								NumLiteral{Value: "3"},
 								Identifier{Name: "four"},
 							},
 						},

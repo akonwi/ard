@@ -80,7 +80,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						},
 						ReturnType: IntType{},
 						Body: []Statement{
-							IntLiteral{Value: "10"},
+							NumLiteral{Value: "10"},
 						},
 					},
 				},
@@ -193,8 +193,8 @@ func TestFunctionCalls(t *testing.T) {
 					FunctionCall{
 						Name: "add",
 						Args: []Expression{
-							IntLiteral{Value: "1"},
-							IntLiteral{Value: "2"},
+							NumLiteral{Value: "1"},
+							NumLiteral{Value: "2"},
 						},
 					},
 				},

@@ -27,9 +27,9 @@ func TestMaps(t *testing.T) {
 						Type:    Map{Key: IntType{}, Value: StringType{}},
 						Value: MapLiteral{
 							Entries: []MapEntry{
-								{Key: IntLiteral{Value: "1"}, Value: StrLiteral{Value: `"one"`}},
-								{Key: IntLiteral{Value: "2"}, Value: StrLiteral{Value: `"two"`}},
-								{Key: IntLiteral{Value: "3"}, Value: StrLiteral{Value: `"three"`}},
+								{Key: NumLiteral{Value: "1"}, Value: StrLiteral{Value: `"one"`}},
+								{Key: NumLiteral{Value: "2"}, Value: StrLiteral{Value: `"two"`}},
+								{Key: NumLiteral{Value: "3"}, Value: StrLiteral{Value: `"three"`}},
 							},
 						},
 					},
