@@ -123,6 +123,7 @@ func TestLiterals(t *testing.T) {
 				`"hello"`,
 				"42",
 				"false",
+				"24.8",
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -135,6 +136,7 @@ func TestLiterals(t *testing.T) {
 					BoolLiteral{
 						Value: false,
 					},
+					FloatLiteral{Value: 24.8},
 				},
 			},
 		},
@@ -186,6 +188,7 @@ func TestVariables(t *testing.T) {
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
 				"let age: Int = 32",
+				"let temp: Float = 98.6",
 				"let is_student: Bool = true",
 			}, "\n"),
 			output: Program{
@@ -199,6 +202,11 @@ func TestVariables(t *testing.T) {
 						Mut:   false,
 						Name:  "age",
 						Value: IntLiteral{Value: 32},
+					},
+					VariableBinding{
+						Mut:   false,
+						Name:  "temp",
+						Value: FloatLiteral{Value: 98.6},
 					},
 					VariableBinding{
 						Mut:   false,
@@ -229,6 +237,19 @@ func TestVariables(t *testing.T) {
 			}, "\n"),
 			diagnostics: []Diagnostic{
 				{Kind: Error, Message: "Immutable variable: name"},
+			},
+		},
+		{
+			name:  "Int literals can be declared as Float",
+			input: `let temp: Float = 98`,
+			output: Program{
+				Statements: []Statement{
+					VariableBinding{
+						Mut:   false,
+						Name:  "temp",
+						Value: FloatLiteral{Value: 98},
+					},
+				},
 			},
 		},
 		{
@@ -313,11 +334,13 @@ func TestMemberAccess(t *testing.T) {
 func TestUnaryExpressions(t *testing.T) {
 	run(t, []test{
 		{
-			name:  "Negative numbers",
-			input: `-10`,
+			name: "Negative numbers",
+			input: `(-10)
+							(-10.0)`,
 			output: Program{
 				Statements: []Statement{
 					Negation{Value: IntLiteral{Value: 10}},
+					Negation{Value: FloatLiteral{Value: 10.0}},
 				},
 			},
 		},
@@ -350,7 +373,7 @@ func TestUnaryExpressions(t *testing.T) {
 	})
 }
 
-func TestNumberOperations(t *testing.T) {
+func TestIntMath(t *testing.T) {
 	cases := []struct {
 		name string
 		op   BinaryOperator
@@ -397,6 +420,59 @@ func TestNumberOperations(t *testing.T) {
 	run(t, tests)
 }
 
+func TestFloatMath(t *testing.T) {
+	cases := []struct {
+		name string
+		op   BinaryOperator
+	}{
+		{"Addition", Add},
+		{"Subtraction", Sub},
+		{"Multiplication", Mul},
+		{"Division", Div},
+		{"Greater than", GreaterThan},
+		{"Greater than or equal", GreaterThanOrEqual},
+		{"Less than", LessThan},
+		{"Less than or equal", LessThanOrEqual},
+	}
+	tests := []test{}
+	for _, c := range cases {
+		tests = append(tests, test{
+			name:  c.name,
+			input: fmt.Sprintf("1.0 %s 2.2", c.op) + "\n" + fmt.Sprintf("3.5 %s (-14.9)", c.op),
+			output: Program{
+				Statements: []Statement{
+					BinaryExpr{
+						Op:    c.op,
+						Left:  FloatLiteral{Value: 1.0},
+						Right: FloatLiteral{Value: 2.2},
+					},
+					BinaryExpr{
+						Op:    c.op,
+						Left:  FloatLiteral{Value: 3.5},
+						Right: Negation{Value: FloatLiteral{Value: 14.9}},
+					},
+				},
+			},
+		},
+			test{
+				name:  c.name + " with wrong types",
+				input: fmt.Sprintf("1 %s true", c.op),
+				diagnostics: []Diagnostic{
+					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Int %s Bool", c.op)},
+				},
+			})
+	}
+
+	tests = append(tests, test{
+		name:  "Modulo is not allowed on floats",
+		input: "1.0 % 2.2",
+		diagnostics: []Diagnostic{
+			{Kind: Error, Message: "% is not supported on Float"},
+		},
+	})
+	run(t, tests)
+}
+
 func TestEqualityComparisons(t *testing.T) {
 	run(t, []test{
 		{
@@ -404,6 +480,8 @@ func TestEqualityComparisons(t *testing.T) {
 			input: strings.Join([]string{
 				"1 == 2",
 				"1 != 2",
+				"10.2 == 21.4",
+				"10.2 != 21.4",
 				"true == false",
 				"true != false",
 				`"hello" == "world"`,
@@ -420,6 +498,16 @@ func TestEqualityComparisons(t *testing.T) {
 						Op:    NotEqual,
 						Left:  IntLiteral{Value: 1},
 						Right: IntLiteral{Value: 2},
+					},
+					BinaryExpr{
+						Op:    Equal,
+						Left:  FloatLiteral{Value: 10.2},
+						Right: FloatLiteral{Value: 21.4},
+					},
+					BinaryExpr{
+						Op:    NotEqual,
+						Left:  FloatLiteral{Value: 10.2},
+						Right: FloatLiteral{Value: 21.4},
 					},
 					BinaryExpr{
 						Op:    Equal,

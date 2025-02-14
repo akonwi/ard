@@ -117,10 +117,10 @@ for fruit in fruits {
 
 ### Built-in types
 - Str
-- Num
+- Int
 - Bool
-- [Num] - List
-- [Str:Num] - Map
+- [Int] - List
+- [Str:Int] - Map
 
 ### Structs
 
@@ -129,7 +129,7 @@ Structs can be used to define a collection of arbitrary data types, i.e. objects
 ```ard
 struct Person {
   name: Str
-  age: Num
+  age: Int
 }
 
 let person = Person {
@@ -204,7 +204,7 @@ match maybe_name {
 Type unions are used to define a type that can be one of several types.
 
 ```ard
-type Printable = Str | Num
+type Printable = Str | Int
 let value: Printable = "Hello"
 let stuff: [Printable] = ["Hello", 42]
 ```
@@ -215,7 +215,7 @@ To do conditional logic on a value of a type union, use a match expression and w
 for item in stuff {
   match item {
     Str => io.print("String: {{it}}"),
-    Num => io.print("Number: {{it.to_str()}}")
+    Int => io.print("Number: {{it.to_str()}}")
   }
 }
 ```

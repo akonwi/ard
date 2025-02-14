@@ -121,6 +121,14 @@ func (n IntLiteral) GetType() Type {
 	return Int{}
 }
 
+type FloatLiteral struct {
+	Value float64
+}
+
+func (f FloatLiteral) GetType() Type {
+	return Float{}
+}
+
 type BoolLiteral struct {
 	Value bool
 }
@@ -162,7 +170,7 @@ type Negation struct {
 }
 
 func (n Negation) GetType() Type {
-	return Int{}
+	return n.Value.GetType()
 }
 
 type Not struct {
@@ -200,7 +208,7 @@ type BinaryExpr struct {
 func (b BinaryExpr) GetType() Type {
 	switch b.Op {
 	case Add, Sub, Div, Mul, Mod:
-		return Int{}
+		return b.Left.GetType()
 	default:
 		return Bool{}
 	}
@@ -488,10 +496,16 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			_type = c.resolveDeclaredType(s.Type)
 			value = c.checkMap(_map, _type)
 		} else {
+			// todo: use new method to check whether the expression is of an expected type
 			value = c.checkExpression(s.Value)
 			// get declared type if it exists
 			if s.Type != nil {
 				_type = c.resolveDeclaredType(s.Type)
+				if _, expectingFloat := _type.(Float); expectingFloat {
+					if _, isInt := value.(IntLiteral); isInt {
+						value = FloatLiteral{Value: float64(value.(IntLiteral).Value)}
+					}
+				}
 				if !AreCoherent(_type, value.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
@@ -914,11 +928,23 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 	case ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
 	case ast.NumLiteral:
+		if strings.Contains(e.Value, ".") {
+			value, err := strconv.ParseFloat(e.Value, 64)
+			if err != nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Invalid float: %s", e.Value),
+					location: e.GetLocation(),
+				})
+				return nil
+			}
+			return FloatLiteral{Value: value}
+		}
 		value, err := strconv.Atoi(e.Value)
 		if err != nil {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("Invalid number: %s", e.Value),
+				Message:  fmt.Sprintf("Invalid int: %s", e.Value),
 				location: e.GetLocation(),
 			})
 			return nil
@@ -941,7 +967,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
 		case ast.Minus:
-			if !AreCoherent(expr.GetType(), Int{}) {
+			if !AreCoherent(Int{}, expr.GetType()) && !AreCoherent(Float{}, expr.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  "The '-' operator can only be used on numbers",
@@ -967,6 +993,10 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		right := c.checkExpression(e.Right)
 		operator := c.resolveBinaryOperator(e.Operator)
 
+		if left == nil || left.GetType() == nil {
+			panic(fmt.Errorf("problem: %s", e.Left))
+		}
+
 		diagnostic := Diagnostic{
 			Kind:     Error,
 			location: e.GetLocation(),
@@ -988,12 +1018,24 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 				return nil
 			}
 		case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-			if !AreCoherent(left.GetType(), Int{}) || !AreCoherent(left.GetType(), right.GetType()) {
+			notNum := !AreCoherent(Float{}, left.GetType()) && !AreCoherent(Int{}, left.GetType())
+			if notNum || !AreCoherent(left.GetType(), right.GetType()) {
+				c.addDiagnostic(diagnostic)
+				return nil
+			}
+		case Mod:
+			if AreCoherent(Float{}, left.GetType()) || AreCoherent(Float{}, right.GetType()) {
+				diagnostic.Message = "% is not supported on Float"
+				c.addDiagnostic(diagnostic)
+				return nil
+			}
+			if !AreCoherent(Int{}, left.GetType()) || !AreCoherent(Int{}, right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
 		default:
-			if !AreCoherent(left.GetType(), Int{}) || !AreCoherent(left.GetType(), right.GetType()) {
+			notNum := !AreCoherent(Float{}, left.GetType()) && !AreCoherent(Int{}, left.GetType())
+			if notNum || !AreCoherent(left.GetType(), right.GetType()) {
 				c.addDiagnostic(diagnostic)
 				return nil
 			}
@@ -1170,6 +1212,9 @@ func (c *checker) checkStaticExpression(expr ast.Expression) Static {
 	case ast.Identifier:
 		if e.Name == "Int" {
 			return Int{}
+		}
+		if e.Name == "Float" {
+			return Float{}
 		}
 
 		sym := c.scope.find(e.Name)
@@ -1812,6 +1857,60 @@ func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Exp
 				Function: FunctionCall{Name: m.Name, Args: args, symbol: fn},
 			}
 		}
+
+	case Float:
+		switch m := member.(type) {
+		case ast.Identifier:
+			panic(fmt.Sprintf("Undefined Float::%s", m))
+		case ast.FunctionCall:
+			prop := s.GetStaticProperty(m.Name)
+			if prop == nil {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Undefined: Float::%s", m.Name),
+					location: m.GetLocation(),
+				})
+				return nil
+			}
+			fn, ok := prop.(function)
+			if !ok {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Not a function: Float::%s", m.Name),
+					location: m.GetLocation(),
+				})
+				return nil
+			}
+
+			if len(m.Args) != len(fn.parameters) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(m.Args)),
+					location: m.GetLocation(),
+				})
+				return nil
+			}
+
+			args := make([]Expression, len(m.Args))
+			for i, param := range fn.parameters {
+				arg := c.checkExpression(m.Args[i])
+				if !AreCoherent(param._type, arg.GetType()) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
+						location: m.Args[i].GetLocation(),
+					})
+					return nil
+				} else {
+					args[i] = arg
+				}
+			}
+
+			return StaticFunctionCall{
+				Subject:  s,
+				Function: FunctionCall{Name: m.Name, Args: args, symbol: fn},
+			}
+		}
 	default:
 		panic(fmt.Sprintf("Unsupported static access for %T", s))
 	}
@@ -1829,6 +1928,8 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 		_type = Str{}
 	case ast.IntType:
 		_type = Int{}
+	case ast.FloatType:
+		_type = Float{}
 	case ast.BooleanType:
 		_type = Bool{}
 	case ast.List:

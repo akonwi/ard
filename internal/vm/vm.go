@@ -204,6 +204,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		return &object{builder.String(), checker.Str{}}
 	case checker.IntLiteral:
 		return &object{e.Value, e.GetType()}
+	case checker.FloatLiteral:
+		return &object{e.Value, e.GetType()}
 	case checker.BoolLiteral:
 		return &object{e.Value, e.GetType()}
 	case checker.ListLiteral:
@@ -226,7 +228,12 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		return val
 	case checker.Negation:
 		val := vm.evalExpression(e.Value)
-		val.raw = -val.raw.(int)
+		switch raw := val.raw.(type) {
+		case int:
+			val.raw = -raw
+		case float64:
+			val.raw = -raw
+		}
 		return val
 	case checker.InstanceProperty:
 		i := vm.evalExpression(e.Subject)
@@ -236,19 +243,31 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		case checker.Add:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) + right.raw.(int), left._type}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) + right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) + right.raw.(float64), left._type}
 		case checker.Sub:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) - right.raw.(int), left._type}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) - right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) - right.raw.(float64), left._type}
 		case checker.Mul:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) * right.raw.(int), left._type}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) * right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) * right.raw.(float64), left._type}
 		case checker.Div:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) / right.raw.(int), left._type}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) / right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) / right.raw.(float64), left._type}
 		case checker.Mod:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
@@ -256,19 +275,31 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		case checker.GreaterThan:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) > right.raw.(int), e.GetType()}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) > right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) > right.raw.(float64), left._type}
 		case checker.GreaterThanOrEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) >= right.raw.(int), e.GetType()}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) >= right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) >= right.raw.(float64), left._type}
 		case checker.LessThan:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) < right.raw.(int), e.GetType()}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) < right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) < right.raw.(float64), left._type}
 		case checker.LessThanOrEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{left.raw.(int) <= right.raw.(int), e.GetType()}
+			if _, isInt := left._type.(checker.Int); isInt {
+				return &object{left.raw.(int) <= right.raw.(int), left._type}
+			}
+			return &object{left.raw.(float64) <= right.raw.(float64), left._type}
 
 		// for equality, compare the entire objects, so that types are considered
 		case checker.Equal:
@@ -314,6 +345,19 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 					res.raw = num
 				}
 				return res
+			}
+
+		case checker.Float:
+			switch e.Function.Name {
+			case "from_str":
+				res := &object{nil, checker.Float{}}
+				if num, err := strconv.ParseFloat(args[0].raw.(string), 64); err == nil {
+					res.raw = num
+				}
+				return res
+
+			case "from_int":
+				return &object{float64(args[0].raw.(int)), checker.Float{}}
 			}
 		}
 		panic(fmt.Sprintf("Function not found: %s", e.Function.Name))
@@ -425,6 +469,12 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		switch fn.Name {
 		case "to_str":
 			return &object{strconv.Itoa(o.raw.(int)), checker.Str{}}
+		}
+
+	case checker.Float:
+		switch fn.Name {
+		case "to_str":
+			return &object{strconv.FormatFloat(o.raw.(float64), 'f', 2, 64), checker.Str{}}
 		}
 	case checker.Bool:
 		switch fn.Name {

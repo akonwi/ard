@@ -141,6 +141,41 @@ func (n Int) GetStaticProperty(name string) Type {
 	}
 }
 
+type Float struct{}
+
+func (f Float) String() string {
+	return "Float"
+}
+func (f Float) GetProperty(name string) Type {
+	switch name {
+	case "to_str":
+		return function{
+			name:    name,
+			returns: Str{},
+		}
+	default:
+		return nil
+	}
+}
+func (f Float) GetStaticProperty(name string) Type {
+	switch name {
+	case "from_str":
+		return function{
+			name:       "from_str",
+			parameters: []variable{{name: "str", _type: Str{}}},
+			returns:    Option{f},
+		}
+	case "from_int":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "int", _type: Int{}}},
+			returns:    f,
+		}
+	default:
+		return nil
+	}
+}
+
 type Bool struct{}
 
 func (b Bool) String() string {
@@ -483,10 +518,11 @@ func (a *Any) refine(t Type) bool {
 }
 
 func areComparable(a, b Type) bool {
-	_, aIsNum := a.(Int)
+	_, aIsInt := a.(Int)
+	_, aIsFloat := a.(Float)
 	_, aIsStr := a.(Str)
 	_, aIsBool := a.(Bool)
-	if aIsBool || aIsNum || aIsStr {
+	if aIsBool || aIsInt || aIsFloat || aIsStr {
 		return AreCoherent(a, b)
 	}
 

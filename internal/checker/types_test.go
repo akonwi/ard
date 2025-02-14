@@ -14,6 +14,7 @@ func TestCoherenceChecks(t *testing.T) {
 
 	tests := []test{
 		{Int{}, Int{}, true},
+		{Int{}, Float{}, false},
 		{Int{}, Str{}, false},
 		{Int{}, Bool{}, false},
 		{Int{}, List{Int{}}, false},

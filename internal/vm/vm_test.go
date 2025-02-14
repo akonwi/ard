@@ -131,6 +131,7 @@ func TestUnaryExpressions(t *testing.T) {
 		{`not true`, false},
 		{`not false`, true},
 		{`-10`, -10},
+		{`-20.1`, -20.1},
 	} {
 		res := run(t, test.input)
 		if res != test.want {
@@ -154,6 +155,7 @@ func TestNumberOperations(t *testing.T) {
 		{input: `30 < 2`, want: false},
 		{input: `30 <= 2`, want: false},
 		{input: `30 <= 30`, want: true},
+		{input: "(72.0 - 32.0) * 5.0 / 9.0", want: 22.22222222222222},
 	}
 
 	for _, test := range tests {
@@ -327,6 +329,26 @@ func TestNumApi(t *testing.T) {
 			name:  "::from_str parses a string into a number",
 			input: `Int::from_str("100")`,
 			want:  100,
+		},
+	})
+}
+
+func TestFloatApi(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  ".to_str() returns the Str representation of a Float",
+			input: `10.1.to_str()`,
+			want:  "10.10",
+		},
+		{
+			name:  "::from_str parses a Str into a Float",
+			input: `Float::from_str("100")`,
+			want:  100.0,
+		},
+		{
+			name:  "::from_int turns an Int into a Float",
+			input: `Float::from_int(100)`,
+			want:  100.0,
 		},
 	})
 }
