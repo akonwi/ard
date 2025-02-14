@@ -118,6 +118,7 @@ for fruit in fruits {
 ### Built-in types
 - Str
 - Int
+- Float
 - Bool
 - [Int] - List
 - [Str:Int] - Map
@@ -319,30 +320,7 @@ async func riskyGet() throws -> String {
 }
 ```
 
-## 5. Pattern Matching
-
-Ard supports pattern matching using the `match` expression:
-
-```ard
-match value {
-    case pattern1 -> expression1
-    case pattern2 -> expression2
-    _ -> defaultExpression
-}
-```
-
-Example:
-
-```ard
-match point {
-    case (0, 0) -> "Origin"
-    case (x, 0) -> "On x-axis at " + x
-    case (0, y) -> "On y-axis at " + y
-    case (x, y) -> "At (" + x + ", " + y + ")"
-}
-```
-
-## 6. Module System
+## 5. Module System
 
 ### Module Definition and Exports
 

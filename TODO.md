@@ -1,5 +1,9 @@
 ## TODO
 
+- [ ] refactoring
+  - check for todos
+  - check for FIXMEs
+  - try to reuse structs from checker in vm rather than redeclare them
 - [ ] methods on enums?
 - [ ] using unary + member_access in if conditions shouldn't require parens
   - fails: `if !a.b { }`
