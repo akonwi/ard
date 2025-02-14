@@ -666,6 +666,7 @@ func (p *Parser) parseImport(node *tree_sitter.Node) (Import, error) {
 }
 
 func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
+	p.sweepForError(node, 1)
 	child := node.NamedChild(0)
 	switch child.GrammarName() {
 	case "variable_definition":
@@ -720,6 +721,8 @@ func (p *Parser) parseStatement(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseVariableDecl(node *tree_sitter.Node) (VariableDeclaration, error) {
+	p.sweepForError(node, 3)
+
 	isMutable := p.text(node.NamedChild(0)) == "mut"
 	name := p.text(node.NamedChild(1))
 	declaredType := p.resolveType(node.ChildByFieldName("type"))
@@ -780,6 +783,7 @@ func (p *Parser) resolveType(node *tree_sitter.Node) DeclaredType {
 }
 
 func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssignment, error) {
+	p.sweepForError(node, 3)
 	targetNode := p.mustChild(node, "target")
 	operatorNode := node.ChildByFieldName("operator")
 	valueNode := node.ChildByFieldName("value")
@@ -810,8 +814,9 @@ func (p *Parser) parseVariableReassignment(node *tree_sitter.Node) (VariableAssi
 }
 
 func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration, error) {
+	p.sweepForError(node, 2)
 	name := p.text(p.mustChild(node, "name"))
-	parameters := p.parseParameters(node.ChildByFieldName("parameters"))
+	parameters := p.parseParameters(p.mustChild(node, "parameters"))
 	returnType := p.resolveType(node.ChildByFieldName("return"))
 
 	// parameterTypes := make([]Type, len(parameters))
@@ -835,9 +840,7 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 }
 
 func (p *Parser) parseParameters(node *tree_sitter.Node) []Parameter {
-	if node.HasError() {
-		panic(fmt.Errorf("Error parsing function parameters: %s", p.text(node)))
-	}
+	p.sweepForError(node, 0)
 	parameterNodes := node.ChildrenByFieldName("parameter", p.tree.Walk())
 	parameters := []Parameter{}
 
@@ -869,6 +872,7 @@ func (p *Parser) parseBlock(node *tree_sitter.Node) ([]Statement, error) {
 }
 
 func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
+	p.sweepForError(node, 2)
 	conditionNode := node.ChildByFieldName("condition")
 	bodyNode := node.ChildByFieldName("body")
 
@@ -889,6 +893,7 @@ func (p *Parser) parseWhileLoop(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseForInLoop(node *tree_sitter.Node) (Statement, error) {
+	p.sweepForError(node, 3)
 	cursorNode := p.mustChild(node, "cursor")
 
 	rangeNode := node.ChildByFieldName("range")
@@ -923,9 +928,7 @@ func (p *Parser) parseForInLoop(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
-	if node.HasError() {
-		return nil, fmt.Errorf("Parsing error encountered in for loop: %s", p.text(node))
-	}
+	p.sweepForError(node, 4)
 
 	cursorNode := p.mustChild(node, "cursor")
 	cursor, err := p.parseVariableDecl(cursorNode)
@@ -961,6 +964,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
+	p.sweepForError(node, 2)
 	conditionNode := node.ChildByFieldName("condition")
 	bodyNode := node.ChildByFieldName("body")
 	elseNode := node.ChildByFieldName("else")
@@ -996,6 +1000,8 @@ func (p *Parser) parseIfStatement(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
+	p.sweepForError(node, 1)
+
 	ifNode := node.ChildByFieldName("if")
 	if ifNode != nil {
 		return p.parseIfStatement(ifNode)
@@ -1014,7 +1020,8 @@ func (p *Parser) parseElseClause(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error) {
-	nameNode := node.ChildByFieldName("name")
+	p.sweepForError(node, 1)
+	nameNode := p.mustChild(node, "name")
 	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
 
 	fields := make([]StructField, len(fieldNodes))
@@ -1037,9 +1044,7 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 }
 
 func (p *Parser) parseImplBlock(node *tree_sitter.Node) (Statement, error) {
-	if node.HasError() {
-		return nil, fmt.Errorf("Parsing error encountered in impl block: %s", p.text(node))
-	}
+	p.sweepForError(node, 2)
 
 	params := p.parseParameters(node.NamedChild(0))
 	if len(params) != 1 {
@@ -1068,6 +1073,7 @@ func (p *Parser) parseImplBlock(node *tree_sitter.Node) (Statement, error) {
 }
 
 func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error) {
+	p.sweepForError(node, 2)
 	nameNode := node.ChildByFieldName("name")
 	fieldNodes := node.ChildrenByFieldName("field", p.tree.Walk())
 
@@ -1097,6 +1103,7 @@ func (p *Parser) parseStructInstance(node *tree_sitter.Node) (Expression, error)
 }
 
 func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) {
+	p.sweepForError(node, 2)
 	nameNode := p.mustChild(node, "name")
 	variantNodes := node.ChildrenByFieldName("variant", p.tree.Walk())
 
@@ -1128,6 +1135,8 @@ func (p *Parser) parseEnumDefinition(node *tree_sitter.Node) (Statement, error) 
 }
 
 func (p *Parser) parseExpression(node *tree_sitter.Node) (Expression, error) {
+	p.sweepForError(node, 1)
+
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "expression":
@@ -1179,6 +1188,7 @@ func (p *Parser) parseIdentifier(node *tree_sitter.Node) (Identifier, error) {
 }
 
 func (p *Parser) parsePrimitiveValue(node *tree_sitter.Node) (Expression, error) {
+	p.sweepForError(node, 1)
 	child := node.Child(0)
 	switch child.GrammarName() {
 	case "string":
@@ -1283,6 +1293,7 @@ func (p *Parser) parseMapLiteral(node *tree_sitter.Node) (Expression, error) {
 }
 
 func (p *Parser) parseMapEntry(node *tree_sitter.Node) (Expression, Expression, error) {
+	p.sweepForError(node, 2)
 	keyNode := node.ChildByFieldName("key")
 	key, err := p.parsePrimitiveValue(keyNode)
 	if err != nil {
@@ -1297,6 +1308,7 @@ func (p *Parser) parseMapEntry(node *tree_sitter.Node) (Expression, Expression, 
 }
 
 func (p *Parser) parseUnaryExpression(node *tree_sitter.Node) (Expression, error) {
+	p.sweepForError(node, 2)
 	operatorNode := node.ChildByFieldName("operator")
 	operandNode := node.ChildByFieldName("operand")
 
@@ -1363,19 +1375,7 @@ func resolveOperator(node *tree_sitter.Node) Operator {
 }
 
 func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, error) {
-	if node.ChildCount() != 3 {
-		// TODO: extract this into a helper function
-		for _, child := range node.Children(p.tree.Walk()) {
-			if child.IsError() {
-				point := child.Range().StartPoint
-				panic(fmt.Errorf(
-					"[%d, %d] Unexpected character: '%s'",
-					point.Row,
-					point.Column,
-					p.text(&child)))
-			}
-		}
-	}
+	p.sweepForError(node, 3)
 	leftNode := node.ChildByFieldName("left")
 	operatorNode := node.ChildByFieldName("operator")
 	rightNode := node.ChildByFieldName("right")
@@ -1412,6 +1412,7 @@ func (p *Parser) parseBinaryExpression(node *tree_sitter.Node) (Expression, erro
 }
 
 func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
+	p.sweepForError(node, 3)
 	targetNode := p.mustChild(node, "target")
 	target, err := p.parseExpression(targetNode)
 	if err != nil {
@@ -1455,6 +1456,7 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 @target - when parsing a method call
 */
 func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (FunctionCall, error) {
+	p.sweepForError(node, 2)
 	targetNode := p.mustChild(node, "target")
 
 	argsNode := node.ChildByFieldName("arguments")
@@ -1478,6 +1480,7 @@ func (p *Parser) parseFunctionCall(node *tree_sitter.Node) (FunctionCall, error)
 }
 
 func (p *Parser) parseMatchExpression(node *tree_sitter.Node) (Expression, error) {
+	p.sweepForError(node, 2)
 	expressionNode := p.mustChild(node, "expr")
 	caseNodes := p.mustChildren(node, "case")
 
@@ -1551,6 +1554,7 @@ func (p *Parser) parseMatchCase(node *tree_sitter.Node) (MatchCase, error) {
 	}, nil
 }
 
+// todo: still necessary?
 func (p *Parser) parseAnonymousFunction(node *tree_sitter.Node) (AnonymousFunction, error) {
 	parameterNodes := node.ChildrenByFieldName("parameter", p.tree.Walk())
 	returnNode := node.ChildByFieldName("return")
