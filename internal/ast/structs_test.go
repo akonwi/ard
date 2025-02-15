@@ -82,15 +82,13 @@ func TestStructDefinitions(t *testing.T) {
 								Body: []Statement{
 									BinaryExpression{
 										Operator: Multiply,
-										Left: MemberAccess{
-											Target:     Identifier{Name: "s"},
-											AccessType: Instance,
-											Member:     Identifier{Name: "height"},
+										Left: InstanceProperty{
+											Target:   Identifier{Name: "s"},
+											Property: Identifier{Name: "height"},
 										},
-										Right: MemberAccess{
-											Target:     Identifier{Name: "s"},
-											AccessType: Instance,
-											Member:     Identifier{Name: "width"},
+										Right: InstanceProperty{
+											Target:   Identifier{Name: "s"},
+											Property: Identifier{Name: "width"},
 										},
 									},
 								},
@@ -161,9 +159,9 @@ func TestUsingStructs(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					MemberAccess{Target: Identifier{Name: "p"}, AccessType: Instance, Member: Identifier{Name: "age"}},
+					InstanceProperty{Target: Identifier{Name: "p"}, Property: Identifier{Name: "age"}},
 					VariableAssignment{
-						Target:   MemberAccess{Target: Identifier{Name: "p"}, AccessType: Instance, Member: Identifier{Name: "employed"}},
+						Target:   InstanceProperty{Target: Identifier{Name: "p"}, Property: Identifier{Name: "employed"}},
 						Operator: Assign,
 						Value:    BoolLiteral{Value: false},
 					},

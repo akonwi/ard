@@ -374,26 +374,44 @@ func (f FunctionCall) String() string {
 	return fmt.Sprintf("FunctionCall(%s)", f.Name)
 }
 
-type MemberAccessType string
-
-const (
-	Instance = "instance"
-	Static   = "static"
-)
-
-type MemberAccess struct {
+type InstanceProperty struct {
 	BaseNode
-	Target     Expression
-	AccessType MemberAccessType
-	Member     Expression
+	Target   Expression
+	Property Identifier
 }
 
-func (m MemberAccess) String() string {
-	operator := "."
-	if m.AccessType == Static {
-		operator = "::"
-	}
-	return fmt.Sprintf("MemberAccess(%s%s%s)", m.Target, operator, m.Member)
+func (ip InstanceProperty) String() string {
+	return fmt.Sprintf("%s.%s", ip.Target, ip.Property)
+}
+
+type InstanceMethod struct {
+	BaseNode
+	Target Expression
+	Method FunctionCall
+}
+
+func (im InstanceMethod) String() string {
+	return fmt.Sprintf("%s.%s", im.Target, im.Method)
+}
+
+type StaticProperty struct {
+	BaseNode
+	Target   Expression
+	Property Identifier
+}
+
+func (s StaticProperty) String() string {
+	return fmt.Sprintf("%s::%s", s.Target, s.Property)
+}
+
+type StaticFunction struct {
+	BaseNode
+	Target   Expression
+	Function FunctionCall
+}
+
+func (s StaticFunction) String() string {
+	return fmt.Sprintf("%s::%s", s.Target, s.Function)
 }
 
 type EnumAccess struct {
@@ -1420,36 +1438,55 @@ func (p *Parser) parseMemberAccess(node *tree_sitter.Node) (Expression, error) {
 	}
 
 	operatorNode := p.mustChild(node, "operator")
-	var accessType MemberAccessType
+	memberNode := p.mustChild(node, "member")
+
 	switch operatorNode.GrammarName() {
 	case "period":
-		accessType = Instance
+		switch memberNode.GrammarName() {
+		case "identifier":
+			return InstanceProperty{
+				BaseNode: makeBaseNode(node),
+				Target:   target,
+				Property: Identifier{BaseNode: makeBaseNode(memberNode), Name: p.text(memberNode)},
+			}, nil
+		case "function_call":
+			method, err := p.parseFunctionCall(memberNode)
+			if err != nil {
+				return nil, err
+			}
+			return InstanceMethod{
+				BaseNode: makeBaseNode(node),
+				Target:   target,
+				Method:   method,
+			}, nil
+		default:
+			panic(fmt.Errorf("Unexpected member node: %s", memberNode.GrammarName()))
+		}
+
 	case "double_colon":
-		accessType = Static
+		switch memberNode.GrammarName() {
+		case "identifier":
+			return StaticProperty{
+				BaseNode: makeBaseNode(node),
+				Target:   target,
+				Property: Identifier{BaseNode: makeBaseNode(memberNode), Name: p.text(memberNode)},
+			}, nil
+		case "function_call":
+			function, err := p.parseFunctionCall(memberNode)
+			if err != nil {
+				return nil, err
+			}
+			return StaticFunction{
+				BaseNode: makeBaseNode(node),
+				Target:   target,
+				Function: function,
+			}, nil
+		default:
+			panic(fmt.Errorf("Unexpected member node: %s", memberNode.GrammarName()))
+		}
 	default:
 		panic(fmt.Errorf("Unexpected member access operator: %s", operatorNode.GrammarName()))
 	}
-
-	memberNode := p.mustChild(node, "member")
-	var member Expression
-	name := memberNode.GrammarName()
-	switch name {
-	case "identifier":
-		member = Identifier{Name: p.text(memberNode), BaseNode: makeBaseNode(memberNode)}
-	case "function_call":
-		call, err := p.parseFunctionCall(memberNode)
-		if err != nil {
-			return nil, err
-		}
-		member = call
-	}
-
-	return MemberAccess{
-		BaseNode:   makeBaseNode(node),
-		Target:     target,
-		AccessType: accessType,
-		Member:     member,
-	}, nil
 }
 
 /*

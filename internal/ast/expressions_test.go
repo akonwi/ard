@@ -420,57 +420,51 @@ func TestMemberAccess(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					MemberAccess{
+					InstanceProperty{
 						Target: StrLiteral{
 							Value: `"string"`,
 						},
-						AccessType: Instance,
-						Member: Identifier{
+						Property: Identifier{
 							Name: "size",
 						},
 					},
-					MemberAccess{
+					InstanceMethod{
 						Target: StrLiteral{
 							Value: `"string"`,
 						},
-						AccessType: Instance,
-						Member: FunctionCall{
+						Method: FunctionCall{
 							Name: "at",
 							Args: []Expression{NumLiteral{Value: "0"}},
 						},
 					},
-					MemberAccess{
+					InstanceProperty{
 						Target: Identifier{
 							Name: "some_string",
 						},
-						AccessType: Instance,
-						Member: Identifier{
+						Property: Identifier{
 							Name: "size",
 						},
 					},
-					MemberAccess{
+					InstanceMethod{
 						Target: Identifier{
 							Name: "some_string",
 						},
-						AccessType: Instance,
-						Member: FunctionCall{
+						Method: FunctionCall{
 							Name: "at",
 							Args: []Expression{NumLiteral{Value: "0"}},
 						},
 					},
-					MemberAccess{
-						Target: MemberAccess{
+					InstanceProperty{
+						Target: InstanceMethod{
 							Target: Identifier{
 								Name: "name",
 							},
-							AccessType: Instance,
-							Member: FunctionCall{
+							Method: FunctionCall{
 								Name: "take",
 								Args: []Expression{NumLiteral{Value: "3"}},
 							},
 						},
-						AccessType: Instance,
-						Member:     Identifier{Name: "size"},
+						Property: Identifier{Name: "size"},
 					},
 				},
 			},
@@ -481,10 +475,9 @@ func TestMemberAccess(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					MemberAccess{
-						Target:     Identifier{Name: "Color"},
-						AccessType: Static,
-						Member:     Identifier{Name: "blue"},
+					StaticProperty{
+						Target:   Identifier{Name: "Color"},
+						Property: Identifier{Name: "blue"},
 					},
 				},
 			},

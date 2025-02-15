@@ -621,7 +621,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 			return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
 
-		case ast.MemberAccess:
+		case ast.InstanceProperty:
 			subject := c.checkExpression(target)
 			if !isMutable(subject) {
 				c.addDiagnostic(Diagnostic{
@@ -643,7 +643,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 			return VariableAssignment{Target: subject, Value: value}
 		default:
-			return nil
+			panic(fmt.Errorf("Unsupported assignment subject: %s", target))
 		}
 	case ast.IfStatement:
 		var condition Expression
@@ -972,17 +972,14 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return IntLiteral{Value: value}
 	case ast.BoolLiteral:
 		return BoolLiteral{Value: e.Value}
-	case ast.MemberAccess:
-		switch e.AccessType {
-		case ast.Instance:
-			subject := c.checkExpression(e.Target)
-			return c.checkInstanceProperty(subject, e.Member)
-		case ast.Static:
-			subject := c.checkStaticExpression(e.Target)
-			return c.checkStaticProperty(subject, e.Member)
-		default:
-			panic("unreachable")
-		}
+	case ast.InstanceProperty:
+		return c.checkInstanceProperty(c.checkExpression(e.Target), e.Property)
+	case ast.InstanceMethod:
+		return c.checkInstanceMethod(c.checkExpression(e.Target), e.Method)
+	case ast.StaticProperty:
+		return c.checkStaticProperty(c.checkStaticExpression(e.Target), e.Property)
+	case ast.StaticFunction:
+		return c.checkStaticFunction(c.checkStaticExpression(e.Target), e.Function)
 	case ast.UnaryExpression:
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
@@ -1723,104 +1720,101 @@ func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) 
 	}
 }
 
-func (c *checker) checkInstanceProperty(subject Expression, member ast.Expression) Expression {
-	switch m := member.(type) {
-	case ast.Identifier:
-		sig := subject.GetType().GetProperty(m.Name)
-		if sig == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s.%s", subject, m.Name),
-				location: m.GetLocation(),
-			})
-			return nil
-		}
-		return InstanceProperty{
-			Subject: subject,
-			Property: Identifier{
-				Name: m.Name,
-				symbol: variable{
-					name:  m.Name,
-					_type: sig,
-				}},
-		}
-	case ast.FunctionCall:
-		sig := subject.GetType().GetProperty(m.Name)
-		if sig == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s.%s", subject, m.Name),
-				location: m.GetLocation(),
-			})
-			return nil
-		}
-		fn, ok := sig.(function)
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Not a function: %s", m.Name),
-				location: m.GetLocation(),
-			})
-			return nil
-		}
-
-		if fn.mutates && !isMutable(subject) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subject, m.Name),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-
-		args := make([]Expression, len(m.Args))
-		if len(m.Args) != len(fn.parameters) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(m.Args)),
-				location: m.GetLocation(),
-			})
-		} else {
-			for i, arg := range m.Args {
-				args[i] = c.checkExpression(arg)
-				if !AreCoherent(fn.parameters[i]._type, args[i].GetType()) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),
-						location: arg.GetLocation(),
-					})
-				} else {
-					if fn.parameters[i].mut && !isMutable(args[i]) {
-						c.addDiagnostic(Diagnostic{
-							Kind:     Error,
-							Message:  fmt.Sprintf("Type mismatch: Expected mutable %s, got %s", fn.parameters[i]._type, args[i].GetType()),
-							location: arg.GetLocation(),
-						})
-					}
-				}
-			}
-		}
-
-		if pkg, ok := subject.GetType().(Package); ok {
-			return PackageAccess{
-				Package:  pkg,
-				Property: FunctionCall{Name: m.Name, Args: args, symbol: fn},
-			}
-		}
-
-		return InstanceProperty{
-			Subject:  subject,
-			Property: FunctionCall{Name: m.Name, Args: args, symbol: fn},
-		}
-	default:
-		panic(fmt.Errorf("Unhandled instance access for %T", m))
+func (c *checker) checkInstanceProperty(subject Expression, member ast.Identifier) Expression {
+	sig := subject.GetType().GetProperty(member.Name)
+	if sig == nil {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  fmt.Sprintf("Undefined: %s.%s", subject, member.Name),
+			location: member.GetLocation(),
+		})
+		return nil
+	}
+	return InstanceProperty{
+		Subject: subject,
+		Property: Identifier{
+			Name: member.Name,
+			symbol: variable{
+				name:  member.Name,
+				_type: sig,
+			}},
 	}
 }
 
-func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Expression {
+func (c *checker) checkInstanceMethod(subject Expression, member ast.FunctionCall) Expression {
+	sig := subject.GetType().GetProperty(member.Name)
+	if sig == nil {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  fmt.Sprintf("Undefined: %s.%s", subject, member.Name),
+			location: member.GetLocation(),
+		})
+		return nil
+	}
+	fn, ok := sig.(function)
+	if !ok {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  fmt.Sprintf("Not a function: %s", member.Name),
+			location: member.GetLocation(),
+		})
+		return nil
+	}
+
+	if fn.mutates && !isMutable(subject) {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subject, member.Name),
+			location: member.GetLocation(),
+		})
+		return nil
+	}
+
+	args := make([]Expression, len(member.Args))
+	if len(member.Args) != len(fn.parameters) {
+		c.addDiagnostic(Diagnostic{
+			Kind:     Error,
+			Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
+			location: member.GetLocation(),
+		})
+	} else {
+		for i, arg := range member.Args {
+			args[i] = c.checkExpression(arg)
+			if !AreCoherent(fn.parameters[i]._type, args[i].GetType()) {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),
+					location: arg.GetLocation(),
+				})
+			} else {
+				if fn.parameters[i].mut && !isMutable(args[i]) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  fmt.Sprintf("Type mismatch: Expected mutable %s, got %s", fn.parameters[i]._type, args[i].GetType()),
+						location: arg.GetLocation(),
+					})
+				}
+			}
+		}
+	}
+
+	if pkg, ok := subject.GetType().(Package); ok {
+		return PackageAccess{
+			Package:  pkg,
+			Property: FunctionCall{Name: member.Name, Args: args, symbol: fn},
+		}
+	}
+
+	return InstanceProperty{
+		Subject:  subject,
+		Property: FunctionCall{Name: member.Name, Args: args, symbol: fn},
+	}
+}
+
+func (c *checker) checkStaticProperty(subject Static, member ast.Identifier) Expression {
 	switch s := subject.(type) {
 	case Enum:
-		if variant, ok := s.GetVariant(member.(ast.Identifier).Name); ok {
+		if variant, ok := s.GetVariant(member.Name); ok {
 			return variant
 		}
 
@@ -1829,122 +1823,117 @@ func (c *checker) checkStaticProperty(subject Static, member ast.Expression) Exp
 			Message: fmt.Sprintf(
 				"Undefined: %s::%s",
 				subject,
-				member.(ast.Identifier).Name),
+				member.Name),
 			location: member.GetLocation(),
 		})
 		return nil
+	default:
+		panic(fmt.Sprintf("Undefined %s::%s", s, member))
+	}
+}
 
+func (c *checker) checkStaticFunction(subject Static, member ast.FunctionCall) Expression {
+	switch s := subject.(type) {
 	case Int:
-		switch m := member.(type) {
-		case ast.Identifier:
-			panic(fmt.Sprintf("Undefined Int::%s", m))
-		case ast.FunctionCall:
-			prop := s.GetStaticProperty(m.Name)
-			if prop == nil {
+		prop := s.GetStaticProperty(member.Name)
+		if prop == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Undefined: Int::%s", member.Name),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+		fn, ok := prop.(function)
+		if !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Not a function: Int::%s", member.Name),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+
+		if len(member.Args) != len(fn.parameters) {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+
+		args := make([]Expression, len(member.Args))
+		for i, param := range fn.parameters {
+			arg := c.checkExpression(member.Args[i])
+			if !AreCoherent(param._type, arg.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("Undefined: Int::%s", m.Name),
-					location: m.GetLocation(),
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
+					location: member.Args[i].GetLocation(),
 				})
 				return nil
+			} else {
+				args[i] = arg
 			}
-			fn, ok := prop.(function)
-			if !ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Not a function: Int::%s", m.Name),
-					location: m.GetLocation(),
-				})
-				return nil
-			}
+		}
 
-			if len(m.Args) != len(fn.parameters) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(m.Args)),
-					location: m.GetLocation(),
-				})
-				return nil
-			}
-
-			args := make([]Expression, len(m.Args))
-			for i, param := range fn.parameters {
-				arg := c.checkExpression(m.Args[i])
-				if !AreCoherent(param._type, arg.GetType()) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
-						location: m.Args[i].GetLocation(),
-					})
-					return nil
-				} else {
-					args[i] = arg
-				}
-			}
-
-			return StaticFunctionCall{
-				Subject:  s,
-				Function: FunctionCall{Name: m.Name, Args: args, symbol: fn},
-			}
+		return StaticFunctionCall{
+			Subject:  s,
+			Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
 		}
 
 	case Float:
-		switch m := member.(type) {
-		case ast.Identifier:
-			panic(fmt.Sprintf("Undefined Float::%s", m))
-		case ast.FunctionCall:
-			prop := s.GetStaticProperty(m.Name)
-			if prop == nil {
+		prop := s.GetStaticProperty(member.Name)
+		if prop == nil {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Undefined: Float::%s", member.Name),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+		fn, ok := prop.(function)
+		if !ok {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Not a function: Float::%s", member.Name),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+
+		if len(member.Args) != len(fn.parameters) {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
+				location: member.GetLocation(),
+			})
+			return nil
+		}
+
+		args := make([]Expression, len(member.Args))
+		for i, param := range fn.parameters {
+			arg := c.checkExpression(member.Args[i])
+			if !AreCoherent(param._type, arg.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
-					Message:  fmt.Sprintf("Undefined: Float::%s", m.Name),
-					location: m.GetLocation(),
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
+					location: member.Args[i].GetLocation(),
 				})
 				return nil
-			}
-			fn, ok := prop.(function)
-			if !ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Not a function: Float::%s", m.Name),
-					location: m.GetLocation(),
-				})
-				return nil
-			}
-
-			if len(m.Args) != len(fn.parameters) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(m.Args)),
-					location: m.GetLocation(),
-				})
-				return nil
-			}
-
-			args := make([]Expression, len(m.Args))
-			for i, param := range fn.parameters {
-				arg := c.checkExpression(m.Args[i])
-				if !AreCoherent(param._type, arg.GetType()) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
-						location: m.Args[i].GetLocation(),
-					})
-					return nil
-				} else {
-					args[i] = arg
-				}
-			}
-
-			return StaticFunctionCall{
-				Subject:  s,
-				Function: FunctionCall{Name: m.Name, Args: args, symbol: fn},
+			} else {
+				args[i] = arg
 			}
 		}
+
+		return StaticFunctionCall{
+			Subject:  s,
+			Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
+		}
 	default:
-		panic(fmt.Sprintf("Unsupported static access for %T", s))
+		panic(fmt.Sprintf("Undefined %s::%s", s, member))
 	}
-	panic("unreachable")
 }
 
 func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {

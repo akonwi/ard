@@ -51,10 +51,9 @@ func TestEnums(t *testing.T) {
 						Name:     "Color",
 						Variants: colorVariants,
 					},
-					MemberAccess{
-						Target:     Identifier{Name: "Color"},
-						AccessType: Static,
-						Member:     Identifier{Name: "Red"},
+					StaticProperty{
+						Target:   Identifier{Name: "Color"},
+						Property: Identifier{Name: "Red"},
 					},
 				},
 			},
@@ -74,10 +73,9 @@ func TestEnums(t *testing.T) {
 						Mutable: false,
 						Name:    "favorite",
 						Type:    CustomType{Name: "Color"},
-						Value: MemberAccess{
-							Target:     Identifier{Name: "Color"},
-							AccessType: Static,
-							Member:     Identifier{Name: "Green"},
+						Value: StaticProperty{
+							Target:   Identifier{Name: "Color"},
+							Property: Identifier{Name: "Green"},
 						},
 					},
 				},
@@ -109,36 +107,32 @@ func TestMatchingOnEnums(t *testing.T) {
 					VariableDeclaration{
 						Mutable: false,
 						Name:    "light",
-						Value: MemberAccess{
-							Target:     Identifier{Name: "Color"},
-							AccessType: Static,
-							Member:     Identifier{Name: "Red"},
+						Value: StaticProperty{
+							Target:   Identifier{Name: "Color"},
+							Property: Identifier{Name: "Red"},
 						},
 					},
 					MatchExpression{
 						Subject: Identifier{Name: "light"},
 						Cases: []MatchCase{
 							{
-								Pattern: MemberAccess{
-									Target:     Identifier{Name: "Color"},
-									AccessType: Static,
-									Member:     Identifier{Name: "Red"},
+								Pattern: StaticProperty{
+									Target:   Identifier{Name: "Color"},
+									Property: Identifier{Name: "Red"},
 								},
 								Body: []Statement{StrLiteral{Value: `"Stop"`}},
 							},
 							{
-								Pattern: MemberAccess{
-									Target:     Identifier{Name: "Color"},
-									AccessType: Static,
-									Member:     Identifier{Name: "Yellow"},
+								Pattern: StaticProperty{
+									Target:   Identifier{Name: "Color"},
+									Property: Identifier{Name: "Yellow"},
 								},
 								Body: []Statement{StrLiteral{Value: `"Yield"`}},
 							},
 							{
-								Pattern: MemberAccess{
-									Target:     Identifier{Name: "Color"},
-									AccessType: Static,
-									Member:     Identifier{Name: "Green"},
+								Pattern: StaticProperty{
+									Target:   Identifier{Name: "Color"},
+									Property: Identifier{Name: "Green"},
 								},
 								Body: []Statement{StrLiteral{Value: `"Go"`}},
 							},
