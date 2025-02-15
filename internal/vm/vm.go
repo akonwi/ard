@@ -34,7 +34,7 @@ func (vm *VM) Run() (any, error) {
 }
 
 func (vm *VM) addVariable(name string, value *object) {
-	vm.scope.bindings[name] = &binding{value, false}
+	vm.scope.bindings[name] = value
 }
 
 func (vm *VM) evalStatement(stmt checker.Statement) *object {
@@ -68,8 +68,8 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		}
 	case checker.ForRange:
 		for i := vm.evalExpression(s.Start).raw.(int); i <= vm.evalExpression(s.End).raw.(int); i++ {
-			cursor := binding{&object{i, checker.Int{}}, false}
-			variables := map[string]binding{s.Cursor.Name: cursor}
+			cursor := &object{i, checker.Int{}}
+			variables := map[string]*object{s.Cursor.Name: cursor}
 			if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 				break
 			}
@@ -79,16 +79,15 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		switch iterable._type.(type) {
 		case checker.Str:
 			for _, item := range iterable.raw.(string) {
-				cursor := binding{&object{string(item), checker.Str{}}, false}
-				variables := map[string]binding{s.Cursor.Name: cursor}
+				cursor := &object{string(item), checker.Str{}}
+				variables := map[string]*object{s.Cursor.Name: cursor}
 				if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 					break
 				}
 			}
 		case checker.List:
 			for _, item := range iterable.raw.([]*object) {
-				cursor := binding{item, false}
-				variables := map[string]binding{s.Cursor.Name: cursor}
+				variables := map[string]*object{s.Cursor.Name: item}
 				if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 					break
 				}
@@ -103,7 +102,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		defer vm.popScope()
 
 		for vm.evalStatement(s.Init); vm.evalExpression(s.Condition).raw.(bool); vm.evalStatement(s.Step) {
-			if _, breaks := vm.evalBlock(s.Body.Body, map[string]binding{}, true); breaks {
+			if _, breaks := vm.evalBlock(s.Body.Body, map[string]*object{}, true); breaks {
 				break
 			}
 		}
@@ -111,7 +110,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 	case checker.WhileLoop:
 		vm.scope.breakable = true
 		for vm.evalExpression(s.Condition).raw.(bool) && !vm.scope.isBroken() {
-			vm.evalBlock(s.Body, map[string]binding{}, false)
+			vm.evalBlock(s.Body, map[string]*object{}, false)
 		}
 		vm.scope.breakable = false
 	default:
@@ -131,9 +130,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 
 func (vm *VM) evalVariableBinding(_binding checker.VariableBinding) {
 	value := vm.evalExpression(_binding.Value)
-	// todo: callable could be determined by casting value._type to checker.function
-	_, callable := value.raw.(func(args ...object) object)
-	vm.scope.bindings[_binding.Name] = &binding{value, callable}
+	vm.scope.bindings[_binding.Name] = value
 	vm.result = *value
 }
 
@@ -141,10 +138,8 @@ func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 	switch target := assignment.Target.(type) {
 	case checker.Identifier:
 		value := vm.evalExpression(assignment.Value)
-		if variable, ok := vm.scope.get(target.Name); ok {
-			(*variable).value = value
-			vm.result = *value
-		}
+		vm.scope.set(target.Name, value)
+		vm.result = *value
 	case checker.InstanceProperty:
 		subject := vm.evalExpression(target.Subject)
 		raw := subject.raw.(map[string]*object)
@@ -155,29 +150,32 @@ func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 }
 
 func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
-	vm.scope.bindings[fn.Name] = &binding{
-		callable: true,
-		value: &object{
-			raw: func(args ...object) object {
-				vm.pushScope()
-				for i, arg := range args {
-					vm.addVariable(fn.Parameters[i].Name, &arg)
-				}
-				result := &object{}
-				for _, statement := range fn.Body {
-					result = vm.evalStatement(statement)
-				}
-				vm.popScope()
-				return *result
-			},
-			_type: fn.GetType(),
-		},
+	raw := func(args ...object) object {
+		vm.pushScope()
+		for i, arg := range args {
+			vm.addVariable(fn.Parameters[i].Name, &arg)
+		}
+		result := &object{}
+		for _, statement := range fn.Body {
+			result = vm.evalStatement(statement)
+		}
+		vm.popScope()
+		return *result
+	}
+	vm.scope.bindings[fn.Name] = &object{
+		raw:   raw,
+		_type: fn.GetType(),
 	}
 }
 
 type object struct {
 	raw   any
 	_type checker.Type
+}
+
+func (o *object) isCallable() bool {
+	_, isFunc := o.raw.(func(args ...object) object)
+	return isFunc
 }
 
 func (o object) String() string {
@@ -218,7 +216,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			return &object{nil, checker.Void{}}
 		}
 		if v, ok := vm.scope.get(e.Name); ok {
-			return v.value
+			return v
 		}
 		panic(fmt.Sprintf("Variable not found: %s", e.Name))
 	case checker.Not:
@@ -554,11 +552,11 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 		if !ok {
 			panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
 		}
-		args := map[string]binding{
-			t.GetInstanceId(): {o, false},
+		args := map[string]*object{
+			t.GetInstanceId(): o,
 		}
 		for i, param := range method.Parameters {
-			args[param.Name] = binding{vm.evalExpression(fn.Args[i]), false}
+			args[param.Name] = vm.evalExpression(fn.Args[i])
 		}
 		res, _ := vm.evalBlock(method.Body, args, false)
 		return res
@@ -587,9 +585,9 @@ func (vm VM) matchEnum(match checker.EnumMatch) *object {
 	}
 
 	if match.CatchAll.Body != nil {
-		variables := map[string]binding{}
+		variables := map[string]*object{}
 		if id, ok := match.CatchAll.Pattern.(checker.Identifier); ok {
-			variables[id.Name] = binding{subj, false}
+			variables[id.Name] = subj
 		}
 		res, _ := vm.evalBlock(match.CatchAll.Body, variables, false)
 		return res
@@ -605,11 +603,10 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 	}
 
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
-	it := binding{subj, false}
-	it.value = &object{subj.raw, subj._type.(checker.Option).GetInnerType()}
+	it := &object{subj.raw, subj._type.(checker.Option).GetInnerType()}
 	res, _ := vm.evalBlock(
 		match.Some.Body,
-		map[string]binding{bindingName: it},
+		map[string]*object{bindingName: it},
 		false,
 	)
 	return res
@@ -621,8 +618,8 @@ func (vm VM) matchUnion(match checker.UnionMatch) *object {
 		if checker.AreCoherent(subj._type, expected_type) {
 			res, _ := vm.evalBlock(
 				arm.Body,
-				map[string]binding{
-					"it": {subj, false},
+				map[string]*object{
+					"it": subj,
 				},
 				false,
 			)
@@ -630,13 +627,13 @@ func (vm VM) matchUnion(match checker.UnionMatch) *object {
 		}
 	}
 	if match.CatchAll.Body != nil {
-		res, _ := vm.evalBlock(match.CatchAll.Body, map[string]binding{}, false)
+		res, _ := vm.evalBlock(match.CatchAll.Body, map[string]*object{}, false)
 		return res
 	}
 	panic(fmt.Sprintf("No match found for %s", subj))
 }
 
-func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding, breakable bool) (*object, bool) {
+func (vm VM) evalBlock(block []checker.Statement, variables map[string]*object, breakable bool) (*object, bool) {
 	vm.pushScope()
 	defer vm.popScope()
 
@@ -644,7 +641,7 @@ func (vm VM) evalBlock(block []checker.Statement, variables map[string]binding, 
 		vm.scope.breakable = true
 	}
 	for name, variable := range variables {
-		vm.scope.bindings[name] = &variable
+		vm.scope.bindings[name] = variable
 	}
 
 	var result *object

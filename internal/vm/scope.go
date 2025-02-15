@@ -4,16 +4,11 @@ import (
 	"github.com/akonwi/ard/internal/checker"
 )
 
-type binding struct {
-	value    *object
-	callable bool
-}
-
 type function func(args ...object) object
 
 type scope struct {
 	parent    *scope
-	bindings  map[string]*binding
+	bindings  map[string]*object
 	enums     map[string]checker.Enum
 	structs   map[string]*checker.Struct
 	breakable bool
@@ -23,7 +18,7 @@ type scope struct {
 func newScope(parent *scope) *scope {
 	return &scope{
 		parent:   parent,
-		bindings: make(map[string]*binding),
+		bindings: make(map[string]*object),
 		enums:    make(map[string]checker.Enum),
 		structs:  make(map[string]*checker.Struct),
 	}
@@ -53,7 +48,7 @@ func (s scope) getStruct(name string) (*checker.Struct, bool) {
 	return v, ok
 }
 
-func (s scope) get(name string) (*binding, bool) {
+func (s scope) get(name string) (*object, bool) {
 	v, ok := s.bindings[name]
 	if !ok && s.parent != nil {
 		return s.parent.get(name)
@@ -61,10 +56,16 @@ func (s scope) get(name string) (*binding, bool) {
 	return v, ok
 }
 
+func (s scope) set(name string, value *object) {
+	if binding, ok := s.get(name); ok {
+		*binding = *value
+	}
+}
+
 func (s scope) getFunction(name string) (function, bool) {
-	if b, ok := s.get(name); ok && b.callable {
-		// can't cast w/ .(function) because function is a type alias not interface
-		return b.value.raw.(func(args ...object) object), true
+	if b, ok := s.get(name); ok && b.isCallable() {
+		// can't cast w/ .(function) because `function` is a type alias not interface
+		return b.raw.(func(args ...object) object), true
 	}
 	return nil, false
 }
