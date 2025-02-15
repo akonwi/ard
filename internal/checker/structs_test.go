@@ -54,7 +54,6 @@ func TestStructs(t *testing.T) {
 				Statements: []Statement{
 					personStruct,
 					VariableBinding{
-						Mut:  false,
 						Name: "alice",
 						Value: StructInstance{
 							Name: "Person",
@@ -102,7 +101,6 @@ func TestStructs(t *testing.T) {
 				Statements: []Statement{
 					personStruct,
 					VariableBinding{
-						Mut:  true,
 						Name: "p",
 						Value: StructInstance{
 							Name: "Person",

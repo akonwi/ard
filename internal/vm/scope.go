@@ -5,7 +5,6 @@ import (
 )
 
 type binding struct {
-	mut      bool
 	value    *object
 	callable bool
 }

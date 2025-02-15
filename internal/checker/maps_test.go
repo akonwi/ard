@@ -10,7 +10,6 @@ func TestMaps(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
-						Mut:  false,
 						Name: "ages",
 						Value: MapLiteral{
 							Entries: map[Expression]Expression{
@@ -28,7 +27,6 @@ func TestMaps(t *testing.T) {
 			output: Program{
 				Statements: []Statement{
 					VariableBinding{
-						Mut:  false,
 						Name: "ages",
 						Value: MapLiteral{
 							Entries: map[Expression]Expression{

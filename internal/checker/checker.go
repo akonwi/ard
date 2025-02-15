@@ -338,8 +338,7 @@ type Statement interface{}
 type VariableBinding struct {
 	Name  string
 	Value Expression
-	// todo: this doesn't need to be public
-	Mut bool
+	mut   bool
 }
 
 type VariableAssignment struct {
@@ -506,7 +505,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 
 			c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
-			return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
+			return VariableBinding{Name: s.Name, Value: value, mut: s.Mutable}
 		}
 
 		expectedType := c.resolveDeclaredType(s.Type)
@@ -542,7 +541,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: expectedType})
-		return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
+		return VariableBinding{Name: s.Name, Value: value, mut: s.Mutable}
 	case ast.VariableAssignment:
 		switch target := s.Target.(type) {
 		case ast.Identifier:

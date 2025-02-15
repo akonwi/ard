@@ -33,8 +33,8 @@ func (vm *VM) Run() (any, error) {
 	return vm.result.raw, nil
 }
 
-func (vm *VM) addVariable(mut bool, name string, value *object) {
-	vm.scope.bindings[name] = &binding{mut, value, false}
+func (vm *VM) addVariable(name string, value *object) {
+	vm.scope.bindings[name] = &binding{value, false}
 }
 
 func (vm *VM) evalStatement(stmt checker.Statement) *object {
@@ -68,7 +68,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		}
 	case checker.ForRange:
 		for i := vm.evalExpression(s.Start).raw.(int); i <= vm.evalExpression(s.End).raw.(int); i++ {
-			cursor := binding{false, &object{i, checker.Int{}}, false}
+			cursor := binding{&object{i, checker.Int{}}, false}
 			variables := map[string]binding{s.Cursor.Name: cursor}
 			if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 				break
@@ -79,7 +79,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		switch iterable._type.(type) {
 		case checker.Str:
 			for _, item := range iterable.raw.(string) {
-				cursor := binding{false, &object{string(item), checker.Str{}}, false}
+				cursor := binding{&object{string(item), checker.Str{}}, false}
 				variables := map[string]binding{s.Cursor.Name: cursor}
 				if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 					break
@@ -87,7 +87,7 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 			}
 		case checker.List:
 			for _, item := range iterable.raw.([]*object) {
-				cursor := binding{false, item, false}
+				cursor := binding{item, false}
 				variables := map[string]binding{s.Cursor.Name: cursor}
 				if _, breaks := vm.evalBlock(s.Body, variables, true); breaks {
 					break
@@ -133,7 +133,7 @@ func (vm *VM) evalVariableBinding(_binding checker.VariableBinding) {
 	value := vm.evalExpression(_binding.Value)
 	// todo: callable could be determined by casting value._type to checker.function
 	_, callable := value.raw.(func(args ...object) object)
-	vm.scope.bindings[_binding.Name] = &binding{false, value, callable}
+	vm.scope.bindings[_binding.Name] = &binding{value, callable}
 	vm.result = *value
 }
 
@@ -156,13 +156,12 @@ func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 
 func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
 	vm.scope.bindings[fn.Name] = &binding{
-		mut:      false,
 		callable: true,
 		value: &object{
 			raw: func(args ...object) object {
 				vm.pushScope()
 				for i, arg := range args {
-					vm.addVariable(false, fn.Parameters[i].Name, &arg)
+					vm.addVariable(fn.Parameters[i].Name, &arg)
 				}
 				result := &object{}
 				for _, statement := range fn.Body {
@@ -366,7 +365,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			raw: func(args ...object) object {
 				vm.pushScope()
 				for i, arg := range args {
-					vm.addVariable(false, e.Parameters[i].Name, &arg)
+					vm.addVariable(e.Parameters[i].Name, &arg)
 				}
 				var result object
 				for _, statement := range e.Body {
@@ -556,10 +555,10 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
 		}
 		args := map[string]binding{
-			t.GetInstanceId(): {false, o, false},
+			t.GetInstanceId(): {o, false},
 		}
 		for i, param := range method.Parameters {
-			args[param.Name] = binding{false, vm.evalExpression(fn.Args[i]), false}
+			args[param.Name] = binding{vm.evalExpression(fn.Args[i]), false}
 		}
 		res, _ := vm.evalBlock(method.Body, args, false)
 		return res
@@ -590,7 +589,7 @@ func (vm VM) matchEnum(match checker.EnumMatch) *object {
 	if match.CatchAll.Body != nil {
 		variables := map[string]binding{}
 		if id, ok := match.CatchAll.Pattern.(checker.Identifier); ok {
-			variables[id.Name] = binding{false, subj, false}
+			variables[id.Name] = binding{subj, false}
 		}
 		res, _ := vm.evalBlock(match.CatchAll.Body, variables, false)
 		return res
@@ -606,7 +605,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 	}
 
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
-	it := binding{false, subj, false}
+	it := binding{subj, false}
 	it.value = &object{subj.raw, subj._type.(checker.Option).GetInnerType()}
 	res, _ := vm.evalBlock(
 		match.Some.Body,
@@ -623,7 +622,7 @@ func (vm VM) matchUnion(match checker.UnionMatch) *object {
 			res, _ := vm.evalBlock(
 				arm.Body,
 				map[string]binding{
-					"it": {false, subj, false},
+					"it": {subj, false},
 				},
 				false,
 			)
