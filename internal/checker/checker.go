@@ -647,18 +647,20 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 	case ast.IfStatement:
 		var condition Expression
-		if s.Condition != nil {
-			condition = c.checkExpression(s.Condition)
-			if condition.GetType() != (Bool{}) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "If conditions must be boolean expressions",
-					location: s.Condition.GetLocation(),
-				})
+		initialize := func() {
+			if s.Condition != nil {
+				condition = c.checkExpression(s.Condition)
+				if condition.GetType() != (Bool{}) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  "If conditions must be boolean expressions",
+						location: s.Condition.GetLocation(),
+					})
+				}
 			}
 		}
 
-		block := c.checkBlock(s.Body, []variable{})
+		block := c.checkBlock(s.Body, initialize)
 
 		var elseClause Statement = nil
 		if s.Else != nil {
@@ -684,7 +686,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 			return nil
 		}
-		block := c.checkBlock(s.Body, []variable{cursor})
+		block := c.checkBlock(s.Body, func() {
+			c.scope.addVariable(cursor)
+		})
 		return ForRange{
 			Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
 			Start:  start,
@@ -696,7 +700,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
 		// getBody func allows lazy evaluation so that cursor can be updated within the switch below
 		getBody := func() []Statement {
-			return c.checkBlock(s.Body, []variable{cursor}).Body
+			return c.checkBlock(s.Body, func() {
+				c.scope.addVariable(cursor)
+			}).Body
 		}
 
 		switch iterable.GetType().(type) {
@@ -734,15 +740,17 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 
 	case ast.ForLoop:
 		// todo: this is a redundant scope
-		new_scope := newScope(c.scope)
-		c.scope = new_scope
-		defer func() { c.scope = new_scope.parent }()
+		var init VariableBinding
+		var condition Expression
+		var step Statement
 
-		init := c.checkStatement(s.Init).(VariableBinding)
-		condition := c.checkExpression(s.Condition)
-		step := c.checkStatement(s.Incrementer)
+		setup := func() {
+			init = c.checkStatement(s.Init).(VariableBinding)
+			condition = c.checkExpression(s.Condition)
+			step = c.checkStatement(s.Incrementer)
+		}
 
-		block := c.checkBlock(s.Body, []variable{})
+		block := c.checkBlock(s.Body, setup)
 
 		return ForLoop{
 			Init:      init,
@@ -761,7 +769,8 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			})
 		}
 
-		block := c.checkBlock(s.Body, []variable{})
+		block := c.checkBlock(s.Body, nil)
+
 		return WhileLoop{
 			Condition: condition,
 			Body:      block.Body,
@@ -786,7 +795,11 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 		c.scope.declare(fn)
 
-		block := c.checkBlock(s.Body, blockVariables)
+		block := c.checkBlock(s.Body, func() {
+			for _, p := range blockVariables {
+				c.scope.addVariable(p)
+			}
+		})
 		if _, isVoid := declaredReturnType.(Void); !isVoid && !AreCoherent(declaredReturnType, block.result) {
 			c.addDiagnostic(Diagnostic{
 				Kind: Error,
@@ -894,13 +907,13 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	}
 }
 
-func (c *checker) checkBlock(block []ast.Statement, variables []variable) Block {
+func (c *checker) checkBlock(block []ast.Statement, setup func()) Block {
 	new_scope := newScope(c.scope)
 	c.scope = new_scope
 	defer func() { c.scope = new_scope.parent }()
 
-	for _, variable := range variables {
-		c.scope.addVariable(variable)
+	if setup != nil {
+		setup()
 	}
 
 	var result Type = Void{}
@@ -1128,7 +1141,11 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
 		}
 		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
-		block := c.checkBlock(e.Body, blockVariables)
+		block := c.checkBlock(e.Body, func() {
+			for _, p := range blockVariables {
+				c.scope.addVariable(p)
+			}
+		})
 		if !IsVoid(declaredReturnType) {
 			if !AreCoherent(declaredReturnType, block.result) {
 				c.addDiagnostic(Diagnostic{
@@ -1411,7 +1428,11 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 			expectedCases[variant.Value] = true
 		}
 
-		block := c.checkBlock(arm.Body, variables)
+		block := c.checkBlock(arm.Body, func() {
+			for _, v := range variables {
+				c.scope.addVariable(v)
+			}
+		})
 		if i == 0 {
 			_type = block.result
 		} else if !AreCoherent(block.result, _type) {
@@ -1486,7 +1507,7 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 			return nil
 		}
 
-		block := c.checkBlock(arm.Body, []variable{})
+		block := c.checkBlock(arm.Body, nil)
 
 		if pattern.(BoolLiteral).Value {
 			if trueCase.Body != nil {
@@ -1570,7 +1591,7 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 				})
 				continue
 			}
-			noneCase = c.checkBlock(arm.Body, []variable{})
+			noneCase = c.checkBlock(arm.Body, nil)
 			if result == nil {
 				result = noneCase.result
 			} else {
@@ -1590,7 +1611,13 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 					location: arm.Pattern.GetLocation(),
 				})
 			} else {
-				block := c.checkBlock(arm.Body, []variable{{name: id.Name, mut: false, _type: subject.GetType().(Option).inner}})
+				block := c.checkBlock(arm.Body, func() {
+					c.scope.addVariable(variable{
+						name:  id.Name,
+						mut:   false,
+						_type: subject.GetType().(Option).inner,
+					})
+				})
 				someCase = MatchCase{
 					Pattern: Identifier{Name: id.Name},
 					Body:    block.Body,
@@ -1659,7 +1686,7 @@ func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) 
 				})
 				return UnionMatch{}
 			}
-			catchAll = c.checkBlock(arm.Body, []variable{})
+			catchAll = c.checkBlock(arm.Body, nil)
 			continue
 		}
 
@@ -1672,12 +1699,9 @@ func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) 
 			})
 			return UnionMatch{}
 		} else {
-			block := c.checkBlock(
-				arm.Body,
-				[]variable{
-					{name: "it", mut: false, _type: it_type},
-				},
-			)
+			block := c.checkBlock(arm.Body, func() {
+				c.scope.addVariable(variable{name: "it", mut: false, _type: it_type})
+			})
 			cases[it_type] = block
 			if result == nil {
 				result = block.result
