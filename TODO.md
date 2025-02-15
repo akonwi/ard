@@ -17,4 +17,8 @@
 - [ ] concurrency (Task?)
 - [ ] error handling
 - [ ] matching on strings?
-- [ ] should
+- [ ] traits
+  - String - use for printing and interpolatables
+- [ ] packages
+  - follow Go; folder is package
+  - ?: use reflection to call into packages?

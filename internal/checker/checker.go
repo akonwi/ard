@@ -739,7 +739,6 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 
 	case ast.ForLoop:
-		// todo: this is a redundant scope
 		var init VariableBinding
 		var condition Expression
 		var step Statement
@@ -1067,7 +1066,6 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		parts := make([]Expression, len(e.Chunks))
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
-			// todo: String trait
 			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), Option{Str{}}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,

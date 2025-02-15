@@ -8,12 +8,6 @@ import (
 	"github.com/akonwi/ard/internal/checker"
 )
 
-// TODO: use this for 3rd party packages
-// iiio := reflect.TypeFor[IO]()
-// if print, ok := iiio.MethodByName("print"); ok {
-// 	print.Func.Call([]reflect.Value{reflect.ValueOf("Hello, World)")})
-// }
-
 func (vm *VM) invokeIO(expr checker.Expression) *object {
 	switch e := expr.(type) {
 	case checker.FunctionCall:
