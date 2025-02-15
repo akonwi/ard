@@ -338,7 +338,8 @@ type Statement interface{}
 type VariableBinding struct {
 	Name  string
 	Value Expression
-	Mut   bool
+	// todo: this doesn't need to be public
+	Mut bool
 }
 
 type VariableAssignment struct {
@@ -487,52 +488,60 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	switch s := stmt.(type) {
 	case ast.VariableDeclaration:
-		var value Expression
-		var _type Type = Void{}
-		if literal, isList := s.Value.(ast.ListLiteral); isList && s.Type != nil {
-			_type = c.resolveDeclaredType(s.Type)
-			value = c.checkList(literal, _type)
-		} else if _map, isMap := s.Value.(ast.MapLiteral); isMap && s.Type != nil {
-			_type = c.resolveDeclaredType(s.Type)
-			value = c.checkMap(_map, _type)
-		} else {
-			// todo: use new method to check whether the expression is of an expected type
-			value = c.checkExpression(s.Value)
-			// get declared type if it exists
-			if s.Type != nil {
-				_type = c.resolveDeclaredType(s.Type)
-				if _, expectingFloat := _type.(Float); expectingFloat {
-					if _, isInt := value.(IntLiteral); isInt {
-						value = FloatLiteral{Value: float64(value.(IntLiteral).Value)}
-					}
-				}
-				if !AreCoherent(_type, value.GetType()) {
+		if s.Type == nil {
+			var value Expression
+			switch astVal := s.Value.(type) {
+			case ast.ListLiteral:
+				value = c.checkList(astVal, nil)
+			default:
+				value = c.checkExpression(astVal)
+				if IsVoid(value.GetType()) {
 					c.addDiagnostic(Diagnostic{
 						Kind:     Error,
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", _type, value.GetType()),
 						location: s.Value.GetLocation(),
+						Message:  "Cannot assign a void value",
 					})
 					return nil
 				}
 			}
 
-			// TODO: we've already checked for type mismatches at this point,
-			// if this is not declared as option, we can safely use the value's type
-			// but for now, we'll just use the value's type when inference is necessary
-			if IsVoid(_type) {
-				_type = value.GetType()
+			c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
+			return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
+		}
+
+		expectedType := c.resolveDeclaredType(s.Type)
+		if IsVoid(expectedType) {
+			c.addDiagnostic(Diagnostic{
+				Kind:     Error,
+				location: s.Value.GetLocation(),
+				Message:  "Cannot assign a void value",
+			})
+		}
+
+		var value Expression
+		switch literal := s.Value.(type) {
+		case ast.ListLiteral:
+			value = c.checkList(literal, expectedType)
+		case ast.MapLiteral:
+			value = c.checkMap(literal, expectedType)
+		default:
+			value = c.checkExpression(s.Value)
+			if _, expectingFloat := expectedType.(Float); expectingFloat {
+				if _, isInt := value.(IntLiteral); isInt {
+					value = FloatLiteral{Value: float64(value.(IntLiteral).Value)}
+				}
 			}
-			// if it's still void, there's a problem
-			if IsVoid(_type) {
+			if !AreCoherent(expectedType, value.GetType()) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
+					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", expectedType, value.GetType()),
 					location: s.Value.GetLocation(),
-					Message:  "Cannot assign a void value",
 				})
+				return nil
 			}
 		}
 
-		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: _type})
+		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: expectedType})
 		return VariableBinding{Name: s.Name, Value: value, Mut: s.Mutable}
 	case ast.VariableAssignment:
 		switch target := s.Target.(type) {
