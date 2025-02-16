@@ -1525,9 +1525,9 @@ func TestMatchingOnBooleans(t *testing.T) {
 						Name: "is_big",
 						Value: BinaryExpr{
 							Op: GreaterThan,
-							Left: InstanceProperty{
-								Subject:  StrLiteral{Value: "foo"},
-								Property: FunctionCall{Name: "size", Args: []Expression{}},
+							Left: InstanceMethod{
+								Subject: StrLiteral{Value: "foo"},
+								Method:  FunctionCall{Name: "size", Args: []Expression{}},
 							},
 							Right: IntLiteral{Value: 20},
 						},

@@ -228,11 +228,20 @@ func (i Identifier) GetType() Type {
 
 type InstanceProperty struct {
 	Subject  Expression
-	Property Expression
+	Property Identifier
 }
 
 func (i InstanceProperty) GetType() Type {
 	return i.Property.GetType()
+}
+
+type InstanceMethod struct {
+	Subject Expression
+	Method  FunctionCall
+}
+
+func (i InstanceMethod) GetType() Type {
+	return i.Method.GetType()
 }
 
 type StaticFunctionCall struct {
@@ -1755,7 +1764,7 @@ func (c *checker) checkInstanceMethod(subject Expression, member ast.FunctionCal
 	if !ok {
 		c.addDiagnostic(Diagnostic{
 			Kind:     Error,
-			Message:  fmt.Sprintf("Not a function: %s", member.Name),
+			Message:  fmt.Sprintf("Not a function: %s.%s", subject, member.Name),
 			location: member.GetLocation(),
 		})
 		return nil
@@ -1805,9 +1814,9 @@ func (c *checker) checkInstanceMethod(subject Expression, member ast.FunctionCal
 		}
 	}
 
-	return InstanceProperty{
-		Subject:  subject,
-		Property: FunctionCall{Name: member.Name, Args: args, symbol: fn},
+	return InstanceMethod{
+		Subject: subject,
+		Method:  FunctionCall{Name: member.Name, Args: args, symbol: fn},
 	}
 }
 

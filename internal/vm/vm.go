@@ -143,7 +143,7 @@ func (vm *VM) evalVariableAssignment(assignment checker.VariableAssignment) {
 	case checker.InstanceProperty:
 		subject := vm.evalExpression(target.Subject)
 		raw := subject.raw.(map[string]*object)
-		raw[target.Property.(checker.Identifier).Name] = vm.evalExpression(assignment.Value)
+		raw[target.Property.Name] = vm.evalExpression(assignment.Value)
 	default:
 		panic(fmt.Sprintf("Unimplemented assignment target: %T", target))
 	}
@@ -233,8 +233,9 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		}
 		return val
 	case checker.InstanceProperty:
-		i := vm.evalExpression(e.Subject)
-		return vm.evalProperty(i, e.Property)
+		return vm.evalProperty(vm.evalExpression(e.Subject), e.Property)
+	case checker.InstanceMethod:
+		return vm.evalInstanceMethod(vm.evalExpression(e.Subject), e.Method)
 	case checker.BinaryExpr:
 		switch e.Op {
 		case checker.Add:
@@ -415,40 +416,14 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 	}
 }
 
-func (vm VM) evalProperty(i *object, prop checker.Expression) *object {
-	// TODO: InstanceProperty.Property should only be an Identifier
-	if fn, ok := prop.(checker.FunctionCall); ok {
-		return vm.evalInstanceMethod(i, fn)
-	}
-	propName := prop.(checker.Identifier).Name
-
+func (vm VM) evalProperty(i *object, prop checker.Identifier) *object {
 	switch i._type.(type) {
-	case checker.Str:
-		// raw := i.raw.(string)
-		switch propName {
-		default:
-			panic(fmt.Errorf("Undefined property: Str.%v", propName))
-		}
-	case checker.Int:
-		switch propName {
-		default:
-			panic(fmt.Errorf("Undefined property: Int.%v", propName))
-		}
-	case checker.Bool:
-		switch propName {
-		default:
-			panic(fmt.Errorf("Undefined property: Bool.%v", propName))
-		}
-	case checker.List:
-		panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
-	case checker.Map:
 	case *checker.Struct:
-		if field, ok := i.raw.(map[string]*object)[propName]; ok {
+		if field, ok := i.raw.(map[string]*object)[prop.Name]; ok {
 			return field
 		}
-		panic(fmt.Sprintf("Field not found: %s", propName))
 	}
-	panic(fmt.Errorf("Unimplemented property: %s.%v", i._type, propName))
+	panic(fmt.Errorf("Undefined property: %s.%s", i._type, prop))
 }
 
 func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
