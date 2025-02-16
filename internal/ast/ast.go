@@ -584,9 +584,6 @@ func (p *Parser) text(node *tree_sitter.Node) string {
 
 func (p *Parser) mustChild(node *tree_sitter.Node, name string) *tree_sitter.Node {
 	child := node.ChildByFieldName(name)
-	// if node.HasError() {
-	// 	panic(fmt.Errorf("Parsing error encountered: %s", p.text(node)))
-	// }
 	if child == nil {
 		panic(fmt.Errorf("Missing child: %s in `%s`", name, p.text(node)))
 	}
@@ -595,16 +592,12 @@ func (p *Parser) mustChild(node *tree_sitter.Node, name string) *tree_sitter.Nod
 
 func (p *Parser) mustChildren(node *tree_sitter.Node, name string) []tree_sitter.Node {
 	children := node.ChildrenByFieldName(name, p.tree.Walk())
-	// if node.HasError() {
-	// 	panic(fmt.Errorf("Parsing error encountered: %s", p.text(node)))
-	// }
 	if len(children) == 0 {
 		panic(fmt.Errorf("Missing children: %s in `%s`", name, p.text(node)))
 	}
 	return children
 }
 
-// i might regret this
 func (p *Parser) sweepForError(node *tree_sitter.Node, minChildren int) error {
 	if int(node.ChildCount()) != minChildren {
 		for _, child := range node.Children(p.tree.Walk()) {
@@ -836,11 +829,6 @@ func (p *Parser) parseFunctionDecl(node *tree_sitter.Node) (FunctionDeclaration,
 	name := p.text(p.mustChild(node, "name"))
 	parameters := p.parseParameters(p.mustChild(node, "parameters"))
 	returnType := p.resolveType(node.ChildByFieldName("return"))
-
-	// parameterTypes := make([]Type, len(parameters))
-	// for i, param := range parameters {
-	// 	parameterTypes[i] = param.Type
-	// }
 
 	body, err := p.parseBlock(node.ChildByFieldName("body"))
 
