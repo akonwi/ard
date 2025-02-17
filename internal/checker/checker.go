@@ -77,11 +77,6 @@ func (p ExternalPackage) GetProperty(name string) Type {
 	return nil
 }
 
-// todo: delete
-func (p ExternalPackage) matches(other Type) bool {
-	return p.String() == other.String()
-}
-
 // Expressions produce something, therefore they have a Type
 type Expression interface {
 	GetType() Type
