@@ -34,7 +34,9 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		Identifier{},
 		FunctionCall{},
-		Package{},
+		IO{},
+		Options{},
+		ExternalPackage{},
 		Diagnostic{},
 		ListLiteral{},
 		MapLiteral{},
@@ -85,21 +87,15 @@ func TestImports(t *testing.T) {
 		{
 			name: "importing modules",
 			input: strings.Join([]string{
-				`use io/fs`,
+				`use ard/io`,
 				`use github.com/google/go-cmp/cmp`,
 				`use github.com/tree-sitter/tree-sitter as ts`,
 			}, "\n"),
 			output: Program{
 				Imports: map[string]Package{
-					"fs": {
-						Path: "io/fs",
-					},
-					"cmp": {
-						Path: "github.com/google/go-cmp/cmp",
-					},
-					"ts": {
-						Path: "github.com/tree-sitter/tree-sitter",
-					},
+					"io":  newIO(""),
+					"cmp": newExternalPackage("github.com/google/go-cmp/cmp", ""),
+					"ts":  newExternalPackage("github.com/tree-sitter/tree-sitter", "ts"),
 				},
 			},
 		},
@@ -1182,13 +1178,11 @@ func TestCallingPackageMethods(t *testing.T) {
 			}, "\n"),
 			output: Program{
 				Imports: map[string]Package{
-					"io": {
-						Path: "ard/io",
-					},
+					"io": newIO(""),
 				},
 				Statements: []Statement{
 					PackageAccess{
-						Package: Package{Path: "ard/io"},
+						Package: newIO(""),
 						Property: FunctionCall{
 							Name: "print",
 							Args: []Expression{
@@ -1615,7 +1609,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 }
 
 func TestOptionals(t *testing.T) {
-	optionPkg := Package{Path: "ard/option"}
+	optionPkg := newOptions("")
 	run(t, []test{
 		{
 			name: "Declaring optionals",
@@ -1698,7 +1692,7 @@ func TestOptionals(t *testing.T) {
 				}`,
 			output: Program{
 				Imports: map[string]Package{
-					"io":     {Path: "ard/io"},
+					"io":     newIO(""),
 					"option": optionPkg,
 				},
 				Statements: []Statement{
@@ -1715,7 +1709,7 @@ func TestOptionals(t *testing.T) {
 							Pattern: Identifier{Name: "it"},
 							Body: []Statement{
 								PackageAccess{
-									Package: Package{Path: "ard/io"},
+									Package: newIO(""),
 									Property: FunctionCall{
 										Name: "print",
 										Args: []Expression{
@@ -1726,7 +1720,7 @@ func TestOptionals(t *testing.T) {
 						None: Block{
 							Body: []Statement{
 								PackageAccess{
-									Package: Package{Path: "ard/io"},
+									Package: newIO(""),
 									Property: FunctionCall{
 										Name: "print",
 										Args: []Expression{StrLiteral{Value: "no name ):"}},

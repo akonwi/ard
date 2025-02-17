@@ -403,13 +403,13 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		}
 		return &object{entries, e.GetType()}
 	case checker.PackageAccess:
-		switch e.Package.Path {
+		switch e.Package.GetPath() {
 		case "ard/io":
 			return vm.invokeIO(e.Property)
 		case "ard/option":
 			return vm.invokeOption(e.Property)
 		default:
-			panic(fmt.Sprintf("Unimplemented package: %s", e.Package.Path))
+			panic(fmt.Sprintf("Unimplemented package: %s", e.Package.GetPath()))
 		}
 	default:
 		panic(fmt.Sprintf("Unimplemented expression: %T", e))

@@ -1,6 +1,7 @@
 package checker
 
 type symbol interface {
+	// Type // todo: try to reuse Type interface
 	GetName() string
 	GetType() Type
 	asFunction() (function, bool)

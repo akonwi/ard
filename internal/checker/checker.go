@@ -31,69 +31,54 @@ type Program struct {
 }
 
 // doubles as a symbol
-type Package struct {
-	name string
-	Path string
+type Package interface {
+	symbol
+	Type
+	GetName() string
+	GetPath() string
 }
 
-// Package impl symbol
-func (p Package) GetName() string {
-	return p.name
+type ExternalPackage struct {
+	path  string
+	alias string
 }
-func (p Package) GetType() Type {
+
+func newExternalPackage(path, alias string) Package {
+	return ExternalPackage{
+		path:  path,
+		alias: alias,
+	}
+}
+
+func (pkg ExternalPackage) GetName() string {
+	if pkg.alias != "" {
+		return pkg.alias
+	}
+	split := strings.Split(pkg.GetPath(), "/")
+	return split[len(split)-1]
+}
+func (pkg ExternalPackage) GetPath() string {
+	return pkg.path
+}
+
+// ExternalPackage impl symbol
+func (p ExternalPackage) GetType() Type {
 	return p
 }
-func (p Package) asFunction() (function, bool) {
+func (p ExternalPackage) asFunction() (function, bool) {
 	return function{}, false
 }
 
-// Package impl Type
-func (p Package) String() string {
-	return "package " + p.name + " " + p.Path
+// ExternalPackage impl Type
+func (p ExternalPackage) String() string {
+	return p.path
 }
-func (p Package) GetProperty(name string) Type {
-	if p.Path == "ard/io" {
-		switch name {
-		case "print":
-			return function{
-				name:       name,
-				parameters: []variable{{name: "string", mut: false, _type: Str{}}},
-				returns:    Void{},
-			}
-
-		case "read_line":
-			return function{
-				name:       name,
-				parameters: []variable{},
-				returns:    Str{},
-			}
-
-		default:
-			return nil
-		}
-	}
-	if p.Path == "ard/option" {
-		switch name {
-		case "none":
-			return function{
-				name:       name,
-				parameters: []variable{},
-				returns:    Option{},
-			}
-		case "some":
-			any := Any{}
-			return function{
-				name:       name,
-				parameters: []variable{{name: "value", mut: false, _type: any}},
-				returns:    Option{any},
-			}
-		default:
-			return nil
-		}
-	}
+func (p ExternalPackage) GetProperty(name string) Type {
 	return nil
 }
-func (p Package) matches(other Type) bool {
+
+// todo: delete
+func (p ExternalPackage) matches(other Type) bool {
 	return p.String() == other.String()
 }
 
@@ -467,16 +452,29 @@ func Check(program ast.Program) (Program, []Diagnostic) {
 	statements := []Statement{}
 
 	for _, imp := range program.Imports {
-		if _, ok := checker.imports[imp.Name]; !ok {
-			pkg := Package{Path: imp.Path, name: imp.Name}
-			checker.imports[imp.Name] = pkg
-			checker.scope.declare(pkg)
-		} else {
+		if _, ok := checker.imports[imp.Name]; ok {
 			checker.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("%s Duplicate package name: %s", imp.GetLocation().Start, imp.Name),
 				location: imp.GetLocation(),
 			})
+		} else {
+			var pkg Package
+			if strings.HasPrefix(imp.Path, "ard/") {
+				pkg = findStdLib(imp.Path, imp.Name)
+				if pkg == nil {
+					checker.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						location: imp.GetLocation(),
+						Message:  fmt.Sprintf("Unknown package: %s", imp.Path),
+					})
+					continue
+				}
+			} else {
+				pkg = newExternalPackage(imp.Path, imp.Name)
+			}
+			checker.imports[pkg.GetName()] = pkg
+			checker.scope.declare(pkg)
 		}
 	}
 
@@ -943,6 +941,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 	case ast.Identifier:
 		sym := c.scope.find(e.Name)
 		if sym == nil {
+			panic(fmt.Sprintf("Undefined: %s", e.Name))
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				Message:  fmt.Sprintf("Undefined: %s", e.Name),
@@ -1751,6 +1750,9 @@ func (c *checker) checkInstanceProperty(subject Expression, member ast.Identifie
 }
 
 func (c *checker) checkInstanceMethod(subject Expression, member ast.FunctionCall) Expression {
+	if subject == nil || subject.GetType() == nil {
+		panic(fmt.Sprintf("problem: %s", subject))
+	}
 	sig := subject.GetType().GetProperty(member.Name)
 	if sig == nil {
 		c.addDiagnostic(Diagnostic{
