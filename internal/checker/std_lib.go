@@ -99,6 +99,19 @@ func (fs FileSystem) GetProperty(name string) Type {
 			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
 			returns:    Option{Str{}},
 		}
+
+	case "create_file":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
+			returns:    Bool{},
+		}
+	case "delete":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
+			returns:    Bool{},
+		}
 	case "write":
 		return function{
 			name:       name,
