@@ -2,6 +2,8 @@ package checker
 
 func findStdLib(path string, alias string) Package {
 	switch path {
+	case "ard/fs":
+		return newFileSystem(alias)
 	case "ard/io":
 		return newIO(alias)
 	case "ard/option":
@@ -56,6 +58,62 @@ func (io IO) GetProperty(name string) Type {
 }
 func (io IO) asFunction() (function, bool) {
 	return function{}, false
+}
+
+type FileSystem struct {
+	alias string
+}
+
+func newFileSystem(alias string) FileSystem {
+	return FileSystem{alias: alias}
+}
+func (fs FileSystem) GetName() string {
+	if fs.alias != "" {
+		return fs.alias
+	}
+	return "fs"
+}
+func (fs FileSystem) String() string {
+	return fs.GetPath()
+}
+func (fs FileSystem) GetPath() string {
+	return "ard/fs"
+}
+func (fs FileSystem) GetType() Type {
+	return fs
+}
+func (fs FileSystem) asFunction() (function, bool) {
+	return function{}, false
+}
+func (fs FileSystem) GetProperty(name string) Type {
+	switch name {
+	case "exists":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
+			returns:    Bool{},
+		}
+	case "read":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
+			returns:    Option{Str{}},
+		}
+	case "write":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "path", mut: false, _type: Str{}}, {name: "content", mut: false, _type: Str{}}},
+			returns:    Void{},
+		}
+	case "append":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "path", mut: false, _type: Str{}}, {name: "content", mut: false, _type: Str{}}},
+			returns:    Void{},
+		}
+	default:
+		return nil
+	}
 }
 
 type Options struct{ name string }

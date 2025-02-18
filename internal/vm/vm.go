@@ -404,6 +404,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		return &object{entries, e.GetType()}
 	case checker.PackageAccess:
 		switch e.Package.GetPath() {
+		case "ard/fs":
+			return vm.invokeFS(e.Property)
 		case "ard/io":
 			return vm.invokeIO(e.Property)
 		case "ard/option":
