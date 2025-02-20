@@ -86,10 +86,7 @@ fn read_move(player: Str) Int {
   io.print("Enter a number between 1 and 9")
   io.print("---------------")
 
-  let input = match Int::from_str(io.read_line()) {
-    n => n,
-    _ => -1
-  }
+  let input = Int::from_str(io.read_line()).or(-1)
   match input >= 1 and input <= 9 {
     true => input - 1,
     false => -1
