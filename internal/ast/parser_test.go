@@ -57,11 +57,12 @@ func TestLexing(t *testing.T) {
 		},
 
 		{
-			name: "variable declarations",
+			name: "variables",
 			input: strings.Join([]string{
 				"mut x = 5",
 				"let y = 10",
 				`let string: Str = "hello"`,
+				"x = 20",
 			}, "\n"),
 			want: []token{
 				{kind: mut, line: 1, column: 1, text: "mut"},
@@ -80,6 +81,10 @@ func TestLexing(t *testing.T) {
 				{kind: identifier, line: 3, column: 13, text: "Str"},
 				{kind: equal, line: 3, column: 17, text: "="},
 				{kind: string_, line: 3, column: 19, text: `"hello"`},
+
+				{kind: identifier, line: 4, column: 1, text: "x"},
+				{kind: equal, line: 4, column: 3, text: "="},
+				{kind: number, line: 4, column: 5, text: "20"},
 
 				{kind: eof},
 			},

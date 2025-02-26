@@ -86,6 +86,14 @@ type char struct {
 	col   uint
 }
 
+func (c char) asToken(kind kind) token {
+	return token{
+		kind:   kind,
+		line:   c.line,
+		column: c.col,
+	}
+}
+
 type lexer struct {
 	source []byte
 	tokens []token
@@ -158,13 +166,13 @@ func isWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 func (l *lexer) take() (token, bool) {
-	switch c := l.advance(); c.raw {
+	switch currentChar := l.advance(); currentChar.raw {
 	case '\n':
 		l.line++
 		l.column = 1
 		return token{}, false
 	case '(':
-		return token{kind: left_paren}, true
+		return currentChar.asToken(left_paren), true
 	case ')':
 		return token{kind: right_paren}, true
 	case '{':
@@ -194,35 +202,24 @@ func (l *lexer) take() (token, bool) {
 		return token{kind: plus}, true
 	case '*':
 		if l.matchNext('/') != nil {
-			return token{
-				kind:   star_slash,
-				line:   c.line,
-				column: c.col,
-			}, true
+			return currentChar.asToken(star_slash), true
 		}
-		return token{kind: star, line: c.line, column: c.col}, true
+		return currentChar.asToken(star), true
 	case '/':
 		if l.matchNext('/') != nil {
-			return token{
-				kind:   slash_slash,
-				line:   uint(c.line),
-				column: uint(c.col),
-			}, true
+			return currentChar.asToken(slash_slash), true
 		}
 		if l.matchNext('*') != nil {
-			return token{
-				kind:   slash_star,
-				line:   uint(c.line),
-				column: uint(c.col),
-			}, true
+			return currentChar.asToken(slash_star), true
+
 		}
-		return token{kind: slash, line: uint(c.line), column: uint(c.col)}, true
+		return currentChar.asToken(slash), true
 	case '%':
 		return token{kind: percent}, true
 	case ':':
 		col := uint(l.column - 1)
 		if l.matchNext(':') != nil {
-			return token{kind: colon_colon, line: uint(l.line), column: uint(c.col)}, true
+			return currentChar.asToken(colon_colon), true
 		}
 		return token{kind: colon, line: uint(l.line), column: col}, true
 	case '>':
@@ -261,11 +258,11 @@ func (l *lexer) take() (token, bool) {
 			column: col,
 		}, true
 	default:
-		if c.isAlpha() {
+		if currentChar.isAlpha() {
 			l.start = l.cursor - 1
 			return l.takeIdentifier(), true
 		}
-		if c.isDigit() {
+		if currentChar.isDigit() {
 			l.start = l.cursor - 1
 			return l.takeNumber(), true
 		}
