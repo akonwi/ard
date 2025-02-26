@@ -34,9 +34,9 @@ func TestLexing(t *testing.T) {
 			name: "comments",
 			input: strings.Join([]string{
 				"// this is a comment",
-				// "/*",
-				// "this is a comment",
-				// "*/",
+				"/*",
+				"this is a comment",
+				"*/",
 			}, "\n"),
 			want: []token{
 				{kind: slash_slash, line: 1, column: 1},
@@ -44,6 +44,14 @@ func TestLexing(t *testing.T) {
 				{kind: identifier, line: 1, column: 9, text: "is"},
 				{kind: identifier, line: 1, column: 12, text: "a"},
 				{kind: identifier, line: 1, column: 14, text: "comment"},
+
+				{kind: slash_star, line: 2, column: 1},
+				{kind: identifier, line: 3, column: 1, text: "this"},
+				{kind: identifier, line: 3, column: 6, text: "is"},
+				{kind: identifier, line: 3, column: 9, text: "a"},
+				{kind: identifier, line: 3, column: 11, text: "comment"},
+				{kind: star_slash, line: 4, column: 1},
+
 				{kind: eof},
 			},
 		},

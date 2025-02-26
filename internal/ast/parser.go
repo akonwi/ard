@@ -30,6 +30,8 @@ const (
 	star
 	slash
 	slash_slash
+	slash_star
+	star_slash
 	percent
 	thin_arrow
 	fat_arrow
@@ -79,20 +81,20 @@ type token struct {
 
 type char struct {
 	raw   byte
-	index int
-	line  int
-	col   int
+	index uint
+	line  uint
+	col   uint
 }
 
 type lexer struct {
 	source []byte
 	tokens []token
 	// position in the source
-	cursor int
+	cursor uint
 	// position of the current token to take
-	start int
+	start uint
 	// position in the source
-	line, column int
+	line, column uint
 }
 
 func newLexer(source []byte) lexer {
@@ -106,7 +108,7 @@ func newLexer(source []byte) lexer {
 }
 
 func (l lexer) isAtEnd() bool {
-	return l.cursor >= len(l.source)
+	return l.cursor >= uint(len(l.source))
 }
 func (l lexer) hasMore() bool {
 	return !l.isAtEnd()
@@ -157,10 +159,10 @@ func (c char) isAlphaNumeric() bool {
 //	}
 func (l *lexer) take() (token, bool) {
 	switch c := l.advance(); c.raw {
-	// case '\n':
-	// 	l.line++
-	// 	l.column = 1
-	// 	return token{}, false
+	case '\n':
+		l.line++
+		l.column = 1
+		return token{}, false
 	// case '(':
 	// 	return token{kind: left_paren}, true
 	// case ')':
@@ -190,14 +192,26 @@ func (l *lexer) take() (token, bool) {
 	// 	return token{kind: bang}, true
 	// case '+':
 	// 	return token{kind: plus}, true
-	// case '*':
-	// 	return token{kind: star}, true
+	case '*':
+		if l.matchNext('/') != nil {
+			return token{
+				kind:   star_slash,
+				line:   c.line,
+				column: c.col,
+			}, true
+		}
+		return token{kind: star, line: c.line, column: c.col}, true
 	case '/':
 		if l.matchNext('/') != nil {
-			// if l.peek().raw == '/' {
-			// l.advance()
 			return token{
 				kind:   slash_slash,
+				line:   uint(c.line),
+				column: uint(c.col),
+			}, true
+		}
+		if l.matchNext('*') != nil {
+			return token{
+				kind:   slash_star,
 				line:   uint(c.line),
 				column: uint(c.col),
 			}, true
