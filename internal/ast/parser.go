@@ -154,44 +154,44 @@ func (c char) isAlphaNumeric() bool {
 	return c.isAlpha() || c.isDigit()
 }
 
-//	func isWhitespace(c byte) bool {
-//		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-//	}
+func isWhitespace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
 func (l *lexer) take() (token, bool) {
 	switch c := l.advance(); c.raw {
 	case '\n':
 		l.line++
 		l.column = 1
 		return token{}, false
-	// case '(':
-	// 	return token{kind: left_paren}, true
-	// case ')':
-	// 	return token{kind: right_paren}, true
-	// case '{':
-	// 	return token{kind: left_brace}, true
-	// case '}':
-	// 	return token{kind: right_brace}, true
-	// case '[':
-	// 	return token{kind: left_bracket}, true
-	// case ']':
-	// 	return token{kind: right_bracket}, true
-	// case ';':
-	// 	return token{kind: semicolon}, true
-	// case ',':
-	// 	return token{kind: comma}, true
-	// case '.':
-	// 	return token{kind: dot}, true
-	// case '?':
-	// 	return token{kind: question_mark}, true
-	// case '|':
-	// 	return token{kind: pipe}, true
-	// case '!':
-	// 	if l.hasMore() && l.matchNext('=') != nil {
-	// 		return token{kind: bang_equal}, true
-	// 	}
-	// 	return token{kind: bang}, true
-	// case '+':
-	// 	return token{kind: plus}, true
+	case '(':
+		return token{kind: left_paren}, true
+	case ')':
+		return token{kind: right_paren}, true
+	case '{':
+		return token{kind: left_brace}, true
+	case '}':
+		return token{kind: right_brace}, true
+	case '[':
+		return token{kind: left_bracket}, true
+	case ']':
+		return token{kind: right_bracket}, true
+	case ';':
+		return token{kind: semicolon}, true
+	case ',':
+		return token{kind: comma}, true
+	case '.':
+		return token{kind: dot}, true
+	case '?':
+		return token{kind: question_mark}, true
+	case '|':
+		return token{kind: pipe}, true
+	case '!':
+		if l.hasMore() && l.matchNext('=') != nil {
+			return token{kind: bang_equal}, true
+		}
+		return token{kind: bang}, true
+	case '+':
+		return token{kind: plus}, true
 	case '*':
 		if l.matchNext('/') != nil {
 			return token{
@@ -217,49 +217,49 @@ func (l *lexer) take() (token, bool) {
 			}, true
 		}
 		return token{kind: slash, line: uint(c.line), column: uint(c.col)}, true
-	// case '%':
-	// 	return token{kind: percent}, true
-	// case ':':
-	// 	col := uint(l.column - 1)
-	// 	if l.matchNext(':') != nil {
-	// 		return token{kind: colon_colon, line: uint(l.line), column: uint(c.col)}, true
-	// 	}
-	// 	return token{kind: colon, line: uint(l.line), column: col}, true
-	// case '>':
-	// 	if l.hasMore() && l.matchNext('=') != nil {
-	// 		return token{kind: greater_than_equal}, true
-	// 	}
-	// 	return token{kind: greater_than}, true
-	// case '<':
-	// 	if l.hasMore() && l.matchNext('=') != nil {
-	// 		return token{kind: less_than_equal}, true
-	// 	}
-	// 	return token{kind: less_than}, true
-	// case '-':
-	// 	if l.hasMore() && l.matchNext('>') != nil {
-	// 		return token{kind: thin_arrow}, true
-	// 	}
-	// 	return token{kind: minus}, true
-	// case '=':
-	// 	column := uint(l.column - 1)
-	// 	if l.matchNext('>') != nil {
-	// 		return token{kind: fat_arrow, line: uint(l.line), column: column, text: "=>"}, true
-	// 	}
-	// 	if l.matchNext('=') != nil {
-	// 		return token{kind: equal_equal, line: uint(l.line), column: column, text: "=="}, true
-	// 	}
-	// 	return token{kind: equal, line: uint(l.line), column: column, text: "="}, true
-	// case '"':
-	// 	start := l.cursor - 1
-	// 	col := uint(l.column - 1)
-	// 	for l.hasMore() && l.advance().raw != '"' {
-	// 	}
-	// 	return token{
-	// 		kind:   string_,
-	// 		text:   string(l.source[start:l.cursor]),
-	// 		line:   uint(l.line),
-	// 		column: col,
-	// 	}, true
+	case '%':
+		return token{kind: percent}, true
+	case ':':
+		col := uint(l.column - 1)
+		if l.matchNext(':') != nil {
+			return token{kind: colon_colon, line: uint(l.line), column: uint(c.col)}, true
+		}
+		return token{kind: colon, line: uint(l.line), column: col}, true
+	case '>':
+		if l.hasMore() && l.matchNext('=') != nil {
+			return token{kind: greater_than_equal}, true
+		}
+		return token{kind: greater_than}, true
+	case '<':
+		if l.hasMore() && l.matchNext('=') != nil {
+			return token{kind: less_than_equal}, true
+		}
+		return token{kind: less_than}, true
+	case '-':
+		if l.hasMore() && l.matchNext('>') != nil {
+			return token{kind: thin_arrow}, true
+		}
+		return token{kind: minus}, true
+	case '=':
+		column := uint(l.column - 1)
+		if l.matchNext('>') != nil {
+			return token{kind: fat_arrow, line: uint(l.line), column: column, text: "=>"}, true
+		}
+		if l.matchNext('=') != nil {
+			return token{kind: equal_equal, line: uint(l.line), column: column, text: "=="}, true
+		}
+		return token{kind: equal, line: uint(l.line), column: column, text: "="}, true
+	case '"':
+		start := l.cursor - 1
+		col := uint(l.column - 1)
+		for l.hasMore() && l.advance().raw != '"' {
+		}
+		return token{
+			kind:   string_,
+			text:   string(l.source[start:l.cursor]),
+			line:   uint(l.line),
+			column: col,
+		}, true
 	default:
 		if c.isAlpha() {
 			l.start = l.cursor - 1

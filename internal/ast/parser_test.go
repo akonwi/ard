@@ -56,33 +56,33 @@ func TestLexing(t *testing.T) {
 			},
 		},
 
-		// {
-		// 	name: "variable declarations",
-		// 	input: strings.Join([]string{
-		// 		"mut x = 5",
-		// 		"let y = 10",
-		// 		`let string: Str = "hello"`,
-		// 	}, "\n"),
-		// 	want: []token{
-		// 		{kind: mut, line: 1, column: 1, text: "mut"},
-		// 		{kind: identifier, line: 1, column: 5, text: "x"},
-		// 		{kind: equal, line: 1, column: 7, text: "="},
-		// 		{kind: number, line: 1, column: 9, text: "5"},
+		{
+			name: "variable declarations",
+			input: strings.Join([]string{
+				"mut x = 5",
+				"let y = 10",
+				`let string: Str = "hello"`,
+			}, "\n"),
+			want: []token{
+				{kind: mut, line: 1, column: 1, text: "mut"},
+				{kind: identifier, line: 1, column: 5, text: "x"},
+				{kind: equal, line: 1, column: 7, text: "="},
+				{kind: number, line: 1, column: 9, text: "5"},
 
-		// 		{kind: let, line: 2, column: 1, text: "let"},
-		// 		{kind: identifier, line: 2, column: 5, text: "y"},
-		// 		{kind: equal, line: 2, column: 7, text: "="},
-		// 		{kind: number, line: 2, column: 9, text: "10"},
+				{kind: let, line: 2, column: 1, text: "let"},
+				{kind: identifier, line: 2, column: 5, text: "y"},
+				{kind: equal, line: 2, column: 7, text: "="},
+				{kind: number, line: 2, column: 9, text: "10"},
 
-		// 		{kind: let, line: 3, column: 1, text: "let"},
-		// 		{kind: identifier, line: 3, column: 5, text: "string"},
-		// 		{kind: colon, line: 3, column: 11},
-		// 		{kind: identifier, line: 3, column: 13, text: "Str"},
-		// 		{kind: equal, line: 3, column: 17, text: "="},
-		// 		{kind: string_, line: 3, column: 19, text: `"hello"`},
+				{kind: let, line: 3, column: 1, text: "let"},
+				{kind: identifier, line: 3, column: 5, text: "string"},
+				{kind: colon, line: 3, column: 11},
+				{kind: identifier, line: 3, column: 13, text: "Str"},
+				{kind: equal, line: 3, column: 17, text: "="},
+				{kind: string_, line: 3, column: 19, text: `"hello"`},
 
-		// 		{kind: eof},
-		// 	},
-		// },
+				{kind: eof},
+			},
+		},
 	})
 }
