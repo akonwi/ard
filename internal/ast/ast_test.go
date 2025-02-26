@@ -13,6 +13,7 @@ import (
 
 var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
+	cmpopts.EquateComparable(token{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},
 		IntType{},

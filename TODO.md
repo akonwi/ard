@@ -1,5 +1,8 @@
 ## TODO
 
+- [ ] custom lexer + parser
+- [ ] rename ard/option to ard/maybe
+- [ ] networking
 - [ ] methods on enums?
 - [ ] using unary + member_access in if conditions shouldn't require parens
   - fails: `if !a.b { }`
