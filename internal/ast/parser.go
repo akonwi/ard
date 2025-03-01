@@ -1,75 +1,77 @@
 package ast
 
-type kind int
+type kind string
 
 const (
-	left_paren kind = iota
-	right_paren
-	left_brace
-	right_brace
-	left_bracket
-	right_bracket
-	colon
-	semicolon
-	comma
-	dot
-	question_mark
-	pipe
+	left_paren    kind = "left_paren"
+	right_paren        = "right_paren"
+	left_brace         = "left_brace"
+	right_brace        = "right_brace"
+	left_bracket       = "left_bracket"
+	right_bracket      = "right_bracket"
+	colon              = "colon"
+	semicolon          = "semicolon"
+	comma              = "comma"
+	dot                = "dot"
+	question_mark      = "question_mark"
+	pipe               = "pipe"
 
-	colon_colon
-	bang
-	greater_than
-	less_than
-	greater_than_equal
-	less_than_equal
-	equal
-	equal_equal
-	bang_equal
-	plus
-	minus
-	star
-	slash
-	slash_slash
-	slash_star
-	star_slash
-	percent
-	thin_arrow
-	fat_arrow
-	increment
-	decrement
+	colon_colon        = "colon_colon"
+	bang               = "bang"
+	greater_than       = "greater_than"
+	less_than          = "less_than"
+	greater_than_equal = "greater_than_equal"
+	less_than_equal    = "less_than_equal"
+	equal              = "equal"
+	equal_equal        = "equal_equal"
+	bang_equal         = "bang_equal"
+	plus               = "plus"
+	minus              = "minus"
+	star               = "star"
+	slash              = "slash"
+	slash_slash        = "slash_slash"
+	slash_star         = "slash_star"
+	star_slash         = "star_slash"
+	percent            = "percent"
+	thin_arrow         = "thin_arrow"
+	fat_arrow          = "fat_arrow"
+	increment          = "increment"
+	decrement          = "decrement"
 
 	// Keywords
-	and
-	not
-	or
-	true_
-	false_
-	struct_
-	enum
-	impl
-	fn
-	let
-	mut
-	break_
-	match
-	while_
-	for_
-	use
-	as
-	in
+	and     = "and"
+	not     = "not"
+	or      = "or"
+	true_   = "true"
+	false_  = "false"
+	struct_ = "struct"
+	enum    = "enum"
+	impl    = "impl"
+	fn      = "fn"
+	let     = "let"
+	mut     = "mut"
+	break_  = "break"
+	match   = "match"
+	while_  = "while"
+	for_    = "for"
+	use     = "use"
+	as      = "as"
+	in      = "in"
+	if_     = "if"
+	else_   = "else"
 
 	// Types
-	int_
-	float
-	bool_
-	str
+	int_  = "int"
+	float = "float"
+	bool_ = "bool"
+	str   = "str"
 
 	// Literals
-	identifier
-	number
-	string_
+	identifier = "identifier"
+	number     = "number"
+	string_    = "string"
 
-	eof
+	eof = "eof"
 )
 
 type token struct {
@@ -176,9 +178,9 @@ func (l *lexer) take() (token, bool) {
 	case ')':
 		return token{kind: right_paren}, true
 	case '{':
-		return token{kind: left_brace}, true
+		return currentChar.asToken(left_brace), true
 	case '}':
-		return token{kind: right_brace}, true
+		return currentChar.asToken(right_brace), true
 	case '[':
 		return token{kind: left_bracket}, true
 	case ']':
@@ -224,9 +226,9 @@ func (l *lexer) take() (token, bool) {
 		return token{kind: colon, line: uint(l.line), column: col}, true
 	case '>':
 		if l.hasMore() && l.matchNext('=') != nil {
-			return token{kind: greater_than_equal}, true
+			return currentChar.asToken(greater_than_equal), true
 		}
-		return token{kind: greater_than}, true
+		return currentChar.asToken(greater_than), true
 	case '<':
 		if l.hasMore() && l.matchNext('=') != nil {
 			return token{kind: less_than_equal}, true
@@ -240,12 +242,12 @@ func (l *lexer) take() (token, bool) {
 	case '=':
 		column := uint(l.column - 1)
 		if l.matchNext('>') != nil {
-			return token{kind: fat_arrow, line: uint(l.line), column: column, text: "=>"}, true
+			return token{kind: fat_arrow, line: uint(l.line), column: column}, true
 		}
 		if l.matchNext('=') != nil {
-			return token{kind: equal_equal, line: uint(l.line), column: column, text: "=="}, true
+			return token{kind: equal_equal, line: uint(l.line), column: column}, true
 		}
-		return token{kind: equal, line: uint(l.line), column: column, text: "="}, true
+		return token{kind: equal, line: uint(l.line), column: column}, true
 	case '"':
 		start := l.cursor - 1
 		col := uint(l.column - 1)
@@ -278,49 +280,56 @@ func (l *lexer) takeIdentifier() token {
 	}
 	text := string(l.source[l.start:l.cursor])
 
-	makeToken := func(kind kind) token {
+	makeKeyword := func(kind kind) token {
+		return token{kind: kind, line: uint(l.line), column: uint(column)}
+	}
+	makeIdentifier := func(kind kind) token {
 		return token{kind: kind, text: text, line: uint(l.line), column: uint(column)}
 	}
 
 	switch text {
 	case "and":
-		return makeToken(and)
+		return makeKeyword(and)
 	case "not":
-		return makeToken(not)
+		return makeKeyword(not)
 	case "or":
-		return makeToken(or)
+		return makeKeyword(or)
 	case "true":
-		return makeToken(true_)
+		return makeKeyword(true_)
 	case "false":
-		return makeToken(false_)
+		return makeKeyword(false_)
 	case "struct":
-		return makeToken(struct_)
+		return makeKeyword(struct_)
 	case "enum":
-		return makeToken(enum)
+		return makeKeyword(enum)
 	case "impl":
-		return makeToken(impl)
+		return makeKeyword(impl)
 	case "fn":
-		return makeToken(fn)
+		return makeKeyword(fn)
 	case "let":
-		return makeToken(let)
+		return makeKeyword(let)
 	case "mut":
-		return makeToken(mut)
+		return makeKeyword(mut)
 	case "break":
-		return makeToken(break_)
+		return makeKeyword(break_)
 	case "match":
-		return makeToken(match)
+		return makeKeyword(match)
 	case "while":
-		return makeToken(while_)
+		return makeKeyword(while_)
 	case "for":
-		return makeToken(for_)
+		return makeKeyword(for_)
 	case "use":
-		return makeToken(use)
+		return makeKeyword(use)
 	case "as":
-		return makeToken(as)
+		return makeKeyword(as)
 	case "in":
-		return makeToken(in)
+		return makeKeyword(in)
+	case "if":
+		return makeKeyword(if_)
+	case "else":
+		return makeKeyword(else_)
 	}
-	return makeToken(identifier)
+	return makeIdentifier(identifier)
 }
 func (l *lexer) takeNumber() token {
 	// record the start column
