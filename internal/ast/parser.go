@@ -176,7 +176,7 @@ func (l *lexer) take() (token, bool) {
 	case '(':
 		return currentChar.asToken(left_paren), true
 	case ')':
-		return token{kind: right_paren}, true
+		return currentChar.asToken(right_paren), true
 	case '{':
 		return currentChar.asToken(left_brace), true
 	case '}':
@@ -188,9 +188,9 @@ func (l *lexer) take() (token, bool) {
 	case ';':
 		return token{kind: semicolon}, true
 	case ',':
-		return token{kind: comma}, true
+		return currentChar.asToken(comma), true
 	case '.':
-		return token{kind: dot}, true
+		return currentChar.asToken(dot), true
 	case '?':
 		return token{kind: question_mark}, true
 	case '|':
@@ -201,7 +201,7 @@ func (l *lexer) take() (token, bool) {
 		}
 		return token{kind: bang}, true
 	case '+':
-		return token{kind: plus}, true
+		return currentChar.asToken(plus), true
 	case '*':
 		if l.matchNext('/') != nil {
 			return currentChar.asToken(star_slash), true

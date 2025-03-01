@@ -129,5 +129,195 @@ func TestLexing(t *testing.T) {
 				{kind: eof},
 			},
 		},
+
+		{
+			name: "function: empty params and no return type",
+			input: strings.Join([]string{
+				"fn get_hello() {",
+				`  "Hello, world!"`,
+				"}",
+				"",
+				"get_hello()",
+			}, "\n"),
+			want: []token{
+				{kind: fn, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 4, text: "get_hello"},
+				{kind: left_paren, line: 1, column: 13},
+				{kind: right_paren, line: 1, column: 14},
+				{kind: left_brace, line: 1, column: 16},
+
+				{kind: string_, line: 2, column: 3, text: `"Hello, world!"`},
+
+				{kind: right_brace, line: 3, column: 1},
+
+				{kind: identifier, line: 5, column: 1, text: "get_hello"},
+				{kind: left_paren, line: 5, column: 10},
+				{kind: right_paren, line: 5, column: 11},
+
+				{kind: eof},
+			},
+		},
+		{
+			name: "function: one param and return type",
+			input: strings.Join([]string{
+				`fn greet(person: Str) Str {`,
+				`  "Hello, {{person}}!"`,
+				`}`,
+				``,
+				`greet("Alice")`,
+				`greet(get_hello())`,
+			}, "\n"),
+			want: []token{
+				{kind: fn, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 4, text: "greet"},
+				{kind: left_paren, line: 1, column: 9},
+				{kind: identifier, line: 1, column: 10, text: "person"},
+				{kind: colon, line: 1, column: 16},
+				{kind: identifier, line: 1, column: 18, text: "Str"},
+				{kind: right_paren, line: 1, column: 21},
+				{kind: identifier, line: 1, column: 23, text: "Str"},
+				{kind: left_brace, line: 1, column: 27},
+
+				{kind: string_, line: 2, column: 3, text: `"Hello, {{person}}!"`},
+
+				{kind: right_brace, line: 3, column: 1},
+
+				{kind: identifier, line: 5, column: 1, text: "greet"},
+				{kind: left_paren, line: 5, column: 6},
+				{kind: string_, line: 5, column: 7, text: `"Alice"`},
+				{kind: right_paren, line: 5, column: 14},
+
+				{kind: identifier, line: 6, column: 1, text: "greet"},
+				{kind: left_paren, line: 6, column: 6},
+				{kind: identifier, line: 6, column: 7, text: "get_hello"},
+				{kind: left_paren, line: 6, column: 16},
+				{kind: right_paren, line: 6, column: 17},
+				{kind: right_paren, line: 6, column: 18},
+
+				{kind: eof},
+			},
+		},
+		{
+			name: "function: multiple params and return type",
+			input: strings.Join([]string{
+				"fn add(x: Int, y: Int) Int {",
+				"  x + y",
+				"}",
+				"add(1, 2)",
+			}, "\n"),
+			want: []token{
+				{kind: fn, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 4, text: "add"},
+				{kind: left_paren, line: 1, column: 7},
+				{kind: identifier, line: 1, column: 8, text: "x"},
+				{kind: colon, line: 1, column: 9},
+				{kind: identifier, line: 1, column: 11, text: "Int"},
+				{kind: comma, line: 1, column: 14},
+				{kind: identifier, line: 1, column: 16, text: "y"},
+				{kind: colon, line: 1, column: 17},
+				{kind: identifier, line: 1, column: 19, text: "Int"},
+				{kind: right_paren, line: 1, column: 22},
+				{kind: identifier, line: 1, column: 24, text: "Int"},
+				{kind: left_brace, line: 1, column: 28},
+
+				{kind: identifier, line: 2, column: 3, text: "x"},
+				{kind: plus, line: 2, column: 5},
+				{kind: identifier, line: 2, column: 7, text: "y"},
+
+				{kind: right_brace, line: 3, column: 1},
+
+				{kind: identifier, line: 4, column: 1, text: "add"},
+				{kind: left_paren, line: 4, column: 4},
+				{kind: number, line: 4, column: 5, text: "1"},
+				{kind: comma, line: 4, column: 6},
+				{kind: number, line: 4, column: 8, text: "2"},
+				{kind: right_paren, line: 4, column: 9},
+
+				{kind: eof},
+			},
+		},
+		{
+			name: "function: anonymous functions",
+			input: strings.Join([]string{
+				"() {",
+				`  print("Hello, anon!")`,
+				"}",
+				"",
+				"(n: Int) Int {",
+				"  do_stuff()",
+				"  n + 1",
+				"}",
+				"",
+				"list.map((n) { n + 1 })",
+			}, "\n"),
+			want: []token{
+				{kind: left_paren, line: 1, column: 1},
+				{kind: right_paren, line: 1, column: 2},
+				{kind: left_brace, line: 1, column: 4},
+
+				{kind: identifier, line: 2, column: 3, text: "print"},
+				{kind: left_paren, line: 2, column: 8},
+				{kind: string_, line: 2, column: 9, text: `"Hello, anon!"`},
+				{kind: right_paren, line: 2, column: 23},
+
+				{kind: right_brace, line: 3, column: 1},
+
+				{kind: left_paren, line: 5, column: 1},
+				{kind: identifier, line: 5, column: 2, text: "n"},
+				{kind: colon, line: 5, column: 3},
+				{kind: identifier, line: 5, column: 5, text: "Int"},
+				{kind: right_paren, line: 5, column: 8},
+				{kind: identifier, line: 5, column: 10, text: "Int"},
+				{kind: left_brace, line: 5, column: 14},
+
+				{kind: identifier, line: 6, column: 3, text: "do_stuff"},
+				{kind: left_paren, line: 6, column: 11},
+				{kind: right_paren, line: 6, column: 12},
+
+				{kind: identifier, line: 7, column: 3, text: "n"},
+				{kind: plus, line: 7, column: 5},
+				{kind: number, line: 7, column: 7, text: "1"},
+
+				{kind: right_brace, line: 8, column: 1},
+
+				{kind: identifier, line: 10, column: 1, text: "list"},
+				{kind: dot, line: 10, column: 5},
+				{kind: identifier, line: 10, column: 6, text: "map"},
+				{kind: left_paren, line: 10, column: 9},
+				{kind: left_paren, line: 10, column: 10},
+				{kind: identifier, line: 10, column: 11, text: "n"},
+				{kind: right_paren, line: 10, column: 12},
+				{kind: left_brace, line: 10, column: 14},
+				{kind: identifier, line: 10, column: 16, text: "n"},
+				{kind: plus, line: 10, column: 18},
+				{kind: number, line: 10, column: 20, text: "1"},
+				{kind: right_brace, line: 10, column: 22},
+				{kind: right_paren, line: 10, column: 23},
+
+				{kind: eof},
+			},
+		},
+		{
+			name:  "function: mutable parameters",
+			input: "fn grow(mut t: Thing, size: Int) Int {}",
+			want: []token{
+				{kind: fn, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 4, text: "grow"},
+				{kind: left_paren, line: 1, column: 8},
+				{kind: mut, line: 1, column: 9},
+				{kind: identifier, line: 1, column: 13, text: "t"},
+				{kind: colon, line: 1, column: 14},
+				{kind: identifier, line: 1, column: 16, text: "Thing"},
+				{kind: comma, line: 1, column: 21},
+				{kind: identifier, line: 1, column: 23, text: "size"},
+				{kind: colon, line: 1, column: 27},
+				{kind: identifier, line: 1, column: 29, text: "Int"},
+				{kind: right_paren, line: 1, column: 32},
+				{kind: identifier, line: 1, column: 34, text: "Int"},
+				{kind: left_brace, line: 1, column: 38},
+				{kind: right_brace, line: 1, column: 39},
+				{kind: eof},
+			},
+		},
 	})
 }
