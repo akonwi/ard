@@ -234,10 +234,10 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(greater_than), true
 	case '<':
-		if l.hasMore() && l.matchNext('=') != nil {
-			return token{kind: less_than_equal}, true
+		if l.matchNext('=') != nil {
+			return currentChar.asToken(less_than_equal), true
 		}
-		return token{kind: less_than}, true
+		return currentChar.asToken(less_than), true
 	case '-':
 		if l.hasMore() && l.matchNext('>') != nil {
 			return token{kind: thin_arrow}, true
@@ -249,6 +249,12 @@ func (l *lexer) take() (token, bool) {
 		}
 		if l.matchNext('=') != nil {
 			return currentChar.asToken(equal_equal), true
+		}
+		if l.matchNext('+') != nil {
+			return currentChar.asToken(increment), true
+		}
+		if l.matchNext('-') != nil {
+			return currentChar.asToken(decrement), true
 		}
 		return currentChar.asToken(equal), true
 	case '"':

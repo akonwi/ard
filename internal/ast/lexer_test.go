@@ -395,5 +395,22 @@ let data = Payload::Plain`,
 				{kind: eof},
 			},
 		},
+
+		{
+			name:  "while loops",
+			input: `while count <= 9 { count =+ 1 }`,
+			want: []token{
+				{kind: while_, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 7, text: "count"},
+				{kind: less_than_equal, line: 1, column: 13},
+				{kind: number, line: 1, column: 16, text: "9"},
+				{kind: left_brace, line: 1, column: 18},
+				{kind: identifier, line: 1, column: 20, text: "count"},
+				{kind: increment, line: 1, column: 26},
+				{kind: number, line: 1, column: 29, text: "1"},
+				{kind: right_brace, line: 1, column: 31},
+				{kind: eof},
+			},
+		},
 	})
 }
