@@ -319,5 +319,34 @@ func TestLexing(t *testing.T) {
 				{kind: eof},
 			},
 		},
+
+		{
+			name: "enums",
+			input: `
+enum Payload {
+  Plain,
+  Rich
+}
+
+let data = Payload::Plain`,
+			want: []token{
+				{kind: enum, line: 2, column: 1},
+				{kind: identifier, line: 2, column: 6, text: "Payload"},
+				{kind: left_brace, line: 2, column: 14},
+				{kind: identifier, line: 3, column: 3, text: "Plain"},
+				{kind: comma, line: 3, column: 8},
+				{kind: identifier, line: 4, column: 3, text: "Rich"},
+				{kind: right_brace, line: 5, column: 1},
+
+				{kind: let, line: 7, column: 1},
+				{kind: identifier, line: 7, column: 5, text: "data"},
+				{kind: equal, line: 7, column: 10},
+				{kind: identifier, line: 7, column: 12, text: "Payload"},
+				{kind: colon_colon, line: 7, column: 19},
+				{kind: identifier, line: 7, column: 21, text: "Plain"},
+
+				{kind: eof},
+			},
+		},
 	})
 }
