@@ -379,5 +379,21 @@ let data = Payload::Plain`,
 				{kind: eof},
 			},
 		},
+
+		{
+			name:  "for integer range",
+			input: `for i in 1..10 {}`,
+			want: []token{
+				{kind: for_, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 5, text: "i"},
+				{kind: in, line: 1, column: 7},
+				{kind: number, line: 1, column: 10, text: "1"},
+				{kind: dot_dot, line: 1, column: 11},
+				{kind: number, line: 1, column: 13, text: "10"},
+				{kind: left_brace, line: 1, column: 16},
+				{kind: right_brace, line: 1, column: 17},
+				{kind: eof},
+			},
+		},
 	})
 }

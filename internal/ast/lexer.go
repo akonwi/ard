@@ -13,6 +13,7 @@ const (
 	semicolon          = "semicolon"
 	comma              = "comma"
 	dot                = "dot"
+	dot_dot            = "dot_dot"
 	question_mark      = "question_mark"
 	pipe               = "pipe"
 
@@ -191,6 +192,9 @@ func (l *lexer) take() (token, bool) {
 	case ',':
 		return currentChar.asToken(comma), true
 	case '.':
+		if l.matchNext('.') != nil {
+			return currentChar.asToken(dot_dot), true
+		}
 		return currentChar.asToken(dot), true
 	case '?':
 		return token{kind: question_mark}, true
