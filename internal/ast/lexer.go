@@ -76,16 +76,16 @@ const (
 
 type token struct {
 	kind   kind
-	line   uint
-	column uint
+	line   int
+	column int
 	text   string
 }
 
 type char struct {
 	raw   byte
-	index uint
-	line  uint
-	col   uint
+	index int
+	line  int
+	col   int
 }
 
 func (c char) asToken(kind kind) token {
@@ -100,11 +100,11 @@ type lexer struct {
 	source []byte
 	tokens []token
 	// position in the source
-	cursor uint
+	cursor int
 	// position of the current token to take
-	start uint
+	start int
 	// position in the source
-	line, column uint
+	line, column int
 }
 
 func newLexer(source []byte) lexer {
@@ -118,7 +118,7 @@ func newLexer(source []byte) lexer {
 }
 
 func (l lexer) isAtEnd() bool {
-	return l.cursor >= uint(len(l.source))
+	return l.cursor >= len(l.source)
 }
 func (l lexer) hasMore() bool {
 	return !l.isAtEnd()
@@ -144,9 +144,10 @@ func (l lexer) peek() *char {
 }
 func (l *lexer) advance() *char {
 	char := &char{
-		raw:  l.source[l.cursor],
-		line: l.line,
-		col:  l.column,
+		raw:   l.source[l.cursor],
+		line:  l.line,
+		col:   l.column,
+		index: l.cursor,
 	}
 	l.cursor++
 	l.column++
@@ -219,11 +220,10 @@ func (l *lexer) take() (token, bool) {
 	case '%':
 		return token{kind: percent}, true
 	case ':':
-		col := uint(l.column - 1)
 		if l.matchNext(':') != nil {
 			return currentChar.asToken(colon_colon), true
 		}
-		return token{kind: colon, line: uint(l.line), column: col}, true
+		return currentChar.asToken(colon), true
 	case '>':
 		if l.hasMore() && l.matchNext('=') != nil {
 			return currentChar.asToken(greater_than_equal), true
@@ -240,24 +240,22 @@ func (l *lexer) take() (token, bool) {
 		}
 		return token{kind: minus}, true
 	case '=':
-		column := uint(l.column - 1)
 		if l.matchNext('>') != nil {
-			return token{kind: fat_arrow, line: uint(l.line), column: column}, true
+			return currentChar.asToken(fat_arrow), true
 		}
 		if l.matchNext('=') != nil {
-			return token{kind: equal_equal, line: uint(l.line), column: column}, true
+			return currentChar.asToken(equal_equal), true
 		}
-		return token{kind: equal, line: uint(l.line), column: column}, true
+		return currentChar.asToken(equal), true
 	case '"':
-		start := l.cursor - 1
-		col := uint(l.column - 1)
+		start := currentChar.index
 		for l.hasMore() && l.advance().raw != '"' {
 		}
 		return token{
 			kind:   string_,
 			text:   string(l.source[start:l.cursor]),
-			line:   uint(l.line),
-			column: col,
+			line:   currentChar.line,
+			column: currentChar.col,
 		}, true
 	default:
 		if currentChar.isAlpha() {
@@ -281,10 +279,10 @@ func (l *lexer) takeIdentifier() token {
 	text := string(l.source[l.start:l.cursor])
 
 	makeKeyword := func(kind kind) token {
-		return token{kind: kind, line: uint(l.line), column: uint(column)}
+		return token{kind: kind, line: l.line, column: column}
 	}
 	makeIdentifier := func(kind kind) token {
-		return token{kind: kind, text: text, line: uint(l.line), column: uint(column)}
+		return token{kind: kind, text: text, line: l.line, column: column}
 	}
 
 	switch text {
@@ -338,7 +336,7 @@ func (l *lexer) takeNumber() token {
 		l.advance()
 	}
 	text := string(l.source[l.start:l.cursor])
-	return token{kind: number, text: text, line: uint(l.line), column: uint(column)}
+	return token{kind: number, text: text, line: l.line, column: column}
 }
 
 func (l *lexer) scan() {

@@ -348,5 +348,36 @@ let data = Payload::Plain`,
 				{kind: eof},
 			},
 		},
+
+		{
+			name: "imports",
+			input: strings.Join([]string{
+				"use ard/io",
+				"use github.com/foo/bar",
+				"use maybe as option",
+			}, "\n"),
+			want: []token{
+				{kind: use, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 5, text: "ard"},
+				{kind: slash, line: 1, column: 8},
+				{kind: identifier, line: 1, column: 9, text: "io"},
+
+				{kind: use, line: 2, column: 1},
+				{kind: identifier, line: 2, column: 5, text: "github"},
+				{kind: dot, line: 2, column: 11},
+				{kind: identifier, line: 2, column: 12, text: "com"},
+				{kind: slash, line: 2, column: 15},
+				{kind: identifier, line: 2, column: 16, text: "foo"},
+				{kind: slash, line: 2, column: 19},
+				{kind: identifier, line: 2, column: 20, text: "bar"},
+
+				{kind: use, line: 3, column: 1},
+				{kind: identifier, line: 3, column: 5, text: "maybe"},
+				{kind: as, line: 3, column: 11},
+				{kind: identifier, line: 3, column: 14, text: "option"},
+
+				{kind: eof},
+			},
+		},
 	})
 }
