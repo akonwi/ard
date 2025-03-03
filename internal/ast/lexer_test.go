@@ -543,5 +543,150 @@ let data = Payload::Plain`,
 				{kind: eof},
 			},
 		},
+
+		{
+			name: "unary expressions",
+			input: strings.Join([]string{
+				"not is_real",
+				"-20",
+			}, "\n"),
+			want: []token{
+				{kind: not, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 5, text: "is_real"},
+
+				{kind: minus, line: 2, column: 1},
+				{kind: number, line: 2, column: 2, text: "20"},
+
+				{kind: eof},
+			},
+		},
+		{
+			name: "logical expressions",
+			input: strings.Join([]string{
+				"true and false",
+				"true or false",
+			}, "\n"),
+			want: []token{
+				{kind: true_, line: 1, column: 1},
+				{kind: and, line: 1, column: 6},
+				{kind: false_, line: 1, column: 10},
+
+				{kind: true_, line: 2, column: 1},
+				{kind: or, line: 2, column: 6},
+				{kind: false_, line: 2, column: 9},
+
+				{kind: eof},
+			},
+		},
+
+		{
+			name: "binary expressions",
+			input: strings.Join([]string{
+				"3 + 4",
+				"10 - 5",
+				"6 * 7",
+				"20 / 4",
+				"15 % 4",
+				"-5 + 10",
+				"8 * -2",
+				"100 / -25",
+				"7 % -3",
+			}, "\n"),
+			want: []token{
+				{kind: number, line: 1, column: 1, text: "3"},
+				{kind: plus, line: 1, column: 3},
+				{kind: number, line: 1, column: 5, text: "4"},
+
+				{kind: number, line: 2, column: 1, text: "10"},
+				{kind: minus, line: 2, column: 4},
+				{kind: number, line: 2, column: 6, text: "5"},
+
+				{kind: number, line: 3, column: 1, text: "6"},
+				{kind: star, line: 3, column: 3},
+				{kind: number, line: 3, column: 5, text: "7"},
+
+				{kind: number, line: 4, column: 1, text: "20"},
+				{kind: slash, line: 4, column: 4},
+				{kind: number, line: 4, column: 6, text: "4"},
+
+				{kind: number, line: 5, column: 1, text: "15"},
+				{kind: percent, line: 5, column: 4},
+				{kind: number, line: 5, column: 6, text: "4"},
+
+				{kind: minus, line: 6, column: 1},
+				{kind: number, line: 6, column: 2, text: "5"},
+				{kind: plus, line: 6, column: 4},
+				{kind: number, line: 6, column: 6, text: "10"},
+
+				{kind: number, line: 7, column: 1, text: "8"},
+				{kind: star, line: 7, column: 3},
+				{kind: minus, line: 7, column: 5},
+				{kind: number, line: 7, column: 6, text: "2"},
+
+				{kind: number, line: 8, column: 1, text: "100"},
+				{kind: slash, line: 8, column: 5},
+				{kind: minus, line: 8, column: 7},
+				{kind: number, line: 8, column: 8, text: "25"},
+
+				{kind: number, line: 9, column: 1, text: "7"},
+				{kind: percent, line: 9, column: 3},
+				{kind: minus, line: 9, column: 5},
+				{kind: number, line: 9, column: 6, text: "3"},
+
+				{kind: eof},
+			},
+		},
+		{
+			name: "comparison expressions",
+			input: strings.Join([]string{
+				"5 == 5",
+				"not 10 == 5",
+			}, "\n"),
+			want: []token{
+				{kind: number, line: 1, column: 1, text: "5"},
+				{kind: equal_equal, line: 1, column: 3},
+				{kind: number, line: 1, column: 6, text: "5"},
+
+				{kind: not, line: 2, column: 1},
+				{kind: number, line: 2, column: 5, text: "10"},
+				{kind: equal_equal, line: 2, column: 8},
+				{kind: number, line: 2, column: 11, text: "5"},
+
+				{kind: eof},
+			},
+		},
+
+		{
+			name:  "optional types",
+			input: "let name: Str? = option.none()",
+			want: []token{
+				{kind: let, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 5, text: "name"},
+				{kind: colon, line: 1, column: 9},
+				{kind: identifier, line: 1, column: 11, text: "Str"},
+				{kind: question_mark, line: 1, column: 14},
+				{kind: equal, line: 1, column: 16},
+				{kind: identifier, line: 1, column: 18, text: "option"},
+				{kind: dot, line: 1, column: 24},
+				{kind: identifier, line: 1, column: 25, text: "none"},
+				{kind: left_paren, line: 1, column: 29},
+				{kind: right_paren, line: 1, column: 30},
+				{kind: eof},
+			},
+		},
+
+		{
+			name:  "unions",
+			input: "type Shape = Square|Circle",
+			want: []token{
+				{kind: type_, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 6, text: "Shape"},
+				{kind: equal, line: 1, column: 12},
+				{kind: identifier, line: 1, column: 14, text: "Square"},
+				{kind: pipe, line: 1, column: 20},
+				{kind: identifier, line: 1, column: 21, text: "Circle"},
+				{kind: eof},
+			},
+		},
 	})
 }

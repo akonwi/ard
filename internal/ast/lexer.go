@@ -60,6 +60,7 @@ const (
 	in      = "in"
 	if_     = "if"
 	else_   = "else"
+	type_   = "type"
 
 	// Types
 	int_  = "int"
@@ -197,9 +198,9 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(dot), true
 	case '?':
-		return token{kind: question_mark}, true
+		return currentChar.asToken(question_mark), true
 	case '|':
-		return token{kind: pipe}, true
+		return currentChar.asToken(pipe), true
 	case '!':
 		if l.hasMore() && l.matchNext('=') != nil {
 			return token{kind: bang_equal}, true
@@ -222,7 +223,7 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(slash), true
 	case '%':
-		return token{kind: percent}, true
+		return currentChar.asToken(percent), true
 	case ':':
 		if l.matchNext(':') != nil {
 			return currentChar.asToken(colon_colon), true
@@ -240,9 +241,9 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(less_than), true
 	case '-':
 		if l.hasMore() && l.matchNext('>') != nil {
-			return token{kind: thin_arrow}, true
+			return currentChar.asToken(thin_arrow), true
 		}
-		return token{kind: minus}, true
+		return currentChar.asToken(minus), true
 	case '=':
 		if l.matchNext('>') != nil {
 			return currentChar.asToken(fat_arrow), true
@@ -336,6 +337,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(if_)
 	case "else":
 		return makeKeyword(else_)
+	case "type":
+		return makeKeyword(type_)
 	}
 	return makeIdentifier(identifier)
 }
