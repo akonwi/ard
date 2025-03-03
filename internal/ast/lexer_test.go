@@ -412,5 +412,136 @@ let data = Payload::Plain`,
 				{kind: eof},
 			},
 		},
+
+		{
+			name: "lists",
+			input: strings.Join([]string{
+				"let empty: [Int] = []",
+				"let numbers = [1, 2, 3]",
+			}, "\n"),
+			want: []token{
+				{kind: let, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 5, text: "empty"},
+				{kind: colon, line: 1, column: 10},
+				{kind: left_bracket, line: 1, column: 12},
+				{kind: identifier, line: 1, column: 13, text: "Int"},
+				{kind: right_bracket, line: 1, column: 16},
+				{kind: equal, line: 1, column: 18},
+				{kind: left_bracket, line: 1, column: 20},
+				{kind: right_bracket, line: 1, column: 21},
+
+				{kind: let, line: 2, column: 1},
+				{kind: identifier, line: 2, column: 5, text: "numbers"},
+				{kind: equal, line: 2, column: 13},
+				{kind: left_bracket, line: 2, column: 15},
+				{kind: number, line: 2, column: 16, text: "1"},
+				{kind: comma, line: 2, column: 17},
+				{kind: number, line: 2, column: 19, text: "2"},
+				{kind: comma, line: 2, column: 20},
+				{kind: number, line: 2, column: 22, text: "3"},
+				{kind: right_bracket, line: 2, column: 23},
+
+				{kind: eof},
+			},
+		},
+
+		{
+			name: "maps",
+			input: strings.Join([]string{
+				"let empty: [Str:Int] = [:]",
+				`let initialized: [Str:Bool] = ["John": true, "Jane": false,]`,
+			}, "\n"),
+			want: []token{
+				{kind: let, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 5, text: "empty"},
+				{kind: colon, line: 1, column: 10},
+				{kind: left_bracket, line: 1, column: 12},
+				{kind: identifier, line: 1, column: 13, text: "Str"},
+				{kind: colon, line: 1, column: 16},
+				{kind: identifier, line: 1, column: 17, text: "Int"},
+				{kind: right_bracket, line: 1, column: 20},
+				{kind: equal, line: 1, column: 22},
+				{kind: left_bracket, line: 1, column: 24},
+				{kind: colon, line: 1, column: 25},
+				{kind: right_bracket, line: 1, column: 26},
+
+				{kind: let, line: 2, column: 1},
+				{kind: identifier, line: 2, column: 5, text: "initialized"},
+				{kind: colon, line: 2, column: 16},
+				{kind: left_bracket, line: 2, column: 18},
+				{kind: identifier, line: 2, column: 19, text: "Str"},
+				{kind: colon, line: 2, column: 22},
+				{kind: identifier, line: 2, column: 23, text: "Bool"},
+				{kind: right_bracket, line: 2, column: 27},
+				{kind: equal, line: 2, column: 29},
+				{kind: left_bracket, line: 2, column: 31},
+				{kind: string_, line: 2, column: 32, text: `"John"`},
+				{kind: colon, line: 2, column: 38},
+				{kind: true_, line: 2, column: 40},
+				{kind: comma, line: 2, column: 44},
+				{kind: string_, line: 2, column: 46, text: `"Jane"`},
+				{kind: colon, line: 2, column: 52},
+				{kind: false_, line: 2, column: 54},
+				{kind: comma, line: 2, column: 59},
+				{kind: right_bracket, line: 2, column: 60},
+
+				{kind: eof},
+			},
+		},
+
+		{
+			name: "matching",
+			input: `match payload {
+		Payload::Plain => print("Plain text"),
+		Payload::Rich => {
+				// block
+				print("Rich text")
+		},
+		other => print("Unknown")
+}`,
+			want: []token{
+				{kind: match, line: 1, column: 1},
+				{kind: identifier, line: 1, column: 7, text: "payload"},
+				{kind: left_brace, line: 1, column: 15},
+
+				{kind: identifier, line: 2, column: 3, text: "Payload"},
+				{kind: colon_colon, line: 2, column: 10},
+				{kind: identifier, line: 2, column: 12, text: "Plain"},
+				{kind: fat_arrow, line: 2, column: 18},
+				{kind: identifier, line: 2, column: 21, text: "print"},
+				{kind: left_paren, line: 2, column: 26},
+				{kind: string_, line: 2, column: 27, text: `"Plain text"`},
+				{kind: right_paren, line: 2, column: 39},
+				{kind: comma, line: 2, column: 40},
+
+				{kind: identifier, line: 3, column: 3, text: "Payload"},
+				{kind: colon_colon, line: 3, column: 10},
+				{kind: identifier, line: 3, column: 12, text: "Rich"},
+				{kind: fat_arrow, line: 3, column: 17},
+				{kind: left_brace, line: 3, column: 20},
+
+				{kind: slash_slash, line: 4, column: 5},
+				{kind: identifier, line: 4, column: 8, text: "block"},
+
+				{kind: identifier, line: 5, column: 5, text: "print"},
+				{kind: left_paren, line: 5, column: 10},
+				{kind: string_, line: 5, column: 11, text: `"Rich text"`},
+				{kind: right_paren, line: 5, column: 22},
+
+				{kind: right_brace, line: 6, column: 3},
+				{kind: comma, line: 6, column: 4},
+
+				{kind: identifier, line: 7, column: 3, text: "other"},
+				{kind: fat_arrow, line: 7, column: 9},
+				{kind: identifier, line: 7, column: 12, text: "print"},
+				{kind: left_paren, line: 7, column: 17},
+				{kind: string_, line: 7, column: 18, text: `"Unknown"`},
+				{kind: right_paren, line: 7, column: 27},
+
+				{kind: right_brace, line: 8, column: 1},
+
+				{kind: eof},
+			},
+		},
 	})
 }

@@ -184,11 +184,11 @@ func (l *lexer) take() (token, bool) {
 	case '}':
 		return currentChar.asToken(right_brace), true
 	case '[':
-		return token{kind: left_bracket}, true
+		return currentChar.asToken(left_bracket), true
 	case ']':
-		return token{kind: right_bracket}, true
+		return currentChar.asToken(right_bracket), true
 	case ';':
-		return token{kind: semicolon}, true
+		return currentChar.asToken(semicolon), true
 	case ',':
 		return currentChar.asToken(comma), true
 	case '.':
