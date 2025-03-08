@@ -13,7 +13,6 @@ import (
 
 var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
-	cmpopts.EquateComparable(token{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},
 		IntType{},
@@ -35,6 +34,26 @@ var compareOptions = cmp.Options{
 			if v2, ok := y[k]; !ok || v1 != v2 {
 				return false
 			}
+		}
+		return true
+	}),
+
+	cmp.Comparer(func(x, y token) bool {
+		if x.kind != y.kind || x.line != y.line || x.column != y.column || x.text != y.text {
+			return false
+		}
+
+		if len(x.chunks) != len(y.chunks) {
+			return false
+		}
+		for i := range x.chunks {
+			if x.chunks[i].kind != y.chunks[i].kind ||
+				x.chunks[i].line != y.chunks[i].line ||
+				x.chunks[i].column != y.chunks[i].column ||
+				x.chunks[i].text != y.chunks[i].text {
+				return false
+			}
+			// TODO?: may need to compare chunks recursively
 		}
 		return true
 	}),

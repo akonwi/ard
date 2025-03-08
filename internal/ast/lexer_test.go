@@ -80,7 +80,7 @@ func TestLexing(t *testing.T) {
 				{kind: colon, line: 3, column: 11},
 				{kind: identifier, line: 3, column: 13, text: "Str"},
 				{kind: equal, line: 3, column: 17},
-				{kind: string_, line: 3, column: 19, text: `"hello"`},
+				{kind: string_, line: 3, column: 19, text: `hello`},
 
 				{kind: identifier, line: 4, column: 1, text: "x"},
 				{kind: equal, line: 4, column: 3},
@@ -146,7 +146,7 @@ func TestLexing(t *testing.T) {
 				{kind: right_paren, line: 1, column: 14},
 				{kind: left_brace, line: 1, column: 16},
 
-				{kind: string_, line: 2, column: 3, text: `"Hello, world!"`},
+				{kind: string_, line: 2, column: 3, text: `Hello, world!`},
 
 				{kind: right_brace, line: 3, column: 1},
 
@@ -160,9 +160,7 @@ func TestLexing(t *testing.T) {
 		{
 			name: "function: one param and return type",
 			input: strings.Join([]string{
-				`fn greet(person: Str) Str {`,
-				`  "Hello, {{person}}!"`,
-				`}`,
+				`fn greet(person: Str) Str {}`,
 				``,
 				`greet("Alice")`,
 				`greet(get_hello())`,
@@ -177,22 +175,19 @@ func TestLexing(t *testing.T) {
 				{kind: right_paren, line: 1, column: 21},
 				{kind: identifier, line: 1, column: 23, text: "Str"},
 				{kind: left_brace, line: 1, column: 27},
+				{kind: right_brace, line: 1, column: 28},
 
-				{kind: string_, line: 2, column: 3, text: `"Hello, {{person}}!"`},
+				{kind: identifier, line: 3, column: 1, text: "greet"},
+				{kind: left_paren, line: 3, column: 6},
+				{kind: string_, line: 3, column: 7, text: "Alice"},
+				{kind: right_paren, line: 3, column: 14},
 
-				{kind: right_brace, line: 3, column: 1},
-
-				{kind: identifier, line: 5, column: 1, text: "greet"},
-				{kind: left_paren, line: 5, column: 6},
-				{kind: string_, line: 5, column: 7, text: `"Alice"`},
-				{kind: right_paren, line: 5, column: 14},
-
-				{kind: identifier, line: 6, column: 1, text: "greet"},
-				{kind: left_paren, line: 6, column: 6},
-				{kind: identifier, line: 6, column: 7, text: "get_hello"},
-				{kind: left_paren, line: 6, column: 16},
-				{kind: right_paren, line: 6, column: 17},
-				{kind: right_paren, line: 6, column: 18},
+				{kind: identifier, line: 4, column: 1, text: "greet"},
+				{kind: left_paren, line: 4, column: 6},
+				{kind: identifier, line: 4, column: 7, text: "get_hello"},
+				{kind: left_paren, line: 4, column: 16},
+				{kind: right_paren, line: 4, column: 17},
+				{kind: right_paren, line: 4, column: 18},
 
 				{kind: eof},
 			},
@@ -257,7 +252,7 @@ func TestLexing(t *testing.T) {
 
 				{kind: identifier, line: 2, column: 3, text: "print"},
 				{kind: left_paren, line: 2, column: 8},
-				{kind: string_, line: 2, column: 9, text: `"Hello, anon!"`},
+				{kind: string_, line: 2, column: 9, text: "Hello, anon!"},
 				{kind: right_paren, line: 2, column: 23},
 
 				{kind: right_brace, line: 3, column: 1},
@@ -475,11 +470,11 @@ let data = Payload::Plain`,
 				{kind: right_bracket, line: 2, column: 27},
 				{kind: equal, line: 2, column: 29},
 				{kind: left_bracket, line: 2, column: 31},
-				{kind: string_, line: 2, column: 32, text: `"John"`},
+				{kind: string_, line: 2, column: 32, text: "John"},
 				{kind: colon, line: 2, column: 38},
 				{kind: true_, line: 2, column: 40},
 				{kind: comma, line: 2, column: 44},
-				{kind: string_, line: 2, column: 46, text: `"Jane"`},
+				{kind: string_, line: 2, column: 46, text: "Jane"},
 				{kind: colon, line: 2, column: 52},
 				{kind: false_, line: 2, column: 54},
 				{kind: comma, line: 2, column: 59},
@@ -510,7 +505,7 @@ let data = Payload::Plain`,
 				{kind: fat_arrow, line: 2, column: 18},
 				{kind: identifier, line: 2, column: 21, text: "print"},
 				{kind: left_paren, line: 2, column: 26},
-				{kind: string_, line: 2, column: 27, text: `"Plain text"`},
+				{kind: string_, line: 2, column: 27, text: "Plain text"},
 				{kind: right_paren, line: 2, column: 39},
 				{kind: comma, line: 2, column: 40},
 
@@ -525,7 +520,7 @@ let data = Payload::Plain`,
 
 				{kind: identifier, line: 5, column: 5, text: "print"},
 				{kind: left_paren, line: 5, column: 10},
-				{kind: string_, line: 5, column: 11, text: `"Rich text"`},
+				{kind: string_, line: 5, column: 11, text: "Rich text"},
 				{kind: right_paren, line: 5, column: 22},
 
 				{kind: right_brace, line: 6, column: 3},
@@ -535,7 +530,7 @@ let data = Payload::Plain`,
 				{kind: fat_arrow, line: 7, column: 9},
 				{kind: identifier, line: 7, column: 12, text: "print"},
 				{kind: left_paren, line: 7, column: 17},
-				{kind: string_, line: 7, column: 18, text: `"Unknown"`},
+				{kind: string_, line: 7, column: 18, text: "Unknown"},
 				{kind: right_paren, line: 7, column: 27},
 
 				{kind: right_brace, line: 8, column: 1},
@@ -685,6 +680,23 @@ let data = Payload::Plain`,
 				{kind: identifier, line: 1, column: 14, text: "Square"},
 				{kind: pipe, line: 1, column: 20},
 				{kind: identifier, line: 1, column: 21, text: "Circle"},
+				{kind: eof},
+			},
+		},
+
+		{
+			name:  "string interpolation",
+			input: `"hello, {{name}}!"`,
+			want: []token{
+				{
+					kind: complex_string,
+					line: 1, column: 1,
+					chunks: []token{
+						{kind: string_, line: 1, column: 1, text: "hello, "},
+						{kind: identifier, line: 1, column: 11, text: "name"},
+						{kind: string_, line: 1, column: 17, text: "!"},
+					},
+				},
 				{kind: eof},
 			},
 		},

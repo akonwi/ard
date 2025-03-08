@@ -16,6 +16,8 @@ const (
 	dot_dot            = "dot_dot"
 	question_mark      = "question_mark"
 	pipe               = "pipe"
+	double_quote       = "double_quote"
+	single_quote       = "single_quote"
 
 	colon_colon        = "colon_colon"
 	bang               = "bang"
@@ -38,6 +40,8 @@ const (
 	fat_arrow          = "fat_arrow"
 	increment          = "increment"
 	decrement          = "decrement"
+	expr_open          = "expr_open"
+	expr_close         = "expr_close"
 
 	// Keywords
 	and     = "and"
@@ -69,9 +73,10 @@ const (
 	str   = "str"
 
 	// Literals
-	identifier = "identifier"
-	number     = "number"
-	string_    = "string"
+	identifier     = "identifier"
+	number         = "number"
+	string_        = "string"
+	complex_string = "complex_string"
 
 	eof = "eof"
 )
@@ -81,6 +86,9 @@ type token struct {
 	line   int
 	column int
 	text   string
+
+	// for strings with interpolated expressions
+	chunks []token
 }
 
 type char struct {
@@ -133,6 +141,19 @@ func (l *lexer) matchNext(byte byte) *char {
 	return l.advance()
 }
 
+func (l *lexer) peekMatch(str string) bool {
+	if l.isAtEnd() {
+		return false
+	}
+
+	for _, r := range str {
+		if l.isAtEnd() || l.peek().raw != byte(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (l lexer) peek() *char {
 	if l.isAtEnd() {
 		return nil
@@ -171,7 +192,8 @@ func isWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 func (l *lexer) take() (token, bool) {
-	switch currentChar := l.advance(); currentChar.raw {
+	currentChar := l.advance()
+	switch currentChar.raw {
 	case '\n':
 		l.line++
 		l.column = 1
@@ -181,8 +203,14 @@ func (l *lexer) take() (token, bool) {
 	case ')':
 		return currentChar.asToken(right_paren), true
 	case '{':
+		if l.matchNext('{') != nil {
+			return currentChar.asToken(expr_open), true
+		}
 		return currentChar.asToken(left_brace), true
 	case '}':
+		if l.matchNext('}') != nil {
+			return currentChar.asToken(expr_close), true
+		}
 		return currentChar.asToken(right_brace), true
 	case '[':
 		return currentChar.asToken(left_bracket), true
@@ -203,9 +231,9 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(pipe), true
 	case '!':
 		if l.hasMore() && l.matchNext('=') != nil {
-			return token{kind: bang_equal}, true
+			return currentChar.asToken(bang_equal), true
 		}
-		return token{kind: bang}, true
+		return currentChar.asToken(bang), true
 	case '+':
 		return currentChar.asToken(plus), true
 	case '*':
@@ -259,15 +287,7 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(equal), true
 	case '"':
-		start := currentChar.index
-		for l.hasMore() && l.advance().raw != '"' {
-		}
-		return token{
-			kind:   string_,
-			text:   string(l.source[start:l.cursor]),
-			line:   currentChar.line,
-			column: currentChar.col,
-		}, true
+		return l.takeString(currentChar), true
 	default:
 		if currentChar.isAlpha() {
 			l.start = l.cursor - 1
@@ -278,6 +298,71 @@ func (l *lexer) take() (token, bool) {
 			return l.takeNumber(), true
 		}
 		return token{}, false
+	}
+}
+
+func (l *lexer) takeString(start *char) token {
+	// if in a string, keep reading until the end of the string
+	// ending at " or seeing {{
+	// when '"' is reached, return the string token
+	// when '{{' are the upcoming chars, return the string token
+	// when '}}' is matched, l.takeString() again
+	if l.isAtEnd() {
+		panic("unterminated string")
+	}
+
+	var _kind kind = string_
+	var text string = ""
+	var chunks []token
+
+	endIndex := l.cursor
+	for l.hasMore() && l.matchNext('"') == nil {
+		if l.peekMatch("{{") {
+			// capture expression
+			l.advance()
+			l.advance()
+
+			_kind = complex_string
+			chunks = []token{
+				// capture text so far as first chunk
+				{
+					kind:   string_,
+					line:   start.line,
+					column: start.col,
+					text:   string(l.source[start.index+1 : l.cursor-2]),
+				},
+			}
+
+			for l.hasMore() && !l.peekMatch("}}") {
+				if token, ok := l.take(); ok {
+					chunks = append(chunks, token)
+				}
+			}
+
+			l.advance()
+			l.advance()
+			chunks = append(chunks, l.takeString(l.advance()))
+			break
+		} else {
+			l.advance()
+			endIndex = l.cursor
+		}
+	}
+
+	if _kind == string_ {
+		startIndex := start.index
+		if start.raw == '"' {
+			startIndex++
+		}
+		text = string(l.source[startIndex:endIndex])
+	}
+
+	return token{
+		kind:   _kind,
+		line:   start.line,
+		column: start.col,
+		text:   text,
+		chunks: chunks,
 	}
 }
 
