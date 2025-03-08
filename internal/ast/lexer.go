@@ -18,6 +18,7 @@ const (
 	pipe               = "pipe"
 	double_quote       = "double_quote"
 	single_quote       = "single_quote"
+	backtick           = "backtick"
 
 	colon_colon        = "colon_colon"
 	bang               = "bang"
@@ -288,6 +289,8 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(equal), true
 	case '"':
 		return l.takeString(currentChar), true
+	case '`':
+		return l.takeInterpolated(currentChar), true
 	default:
 		if currentChar.isAlpha() {
 			l.start = l.cursor - 1
@@ -302,11 +305,6 @@ func (l *lexer) take() (token, bool) {
 }
 
 func (l *lexer) takeString(start *char) token {
-	// if in a string, keep reading until the end of the string
-	// ending at " or seeing {{
-	// when '"' is reached, return the string token
-	// when '{{' are the upcoming chars, return the string token
-	// when '}}' is matched, l.takeString() again
 	if l.isAtEnd() {
 		panic("unterminated string")
 	}
@@ -316,46 +314,17 @@ func (l *lexer) takeString(start *char) token {
 	var chunks []token
 
 	endIndex := l.cursor
+
 	for l.hasMore() && l.matchNext('"') == nil {
-		if l.peekMatch("{{") {
-			// capture expression
-			l.advance()
-			l.advance()
-
-			_kind = complex_string
-			chunks = []token{
-				// capture text so far as first chunk
-				{
-					kind:   string_,
-					line:   start.line,
-					column: start.col,
-					text:   string(l.source[start.index+1 : l.cursor-2]),
-				},
-			}
-
-			for l.hasMore() && !l.peekMatch("}}") {
-				if token, ok := l.take(); ok {
-					chunks = append(chunks, token)
-				}
-			}
-
-			l.advance()
-			l.advance()
-			chunks = append(chunks, l.takeString(l.advance()))
-			break
-		} else {
-			l.advance()
-			endIndex = l.cursor
-		}
+		l.advance()
+		endIndex = l.cursor
 	}
 
-	if _kind == string_ {
-		startIndex := start.index
-		if start.raw == '"' {
-			startIndex++
-		}
-		text = string(l.source[startIndex:endIndex])
+	startIndex := start.index
+	if start.raw == '"' {
+		startIndex++
 	}
+	text = string(l.source[startIndex:endIndex])
 
 	return token{
 		kind:   _kind,
@@ -364,6 +333,68 @@ func (l *lexer) takeString(start *char) token {
 		text:   text,
 		chunks: chunks,
 	}
+}
+
+func (l *lexer) takeInterpolated(start *char) token {
+	if l.isAtEnd() {
+		// todo: this probably needs to be checked later too
+		panic("unterminated string")
+	}
+
+	// if in a string, keep reading until the end of the string
+	// when '`' is reached, finished. take latest chunk
+	// when '{{' is reached, take subsequent tokens until '}}'
+	// when '}}' is reached, continue taking string from there
+	interpol := token{
+		kind:   complex_string,
+		line:   start.line,
+		column: start.col,
+		chunks: []token{},
+	}
+
+	// peek to skip the backtick
+	currentStringStart := l.peek()
+
+	for l.hasMore() && l.matchNext('`') == nil {
+		if l.peekMatch("{{") {
+			// capture text so far as first chunk
+			interpol.chunks = append(interpol.chunks,
+				token{
+					kind:   string_,
+					line:   start.line,
+					column: start.col,
+					text:   string(l.source[currentStringStart.index:l.cursor]),
+				},
+			)
+
+			// skip the {{
+			l.advance()
+			l.advance()
+
+			for l.hasMore() && !l.peekMatch("}}") {
+				if token, ok := l.take(); ok {
+					interpol.chunks = append(interpol.chunks, token)
+				}
+			}
+
+			l.advance()
+			l.advance()
+			// reset the start of the next string
+			currentStringStart = l.advance()
+		} else {
+			l.advance()
+		}
+	}
+
+	interpol.chunks = append(interpol.chunks, token{
+		kind:   string_,
+		line:   currentStringStart.line,
+		column: currentStringStart.col,
+		// skip closing backtick
+		text: string(l.source[currentStringStart.index : l.cursor-1]),
+	})
+
+	return interpol
 }
 
 func (l *lexer) takeIdentifier() token {
