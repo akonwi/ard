@@ -3,6 +3,8 @@ package ast
 type kind string
 
 const (
+	space         kind = "space"
+	new_line           = "new_line"
 	left_paren    kind = "left_paren"
 	right_paren        = "right_paren"
 	left_brace         = "left_brace"
@@ -189,16 +191,20 @@ func (c char) isAlphaNumeric() bool {
 	return c.isAlpha() || c.isDigit()
 }
 
-func isWhitespace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-}
+//	func isWhitespace(c byte) bool {
+//		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+//	}
+
 func (l *lexer) take() (token, bool) {
 	currentChar := l.advance()
 	switch currentChar.raw {
 	case '\n':
+		t := currentChar.asToken(new_line)
 		l.line++
 		l.column = 1
-		return token{}, false
+		return t, true
+	case ' ', '\t', '\r':
+		return currentChar.asToken(space), true
 	case '(':
 		return currentChar.asToken(left_paren), true
 	case ')':
