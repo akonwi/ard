@@ -80,7 +80,9 @@ func TestLexing(t *testing.T) {
 				{kind: colon, line: 3, column: 11},
 				{kind: identifier, line: 3, column: 13, text: "Str"},
 				{kind: equal, line: 3, column: 17},
-				{kind: string_, line: 3, column: 19, text: `hello`},
+				{kind: complex_string, line: 3, column: 19, chunks: []token{
+					{kind: string_, line: 3, column: 19, text: `hello`},
+				}},
 
 				{kind: identifier, line: 4, column: 1, text: "x"},
 				{kind: equal, line: 4, column: 3},
@@ -146,7 +148,9 @@ func TestLexing(t *testing.T) {
 				{kind: right_paren, line: 1, column: 14},
 				{kind: left_brace, line: 1, column: 16},
 
-				{kind: string_, line: 2, column: 3, text: `Hello, world!`},
+				{kind: complex_string, line: 2, column: 3, chunks: []token{
+					{kind: string_, line: 2, column: 3, text: "Hello, world!"},
+				}},
 
 				{kind: right_brace, line: 3, column: 1},
 
@@ -179,7 +183,9 @@ func TestLexing(t *testing.T) {
 
 				{kind: identifier, line: 3, column: 1, text: "greet"},
 				{kind: left_paren, line: 3, column: 6},
-				{kind: string_, line: 3, column: 7, text: "Alice"},
+				{kind: complex_string, line: 3, column: 7, chunks: []token{
+					{kind: string_, line: 3, column: 7, text: "Alice"},
+				}},
 				{kind: right_paren, line: 3, column: 14},
 
 				{kind: identifier, line: 4, column: 1, text: "greet"},
@@ -252,7 +258,9 @@ func TestLexing(t *testing.T) {
 
 				{kind: identifier, line: 2, column: 3, text: "print"},
 				{kind: left_paren, line: 2, column: 8},
-				{kind: string_, line: 2, column: 9, text: "Hello, anon!"},
+				{kind: complex_string, line: 2, column: 9, chunks: []token{
+					{kind: string_, line: 2, column: 9, text: "Hello, anon!"},
+				}},
 				{kind: right_paren, line: 2, column: 23},
 
 				{kind: right_brace, line: 3, column: 1},
@@ -500,11 +508,15 @@ let data = Payload::Plain`,
 				{kind: right_bracket, line: 2, column: 27},
 				{kind: equal, line: 2, column: 29},
 				{kind: left_bracket, line: 2, column: 31},
-				{kind: string_, line: 2, column: 32, text: "John"},
+				{kind: complex_string, line: 2, column: 32, chunks: []token{
+					{kind: string_, line: 2, column: 32, text: "John"},
+				}},
 				{kind: colon, line: 2, column: 38},
 				{kind: true_, line: 2, column: 40},
 				{kind: comma, line: 2, column: 44},
-				{kind: string_, line: 2, column: 46, text: "Jane"},
+				{kind: complex_string, line: 2, column: 46, chunks: []token{
+					{kind: string_, line: 2, column: 46, text: "Jane"},
+				}},
 				{kind: colon, line: 2, column: 52},
 				{kind: false_, line: 2, column: 54},
 				{kind: comma, line: 2, column: 59},
@@ -535,7 +547,9 @@ let data = Payload::Plain`,
 				{kind: fat_arrow, line: 2, column: 18},
 				{kind: identifier, line: 2, column: 21, text: "print"},
 				{kind: left_paren, line: 2, column: 26},
-				{kind: string_, line: 2, column: 27, text: "Plain text"},
+				{kind: complex_string, line: 2, column: 27, chunks: []token{
+					{kind: string_, line: 2, column: 27, text: "Plain text"},
+				}},
 				{kind: right_paren, line: 2, column: 39},
 				{kind: comma, line: 2, column: 40},
 
@@ -550,7 +564,9 @@ let data = Payload::Plain`,
 
 				{kind: identifier, line: 5, column: 5, text: "print"},
 				{kind: left_paren, line: 5, column: 10},
-				{kind: string_, line: 5, column: 11, text: "Rich text"},
+				{kind: complex_string, line: 5, column: 11, chunks: []token{
+					{kind: string_, line: 5, column: 11, text: "Rich text"},
+				}},
 				{kind: right_paren, line: 5, column: 22},
 
 				{kind: right_brace, line: 6, column: 3},
@@ -560,7 +576,9 @@ let data = Payload::Plain`,
 				{kind: fat_arrow, line: 7, column: 9},
 				{kind: identifier, line: 7, column: 12, text: "print"},
 				{kind: left_paren, line: 7, column: 17},
-				{kind: string_, line: 7, column: 18, text: "Unknown"},
+				{kind: complex_string, line: 7, column: 18, chunks: []token{
+					{kind: string_, line: 7, column: 18, text: "Unknown"},
+				}},
 				{kind: right_paren, line: 7, column: 27},
 
 				{kind: right_brace, line: 8, column: 1},
@@ -717,8 +735,8 @@ let data = Payload::Plain`,
 		{
 			name: "string interpolation",
 			input: strings.Join([]string{
-				"`hello, {{name}}!`",
-				// "`{{(1 + 1).to_str()}}`",
+				`"hello, {{name}}!"`,
+				`"{{(1 + 1).to_str()}}"`,
 			}, "\n"),
 			want: []token{
 				{
@@ -731,21 +749,23 @@ let data = Payload::Plain`,
 					},
 				},
 
-				// {
-				// 	kind: complex_string,
-				// 	line: 2, column: 1,
-				// 	chunks: []token{
-				// 		{kind: left_paren, line: 2, column: 3},
-				// 		{kind: number, line: 2, column: 4, text: "1"},
-				// 		{kind: plus, line: 2, column: 6},
-				// 		{kind: number, line: 2, column: 8, text: "1"},
-				// 		{kind: right_paren, line: 2, column: 9},
-				// 		{kind: dot, line: 2, column: 10},
-				// 		{kind: identifier, line: 2, column: 11, text: "to_str"},
-				// 		{kind: left_paren, line: 2, column: 17},
-				// 		{kind: right_paren, line: 2, column: 18},
-				// 	},
-				// },
+				{
+					kind: complex_string,
+					line: 2, column: 1,
+					chunks: []token{
+						{kind: string_, line: 2, column: 1},
+						{kind: left_paren, line: 2, column: 4},
+						{kind: number, line: 2, column: 5, text: "1"},
+						{kind: plus, line: 2, column: 7},
+						{kind: number, line: 2, column: 9, text: "1"},
+						{kind: right_paren, line: 2, column: 10},
+						{kind: dot, line: 2, column: 11},
+						{kind: identifier, line: 2, column: 12, text: "to_str"},
+						{kind: left_paren, line: 2, column: 18},
+						{kind: right_paren, line: 2, column: 19},
+						{kind: string_, line: 2, column: 22},
+					},
+				},
 
 				{kind: eof},
 			},
@@ -782,7 +802,9 @@ let data = Payload::Plain`,
 				{kind: dot, line: 3, column: 12},
 				{kind: identifier, line: 3, column: 13, text: "put"},
 				{kind: left_paren, line: 3, column: 16},
-				{kind: string_, line: 3, column: 17, text: "key"},
+				{kind: complex_string, line: 3, column: 17, chunks: []token{
+					{kind: string_, line: 3, column: 17, text: "key"},
+				}},
 				{kind: comma, line: 3, column: 22},
 				{kind: true_, line: 3, column: 24},
 				{kind: right_paren, line: 3, column: 28},
@@ -847,7 +869,9 @@ let data = Payload::Plain`,
 				{kind: left_brace, line: 7, column: 19},
 				{kind: identifier, line: 7, column: 21, text: "name"},
 				{kind: colon, line: 7, column: 25},
-				{kind: string_, line: 7, column: 27, text: "John"},
+				{kind: complex_string, line: 7, column: 27, chunks: []token{
+					{kind: string_, line: 7, column: 27, text: "John"},
+				}},
 				{kind: comma, line: 7, column: 33},
 				{kind: identifier, line: 7, column: 35, text: "age"},
 				{kind: colon, line: 7, column: 38},
@@ -874,7 +898,9 @@ let data = Payload::Plain`,
 				{kind: left_brace, line: 10, column: 10},
 				{kind: identifier, line: 10, column: 12, text: "name"},
 				{kind: colon, line: 10, column: 16},
-				{kind: string_, line: 10, column: 18, text: "Alice"},
+				{kind: complex_string, line: 10, column: 18, chunks: []token{
+					{kind: string_, line: 10, column: 18, text: "Alice"},
+				}},
 				{kind: comma, line: 10, column: 25},
 				{kind: identifier, line: 10, column: 27, text: "age"},
 				{kind: colon, line: 10, column: 30},

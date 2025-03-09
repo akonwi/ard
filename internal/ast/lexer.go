@@ -289,8 +289,6 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(equal), true
 	case '"':
 		return l.takeString(currentChar), true
-	case '`':
-		return l.takeInterpolated(currentChar), true
 	default:
 		if currentChar.isAlpha() {
 			l.start = l.cursor - 1
@@ -305,37 +303,6 @@ func (l *lexer) take() (token, bool) {
 }
 
 func (l *lexer) takeString(start *char) token {
-	if l.isAtEnd() {
-		panic("unterminated string")
-	}
-
-	var _kind kind = string_
-	var text string = ""
-	var chunks []token
-
-	endIndex := l.cursor
-
-	for l.hasMore() && l.matchNext('"') == nil {
-		l.advance()
-		endIndex = l.cursor
-	}
-
-	startIndex := start.index
-	if start.raw == '"' {
-		startIndex++
-	}
-	text = string(l.source[startIndex:endIndex])
-
-	return token{
-		kind:   _kind,
-		line:   start.line,
-		column: start.col,
-		text:   text,
-		chunks: chunks,
-	}
-}
-
-func (l *lexer) takeInterpolated(start *char) token {
 	if l.isAtEnd() {
 		// todo: this probably needs to be checked later too
 		panic("unterminated string")
@@ -352,12 +319,13 @@ func (l *lexer) takeInterpolated(start *char) token {
 		chunks: []token{},
 	}
 
-	// peek to skip the backtick
+	// peek to skip the quote
 	currentStringStart := l.peek()
 
-	for l.hasMore() && l.matchNext('`') == nil {
+	for l.hasMore() && l.matchNext('"') == nil {
 		if l.peekMatch("{{") {
 			// capture text so far as first chunk
+			// todo: skip adding empty strings
 			interpol.chunks = append(interpol.chunks,
 				token{
 					kind:   string_,
@@ -386,12 +354,20 @@ func (l *lexer) takeInterpolated(start *char) token {
 		}
 	}
 
+	rawStart := currentStringStart.index
+	quote := currentStringStart
+	// if there was no interpolation, the start of this chunk is the quote
+	if currentStringStart.index == start.index+1 {
+		rawStart = start.index + 1
+		quote = start
+	}
+	// todo: skip adding empty strings
 	interpol.chunks = append(interpol.chunks, token{
 		kind:   string_,
-		line:   currentStringStart.line,
-		column: currentStringStart.col,
+		line:   quote.line,
+		column: quote.col,
 		// skip closing backtick
-		text: string(l.source[currentStringStart.index : l.cursor-1]),
+		text: string(l.source[rawStart : l.cursor-1]),
 	})
 
 	return interpol
