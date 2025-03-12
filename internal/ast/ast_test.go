@@ -93,8 +93,29 @@ func runTests(t *testing.T, tests []test) {
 	}
 }
 
+func runTestsV2(t *testing.T, tests []test) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lexer := newLexer([]byte(tt.input))
+			lexer.scan()
+			parser := newParser(lexer.tokens)
+			ast, err := parser.parse()
+			if err != nil {
+				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
+			}
+
+			// if len(tt.output.Imports) > 0 || len(tt.output.Statements) > 0 {
+			diff := cmp.Diff(&tt.output, ast, compareOptions)
+			if diff != "" {
+				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
+			}
+			// }
+		})
+	}
+}
+
 func TestEmptyProgram(t *testing.T) {
-	runTests(t, []test{
+	runTestsV2(t, []test{
 		{
 			name:  "Empty program",
 			input: "",
@@ -106,11 +127,11 @@ func TestEmptyProgram(t *testing.T) {
 }
 
 func TestImportStatements(t *testing.T) {
-	runTests(t, []test{
+	runTestsV2(t, []test{
 		{
 			name: "importing modules",
 			input: strings.Join([]string{
-				`use io/fs`,
+				`use ard/fs`,
 				`use github.com/google/go-cmp/cmp`,
 				`use github.com/tree-sitter/go-tree-sitter as ts`,
 				`use github.com/tree-sitter/tree-sitter`,
@@ -118,11 +139,7 @@ func TestImportStatements(t *testing.T) {
 			output: Program{
 				Imports: []Import{
 					{
-						Path: "fmt",
-						Name: "fmt",
-					},
-					{
-						Path: "io/fs",
+						Path: "ard/fs",
 						Name: "fs",
 					},
 					{
