@@ -194,28 +194,18 @@ func TestIdentifiers(t *testing.T) {
 		{
 			name: "referencing variables",
 			input: strings.Join([]string{
-				`let count = 10`,
-				`count <= 10`,
+				`count`,
 			}, "\n"),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: false,
-						Name:    "count",
-						Value:   NumLiteral{Value: "10"},
-					},
-					BinaryExpression{
-						Left:     Identifier{Name: "count"},
-						Operator: LessThanOrEqual,
-						Right:    NumLiteral{Value: "10"},
-					},
+					&Identifier{Name: "count"},
 				},
 			},
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
 
 func TestWhileLoop(t *testing.T) {

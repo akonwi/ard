@@ -127,7 +127,7 @@ func (p *parser) parseStatement() (Statement, error) {
 	// }
 }
 
-func (p *parser) parseVariableDef() (*VariableDeclaration, error) {
+func (p *parser) parseVariableDef() (Statement, error) {
 	if p.match(let, mut) {
 		kind := p.tokens[p.index-1].kind
 		name := p.consume(identifier, "Expected identifier after variable declaration")
@@ -162,8 +162,7 @@ func (p *parser) parseVariableDef() (*VariableDeclaration, error) {
 			Type:    declaredType,
 		}, nil
 	}
-	p.advance()
-	return nil, nil
+	return p.parseExpression()
 }
 
 func (p *parser) parseExpression() (Expression, error) {
