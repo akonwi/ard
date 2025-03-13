@@ -162,8 +162,11 @@ func TestImportStatements(t *testing.T) {
 func TestVariableDeclarations(t *testing.T) {
 	tests := []test{
 		{
-			name:  "declaring variables",
-			input: `let count = 10`,
+			name: "declaring variables",
+			input: strings.Join([]string{
+				`let count = 10`,
+				`mut boolean: Bool = false`,
+			}, "\n"),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -171,6 +174,12 @@ func TestVariableDeclarations(t *testing.T) {
 						Mutable: false,
 						Name:    "count",
 						Value:   &NumLiteral{Value: "10"},
+					},
+					&VariableDeclaration{
+						Mutable: true,
+						Name:    "boolean",
+						Type:    BooleanType{},
+						Value:   &BoolLiteral{Value: false},
 					},
 				},
 			},

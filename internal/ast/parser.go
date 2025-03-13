@@ -131,6 +131,24 @@ func (p *parser) parseVariableDef() (*VariableDeclaration, error) {
 	if p.match(let, mut) {
 		kind := p.tokens[p.index-1].kind
 		name := p.consume(identifier, "Expected identifier after variable declaration")
+		var declaredType DeclaredType
+		if p.match(colon) {
+			typeToken := p.consume(identifier, "Expected a type name after ':'")
+			switch typeToken.text {
+			case "Int":
+				declaredType = IntType{}
+			case "Float":
+				declaredType = FloatType{}
+			case "Str":
+				declaredType = StringType{}
+			case "Bool":
+				declaredType = BooleanType{}
+			default:
+				declaredType = CustomType{
+					Name: typeToken.text,
+				}
+			}
+		}
 		p.consume(equal, "Expected '=' after variable name")
 		value, err := p.parseExpression()
 		if err != nil {
@@ -141,6 +159,7 @@ func (p *parser) parseVariableDef() (*VariableDeclaration, error) {
 			Mutable: kind == mut,
 			Name:    name.text,
 			Value:   value,
+			Type:    declaredType,
 		}, nil
 	}
 	p.advance()
@@ -153,6 +172,22 @@ func (p *parser) parseExpression() (Expression, error) {
 			Value: p.previous().text,
 		}, nil
 	}
+	if p.match(string_) {
+		return &StrLiteral{
+			Value: p.previous().text,
+		}, nil
+	}
+	if p.match(true_, false_) {
+		return &BoolLiteral{
+			Value: p.previous().text == "true",
+		}, nil
+	}
+	if p.match(identifier) {
+		return &Identifier{
+			Name: p.previous().text,
+		}, nil
+	}
+	fmt.Printf("unmatched expression: %s\n", p.peek().kind)
 	return nil, nil
 }
 
