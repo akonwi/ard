@@ -78,91 +78,45 @@ func (p *parser) parseImport() (*Import, error) {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
-	return p.parseVariableDef()
-	// token := p.tokens[p.index]
-
-	// switch token.kind {
-	// // case let, mut:
-	// // 	return p.parseVariableDeclaration()
-	// // case if_:
-	// // 	return p.parseIfStatement()
-	// // case while_:
-	// // 	return p.parseWhileLoop()
-	// // case for_:
-	// // 	return p.parseForLoop()
-	// // case fn:
-	// // 	return p.parseFunctionDeclaration()
-	// // case struct_:
-	// // 	return p.parseStructDefinition()
-	// // case enum:
-	// // 	return p.parseEnumDefinition()
-	// // case impl:
-	// // 	return p.parseImplBlock()
-	// // case type_:
-	// // 	return p.parseTypeDeclaration()
-	// // case break_:
-	// // 	p.index++
-	// // 	return Break{}, nil
-	// // case slash_slash, slash_star:
-	// // 	return p.parseComment()
-	// // case identifier:
-	// // 	// Could be a variable assignment or function call
-	// // 	if p.peekNext().kind == equal || p.peekNext().kind == increment || p.peekNext().kind == decrement {
-	// // 		return p.parseAssignment()
-	// // 	}
-	// // 	// Otherwise treat as expression statement
-	// // 	expr, err := p.parseExpression()
-	// // 	if err != nil {
-	// // 		return nil, err
-	// // 	}
-	// // 	return expr, nil
-	// default:
-	// 	// Try parsing as expression statement
-	// 	// expr, err := p.parseExpression()
-	// 	// if err != nil {
-	// 	// 	return nil, err
-	// 	// }
-	// 	// return expr, nil
-	// 	return nil, nil
-	// }
+	if p.match(let, mut) {
+		return p.parseVariableDef()
+	}
+	return p.parseExpression()
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {
-	if p.match(let, mut) {
-		kind := p.tokens[p.index-1].kind
-		name := p.consume(identifier, "Expected identifier after variable declaration")
-		var declaredType DeclaredType
-		if p.match(colon) {
-			typeToken := p.consume(identifier, "Expected a type name after ':'")
-			switch typeToken.text {
-			case "Int":
-				declaredType = IntType{}
-			case "Float":
-				declaredType = FloatType{}
-			case "Str":
-				declaredType = StringType{}
-			case "Bool":
-				declaredType = BooleanType{}
-			default:
-				declaredType = CustomType{
-					Name: typeToken.text,
-				}
+	kind := p.tokens[p.index-1].kind
+	name := p.consume(identifier, "Expected identifier after variable declaration")
+	var declaredType DeclaredType
+	if p.match(colon) {
+		typeToken := p.consume(identifier, "Expected a type name after ':'")
+		switch typeToken.text {
+		case "Int":
+			declaredType = IntType{}
+		case "Float":
+			declaredType = FloatType{}
+		case "Str":
+			declaredType = StringType{}
+		case "Bool":
+			declaredType = BooleanType{}
+		default:
+			declaredType = CustomType{
+				Name: typeToken.text,
 			}
 		}
-		p.consume(equal, "Expected '=' after variable name")
-		value, err := p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-		p.match(new_line)
-		return &VariableDeclaration{
-			Mutable: kind == mut,
-			Name:    name.text,
-			Value:   value,
-			Type:    declaredType,
-		}, nil
 	}
-	return p.parseExpression()
+	p.consume(equal, "Expected '=' after variable name")
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	p.match(new_line)
+	return &VariableDeclaration{
+		Mutable: kind == mut,
+		Name:    name.text,
+		Value:   value,
+		Type:    declaredType,
+	}, nil
 }
 
 func (p *parser) parseExpression() (Expression, error) {
