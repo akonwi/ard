@@ -140,6 +140,22 @@ func (p *parser) parseExpression() (Expression, error) {
 			Name: p.previous().text,
 		}, nil
 	}
+	if p.match(minus, not) {
+		opToken := p.previous()
+		op := Minus
+		if opToken.kind == not {
+			op = Not
+		}
+
+		operand, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &UnaryExpression{
+			Operator: op,
+			Operand:  operand,
+		}, nil
+	}
 	fmt.Printf("unmatched expression: %s\n", p.peek().kind)
 	return nil, nil
 }

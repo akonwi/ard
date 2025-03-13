@@ -1,7 +1,5 @@
 package ast
 
-import "fmt"
-
 type kind string
 
 const (
@@ -95,149 +93,6 @@ type token struct {
 
 	// for strings with interpolated expressions
 	chunks []token
-}
-
-func toString(kind kind) string {
-	switch kind {
-	case space:
-		return " "
-	case new_line:
-		return "\n"
-	case left_paren:
-		return "("
-	case right_paren:
-		return ")"
-	case left_brace:
-		return "{"
-	case right_brace:
-		return "}"
-	case left_bracket:
-		return "["
-	case right_bracket:
-		return "]"
-	case colon:
-		return ":"
-	case semicolon:
-		return ";"
-	case comma:
-		return ","
-	case dot:
-		return "."
-	case dot_dot:
-		return ".."
-	case question_mark:
-		return "?"
-	case pipe:
-		return "|"
-	case double_quote:
-		return "\""
-	case single_quote:
-		return "'"
-	case backtick:
-		return "`"
-	case colon_colon:
-		return "::"
-	case bang:
-		return "!"
-	case greater_than:
-		return ">"
-	case less_than:
-		return "<"
-	case greater_than_equal:
-		return ">="
-	case less_than_equal:
-		return "<="
-	case equal:
-		return "="
-	case equal_equal:
-		return "=="
-	case bang_equal:
-		return "!="
-	case plus:
-		return "+"
-	case minus:
-		return "-"
-	case star:
-		return "*"
-	case slash:
-		return "/"
-	case slash_slash:
-		return "//"
-	case slash_star:
-		return "/*"
-	case star_slash:
-		return "*/"
-	case percent:
-		return "%"
-	case thin_arrow:
-		return "->"
-	case fat_arrow:
-		return "=>"
-	case increment:
-		return "=+"
-	case decrement:
-		return "=-"
-	case expr_open:
-		return "{{"
-	case expr_close:
-		return "}}"
-	case and:
-		return "and"
-	case not:
-		return "not"
-	case or:
-		return "or"
-	case true_:
-		return "true"
-	case false_:
-		return "false"
-	case struct_:
-		return "struct"
-	case enum:
-		return "enum"
-	case impl:
-		return "impl"
-	case fn:
-		return "fn"
-	case let:
-		return "let"
-	case mut:
-		return "mut"
-	case break_:
-		return "break"
-	case match:
-		return "match"
-	case while_:
-		return "while"
-	case for_:
-		return "for"
-	case use:
-		return "use"
-	case as:
-		return "as"
-	case in:
-		return "in"
-	case if_:
-		return "if"
-	case else_:
-		return "else"
-	case type_:
-		return "type"
-	case int_:
-		return "int"
-	case float:
-		return "float"
-	case bool_:
-		return "bool"
-	case str:
-		return "str"
-	case complex_string:
-		return "complex_string"
-	case eof:
-		return "EOF"
-	default:
-		panic(fmt.Errorf("missing String() for token kind: %v", kind))
-	}
 }
 
 type char struct {
@@ -580,9 +435,13 @@ func (l *lexer) takeIdentifier() token {
 	case "or":
 		return makeKeyword(or)
 	case "true":
-		return makeKeyword(true_)
+		k := makeKeyword(true_)
+		k.text = text
+		return k
 	case "false":
-		return makeKeyword(false_)
+		k := makeKeyword(false_)
+		k.text = text
+		return k
 	case "struct":
 		return makeKeyword(struct_)
 	case "enum":

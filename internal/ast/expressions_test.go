@@ -13,12 +13,12 @@ func TestUnaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "negative_number",
 						Mutable: false,
-						Value: UnaryExpression{
+						Value: &UnaryExpression{
 							Operator: Minus,
-							Operand: NumLiteral{
+							Operand: &NumLiteral{
 								Value: `30`,
 							}},
 					},
@@ -31,12 +31,12 @@ func TestUnaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "nope",
 						Mutable: false,
-						Value: UnaryExpression{
+						Value: &UnaryExpression{
 							Operator: Not,
-							Operand: BoolLiteral{
+							Operand: &BoolLiteral{
 								Value: true,
 							},
 						},
@@ -46,7 +46,7 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
 
 func TestBinaryExpressions(t *testing.T) {

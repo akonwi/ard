@@ -546,13 +546,13 @@ func TestLexing(t *testing.T) {
 					{kind: string_, line: 2, column: 32, text: "John"},
 				}},
 				{kind: colon, line: 2, column: 38},
-				{kind: true_, line: 2, column: 40},
+				{kind: true_, line: 2, column: 40, text: "true"},
 				{kind: comma, line: 2, column: 44},
 				{kind: complex_string, line: 2, column: 46, chunks: []token{
 					{kind: string_, line: 2, column: 46, text: "Jane"},
 				}},
 				{kind: colon, line: 2, column: 52},
-				{kind: false_, line: 2, column: 54},
+				{kind: false_, line: 2, column: 54, text: "false"},
 				{kind: comma, line: 2, column: 59},
 				{kind: right_bracket, line: 2, column: 60},
 
@@ -654,14 +654,14 @@ func TestLexing(t *testing.T) {
 				"true or false",
 			}, "\n"),
 			want: []token{
-				{kind: true_, line: 1, column: 1},
+				{kind: true_, line: 1, column: 1, text: "true"},
 				{kind: and, line: 1, column: 6},
-				{kind: false_, line: 1, column: 10},
+				{kind: false_, line: 1, column: 10, text: "false"},
 				{kind: new_line, line: 1, column: 15},
 
-				{kind: true_, line: 2, column: 1},
+				{kind: true_, line: 2, column: 1, text: "true"},
 				{kind: or, line: 2, column: 6},
-				{kind: false_, line: 2, column: 9},
+				{kind: false_, line: 2, column: 9, text: "false"},
 
 				{kind: eof},
 			},
@@ -862,7 +862,7 @@ func TestLexing(t *testing.T) {
 					{kind: string_, line: 3, column: 17, text: "key"},
 				}},
 				{kind: comma, line: 3, column: 22},
-				{kind: true_, line: 3, column: 24},
+				{kind: true_, line: 3, column: 24, text: "true"},
 				{kind: right_paren, line: 3, column: 28},
 				{kind: new_line, line: 3, column: 29},
 
@@ -947,7 +947,7 @@ func TestLexing(t *testing.T) {
 				{kind: comma, line: 7, column: 42},
 				{kind: identifier, line: 7, column: 44, text: "employed"},
 				{kind: colon, line: 7, column: 52},
-				{kind: true_, line: 7, column: 54},
+				{kind: true_, line: 7, column: 54, text: "true"},
 				{kind: right_brace, line: 7, column: 59},
 				{kind: new_line, line: 7, column: 60},
 
@@ -979,7 +979,7 @@ func TestLexing(t *testing.T) {
 				{kind: comma, line: 10, column: 41},
 				{kind: identifier, line: 10, column: 43, text: "employed"},
 				{kind: colon, line: 10, column: 51},
-				{kind: true_, line: 10, column: 53},
+				{kind: true_, line: 10, column: 53, text: "true"},
 				{kind: right_brace, line: 10, column: 58},
 				{kind: new_line, line: 10, column: 59},
 
