@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -38,15 +39,15 @@ func (p *parser) parse() (*Program, error) {
 	}
 
 	// Parse statements
-	// for p.index < len(p.tokens) && p.tokens[p.index].kind != eof {
-	// 	stmt, err := p.parseStatement()
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	if stmt != nil {
-	// 		program.Statements = append(program.Statements, stmt)
-	// 	}
-	// }
+	for !p.isAtEnd() {
+		stmt, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		if stmt != nil {
+			program.Statements = append(program.Statements, stmt)
+		}
+	}
 
 	return program, nil
 }
@@ -77,52 +78,82 @@ func (p *parser) parseImport() (*Import, error) {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
-	token := p.tokens[p.index]
+	return p.parseVariableDef()
+	// token := p.tokens[p.index]
 
-	switch token.kind {
-	// case let, mut:
-	// 	return p.parseVariableDeclaration()
-	// case if_:
-	// 	return p.parseIfStatement()
-	// case while_:
-	// 	return p.parseWhileLoop()
-	// case for_:
-	// 	return p.parseForLoop()
-	// case fn:
-	// 	return p.parseFunctionDeclaration()
-	// case struct_:
-	// 	return p.parseStructDefinition()
-	// case enum:
-	// 	return p.parseEnumDefinition()
-	// case impl:
-	// 	return p.parseImplBlock()
-	// case type_:
-	// 	return p.parseTypeDeclaration()
-	// case break_:
-	// 	p.index++
-	// 	return Break{}, nil
-	// case slash_slash, slash_star:
-	// 	return p.parseComment()
-	// case identifier:
-	// 	// Could be a variable assignment or function call
-	// 	if p.peekNext().kind == equal || p.peekNext().kind == increment || p.peekNext().kind == decrement {
-	// 		return p.parseAssignment()
-	// 	}
-	// 	// Otherwise treat as expression statement
-	// 	expr, err := p.parseExpression()
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	return expr, nil
-	default:
-		// Try parsing as expression statement
-		// expr, err := p.parseExpression()
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// return expr, nil
-		return nil, nil
+	// switch token.kind {
+	// // case let, mut:
+	// // 	return p.parseVariableDeclaration()
+	// // case if_:
+	// // 	return p.parseIfStatement()
+	// // case while_:
+	// // 	return p.parseWhileLoop()
+	// // case for_:
+	// // 	return p.parseForLoop()
+	// // case fn:
+	// // 	return p.parseFunctionDeclaration()
+	// // case struct_:
+	// // 	return p.parseStructDefinition()
+	// // case enum:
+	// // 	return p.parseEnumDefinition()
+	// // case impl:
+	// // 	return p.parseImplBlock()
+	// // case type_:
+	// // 	return p.parseTypeDeclaration()
+	// // case break_:
+	// // 	p.index++
+	// // 	return Break{}, nil
+	// // case slash_slash, slash_star:
+	// // 	return p.parseComment()
+	// // case identifier:
+	// // 	// Could be a variable assignment or function call
+	// // 	if p.peekNext().kind == equal || p.peekNext().kind == increment || p.peekNext().kind == decrement {
+	// // 		return p.parseAssignment()
+	// // 	}
+	// // 	// Otherwise treat as expression statement
+	// // 	expr, err := p.parseExpression()
+	// // 	if err != nil {
+	// // 		return nil, err
+	// // 	}
+	// // 	return expr, nil
+	// default:
+	// 	// Try parsing as expression statement
+	// 	// expr, err := p.parseExpression()
+	// 	// if err != nil {
+	// 	// 	return nil, err
+	// 	// }
+	// 	// return expr, nil
+	// 	return nil, nil
+	// }
+}
+
+func (p *parser) parseVariableDef() (*VariableDeclaration, error) {
+	if p.match(let, mut) {
+		kind := p.tokens[p.index-1].kind
+		name := p.consume(identifier, "Expected identifier after variable declaration")
+		p.consume(equal, "Expected '=' after variable name")
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		p.match(new_line)
+		return &VariableDeclaration{
+			Mutable: kind == mut,
+			Name:    name.text,
+			Value:   value,
+		}, nil
 	}
+	p.advance()
+	return nil, nil
+}
+
+func (p *parser) parseExpression() (Expression, error) {
+	if p.match(number) {
+		return &NumLiteral{
+			Value: p.previous().text,
+		}, nil
+	}
+	return nil, nil
 }
 
 func (p *parser) advance() token {
@@ -146,12 +177,12 @@ func (p *parser) consume(kind kind, message string) token {
 }
 
 /* conditionally advance if the current token is the provided kind */
-func (p *parser) match(kind kind) bool {
-	if c := p.peek(); c.kind != kind {
-		return false
+func (p *parser) match(kinds ...kind) bool {
+	if slices.Contains(kinds, p.peek().kind) {
+		p.advance()
+		return true
 	}
-	p.advance()
-	return true
+	return false
 }
 
 func (p *parser) peek() *token {
@@ -159,6 +190,13 @@ func (p *parser) peek() *token {
 		return nil
 	}
 	return &p.tokens[p.index]
+}
+
+func (p *parser) previous() *token {
+	if p.index == 0 {
+		return nil
+	}
+	return &p.tokens[p.index-1]
 }
 
 func (p *parser) isAtEnd() bool {

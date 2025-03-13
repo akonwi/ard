@@ -104,12 +104,10 @@ func runTestsV2(t *testing.T, tests []test) {
 				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
 			}
 
-			// if len(tt.output.Imports) > 0 || len(tt.output.Statements) > 0 {
 			diff := cmp.Diff(&tt.output, ast, compareOptions)
 			if diff != "" {
 				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
 			}
-			// }
 		})
 	}
 }
@@ -159,6 +157,27 @@ func TestImportStatements(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestVariableDeclarations(t *testing.T) {
+	tests := []test{
+		{
+			name:  "declaring variables",
+			input: `let count = 10`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Mutable: false,
+						Name:    "count",
+						Value:   &NumLiteral{Value: "10"},
+					},
+				},
+			},
+		},
+	}
+
+	runTestsV2(t, tests)
 }
 
 func TestIdentifiers(t *testing.T) {
