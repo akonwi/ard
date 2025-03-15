@@ -81,6 +81,14 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
+	if p.match(fn) {
+		def, err := p.functionDef()
+		if err != nil {
+			return nil, err
+		}
+		p.match(new_line)
+		return def, nil
+	}
 	return p.expressionStatement()
 }
 
@@ -117,6 +125,64 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		Value:   value,
 		Type:    declaredType,
 	}, nil
+}
+
+func (p *parser) functionDef() (Statement, error) {
+	nameToken := p.consume(identifier, "Expected function name after 'fn'")
+	p.consume(left_paren, "Expected parameters list after function name")
+	params := []Parameter{}
+	for !p.match(right_paren) {
+		isMutable := p.match(mut)
+		nameToken := p.consume(identifier, "Expected parameter name")
+		p.consume(colon, "Expected ':' after parameter name")
+		paramType := p.parseType()
+		params = append(params, Parameter{
+			Mutable: isMutable,
+			Name:    nameToken.text,
+			Type:    paramType,
+		})
+		p.match(comma)
+	}
+	returnType := p.parseType()
+
+	p.consume(left_brace, "Expected function body")
+	statements := []Statement{}
+	for !p.check(right_brace) {
+		stmt, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, stmt)
+	}
+
+	p.consume(right_brace, "Unclosed function body")
+
+	return &FunctionDeclaration{
+		Name:       nameToken.text,
+		Parameters: params,
+		ReturnType: returnType,
+		Body:       statements,
+	}, nil
+}
+
+func (p *parser) parseType() DeclaredType {
+	if p.match(identifier) {
+		switch p.previous().text {
+		case "Int":
+			return IntType{}
+		case "Float":
+			return FloatType{}
+		case "Str":
+			return StringType{}
+		case "Bool":
+			return BooleanType{}
+		default:
+			return CustomType{
+				Name: p.previous().text,
+			}
+		}
+	}
+	return nil
 }
 
 func (p *parser) expressionStatement() (Statement, error) {

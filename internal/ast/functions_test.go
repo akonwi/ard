@@ -12,7 +12,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name:       "empty",
 						Parameters: []Parameter{},
 						Body:       []Statement{},
@@ -26,12 +26,12 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name:       "get_msg",
 						Parameters: []Parameter{},
 						Body: []Statement{
-							StrLiteral{
-								Value: `"Hello, world!"`,
+							&StrLiteral{
+								Value: "Hello, world!",
 							},
 						},
 					},
@@ -44,7 +44,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{
@@ -54,7 +54,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						},
 						ReturnType: StringType{},
 						Body: []Statement{
-							StrLiteral{Value: `"hello"`},
+							&StrLiteral{Value: "hello"},
 						},
 					},
 				},
@@ -66,7 +66,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
 							{
@@ -80,7 +80,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						},
 						ReturnType: IntType{},
 						Body: []Statement{
-							NumLiteral{Value: "10"},
+							&NumLiteral{Value: "10"},
 						},
 					},
 				},
@@ -92,7 +92,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{
@@ -109,7 +109,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
 
 func TestFunctionCalls(t *testing.T) {
