@@ -316,9 +316,78 @@ func (p *parser) unary() (Expression, error) {
 				Operand:  operand,
 			}, nil
 		}
-
 	}
-	return p.primary()
+	return p.memberAccess()
+}
+
+func (p *parser) memberAccess() (Expression, error) {
+	expr, err := p.primary()
+	if err != nil {
+		return nil, err
+	}
+	for p.match(dot, colon_colon) {
+		if p.previous().kind == dot {
+			call, err := p.call()
+			if err != nil {
+				return nil, err
+			}
+
+			switch prop := call.(type) {
+			case *Identifier:
+				expr = &InstanceProperty{
+					Target:   expr,
+					Property: *prop,
+				}
+			case *FunctionCall:
+				expr = &InstanceMethod{
+					Target: expr,
+					Method: *prop,
+				}
+			}
+		} else {
+			call, err := p.call()
+			if err != nil {
+				return nil, err
+			}
+
+			switch prop := call.(type) {
+			case *Identifier:
+				expr = &StaticProperty{
+					Target:   expr,
+					Property: *prop,
+				}
+			case *FunctionCall:
+				expr = &StaticFunction{
+					Target:   expr,
+					Function: *prop,
+				}
+			}
+		}
+	}
+	return expr, nil
+}
+
+func (p *parser) call() (Expression, error) {
+	name := p.consume(identifier, "Expected identifier after '.'")
+	if p.match(left_paren) {
+		args := []Expression{}
+		for !p.check(right_paren) {
+			arg, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+		}
+		p.consume(right_paren, "Unclosed function call")
+		return &FunctionCall{
+			Name: name.text,
+			Args: args,
+		}, nil
+	}
+
+	return &Identifier{
+		Name: name.text,
+	}, nil
 }
 
 func (p *parser) primary() (Expression, error) {
@@ -409,6 +478,10 @@ func (p *parser) match(kinds ...kind) bool {
 		return true
 	}
 	return false
+}
+
+func (p *parser) check(kind kind) bool {
+	return p.peek().kind == kind
 }
 
 func (p *parser) peek() *token {

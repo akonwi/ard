@@ -427,7 +427,7 @@ func TestParenthesizedExpressions(t *testing.T) {
 }
 
 func TestMemberAccess(t *testing.T) {
-	runTests(t, []test{
+	runTestsV2(t, []test{
 		{
 			name: "Accessing instance members",
 			input: strings.Join([]string{
@@ -440,48 +440,48 @@ func TestMemberAccess(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					InstanceProperty{
-						Target: StrLiteral{
-							Value: `"string"`,
+					&InstanceProperty{
+						Target: &StrLiteral{
+							Value: "string",
 						},
 						Property: Identifier{
 							Name: "size",
 						},
 					},
-					InstanceMethod{
-						Target: StrLiteral{
-							Value: `"string"`,
+					&InstanceMethod{
+						Target: &StrLiteral{
+							Value: "string",
 						},
 						Method: FunctionCall{
 							Name: "at",
-							Args: []Expression{NumLiteral{Value: "0"}},
+							Args: []Expression{&NumLiteral{Value: "0"}},
 						},
 					},
-					InstanceProperty{
-						Target: Identifier{
+					&InstanceProperty{
+						Target: &Identifier{
 							Name: "some_string",
 						},
 						Property: Identifier{
 							Name: "size",
 						},
 					},
-					InstanceMethod{
-						Target: Identifier{
+					&InstanceMethod{
+						Target: &Identifier{
 							Name: "some_string",
 						},
 						Method: FunctionCall{
 							Name: "at",
-							Args: []Expression{NumLiteral{Value: "0"}},
+							Args: []Expression{&NumLiteral{Value: "0"}},
 						},
 					},
-					InstanceProperty{
-						Target: InstanceMethod{
-							Target: Identifier{
+					&InstanceProperty{
+						Target: &InstanceMethod{
+							Target: &Identifier{
 								Name: "name",
 							},
 							Method: FunctionCall{
 								Name: "take",
-								Args: []Expression{NumLiteral{Value: "3"}},
+								Args: []Expression{&NumLiteral{Value: "3"}},
 							},
 						},
 						Property: Identifier{Name: "size"},
@@ -495,8 +495,8 @@ func TestMemberAccess(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					StaticProperty{
-						Target:   Identifier{Name: "Color"},
+					&StaticProperty{
+						Target:   &Identifier{Name: "Color"},
 						Property: Identifier{Name: "blue"},
 					},
 				},
