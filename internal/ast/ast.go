@@ -243,7 +243,7 @@ type FunctionDeclaration struct {
 }
 
 func (f FunctionDeclaration) String() string {
-	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType)
+	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType.GetName())
 }
 
 type AnonymousFunction struct {

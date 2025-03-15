@@ -40,6 +40,9 @@ func (p *parser) parse() (*Program, error) {
 
 	// Parse statements
 	for !p.isAtEnd() {
+		if p.match(new_line) {
+			continue
+		}
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -387,7 +390,7 @@ func (p *parser) unary() (Expression, error) {
 }
 
 func (p *parser) memberAccess() (Expression, error) {
-	expr, err := p.primary()
+	expr, err := p.call()
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +437,13 @@ func (p *parser) memberAccess() (Expression, error) {
 }
 
 func (p *parser) call() (Expression, error) {
-	name := p.consume(identifier, "Expected identifier after '.'")
+	expr, err := p.primary()
+	if err != nil {
+		return nil, err
+	}
+
+	// todo: to support chaining, wrap in for loop
+	// ex: foo()()()
 	if p.match(left_paren) {
 		args := []Expression{}
 		for !p.check(right_paren) {
@@ -443,17 +452,16 @@ func (p *parser) call() (Expression, error) {
 				return nil, err
 			}
 			args = append(args, arg)
+			p.match(comma)
 		}
 		p.consume(right_paren, "Unclosed function call")
 		return &FunctionCall{
-			Name: name.text,
+			Name: expr.(*Identifier).Name,
 			Args: args,
 		}, nil
 	}
 
-	return &Identifier{
-		Name: name.text,
-	}, nil
+	return expr, nil
 }
 
 func (p *parser) primary() (Expression, error) {

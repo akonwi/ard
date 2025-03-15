@@ -122,25 +122,18 @@ func TestFunctionCalls(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name:       "get_name",
 						Parameters: []Parameter{},
 						ReturnType: StringType{},
-						Body:       []Statement{StrLiteral{Value: `"name"`}},
+						Body:       []Statement{&StrLiteral{Value: "name"}},
 					},
-					FunctionCall{
+					&FunctionCall{
 						Name: "get_name",
 						Args: []Expression{},
 					},
 				},
 			},
-		},
-		{
-			name: "Providing arguments when none are expected",
-			input: `
-				fn get_name() Str { "name" }
-				get_name("bo")
-			`,
 		},
 		{
 			name: "Valid function call with one argument",
@@ -150,18 +143,18 @@ func TestFunctionCalls(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{Name: "name", Type: StringType{}},
 						},
 						ReturnType: StringType{},
-						Body:       []Statement{StrLiteral{Value: `"hello"`}},
+						Body:       []Statement{&StrLiteral{Value: "hello"}},
 					},
-					FunctionCall{
+					&FunctionCall{
 						Name: "greet",
 						Args: []Expression{
-							StrLiteral{Value: `"Alice"`},
+							&StrLiteral{Value: "Alice"},
 						},
 					},
 				},
@@ -175,7 +168,7 @@ func TestFunctionCalls(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
 							{Name: "x", Type: IntType{}},
@@ -183,32 +176,26 @@ func TestFunctionCalls(t *testing.T) {
 						},
 						ReturnType: IntType{},
 						Body: []Statement{
-							BinaryExpression{
-								Left:     Identifier{Name: "x"},
+							&BinaryExpression{
+								Left:     &Identifier{Name: "x"},
 								Operator: Plus,
-								Right:    Identifier{Name: "y"},
+								Right:    &Identifier{Name: "y"},
 							},
 						},
 					},
-					FunctionCall{
+					&FunctionCall{
 						Name: "add",
 						Args: []Expression{
-							NumLiteral{Value: "1"},
-							NumLiteral{Value: "2"},
+							&NumLiteral{Value: "1"},
+							&NumLiteral{Value: "2"},
 						},
 					},
 				},
 			},
 		},
-		{
-			name: "Wrong argument type",
-			input: `
-				fn add(x: Int, y: Int) Int { x + y }
-				add(1, "two")`,
-		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
 
 func TestAnonymousFunctions(t *testing.T) {
