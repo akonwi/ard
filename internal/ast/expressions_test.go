@@ -380,25 +380,23 @@ func TestBinaryExpressions(t *testing.T) {
 func TestParenthesizedExpressions(t *testing.T) {
 	tests := []test{
 		{
-			name:  "Valid parenthesized expression",
+			name:  "Parenthesized expression",
 			input: `(30 + 20) * 2`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						HasPrecedence: false,
-						Operator:      Multiply,
-						Left: BinaryExpression{
-							HasPrecedence: true,
-							Operator:      Plus,
-							Left: NumLiteral{
+					&BinaryExpression{
+						Operator: Multiply,
+						Left: &BinaryExpression{
+							Operator: Plus,
+							Left: &NumLiteral{
 								Value: `30`,
 							},
-							Right: NumLiteral{
+							Right: &NumLiteral{
 								Value: `20`,
 							},
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `2`,
 						},
 					},
@@ -406,12 +404,26 @@ func TestParenthesizedExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "Invalid parenthesized expression",
-			input: `30 + (20 * "fizz")`,
+			name:  "Multiplication precedence",
+			input: `30 + 20 * x`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Plus,
+						Left:     &NumLiteral{Value: `30`},
+						Right: &BinaryExpression{
+							Operator: Multiply,
+							Left:     &NumLiteral{Value: `20`},
+							Right:    &Identifier{Name: "x"},
+						},
+					},
+				},
+			},
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
 
 func TestMemberAccess(t *testing.T) {

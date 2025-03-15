@@ -462,8 +462,9 @@ func (u UnaryExpression) String() string {
 
 type BinaryExpression struct {
 	BaseNode
-	Operator      Operator
-	Left, Right   Expression
+	Operator    Operator
+	Left, Right Expression
+	// todo: drop this field
 	HasPrecedence bool
 }
 
