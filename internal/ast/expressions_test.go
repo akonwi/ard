@@ -57,15 +57,15 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Plus,
-						Left: UnaryExpression{
+						Left: &UnaryExpression{
 							Operator: Minus,
-							Operand: NumLiteral{
+							Operand: &NumLiteral{
 								Value: `30`,
 							},
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: "20",
 						},
 					},
@@ -78,12 +78,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Minus,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -96,12 +96,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Divide,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `6`,
 						},
 					},
@@ -114,12 +114,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Multiply,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `10`,
 						},
 					},
@@ -132,12 +132,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Modulo,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `3`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `9`,
 						},
 					},
@@ -150,12 +150,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: GreaterThan,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -168,12 +168,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: LessThan,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -186,12 +186,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: LessThanOrEqual,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -204,13 +204,13 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Equal,
-						Left: StrLiteral{
-							Value: `"Joe"`,
+						Left: &StrLiteral{
+							Value: "Joe",
 						},
-						Right: StrLiteral{
-							Value: `"Joe"`,
+						Right: &StrLiteral{
+							Value: "Joe",
 						},
 					},
 				},
@@ -222,12 +222,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Equal,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `1`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `1`,
 						},
 					},
@@ -240,12 +240,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Equal,
-						Left: BoolLiteral{
+						Left: &BoolLiteral{
 							Value: true,
 						},
-						Right: BoolLiteral{
+						Right: &BoolLiteral{
 							Value: false,
 						},
 					},
@@ -253,38 +253,43 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 
-		// Test cases for the '!=' operator
+		// Test cases for not (foo == bar)
 		{
 			name:  "Valid string inequality checks",
-			input: `"Joe" != "Joe"`,
+			input: `not "Joe" == "Joe"`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: StrLiteral{
-							Value: `"Joe"`,
-						},
-						Right: StrLiteral{
-							Value: `"Joe"`,
-						},
-					},
+					&UnaryExpression{
+						Operator: Not,
+						Operand: &BinaryExpression{
+							Operator: Equal,
+							Left: &StrLiteral{
+								Value: "Joe",
+							},
+							Right: &StrLiteral{
+								Value: "Joe",
+							},
+						}},
 				},
 			},
 		},
 		{
 			name:  "Valid number inequality checks",
-			input: `1 != 1`,
+			input: `not 1 == 1`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: NumLiteral{
-							Value: `1`,
-						},
-						Right: NumLiteral{
-							Value: `1`,
+					&UnaryExpression{
+						Operator: Not,
+						Operand: &BinaryExpression{
+							Operator: Equal,
+							Left: &NumLiteral{
+								Value: `1`,
+							},
+							Right: &NumLiteral{
+								Value: `1`,
+							},
 						},
 					},
 				},
@@ -292,17 +297,20 @@ func TestBinaryExpressions(t *testing.T) {
 		},
 		{
 			name:  "Valid boolean inequality checks",
-			input: `true != false`,
+			input: `not true == false`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: BoolLiteral{
-							Value: true,
-						},
-						Right: BoolLiteral{
-							Value: false,
+					&UnaryExpression{
+						Operator: Not,
+						Operand: &BinaryExpression{
+							Operator: Equal,
+							Left: &BoolLiteral{
+								Value: true,
+							},
+							Right: &BoolLiteral{
+								Value: false,
+							},
 						},
 					},
 				},
@@ -315,12 +323,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: And,
-						Left: BoolLiteral{
+						Left: &BoolLiteral{
 							Value: true,
 						},
-						Right: BoolLiteral{
+						Right: &BoolLiteral{
 							Value: false,
 						},
 					},
@@ -333,12 +341,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Or,
-						Left: BoolLiteral{
+						Left: &BoolLiteral{
 							Value: true,
 						},
-						Right: BoolLiteral{
+						Right: &BoolLiteral{
 							Value: false,
 						},
 					},
@@ -353,11 +361,11 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					RangeExpression{
-						Start: NumLiteral{
+					&RangeExpression{
+						Start: &NumLiteral{
 							Value: `1`,
 						},
-						End: NumLiteral{
+						End: &NumLiteral{
 							Value: `10`,
 						},
 					},
@@ -366,7 +374,7 @@ func TestBinaryExpressions(t *testing.T) {
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
 
 func TestParenthesizedExpressions(t *testing.T) {

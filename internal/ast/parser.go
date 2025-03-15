@@ -81,7 +81,7 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
-	return p.parseExpression()
+	return p.expressionStatement()
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {
@@ -119,11 +119,216 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	}, nil
 }
 
+func (p *parser) expressionStatement() (Statement, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	p.match(new_line)
+	return expr, nil
+}
+
 func (p *parser) parseExpression() (Expression, error) {
+	return p.iterRange()
+}
+
+func (p *parser) iterRange() (Expression, error) {
+	start, err := p.or()
+	if err != nil {
+		return nil, err
+	}
+
+	if p.match(dot_dot) {
+		end, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+
+		return &RangeExpression{
+			Start: start,
+			End:   end,
+		}, nil
+	}
+
+	return start, nil
+}
+
+func (p *parser) or() (Expression, error) {
+	left, err := p.and()
+	if err != nil {
+		return nil, err
+	}
+
+	if p.match(or) {
+		right, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		return &BinaryExpression{
+			Operator: Or,
+			Left:     left,
+			Right:    right,
+		}, nil
+	}
+	return left, nil
+}
+
+func (p *parser) and() (Expression, error) {
+	left, err := p.comparison()
+	if err != nil {
+		return nil, err
+	}
+	if p.match(and) {
+		right, err := p.and()
+		if err != nil {
+			return nil, err
+		}
+		return &BinaryExpression{
+			Operator: And,
+			Left:     left,
+			Right:    right,
+		}, nil
+	}
+	return left, nil
+}
+
+func (p *parser) comparison() (Expression, error) {
+	left, err := p.modulo()
+	if err != nil {
+		return nil, err
+	}
+	for p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
+		opToken := p.previous()
+		var operator Operator
+		switch opToken.kind {
+		case greater_than:
+			operator = GreaterThan
+		case greater_than_equal:
+			operator = GreaterThanOrEqual
+		case less_than:
+			operator = LessThan
+		case less_than_equal:
+			operator = LessThanOrEqual
+		case equal_equal:
+			operator = Equal
+		}
+		right, err := p.modulo()
+		if err != nil {
+			return nil, err
+		}
+		left = &BinaryExpression{
+			Operator: operator,
+			Left:     left,
+			Right:    right,
+		}
+	}
+	return left, nil
+}
+
+func (p *parser) modulo() (Expression, error) {
+	left, err := p.addition()
+	if err != nil {
+		return nil, err
+	}
+	if p.match(percent) {
+		right, err := p.addition()
+		if err != nil {
+			return nil, err
+		}
+		return &BinaryExpression{
+			Operator: Modulo,
+			Left:     left,
+			Right:    right,
+		}, nil
+	}
+	return left, nil
+}
+
+func (p *parser) addition() (Expression, error) {
+	left, err := p.multiplication()
+	if err != nil {
+		return nil, err
+	}
+
+	for p.match(plus, minus) {
+		opToken := p.previous()
+		operator := Plus
+		if opToken.kind == minus {
+			operator = Minus
+		}
+		right, err := p.multiplication()
+		if err != nil {
+			return nil, err
+		}
+		left = &BinaryExpression{
+			Operator: operator,
+			Left:     left,
+			Right:    right,
+		}
+	}
+	return left, nil
+}
+
+func (p *parser) multiplication() (Expression, error) {
+	left, err := p.unary()
+	if err != nil {
+		return nil, err
+	}
+	for p.match(star, slash) {
+		opToken := p.previous()
+		operator := Multiply
+		if opToken.kind == slash {
+			operator = Divide
+		}
+
+		right, err := p.unary()
+		if err != nil {
+			return nil, err
+		}
+		left = &BinaryExpression{
+			Operator: operator,
+			Left:     left,
+			Right:    right,
+		}
+	}
+	return left, nil
+}
+
+func (p *parser) unary() (Expression, error) {
+	if p.match(minus, not) {
+		opToken := p.previous()
+		if opToken.kind == not {
+			operand, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			return &UnaryExpression{
+				Operator: Not,
+				Operand:  operand,
+			}, nil
+		} else {
+			operand, err := p.unary()
+			if err != nil {
+				return nil, err
+			}
+			return &UnaryExpression{
+				Operator: Minus,
+				Operand:  operand,
+			}, nil
+		}
+
+	}
+	return p.primary()
+}
+
+func (p *parser) primary() (Expression, error) {
 	if p.match(number) {
 		return &NumLiteral{
 			Value: p.previous().text,
 		}, nil
+	}
+	if p.match(complex_string) {
+		return p.interpolatedString()
 	}
 	if p.match(string_) {
 		return &StrLiteral{
@@ -140,24 +345,41 @@ func (p *parser) parseExpression() (Expression, error) {
 			Name: p.previous().text,
 		}, nil
 	}
-	if p.match(minus, not) {
-		opToken := p.previous()
-		op := Minus
-		if opToken.kind == not {
-			op = Not
-		}
-
-		operand, err := p.parseExpression()
+	if p.match(left_paren) {
+		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpression{
-			Operator: op,
-			Operand:  operand,
-		}, nil
+		p.consume(right_paren, "Expected ')' after expression")
+		return expr, nil
 	}
-	fmt.Printf("unmatched expression: %s\n", p.peek().kind)
-	return nil, nil
+	panic(fmt.Errorf("unmatched primary expression: %s", p.peek().kind))
+}
+
+func (p *parser) interpolatedString() (Expression, error) {
+	chunks := []Expression{}
+	tok := p.previous()
+	for i := range tok.chunks {
+		chunk := tok.chunks[i]
+		if chunk.kind == string_ {
+			chunks = append(chunks, &StrLiteral{
+				Value: chunk.text,
+			})
+		} else {
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, expr)
+		}
+	}
+
+	if len(chunks) == 1 {
+		return chunks[0], nil
+	}
+	return &InterpolatedStr{
+		Chunks: chunks,
+	}, nil
 }
 
 func (p *parser) advance() token {
