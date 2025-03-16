@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestListLiterals(t *testing.T) {
+	runTestsV2(t, []test{
+		{
+			name:  "Empty list",
+			input: "[]",
+			output: Program{
+				Imports:    []Import{},
+				Statements: []Statement{&ListLiteral{Items: []Expression{}}},
+			},
+		},
+		{
+			name:  "List with items",
+			input: "[1,2,3,]",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ListLiteral{Items: []Expression{
+						&NumLiteral{Value: "1"},
+						&NumLiteral{Value: "2"},
+						&NumLiteral{Value: "3"},
+					}},
+				},
+			},
+		},
+	})
+}
+
 func TestUnaryExpressions(t *testing.T) {
 	tests := []test{
 		{

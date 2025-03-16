@@ -303,15 +303,6 @@ func (p *parser) parseType() DeclaredType {
 	return nil
 }
 
-func (p *parser) expressionStatement() (Statement, error) {
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	p.match(new_line)
-	return expr, nil
-}
-
 func (p *parser) functionDef() (Statement, error) {
 	if p.match(fn) {
 		name := ""
@@ -664,7 +655,23 @@ func (p *parser) primary() (Expression, error) {
 		p.consume(right_paren, "Expected ')' after expression")
 		return expr, nil
 	}
+	if p.match(left_bracket) {
+		return p.list()
+	}
 	panic(fmt.Errorf("unmatched primary expression: %s", p.peek().kind))
+}
+
+func (p *parser) list() (Expression, error) {
+	items := []Expression{}
+	for !p.match(right_bracket) {
+		item, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+		p.match(comma)
+	}
+	return &ListLiteral{Items: items}, nil
 }
 
 func (p *parser) interpolatedString() (Expression, error) {
