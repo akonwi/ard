@@ -56,7 +56,8 @@ func TestVariables(t *testing.T) {
 			input: `
 				name = "Bob"
 				age =+ 1
-				age =- 2`,
+				age =- 2
+				bob.age = 30`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -87,6 +88,16 @@ func TestVariables(t *testing.T) {
 							Right: &NumLiteral{
 								Value: "2",
 							},
+						},
+					},
+					&VariableAssignment{
+						Target: &InstanceProperty{
+							Target:   &Identifier{Name: "bob"},
+							Property: Identifier{Name: "age"},
+						},
+						Operator: Assign,
+						Value: &NumLiteral{
+							Value: "30",
 						},
 					},
 				},
