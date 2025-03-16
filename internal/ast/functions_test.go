@@ -202,14 +202,14 @@ func TestAnonymousFunctions(t *testing.T) {
 	tests := []test{
 		{
 			name:  "Anonymous function",
-			input: `() { "Hello, world!" }`,
+			input: `fn() { "Hello, world!" }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					AnonymousFunction{
+					&AnonymousFunction{
 						Parameters: []Parameter{},
 						Body: []Statement{
-							StrLiteral{Value: `"Hello, world!"`},
+							&StrLiteral{Value: "Hello, world!"},
 						},
 					},
 				},
@@ -217,16 +217,16 @@ func TestAnonymousFunctions(t *testing.T) {
 		},
 		{
 			name:  "Anonymous function with a parameter",
-			input: `(name: Str) { "Hello, name!" }`,
+			input: `fn(name: Str) { "Hello, name!" }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					AnonymousFunction{
+					&AnonymousFunction{
 						Parameters: []Parameter{
 							{Name: "name", Type: StringType{}},
 						},
 						Body: []Statement{
-							StrLiteral{Value: `"Hello, name!"`},
+							&StrLiteral{Value: "Hello, name!"},
 						},
 					},
 				},
@@ -234,16 +234,16 @@ func TestAnonymousFunctions(t *testing.T) {
 		},
 		{
 			name:  "Anonymous function with a parameter",
-			input: `(name: Str) { "Hello, name!" }`,
+			input: `fn(name: Str) { "Hello, name!" }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					AnonymousFunction{
+					&AnonymousFunction{
 						Parameters: []Parameter{
 							{Name: "name", Type: StringType{}},
 						},
 						Body: []Statement{
-							StrLiteral{Value: `"Hello, name!"`},
+							&StrLiteral{Value: "Hello, name!"},
 						},
 					},
 				},
@@ -251,5 +251,5 @@ func TestAnonymousFunctions(t *testing.T) {
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }

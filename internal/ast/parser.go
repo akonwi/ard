@@ -84,14 +84,6 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
-	if p.match(fn) {
-		def, err := p.functionDef()
-		if err != nil {
-			return nil, err
-		}
-		p.match(new_line)
-		return def, nil
-	}
 	return p.expressionStatement()
 }
 
@@ -130,44 +122,6 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	}, nil
 }
 
-func (p *parser) functionDef() (Statement, error) {
-	nameToken := p.consume(identifier, "Expected function name after 'fn'")
-	p.consume(left_paren, "Expected parameters list after function name")
-	params := []Parameter{}
-	for !p.match(right_paren) {
-		isMutable := p.match(mut)
-		nameToken := p.consume(identifier, "Expected parameter name")
-		p.consume(colon, "Expected ':' after parameter name")
-		paramType := p.parseType()
-		params = append(params, Parameter{
-			Mutable: isMutable,
-			Name:    nameToken.text,
-			Type:    paramType,
-		})
-		p.match(comma)
-	}
-	returnType := p.parseType()
-
-	p.consume(left_brace, "Expected function body")
-	statements := []Statement{}
-	for !p.check(right_brace) {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
-		}
-		statements = append(statements, stmt)
-	}
-
-	p.consume(right_brace, "Unclosed function body")
-
-	return &FunctionDeclaration{
-		Name:       nameToken.text,
-		Parameters: params,
-		ReturnType: returnType,
-		Body:       statements,
-	}, nil
-}
-
 func (p *parser) parseType() DeclaredType {
 	if p.match(identifier) {
 		switch p.previous().text {
@@ -197,8 +151,61 @@ func (p *parser) expressionStatement() (Statement, error) {
 	return expr, nil
 }
 
-func (p *parser) parseExpression() (Expression, error) {
+func (p *parser) functionDef() (Statement, error) {
+	if p.match(fn) {
+		name := ""
+		if p.check(identifier) {
+			name = p.consume("identifier", "Expected function name after 'fn'").text
+		}
+		p.consume(left_paren, "Expected parameters list")
+		params := []Parameter{}
+		for !p.match(right_paren) {
+			isMutable := p.match(mut)
+			nameToken := p.consume(identifier, "Expected parameter name")
+			p.consume(colon, "Expected ':' after parameter name")
+			paramType := p.parseType()
+			params = append(params, Parameter{
+				Mutable: isMutable,
+				Name:    nameToken.text,
+				Type:    paramType,
+			})
+			p.match(comma)
+		}
+		returnType := p.parseType()
+
+		p.consume(left_brace, "Expected function body")
+		statements := []Statement{}
+		for !p.check(right_brace) {
+			stmt, err := p.parseStatement()
+			if err != nil {
+				return nil, err
+			}
+			statements = append(statements, stmt)
+		}
+
+		p.consume(right_brace, "Unclosed function body")
+
+		if name == "" {
+			return &AnonymousFunction{
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       statements,
+			}, nil
+		}
+
+		return &FunctionDeclaration{
+			Name:       name,
+			Parameters: params,
+			ReturnType: returnType,
+			Body:       statements,
+		}, nil
+	}
+
 	return p.iterRange()
+}
+
+func (p *parser) parseExpression() (Expression, error) {
+	return p.functionDef()
 }
 
 func (p *parser) iterRange() (Expression, error) {
