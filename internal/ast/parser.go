@@ -325,17 +325,10 @@ func (p *parser) functionDef() (Statement, error) {
 		}
 		returnType := p.parseType()
 
-		p.consume(left_brace, "Expected function body")
-		statements := []Statement{}
-		for !p.check(right_brace) {
-			stmt, err := p.parseStatement()
-			if err != nil {
-				return nil, err
-			}
-			statements = append(statements, stmt)
+		statements, err := p.block()
+		if err != nil {
+			return nil, err
 		}
-
-		p.consume(right_brace, "Unclosed function body")
 
 		if name == "" {
 			return &AnonymousFunction{
@@ -662,16 +655,54 @@ func (p *parser) primary() (Expression, error) {
 }
 
 func (p *parser) list() (Expression, error) {
+	if p.check(colon) {
+		return p.map_()
+	}
+
+	start := p.index
 	items := []Expression{}
 	for !p.match(right_bracket) {
 		item, err := p.or()
 		if err != nil {
 			return nil, err
 		}
+		if p.check(colon) {
+			p.index = start
+			return p.map_()
+		}
+
 		items = append(items, item)
 		p.match(comma)
 	}
 	return &ListLiteral{Items: items}, nil
+}
+
+func (p *parser) map_() (Expression, error) {
+	if p.match(colon) {
+		p.consume(right_bracket, "Expected ']' after ':' in empty map")
+		return &MapLiteral{Entries: []MapEntry{}}, nil
+	}
+
+	entries := []MapEntry{}
+	for !p.match(right_bracket) {
+		key, err := p.primary()
+		if err != nil {
+			return nil, err
+		}
+		p.consume(colon, "Expected ':' after map key")
+		val, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, MapEntry{
+			Key:   key,
+			Value: val,
+		})
+		p.match(comma)
+	}
+	return &MapLiteral{
+		Entries: entries,
+	}, nil
 }
 
 func (p *parser) interpolatedString() (Expression, error) {

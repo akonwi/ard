@@ -366,21 +366,18 @@ func TestForInLoops(t *testing.T) {
 				},
 			},
 		},
-	})
-
-	runTests(t, []test{
 		{
 			name:  "Iterating over a list",
 			input: `for num in [1, 2] {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					ForInLoop{
+					&ForInLoop{
 						Cursor: Identifier{Name: "num"},
-						Iterable: ListLiteral{
+						Iterable: &ListLiteral{
 							Items: []Expression{
-								NumLiteral{Value: "1"},
-								NumLiteral{Value: "2"},
+								&NumLiteral{Value: "1"},
+								&NumLiteral{Value: "2"},
 							},
 						},
 						Body: []Statement{},

@@ -32,6 +32,32 @@ func TestListLiterals(t *testing.T) {
 	})
 }
 
+func TestMapLiterals(t *testing.T) {
+	runTestsV2(t, []test{
+		{
+			name:  "Empty map",
+			input: "[:]",
+			output: Program{
+				Imports:    []Import{},
+				Statements: []Statement{&MapLiteral{Entries: []MapEntry{}}},
+			},
+		},
+		{
+			name:  "Map with entries",
+			input: `[1:"one", 2:"two",]`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&MapLiteral{Entries: []MapEntry{
+						{Key: &NumLiteral{Value: "1"}, Value: &StrLiteral{Value: "one"}},
+						{Key: &NumLiteral{Value: "2"}, Value: &StrLiteral{Value: "two"}},
+					}},
+				},
+			},
+		},
+	})
+}
+
 func TestUnaryExpressions(t *testing.T) {
 	tests := []test{
 		{
