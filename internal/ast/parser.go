@@ -87,6 +87,9 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
+	if p.match(if_) {
+		return p.ifStatement()
+	}
 	if p.match(while_) {
 		return p.whileLoop()
 	}
@@ -129,6 +132,39 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	}, nil
 }
 
+func (p *parser) ifStatement() (Statement, error) {
+	condition, err := p.or()
+	if err != nil {
+		return nil, err
+	}
+
+	statements, err := p.block()
+	p.match(new_line)
+
+	stmt := &IfStatement{
+		Condition: condition,
+		Body:      statements,
+	}
+
+	if p.match(else_) {
+		if p.match(if_) {
+			elseIf, err := p.ifStatement()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Else = elseIf
+		} else {
+			elseBlock, err := p.block()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Else = &IfStatement{Body: elseBlock}
+		}
+	}
+
+	return stmt, nil
+}
+
 func (p *parser) whileLoop() (Statement, error) {
 	condition, err := p.parseExpression()
 	if err != nil {
@@ -153,6 +189,20 @@ func (p *parser) whileLoop() (Statement, error) {
 		Condition: condition,
 		Body:      statements,
 	}, nil
+}
+
+func (p *parser) block() ([]Statement, error) {
+	p.consume(left_brace, "Expected block")
+	statements := []Statement{}
+	for !p.check(right_brace) {
+		stmt, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, stmt)
+	}
+	p.consume(right_brace, "Unclosed block")
+	return statements, nil
 }
 
 func (p *parser) assignment() (Statement, error) {

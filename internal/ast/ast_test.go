@@ -233,15 +233,15 @@ func TestWhileLoop(t *testing.T) {
 }
 
 func TestIfAndElse(t *testing.T) {
-	tests := []test{
+	runTestsV2(t, []test{
 		{
 			name:  "Valid if statement",
 			input: `if true {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					IfStatement{
-						Condition: BoolLiteral{Value: true},
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
 						Body:      []Statement{},
 						Else:      nil,
 					},
@@ -249,18 +249,21 @@ func TestIfAndElse(t *testing.T) {
 			},
 		},
 		{
-			name:  "Invalid condition expression",
-			input: `if 20 - 1 {}`,
+			name:  "Complex condition",
+			input: `if not foo.bar {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					IfStatement{
-						Condition: BinaryExpression{
-							Left:     NumLiteral{Value: "20"},
-							Operator: Minus,
-							Right:    NumLiteral{Value: "1"},
+					&IfStatement{
+						Condition: &UnaryExpression{
+							Operator: Not,
+							Operand: &InstanceProperty{
+								Target:   &Identifier{Name: "foo"},
+								Property: Identifier{Name: "bar"},
+							},
 						},
 						Body: []Statement{},
+						Else: nil,
 					},
 				},
 			},
@@ -268,15 +271,15 @@ func TestIfAndElse(t *testing.T) {
 		{
 			name: "Valid if-else",
 			input: `
-				if true {}
-				else {}`,
+					if true {}
+					else {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					IfStatement{
-						Condition: BoolLiteral{Value: true},
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
 						Body:      []Statement{},
-						Else: IfStatement{
+						Else: &IfStatement{
 							Condition: nil,
 							Body:      []Statement{},
 						},
@@ -287,16 +290,16 @@ func TestIfAndElse(t *testing.T) {
 		{
 			name: "Valid if-else if",
 			input: `
-				if true {}
-				else if false {}`,
+					if true {}
+					else if false {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					IfStatement{
-						Condition: BoolLiteral{Value: true},
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
 						Body:      []Statement{},
-						Else: IfStatement{
-							Condition: BoolLiteral{Value: false},
+						Else: &IfStatement{
+							Condition: &BoolLiteral{Value: false},
 							Body:      []Statement{},
 						},
 					},
@@ -306,19 +309,19 @@ func TestIfAndElse(t *testing.T) {
 		{
 			name: "Valid if-else-if-else",
 			input: `
-				if true {}
-				else if false {}
-				else {}`,
+					if true {}
+					else if false {}
+					else {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					IfStatement{
-						Condition: BoolLiteral{Value: true},
+					&IfStatement{
+						Condition: &BoolLiteral{Value: true},
 						Body:      []Statement{},
-						Else: IfStatement{
-							Condition: BoolLiteral{Value: false},
+						Else: &IfStatement{
+							Condition: &BoolLiteral{Value: false},
 							Body:      []Statement{},
-							Else: IfStatement{
+							Else: &IfStatement{
 								Condition: nil,
 								Body:      []Statement{},
 							},
@@ -327,9 +330,7 @@ func TestIfAndElse(t *testing.T) {
 				},
 			},
 		},
-	}
-
-	runTests(t, tests)
+	})
 }
 
 func TestForInLoops(t *testing.T) {
