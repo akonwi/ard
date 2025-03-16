@@ -93,8 +93,10 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(while_) {
 		return p.whileLoop()
 	}
+	if p.match(for_) {
+		return p.forLoop()
+	}
 	return p.assignment()
-	// return p.expressionStatement()
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {
@@ -189,6 +191,36 @@ func (p *parser) whileLoop() (Statement, error) {
 		Condition: condition,
 		Body:      statements,
 	}, nil
+}
+
+func (p *parser) forLoop() (Statement, error) {
+	if p.match(identifier) {
+		cursor := Identifier{Name: p.previous().text}
+		p.consume(in, "Expected 'in' after cursor name")
+		seq, err := p.iterRange()
+		if err != nil {
+			return nil, err
+		}
+		body, err := p.block()
+		if err != nil {
+			return nil, err
+		}
+		if seq, ok := seq.(*RangeExpression); ok {
+			return &RangeLoop{
+				Cursor: cursor,
+				Start:  seq.Start,
+				End:    seq.End,
+				Body:   body,
+			}, nil
+		}
+
+		return &ForInLoop{
+			Cursor:   cursor,
+			Iterable: seq,
+			Body:     body,
+		}, nil
+	}
+	panic("Unimplemented basic for loop")
 }
 
 func (p *parser) block() ([]Statement, error) {

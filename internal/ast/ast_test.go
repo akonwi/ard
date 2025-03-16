@@ -334,17 +334,17 @@ func TestIfAndElse(t *testing.T) {
 }
 
 func TestForInLoops(t *testing.T) {
-	tests := []test{
+	runTestsV2(t, []test{
 		{
 			name:  "Number range",
 			input: `for i in 1..10 {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					RangeLoop{
+					&RangeLoop{
 						Cursor: Identifier{Name: "i"},
-						Start:  NumLiteral{Value: "1"},
-						End:    NumLiteral{Value: "10"},
+						Start:  &NumLiteral{Value: "1"},
+						End:    &NumLiteral{Value: "10"},
 						Body:   []Statement{},
 					},
 				},
@@ -356,16 +356,19 @@ func TestForInLoops(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					ForInLoop{
+					&ForInLoop{
 						Cursor: Identifier{Name: "char"},
-						Iterable: StrLiteral{
-							Value: `"foobar"`,
+						Iterable: &StrLiteral{
+							Value: "foobar",
 						},
 						Body: []Statement{},
 					},
 				},
 			},
 		},
+	})
+
+	runTests(t, []test{
 		{
 			name:  "Iterating over a list",
 			input: `for num in [1, 2] {}`,
@@ -385,9 +388,7 @@ func TestForInLoops(t *testing.T) {
 				},
 			},
 		},
-	}
-
-	runTests(t, tests)
+	})
 }
 
 func TestForLoops(t *testing.T) {
