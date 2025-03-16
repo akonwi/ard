@@ -66,6 +66,7 @@ func TestLexing(t *testing.T) {
 				"let y = 10",
 				`let string: Str = "hello"`,
 				"x = 20",
+				"mut temp: Float = 98.6",
 			}, "\n"),
 			want: []token{
 				{kind: mut, line: 1, column: 1},
@@ -93,6 +94,14 @@ func TestLexing(t *testing.T) {
 				{kind: identifier, line: 4, column: 1, text: "x"},
 				{kind: equal, line: 4, column: 3},
 				{kind: number, line: 4, column: 5, text: "20"},
+				{kind: new_line, line: 4, column: 7},
+
+				{kind: mut, line: 5, column: 1},
+				{kind: identifier, line: 5, column: 5, text: "temp"},
+				{kind: colon, line: 5, column: 9},
+				{kind: identifier, line: 5, column: 11, text: "Float"},
+				{kind: equal, line: 5, column: 17},
+				{kind: number, line: 5, column: 19, text: "98.6"},
 
 				{kind: eof},
 			},

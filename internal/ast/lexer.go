@@ -169,6 +169,16 @@ func (l lexer) peek() *char {
 		col:   l.column,
 	}
 }
+
+func (l *lexer) check(string string) bool {
+	for i, r := range string {
+		if l.isAtEnd() || l.source[i+l.cursor] != byte(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (l *lexer) advance() *char {
 	char := &char{
 		raw:   l.source[l.cursor],
@@ -481,7 +491,7 @@ func (l *lexer) takeIdentifier() token {
 func (l *lexer) takeNumber() token {
 	// record the start column
 	column := l.column - 1
-	for l.hasMore() && l.peek().isDigit() {
+	for l.hasMore() && (l.peek().isDigit() || (l.check(".") && !l.check(".."))) {
 		l.advance()
 	}
 	text := string(l.source[l.start:l.cursor])

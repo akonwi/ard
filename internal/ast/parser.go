@@ -84,7 +84,11 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
-	return p.expressionStatement()
+	if p.match(while_) {
+		return p.whileLoop()
+	}
+	return p.assignment()
+	// return p.expressionStatement()
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {
@@ -120,6 +124,76 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		Value:   value,
 		Type:    declaredType,
 	}, nil
+}
+
+func (p *parser) whileLoop() (Statement, error) {
+	condition, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	p.consume(left_brace, "Expected '{' after while condition")
+
+	statements := []Statement{}
+	for !p.check(right_brace) {
+		stmt, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, stmt)
+	}
+	p.consume(right_brace, "Unclosed while loop")
+	p.match(new_line)
+
+	return &WhileLoop{
+		Condition: condition,
+		Body:      statements,
+	}, nil
+}
+
+func (p *parser) assignment() (Statement, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.match(equal, increment, decrement) {
+		opToken := p.previous()
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		p.match(new_line)
+
+		switch opToken.kind {
+		case increment:
+			return &VariableAssignment{
+				Operator: Assign,
+				Target:   expr,
+				Value: &BinaryExpression{
+					Operator: Plus,
+					Left:     expr,
+					Right:    value,
+				},
+			}, nil
+		case decrement:
+			return &VariableAssignment{
+				Operator: Assign,
+				Target:   expr,
+				Value: &BinaryExpression{
+					Operator: Minus,
+					Left:     expr,
+					Right:    value,
+				},
+			}, nil
+		default:
+			return &VariableAssignment{
+				Operator: Assign,
+				Target:   expr,
+				Value:    value,
+			}, nil
+		}
+	}
+
+	return expr, nil
 }
 
 func (p *parser) parseType() DeclaredType {

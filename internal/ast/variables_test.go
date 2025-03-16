@@ -16,35 +16,35 @@ func TestVariables(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "name",
 						Mutable: false,
 						Type:    StringType{},
-						Value: StrLiteral{
-							Value: `"Alice"`,
+						Value: &StrLiteral{
+							Value: "Alice",
 						},
 					},
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "age",
 						Mutable: true,
 						Type:    IntType{},
-						Value: NumLiteral{
+						Value: &NumLiteral{
 							Value: "30",
 						},
 					},
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "temp",
 						Mutable: true,
 						Type:    FloatType{},
-						Value: NumLiteral{
+						Value: &NumLiteral{
 							Value: "98.6",
 						},
 					},
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "is_student",
 						Mutable: false,
 						Type:    BooleanType{},
-						Value: BoolLiteral{
+						Value: &BoolLiteral{
 							Value: true,
 						},
 					},
@@ -52,16 +52,41 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
-			name:  "Reassigning variables",
-			input: `name = "Bob"`,
+			name: "Reassigning variables",
+			input: `
+				name = "Bob"
+				age =+ 1
+				age =- 2`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableAssignment{
-						Target:   Identifier{Name: "name"},
+					&VariableAssignment{
+						Target:   &Identifier{Name: "name"},
 						Operator: Assign,
-						Value: StrLiteral{
-							Value: `"Bob"`,
+						Value: &StrLiteral{
+							Value: "Bob",
+						},
+					},
+					&VariableAssignment{
+						Target:   &Identifier{Name: "age"},
+						Operator: Assign,
+						Value: &BinaryExpression{
+							Operator: Plus,
+							Left:     &Identifier{Name: "age"},
+							Right: &NumLiteral{
+								Value: "1",
+							},
+						},
+					},
+					&VariableAssignment{
+						Target:   &Identifier{Name: "age"},
+						Operator: Assign,
+						Value: &BinaryExpression{
+							Operator: Minus,
+							Left:     &Identifier{Name: "age"},
+							Right: &NumLiteral{
+								Value: "2",
+							},
 						},
 					},
 				},
@@ -69,5 +94,5 @@ func TestVariables(t *testing.T) {
 		},
 	}
 
-	runTests(t, tests)
+	runTestsV2(t, tests)
 }
