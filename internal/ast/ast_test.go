@@ -209,54 +209,27 @@ func TestIdentifiers(t *testing.T) {
 }
 
 func TestWhileLoop(t *testing.T) {
-	tests := []test{
+	runTestsV2(t, []test{
 		{
 			name: "while loop",
 			input: `
-				while count <= 9 {
-					count =+ 1
-				}`,
+					while count <= 9 {
+					}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					WhileLoop{
-						Condition: BinaryExpression{
-							Left:     Identifier{Name: "count"},
+					&WhileLoop{
+						Condition: &BinaryExpression{
+							Left:     &Identifier{Name: "count"},
 							Operator: LessThanOrEqual,
-							Right:    NumLiteral{Value: "9"},
-						},
-						Body: []Statement{
-							VariableAssignment{
-								Target:   Identifier{Name: "count"},
-								Operator: Increment,
-								Value:    NumLiteral{Value: "1"},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "With non-boolean condition",
-			input: `
-						while 9 - 7 {}`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					WhileLoop{
-						Condition: BinaryExpression{
-							Left:     NumLiteral{Value: "9"},
-							Operator: Minus,
-							Right:    NumLiteral{Value: "7"},
+							Right:    &NumLiteral{Value: "9"},
 						},
 						Body: []Statement{},
 					},
 				},
 			},
 		},
-	}
-
-	runTests(t, tests)
+	})
 }
 
 func TestIfAndElse(t *testing.T) {

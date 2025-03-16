@@ -81,6 +81,9 @@ func (p *parser) parseImport() (*Import, error) {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
+	if p.match(new_line) {
+		return nil, nil
+	}
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
@@ -139,7 +142,9 @@ func (p *parser) whileLoop() (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		statements = append(statements, stmt)
+		if stmt != nil {
+			statements = append(statements, stmt)
+		}
 	}
 	p.consume(right_brace, "Unclosed while loop")
 	p.match(new_line)
