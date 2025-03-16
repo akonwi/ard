@@ -389,28 +389,32 @@ func TestForInLoops(t *testing.T) {
 }
 
 func TestForLoops(t *testing.T) {
-	runTests(t, []test{
+	runTestsV2(t, []test{
 		{
-			name:  "For loop",
+			name:  "Basic",
 			input: `for mut i = 0; i < 10; i =+ 1 {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					ForLoop{
+					&ForLoop{
 						Init: VariableDeclaration{
 							Mutable: true,
 							Name:    "i",
-							Value:   NumLiteral{Value: "0"},
+							Value:   &NumLiteral{Value: "0"},
 						},
-						Condition: BinaryExpression{
+						Condition: &BinaryExpression{
 							Operator: LessThan,
-							Left:     Identifier{Name: "i"},
-							Right:    NumLiteral{Value: "10"},
+							Left:     &Identifier{Name: "i"},
+							Right:    &NumLiteral{Value: "10"},
 						},
-						Incrementer: VariableAssignment{
-							Target:   Identifier{Name: "i"},
-							Operator: Increment,
-							Value:    NumLiteral{Value: "1"},
+						Incrementer: &VariableAssignment{
+							Target:   &Identifier{Name: "i"},
+							Operator: Assign,
+							Value: &BinaryExpression{
+								Operator: Plus,
+								Left:     &Identifier{Name: "i"},
+								Right:    &NumLiteral{Value: "1"},
+							},
 						},
 						Body: []Statement{},
 					},

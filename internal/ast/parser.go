@@ -100,8 +100,8 @@ func (p *parser) parseStatement() (Statement, error) {
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {
-	kind := p.tokens[p.index-1].kind
-	name := p.consume(identifier, "Expected identifier after variable declaration")
+	kind := p.previous().kind
+	name := p.consume(identifier, fmt.Sprintf("Expected identifier after '%s'", string(kind)))
 	var declaredType DeclaredType
 	if p.match(colon) {
 		typeToken := p.consume(identifier, "Expected a type name after ':'")
@@ -121,7 +121,7 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		}
 	}
 	p.consume(equal, "Expected '=' after variable name")
-	value, err := p.parseExpression()
+	value, err := p.or()
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,33 @@ func (p *parser) forLoop() (Statement, error) {
 			Body:     body,
 		}, nil
 	}
-	panic("Unimplemented basic for loop")
+
+	p.match(let, mut)
+	initial, err := p.parseVariableDef()
+	if err != nil {
+		return nil, err
+	}
+	p.consume(semicolon, "Expected ';' after loop cursor")
+	condition, err := p.or()
+	if err != nil {
+		return nil, err
+	}
+	p.consume(semicolon, "Expected ';' after loop condition")
+	incrementer, err := p.parseStatement()
+	if err != nil {
+		return nil, err
+	}
+	p.match(semicolon)
+	body, err := p.block()
+	if err != nil {
+		return nil, err
+	}
+	return &ForLoop{
+		Init:        *initial.(*VariableDeclaration),
+		Condition:   condition,
+		Incrementer: incrementer,
+		Body:        body,
+	}, nil
 }
 
 func (p *parser) block() ([]Statement, error) {
