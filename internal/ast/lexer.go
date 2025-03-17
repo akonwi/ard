@@ -328,25 +328,16 @@ func (l *lexer) takeString(start *char) token {
 		panic("unterminated string")
 	}
 
-	// if in a string, keep reading until the end of the string
-	// when '`' is reached, finished. take latest chunk
 	// when '{{' is reached, take subsequent tokens until '}}'
 	// when '}}' is reached, continue taking string from there
-	interpol := token{
-		kind:   complex_string,
-		line:   start.line,
-		column: start.col,
-		chunks: []token{},
-	}
 
 	// peek to skip the quote
 	currentStringStart := l.peek()
 
 	for l.hasMore() && l.matchNext('"') == nil {
 		if l.peekMatch("{{") {
-			// capture text so far as first chunk
-			// todo: skip adding empty strings
-			interpol.chunks = append(interpol.chunks,
+			// capture string so far
+			l.tokens = append(l.tokens,
 				token{
 					kind:   string_,
 					line:   start.line,
@@ -354,19 +345,30 @@ func (l *lexer) takeString(start *char) token {
 					text:   string(l.source[currentStringStart.index:l.cursor]),
 				},
 			)
-
-			// skip the {{
+			// take the {{
+			l.tokens = append(l.tokens, token{
+				kind:   expr_open,
+				line:   l.line,
+				column: l.column,
+			})
 			l.advance()
 			l.advance()
 
 			for l.hasMore() && !l.peekMatch("}}") {
 				if token, ok := l.take(); ok {
-					interpol.chunks = append(interpol.chunks, token)
+					l.tokens = append(l.tokens, token)
 				}
 			}
 
+			// take the }}
+			l.tokens = append(l.tokens, token{
+				kind:   expr_close,
+				line:   l.line,
+				column: l.column,
+			})
 			l.advance()
 			l.advance()
+
 			// reset the start of the next string
 			currentStringStart = l.advance()
 		} else {
@@ -381,16 +383,13 @@ func (l *lexer) takeString(start *char) token {
 		rawStart = start.index + 1
 		quote = start
 	}
-	// todo: skip adding empty strings
-	interpol.chunks = append(interpol.chunks, token{
-		kind:   string_,
-		line:   quote.line,
-		column: quote.col,
-		// skip closing backtick
-		text: string(l.source[rawStart : l.cursor-1]),
-	})
 
-	return interpol
+	return token{
+		kind:   string_,
+		line:   currentStringStart.line,
+		column: quote.col,
+		text:   string(l.source[rawStart : l.cursor-1]),
+	}
 }
 
 func (l *lexer) takePath(start *char) (token, bool) {
