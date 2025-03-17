@@ -557,3 +557,23 @@ func TestMemberAccess(t *testing.T) {
 		},
 	})
 }
+
+func TestInterpolatedStrings(t *testing.T) {
+	runTestsV2(t, []test{
+		{
+			name:  "Interpolated string",
+			input: `"Hello, {{name}}"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&InterpolatedStr{
+						Chunks: []Expression{
+							&StrLiteral{Value: "Hello, "},
+							&Identifier{Name: "name"},
+						},
+					},
+				},
+			},
+		},
+	})
+}

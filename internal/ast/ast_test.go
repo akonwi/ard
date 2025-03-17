@@ -21,7 +21,8 @@ var compareOptions = cmp.Options{
 		BooleanType{},
 		List{},
 		Map{},
-		CustomType{}),
+		CustomType{},
+		token{}),
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),
@@ -34,26 +35,6 @@ var compareOptions = cmp.Options{
 			if v2, ok := y[k]; !ok || v1 != v2 {
 				return false
 			}
-		}
-		return true
-	}),
-
-	cmp.Comparer(func(x, y token) bool {
-		if x.kind != y.kind || x.line != y.line || x.column != y.column || x.text != y.text {
-			return false
-		}
-
-		if len(x.chunks) != len(y.chunks) {
-			return false
-		}
-		for i := range x.chunks {
-			if x.chunks[i].kind != y.chunks[i].kind ||
-				x.chunks[i].line != y.chunks[i].line ||
-				x.chunks[i].column != y.chunks[i].column ||
-				x.chunks[i].text != y.chunks[i].text {
-				return false
-			}
-			// TODO?: may need to compare chunks recursively
 		}
 		return true
 	}),
@@ -422,35 +403,6 @@ func TestForLoops(t *testing.T) {
 			},
 		},
 	})
-}
-
-func TestInterpolatedStrings(t *testing.T) {
-	tests := []test{
-		{
-			name: "Interpolated string",
-			input: `
-			let name = "world"
-			"Hello, {{name}}"`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					VariableDeclaration{
-						Mutable: false,
-						Name:    "name",
-						Value:   StrLiteral{Value: `"world"`},
-					},
-					InterpolatedStr{
-						Chunks: []Expression{
-							StrLiteral{Value: "Hello, "},
-							Identifier{Name: "name"},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	runTests(t, tests)
 }
 
 func TestComments(t *testing.T) {

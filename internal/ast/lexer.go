@@ -76,11 +76,10 @@ const (
 	str   = "str"
 
 	// Literals
-	path           = "path"
-	identifier     = "identifier"
-	number         = "number"
-	string_        = "string"
-	complex_string = "complex_string"
+	path       = "path"
+	identifier = "identifier"
+	number     = "number"
+	string_    = "string"
 
 	eof = "eof"
 )
@@ -90,9 +89,6 @@ type token struct {
 	line   int
 	column int
 	text   string
-
-	// for strings with interpolated expressions
-	chunks []token
 }
 
 type char struct {

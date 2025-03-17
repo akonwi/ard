@@ -648,13 +648,8 @@ func (p *parser) primary() (Expression, error) {
 			Value: p.previous().text,
 		}, nil
 	}
-	if p.match(complex_string) {
-		return p.interpolatedString()
-	}
 	if p.match(string_) {
-		return &StrLiteral{
-			Value: p.previous().text,
-		}, nil
+		return p.string()
 	}
 	if p.match(true_, false_) {
 		return &BoolLiteral{
@@ -731,30 +726,32 @@ func (p *parser) map_() (Expression, error) {
 	}, nil
 }
 
-func (p *parser) interpolatedString() (Expression, error) {
-	chunks := []Expression{}
-	tok := p.previous()
-	for i := range tok.chunks {
-		chunk := tok.chunks[i]
-		if chunk.kind == string_ {
-			chunks = append(chunks, &StrLiteral{
-				Value: chunk.text,
-			})
-		} else {
-			expr, err := p.parseExpression()
+func (p *parser) string() (Expression, error) {
+	str := &StrLiteral{Value: p.previous().text}
+	if p.match(expr_open) {
+		chunks := []Expression{str}
+		for !p.match(expr_close) {
+			expr, err := p.or()
 			if err != nil {
 				return nil, err
 			}
 			chunks = append(chunks, expr)
 		}
+		for p.match(string_) {
+			more, err := p.string()
+			if err != nil {
+				return nil, err
+			}
+			if more.String() != "" {
+				chunks = append(chunks, more)
+			}
+		}
+		return &InterpolatedStr{
+			Chunks: chunks,
+		}, nil
 	}
 
-	if len(chunks) == 1 {
-		return chunks[0], nil
-	}
-	return &InterpolatedStr{
-		Chunks: chunks,
-	}, nil
+	return str, nil
 }
 
 func (p *parser) advance() token {
