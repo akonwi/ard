@@ -39,21 +39,10 @@ func TestLexing(t *testing.T) {
 				"*/",
 			}, "\n"),
 			want: []token{
-				{kind: slash_slash, line: 1, column: 1},
-				{kind: identifier, line: 1, column: 4, text: "this"},
-				{kind: identifier, line: 1, column: 9, text: "is"},
-				{kind: identifier, line: 1, column: 12, text: "a"},
-				{kind: identifier, line: 1, column: 14, text: "comment"},
+				{kind: comment, line: 1, column: 1, text: "// this is a comment"},
 				{kind: new_line, line: 1, column: 21},
 
-				{kind: slash_star, line: 2, column: 1},
-				{kind: new_line, line: 2, column: 3},
-				{kind: identifier, line: 3, column: 1, text: "this"},
-				{kind: identifier, line: 3, column: 6, text: "is"},
-				{kind: identifier, line: 3, column: 9, text: "a"},
-				{kind: identifier, line: 3, column: 11, text: "comment"},
-				{kind: new_line, line: 3, column: 18},
-				{kind: star_slash, line: 4, column: 1},
+				{kind: block_comment, line: 2, column: 1, text: "/*\nthis is a comment\n*/"},
 
 				{kind: eof},
 			},
@@ -593,8 +582,7 @@ func TestLexing(t *testing.T) {
 				{kind: left_brace, line: 3, column: 20},
 				{kind: new_line, line: 3, column: 21},
 
-				{kind: slash_slash, line: 4, column: 5},
-				{kind: identifier, line: 4, column: 8, text: "block"},
+				{kind: comment, line: 4, column: 5, text: "// block"},
 				{kind: new_line, line: 4, column: 13},
 
 				{kind: identifier, line: 5, column: 5, text: "print"},

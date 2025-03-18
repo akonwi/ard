@@ -21,8 +21,7 @@ var compareOptions = cmp.Options{
 		BooleanType{},
 		List{},
 		Map{},
-		CustomType{},
-		token{}),
+		CustomType{}),
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
 	}, cmp.Ignore()),
@@ -37,6 +36,12 @@ var compareOptions = cmp.Options{
 			}
 		}
 		return true
+	}),
+	cmp.Comparer(func(x, y token) bool {
+		return x.kind == y.kind &&
+			x.line == y.line &&
+			x.column == y.column &&
+			x.text == y.text
 	}),
 }
 

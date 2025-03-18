@@ -35,9 +35,6 @@ const (
 	minus              = "minus"
 	star               = "star"
 	slash              = "slash"
-	slash_slash        = "slash_slash"
-	slash_star         = "slash_star"
-	star_slash         = "star_slash"
 	percent            = "percent"
 	thin_arrow         = "thin_arrow"
 	fat_arrow          = "fat_arrow"
@@ -76,10 +73,12 @@ const (
 	str   = "str"
 
 	// Literals
-	path       = "path"
-	identifier = "identifier"
-	number     = "number"
-	string_    = "string"
+	path          = "path"
+	identifier    = "identifier"
+	number        = "number"
+	string_       = "string"
+	comment       = "comment"
+	block_comment = "block_comment"
 
 	eof = "eof"
 )
@@ -251,16 +250,13 @@ func (l *lexer) take() (token, bool) {
 	case '+':
 		return currentChar.asToken(plus), true
 	case '*':
-		if l.matchNext('/') != nil {
-			return currentChar.asToken(star_slash), true
-		}
 		return currentChar.asToken(star), true
 	case '/':
 		if l.matchNext('/') != nil {
-			return currentChar.asToken(slash_slash), true
+			return l.comment(currentChar), true
 		}
 		if l.matchNext('*') != nil {
-			return currentChar.asToken(slash_star), true
+			return l.blockComment(currentChar), true
 
 		}
 		return currentChar.asToken(slash), true
@@ -316,6 +312,24 @@ func (l *lexer) take() (token, bool) {
 		}
 		return token{}, false
 	}
+}
+
+func (l *lexer) comment(start *char) token {
+	text := "//"
+	for l.hasMore() && !l.peekMatch(string('\n')) {
+		text += string(l.peek().raw)
+		l.advance()
+	}
+	return token{kind: comment, line: start.line, column: start.col, text: text}
+}
+
+func (l *lexer) blockComment(start *char) token {
+	text := "/*"
+	for l.hasMore() && !l.peekMatch("*/") {
+		text += string(l.peek().raw)
+		l.advance()
+	}
+	return token{kind: block_comment, line: start.line, column: start.col, text: text}
 }
 
 func (l *lexer) takeString(start *char) token {
