@@ -99,6 +99,9 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(for_) {
 		return p.forLoop()
 	}
+	if p.match(type_) {
+		return p.typeUnion()
+	}
 	return p.assignment()
 }
 
@@ -250,6 +253,26 @@ func (p *parser) forLoop() (Statement, error) {
 		Incrementer: incrementer,
 		Body:        body,
 	}, nil
+}
+
+func (p *parser) typeUnion() (Statement, error) {
+	decl := &TypeDeclaration{Type: []DeclaredType{}}
+	nameToken := p.consume(identifier, "Expected name after 'type'")
+	decl.Name = Identifier{Name: nameToken.text}
+	p.consume(equal, "Expected '=' after type name")
+
+	if p.check(new_line) {
+		return nil, fmt.Errorf("Expected type definition after '='")
+	}
+
+	hasMore := true
+	for hasMore {
+		declType := p.parseType()
+		decl.Type = append(decl.Type, declType)
+		hasMore = p.match(pipe)
+	}
+
+	return decl, nil
 }
 
 func (p *parser) block() ([]Statement, error) {

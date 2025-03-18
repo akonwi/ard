@@ -436,14 +436,14 @@ func TestComments(t *testing.T) {
 }
 
 func TestTypeUnion(t *testing.T) {
-	runTests(t, []test{
+	runTestsV2(t, []test{
 		{
 			name:  "Type union",
 			input: `type Value = Int | Bool`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					TypeDeclaration{
+					&TypeDeclaration{
 						Name: Identifier{Name: "Value"},
 						Type: []DeclaredType{IntType{}, BooleanType{}},
 					},
