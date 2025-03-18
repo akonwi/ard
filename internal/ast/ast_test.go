@@ -411,14 +411,24 @@ func TestForLoops(t *testing.T) {
 }
 
 func TestComments(t *testing.T) {
-	runTests(t, []test{
+	runTestsV2(t, []test{
 		{
 			name:  "Single line comment",
 			input: "// this is a comment",
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					Comment{Value: "// this is a comment"},
+					&Comment{Value: "// this is a comment"},
+				},
+			},
+		},
+		{
+			name:  "Block comment",
+			input: "/* this is comment line 1" + "\n" + "this is a comment line 2*/",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Comment{Value: "/* this is comment line 1" + "\n" + "this is a comment line 2*/"},
 				},
 			},
 		},

@@ -81,6 +81,9 @@ func (p *parser) parseImport() (*Import, error) {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
+	if p.match(comment, block_comment) {
+		return &Comment{Value: p.previous().text}, nil
+	}
 	if p.match(new_line) {
 		return nil, nil
 	}
