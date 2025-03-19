@@ -373,6 +373,57 @@ func (p *parser) parseType() DeclaredType {
 	return nil
 }
 
+func (p *parser) parseExpression() (Expression, error) {
+	return p.matchExpr()
+}
+
+func (p *parser) matchExpr() (Expression, error) {
+	if p.match(match) {
+		matchExpr := &MatchExpression{}
+		expr, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		p.consume(left_brace, "Expected '{'")
+		p.consume(new_line, "Expected new line")
+		for !p.match(right_brace) {
+			if p.match(new_line) {
+				continue
+			}
+			pattern, err := p.or()
+			if err != nil {
+				return nil, err
+			}
+			p.consume(fat_arrow, "Expected '=>'")
+			body := []Statement{}
+			if p.check(left_brace) {
+				b, err := p.block()
+				if err != nil {
+					return nil, err
+				}
+				body = b
+			} else {
+				stmt, err := p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+				body = append(body, stmt)
+			}
+
+			matchExpr.Cases = append(matchExpr.Cases, MatchCase{
+				Pattern: pattern,
+				Body:    body,
+			})
+			p.match(comma)
+		}
+
+		matchExpr.Subject = expr
+		return matchExpr, nil
+	}
+
+	return p.functionDef()
+}
+
 func (p *parser) functionDef() (Statement, error) {
 	if p.match(fn) {
 		name := ""
@@ -417,10 +468,6 @@ func (p *parser) functionDef() (Statement, error) {
 	}
 
 	return p.iterRange()
-}
-
-func (p *parser) parseExpression() (Expression, error) {
-	return p.functionDef()
 }
 
 func (p *parser) iterRange() (Expression, error) {
