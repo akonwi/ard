@@ -19,23 +19,21 @@ var colorVariants = []string{
 }
 
 func TestEnumDefinitions(t *testing.T) {
-	tests := []test{
+	runTestsV2(t, []test{
 		{
 			name:  "Valid basic enum",
 			input: colorCode,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					EnumDefinition{
+					&EnumDefinition{
 						Name:     "Color",
 						Variants: []string{"Red", "Green", "Yellow"},
 					},
 				},
 			},
 		},
-	}
-
-	runTests(t, tests)
+	})
 }
 
 func TestEnums(t *testing.T) {

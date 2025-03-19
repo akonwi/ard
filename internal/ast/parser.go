@@ -102,6 +102,9 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(type_) {
 		return p.typeUnion()
 	}
+	if p.match(enum) {
+		return p.enumDef()
+	}
 	return p.assignment()
 }
 
@@ -273,6 +276,21 @@ func (p *parser) typeUnion() (Statement, error) {
 	}
 
 	return decl, nil
+}
+
+func (p *parser) enumDef() (Statement, error) {
+	nameToken := p.consume(identifier, "Expected name after 'enum'")
+	enum := &EnumDefinition{Name: nameToken.text}
+	p.consume(left_brace, "Expected '{'")
+	p.match(new_line)
+	for !p.match(right_brace) {
+		variantToken := p.consume(identifier, "Expected variant name")
+		enum.Variants = append(enum.Variants, variantToken.text)
+		p.match(comma)
+		p.match(new_line)
+	}
+
+	return enum, nil
 }
 
 func (p *parser) block() ([]Statement, error) {
