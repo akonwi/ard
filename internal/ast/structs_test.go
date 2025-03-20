@@ -1,7 +1,6 @@
 package ast
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -91,20 +90,14 @@ func TestStructDefinitions(t *testing.T) {
 }
 
 func TestUsingStructs(t *testing.T) {
-	tests := []test{
+	runTestsV2(t, []test{
 		{
-			name: "Instantiating a field-less struct",
-			input: `
-				struct Box {}
-				Box{}`,
+			name:  "Instantiating an empty struct",
+			input: `Box{}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					StructDefinition{
-						Name:   Identifier{Name: "Box"},
-						Fields: []StructField{},
-					},
-					StructInstance{
+					&StructInstance{
 						Name:       Identifier{Name: "Box"},
 						Properties: []StructValue{},
 					},
@@ -112,27 +105,18 @@ func TestUsingStructs(t *testing.T) {
 			},
 		},
 		{
-			name: "Correctly instantiating a struct with fields",
-			input: fmt.Sprintf(`%s
-				let age = 23
-				Person { name: "John", age: age, employed: true }
-			`, personStructCode),
+			name:  "Instantiating with fields",
+			input: `Person{ name: "John", age: age, employed: true }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					personStruct,
-					VariableDeclaration{
-						Mutable: false,
-						Name:    "age",
-						Value:   NumLiteral{Value: "23"},
-					},
-					StructInstance{
+					&StructInstance{
 						Name: Identifier{Name: "Person"},
 						Properties: []StructValue{
 							{Name: Identifier{Name: "name"},
-								Value: StrLiteral{Value: `"John"`}},
-							{Name: Identifier{Name: "age"}, Value: Identifier{Name: "age"}},
-							{Name: Identifier{Name: "employed"}, Value: BoolLiteral{Value: true}},
+								Value: &StrLiteral{Value: "John"}},
+							{Name: Identifier{Name: "age"}, Value: &Identifier{Name: "age"}},
+							{Name: Identifier{Name: "employed"}, Value: &BoolLiteral{Value: true}},
 						},
 					},
 				},
@@ -141,21 +125,19 @@ func TestUsingStructs(t *testing.T) {
 		{
 			name: "Referencing fields",
 			input: `
-				p.age
-				p.employed = false`,
+					p.age
+					p.employed = false`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					InstanceProperty{Target: Identifier{Name: "p"}, Property: Identifier{Name: "age"}},
-					VariableAssignment{
-						Target:   InstanceProperty{Target: Identifier{Name: "p"}, Property: Identifier{Name: "employed"}},
+					&InstanceProperty{Target: &Identifier{Name: "p"}, Property: Identifier{Name: "age"}},
+					&VariableAssignment{
+						Target:   &InstanceProperty{Target: &Identifier{Name: "p"}, Property: Identifier{Name: "employed"}},
 						Operator: Assign,
-						Value:    BoolLiteral{Value: false},
+						Value:    &BoolLiteral{Value: false},
 					},
 				},
 			},
 		},
-	}
-
-	runTests(t, tests)
+	})
 }

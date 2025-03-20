@@ -535,6 +535,34 @@ func (p *parser) functionDef() (Statement, error) {
 		}, nil
 	}
 
+	return p.structInstance()
+}
+
+func (p *parser) structInstance() (Expression, error) {
+	if p.check(identifier, left_brace) {
+		nameToken := p.consume(identifier, "Expected struct name")
+		p.consume(left_brace, "Expected '{'")
+		instance := &StructInstance{
+			Name:       Identifier{Name: nameToken.text},
+			Properties: []StructValue{},
+		}
+
+		for !p.match(right_brace) {
+			propToken := p.consume(identifier, "Expected name")
+			p.consume(colon, "Expected ':'")
+			val, err := p.or()
+			if err != nil {
+				return nil, err
+			}
+			instance.Properties = append(instance.Properties, StructValue{
+				Name:  Identifier{Name: propToken.text},
+				Value: val,
+			})
+			p.match(comma)
+		}
+		return instance, nil
+	}
+
 	return p.iterRange()
 }
 
@@ -933,7 +961,7 @@ func (p *parser) consume(kind kind, message string) token {
 		message, p.tokens[p.index].line, p.tokens[p.index].column))
 }
 
-/* conditionally advance if the current token is the provided kind */
+/* conditionally advance if the current token is one of those provided */
 func (p *parser) match(kinds ...kind) bool {
 	if slices.Contains(kinds, p.peek().kind) {
 		p.advance()
@@ -942,8 +970,17 @@ func (p *parser) match(kinds ...kind) bool {
 	return false
 }
 
-func (p *parser) check(kind kind) bool {
-	return p.peek().kind == kind
+// check if the provided sequence of tokens is next
+func (p *parser) check(kind ...kind) bool {
+	for i, k := range kind {
+		if p.index+i >= len(p.tokens) {
+			return false
+		}
+		if p.tokens[p.index+i].kind != k {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *parser) peek() *token {
