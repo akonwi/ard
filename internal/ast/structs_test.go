@@ -12,7 +12,7 @@ struct Person {
 	employed: Bool
 }`
 
-var personStruct = StructDefinition{
+var personStruct = &StructDefinition{
 	Name: Identifier{Name: "Person"},
 	Fields: []StructField{
 		{Identifier{Name: "name"}, StringType{}},
@@ -22,15 +22,15 @@ var personStruct = StructDefinition{
 }
 
 func TestStructDefinitions(t *testing.T) {
-	tests := []test{
+	runTestsV2(t, []test{
 		{
 			name: "An empty struct",
 			input: `
-				struct Box {}`,
+					struct Box {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					StructDefinition{
+					&StructDefinition{
 						Name:   Identifier{Name: "Box"},
 						Fields: []StructField{},
 					},
@@ -50,26 +50,15 @@ func TestStructDefinitions(t *testing.T) {
 		{
 			name: "Method definitions",
 			input: `
-				struct Shape {
-					height: Int,
-					width: Int
-				}
-				impl (s: Shape) {
-					fn area() Int {
-						s.height * s.width
-					}
-				}`,
+					impl (s: Shape) {
+						fn area() Int {
+							s.height * s.width
+						}
+					}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					StructDefinition{
-						Name: Identifier{Name: "Shape"},
-						Fields: []StructField{
-							{Identifier{Name: "height"}, IntType{}},
-							{Identifier{Name: "width"}, IntType{}},
-						},
-					},
-					ImplBlock{
+					&ImplBlock{
 						Self: Parameter{
 							Name: "s",
 							Type: CustomType{Name: "Shape"},
@@ -80,14 +69,14 @@ func TestStructDefinitions(t *testing.T) {
 								Parameters: []Parameter{},
 								ReturnType: IntType{},
 								Body: []Statement{
-									BinaryExpression{
+									&BinaryExpression{
 										Operator: Multiply,
-										Left: InstanceProperty{
-											Target:   Identifier{Name: "s"},
+										Left: &InstanceProperty{
+											Target:   &Identifier{Name: "s"},
 											Property: Identifier{Name: "height"},
 										},
-										Right: InstanceProperty{
-											Target:   Identifier{Name: "s"},
+										Right: &InstanceProperty{
+											Target:   &Identifier{Name: "s"},
 											Property: Identifier{Name: "width"},
 										},
 									},
@@ -98,9 +87,7 @@ func TestStructDefinitions(t *testing.T) {
 				},
 			},
 		},
-	}
-
-	runTests(t, tests)
+	})
 }
 
 func TestUsingStructs(t *testing.T) {

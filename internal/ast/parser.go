@@ -105,6 +105,12 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(enum) {
 		return p.enumDef()
 	}
+	if p.match(struct_) {
+		return p.structDef()
+	}
+	if p.match(impl) {
+		return p.implBlock()
+	}
 	return p.assignment()
 }
 
@@ -293,8 +299,69 @@ func (p *parser) enumDef() (Statement, error) {
 	return enum, nil
 }
 
+func (p *parser) structDef() (Statement, error) {
+	nameToken := p.consume(identifier, "Expected name")
+	structDef := &StructDefinition{
+		Name:   Identifier{Name: nameToken.text},
+		Fields: []StructField{},
+	}
+	p.consume(left_brace, "Expected '{'")
+	p.match(new_line)
+	for !p.match(right_brace) {
+		fieldName := p.consume(identifier, "Expected field name")
+		p.consume(colon, "Expected ':'")
+		fieldType := p.parseType()
+		structDef.Fields = append(structDef.Fields, StructField{
+			Name: Identifier{Name: fieldName.text},
+			Type: fieldType,
+		})
+		p.match(comma)
+		p.match(new_line)
+	}
+
+	return structDef, nil
+}
+
+func (p *parser) implBlock() (*ImplBlock, error) {
+	impl := &ImplBlock{}
+	p.consume(left_paren, "Expected '('")
+	isMutable := p.match(mut)
+	selfToken := p.consume(identifier, "Expected self parameter")
+	p.consume(colon, "Expected ':'")
+	typeDecl := p.parseType()
+	p.consume(right_paren, "Expected ')'")
+
+	impl.Self = Parameter{
+		Mutable: isMutable,
+		Name:    selfToken.text,
+		Type:    typeDecl,
+	}
+
+	p.consume(left_brace, "Expected '{'")
+	p.consume(new_line, "Expected new line")
+
+	for !p.match(right_brace) {
+		// not using p.parseStatement() in order to be precise
+		if p.match(new_line) {
+			continue
+		}
+		stmt, err := p.functionDef()
+		if err != nil {
+			return nil, err
+		}
+		fn, ok := stmt.(*FunctionDeclaration)
+		if !ok {
+			return nil, fmt.Errorf("Expected function declaration in impl block")
+		}
+		impl.Methods = append(impl.Methods, *fn)
+	}
+
+	return impl, nil
+}
+
 func (p *parser) block() ([]Statement, error) {
 	p.consume(left_brace, "Expected block")
+	p.match(new_line)
 	statements := []Statement{}
 	for !p.check(right_brace) {
 		stmt, err := p.parseStatement()
@@ -349,6 +416,7 @@ func (p *parser) assignment() (Statement, error) {
 			}, nil
 		}
 	}
+	p.match(new_line)
 
 	return expr, nil
 }
