@@ -119,21 +119,7 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	name := p.consume(identifier, fmt.Sprintf("Expected identifier after '%s'", string(kind)))
 	var declaredType DeclaredType
 	if p.match(colon) {
-		typeToken := p.consume(identifier, "Expected a type name after ':'")
-		switch typeToken.text {
-		case "Int":
-			declaredType = IntType{}
-		case "Float":
-			declaredType = FloatType{}
-		case "Str":
-			declaredType = StringType{}
-		case "Bool":
-			declaredType = BooleanType{}
-		default:
-			declaredType = CustomType{
-				Name: typeToken.text,
-			}
-		}
+		declaredType = p.parseType()
 	}
 	p.consume(equal, "Expected '=' after variable name")
 	value, err := p.or()
@@ -437,6 +423,16 @@ func (p *parser) parseType() DeclaredType {
 				Name: p.previous().text,
 			}
 		}
+	}
+	if p.match(left_bracket) {
+		elementType := p.parseType()
+		if p.match(colon) {
+			valElementType := p.parseType()
+			p.consume(right_bracket, "Expected ']'")
+			return &Map{Key: elementType, Value: valElementType}
+		}
+		p.consume(right_bracket, "Expected ']'")
+		return &List{Element: elementType}
 	}
 	return nil
 }
