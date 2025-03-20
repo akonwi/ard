@@ -8,7 +8,6 @@ import (
 	"github.com/akonwi/ard/internal/ast"
 	"github.com/akonwi/ard/internal/checker"
 	"github.com/akonwi/ard/internal/vm"
-	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 )
 
 func main() {
@@ -35,14 +34,12 @@ func main() {
 			os.Exit(1)
 		}
 
-		tree, err := ts_ard.Parse(sourceCode)
 		if err != nil {
 			fmt.Println("Error parsing source code with tree-sitter")
 			os.Exit(1)
 		}
 
-		astParser := ast.NewParser(sourceCode, tree)
-		ast, err := astParser.Parse()
+		ast, err := ast.Parse(sourceCode)
 		if err != nil {
 			fmt.Printf("Error parsing tree: %v\n", err)
 			os.Exit(1)

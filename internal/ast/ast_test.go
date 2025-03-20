@@ -5,13 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	tree_sitter_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-var tsParser *tree_sitter.Parser
 var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		Identifier{},
@@ -45,14 +42,6 @@ var compareOptions = cmp.Options{
 	}),
 }
 
-func init() {
-	_tsParser, err := tree_sitter_ard.MakeParser()
-	if err != nil {
-		panic(err)
-	}
-	tsParser = _tsParser
-}
-
 type test struct {
 	name   string
 	input  string
@@ -62,10 +51,7 @@ type test struct {
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lexer := newLexer([]byte(tt.input))
-			lexer.scan()
-			parser := newParser(lexer.tokens)
-			ast, err := parser.parse()
+			ast, err := Parse([]byte(tt.input))
 			if err != nil {
 				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
 			}

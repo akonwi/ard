@@ -438,7 +438,7 @@ func (c *checker) addDiagnostic(d Diagnostic) {
 	c.diagnostics = append(c.diagnostics, d)
 }
 
-func Check(program ast.Program) (Program, []Diagnostic) {
+func Check(program *ast.Program) (Program, []Diagnostic) {
 	checker := checker{
 		diagnostics: []Diagnostic{},
 		imports:     map[string]Package{},

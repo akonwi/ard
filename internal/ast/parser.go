@@ -16,14 +16,19 @@ type parser struct {
 	index  int
 }
 
-func newParser(tokens []token) *parser {
+func Parse(source []byte) (*Program, error) {
+	p := new(NewLexer(source).Scan())
+	return p.Parse()
+}
+
+func new(tokens []token) *parser {
 	return &parser{
 		tokens: tokens,
 		index:  0,
 	}
 }
 
-func (p *parser) parse() (*Program, error) {
+func (p *parser) Parse() (*Program, error) {
 	program := &Program{
 		Imports:    []Import{},
 		Statements: []Statement{},
@@ -56,12 +61,16 @@ func (p *parser) parse() (*Program, error) {
 }
 
 func (p *parser) parseImport() (*Import, error) {
+	useToken := p.previous()
 	pathToken := p.consume(path, "Expected a module path after 'use'")
+	start := Point{Row: useToken.line, Col: useToken.column}
+	var end Point
 
 	var name string
 	if p.match(as) {
 		alias := p.consume(identifier, "Expected alias name after 'as'")
 		name = alias.text
+		end = Point{Row: alias.line, Col: alias.End()}
 	} else {
 		// Default alias is last part of path
 		parts := strings.Split(pathToken.text, "/")
@@ -77,6 +86,10 @@ func (p *parser) parseImport() (*Import, error) {
 	return &Import{
 		Path: pathToken.text,
 		Name: name,
+		BaseNode: BaseNode{
+			start: start,
+			end:   end,
+		},
 	}, nil
 }
 

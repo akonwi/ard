@@ -6,21 +6,9 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/internal/ast"
-	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	ts "github.com/tree-sitter/go-tree-sitter"
 )
-
-var tsParser *ts.Parser
-
-func init() {
-	_tsParser, err := ts_ard.MakeParser()
-	if err != nil {
-		panic(err)
-	}
-	tsParser = _tsParser
-}
 
 type test struct {
 	name        string
@@ -55,10 +43,7 @@ var compareOptions = cmp.Options{
 func run(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			source := []byte(tt.input)
-			tree := tsParser.Parse(source, nil)
-			parser := ast.NewParser(source, tree)
-			ast, err := parser.Parse()
+			ast, err := ast.Parse([]byte(tt.input))
 			if err != nil {
 				t.Fatalf("Error parsing input: %v", err)
 			}

@@ -20,7 +20,8 @@ type Expression interface {
 
 // the base struct for all AST nodes
 type BaseNode struct {
-	tsNode *tree_sitter.Node
+	tsNode     *tree_sitter.Node
+	start, end Point
 }
 
 func makeBaseNode(node *tree_sitter.Node) BaseNode {
@@ -28,8 +29,8 @@ func makeBaseNode(node *tree_sitter.Node) BaseNode {
 }
 
 type Point struct {
-	Row uint
-	Col uint
+	Row int
+	Col int
 }
 
 func (p Point) String() string {
@@ -46,11 +47,9 @@ func (l Location) String() string {
 }
 
 func (b BaseNode) GetLocation() Location {
-	_range := b.tsNode.Range()
 	return Location{
-		// tree-sitter start positions are 0-indexed
-		Start: Point{Row: _range.StartPoint.Row + 1, Col: _range.StartPoint.Column + 1},
-		End:   Point{Row: _range.EndPoint.Row, Col: _range.EndPoint.Column},
+		Start: b.start,
+		End:   b.end,
 	}
 }
 
@@ -1043,9 +1042,9 @@ func (p *Parser) parseStructDefinition(node *tree_sitter.Node) (Statement, error
 	}
 
 	strct := StructDefinition{
-		BaseNode: BaseNode{node},
-		Name:     Identifier{BaseNode: makeBaseNode(nameNode), Name: p.text(nameNode)},
-		Fields:   fields,
+		// BaseNode: BaseNode{node},
+		Name:   Identifier{BaseNode: makeBaseNode(nameNode), Name: p.text(nameNode)},
+		Fields: fields,
 	}
 	return strct, nil
 }

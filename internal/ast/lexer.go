@@ -1,5 +1,7 @@
 package ast
 
+import "strings"
+
 type kind string
 
 const (
@@ -90,6 +92,18 @@ type token struct {
 	text   string
 }
 
+func (t *token) End() int {
+	switch t.kind {
+	case string_, identifier, path, comment, block_comment:
+		return t.column + len(t.text)
+	case colon_colon, fat_arrow, thin_arrow, expr_open, expr_close,
+		bang_equal, greater_than_equal, less_than_equal, equal_equal, increment, decrement:
+		return t.column + 2
+	default:
+		return t.column
+	}
+}
+
 type char struct {
 	raw   byte
 	index int
@@ -116,8 +130,8 @@ type lexer struct {
 	line, column int
 }
 
-func newLexer(source []byte) lexer {
-	return lexer{
+func NewLexer(source []byte) *lexer {
+	return &lexer{
 		source: source,
 		tokens: []token{},
 		cursor: 0,
@@ -333,18 +347,8 @@ func (l *lexer) blockComment(start *char) token {
 }
 
 func (l *lexer) takeString(start *char) token {
-	if l.isAtEnd() {
-		// todo: this probably needs to be checked later too
-		panic("unterminated string")
-	}
-
-	// when '{{' is reached, take subsequent tokens until '}}'
-	// when '}}' is reached, continue taking string from there
-
-	// peek to skip the quote
-	currentStringStart := l.peek()
-
-	for l.hasMore() && l.matchNext('"') == nil {
+	begin := start
+	for l.hasMore() && l.peek().raw != '"' {
 		if l.peekMatch("{{") {
 			// capture string so far
 			l.tokens = append(l.tokens,
@@ -352,17 +356,13 @@ func (l *lexer) takeString(start *char) token {
 					kind:   string_,
 					line:   start.line,
 					column: start.col,
-					text:   string(l.source[currentStringStart.index:l.cursor]),
+					text:   string(l.source[start.index+1 : l.cursor]),
 				},
 			)
 			// take the {{
-			l.tokens = append(l.tokens, token{
-				kind:   expr_open,
-				line:   l.line,
-				column: l.column,
-			})
-			l.advance()
-			l.advance()
+			if open, ok := l.take(); ok {
+				l.tokens = append(l.tokens, open)
+			}
 
 			for l.hasMore() && !l.peekMatch("}}") {
 				if token, ok := l.take(); ok {
@@ -371,34 +371,23 @@ func (l *lexer) takeString(start *char) token {
 			}
 
 			// take the }}
-			l.tokens = append(l.tokens, token{
-				kind:   expr_close,
-				line:   l.line,
-				column: l.column,
-			})
-			l.advance()
-			l.advance()
-
-			// reset the start of the next string
-			currentStringStart = l.advance()
+			if close, ok := l.take(); ok {
+				l.tokens = append(l.tokens, close)
+			}
+			begin = l.peek()
 		} else {
 			l.advance()
 		}
 	}
 
-	rawStart := currentStringStart.index
-	quote := currentStringStart
-	// if there was no interpolation, the start of this chunk is the quote
-	if currentStringStart.index == start.index+1 {
-		rawStart = start.index + 1
-		quote = start
-	}
+	endQuote := l.advance()
+	text := string(l.source[begin.index:endQuote.index])
 
 	return token{
 		kind:   string_,
-		line:   currentStringStart.line,
-		column: quote.col,
-		text:   string(l.source[rawStart : l.cursor-1]),
+		line:   begin.line,
+		column: begin.col,
+		text:   strings.TrimPrefix(text, string('"')),
 	}
 }
 
@@ -507,7 +496,7 @@ func (l *lexer) takeNumber() token {
 	return token{kind: number, text: text, line: l.line, column: column}
 }
 
-func (l *lexer) scan() {
+func (l *lexer) Scan() []token {
 	for l.hasMore() {
 		if token, ok := l.take(); ok {
 			l.tokens = append(l.tokens, token)
@@ -515,4 +504,5 @@ func (l *lexer) scan() {
 	}
 
 	l.tokens = append(l.tokens, token{kind: eof})
+	return l.tokens
 }

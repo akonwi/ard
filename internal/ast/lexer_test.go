@@ -17,10 +17,8 @@ func runLexing(t *testing.T, tests []lexTest) {
 	t.Helper()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			lexer := newLexer([]byte(test.input))
-			lexer.scan()
-
-			diff := cmp.Diff(test.want, lexer.tokens, compareOptions)
+			lexer := NewLexer([]byte(test.input))
+			diff := cmp.Diff(test.want, lexer.Scan(), compareOptions)
 			if diff != "" {
 				t.Errorf("Tokens do not match (-want +got):\n%s", diff)
 			}
@@ -770,6 +768,7 @@ func TestLexing(t *testing.T) {
 			input: strings.Join([]string{
 				`"hello, {{name}}!"`,
 				`"{{(1 + 1).to_str()}}"`,
+				`"Hello, {{num}}"`,
 			}, "\n"),
 			want: []token{
 				{kind: string_, line: 1, column: 1, text: "hello, "},
@@ -792,6 +791,13 @@ func TestLexing(t *testing.T) {
 				{kind: right_paren, line: 2, column: 19},
 				{kind: expr_close, line: 2, column: 20},
 				{kind: string_, line: 2, column: 22},
+				{kind: new_line, line: 2, column: 23},
+
+				{kind: string_, line: 3, column: 1, text: "Hello, "},
+				{kind: expr_open, line: 3, column: 9},
+				{kind: identifier, line: 3, column: 11, text: "num"},
+				{kind: expr_close, line: 3, column: 14},
+				{kind: string_, line: 3, column: 16},
 
 				{kind: eof},
 			},

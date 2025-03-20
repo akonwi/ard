@@ -10,7 +10,6 @@ import (
 	"github.com/akonwi/ard/internal/ast"
 	"github.com/akonwi/ard/internal/checker"
 	"github.com/akonwi/ard/internal/vm"
-	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 )
 
 type test struct {
@@ -19,24 +18,13 @@ type test struct {
 	want  any
 }
 
-func parse(t *testing.T, input string) ast.Program {
-	t.Helper()
-	ts, err := ts_ard.MakeParser()
-	if err != nil {
-		panic(err)
-	}
-	tree := ts.Parse([]byte(input), nil)
-	parser := ast.NewParser([]byte(input), tree)
-	program, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Program error: %v", err)
-	}
-	return program
-}
-
 func run(t *testing.T, input string) any {
 	t.Helper()
-	program, diagnostics := checker.Check(parse(t, input))
+	tree, err := ast.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Error parsing program: %v", err)
+	}
+	program, diagnostics := checker.Check(tree)
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
