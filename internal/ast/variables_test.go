@@ -105,5 +105,5 @@ func TestVariables(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }

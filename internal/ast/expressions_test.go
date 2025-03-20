@@ -6,7 +6,7 @@ import (
 )
 
 func TestListLiterals(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Empty list",
 			input: "[]",
@@ -33,7 +33,7 @@ func TestListLiterals(t *testing.T) {
 }
 
 func TestMapLiterals(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Empty map",
 			input: "[:]",
@@ -99,7 +99,7 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestBinaryExpressions(t *testing.T) {
@@ -427,7 +427,7 @@ func TestBinaryExpressions(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestParenthesizedExpressions(t *testing.T) {
@@ -476,11 +476,11 @@ func TestParenthesizedExpressions(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestMemberAccess(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Accessing instance members",
 			input: strings.Join([]string{
@@ -559,7 +559,7 @@ func TestMemberAccess(t *testing.T) {
 }
 
 func TestInterpolatedStrings(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Interpolated string",
 			input: `"Hello, {{name}}"`,

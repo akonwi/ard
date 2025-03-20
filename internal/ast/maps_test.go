@@ -3,7 +3,7 @@ package ast
 import "testing"
 
 func TestMaps(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Instantiating maps",
 			input: `

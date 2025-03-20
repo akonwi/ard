@@ -18,7 +18,7 @@ var colorVariants = []string{
 }
 
 func TestEnumDefinitions(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Valid basic enum",
 			input: colorCode,
@@ -36,7 +36,7 @@ func TestEnumDefinitions(t *testing.T) {
 }
 
 func TestMatchingOnEnums(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Valid matching",
 			input: `

@@ -21,7 +21,7 @@ var personStruct = &StructDefinition{
 }
 
 func TestStructDefinitions(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name: "An empty struct",
 			input: `
@@ -90,7 +90,7 @@ func TestStructDefinitions(t *testing.T) {
 }
 
 func TestUsingStructs(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Instantiating an empty struct",
 			input: `Box{}`,

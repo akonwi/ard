@@ -5,7 +5,7 @@ import (
 )
 
 func TestLists(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Explicitly typed list",
 			input: `let strings: [Str] = [1, 2, 3]`,

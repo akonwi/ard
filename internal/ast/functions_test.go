@@ -109,7 +109,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestFunctionCalls(t *testing.T) {
@@ -195,7 +195,7 @@ func TestFunctionCalls(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestAnonymousFunctions(t *testing.T) {
@@ -251,5 +251,5 @@ func TestAnonymousFunctions(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }

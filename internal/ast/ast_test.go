@@ -62,26 +62,6 @@ type test struct {
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tree := tsParser.Parse([]byte(tt.input), nil)
-			parser := NewParser([]byte(tt.input), tree)
-			ast, err := parser.Parse()
-			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
-			}
-
-			if len(tt.output.Statements) > 0 {
-				diff := cmp.Diff(tt.output, ast, compareOptions)
-				if diff != "" {
-					t.Errorf("Built AST does not match (-want +got):\n%s", diff)
-				}
-			}
-		})
-	}
-}
-
-func runTestsV2(t *testing.T, tests []test) {
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
 			lexer := newLexer([]byte(tt.input))
 			lexer.scan()
 			parser := newParser(lexer.tokens)
@@ -99,7 +79,7 @@ func runTestsV2(t *testing.T, tests []test) {
 }
 
 func TestEmptyProgram(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Empty program",
 			input: "",
@@ -111,7 +91,7 @@ func TestEmptyProgram(t *testing.T) {
 }
 
 func TestImportStatements(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name: "importing modules",
 			input: strings.Join([]string{
@@ -172,7 +152,7 @@ func TestVariableDeclarations(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestIdentifiers(t *testing.T) {
@@ -191,11 +171,11 @@ func TestIdentifiers(t *testing.T) {
 		},
 	}
 
-	runTestsV2(t, tests)
+	runTests(t, tests)
 }
 
 func TestWhileLoop(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name: "while loop",
 			input: `
@@ -219,7 +199,7 @@ func TestWhileLoop(t *testing.T) {
 }
 
 func TestIfAndElse(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Valid if statement",
 			input: `if true {}`,
@@ -320,7 +300,7 @@ func TestIfAndElse(t *testing.T) {
 }
 
 func TestForInLoops(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Number range",
 			input: `for i in 1..10 {}`,
@@ -375,7 +355,7 @@ func TestForInLoops(t *testing.T) {
 }
 
 func TestForLoops(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Basic",
 			input: `for mut i = 0; i < 10; i =+ 1 {}`,
@@ -411,7 +391,7 @@ func TestForLoops(t *testing.T) {
 }
 
 func TestComments(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Single line comment",
 			input: "// this is a comment",
@@ -436,7 +416,7 @@ func TestComments(t *testing.T) {
 }
 
 func TestTypeUnion(t *testing.T) {
-	runTestsV2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Type union",
 			input: `type Value = Int | Bool`,
