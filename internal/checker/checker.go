@@ -671,7 +671,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		return IfStatement{Condition: condition, Body: block.Body, Else: elseClause}
 	case *ast.Comment:
 		return nil
-	case ast.Break:
+	case *ast.Break:
 		return Break{}
 	case *ast.RangeLoop:
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: Int{}}

@@ -104,6 +104,10 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(new_line) {
 		return nil, nil
 	}
+	if p.match(break_) {
+		p.consume(new_line, "Expected new line")
+		return &Break{}, nil
+	}
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
