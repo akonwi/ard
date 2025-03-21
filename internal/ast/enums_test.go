@@ -41,9 +41,9 @@ func TestMatchingOnEnums(t *testing.T) {
 			name: "Valid matching",
 			input: `
 					match light {
-						Color::Red => "Stop",
 						Color::Yellow => "Yield",
 						Color::Green => { "Go" },
+						_ => "Stop",
 					}`,
 			output: Program{
 				Imports: []Import{},
@@ -51,13 +51,6 @@ func TestMatchingOnEnums(t *testing.T) {
 					&MatchExpression{
 						Subject: &Identifier{Name: "light"},
 						Cases: []MatchCase{
-							{
-								Pattern: &StaticProperty{
-									Target:   &Identifier{Name: "Color"},
-									Property: Identifier{Name: "Red"},
-								},
-								Body: []Statement{&StrLiteral{Value: "Stop"}},
-							},
 							{
 								Pattern: &StaticProperty{
 									Target:   &Identifier{Name: "Color"},
@@ -71,6 +64,10 @@ func TestMatchingOnEnums(t *testing.T) {
 									Property: Identifier{Name: "Green"},
 								},
 								Body: []Statement{&StrLiteral{Value: "Go"}},
+							},
+							{
+								Pattern: &Identifier{Name: "_"},
+								Body:    []Statement{&StrLiteral{Value: "Stop"}},
 							},
 						},
 					},

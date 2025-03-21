@@ -337,6 +337,37 @@ func TestForInLoops(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Iterating over a list of struct literals",
+			input: `for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ForInLoop{
+						Cursor: Identifier{Name: "shape"},
+						Iterable: &ListLiteral{
+							Items: []Expression{
+								&StructInstance{
+									Name: Identifier{Name: "Shape"},
+									Properties: []StructValue{
+										{Name: Identifier{Name: "height"}, Value: &NumLiteral{Value: "1"}},
+										{Name: Identifier{Name: "width"}, Value: &NumLiteral{Value: "2"}},
+									},
+								},
+								&StructInstance{
+									Name: Identifier{Name: "Shape"},
+									Properties: []StructValue{
+										{Name: Identifier{Name: "height"}, Value: &NumLiteral{Value: "2"}},
+										{Name: Identifier{Name: "width"}, Value: &NumLiteral{Value: "2"}},
+									},
+								},
+							},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
 	})
 }
 
@@ -349,7 +380,7 @@ func TestForLoops(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&ForLoop{
-						Init: VariableDeclaration{
+						Init: &VariableDeclaration{
 							Mutable: true,
 							Name:    "i",
 							Value:   &NumLiteral{Value: "0"},

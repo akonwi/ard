@@ -342,7 +342,7 @@ func (f ForInLoop) String() string {
 
 type ForLoop struct {
 	BaseNode
-	Init        VariableDeclaration
+	Init        *VariableDeclaration
 	Condition   Expression
 	Incrementer Statement
 	Body        []Statement
@@ -962,7 +962,7 @@ func (p *Parser) parseForLoop(node *tree_sitter.Node) (Statement, error) {
 
 	return ForLoop{
 		BaseNode:    BaseNode{tsNode: node},
-		Init:        cursor,
+		Init:        &cursor,
 		Condition:   condition,
 		Incrementer: incrementer,
 		Body:        body,

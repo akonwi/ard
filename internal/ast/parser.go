@@ -135,7 +135,7 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		declaredType = p.parseType()
 	}
 	p.consume(equal, "Expected '=' after variable name")
-	value, err := p.or()
+	value, err := p.parseExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (p *parser) forLoop() (Statement, error) {
 		return nil, err
 	}
 	return &ForLoop{
-		Init:        *initial.(*VariableDeclaration),
+		Init:        initial.(*VariableDeclaration),
 		Condition:   condition,
 		Incrementer: incrementer,
 		Body:        body,
@@ -879,7 +879,7 @@ func (p *parser) list() (Expression, error) {
 	start := p.index
 	items := []Expression{}
 	for !p.match(right_bracket) {
-		item, err := p.or()
+		item, err := p.structInstance()
 		if err != nil {
 			return nil, err
 		}

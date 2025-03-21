@@ -553,7 +553,7 @@ func TestLexing(t *testing.T) {
 				"    // block",
 				"    print(\"Rich text\")",
 				"  },",
-				"  other => print(\"Unknown\")",
+				"  _ => print(\"Unknown\")",
 				"}",
 			}, "\n"),
 			want: []token{
@@ -593,13 +593,13 @@ func TestLexing(t *testing.T) {
 				{kind: comma, line: 6, column: 4},
 				{kind: new_line, line: 6, column: 5},
 
-				{kind: identifier, line: 7, column: 3, text: "other"},
-				{kind: fat_arrow, line: 7, column: 9},
-				{kind: identifier, line: 7, column: 12, text: "print"},
-				{kind: left_paren, line: 7, column: 17},
-				{kind: string_, line: 7, column: 18, text: "Unknown"},
-				{kind: right_paren, line: 7, column: 27},
-				{kind: new_line, line: 7, column: 28},
+				{kind: identifier, line: 7, column: 3, text: "_"},
+				{kind: fat_arrow, line: 7, column: 5},
+				{kind: identifier, line: 7, column: 8, text: "print"},
+				{kind: left_paren, line: 7, column: 13},
+				{kind: string_, line: 7, column: 14, text: "Unknown"},
+				{kind: right_paren, line: 7, column: 23},
+				{kind: new_line, line: 7, column: 24},
 
 				{kind: right_brace, line: 8, column: 1},
 

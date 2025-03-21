@@ -202,16 +202,18 @@ func TestAnonymousFunctions(t *testing.T) {
 	tests := []test{
 		{
 			name:  "Anonymous function",
-			input: `fn() { "Hello, world!" }`,
+			input: `let lambda = fn() { "Hello, world!" }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					&AnonymousFunction{
-						Parameters: []Parameter{},
-						Body: []Statement{
-							&StrLiteral{Value: "Hello, world!"},
-						},
-					},
+					&VariableDeclaration{
+						Name: "lambda",
+						Value: &AnonymousFunction{
+							Parameters: []Parameter{},
+							Body: []Statement{
+								&StrLiteral{Value: "Hello, world!"},
+							},
+						}},
 				},
 			},
 		},
