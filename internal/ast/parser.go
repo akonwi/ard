@@ -18,7 +18,7 @@ type parser struct {
 
 func Parse(source []byte) (*Program, error) {
 	p := new(NewLexer(source).Scan())
-	return p.Parse()
+	return p.parse()
 }
 
 func new(tokens []token) *parser {
@@ -28,14 +28,18 @@ func new(tokens []token) *parser {
 	}
 }
 
-func (p *parser) Parse() (*Program, error) {
+func (p *parser) parse() (*Program, error) {
 	program := &Program{
 		Imports:    []Import{},
 		Statements: []Statement{},
 	}
 
 	// Parse imports first
-	for p.match(use) {
+	for p.check(use) || p.check(new_line) {
+		if p.match(new_line) {
+			continue
+		}
+		p.consume(use, "Expected 'use' keyword")
 		imp, err := p.parseImport()
 		if err != nil {
 			return nil, err
@@ -130,7 +134,7 @@ func (p *parser) parseStatement() (Statement, error) {
 func (p *parser) parseVariableDef() (Statement, error) {
 	kind := p.previous().kind
 	name := p.consume(identifier, fmt.Sprintf("Expected identifier after '%s'", string(kind)))
-	var declaredType DeclaredType
+	var declaredType DeclaredType = nil
 	if p.match(colon) {
 		declaredType = p.parseType()
 	}
@@ -422,18 +426,21 @@ func (p *parser) assignment() (Statement, error) {
 
 func (p *parser) parseType() DeclaredType {
 	if p.match(identifier) {
-		switch p.previous().text {
+		id := p.previous()
+		optional := p.match(question_mark)
+		switch id.text {
 		case "Int":
-			return IntType{}
+			return IntType{optional: optional}
 		case "Float":
-			return FloatType{}
+			return FloatType{optional: optional}
 		case "Str":
-			return StringType{}
+			return StringType{optional: optional}
 		case "Bool":
-			return BooleanType{}
+			return BooleanType{optional: optional}
 		default:
 			return CustomType{
-				Name: p.previous().text,
+				Name:     p.previous().text,
+				optional: optional,
 			}
 		}
 	}
@@ -442,10 +449,18 @@ func (p *parser) parseType() DeclaredType {
 		if p.match(colon) {
 			valElementType := p.parseType()
 			p.consume(right_bracket, "Expected ']'")
-			return &Map{Key: elementType, Value: valElementType}
+			return &Map{
+				Key:      elementType,
+				Value:    valElementType,
+				optional: p.match(question_mark),
+			}
 		}
 		p.consume(right_bracket, "Expected ']'")
-		return &List{Element: elementType}
+
+		return &List{
+			Element:  elementType,
+			optional: p.match(question_mark),
+		}
 	}
 	return nil
 }
