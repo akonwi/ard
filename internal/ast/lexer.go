@@ -1,6 +1,8 @@
 package ast
 
-import "strings"
+import (
+	"strings"
+)
 
 type kind string
 
@@ -236,7 +238,8 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(left_brace), true
 	case '}':
 		if l.matchNext('}') != nil {
-			return currentChar.asToken(expr_close), true
+			l.tokens = append(l.tokens, currentChar.asToken(expr_close))
+			return l.takeString(nil)
 		}
 		return currentChar.asToken(right_brace), true
 	case '[':
@@ -311,7 +314,7 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(equal), true
 	case '"':
-		return l.takeString(currentChar), true
+		return l.takeString(currentChar)
 	default:
 		if currentChar.isAlpha() {
 			if path, ok := l.takePath(currentChar); ok {
@@ -346,49 +349,34 @@ func (l *lexer) blockComment(start *char) token {
 	return token{kind: block_comment, line: start.line, column: start.col, text: text}
 }
 
-func (l *lexer) takeString(start *char) token {
-	begin := start
-	for l.hasMore() && l.peek().raw != '"' {
-		if l.peekMatch("{{") {
-			// capture string so far
-			l.tokens = append(l.tokens,
-				token{
-					kind:   string_,
-					line:   start.line,
-					column: start.col,
-					text:   string(l.source[start.index+1 : l.cursor]),
-				},
-			)
-			// take the {{
-			if open, ok := l.take(); ok {
-				l.tokens = append(l.tokens, open)
-			}
+func (l *lexer) takeString(openQuote *char) (token, bool) {
+	start := openQuote
+	if openQuote == nil {
+		start = l.peek()
+	}
+	for l.hasMore() && !l.check(`"`) {
+		if l.check(`{{`) {
+			text := string(l.source[start.index:l.cursor])
 
-			for l.hasMore() && !l.peekMatch("}}") {
-				if token, ok := l.take(); ok {
-					l.tokens = append(l.tokens, token)
-				}
-			}
-
-			// take the }}
-			if close, ok := l.take(); ok {
-				l.tokens = append(l.tokens, close)
-			}
-			begin = l.peek()
-		} else {
-			l.advance()
+			return token{
+				kind:   string_,
+				line:   start.line,
+				column: start.col,
+				text:   strings.TrimPrefix(text, string('"')),
+			}, true
 		}
+		l.advance()
 	}
 
 	endQuote := l.advance()
-	text := string(l.source[begin.index:endQuote.index])
+	text := string(l.source[start.index:endQuote.index])
 
 	return token{
 		kind:   string_,
-		line:   begin.line,
-		column: begin.col,
+		line:   start.line,
+		column: start.col,
 		text:   strings.TrimPrefix(text, string('"')),
-	}
+	}, true
 }
 
 func (l *lexer) takePath(start *char) (token, bool) {
