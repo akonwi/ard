@@ -19,7 +19,7 @@ func TestVariables(t *testing.T) {
 					&VariableDeclaration{
 						Name:    "name",
 						Mutable: false,
-						Type:    StringType{},
+						Type:    &StringType{},
 						Value: &StrLiteral{
 							Value: "Alice",
 						},
@@ -27,7 +27,7 @@ func TestVariables(t *testing.T) {
 					&VariableDeclaration{
 						Name:    "age",
 						Mutable: true,
-						Type:    IntType{},
+						Type:    &IntType{},
 						Value: &NumLiteral{
 							Value: "30",
 						},
@@ -35,7 +35,7 @@ func TestVariables(t *testing.T) {
 					&VariableDeclaration{
 						Name:    "temp",
 						Mutable: true,
-						Type:    FloatType{},
+						Type:    &FloatType{},
 						Value: &NumLiteral{
 							Value: "98.6",
 						},
@@ -43,7 +43,7 @@ func TestVariables(t *testing.T) {
 					&VariableDeclaration{
 						Name:    "is_student",
 						Mutable: false,
-						Type:    BooleanType{},
+						Type:    &BooleanType{},
 						Value: &BoolLiteral{
 							Value: true,
 						},

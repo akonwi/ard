@@ -16,7 +16,7 @@ func TestMaps(t *testing.T) {
 					&VariableDeclaration{
 						Mutable: false,
 						Name:    "empty",
-						Type:    &Map{Key: StringType{}, Value: IntType{}},
+						Type:    &Map{Key: &StringType{}, Value: &IntType{}},
 						Value: &MapLiteral{
 							Entries: []MapEntry{},
 						},
@@ -24,7 +24,7 @@ func TestMaps(t *testing.T) {
 					&VariableDeclaration{
 						Mutable: false,
 						Name:    "num_to_str",
-						Type:    &Map{Key: IntType{}, Value: StringType{}},
+						Type:    &Map{Key: &IntType{}, Value: &StringType{}},
 						Value: &MapLiteral{
 							Entries: []MapEntry{
 								{Key: &NumLiteral{Value: "1"}, Value: &StrLiteral{Value: "one"}},

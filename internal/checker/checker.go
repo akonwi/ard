@@ -488,11 +488,11 @@ func Check(program *ast.Program) (Program, []Diagnostic) {
 
 func (c *checker) checkStatement(stmt ast.Statement) Statement {
 	switch s := stmt.(type) {
-	case ast.VariableDeclaration:
+	case *ast.VariableDeclaration:
 		if s.Type == nil {
 			var value Expression
 			switch astVal := s.Value.(type) {
-			case ast.ListLiteral:
+			case *ast.ListLiteral:
 				value = c.checkList(astVal, nil)
 			default:
 				value = c.checkExpression(astVal)
@@ -521,9 +521,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 
 		var value Expression
 		switch literal := s.Value.(type) {
-		case ast.ListLiteral:
+		case *ast.ListLiteral:
 			value = c.checkList(literal, expectedType)
-		case ast.MapLiteral:
+		case *ast.MapLiteral:
 			value = c.checkMap(literal, expectedType)
 		default:
 			value = c.checkExpression(s.Value)
@@ -544,9 +544,9 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 
 		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: expectedType})
 		return VariableBinding{Name: s.Name, Value: value, mut: s.Mutable}
-	case ast.VariableAssignment:
+	case *ast.VariableAssignment:
 		switch target := s.Target.(type) {
-		case ast.Identifier:
+		case *ast.Identifier:
 			symbol := c.scope.find(target.Name)
 			if symbol == nil {
 				c.addDiagnostic(Diagnostic{
@@ -623,7 +623,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			}
 			return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
 
-		case ast.InstanceProperty:
+		case *ast.InstanceProperty:
 			subject := c.checkExpression(target)
 			if !isMutable(subject) {
 				c.addDiagnostic(Diagnostic{
@@ -647,7 +647,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		default:
 			panic(fmt.Errorf("Unsupported assignment subject: %s", target))
 		}
-	case ast.IfStatement:
+	case *ast.IfStatement:
 		var condition Expression
 		initialize := func() {
 			if s.Condition != nil {
@@ -669,11 +669,11 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			elseClause = c.checkStatement(s.Else)
 		}
 		return IfStatement{Condition: condition, Body: block.Body, Else: elseClause}
-	case ast.Comment:
+	case *ast.Comment:
 		return nil
 	case ast.Break:
 		return Break{}
-	case ast.RangeLoop:
+	case *ast.RangeLoop:
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: Int{}}
 		start := c.checkExpression(s.Start)
 		end := c.checkExpression(s.End)
@@ -697,7 +697,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			End:    end,
 			Body:   block.Body,
 		}
-	case ast.ForInLoop:
+	case *ast.ForInLoop:
 		iterable := c.checkExpression(s.Iterable)
 		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
 		// getBody func allows lazy evaluation so that cursor can be updated within the switch below
@@ -740,7 +740,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			panic(fmt.Sprintf("Unhandled iterable type: %T", iterable.GetType()))
 		}
 
-	case ast.ForLoop:
+	case *ast.ForLoop:
 		var init VariableBinding
 		var condition Expression
 		var step Statement
@@ -760,7 +760,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			Body:      block,
 		}
 
-	case ast.WhileLoop:
+	case *ast.WhileLoop:
 		condition := c.checkExpression(s.Condition)
 		if condition.GetType() != (Bool{}) {
 			c.addDiagnostic(Diagnostic{
@@ -776,49 +776,11 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			Condition: condition,
 			Body:      block.Body,
 		}
+	case *ast.FunctionDeclaration:
+		return c.checkFunctionDeclaration(s)
 	case ast.FunctionDeclaration:
-		parameters := make([]Parameter, len(s.Parameters))
-		blockVariables := make([]variable, len(s.Parameters))
-		for i, p := range s.Parameters {
-			parameters[i] = Parameter{
-				Name:    p.Name,
-				Type:    c.resolveDeclaredType(p.Type),
-				Mutable: p.Mutable,
-			}
-			blockVariables[i] = variable{name: p.Name, mut: p.Mutable, isParam: true, _type: parameters[i].Type}
-		}
-
-		declaredReturnType := c.resolveDeclaredType(s.ReturnType)
-		fn := function{
-			name:       s.Name,
-			parameters: blockVariables,
-			returns:    declaredReturnType,
-		}
-		c.scope.declare(fn)
-
-		block := c.checkBlock(s.Body, func() {
-			for _, p := range blockVariables {
-				c.scope.addVariable(p)
-			}
-		})
-		if _, isVoid := declaredReturnType.(Void); !isVoid && !AreCoherent(declaredReturnType, block.result) {
-			c.addDiagnostic(Diagnostic{
-				Kind: Error,
-				Message: fmt.Sprintf(
-					"Type mismatch: Expected %s, got %s",
-					declaredReturnType,
-					block.result),
-				location: s.ReturnType.GetLocation(),
-			})
-		}
-
-		return FunctionDeclaration{
-			Name:       s.Name,
-			Parameters: parameters,
-			Body:       block.Body,
-			Return:     declaredReturnType,
-		}
-	case ast.EnumDefinition:
+		return c.checkFunctionDeclaration(&s)
+	case *ast.EnumDefinition:
 		if len(s.Variants) == 0 {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -843,7 +805,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		}
 		c.scope.declare(enum)
 		return enum
-	case ast.StructDefinition:
+	case *ast.StructDefinition:
 		fields := map[string]Type{}
 		for _, field := range s.Fields {
 			name := field.Name.Name
@@ -872,7 +834,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			return nil
 		}
 		return strct
-	case ast.ImplBlock:
+	case *ast.ImplBlock:
 		_struct, ok := c.scope.getStruct(s.Self.Type.GetName())
 		if !ok {
 			c.addDiagnostic(Diagnostic{
@@ -895,7 +857,7 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 			_struct.addMethod(s.Self.Name, meth)
 		}
 		return nil
-	case ast.TypeDeclaration:
+	case *ast.TypeDeclaration:
 		types := make([]Type, len(s.Type))
 		for i, t := range s.Type {
 			types[i] = c.resolveDeclaredType(t)
@@ -905,6 +867,50 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 		return nil
 	default:
 		return c.checkExpression(s)
+	}
+}
+
+func (c *checker) checkFunctionDeclaration(s *ast.FunctionDeclaration) FunctionDeclaration {
+	parameters := make([]Parameter, len(s.Parameters))
+	blockVariables := make([]variable, len(s.Parameters))
+	for i, p := range s.Parameters {
+		parameters[i] = Parameter{
+			Name:    p.Name,
+			Type:    c.resolveDeclaredType(p.Type),
+			Mutable: p.Mutable,
+		}
+		blockVariables[i] = variable{name: p.Name, mut: p.Mutable, isParam: true, _type: parameters[i].Type}
+	}
+
+	declaredReturnType := c.resolveDeclaredType(s.ReturnType)
+	fn := function{
+		name:       s.Name,
+		parameters: blockVariables,
+		returns:    declaredReturnType,
+	}
+	c.scope.declare(fn)
+
+	block := c.checkBlock(s.Body, func() {
+		for _, p := range blockVariables {
+			c.scope.addVariable(p)
+		}
+	})
+	if _, isVoid := declaredReturnType.(Void); !isVoid && !AreCoherent(declaredReturnType, block.result) {
+		c.addDiagnostic(Diagnostic{
+			Kind: Error,
+			Message: fmt.Sprintf(
+				"Type mismatch: Expected %s, got %s",
+				declaredReturnType,
+				block.result),
+			location: s.ReturnType.GetLocation(),
+		})
+	}
+
+	return FunctionDeclaration{
+		Name:       s.Name,
+		Parameters: parameters,
+		Body:       block.Body,
+		Return:     declaredReturnType,
 	}
 }
 
@@ -933,24 +939,18 @@ func (c *checker) checkBlock(block []ast.Statement, setup func()) Block {
 
 func (c *checker) checkExpression(expr ast.Expression) Expression {
 	switch e := expr.(type) {
-	case ast.Identifier:
+	case *ast.Identifier:
 		sym := c.scope.find(e.Name)
 		if sym == nil {
 			panic(fmt.Sprintf("Undefined: %s", e.Name))
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", e.Name),
-				location: e.GetLocation(),
-			})
-			return nil
 		}
 		return Identifier{
 			Name:   e.Name,
 			symbol: *sym,
 		}
-	case ast.StrLiteral:
+	case *ast.StrLiteral:
 		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
-	case ast.NumLiteral:
+	case *ast.NumLiteral:
 		if strings.Contains(e.Value, ".") {
 			value, err := strconv.ParseFloat(e.Value, 64)
 			if err != nil {
@@ -973,17 +973,17 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return nil
 		}
 		return IntLiteral{Value: value}
-	case ast.BoolLiteral:
+	case *ast.BoolLiteral:
 		return BoolLiteral{Value: e.Value}
-	case ast.InstanceProperty:
+	case *ast.InstanceProperty:
 		return c.checkInstanceProperty(c.checkExpression(e.Target), e.Property)
-	case ast.InstanceMethod:
+	case *ast.InstanceMethod:
 		return c.checkInstanceMethod(c.checkExpression(e.Target), e.Method)
-	case ast.StaticProperty:
+	case *ast.StaticProperty:
 		return c.checkStaticProperty(c.checkStaticExpression(e.Target), e.Property)
 	case ast.StaticFunction:
 		return c.checkStaticFunction(c.checkStaticExpression(e.Target), e.Function)
-	case ast.UnaryExpression:
+	case *ast.UnaryExpression:
 		expr := c.checkExpression(e.Operand)
 		switch e.Operator {
 		case ast.Minus:
@@ -1008,7 +1008,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return Not{Value: expr}
 		}
 		panic(fmt.Sprintf("Unhandled unary operator: %d", e.Operator))
-	case ast.BinaryExpression:
+	case *ast.BinaryExpression:
 		left := c.checkExpression(e.Left)
 		right := c.checkExpression(e.Right)
 		operator := c.resolveBinaryOperator(e.Operator)
@@ -1062,7 +1062,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 
 		return BinaryExpr{Op: operator, Left: left, Right: right}
-	case ast.InterpolatedStr:
+	case *ast.InterpolatedStr:
 		parts := make([]Expression, len(e.Chunks))
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
@@ -1077,7 +1077,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			}
 		}
 		return InterpolatedStr{Parts: parts}
-	case ast.FunctionCall:
+	case *ast.FunctionCall:
 		sym := c.scope.find(e.Name)
 		if sym == nil {
 			c.addDiagnostic(Diagnostic{
@@ -1128,7 +1128,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		}
 
 		return FunctionCall{Name: e.Name, Args: args, symbol: fn}
-	case ast.AnonymousFunction:
+	case *ast.AnonymousFunction:
 		parameters := make([]Parameter, len(e.Parameters))
 		blockVariables := make([]variable, len(e.Parameters))
 		for i, p := range e.Parameters {
@@ -1161,9 +1161,9 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			Return:     declaredReturnType,
 			Body:       block.Body,
 		}
-	case ast.ListLiteral:
+	case *ast.ListLiteral:
 		return c.checkList(e, nil)
-	case ast.MatchExpression:
+	case *ast.MatchExpression:
 		subject := c.checkExpression(e.Subject)
 		switch sub := subject.GetType().(type) {
 		case Enum:
@@ -1183,7 +1183,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return nil
 		}
 
-	case ast.StructInstance:
+	case *ast.StructInstance:
 		_struct, ok := c.scope.getStruct(e.Name.Name)
 		if !ok {
 			c.addDiagnostic(Diagnostic{
@@ -1223,7 +1223,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			_type:  _struct,
 		}
 		return instance
-	case ast.MapLiteral:
+	case *ast.MapLiteral:
 		return c.checkMap(e, nil)
 	default:
 		panic(fmt.Sprintf("Unhandled expression: %T", e))
@@ -1232,7 +1232,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 
 func (c *checker) checkStaticExpression(expr ast.Expression) Static {
 	switch e := expr.(type) {
-	case ast.Identifier:
+	case *ast.Identifier:
 		if e.Name == "Int" {
 			return Int{}
 		}
@@ -1259,7 +1259,7 @@ func (c *checker) checkStaticExpression(expr ast.Expression) Static {
 	}
 }
 
-func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression {
+func (c *checker) checkList(expr *ast.ListLiteral, declaredType Type) Expression {
 	if declaredType != nil {
 		elements := make([]Expression, len(expr.Items))
 		for i, item := range expr.Items {
@@ -1310,7 +1310,7 @@ func (c *checker) checkList(expr ast.ListLiteral, declaredType Type) Expression 
 	}
 }
 
-func (c *checker) checkMap(expr ast.MapLiteral, declaredType Type) Expression {
+func (c *checker) checkMap(expr *ast.MapLiteral, declaredType Type) Expression {
 	entries := map[Expression]Expression{}
 	if declaredType != nil {
 		for _, entry := range expr.Entries {
@@ -1378,7 +1378,7 @@ func (c *checker) checkMap(expr ast.MapLiteral, declaredType Type) Expression {
 	}
 }
 
-func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, enum Enum) EnumMatch {
+func (c *checker) checkEnumMatch(expr *ast.MatchExpression, subject Expression, enum Enum) EnumMatch {
 	expectedCases := make([]bool, len(enum.Variants))
 	for i := range enum.Variants {
 		expectedCases[i] = false
@@ -1393,7 +1393,7 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 		variables := []variable{}
 		var isCatchAll bool = false
 
-		if id, ok := arm.Pattern.(ast.Identifier); ok {
+		if id, ok := arm.Pattern.(*ast.Identifier); ok {
 			if i != len(expr.Cases)-1 {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
@@ -1480,13 +1480,13 @@ func (c *checker) checkEnumMatch(expr ast.MatchExpression, subject Expression, e
 	}
 }
 
-func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) Expression {
+func (c *checker) checkBoolMatch(expr *ast.MatchExpression, subject Expression) Expression {
 	var trueCase Block
 	var falseCase Block
 
 	var result Type = Void{}
 	for i, arm := range expr.Cases {
-		if _, isIdentifier := arm.Pattern.(ast.Identifier); isIdentifier {
+		if _, isIdentifier := arm.Pattern.(*ast.Identifier); isIdentifier {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
 				location: arm.Pattern.GetLocation(),
@@ -1564,13 +1564,13 @@ func (c *checker) checkBoolMatch(expr ast.MatchExpression, subject Expression) E
 	}
 }
 
-func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression) OptionMatch {
+func (c *checker) checkOptionMatch(expr *ast.MatchExpression, subject Expression) OptionMatch {
 	var someCase MatchCase
 	var noneCase Block
 
 	var result Type = nil
 	for _, arm := range expr.Cases {
-		id, isIdentifier := arm.Pattern.(ast.Identifier)
+		id, isIdentifier := arm.Pattern.(*ast.Identifier)
 		if !isIdentifier {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -1659,13 +1659,13 @@ func (c *checker) checkOptionMatch(expr ast.MatchExpression, subject Expression)
 	}
 }
 
-func (c *checker) checkUnionMatch(expr ast.MatchExpression, subject Expression) UnionMatch {
+func (c *checker) checkUnionMatch(expr *ast.MatchExpression, subject Expression) UnionMatch {
 	cases := map[Type]Block{}
 	var catchAll Block
 
 	var result Type = nil
 	for i, arm := range expr.Cases {
-		id, isIdentifier := arm.Pattern.(ast.Identifier)
+		id, isIdentifier := arm.Pattern.(*ast.Identifier)
 		if !isIdentifier {
 			c.addDiagnostic(Diagnostic{
 				Kind:     Error,
@@ -1949,24 +1949,24 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 
 	var _type Type
 	switch tt := t.(type) {
-	case ast.StringType:
+	case *ast.StringType:
 		_type = Str{}
-	case ast.IntType:
+	case *ast.IntType:
 		_type = Int{}
-	case ast.FloatType:
+	case *ast.FloatType:
 		_type = Float{}
-	case ast.BooleanType:
+	case *ast.BooleanType:
 		_type = Bool{}
-	case ast.List:
+	case *ast.List:
 		_type = List{
 			element: c.resolveDeclaredType(tt.Element),
 		}
-	case ast.Map:
+	case *ast.Map:
 		_type = Map{
 			key:   c.resolveDeclaredType(tt.Key),
 			value: c.resolveDeclaredType(tt.Value),
 		}
-	case ast.CustomType:
+	case *ast.CustomType:
 		if name := c.scope.find(tt.GetName()); name != nil {
 			if custom, isType := (*name).(Type); isType {
 				_type = custom

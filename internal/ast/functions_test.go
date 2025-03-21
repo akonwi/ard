@@ -49,10 +49,10 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "person",
-								Type: StringType{},
+								Type: &StringType{},
 							},
 						},
-						ReturnType: StringType{},
+						ReturnType: &StringType{},
 						Body: []Statement{
 							&StrLiteral{Value: "hello"},
 						},
@@ -71,14 +71,14 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name: "x",
-								Type: IntType{},
+								Type: &IntType{},
 							},
 							{
 								Name: "y",
-								Type: IntType{},
+								Type: &IntType{},
 							},
 						},
-						ReturnType: IntType{},
+						ReturnType: &IntType{},
 						Body: []Statement{
 							&NumLiteral{Value: "10"},
 						},
@@ -97,11 +97,11 @@ func TestFunctionDeclaration(t *testing.T) {
 						Parameters: []Parameter{
 							{
 								Name:    "person",
-								Type:    StringType{},
+								Type:    &StringType{},
 								Mutable: true,
 							},
 						},
-						ReturnType: StringType{},
+						ReturnType: &StringType{},
 						Body:       []Statement{},
 					},
 				},
@@ -125,7 +125,7 @@ func TestFunctionCalls(t *testing.T) {
 					&FunctionDeclaration{
 						Name:       "get_name",
 						Parameters: []Parameter{},
-						ReturnType: StringType{},
+						ReturnType: &StringType{},
 						Body:       []Statement{&StrLiteral{Value: "name"}},
 					},
 					&FunctionCall{
@@ -146,9 +146,9 @@ func TestFunctionCalls(t *testing.T) {
 					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
-							{Name: "name", Type: StringType{}},
+							{Name: "name", Type: &StringType{}},
 						},
-						ReturnType: StringType{},
+						ReturnType: &StringType{},
 						Body:       []Statement{&StrLiteral{Value: "hello"}},
 					},
 					&FunctionCall{
@@ -171,10 +171,10 @@ func TestFunctionCalls(t *testing.T) {
 					&FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
-							{Name: "x", Type: IntType{}},
-							{Name: "y", Type: IntType{}},
+							{Name: "x", Type: &IntType{}},
+							{Name: "y", Type: &IntType{}},
 						},
-						ReturnType: IntType{},
+						ReturnType: &IntType{},
 						Body: []Statement{
 							&BinaryExpression{
 								Left:     &Identifier{Name: "x"},
@@ -225,7 +225,7 @@ func TestAnonymousFunctions(t *testing.T) {
 				Statements: []Statement{
 					&AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: StringType{}},
+							{Name: "name", Type: &StringType{}},
 						},
 						Body: []Statement{
 							&StrLiteral{Value: "Hello, name!"},
@@ -242,7 +242,7 @@ func TestAnonymousFunctions(t *testing.T) {
 				Statements: []Statement{
 					&AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: StringType{}},
+							{Name: "name", Type: &StringType{}},
 						},
 						Body: []Statement{
 							&StrLiteral{Value: "Hello, name!"},

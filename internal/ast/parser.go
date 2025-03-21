@@ -430,15 +430,15 @@ func (p *parser) parseType() DeclaredType {
 		optional := p.match(question_mark)
 		switch id.text {
 		case "Int":
-			return IntType{optional: optional}
+			return &IntType{optional: optional}
 		case "Float":
-			return FloatType{optional: optional}
+			return &FloatType{optional: optional}
 		case "Str":
-			return StringType{optional: optional}
+			return &StringType{optional: optional}
 		case "Bool":
-			return BooleanType{optional: optional}
+			return &BooleanType{optional: optional}
 		default:
-			return CustomType{
+			return &CustomType{
 				Name:     p.previous().text,
 				optional: optional,
 			}

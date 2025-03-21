@@ -14,9 +14,9 @@ struct Person {
 var personStruct = &StructDefinition{
 	Name: Identifier{Name: "Person"},
 	Fields: []StructField{
-		{Identifier{Name: "name"}, StringType{}},
-		{Identifier{Name: "age"}, IntType{}},
-		{Identifier{Name: "employed"}, BooleanType{}},
+		{Identifier{Name: "name"}, &StringType{}},
+		{Identifier{Name: "age"}, &IntType{}},
+		{Identifier{Name: "employed"}, &BooleanType{}},
 	},
 }
 
@@ -60,13 +60,13 @@ func TestStructDefinitions(t *testing.T) {
 					&ImplBlock{
 						Self: Parameter{
 							Name: "s",
-							Type: CustomType{Name: "Shape"},
+							Type: &CustomType{Name: "Shape"},
 						},
 						Methods: []FunctionDeclaration{
 							{
 								Name:       "area",
 								Parameters: []Parameter{},
-								ReturnType: IntType{},
+								ReturnType: &IntType{},
 								Body: []Statement{
 									&BinaryExpression{
 										Operator: Multiply,

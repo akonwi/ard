@@ -15,7 +15,7 @@ func TestLists(t *testing.T) {
 					&VariableDeclaration{
 						Mutable: false,
 						Name:    "strings",
-						Type:    &List{Element: StringType{}},
+						Type:    &List{Element: &StringType{}},
 						Value: &ListLiteral{
 							Items: []Expression{
 								&NumLiteral{Value: "1"},
@@ -37,7 +37,7 @@ func TestLists(t *testing.T) {
 					&VariableDeclaration{
 						Mutable: false,
 						Name:    "numbers",
-						Type:    &List{Element: IntType{}},
+						Type:    &List{Element: &IntType{}},
 						Value: &ListLiteral{
 							Items: []Expression{
 								&NumLiteral{Value: "1"},

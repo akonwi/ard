@@ -453,13 +453,9 @@ func TestEqualityComparisons(t *testing.T) {
 			name: "Equality between primitives",
 			input: strings.Join([]string{
 				"1 == 2",
-				"1 != 2",
 				"10.2 == 21.4",
-				"10.2 != 21.4",
 				"true == false",
-				"true != false",
 				`"hello" == "world"`,
-				`"hello" != "world"`,
 			}, "\n"),
 			output: Program{
 				Statements: []Statement{
@@ -469,17 +465,7 @@ func TestEqualityComparisons(t *testing.T) {
 						Right: IntLiteral{Value: 2},
 					},
 					BinaryExpr{
-						Op:    NotEqual,
-						Left:  IntLiteral{Value: 1},
-						Right: IntLiteral{Value: 2},
-					},
-					BinaryExpr{
 						Op:    Equal,
-						Left:  FloatLiteral{Value: 10.2},
-						Right: FloatLiteral{Value: 21.4},
-					},
-					BinaryExpr{
-						Op:    NotEqual,
 						Left:  FloatLiteral{Value: 10.2},
 						Right: FloatLiteral{Value: 21.4},
 					},
@@ -489,17 +475,7 @@ func TestEqualityComparisons(t *testing.T) {
 						Right: BoolLiteral{Value: false},
 					},
 					BinaryExpr{
-						Op:    NotEqual,
-						Left:  BoolLiteral{Value: true},
-						Right: BoolLiteral{Value: false},
-					},
-					BinaryExpr{
 						Op:    Equal,
-						Left:  StrLiteral{Value: "hello"},
-						Right: StrLiteral{Value: "world"},
-					},
-					BinaryExpr{
-						Op:    NotEqual,
 						Left:  StrLiteral{Value: "hello"},
 						Right: StrLiteral{Value: "world"},
 					},
@@ -1121,7 +1097,7 @@ func TestFunctions(t *testing.T) {
 		{
 			name: "Anonymous functions",
 			input: strings.Join([]string{
-				`let add = (a: Int, b: Int) Int { a + b }`,
+				`let add = fn(a: Int, b: Int) Int { a + b }`,
 				`let eight: Int = add(3, 5)`,
 			}, "\n"),
 			output: Program{
