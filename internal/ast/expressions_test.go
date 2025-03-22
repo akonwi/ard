@@ -489,6 +489,7 @@ func TestMemberAccess(t *testing.T) {
 				`some_string.size`,
 				`some_string.at(0)`,
 				"name.take(3).size",
+				`100.to_str()`,
 			}, "\n"),
 			output: Program{
 				Imports: []Import{},
@@ -538,6 +539,15 @@ func TestMemberAccess(t *testing.T) {
 							},
 						},
 						Property: Identifier{Name: "size"},
+					},
+					&InstanceMethod{
+						Target: &NumLiteral{
+							Value: "100",
+						},
+						Method: FunctionCall{
+							Name: "to_str",
+							Args: []Expression{},
+						},
 					},
 				},
 			},

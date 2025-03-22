@@ -474,10 +474,24 @@ func (l *lexer) takeIdentifier() token {
 		return makeIdentifier(identifier)
 	}
 }
+
+func (l *lexer) at(i int) *char {
+	if i < 0 || i >= len(l.source) {
+		return nil
+	}
+	return &char{
+		raw:   l.source[i],
+		index: i,
+	}
+}
+
 func (l *lexer) takeNumber() token {
 	// record the start column
 	column := l.column - 1
 	for l.hasMore() && (l.peek().isDigit() || (l.check(".") && !l.check(".."))) {
+		if l.check(".") && !l.at(l.cursor+1).isDigit() {
+			break
+		}
 		l.advance()
 	}
 	text := string(l.source[l.start:l.cursor])

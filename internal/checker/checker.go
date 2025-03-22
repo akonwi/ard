@@ -981,7 +981,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		return c.checkInstanceMethod(c.checkExpression(e.Target), e.Method)
 	case *ast.StaticProperty:
 		return c.checkStaticProperty(c.checkStaticExpression(e.Target), e.Property)
-	case ast.StaticFunction:
+	case *ast.StaticFunction:
 		return c.checkStaticFunction(c.checkStaticExpression(e.Target), e.Function)
 	case *ast.UnaryExpression:
 		expr := c.checkExpression(e.Operand)

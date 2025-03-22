@@ -291,7 +291,7 @@ func TestFunctions(t *testing.T) {
 		{
 			name: "first class functions",
 			input: `
-			let sub = (a: Int, b: Int) { a - b }
+			let sub = fn(a: Int, b: Int) { a - b }
 			sub(30, 8)`,
 			want: 22,
 		},
