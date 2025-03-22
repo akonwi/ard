@@ -939,6 +939,8 @@ func (c *checker) checkBlock(block []ast.Statement, setup func()) Block {
 
 func (c *checker) checkExpression(expr ast.Expression) Expression {
 	switch e := expr.(type) {
+	case nil:
+		return nil
 	case *ast.Identifier:
 		sym := c.scope.find(e.Name)
 		if sym == nil {

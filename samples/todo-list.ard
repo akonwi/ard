@@ -31,7 +31,7 @@ while running {
   render(list)
   io.print("What's your next todo?")
   let title = io.read_line()
-  if (title.is_empty()) {
+  if title.is_empty() {
     running = false
   } else {
     let todo = Todo { title: title, completed: false }
