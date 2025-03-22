@@ -160,12 +160,12 @@ func TestEquality(t *testing.T) {
 	}{
 		{input: `30 == 30`, want: true},
 		{input: `1 == 10`, want: false},
-		{input: `30 != 30`, want: false},
-		{input: `1 != 10`, want: true},
+		{input: `not 30 == 30`, want: false},
+		{input: `not 1 == 10`, want: true},
 		{input: `true == false`, want: false},
-		{input: `true != false`, want: true},
+		{input: `not true == false`, want: true},
 		{input: `"hello" == "world"`, want: false},
-		{input: `"hello" != "world"`, want: true},
+		{input: `not "hello" == "world"`, want: true},
 	}
 
 	for _, test := range tests {
