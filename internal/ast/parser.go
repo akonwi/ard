@@ -887,7 +887,14 @@ func (p *parser) primary() (Expression, error) {
 	if p.match(left_bracket) {
 		return p.list()
 	}
-	panic(fmt.Errorf("unmatched primary expression: %s", p.peek().kind))
+	switch tok := p.peek(); tok.kind {
+	// will i regret this?
+	case and, or, fn, match:
+		name := string(p.advance().kind)
+		return &Identifier{Name: name}, nil
+	default:
+		panic(fmt.Errorf("unmatched primary expression: %s", p.peek().kind))
+	}
 }
 
 func (p *parser) list() (Expression, error) {
