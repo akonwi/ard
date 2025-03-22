@@ -1,23 +1,14 @@
 package ast
 
-import (
-	"fmt"
-)
+import "fmt"
 
-// statements do not produce values
 type Statement interface {
 	String() string
 	GetLocation() Location
 }
 
-// expressions produce values
 type Expression interface {
 	Statement
-}
-
-// the base struct for all AST nodes
-type BaseNode struct {
-	start, end Point
 }
 
 type Point struct {
@@ -38,17 +29,14 @@ func (l Location) String() string {
 	return l.Start.String() + "-" + l.End.String()
 }
 
-func (b BaseNode) GetLocation() Location {
-	return Location{
-		Start: b.start,
-		End:   b.end,
-	}
+func (l Location) GetLocation() Location {
+	return l
 }
 
 type Import struct {
-	BaseNode
 	Path string
 	Name string
+	Location
 }
 
 func (p Import) String() string {
@@ -56,19 +44,18 @@ func (p Import) String() string {
 }
 
 type Program struct {
-	BaseNode
 	Imports    []Import
 	Statements []Statement
 }
 
-type Break struct{ BaseNode }
+type Break struct{ Location }
 
 func (b Break) String() string {
 	return "break"
 }
 
 type Comment struct {
-	BaseNode
+	Location
 	Value string
 }
 
@@ -77,7 +64,7 @@ func (c Comment) String() string {
 }
 
 type VariableDeclaration struct {
-	BaseNode
+	Location
 	Name    string
 	Mutable bool
 	Value   Expression
@@ -91,7 +78,7 @@ type DeclaredType interface {
 }
 
 type StringType struct {
-	BaseNode
+	Location
 	optional bool
 }
 
@@ -104,7 +91,7 @@ func (s StringType) GetName() string {
 }
 
 type IntType struct {
-	BaseNode
+	Location
 	optional bool
 }
 
@@ -117,7 +104,7 @@ func (v IntType) IsOptional() bool {
 }
 
 type FloatType struct {
-	BaseNode
+	Location
 	optional bool
 }
 
@@ -129,7 +116,7 @@ func (f FloatType) IsOptional() bool {
 }
 
 type BooleanType struct {
-	BaseNode
+	Location
 	optional bool
 }
 
@@ -142,7 +129,7 @@ func (v BooleanType) IsOptional() bool {
 }
 
 type TypeDeclaration struct {
-	BaseNode
+	Location
 	Name Identifier
 	Type []DeclaredType
 }
@@ -152,7 +139,7 @@ func (t TypeDeclaration) String() string {
 }
 
 type List struct {
-	BaseNode
+	Location
 	Element  DeclaredType
 	optional bool
 }
@@ -166,7 +153,7 @@ func (v List) IsOptional() bool {
 }
 
 type Map struct {
-	BaseNode
+	Location
 	Key      DeclaredType
 	Value    DeclaredType
 	optional bool
@@ -181,7 +168,7 @@ func (v Map) IsOptional() bool {
 }
 
 type CustomType struct {
-	BaseNode
+	Location
 	Name     string
 	optional bool
 }
@@ -203,7 +190,7 @@ func (v VariableDeclaration) String() string {
 }
 
 type VariableAssignment struct {
-	BaseNode
+	Location
 	Target   Expression
 	Operator Operator
 	Value    Expression
@@ -215,7 +202,7 @@ func (v VariableAssignment) String() string {
 }
 
 type Parameter struct {
-	BaseNode
+	Location
 	Name    string
 	Type    DeclaredType
 	Mutable bool
@@ -226,7 +213,7 @@ func (p Parameter) String() string {
 }
 
 type FunctionDeclaration struct {
-	BaseNode
+	Location
 	Name       string
 	Parameters []Parameter
 	ReturnType DeclaredType
@@ -238,7 +225,7 @@ func (f FunctionDeclaration) String() string {
 }
 
 type AnonymousFunction struct {
-	BaseNode
+	Location
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
@@ -249,7 +236,7 @@ func (a AnonymousFunction) String() string {
 }
 
 type StructDefinition struct {
-	BaseNode
+	Location
 	Name   Identifier
 	Fields []StructField
 }
@@ -264,7 +251,7 @@ func (s StructDefinition) String() string {
 }
 
 type ImplBlock struct {
-	BaseNode
+	Location
 	Self    Parameter
 	Methods []FunctionDeclaration
 }
@@ -274,13 +261,13 @@ func (i ImplBlock) String() string {
 }
 
 type StructValue struct {
-	BaseNode
+	Location
 	Name  Identifier
 	Value Expression
 }
 
 type StructInstance struct {
-	BaseNode
+	Location
 	Name       Identifier
 	Properties []StructValue
 }
@@ -290,7 +277,7 @@ func (s StructInstance) String() string {
 }
 
 type EnumDefinition struct {
-	BaseNode
+	Location
 	Name     string
 	Variants []string
 }
@@ -300,7 +287,7 @@ func (e EnumDefinition) String() string {
 }
 
 type WhileLoop struct {
-	BaseNode
+	Location
 	Condition Expression
 	Body      []Statement
 }
@@ -310,7 +297,7 @@ func (w WhileLoop) String() string {
 }
 
 type RangeLoop struct {
-	BaseNode
+	Location
 	Cursor Identifier
 	Start  Expression
 	End    Expression
@@ -322,7 +309,7 @@ func (r RangeLoop) String() string {
 }
 
 type ForInLoop struct {
-	BaseNode
+	Location
 	Cursor   Identifier
 	Iterable Expression
 	Body     []Statement
@@ -333,7 +320,7 @@ func (f ForInLoop) String() string {
 }
 
 type ForLoop struct {
-	BaseNode
+	Location
 	Init        *VariableDeclaration
 	Condition   Expression
 	Incrementer Statement
@@ -345,7 +332,7 @@ func (f ForLoop) String() string {
 }
 
 type IfStatement struct {
-	BaseNode
+	Location
 	Condition Expression
 	Body      []Statement
 	Else      Statement
@@ -356,7 +343,7 @@ func (i IfStatement) String() string {
 }
 
 type FunctionCall struct {
-	BaseNode
+	Location
 	Name string
 	Args []Expression
 }
@@ -366,7 +353,7 @@ func (f FunctionCall) String() string {
 }
 
 type InstanceProperty struct {
-	BaseNode
+	Location
 	Target   Expression
 	Property Identifier
 }
@@ -376,7 +363,7 @@ func (ip InstanceProperty) String() string {
 }
 
 type InstanceMethod struct {
-	BaseNode
+	Location
 	Target Expression
 	Method FunctionCall
 }
@@ -386,7 +373,7 @@ func (im InstanceMethod) String() string {
 }
 
 type StaticProperty struct {
-	BaseNode
+	Location
 	Target   Expression
 	Property Identifier
 }
@@ -396,7 +383,7 @@ func (s StaticProperty) String() string {
 }
 
 type StaticFunction struct {
-	BaseNode
+	Location
 	Target   Expression
 	Function FunctionCall
 }
@@ -406,7 +393,7 @@ func (s StaticFunction) String() string {
 }
 
 type EnumAccess struct {
-	BaseNode
+	Location
 	Enum    Identifier
 	Variant Identifier
 }
@@ -441,7 +428,7 @@ const (
 )
 
 type UnaryExpression struct {
-	BaseNode
+	Location
 	Operator Operator
 	Operand  Expression
 }
@@ -452,7 +439,7 @@ func (u UnaryExpression) String() string {
 }
 
 type BinaryExpression struct {
-	BaseNode
+	Location
 	Operator    Operator
 	Left, Right Expression
 	// todo: drop this field
@@ -464,7 +451,7 @@ func (b BinaryExpression) String() string {
 }
 
 type RangeExpression struct {
-	BaseNode
+	Location
 	Start, End Expression
 }
 
@@ -473,7 +460,7 @@ func (b RangeExpression) String() string {
 }
 
 type Identifier struct {
-	BaseNode
+	Location
 	Name string
 }
 
@@ -482,7 +469,7 @@ func (i Identifier) String() string {
 }
 
 type StrLiteral struct {
-	BaseNode
+	Location
 	Value string
 }
 
@@ -491,7 +478,7 @@ func (s StrLiteral) String() string {
 }
 
 type InterpolatedStr struct {
-	BaseNode
+	Location
 	Chunks []Expression
 }
 
@@ -500,7 +487,7 @@ func (i InterpolatedStr) String() string {
 }
 
 type NumLiteral struct {
-	BaseNode
+	Location
 	Value string
 }
 
@@ -509,7 +496,7 @@ func (n NumLiteral) String() string {
 }
 
 type BoolLiteral struct {
-	BaseNode
+	Location
 	Value bool
 }
 
@@ -519,7 +506,7 @@ func (b BoolLiteral) String() string {
 }
 
 type ListLiteral struct {
-	BaseNode
+	Location
 	Items []Expression
 }
 
@@ -533,7 +520,7 @@ type MapEntry struct {
 }
 
 type MapLiteral struct {
-	BaseNode
+	Location
 	Entries []MapEntry
 }
 
@@ -542,7 +529,7 @@ func (m MapLiteral) String() string {
 }
 
 type MatchExpression struct {
-	BaseNode
+	Location
 	Subject Expression
 	Cases   []MatchCase
 }
@@ -552,7 +539,7 @@ func (m MatchExpression) String() string {
 }
 
 type MatchCase struct {
-	BaseNode
+	Location
 	Pattern Expression
 	Body    []Statement
 }

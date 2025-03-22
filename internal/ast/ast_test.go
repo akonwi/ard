@@ -20,7 +20,7 @@ var compareOptions = cmp.Options{
 		Map{},
 		CustomType{}),
 	cmp.FilterPath(func(p cmp.Path) bool {
-		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Range"
+		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Location"
 	}, cmp.Ignore()),
 
 	cmp.Comparer(func(x, y map[string]int) bool {
@@ -133,10 +133,10 @@ func TestIdentifiers(t *testing.T) {
 func TestWhileLoop(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "while loop",
+			name: "while loops",
 			input: `
-					while count <= 9 {
-					}`,
+					while count <= 9 {}
+					while has_more {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -147,6 +147,10 @@ func TestWhileLoop(t *testing.T) {
 							Right:    &NumLiteral{Value: "9"},
 						},
 						Body: []Statement{},
+					},
+					&WhileLoop{
+						Condition: &Identifier{Name: "has_more"},
+						Body:      []Statement{},
 					},
 				},
 			},

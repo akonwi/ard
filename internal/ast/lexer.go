@@ -94,18 +94,6 @@ type token struct {
 	text   string
 }
 
-func (t *token) End() int {
-	switch t.kind {
-	case string_, identifier, path, comment, block_comment:
-		return t.column + len(t.text)
-	case colon_colon, fat_arrow, thin_arrow, expr_open, expr_close,
-		bang_equal, greater_than_equal, less_than_equal, equal_equal, increment, decrement:
-		return t.column + 2
-	default:
-		return t.column
-	}
-}
-
 type char struct {
 	raw   byte
 	index int

@@ -23,7 +23,7 @@ fn render(list: [Todo]) {
 }
 
 mut list: [Todo] = [
-  Todo { title: "Buy milk", completed: true }
+  Todo{ title: "Buy milk", completed: true }
 ]
 
 mut running = true

@@ -68,13 +68,11 @@ func (p *parser) parseImport() (*Import, error) {
 	useToken := p.previous()
 	pathToken := p.consume(path, "Expected a module path after 'use'")
 	start := Point{Row: useToken.line, Col: useToken.column}
-	var end Point
 
 	var name string
 	if p.match(as) {
 		alias := p.consume(identifier, "Expected alias name after 'as'")
 		name = alias.text
-		end = Point{Row: alias.line, Col: alias.End()}
 	} else {
 		// Default alias is last part of path
 		parts := strings.Split(pathToken.text, "/")
@@ -85,28 +83,45 @@ func (p *parser) parseImport() (*Import, error) {
 		}
 		name = strings.ReplaceAll(name, "-", "_")
 	}
-	p.match(new_line)
+	endCol := p.previous().column
+	if p.match(new_line) {
+		endCol = p.previous().column - 1
+	}
+	end := Point{Row: pathToken.line, Col: endCol}
 
 	return &Import{
 		Path: pathToken.text,
 		Name: name,
-		BaseNode: BaseNode{
-			start: start,
-			end:   end,
+		Location: Location{
+			Start: start,
+			End:   end,
 		},
 	}, nil
 }
 
 func (p *parser) parseStatement() (Statement, error) {
 	if p.match(comment, block_comment) {
-		return &Comment{Value: p.previous().text}, nil
+		tok := p.previous()
+		return &Comment{
+			Value: tok.text,
+			Location: Location{
+				Start: Point{Row: tok.line, Col: tok.column},
+				End:   Point{Row: p.peek().line, Col: p.peek().column - 1},
+			},
+		}, nil
 	}
 	if p.match(new_line) {
 		return nil, nil
 	}
 	if p.match(break_) {
-		p.consume(new_line, "Expected new line")
-		return &Break{}, nil
+		tok := p.previous()
+		new_line := p.consume(new_line, "Expected new line")
+		return &Break{
+			Location: Location{
+				Start: Point{Row: tok.line, Col: tok.column},
+				End:   Point{Row: tok.line, Col: new_line.column - 1},
+			},
+		}, nil
 	}
 	if p.match(let, mut) {
 		return p.parseVariableDef()
@@ -136,7 +151,8 @@ func (p *parser) parseStatement() (Statement, error) {
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {
-	kind := p.previous().kind
+	start := p.previous()
+	kind := start.kind
 	name := p.consume(identifier, fmt.Sprintf("Expected identifier after '%s'", string(kind)))
 	var declaredType DeclaredType = nil
 	if p.match(colon) {
@@ -147,12 +163,19 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.match(new_line)
+	endCol := p.previous().column
+	if p.match(new_line) {
+		endCol = p.previous().column - 1
+	}
 	return &VariableDeclaration{
 		Mutable: kind == mut,
 		Name:    name.text,
 		Value:   value,
 		Type:    declaredType,
+		Location: Location{
+			Start: Point{Row: start.line, Col: start.column},
+			End:   Point{Row: start.line, Col: endCol},
+		},
 	}, nil
 }
 
@@ -190,7 +213,7 @@ func (p *parser) ifStatement() (Statement, error) {
 }
 
 func (p *parser) whileLoop() (Statement, error) {
-	condition, err := p.parseExpression()
+	condition, err := p.or()
 	if err != nil {
 		return nil, err
 	}
@@ -893,7 +916,8 @@ func (p *parser) primary() (Expression, error) {
 		name := string(p.advance().kind)
 		return &Identifier{Name: name}, nil
 	default:
-		panic(fmt.Errorf("unmatched primary expression: %s", p.peek().kind))
+		peek := p.peek()
+		panic(fmt.Errorf("unmatched primary expression at %d,%d: %s", peek.line, peek.column, peek.kind))
 	}
 }
 
@@ -901,6 +925,8 @@ func (p *parser) list() (Expression, error) {
 	if p.check(colon) {
 		return p.map_()
 	}
+
+	p.match(new_line)
 
 	start := p.index
 	items := []Expression{}
@@ -916,6 +942,7 @@ func (p *parser) list() (Expression, error) {
 
 		items = append(items, item)
 		p.match(comma)
+		p.match(new_line)
 	}
 	return &ListLiteral{Items: items}, nil
 }
