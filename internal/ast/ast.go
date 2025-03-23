@@ -33,6 +33,10 @@ func (l Location) GetLocation() Location {
 	return l
 }
 
+func (l Location) GetStart() Point {
+	return l.Start
+}
+
 type Import struct {
 	Path string
 	Name string

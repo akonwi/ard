@@ -180,6 +180,7 @@ func (p *parser) parseVariableDef() (Statement, error) {
 }
 
 func (p *parser) ifStatement() (Statement, error) {
+	ifToken := p.previous()
 	condition, err := p.or()
 	if err != nil {
 		return nil, err
@@ -191,6 +192,9 @@ func (p *parser) ifStatement() (Statement, error) {
 	stmt := &IfStatement{
 		Condition: condition,
 		Body:      statements,
+		Location: Location{
+			Start: Point{Row: ifToken.line, Col: ifToken.column},
+		},
 	}
 
 	if p.match(else_) {
@@ -498,7 +502,12 @@ func (p *parser) parseExpression() (Expression, error) {
 
 func (p *parser) matchExpr() (Expression, error) {
 	if p.match(match) {
-		matchExpr := &MatchExpression{}
+		keyword := p.previous()
+		matchExpr := &MatchExpression{
+			Location: Location{
+				Start: Point{Row: keyword.line, Col: keyword.column},
+			},
+		}
 		expr, err := p.or()
 		if err != nil {
 			return nil, err
@@ -536,6 +545,7 @@ func (p *parser) matchExpr() (Expression, error) {
 			p.match(comma)
 		}
 
+		matchExpr.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 		matchExpr.Subject = expr
 		return matchExpr, nil
 	}
@@ -545,6 +555,7 @@ func (p *parser) matchExpr() (Expression, error) {
 
 func (p *parser) functionDef() (Statement, error) {
 	if p.match(fn) {
+		keyword := p.previous()
 		name := ""
 		if p.check(identifier) {
 			name = p.consume("identifier", "Expected function name after 'fn'").text
@@ -575,6 +586,10 @@ func (p *parser) functionDef() (Statement, error) {
 				Parameters: params,
 				ReturnType: returnType,
 				Body:       statements,
+				Location: Location{
+					Start: Point{Row: keyword.line, Col: keyword.column},
+					End:   Point{Row: p.previous().line, Col: p.previous().column},
+				},
 			}, nil
 		}
 
@@ -583,6 +598,10 @@ func (p *parser) functionDef() (Statement, error) {
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       statements,
+			Location: Location{
+				Start: Point{Row: keyword.line, Col: keyword.column},
+				End:   Point{Row: p.previous().line, Col: p.previous().column},
+			},
 		}, nil
 	}
 
@@ -596,6 +615,9 @@ func (p *parser) structInstance() (Expression, error) {
 		instance := &StructInstance{
 			Name:       Identifier{Name: nameToken.text},
 			Properties: []StructValue{},
+			Location: Location{
+				Start: Point{Row: nameToken.line, Col: nameToken.column},
+			},
 		}
 
 		for !p.match(right_brace) {
@@ -611,6 +633,7 @@ func (p *parser) structInstance() (Expression, error) {
 			})
 			p.match(comma)
 		}
+		instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 		return instance, nil
 	}
 
@@ -895,8 +918,13 @@ func (p *parser) primary() (Expression, error) {
 		}, nil
 	}
 	if p.match(identifier) {
+		tok := p.previous()
 		return &Identifier{
-			Name: p.previous().text,
+			Name: tok.text,
+			Location: Location{
+				Start: Point{Row: tok.line, Col: tok.column},
+				End:   Point{Row: tok.line, Col: tok.column + len(tok.text) - 1},
+			},
 		}, nil
 	}
 	if p.match(left_paren) {

@@ -450,7 +450,7 @@ func Check(program *ast.Program) (Program, []Diagnostic) {
 		if _, ok := checker.imports[imp.Name]; ok {
 			checker.addDiagnostic(Diagnostic{
 				Kind:     Error,
-				Message:  fmt.Sprintf("%s Duplicate package name: %s", imp.GetLocation().Start, imp.Name),
+				Message:  fmt.Sprintf("%s Duplicate package name: %s", imp.GetStart(), imp.Name),
 				location: imp.GetLocation(),
 			})
 		} else {
