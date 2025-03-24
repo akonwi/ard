@@ -5,6 +5,59 @@ import (
 	"testing"
 )
 
+func TestListLiterals(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Empty list",
+			input: "[]",
+			output: Program{
+				Imports:    []Import{},
+				Statements: []Statement{&ListLiteral{Items: []Expression{}}},
+			},
+		},
+		{
+			name:  "List with items",
+			input: "[1,2,3,]",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ListLiteral{Items: []Expression{
+						&NumLiteral{Value: "1"},
+						&NumLiteral{Value: "2"},
+						&NumLiteral{Value: "3"},
+					}},
+				},
+			},
+		},
+	})
+}
+
+func TestMapLiterals(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Empty map",
+			input: "[:]",
+			output: Program{
+				Imports:    []Import{},
+				Statements: []Statement{&MapLiteral{Entries: []MapEntry{}}},
+			},
+		},
+		{
+			name:  "Map with entries",
+			input: `[1:"one", 2:"two",]`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&MapLiteral{Entries: []MapEntry{
+						{Key: &NumLiteral{Value: "1"}, Value: &StrLiteral{Value: "one"}},
+						{Key: &NumLiteral{Value: "2"}, Value: &StrLiteral{Value: "two"}},
+					}},
+				},
+			},
+		},
+	})
+}
+
 func TestUnaryExpressions(t *testing.T) {
 	tests := []test{
 		{
@@ -13,12 +66,12 @@ func TestUnaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "negative_number",
 						Mutable: false,
-						Value: UnaryExpression{
+						Value: &UnaryExpression{
 							Operator: Minus,
-							Operand: NumLiteral{
+							Operand: &NumLiteral{
 								Value: `30`,
 							}},
 					},
@@ -31,12 +84,12 @@ func TestUnaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					VariableDeclaration{
+					&VariableDeclaration{
 						Name:    "nope",
 						Mutable: false,
-						Value: UnaryExpression{
+						Value: &UnaryExpression{
 							Operator: Not,
-							Operand: BoolLiteral{
+							Operand: &BoolLiteral{
 								Value: true,
 							},
 						},
@@ -57,15 +110,15 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Plus,
-						Left: UnaryExpression{
+						Left: &UnaryExpression{
 							Operator: Minus,
-							Operand: NumLiteral{
+							Operand: &NumLiteral{
 								Value: `30`,
 							},
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: "20",
 						},
 					},
@@ -78,12 +131,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Minus,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -96,12 +149,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Divide,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `6`,
 						},
 					},
@@ -114,12 +167,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Multiply,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `10`,
 						},
 					},
@@ -132,12 +185,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Modulo,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `3`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `9`,
 						},
 					},
@@ -150,12 +203,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: GreaterThan,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -168,12 +221,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: LessThan,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -186,12 +239,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: LessThanOrEqual,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `30`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `12`,
 						},
 					},
@@ -204,13 +257,13 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Equal,
-						Left: StrLiteral{
-							Value: `"Joe"`,
+						Left: &StrLiteral{
+							Value: "Joe",
 						},
-						Right: StrLiteral{
-							Value: `"Joe"`,
+						Right: &StrLiteral{
+							Value: "Joe",
 						},
 					},
 				},
@@ -222,12 +275,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Equal,
-						Left: NumLiteral{
+						Left: &NumLiteral{
 							Value: `1`,
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `1`,
 						},
 					},
@@ -240,12 +293,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Equal,
-						Left: BoolLiteral{
+						Left: &BoolLiteral{
 							Value: true,
 						},
-						Right: BoolLiteral{
+						Right: &BoolLiteral{
 							Value: false,
 						},
 					},
@@ -253,38 +306,43 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 
-		// Test cases for the '!=' operator
+		// Test cases for not (foo == bar)
 		{
 			name:  "Valid string inequality checks",
-			input: `"Joe" != "Joe"`,
+			input: `not "Joe" == "Joe"`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: StrLiteral{
-							Value: `"Joe"`,
-						},
-						Right: StrLiteral{
-							Value: `"Joe"`,
-						},
-					},
+					&UnaryExpression{
+						Operator: Not,
+						Operand: &BinaryExpression{
+							Operator: Equal,
+							Left: &StrLiteral{
+								Value: "Joe",
+							},
+							Right: &StrLiteral{
+								Value: "Joe",
+							},
+						}},
 				},
 			},
 		},
 		{
 			name:  "Valid number inequality checks",
-			input: `1 != 1`,
+			input: `not 1 == 1`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: NumLiteral{
-							Value: `1`,
-						},
-						Right: NumLiteral{
-							Value: `1`,
+					&UnaryExpression{
+						Operator: Not,
+						Operand: &BinaryExpression{
+							Operator: Equal,
+							Left: &NumLiteral{
+								Value: `1`,
+							},
+							Right: &NumLiteral{
+								Value: `1`,
+							},
 						},
 					},
 				},
@@ -292,17 +350,20 @@ func TestBinaryExpressions(t *testing.T) {
 		},
 		{
 			name:  "Valid boolean inequality checks",
-			input: `true != false`,
+			input: `not true == false`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						Operator: NotEqual,
-						Left: BoolLiteral{
-							Value: true,
-						},
-						Right: BoolLiteral{
-							Value: false,
+					&UnaryExpression{
+						Operator: Not,
+						Operand: &BinaryExpression{
+							Operator: Equal,
+							Left: &BoolLiteral{
+								Value: true,
+							},
+							Right: &BoolLiteral{
+								Value: false,
+							},
 						},
 					},
 				},
@@ -315,12 +376,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: And,
-						Left: BoolLiteral{
+						Left: &BoolLiteral{
 							Value: true,
 						},
-						Right: BoolLiteral{
+						Right: &BoolLiteral{
 							Value: false,
 						},
 					},
@@ -333,12 +394,12 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
+					&BinaryExpression{
 						Operator: Or,
-						Left: BoolLiteral{
+						Left: &BoolLiteral{
 							Value: true,
 						},
-						Right: BoolLiteral{
+						Right: &BoolLiteral{
 							Value: false,
 						},
 					},
@@ -353,11 +414,11 @@ func TestBinaryExpressions(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					RangeExpression{
-						Start: NumLiteral{
+					&RangeExpression{
+						Start: &NumLiteral{
 							Value: `1`,
 						},
-						End: NumLiteral{
+						End: &NumLiteral{
 							Value: `10`,
 						},
 					},
@@ -372,25 +433,23 @@ func TestBinaryExpressions(t *testing.T) {
 func TestParenthesizedExpressions(t *testing.T) {
 	tests := []test{
 		{
-			name:  "Valid parenthesized expression",
+			name:  "Parenthesized expression",
 			input: `(30 + 20) * 2`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					BinaryExpression{
-						HasPrecedence: false,
-						Operator:      Multiply,
-						Left: BinaryExpression{
-							HasPrecedence: true,
-							Operator:      Plus,
-							Left: NumLiteral{
+					&BinaryExpression{
+						Operator: Multiply,
+						Left: &BinaryExpression{
+							Operator: Plus,
+							Left: &NumLiteral{
 								Value: `30`,
 							},
-							Right: NumLiteral{
+							Right: &NumLiteral{
 								Value: `20`,
 							},
 						},
-						Right: NumLiteral{
+						Right: &NumLiteral{
 							Value: `2`,
 						},
 					},
@@ -398,8 +457,22 @@ func TestParenthesizedExpressions(t *testing.T) {
 			},
 		},
 		{
-			name:  "Invalid parenthesized expression",
-			input: `30 + (20 * "fizz")`,
+			name:  "Multiplication precedence",
+			input: `30 + 20 * x`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Plus,
+						Left:     &NumLiteral{Value: `30`},
+						Right: &BinaryExpression{
+							Operator: Multiply,
+							Left:     &NumLiteral{Value: `20`},
+							Right:    &Identifier{Name: "x"},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -416,55 +489,65 @@ func TestMemberAccess(t *testing.T) {
 				`some_string.size`,
 				`some_string.at(0)`,
 				"name.take(3).size",
+				`100.to_str()`,
 			}, "\n"),
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					InstanceProperty{
-						Target: StrLiteral{
-							Value: `"string"`,
+					&InstanceProperty{
+						Target: &StrLiteral{
+							Value: "string",
 						},
 						Property: Identifier{
 							Name: "size",
 						},
 					},
-					InstanceMethod{
-						Target: StrLiteral{
-							Value: `"string"`,
+					&InstanceMethod{
+						Target: &StrLiteral{
+							Value: "string",
 						},
 						Method: FunctionCall{
 							Name: "at",
-							Args: []Expression{NumLiteral{Value: "0"}},
+							Args: []Expression{&NumLiteral{Value: "0"}},
 						},
 					},
-					InstanceProperty{
-						Target: Identifier{
+					&InstanceProperty{
+						Target: &Identifier{
 							Name: "some_string",
 						},
 						Property: Identifier{
 							Name: "size",
 						},
 					},
-					InstanceMethod{
-						Target: Identifier{
+					&InstanceMethod{
+						Target: &Identifier{
 							Name: "some_string",
 						},
 						Method: FunctionCall{
 							Name: "at",
-							Args: []Expression{NumLiteral{Value: "0"}},
+							Args: []Expression{&NumLiteral{Value: "0"}},
 						},
 					},
-					InstanceProperty{
-						Target: InstanceMethod{
-							Target: Identifier{
+					&InstanceProperty{
+						Target: &InstanceMethod{
+							Target: &Identifier{
 								Name: "name",
 							},
 							Method: FunctionCall{
 								Name: "take",
-								Args: []Expression{NumLiteral{Value: "3"}},
+								Args: []Expression{&NumLiteral{Value: "3"}},
 							},
 						},
 						Property: Identifier{Name: "size"},
+					},
+					&InstanceMethod{
+						Target: &NumLiteral{
+							Value: "100",
+						},
+						Method: FunctionCall{
+							Name: "to_str",
+							Args: []Expression{},
+						},
 					},
 				},
 			},
@@ -475,9 +558,29 @@ func TestMemberAccess(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					StaticProperty{
-						Target:   Identifier{Name: "Color"},
+					&StaticProperty{
+						Target:   &Identifier{Name: "Color"},
 						Property: Identifier{Name: "blue"},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestInterpolatedStrings(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Interpolated string",
+			input: `"Hello, {{name}}"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&InterpolatedStr{
+						Chunks: []Expression{
+							&StrLiteral{Value: "Hello, "},
+							&Identifier{Name: "name"},
+						},
 					},
 				},
 			},

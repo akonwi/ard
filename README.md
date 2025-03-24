@@ -158,9 +158,8 @@ person.get_intro() // "My name is Alton"
 
 ### Enums
 
-Enums are used to enumerate a specific set of values.
-They are simply labeled numbers.
-They cannot have associated values.
+Enums are used to enumerate a discrete set of values.
+They are simply labeled integers and cannot have associated values.
 
 ```ard
 enum Status {
@@ -170,7 +169,7 @@ enum Status {
 }
 ```
 
-The static operator (`::`) is used to cccess variants.
+The static operator (`::`) is used to access variants.
 The static operator avoids naming conflicts between the variants and instance properties on the enum.
 
 Enum values can be used in match expressions to handle different cases:

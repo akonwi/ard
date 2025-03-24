@@ -5,7 +5,7 @@ use ard/option
 mut name: Str? = option.none()
 
 // update the value
-name.some("Akonwi")
+name = option.some("Akonwi")
 
 // read the value
 match name {

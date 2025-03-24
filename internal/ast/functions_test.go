@@ -12,7 +12,7 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name:       "empty",
 						Parameters: []Parameter{},
 						Body:       []Statement{},
@@ -26,12 +26,12 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name:       "get_msg",
 						Parameters: []Parameter{},
 						Body: []Statement{
-							StrLiteral{
-								Value: `"Hello, world!"`,
+							&StrLiteral{
+								Value: "Hello, world!",
 							},
 						},
 					},
@@ -44,17 +44,17 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{
 								Name: "person",
-								Type: StringType{},
+								Type: &StringType{},
 							},
 						},
-						ReturnType: StringType{},
+						ReturnType: &StringType{},
 						Body: []Statement{
-							StrLiteral{Value: `"hello"`},
+							&StrLiteral{Value: "hello"},
 						},
 					},
 				},
@@ -66,21 +66,21 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
 							{
 								Name: "x",
-								Type: IntType{},
+								Type: &IntType{},
 							},
 							{
 								Name: "y",
-								Type: IntType{},
+								Type: &IntType{},
 							},
 						},
-						ReturnType: IntType{},
+						ReturnType: &IntType{},
 						Body: []Statement{
-							NumLiteral{Value: "10"},
+							&NumLiteral{Value: "10"},
 						},
 					},
 				},
@@ -92,16 +92,16 @@ func TestFunctionDeclaration(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
 							{
 								Name:    "person",
-								Type:    StringType{},
+								Type:    &StringType{},
 								Mutable: true,
 							},
 						},
-						ReturnType: StringType{},
+						ReturnType: &StringType{},
 						Body:       []Statement{},
 					},
 				},
@@ -122,25 +122,18 @@ func TestFunctionCalls(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name:       "get_name",
 						Parameters: []Parameter{},
-						ReturnType: StringType{},
-						Body:       []Statement{StrLiteral{Value: `"name"`}},
+						ReturnType: &StringType{},
+						Body:       []Statement{&StrLiteral{Value: "name"}},
 					},
-					FunctionCall{
+					&FunctionCall{
 						Name: "get_name",
 						Args: []Expression{},
 					},
 				},
 			},
-		},
-		{
-			name: "Providing arguments when none are expected",
-			input: `
-				fn get_name() Str { "name" }
-				get_name("bo")
-			`,
 		},
 		{
 			name: "Valid function call with one argument",
@@ -150,18 +143,18 @@ func TestFunctionCalls(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "greet",
 						Parameters: []Parameter{
-							{Name: "name", Type: StringType{}},
+							{Name: "name", Type: &StringType{}},
 						},
-						ReturnType: StringType{},
-						Body:       []Statement{StrLiteral{Value: `"hello"`}},
+						ReturnType: &StringType{},
+						Body:       []Statement{&StrLiteral{Value: "hello"}},
 					},
-					FunctionCall{
+					&FunctionCall{
 						Name: "greet",
 						Args: []Expression{
-							StrLiteral{Value: `"Alice"`},
+							&StrLiteral{Value: "Alice"},
 						},
 					},
 				},
@@ -175,36 +168,30 @@ func TestFunctionCalls(t *testing.T) {
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					FunctionDeclaration{
+					&FunctionDeclaration{
 						Name: "add",
 						Parameters: []Parameter{
-							{Name: "x", Type: IntType{}},
-							{Name: "y", Type: IntType{}},
+							{Name: "x", Type: &IntType{}},
+							{Name: "y", Type: &IntType{}},
 						},
-						ReturnType: IntType{},
+						ReturnType: &IntType{},
 						Body: []Statement{
-							BinaryExpression{
-								Left:     Identifier{Name: "x"},
+							&BinaryExpression{
+								Left:     &Identifier{Name: "x"},
 								Operator: Plus,
-								Right:    Identifier{Name: "y"},
+								Right:    &Identifier{Name: "y"},
 							},
 						},
 					},
-					FunctionCall{
+					&FunctionCall{
 						Name: "add",
 						Args: []Expression{
-							NumLiteral{Value: "1"},
-							NumLiteral{Value: "2"},
+							&NumLiteral{Value: "1"},
+							&NumLiteral{Value: "2"},
 						},
 					},
 				},
 			},
-		},
-		{
-			name: "Wrong argument type",
-			input: `
-				fn add(x: Int, y: Int) Int { x + y }
-				add(1, "two")`,
 		},
 	}
 
@@ -215,14 +202,33 @@ func TestAnonymousFunctions(t *testing.T) {
 	tests := []test{
 		{
 			name:  "Anonymous function",
-			input: `() { "Hello, world!" }`,
+			input: `let lambda = fn() { "Hello, world!" }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					AnonymousFunction{
-						Parameters: []Parameter{},
+					&VariableDeclaration{
+						Name: "lambda",
+						Value: &AnonymousFunction{
+							Parameters: []Parameter{},
+							Body: []Statement{
+								&StrLiteral{Value: "Hello, world!"},
+							},
+						}},
+				},
+			},
+		},
+		{
+			name:  "Anonymous function with a parameter",
+			input: `fn(name: Str) { "Hello, name!" }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&AnonymousFunction{
+						Parameters: []Parameter{
+							{Name: "name", Type: &StringType{}},
+						},
 						Body: []Statement{
-							StrLiteral{Value: `"Hello, world!"`},
+							&StrLiteral{Value: "Hello, name!"},
 						},
 					},
 				},
@@ -230,33 +236,16 @@ func TestAnonymousFunctions(t *testing.T) {
 		},
 		{
 			name:  "Anonymous function with a parameter",
-			input: `(name: Str) { "Hello, name!" }`,
+			input: `fn(name: Str) { "Hello, name!" }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					AnonymousFunction{
+					&AnonymousFunction{
 						Parameters: []Parameter{
-							{Name: "name", Type: StringType{}},
+							{Name: "name", Type: &StringType{}},
 						},
 						Body: []Statement{
-							StrLiteral{Value: `"Hello, name!"`},
-						},
-					},
-				},
-			},
-		},
-		{
-			name:  "Anonymous function with a parameter",
-			input: `(name: Str) { "Hello, name!" }`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					AnonymousFunction{
-						Parameters: []Parameter{
-							{Name: "name", Type: StringType{}},
-						},
-						Body: []Statement{
-							StrLiteral{Value: `"Hello, name!"`},
+							&StrLiteral{Value: "Hello, name!"},
 						},
 					},
 				},
