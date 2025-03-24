@@ -897,6 +897,10 @@ func (p *parser) call() (Expression, error) {
 		return &FunctionCall{
 			Name: expr.(*Identifier).Name,
 			Args: args,
+			Location: Location{
+				Start: expr.GetLocation().Start,
+				End:   Point{Row: p.previous().line, Col: p.previous().column},
+			},
 		}, nil
 	}
 
@@ -907,6 +911,10 @@ func (p *parser) primary() (Expression, error) {
 	if p.match(number) {
 		return &NumLiteral{
 			Value: p.previous().text,
+			Location: Location{
+				Start: Point{Row: p.previous().line, Col: p.previous().column},
+				End:   Point{Row: p.previous().line, Col: p.previous().column + len(p.previous().text) - 1},
+			},
 		}, nil
 	}
 	if p.match(string_) {
@@ -1004,7 +1012,13 @@ func (p *parser) map_() (Expression, error) {
 }
 
 func (p *parser) string() (Expression, error) {
-	str := &StrLiteral{Value: p.previous().text}
+	str := &StrLiteral{
+		Value: p.previous().text,
+		Location: Location{
+			Start: Point{Row: p.previous().line, Col: p.previous().column},
+			End:   Point{Row: p.previous().line, Col: p.previous().column + len(p.previous().text) - 1},
+		},
+	}
 	if p.match(expr_open) {
 		chunks := []Expression{str}
 		for !p.match(expr_close) {
@@ -1025,6 +1039,10 @@ func (p *parser) string() (Expression, error) {
 		}
 		return &InterpolatedStr{
 			Chunks: chunks,
+			Location: Location{
+				Start: str.GetLocation().Start,
+				End:   Point{Row: p.peek().line, Col: p.peek().column},
+			},
 		}, nil
 	}
 

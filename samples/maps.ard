@@ -1,7 +1,7 @@
 use ard/io
 
-let nums_to_str = [1:"one"]
-io.print("size is {{nums_to_str.size.to_str()}}")
+mut nums_to_str = [1:"one"]
+io.print("size is {{nums_to_str.size().to_str()}}")
 
 for n in 2..5 {
   nums_to_str.set(n, n.to_str())

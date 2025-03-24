@@ -17,5 +17,5 @@ for student in students {
   sum = sum + student.grade
 }
 
-let average = sum / students.size
+let average = sum / students.size()
 io.print("Class average is {{average.to_str()}}")
