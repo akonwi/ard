@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/internal/ast"
+	"github.com/akonwi/ard/ast"
 	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
 	"github.com/google/go-cmp/cmp"
 	ts "github.com/tree-sitter/go-tree-sitter"

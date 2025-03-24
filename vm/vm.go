@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/internal/checker"
+	"github.com/akonwi/ard/checker"
 )
 
 type VM struct {

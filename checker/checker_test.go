@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/internal/ast"
+	"github.com/akonwi/ard/ast"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )

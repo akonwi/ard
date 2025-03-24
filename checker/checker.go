@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/internal/ast"
+	"github.com/akonwi/ard/ast"
 )
 
 type DiagnosticKind string

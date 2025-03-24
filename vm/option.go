@@ -3,7 +3,7 @@ package vm
 import (
 	"fmt"
 
-	"github.com/akonwi/ard/internal/checker"
+	"github.com/akonwi/ard/checker"
 )
 
 func (vm *VM) invokeOption(expr checker.Expression) *object {

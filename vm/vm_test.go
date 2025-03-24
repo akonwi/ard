@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/internal/ast"
-	"github.com/akonwi/ard/internal/checker"
-	"github.com/akonwi/ard/internal/vm"
+	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm"
 )
 
 type test struct {

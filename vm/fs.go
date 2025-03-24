@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/akonwi/ard/internal/checker"
+	"github.com/akonwi/ard/checker"
 )
 
 func (vm *VM) invokeFS(expr checker.Expression) *object {

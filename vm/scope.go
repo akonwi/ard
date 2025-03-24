@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"github.com/akonwi/ard/internal/checker"
+	"github.com/akonwi/ard/checker"
 )
 
 type function func(args ...object) object

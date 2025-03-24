@@ -15,7 +15,7 @@ func TestVM(t *testing.T) {
 			name: "fs.exists returns true when there is something at the given path",
 			input: `
 					  use ard/fs
-						fs.exists("../../main.go")`,
+						fs.exists("../main.go")`,
 			want: true,
 		},
 		{
