@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] custom lexer + parser
 - [ ] rename ard/option to ard/maybe
 - [ ] networking
 - [ ] methods on enums?
