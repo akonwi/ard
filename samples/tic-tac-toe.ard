@@ -15,7 +15,7 @@ impl (b: Board) {
   fn is_full() Bool {
     mut full = true
     for cell in (b.cells) {
-      if (cell.is_empty()) {
+      if cell.is_empty() {
         full = false
         break
       }
@@ -41,7 +41,7 @@ impl (b: Board) {
   fn get_winner() Str? {
     mut res: Str? = maybe.none()
 
-    if (b.cells.at(0).or("").is_empty() == false) {
+    if not b.cells.at(0).or("").is_empty() {
       // check top row
       if b.cells.at(0) == b.cells.at(1) and b.cells.at(0) == b.cells.at(2) {
         res = b.cells.at(0)
@@ -55,13 +55,13 @@ impl (b: Board) {
     }
 
     // check middle column
-    if (b.cells.at(1).or("").is_empty() == false) {
+    if not b.cells.at(1).or("").is_empty() {
       if b.cells.at(1) == b.cells.at(4) and b.cells.at(1) == b.cells.at(7) {
         res = b.cells.at(1)
       }
     }
 
-    if (b.cells.at(2).or("").is_empty() == false) {
+    if not b.cells.at(2).or("").is_empty() {
       // check right column
       if b.cells.at(2) == b.cells.at(5) and b.cells.at(2) == b.cells.at(8) {
         res = b.cells.at(2)
@@ -72,7 +72,7 @@ impl (b: Board) {
     }
 
     // check middle row
-    if (b.cells.at(3).or("").is_empty() == false) {
+    if not b.cells.at(3).or("").is_empty() {
       if b.cells.at(3) == b.cells.at(4) and b.cells.at(3) == b.cells.at(5) {
         res = b.cells.at(3)
       }
@@ -131,7 +131,7 @@ while (board.is_full() == false) {
     }
   }
 
-  if board.is_full() == true {
+  if board.is_full() {
     io.print("Game Over! It's a draw")
   }
 }
