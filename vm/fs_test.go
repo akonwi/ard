@@ -41,7 +41,7 @@ func TestVM(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "fs.read returns option.some with the file contents, when there is a file at the given path",
+			name: "fs.read returns maybe.some with the file contents, when there is a file at the given path",
 			input: `
 				use ard/fs
 				match fs.read("./fixtures/fake.file") {
@@ -51,7 +51,7 @@ func TestVM(t *testing.T) {
 			want: "content\nline 2",
 		},
 		{
-			name: "fs.read returns an empty option when there is nothing at the given path",
+			name: "fs.read returns an empty maybe when there is nothing at the given path",
 			input: `
 				use ard/fs
 				match fs.read("foo") {

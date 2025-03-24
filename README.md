@@ -182,16 +182,16 @@ match status {
 }
 ```
 
-### Optional Types
+### Nullable Values
 
-Optional type declarations end with `?` and can be created using the `ard/option` package from the standard library.
-An optional type can either have a value (`some`) or be empty (`none`).
+To declare a type that could be present or not, add `?` to the end. This declares it as a built-in `Maybe` type. Values can be created with the `ard/maybe` package from the standard library.
+A maybe type can either have a value (`some`) or be empty (`none`).
 
 ```ard
-use ard/option
+use ard/maybe
 
-mut maybe_name: Str? = option.none()
-maybe_name = option.some("Joe")
+mut maybe_name: Str? = maybe.none()
+maybe_name = maybe.some("Joe")
 
 match maybe_name {
   n => "Hello, {{n}}",
@@ -281,7 +281,7 @@ func performOperation() throws {
 }
 ```
 
-The `try?` operator can be used to convert a throwing expression to an optional:
+The `try?` operator can be used to convert a throwing expression to a maybe value:
 
 ```ard
 let result: String? = try? riskyOperation()

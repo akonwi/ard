@@ -1,11 +1,11 @@
 use ard/io
-use ard/option
+use ard/maybe
 
-// a declared optional needs to be explicitly typed
-mut name: Str? = option.none()
+// a declared none value needs to be explicitly typed
+mut name: Str? = maybe.none()
 
 // update the value
-name = option.some("Akonwi")
+name = maybe.some("Akonwi")
 
 // read the value
 match name {

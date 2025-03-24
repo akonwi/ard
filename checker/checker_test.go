@@ -1570,30 +1570,30 @@ func TestMatchingOnBooleans(t *testing.T) {
 }
 
 func TestOptionals(t *testing.T) {
-	optionPkg := newOptions("")
+	maybePkg := newMaybe("")
 	run(t, []test{
 		{
-			name: "Declaring optionals",
+			name: "Declaring nullables",
 			input: `
-				use ard/option
-				mut name: Str? = option.none()
-				mut name2 = option.some("Bob")`,
+				use ard/maybe
+				mut name: Str? = maybe.none()
+				mut name2 = maybe.some("Bob")`,
 			output: Program{
 				Imports: map[string]Package{
-					"option": optionPkg,
+					"maybe": maybePkg,
 				},
 				Statements: []Statement{
 					VariableBinding{
 						Name: "name",
 						Value: PackageAccess{
-							Package:  optionPkg,
+							Package:  maybePkg,
 							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
 					VariableBinding{
 						Name: "name2",
 						Value: PackageAccess{
-							Package:  optionPkg,
+							Package:  maybePkg,
 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
 						},
 					},
@@ -1601,36 +1601,36 @@ func TestOptionals(t *testing.T) {
 			},
 		},
 		{
-			name: "Reassigning with optional",
+			name: "Reassigning with nullables",
 			input: `
-				use ard/option
-				mut name: Str? = option.some("Joe")
-				name = option.some("Bob")
+				use ard/maybe
+				mut name: Str? = maybe.some("Joe")
+				name = maybe.some("Bob")
 				name = "Alice"
-				name = option.none()`,
+				name = maybe.none()`,
 			output: Program{
 				Imports: map[string]Package{
-					"option": optionPkg,
+					"maybe": maybePkg,
 				},
 				Statements: []Statement{
 					VariableBinding{
 						Name: "name",
 						Value: PackageAccess{
-							Package:  optionPkg,
+							Package:  maybePkg,
 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Joe"}}},
 						},
 					},
 					VariableAssignment{
 						Target: Identifier{Name: "name"},
 						Value: PackageAccess{
-							Package:  optionPkg,
+							Package:  maybePkg,
 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
 						},
 					},
 					VariableAssignment{
 						Target: Identifier{Name: "name"},
 						Value: PackageAccess{
-							Package:  optionPkg,
+							Package:  maybePkg,
 							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
@@ -1641,26 +1641,26 @@ func TestOptionals(t *testing.T) {
 			},
 		},
 		{
-			name: "Matching an optional",
+			name: "Matching an nullables",
 			input: `
 				use ard/io
-				use ard/option
+				use ard/maybe
 
-				mut name: Str? = option.none()
+				mut name: Str? = maybe.none()
 				match name {
 				  it => io.print("name is {{it}}"),
 					_ => io.print("no name ):")
 				}`,
 			output: Program{
 				Imports: map[string]Package{
-					"io":     newIO(""),
-					"option": optionPkg,
+					"io":    newIO(""),
+					"maybe": maybePkg,
 				},
 				Statements: []Statement{
 					VariableBinding{
 						Name: "name",
 						Value: PackageAccess{
-							Package:  optionPkg,
+							Package:  maybePkg,
 							Property: FunctionCall{Name: "none", Args: []Expression{}},
 						},
 					},
@@ -1696,18 +1696,18 @@ func TestOptionals(t *testing.T) {
 		{
 			name: "Using Str? in interpolation",
 			input: `
-				use ard/option
-			  "foo-{{option.some("bar")}}"`,
+				use ard/maybe
+			  "foo-{{maybe.some("bar")}}"`,
 			output: Program{
 				Imports: map[string]Package{
-					"option": optionPkg,
+					"maybe": maybePkg,
 				},
 				Statements: []Statement{
 					InterpolatedStr{
 						Parts: []Expression{
 							StrLiteral{Value: "foo-"},
 							PackageAccess{
-								Package:  optionPkg,
+								Package:  maybePkg,
 								Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "bar"}}},
 							},
 						},

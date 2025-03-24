@@ -1,5 +1,5 @@
 use ard/io
-use ard/option
+use ard/maybe
 
 struct Board {
   cells: [Str]
@@ -39,7 +39,7 @@ impl (b: Board) {
   }
 
   fn get_winner() Str? {
-    mut res: Str? = option.none()
+    mut res: Str? = maybe.none()
 
     if (b.cells.at(0).or("").is_empty() == false) {
       // check top row

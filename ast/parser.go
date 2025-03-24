@@ -458,20 +458,20 @@ func (p *parser) assignment() (Statement, error) {
 func (p *parser) parseType() DeclaredType {
 	if p.match(identifier) {
 		id := p.previous()
-		optional := p.match(question_mark)
+		nullable := p.match(question_mark)
 		switch id.text {
 		case "Int":
-			return &IntType{optional: optional}
+			return &IntType{nullable: nullable}
 		case "Float":
-			return &FloatType{optional: optional}
+			return &FloatType{nullable: nullable}
 		case "Str":
-			return &StringType{optional: optional}
+			return &StringType{nullable: nullable}
 		case "Bool":
-			return &BooleanType{optional: optional}
+			return &BooleanType{nullable: nullable}
 		default:
 			return &CustomType{
 				Name:     p.previous().text,
-				optional: optional,
+				nullable: nullable,
 			}
 		}
 	}
@@ -483,14 +483,14 @@ func (p *parser) parseType() DeclaredType {
 			return &Map{
 				Key:      elementType,
 				Value:    valElementType,
-				optional: p.match(question_mark),
+				nullable: p.match(question_mark),
 			}
 		}
 		p.consume(right_bracket, "Expected ']'")
 
 		return &List{
 			Element:  elementType,
-			optional: p.match(question_mark),
+			nullable: p.match(question_mark),
 		}
 	}
 	return nil

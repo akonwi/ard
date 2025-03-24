@@ -20,9 +20,9 @@ func (vm *VM) invokeFS(expr checker.Expression) *object {
 			path := vm.evalExpression(e.Args[0]).raw.(string)
 			contents, err := os.ReadFile(path)
 			if err != nil {
-				return &object{nil, checker.MakeOption(checker.Str{})}
+				return &object{nil, checker.MakeMaybe(checker.Str{})}
 			}
-			return &object{string(contents), checker.MakeOption(checker.Str{})}
+			return &object{string(contents), checker.MakeMaybe(checker.Str{})}
 		case "create_file":
 			path := vm.evalExpression(e.Args[0]).raw.(string)
 			_, err := os.Create(path)

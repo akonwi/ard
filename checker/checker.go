@@ -1068,7 +1068,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		parts := make([]Expression, len(e.Chunks))
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
-			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), Option{Str{}}) {
+			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), Maybe{Str{}}) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),
@@ -1172,8 +1172,8 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return c.checkEnumMatch(e, subject, sub)
 		case Bool:
 			return c.checkBoolMatch(e, subject)
-		case Option:
-			return c.checkOptionMatch(e, subject)
+		case Maybe:
+			return c.checkMaybeMatch(e, subject)
 		case Union:
 			return c.checkUnionMatch(e, subject)
 		default:
@@ -1566,7 +1566,7 @@ func (c *checker) checkBoolMatch(expr *ast.MatchExpression, subject Expression) 
 	}
 }
 
-func (c *checker) checkOptionMatch(expr *ast.MatchExpression, subject Expression) OptionMatch {
+func (c *checker) checkMaybeMatch(expr *ast.MatchExpression, subject Expression) OptionMatch {
 	var someCase MatchCase
 	var noneCase Block
 
@@ -1615,7 +1615,7 @@ func (c *checker) checkOptionMatch(expr *ast.MatchExpression, subject Expression
 					c.scope.addVariable(variable{
 						name:  id.Name,
 						mut:   false,
-						_type: subject.GetType().(Option).inner,
+						_type: subject.GetType().(Maybe).inner,
 					})
 				})
 				someCase = MatchCase{
@@ -1987,8 +1987,8 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}
 
-	if t.IsOptional() {
-		return Option{_type}
+	if t.IsNullable() {
+		return Maybe{_type}
 	}
 	return _type
 }

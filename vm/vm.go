@@ -338,7 +338,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		case checker.Int:
 			switch e.Function.Name {
 			case "from_str":
-				res := &object{nil, checker.MakeOption(checker.Int{})}
+				res := &object{nil, checker.MakeMaybe(checker.Int{})}
 				if num, err := strconv.Atoi(args[0].raw.(string)); err == nil {
 					res.raw = num
 				}
@@ -408,8 +408,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			return vm.invokeFS(e.Property)
 		case "ard/io":
 			return vm.invokeIO(e.Property)
-		case "ard/option":
-			return vm.invokeOption(e.Property)
+		case "ard/maybe":
+			return vm.invokeMaybe(e.Property)
 		default:
 			panic(fmt.Sprintf("Unimplemented package: %s", e.Package.GetPath()))
 		}
@@ -471,9 +471,9 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
 			val := list[index]
 			if val == nil {
-				return &object{val, checker.MakeOption(t.GetElementType())}
+				return &object{val, checker.MakeMaybe(t.GetElementType())}
 			}
-			return &object{val.raw, checker.MakeOption(t.GetElementType())}
+			return &object{val.raw, checker.MakeMaybe(t.GetElementType())}
 		case "set":
 			result := &object{false, checker.Bool{}}
 			index := vm.evalExpression(fn.Args[0]).raw.(int)
@@ -514,7 +514,7 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
 
-	case checker.Option:
+	case checker.Maybe:
 		switch fn.Name {
 		case "or":
 			if o.raw != nil {
@@ -580,7 +580,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 	}
 
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
-	it := &object{subj.raw, subj._type.(checker.Option).GetInnerType()}
+	it := &object{subj.raw, subj._type.(checker.Maybe).GetInnerType()}
 	res, _ := vm.evalBlock(
 		match.Some.Body,
 		map[string]*object{bindingName: it},

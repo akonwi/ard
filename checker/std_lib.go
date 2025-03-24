@@ -6,8 +6,8 @@ func findStdLib(path string, alias string) Package {
 		return newFileSystem(alias)
 	case "ard/io":
 		return newIO(alias)
-	case "ard/option":
-		return newOptions(alias)
+	case "ard/maybe":
+		return newMaybe(alias)
 	default:
 		return nil
 	}
@@ -97,7 +97,7 @@ func (fs FileSystem) GetProperty(name string) Type {
 		return function{
 			name:       name,
 			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
-			returns:    Option{Str{}},
+			returns:    Maybe{Str{}},
 		}
 
 	case "create_file":
@@ -131,17 +131,17 @@ func (fs FileSystem) GetProperty(name string) Type {
 
 type Options struct{ name string }
 
-func newOptions(alias string) Options {
+func newMaybe(alias string) Options {
 	return Options{name: alias}
 }
 func (pkg Options) GetPath() string {
-	return "ard/option"
+	return "ard/maybe"
 }
 func (pkg Options) GetName() string {
 	if pkg.name != "" {
 		return pkg.name
 	}
-	return "option"
+	return "maybe"
 }
 func (pkg Options) String() string {
 	return pkg.GetPath()
@@ -158,14 +158,14 @@ func (pkg Options) GetProperty(name string) Type {
 		return function{
 			name:       name,
 			parameters: []variable{},
-			returns:    Option{},
+			returns:    Maybe{},
 		}
 	case "some":
 		any := Any{}
 		return function{
 			name:       name,
 			parameters: []variable{{name: "value", mut: false, _type: any}},
-			returns:    Option{any},
+			returns:    Maybe{any},
 		}
 	default:
 		return nil

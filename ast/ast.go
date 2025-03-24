@@ -77,17 +77,17 @@ type VariableDeclaration struct {
 
 type DeclaredType interface {
 	GetName() string
-	IsOptional() bool
+	IsNullable() bool
 	GetLocation() Location
 }
 
 type StringType struct {
 	Location
-	optional bool
+	nullable bool
 }
 
-func (v StringType) IsOptional() bool {
-	return v.optional
+func (v StringType) IsNullable() bool {
+	return v.nullable
 }
 
 func (s StringType) GetName() string {
@@ -96,40 +96,40 @@ func (s StringType) GetName() string {
 
 type IntType struct {
 	Location
-	optional bool
+	nullable bool
 }
 
 func (s IntType) GetName() string {
 	return "Int"
 }
 
-func (v IntType) IsOptional() bool {
-	return v.optional
+func (v IntType) IsNullable() bool {
+	return v.nullable
 }
 
 type FloatType struct {
 	Location
-	optional bool
+	nullable bool
 }
 
 func (f FloatType) GetName() string {
 	return "Float"
 }
-func (f FloatType) IsOptional() bool {
-	return f.optional
+func (f FloatType) IsNullable() bool {
+	return f.nullable
 }
 
 type BooleanType struct {
 	Location
-	optional bool
+	nullable bool
 }
 
 func (s BooleanType) GetName() string {
 	return "Boolean"
 }
 
-func (v BooleanType) IsOptional() bool {
-	return v.optional
+func (v BooleanType) IsNullable() bool {
+	return v.nullable
 }
 
 type TypeDeclaration struct {
@@ -145,44 +145,44 @@ func (t TypeDeclaration) String() string {
 type List struct {
 	Location
 	Element  DeclaredType
-	optional bool
+	nullable bool
 }
 
 func (s List) GetName() string {
 	return "List"
 }
 
-func (v List) IsOptional() bool {
-	return v.optional
+func (v List) IsNullable() bool {
+	return v.nullable
 }
 
 type Map struct {
 	Location
 	Key      DeclaredType
 	Value    DeclaredType
-	optional bool
+	nullable bool
 }
 
 func (s Map) GetName() string {
 	return "Map"
 }
 
-func (v Map) IsOptional() bool {
-	return v.optional
+func (v Map) IsNullable() bool {
+	return v.nullable
 }
 
 type CustomType struct {
 	Location
 	Name     string
-	optional bool
+	nullable bool
 }
 
 func (u CustomType) GetName() string {
 	return u.Name
 }
 
-func (u CustomType) IsOptional() bool {
-	return u.optional
+func (u CustomType) IsNullable() bool {
+	return u.nullable
 }
 
 func (v VariableDeclaration) String() string {
