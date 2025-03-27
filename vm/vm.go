@@ -108,11 +108,12 @@ func (vm *VM) evalStatement(stmt checker.Statement) *object {
 		}
 
 	case checker.WhileLoop:
-		vm.scope.breakable = true
 		for vm.evalExpression(s.Condition).raw.(bool) && !vm.scope.isBroken() {
-			vm.evalBlock(s.Body, map[string]*object{}, false)
+			_, broke := vm.evalBlock(s.Body, map[string]*object{}, true)
+			if broke {
+				break
+			}
 		}
-		vm.scope.breakable = false
 	default:
 		expr, ok := s.(checker.Expression)
 		if !ok {

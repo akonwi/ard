@@ -587,3 +587,50 @@ func TestInterpolatedStrings(t *testing.T) {
 		},
 	})
 }
+
+func TestAndOrs(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "And",
+			input: `true and false`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: And,
+						Left:     &BoolLiteral{Value: true},
+						Right:    &BoolLiteral{Value: false},
+					},
+				},
+			},
+		},
+		{
+			name:  "Or",
+			input: `true or false`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Or,
+						Left:     &BoolLiteral{Value: true},
+						Right:    &BoolLiteral{Value: false},
+					},
+				},
+			},
+		},
+		{
+			name:  "Not or not",
+			input: `(not true) or (not false)`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: Or,
+						Left:     &UnaryExpression{Operator: Not, Operand: &BoolLiteral{Value: true}},
+						Right:    &UnaryExpression{Operator: Not, Operand: &BoolLiteral{Value: false}},
+					},
+				},
+			},
+		},
+	})
+}
