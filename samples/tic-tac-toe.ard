@@ -14,7 +14,7 @@ impl (mut b: Board) {
 impl (b: Board) {
   fn is_full() Bool {
     mut full = true
-    for cell in (b.cells) {
+    for cell in b.cells {
       if cell.is_empty() {
         full = false
         break
@@ -102,7 +102,8 @@ io.print("---------------")
 
 board.draw()
 
-while (board.is_full() == false) {
+mut finished = false
+while not board.is_full() or finished {
   for player in players {
     io.print("Player {{player}}: Your move")
     mut move = read_move(player)
@@ -125,6 +126,7 @@ while (board.is_full() == false) {
     match board.get_winner() {
       winner => {
         io.print("Player {{winner}} wins!")
+        finished = true
         break
       },
       _ => {}
