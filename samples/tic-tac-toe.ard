@@ -111,7 +111,7 @@ while not board.is_full() or finished {
       io.print("Invalid move")
       move = read_move(player)
     }
-    while (board.can_play(move) == false) {
+    while not board.can_play(move) {
       io.print("Position already played")
       move = read_move(player)
     }
