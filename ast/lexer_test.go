@@ -816,6 +816,17 @@ func TestLexing(t *testing.T) {
 		},
 
 		{
+			name: "escaping characters in strings",
+			input: strings.Join([]string{
+				`"hello, \"world\"!"`,
+			}, "\n"),
+			want: []token{
+				{kind: string_, line: 1, column: 1, text: `hello, "world"!`},
+				{kind: eof},
+			},
+		},
+
+		{
 			name: "member access",
 			input: strings.Join([]string{
 				`let initialized: [Str:Bool] = [:]`,

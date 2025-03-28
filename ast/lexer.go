@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -338,13 +339,14 @@ func (l *lexer) blockComment(start *char) token {
 }
 
 func (l *lexer) takeString(openQuote *char) (token, bool) {
+	sb := strings.Builder{}
 	start := openQuote
 	if openQuote == nil {
 		start = l.peek()
 	}
 	for l.hasMore() && !l.check(`"`) {
 		if l.check(`{{`) {
-			text := string(l.source[start.index:l.cursor])
+			text := sb.String()
 
 			return token{
 				kind:   string_,
@@ -353,17 +355,21 @@ func (l *lexer) takeString(openQuote *char) (token, bool) {
 				text:   strings.TrimPrefix(text, string('"')),
 			}, true
 		}
-		l.advance()
+		last := l.advance()
+		if last.raw == '\\' && slices.Contains([]byte{'"', '\\'}, l.peek().raw) {
+			last = l.advance()
+		}
+		sb.WriteByte(last.raw)
 	}
 
-	endQuote := l.advance()
-	text := string(l.source[start.index:endQuote.index])
+	// take end quote
+	l.advance()
 
 	return token{
 		kind:   string_,
 		line:   start.line,
 		column: start.col,
-		text:   strings.TrimPrefix(text, string('"')),
+		text:   sb.String(),
 	}, true
 }
 
