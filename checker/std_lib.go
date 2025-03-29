@@ -6,6 +6,8 @@ func findStdLib(path string, alias string) Package {
 		return newFileSystem(alias)
 	case "ard/io":
 		return newIO(alias)
+	case "ard/json":
+		return newJSON(alias)
 	case "ard/maybe":
 		return newMaybe(alias)
 	default:
@@ -166,6 +168,49 @@ func (pkg Options) GetProperty(name string) Type {
 			name:       name,
 			parameters: []variable{{name: "value", mut: false, _type: any}},
 			returns:    Maybe{any},
+		}
+	default:
+		return nil
+	}
+}
+
+type JSON struct{ name string }
+
+func newJSON(alias string) JSON {
+	return JSON{name: alias}
+}
+
+func (j JSON) GetName() string {
+	if j.name != "" {
+		return j.name
+	}
+	return "json"
+}
+func (j JSON) GetPath() string {
+	return "ard/json"
+}
+func (j JSON) GetType() Type {
+	return j
+}
+func (j JSON) asFunction() (function, bool) {
+	return function{}, false
+}
+func (j JSON) String() string {
+	return j.GetPath()
+}
+func (j JSON) GetProperty(name string) Type {
+	switch name {
+	case "encode":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "thing", mut: false, _type: Any{}}},
+			returns:    MakeMaybe(Str{}),
+		}
+	case "decode":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "input", mut: false, _type: Any{}}},
+			returns:    Str{},
 		}
 	default:
 		return nil

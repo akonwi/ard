@@ -183,8 +183,27 @@ func (o object) String() string {
 	return fmt.Sprintf("%v:%s", o.raw, o._type)
 }
 
-func (o object) equals(other object) bool {
-	return o.raw == other.raw && checker.AreCoherent(o._type, other._type)
+func (o *object) premarshal() any {
+	switch o._type.(type) {
+	case checker.Str, checker.Int, checker.Float, checker.Bool:
+		return o.raw
+	case checker.List:
+		list := o.raw.([]*object)
+		rawList := make([]any, len(list))
+		for i := range list {
+			rawList[i] = list[i].premarshal()
+		}
+		return rawList
+	case checker.Map, *checker.Struct:
+		m := o.raw.(map[string]*object)
+		rawMap := make(map[string]any)
+		for key, value := range m {
+			rawMap[key] = value.premarshal()
+		}
+		return rawMap
+	default:
+		panic(fmt.Sprintf("Cannot marshall type: %T", o._type))
+	}
 }
 
 func (vm *VM) evalExpression(expr checker.Expression) *object {
@@ -404,6 +423,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		}
 		return &object{entries, e.GetType()}
 	case checker.PackageAccess:
+		// todo: eval e.Property, then call pkg methods
+		// so pkgs do not need to know the VM
 		switch e.Package.GetPath() {
 		case "ard/fs":
 			return vm.invokeFS(e.Property)
@@ -411,6 +432,8 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 			return vm.invokeIO(e.Property)
 		case "ard/maybe":
 			return vm.invokeMaybe(e.Property)
+		case "ard/json":
+			return vm.invokeJSON(e.Property)
 		default:
 			panic(fmt.Sprintf("Unimplemented package: %s", e.Package.GetPath()))
 		}

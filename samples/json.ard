@@ -1,0 +1,13 @@
+use ard/io
+use ard/json
+
+struct Todo {
+  id: Int,
+  title: Str,
+  completed: Bool,
+}
+
+let first = Todo{id: 1, title: "Buy milk", completed: false}
+let first_str: Str? = json.encode(first, ["completed": "done"])
+
+let second: Todo? = json.decode("{\"id\": 2, \"title\": \"Buy eggs\", \"completed\": false}")

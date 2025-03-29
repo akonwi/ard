@@ -1,5 +1,6 @@
 ## TODO
 
+- [ ] decoding/json
 - [ ] networking
 - [ ] methods on enums?
 - [ ] matching on numbers
