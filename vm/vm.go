@@ -461,6 +461,9 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			return &object{len(str), checker.Int{}}
 		case "is_empty":
 			return &object{len(str) == 0, checker.Bool{}}
+		case "contains":
+			needle := vm.evalExpression(fn.Args[0]).raw.(string)
+			return &object{strings.Contains(str, needle), checker.Bool{}}
 		}
 		panic(fmt.Sprintf("Undefined method: %s.%s", o._type, fn.Name))
 	case checker.Int:

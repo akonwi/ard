@@ -107,6 +107,12 @@ func (s Str) GetProperty(name string) Type {
 		}
 	case "is_empty":
 		return function{name: name, returns: Bool{}}
+	case "contains":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "substr", _type: s}},
+			returns:    Bool{},
+		}
 	default:
 		return nil
 	}

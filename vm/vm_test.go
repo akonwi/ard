@@ -359,6 +359,11 @@ func TestStrApi(t *testing.T) {
 			input: `"".is_empty()`,
 			want:  true,
 		},
+		{
+			name:  "Str.contains",
+			input: `"foobar".contains("oba")`,
+			want:  true,
+		},
 	}
 	runTests(t, tests)
 }
