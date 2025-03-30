@@ -1244,12 +1244,16 @@ func (c *checker) checkStaticExpression(expr ast.Expression) Static {
 
 		sym := c.scope.find(e.Name)
 		if sym == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", e.Name),
-				location: e.GetLocation(),
-			})
-			return nil
+			strct, ok := c.scope.getStruct(e.Name)
+			if !ok {
+				c.addDiagnostic(Diagnostic{
+					Kind:     Error,
+					Message:  fmt.Sprintf("Undefined: %s", e.Name),
+					location: e.GetLocation(),
+				})
+				return nil
+			}
+			return strct
 		}
 
 		if enum, ok := (*sym).(Enum); ok {
@@ -1940,7 +1944,50 @@ func (c *checker) checkStaticFunction(subject Static, member ast.FunctionCall) E
 			Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
 		}
 	default:
-		panic(fmt.Sprintf("Undefined %s::%s", s, member))
+		// assuming it's a struct
+		if _struct, ok := s.(*Struct); ok {
+			if prop := _struct.GetStaticProperty(member.Name); prop != nil {
+				fn, ok := prop.(function)
+				if !ok {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  fmt.Sprintf("Not a function: %s::%s", _struct.Name, member.Name),
+						location: member.GetLocation(),
+					})
+					return nil
+				}
+
+				if len(member.Args) != len(fn.parameters) {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
+						location: member.GetLocation(),
+					})
+					return nil
+				}
+
+				args := make([]Expression, len(member.Args))
+				for i, param := range fn.parameters {
+					arg := c.checkExpression(member.Args[i])
+					if !AreCoherent(param._type, arg.GetType()) {
+						c.addDiagnostic(Diagnostic{
+							Kind:     Error,
+							Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
+							location: member.Args[i].GetLocation(),
+						})
+						return nil
+					} else {
+						args[i] = arg
+					}
+				}
+
+				return StaticFunctionCall{
+					Subject:  s,
+					Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
+				}
+			}
+		}
+		panic(fmt.Sprintf("Undefined %s::%s", s, member.Name))
 	}
 }
 

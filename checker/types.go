@@ -140,7 +140,7 @@ func (n Int) GetStaticProperty(name string) Type {
 		return function{
 			name:       "from_str",
 			parameters: []variable{{name: "str", _type: Str{}}},
-			returns:    Maybe{Int{}},
+			returns:    Maybe{n},
 		}
 	default:
 		return nil
@@ -416,6 +416,18 @@ func (s Struct) GetType() Type {
 }
 func (s Struct) asFunction() (function, bool) {
 	return function{}, false
+}
+func (s Struct) GetStaticProperty(name string) Type {
+	switch name {
+	case "from_json":
+		return function{
+			name:       name,
+			parameters: []variable{{name: "json", _type: Str{}}},
+			returns:    Maybe{s.GetType()},
+		}
+	default:
+		return nil
+	}
 }
 
 type Maybe struct {

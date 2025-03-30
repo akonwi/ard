@@ -20,7 +20,6 @@ func (vm *VM) invokeJSON(expr checker.Expression) *object {
 			}
 			result.raw = string(bytes)
 			return result
-		case "decode":
 		default:
 			panic(fmt.Sprintf("Undefined json.%s", e.Name))
 		}

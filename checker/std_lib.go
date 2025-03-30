@@ -203,14 +203,17 @@ func (j JSON) GetProperty(name string) Type {
 	case "encode":
 		return function{
 			name:       name,
-			parameters: []variable{{name: "thing", mut: false, _type: Any{}}},
+			parameters: []variable{{name: "input", mut: false, _type: Any{}}},
 			returns:    MakeMaybe(Str{}),
 		}
 	case "decode":
 		return function{
-			name:       name,
-			parameters: []variable{{name: "input", mut: false, _type: Any{}}},
-			returns:    Str{},
+			name: name,
+			parameters: []variable{
+				{name: "type", mut: false, _type: Any{}},
+				{name: "string", mut: false, _type: Str{}},
+			},
+			returns: MakeMaybe(Str{}),
 		}
 	default:
 		return nil

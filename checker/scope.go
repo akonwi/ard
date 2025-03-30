@@ -83,18 +83,6 @@ func (s *scope) addVariable(v variable) bool {
 	return true
 }
 
-func (s scope) findVariable(name string) (variable, bool) {
-	if symbol, ok := s.symbols[name]; ok {
-		if variable, ok := symbol.(variable); ok {
-			return variable, ok
-		}
-	}
-	if s.parent != nil {
-		return s.parent.findVariable(name)
-	}
-	return variable{}, false
-}
-
 func (s scope) find(name string) *symbol {
 	sym := s.symbols[name]
 	if sym != nil {

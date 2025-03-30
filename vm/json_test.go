@@ -32,3 +32,24 @@ func TestJsonEncode(t *testing.T) {
 		t.Errorf("Result json string does not contain 'employed': %s", got)
 	}
 }
+
+func TestJsonDecode(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		struct Person {
+			name: Str,
+			age: Int,
+		  employed: Bool
+		}
+		let john_str = "{\"name\": \"John\", \"age\": 30, \"employed\": true}"
+		let result = Person::from_json(john_str)
+		match result {
+		  john => john.name == "John" and john.age == 30 and john.employed == true,
+			_ => false
+		}
+	`)
+
+	if result == false {
+		t.Errorf("Got wrong decoded result")
+	}
+}
