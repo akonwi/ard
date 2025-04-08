@@ -503,16 +503,21 @@ func (u Union) getFor(string string) Type {
 }
 
 /*
-Any is like a wildcard that initially is coherent with any type.
+Any is a generic that initially is coherent with all types.
 Once it passes coherence with another concrete type, it becomes that type.
 */
 type Any struct {
+	name  string
 	inner Type
+}
+
+func MakeAny(name string) Any {
+	return Any{name: name}
 }
 
 func (a Any) String() string {
 	if a.inner == nil {
-		return "Any"
+		return "$" + a.name
 	}
 	return a.inner.String()
 }
