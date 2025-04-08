@@ -33,10 +33,10 @@ func AreCoherent(a, b Type) bool {
 		return false
 	}
 
-	if aAny, ok := a.(Any); ok {
+	if aAny, ok := a.(*Any); ok {
 		return aAny.refine(b)
 	}
-	if bAny, ok := b.(Any); ok {
+	if bAny, ok := b.(*Any); ok {
 		return bAny.refine(a)
 	}
 
@@ -511,8 +511,8 @@ type Any struct {
 	inner Type
 }
 
-func MakeAny(name string) Any {
-	return Any{name: name}
+func MakeAny(name string) *Any {
+	return &Any{name: name}
 }
 
 func (a Any) String() string {

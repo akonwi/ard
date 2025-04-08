@@ -175,6 +175,15 @@ type object struct {
 	_type checker.Type
 }
 
+func areEqual(a, b *object) bool {
+	if a.raw == b.raw {
+		if a._type.String() == b._type.String() {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *object) isCallable() bool {
 	_, isFunc := o.raw.(func(args ...object) object)
 	return isFunc
@@ -324,7 +333,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		case checker.Equal:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)
-			return &object{*(left) == *(right), e.GetType()}
+			return &object{areEqual(left, right), e.GetType()}
 		case checker.NotEqual:
 			left := vm.evalExpression(e.Left)
 			right := vm.evalExpression(e.Right)

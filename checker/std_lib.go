@@ -163,11 +163,11 @@ func (pkg Options) GetProperty(name string) Type {
 			returns:    Maybe{},
 		}
 	case "some":
-		any := Any{}
+		Value := MakeAny("Value")
 		return function{
 			name:       name,
-			parameters: []variable{{name: "value", mut: false, _type: any}},
-			returns:    Maybe{any},
+			parameters: []variable{{name: "value", mut: false, _type: Value}},
+			returns:    Maybe{Value},
 		}
 	default:
 		return nil
@@ -203,17 +203,16 @@ func (j JSON) GetProperty(name string) Type {
 	case "encode":
 		return function{
 			name:       name,
-			parameters: []variable{{name: "input", mut: false, _type: Any{}}},
+			parameters: []variable{{name: "val", mut: false, _type: MakeAny("Value")}},
 			returns:    MakeMaybe(Str{}),
 		}
 	case "decode":
 		return function{
 			name: name,
 			parameters: []variable{
-				{name: "type", mut: false, _type: Any{}},
 				{name: "string", mut: false, _type: Str{}},
 			},
-			returns: MakeMaybe(Str{}),
+			returns: MakeMaybe(MakeAny("Out")),
 		}
 	default:
 		return nil

@@ -26,5 +26,4 @@ func (vm *VM) invokeJSON(expr checker.Expression) *object {
 	default:
 		panic(fmt.Sprintf("Unimplemented json property: %s", e))
 	}
-	panic("Unreachable")
 }
