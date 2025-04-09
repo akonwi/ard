@@ -504,6 +504,15 @@ func (c *checker) checkStatement(stmt ast.Statement) Statement {
 					})
 					return nil
 				}
+
+				if strings.HasPrefix(value.GetType().String(), "$") {
+					c.addDiagnostic(Diagnostic{
+						Kind:     Error,
+						location: s.Value.GetLocation(),
+						Message:  "Unknown: Cannot infer type of a generic. Declare the variable type.",
+					})
+					return nil
+				}
 			}
 
 			c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})

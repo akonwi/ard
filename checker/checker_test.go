@@ -1790,3 +1790,17 @@ func TestTypeUnions(t *testing.T) {
 		},
 	})
 }
+
+func TestJson(t *testing.T) {
+	run(t, []test{
+		{
+			name: "json.decode return type must be inferred by usage",
+			input: `
+			  use ard/json
+			  let obj = json.decode("")`,
+			diagnostics: []Diagnostic{
+				{Kind: Error, Message: "Unknown: Cannot infer type of a generic. Declare the variable type."},
+			},
+		},
+	})
+}
