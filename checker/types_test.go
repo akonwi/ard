@@ -1,6 +1,8 @@
 package checker
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestCoherenceChecks(t *testing.T) {
 	type test struct {
@@ -40,6 +42,21 @@ func TestCoherenceChecks(t *testing.T) {
 		if res := AreCoherent(tt.a, tt.b); res != tt.want {
 			t.Errorf("%s == %s: want %v, got %v", tt.a, tt.b, tt.want, res)
 		}
+	}
+}
+
+func TestGenerics(t *testing.T) {
+	a := MakeAny("A")
+	str := Str{}
+
+	if AreCoherent(a, Str{}) != true {
+		t.Fatalf("%s == %s", a, str)
+	}
+	if AreCoherent(a, Int{}) != false {
+		t.Fatalf("Expected A to not allow Int")
+	}
+	if AreCoherent(a, str) != true {
+		t.Fatalf("Expected A to allow Str")
 	}
 }
 
