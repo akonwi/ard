@@ -575,7 +575,7 @@ func (vm VM) evalInstanceMethod(o *object, fn checker.FunctionCall) *object {
 			panic(fmt.Sprintf("Unknown method: %s.%s", o._type, fn.Name))
 		}
 
-	case checker.Maybe:
+	case *checker.Maybe:
 		switch fn.Name {
 		case "or":
 			if o.raw != nil {
@@ -641,7 +641,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 	}
 
 	bindingName := match.Some.Pattern.(checker.Identifier).Name
-	it := &object{subj.raw, subj._type.(checker.Maybe).GetInnerType()}
+	it := &object{subj.raw, subj._type.(*checker.Maybe).GetInnerType()}
 	res, _ := vm.evalBlock(
 		match.Some.Body,
 		map[string]*object{bindingName: it},

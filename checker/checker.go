@@ -1077,7 +1077,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 		parts := make([]Expression, len(e.Chunks))
 		for i, chunk := range e.Chunks {
 			part := c.checkExpression(chunk)
-			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), Maybe{Str{}}) {
+			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), MakeMaybe(Str{})) {
 				c.addDiagnostic(Diagnostic{
 					Kind:     Error,
 					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),
@@ -1181,7 +1181,7 @@ func (c *checker) checkExpression(expr ast.Expression) Expression {
 			return c.checkEnumMatch(e, subject, sub)
 		case Bool:
 			return c.checkBoolMatch(e, subject)
-		case Maybe:
+		case *Maybe:
 			return c.checkMaybeMatch(e, subject)
 		case Union:
 			return c.checkUnionMatch(e, subject)
@@ -1628,7 +1628,7 @@ func (c *checker) checkMaybeMatch(expr *ast.MatchExpression, subject Expression)
 					c.scope.addVariable(variable{
 						name:  id.Name,
 						mut:   false,
-						_type: subject.GetType().(Maybe).inner,
+						_type: *subject.GetType().(*Maybe).inner,
 					})
 				})
 				someCase = MatchCase{
@@ -2044,7 +2044,7 @@ func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
 	}
 
 	if t.IsNullable() {
-		return Maybe{_type}
+		return MakeMaybe(_type)
 	}
 	return _type
 }

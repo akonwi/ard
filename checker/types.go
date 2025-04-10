@@ -23,12 +23,23 @@ func AreCoherent(a, b Type) bool {
 		return true
 	}
 
-	if aOption, ok := a.(Maybe); ok {
-		if bOption, ok := b.(Maybe); ok {
+	if aOption, ok := a.(*Maybe); ok {
+		if bOption, ok := b.(*Maybe); ok {
 			if aOption.inner == nil || bOption.inner == nil {
 				return true
 			}
-			return AreCoherent(aOption.inner, bOption.inner)
+			return AreCoherent(*aOption.inner, *bOption.inner)
+		}
+		return false
+	}
+
+	if bOption, ok := b.(*Maybe); ok {
+		if aOption, ok := a.(*Maybe); ok {
+			if bOption.inner == nil || aOption.inner == nil {
+				fmt.Printf("checking equality in maybes: %s, %s\n", *aOption.inner, *bOption.inner)
+				return true
+			}
+			return AreCoherent(*bOption.inner, *aOption.inner)
 		}
 		return false
 	}
@@ -140,7 +151,7 @@ func (n Int) GetStaticProperty(name string) Type {
 		return function{
 			name:       "from_str",
 			parameters: []variable{{name: "str", _type: Str{}}},
-			returns:    Maybe{n},
+			returns:    MakeMaybe(n),
 		}
 	default:
 		return nil
@@ -169,7 +180,7 @@ func (f Float) GetStaticProperty(name string) Type {
 		return function{
 			name:       "from_str",
 			parameters: []variable{{name: "str", _type: Str{}}},
-			returns:    Maybe{f},
+			returns:    MakeMaybe(f),
 		}
 	case "from_int":
 		return function{
@@ -251,7 +262,7 @@ func (l List) GetProperty(name string) Type {
 		return function{
 			name:       "at",
 			parameters: []variable{{name: "index", _type: Int{}}},
-			returns:    Maybe{l.element},
+			returns:    MakeMaybe(l.element),
 		}
 	case "set":
 		return function{
@@ -302,7 +313,7 @@ func (m Map) GetProperty(name string) Type {
 		return function{
 			name:       name,
 			parameters: []variable{{name: "key", _type: m.key}},
-			returns:    Maybe{m.value},
+			returns:    MakeMaybe(m.value),
 		}
 	case "drop":
 		return function{
@@ -423,7 +434,7 @@ func (s Struct) GetStaticProperty(name string) Type {
 		return function{
 			name:       name,
 			parameters: []variable{{name: "json", _type: Str{}}},
-			returns:    Maybe{s.GetType()},
+			returns:    MakeMaybe(s.GetType()),
 		}
 	default:
 		return nil
@@ -431,21 +442,24 @@ func (s Struct) GetStaticProperty(name string) Type {
 }
 
 type Maybe struct {
-	inner Type
+	inner *Type
 }
 
-func MakeMaybe(inner Type) Maybe {
-	return Maybe{inner: inner}
+func MakeMaybe(inner Type) *Maybe {
+	if inner == nil {
+		return &Maybe{nil}
+	}
+	return &Maybe{inner: &inner}
 }
 
 func (g Maybe) GetInnerType() Type {
-	return g.inner
+	return *g.inner
 }
 func (g Maybe) String() string {
 	if g.inner == nil {
 		return "??"
 	}
-	return g.inner.String() + "?"
+	return (*g.inner).String() + "?"
 }
 
 func (g Maybe) GetProperty(name string) Type {
@@ -453,8 +467,8 @@ func (g Maybe) GetProperty(name string) Type {
 	case "or":
 		return function{
 			name:       name,
-			parameters: []variable{{name: "default", _type: g.inner}},
-			returns:    g.inner,
+			parameters: []variable{{name: "default", _type: *g.inner}},
+			returns:    *g.inner,
 		}
 	default:
 		return nil
@@ -549,7 +563,7 @@ func areComparable(a, b Type) bool {
 		return AreCoherent(a, b)
 	}
 
-	_, aIsOption := a.(Maybe)
+	_, aIsOption := a.(*Maybe)
 	if aIsOption {
 		return AreCoherent(a, b)
 	}

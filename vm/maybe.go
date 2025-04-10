@@ -7,7 +7,7 @@ import (
 )
 
 func (vm *VM) invokeMaybe(expr checker.Expression) *object {
-	maybe := expr.GetType().(checker.Maybe)
+	maybe := expr.GetType().(*checker.Maybe)
 	switch e := expr.(type) {
 	case checker.FunctionCall:
 		switch e.Name {
