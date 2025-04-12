@@ -184,6 +184,9 @@ func (u CustomType) GetName() string {
 func (u CustomType) IsNullable() bool {
 	return u.nullable
 }
+func (u CustomType) String() string {
+	return u.Name
+}
 
 func (v VariableDeclaration) String() string {
 	binding := "let"

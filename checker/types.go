@@ -430,12 +430,6 @@ func (s Struct) asFunction() (function, bool) {
 }
 func (s Struct) GetStaticProperty(name string) Type {
 	switch name {
-	case "from_json":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "json", _type: Str{}}},
-			returns:    MakeMaybe(s.GetType()),
-		}
 	default:
 		return nil
 	}
@@ -534,6 +528,10 @@ func (a Any) String() string {
 		return "$" + a.name
 	}
 	return a.inner.String()
+}
+
+func (a Any) GetInner() Type {
+	return a.inner
 }
 
 func (a Any) GetProperty(name string) Type {

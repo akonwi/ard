@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -364,7 +363,7 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 		for i, arg := range e.Function.Args {
 			args[i] = *vm.evalExpression(arg)
 		}
-		switch subj := e.Subject.(type) {
+		switch e.Subject.(type) {
 		case checker.Int:
 			switch e.Function.Name {
 			case "from_str":
@@ -386,30 +385,6 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 
 			case "from_int":
 				return &object{float64(args[0].raw.(int)), checker.Float{}}
-			}
-		case *checker.Struct:
-			switch e.Function.Name {
-			case "from_json":
-				result := &object{nil, e.Function.GetType()}
-				_map := make(map[string]any)
-				jsonString := args[0].raw.(string)
-				err := json.Unmarshal([]byte(jsonString), &_map)
-				if err != nil {
-					fmt.Printf("Error unmarshalling: %s\n", err)
-					return result
-				}
-
-				fields := make(map[string]*object)
-				for name, fType := range subj.Fields {
-					val := _map[name]
-					if f64, ok := val.(float64); ok && fType == (checker.Int{}) {
-						val = int(f64)
-					}
-					fields[name] = &object{val, fType}
-				}
-
-				result.raw = fields
-				return result
 			}
 		}
 		panic(fmt.Sprintf("Function not found: %s", e.Function.Name))
@@ -476,12 +451,10 @@ func (vm *VM) evalExpression(expr checker.Expression) *object {
 	}
 }
 
+// only Structs can have custom properties, so just do raw map access
 func (vm VM) evalProperty(i *object, prop checker.Identifier) *object {
-	switch i._type.(type) {
-	case *checker.Struct:
-		if field, ok := i.raw.(map[string]*object)[prop.Name]; ok {
-			return field
-		}
+	if field, ok := i.raw.(map[string]*object)[prop.Name]; ok {
+		return field
 	}
 	panic(fmt.Errorf("Undefined property: %s.%s", i._type, prop))
 }
