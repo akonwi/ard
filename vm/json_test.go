@@ -33,7 +33,22 @@ func TestJsonEncode(t *testing.T) {
 	}
 }
 
-func TestJsonDecode(t *testing.T) {
+func TestJsonDecodeList(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		let nums: [Int]? = json.decode("[1,2,3]")
+		match nums {
+		  ns => ns.size(),
+			_ => 0
+		}
+	`)
+
+	if result != 3 {
+		t.Errorf("Expected 3, got %v", result)
+	}
+}
+
+func TestJsonDecodeStruct(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		struct Person {

@@ -3,6 +3,7 @@ package vm
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -49,6 +50,27 @@ func (vm *VM) invokeJSON(expr checker.Expression) *object {
 						result.raw = fields
 						return result
 					}
+				case checker.List:
+					{
+						fmt.Printf("subj: %v\n", reflect.TypeOf(subj))
+						array := []any{}
+						err := json.Unmarshal([]byte(jsonString), &array)
+						if err != nil {
+							// todo: build error handling
+							fmt.Printf("Error unmarshalling: %s\n", err)
+							return result
+						}
+
+						raw := make([]*object, len(array))
+						for i, val := range array {
+							raw[i] = makeObject(val, subj.GetElementType())
+						}
+
+						result.raw = array
+						return result
+					}
+				case checker.Int, checker.Str:
+					panic(fmt.Errorf("Cannot decode into primitive: %s", subj))
 				default:
 					panic(fmt.Errorf("trying to decode into %s", subj))
 				}
@@ -60,4 +82,25 @@ func (vm *VM) invokeJSON(expr checker.Expression) *object {
 		panic(fmt.Sprintf("Unimplemented json property: %s", e))
 	}
 	panic("unreachable")
+}
+
+func makeObject(val any, typ checker.Type) *object {
+	switch typ.(type) {
+	case checker.Int:
+		switch v := val.(type) {
+		case int:
+			return &object{v, typ}
+		case float64:
+			return &object{int(v), typ}
+		default:
+			panic(fmt.Errorf("unexpected type for int: %T", val))
+		}
+	case checker.Str:
+		if str, ok := val.(string); ok {
+			return &object{str, typ}
+		}
+		return &object{fmt.Sprintf("%v", val), typ}
+	default:
+		panic(fmt.Errorf("trying to decode into %s", typ))
+	}
 }
