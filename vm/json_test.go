@@ -57,11 +57,7 @@ func TestJsonDecodeStruct(t *testing.T) {
 		  employed: Bool
 		}
 		let john_str = "{\"name\": \"John\", \"age\": 30, \"employed\": true}"
-<<<<<<< HEAD
 		let result: Person? = json::decode(john_str)
-=======
-		let result: Person? = json.decode(john_str)
->>>>>>> 598f277 (Implement json.decode function)
 		match result {
 		  john => john.name == "John" and john.age == 30 and john.employed == true,
 			_ => false
