@@ -1,6 +1,8 @@
 ## TODO
 
 - [ ] decoding/json
+- [ ] refining Generics in calls `json.decode<Person>(str)`
+- [ ] declaring Generics in fns `fn decode() $Out {}`
 - [ ] networking
 - [ ] methods on enums?
 - [ ] matching on numbers
