@@ -180,7 +180,6 @@ func TestVariables(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "name",
-							Type:    checker.Str,
 							Value:   &checker.StrLiteral{Value: "Alice"},
 						},
 					},
@@ -188,7 +187,6 @@ func TestVariables(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "age",
-							Type:    checker.Int,
 							Value:   &checker.IntLiteral{Value: 32},
 						},
 					},
@@ -196,7 +194,6 @@ func TestVariables(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "temp",
-							Type:    checker.Float,
 							Value:   &checker.FloatLiteral{Value: 98.6},
 						},
 					},
@@ -204,24 +201,23 @@ func TestVariables(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: true,
 							Name:    "is_student",
-							Type:    checker.Bool,
 							Value:   &checker.BoolLiteral{Value: true},
 						},
 					},
 				},
 			},
 		},
-		// {
-		// 	name: "Actual types should match declarations",
-		// 	input: strings.Join([]string{
-		// 		`let name: Str = "Alice"`,
-		// 		`let age: Int = "32"`,
-		// 		`let is_student: Bool = true`,
-		// 	}, "\n"),
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
-		// 	},
-		// },
+		{
+			name: "Actual types should match declarations",
+			input: strings.Join([]string{
+				`let name: Str = "Alice"`,
+				`let age: Int = "32"`,
+				`let is_student: Bool = true`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+			},
+		},
 		// {
 		// 	name: "Only mutable variables can be reassigned",
 		// 	input: strings.Join([]string{

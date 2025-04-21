@@ -197,12 +197,20 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
 	case *ast.VariableDeclaration:
+		val := c.checkExpr(s.Value)
+		if s.Type != nil {
+			if expected := c.resolveType(s.Type); expected != nil {
+				if expected != val.Type() {
+					c.addError(fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, val.Type()), s.Value.GetLocation())
+					return nil
+				}
+			}
+		}
 		return &Statement{
 			Stmt: &VariableDef{
 				Mutable: s.Mutable,
 				Name:    s.Name,
-				Type:    c.resolveType(s.Type),
-				Value:   c.checkExpr(s.Value),
+				Value:   val,
 			},
 		}
 	default:
