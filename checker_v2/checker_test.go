@@ -133,8 +133,8 @@ func TestLiterals(t *testing.T) {
 		// 		`let num = 3`,
 		// 		`"Hello, {{num}}"`,
 		// 	}, "\n"),
-		// 	output: Program{
-		// 		Statements: []Statement{
+		// 	output: &checker.Program{
+		// 		Statements: []checker.Statement{
 		// 			VariableBinding{
 		// 				Name:  "name",
 		// 				Value: StrLiteral{Value: "world"},
@@ -164,108 +164,124 @@ func TestLiterals(t *testing.T) {
 	})
 }
 
-// func TestVariables(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Declared types",
-// 			input: strings.Join([]string{
-// 				`let name: Str = "Alice"`,
-// 				"let age: Int = 32",
-// 				"let temp: Float = 98.6",
-// 				"let is_student: Bool = true",
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name:  "name",
-// 						Value: StrLiteral{Value: "Alice"},
-// 					},
-// 					VariableBinding{
-// 						Name:  "age",
-// 						Value: IntLiteral{Value: 32},
-// 					},
-// 					VariableBinding{
-// 						Name:  "temp",
-// 						Value: FloatLiteral{Value: 98.6},
-// 					},
-// 					VariableBinding{
-// 						Name:  "is_student",
-// 						Value: BoolLiteral{Value: true},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Actual types should match declarations",
-// 			input: strings.Join([]string{
-// 				`let name: Str = "Alice"`,
-// 				`let age: Int = "32"`,
-// 				`let is_student: Bool = true`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
-// 			},
-// 		},
-// 		{
-// 			name: "Only mutable variables can be reassigned",
-// 			input: strings.Join([]string{
-// 				`let name: Str = "Alice"`,
-// 				`name = "Bob"`,
-// 				`mut other_name = "Bob"`,
-// 				`other_name = "joe"`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Immutable variable: name"},
-// 			},
-// 		},
-// 		{
-// 			name:  "Int literals can be declared as Float",
-// 			input: `let temp: Float = 98`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name:  "temp",
-// 						Value: FloatLiteral{Value: 98},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Reassigning types must match",
-// 			input: `mut name = "Bob"` + "\n" + `name = 0`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
-// 			},
-// 		},
-// 		{
-// 			name:  "Cannot reassign undeclared variables",
-// 			input: `name = "Bob"`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Undefined: name"},
-// 			},
-// 		},
-// 		{
-// 			name:  "Valid reassigments",
-// 			input: `mut count = 0` + "\n" + `count = 1`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "count", Value: IntLiteral{Value: 0}},
-// 					VariableAssignment{Target: Identifier{Name: "count"}, Value: IntLiteral{Value: 1}},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Using variables",
-// 			input: `let string_1 = "Hello"` + "\n" + `let string_2 = string_1`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "string_1", Value: StrLiteral{Value: "Hello"}},
-// 					VariableBinding{Name: "string_2", Value: Identifier{Name: "string_1"}},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestVariables(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Declared types",
+			input: strings.Join([]string{
+				`let name: Str = "Alice"`,
+				"let age: Int = 32",
+				"let temp: Float = 98.6",
+				"mut is_student: Bool = true",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "name",
+							Type:    checker.Str,
+							Value:   &checker.StrLiteral{Value: "Alice"},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "age",
+							Type:    checker.Int,
+							Value:   &checker.IntLiteral{Value: 32},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "temp",
+							Type:    checker.Float,
+							Value:   &checker.FloatLiteral{Value: 98.6},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "is_student",
+							Type:    checker.Bool,
+							Value:   &checker.BoolLiteral{Value: true},
+						},
+					},
+				},
+			},
+		},
+		// {
+		// 	name: "Actual types should match declarations",
+		// 	input: strings.Join([]string{
+		// 		`let name: Str = "Alice"`,
+		// 		`let age: Int = "32"`,
+		// 		`let is_student: Bool = true`,
+		// 	}, "\n"),
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
+		// 	},
+		// },
+		// {
+		// 	name: "Only mutable variables can be reassigned",
+		// 	input: strings.Join([]string{
+		// 		`let name: Str = "Alice"`,
+		// 		`name = "Bob"`,
+		// 		`mut other_name = "Bob"`,
+		// 		`other_name = "joe"`,
+		// 	}, "\n"),
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Immutable variable: name"},
+		// 	},
+		// },
+		// {
+		// 	name:  "Int literals can be declared as Float",
+		// 	input: `let temp: Float = 98`,
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			VariableBinding{
+		// 				Name:  "temp",
+		// 				Value: FloatLiteral{Value: 98},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:  "Reassigning types must match",
+		// 	input: `mut name = "Bob"` + "\n" + `name = 0`,
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
+		// 	},
+		// },
+		// {
+		// 	name:  "Cannot reassign undeclared variables",
+		// 	input: `name = "Bob"`,
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Undefined: name"},
+		// 	},
+		// },
+		// {
+		// 	name:  "Valid reassigments",
+		// 	input: `mut count = 0` + "\n" + `count = 1`,
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			VariableBinding{Name: "count", Value: IntLiteral{Value: 0}},
+		// 			VariableAssignment{Target: Identifier{Name: "count"}, Value: IntLiteral{Value: 1}},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:  "Using variables",
+		// 	input: `let string_1 = "Hello"` + "\n" + `let string_2 = string_1`,
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			VariableBinding{Name: "string_1", Value: StrLiteral{Value: "Hello"}},
+		// 			VariableBinding{Name: "string_2", Value: Identifier{Name: "string_1"}},
+		// 		},
+		// 	},
+		// },
+	})
+}
 
 // func TestMemberAccess(t *testing.T) {
 // 	run(t, []test{
