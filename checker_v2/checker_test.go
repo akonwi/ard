@@ -220,6 +220,13 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
+			name:  "Int literals are not inferred as Float",
+			input: `let temp: Float = 98`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Float, got Int"},
+			},
+		},
+		{
 			name: "Only mutable variables can be reassigned",
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
@@ -255,32 +262,20 @@ func TestVariables(t *testing.T) {
 				{Kind: checker.Error, Message: "Immutable variable: name"},
 			},
 		},
-		// {
-		// 	name:  "Int literals can be declared as Float",
-		// 	input: `let temp: Float = 98`,
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			VariableBinding{
-		// 				Name:  "temp",
-		// 				Value: FloatLiteral{Value: 98},
-		// 			},
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name:  "Reassigning types must match",
-		// 	input: `mut name = "Bob"` + "\n" + `name = 0`,
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
-		// 	},
-		// },
-		// {
-		// 	name:  "Cannot reassign undeclared variables",
-		// 	input: `name = "Bob"`,
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Undefined: name"},
-		// 	},
-		// },
+		{
+			name:  "Reassigning types must match",
+			input: strings.Join([]string{`mut name = "Bob"`, `name = 0`}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+			},
+		},
+		{
+			name:  "Cannot reassign undeclared variables",
+			input: `name = "Bob"`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: name"},
+			},
+		},
 		// {
 		// 	name:  "Valid reassigments",
 		// 	input: `mut count = 0` + "\n" + `count = 1`,

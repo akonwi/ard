@@ -215,6 +215,10 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 	}
 }
 
+func typeMismatch(expected, got Type) string {
+	return fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, got)
+}
+
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
 	case *ast.VariableDeclaration:
@@ -223,7 +227,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
 					if expected != val.Type() {
-						c.addError(fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, val.Type()), s.Value.GetLocation())
+						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
 						return nil
 					}
 				}
@@ -242,22 +246,34 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.VariableAssignment:
 		{
 			// todo: not always a variable
-			target := c.scope.getVar(s.Target.(*ast.Identifier).Name)
-			value := c.checkExpr(s.Value)
-			if value == nil {
-				return nil
-			}
-
-			if binding, ok := target.(*VariableDef); ok {
-				if !binding.Mutable {
-					c.addError(fmt.Sprintf("Immutable variable: %s", binding.Name), s.Target.GetLocation())
+			if id, ok := s.Target.(*ast.Identifier); ok {
+				target := c.scope.getVar(id.Name)
+				if target == nil {
+					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
 					return nil
 				}
-			}
+				value := c.checkExpr(s.Value)
+				if value == nil {
+					return nil
+				}
 
-			return &Statement{
-				Stmt: &Reassignment{Target: &Identifier{target.name()}, Value: value},
+				if binding, ok := target.(*VariableDef); ok {
+					if !binding.Mutable {
+						c.addError(fmt.Sprintf("Immutable variable: %s", binding.Name), s.Target.GetLocation())
+						return nil
+					}
+					if target._type() != value.Type() {
+						c.addError(typeMismatch(target._type(), value.Type()), s.Value.GetLocation())
+						return nil
+					}
+
+					return &Statement{
+						Stmt: &Reassignment{Target: &Identifier{target.name()}, Value: value},
+					}
+				}
+
 			}
+			return nil
 		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
