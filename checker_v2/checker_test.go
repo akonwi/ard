@@ -22,6 +22,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		checker.Diagnostic{},
 		checker.Statement{},
+		checker.VariableDef{},
 	),
 }
 
@@ -218,18 +219,42 @@ func TestVariables(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
 			},
 		},
-		// {
-		// 	name: "Only mutable variables can be reassigned",
-		// 	input: strings.Join([]string{
-		// 		`let name: Str = "Alice"`,
-		// 		`name = "Bob"`,
-		// 		`mut other_name = "Bob"`,
-		// 		`other_name = "joe"`,
-		// 	}, "\n"),
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Immutable variable: name"},
-		// 	},
-		// },
+		{
+			name: "Only mutable variables can be reassigned",
+			input: strings.Join([]string{
+				`let name: Str = "Alice"`,
+				`name = "Bob"`,
+				`mut other_name = "Bob"`,
+				`other_name = "joe"`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "name",
+							Value:   &checker.StrLiteral{"Alice"},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "other_name",
+							Value:   &checker.StrLiteral{"Bob"},
+						},
+					},
+					{
+						Stmt: &checker.Reassignment{
+							Target: &checker.Identifier{"other_name"},
+							Value:  &checker.StrLiteral{"joe"},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Immutable variable: name"},
+			},
+		},
 		// {
 		// 	name:  "Int literals can be declared as Float",
 		// 	input: `let temp: Float = 98`,

@@ -53,7 +53,6 @@ type NonProducing interface {
 }
 
 type Expression interface {
-	String() string
 	Type() Type
 }
 
@@ -107,14 +106,36 @@ func (f *FloatLiteral) Type() Type {
 type VariableDef struct {
 	Mutable bool
 	Name    string
-	Type    Type
+	__type  Type
 	Value   Expression
 }
 
 func (v *VariableDef) NonProducing() {}
+func (v *VariableDef) name() string {
+	return v.Name
+}
+func (v *VariableDef) _type() Type {
+	return v.__type
+}
+
+type Reassignment struct {
+	Target Expression
+	Value  Expression
+}
+
+func (r *Reassignment) NonProducing() {}
+
+type Identifier struct {
+	Name string
+}
+
+func (i *Identifier) Type() Type {
+	return nil
+}
 
 type checker struct {
 	diagnostics []Diagnostic
+	scope       *scope
 }
 
 func (c *checker) addError(msg string, location ast.Location) {
@@ -134,7 +155,7 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 }
 
 func Check(input *ast.Program) (*Program, []Diagnostic) {
-	c := checker{diagnostics: []Diagnostic{}}
+	c := checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
 	program := &Program{
 		StdImports: map[string]StdPackage{},
 		Imports:    map[string]ExtPackage{},
@@ -197,21 +218,46 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
 	case *ast.VariableDeclaration:
-		val := c.checkExpr(s.Value)
-		if s.Type != nil {
-			if expected := c.resolveType(s.Type); expected != nil {
-				if expected != val.Type() {
-					c.addError(fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, val.Type()), s.Value.GetLocation())
-					return nil
+		{
+			val := c.checkExpr(s.Value)
+			if s.Type != nil {
+				if expected := c.resolveType(s.Type); expected != nil {
+					if expected != val.Type() {
+						c.addError(fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, val.Type()), s.Value.GetLocation())
+						return nil
+					}
 				}
 			}
-		}
-		return &Statement{
-			Stmt: &VariableDef{
+			v := &VariableDef{
 				Mutable: s.Mutable,
 				Name:    s.Name,
 				Value:   val,
-			},
+				__type:  val.Type(),
+			}
+			c.scope.add(v)
+			return &Statement{
+				Stmt: v,
+			}
+		}
+	case *ast.VariableAssignment:
+		{
+			// todo: not always a variable
+			target := c.scope.getVar(s.Target.(*ast.Identifier).Name)
+			value := c.checkExpr(s.Value)
+			if value == nil {
+				return nil
+			}
+
+			if binding, ok := target.(*VariableDef); ok {
+				if !binding.Mutable {
+					c.addError(fmt.Sprintf("Immutable variable: %s", binding.Name), s.Target.GetLocation())
+					return nil
+				}
+			}
+
+			return &Statement{
+				Stmt: &Reassignment{Target: &Identifier{target.name()}, Value: value},
+			}
 		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
