@@ -22,6 +22,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		checker.Diagnostic{},
 		checker.Statement{},
+		checker.Variable{},
 		checker.VariableDef{},
 	),
 }
@@ -252,7 +253,7 @@ func TestVariables(t *testing.T) {
 					},
 					{
 						Stmt: &checker.Reassignment{
-							Target: &checker.Identifier{"other_name"},
+							Target: &checker.Variable{},
 							Value:  &checker.StrLiteral{"joe"},
 						},
 					},
@@ -276,26 +277,28 @@ func TestVariables(t *testing.T) {
 				{Kind: checker.Error, Message: "Undefined: name"},
 			},
 		},
-		// {
-		// 	name:  "Valid reassigments",
-		// 	input: `mut count = 0` + "\n" + `count = 1`,
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			VariableBinding{Name: "count", Value: IntLiteral{Value: 0}},
-		// 			VariableAssignment{Target: Identifier{Name: "count"}, Value: IntLiteral{Value: 1}},
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name:  "Using variables",
-		// 	input: `let string_1 = "Hello"` + "\n" + `let string_2 = string_1`,
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			VariableBinding{Name: "string_1", Value: StrLiteral{Value: "Hello"}},
-		// 			VariableBinding{Name: "string_2", Value: Identifier{Name: "string_1"}},
-		// 		},
-		// 	},
-		// },
+		{
+			name:  "Using variables",
+			input: strings.Join([]string{`let string_1 = "Hello"`, `let string_2 = string_1`}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "string_1",
+							Value:   &checker.StrLiteral{"Hello"},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "string_2",
+							Value:   &checker.Variable{},
+						},
+					},
+				},
+			},
+		},
 	})
 }
 

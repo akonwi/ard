@@ -127,10 +127,22 @@ func (r *Reassignment) NonProducing() {}
 
 type Identifier struct {
 	Name string
+	sym  symbol
 }
 
 func (i *Identifier) Type() Type {
-	return nil
+	return i.sym._type()
+}
+
+type Variable struct {
+	sym symbol
+}
+
+func (v Variable) Name() string {
+	return v.sym.name()
+}
+func (v *Variable) Type() Type {
+	return v.sym._type()
 }
 
 type checker struct {
@@ -268,7 +280,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					}
 
 					return &Statement{
-						Stmt: &Reassignment{Target: &Identifier{target.name()}, Value: value},
+						Stmt: &Reassignment{Target: &Variable{target}, Value: value},
 					}
 				}
 
@@ -303,6 +315,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 			return &IntLiteral{value}
 		}
+	case *ast.Identifier:
+		if sym := c.scope.getVar(s.Name); sym != nil {
+			return &Variable{sym}
+		}
+		panic(fmt.Errorf("Undefined variable: %s", s.Name))
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}
