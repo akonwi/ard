@@ -61,7 +61,7 @@ type StrLiteral struct {
 }
 
 func (s *StrLiteral) String() string {
-	return s.Value
+	return fmt.Sprintf(`"%s"`, s.Value)
 }
 func (s *StrLiteral) Type() Type {
 	return Str
@@ -138,11 +138,208 @@ type Variable struct {
 	sym symbol
 }
 
+func (v Variable) String() string {
+	return v.Name()
+}
 func (v Variable) Name() string {
 	return v.sym.name()
 }
 func (v *Variable) Type() Type {
 	return v.sym._type()
+}
+
+type InstanceProperty struct {
+	Subject  Expression
+	Property string
+	_type    Type
+}
+
+func (i *InstanceProperty) Type() Type {
+	return i._type
+}
+
+type Negation struct {
+	Value Expression
+}
+
+func (n *Negation) String() string {
+	return fmt.Sprintf("-%s", n.Value)
+}
+func (n *Negation) Type() Type {
+	return n.Value.Type()
+}
+
+type Not struct {
+	Value Expression
+}
+
+func (n *Not) String() string {
+	return fmt.Sprintf("not %s", n.Value)
+}
+func (n *Not) Type() Type {
+	return Bool
+}
+
+type IntAddition struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntAddition) Type() Type {
+	return Int
+}
+
+type IntSubtraction struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntSubtraction) Type() Type {
+	return Int
+}
+
+type IntMultiplication struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntMultiplication) Type() Type {
+	return Int
+}
+
+type IntDivision struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntDivision) Type() Type {
+	return Int
+}
+
+type IntModulo struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntModulo) Type() Type {
+	return Int
+}
+
+type IntGreater struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntGreater) Type() Type {
+	return Bool
+}
+
+type IntGreaterEqual struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntGreaterEqual) Type() Type {
+	return Bool
+}
+
+type IntLess struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntLess) Type() Type {
+	return Bool
+}
+
+type IntLessEqual struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntLessEqual) Type() Type {
+	return Bool
+}
+
+type FloatAddition struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatAddition) Type() Type {
+	return Float
+}
+
+type FloatSubtraction struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatSubtraction) Type() Type {
+	return Float
+}
+
+type FloatMultiplication struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatMultiplication) Type() Type {
+	return Float
+}
+
+type FloatDivision struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatDivision) Type() Type {
+	return Float
+}
+
+type FloatGreater struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatGreater) Type() Type {
+	return Bool
+}
+
+type FloatGreaterEqual struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatGreaterEqual) Type() Type {
+	return Bool
+}
+
+type FloatLess struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatLess) Type() Type {
+	return Bool
+}
+
+type FloatLessEqual struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatLessEqual) Type() Type {
+	return Bool
+}
+
+type StrAddition struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *StrAddition) Type() Type {
+	return Str
 }
 
 type checker struct {
@@ -320,6 +517,240 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return &Variable{sym}
 		}
 		panic(fmt.Errorf("Undefined variable: %s", s.Name))
+	case *ast.InstanceProperty:
+		{
+			subj := c.checkExpr(s.Target)
+			if subj == nil {
+				panic(fmt.Errorf("Cannot access %s on nil", s.Property))
+			}
+
+			propType := subj.Type().get(s.Property.Name)
+			if propType == nil {
+				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
+				return nil
+			}
+			return &InstanceProperty{
+				Subject:  subj,
+				Property: s.Property.Name,
+				_type:    propType,
+			}
+		}
+	case *ast.UnaryExpression:
+		{
+			value := c.checkExpr(s.Operand)
+			if value == nil {
+				return nil
+			}
+			if s.Operator == ast.Minus {
+				if value.Type() != Int && value.Type() != Float {
+					c.addError("Only numbers can be negated with '-'", s.GetLocation())
+					return nil
+				}
+				return &Negation{value}
+			}
+
+			if value.Type() != Bool {
+				c.addError("Only booleans can be negated with 'not'", s.GetLocation())
+				return nil
+			}
+			return &Not{value}
+		}
+	case *ast.BinaryExpression:
+		{
+			switch s.Operator {
+			case ast.Plus:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot add different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntAddition{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatAddition{left, right}
+					}
+					if left.Type() == Str {
+						return &StrAddition{left, right}
+					}
+					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Minus:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot subtract different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntSubtraction{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatSubtraction{left, right}
+					}
+					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Multiply:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot multiply different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntMultiplication{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatMultiplication{left, right}
+					}
+					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Divide:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot divide different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntDivision{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatDivision{left, right}
+					}
+					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Modulo:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot modulo different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntModulo{left, right}
+					}
+					c.addError("The '%' operator can only be used for Int", s.GetLocation())
+					return nil
+				}
+			case ast.GreaterThan:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntGreater{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatGreater{left, right}
+					}
+					c.addError("The '>' operator can only be used for Int", s.GetLocation())
+					return nil
+				}
+			case ast.GreaterThanOrEqual:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntGreaterEqual{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatGreaterEqual{left, right}
+					}
+					c.addError("The '>=' operator can only be used for Int", s.GetLocation())
+					return nil
+				}
+			case ast.LessThan:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntLess{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatLess{left, right}
+					}
+					c.addError("The '<' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.LessThanOrEqual:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntLessEqual{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatLessEqual{left, right}
+					}
+					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			default:
+				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))
+			}
+		}
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}

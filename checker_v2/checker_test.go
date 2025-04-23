@@ -21,6 +21,7 @@ var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
 		checker.Diagnostic{},
+		checker.InstanceProperty{},
 		checker.Statement{},
 		checker.Variable{},
 		checker.VariableDef{},
@@ -302,135 +303,518 @@ func TestVariables(t *testing.T) {
 	})
 }
 
-// func TestMemberAccess(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "valid instance members",
-// 			input: strings.Join([]string{
-// 				`"foobar".size`,
-// 				`let name = "Alice"`,
-// 				`name.size`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					InstanceProperty{
-// 						Subject:  StrLiteral{Value: "foobar"},
-// 						Property: Identifier{Name: "size"},
-// 					},
-// 					VariableBinding{
-// 						Name:  "name",
-// 						Value: StrLiteral{Value: "Alice"},
-// 					},
-// 					InstanceProperty{
-// 						Subject:  Identifier{Name: "name"},
-// 						Property: Identifier{Name: "size"},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Undefined instance members",
-// 			input: strings.Join([]string{
-// 				`"foo".length`,
-// 				`let name = "joe"`,
-// 				`name.len`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Undefined: \"foo\".length"},
-// 				{Kind: Error, Message: "Undefined: name.len"},
-// 			},
-// 		},
-// 	})
-// }
+func TestInstanceProperties(t *testing.T) {
+	run(t, []test{
+		{
+			name: "valid instance members",
+			input: strings.Join([]string{
+				`"foobar".size`,
+				`let name = "Alice"`,
+				`name.size`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.InstanceProperty{
+							Subject:  &checker.StrLiteral{"foobar"},
+							Property: "size",
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "name",
+							Value:   &checker.StrLiteral{"Alice"},
+						},
+					},
+					{
+						Expr: &checker.InstanceProperty{
+							Subject:  &checker.Variable{},
+							Property: "size",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Undefined instance members are errors",
+			input: strings.Join([]string{
+				`"foo".length`,
+				`let name = "joe"`,
+				`name.len`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: `Undefined: "foo".length`},
+				{Kind: checker.Error, Message: "Undefined: name.len"},
+			},
+		},
+	})
+}
 
-// func TestUnaryExpressions(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Negative numbers",
-// 			input: `(-10)
-// 							(-10.0)`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					Negation{Value: IntLiteral{Value: 10}},
-// 					Negation{Value: FloatLiteral{Value: 10.0}},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Minus operator must be on numbers",
-// 			input: `-true`,
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "The '-' operator can only be used on numbers",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Boolean negation",
-// 			input: `not true`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					Not{Value: BoolLiteral{Value: true}},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Bang operator must be on booleans",
-// 			input: `not "string"`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "The 'not' keyword can only be used on booleans"},
-// 			},
-// 		},
-// 	})
-// }
+func TestUnaryExpressions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Negative numbers",
+			input: `(-10)
+							(-10.0)`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{Expr: &checker.Negation{Value: &checker.IntLiteral{Value: 10}}},
+					{Expr: &checker.Negation{Value: &checker.FloatLiteral{Value: 10.0}}},
+				},
+			},
+		},
+		{
+			name:  "Minus operator must be on numbers",
+			input: `-true`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Only numbers can be negated with '-'",
+				},
+			},
+		},
+		{
+			name:  "Boolean negation",
+			input: `not true`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.Not{Value: &checker.BoolLiteral{Value: true}},
+					},
+				},
+			},
+		},
+		{
+			name:  "Bang operator must be on booleans",
+			input: `not "string"`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Only booleans can be negated with 'not'"},
+			},
+		},
+	})
+}
 
-// func TestIntMath(t *testing.T) {
-// 	cases := []struct {
-// 		name string
-// 		op   BinaryOperator
-// 	}{
-// 		{"Addition", Add},
-// 		{"Subtraction", Sub},
-// 		{"Multiplication", Mul},
-// 		{"Division", Div},
-// 		{"Modulo", Mod},
-// 		{"Greater than", GreaterThan},
-// 		{"Greater than or equal", GreaterThanOrEqual},
-// 		{"Less than", LessThan},
-// 		{"Less than or equal", LessThanOrEqual},
-// 	}
-// 	tests := []test{}
-// 	for _, c := range cases {
-// 		tests = append(tests, test{
-// 			name:  c.name,
-// 			input: fmt.Sprintf("1 %s 2", c.op) + "\n" + fmt.Sprintf("3 %s -4", c.op),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					BinaryExpr{
-// 						Op:    c.op,
-// 						Left:  IntLiteral{Value: 1},
-// 						Right: IntLiteral{Value: 2},
-// 					},
-// 					BinaryExpr{
-// 						Op:    c.op,
-// 						Left:  IntLiteral{Value: 3},
-// 						Right: Negation{Value: IntLiteral{Value: 4}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 			test{
-// 				name:  c.name + " with wrong types",
-// 				input: fmt.Sprintf("1 %s true", c.op),
-// 				diagnostics: []Diagnostic{
-// 					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Int %s Bool", c.op)},
-// 				},
-// 			})
-// 	}
+func TestIntMath(t *testing.T) {
+	tests := []test{
+		{
+			name: "Adding Ints",
+			input: strings.Join([]string{
+				"1 + 2",
+				"3 + -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntAddition{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntAddition{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Adding Floats",
+			input: strings.Join([]string{
+				"1.0 + 2.0",
+				"3.0 + -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatAddition{
+							Left:  &checker.FloatLiteral{1},
+							Right: &checker.FloatLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.FloatAddition{
+							Left:  &checker.FloatLiteral{3},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Adding Strs",
+			input: strings.Join([]string{
+				`"hello" + "world"`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.StrAddition{
+							Left:  &checker.StrLiteral{"hello"},
+							Right: &checker.StrLiteral{"world"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Subtracting Ints",
+			input: strings.Join([]string{
+				"1 - 2",
+				"3 - -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntSubtraction{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntSubtraction{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Subtracting Floats",
+			input: strings.Join([]string{
+				"1.0 - 2.0",
+				"3.0 - -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatSubtraction{
+							Left:  &checker.FloatLiteral{1},
+							Right: &checker.FloatLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.FloatSubtraction{
+							Left:  &checker.FloatLiteral{3},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Multiplying Ints",
+			input: strings.Join([]string{
+				"1 * 2",
+				"3 * -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntMultiplication{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntMultiplication{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Multiplying Floats",
+			input: strings.Join([]string{
+				"1.0 * 2.0",
+				"3.0 * -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatMultiplication{
+							Left:  &checker.FloatLiteral{1},
+							Right: &checker.FloatLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.FloatMultiplication{
+							Left:  &checker.FloatLiteral{3},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Dividing Ints",
+			input: strings.Join([]string{
+				"10 / 2",
+				"15 / -3",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntDivision{
+							Left:  &checker.IntLiteral{10},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntDivision{
+							Left:  &checker.IntLiteral{15},
+							Right: &checker.Negation{&checker.IntLiteral{3}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Dividing Floats",
+			input: strings.Join([]string{
+				"10.0 / 2.0",
+				"15.0 / -3.0",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatDivision{
+							Left:  &checker.FloatLiteral{10},
+							Right: &checker.FloatLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.FloatDivision{
+							Left:  &checker.FloatLiteral{15},
+							Right: &checker.Negation{&checker.FloatLiteral{3}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Modulo Ints",
+			input: strings.Join([]string{
+				"10 % 3",
+				"15 % -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntModulo{
+							Left:  &checker.IntLiteral{10},
+							Right: &checker.IntLiteral{3},
+						},
+					},
+					{
+						Expr: &checker.IntModulo{
+							Left:  &checker.IntLiteral{15},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Modulo Floats",
+			input: "10.0 % 3.0",
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "The '%' operator can only be used for Int"},
+			},
+		},
+		{
+			name: "Greater than for Ints",
+			input: strings.Join([]string{
+				"1 > 2",
+				"3 > -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntGreater{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntGreater{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Greater than or equal for Ints",
+			input: strings.Join([]string{
+				"1 >= 2",
+				"3 >= -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntGreaterEqual{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntGreaterEqual{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Greater than for Floats",
+			input: strings.Join([]string{
+				"1.0 > 2.0",
+				"3.0 > -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatGreater{
+							Left:  &checker.FloatLiteral{1.0},
+							Right: &checker.FloatLiteral{2.0},
+						},
+					},
+					{
+						Expr: &checker.FloatGreater{
+							Left:  &checker.FloatLiteral{3.0},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Greater than or equal for Floats",
+			input: strings.Join([]string{
+				"1.0 >= 2.0",
+				"3.0 >= -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatGreaterEqual{
+							Left:  &checker.FloatLiteral{1.0},
+							Right: &checker.FloatLiteral{2.0},
+						},
+					},
+					{
+						Expr: &checker.FloatGreaterEqual{
+							Left:  &checker.FloatLiteral{3.0},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Less than for Ints",
+			input: strings.Join([]string{
+				"1 < 2",
+				"3 < -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntLess{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntLess{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Less than or equal for Ints",
+			input: strings.Join([]string{
+				"1 <= 2",
+				"3 <= -4",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntLessEqual{
+							Left:  &checker.IntLiteral{1},
+							Right: &checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.IntLessEqual{
+							Left:  &checker.IntLiteral{3},
+							Right: &checker.Negation{&checker.IntLiteral{4}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Less than for Floats",
+			input: strings.Join([]string{
+				"1.0 < 2.0",
+				"3.0 < -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatLess{
+							Left:  &checker.FloatLiteral{1.0},
+							Right: &checker.FloatLiteral{2.0},
+						},
+					},
+					{
+						Expr: &checker.FloatLess{
+							Left:  &checker.FloatLiteral{3.0},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Less than or equal for Floats",
+			input: strings.Join([]string{
+				"1.0 <= 2.0",
+				"3.0 <= -4.5",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FloatLessEqual{
+							Left:  &checker.FloatLiteral{1.0},
+							Right: &checker.FloatLiteral{2.0},
+						},
+					},
+					{
+						Expr: &checker.FloatLessEqual{
+							Left:  &checker.FloatLiteral{3.0},
+							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+						},
+					},
+				},
+			},
+		},
+	}
 
-// 	run(t, tests)
-// }
+	run(t, tests)
+}
 
 // func TestFloatMath(t *testing.T) {
 // 	cases := []struct {
