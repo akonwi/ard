@@ -816,96 +816,51 @@ func TestIntMath(t *testing.T) {
 	run(t, tests)
 }
 
-// func TestFloatMath(t *testing.T) {
-// 	cases := []struct {
-// 		name string
-// 		op   BinaryOperator
-// 	}{
-// 		{"Addition", Add},
-// 		{"Subtraction", Sub},
-// 		{"Multiplication", Mul},
-// 		{"Division", Div},
-// 		{"Greater than", GreaterThan},
-// 		{"Greater than or equal", GreaterThanOrEqual},
-// 		{"Less than", LessThan},
-// 		{"Less than or equal", LessThanOrEqual},
-// 	}
-// 	tests := []test{}
-// 	for _, c := range cases {
-// 		tests = append(tests, test{
-// 			name:  c.name,
-// 			input: fmt.Sprintf("1.0 %s 2.2", c.op) + "\n" + fmt.Sprintf("3.5 %s (-14.9)", c.op),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					BinaryExpr{
-// 						Op:    c.op,
-// 						Left:  FloatLiteral{Value: 1.0},
-// 						Right: FloatLiteral{Value: 2.2},
-// 					},
-// 					BinaryExpr{
-// 						Op:    c.op,
-// 						Left:  FloatLiteral{Value: 3.5},
-// 						Right: Negation{Value: FloatLiteral{Value: 14.9}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 			test{
-// 				name:  c.name + " with wrong types",
-// 				input: fmt.Sprintf("1 %s true", c.op),
-// 				diagnostics: []Diagnostic{
-// 					{Kind: Error, Message: fmt.Sprintf("Invalid operation: Int %s Bool", c.op)},
-// 				},
-// 			})
-// 	}
-
-// 	tests = append(tests, test{
-// 		name:  "Modulo is not allowed on floats",
-// 		input: "1.0 % 2.2",
-// 		diagnostics: []Diagnostic{
-// 			{Kind: Error, Message: "% is not supported on Float"},
-// 		},
-// 	})
-// 	run(t, tests)
-// }
-
-// func TestEqualityComparisons(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Equality between primitives",
-// 			input: strings.Join([]string{
-// 				"1 == 2",
-// 				"10.2 == 21.4",
-// 				"true == false",
-// 				`"hello" == "world"`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					BinaryExpr{
-// 						Op:    Equal,
-// 						Left:  IntLiteral{Value: 1},
-// 						Right: IntLiteral{Value: 2},
-// 					},
-// 					BinaryExpr{
-// 						Op:    Equal,
-// 						Left:  FloatLiteral{Value: 10.2},
-// 						Right: FloatLiteral{Value: 21.4},
-// 					},
-// 					BinaryExpr{
-// 						Op:    Equal,
-// 						Left:  BoolLiteral{Value: true},
-// 						Right: BoolLiteral{Value: false},
-// 					},
-// 					BinaryExpr{
-// 						Op:    Equal,
-// 						Left:  StrLiteral{Value: "hello"},
-// 						Right: StrLiteral{Value: "world"},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestEqualityComparisons(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Equality between primitives",
+			input: strings.Join([]string{
+				"1 == 2",
+				"10.2 == 21.4",
+				"true == false",
+				`"hello" == "world"`,
+				`1 == false`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.Equality{
+							&checker.IntLiteral{1},
+							&checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.Equality{
+							&checker.FloatLiteral{10.2},
+							&checker.FloatLiteral{21.4},
+						},
+					},
+					{
+						Expr: &checker.Equality{
+							&checker.BoolLiteral{true},
+							&checker.BoolLiteral{false},
+						},
+					},
+					{
+						Expr: &checker.Equality{
+							&checker.StrLiteral{"hello"},
+							&checker.StrLiteral{"world"},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid: Int == Bool"},
+			},
+		},
+	})
+}
 
 // func TestBooleanOperations(t *testing.T) {
 // 	run(t, []test{

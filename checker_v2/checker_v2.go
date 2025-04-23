@@ -3,6 +3,7 @@ package checker_v2
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -342,6 +343,14 @@ func (n *StrAddition) Type() Type {
 	return Str
 }
 
+type Equality struct {
+	Left, Right Expression
+}
+
+func (n *Equality) Type() Type {
+	return Bool
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -486,6 +495,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
+		if expr == nil {
+			return nil
+		}
 		return &Statement{Expr: expr}
 	}
 }
@@ -746,6 +758,26 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
 					return nil
+				}
+			case ast.Equal:
+				{
+					left, right := c.checkExpr(s.Left), c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						return nil
+					}
+
+					allowedTypes := []Type{Int, Float, Str, Bool}
+					if !slices.Contains(allowedTypes, left.Type()) || !slices.Contains(allowedTypes, right.Type()) {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						return nil
+					}
+
+					return &Equality{left, right}
 				}
 			default:
 				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))
