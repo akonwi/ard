@@ -862,239 +862,199 @@ func TestEqualityComparisons(t *testing.T) {
 	})
 }
 
-// func TestBooleanOperations(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name:  "Boolean operations",
-// 			input: "let never = true and false" + "\n" + "let always = true or false",
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name: "never",
-// 						Value: BinaryExpr{
-// 							Op:    And,
-// 							Left:  BoolLiteral{Value: true},
-// 							Right: BoolLiteral{Value: false},
-// 						},
-// 					},
-// 					VariableBinding{
-// 						Name: "always",
-// 						Value: BinaryExpr{
-// 							Op:    Or,
-// 							Left:  BoolLiteral{Value: true},
-// 							Right: BoolLiteral{Value: false},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestBooleanOperations(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Boolean operations",
+			input: strings.Join([]string{
+				"let never = true and false",
+				"let always = true or false",
+				"let invalid = 5 and true",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{Stmt: &checker.VariableDef{
+						Name: "never",
+						Value: &checker.And{
+							Left:  &checker.BoolLiteral{Value: true},
+							Right: &checker.BoolLiteral{Value: false},
+						},
+					}},
+					{Stmt: &checker.VariableDef{
+						Name: "always",
+						Value: &checker.Or{
+							Left:  &checker.BoolLiteral{Value: true},
+							Right: &checker.BoolLiteral{Value: false},
+						},
+					}},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "The 'and' operator can only be used between Bools"},
+			},
+		},
+	})
+}
 
-// func TestParenthesizedExpressions(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name:  "arithmatic",
-// 			input: "(30 + 20) * 4",
-// 			output: Program{
-// 				Statements: []Statement{
-// 					BinaryExpr{
-// 						Op: Mul,
-// 						Left: BinaryExpr{
-// 							Op:    Add,
-// 							Left:  IntLiteral{Value: 30},
-// 							Right: IntLiteral{Value: 20},
-// 						},
-// 						Right: IntLiteral{Value: 4},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "logical",
-// 			input: "(true and true) or (true and false)",
-// 			output: Program{
-// 				Statements: []Statement{
-// 					BinaryExpr{
-// 						Op: Or,
-// 						Left: BinaryExpr{
-// 							Op:    And,
-// 							Left:  BoolLiteral{Value: true},
-// 							Right: BoolLiteral{Value: true},
-// 						},
-// 						Right: BinaryExpr{
-// 							Op:    And,
-// 							Left:  BoolLiteral{Value: true},
-// 							Right: BoolLiteral{Value: false},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestParenthesizedExpressions(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "arithmatic",
+			input: "(30 + 20) * 4",
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.IntMultiplication{
+							Left:  &checker.IntAddition{&checker.IntLiteral{30}, &checker.IntLiteral{20}},
+							Right: &checker.IntLiteral{4},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "logical",
+			input: "(true and true) or (true and false)",
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.Or{
+							&checker.And{&checker.BoolLiteral{true}, &checker.BoolLiteral{true}},
+							&checker.And{&checker.BoolLiteral{true}, &checker.BoolLiteral{false}},
+						},
+					},
+				},
+			},
+		},
+	})
+}
 
-// func TestIfStatements(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Simple if statement",
-// 			input: strings.Join([]string{
-// 				`let is_on = true`,
-// 				`if is_on {
-// 				  let foo = "bar"
-// 				}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
-// 					IfStatement{
-// 						Condition: Identifier{Name: "is_on"},
-// 						Body: []Statement{
-// 							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "The condition expression must be a boolean",
-// 			input: strings.Join([]string{
-// 				`if 20 {
-// 				  let foo = "bar"
-// 				}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "If conditions must be boolean expressions"},
-// 			},
-// 		},
-// 		{
-// 			name: "Compound conditions",
-// 			input: strings.Join([]string{
-// 				`let is_on = true`,
-// 				`if is_on and 100 > 30 {
-// 				  let foo = "bar"
-// 				}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
-// 					IfStatement{
-// 						Condition: BinaryExpr{
-// 							Op:   And,
-// 							Left: Identifier{Name: "is_on"},
-// 							Right: BinaryExpr{
-// 								Op:    GreaterThan,
-// 								Left:  IntLiteral{Value: 100},
-// 								Right: IntLiteral{Value: 30},
-// 							},
-// 						},
-// 						Body: []Statement{
-// 							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "With else clause",
-// 			input: strings.Join([]string{
-// 				`let is_on = true`,
-// 				`if is_on {
-// 				  let foo = "bar"
-// 				} else {
-// 				  let foo = "baz"
-// 				}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
-// 					IfStatement{
-// 						Condition: Identifier{Name: "is_on"},
-// 						Body: []Statement{
-// 							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
-// 						},
-// 						Else: IfStatement{
-// 							Body: []Statement{
-// 								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "With else-if clause",
-// 			input: strings.Join([]string{
-// 				`let is_on = true`,
-// 				`if is_on {
-// 				  let foo = "bar"
-// 				} else if 1 > 2 {
-// 				  let foo = "baz"
-// 				}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
-// 					IfStatement{
-// 						Condition: Identifier{Name: "is_on"},
-// 						Body: []Statement{
-// 							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
-// 						},
-// 						Else: IfStatement{
-// 							Condition: BinaryExpr{
-// 								Op:    GreaterThan,
-// 								Left:  IntLiteral{Value: 1},
-// 								Right: IntLiteral{Value: 2},
-// 							},
-// 							Body: []Statement{
-// 								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "if-else-if-else",
-// 			input: strings.Join([]string{
-// 				`let is_on = true`,
-// 				`if is_on {
-// 				  let foo = "bar"
-// 				} else if 1 > 2 {
-// 				  let foo = "baz"
-// 				} else {
-// 					let foo = "qux"
-// 				}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "is_on", Value: BoolLiteral{Value: true}},
-// 					IfStatement{
-// 						Condition: Identifier{Name: "is_on"},
-// 						Body: []Statement{
-// 							VariableBinding{Name: "foo", Value: StrLiteral{Value: "bar"}},
-// 						},
-// 						Else: IfStatement{
-// 							Condition: BinaryExpr{
-// 								Op:    GreaterThan,
-// 								Left:  IntLiteral{Value: 1},
-// 								Right: IntLiteral{Value: 2},
-// 							},
-// 							Body: []Statement{
-// 								VariableBinding{Name: "foo", Value: StrLiteral{Value: "baz"}},
-// 							},
-// 							Else: IfStatement{
-// 								Body: []Statement{
-// 									VariableBinding{Name: "foo", Value: StrLiteral{Value: "qux"}},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestIfStatements(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Simple if statement",
+			input: strings.Join([]string{
+				`let is_on = true`,
+				`if is_on {
+				  "on"
+				}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "is_on",
+							Value:   &checker.BoolLiteral{true},
+						},
+					},
+					{
+						Expr: &checker.If{
+							Condition: &checker.Variable{},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{"on"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "The condition expression must be a boolean",
+			input: strings.Join([]string{
+				`if 20 {
+				  let foo = "bar"
+				}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "If conditions must be boolean expressions"},
+			},
+		},
+		{
+			name: "Else clause",
+			input: strings.Join([]string{
+				`if true {
+				  "bar"
+				} else {
+				  "baz"
+				}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.If{
+							Condition: &checker.BoolLiteral{true},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{"bar"}},
+								},
+							},
+							Else: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{"baz"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Else If clause",
+			input: strings.Join([]string{
+				`if true {
+				  "bar"
+				} else if false {
+				  "baz"
+				} else {
+				  "qux"
+				}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.If{
+							Condition: &checker.BoolLiteral{true},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{"bar"}},
+								},
+							},
+							ElseIf: &checker.If{
+								Condition: &checker.BoolLiteral{false},
+								Body: &checker.Block{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{"baz"}},
+									},
+								},
+							},
+							Else: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{"qux"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Branches must have consistent return type",
+			input: strings.Join([]string{
+				"if true {",
+				"  1",
+				"} else {",
+				"  false",
+				"}",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "All branches must have the same result type"},
+			},
+		},
+	})
+}
 
 // func TestForLoops(t *testing.T) {
 // 	run(t, []test{

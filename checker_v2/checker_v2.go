@@ -351,6 +351,48 @@ func (n *Equality) Type() Type {
 	return Bool
 }
 
+type And struct {
+	Left, Right Expression
+}
+
+func (a *And) Type() Type {
+	return Bool
+}
+
+type Or struct {
+	Left, Right Expression
+}
+
+func (o *Or) Type() Type {
+	return Bool
+}
+
+type Block struct {
+	Stmts []Statement
+}
+
+func (b *Block) Type() Type {
+	if len(b.Stmts) == 0 {
+		return Void
+	}
+	last := b.Stmts[len(b.Stmts)-1]
+	if last.Expr != nil {
+		return last.Expr.Type()
+	}
+	return Void
+}
+
+type If struct {
+	Condition Expression
+	Body      *Block
+	ElseIf    *If
+	Else      *Block
+}
+
+func (i *If) Type() Type {
+	return i.Body.Type()
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -442,6 +484,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.VariableDeclaration:
 		{
 			val := c.checkExpr(s.Value)
+			if val == nil {
+				return nil
+			}
+
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
 					if expected != val.Type() {
@@ -450,6 +496,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					}
 				}
 			}
+
 			v := &VariableDef{
 				Mutable: s.Mutable,
 				Name:    s.Name,
@@ -500,6 +547,24 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 		return &Statement{Expr: expr}
 	}
+}
+
+func (c *checker) checkBlock(stmts []ast.Statement) *Block {
+	if len(stmts) == 0 {
+		return &Block{Stmts: []Statement{}}
+	}
+
+	scope := newScope(c.scope)
+	c.scope = scope
+	defer func() {
+		c.scope = c.scope.parent
+	}()
+
+	block := &Block{Stmts: make([]Statement, len(stmts))}
+	for i := range stmts {
+		block.Stmts[i] = *c.checkStmt(&stmts[i])
+	}
+	return block
 }
 
 func (c *checker) checkExpr(expr ast.Expression) Expression {
@@ -779,8 +844,98 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 					return &Equality{left, right}
 				}
+			case ast.And:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != Bool || right.Type() != Bool {
+						c.addError("The 'and' operator can only be used between Bools", s.GetLocation())
+						return nil
+					}
+
+					return &And{left, right}
+				}
+			case ast.Or:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != Bool || right.Type() != Bool {
+						c.addError("The 'or' operator can only be used with Boolean values", s.GetLocation())
+						return nil
+					}
+
+					return &Or{left, right}
+				}
 			default:
 				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))
+			}
+		}
+	case *ast.IfStatement:
+		{
+			cond := c.checkExpr(s.Condition)
+			if cond == nil {
+				return nil
+			}
+			if cond.Type() != Bool {
+				c.addError("If conditions must be boolean expressions", s.GetLocation())
+				return nil
+			}
+
+			body := c.checkBlock(s.Body)
+
+			var elseIf *If
+			var elseBody *Block
+
+			// does not recurse. reach into AST for each level since it's fixed
+			if s.Else != nil {
+				next := s.Else.(*ast.IfStatement)
+				if next.Condition != nil {
+					cond := c.checkExpr(next.Condition)
+					if cond == nil {
+						return nil
+					}
+					if cond.Type() != Bool {
+						c.addError("If conditions must be boolean expressions", next.GetLocation())
+						return nil
+					}
+
+					elseIfBody := c.checkBlock(next.Body)
+					if elseIfBody.Type() != body.Type() {
+						c.addError("All branches must have the same result type", next.GetLocation())
+						return nil
+					}
+
+					elseIf = &If{
+						Condition: cond,
+						Body:      elseIfBody,
+					}
+
+					if next, ok := next.Else.(*ast.IfStatement); ok {
+						elseBody = c.checkBlock(next.Body)
+					}
+				} else {
+					b := c.checkBlock(next.Body)
+					if b.Type() != body.Type() {
+						c.addError("All branches must have the same result type", next.GetLocation())
+						return nil
+					}
+					elseBody = b
+				}
+			}
+
+			return &If{
+				Condition: cond,
+				Body:      body,
+				ElseIf:    elseIf,
+				Else:      elseBody,
 			}
 		}
 	default:

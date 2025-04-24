@@ -54,3 +54,10 @@ func (b _bool) get(name string) Type {
 }
 
 var Bool = &_bool{}
+
+type void struct{}
+
+func (v void) String() string       { return "Void" }
+func (v void) get(name string) Type { return nil }
+
+var Void = &void{}
