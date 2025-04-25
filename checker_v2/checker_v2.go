@@ -410,6 +410,15 @@ type ForInStr struct {
 
 func (f ForInStr) NonProducing() {}
 
+type ForLoop struct {
+	Init      *VariableDef
+	Condition Expression
+	Update    *Reassignment
+	Body      *Block
+}
+
+func (f ForLoop) NonProducing() {}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -556,6 +565,66 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 			}
 			return nil
+		}
+	case *ast.ForLoop:
+		{
+			// Create a new scope for the loop body and initialization
+			scope := newScope(c.scope)
+			c.scope = scope
+			defer func() {
+				c.scope = c.scope.parent
+			}()
+			
+			// Check the initialization statement - handle it as a variable declaration
+			initDeclStmt := ast.Statement(s.Init)
+			initStmt := c.checkStmt(&initDeclStmt)
+			if initStmt == nil || initStmt.Stmt == nil {
+				c.addError("Invalid for loop initialization", s.Init.GetLocation())
+				return nil
+			}
+			initVarDef, ok := initStmt.Stmt.(*VariableDef)
+			if !ok {
+				c.addError("For loop initialization must be a variable declaration", s.Init.GetLocation())
+				return nil
+			}
+			
+			// Check the condition expression
+			condition := c.checkExpr(s.Condition)
+			if condition == nil {
+				return nil
+			}
+			
+			// Condition must be a boolean expression
+			if condition.Type() != Bool {
+				c.addError("For loop condition must be a boolean expression", s.Condition.GetLocation())
+				return nil
+			}
+			
+			// Check the update statement - handle it as a variable assignment
+			incrStmt := ast.Statement(s.Incrementer)
+			updateStmt := c.checkStmt(&incrStmt)
+			if updateStmt == nil || updateStmt.Stmt == nil {
+				c.addError("Invalid for loop update expression", s.Incrementer.GetLocation())
+				return nil
+			}
+			update, ok := updateStmt.Stmt.(*Reassignment)
+			if !ok {
+				c.addError("For loop update must be a reassignment", s.Incrementer.GetLocation())
+				return nil
+			}
+			
+			// Check the body of the loop
+			body := c.checkBlock(s.Body, nil)
+			
+			// Create and return the for loop
+			loop := &ForLoop{
+				Init:      initVarDef,
+				Condition: condition,
+				Update:    update,
+				Body:      body,
+			}
+			
+			return &Statement{Stmt: loop}
 		}
 	case *ast.RangeLoop:
 		{
