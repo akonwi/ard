@@ -393,6 +393,16 @@ func (i *If) Type() Type {
 	return i.Body.Type()
 }
 
+type ForIntRange struct {
+	Cursor string
+	Start  Expression
+	End    Expression
+	Body   *Block
+}
+
+func (f ForIntRange) NonProducing() {
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -540,6 +550,36 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 			return nil
 		}
+	case *ast.RangeLoop:
+		{
+			start, end := c.checkExpr(s.Start), c.checkExpr(s.End)
+			if start == nil || end == nil {
+				return nil
+			}
+			if start.Type() != end.Type() {
+				c.addError(fmt.Sprintf("Invalid range: %s != %s", start.Type(), end.Type()), s.Start.GetLocation())
+				return nil
+			}
+
+			if start.Type() == Int {
+				loop := &ForIntRange{
+					Cursor: s.Cursor.Name,
+					Start:  start,
+					End:    end,
+				}
+				body := c.checkBlock(s.Body, func() {
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  start.Type(),
+					})
+				})
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
+			panic(fmt.Errorf("Cannot create range of %s", start.Type()))
+		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
 		if expr == nil {
@@ -549,7 +589,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	}
 }
 
-func (c *checker) checkBlock(stmts []ast.Statement) *Block {
+func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 	if len(stmts) == 0 {
 		return &Block{Stmts: []Statement{}}
 	}
@@ -560,9 +600,15 @@ func (c *checker) checkBlock(stmts []ast.Statement) *Block {
 		c.scope = c.scope.parent
 	}()
 
+	if setup != nil {
+		setup()
+	}
+
 	block := &Block{Stmts: make([]Statement, len(stmts))}
 	for i := range stmts {
-		block.Stmts[i] = *c.checkStmt(&stmts[i])
+		if stmt := c.checkStmt(&stmts[i]); stmt != nil {
+			block.Stmts[i] = *stmt
+		}
 	}
 	return block
 }
@@ -889,7 +935,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			body := c.checkBlock(s.Body)
+			body := c.checkBlock(s.Body, nil)
 
 			var elseIf *If
 			var elseBody *Block
@@ -907,7 +953,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					elseIfBody := c.checkBlock(next.Body)
+					elseIfBody := c.checkBlock(next.Body, nil)
 					if elseIfBody.Type() != body.Type() {
 						c.addError("All branches must have the same result type", next.GetLocation())
 						return nil
@@ -919,10 +965,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 
 					if next, ok := next.Else.(*ast.IfStatement); ok {
-						elseBody = c.checkBlock(next.Body)
+						elseBody = c.checkBlock(next.Body, nil)
 					}
 				} else {
-					b := c.checkBlock(next.Body)
+					b := c.checkBlock(next.Body, nil)
 					if b.Type() != body.Type() {
 						c.addError("All branches must have the same result type", next.GetLocation())
 						return nil

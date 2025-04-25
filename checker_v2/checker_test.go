@@ -1056,185 +1056,196 @@ func TestIfStatements(t *testing.T) {
 	})
 }
 
-// func TestForLoops(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Iterating over a range",
-// 			input: strings.Join([]string{
-// 				`mut count = 0`,
-// 				`for i in 1..10 {`,
-// 				`  count = count + i`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "count", Value: IntLiteral{Value: 0}},
-// 					ForRange{
-// 						Cursor: Identifier{Name: "i"},
-// 						Start:  IntLiteral{Value: 1},
-// 						End:    IntLiteral{Value: 10},
-// 						Body: []Statement{
-// 							VariableAssignment{
-// 								Target: Identifier{Name: "count"},
-// 								Value: BinaryExpr{
-// 									Op:    Add,
-// 									Left:  Identifier{Name: "count"},
-// 									Right: Identifier{Name: "i"},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "The range must be between numbers",
-// 			input: strings.Join([]string{
-// 				`mut count = 0`,
-// 				`for i in 1..true {`,
-// 				`  count = count + i`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Invalid range: Int..Bool"},
-// 			},
-// 		},
-// 		{
-// 			name: "Iterating over a string",
-// 			input: strings.Join([]string{
-// 				`let string = "hello"`,
-// 				`for c in string {`,
-// 				`  c`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "string", Value: StrLiteral{Value: "hello"}},
-// 					ForIn{
-// 						Cursor:   Identifier{Name: "c"},
-// 						Iterable: Identifier{Name: "string"},
-// 						Body: []Statement{
-// 							Identifier{Name: "c"},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Iterating up to a number, is sugar for 0..n",
-// 			input: strings.Join([]string{
-// 				`for i in 20 {`,
-// 				`  i`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					ForRange{
-// 						Cursor: Identifier{Name: "i"},
-// 						Start:  IntLiteral{Value: 0},
-// 						End:    IntLiteral{Value: 20},
-// 						Body: []Statement{
-// 							Identifier{Name: "i"},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Iterating over a list",
-// 			input: strings.Join([]string{
-// 				`for i in [1,2,3] {}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					ForIn{
-// 						Cursor: Identifier{Name: "i"},
-// 						Iterable: ListLiteral{
-// 							Elements: []Expression{
-// 								IntLiteral{Value: 1},
-// 								IntLiteral{Value: 2},
-// 								IntLiteral{Value: 3},
-// 							},
-// 						},
-// 						Body: []Statement{},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Cannot iterate over a boolean",
-// 			input: `for b in false {}`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Cannot iterate over a Bool"},
-// 			},
-// 		},
-// 		{
-// 			name: "Iterating over a list of structs",
-// 			input: strings.Join([]string{
-// 				`struct Shape { height: Int, width: Int }`,
-// 				`for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					&Struct{
-// 						Name: "Shape",
-// 						Fields: map[string]Type{
-// 							"height": Int{},
-// 							"width":  Int{},
-// 						},
-// 					},
-// 					ForIn{
-// 						Cursor: Identifier{Name: "shape"},
-// 						Iterable: ListLiteral{
-// 							Elements: []Expression{
-// 								StructInstance{
-// 									Name: "Shape",
-// 									Fields: map[string]Expression{
-// 										"height": IntLiteral{Value: 1},
-// 										"width":  IntLiteral{Value: 2},
-// 									},
-// 								},
-// 								StructInstance{
-// 									Name: "Shape",
-// 									Fields: map[string]Expression{
-// 										"height": IntLiteral{Value: 2},
-// 										"width":  IntLiteral{Value: 2},
-// 									},
-// 								},
-// 							},
-// 						},
-// 						Body: []Statement{},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Traditional for loop",
-// 			input: `for mut i = 0; i < 10; i =+ 1 {}`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					ForLoop{
-// 						Init: VariableBinding{Name: "i", Value: IntLiteral{Value: 0}},
-// 						Condition: BinaryExpr{
-// 							Op:    LessThan,
-// 							Left:  Identifier{Name: "i"},
-// 							Right: IntLiteral{Value: 10},
-// 						},
-// 						Step: VariableAssignment{
-// 							Target: Identifier{Name: "i"},
-// 							Value: BinaryExpr{
-// 								Op:    Add,
-// 								Left:  Identifier{Name: "i"},
-// 								Right: IntLiteral{Value: 1},
-// 							},
-// 						},
-// 						Body: Block{Body: []Statement{}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestForLoops(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Iterating over a numeric range",
+			input: strings.Join([]string{
+				`mut count = 0`,
+				`for i in 1..10 {`,
+				`  count = count + i`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "count",
+							Value:   &checker.IntLiteral{0},
+						},
+					},
+					{
+						Stmt: &checker.ForIntRange{
+							Cursor: "i",
+							Start:  &checker.IntLiteral{1},
+							End:    &checker.IntLiteral{10},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Stmt: &checker.Reassignment{
+											Target: &checker.Variable{},
+											Value: &checker.IntAddition{
+												Left:  &checker.Variable{},
+												Right: &checker.Variable{},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		// {
+		// 	name: "The range must be between numbers",
+		// 	input: strings.Join([]string{
+		// 		`mut count = 0`,
+		// 		`for i in 1..true {`,
+		// 		`  count = count + i`,
+		// 		`}`,
+		// 	}, "\n"),
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Invalid range: Int..Bool"},
+		// 	},
+		// },
+		// {
+		// 	name: "Iterating over a string",
+		// 	input: strings.Join([]string{
+		// 		`let string = "hello"`,
+		// 		`for c in string {`,
+		// 		`  c`,
+		// 		`}`,
+		// 	}, "\n"),
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			VariableBinding{Name: "string", Value: StrLiteral{Value: "hello"}},
+		// 			ForIn{
+		// 				Cursor:   Identifier{Name: "c"},
+		// 				Iterable: Identifier{Name: "string"},
+		// 				Body: []Statement{
+		// 					Identifier{Name: "c"},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "Iterating up to a number, is sugar for 0..n",
+		// 	input: strings.Join([]string{
+		// 		`for i in 20 {`,
+		// 		`  i`,
+		// 		`}`,
+		// 	}, "\n"),
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			ForRange{
+		// 				Cursor: Identifier{Name: "i"},
+		// 				Start:  IntLiteral{Value: 0},
+		// 				End:    IntLiteral{Value: 20},
+		// 				Body: []Statement{
+		// 					Identifier{Name: "i"},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "Iterating over a list",
+		// 	input: strings.Join([]string{
+		// 		`for i in [1,2,3] {}`,
+		// 	}, "\n"),
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			ForIn{
+		// 				Cursor: Identifier{Name: "i"},
+		// 				Iterable: ListLiteral{
+		// 					Elements: []Expression{
+		// 						IntLiteral{Value: 1},
+		// 						IntLiteral{Value: 2},
+		// 						IntLiteral{Value: 3},
+		// 					},
+		// 				},
+		// 				Body: []Statement{},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:  "Cannot iterate over a boolean",
+		// 	input: `for b in false {}`,
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Cannot iterate over a Bool"},
+		// 	},
+		// },
+		// {
+		// 	name: "Iterating over a list of structs",
+		// 	input: strings.Join([]string{
+		// 		`struct Shape { height: Int, width: Int }`,
+		// 		`for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
+		// 	}, "\n"),
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			&Struct{
+		// 				Name: "Shape",
+		// 				Fields: map[string]Type{
+		// 					"height": Int{},
+		// 					"width":  Int{},
+		// 				},
+		// 			},
+		// 			ForIn{
+		// 				Cursor: Identifier{Name: "shape"},
+		// 				Iterable: ListLiteral{
+		// 					Elements: []Expression{
+		// 						StructInstance{
+		// 							Name: "Shape",
+		// 							Fields: map[string]Expression{
+		// 								"height": IntLiteral{Value: 1},
+		// 								"width":  IntLiteral{Value: 2},
+		// 							},
+		// 						},
+		// 						StructInstance{
+		// 							Name: "Shape",
+		// 							Fields: map[string]Expression{
+		// 								"height": IntLiteral{Value: 2},
+		// 								"width":  IntLiteral{Value: 2},
+		// 							},
+		// 						},
+		// 					},
+		// 				},
+		// 				Body: []Statement{},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:  "Traditional for loop",
+		// 	input: `for mut i = 0; i < 10; i =+ 1 {}`,
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			ForLoop{
+		// 				Init: VariableBinding{Name: "i", Value: IntLiteral{Value: 0}},
+		// 				Condition: BinaryExpr{
+		// 					Op:    LessThan,
+		// 					Left:  Identifier{Name: "i"},
+		// 					Right: IntLiteral{Value: 10},
+		// 				},
+		// 				Step: VariableAssignment{
+		// 					Target: Identifier{Name: "i"},
+		// 					Value: BinaryExpr{
+		// 						Op:    Add,
+		// 						Left:  Identifier{Name: "i"},
+		// 						Right: IntLiteral{Value: 1},
+		// 					},
+		// 				},
+		// 				Body: Block{Body: []Statement{}},
+		// 			},
+		// 		},
+		// 	},
+		// },
+	})
+}
 
 // func TestWhileLoops(t *testing.T) {
 // 	run(t, []test{
