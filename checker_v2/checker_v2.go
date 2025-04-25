@@ -419,6 +419,13 @@ type ForLoop struct {
 
 func (f ForLoop) NonProducing() {}
 
+type WhileLoop struct {
+	Condition Expression
+	Body      *Block
+}
+
+func (w WhileLoop) NonProducing() {}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -565,6 +572,31 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 			}
 			return nil
+		}
+	case *ast.WhileLoop:
+		{
+			// Check the condition expression
+			condition := c.checkExpr(s.Condition)
+			if condition == nil {
+				return nil
+			}
+			
+			// Condition must be a boolean expression
+			if condition.Type() != Bool {
+				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
+				return nil
+			}
+			
+			// Check the body of the loop
+			body := c.checkBlock(s.Body, nil)
+			
+			// Create and return the while loop
+			loop := &WhileLoop{
+				Condition: condition,
+				Body:      body,
+			}
+			
+			return &Statement{Stmt: loop}
 		}
 	case *ast.ForLoop:
 		{

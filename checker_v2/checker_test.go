@@ -1222,41 +1222,117 @@ func TestTraditionalForLoop(t *testing.T) {
 	})
 }
 
-// func TestWhileLoops(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Simple condition",
-// 			input: strings.Join([]string{
-// 				`mut count = 10`,
-// 				`while count > 0 {`,
-// 				`  count = count - 1`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{Name: "count", Value: IntLiteral{Value: 10}},
-// 					WhileLoop{
-// 						Condition: BinaryExpr{
-// 							Op:    GreaterThan,
-// 							Left:  Identifier{Name: "count"},
-// 							Right: IntLiteral{Value: 0},
-// 						},
-// 						Body: []Statement{
-// 							VariableAssignment{
-// 								Target: Identifier{Name: "count"},
-// 								Value: BinaryExpr{
-// 									Op:    Sub,
-// 									Left:  Identifier{Name: "count"},
-// 									Right: IntLiteral{Value: 1},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestWhileLoops(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Simple condition",
+			input: strings.Join([]string{
+				`mut count = 10`,
+				`while count > 0 {`,
+				`  count = count - 1`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "count",
+							Value:   &checker.IntLiteral{10},
+						},
+					},
+					{
+						Stmt: &checker.WhileLoop{
+							Condition: &checker.IntGreater{
+								Left:  &checker.Variable{},
+								Right: &checker.IntLiteral{0},
+							},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Stmt: &checker.Reassignment{
+											Target: &checker.Variable{},
+											Value: &checker.IntSubtraction{
+												Left:  &checker.Variable{},
+												Right: &checker.IntLiteral{1},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "While loop condition must be boolean",
+			input: strings.Join([]string{
+				`while 42 {`,
+				`  42`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "While loop condition must be a boolean expression"},
+			},
+		},
+		{
+			name: "Complex condition",
+			input: strings.Join([]string{
+				`mut i = 0`,
+				`mut j = 10`,
+				`while i < 5 and j > 0 {`,
+				`  i = i + 1`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "i",
+							Value:   &checker.IntLiteral{0},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "j",
+							Value:   &checker.IntLiteral{10},
+						},
+					},
+					{
+						Stmt: &checker.WhileLoop{
+							Condition: &checker.And{
+								Left: &checker.IntLess{
+									Left:  &checker.Variable{},
+									Right: &checker.IntLiteral{5},
+								},
+								Right: &checker.IntGreater{
+									Left:  &checker.Variable{},
+									Right: &checker.IntLiteral{0},
+								},
+							},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Stmt: &checker.Reassignment{
+											Target: &checker.Variable{},
+											Value: &checker.IntAddition{
+												Left:  &checker.Variable{},
+												Right: &checker.IntLiteral{1},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
 
 // func TestFunctions(t *testing.T) {
 // 	run(t, []test{
