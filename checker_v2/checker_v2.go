@@ -400,8 +400,15 @@ type ForIntRange struct {
 	Body   *Block
 }
 
-func (f ForIntRange) NonProducing() {
+func (f ForIntRange) NonProducing() {}
+
+type ForInStr struct {
+	Cursor string
+	Value  Expression
+	Body   *Block
 }
+
+func (f ForInStr) NonProducing() {}
 
 type checker struct {
 	diagnostics []Diagnostic
@@ -557,7 +564,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 			if start.Type() != end.Type() {
-				c.addError(fmt.Sprintf("Invalid range: %s != %s", start.Type(), end.Type()), s.Start.GetLocation())
+				c.addError(fmt.Sprintf("Invalid range: %s..%s", start.Type(), end.Type()), s.Start.GetLocation())
 				return nil
 			}
 
@@ -579,6 +586,63 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			panic(fmt.Errorf("Cannot create range of %s", start.Type()))
+		}
+	case *ast.ForInLoop:
+		{
+			iterValue := c.checkExpr(s.Iterable)
+			if iterValue == nil {
+				return nil
+			}
+			
+			// Handle strings specifically
+			if iterValue.Type() == Str {
+				loop := &ForInStr{
+					Cursor: s.Cursor.Name,
+					Value:  iterValue,
+				}
+				
+				// Create a new scope for the loop body where the cursor is defined
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursor variable to the scope as a string
+					// Each character in a string is also a string
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  Str,
+					})
+				})
+				
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+			
+			// Handle integer iteration (for i in n - sugar for 0..n)
+			if iterValue.Type() == Int {
+				// This is syntax sugar for a range from 0 to n
+				loop := &ForIntRange{
+					Cursor: s.Cursor.Name,
+					Start:  &IntLiteral{0},      // Start from 0
+					End:    iterValue,           // End at the specified number
+				}
+				
+				// Create a new scope for the loop body where the cursor is defined
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursor variable to the scope
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  Int,
+					})
+				})
+				
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+			
+			// Here we would handle other iterable types (like lists, etc.)
+			// Currently we only support string and integer iteration
+			c.addError(fmt.Sprintf("Cannot iterate over a value of type %s", iterValue.Type()), s.Iterable.GetLocation())
+			return nil
 		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))

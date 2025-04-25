@@ -1098,60 +1098,69 @@ func TestForLoops(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	name: "The range must be between numbers",
-		// 	input: strings.Join([]string{
-		// 		`mut count = 0`,
-		// 		`for i in 1..true {`,
-		// 		`  count = count + i`,
-		// 		`}`,
-		// 	}, "\n"),
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Invalid range: Int..Bool"},
-		// 	},
-		// },
-		// {
-		// 	name: "Iterating over a string",
-		// 	input: strings.Join([]string{
-		// 		`let string = "hello"`,
-		// 		`for c in string {`,
-		// 		`  c`,
-		// 		`}`,
-		// 	}, "\n"),
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			VariableBinding{Name: "string", Value: StrLiteral{Value: "hello"}},
-		// 			ForIn{
-		// 				Cursor:   Identifier{Name: "c"},
-		// 				Iterable: Identifier{Name: "string"},
-		// 				Body: []Statement{
-		// 					Identifier{Name: "c"},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name: "Iterating up to a number, is sugar for 0..n",
-		// 	input: strings.Join([]string{
-		// 		`for i in 20 {`,
-		// 		`  i`,
-		// 		`}`,
-		// 	}, "\n"),
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			ForRange{
-		// 				Cursor: Identifier{Name: "i"},
-		// 				Start:  IntLiteral{Value: 0},
-		// 				End:    IntLiteral{Value: 20},
-		// 				Body: []Statement{
-		// 					Identifier{Name: "i"},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// },
-		// {
+		{
+			name: "The range must be between numbers",
+			input: strings.Join([]string{
+				`for i in 1..true {}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid range: Int..Bool"},
+			},
+		},
+		{
+			name: "Iterating over a string",
+			input: strings.Join([]string{
+				`let string = "hello"`,
+				`for c in string {`,
+				`  c`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "string",
+							Value: &checker.StrLiteral{
+								Value: "hello",
+							},
+						},
+					},
+					{Stmt: &checker.ForInStr{
+						Cursor: "c",
+						Value:  &checker.Variable{},
+						Body: &checker.Block{
+							Stmts: []checker.Statement{
+								{Expr: &checker.Variable{}},
+							},
+						},
+					}},
+				},
+			},
+		},
+			{
+				name: "Iterating up to a number, is sugar for 0..n",
+				input: strings.Join([]string{
+					`for i in 20 {`,
+					`  i`,
+					`}`,
+				}, "\n"),
+				output: &checker.Program{
+					Statements: []checker.Statement{
+						{
+							Stmt: &checker.ForIntRange{
+								Cursor: "i",
+								Start:  &checker.IntLiteral{0},
+								End:    &checker.IntLiteral{20},
+								Body: &checker.Block{
+									Stmts: []checker.Statement{
+										{Expr: &checker.Variable{}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},		// {
 		// 	name: "Iterating over a list",
 		// 	input: strings.Join([]string{
 		// 		`for i in [1,2,3] {}`,
