@@ -25,6 +25,7 @@ var compareOptions = cmp.Options{
 		checker.Statement{},
 		checker.Variable{},
 		checker.VariableDef{},
+		checker.FunctionCall{},
 	),
 }
 
@@ -1334,199 +1335,139 @@ func TestWhileLoops(t *testing.T) {
 	})
 }
 
-// func TestFunctions(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name:  "Empty function",
-// 			input: `fn noop() {}` + "\n" + `noop()`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					FunctionDeclaration{
-// 						Name:       "noop",
-// 						Parameters: []Parameter{},
-// 						Body:       []Statement{},
-// 						Return:     Void{},
-// 					},
-// 					FunctionCall{
-// 						Name: "noop",
-// 						Args: []Expression{},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Return type is not inferred",
-// 			input: strings.Join([]string{
-// 				`fn get_msg() { "Hello, world!" }`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					FunctionDeclaration{
-// 						Name:       "get_msg",
-// 						Parameters: []Parameter{},
-// 						Body: []Statement{
-// 							StrLiteral{Value: "Hello, world!"},
-// 						},
-// 						Return: Void{},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Can't use return value of non-returning function",
-// 			input: strings.Join([]string{
-// 				`fn get_msg() { "Hello, world!" }`,
-// 				`let msg = get_msg()`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: fmt.Sprintf("Cannot assign a void value")},
-// 			},
-// 		},
-// 		{
-// 			name: "Explicit return type",
-// 			input: strings.Join([]string{
-// 				`fn get_msg() Str { "Hello, world!" }`,
-// 				`let msg = get_msg()`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					FunctionDeclaration{
-// 						Name:       "get_msg",
-// 						Parameters: []Parameter{},
-// 						Body: []Statement{
-// 							StrLiteral{Value: "Hello, world!"},
-// 						},
-// 						Return: Str{},
-// 					},
-// 					VariableBinding{
-// 						Name: "msg",
-// 						Value: FunctionCall{
-// 							Name: "get_msg",
-// 							Args: []Expression{},
-// 						}},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Implementation should match declared return type",
-// 			input: strings.Join([]string{
-// 				`fn get_msg() Str { 200 }`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
-// 			},
-// 		},
-// 		{
-// 			name: "Function with parameters",
-// 			input: strings.Join([]string{
-// 				`fn greet(person: Str) Str { "hello {{person}}" }`,
-// 				`greet("joe")`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					FunctionDeclaration{
-// 						Name: "greet",
-// 						Parameters: []Parameter{
-// 							{Name: "person", Type: Str{}},
-// 						},
-// 						Return: Str{},
-// 						Body: []Statement{
-// 							InterpolatedStr{
-// 								Parts: []Expression{
-// 									StrLiteral{Value: "hello "},
-// 									Identifier{Name: "person"},
-// 								},
-// 							},
-// 						},
-// 					},
-// 					FunctionCall{
-// 						Name: "greet",
-// 						Args: []Expression{StrLiteral{Value: "joe"}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Mutable parameters",
-// 			input: `fn change(mut person: Str) { }`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					FunctionDeclaration{
-// 						Name: "change",
-// 						Parameters: []Parameter{
-// 							{Name: "person", Type: Str{}, Mutable: true},
-// 						},
-// 						Return: Void{},
-// 						Body:   []Statement{},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Even mutable parameters cannot be reassigned",
-// 			input: `
-// 				fn change(person: Str) {
-// 					person = "joe"
-// 				}`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Cannot assign to parameter: person"},
-// 			},
-// 		},
-// 		{
-// 			name: "Function calls must have correct arguments",
-// 			input: `
-// 				fn greet(person: Str) { "hello {{person}}" }
-// 				greet(101)
-// 				fn add(a: Int, b: Int) { a + b }
-// 				add(2)
-// 				add(1, "two")
-// 				fn change(mut person: Str) { }
-// 				mut john = "john"
-// 				let james = "james"
-// 				change("joe")
-// 				change(john)
-// 				change(james)`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
-// 				{Kind: Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
-// 				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
-// 				{Kind: Error, Message: "Type mismatch: Expected mutable Str, got Str"},
-// 			},
-// 		},
-// 		{
-// 			name: "Anonymous functions",
-// 			input: strings.Join([]string{
-// 				`let add = fn(a: Int, b: Int) Int { a + b }`,
-// 				`let eight: Int = add(3, 5)`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name: "add",
-// 						Value: FunctionLiteral{
-// 							Parameters: []Parameter{
-// 								{Name: "a", Type: Int{}},
-// 								{Name: "b", Type: Int{}},
-// 							},
-// 							Return: Int{},
-// 							Body: []Statement{
-// 								BinaryExpr{
-// 									Op:    Add,
-// 									Left:  Identifier{Name: "a"},
-// 									Right: Identifier{Name: "b"},
-// 								},
-// 							},
-// 						},
-// 					},
-// 					VariableBinding{
-// 						Name:  "eight",
-// 						Value: FunctionCall{Name: "add", Args: []Expression{IntLiteral{Value: 3}, IntLiteral{Value: 5}}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestFunctions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Calling empty function",
+			input: strings.Join(
+				[]string{
+					`fn noop() {}`,
+					`noop()`,
+				},
+				"\n",
+			),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FunctionDef{
+							Name:       "noop",
+							Parameters: []checker.Parameter{},
+							ReturnType: checker.Void,
+							Body: &checker.Block{
+								Stmts: []checker.Statement{},
+							},
+						},
+					},
+					{
+						Expr: &checker.FunctionCall{
+							Name: "noop",
+							Args: []checker.Expression{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Calling function with parameters",
+			input: strings.Join(
+				[]string{
+					`fn add(a: Int, b: Int) {}`,
+					`add(1, 2)`,
+				},
+				"\n",
+			),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FunctionDef{
+							Name: "add",
+							Parameters: []checker.Parameter{
+								{Name: "a", Type: checker.Int, Mutable: false},
+								{Name: "b", Type: checker.Int, Mutable: false},
+							},
+							ReturnType: checker.Void,
+							Body: &checker.Block{
+								Stmts: []checker.Statement{},
+							},
+						},
+					},
+					{
+						Expr: &checker.FunctionCall{
+							Name: "add",
+							Args: []checker.Expression{
+								&checker.IntLiteral{Value: 1},
+								&checker.IntLiteral{Value: 2},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Mutable parameters",
+			input: strings.Join(
+				[]string{
+					`fn update(mut value: Int) {}`,
+				},
+				"\n",
+			),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FunctionDef{
+							Name: "update",
+							Parameters: []checker.Parameter{
+								{Name: "value", Type: checker.Int, Mutable: true},
+							},
+							ReturnType: checker.Void,
+							Body: &checker.Block{
+								Stmts: []checker.Statement{},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Functions should return the declared return type",
+			input: strings.Join(
+				[]string{
+					`fn add(a: Int, b: Int) Int { false }`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Bool"},
+			},
+		},
+		{
+			name: "Type mismatch in function arguments",
+			input: strings.Join(
+				[]string{
+					`fn greet(name: Str) {}`,
+					`greet(42)`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+			},
+		},
+		{
+			name: "Incorrect number of arguments",
+			input: strings.Join(
+				[]string{
+					`fn add(a: Int, b: Int) {}`,
+					`add(1)`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
+			},
+		},
+	})
+}
 
 // func TestCallingPackageMethods(t *testing.T) {
 // 	run(t, []test{

@@ -426,6 +426,50 @@ type WhileLoop struct {
 
 func (w WhileLoop) NonProducing() {}
 
+type Parameter struct {
+	Name    string
+	Type    Type
+	Mutable bool
+}
+
+type FunctionDef struct {
+	Name       string
+	Parameters []Parameter
+	ReturnType Type
+	Body       *Block
+}
+
+func (f FunctionDef) String() string {
+	paramStrs := make([]string, len(f.Parameters))
+	for i := range f.Parameters {
+		paramStrs[i] = f.Parameters[i].Type.String()
+	}
+
+	return fmt.Sprintf("fn (%s) %s", strings.Join(paramStrs, ","), f.ReturnType.String())
+}
+
+func (f FunctionDef) get(name string) Type { return nil }
+
+func (f FunctionDef) name() string {
+	return f.Name
+}
+func (f FunctionDef) _type() Type {
+	return f
+}
+func (f FunctionDef) Type() Type {
+	return f
+}
+
+type FunctionCall struct {
+	Name string
+	Args []Expression
+	fn   *FunctionDef
+}
+
+func (f *FunctionCall) Type() Type {
+	return f.fn
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -569,9 +613,63 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Stmt: &Reassignment{Target: &Variable{target}, Value: value},
 					}
 				}
-
 			}
 			return nil
+		}
+	case *ast.FunctionDeclaration:
+		{
+			// Process parameters
+			params := make([]Parameter, len(s.Parameters))
+			for i, param := range s.Parameters {
+				var paramType Type = Void
+				if param.Type != nil {
+					paramType = c.resolveType(param.Type)
+				}
+
+				params[i] = Parameter{
+					Name:    param.Name,
+					Type:    paramType,
+					Mutable: param.Mutable,
+				}
+			}
+
+			// Determine return type
+			var returnType Type = Void
+			if s.ReturnType != nil {
+				returnType = c.resolveType(s.ReturnType)
+			}
+
+			// Check function body with a setup function that adds parameters to scope
+			body := c.checkBlock(s.Body, func() {
+				for _, param := range params {
+					c.scope.add(&VariableDef{
+						Mutable: param.Mutable,
+						Name:    param.Name,
+						__type:  param.Type,
+					})
+				}
+			})
+
+			// Check that the function's return type matches its body's type
+			if returnType != Void && body.Type() != returnType {
+				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				return nil
+			}
+
+			// Create function definition
+			fn := &FunctionDef{
+				Name:       s.Name,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       body,
+			}
+
+			// Add function to scope
+			c.scope.add(fn)
+
+			return &Statement{
+				Expr: fn,
+			}
 		}
 	case *ast.WhileLoop:
 		{
@@ -580,22 +678,22 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			if condition == nil {
 				return nil
 			}
-			
+
 			// Condition must be a boolean expression
 			if condition.Type() != Bool {
 				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
 				return nil
 			}
-			
+
 			// Check the body of the loop
 			body := c.checkBlock(s.Body, nil)
-			
+
 			// Create and return the while loop
 			loop := &WhileLoop{
 				Condition: condition,
 				Body:      body,
 			}
-			
+
 			return &Statement{Stmt: loop}
 		}
 	case *ast.ForLoop:
@@ -606,7 +704,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			defer func() {
 				c.scope = c.scope.parent
 			}()
-			
+
 			// Check the initialization statement - handle it as a variable declaration
 			initDeclStmt := ast.Statement(s.Init)
 			initStmt := c.checkStmt(&initDeclStmt)
@@ -619,19 +717,19 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				c.addError("For loop initialization must be a variable declaration", s.Init.GetLocation())
 				return nil
 			}
-			
+
 			// Check the condition expression
 			condition := c.checkExpr(s.Condition)
 			if condition == nil {
 				return nil
 			}
-			
+
 			// Condition must be a boolean expression
 			if condition.Type() != Bool {
 				c.addError("For loop condition must be a boolean expression", s.Condition.GetLocation())
 				return nil
 			}
-			
+
 			// Check the update statement - handle it as a variable assignment
 			incrStmt := ast.Statement(s.Incrementer)
 			updateStmt := c.checkStmt(&incrStmt)
@@ -644,10 +742,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				c.addError("For loop update must be a reassignment", s.Incrementer.GetLocation())
 				return nil
 			}
-			
+
 			// Check the body of the loop
 			body := c.checkBlock(s.Body, nil)
-			
+
 			// Create and return the for loop
 			loop := &ForLoop{
 				Init:      initVarDef,
@@ -655,7 +753,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Update:    update,
 				Body:      body,
 			}
-			
+
 			return &Statement{Stmt: loop}
 		}
 	case *ast.RangeLoop:
@@ -694,14 +792,14 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			if iterValue == nil {
 				return nil
 			}
-			
+
 			// Handle strings specifically
 			if iterValue.Type() == Str {
 				loop := &ForInStr{
 					Cursor: s.Cursor.Name,
 					Value:  iterValue,
 				}
-				
+
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope as a string
@@ -712,20 +810,20 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						__type:  Str,
 					})
 				})
-				
+
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
-			
+
 			// Handle integer iteration (for i in n - sugar for 0..n)
 			if iterValue.Type() == Int {
 				// This is syntax sugar for a range from 0 to n
 				loop := &ForIntRange{
 					Cursor: s.Cursor.Name,
-					Start:  &IntLiteral{0},      // Start from 0
-					End:    iterValue,           // End at the specified number
+					Start:  &IntLiteral{0}, // Start from 0
+					End:    iterValue,      // End at the specified number
 				}
-				
+
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
@@ -735,11 +833,11 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						__type:  Int,
 					})
 				})
-				
+
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
-			
+
 			// Here we would handle other iterable types (like lists, etc.)
 			// Currently we only support string and integer iteration
 			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
@@ -805,6 +903,60 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return &Variable{sym}
 		}
 		panic(fmt.Errorf("Undefined variable: %s", s.Name))
+	case *ast.FunctionCall:
+		{
+			// Find the function in the scope
+			fnSym := c.scope.getVar(s.Name)
+			if fnSym == nil {
+				c.addError(fmt.Sprintf("Undefined function: %s", s.Name), s.GetLocation())
+				return nil
+			}
+
+			// Cast to FunctionDef
+			fnDef, ok := fnSym.(*FunctionDef)
+			if !ok {
+				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+				return nil
+			}
+
+			// Check argument count
+			if len(s.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Args)), s.GetLocation())
+				return nil
+			}
+
+			// Check and process arguments
+			args := make([]Expression, len(s.Args))
+			for i, arg := range s.Args {
+				checkedArg := c.checkExpr(arg)
+				if checkedArg == nil {
+					return nil
+				}
+
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if checkedArg.Type() != paramType {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					return nil
+				}
+
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable {
+					// For now, we don't do additional checks for mutable parameters
+					// This might involve checking that the argument is a mutable variable
+				}
+
+				args[i] = checkedArg
+			}
+
+			// Create and return the function call node
+			return &FunctionCall{
+				Name: s.Name,
+				Args: args,
+				fn:   fnDef,
+			}
+		}
 	case *ast.InstanceProperty:
 		{
 			subj := c.checkExpr(s.Target)
