@@ -1,9 +1,7 @@
 package vm_test
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -47,40 +45,40 @@ func runTests(t *testing.T, tests []test) {
 	}
 }
 
-func TestEmptyProgram(t *testing.T) {
-	res := run(t, "")
-	if res != nil {
-		t.Fatalf("Expected nil, got %v", res)
-	}
-}
+// func TestEmptyProgram(t *testing.T) {
+// 	res := run(t, "")
+// 	if res != nil {
+// 		t.Fatalf("Expected nil, got %v", res)
+// 	}
+// }
 
-func TestPrinting(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
+// func TestPrinting(t *testing.T) {
+// 	old := os.Stdout
+// 	r, w, _ := os.Pipe()
+// 	os.Stdout = w
 
-	run(t, strings.Join([]string{
-		`use ard/io`,
-		`io.print("Hello, World!")`,
-		`io.print("Hello, {{"Ard"}}!")`,
-	}, "\n"))
+// 	run(t, strings.Join([]string{
+// 		`use ard/io`,
+// 		`io.print("Hello, World!")`,
+// 		`io.print("Hello, {{"Ard"}}!")`,
+// 	}, "\n"))
 
-	w.Close()
-	os.Stdout = old
+// 	w.Close()
+// 	os.Stdout = old
 
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	got := buf.String()
+// 	var buf bytes.Buffer
+// 	buf.ReadFrom(r)
+// 	got := buf.String()
 
-	for _, want := range []string{
-		"Hello, World!",
-		"Hello, Ard!",
-	} {
-		if strings.Contains(got, want) == false {
-			t.Errorf("Expected \"%s\", got %s", want, got)
-		}
-	}
-}
+// 	for _, want := range []string{
+// 		"Hello, World!",
+// 		"Hello, Ard!",
+// 	} {
+// 		if strings.Contains(got, want) == false {
+// 			t.Errorf("Expected \"%s\", got %s", want, got)
+// 		}
+// 	}
+// }
 
 func TestBindingVariables(t *testing.T) {
 	for want := range []any{

@@ -27,5 +27,5 @@ func (vm *VM) invokeIO(expr checker.Expression) *object {
 	default:
 		panic(fmt.Sprintf("Unimplemented io property: %s", e))
 	}
-	return &object{nil, checker.Void{}}
+	return void
 }

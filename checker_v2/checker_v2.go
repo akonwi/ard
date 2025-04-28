@@ -1329,7 +1329,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Create package function call
 			return &PackageFunctionCall{
-				Package: packageName,
+				Package: pkg.Path,
 				Call:    call,
 			}
 		}

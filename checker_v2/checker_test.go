@@ -1485,7 +1485,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.PackageFunctionCall{
-							Package: "io",
+							Package: "ard/io",
 							Call: &checker.FunctionCall{
 								Name: "print",
 								Args: []checker.Expression{

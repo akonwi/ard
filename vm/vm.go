@@ -171,14 +171,16 @@ func (vm *VM) evalFunctionDefinition(fn checker.FunctionDeclaration) {
 
 type object struct {
 	raw   any
-	_type checker.Type
+	_type any
 }
 
 func areEqual(a, b *object) bool {
 	if a.raw == b.raw {
-		if a._type.String() == b._type.String() {
+		if a._type == b._type {
 			return true
 		}
+
+		return a._type.(checker.Type).String() == b._type.(checker.Type).String()
 	}
 	return false
 }
@@ -626,7 +628,7 @@ func (vm VM) matchOption(match checker.OptionMatch) *object {
 func (vm VM) matchUnion(match checker.UnionMatch) *object {
 	subj := vm.evalExpression(match.Subject)
 	for expected_type, arm := range match.Cases {
-		if checker.AreCoherent(subj._type, expected_type) {
+		if checker.AreCoherent(subj._type.(checker.Type), expected_type) {
 			res, _ := vm.evalBlock(
 				arm.Body,
 				map[string]*object{
