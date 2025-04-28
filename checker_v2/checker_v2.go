@@ -139,6 +139,13 @@ type Variable struct {
 	sym symbol
 }
 
+func (v *Variable) isMutable() bool {
+	if def, ok := v.sym.(*VariableDef); ok {
+		return def.Mutable
+	}
+	return false
+}
+
 func (v Variable) String() string {
 	return v.Name()
 }
@@ -479,6 +486,16 @@ func (p *PackageFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+func isMutable(expr Expression) bool {
+	if v, ok := expr.(*Variable); ok {
+		return v.isMutable()
+	}
+	if prop, ok := expr.(*InstanceProperty); ok {
+		return isMutable(prop.Subject)
+	}
+	return false
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -542,7 +559,7 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 func findInStdLib(path, name string) (StdPackage, bool) {
 	switch path {
 	case "ard/io", "ard/json", "ard/maybe", "ard/fs":
-		return StdPackage{path, name}, true
+		return StdPackage{Path: path, Name: name}, true
 	}
 	return StdPackage{}, false
 }
@@ -1256,29 +1273,58 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Process package function calls like io::print()
 			packageName := s.Target.(*ast.Identifier).Name
 
-			if _, ok := c.program.StdImports[packageName]; !ok {
+			pkg, ok := c.program.StdImports[packageName]
+			if !ok {
 				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
 				return nil
 			}
 
-			// Process the function call
-			methodName := s.Function.Name
-			args := make([]Expression, len(s.Function.Args))
+			sym := getInPackage(pkg.Path, s.Function.Name)
+			if sym == nil {
+				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				return nil
+			}
 
-			// Check each argument
+			fnDef, ok := sym.(*FunctionDef)
+			if !ok {
+				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			// Check argument count
+			if len(s.Function.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+				return nil
+			}
+
+			// Check and process arguments
+			args := make([]Expression, len(s.Function.Args))
 			for i, arg := range s.Function.Args {
 				checkedArg := c.checkExpr(arg)
 				if checkedArg == nil {
 					return nil
 				}
+
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if checkedArg.Type() != paramType {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					return nil
+				}
+
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+				}
+
 				args[i] = checkedArg
 			}
-
 			// Create function call
 			call := &FunctionCall{
-				Name: methodName,
+				Name: s.Function.Name,
 				Args: args,
-				// For now, don't set fn as we don't have function definitions for packages
+				fn:   fnDef,
 			}
 
 			// Create package function call

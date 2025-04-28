@@ -1472,10 +1472,11 @@ func TestFunctions(t *testing.T) {
 func TestCallingPackageFunctions(t *testing.T) {
 	run(t, []test{
 		{
-			name: "io.print",
+			name: "Calling io::print",
 			input: strings.Join([]string{
 				`use ard/io`,
 				`io::print("Hello World")`,
+				`io::print(200)`,
 			}, "\n"),
 			output: &checker.Program{
 				StdImports: map[string]checker.StdPackage{
@@ -1494,6 +1495,9 @@ func TestCallingPackageFunctions(t *testing.T) {
 						},
 					},
 				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 	})
