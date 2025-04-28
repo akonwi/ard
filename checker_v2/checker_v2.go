@@ -470,9 +470,19 @@ func (f *FunctionCall) Type() Type {
 	return f.fn
 }
 
+type PackageFunctionCall struct {
+	Package string
+	Call    *FunctionCall
+}
+
+func (p *PackageFunctionCall) Type() Type {
+	return p.Call.Type()
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
+	program     *Program
 }
 
 func (c *checker) addError(msg string, location ast.Location) {
@@ -492,41 +502,41 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 }
 
 func Check(input *ast.Program) (*Program, []Diagnostic) {
-	c := checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
-	program := &Program{
+	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
+	c.program = &Program{
 		StdImports: map[string]StdPackage{},
 		Imports:    map[string]ExtPackage{},
 		Statements: []Statement{},
 	}
 
 	for _, imp := range input.Imports {
-		if _, dup := program.StdImports[imp.Name]; dup {
+		if _, dup := c.program.StdImports[imp.Name]; dup {
 			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
 			continue
 		}
-		if _, dup := program.Imports[imp.Name]; dup {
+		if _, dup := c.program.Imports[imp.Name]; dup {
 			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
 			continue
 		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			if pkg, ok := findInStdLib(imp.Path, imp.Name); ok {
-				program.StdImports[imp.Name] = pkg
+				c.program.StdImports[imp.Name] = pkg
 			} else {
 				c.addError(fmt.Sprintf("Unknown package: %s", imp.Path), imp.GetLocation())
 			}
 		} else {
-			program.Imports[imp.Name] = ExtPackage{Path: imp.Path, Name: imp.Name}
+			c.program.Imports[imp.Name] = ExtPackage{Path: imp.Path, Name: imp.Name}
 		}
 	}
 
 	for i := range input.Statements {
 		if stmt := c.checkStmt(&input.Statements[i]); stmt != nil {
-			program.Statements = append(program.Statements, *stmt)
+			c.program.Statements = append(c.program.Statements, *stmt)
 		}
 	}
 
-	return program, c.diagnostics
+	return c.program, c.diagnostics
 }
 
 func findInStdLib(path, name string) (StdPackage, bool) {
@@ -1239,6 +1249,42 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 			default:
 				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))
+			}
+		}
+	case *ast.StaticFunction:
+		{
+			// Process package function calls like io::print()
+			packageName := s.Target.(*ast.Identifier).Name
+
+			if _, ok := c.program.StdImports[packageName]; !ok {
+				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				return nil
+			}
+
+			// Process the function call
+			methodName := s.Function.Name
+			args := make([]Expression, len(s.Function.Args))
+
+			// Check each argument
+			for i, arg := range s.Function.Args {
+				checkedArg := c.checkExpr(arg)
+				if checkedArg == nil {
+					return nil
+				}
+				args[i] = checkedArg
+			}
+
+			// Create function call
+			call := &FunctionCall{
+				Name: methodName,
+				Args: args,
+				// For now, don't set fn as we don't have function definitions for packages
+			}
+
+			// Create package function call
+			return &PackageFunctionCall{
+				Package: packageName,
+				Call:    call,
 			}
 		}
 	case *ast.IfStatement:

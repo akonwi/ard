@@ -1469,33 +1469,35 @@ func TestFunctions(t *testing.T) {
 	})
 }
 
-// func TestCallingPackageMethods(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "io.print",
-// 			input: strings.Join([]string{
-// 				`use ard/io`,
-// 				`io.print("Hello World")`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Imports: map[string]Package{
-// 					"io": newIO(""),
-// 				},
-// 				Statements: []Statement{
-// 					PackageAccess{
-// 						Package: newIO(""),
-// 						Property: FunctionCall{
-// 							Name: "print",
-// 							Args: []Expression{
-// 								StrLiteral{Value: "Hello World"},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestCallingPackageFunctions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "io.print",
+			input: strings.Join([]string{
+				`use ard/io`,
+				`io::print("Hello World")`,
+			}, "\n"),
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"io": {Name: "io", Path: "ard/io"},
+				},
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.PackageFunctionCall{
+							Package: "io",
+							Call: &checker.FunctionCall{
+								Name: "print",
+								Args: []checker.Expression{
+									&checker.StrLiteral{Value: "Hello World"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
 
 // func TestLists(t *testing.T) {
 // 	run(t, []test{
