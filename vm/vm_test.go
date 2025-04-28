@@ -28,8 +28,7 @@ func run(t *testing.T, input string) any {
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
-	v := vm.New(&program)
-	res, err := v.Run()
+	res, err := vm.Run(&program)
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
 	}

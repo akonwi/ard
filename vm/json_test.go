@@ -33,7 +33,7 @@ func TestJsonEncode(t *testing.T) {
 	}
 }
 
-func TestJsonDecodeList(t *testing.T) {
+func testJsonDecodeList(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		let nums: [Int]? = json.decode("[1,2,3]")

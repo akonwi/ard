@@ -9,13 +9,12 @@ import (
 )
 
 type VM struct {
-	program *checker.Program
-	scope   *scope
-	result  object
+	scope  *scope
+	result object
 }
 
-func New(program *checker.Program) *VM {
-	return &VM{program: program, scope: newScope(nil)}
+func New() *VM {
+	return &VM{scope: newScope(nil)}
 }
 
 func (vm *VM) pushScope() {
@@ -26,8 +25,9 @@ func (vm *VM) popScope() {
 	vm.scope = vm.scope.parent
 }
 
-func (vm *VM) Run() (any, error) {
-	for _, statement := range vm.program.Statements {
+func Run(program *checker.Program) (any, error) {
+	vm := New()
+	for _, statement := range program.Statements {
 		vm.evalStatement(statement)
 	}
 	return vm.result.raw, nil
