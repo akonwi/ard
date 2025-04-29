@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/akonwi/ard/checker_v2"
 )
@@ -52,6 +53,13 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 		return &object{e.Value, e.Type()}
 	case *checker_v2.FloatLiteral:
 		return &object{e.Value, e.Type()}
+	case *checker_v2.TemplateStr:
+		sb := strings.Builder{}
+		for i := range e.Chunks {
+			chunk := vm.eval(e.Chunks[i])
+			sb.WriteString(chunk.raw.(string))
+		}
+		return &object{sb.String(), checker_v2.Str}
 	case *checker_v2.Variable:
 		val, ok := vm.scope.get(e.Name())
 		if !ok {

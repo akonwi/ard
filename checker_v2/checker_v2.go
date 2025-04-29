@@ -663,61 +663,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 			return nil
 		}
-	case *ast.FunctionDeclaration:
-		{
-			// Process parameters
-			params := make([]Parameter, len(s.Parameters))
-			for i, param := range s.Parameters {
-				var paramType Type = Void
-				if param.Type != nil {
-					paramType = c.resolveType(param.Type)
-				}
-
-				params[i] = Parameter{
-					Name:    param.Name,
-					Type:    paramType,
-					Mutable: param.Mutable,
-				}
-			}
-
-			// Determine return type
-			var returnType Type = Void
-			if s.ReturnType != nil {
-				returnType = c.resolveType(s.ReturnType)
-			}
-
-			// Check function body with a setup function that adds parameters to scope
-			body := c.checkBlock(s.Body, func() {
-				for _, param := range params {
-					c.scope.add(&VariableDef{
-						Mutable: param.Mutable,
-						Name:    param.Name,
-						__type:  param.Type,
-					})
-				}
-			})
-
-			// Check that the function's return type matches its body's type
-			if returnType != Void && body.Type() != returnType {
-				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
-				return nil
-			}
-
-			// Create function definition
-			fn := &FunctionDef{
-				Name:       s.Name,
-				Parameters: params,
-				ReturnType: returnType,
-				Body:       body,
-			}
-
-			// Add function to scope
-			c.scope.add(fn)
-
-			return &Statement{
-				Expr: fn,
-			}
-		}
 	case *ast.WhileLoop:
 		{
 			// Check the condition expression
@@ -978,8 +923,12 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Cast to FunctionDef
 			fnDef, ok := fnSym.(*FunctionDef)
 			if !ok {
-				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-				return nil
+				if anon, ok := fnSym.(*VariableDef).Value.(*FunctionDef); ok {
+					fnDef = anon
+				} else {
+					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+					return nil
+				}
 			}
 
 			// Check argument count
@@ -1487,6 +1436,116 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				ElseIf:    elseIf,
 				Else:      elseBody,
 			}
+		}
+	case *ast.FunctionDeclaration:
+		{
+			// Process parameters
+			params := make([]Parameter, len(s.Parameters))
+			for i, param := range s.Parameters {
+				var paramType Type = Void
+				if param.Type != nil {
+					paramType = c.resolveType(param.Type)
+				}
+
+				params[i] = Parameter{
+					Name:    param.Name,
+					Type:    paramType,
+					Mutable: param.Mutable,
+				}
+			}
+
+			// Determine return type
+			var returnType Type = Void
+			if s.ReturnType != nil {
+				returnType = c.resolveType(s.ReturnType)
+			}
+
+			// Check function body with a setup function that adds parameters to scope
+			body := c.checkBlock(s.Body, func() {
+				for _, param := range params {
+					c.scope.add(&VariableDef{
+						Mutable: param.Mutable,
+						Name:    param.Name,
+						__type:  param.Type,
+					})
+				}
+			})
+
+			// Check that the function's return type matches its body's type
+			if returnType != Void && body.Type() != returnType {
+				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				return nil
+			}
+
+			// Create function definition
+			fn := &FunctionDef{
+				Name:       s.Name,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       body,
+			}
+
+			// Add function to scope
+			c.scope.add(fn)
+
+			return fn
+		}
+
+	case *ast.AnonymousFunction:
+		{
+			// Process parameters
+			params := make([]Parameter, len(s.Parameters))
+			for i, param := range s.Parameters {
+				var paramType Type = Void
+				if param.Type != nil {
+					paramType = c.resolveType(param.Type)
+				}
+
+				params[i] = Parameter{
+					Name:    param.Name,
+					Type:    paramType,
+					Mutable: param.Mutable,
+				}
+			}
+
+			// Determine return type
+			var returnType Type = Void
+			if s.ReturnType != nil {
+				returnType = c.resolveType(s.ReturnType)
+			}
+
+			// Check function body with a setup function that adds parameters to scope
+			body := c.checkBlock(s.Body, func() {
+				for _, param := range params {
+					c.scope.add(&VariableDef{
+						Mutable: param.Mutable,
+						Name:    param.Name,
+						__type:  param.Type,
+					})
+				}
+			})
+
+			// Check that the function's return type matches its body's type
+			if returnType != Void && body.Type() != returnType {
+				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				return nil
+			}
+
+			// Create function definition
+			// Generate a unique name for the anonymous function
+			uniqueName := fmt.Sprintf("anon_func_%p", s)
+
+			fn := &FunctionDef{
+				Name:       uniqueName,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       body,
+			}
+
+			// Add function to scope
+			c.scope.add(fn)
+
+			return fn
 		}
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
