@@ -68,6 +68,17 @@ func (s *StrLiteral) Type() Type {
 	return Str
 }
 
+type TemplateStr struct {
+	Chunks []Expression
+}
+
+func (t *TemplateStr) String() string {
+	return "TemplateStr"
+}
+func (t *TemplateStr) Type() Type {
+	return Str
+}
+
 type BoolLiteral struct {
 	Value bool
 }
@@ -933,6 +944,22 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
 			}
 			return &IntLiteral{value}
+		}
+	case *ast.InterpolatedStr:
+		{
+			chunks := make([]Expression, len(s.Chunks))
+			for i := range s.Chunks {
+				cx := c.checkExpr(s.Chunks[i])
+				if cx == nil {
+					return nil
+				}
+				if cx.Type() != Str {
+					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
+					return nil
+				}
+				chunks[i] = cx
+			}
+			return &TemplateStr{chunks}
 		}
 	case *ast.Identifier:
 		if sym := c.scope.getVar(s.Name); sym != nil {

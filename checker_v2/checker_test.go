@@ -129,42 +129,32 @@ func TestLiterals(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	name: "interpolated strings",
-		// 	input: strings.Join([]string{
-		// 		`let name = "world"`,
-		// 		`"Hello, {{name}}"`,
-		// 		`let num = 3`,
-		// 		`"Hello, {{num}}"`,
-		// 	}, "\n"),
-		// 	output: &checker.Program{
-		// 		Statements: []checker.Statement{
-		// 			VariableBinding{
-		// 				Name:  "name",
-		// 				Value: StrLiteral{Value: "world"},
-		// 			},
-		// 			InterpolatedStr{
-		// 				Parts: []Expression{
-		// 					StrLiteral{Value: "Hello, "},
-		// 					Identifier{Name: "name"},
-		// 				},
-		// 			},
-		// 			VariableBinding{
-		// 				Name:  "num",
-		// 				Value: IntLiteral{Value: 3},
-		// 			},
-		// 			InterpolatedStr{
-		// 				Parts: []Expression{
-		// 					StrLiteral{Value: "Hello, "},
-		// 					nil,
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Type mismatch: Expected Str, got Int"},
-		// 	},
-		// },
+		{
+			name: "interpolated strings",
+			input: strings.Join([]string{
+				`let name = "world"`,
+				`"Hello, {{name}}"`,
+				`"Hello, {{3}}"`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{Name: "name", Value: &checker.StrLiteral{"world"}},
+					},
+					{
+						Expr: &checker.TemplateStr{
+							Chunks: []checker.Expression{
+								&checker.StrLiteral{"Hello, "},
+								&checker.Variable{},
+							},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+			},
+		},
 	})
 }
 
