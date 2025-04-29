@@ -205,11 +205,7 @@ func TestArithmatic(t *testing.T) {
 }
 
 func TestIfStatements(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  any
-	}{
+	tests := []test{
 		{
 			name: "Simple if",
 			input: `
@@ -244,15 +240,7 @@ func TestIfStatements(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			res := run(t, test.input)
-			if res != test.want {
-				t.Logf("Expected %v, got %v", test.want, res)
-				t.Fail()
-			}
-		})
-	}
+	runTests2(t, tests)
 }
 
 func TestFunctions(t *testing.T) {

@@ -155,6 +155,11 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	case *checker_v2.Or:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{left.raw.(bool) || right.raw.(bool), checker_v2.Bool}
+	case *checker_v2.If:
+		if cond := vm.eval(e.Condition); cond.raw.(bool) {
+			return vm.evalBlock2(e.Body, nil)
+		}
+		return void
 	case *checker_v2.PackageFunctionCall:
 		if e.Package == "ard/io" {
 			switch e.Call.Name {
@@ -175,4 +180,20 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
+}
+
+func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) *object {
+	vm.pushScope()
+	defer vm.popScope()
+
+	if init != nil {
+		init()
+	}
+
+	res := void
+	for i := range block.Stmts {
+		res = vm.do(block.Stmts[i])
+	}
+
+	return res
 }
