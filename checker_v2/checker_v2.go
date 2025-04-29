@@ -166,6 +166,15 @@ func (i *InstanceProperty) Type() Type {
 	return i._type
 }
 
+type InstanceMethod struct {
+	Subject Expression
+	Method  *FunctionCall
+}
+
+func (i *InstanceMethod) Type() Type {
+	return i.Method.Type()
+}
+
 type Negation struct {
 	Value Expression
 }
@@ -1000,6 +1009,65 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				Subject:  subj,
 				Property: s.Property.Name,
 				_type:    propType,
+			}
+		}
+	case *ast.InstanceMethod:
+		{
+			subj := c.checkExpr(s.Target)
+			if subj == nil {
+				panic(fmt.Errorf("Cannot access %s on Void", s.Method.Name))
+			}
+
+			sig := subj.Type().get(s.Method.Name)
+			if sig == nil {
+				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			fnDef, ok := sig.(*FunctionDef)
+			if !ok {
+				c.addError(fmt.Sprintf("%s.%s is not a function", subj, s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			if len(s.Method.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Method.Args)), s.GetLocation())
+				return nil
+			}
+
+			// Check and process arguments
+			args := make([]Expression, len(s.Method.Args))
+			for i, arg := range s.Method.Args {
+				checkedArg := c.checkExpr(arg)
+				if checkedArg == nil {
+					return nil
+				}
+
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if checkedArg.Type() != paramType {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					return nil
+				}
+
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+				}
+
+				args[i] = checkedArg
+			}
+			// Create function call
+			call := &FunctionCall{
+				Name: s.Method.Name,
+				Args: args,
+				fn:   fnDef,
+			}
+
+			return &InstanceMethod{
+				Subject: subj,
+				Method:  call,
 			}
 		}
 	case *ast.UnaryExpression:

@@ -24,6 +24,12 @@ type _int struct{}
 func (i _int) String() string { return "Int" }
 func (i _int) get(name string) Type {
 	switch name {
+	case "to_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
 	default:
 		return nil
 	}

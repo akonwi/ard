@@ -1544,6 +1544,28 @@ func TestCallingPackageFunctions(t *testing.T) {
 	})
 }
 
+func TestCallingInstanceMethods(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Int.to_str()",
+			input: `200.to_str()`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.InstanceMethod{
+							Subject: &checker.IntLiteral{200},
+							Method: &checker.FunctionCall{
+								Name: "to_str",
+								Args: []checker.Expression{},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 // func TestLists(t *testing.T) {
 // 	run(t, []test{
 // 		{
