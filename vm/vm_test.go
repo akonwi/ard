@@ -286,14 +286,14 @@ func TestFunctions(t *testing.T) {
 }
 
 func TestNumApi(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
-			name:  ".to_str() returns the string representation of a number",
+			name:  "Int.to_str() returns the string representation of a number",
 			input: `100.to_str()`,
 			want:  "100",
 		},
 		{
-			name:  "::from_str parses a string into a number",
+			name:  "Int::from_str parses a string into a number",
 			input: `Int::from_str("100")`,
 			want:  100,
 		},

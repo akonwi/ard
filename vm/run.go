@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/checker_v2"
@@ -211,6 +212,16 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				return void
 			}
 		}
+	case *checker_v2.InstanceMethod:
+		{
+			subj := vm.eval(e.Subject)
+			switch subj._type {
+			case checker_v2.Int:
+				return vm.evalIntMethod(subj, e)
+			default:
+				return void
+			}
+		}
 	case *checker_v2.PackageFunctionCall:
 		if e.Package == "ard/io" {
 			switch e.Call.Name {
@@ -253,6 +264,15 @@ func (vm *VM) evalStrProperty(subj *object, name string) *object {
 	switch name {
 	case "size":
 		return &object{len(subj.raw.(string)), checker_v2.Int}
+	default:
+		return void
+	}
+}
+
+func (vm *VM) evalIntMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+	switch m.Method.Name {
+	case "to_str":
+		return &object{strconv.Itoa(subj.raw.(int)), checker_v2.Str}
 	default:
 		return void
 	}
