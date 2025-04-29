@@ -158,8 +158,51 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	case *checker_v2.If:
 		if cond := vm.eval(e.Condition); cond.raw.(bool) {
 			return vm.evalBlock2(e.Body, nil)
+		} else if e.ElseIf != nil {
+			if cond := vm.eval(e.ElseIf.Condition); cond.raw.(bool) {
+				return vm.evalBlock2(e.ElseIf.Body, nil)
+			}
+		} else if e.Else != nil {
+			return vm.evalBlock2(e.Else, nil)
 		}
 		return void
+	case *checker_v2.FunctionDef:
+		raw := func(args ...*object) *object {
+			return vm.evalBlock2(e.Body, func() {
+				for i := range args {
+					vm.scope.add(e.Parameters[i].Name, args[i])
+				}
+			})
+		}
+		obj := &object{raw, e.Type()}
+		vm.scope.add(e.Name, obj)
+		return obj
+	case *checker_v2.FunctionCall:
+		sig, ok := vm.scope.get(e.Name)
+		if !ok {
+			panic(fmt.Errorf("Undefined: %s", e.Name))
+		}
+		fn, ok := sig.raw.(func(args ...*object) *object)
+		if !ok {
+			panic(fmt.Errorf("Not a function: %s: %s", e.Name, sig._type))
+		}
+
+		args := make([]*object, len(e.Args))
+		for i := range e.Args {
+			args[i] = vm.eval(e.Args[i])
+		}
+
+		return fn(args...)
+	case *checker_v2.InstanceProperty:
+		{
+			subj := vm.eval(e.Subject)
+			switch subj._type {
+			case checker_v2.Str:
+				return vm.evalStrProperty(subj, e.Property)
+			default:
+				return void
+			}
+		}
 	case *checker_v2.PackageFunctionCall:
 		if e.Package == "ard/io" {
 			switch e.Call.Name {
@@ -196,4 +239,13 @@ func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) *object {
 	}
 
 	return res
+}
+
+func (vm *VM) evalStrProperty(subj *object, name string) *object {
+	switch name {
+	case "size":
+		return &object{len(subj.raw.(string)), checker_v2.Int}
+	default:
+		return void
+	}
 }
