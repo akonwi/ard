@@ -48,6 +48,10 @@ func (s scope) getStruct(name string) (*checker.Struct, bool) {
 	return v, ok
 }
 
+func (s *scope) add(name string, value *object) {
+	s.bindings[name] = value
+}
+
 func (s scope) get(name string) (*object, bool) {
 	v, ok := s.bindings[name]
 	if !ok && s.parent != nil {
@@ -56,7 +60,7 @@ func (s scope) get(name string) (*object, bool) {
 	return v, ok
 }
 
-func (s scope) set(name string, value *object) {
+func (s *scope) set(name string, value *object) {
 	if binding, ok := s.get(name); ok {
 		*binding = *value
 	}

@@ -32,7 +32,7 @@ func runTests2(t *testing.T, tests []test) {
 	t.Helper()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if res := run(t, test.input); test.want != res {
+			if res := run2(t, test.input); test.want != res {
 				t.Logf("Expected %v, got %v", test.want, res)
 				t.Fail()
 			}

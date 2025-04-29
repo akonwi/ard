@@ -212,6 +212,47 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
+			name: "Inferred types",
+			input: strings.Join([]string{
+				`let name = "Alice"`,
+				"let age = 32",
+				"let temp = 98.6",
+				"mut is_student = true",
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "name",
+							Value:   &checker.StrLiteral{Value: "Alice"},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "age",
+							Value:   &checker.IntLiteral{Value: 32},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "temp",
+							Value:   &checker.FloatLiteral{Value: 98.6},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "is_student",
+							Value:   &checker.BoolLiteral{Value: true},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "Actual types should match declarations",
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,

@@ -20,13 +20,141 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 	if stmt.Expr != nil {
 		return vm.eval(stmt.Expr)
 	}
-	return void
+
+	switch s := stmt.Stmt.(type) {
+	case *checker_v2.VariableDef:
+		val := vm.eval(s.Value)
+		if !s.Mutable {
+			original := val.raw
+			var copy any = new(any)
+			copy = original
+			val.raw = copy
+		}
+		vm.scope.add(s.Name, val)
+		return void
+	case *checker_v2.Reassignment:
+		target := vm.eval(s.Target)
+		val := vm.eval(s.Value)
+		target.raw = val.raw
+		return void
+	default:
+		panic(fmt.Errorf("Unimplemented statement: %T", s))
+	}
 }
 
 func (vm *VM) eval(expr checker_v2.Expression) *object {
 	switch e := expr.(type) {
 	case *checker_v2.StrLiteral:
 		return &object{e.Value, e.Type()}
+	case *checker_v2.BoolLiteral:
+		return &object{e.Value, e.Type()}
+	case *checker_v2.IntLiteral:
+		return &object{e.Value, e.Type()}
+	case *checker_v2.FloatLiteral:
+		return &object{e.Value, e.Type()}
+	case *checker_v2.Variable:
+		val, ok := vm.scope.get(e.Name())
+		if !ok {
+			panic(fmt.Errorf("variable not found: %s", e.Name()))
+		}
+		return val
+	case *checker_v2.Not:
+		val := vm.eval(e.Value)
+		return &object{!val.raw.(bool), val._type}
+
+	case *checker_v2.Negation:
+		val := vm.eval(e.Value)
+		if num, isInt := val.raw.(int); isInt {
+			return &object{-num, val._type}
+		}
+		return &object{-val.raw.(float64), val._type}
+	case *checker_v2.IntAddition:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) + right.raw.(int),
+			left._type,
+		}
+	case *checker_v2.IntSubtraction:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) - right.raw.(int),
+			left._type,
+		}
+	case *checker_v2.IntMultiplication:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) * right.raw.(int),
+			left._type,
+		}
+	case *checker_v2.IntDivision:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) / right.raw.(int),
+			left._type,
+		}
+	case *checker_v2.IntModulo:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) % right.raw.(int),
+			left._type,
+		}
+	case *checker_v2.IntGreater:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) > right.raw.(int),
+			checker_v2.Bool,
+		}
+	case *checker_v2.IntGreaterEqual:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) >= right.raw.(int),
+			checker_v2.Bool,
+		}
+	case *checker_v2.IntLess:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) < right.raw.(int),
+			checker_v2.Bool,
+		}
+	case *checker_v2.IntLessEqual:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(int) <= right.raw.(int),
+			checker_v2.Bool,
+		}
+	case *checker_v2.FloatDivision:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) / right.raw.(float64),
+			left._type,
+		}
+	case *checker_v2.FloatMultiplication:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) * right.raw.(float64),
+			left._type,
+		}
+	case *checker_v2.FloatSubtraction:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) - right.raw.(float64),
+			left._type,
+		}
+	case *checker_v2.FloatAddition:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) + right.raw.(float64),
+			left._type,
+		}
+	case *checker_v2.Equality:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{left.raw == right.raw, checker_v2.Bool}
+	case *checker_v2.And:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{left.raw.(bool) && right.raw.(bool), checker_v2.Bool}
+	case *checker_v2.Or:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{left.raw.(bool) || right.raw.(bool), checker_v2.Bool}
 	case *checker_v2.PackageFunctionCall:
 		if e.Package == "ard/io" {
 			switch e.Call.Name {

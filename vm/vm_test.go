@@ -86,7 +86,7 @@ func TestBindingVariables(t *testing.T) {
 		40,
 		true,
 	} {
-		res := run(t, strings.Join([]string{
+		res := run2(t, strings.Join([]string{
 			fmt.Sprintf(`let val = %v`, want),
 			`val`,
 		}, "\n"))
@@ -97,7 +97,7 @@ func TestBindingVariables(t *testing.T) {
 }
 
 func TestReassigningVariables(t *testing.T) {
-	res := run(t, strings.Join([]string{
+	res := run2(t, strings.Join([]string{
 		`mut val = 1`,
 		`val = 2`,
 		`val = 3`,
@@ -118,7 +118,7 @@ func TestUnaryExpressions(t *testing.T) {
 		{`-10`, -10},
 		{`-20.1`, -20.1},
 	} {
-		res := run(t, test.input)
+		res := run2(t, test.input)
 		if res != test.want {
 			t.Fatalf("Expected %v, got %v", test.want, res)
 		}
@@ -144,7 +144,7 @@ func TestNumberOperations(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run(t, test.input); res != test.want {
+		if res := run2(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -166,7 +166,7 @@ func TestEquality(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run(t, test.input); res != test.want {
+		if res := run2(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -182,7 +182,7 @@ func TestBooleanOperations(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run(t, test.input); res != test.want {
+		if res := run2(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -198,7 +198,7 @@ func TestArithmatic(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run(t, test.input); res != test.want {
+		if res := run2(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
