@@ -67,3 +67,22 @@ func (v void) String() string       { return "Void" }
 func (v void) get(name string) Type { return nil }
 
 var Void = &void{}
+
+type List struct {
+	of Type
+}
+
+func MakeList(of Type) List {
+	return List{of}
+}
+func (l List) String() string {
+	return "[" + l.of.String() + "]"
+}
+func (l List) get(name string) Type {
+	switch name {
+	default:
+		return nil
+	}
+}
+
+type Any struct{}

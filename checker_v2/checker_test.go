@@ -26,6 +26,7 @@ var compareOptions = cmp.Options{
 		checker.Variable{},
 		checker.VariableDef{},
 		checker.FunctionCall{},
+		checker.ListLiteral{},
 	),
 }
 
@@ -104,7 +105,7 @@ func TestImports(t *testing.T) {
 	})
 }
 
-func TestLiterals(t *testing.T) {
+func TestPrimitiveLiterals(t *testing.T) {
 	run(t, []test{
 		{
 			name: "primitive literals",
@@ -1556,77 +1557,80 @@ func TestCallingInstanceMethods(t *testing.T) {
 	})
 }
 
-// func TestLists(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name:  "Empty list",
-// 			input: `let empty: [Int] = []`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name:  "empty",
-// 						Value: ListLiteral{Elements: []Expression{}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Empty lists must have declared type",
-// 			input: `let empty = []`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Empty lists need an explicit type"},
-// 			},
-// 		},
-// 		{
-// 			name:  "Lists cannot have mixed types",
-// 			input: `let numbers = [1, "two", false]`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Int, got Str"},
-// 				{Kind: Error, Message: "Type mismatch: Expected Int, got Bool"},
-// 			},
-// 		},
-// 		{
-// 			name:  "A valid list",
-// 			input: `[1,2,3]`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					ListLiteral{
-// 						Elements: []Expression{
-// 							IntLiteral{Value: 1},
-// 							IntLiteral{Value: 2},
-// 							IntLiteral{Value: 3},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "List API",
-// 			input: strings.Join([]string{
-// 				`[1].size`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					InstanceProperty{
-// 						Subject: ListLiteral{
-// 							Elements: []Expression{IntLiteral{Value: 1}},
-// 						},
-// 						Property: Identifier{Name: "size"},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "An immutable list cannot be changed",
-// 			input: `
-// 			  let list = [1,2,3]
-// 				list.push(4)`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
-// 			},
-// 		},
-// 	})
-// }
+func TestLists(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Empty list",
+			input: `let empty: [Int] = []`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{Stmt: &checker.VariableDef{
+						Mutable: false,
+						Name:    "empty",
+						Value: &checker.ListLiteral{
+							Elements: []checker.Expression{},
+						},
+					}},
+				},
+			},
+		},
+		{
+			name:  "Empty lists must have declared type",
+			input: `let empty = []`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Empty lists need an explicit type"},
+			},
+		},
+		{
+			name:  "Lists cannot have mixed types",
+			input: `let numbers = [1, "two", false]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
+				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
+			},
+		},
+		// {
+		// 	name:  "A valid list",
+		// 	input: `[1,2,3]`,
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			ListLiteral{
+		// 				Elements: []Expression{
+		// 					IntLiteral{Value: 1},
+		// 					IntLiteral{Value: 2},
+		// 					IntLiteral{Value: 3},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "List API",
+		// 	input: strings.Join([]string{
+		// 		`[1].size`,
+		// 	}, "\n"),
+		// 	output: Program{
+		// 		Statements: []Statement{
+		// 			InstanceProperty{
+		// 				Subject: ListLiteral{
+		// 					Elements: []Expression{IntLiteral{Value: 1}},
+		// 				},
+		// 				Property: Identifier{Name: "size"},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "An immutable list cannot be changed",
+		// 	input: `
+		// 	  let list = [1,2,3]
+		// 		list.push(4)`,
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
+		// 	},
+		// },
+	})
+}
 
 // func TestEnums(t *testing.T) {
 // 	run(t, []test{

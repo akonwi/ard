@@ -115,6 +115,15 @@ func (f *FloatLiteral) Type() Type {
 	return Float
 }
 
+type ListLiteral struct {
+	Elements []Expression
+	_type    Type
+}
+
+func (l *ListLiteral) Type() Type {
+	return l._type
+}
+
 type VariableDef struct {
 	Mutable bool
 	Name    string
@@ -597,15 +606,18 @@ func (c *checker) resolvePkg(name string) *StdPackage {
 }
 
 func (c *checker) resolveType(t ast.DeclaredType) Type {
-	switch t.GetName() {
-	case "String":
+	switch ty := t.(type) {
+	case *ast.StringType:
 		return Str
-	case Int.String():
+	case *ast.IntType:
 		return Int
-	case Float.String():
+	case *ast.FloatType:
 		return Float
-	case "Boolean":
+	case *ast.BooleanType:
 		return Bool
+	case *ast.List:
+		of := c.resolveType(ty.Element)
+		return MakeList(of)
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
 	}
@@ -619,7 +631,34 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
 	case *ast.VariableDeclaration:
 		{
-			val := c.checkExpr(s.Value)
+			var val Expression
+			if s.Type == nil {
+				switch literal := s.Value.(type) {
+				case *ast.ListLiteral:
+					if expr := c.checkList(nil, literal); expr != nil {
+						val = expr
+					}
+				default:
+					val = c.checkExpr(s.Value)
+				}
+			} else {
+
+				expected := c.resolveType(s.Type)
+				if expected == Void {
+					c.addError("Cannot assign a void value", s.Value.GetLocation())
+					return nil
+				}
+
+				switch literal := s.Value.(type) {
+				case *ast.ListLiteral:
+					if expr := c.checkList(expected, literal); expr != nil {
+						val = expr
+					}
+				default:
+					val = c.checkExpr(s.Value)
+				}
+			}
+
 			if val == nil {
 				return nil
 			}
@@ -853,6 +892,59 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			return nil
 		}
 		return &Statement{Expr: expr}
+	}
+}
+
+func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiteral {
+	if declaredType != nil {
+		expectedElementType := declaredType.(List).of
+		elements := make([]Expression, len(expr.Items))
+		for i := range expr.Items {
+			item := expr.Items[i]
+			element := c.checkExpr(item)
+			if element.Type() != expectedElementType {
+				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
+				return nil
+			}
+			elements[i] = element
+		}
+
+		return &ListLiteral{
+			Elements: elements,
+			_type:    declaredType.(List),
+		}
+	}
+
+	if len(expr.Items) == 0 {
+		c.addError("Empty lists need an explicit type", expr.GetLocation())
+		return nil
+	}
+
+	hasError := false
+	var elementType Type
+	elements := make([]Expression, len(expr.Items))
+	for i := range expr.Items {
+		item := expr.Items[i]
+		element := c.checkExpr(item)
+		if element == nil {
+			continue
+		}
+
+		if i == 0 {
+			elementType = element.Type()
+		} else if elementType != element.Type() {
+			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
+			hasError = true
+		}
+	}
+
+	if hasError {
+		return nil
+	}
+
+	return &ListLiteral{
+		Elements: elements,
+		_type:    MakeList(elementType),
 	}
 }
 
@@ -1502,7 +1594,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			return fn
 		}
-
 	case *ast.AnonymousFunction:
 		{
 			// Process parameters
