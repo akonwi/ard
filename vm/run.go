@@ -223,6 +223,22 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			}
 		}
 	case *checker_v2.PackageFunctionCall:
+		if e.Package == "ard/ints" {
+			switch e.Call.Name {
+			case "from_str":
+				input := vm.eval(e.Call.Args[0]).raw.(string)
+
+				// todo: this type should be a Maybe
+				res := &object{nil, checker_v2.Int}
+				if num, err := strconv.Atoi(input); err == nil {
+					res.raw = num
+				}
+				return res
+			default:
+				panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
+			}
+		}
+
 		if e.Package == "ard/io" {
 			switch e.Call.Name {
 			case "print":

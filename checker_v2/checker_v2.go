@@ -584,6 +584,18 @@ func findInStdLib(path, name string) (StdPackage, bool) {
 	return StdPackage{}, false
 }
 
+func (c *checker) resolvePkg(name string) *StdPackage {
+	if pkg, ok := c.program.StdImports[name]; ok {
+		return &pkg
+	}
+
+	if pkg, ok := preludePkgs[name]; ok {
+		return pkg
+	}
+
+	return nil
+}
+
 func (c *checker) resolveType(t ast.DeclaredType) Type {
 	switch t.GetName() {
 	case "String":
@@ -1317,8 +1329,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Process package function calls like io::print()
 			packageName := s.Target.(*ast.Identifier).Name
 
-			pkg, ok := c.program.StdImports[packageName]
-			if !ok {
+			pkg := c.resolvePkg(packageName)
+			if pkg == nil {
 				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
 				return nil
 			}
