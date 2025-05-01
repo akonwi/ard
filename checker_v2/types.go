@@ -1,5 +1,7 @@
 package checker_v2
 
+import "fmt"
+
 type Type interface {
 	String() string
 	get(name string) Type
@@ -18,6 +20,15 @@ func (s str) get(name string) Type {
 	}
 }
 func (s *str) equal(other Type) bool {
+	// coerce other if it's an open Any
+	// todo: implement in other Types
+	if o, ok := other.(*Any); ok {
+		if o.actual == nil {
+			o.actual = s
+			return true
+		}
+		return s == o.actual
+	}
 	return s == other
 }
 
@@ -116,4 +127,50 @@ func (l *List) equal(other Type) bool {
 	}
 
 	return false
+}
+
+type Maybe struct {
+	of Type
+}
+
+func (m *Maybe) String() string {
+	return m.of.String() + "?"
+}
+func (m *Maybe) get(name string) Type {
+	switch name {
+	case "or":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "default", Type: m.of}},
+			ReturnType: m.of,
+		}
+	default:
+		return nil
+	}
+}
+func (m *Maybe) equal(other Type) bool {
+	if o, ok := other.(*Maybe); ok {
+		return m.of.equal(o.of)
+	}
+
+	return false
+}
+
+type Any struct {
+	name   string
+	actual Type
+}
+
+func (a Any) String() string { return "$" + a.name }
+func (a Any) get(name string) Type {
+	if a.actual != nil {
+		return a.actual.get(name)
+	}
+	panic(fmt.Errorf("Cannot look up symbols in unrefined %s", a.String()))
+}
+func (a *Any) equal(other Type) bool {
+	if a.actual == nil {
+		return true
+	}
+	return a.actual.equal(other)
 }

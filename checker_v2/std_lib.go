@@ -10,6 +10,8 @@ func getInPackage(pkgPath, name string) symbol {
 		return getInInts(name)
 	case "ard/io":
 		return getInIO(name)
+	case "ard/maybe":
+		return getInMaybe(name)
 	default:
 		return nil
 	}
@@ -37,6 +39,29 @@ func getInIO(name string) symbol {
 			ReturnType: Void,
 		}
 		return fn
+	default:
+		return nil
+	}
+}
+
+func getInMaybe(name string) symbol {
+	switch name {
+	case "none":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: &Maybe{&Any{name: "T"}},
+		}
+	case "some":
+		// This function returns Maybe<T> where T is the type of the parameter
+		// We use Any as a placeholder, but the type checker should infer
+		// the actual type based on the argument type
+		any := &Any{name: "T"}
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "val", Type: any}},
+			ReturnType: &Maybe{any},
+		}
 	default:
 		return nil
 	}

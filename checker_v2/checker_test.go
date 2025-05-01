@@ -1634,6 +1634,166 @@ func TestLists(t *testing.T) {
 	})
 }
 
+func TestOptionals(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Declaring nullables",
+			input: `
+				use ard/maybe
+				mut name: Str? = maybe::none()
+				mut name2 = maybe::some("Bob")`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"maybe": {"maybe", "ard/maybe"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "name",
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/maybe",
+								Call: &checker.FunctionCall{
+									Name: "none",
+									Args: []checker.Expression{},
+								},
+							},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "name2",
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/maybe",
+								Call: &checker.FunctionCall{
+									Name: "some",
+									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		// {
+		// 	name: "Reassigning with nullables",
+		// 	input: `
+		// 		use ard/maybe
+		// 		mut name: Str? = maybe.some("Joe")
+		// 		name = maybe.some("Bob")
+		// 		name = "Alice"
+		// 		name = maybe.none()`,
+		// 	output: Program{
+		// 		Imports: map[string]Package{
+		// 			"maybe": maybePkg,
+		// 		},
+		// 		Statements: []Statement{
+		// 			VariableBinding{
+		// 				Name: "name",
+		// 				Value: PackageAccess{
+		// 					Package:  maybePkg,
+		// 					Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Joe"}}},
+		// 				},
+		// 			},
+		// 			VariableAssignment{
+		// 				Target: Identifier{Name: "name"},
+		// 				Value: PackageAccess{
+		// 					Package:  maybePkg,
+		// 					Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
+		// 				},
+		// 			},
+		// 			VariableAssignment{
+		// 				Target: Identifier{Name: "name"},
+		// 				Value: PackageAccess{
+		// 					Package:  maybePkg,
+		// 					Property: FunctionCall{Name: "none", Args: []Expression{}},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	diagnostics: []Diagnostic{
+		// 		{Kind: Error, Message: "Type mismatch: Expected Str?, got Str"},
+		// 	},
+		// },
+		// {
+		// 	name: "Matching an nullables",
+		// 	input: `
+		// 		use ard/io
+		// 		use ard/maybe
+
+		// 		mut name: Str? = maybe.none()
+		// 		match name {
+		// 		  it => io.print("name is {{it}}"),
+		// 			_ => io.print("no name ):")
+		// 		}`,
+		// 	output: Program{
+		// 		Imports: map[string]Package{
+		// 			"io":    newIO(""),
+		// 			"maybe": maybePkg,
+		// 		},
+		// 		Statements: []Statement{
+		// 			VariableBinding{
+		// 				Name: "name",
+		// 				Value: PackageAccess{
+		// 					Package:  maybePkg,
+		// 					Property: FunctionCall{Name: "none", Args: []Expression{}},
+		// 				},
+		// 			},
+		// 			OptionMatch{
+		// 				Subject: Identifier{Name: "name"},
+		// 				Some: MatchCase{
+		// 					Pattern: Identifier{Name: "it"},
+		// 					Body: []Statement{
+		// 						PackageAccess{
+		// 							Package: newIO(""),
+		// 							Property: FunctionCall{
+		// 								Name: "print",
+		// 								Args: []Expression{
+		// 									InterpolatedStr{Parts: []Expression{StrLiteral{Value: "name is "}, Identifier{Name: "it"}}}}},
+		// 						},
+		// 					},
+		// 				},
+		// 				None: Block{
+		// 					Body: []Statement{
+		// 						PackageAccess{
+		// 							Package: newIO(""),
+		// 							Property: FunctionCall{
+		// 								Name: "print",
+		// 								Args: []Expression{StrLiteral{Value: "no name ):"}},
+		// 							},
+		// 						},
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "Using Str? in interpolation",
+		// 	input: `
+		// 		use ard/maybe
+		// 	  "foo-{{maybe.some("bar")}}"`,
+		// 	output: Program{
+		// 		Imports: map[string]Package{
+		// 			"maybe": maybePkg,
+		// 		},
+		// 		Statements: []Statement{
+		// 			InterpolatedStr{
+		// 				Parts: []Expression{
+		// 					StrLiteral{Value: "foo-"},
+		// 					PackageAccess{
+		// 						Package:  maybePkg,
+		// 						Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "bar"}}},
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+	})
+}
+
 // func TestEnums(t *testing.T) {
 // 	run(t, []test{
 // 		{
@@ -1969,155 +2129,6 @@ func TestLists(t *testing.T) {
 // 			}, "\n"),
 // 			diagnostics: []Diagnostic{
 // 				{Kind: Error, Message: "Catch-all case is not allowed for boolean matches"},
-// 			},
-// 		},
-// 	})
-// }
-
-// func TestOptionals(t *testing.T) {
-// 	maybePkg := newMaybe("")
-// 	run(t, []test{
-// 		{
-// 			name: "Declaring nullables",
-// 			input: `
-// 				use ard/maybe
-// 				mut name: Str? = maybe.none()
-// 				mut name2 = maybe.some("Bob")`,
-// 			output: Program{
-// 				Imports: map[string]Package{
-// 					"maybe": maybePkg,
-// 				},
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name: "name",
-// 						Value: PackageAccess{
-// 							Package:  maybePkg,
-// 							Property: FunctionCall{Name: "none", Args: []Expression{}},
-// 						},
-// 					},
-// 					VariableBinding{
-// 						Name: "name2",
-// 						Value: PackageAccess{
-// 							Package:  maybePkg,
-// 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Reassigning with nullables",
-// 			input: `
-// 				use ard/maybe
-// 				mut name: Str? = maybe.some("Joe")
-// 				name = maybe.some("Bob")
-// 				name = "Alice"
-// 				name = maybe.none()`,
-// 			output: Program{
-// 				Imports: map[string]Package{
-// 					"maybe": maybePkg,
-// 				},
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name: "name",
-// 						Value: PackageAccess{
-// 							Package:  maybePkg,
-// 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Joe"}}},
-// 						},
-// 					},
-// 					VariableAssignment{
-// 						Target: Identifier{Name: "name"},
-// 						Value: PackageAccess{
-// 							Package:  maybePkg,
-// 							Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
-// 						},
-// 					},
-// 					VariableAssignment{
-// 						Target: Identifier{Name: "name"},
-// 						Value: PackageAccess{
-// 							Package:  maybePkg,
-// 							Property: FunctionCall{Name: "none", Args: []Expression{}},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Str?, got Str"},
-// 			},
-// 		},
-// 		{
-// 			name: "Matching an nullables",
-// 			input: `
-// 				use ard/io
-// 				use ard/maybe
-
-// 				mut name: Str? = maybe.none()
-// 				match name {
-// 				  it => io.print("name is {{it}}"),
-// 					_ => io.print("no name ):")
-// 				}`,
-// 			output: Program{
-// 				Imports: map[string]Package{
-// 					"io":    newIO(""),
-// 					"maybe": maybePkg,
-// 				},
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name: "name",
-// 						Value: PackageAccess{
-// 							Package:  maybePkg,
-// 							Property: FunctionCall{Name: "none", Args: []Expression{}},
-// 						},
-// 					},
-// 					OptionMatch{
-// 						Subject: Identifier{Name: "name"},
-// 						Some: MatchCase{
-// 							Pattern: Identifier{Name: "it"},
-// 							Body: []Statement{
-// 								PackageAccess{
-// 									Package: newIO(""),
-// 									Property: FunctionCall{
-// 										Name: "print",
-// 										Args: []Expression{
-// 											InterpolatedStr{Parts: []Expression{StrLiteral{Value: "name is "}, Identifier{Name: "it"}}}}},
-// 								},
-// 							},
-// 						},
-// 						None: Block{
-// 							Body: []Statement{
-// 								PackageAccess{
-// 									Package: newIO(""),
-// 									Property: FunctionCall{
-// 										Name: "print",
-// 										Args: []Expression{StrLiteral{Value: "no name ):"}},
-// 									},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Using Str? in interpolation",
-// 			input: `
-// 				use ard/maybe
-// 			  "foo-{{maybe.some("bar")}}"`,
-// 			output: Program{
-// 				Imports: map[string]Package{
-// 					"maybe": maybePkg,
-// 				},
-// 				Statements: []Statement{
-// 					InterpolatedStr{
-// 						Parts: []Expression{
-// 							StrLiteral{Value: "foo-"},
-// 							PackageAccess{
-// 								Package:  maybePkg,
-// 								Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "bar"}}},
-// 							},
-// 						},
-// 					},
-// 				},
 // 			},
 // 		},
 // 	})

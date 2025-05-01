@@ -511,6 +511,14 @@ func (f FunctionDef) equal(other Type) bool {
 
 	return false
 }
+func (f *FunctionDef) hasGenerics() bool {
+	for i := range f.Parameters {
+		if strings.HasPrefix(f.Parameters[i].Type.String(), "$") {
+			return true
+		}
+	}
+	return strings.HasPrefix(f.ReturnType.String(), "$")
+}
 
 type FunctionCall struct {
 	Name string
@@ -519,7 +527,7 @@ type FunctionCall struct {
 }
 
 func (f *FunctionCall) Type() Type {
-	return f.fn
+	return f.fn.ReturnType
 }
 
 type PackageFunctionCall struct {
@@ -622,21 +630,29 @@ func (c *checker) resolvePkg(name string) *StdPackage {
 }
 
 func (c *checker) resolveType(t ast.DeclaredType) Type {
+	var baseType Type
 	switch ty := t.(type) {
 	case *ast.StringType:
-		return Str
+		baseType = Str
 	case *ast.IntType:
-		return Int
+		baseType = Int
 	case *ast.FloatType:
-		return Float
+		baseType = Float
 	case *ast.BooleanType:
-		return Bool
+		baseType = Bool
 	case *ast.List:
 		of := c.resolveType(ty.Element)
-		return MakeList(of)
+		baseType = MakeList(of)
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
 	}
+
+	// If the type is nullable, wrap it in a Maybe
+	if t.IsNullable() {
+		return &Maybe{of: baseType}
+	}
+
+	return baseType
 }
 
 func typeMismatch(expected, got Type) string {
@@ -658,7 +674,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					val = c.checkExpr(s.Value)
 				}
 			} else {
-
 				expected := c.resolveType(s.Type)
 				if expected == Void {
 					c.addError("Cannot assign a void value", s.Value.GetLocation())
@@ -1480,7 +1495,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if checkedArg.Type() != paramType {
+				if !checkedArg.Type().equal(paramType) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -1492,6 +1507,54 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				args[i] = checkedArg
 			}
+
+			if fnDef.hasGenerics() {
+				// Create a mapping of generic parameters to concrete types
+				typeMap := make(map[string]Type)
+				// Infer types from arguments
+				for i, param := range fnDef.Parameters {
+					if genType, ok := param.Type.(*Any); ok {
+						if existing, exists := typeMap[genType.name]; exists {
+							// Ensure consistent types for the same generic parameter
+							if !existing.equal(args[i].Type()) {
+								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", genType.name, genType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
+								return nil
+							}
+						} else {
+							// Bind the generic parameter to the argument type
+							typeMap[genType.name] = args[i].Type()
+						}
+					}
+				}
+
+				// Create specialized function with generic parameters substituted
+				specialized := &FunctionDef{
+					Name:       fnDef.Name,
+					Parameters: make([]Parameter, len(fnDef.Parameters)),
+					ReturnType: substituteType(fnDef.ReturnType, typeMap),
+					Body:       fnDef.Body,
+				}
+
+				// Substitute types in parameters
+				for i, param := range fnDef.Parameters {
+					specialized.Parameters[i] = Parameter{
+						Name:    param.Name,
+						Type:    substituteType(param.Type, typeMap),
+						Mutable: param.Mutable,
+					}
+				}
+
+				// Return function call with specialized function
+				return &PackageFunctionCall{
+					Package: pkg.Path,
+					Call: &FunctionCall{
+						Name: s.Function.Name,
+						Args: args,
+						fn:   specialized,
+					},
+				}
+			}
+
 			// Create function call
 			call := &FunctionCall{
 				Name: s.Function.Name,
@@ -1678,5 +1741,21 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		return c.checkList(nil, s)
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
+	}
+}
+
+// Substitute generic parameters in a type
+func substituteType(t Type, typeMap map[string]Type) Type {
+	switch typ := t.(type) {
+	case *Any:
+		if concrete, exists := typeMap[typ.name]; exists {
+			return concrete
+		}
+		return typ
+	case *Maybe:
+		return &Maybe{of: substituteType(typ.of, typeMap)}
+	// Handle other compound types
+	default:
+		return t
 	}
 }
