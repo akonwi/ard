@@ -1589,46 +1589,48 @@ func TestLists(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
 			},
 		},
-		// {
-		// 	name:  "A valid list",
-		// 	input: `[1,2,3]`,
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			ListLiteral{
-		// 				Elements: []Expression{
-		// 					IntLiteral{Value: 1},
-		// 					IntLiteral{Value: 2},
-		// 					IntLiteral{Value: 3},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name: "List API",
-		// 	input: strings.Join([]string{
-		// 		`[1].size`,
-		// 	}, "\n"),
-		// 	output: Program{
-		// 		Statements: []Statement{
-		// 			InstanceProperty{
-		// 				Subject: ListLiteral{
-		// 					Elements: []Expression{IntLiteral{Value: 1}},
-		// 				},
-		// 				Property: Identifier{Name: "size"},
-		// 			},
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name: "An immutable list cannot be changed",
-		// 	input: `
-		// 	  let list = [1,2,3]
-		// 		list.push(4)`,
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
-		// 	},
-		// },
+		{
+			name:  "A valid list",
+			input: `[1,2,3]`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.ListLiteral{
+							Elements: []checker.Expression{
+								&checker.IntLiteral{Value: 1},
+								&checker.IntLiteral{Value: 2},
+								&checker.IntLiteral{Value: 3},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "List API",
+			input: strings.Join([]string{
+				`[1].size()`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.InstanceMethod{
+							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
+							Method:  &checker.FunctionCall{Name: "size", Args: []checker.Expression{}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "An immutable list cannot be changed",
+			input: `
+			  let list = [1,2,3]
+				list.push(4)`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
+			},
+		},
 	})
 }
 

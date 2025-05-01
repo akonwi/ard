@@ -472,6 +472,7 @@ type FunctionDef struct {
 	Name       string
 	Parameters []Parameter
 	ReturnType Type
+	Mutates    bool
 	Body       *Block
 }
 
@@ -935,7 +936,10 @@ func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 		} else if elementType != element.Type() {
 			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
 			hasError = true
+			continue
 		}
+
+		elements[i] = element
 	}
 
 	if hasError {
@@ -1107,6 +1111,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			fnDef, ok := sig.(*FunctionDef)
 			if !ok {
 				c.addError(fmt.Sprintf("%s.%s is not a function", subj, s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			if fnDef.Mutates && !isMutable(subj) {
+				c.addError(fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subj, s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
 
@@ -1650,6 +1659,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			return fn
 		}
+	case *ast.ListLiteral:
+		return c.checkList(nil, s)
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}

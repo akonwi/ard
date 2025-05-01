@@ -80,6 +80,18 @@ func (l List) String() string {
 }
 func (l List) get(name string) Type {
 	switch name {
+	case "size":
+		return &FunctionDef{
+			Name:       name,
+			ReturnType: Int,
+		}
+	case "push":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: l.of}},
+			Mutates:    true,
+			ReturnType: Int,
+		}
 	default:
 		return nil
 	}
