@@ -348,9 +348,9 @@ func TestStrApi(t *testing.T) {
 }
 
 func TestListApi(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
-			name:  "List::size",
+			name:  "List.size",
 			input: "[1,2,3].size()",
 			want:  3,
 		},

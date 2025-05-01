@@ -215,46 +215,58 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	case *checker_v2.InstanceMethod:
 		{
 			subj := vm.eval(e.Subject)
-			switch subj._type {
-			case checker_v2.Int:
+			if subj._type == checker_v2.Int {
 				return vm.evalIntMethod(subj, e)
-			default:
-				return void
 			}
+			if _, ok := subj._type.(*checker_v2.List); ok {
+				return vm.evalListMethod(subj, e)
+			}
+
+			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", e.Subject.Type(), e.Method.Name, e.Subject.Type()))
 		}
 	case *checker_v2.PackageFunctionCall:
-		if e.Package == "ard/ints" {
-			switch e.Call.Name {
-			case "from_str":
-				input := vm.eval(e.Call.Args[0]).raw.(string)
+		{
+			if e.Package == "ard/ints" {
+				switch e.Call.Name {
+				case "from_str":
+					input := vm.eval(e.Call.Args[0]).raw.(string)
 
-				// todo: this type should be a Maybe
-				res := &object{nil, checker_v2.Int}
-				if num, err := strconv.Atoi(input); err == nil {
-					res.raw = num
+					// todo: this type should be a Maybe
+					res := &object{nil, checker_v2.Int}
+					if num, err := strconv.Atoi(input); err == nil {
+						res.raw = num
+					}
+					return res
+				default:
+					panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
 				}
-				return res
-			default:
-				panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
 			}
-		}
 
-		if e.Package == "ard/io" {
-			switch e.Call.Name {
-			case "print":
-				arg := vm.eval(e.Call.Args[0])
+			if e.Package == "ard/io" {
+				switch e.Call.Name {
+				case "print":
+					arg := vm.eval(e.Call.Args[0])
 
-				string, ok := arg.raw.(string)
-				if !ok {
-					panic(fmt.Errorf("Unprintable arg to print: %s", arg))
+					string, ok := arg.raw.(string)
+					if !ok {
+						panic(fmt.Errorf("Unprintable arg to print: %s", arg))
+					}
+					fmt.Println(string)
+					return void
+				default:
+					panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
 				}
-				fmt.Println(string)
-				return void
-			default:
-				panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
 			}
+			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
 		}
-		panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
+	case *checker_v2.ListLiteral:
+		{
+			raw := make([]*object, len(e.Elements))
+			for i, el := range e.Elements {
+				raw[i] = vm.eval(el)
+			}
+			return &object{raw, e.Type()}
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
@@ -291,5 +303,18 @@ func (vm *VM) evalIntMethod(subj *object, m *checker_v2.InstanceMethod) *object 
 		return &object{strconv.Itoa(subj.raw.(int)), checker_v2.Str}
 	default:
 		return void
+	}
+}
+
+func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+	raw := subj.raw.([]*object)
+	switch m.Method.Name {
+	case "size":
+		return &object{len(raw), checker_v2.Int}
+	case "push":
+		subj.raw = append(raw, vm.eval(m.Method.Args[0]))
+		return subj
+	default:
+		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
 	}
 }

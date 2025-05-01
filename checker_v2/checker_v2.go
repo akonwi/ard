@@ -496,6 +496,21 @@ func (f FunctionDef) _type() Type {
 func (f FunctionDef) Type() Type {
 	return f
 }
+func (f FunctionDef) equal(other Type) bool {
+	if oFn, ok := other.(*FunctionDef); ok {
+		if len(f.Parameters) != len(oFn.Parameters) {
+			return false
+		}
+		for i := range f.Parameters {
+			if !f.Parameters[i].Type.equal(oFn.Parameters[i].Type) {
+				return false
+			}
+		}
+		return f.Mutates == oFn.Mutates && f.ReturnType.equal(oFn.ReturnType)
+	}
+
+	return false
+}
 
 type FunctionCall struct {
 	Name string
@@ -666,7 +681,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
-					if expected != val.Type() {
+					if !expected.equal(val.Type()) {
 						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
 						return nil
 					}
@@ -898,7 +913,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiteral {
 	if declaredType != nil {
-		expectedElementType := declaredType.(List).of
+		expectedElementType := declaredType.(*List).of
 		elements := make([]Expression, len(expr.Items))
 		for i := range expr.Items {
 			item := expr.Items[i]
@@ -912,7 +927,7 @@ func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 
 		return &ListLiteral{
 			Elements: elements,
-			_type:    declaredType.(List),
+			_type:    declaredType.(*List),
 		}
 	}
 
