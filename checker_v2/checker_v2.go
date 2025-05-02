@@ -307,6 +307,21 @@ func (n *FloatAddition) Type() Type {
 	return Float
 }
 
+type Match struct {
+	Pattern *Identifier
+	Body    *Block
+}
+
+type OptionMatch struct {
+	Subject Expression
+	Some    *Match
+	None    *Block
+}
+
+func (o *OptionMatch) Type() Type {
+	return o.Some.Body.Type()
+}
+
 type FloatSubtraction struct {
 	Left  Expression
 	Right Expression
@@ -1036,7 +1051,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if cx.Type() != Str {
+				if !Str.equal(cx.Type()) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -1739,6 +1754,73 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.ListLiteral:
 		return c.checkList(nil, s)
+	case *ast.MatchExpression:
+		// Check the subject
+		subject := c.checkExpr(s.Subject)
+		if subject == nil {
+			return nil
+		}
+
+		// For Maybe types, generate an OptionMatch
+		if maybeType, ok := subject.Type().(*Maybe); ok {
+			var patternIdent *Identifier
+			var someBody *Block
+			var noneBody *Block
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				// Check if it's the default case (_)
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						// This is the None case
+						noneBody = c.checkBlock(matchCase.Body, nil)
+					} else {
+						// This is the Some case with a variable binding
+						// Create a new scope for the body with the pattern bound to the unwrapped value
+						someBody = c.checkBlock(matchCase.Body, func() {
+							// Add the pattern name as a variable in the scope with the inner type
+							// For example, if the Maybe is Str?, the pattern should be a Str
+							c.scope.add(&VariableDef{
+								Mutable: false,
+								Name:    id.Name,
+								__type:  maybeType.of,
+							})
+						})
+
+						// Create an identifier to use in the Match struct
+						patternIdent = &Identifier{Name: id.Name}
+					}
+				} else {
+					c.addError("Pattern in Maybe match must be an identifier", matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Ensure we have both some and none cases
+			if someBody == nil {
+				c.addError("Match on a Maybe type must include a binding case", s.GetLocation())
+				return nil
+			}
+
+			if noneBody == nil {
+				c.addError("Match on a Maybe type must include a wildcard (_) case", s.GetLocation())
+				return nil
+			}
+
+			// Create the OptionMatch
+			return &OptionMatch{
+				Subject: subject,
+				Some: &Match{
+					Pattern: patternIdent,
+					Body:    someBody,
+				},
+				None: noneBody,
+			}
+		}
+
+		// For other types, handle according to their type...
+		c.addError("Currently only Maybe types are supported in match expressions", s.GetLocation())
+		return nil
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}

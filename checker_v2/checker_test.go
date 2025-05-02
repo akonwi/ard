@@ -21,6 +21,7 @@ var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
 		checker.Diagnostic{},
+		checker.Identifier{},
 		checker.InstanceProperty{},
 		checker.Statement{},
 		checker.Variable{},
@@ -1732,81 +1733,82 @@ func TestOptionals(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected Str?, got Str"},
 			},
 		},
-		// {
-		// 	name: "Matching an nullables",
-		// 	input: `
-		// 		use ard/io
-		// 		use ard/maybe
+		{
+			name: "Matching on maybes",
+			input: `
+				use ard/io
+				use ard/maybe
 
-		// 		mut name: Str? = maybe.none()
-		// 		match name {
-		// 		  it => io.print("name is {{it}}"),
-		// 			_ => io.print("no name ):")
-		// 		}`,
-		// 	output: Program{
-		// 		Imports: map[string]Package{
-		// 			"io":    newIO(""),
-		// 			"maybe": maybePkg,
-		// 		},
-		// 		Statements: []Statement{
-		// 			VariableBinding{
-		// 				Name: "name",
-		// 				Value: PackageAccess{
-		// 					Package:  maybePkg,
-		// 					Property: FunctionCall{Name: "none", Args: []Expression{}},
-		// 				},
-		// 			},
-		// 			OptionMatch{
-		// 				Subject: Identifier{Name: "name"},
-		// 				Some: MatchCase{
-		// 					Pattern: Identifier{Name: "it"},
-		// 					Body: []Statement{
-		// 						PackageAccess{
-		// 							Package: newIO(""),
-		// 							Property: FunctionCall{
-		// 								Name: "print",
-		// 								Args: []Expression{
-		// 									InterpolatedStr{Parts: []Expression{StrLiteral{Value: "name is "}, Identifier{Name: "it"}}}}},
-		// 						},
-		// 					},
-		// 				},
-		// 				None: Block{
-		// 					Body: []Statement{
-		// 						PackageAccess{
-		// 							Package: newIO(""),
-		// 							Property: FunctionCall{
-		// 								Name: "print",
-		// 								Args: []Expression{StrLiteral{Value: "no name ):"}},
-		// 							},
-		// 						},
-		// 					},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// },
-		// {
-		// 	name: "Using Str? in interpolation",
-		// 	input: `
-		// 		use ard/maybe
-		// 	  "foo-{{maybe.some("bar")}}"`,
-		// 	output: Program{
-		// 		Imports: map[string]Package{
-		// 			"maybe": maybePkg,
-		// 		},
-		// 		Statements: []Statement{
-		// 			InterpolatedStr{
-		// 				Parts: []Expression{
-		// 					StrLiteral{Value: "foo-"},
-		// 					PackageAccess{
-		// 						Package:  maybePkg,
-		// 						Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "bar"}}},
-		// 					},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// },
+				mut name: Str? = maybe::none()
+				match name {
+				  value => io::print("name is {{value}}"),
+					_ => io::print("no name")
+				}`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"io":    {Name: "io", Path: "ard/io"},
+					"maybe": {Name: "maybe", Path: "ard/maybe"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "name",
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/maybe",
+								Call: &checker.FunctionCall{
+									Name: "none",
+									Args: []checker.Expression{},
+								},
+							},
+						},
+					},
+					{
+						Expr: &checker.OptionMatch{
+							Subject: &checker.Variable{},
+							Some: &checker.Match{
+								Pattern: &checker.Identifier{Name: "value"},
+								Body: &checker.Block{
+									Stmts: []checker.Statement{
+										{
+											Expr: &checker.PackageFunctionCall{
+												Package: "ard/io",
+												Call: &checker.FunctionCall{
+													Name: "print",
+													Args: []checker.Expression{
+														&checker.TemplateStr{
+															Chunks: []checker.Expression{
+																&checker.StrLiteral{Value: "name is "},
+																&checker.Variable{},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+							None: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Expr: &checker.PackageFunctionCall{
+											Package: "ard/io",
+											Call: &checker.FunctionCall{
+												Name: "print",
+												Args: []checker.Expression{
+													&checker.StrLiteral{Value: "no name"},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	})
 }
 
