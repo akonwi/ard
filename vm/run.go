@@ -221,6 +221,9 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			if _, ok := subj._type.(*checker_v2.List); ok {
 				return vm.evalListMethod(subj, e)
 			}
+			if _, ok := subj._type.(*checker_v2.Maybe); ok {
+				return vm.evalMaybeMethod(subj, e)
+			}
 
 			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", e.Subject.Type(), e.Method.Name, e.Subject.Type()))
 		}
@@ -255,6 +258,19 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 					return void
 				default:
 					panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
+				}
+			}
+
+			if e.Package == "ard/maybe" {
+				switch e.Call.Name {
+				case "none":
+					return &object{nil, e.Call.Type()}
+				case "some":
+					arg := vm.eval(e.Call.Args[0])
+					arg._type = e.Call.Type()
+					return arg
+				default:
+					panic(fmt.Errorf("Unimplemented: maybe::%s()", e.Call.Name))
 				}
 			}
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
@@ -326,6 +342,18 @@ func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object
 	case "push":
 		subj.raw = append(raw, vm.eval(m.Method.Args[0]))
 		return subj
+	default:
+		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
+	}
+}
+
+func (vm *VM) evalMaybeMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+	switch m.Method.Name {
+	case "or":
+		if subj.raw == nil {
+			return vm.eval(m.Method.Args[0])
+		}
+		return &object{subj.raw, m.Type()}
 	default:
 		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
 	}

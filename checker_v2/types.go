@@ -194,6 +194,7 @@ func (a Any) get(name string) Type {
 }
 func (a *Any) equal(other Type) bool {
 	if a.actual == nil {
+		a.actual = other
 		return true
 	}
 	return a.actual.equal(other)

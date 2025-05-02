@@ -948,7 +948,7 @@ func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 		for i := range expr.Items {
 			item := expr.Items[i]
 			element := c.checkExpr(item)
-			if element.Type() != expectedElementType {
+			if !expectedElementType.equal(element.Type()) {
 				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
 				return nil
 			}
@@ -1101,7 +1101,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if checkedArg.Type() != paramType {
+				if !paramType.equal(checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -1180,7 +1180,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if checkedArg.Type() != paramType {
+				if !paramType.equal(checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -1423,17 +1423,23 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
 						return nil
 					}
 
+					isMaybe := func(val Type) bool {
+						_, ok := val.(*Maybe)
+						return ok
+					}
+					if isMaybe(left.Type()) {
+						return &Equality{left, right}
+					}
 					allowedTypes := []Type{Int, Float, Str, Bool}
 					if !slices.Contains(allowedTypes, left.Type()) || !slices.Contains(allowedTypes, right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
 						return nil
 					}
-
 					return &Equality{left, right}
 				}
 			case ast.And:
