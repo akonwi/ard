@@ -124,6 +124,16 @@ func (l *ListLiteral) Type() Type {
 	return l._type
 }
 
+type MapLiteral struct {
+	Keys   []Expression
+	Values []Expression
+	_type  Type
+}
+
+func (m *MapLiteral) Type() Type {
+	return m._type
+}
+
 type VariableDef struct {
 	Mutable bool
 	Name    string
@@ -658,6 +668,10 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 	case *ast.List:
 		of := c.resolveType(ty.Element)
 		baseType = MakeList(of)
+	case *ast.Map:
+		key := c.resolveType(ty.Key)
+		value := c.resolveType(ty.Value)
+		baseType = MakeMap(key, value)
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
 	}
@@ -685,6 +699,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					if expr := c.checkList(nil, literal); expr != nil {
 						val = expr
 					}
+				case *ast.MapLiteral:
+					if expr := c.checkMap(nil, literal); expr != nil {
+						val = expr
+					}
 				default:
 					val = c.checkExpr(s.Value)
 				}
@@ -698,6 +716,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				switch literal := s.Value.(type) {
 				case *ast.ListLiteral:
 					if expr := c.checkList(expected, literal); expr != nil {
+						val = expr
+					}
+				case *ast.MapLiteral:
+					if expr := c.checkMap(expected, literal); expr != nil {
 						val = expr
 					}
 				default:
@@ -1019,6 +1041,140 @@ func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 		}
 	}
 	return block
+}
+
+func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral {
+	// Handle empty map with declared type
+	if len(expr.Entries) == 0 {
+		if declaredType != nil {
+			mapType, ok := declaredType.(*Map)
+			if !ok {
+				c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
+				return nil
+			}
+			
+			// Return empty map with the declared type
+			return &MapLiteral{
+				Keys:   []Expression{},
+				Values: []Expression{},
+				_type:  mapType,
+			}
+		} else {
+			// Empty map without a declared type is an error
+			c.addError("Empty maps need an explicit type", expr.GetLocation())
+			return nil
+		}
+	}
+
+	// Handle non-empty map
+	if declaredType != nil {
+		mapType, ok := declaredType.(*Map)
+		if !ok {
+			c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
+			return nil
+		}
+
+		expectedKeyType := mapType.key
+		expectedValueType := mapType.value
+
+		keys := make([]Expression, len(expr.Entries))
+		values := make([]Expression, len(expr.Entries))
+
+		hasError := false
+		for i, entry := range expr.Entries {
+			// Type check the key
+			key := c.checkExpr(entry.Key)
+			if key == nil {
+				hasError = true
+				continue
+			}
+			if !expectedKeyType.equal(key.Type()) {
+				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
+				hasError = true
+				continue
+			}
+			keys[i] = key
+
+			// Type check the value
+			value := c.checkExpr(entry.Value)
+			if value == nil {
+				hasError = true
+				continue
+			}
+			if !expectedValueType.equal(value.Type()) {
+				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
+				hasError = true
+				continue
+			}
+			values[i] = value
+		}
+		
+		if hasError {
+			return nil
+		}
+
+		return &MapLiteral{
+			Keys:   keys,
+			Values: values,
+			_type:  mapType,
+		}
+	}
+
+	// Type inference for non-empty maps without declared type
+	keys := make([]Expression, len(expr.Entries))
+	values := make([]Expression, len(expr.Entries))
+
+	// Check the first entry to determine key and value types
+	firstKey := c.checkExpr(expr.Entries[0].Key)
+	firstValue := c.checkExpr(expr.Entries[0].Value)
+	
+	if firstKey == nil || firstValue == nil {
+		return nil
+	}
+
+	keyType := firstKey.Type()
+	valueType := firstValue.Type()
+	keys[0] = firstKey
+	values[0] = firstValue
+
+	// Check that all entries have consistent types
+	hasError := false
+	for i := 1; i < len(expr.Entries); i++ {
+		key := c.checkExpr(expr.Entries[i].Key)
+		if key == nil {
+			hasError = true
+			continue
+		}
+		if !keyType.equal(key.Type()) {
+			c.addError(fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type()), expr.Entries[i].Key.GetLocation())
+			hasError = true
+			continue
+		}
+		keys[i] = key
+
+		value := c.checkExpr(expr.Entries[i].Value)
+		if value == nil {
+			hasError = true
+			continue
+		}
+		if !valueType.equal(value.Type()) {
+			c.addError(fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type()), expr.Entries[i].Value.GetLocation())
+			hasError = true
+			continue
+		}
+		values[i] = value
+	}
+
+	if hasError {
+		return nil
+	}
+
+	// Create and return the map
+	return &MapLiteral{
+		Keys:   keys,
+		Values: values,
+		_type:  MakeMap(keyType, valueType),
+	}
 }
 
 func (c *checker) checkExpr(expr ast.Expression) Expression {
@@ -1760,6 +1916,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.ListLiteral:
 		return c.checkList(nil, s)
+	case *ast.MapLiteral:
+		return c.checkMap(nil, s)
 	case *ast.MatchExpression:
 		// Check the subject
 		subject := c.checkExpr(s.Subject)

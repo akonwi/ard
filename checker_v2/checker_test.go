@@ -28,6 +28,7 @@ var compareOptions = cmp.Options{
 		checker.VariableDef{},
 		checker.FunctionCall{},
 		checker.ListLiteral{},
+		checker.MapLiteral{},
 	),
 }
 
@@ -1558,83 +1559,6 @@ func TestCallingInstanceMethods(t *testing.T) {
 	})
 }
 
-func TestLists(t *testing.T) {
-	run(t, []test{
-		{
-			name:  "Empty list",
-			input: `let empty: [Int] = []`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{Stmt: &checker.VariableDef{
-						Mutable: false,
-						Name:    "empty",
-						Value: &checker.ListLiteral{
-							Elements: []checker.Expression{},
-						},
-					}},
-				},
-			},
-		},
-		{
-			name:  "Empty lists must have declared type",
-			input: `let empty = []`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Empty lists need an explicit type"},
-			},
-		},
-		{
-			name:  "Lists cannot have mixed types",
-			input: `let numbers = [1, "two", false]`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
-				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
-			},
-		},
-		{
-			name:  "A valid list",
-			input: `[1,2,3]`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Expr: &checker.ListLiteral{
-							Elements: []checker.Expression{
-								&checker.IntLiteral{Value: 1},
-								&checker.IntLiteral{Value: 2},
-								&checker.IntLiteral{Value: 3},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "List API",
-			input: strings.Join([]string{
-				`[1].size()`,
-			}, "\n"),
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Expr: &checker.InstanceMethod{
-							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
-							Method:  &checker.FunctionCall{Name: "size", Args: []checker.Expression{}},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "An immutable list cannot be changed",
-			input: `
-			  let list = [1,2,3]
-				list.push(4)`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
-			},
-		},
-	})
-}
-
 func TestOptionals(t *testing.T) {
 	run(t, []test{
 		{
@@ -1807,6 +1731,156 @@ func TestOptionals(t *testing.T) {
 						},
 					},
 				},
+			},
+		},
+	})
+}
+
+func TestLists(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Empty list",
+			input: `let empty: [Int] = []`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{Stmt: &checker.VariableDef{
+						Mutable: false,
+						Name:    "empty",
+						Value: &checker.ListLiteral{
+							Elements: []checker.Expression{},
+						},
+					}},
+				},
+			},
+		},
+		{
+			name:  "Empty lists must have declared type",
+			input: `let empty = []`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Empty lists need an explicit type"},
+			},
+		},
+		{
+			name:  "Lists cannot have mixed types",
+			input: `let numbers = [1, "two", false]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
+				{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"},
+			},
+		},
+		{
+			name:  "A valid list",
+			input: `[1,2,3]`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.ListLiteral{
+							Elements: []checker.Expression{
+								&checker.IntLiteral{Value: 1},
+								&checker.IntLiteral{Value: 2},
+								&checker.IntLiteral{Value: 3},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "List API",
+			input: strings.Join([]string{
+				`[1].size()`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.InstanceMethod{
+							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
+							Method:  &checker.FunctionCall{Name: "size", Args: []checker.Expression{}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "An immutable list cannot be changed",
+			input: `
+			  let list = [1,2,3]
+				list.push(4)`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
+			},
+		},
+	})
+}
+
+func TestMaps(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Valid map instantiation",
+			input: `let ages: [Str:Int] = ["ard":0, "go":15] `,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "ages",
+							Value: &checker.MapLiteral{
+								Keys: []checker.Expression{
+									&checker.StrLiteral{"ard"},
+									&checker.StrLiteral{"go"},
+								},
+								Values: []checker.Expression{
+									&checker.IntLiteral{0},
+									&checker.IntLiteral{15},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Inferring types with initial values",
+			input: `let ages = ["ard":0, "go":15]`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "ages",
+							Value: &checker.MapLiteral{
+								Keys: []checker.Expression{
+									&checker.StrLiteral{"ard"},
+									&checker.StrLiteral{"go"},
+								},
+								Values: []checker.Expression{
+									&checker.IntLiteral{0},
+									&checker.IntLiteral{15},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Empty maps need an explicit type",
+			input: `let empty = [:]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Empty maps need an explicit type"},
+			},
+		},
+		{
+			name:  "Initial entries must match the declared type",
+			input: `let ages: [Str:Int] = [1:1, "two":true]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Bool"},
+			},
+		},
+		{
+			name:  "In order to infer, all entries must have the same type",
+			input: `let peeps = ["joe":true, "jack":100]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Map value type mismatch: Expected Bool, got Int"},
 			},
 		},
 	})

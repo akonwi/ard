@@ -153,6 +153,45 @@ func (l *List) equal(other Type) bool {
 	return false
 }
 
+type Map struct {
+	key   Type
+	value Type
+}
+
+func MakeMap(key, value Type) *Map {
+	return &Map{key, value}
+}
+
+func (m Map) String() string {
+	return fmt.Sprintf("[%s:%s]", m.key.String(), m.value.String())
+}
+func (m Map) equal(other Type) bool {
+	if o, ok := other.(*Map); ok {
+		return m.key.equal(o.key) && m.value.equal(o.value)
+	}
+
+	return false
+}
+func (m Map) get(name string) Type {
+	switch name {
+	case "get":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "key", Type: m.key}},
+			ReturnType: &Maybe{m.value},
+		}
+	case "set":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "key", Type: m.key}, {Name: "value", Type: m.value}},
+			Mutates:    true,
+			ReturnType: Bool,
+		}
+	default:
+		return nil
+	}
+}
+
 type Maybe struct {
 	of Type
 }
