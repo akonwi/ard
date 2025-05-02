@@ -733,7 +733,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						c.addError(fmt.Sprintf("Immutable variable: %s", binding.Name), s.Target.GetLocation())
 						return nil
 					}
-					if target._type() != value.Type() {
+					if !target._type().equal(value.Type()) {
 						c.addError(typeMismatch(target._type(), value.Type()), s.Value.GetLocation())
 						return nil
 					}

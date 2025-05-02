@@ -1676,46 +1676,62 @@ func TestOptionals(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	name: "Reassigning with nullables",
-		// 	input: `
-		// 		use ard/maybe
-		// 		mut name: Str? = maybe.some("Joe")
-		// 		name = maybe.some("Bob")
-		// 		name = "Alice"
-		// 		name = maybe.none()`,
-		// 	output: Program{
-		// 		Imports: map[string]Package{
-		// 			"maybe": maybePkg,
-		// 		},
-		// 		Statements: []Statement{
-		// 			VariableBinding{
-		// 				Name: "name",
-		// 				Value: PackageAccess{
-		// 					Package:  maybePkg,
-		// 					Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Joe"}}},
-		// 				},
-		// 			},
-		// 			VariableAssignment{
-		// 				Target: Identifier{Name: "name"},
-		// 				Value: PackageAccess{
-		// 					Package:  maybePkg,
-		// 					Property: FunctionCall{Name: "some", Args: []Expression{StrLiteral{Value: "Bob"}}},
-		// 				},
-		// 			},
-		// 			VariableAssignment{
-		// 				Target: Identifier{Name: "name"},
-		// 				Value: PackageAccess{
-		// 					Package:  maybePkg,
-		// 					Property: FunctionCall{Name: "none", Args: []Expression{}},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	diagnostics: []Diagnostic{
-		// 		{Kind: Error, Message: "Type mismatch: Expected Str?, got Str"},
-		// 	},
-		// },
+		{
+			name: "Reassigning with nullables",
+			input: `
+				use ard/maybe
+				mut name: Str? = maybe::some("Joe")
+				name = maybe::some("Bob")
+			  name = "Alice"
+				name = maybe::none()`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"maybe": {Name: "maybe", Path: "ard/maybe"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "name",
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/maybe",
+								Call: &checker.FunctionCall{
+									Name: "some",
+									Args: []checker.Expression{&checker.StrLiteral{"Joe"}},
+								},
+							},
+						},
+					},
+					{
+						Stmt: &checker.Reassignment{
+							Target: &checker.Variable{},
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/maybe",
+								Call: &checker.FunctionCall{
+									Name: "some",
+									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
+								},
+							},
+						},
+					},
+					{
+						Stmt: &checker.Reassignment{
+							Target: &checker.Variable{},
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/maybe",
+								Call: &checker.FunctionCall{
+									Name: "none",
+									Args: []checker.Expression{},
+								},
+							},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str?, got Str"},
+			},
+		},
 		// {
 		// 	name: "Matching an nullables",
 		// 	input: `

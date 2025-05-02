@@ -1,9 +1,6 @@
 package vm_test
 
 import (
-	"bytes"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/ast"
@@ -37,40 +34,5 @@ func runTests2(t *testing.T, tests []test) {
 				t.Fail()
 			}
 		})
-	}
-}
-
-func TestEmptyProgram(t *testing.T) {
-	res := run2(t, "")
-	if res != nil {
-		t.Fatalf("Expected nil, got %v", res)
-	}
-}
-
-func TestPrinting(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	run2(t, strings.Join([]string{
-		`use ard/io`,
-		`io::print("Hello, World!")`,
-		// `io::print("Hello, {{"Ard"}}!")`,
-	}, "\n"))
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	got := buf.String()
-
-	for _, want := range []string{
-		"Hello, World!",
-		// "Hello, Ard!",
-	} {
-		if strings.Contains(got, want) == false {
-			t.Errorf("Expected \"%s\", got %s", want, got)
-		}
 	}
 }

@@ -309,6 +309,18 @@ func (vm *VM) evalIntMethod(subj *object, m *checker_v2.InstanceMethod) *object 
 func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object {
 	raw := subj.raw.([]*object)
 	switch m.Method.Name {
+	case "at":
+		index := vm.eval(m.Method.Args[0]).raw.(int)
+		return &object{raw[index].raw, m.Type()}
+	case "set":
+		index := vm.eval(m.Method.Args[0]).raw.(int)
+		value := vm.eval(m.Method.Args[1])
+		result := &object{false, checker_v2.Bool}
+		if index <= len(raw) {
+			raw[index] = value
+			result.raw = true
+		}
+		return result
 	case "size":
 		return &object{len(raw), checker_v2.Int}
 	case "push":

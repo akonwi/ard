@@ -5,6 +5,14 @@ import "fmt"
 type Type interface {
 	String() string
 	get(name string) Type
+
+	/* A.K.A 'compatible()'
+	  The Ard type system only allows generics in parameters.
+		This means equal is called as `expected.equal(actual)`,
+		where `expected` is the declared parameter type and `actual` is the provided dynamic type.
+		The exception is when resolving generics in a function call based on inferred types.
+	 	In this scenario, the generic is the `other` argument, so that the callee type can fill in the resolved type.
+	*/
 	equal(other Type) bool
 }
 
@@ -105,16 +113,32 @@ func (l List) String() string {
 }
 func (l List) get(name string) Type {
 	switch name {
-	case "size":
+	case "at":
 		return &FunctionDef{
 			Name:       name,
-			ReturnType: Int,
+			Parameters: []Parameter{{Name: "index", Type: Int}},
+			ReturnType: &Maybe{l.of},
 		}
 	case "push":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "value", Type: l.of}},
 			Mutates:    true,
+			ReturnType: Int,
+		}
+	case "set":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "index", Type: Int},
+				{Name: "value", Type: l.of},
+			},
+			Mutates:    true,
+			ReturnType: Bool,
+		}
+	case "size":
+		return &FunctionDef{
+			Name:       name,
 			ReturnType: Int,
 		}
 	default:
