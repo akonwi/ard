@@ -384,7 +384,7 @@ func TestListApi(t *testing.T) {
 }
 
 func TestMapApi(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name: "Map::size",
 			input: `

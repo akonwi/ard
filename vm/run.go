@@ -10,6 +10,44 @@ import (
 
 var void = &object{nil, checker_v2.Void}
 
+// compareKey is a wrapper around an object to use for map keys
+// enabling proper equality comparison
+type compareKey struct {
+	obj *object
+	// Store a string representation for hashability
+	strKey string
+}
+
+// Go requires map keys to be comparable with ==
+// We need to ensure that our compareKey is comparable
+// Here's what we'll do:
+// 1. Create a string representation of the object to use as the key
+// 2. Implement Equals method to compare based on the underlying objects
+
+// Override constructor to set strKey
+func newCompareKey(o *object) compareKey {
+	if o == nil {
+		return compareKey{nil, "nil"}
+	}
+
+	var strKey string
+	switch v := o.raw.(type) {
+	case string:
+		strKey = v
+	case int:
+		strKey = strconv.Itoa(v)
+	case bool:
+		strKey = strconv.FormatBool(v)
+	case float64:
+		strKey = strconv.FormatFloat(v, 'g', -1, 64)
+	default:
+		// For complex types use the pointer address
+		strKey = fmt.Sprintf("%p", o.raw)
+	}
+
+	return compareKey{o, strKey}
+}
+
 func Run2(program *checker_v2.Program) (any, error) {
 	vm := New()
 	for _, statement := range program.Statements {
@@ -218,8 +256,14 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			if subj._type == checker_v2.Int {
 				return vm.evalIntMethod(subj, e)
 			}
+			if subj._type == checker_v2.Bool {
+				return vm.evalBoolMethod(subj, e)
+			}
 			if _, ok := subj._type.(*checker_v2.List); ok {
 				return vm.evalListMethod(subj, e)
+			}
+			if _, ok := subj._type.(*checker_v2.Map); ok {
+				return vm.evalMapMethod(subj, e)
 			}
 			if _, ok := subj._type.(*checker_v2.Maybe); ok {
 				return vm.evalMaybeMethod(subj, e)
@@ -283,6 +327,48 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			}
 			return &object{raw, e.Type()}
 		}
+	case *checker_v2.MapLiteral:
+		{
+			raw := make(map[string]*object)
+			for i := range e.Keys {
+				key := vm.eval(e.Keys[i])
+				value := vm.eval(e.Values[i])
+
+				// Create a string representation for the key
+				var keyStr string
+				switch v := key.raw.(type) {
+				case string:
+					keyStr = v
+				case int:
+					keyStr = strconv.Itoa(v)
+				case bool:
+					keyStr = strconv.FormatBool(v)
+				case float64:
+					keyStr = strconv.FormatFloat(v, 'g', -1, 64)
+				default:
+					// For complex types use the pointer address
+					keyStr = fmt.Sprintf("%p", key.raw)
+				}
+
+				raw[keyStr] = value
+			}
+			return &object{raw, e.Type()}
+		}
+	case *checker_v2.OptionMatch:
+		{
+			subject := vm.eval(e.Subject)
+			if subject.raw == nil {
+				// None case - evaluate the None block
+				return vm.evalBlock2(e.None, nil)
+			} else {
+				// Some case - bind the value and evaluate the Some block
+				return vm.evalBlock2(e.Some.Body, func() {
+					// Bind the pattern name to the value
+					subject := &object{subject.raw, subject._type.(*checker_v2.Maybe).Of()}
+					vm.scope.add(e.Some.Pattern.Name, subject)
+				})
+			}
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
@@ -322,6 +408,15 @@ func (vm *VM) evalIntMethod(subj *object, m *checker_v2.InstanceMethod) *object 
 	}
 }
 
+func (vm *VM) evalBoolMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+	switch m.Method.Name {
+	case "to_str":
+		return &object{strconv.FormatBool(subj.raw.(bool)), checker_v2.Str}
+	default:
+		return void
+	}
+}
+
 func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object {
 	raw := subj.raw.([]*object)
 	switch m.Method.Name {
@@ -342,6 +437,106 @@ func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object
 	case "push":
 		subj.raw = append(raw, vm.eval(m.Method.Args[0]))
 		return subj
+	default:
+		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
+	}
+}
+
+func (vm *VM) evalMapMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+	raw := subj.raw.(map[string]*object)
+	switch m.Method.Name {
+	case "size":
+		return &object{len(raw), checker_v2.Int}
+	case "get":
+		keyArg := vm.eval(m.Method.Args[0])
+
+		// Convert key to string
+		var keyStr string
+		switch v := keyArg.raw.(type) {
+		case string:
+			keyStr = v
+		case int:
+			keyStr = strconv.Itoa(v)
+		case bool:
+			keyStr = strconv.FormatBool(v)
+		case float64:
+			keyStr = strconv.FormatFloat(v, 'g', -1, 64)
+		default:
+			keyStr = fmt.Sprintf("%p", keyArg.raw)
+		}
+
+		// Try to find the key
+		value, found := raw[keyStr]
+		if !found {
+			// Return nil for the maybe type
+			return &object{nil, m.Type()}
+		}
+		return &object{value.raw, m.Type()}
+	case "set":
+		keyArg := vm.eval(m.Method.Args[0])
+		valueArg := vm.eval(m.Method.Args[1])
+
+		// Convert key to string
+		var keyStr string
+		switch v := keyArg.raw.(type) {
+		case string:
+			keyStr = v
+		case int:
+			keyStr = strconv.Itoa(v)
+		case bool:
+			keyStr = strconv.FormatBool(v)
+		case float64:
+			keyStr = strconv.FormatFloat(v, 'g', -1, 64)
+		default:
+			keyStr = fmt.Sprintf("%p", keyArg.raw)
+		}
+
+		// Add or update the entry
+		raw[keyStr] = valueArg
+		// Return success
+		return &object{true, checker_v2.Bool}
+	case "drop":
+		keyArg := vm.eval(m.Method.Args[0])
+
+		// Convert key to string
+		var keyStr string
+		switch v := keyArg.raw.(type) {
+		case string:
+			keyStr = v
+		case int:
+			keyStr = strconv.Itoa(v)
+		case bool:
+			keyStr = strconv.FormatBool(v)
+		case float64:
+			keyStr = strconv.FormatFloat(v, 'g', -1, 64)
+		default:
+			keyStr = fmt.Sprintf("%p", keyArg.raw)
+		}
+
+		// Remove the entry
+		delete(raw, keyStr)
+		return void
+	case "has":
+		keyArg := vm.eval(m.Method.Args[0])
+
+		// Convert key to string
+		var keyStr string
+		switch v := keyArg.raw.(type) {
+		case string:
+			keyStr = v
+		case int:
+			keyStr = strconv.Itoa(v)
+		case bool:
+			keyStr = strconv.FormatBool(v)
+		case float64:
+			keyStr = strconv.FormatFloat(v, 'g', -1, 64)
+		default:
+			keyStr = fmt.Sprintf("%p", keyArg.raw)
+		}
+
+		// Check if the key exists
+		_, found := raw[keyStr]
+		return &object{found, checker_v2.Bool}
 	default:
 		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
 	}

@@ -83,6 +83,12 @@ type _bool struct{}
 func (b _bool) String() string { return "Bool" }
 func (b _bool) get(name string) Type {
 	switch name {
+	case "to_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
 	default:
 		return nil
 	}
@@ -187,9 +193,32 @@ func (m Map) get(name string) Type {
 			Mutates:    true,
 			ReturnType: Bool,
 		}
+	case "drop":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "key", Type: m.key}},
+			Mutates:    true,
+			ReturnType: Void,
+		}
+	case "has":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "key", Type: m.key}},
+			ReturnType: Bool,
+		}
+	case "size":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Int,
+		}
 	default:
 		return nil
 	}
+}
+
+func (m *Map) Value() Type {
+	return m.value
 }
 
 type Maybe struct {
@@ -217,6 +246,9 @@ func (m *Maybe) equal(other Type) bool {
 	}
 
 	return false
+}
+func (m *Maybe) Of() Type {
+	return m.of
 }
 
 type Any struct {
