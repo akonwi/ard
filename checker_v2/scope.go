@@ -20,12 +20,12 @@ func newScope(parent *scope) *scope {
 func (s *scope) add(sym symbol) {
 	s.symbols[sym.name()] = sym
 }
-func (s *scope) getVar(name string) symbol {
+func (s *scope) get(name string) symbol {
 	if sym, ok := s.symbols[name]; ok {
 		return sym
 	}
 	if s.parent != nil {
-		return s.parent.getVar(name)
+		return s.parent.get(name)
 	}
 	return nil
 }

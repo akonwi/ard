@@ -726,7 +726,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		value := c.resolveType(ty.Value)
 		baseType = MakeMap(key, value)
 	case *ast.CustomType:
-		if sym := c.scope.getVar(t.GetName()); sym != nil {
+		if sym := c.scope.get(t.GetName()); sym != nil {
 			if enum, ok := sym.(*Enum); ok {
 				baseType = enum
 				break
@@ -817,7 +817,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		{
 			// todo: not always a variable
 			if id, ok := s.Target.(*ast.Identifier); ok {
-				target := c.scope.getVar(id.Name)
+				target := c.scope.get(id.Name)
 				if target == nil {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
 					return nil
@@ -1038,9 +1038,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Variants: s.Variants,
 			}
 			c.scope.add(enum)
-			return &Statement{
-				Stmt: enum,
-			}
+			return nil
 		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
@@ -1304,14 +1302,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return &TemplateStr{chunks}
 		}
 	case *ast.Identifier:
-		if sym := c.scope.getVar(s.Name); sym != nil {
+		if sym := c.scope.get(s.Name); sym != nil {
 			return &Variable{sym}
 		}
 		panic(fmt.Errorf("Undefined variable: %s", s.Name))
 	case *ast.FunctionCall:
 		{
 			// Find the function in the scope
-			fnSym := c.scope.getVar(s.Name)
+			fnSym := c.scope.get(s.Name)
 			if fnSym == nil {
 				c.addError(fmt.Sprintf("Undefined function: %s", s.Name), s.GetLocation())
 				return nil
@@ -2076,7 +2074,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 	case *ast.StaticProperty:
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
-				sym := c.scope.getVar(id.Name)
+				sym := c.scope.get(id.Name)
 				if sym == nil {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
 					return nil

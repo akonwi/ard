@@ -1899,14 +1899,7 @@ func TestEnums(t *testing.T) {
 				}
 			`,
 			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.Enum{
-							Name:     "Color",
-							Variants: []string{"Red", "Yellow", "Green"},
-						},
-					},
-				},
+				Statements: []checker.Statement{},
 			},
 		},
 		{
@@ -1949,12 +1942,6 @@ func TestEnums(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
-					{
-						Stmt: &checker.Enum{
-							Name:     "Color",
-							Variants: []string{"blue", "green", "purple"},
-						},
-					},
 					{
 						Stmt: &checker.VariableDef{
 							Name:  "choice",
