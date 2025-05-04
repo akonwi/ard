@@ -323,7 +323,7 @@ func TestFloatApi(t *testing.T) {
 }
 
 func TestBoolApi(t *testing.T) {
-	if res := run(t, `true.to_str()`); res != "true" {
+	if res := run2(t, `true.to_str()`); res != "true" {
 		t.Errorf(`Expected "true", got %v`, res)
 	}
 }
