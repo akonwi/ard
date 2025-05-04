@@ -1,17 +1,39 @@
 package checker_v2
 
 var preludePkgs = map[string]*StdPackage{
-	"Int": {Name: "Int", Path: "ard/ints"},
+	"Float": {Name: "Int", Path: "ard/float"},
+	"Int":   {Name: "Int", Path: "ard/ints"},
 }
 
 func getInPackage(pkgPath, name string) symbol {
 	switch pkgPath {
+	case "ard/float":
+		return getInFloat(name)
 	case "ard/ints":
 		return getInInts(name)
 	case "ard/io":
 		return getInIO(name)
 	case "ard/maybe":
 		return getInMaybe(name)
+	default:
+		return nil
+	}
+}
+
+func getInFloat(name string) symbol {
+	switch name {
+	case "from_int":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "int", Type: Int}},
+			ReturnType: Float,
+		}
+	case "from_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "string", Type: Str}},
+			ReturnType: &Maybe{Float},
+		}
 	default:
 		return nil
 	}

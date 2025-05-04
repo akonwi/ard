@@ -303,7 +303,7 @@ func TestNumApi(t *testing.T) {
 }
 
 func TestFloatApi(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name:  ".to_str() returns the Str representation of a Float",
 			input: `10.1.to_str()`,

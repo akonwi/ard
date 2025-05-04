@@ -259,6 +259,9 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			if subj._type == checker_v2.Int {
 				return vm.evalIntMethod(subj, e)
 			}
+			if subj._type == checker_v2.Float {
+				return vm.evalFloatMethod(subj, e.Method)
+			}
 			if subj._type == checker_v2.Bool {
 				return vm.evalBoolMethod(subj, e)
 			}
@@ -289,6 +292,24 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 					return res
 				default:
 					panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
+				}
+			}
+
+			if e.Package == "ard/float" {
+				switch e.Call.Name {
+				case "from_int":
+					input := vm.eval(e.Call.Args[0]).raw.(int)
+					return &object{float64(input), e.Call.Type()}
+				case "from_str":
+					input := vm.eval(e.Call.Args[0]).raw.(string)
+
+					res := &object{nil, e.Call.Type()}
+					if num, err := strconv.ParseFloat(input, 64); err == nil {
+						res.raw = num
+					}
+					return res
+				default:
+					panic(fmt.Errorf("Unimplemented: Float::%s()", e.Call.Name))
 				}
 			}
 
@@ -419,6 +440,15 @@ func (vm *VM) evalIntMethod(subj *object, m *checker_v2.InstanceMethod) *object 
 	switch m.Method.Name {
 	case "to_str":
 		return &object{strconv.Itoa(subj.raw.(int)), checker_v2.Str}
+	default:
+		return void
+	}
+}
+
+func (vm *VM) evalFloatMethod(subj *object, m *checker_v2.FunctionCall) *object {
+	switch m.Name {
+	case "to_str":
+		return &object{strconv.FormatFloat(subj.raw.(float64), 'f', 2, 64), checker_v2.Str}
 	default:
 		return void
 	}

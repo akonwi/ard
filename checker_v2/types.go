@@ -84,6 +84,12 @@ type float struct{}
 func (f float) String() string { return "Float" }
 func (f float) get(name string) Type {
 	switch name {
+	case "to_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
 	default:
 		return nil
 	}
