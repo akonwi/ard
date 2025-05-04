@@ -284,8 +284,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				case "from_str":
 					input := vm.eval(e.Call.Args[0]).raw.(string)
 
-					// todo: this type should be a Maybe
-					res := &object{nil, checker_v2.Int}
+					res := &object{nil, e.Call.Type()}
 					if num, err := strconv.Atoi(input); err == nil {
 						res.raw = num
 					}

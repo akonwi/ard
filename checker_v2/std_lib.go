@@ -45,7 +45,7 @@ func getInInts(name string) symbol {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "string", Type: Str}},
-			ReturnType: Int,
+			ReturnType: &Maybe{Int},
 		}
 	default:
 		return nil
