@@ -415,6 +415,18 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 		}
 	case *checker_v2.EnumVariant:
 		return &object{e.Variant, e.Type()}
+	case *checker_v2.BoolMatch:
+		{
+			subject := vm.eval(e.Subject)
+			value := subject.raw.(bool)
+
+			// Execute the appropriate case based on the boolean value
+			if value {
+				return vm.evalBlock2(e.True, nil)
+			} else {
+				return vm.evalBlock2(e.False, nil)
+			}
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}

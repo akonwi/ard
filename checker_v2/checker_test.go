@@ -2107,111 +2107,84 @@ func TestMatchingOnEnums(t *testing.T) {
 	})
 }
 
-// func TestMatchingOnBooleans(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Matching on booleans",
-// 			input: strings.Join([]string{
-// 				`let is_big = "foo".size() > 20`,
-// 				`match is_big {`,
-// 				`  true => "big",`,
-// 				`  false => "smol"`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name: "is_big",
-// 						Value: BinaryExpr{
-// 							Op: GreaterThan,
-// 							Left: InstanceMethod{
-// 								Subject: StrLiteral{Value: "foo"},
-// 								Method:  FunctionCall{Name: "size", Args: []Expression{}},
-// 							},
-// 							Right: IntLiteral{Value: 20},
-// 						},
-// 					},
-// 					BoolMatch{
-// 						Subject: Identifier{
-// 							Name: "is_big",
-// 						},
-// 						True: Block{
-// 							Body: []Statement{
-// 								StrLiteral{Value: "big"},
-// 							},
-// 						},
-// 						False: Block{
-// 							Body: []Statement{
-// 								StrLiteral{Value: "smol"},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Matching on booleans should be exhaustive",
-// 			input: strings.Join([]string{
-// 				`let is_big = "foo".size() > 20`,
-// 				`match is_big {`,
-// 				`  true => "big",`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Incomplete match: Missing case for 'false'",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Duplicate cases are caught",
-// 			input: strings.Join([]string{
-// 				`let is_big = "foo".size() > 20`,
-// 				`match is_big {`,
-// 				`  true => "big",`,
-// 				`  true => "big",`,
-// 				`  false => "smol",`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Duplicate case: 'true'",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Each case must return the same type",
-// 			input: strings.Join([]string{
-// 				`let is_big = "foo".size() > 20`,
-// 				`match is_big {`,
-// 				`  true => "big",`,
-// 				`  false => 21,`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Type mismatch: Expected Str, got Int",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Cannot use a catch-all case",
-// 			input: strings.Join([]string{
-// 				`let is_big = "foo".size() > 20`,
-// 				`match is_big {`,
-// 				`  true => "big",`,
-// 				`  _ => "smol"`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Catch-all case is not allowed for boolean matches"},
-// 			},
-// 		},
-// 	})
-// }
+func TestMatchingOnBooleans(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Matching on booleans",
+			input: strings.Join([]string{
+				`let is_big = "foo".size() > 20`,
+				`match is_big {`,
+				`  true => "big",`,
+				`  false => "smol"`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+		},
+		{
+			name: "Matching on booleans should be exhaustive",
+			input: strings.Join([]string{
+				`let is_big = "foo".size() > 20`,
+				`match is_big {`,
+				`  true => "big",`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Incomplete match: Missing case for 'false'",
+				},
+			},
+		},
+		{
+			name: "Duplicate cases are caught",
+			input: strings.Join([]string{
+				`let is_big = "foo".size() > 20`,
+				`match is_big {`,
+				`  true => "big",`,
+				`  true => "big",`,
+				`  false => "smol",`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Duplicate case: 'true'",
+				},
+			},
+		},
+		{
+			name: "Each case must return the same type",
+			input: strings.Join([]string{
+				`let is_big = "foo".size() > 20`,
+				`match is_big {`,
+				`  true => "big",`,
+				`  false => 21,`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Type mismatch: Expected Str, got Int",
+				},
+			},
+		},
+		{
+			name: "Cannot use a catch-all case",
+			input: strings.Join([]string{
+				`let is_big = "foo".size() > 20`,
+				`match is_big {`,
+				`  true => "big",`,
+				`  _ => "smol"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Catch-all case is not allowed for boolean matches"},
+			},
+		},
+	})
+}
 
 // func TestTypeUnions(t *testing.T) {
 // 	run(t, []test{

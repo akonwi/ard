@@ -339,7 +339,27 @@ type EnumMatch struct {
 }
 
 func (e *EnumMatch) Type() Type {
-	return e.Cases[0].Type()
+	// Find the first non-nil case
+	for _, c := range e.Cases {
+		if c != nil {
+			return c.Type()
+		}
+	}
+	// If all cases are nil, use the catch-all
+	if e.CatchAll != nil {
+		return e.CatchAll.Type()
+	}
+	return Void
+}
+
+type BoolMatch struct {
+	Subject Expression
+	True    *Block
+	False   *Block
+}
+
+func (b *BoolMatch) Type() Type {
+	return b.True.Type()
 }
 
 type FloatSubtraction struct {
@@ -2093,7 +2113,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			seenVariants := make(map[string]bool)
 			// Track whether we've seen a catch-all case
 			hasCatchAll := false
-
 			// Cases in the match statement mapped to enum variants
 			cases := make([]*Block, len(enumType.Variants))
 			var catchAllBody *Block
@@ -2198,8 +2217,77 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return enumMatch
 		}
 
+		// For Bool types, generate a BoolMatch
+		if subject.Type() == Bool {
+			var trueBody, falseBody *Block
+			// Track which cases we've seen
+			seenTrue, seenFalse := false, false
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						// Catch-all cases aren't allowed for boolean matches
+						c.addError("Catch-all case is not allowed for boolean matches", matchCase.Pattern.GetLocation())
+						return nil
+					}
+				}
+
+				// Handle boolean literal case
+				if boolLit, ok := matchCase.Pattern.(*ast.BoolLiteral); ok {
+					// Check for duplicates
+					if boolLit.Value && seenTrue {
+						c.addError("Duplicate case: 'true'", matchCase.Pattern.GetLocation())
+						return nil
+					}
+					if !boolLit.Value && seenFalse {
+						c.addError("Duplicate case: 'false'", matchCase.Pattern.GetLocation())
+						return nil
+					}
+
+					// Process the body
+					body := c.checkBlock(matchCase.Body, nil)
+					
+					// Store the body in the appropriate field
+					if boolLit.Value {
+						seenTrue = true
+						trueBody = body
+					} else {
+						seenFalse = true
+						falseBody = body
+					}
+				} else {
+					c.addError("Pattern in boolean match must be a boolean literal (true or false)", matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Check exhaustiveness
+			if !seenTrue || !seenFalse {
+				if !seenTrue {
+					c.addError("Incomplete match: Missing case for 'true'", s.GetLocation())
+				} else {
+					c.addError("Incomplete match: Missing case for 'false'", s.GetLocation())
+				}
+				return nil
+			}
+
+			// Ensure both branches return the same type
+			if !trueBody.Type().equal(falseBody.Type()) {
+				c.addError(typeMismatch(trueBody.Type(), falseBody.Type()), s.GetLocation())
+				return nil
+			}
+
+			// Create and return the BoolMatch
+			return &BoolMatch{
+				Subject: subject,
+				True:    trueBody,
+				False:   falseBody,
+			}
+		}
+
 		// For other types, handle according to their type...
-		c.addError("Currently only Maybe and Enum types are supported in match expressions", s.GetLocation())
+		c.addError("Currently only Maybe, Enum, and Bool types are supported in match expressions", s.GetLocation())
 		return nil
 	case *ast.StaticProperty:
 		{

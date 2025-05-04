@@ -529,7 +529,7 @@ func TestStructs(t *testing.T) {
 }
 
 func TestMatchingOnBooleans(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name: "Matching on booleans",
 			input: `
