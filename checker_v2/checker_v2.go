@@ -339,14 +339,7 @@ type EnumMatch struct {
 }
 
 func (e *EnumMatch) Type() Type {
-	// All cases must have the same return type
-	if len(e.Cases) > 0 {
-		return e.Cases[0].Type()
-	}
-	if e.CatchAll != nil {
-		return e.CatchAll.Type()
-	}
-	return Void
+	return e.Cases[0].Type()
 }
 
 type FloatSubtraction struct {
@@ -584,6 +577,15 @@ func (p *PackageFunctionCall) Type() Type {
 type Enum struct {
 	Name     string
 	Variants []string
+}
+
+func (e Enum) variant(name string) int8 {
+	for i, v := range e.Variants {
+		if v == name {
+			return int8(i)
+		}
+	}
+	return -1
 }
 
 func (e Enum) NonProducing() {}
@@ -2105,7 +2107,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
 							return nil
 						}
-						
+
 						hasCatchAll = true
 						catchAllBody = c.checkBlock(matchCase.Body, nil)
 						continue
@@ -2118,21 +2120,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					if enumId, ok := staticProp.Target.(*ast.Identifier); ok {
 						// Verify the enum name matches
 						if enumId.Name != enumType.Name {
-							c.addError(fmt.Sprintf("Expected %s::<variant>, got %s::%s", 
+							c.addError(fmt.Sprintf("Expected %s::<variant>, got %s::%s",
 								enumType.Name, enumId.Name, staticProp.Property.Name), staticProp.GetLocation())
 							return nil
 						}
 
 						// Find the variant in the enum
 						variantName := staticProp.Property.Name
-						variantIndex := -1
-						for i, v := range enumType.Variants {
-							if v == variantName {
-								variantIndex = i
-								break
-							}
-						}
-
+						variantIndex := enumType.variant(variantName)
 						if variantIndex == -1 {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
 							return nil
@@ -2180,13 +2175,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				if referenceType != nil {
 					if catchAllBody != nil && !referenceType.equal(catchAllBody.Type()) {
-						c.addError("Type mismatch: Expected " + referenceType.String() + ", got " + catchAllBody.Type().String(), s.GetLocation())
+						c.addError(typeMismatch(referenceType, catchAllBody.Type()), s.GetLocation())
 						return nil
 					}
 
 					for _, caseBody := range cases {
 						if caseBody != nil && !referenceType.equal(caseBody.Type()) {
-							c.addError("Type mismatch: Expected " + referenceType.String() + ", got " + caseBody.Type().String(), s.GetLocation())
+							c.addError(typeMismatch(referenceType, caseBody.Type()), s.GetLocation())
 							return nil
 						}
 					}
