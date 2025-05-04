@@ -448,7 +448,7 @@ func TestMapApi(t *testing.T) {
 }
 
 func TestEnums(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name: "Enum usage",
 			input: `
@@ -457,7 +457,7 @@ func TestEnums(t *testing.T) {
 				}
 				let dir: Direction = Direction::Right
 				dir`,
-			want: 3,
+			want: int8(3),
 		},
 		{
 			name: "Matching on enum",

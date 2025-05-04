@@ -62,6 +62,8 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 	}
 
 	switch s := stmt.Stmt.(type) {
+	case *checker_v2.Enum:
+		return nil
 	case *checker_v2.VariableDef:
 		val := vm.eval(s.Value)
 		if !s.Mutable {
@@ -392,6 +394,27 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				})
 			}
 		}
+	case *checker_v2.EnumMatch:
+		{
+			subject := vm.eval(e.Subject)
+			variantIndex := subject.raw.(int8)
+
+			// If there is a catch-all case and we do not have a specific handler for this variant
+			if e.CatchAll != nil && (variantIndex >= int8(len(e.Cases)) || e.Cases[variantIndex] == nil) {
+				return vm.evalBlock2(e.CatchAll, nil)
+			}
+
+			// Execute the matching case block for this variant
+			if variantIndex < int8(len(e.Cases)) && e.Cases[variantIndex] != nil {
+				return vm.evalBlock2(e.Cases[variantIndex], nil)
+			}
+
+			// This should never happen if the type checker is working correctly
+			// because it ensures the match is exhaustive
+			panic(fmt.Errorf("No matching case for enum variant %d", variantIndex))
+		}
+	case *checker_v2.EnumVariant:
+		return &object{e.Variant, e.Type()}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
