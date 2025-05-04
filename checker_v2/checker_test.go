@@ -1958,157 +1958,154 @@ func TestEnums(t *testing.T) {
 	})
 }
 
-// func TestMatchingOnEnums(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Matching on enums",
-// 			input: strings.Join([]string{
-// 				`enum Direction { up, down }`,
-// 				`let dir = Direction::down`,
-// 				"match dir {",
-// 				`  Direction::up => "north",`,
-// 				`  Direction::down => "south"`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					Enum{
-// 						Name:     "Direction",
-// 						Variants: []string{"up", "down"},
-// 					},
-// 					VariableBinding{
-// 						Name:  "dir",
-// 						Value: EnumVariant{Enum: "Direction", Variant: "down", Value: 1},
-// 					},
-// 					EnumMatch{
-// 						Subject: Identifier{
-// 							Name: "dir",
-// 						},
-// 						Cases: []Block{
-// 							{
-// 								Body: []Statement{
-// 									StrLiteral{Value: "north"},
-// 								},
-// 							},
-// 							{
-// 								Body: []Statement{
-// 									StrLiteral{Value: "south"},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Matching on enums should be exhaustive",
-// 			input: strings.Join([]string{
-// 				`enum Direction { up, down, left, right }`,
-// 				"let dir = Direction::down",
-// 				`match dir {`,
-// 				`  Direction::up => "north",`,
-// 				`  Direction::down => "south"`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Incomplete match: missing case for 'Direction::left'",
-// 				},
-// 				{
-// 					Kind:    Error,
-// 					Message: "Incomplete match: missing case for 'Direction::right'",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Duplicate cases are caught",
-// 			input: strings.Join([]string{
-// 				`enum Direction { up, down, left, right }`,
-// 				"let dir = Direction::down",
-// 				`match dir {`,
-// 				`  Direction::up => "north",`,
-// 				`  Direction::down => "south",`,
-// 				`  Direction::left => "west",`,
-// 				`  Direction::down => "south",`,
-// 				`  Direction::right => "east"`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Duplicate case: Direction::down",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Each case must return the same type",
-// 			input: strings.Join([]string{
-// 				`enum Direction { up, down, left, right }`,
-// 				"let dir = Direction::down",
-// 				`match dir {`,
-// 				`  Direction::up => "north",`,
-// 				`  Direction::down => "south",`,
-// 				`  Direction::left => false,`,
-// 				`  Direction::right => "east"`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Type mismatch: Expected Str, got Bool",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "A catch-all case can be provided",
-// 			input: strings.Join([]string{
-// 				`enum Direction { up, down, left, right }`,
-// 				"let dir = Direction::down",
-// 				`match dir {`,
-// 				`  Direction::up => "north",`,
-// 				`  Direction::down => "south",`,
-// 				`  _ => "lateral"`,
-// 				`}`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					Enum{
-// 						Name:     "Direction",
-// 						Variants: []string{"up", "down", "left", "right"},
-// 					},
-// 					VariableBinding{
-// 						Name:  "dir",
-// 						Value: EnumVariant{Enum: "Direction", Variant: "down", Value: 1},
-// 					},
-// 					EnumMatch{
-// 						Subject: Identifier{
-// 							Name: "dir",
-// 						},
-// 						Cases: []Block{
-// 							{
-// 								Body: []Statement{
-// 									StrLiteral{Value: "north"},
-// 								},
-// 							},
-// 							{
-// 								Body: []Statement{
-// 									StrLiteral{Value: "south"},
-// 								},
-// 							},
-// 						},
-// 						CatchAll: MatchCase{
-// 							Pattern: nil,
-// 							Body: []Statement{
-// 								StrLiteral{Value: "lateral"},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestMatchingOnEnums(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Matching on enums",
+			input: strings.Join([]string{
+				`enum Direction { up, down }`,
+				`let dir = Direction::down`,
+				"match dir {",
+				`  Direction::up => "north",`,
+				`  Direction::down => "south"`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name:  "dir",
+							Value: &checker.EnumVariant{Variant: 1},
+						},
+					},
+					{
+						Expr: &checker.EnumMatch{
+							Subject: &checker.Variable{},
+							Cases: []*checker.Block{
+								{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "north"}},
+									},
+								},
+								{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "south"}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Matching on enums should be exhaustive",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Incomplete match: missing case for 'Direction::left'",
+				},
+				{
+					Kind:    checker.Error,
+					Message: "Incomplete match: missing case for 'Direction::right'",
+				},
+			},
+		},
+		{
+			name: "Duplicate cases are caught",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south",`,
+				`  Direction::left => "west",`,
+				`  Direction::down => "south",`,
+				`  Direction::right => "east"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Duplicate case: Direction::down",
+				},
+			},
+		},
+		{
+			name: "Each case must return the same type",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south",`,
+				`  Direction::left => false,`,
+				`  Direction::right => "east"`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Type mismatch: Expected Str, got Bool",
+				},
+			},
+		},
+		{
+			name: "A catch-all case can be provided",
+			input: strings.Join([]string{
+				`enum Direction { up, down, left, right }`,
+				"let dir = Direction::down",
+				`match dir {`,
+				`  Direction::up => "north",`,
+				`  Direction::down => "south",`,
+				`  _ => "lateral"`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name:  "dir",
+							Value: &checker.EnumVariant{Variant: 1},
+						},
+					},
+					{
+						Expr: &checker.EnumMatch{
+							Subject: &checker.Variable{},
+							Cases: []*checker.Block{
+								{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "north"}},
+									},
+								},
+								{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "south"}},
+									},
+								},
+								nil,
+								nil,
+							},
+							CatchAll: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{Value: "lateral"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
 
 // func TestMatchingOnBooleans(t *testing.T) {
 // 	run(t, []test{

@@ -332,6 +332,23 @@ func (o *OptionMatch) Type() Type {
 	return o.Some.Body.Type()
 }
 
+type EnumMatch struct {
+	Subject  Expression
+	Cases    []*Block
+	CatchAll *Block
+}
+
+func (e *EnumMatch) Type() Type {
+	// All cases must have the same return type
+	if len(e.Cases) > 0 {
+		return e.Cases[0].Type()
+	}
+	if e.CatchAll != nil {
+		return e.CatchAll.Type()
+	}
+	return Void
+}
+
 type FloatSubtraction struct {
 	Left  Expression
 	Right Expression
@@ -2068,8 +2085,126 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 		}
 
+		// For Enum types, generate an EnumMatch
+		if enumType, ok := subject.Type().(*Enum); ok {
+			// Map to track which variants we've seen
+			seenVariants := make(map[string]bool)
+			// Track whether we've seen a catch-all case
+			hasCatchAll := false
+
+			// Cases in the match statement mapped to enum variants
+			cases := make([]*Block, len(enumType.Variants))
+			var catchAllBody *Block
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						// This is a catch-all case
+						if hasCatchAll {
+							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+							return nil
+						}
+						
+						hasCatchAll = true
+						catchAllBody = c.checkBlock(matchCase.Body, nil)
+						continue
+					}
+				}
+
+				// Handle enum variant case - the pattern should be a static property reference like Enum::Variant
+				if staticProp, ok := matchCase.Pattern.(*ast.StaticProperty); ok {
+					// Get the enum name from the target
+					if enumId, ok := staticProp.Target.(*ast.Identifier); ok {
+						// Verify the enum name matches
+						if enumId.Name != enumType.Name {
+							c.addError(fmt.Sprintf("Expected %s::<variant>, got %s::%s", 
+								enumType.Name, enumId.Name, staticProp.Property.Name), staticProp.GetLocation())
+							return nil
+						}
+
+						// Find the variant in the enum
+						variantName := staticProp.Property.Name
+						variantIndex := -1
+						for i, v := range enumType.Variants {
+							if v == variantName {
+								variantIndex = i
+								break
+							}
+						}
+
+						if variantIndex == -1 {
+							c.addError(fmt.Sprintf("Undefined: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+							return nil
+						}
+
+						// Check for duplicate cases
+						if seenVariants[variantName] {
+							c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+							return nil
+						}
+						seenVariants[variantName] = true
+
+						// Check the body for this case
+						body := c.checkBlock(matchCase.Body, nil)
+						cases[variantIndex] = body
+					} else {
+						c.addError("Invalid pattern in enum match", matchCase.Pattern.GetLocation())
+						return nil
+					}
+				} else {
+					c.addError("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Check if the match is exhaustive
+			if !hasCatchAll {
+				for i, variant := range enumType.Variants {
+					if cases[i] == nil {
+						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, variant), s.GetLocation())
+					}
+				}
+			}
+
+			// Ensure all cases return the same type
+			if len(cases) > 0 {
+				// Find the first non-nil case to use as reference type
+				var referenceType Type
+				for _, caseBody := range cases {
+					if caseBody != nil {
+						referenceType = caseBody.Type()
+						break
+					}
+				}
+
+				if referenceType != nil {
+					if catchAllBody != nil && !referenceType.equal(catchAllBody.Type()) {
+						c.addError("Type mismatch: Expected " + referenceType.String() + ", got " + catchAllBody.Type().String(), s.GetLocation())
+						return nil
+					}
+
+					for _, caseBody := range cases {
+						if caseBody != nil && !referenceType.equal(caseBody.Type()) {
+							c.addError("Type mismatch: Expected " + referenceType.String() + ", got " + caseBody.Type().String(), s.GetLocation())
+							return nil
+						}
+					}
+				}
+			}
+
+			// Create the EnumMatch
+			enumMatch := &EnumMatch{
+				Subject:  subject,
+				Cases:    cases,
+				CatchAll: catchAllBody,
+			}
+
+			return enumMatch
+		}
+
 		// For other types, handle according to their type...
-		c.addError("Currently only Maybe types are supported in match expressions", s.GetLocation())
+		c.addError("Currently only Maybe and Enum types are supported in match expressions", s.GetLocation())
 		return nil
 	case *ast.StaticProperty:
 		{
