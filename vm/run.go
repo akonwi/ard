@@ -253,6 +253,9 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	case *checker_v2.InstanceMethod:
 		{
 			subj := vm.eval(e.Subject)
+			if subj._type == checker_v2.Str {
+				return vm.evalStrMethod(subj, e.Method)
+			}
 			if subj._type == checker_v2.Int {
 				return vm.evalIntMethod(subj, e)
 			}
@@ -394,6 +397,19 @@ func (vm *VM) evalStrProperty(subj *object, name string) *object {
 	switch name {
 	case "size":
 		return &object{len(subj.raw.(string)), checker_v2.Int}
+	default:
+		return void
+	}
+}
+
+func (vm *VM) evalStrMethod(subj *object, m *checker_v2.FunctionCall) *object {
+	switch m.Name {
+	case "size":
+		return &object{len(subj.raw.(string)), checker_v2.Int}
+	case "is_empty":
+		return &object{len(subj.raw.(string)) == 0, checker_v2.Bool}
+	case "contains":
+		return &object{strings.Contains(subj.raw.(string), vm.eval(m.Args[0]).raw.(string)), checker_v2.Bool}
 	default:
 		return void
 	}

@@ -21,8 +21,24 @@ type str struct{}
 func (s str) String() string { return "Str" }
 func (s str) get(name string) Type {
 	switch name {
+	case "contains":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "sub", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "is_empty":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Bool,
+		}
 	case "size":
-		return Int
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Int,
+		}
 	default:
 		return nil
 	}

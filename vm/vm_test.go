@@ -235,7 +235,7 @@ func TestIfStatements(t *testing.T) {
 				let is_on = false
 				mut result = ""
 				if is_on { result = "then" }
-				else if result.size == 0 { result = "else if" }
+				else if result.size() == 0 { result = "else if" }
 				else { result = "else" }
 				result`,
 			want: "else if",
@@ -336,17 +336,17 @@ func TestStrApi(t *testing.T) {
 			want:  6,
 		},
 		{
-			name:  "Str.is_empty",
+			name:  "Str.is_empty()",
 			input: `"".is_empty()`,
 			want:  true,
 		},
 		{
-			name:  "Str.contains",
+			name:  "Str.contains()",
 			input: `"foobar".contains("oba")`,
 			want:  true,
 		},
 	}
-	runTests(t, tests)
+	runTests2(t, tests)
 }
 
 func TestListApi(t *testing.T) {
