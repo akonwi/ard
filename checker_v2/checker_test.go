@@ -21,6 +21,7 @@ var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
 		checker.Diagnostic{},
+		checker.EnumVariant{},
 		checker.Identifier{},
 		checker.InstanceProperty{},
 		checker.Statement{},
@@ -1886,87 +1887,89 @@ func TestMaps(t *testing.T) {
 	})
 }
 
-// func TestEnums(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Valid enum definition",
-// 			input: `
-// 				enum Color {
-// 					Red,
-// 					Yellow,
-// 					Green
-// 				}
-// 			`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					Enum{
-// 						Name:     "Color",
-// 						Variants: []string{"Red", "Yellow", "Green"},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:  "Enums must have at least one variant",
-// 			input: `enum Color {}`,
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Enums must have at least one variant",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Variants must be unique",
-// 			input: strings.Join([]string{
-// 				`enum Color {`,
-// 				`  Blue,`,
-// 				`  Green,`,
-// 				`  Blue`,
-// 				`}`,
-// 			}, "\n"),
-// 			diagnostics: []Diagnostic{
-// 				{
-// 					Kind:    Error,
-// 					Message: "Duplicate variant: Blue",
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Referencing a variant",
-// 			input: strings.Join([]string{
-// 				`enum Color {`,
-// 				`  blue,`,
-// 				`  green,`,
-// 				`  purple`,
-// 				`}`,
-// 				`Color::onyx`,
-// 				`Color.green`,
-// 				`let choice: Color = Color::green`,
-// 			}, "\n"),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					Enum{
-// 						Name:     "Color",
-// 						Variants: []string{"blue", "green", "purple"},
-// 					},
-// 					VariableBinding{
-// 						Name: "choice",
-// 						Value: EnumVariant{
-// 							Enum:    "Color",
-// 							Variant: "green",
-// 							Value:   1,
-// 						},
-// 					},
-// 				},
-// 			},
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Undefined: Color::onyx"},
-// 				{Kind: Error, Message: "Undefined: Color.green"},
-// 			},
-// 		},
-// 	})
-// }
+func TestEnums(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Valid enum definition",
+			input: `
+				enum Color {
+					Red,
+					Yellow,
+					Green
+				}
+			`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.Enum{
+							Name:     "Color",
+							Variants: []string{"Red", "Yellow", "Green"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Enums must have at least one variant",
+			input: `enum Color {}`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Enums must have at least one variant",
+				},
+			},
+		},
+		{
+			name: "Variants must be unique",
+			input: strings.Join([]string{
+				`enum Color {`,
+				`  Blue,`,
+				`  Green,`,
+				`  Blue`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Duplicate variant: Blue",
+				},
+			},
+		},
+		{
+			name: "Referencing a variant",
+			input: strings.Join([]string{
+				`enum Color {`,
+				`  blue,`,
+				`  green,`,
+				`  purple`,
+				`}`,
+				`Color::onyx`,
+				`Color.yellow`,
+				`let choice: Color = Color::green`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.Enum{
+							Name:     "Color",
+							Variants: []string{"blue", "green", "purple"},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Name:  "choice",
+							Value: &checker.EnumVariant{Variant: 1},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: Color::onyx"},
+				{Kind: checker.Error, Message: "Undefined: Color.yellow"},
+			},
+		},
+	})
+}
 
 // func TestMatchingOnEnums(t *testing.T) {
 // 	run(t, []test{

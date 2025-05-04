@@ -564,6 +564,59 @@ func (p *PackageFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type Enum struct {
+	Name     string
+	Variants []string
+}
+
+func (e Enum) NonProducing() {}
+
+func (e Enum) _type() Type {
+	return e
+}
+func (e Enum) name() string {
+	return e.Name
+}
+
+func (e Enum) Type() Type {
+	return e
+}
+func (e Enum) String() string {
+	return e.Name
+}
+func (e Enum) equal(other Type) bool {
+	o, ok := other.(*Enum)
+	if !ok {
+		return false
+	}
+	if e.Name != o.Name {
+		return false
+	}
+	if len(e.Variants) != len(o.Variants) {
+		return false
+	}
+	for i := range e.Variants {
+		if e.Variants[i] != o.Variants[i] {
+			return false
+		}
+	}
+	return true
+}
+func (e Enum) get(name string) Type { return nil }
+
+type EnumVariant struct {
+	enum    *Enum
+	Variant int8
+}
+
+func (ev EnumVariant) Type() Type {
+	return ev.enum
+}
+
+func (ev EnumVariant) String() string {
+	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Variants[ev.Variant])
+}
+
 func isMutable(expr Expression) bool {
 	if v, ok := expr.(*Variable); ok {
 		return v.isMutable()
@@ -672,6 +725,15 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
 		baseType = MakeMap(key, value)
+	case *ast.CustomType:
+		if sym := c.scope.getVar(t.GetName()); sym != nil {
+			if enum, ok := sym.(*Enum); ok {
+				baseType = enum
+				break
+			}
+		}
+		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
+		return nil
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
 	}
@@ -954,6 +1016,32 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
 			return nil
 		}
+	case *ast.EnumDefinition:
+		{
+			if len(s.Variants) == 0 {
+				c.addError("Enums must have at least one variant", s.GetLocation())
+				return nil
+			}
+
+			// Check for duplicate variant names
+			seenVariants := make(map[string]bool)
+			for _, variant := range s.Variants {
+				if seenVariants[variant] {
+					c.addError(fmt.Sprintf("Duplicate variant: %s", variant), s.GetLocation())
+					return nil
+				}
+				seenVariants[variant] = true
+			}
+
+			enum := &Enum{
+				Name:     s.Name,
+				Variants: s.Variants,
+			}
+			c.scope.add(enum)
+			return &Statement{
+				Stmt: enum,
+			}
+		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
 		if expr == nil {
@@ -1052,7 +1140,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 				c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
 				return nil
 			}
-			
+
 			// Return empty map with the declared type
 			return &MapLiteral{
 				Keys:   []Expression{},
@@ -1108,7 +1196,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 			}
 			values[i] = value
 		}
-		
+
 		if hasError {
 			return nil
 		}
@@ -1127,7 +1215,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 	// Check the first entry to determine key and value types
 	firstKey := c.checkExpr(expr.Entries[0].Key)
 	firstValue := c.checkExpr(expr.Entries[0].Value)
-	
+
 	if firstKey == nil || firstValue == nil {
 		return nil
 	}
@@ -1985,6 +2073,36 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		// For other types, handle according to their type...
 		c.addError("Currently only Maybe types are supported in match expressions", s.GetLocation())
 		return nil
+	case *ast.StaticProperty:
+		{
+			if id, ok := s.Target.(*ast.Identifier); ok {
+				sym := c.scope.getVar(id.Name)
+				if sym == nil {
+					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
+					return nil
+				}
+				enum, ok := sym.(*Enum)
+				if !ok {
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property), id.GetLocation())
+					return nil
+				}
+
+				var variant int8 = -1
+				for i := range enum.Variants {
+					if enum.Variants[i] == s.Property.Name {
+						variant = int8(i)
+						break
+					}
+				}
+				if variant == -1 {
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property.Name), id.GetLocation())
+					return nil
+				}
+
+				return &EnumVariant{enum: enum, Variant: variant}
+			}
+			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
+		}
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}
