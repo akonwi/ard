@@ -744,6 +744,55 @@ func (u Union) equal(other Type) bool {
 	return false
 }
 
+type StructDef struct {
+	Name   string
+	Fields map[string]Type
+}
+
+func (def *StructDef) name() string {
+	return def.Name
+}
+func (def StructDef) _type() Type {
+	return def
+}
+func (def StructDef) String() string {
+	return def.name()
+}
+func (def StructDef) get(name string) Type {
+	field, ok := def.Fields[name]
+	if !ok {
+		return nil
+	}
+	return field
+}
+func (def StructDef) equal(other Type) bool {
+	if otherDef, ok := other.(StructDef); ok {
+		if def.Name != otherDef.Name {
+			return false
+		}
+		if len(def.Fields) != len(otherDef.Fields) {
+			return false
+		}
+		for name, fieldType := range def.Fields {
+			if otherFieldType, ok := otherDef.Fields[name]; !ok || !fieldType.equal(otherFieldType) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+type StructInstance struct {
+	Name   string
+	Fields map[string]Expression
+	_type  *StructDef
+}
+
+func (s StructInstance) Type() Type {
+	return s._type
+}
+
 func isMutable(expr Expression) bool {
 	if v, ok := expr.(*Variable); ok {
 		return v.isMutable()
@@ -1006,7 +1055,28 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					}
 				}
 			}
-			return nil
+
+			if ip, ok := s.Target.(*ast.InstanceProperty); ok {
+				subject := c.checkExpr(ip)
+				if subject == nil {
+					return nil
+				}
+				value := c.checkExpr(s.Value)
+				if value == nil {
+					return nil
+				}
+
+				if !isMutable(subject) {
+					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+					return nil
+				}
+
+				return &Statement{
+					Stmt: &Reassignment{Target: subject, Value: value},
+				}
+			}
+
+			panic(fmt.Sprintf("Unimplemented reassignment target: %T", s.Target))
 		}
 	case *ast.WhileLoop:
 		{
@@ -1222,6 +1292,27 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Variants: s.Variants,
 			}
 			c.scope.add(enum)
+			return nil
+		}
+	case *ast.StructDefinition:
+		{
+			def := &StructDef{
+				Name:   s.Name.Name,
+				Fields: make(map[string]Type),
+			}
+			for _, field := range s.Fields {
+				fieldType := c.resolveType(field.Type)
+				if fieldType == nil {
+					return nil
+				}
+
+				if _, dup := def.Fields[field.Name.Name]; dup {
+					c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
+					return nil
+				}
+				def.Fields[field.Name.Name] = fieldType
+			}
+			c.scope.add(def)
 			return nil
 		}
 	default:
@@ -2572,6 +2663,43 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}
+	case *ast.StructInstance:
+		name := s.Name.Name
+		sym := c.scope.get(name)
+		if sym == nil {
+			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
+			return nil
+		}
+
+		structType, ok := sym.(*StructDef)
+		if !ok {
+			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
+			return nil
+		}
+
+		instance := &StructInstance{Name: name, _type: structType}
+		fields := make(map[string]Expression)
+		for _, prop := range s.Properties {
+			if structType.Fields[prop.Name.Name] == nil {
+				c.addError(fmt.Sprintf("Unknown field: %s", prop.Name.Name), prop.GetLocation())
+			} else {
+				fields[prop.Name.Name] = c.checkExpr(prop.Value)
+			}
+		}
+
+		missing := []string{}
+		for name, _ := range structType.Fields {
+			if _, exists := fields[name]; !exists {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), s.GetLocation())
+			return nil
+		}
+
+		instance.Fields = fields
+		return instance
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}

@@ -30,6 +30,7 @@ var compareOptions = cmp.Options{
 		checker.FunctionCall{},
 		checker.ListLiteral{},
 		checker.MapLiteral{},
+		checker.StructInstance{},
 	),
 }
 
