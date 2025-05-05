@@ -27,6 +27,10 @@ func Run2(program *checker_v2.Program) (any, error) {
 }
 
 func (vm *VM) do(stmt checker_v2.Statement) *object {
+	if stmt.Break {
+		vm.scope._break()
+		return void
+	}
 	if stmt.Expr != nil {
 		return vm.eval(stmt.Expr)
 	}
@@ -53,38 +57,56 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 		init := func() { vm.do(checker_v2.Statement{Stmt: s.Init}) }
 		update := func() { vm.do(checker_v2.Statement{Stmt: s.Update}) }
 		for init(); vm.eval(s.Condition).raw.(bool); update() {
-			vm.evalBlock2(s.Body, nil)
+			_, broke := vm.evalBlock2(s.Body, func() { vm.scope.breakable = true })
+			if broke {
+				break
+			}
 		}
 		return void
 	case *checker_v2.ForIntRange:
 		i := vm.eval(s.Start).raw.(int)
 		end := vm.eval(s.End).raw.(int)
 		for i <= end {
-			vm.evalBlock2(s.Body, func() {
+			_, broke := vm.evalBlock2(s.Body, func() {
+				vm.scope.breakable = true
 				vm.scope.add(s.Cursor, &object{i, checker_v2.Int})
 			})
+			if broke {
+				break
+			}
 			i++
 		}
 		return void
 	case *checker_v2.ForInStr:
 		val := vm.eval(s.Value).raw.(string)
 		for _, c := range val {
-			vm.evalBlock2(s.Body, func() {
+			_, broke := vm.evalBlock2(s.Body, func() {
+				vm.scope.breakable = true
 				vm.scope.add(s.Cursor, &object{string(c), checker_v2.Str})
 			})
+			if broke {
+				break
+			}
 		}
 		return void
 	case *checker_v2.ForInList:
 		val := vm.eval(s.List).raw.([]*object)
 		for i := range val {
-			vm.evalBlock2(s.Body, func() {
+			_, broke := vm.evalBlock2(s.Body, func() {
+				vm.scope.breakable = true
 				vm.scope.add(s.Cursor, val[i])
 			})
+			if broke {
+				break
+			}
 		}
 		return void
 	case *checker_v2.WhileLoop:
 		for vm.eval(s.Condition).raw.(bool) {
-			vm.evalBlock2(s.Body, nil)
+			_, broke := vm.evalBlock2(s.Body, func() { vm.scope.breakable = true })
+			if broke {
+				break
+			}
 		}
 		return void
 	default:
@@ -214,22 +236,26 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 		return &object{left.raw.(bool) || right.raw.(bool), checker_v2.Bool}
 	case *checker_v2.If:
 		if cond := vm.eval(e.Condition); cond.raw.(bool) {
-			return vm.evalBlock2(e.Body, nil)
+			res, _ := vm.evalBlock2(e.Body, nil)
+			return res
 		} else if e.ElseIf != nil {
 			if cond := vm.eval(e.ElseIf.Condition); cond.raw.(bool) {
-				return vm.evalBlock2(e.ElseIf.Body, nil)
+				res, _ := vm.evalBlock2(e.ElseIf.Body, nil)
+				return res
 			}
 		} else if e.Else != nil {
-			return vm.evalBlock2(e.Else, nil)
+			res, _ := vm.evalBlock2(e.Else, nil)
+			return res
 		}
 		return void
 	case *checker_v2.FunctionDef:
 		raw := func(args ...*object) *object {
-			return vm.evalBlock2(e.Body, func() {
+			res, _ := vm.evalBlock2(e.Body, func() {
 				for i := range args {
 					vm.scope.add(e.Parameters[i].Name, args[i])
 				}
 			})
+			return res
 		}
 		obj := &object{raw, e.Type()}
 		vm.scope.add(e.Name, obj)
@@ -392,14 +418,16 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			subject := vm.eval(e.Subject)
 			if subject.raw == nil {
 				// None case - evaluate the None block
-				return vm.evalBlock2(e.None, nil)
+				res, _ := vm.evalBlock2(e.None, nil)
+				return res
 			} else {
 				// Some case - bind the value and evaluate the Some block
-				return vm.evalBlock2(e.Some.Body, func() {
+				res, _ := vm.evalBlock2(e.Some.Body, func() {
 					// Bind the pattern name to the value
 					subject := &object{subject.raw, subject._type.(*checker_v2.Maybe).Of()}
 					vm.scope.add(e.Some.Pattern.Name, subject)
 				})
+				return res
 			}
 		}
 	case *checker_v2.EnumMatch:
@@ -409,12 +437,14 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 
 			// If there is a catch-all case and we do not have a specific handler for this variant
 			if e.CatchAll != nil && (variantIndex >= int8(len(e.Cases)) || e.Cases[variantIndex] == nil) {
-				return vm.evalBlock2(e.CatchAll, nil)
+				res, _ := vm.evalBlock2(e.CatchAll, nil)
+				return res
 			}
 
 			// Execute the matching case block for this variant
 			if variantIndex < int8(len(e.Cases)) && e.Cases[variantIndex] != nil {
-				return vm.evalBlock2(e.Cases[variantIndex], nil)
+				res, _ := vm.evalBlock2(e.Cases[variantIndex], nil)
+				return res
 			}
 
 			// This should never happen if the type checker is working correctly
@@ -430,9 +460,11 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 
 			// Execute the appropriate case based on the boolean value
 			if value {
-				return vm.evalBlock2(e.True, nil)
+				res, _ := vm.evalBlock2(e.True, nil)
+				return res
 			} else {
-				return vm.evalBlock2(e.False, nil)
+				res, _ := vm.evalBlock2(e.False, nil)
+				return res
 			}
 		}
 	case *checker_v2.UnionMatch:
@@ -444,15 +476,17 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 
 			// If we have a case for this specific type
 			if block, ok := e.TypeCases[typeName]; ok {
-				return vm.evalBlock2(block, func() {
+				res, _ := vm.evalBlock2(block, func() {
 					// Bind the pattern variable 'it' to the value
 					vm.scope.add("it", subject)
 				})
+				return res
 			}
 
 			// If we have a catch-all case
 			if e.CatchAll != nil {
-				return vm.evalBlock2(e.CatchAll, nil)
+				res, _ := vm.evalBlock2(e.CatchAll, nil)
+				return res
 			}
 
 			// This should never happen if the type checker is working correctly
@@ -464,7 +498,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	}
 }
 
-func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) *object {
+func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) (*object, bool) {
 	vm.pushScope()
 	defer vm.popScope()
 
@@ -474,10 +508,15 @@ func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) *object {
 
 	res := void
 	for i := range block.Stmts {
-		res = vm.do(block.Stmts[i])
+		stmt := block.Stmts[i]
+		r := vm.do(stmt)
+		if vm.scope.broken {
+			return r, true
+		}
+		res = r
 	}
 
-	return res
+	return res, false
 }
 
 func (vm *VM) evalStrProperty(subj *object, name string) *object {

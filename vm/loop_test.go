@@ -80,39 +80,39 @@ func TestWhileLoops(t *testing.T) {
 }
 
 func TestBreakStatement(t *testing.T) {
-	runTests(t, []test{
-		// {
-		// 	name: "break out of loop",
-		// 	input: `
-		// 	  mut count = 5
-		// 		while count > 0 {
-		// 		  count = count - 1
-		// 			if count == 3 {
-		// 			  break
-		// 			}
-		// 		}
-		// 		count`,
-		// 	want: 3,
-		// },
+	runTests2(t, []test{
 		{
-			name: "break out of loop in methods",
+			name: "break out of loop",
 			input: `
-			  struct Foo {}
-				impl (f: Foo) {
-				  fn bar() Int {
-					  mut count = 0
-						for i in [1,2,3,4,5,6] {
-						  count = i
-							if i == 5 {
-							  break
-							}
-						}
-						count
+			  mut count = 5
+				while count > 0 {
+				  count = count - 1
+					if count == 3 {
+					  break
 					}
 				}
-				let f = Foo{}
-				f.bar()`,
-			want: 5,
+				count`,
+			want: 3,
 		},
+		// {
+		// 	name: "break out of loop in methods",
+		// 	input: `
+		// 	  struct Foo {}
+		// 		impl (f: Foo) {
+		// 		  fn bar() Int {
+		// 			  mut count = 0
+		// 				for i in [1,2,3,4,5,6] {
+		// 				  count = i
+		// 					if i == 5 {
+		// 					  break
+		// 					}
+		// 				}
+		// 				count
+		// 			}
+		// 		}
+		// 		let f = Foo{}
+		// 		f.bar()`,
+		// 	want: 5,
+		// },
 	})
 }

@@ -45,8 +45,9 @@ func (d Diagnostic) String() string {
 
 /* can either produce a value or not */
 type Statement struct {
-	Expr Expression
-	Stmt NonProducing
+	Break bool
+	Expr  Expression
+	Stmt  NonProducing
 }
 
 type NonProducing interface {
@@ -887,6 +888,8 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
 	case *ast.Comment:
 		return nil
+	case *ast.Break:
+		return &Statement{Break: true}
 	case *ast.TypeDeclaration:
 		{
 			// Handle type declaration (type unions/aliases)
