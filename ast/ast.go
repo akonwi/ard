@@ -472,7 +472,7 @@ type Identifier struct {
 }
 
 func (i Identifier) String() string {
-	return fmt.Sprintf("Identifier(%s)", i.Name)
+	return fmt.Sprintf("%s", i.Name)
 }
 
 type StrLiteral struct {
