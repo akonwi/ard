@@ -131,66 +131,58 @@ func TestStructs(t *testing.T) {
 	})
 }
 
-// func TestMethods(t *testing.T) {
-// 	shapeCode := strings.Join([]string{
-// 		"struct Shape {",
-// 		"  width: Int,",
-// 		"  height: Int",
-// 		"}",
-// 	}, "\n")
-// 	run(t, []test{
-// 		{
-// 			name: "Valid impl block",
-// 			input: fmt.Sprintf(
-// 				`%s
-// 				impl (self: Shape) {
-// 				  fn get_area() Int {
-// 						self.width * self.height
-// 					}
-// 				}`, shapeCode),
-// 			output: Program{
-// 				Statements: []Statement{
-// 					&Struct{
-// 						Name: "Shape",
-// 						Fields: map[string]Type{
-// 							"width":  Int{},
-// 							"height": Int{},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "The instance can't be mutated in a non-mutable impl block",
-// 			input: fmt.Sprintf(
-// 				`%s
-// 				impl (self: Shape) {
-// 				  fn resize(h: Int, w: Int) {
-// 						self.width = w
-// 						self.height = h
-// 					}
-// 				}`, shapeCode),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Cannot reassign in immutables"},
-// 				{Kind: Error, Message: "Cannot reassign in immutables"},
-// 			},
-// 		},
-// 		{
-// 			name: "A mutable impl block",
-// 			input: fmt.Sprintf(
-// 				`%s
-// 				impl (mut self: Shape) {
-// 				  fn resize(width: Int, height: Int) {
-// 						self.width = width
-// 						self.height = height
-// 					}
-// 				}
+func TestMethods(t *testing.T) {
+	shapeCode := strings.Join([]string{
+		"struct Shape {",
+		"  width: Int,",
+		"  height: Int",
+		"}",
+	}, "\n")
+	run(t, []test{
+		{
+			name: "Valid impl block",
+			input: fmt.Sprintf(
+				`%s
+				impl (self: Shape) {
+				  fn get_area() Int {
+						self.width * self.height
+					}
+				}`, shapeCode),
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+		},
+		{
+			name: "The instance can't be mutated in a non-mutable impl block",
+			input: fmt.Sprintf(
+				`%s
+				impl (self: Shape) {
+				  fn resize(h: Int, w: Int) {
+						self.width = w
+						self.height = h
+					}
+				}`, shapeCode),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Immutable: self.width"},
+				{Kind: checker.Error, Message: "Immutable: self.height"},
+			},
+		},
+		{
+			name: "A mutable impl block",
+			input: fmt.Sprintf(
+				`%s
+				impl (mut self: Shape) {
+				  fn resize(width: Int, height: Int) {
+						self.width = width
+						self.height = height
+					}
+				}
 
-// 				let square = Shape{width: 5, height: 5}
-// 				square.resize(8,8)`, shapeCode),
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
-// 			},
-// 		},
-// 	})
-// }
+				let square = Shape{width: 5, height: 5}
+				square.resize(8,8)`, shapeCode),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
+			},
+		},
+	})
+}

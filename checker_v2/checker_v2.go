@@ -747,6 +747,7 @@ func (u Union) equal(other Type) bool {
 type StructDef struct {
 	Name   string
 	Fields map[string]Type
+	Self   string
 }
 
 func (def *StructDef) name() string {
@@ -912,6 +913,12 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			// Check if it's a union type
 			if union, ok := sym.(*Union); ok {
 				baseType = union
+				break
+			}
+
+			// Check if it's a struct type
+			if structType, ok := sym.(*StructDef); ok {
+				baseType = structType
 				break
 			}
 		}
@@ -1315,6 +1322,32 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			c.scope.add(def)
 			return nil
 		}
+	case *ast.ImplBlock:
+		{
+			t := c.resolveType(s.Self.Type)
+			if t == nil {
+				return nil
+			}
+
+			structDef, ok := t.(*StructDef)
+			if !ok {
+				c.addError(fmt.Sprintf("Expected struct type, got %s", t), s.Self.Type.GetLocation())
+				return nil
+			}
+
+			for _, method := range s.Methods {
+				fnDef := c.checkFunction(&method, func() {
+					c.scope.add(&VariableDef{
+						Name:    s.Self.Name,
+						__type:  structDef,
+						Mutable: s.Self.Mutable,
+					})
+				})
+				fnDef.Mutates = s.Self.Mutable
+				structDef.Fields[method.Name] = fnDef
+			}
+			return nil
+		}
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
 		if expr == nil {
@@ -1580,7 +1613,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		if sym := c.scope.get(s.Name); sym != nil {
 			return &Variable{sym}
 		}
-		panic(fmt.Errorf("Undefined variable: %s", s.Name))
+		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
+		return nil
 	case *ast.FunctionCall:
 		{
 			// Find the function in the scope
@@ -1661,7 +1695,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		{
 			subj := c.checkExpr(s.Target)
 			if subj == nil {
-				panic(fmt.Errorf("Cannot access %s on Void", s.Method.Name))
+				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
+				return nil
 			}
 
 			sig := subj.Type().get(s.Method.Name)
@@ -2167,58 +2202,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 		}
 	case *ast.FunctionDeclaration:
-		{
-			// Process parameters
-			params := make([]Parameter, len(s.Parameters))
-			for i, param := range s.Parameters {
-				var paramType Type = Void
-				if param.Type != nil {
-					paramType = c.resolveType(param.Type)
-				}
-
-				params[i] = Parameter{
-					Name:    param.Name,
-					Type:    paramType,
-					Mutable: param.Mutable,
-				}
-			}
-
-			// Determine return type
-			var returnType Type = Void
-			if s.ReturnType != nil {
-				returnType = c.resolveType(s.ReturnType)
-			}
-
-			// Check function body with a setup function that adds parameters to scope
-			body := c.checkBlock(s.Body, func() {
-				for _, param := range params {
-					c.scope.add(&VariableDef{
-						Mutable: param.Mutable,
-						Name:    param.Name,
-						__type:  param.Type,
-					})
-				}
-			})
-
-			// Check that the function's return type matches its body's type
-			if returnType != Void && body.Type() != returnType {
-				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
-				return nil
-			}
-
-			// Create function definition
-			fn := &FunctionDef{
-				Name:       s.Name,
-				Parameters: params,
-				ReturnType: returnType,
-				Body:       body,
-			}
-
-			// Add function to scope
-			c.scope.add(fn)
-
-			return fn
-		}
+		return c.checkFunction(s, nil)
 	case *ast.AnonymousFunction:
 		{
 			// Process parameters
@@ -2688,9 +2672,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 
 		missing := []string{}
-		for name, _ := range structType.Fields {
-			if _, exists := fields[name]; !exists {
-				missing = append(missing, name)
+		for name, t := range structType.Fields {
+			if _, isMethod := t.(*FunctionDef); !isMethod {
+				if _, exists := fields[name]; !exists {
+					missing = append(missing, name)
+				}
 			}
 		}
 		if len(missing) > 0 {
@@ -2703,6 +2689,63 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}
+}
+
+func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {
+	if init != nil {
+		init()
+	}
+
+	// Process parameters
+	params := make([]Parameter, len(def.Parameters))
+	for i, param := range def.Parameters {
+		var paramType Type = Void
+		if param.Type != nil {
+			paramType = c.resolveType(param.Type)
+		}
+
+		params[i] = Parameter{
+			Name:    param.Name,
+			Type:    paramType,
+			Mutable: param.Mutable,
+		}
+	}
+
+	// Determine return type
+	var returnType Type = Void
+	if def.ReturnType != nil {
+		returnType = c.resolveType(def.ReturnType)
+	}
+
+	// Check function body with a setup function that adds parameters to scope
+	body := c.checkBlock(def.Body, func() {
+		for _, param := range params {
+			c.scope.add(&VariableDef{
+				Mutable: param.Mutable,
+				Name:    param.Name,
+				__type:  param.Type,
+			})
+		}
+	})
+
+	// Check that the function's return type matches its body's type
+	if returnType != Void && body.Type() != returnType {
+		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
+		return nil
+	}
+
+	// Create function definition
+	fn := &FunctionDef{
+		Name:       def.Name,
+		Parameters: params,
+		ReturnType: returnType,
+		Body:       body,
+	}
+
+	// Add function to scope
+	c.scope.add(fn)
+
+	return fn
 }
 
 // Substitute generic parameters in a type
