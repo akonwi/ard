@@ -9,6 +9,8 @@ func getInPackage(pkgPath, name string) symbol {
 	switch pkgPath {
 	case "ard/float":
 		return getInFloat(name)
+	case "ard/fs":
+		return getInFS(name)
 	case "ard/ints":
 		return getInInts(name)
 	case "ard/io":
@@ -33,6 +35,49 @@ func getInFloat(name string) symbol {
 			Name:       name,
 			Parameters: []Parameter{{Name: "string", Type: Str}},
 			ReturnType: &Maybe{Float},
+		}
+	default:
+		return nil
+	}
+}
+
+func getInFS(name string) symbol {
+	switch name {
+	case "append":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "create_file":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "delete":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "exists":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "read":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: &Maybe{Str},
+		}
+	case "write":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
+			ReturnType: Bool,
 		}
 	default:
 		return nil
