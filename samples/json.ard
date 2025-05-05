@@ -9,15 +9,15 @@ struct Todo {
 
 let first = Todo{id: 1, title: "Buy milk", completed: false}
 
-mut options = json.encode_options().set_case(json.CaseStyle::SnakeCase)
-json.encode_with(first, options)
-let first_str: Str? = json.encode(first)
+mut options = json::encode_options().set_case(json::CaseStyle::SnakeCase)
+json::encode_with(first, options)
+let first_str: Str? = json::encode(first)
 
-let second: Todo? = json.decode(string)
+let second: Todo? = json::decode(string)
 
 // $ for generic type declaration
 fn decode(in: Str) $Out! {...}
 fn encode(in: $In) Str! {...}
 
 
-json.decode<Todo>(string) else
+json::decode<Todo>(string) else

@@ -1,10 +1,10 @@
 use ard/io
 
 mut name: Str = "Alice"
-io.print("name = {{name}}")
+io::print("name = {{name}}")
 
 let age: Int = 30
-io.print("age = {{age.to_str()}}")
+io::print("age = {{age.to_str()}}")
 
 let is_student: Bool = true
-io.print("is_student = {{is_student.to_str()}}")
+io::print("is_student = {{is_student.to_str()}}")

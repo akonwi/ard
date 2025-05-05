@@ -16,9 +16,9 @@ impl (it: Todo) {
 }
 
 fn render(list: [Todo]) {
-  io.print("Todo List:")
+  io::print("Todo List:")
   for todo in list {
-    io.print(todo.get_str())
+    io::print(todo.get_str())
   }
 }
 
@@ -29,13 +29,13 @@ mut list: [Todo] = [
 mut running = true
 while running {
   render(list)
-  io.print("What's your next todo?")
-  let title = io.read_line()
+  io::print("What's your next todo?")
+  let title = io::read_line()
   if title.is_empty() {
     running = false
   } else {
     let todo = Todo { title: title, completed: false }
     list.push(todo)
-    io.print("------")
+    io::print("------")
   }
 }
