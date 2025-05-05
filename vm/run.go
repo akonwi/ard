@@ -39,6 +39,8 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 	switch s := stmt.Stmt.(type) {
 	case *checker_v2.Enum:
 		return void
+	case *checker_v2.StructDef:
+		return void
 	case *checker_v2.VariableDef:
 		val := vm.eval(s.Value)
 		if !s.Mutable {
@@ -280,11 +282,16 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	case *checker_v2.InstanceProperty:
 		{
 			subj := vm.eval(e.Subject)
+			if _, ok := subj._type.(*checker_v2.StructDef); ok {
+				raw := subj.raw.(map[string]*object)
+				return raw[e.Property]
+			}
+
 			switch subj._type {
 			case checker_v2.Str:
 				return vm.evalStrProperty(subj, e.Property)
 			default:
-				return void
+				panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj._type, e.Property))
 			}
 		}
 	case *checker_v2.InstanceMethod:
@@ -311,8 +318,11 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			if _, ok := subj._type.(*checker_v2.Maybe); ok {
 				return vm.evalMaybeMethod(subj, e)
 			}
+			if _, ok := subj._type.(*checker_v2.StructDef); ok {
+				return vm.evalStructMethod(subj, e.Method)
+			}
 
-			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", e.Subject.Type(), e.Method.Name, e.Subject.Type()))
+			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", subj._type, e.Method.Name, subj._type))
 		}
 	case *checker_v2.PackageFunctionCall:
 		{
@@ -557,6 +567,14 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			// because it ensures the match is exhaustive
 			panic(fmt.Errorf("No matching case for union type %s", typeName))
 		}
+	case *checker_v2.StructInstance:
+		{
+			raw := map[string]*object{}
+			for name, val := range e.Fields {
+				raw[name] = vm.eval(val)
+			}
+			return &object{raw, e.Type()}
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
@@ -767,4 +785,34 @@ func (vm *VM) evalMaybeMethod(subj *object, m *checker_v2.InstanceMethod) *objec
 	default:
 		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
 	}
+}
+
+func (vm *VM) evalStructMethod(subj *object, call *checker_v2.FunctionCall) *object {
+	istruct := subj._type.(*checker_v2.StructDef)
+	sig, ok := istruct.Fields[call.Name]
+	if !ok {
+		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))
+	}
+
+	fnDef, ok := sig.(*checker_v2.FunctionDef)
+	if !ok {
+		panic(fmt.Errorf("Not a function: %s.%s", istruct.Name, call.Name))
+	}
+
+	fn := func(args ...*object) *object {
+		res, _ := vm.evalBlock2(fnDef.Body, func() {
+			vm.scope.add(fnDef.SelfName, subj)
+			for i := range args {
+				vm.scope.add(fnDef.Parameters[i].Name, args[i])
+			}
+		})
+		return res
+	}
+
+	args := make([]*object, len(call.Args))
+	for i := range call.Args {
+		args[i] = vm.eval(call.Args[i])
+	}
+
+	return fn(args...)
 }

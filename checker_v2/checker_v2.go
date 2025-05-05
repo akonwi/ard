@@ -560,6 +560,8 @@ type FunctionDef struct {
 	ReturnType Type
 	Mutates    bool
 	Body       *Block
+	// todo: delete
+	SelfName string
 }
 
 func (f FunctionDef) String() string {
@@ -720,13 +722,7 @@ func (u Union) equal(other Type) bool {
 
 		// Check that all types in the union match
 		for _, uType := range u.Types {
-			found := false
-			for _, otherType := range otherUnion.Types {
-				if uType.equal(otherType) {
-					found = true
-					break
-				}
-			}
+			found := slices.ContainsFunc(otherUnion.Types, uType.equal)
 			if !found {
 				return false
 			}
@@ -749,6 +745,8 @@ type StructDef struct {
 	Fields map[string]Type
 	Self   string
 }
+
+func (def StructDef) NonProducing() {}
 
 func (def *StructDef) name() string {
 	return def.Name
@@ -1345,6 +1343,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				})
 				fnDef.Mutates = s.Self.Mutable
 				structDef.Fields[method.Name] = fnDef
+				fnDef.SelfName = s.Self.Name
 			}
 			return nil
 		}

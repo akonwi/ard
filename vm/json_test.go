@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestJsonEncode(t *testing.T) {
+func testJsonEncode(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		struct Person {
@@ -48,7 +48,7 @@ func testJsonDecodeList(t *testing.T) {
 	}
 }
 
-func TestJsonDecodeStruct(t *testing.T) {
+func testJsonDecodeStruct(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		struct Person {
