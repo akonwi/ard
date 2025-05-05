@@ -1,8 +1,15 @@
 ## TODO
 
+- [ ] improve Type modeling
+  - [ ] rewrite checker
+  - [ ] rewrite vm
+- [ ] update samples with new syntax for package references
 - [ ] decoding/json
-- [ ] refining Generics in calls `json.decode<Person>(str)`
-- [ ] declaring Generics in fns `fn decode() $Out {}`
+- [ ] parse syntax for annotating Generics in calls `json.decode<Person>(str)`
+- [ ] parse syntax for declaring Generics in fns `fn decode() $Out {}`
+- [ ] support escape sequences in strings
+- [ ] remove need for naming self in impl blocks
+  - [ ] use @ for accessing props
 - [ ] networking
 - [ ] methods on enums?
 - [ ] matching on numbers
