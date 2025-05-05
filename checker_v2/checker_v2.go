@@ -523,6 +523,14 @@ type ForInStr struct {
 
 func (f ForInStr) NonProducing() {}
 
+type ForInList struct {
+	Cursor string
+	List   Expression
+	Body   *Block
+}
+
+func (f ForInList) NonProducing() {}
+
 type ForLoop struct {
 	Init      *VariableDef
 	Condition Expression
@@ -877,6 +885,8 @@ func typeMismatch(expected, got Type) string {
 
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
+	case *ast.Comment:
+		return nil
 	case *ast.TypeDeclaration:
 		{
 			// Handle type declaration (type unions/aliases)
@@ -1155,6 +1165,26 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Mutable: false,
 						Name:    s.Cursor.Name,
 						__type:  Int,
+					})
+				})
+
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
+			if listType, ok := iterValue.Type().(*List); ok {
+				// This is syntax sugar for a range from 0 to n
+				loop := &ForInList{
+					Cursor: s.Cursor.Name,
+					List:   iterValue,
+				}
+
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursor variable to the scope
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  listType.of,
 					})
 				})
 

@@ -18,36 +18,6 @@ type compareKey struct {
 	strKey string
 }
 
-// Go requires map keys to be comparable with ==
-// We need to ensure that our compareKey is comparable
-// Here's what we'll do:
-// 1. Create a string representation of the object to use as the key
-// 2. Implement Equals method to compare based on the underlying objects
-
-// Override constructor to set strKey
-func newCompareKey(o *object) compareKey {
-	if o == nil {
-		return compareKey{nil, "nil"}
-	}
-
-	var strKey string
-	switch v := o.raw.(type) {
-	case string:
-		strKey = v
-	case int:
-		strKey = strconv.Itoa(v)
-	case bool:
-		strKey = strconv.FormatBool(v)
-	case float64:
-		strKey = strconv.FormatFloat(v, 'g', -1, 64)
-	default:
-		// For complex types use the pointer address
-		strKey = fmt.Sprintf("%p", o.raw)
-	}
-
-	return compareKey{o, strKey}
-}
-
 func Run2(program *checker_v2.Program) (any, error) {
 	vm := New()
 	for _, statement := range program.Statements {
@@ -63,7 +33,7 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 
 	switch s := stmt.Stmt.(type) {
 	case *checker_v2.Enum:
-		return nil
+		return void
 	case *checker_v2.VariableDef:
 		val := vm.eval(s.Value)
 		if !s.Mutable {
@@ -78,6 +48,44 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 		target := vm.eval(s.Target)
 		val := vm.eval(s.Value)
 		target.raw = val.raw
+		return void
+	case *checker_v2.ForLoop:
+		init := func() { vm.do(checker_v2.Statement{Stmt: s.Init}) }
+		update := func() { vm.do(checker_v2.Statement{Stmt: s.Update}) }
+		for init(); vm.eval(s.Condition).raw.(bool); update() {
+			vm.evalBlock2(s.Body, nil)
+		}
+		return void
+	case *checker_v2.ForIntRange:
+		i := vm.eval(s.Start).raw.(int)
+		end := vm.eval(s.End).raw.(int)
+		for i <= end {
+			vm.evalBlock2(s.Body, func() {
+				vm.scope.add(s.Cursor, &object{i, checker_v2.Int})
+			})
+			i++
+		}
+		return void
+	case *checker_v2.ForInStr:
+		val := vm.eval(s.Value).raw.(string)
+		for _, c := range val {
+			vm.evalBlock2(s.Body, func() {
+				vm.scope.add(s.Cursor, &object{string(c), checker_v2.Str})
+			})
+		}
+		return void
+	case *checker_v2.ForInList:
+		val := vm.eval(s.List).raw.([]*object)
+		for i := range val {
+			vm.evalBlock2(s.Body, func() {
+				vm.scope.add(s.Cursor, val[i])
+			})
+		}
+		return void
+	case *checker_v2.WhileLoop:
+		for vm.eval(s.Condition).raw.(bool) {
+			vm.evalBlock2(s.Body, nil)
+		}
 		return void
 	default:
 		panic(fmt.Errorf("Unimplemented statement: %T", s))
@@ -430,10 +438,10 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	case *checker_v2.UnionMatch:
 		{
 			subject := vm.eval(e.Subject)
-			
+
 			// Get the concrete type name as a string
 			typeName := subject._type.(checker_v2.Type).String()
-			
+
 			// If we have a case for this specific type
 			if block, ok := e.TypeCases[typeName]; ok {
 				return vm.evalBlock2(block, func() {
@@ -441,12 +449,12 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 					vm.scope.add("it", subject)
 				})
 			}
-			
+
 			// If we have a catch-all case
 			if e.CatchAll != nil {
 				return vm.evalBlock2(e.CatchAll, nil)
 			}
-			
+
 			// This should never happen if the type checker is working correctly
 			// because it ensures the match is exhaustive
 			panic(fmt.Errorf("No matching case for union type %s", typeName))

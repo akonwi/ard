@@ -1787,6 +1787,33 @@ func TestLists(t *testing.T) {
 			},
 		},
 		{
+			name:  "Looping over a list",
+			input: `for i in [1,2,3] { i }`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.ForInList{
+							Cursor: "i",
+							List: &checker.ListLiteral{
+								Elements: []checker.Expression{
+									&checker.IntLiteral{Value: 1},
+									&checker.IntLiteral{Value: 2},
+									&checker.IntLiteral{Value: 3},
+								},
+							},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Expr: &checker.Variable{},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "List API",
 			input: strings.Join([]string{
 				`[1].size()`,

@@ -3,7 +3,7 @@ package vm_test
 import "testing"
 
 func TestForLoop(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name: "Basic for loop",
 			input: `
@@ -11,7 +11,7 @@ func TestForLoop(t *testing.T) {
 				// sum even numbers
 				mut sum = 0
 				for mut even = 0; even <= 10; even =+ 2 {
-					io.print(even.to_str())
+					io::print(even.to_str())
 				  sum =+ even
 				}
 				sum`,
@@ -21,7 +21,7 @@ func TestForLoop(t *testing.T) {
 }
 
 func TestForInLoops(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name: "loop over numeric range",
 			input: `
@@ -74,7 +74,7 @@ func TestWhileLoops(t *testing.T) {
 		}
 		count == 0`
 
-	if res := run(t, input); res != true {
+	if res := run2(t, input); res != true {
 		t.Errorf("Expected true but got %v", res)
 	}
 }
