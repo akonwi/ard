@@ -427,6 +427,30 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				return vm.evalBlock2(e.False, nil)
 			}
 		}
+	case *checker_v2.UnionMatch:
+		{
+			subject := vm.eval(e.Subject)
+			
+			// Get the concrete type name as a string
+			typeName := subject._type.(checker_v2.Type).String()
+			
+			// If we have a case for this specific type
+			if block, ok := e.TypeCases[typeName]; ok {
+				return vm.evalBlock2(block, func() {
+					// Bind the pattern variable 'it' to the value
+					vm.scope.add("it", subject)
+				})
+			}
+			
+			// If we have a catch-all case
+			if e.CatchAll != nil {
+				return vm.evalBlock2(e.CatchAll, nil)
+			}
+			
+			// This should never happen if the type checker is working correctly
+			// because it ensures the match is exhaustive
+			panic(fmt.Errorf("No matching case for union type %s", typeName))
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}

@@ -362,6 +362,28 @@ func (b *BoolMatch) Type() Type {
 	return b.True.Type()
 }
 
+type UnionMatch struct {
+	Subject   Expression
+	TypeCases map[string]*Block
+	CatchAll  *Block
+}
+
+func (u *UnionMatch) Type() Type {
+	// Find the first non-nil case and return its type
+	for _, block := range u.TypeCases {
+		if block != nil {
+			return block.Type()
+		}
+	}
+
+	// If no type cases are defined, use the catch-all case type
+	if u.CatchAll != nil {
+		return u.CatchAll.Type()
+	}
+
+	return Void
+}
+
 type FloatSubtraction struct {
 	Left  Expression
 	Right Expression
@@ -656,6 +678,63 @@ func (ev EnumVariant) String() string {
 	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Variants[ev.Variant])
 }
 
+type Union struct {
+	Name  string
+	Types []Type
+}
+
+func (u Union) NonProducing() {}
+func (u Union) String() string {
+	strs := make([]string, len(u.Types))
+	for i, t := range u.Types {
+		strs[i] = t.String()
+	}
+	return strings.Join(strs, "|")
+}
+func (u Union) get(name string) Type { return nil }
+
+// Implement the symbol interface
+func (u Union) name() string {
+	return u.Name
+}
+func (u Union) _type() Type {
+	return u
+}
+func (u Union) Type() Type {
+	return u
+}
+func (u Union) equal(other Type) bool {
+	if otherUnion, ok := other.(*Union); ok {
+		if len(u.Types) != len(otherUnion.Types) {
+			return false
+		}
+
+		// Check that all types in the union match
+		for _, uType := range u.Types {
+			found := false
+			for _, otherType := range otherUnion.Types {
+				if uType.equal(otherType) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Check if the other type matches any type in this union
+	for _, t := range u.Types {
+		if t.equal(other) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func isMutable(expr Expression) bool {
 	if v, ok := expr.(*Variable); ok {
 		return v.isMutable()
@@ -766,8 +845,15 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		baseType = MakeMap(key, value)
 	case *ast.CustomType:
 		if sym := c.scope.get(t.GetName()); sym != nil {
+			// Check if it's an enum
 			if enum, ok := sym.(*Enum); ok {
 				baseType = enum
+				break
+			}
+
+			// Check if it's a union type
+			if union, ok := sym.(*Union); ok {
+				baseType = union
 				break
 			}
 		}
@@ -791,6 +877,29 @@ func typeMismatch(expected, got Type) string {
 
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	switch s := (*stmt).(type) {
+	case *ast.TypeDeclaration:
+		{
+			// Handle type declaration (type unions/aliases)
+			types := make([]Type, len(s.Type))
+			for i, declType := range s.Type {
+				resolvedType := c.resolveType(declType)
+				if resolvedType == nil {
+					c.addError(fmt.Sprintf("Unrecognized type: %s", declType.GetName()), declType.GetLocation())
+					return nil
+				}
+				types[i] = resolvedType
+			}
+
+			// Create a union type (even if it only contains one type)
+			unionType := &Union{
+				Name:  s.Name.Name,
+				Types: types,
+			}
+
+			// Register the type in the scope with the given name
+			c.scope.add(unionType)
+			return nil
+		}
 	case *ast.VariableDeclaration:
 		{
 			var val Expression
@@ -832,12 +941,15 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
+			__type := val.Type()
+
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
 					if !expected.equal(val.Type()) {
 						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
 						return nil
 					}
+					__type = expected
 				}
 			}
 
@@ -845,7 +957,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Mutable: s.Mutable,
 				Name:    s.Name,
 				Value:   val,
-				__type:  val.Type(),
+				__type:  __type,
 			}
 			c.scope.add(v)
 			return &Statement{
@@ -2247,7 +2359,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 					// Process the body
 					body := c.checkBlock(matchCase.Body, nil)
-					
+
 					// Store the body in the appropriate field
 					if boolLit.Value {
 						seenTrue = true
@@ -2287,7 +2399,115 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 
 		// For other types, handle according to their type...
-		c.addError("Currently only Maybe, Enum, and Bool types are supported in match expressions", s.GetLocation())
+		// For Union types, generate a UnionMatch
+		if unionType, ok := subject.Type().(*Union); ok {
+			// Track which union types we've seen and their corresponding bodies
+			typeCases := make(map[string]*Block)
+			var catchAllBody *Block
+
+			// Record all types in the union
+			unionTypeSet := make(map[string]Type)
+			for _, t := range unionType.Types {
+				unionTypeSet[t.String()] = t
+			}
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				// Check for catch-all case (_)
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						if catchAllBody != nil {
+							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+							return nil
+						}
+						catchAllBody = c.checkBlock(matchCase.Body, nil)
+						continue
+					}
+				}
+
+				// Handle type pattern - should be an identifier matching a type in the union
+				if typeId, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					typeName := typeId.Name
+
+					// Check if the type exists in the union
+					_, found := unionTypeSet[typeName]
+					if !found {
+						c.addError(fmt.Sprintf("Type %s is not part of union %s", typeName, unionType),
+							matchCase.Pattern.GetLocation())
+						return nil
+					}
+
+					// Check for duplicates
+					if _, exists := typeCases[typeName]; exists {
+						c.addError(fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation())
+						return nil
+					}
+
+					// Get the actual type object
+					matchedType := unionTypeSet[typeName]
+
+					// Process the body with the matched type binding
+					body := c.checkBlock(matchCase.Body, func() {
+						// Add "it" variable to the scope with the union element's type
+						c.scope.add(&VariableDef{
+							Mutable: false,
+							Name:    "it",
+							__type:  matchedType,
+							Value:   nil, // Will be set at runtime
+						})
+					})
+					typeCases[typeName] = body
+				} else {
+					c.addError("Pattern in union match must be a type name or catch-all (_)",
+						matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Check exhaustiveness if no catch-all is provided
+			if catchAllBody == nil {
+				for typeName := range unionTypeSet {
+					if _, covered := typeCases[typeName]; !covered {
+						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s'", typeName),
+							s.GetLocation())
+						return nil
+					}
+				}
+			}
+
+			// Ensure all cases return the same type
+			var referenceType Type
+			for _, caseBody := range typeCases {
+				if caseBody != nil {
+					referenceType = caseBody.Type()
+					break
+				}
+			}
+
+			if referenceType != nil {
+				if catchAllBody != nil && !referenceType.equal(catchAllBody.Type()) {
+					c.addError(typeMismatch(referenceType, catchAllBody.Type()), s.GetLocation())
+					return nil
+				}
+
+				for _, caseBody := range typeCases {
+					if caseBody != nil && !referenceType.equal(caseBody.Type()) {
+						c.addError(typeMismatch(referenceType, caseBody.Type()), s.GetLocation())
+						return nil
+					}
+				}
+			}
+
+			// Create and return the UnionMatch
+			return &UnionMatch{
+				Subject:   subject,
+				TypeCases: typeCases,
+				CatchAll:  catchAllBody,
+			}
+		}
+
+		fmt.Printf("Unexpected type: %T\n", subject.Type())
+		c.addError("Currently only Maybe, Enum, Bool, and Union types are supported in match expressions", s.GetLocation())
 		return nil
 	case *ast.StaticProperty:
 		{

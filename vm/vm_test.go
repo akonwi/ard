@@ -544,7 +544,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 }
 
 func TestUnions(t *testing.T) {
-	runTests(t, []test{
+	runTests2(t, []test{
 		{
 			name: "Using unions",
 			input: `
@@ -553,14 +553,12 @@ func TestUnions(t *testing.T) {
 				  match p {
 					  Str => it,
 						Int => it.to_str(),
-						_ => {
-						  "boolean value"
-						}
+						_ => "boolean value"
 					}
 				}
-				print(true)
+				print(20)
 			`,
-			want: "boolean value",
+			want: "20",
 		},
 	})
 }

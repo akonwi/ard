@@ -2186,78 +2186,104 @@ func TestMatchingOnBooleans(t *testing.T) {
 	})
 }
 
-// func TestTypeUnions(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "Valid type union",
-// 			input: `
-// 				type Alias = Bool
-// 			  type Printable = Int|Str
-// 				let a: Printable = "foo"
-// 				let b: Alias = true
-// 				let list: [Printable] = [1, "two", 3]`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name:  "a",
-// 						Value: StrLiteral{Value: "foo"},
-// 					},
-// 					VariableBinding{
-// 						Name:  "b",
-// 						Value: BoolLiteral{Value: true},
-// 					},
-// 					VariableBinding{
-// 						Name: "list",
-// 						Value: ListLiteral{
-// 							Elements: []Expression{
-// 								IntLiteral{Value: 1},
-// 								StrLiteral{Value: "two"},
-// 								IntLiteral{Value: 3},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name: "Errors when types don't match",
-// 			input: `
-// 					  type Printable = Int|Str
-// 						fn print(p: Printable) {}
-// 						print(true)`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Type mismatch: Expected Int|Str, got Bool"},
-// 			},
-// 		},
-// 		{
-// 			name: "Matching behavior on type unions",
-// 			input: `
-// 				type Printable = Int|Str|Bool
-// 				let a: Printable = "foo"
-// 				match a {
-// 				  Int => "number",
-// 					Str => "string",
-// 					_ => "other"
-// 				}`,
-// 			output: Program{
-// 				Statements: []Statement{
-// 					VariableBinding{
-// 						Name:  "a",
-// 						Value: StrLiteral{Value: "foo"},
-// 					},
-// 					UnionMatch{
-// 						Subject: Identifier{Name: "a"},
-// 						Cases: map[Type]Block{
-// 							Int{}: {Body: []Statement{StrLiteral{Value: "number"}}},
-// 							Str{}: {Body: []Statement{StrLiteral{Value: "string"}}},
-// 						},
-// 						CatchAll: Block{Body: []Statement{StrLiteral{Value: "other"}}},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	})
-// }
+func TestTypeUnions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Valid type union",
+			input: `
+				type Alias = Bool
+			  type Printable = Int|Str
+				let a: Printable = "foo"
+				let b: Alias = true
+				let list: [Printable] = [1, "two", 3]`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "a",
+							Value:   &checker.StrLiteral{Value: "foo"},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "b",
+							Value:   &checker.BoolLiteral{Value: true},
+						},
+					},
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "list",
+							Value: &checker.ListLiteral{
+								Elements: []checker.Expression{
+									&checker.IntLiteral{Value: 1},
+									&checker.StrLiteral{Value: "two"},
+									&checker.IntLiteral{Value: 3},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Errors when types don't match",
+			input: `
+					  type Printable = Int|Str
+						fn print(p: Printable) {}
+						print(true)`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int|Str, got Bool"},
+			},
+		},
+		{
+			name: "Matching behavior on type unions",
+			input: `
+				type Printable = Int|Str|Bool
+				let a: Printable = "foo"
+				match a {
+				  Int => "number",
+					Str => "string",
+					_ => "other"
+				}`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: false,
+							Name:    "a",
+							Value:   &checker.StrLiteral{Value: "foo"},
+						},
+					},
+					{
+						Expr: &checker.UnionMatch{
+							Subject: &checker.Variable{},
+							TypeCases: map[string]*checker.Block{
+								"Int": {
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "number"}},
+									},
+								},
+								"Str": {
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "string"}},
+									},
+								},
+							},
+							CatchAll: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.StrLiteral{Value: "other"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
 
 // func TestJson(t *testing.T) {
 // 	run(t, []test{
