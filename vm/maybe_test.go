@@ -3,7 +3,7 @@ package vm_test
 import "testing"
 
 func TestMaybes(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Equality comparison returns false when each are different",
 			input: `

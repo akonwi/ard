@@ -3,7 +3,7 @@ package vm_test
 import "testing"
 
 func TestVM(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "fs::exists returns false when there is something at the given path",
 			input: `

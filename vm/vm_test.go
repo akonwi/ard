@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/ast"
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/checker_v2"
 	"github.com/akonwi/ard/vm"
 )
 
@@ -24,11 +24,11 @@ func run(t *testing.T, input string) any {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, diagnostics := checker.Check(tree)
+	program, diagnostics := checker_v2.Check(tree)
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
-	res, err := vm.Run(&program)
+	res, err := vm.Run2(program)
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
 	}
@@ -48,7 +48,7 @@ func runTests(t *testing.T, tests []test) {
 }
 
 func TestEmptyProgram(t *testing.T) {
-	res := run2(t, "")
+	res := run(t, "")
 	if res != nil {
 		t.Fatalf("Expected nil, got %v", res)
 	}
@@ -59,7 +59,7 @@ func TestPrinting(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	run2(t, strings.Join([]string{
+	run(t, strings.Join([]string{
 		`use ard/io`,
 		`io::print("Hello, World!")`,
 		// `io::print("Hello, {{"Ard"}}!")`,
@@ -88,7 +88,7 @@ func TestBindingVariables(t *testing.T) {
 		40,
 		true,
 	} {
-		res := run2(t, strings.Join([]string{
+		res := run(t, strings.Join([]string{
 			fmt.Sprintf(`let val = %v`, want),
 			`val`,
 		}, "\n"))
@@ -99,7 +99,7 @@ func TestBindingVariables(t *testing.T) {
 }
 
 func TestReassigningVariables(t *testing.T) {
-	res := run2(t, strings.Join([]string{
+	res := run(t, strings.Join([]string{
 		`mut val = 1`,
 		`val = 2`,
 		`val = 3`,
@@ -120,7 +120,7 @@ func TestUnaryExpressions(t *testing.T) {
 		{`-10`, -10},
 		{`-20.1`, -20.1},
 	} {
-		res := run2(t, test.input)
+		res := run(t, test.input)
 		if res != test.want {
 			t.Fatalf("Expected %v, got %v", test.want, res)
 		}
@@ -146,7 +146,7 @@ func TestNumberOperations(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run2(t, test.input); res != test.want {
+		if res := run(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -168,7 +168,7 @@ func TestEquality(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run2(t, test.input); res != test.want {
+		if res := run(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -184,7 +184,7 @@ func TestBooleanOperations(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run2(t, test.input); res != test.want {
+		if res := run(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -200,7 +200,7 @@ func TestArithmatic(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if res := run2(t, test.input); res != test.want {
+		if res := run(t, test.input); res != test.want {
 			t.Errorf("%s = %v but got %v", test.input, test.want, res)
 		}
 	}
@@ -242,7 +242,7 @@ func TestIfStatements(t *testing.T) {
 		},
 	}
 
-	runTests2(t, tests)
+	runTests(t, tests)
 }
 
 func TestFunctions(t *testing.T) {
@@ -284,11 +284,11 @@ func TestFunctions(t *testing.T) {
 		},
 	}
 
-	runTests2(t, tests)
+	runTests(t, tests)
 }
 
 func TestNumApi(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "Int.to_str() returns the string representation of a number",
 			input: `100.to_str()`,
@@ -303,7 +303,7 @@ func TestNumApi(t *testing.T) {
 }
 
 func TestFloatApi(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name:  ".to_str() returns the Str representation of a Float",
 			input: `10.1.to_str()`,
@@ -323,7 +323,7 @@ func TestFloatApi(t *testing.T) {
 }
 
 func TestBoolApi(t *testing.T) {
-	if res := run2(t, `true.to_str()`); res != "true" {
+	if res := run(t, `true.to_str()`); res != "true" {
 		t.Errorf(`Expected "true", got %v`, res)
 	}
 }
@@ -346,11 +346,11 @@ func TestStrApi(t *testing.T) {
 			want:  true,
 		},
 	}
-	runTests2(t, tests)
+	runTests(t, tests)
 }
 
 func TestListApi(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name:  "List.size",
 			input: "[1,2,3].size()",
@@ -384,7 +384,7 @@ func TestListApi(t *testing.T) {
 }
 
 func TestMapApi(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Map::size",
 			input: `
@@ -448,7 +448,7 @@ func TestMapApi(t *testing.T) {
 }
 
 func TestEnums(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Enum usage",
 			input: `
@@ -529,7 +529,7 @@ func TestStructs(t *testing.T) {
 }
 
 func TestMatchingOnBooleans(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Matching on booleans",
 			input: `
@@ -544,7 +544,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 }
 
 func TestUnions(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Using unions",
 			input: `

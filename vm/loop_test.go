@@ -3,7 +3,7 @@ package vm_test
 import "testing"
 
 func TestForLoop(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "Basic for loop",
 			input: `
@@ -21,7 +21,7 @@ func TestForLoop(t *testing.T) {
 }
 
 func TestForInLoops(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "loop over numeric range",
 			input: `
@@ -74,13 +74,13 @@ func TestWhileLoops(t *testing.T) {
 		}
 		count == 0`
 
-	if res := run2(t, input); res != true {
+	if res := run(t, input); res != true {
 		t.Errorf("Expected true but got %v", res)
 	}
 }
 
 func TestBreakStatement(t *testing.T) {
-	runTests2(t, []test{
+	runTests(t, []test{
 		{
 			name: "break out of loop",
 			input: `
