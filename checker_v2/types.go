@@ -278,7 +278,13 @@ type Any struct {
 	actual Type
 }
 
-func (a Any) String() string { return "$" + a.name }
+func (a Any) String() string {
+	if a.actual != nil {
+		return a.actual.String()
+	}
+	return "$" + a.name
+}
+
 func (a Any) get(name string) Type {
 	if a.actual != nil {
 		return a.actual.get(name)

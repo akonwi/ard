@@ -779,6 +779,14 @@ func (def StructDef) equal(other Type) bool {
 		}
 		return true
 	}
+	// todo: is this really necessary while the substitution is in place?
+	if o, ok := other.(*Any); ok {
+		if o.actual == nil {
+			o.actual = def
+			return true
+		}
+		return def.equal(o.actual)
+	}
 	return false
 }
 
@@ -2085,16 +2093,16 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				typeMap := make(map[string]Type)
 				// Infer types from arguments
 				for i, param := range fnDef.Parameters {
-					if genType, ok := param.Type.(*Any); ok {
-						if existing, exists := typeMap[genType.name]; exists {
+					if anyType, ok := param.Type.(*Any); ok {
+						if existing, exists := typeMap[anyType.name]; exists {
 							// Ensure consistent types for the same generic parameter
 							if !existing.equal(args[i].Type()) {
-								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", genType.name, genType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
+								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
 								return nil
 							}
 						} else {
 							// Bind the generic parameter to the argument type
-							typeMap[genType.name] = args[i].Type()
+							typeMap[anyType.name] = args[i].Type()
 						}
 					}
 				}
@@ -2613,7 +2621,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 		}
 
-		fmt.Printf("Unexpected type: %T\n", subject.Type())
 		c.addError("Currently only Maybe, Enum, Bool, and Union types are supported in match expressions", s.GetLocation())
 		return nil
 	case *ast.StaticProperty:

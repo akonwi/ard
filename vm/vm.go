@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/checker_v2"
 )
 
 type VM struct {
@@ -213,6 +214,17 @@ func (o *object) premarshal() any {
 		}
 		return rawMap
 	default:
+		if o._type == checker_v2.Str || o._type == checker_v2.Int || o._type == checker_v2.Float || o._type == checker_v2.Bool {
+			return o.raw
+		}
+		if _, isStruct := o._type.(*checker_v2.StructDef); isStruct {
+			m := o.raw.(map[string]*object)
+			rawMap := make(map[string]any)
+			for key, value := range m {
+				rawMap[key] = value.premarshal()
+			}
+			return rawMap
+		}
 		panic(fmt.Sprintf("Cannot marshall type: %T", o._type))
 	}
 }

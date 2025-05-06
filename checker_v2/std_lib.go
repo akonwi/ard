@@ -15,6 +15,8 @@ func getInPackage(pkgPath, name string) symbol {
 		return getInInts(name)
 	case "ard/io":
 		return getInIO(name)
+	case "ard/json":
+		return getInJson(name)
 	case "ard/maybe":
 		return getInMaybe(name)
 	default:
@@ -106,6 +108,19 @@ func getInIO(name string) symbol {
 			ReturnType: Void,
 		}
 		return fn
+	default:
+		return nil
+	}
+}
+
+func getInJson(name string) symbol {
+	switch name {
+	case "encode":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: &Any{name: "In"}}},
+			ReturnType: &Maybe{Str},
+		}
 	default:
 		return nil
 	}

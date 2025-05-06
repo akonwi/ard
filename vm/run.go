@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -435,6 +436,22 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 					return void
 				default:
 					panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
+				}
+			}
+
+			if e.Package == "ard/json" {
+				switch e.Call.Name {
+				case "encode":
+					val := vm.eval(e.Call.Args[0])
+					result := &object{nil, e.Call.Type()}
+					bytes, err := json.Marshal(val.premarshal())
+					if err != nil {
+						return result
+					}
+					result.raw = string(bytes)
+					return result
+				default:
+					panic(fmt.Errorf("Unimplemented: json::%s()", e.Call.Name))
 				}
 			}
 

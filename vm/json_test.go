@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func testJsonEncode(t *testing.T) {
+func TestJsonEncode(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		struct Person {
@@ -14,7 +14,7 @@ func testJsonEncode(t *testing.T) {
 		  employed: Bool
 		}
 		let john = Person{name: "John", age: 30, employed: true}
-		let result = json.encode(john)
+		let result = json::encode(john)
 		match result {
 		  str => str,
 			_ => ""
