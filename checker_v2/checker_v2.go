@@ -58,6 +58,11 @@ type Expression interface {
 	Type() Type
 }
 
+type Coercable interface {
+	Expression
+	Coerce(Type) Expression
+}
+
 type StrLiteral struct {
 	Value string
 }
@@ -609,13 +614,21 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name string
-	Args []Expression
-	fn   *FunctionDef
+	Name    string
+	Args    []Expression
+	fn      *FunctionDef
+	coerced Type
 }
 
 func (f *FunctionCall) Type() Type {
+	if f.coerced != nil {
+		return f.coerced
+	}
 	return f.fn.ReturnType
+}
+
+func (f *FunctionCall) Coerce(t Type) {
+	f.coerced = t
 }
 
 type PackageFunctionCall struct {
@@ -625,6 +638,10 @@ type PackageFunctionCall struct {
 
 func (p *PackageFunctionCall) Type() Type {
 	return p.Call.Type()
+}
+
+func (p *PackageFunctionCall) Coerce(t Type) {
+	p.Call.Coerce(t)
 }
 
 type Enum struct {
@@ -782,7 +799,7 @@ func (def StructDef) equal(other Type) bool {
 	// todo: is this really necessary while the substitution is in place?
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			o.actual = def
+			// o.actual = def
 			return true
 		}
 		return def.equal(o.actual)
@@ -1026,9 +1043,15 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					}
 					__type = expected
 
-					// if we have a declared type and the inferred has a generic, then refine the generic
+					// if val is a function call returning a generic + there is a declared type
+					// coerce the function call to the declared type
 					if strings.HasPrefix(val.Type().String(), "$") {
-						refine(val.Type(), expected)
+						if coercable, ok := val.(*PackageFunctionCall); ok {
+							coercable.Coerce(expected)
+						}
+						if coercable, ok := val.(*FunctionCall); ok {
+							coercable.Coerce(expected)
+						}
 					}
 				}
 			}

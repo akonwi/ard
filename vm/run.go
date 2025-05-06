@@ -439,7 +439,6 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				}
 			}
 
-			fmt.Printf("package: %s, call: %s\n", e.Package, e.Call.Name)
 			if e.Package == "ard/json" {
 				switch e.Call.Name {
 				case "encode":
