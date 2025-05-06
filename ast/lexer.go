@@ -26,6 +26,7 @@ const (
 	double_quote       = "double_quote"
 	single_quote       = "single_quote"
 	backtick           = "backtick"
+	dollar             = "dollar"
 
 	colon_colon        = "colon_colon"
 	bang               = "bang"
@@ -248,6 +249,12 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(question_mark), true
 	case '|':
 		return currentChar.asToken(pipe), true
+	case '$':
+		if l.hasMore() && l.peek().isAlpha() {
+			l.start = l.cursor - 1
+			return l.takeIdentifier(), true
+		}
+		return currentChar.asToken(dollar), true
 	case '!':
 		if l.hasMore() && l.matchNext('=') != nil {
 			return currentChar.asToken(bang_equal), true

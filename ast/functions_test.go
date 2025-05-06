@@ -21,6 +21,26 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
+			name:  "Function with generics",
+			input: `fn decode(str: $In) $Out {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "decode",
+						Parameters: []Parameter{
+							{
+								Name: "str",
+								Type: &GenericType{Name: "In"},
+							},
+						},
+						ReturnType: &GenericType{Name: "Out"},
+						Body:       []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name:  "Non-returning function",
 			input: `fn get_msg() { "Hello, world!" }`,
 			output: Program{
@@ -131,6 +151,27 @@ func TestFunctionCalls(t *testing.T) {
 					&FunctionCall{
 						Name: "get_name",
 						Args: []Expression{},
+					},
+				},
+			},
+		},
+		{
+			name: "Static function call with generic type argument",
+			input: `json::decode<Person>(str)`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StaticFunction{
+						Target: &Identifier{Name: "json"},
+						Function: FunctionCall{
+							Name: "decode",
+							TypeArgs: []DeclaredType{
+								&CustomType{Name: "Person"},
+							},
+							Args: []Expression{
+								&Identifier{Name: "str"},
+							},
+						},
 					},
 				},
 			},

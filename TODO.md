@@ -1,10 +1,11 @@
 ## TODO
 
-- [ ] parse syntax for annotating Generics in calls `json.decode<Person>(str)`
-- [ ] parse syntax for declaring Generics in fns `fn decode() $Out {}`
+- [ ] parse syntax for declaring Generics in fns `fn decode(str: Str) $Out {}`
+- [ ] parse syntax for providing type arguments in calls `json::decode::<Person>(str)`
 - [ ] support escape sequences in strings
 - [ ] remove need for naming self in impl blocks
   - [ ] use @ for accessing props
+- [ ] simplify interpolation syntax to `"{name}"` instead of `{{name}}`
 - [ ] networking
 - [ ] methods on enums?
 - [ ] matching on numbers
