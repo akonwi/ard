@@ -36,7 +36,7 @@ func TestJsonEncode(t *testing.T) {
 func TestJsonDecodeList(t *testing.T) {
 	result := run(t, `
 		use ard/json
-		let nums: [Int]? = json::decode("[1,2,3]")
+		let nums = json::decode<[Int]>("[1,2,3]")
 		match nums {
 		  ns => ns.size(),
 			_ => 0
@@ -57,7 +57,7 @@ func TestJsonDecodeStruct(t *testing.T) {
 		  employed: Bool
 		}
 		let john_str = "{\"name\": \"John\", \"age\": 30, \"employed\": true}"
-		let result: Person? = json::decode(john_str)
+		let result = json::decode<Person>(john_str)
 		match result {
 		  john => john.name == "John" and john.age == 30 and john.employed == true,
 			_ => false

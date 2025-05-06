@@ -74,7 +74,16 @@ func (i _int) get(name string) Type {
 	}
 }
 func (i *_int) equal(other Type) bool {
-	return i == other
+	if i == other {
+		return true
+	}
+	if any, ok := other.(*Any); ok {
+		if any.actual == nil {
+			return true
+		}
+		return i.equal(any.actual)
+	}
+	return false
 }
 
 var Int = &_int{}
