@@ -439,17 +439,71 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				}
 			}
 
+			fmt.Printf("package: %s, call: %s\n", e.Package, e.Call.Name)
 			if e.Package == "ard/json" {
 				switch e.Call.Name {
 				case "encode":
-					val := vm.eval(e.Call.Args[0])
-					result := &object{nil, e.Call.Type()}
-					bytes, err := json.Marshal(val.premarshal())
-					if err != nil {
+					{
+						val := vm.eval(e.Call.Args[0])
+						result := &object{nil, e.Call.Type()}
+						bytes, err := json.Marshal(val.premarshal())
+						if err != nil {
+							return result
+						}
+						result.raw = string(bytes)
 						return result
 					}
-					result.raw = string(bytes)
-					return result
+				case "decode":
+					{
+						result := &object{nil, e.Call.Type()}
+						jsonBytes := []byte(vm.eval(e.Call.Args[0]).raw.(string))
+
+						inner := result._type.(*checker_v2.Maybe).Of()
+						switch subj := inner.(type) {
+						case *checker_v2.StructDef:
+							{
+								_map := make(map[string]any)
+								err := json.Unmarshal(jsonBytes, &_map)
+								if err != nil {
+									// todo: build error handling
+									fmt.Printf("Error unmarshalling: %s\n", err)
+									return result
+								}
+
+								fields := make(map[string]*object)
+								for name, fType := range subj.Fields {
+									val := _map[name]
+									if f64, ok := val.(float64); ok && fType == (checker_v2.Int) {
+										val = int(f64)
+									}
+									fields[name] = &object{val, fType}
+								}
+
+								result.raw = fields
+								return result
+							}
+						case *checker_v2.List:
+							{
+								array := []any{}
+								err := json.Unmarshal([]byte(jsonBytes), &array)
+								if err != nil {
+									// todo: build error handling
+									fmt.Printf("Error unmarshalling: %s\n", err)
+									return result
+								}
+
+								raw := make([]*object, len(array))
+								for i := range array {
+									raw[i] = &object{array[i], subj.Of()}
+								}
+
+								result.raw = raw
+								return result
+							}
+						default:
+							panic(fmt.Errorf("unable to decode into %s", subj))
+						}
+					}
 				default:
 					panic(fmt.Errorf("Unimplemented: json::%s()", e.Call.Name))
 				}
@@ -467,6 +521,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 					panic(fmt.Errorf("Unimplemented: maybe::%s()", e.Call.Name))
 				}
 			}
+
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
 		}
 	case *checker_v2.ListLiteral:

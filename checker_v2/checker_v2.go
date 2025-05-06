@@ -1025,6 +1025,11 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						return nil
 					}
 					__type = expected
+
+					// if we have a declared type and the inferred has a generic, then refine the generic
+					if strings.HasPrefix(val.Type().String(), "$") {
+						refine(val.Type(), expected)
+					}
 				}
 			}
 
@@ -2759,11 +2764,29 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	switch typ := t.(type) {
 	case *Any:
 		if concrete, exists := typeMap[typ.name]; exists {
-			return concrete
+			typ.actual = concrete
 		}
 		return typ
 	case *Maybe:
 		return &Maybe{of: substituteType(typ.of, typeMap)}
+	// Handle other compound types
+	default:
+		return t
+	}
+}
+
+// Refine a generic as a concrete type
+func refine(t Type, expected Type) Type {
+	switch typ := t.(type) {
+	case *Any:
+		typ.actual = expected
+		return typ
+	case *Maybe:
+		if m, ok := expected.(*Maybe); ok {
+			typ.of = m.of
+			return typ
+		}
+		return typ
 	// Handle other compound types
 	default:
 		return t

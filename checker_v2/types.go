@@ -177,8 +177,17 @@ func (l *List) equal(other Type) bool {
 	if o, ok := other.(*List); ok {
 		return o.of.equal(o.of)
 	}
+	if any, ok := other.(*Any); ok {
+		if any.actual == nil {
+			return true
+		}
+		return l.equal(any.actual)
+	}
 
 	return false
+}
+func (l List) Of() Type {
+	return l.of
 }
 
 type Map struct {
@@ -283,6 +292,9 @@ func (a Any) String() string {
 		return a.actual.String()
 	}
 	return "$" + a.name
+}
+func (a Any) Actual() Type {
+	return a.actual
 }
 
 func (a Any) get(name string) Type {
