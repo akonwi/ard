@@ -1052,5 +1052,41 @@ func TestLexing(t *testing.T) {
 				{kind: eof},
 			},
 		},
+
+		{
+			name:  "declaring generic types",
+			input: `fn call(with: $T) { }`,
+			want: []token{
+					{kind: fn, line: 1, column: 1},
+					{kind: identifier, line: 1, column: 4, text: "call"},
+					{kind: left_paren, line: 1, column: 8},
+					{kind: identifier, line: 1, column: 9, text: "with"},
+					{kind: colon, line: 1, column: 13},
+					{kind: identifier, line: 1, column: 15, text: "$T"},
+					{kind: right_paren, line: 1, column: 17},
+					{kind: left_brace, line: 1, column: 19},
+					{kind: right_brace, line: 1, column: 21},
+					{kind: eof},
+				},
+		},
+
+		{
+			name: "Narrowing generics in function calls",
+			input: strings.Join([]string{
+				`json::decode<Person>(val)`,
+			}, "\n"),
+			want: []token{
+				{kind: identifier, line: 1, column: 1, text: "json"},
+				{kind: colon_colon, line: 1, column: 5},
+				{kind: identifier, line: 1, column: 7, text: "decode"},
+				{kind: less_than, line: 1, column: 13},
+				{kind: identifier, line: 1, column: 14, text: "Person"},
+				{kind: greater_than, line: 1, column: 20},
+				{kind: left_paren, line: 1, column: 21},
+				{kind: identifier, line: 1, column: 22, text: "val"},
+				{kind: right_paren, line: 1, column: 25},
+				{kind: eof},
+			},
+		},
 	})
 }

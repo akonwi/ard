@@ -20,6 +20,7 @@ type test struct {
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
+		checker.Any{},
 		checker.Diagnostic{},
 		checker.EnumVariant{},
 		checker.Identifier{},
@@ -2313,23 +2314,110 @@ func TestTypeUnions(t *testing.T) {
 	})
 }
 
-// func TestJson(t *testing.T) {
-// 	run(t, []test{
-// 		{
-// 			name: "json.decode return type cannot be inferred in variable declarations",
-// 			input: `
-// 			  use ard/json
-// 			  let obj = json.decode("")`,
-// 			diagnostics: []Diagnostic{
-// 				{Kind: Error, Message: "Unknown: Cannot infer type of a generic. Declare the variable type."},
-// 			},
-// 		},
-// 		{
-// 			name: "json.decode return type is inferred by usage",
-// 			input: `
-// 			  use ard/json
-// 				struct Thing {}
-// 			  let obj: Thing? = json.decode("")`,
-// 		},
-// 	})
-// }
+func TestGenerics(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "An identity function",
+			input: `fn identity(of: $T) $T { of }`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FunctionDef{
+							Name:       "identity",
+							Parameters: []checker.Parameter{{Name: "of", Type: &checker.Any{}}},
+							ReturnType: &checker.Any{},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.Variable{}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Providing type arguments to static functions",
+			input: `
+				use ard/json
+				let int = json::decode<Int>("1")
+				match int {
+				  i => i + 10,
+					_ => -1
+				}
+			`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"json": {Name: "json", Path: "ard/json"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "int",
+							Value: &checker.PackageFunctionCall{
+								Package: "ard/json",
+								Call: &checker.FunctionCall{
+									Name: "decode",
+									Args: []checker.Expression{&checker.StrLiteral{"1"}},
+								},
+							},
+						},
+					},
+					{
+						Expr: &checker.OptionMatch{
+							Subject: &checker.Variable{},
+							Some: &checker.Match{
+								Pattern: &checker.Identifier{Name: "i"},
+								Body: &checker.Block{
+									Stmts: []checker.Statement{
+										{Expr: &checker.IntAddition{
+											&checker.Variable{},
+											&checker.IntLiteral{10},
+										}},
+									},
+								},
+							},
+							None: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.Negation{&checker.IntLiteral{1}}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Providing type arguments to normal functions",
+			input: `
+			  fn identity(of: $T) $T { of }
+				2 + identity<Int>(1)
+			`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FunctionDef{
+							Name:       "identity",
+							Parameters: []checker.Parameter{{Name: "of", Type: &checker.Any{}}},
+							ReturnType: &checker.Any{},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{Expr: &checker.Variable{}},
+								},
+							},
+						},
+					},
+					{
+						Expr: &checker.IntAddition{
+							&checker.IntLiteral{2},
+							&checker.FunctionCall{
+								Name: "identity",
+								Args: []checker.Expression{&checker.IntLiteral{1}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}

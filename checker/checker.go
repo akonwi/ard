@@ -58,11 +58,6 @@ type Expression interface {
 	Type() Type
 }
 
-type Coercable interface {
-	Expression
-	Coerce(Type) Expression
-}
-
 type StrLiteral struct {
 	Value string
 }
@@ -614,21 +609,13 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name    string
-	Args    []Expression
-	fn      *FunctionDef
-	coerced Type
+	Name string
+	Args []Expression
+	fn   *FunctionDef
 }
 
 func (f *FunctionCall) Type() Type {
-	if f.coerced != nil {
-		return f.coerced
-	}
 	return f.fn.ReturnType
-}
-
-func (f *FunctionCall) Coerce(t Type) {
-	f.coerced = t
 }
 
 type PackageFunctionCall struct {
@@ -638,10 +625,6 @@ type PackageFunctionCall struct {
 
 func (p *PackageFunctionCall) Type() Type {
 	return p.Call.Type()
-}
-
-func (p *PackageFunctionCall) Coerce(t Type) {
-	p.Call.Coerce(t)
 }
 
 type Enum struct {
@@ -947,6 +930,8 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return nil
+	case *ast.GenericType:
+		return &Any{name: ty.Name}
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
 	}
@@ -1042,17 +1027,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						return nil
 					}
 					__type = expected
-
-					// if val is a function call returning a generic + there is a declared type
-					// coerce the function call to the declared type
-					if strings.HasPrefix(val.Type().String(), "$") {
-						if coercable, ok := val.(*PackageFunctionCall); ok {
-							coercable.Coerce(expected)
-						}
-						if coercable, ok := val.(*FunctionCall); ok {
-							coercable.Coerce(expected)
-						}
-					}
 				}
 			}
 
@@ -1687,18 +1661,95 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !paramType.equal(checkedArg.Type()) {
+				if !checkedArg.Type().equal(paramType) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
 
 				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable {
-					// For now, we don't do additional checks for mutable parameters
-					// This might involve checking that the argument is a mutable variable
+				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
 				}
 
 				args[i] = checkedArg
+			}
+
+			if fnDef.hasGenerics() {
+				if len(s.TypeArgs) > 0 {
+					// collect generics
+					generics := []Type{}
+					for _, param := range fnDef.Parameters {
+						if strings.HasPrefix(param.Type.String(), "$") {
+							if !slices.ContainsFunc(generics, func(g Type) bool {
+								return g.String() == param.Type.String()
+							}) {
+								generics = append(generics, param.Type)
+							}
+						}
+					}
+					if strings.HasPrefix(fnDef.ReturnType.String(), "$") {
+						if !slices.ContainsFunc(generics, func(g Type) bool {
+							return g.String() == fnDef.ReturnType.String()
+						}) {
+							generics = append(generics, fnDef.ReturnType)
+						}
+					}
+
+					if len(s.TypeArgs) != len(generics) {
+						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.GetLocation())
+						return nil
+					}
+
+					for i, any := range generics {
+						actual := c.resolveType(s.TypeArgs[i])
+						if actual == nil {
+							return nil
+						}
+						refine(any, actual)
+					}
+				}
+
+				// Create a mapping of generic parameters to concrete types
+				typeMap := make(map[string]Type)
+				// Infer types from arguments
+				for i, param := range fnDef.Parameters {
+					if anyType, ok := param.Type.(*Any); ok {
+						if existing, exists := typeMap[anyType.name]; exists {
+							// Ensure consistent types for the same generic parameter
+							if !existing.equal(args[i].Type()) {
+								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Args[i].GetLocation())
+								return nil
+							}
+						} else {
+							// Bind the generic parameter to the argument type
+							typeMap[anyType.name] = args[i].Type()
+						}
+					}
+				}
+
+				// Create specialized function with generic parameters substituted
+				specialized := &FunctionDef{
+					Name:       fnDef.Name,
+					Parameters: make([]Parameter, len(fnDef.Parameters)),
+					ReturnType: substituteType(fnDef.ReturnType, typeMap),
+					Body:       fnDef.Body,
+				}
+
+				// Substitute types in parameters
+				for i, param := range fnDef.Parameters {
+					specialized.Parameters[i] = Parameter{
+						Name:    param.Name,
+						Type:    substituteType(param.Type, typeMap),
+						Mutable: param.Mutable,
+					}
+				}
+
+				// Return function call with specialized function
+				return &FunctionCall{
+					Name: s.Name,
+					Args: args,
+					fn:   specialized,
+				}
 			}
 
 			// Create and return the function call node
@@ -1822,7 +1873,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot add different types", s.GetLocation())
 						return nil
 					}
@@ -2117,6 +2168,39 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			if fnDef.hasGenerics() {
+				if len(s.Function.TypeArgs) > 0 {
+					// collect generics
+					generics := []Type{}
+					for _, param := range fnDef.Parameters {
+						if strings.HasPrefix(param.Type.String(), "$") {
+							if !slices.ContainsFunc(generics, func(g Type) bool {
+								return g.String() == param.Type.String()
+							}) {
+								generics = append(generics, param.Type)
+							}
+						}
+					}
+					if strings.HasPrefix(fnDef.ReturnType.String(), "$") {
+						if !slices.ContainsFunc(generics, func(g Type) bool {
+							return g.String() == fnDef.ReturnType.String()
+						}) {
+							generics = append(generics, fnDef.ReturnType)
+						}
+					}
+					if len(s.Function.TypeArgs) != len(generics) {
+						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
+						return nil
+					}
+
+					for i, any := range generics {
+						actual := c.resolveType(s.Function.TypeArgs[i])
+						if actual == nil {
+							return nil
+						}
+						refine(any, actual)
+					}
+				}
+
 				// Create a mapping of generic parameters to concrete types
 				typeMap := make(map[string]Type)
 				// Infer types from arguments
@@ -2273,7 +2357,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			})
 
 			// Check that the function's return type matches its body's type
-			if returnType != Void && body.Type() != returnType {
+			if returnType != Void && !returnType.equal(body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
@@ -2763,7 +2847,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 	})
 
 	// Check that the function's return type matches its body's type
-	if returnType != Void && body.Type() != returnType {
+	if returnType != Void && !returnType.equal(body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 		return nil
 	}
@@ -2805,10 +2889,7 @@ func refine(t Type, expected Type) Type {
 		typ.actual = expected
 		return typ
 	case *Maybe:
-		if m, ok := expected.(*Maybe); ok {
-			typ.of = m.of
-			return typ
-		}
+		typ.of = expected
 		return typ
 	// Handle other compound types
 	default:

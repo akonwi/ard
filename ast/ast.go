@@ -188,6 +188,24 @@ func (u CustomType) String() string {
 	return u.Name
 }
 
+type GenericType struct {
+	Location
+	Name     string
+	nullable bool
+}
+
+func (g GenericType) GetName() string {
+	return g.Name
+}
+
+func (g GenericType) IsNullable() bool {
+	return g.nullable
+}
+
+func (g GenericType) String() string {
+	return g.Name
+}
+
 func (v VariableDeclaration) String() string {
 	binding := "let"
 	if v.Mutable {
@@ -351,8 +369,9 @@ func (i IfStatement) String() string {
 
 type FunctionCall struct {
 	Location
-	Name string
-	Args []Expression
+	Name         string
+	TypeArgs     []DeclaredType
+	Args         []Expression
 }
 
 func (f FunctionCall) String() string {
