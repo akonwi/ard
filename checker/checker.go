@@ -58,11 +58,6 @@ type Expression interface {
 	Type() Type
 }
 
-type Coercable interface {
-	Expression
-	Coerce(Type) Expression
-}
-
 type StrLiteral struct {
 	Value string
 }
@@ -614,21 +609,13 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name    string
-	Args    []Expression
-	fn      *FunctionDef
-	coerced Type
+	Name string
+	Args []Expression
+	fn   *FunctionDef
 }
 
 func (f *FunctionCall) Type() Type {
-	if f.coerced != nil {
-		return f.coerced
-	}
 	return f.fn.ReturnType
-}
-
-func (f *FunctionCall) Coerce(t Type) {
-	f.coerced = t
 }
 
 type PackageFunctionCall struct {
@@ -638,10 +625,6 @@ type PackageFunctionCall struct {
 
 func (p *PackageFunctionCall) Type() Type {
 	return p.Call.Type()
-}
-
-func (p *PackageFunctionCall) Coerce(t Type) {
-	p.Call.Coerce(t)
 }
 
 type Enum struct {
@@ -1044,17 +1027,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						return nil
 					}
 					__type = expected
-
-					// if val is a function call returning a generic + there is a declared type
-					// coerce the function call to the declared type
-					if strings.HasPrefix(val.Type().String(), "$") {
-						if coercable, ok := val.(*PackageFunctionCall); ok {
-							coercable.Coerce(expected)
-						}
-						if coercable, ok := val.(*FunctionCall); ok {
-							coercable.Coerce(expected)
-						}
-					}
 				}
 			}
 
