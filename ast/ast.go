@@ -184,6 +184,9 @@ func (u CustomType) GetName() string {
 func (u CustomType) IsNullable() bool {
 	return u.nullable
 }
+func (u CustomType) String() string {
+	return u.Name
+}
 
 func (v VariableDeclaration) String() string {
 	binding := "let"
@@ -469,7 +472,7 @@ type Identifier struct {
 }
 
 func (i Identifier) String() string {
-	return fmt.Sprintf("Identifier(%s)", i.Name)
+	return fmt.Sprintf("%s", i.Name)
 }
 
 type StrLiteral struct {

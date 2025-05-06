@@ -1,218 +1,154 @@
 package checker
 
-func findStdLib(path string, alias string) Package {
-	switch path {
+var preludePkgs = map[string]*StdPackage{
+	"Float": {Name: "Int", Path: "ard/float"},
+	"Int":   {Name: "Int", Path: "ard/ints"},
+}
+
+func getInPackage(pkgPath, name string) symbol {
+	switch pkgPath {
+	case "ard/float":
+		return getInFloat(name)
 	case "ard/fs":
-		return newFileSystem(alias)
+		return getInFS(name)
+	case "ard/ints":
+		return getInInts(name)
 	case "ard/io":
-		return newIO(alias)
+		return getInIO(name)
 	case "ard/json":
-		return newJSON(alias)
+		return getInJson(name)
 	case "ard/maybe":
-		return newMaybe(alias)
+		return getInMaybe(name)
 	default:
 		return nil
 	}
 }
 
-type IO struct {
-	name string
-}
-
-func newIO(name string) IO {
-	_name := "io"
-	if name != "" {
-		_name = name
-	}
-	return IO{name: _name}
-}
-func (io IO) GetName() string {
-	return io.name
-}
-func (io IO) String() string {
-	return io.GetPath()
-}
-func (io IO) GetPath() string {
-	return "ard/io"
-}
-func (io IO) GetType() Type {
-	return io
-}
-func (io IO) GetProperty(name string) Type {
+func getInFloat(name string) symbol {
 	switch name {
-	case "print":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "string", mut: false, _type: Str{}}},
-			returns:    Void{},
+	case "from_int":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "int", Type: Int}},
+			ReturnType: Float,
 		}
-
-	case "read_line":
-		return function{
-			name:       name,
-			parameters: []variable{},
-			returns:    Str{},
+	case "from_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "string", Type: Str}},
+			ReturnType: &Maybe{Float},
 		}
-
 	default:
 		return nil
 	}
 }
-func (io IO) asFunction() (function, bool) {
-	return function{}, false
-}
 
-type FileSystem struct {
-	alias string
-}
-
-func newFileSystem(alias string) FileSystem {
-	return FileSystem{alias: alias}
-}
-func (fs FileSystem) GetName() string {
-	if fs.alias != "" {
-		return fs.alias
-	}
-	return "fs"
-}
-func (fs FileSystem) String() string {
-	return fs.GetPath()
-}
-func (fs FileSystem) GetPath() string {
-	return "ard/fs"
-}
-func (fs FileSystem) GetType() Type {
-	return fs
-}
-func (fs FileSystem) asFunction() (function, bool) {
-	return function{}, false
-}
-func (fs FileSystem) GetProperty(name string) Type {
+func getInFS(name string) symbol {
 	switch name {
-	case "exists":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
-			returns:    Bool{},
+	case "append":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
+			ReturnType: Bool,
 		}
-	case "read":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
-			returns:    MakeMaybe(Str{}),
-		}
-
 	case "create_file":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
-			returns:    Bool{},
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: Bool,
 		}
 	case "delete":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "path", mut: false, _type: Str{}}},
-			returns:    Bool{},
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "exists":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: Bool,
+		}
+	case "read":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}},
+			ReturnType: &Maybe{Str},
 		}
 	case "write":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "path", mut: false, _type: Str{}}, {name: "content", mut: false, _type: Str{}}},
-			returns:    Void{},
-		}
-	case "append":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "path", mut: false, _type: Str{}}, {name: "content", mut: false, _type: Str{}}},
-			returns:    Void{},
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
+			ReturnType: Bool,
 		}
 	default:
 		return nil
 	}
 }
 
-type Options struct{ name string }
-
-func newMaybe(alias string) Options {
-	return Options{name: alias}
-}
-func (pkg Options) GetPath() string {
-	return "ard/maybe"
-}
-func (pkg Options) GetName() string {
-	if pkg.name != "" {
-		return pkg.name
-	}
-	return "maybe"
-}
-func (pkg Options) String() string {
-	return pkg.GetPath()
-}
-func (pkg Options) GetType() Type {
-	return pkg
-}
-func (pkg Options) asFunction() (function, bool) {
-	return function{}, false
-}
-func (pkg Options) GetProperty(name string) Type {
+func getInInts(name string) symbol {
 	switch name {
-	case "none":
-		return function{
-			name:       name,
-			parameters: []variable{},
-			returns:    MakeMaybe(MakeAny("Any")),
-		}
-	case "some":
-		Value := MakeAny("Value")
-		return function{
-			name:       name,
-			parameters: []variable{{name: "value", mut: false, _type: Value}},
-			returns:    MakeMaybe(Value),
+	case "from_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "string", Type: Str}},
+			ReturnType: &Maybe{Int},
 		}
 	default:
 		return nil
 	}
 }
 
-type JSON struct{ name string }
-
-func newJSON(alias string) JSON {
-	return JSON{name: alias}
-}
-
-func (j JSON) GetName() string {
-	if j.name != "" {
-		return j.name
+func getInIO(name string) symbol {
+	switch name {
+	case "print":
+		fn := &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "string", Type: Str}},
+			ReturnType: Void,
+		}
+		return fn
+	default:
+		return nil
 	}
-	return "json"
 }
-func (j JSON) GetPath() string {
-	return "ard/json"
-}
-func (j JSON) GetType() Type {
-	return j
-}
-func (j JSON) asFunction() (function, bool) {
-	return function{}, false
-}
-func (j JSON) String() string {
-	return j.GetPath()
-}
-func (j JSON) GetProperty(name string) Type {
+
+func getInJson(name string) symbol {
 	switch name {
 	case "encode":
-		return function{
-			name:       name,
-			parameters: []variable{{name: "val", mut: false, _type: MakeAny("Value")}},
-			returns:    MakeMaybe(Str{}),
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: &Any{name: "In"}}},
+			ReturnType: &Maybe{Str},
 		}
 	case "decode":
-		return function{
-			name: name,
-			parameters: []variable{
-				{name: "string", mut: false, _type: Str{}},
-			},
-			returns: MakeMaybe(MakeAny("Out")),
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "string", Type: Str}},
+			ReturnType: &Maybe{&Any{name: "Out"}},
+		}
+	default:
+		return nil
+	}
+}
+
+func getInMaybe(name string) symbol {
+	switch name {
+	case "none":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: &Maybe{&Any{name: "T"}},
+		}
+	case "some":
+		// This function returns Maybe<T> where T is the type of the parameter
+		// We use Any as a placeholder, but the type checker should infer
+		// the actual type based on the argument type
+		any := &Any{name: "T"}
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "val", Type: any}},
+			ReturnType: &Maybe{any},
 		}
 	default:
 		return nil

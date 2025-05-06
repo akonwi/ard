@@ -14,7 +14,7 @@ func TestJsonEncode(t *testing.T) {
 		  employed: Bool
 		}
 		let john = Person{name: "John", age: 30, employed: true}
-		let result = json.encode(john)
+		let result = json::encode(john)
 		match result {
 		  str => str,
 			_ => ""
@@ -33,7 +33,22 @@ func TestJsonEncode(t *testing.T) {
 	}
 }
 
-func TestJsonDecode(t *testing.T) {
+func TestJsonDecodeList(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		let nums: [Int]? = json::decode("[1,2,3]")
+		match nums {
+		  ns => ns.size(),
+			_ => 0
+		}
+	`)
+
+	if result != 3 {
+		t.Errorf("Expected 3, got %v", result)
+	}
+}
+
+func TestJsonDecodeStruct(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		struct Person {
@@ -42,7 +57,7 @@ func TestJsonDecode(t *testing.T) {
 		  employed: Bool
 		}
 		let john_str = "{\"name\": \"John\", \"age\": 30, \"employed\": true}"
-		let result = Person::from_json(john_str)
+		let result: Person? = json::decode(john_str)
 		match result {
 		  john => john.name == "John" and john.age == 30 and john.employed == true,
 			_ => false

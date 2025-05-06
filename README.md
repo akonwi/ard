@@ -95,14 +95,14 @@ C style for loop:
 
 ```ard
 for mut i = 0; i <= 5; i =+1 {
-  io.print(i.to_str())
+  io::print(i.to_str())
 }
 ```
 
 Numeric inclusive range:
 ```ard
 for i in 1..10 {
-	io.print(i) // 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+	io::print(i) // 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 }
 ```
 
@@ -110,7 +110,7 @@ Iterating over a list:
 ```ard
 let fruits = ["apple", "banana", "cherry"]
 for fruit in fruits {
-  io.print(fruit)
+  io::print(fruit)
 }
 ```
 ## Types
@@ -190,8 +190,8 @@ A maybe type can either have a value (`some`) or be empty (`none`).
 ```ard
 use ard/maybe
 
-mut maybe_name: Str? = maybe.none()
-maybe_name = maybe.some("Joe")
+mut maybe_name: Str? = maybe::none()
+maybe_name = maybe::some("Joe")
 
 match maybe_name {
   n => "Hello, {{n}}",
@@ -214,8 +214,8 @@ To do conditional logic on a value of a type union, use a match expression and w
 ```ard
 for item in stuff {
   match item {
-    Str => io.print("String: {{it}}"),
-    Int => io.print("Number: {{it.to_str()}}")
+    Str => io::print("String: {{it}}"),
+    Int => io::print("Number: {{it.to_str()}}")
   }
 }
 ```

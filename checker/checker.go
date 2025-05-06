@@ -2,11 +2,29 @@ package checker
 
 import (
 	"fmt"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/ast"
 )
+
+type Program struct {
+	StdImports map[string]StdPackage
+	Imports    map[string]ExtPackage
+	Statements []Statement
+}
+
+type StdPackage struct {
+	Name string
+	Path string
+}
+
+type ExtPackage struct {
+	Name string
+	Path string
+}
 
 type DiagnosticKind string
 
@@ -25,348 +43,515 @@ func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s", d.location.Start, d.Message)
 }
 
-type Program struct {
-	Imports    map[string]Package
-	Statements []Statement
+/* can either produce a value or not */
+type Statement struct {
+	Break bool
+	Expr  Expression
+	Stmt  NonProducing
 }
 
-// doubles as a symbol
-type Package interface {
-	symbol
-	Type
-	GetName() string
-	GetPath() string
+type NonProducing interface {
+	NonProducing()
 }
 
-type ExternalPackage struct {
-	path  string
-	alias string
-}
-
-func newExternalPackage(path, alias string) Package {
-	return ExternalPackage{
-		path:  path,
-		alias: alias,
-	}
-}
-
-func (pkg ExternalPackage) GetName() string {
-	if pkg.alias != "" {
-		return pkg.alias
-	}
-	split := strings.Split(pkg.GetPath(), "/")
-	return split[len(split)-1]
-}
-func (pkg ExternalPackage) GetPath() string {
-	return pkg.path
-}
-
-// ExternalPackage impl symbol
-func (p ExternalPackage) GetType() Type {
-	return p
-}
-func (p ExternalPackage) asFunction() (function, bool) {
-	return function{}, false
-}
-
-// ExternalPackage impl Type
-func (p ExternalPackage) String() string {
-	return p.path
-}
-func (p ExternalPackage) GetProperty(name string) Type {
-	return nil
-}
-
-// Expressions produce something, therefore they have a Type
 type Expression interface {
-	GetType() Type
+	Type() Type
+}
+
+type Coercable interface {
+	Expression
+	Coerce(Type) Expression
 }
 
 type StrLiteral struct {
 	Value string
 }
 
-func (s StrLiteral) String() string {
-	return `"` + s.Value + `"`
+func (s *StrLiteral) String() string {
+	return fmt.Sprintf(`"%s"`, s.Value)
 }
-func (s StrLiteral) GetType() Type {
-	return Str{}
-}
-
-type IntLiteral struct {
-	Value int
+func (s *StrLiteral) Type() Type {
+	return Str
 }
 
-func (n IntLiteral) GetType() Type {
-	return Int{}
+type TemplateStr struct {
+	Chunks []Expression
 }
 
-type FloatLiteral struct {
-	Value float64
+func (t *TemplateStr) String() string {
+	return "TemplateStr"
 }
-
-func (f FloatLiteral) GetType() Type {
-	return Float{}
+func (t *TemplateStr) Type() Type {
+	return Str
 }
 
 type BoolLiteral struct {
 	Value bool
 }
 
-func (b BoolLiteral) GetType() Type {
-	return Bool{}
+func (b *BoolLiteral) String() string {
+	return strconv.FormatBool(b.Value)
+}
+
+func (b *BoolLiteral) Type() Type {
+	return Bool
+}
+
+type IntLiteral struct {
+	Value int
+}
+
+func (i *IntLiteral) String() string {
+	return strconv.Itoa(i.Value)
+}
+
+func (i *IntLiteral) Type() Type {
+	return Int
+}
+
+type FloatLiteral struct {
+	Value float64
+}
+
+func (f *FloatLiteral) String() string {
+	return strconv.FormatFloat(f.Value, 'g', 10, 64)
+}
+
+func (f *FloatLiteral) Type() Type {
+	return Float
 }
 
 type ListLiteral struct {
 	Elements []Expression
-	_type    List
+	_type    Type
 }
 
-func (l ListLiteral) GetType() Type {
+func (l *ListLiteral) Type() Type {
 	return l._type
 }
 
 type MapLiteral struct {
-	Entries map[Expression]Expression
-	_type   Map
+	Keys   []Expression
+	Values []Expression
+	_type  Type
 }
 
-func (m MapLiteral) GetType() Type {
+func (m *MapLiteral) Type() Type {
 	return m._type
 }
 
-type StructInstance struct {
-	Name   string
-	Fields map[string]Expression
-	_type  *Struct
+type VariableDef struct {
+	Mutable bool
+	Name    string
+	__type  Type
+	Value   Expression
 }
 
-func (s StructInstance) GetType() Type {
-	return s._type
+func (v *VariableDef) NonProducing() {}
+func (v *VariableDef) name() string {
+	return v.Name
+}
+func (v *VariableDef) _type() Type {
+	return v.__type
+}
+
+type Reassignment struct {
+	Target Expression
+	Value  Expression
+}
+
+func (r *Reassignment) NonProducing() {}
+
+type Identifier struct {
+	Name string
+	sym  symbol
+}
+
+func (i *Identifier) Type() Type {
+	return i.sym._type()
+}
+
+type Variable struct {
+	sym symbol
+}
+
+func (v *Variable) isMutable() bool {
+	if def, ok := v.sym.(*VariableDef); ok {
+		return def.Mutable
+	}
+	return false
+}
+
+func (v Variable) String() string {
+	return v.Name()
+}
+func (v Variable) Name() string {
+	return v.sym.name()
+}
+func (v *Variable) Type() Type {
+	return v.sym._type()
+}
+
+type InstanceProperty struct {
+	Subject  Expression
+	Property string
+	_type    Type
+}
+
+func (i *InstanceProperty) Type() Type {
+	return i._type
+}
+
+type InstanceMethod struct {
+	Subject Expression
+	Method  *FunctionCall
+}
+
+func (i *InstanceMethod) Type() Type {
+	return i.Method.Type()
 }
 
 type Negation struct {
 	Value Expression
 }
 
-func (n Negation) GetType() Type {
-	return n.Value.GetType()
+func (n *Negation) String() string {
+	return fmt.Sprintf("-%s", n.Value)
+}
+func (n *Negation) Type() Type {
+	return n.Value.Type()
 }
 
 type Not struct {
 	Value Expression
 }
 
-func (n Not) GetType() Type {
-	return Bool{}
+func (n *Not) String() string {
+	return fmt.Sprintf("not %s", n.Value)
+}
+func (n *Not) Type() Type {
+	return Bool
 }
 
-type BinaryOperator string
-
-const (
-	Add                BinaryOperator = "+"
-	Sub                               = "-"
-	Div                               = "/"
-	Mul                               = "*"
-	Mod                               = "%"
-	Equal                             = "=="
-	NotEqual                          = "!="
-	GreaterThan                       = ">"
-	GreaterThanOrEqual                = ">="
-	LessThan                          = "<"
-	LessThanOrEqual                   = "<="
-	And                               = "and"
-	Or                                = "or"
-)
-
-type BinaryExpr struct {
-	Op    BinaryOperator
+type IntAddition struct {
 	Left  Expression
 	Right Expression
 }
 
-func (b BinaryExpr) GetType() Type {
-	switch b.Op {
-	case Add, Sub, Div, Mul, Mod:
-		return b.Left.GetType()
-	default:
-		return Bool{}
-	}
+func (n *IntAddition) Type() Type {
+	return Int
 }
 
-type Identifier struct {
-	Name   string
-	symbol symbol
+type IntSubtraction struct {
+	Left  Expression
+	Right Expression
 }
 
-func (i Identifier) String() string {
-	return i.Name
-}
-func (i Identifier) GetType() Type {
-	return i.symbol.GetType()
+func (n *IntSubtraction) Type() Type {
+	return Int
 }
 
-type InstanceProperty struct {
-	Subject  Expression
-	Property Identifier
+type IntMultiplication struct {
+	Left  Expression
+	Right Expression
 }
 
-func (i InstanceProperty) GetType() Type {
-	return i.Property.GetType()
+func (n *IntMultiplication) Type() Type {
+	return Int
 }
 
-type InstanceMethod struct {
-	Subject Expression
-	Method  FunctionCall
+type IntDivision struct {
+	Left  Expression
+	Right Expression
 }
 
-func (i InstanceMethod) GetType() Type {
-	return i.Method.GetType()
+func (n *IntDivision) Type() Type {
+	return Int
 }
 
-type StaticFunctionCall struct {
-	Subject  Static
-	Function FunctionCall
+type IntModulo struct {
+	Left  Expression
+	Right Expression
 }
 
-func (s StaticFunctionCall) GetType() Type {
-	return s.Function.GetType()
+func (n *IntModulo) Type() Type {
+	return Int
 }
 
-type PackageAccess struct {
-	Package  Package
-	Property Expression
+type IntGreater struct {
+	Left  Expression
+	Right Expression
 }
 
-func (p PackageAccess) GetType() Type {
-	return p.Property.GetType()
+func (n *IntGreater) Type() Type {
+	return Bool
 }
 
-type InterpolatedStr struct {
-	Parts []Expression
+type IntGreaterEqual struct {
+	Left  Expression
+	Right Expression
 }
 
-func (i InterpolatedStr) GetType() Type {
-	return Str{}
+func (n *IntGreaterEqual) Type() Type {
+	return Bool
 }
 
-type FunctionLiteral struct {
-	Parameters []Parameter
-	Return     Type
-	Body       []Statement
+type IntLess struct {
+	Left  Expression
+	Right Expression
 }
 
-func (f FunctionLiteral) GetType() Type {
-	params := make([]variable, len(f.Parameters))
-	for i, p := range f.Parameters {
-		params[i] = variable{
-			name:  p.Name,
-			mut:   false,
-			_type: p.Type,
-		}
-	}
-	return function{
-		name:       "",
-		parameters: params,
-		returns:    f.Return,
-	}
+func (n *IntLess) Type() Type {
+	return Bool
 }
 
-type MatchCase struct {
-	Pattern Expression
-	Body    []Statement
-	_type   Type
+type IntLessEqual struct {
+	Left  Expression
+	Right Expression
 }
 
-type BoolMatch struct {
-	Subject Expression
-	True    Block
-	False   Block
+func (n *IntLessEqual) Type() Type {
+	return Bool
 }
 
-func (m BoolMatch) GetType() Type {
-	return m.True.result
+type FloatAddition struct {
+	Left  Expression
+	Right Expression
 }
 
-type EnumMatch struct {
-	Subject  Expression
-	Cases    []Block
-	CatchAll MatchCase
+func (n *FloatAddition) Type() Type {
+	return Float
 }
 
-func (m EnumMatch) GetType() Type {
-	return m.Cases[0].result
+type Match struct {
+	Pattern *Identifier
+	Body    *Block
 }
 
 type OptionMatch struct {
 	Subject Expression
-	None    Block
-	Some    MatchCase
+	Some    *Match
+	None    *Block
 }
 
-func (o OptionMatch) GetType() Type {
-	return o.Some._type
+func (o *OptionMatch) Type() Type {
+	return o.Some.Body.Type()
+}
+
+type EnumMatch struct {
+	Subject  Expression
+	Cases    []*Block
+	CatchAll *Block
+}
+
+func (e *EnumMatch) Type() Type {
+	// Find the first non-nil case
+	for _, c := range e.Cases {
+		if c != nil {
+			return c.Type()
+		}
+	}
+	// If all cases are nil, use the catch-all
+	if e.CatchAll != nil {
+		return e.CatchAll.Type()
+	}
+	return Void
+}
+
+type BoolMatch struct {
+	Subject Expression
+	True    *Block
+	False   *Block
+}
+
+func (b *BoolMatch) Type() Type {
+	return b.True.Type()
 }
 
 type UnionMatch struct {
-	Subject  Expression
-	Cases    map[Type]Block
-	CatchAll Block
+	Subject   Expression
+	TypeCases map[string]*Block
+	CatchAll  *Block
 }
 
-func (u UnionMatch) GetType() Type {
-	for _, block := range u.Cases {
-		return block.result
+func (u *UnionMatch) Type() Type {
+	// Find the first non-nil case and return its type
+	for _, block := range u.TypeCases {
+		if block != nil {
+			return block.Type()
+		}
 	}
-	panic("unreachable")
+
+	// If no type cases are defined, use the catch-all case type
+	if u.CatchAll != nil {
+		return u.CatchAll.Type()
+	}
+
+	return Void
 }
 
-// Statements don't produce anything
-type Statement interface{}
-
-type VariableBinding struct {
-	Name  string
-	Value Expression
-	mut   bool
+type FloatSubtraction struct {
+	Left  Expression
+	Right Expression
 }
 
-type VariableAssignment struct {
-	Target Expression
-	Value  Expression
+func (n *FloatSubtraction) Type() Type {
+	return Float
 }
 
-type Break struct{}
+type FloatMultiplication struct {
+	Left  Expression
+	Right Expression
+}
 
-type IfStatement struct {
+func (n *FloatMultiplication) Type() Type {
+	return Float
+}
+
+type FloatDivision struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatDivision) Type() Type {
+	return Float
+}
+
+type FloatGreater struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatGreater) Type() Type {
+	return Bool
+}
+
+type FloatGreaterEqual struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatGreaterEqual) Type() Type {
+	return Bool
+}
+
+type FloatLess struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatLess) Type() Type {
+	return Bool
+}
+
+type FloatLessEqual struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *FloatLessEqual) Type() Type {
+	return Bool
+}
+
+type StrAddition struct {
+	Left  Expression
+	Right Expression
+}
+
+func (n *StrAddition) Type() Type {
+	return Str
+}
+
+type Equality struct {
+	Left, Right Expression
+}
+
+func (n *Equality) Type() Type {
+	return Bool
+}
+
+type And struct {
+	Left, Right Expression
+}
+
+func (a *And) Type() Type {
+	return Bool
+}
+
+type Or struct {
+	Left, Right Expression
+}
+
+func (o *Or) Type() Type {
+	return Bool
+}
+
+type Block struct {
+	Stmts []Statement
+}
+
+func (b *Block) Type() Type {
+	if len(b.Stmts) == 0 {
+		return Void
+	}
+	last := b.Stmts[len(b.Stmts)-1]
+	if last.Expr != nil {
+		return last.Expr.Type()
+	}
+	return Void
+}
+
+type If struct {
 	Condition Expression
-	Body      []Statement
-	Else      Statement
+	Body      *Block
+	ElseIf    *If
+	Else      *Block
 }
 
-type ForRange struct {
-	Cursor Identifier
+func (i *If) Type() Type {
+	return i.Body.Type()
+}
+
+type ForIntRange struct {
+	Cursor string
 	Start  Expression
 	End    Expression
-	Body   []Statement
+	Body   *Block
 }
 
-type ForIn struct {
-	Cursor   Identifier
-	Iterable Expression
-	Body     []Statement
+func (f ForIntRange) NonProducing() {}
+
+type ForInStr struct {
+	Cursor string
+	Value  Expression
+	Body   *Block
 }
+
+func (f ForInStr) NonProducing() {}
+
+type ForInList struct {
+	Cursor string
+	List   Expression
+	Body   *Block
+}
+
+func (f ForInList) NonProducing() {}
 
 type ForLoop struct {
-	Init      VariableBinding
+	Init      *VariableDef
 	Condition Expression
-	Step      Statement
-	Body      Block
+	Update    *Reassignment
+	Body      *Block
 }
+
+func (f ForLoop) NonProducing() {}
 
 type WhileLoop struct {
 	Condition Expression
-	Body      []Statement
+	Body      *Block
 }
+
+func (w WhileLoop) NonProducing() {}
 
 type Parameter struct {
 	Name    string
@@ -374,1710 +559,2259 @@ type Parameter struct {
 	Mutable bool
 }
 
-type FunctionDeclaration struct {
+type FunctionDef struct {
 	Name       string
 	Parameters []Parameter
-	Body       []Statement
-	Return     Type
-	mutates    bool
+	ReturnType Type
+	Mutates    bool
+	Body       *Block
+	// todo: delete
+	SelfName string
 }
 
-func (f FunctionDeclaration) GetType() Type {
-	params := make([]variable, len(f.Parameters))
-	for i, p := range f.Parameters {
-		params[i] = variable{
-			name:  p.Name,
-			mut:   false,
-			_type: p.Type,
+func (f FunctionDef) String() string {
+	paramStrs := make([]string, len(f.Parameters))
+	for i := range f.Parameters {
+		paramStrs[i] = f.Parameters[i].Type.String()
+	}
+
+	return fmt.Sprintf("fn (%s) %s", strings.Join(paramStrs, ","), f.ReturnType.String())
+}
+
+func (f FunctionDef) get(name string) Type { return nil }
+
+func (f FunctionDef) name() string {
+	return f.Name
+}
+func (f FunctionDef) _type() Type {
+	return f
+}
+func (f FunctionDef) Type() Type {
+	return f
+}
+func (f FunctionDef) equal(other Type) bool {
+	if oFn, ok := other.(*FunctionDef); ok {
+		if len(f.Parameters) != len(oFn.Parameters) {
+			return false
+		}
+		for i := range f.Parameters {
+			if !f.Parameters[i].Type.equal(oFn.Parameters[i].Type) {
+				return false
+			}
+		}
+		return f.Mutates == oFn.Mutates && f.ReturnType.equal(oFn.ReturnType)
+	}
+
+	return false
+}
+func (f *FunctionDef) hasGenerics() bool {
+	for i := range f.Parameters {
+		if strings.HasPrefix(f.Parameters[i].Type.String(), "$") {
+			return true
 		}
 	}
-	return function{
-		name:       f.Name,
-		parameters: params,
-		returns:    f.Return,
-		mutates:    f.mutates,
-	}
-}
-
-func (e Enum) GetType() Type {
-	return e
+	return strings.HasPrefix(f.ReturnType.String(), "$")
 }
 
 type FunctionCall struct {
+	Name    string
+	Args    []Expression
+	fn      *FunctionDef
+	coerced Type
+}
+
+func (f *FunctionCall) Type() Type {
+	if f.coerced != nil {
+		return f.coerced
+	}
+	return f.fn.ReturnType
+}
+
+func (f *FunctionCall) Coerce(t Type) {
+	f.coerced = t
+}
+
+type PackageFunctionCall struct {
+	Package string
+	Call    *FunctionCall
+}
+
+func (p *PackageFunctionCall) Type() Type {
+	return p.Call.Type()
+}
+
+func (p *PackageFunctionCall) Coerce(t Type) {
+	p.Call.Coerce(t)
+}
+
+type Enum struct {
+	Name     string
+	Variants []string
+}
+
+func (e Enum) variant(name string) int8 {
+	for i, v := range e.Variants {
+		if v == name {
+			return int8(i)
+		}
+	}
+	return -1
+}
+
+func (e Enum) NonProducing() {}
+
+func (e Enum) _type() Type {
+	return e
+}
+func (e Enum) name() string {
+	return e.Name
+}
+
+func (e Enum) Type() Type {
+	return e
+}
+func (e Enum) String() string {
+	return e.Name
+}
+func (e Enum) equal(other Type) bool {
+	o, ok := other.(*Enum)
+	if !ok {
+		return false
+	}
+	if e.Name != o.Name {
+		return false
+	}
+	if len(e.Variants) != len(o.Variants) {
+		return false
+	}
+	for i := range e.Variants {
+		if e.Variants[i] != o.Variants[i] {
+			return false
+		}
+	}
+	return true
+}
+func (e Enum) get(name string) Type { return nil }
+
+type EnumVariant struct {
+	enum    *Enum
+	Variant int8
+}
+
+func (ev EnumVariant) Type() Type {
+	return ev.enum
+}
+
+func (ev EnumVariant) String() string {
+	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Variants[ev.Variant])
+}
+
+type Union struct {
+	Name  string
+	Types []Type
+}
+
+func (u Union) NonProducing() {}
+func (u Union) String() string {
+	strs := make([]string, len(u.Types))
+	for i, t := range u.Types {
+		strs[i] = t.String()
+	}
+	return strings.Join(strs, "|")
+}
+func (u Union) get(name string) Type { return nil }
+
+// Implement the symbol interface
+func (u Union) name() string {
+	return u.Name
+}
+func (u Union) _type() Type {
+	return u
+}
+func (u Union) Type() Type {
+	return u
+}
+func (u Union) equal(other Type) bool {
+	if otherUnion, ok := other.(*Union); ok {
+		if len(u.Types) != len(otherUnion.Types) {
+			return false
+		}
+
+		// Check that all types in the union match
+		for _, uType := range u.Types {
+			found := slices.ContainsFunc(otherUnion.Types, uType.equal)
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Check if the other type matches any type in this union
+	for _, t := range u.Types {
+		if t.equal(other) {
+			return true
+		}
+	}
+
+	return false
+}
+
+type StructDef struct {
 	Name   string
-	Args   []Expression
-	symbol function
+	Fields map[string]Type
+	Self   string
 }
 
-func (f FunctionCall) GetType() Type {
-	return f.symbol.returns
+func (def StructDef) NonProducing() {}
+
+func (def *StructDef) name() string {
+	return def.Name
+}
+func (def StructDef) _type() Type {
+	return def
+}
+func (def StructDef) String() string {
+	return def.name()
+}
+func (def StructDef) get(name string) Type {
+	field, ok := def.Fields[name]
+	if !ok {
+		return nil
+	}
+	return field
+}
+func (def StructDef) equal(other Type) bool {
+	if otherDef, ok := other.(StructDef); ok {
+		if def.Name != otherDef.Name {
+			return false
+		}
+		if len(def.Fields) != len(otherDef.Fields) {
+			return false
+		}
+		for name, fieldType := range def.Fields {
+			if otherFieldType, ok := otherDef.Fields[name]; !ok || !fieldType.equal(otherFieldType) {
+				return false
+			}
+		}
+		return true
+	}
+	// todo: is this really necessary while the substitution is in place?
+	if o, ok := other.(*Any); ok {
+		if o.actual == nil {
+			// o.actual = def
+			return true
+		}
+		return def.equal(o.actual)
+	}
+	return false
 }
 
-type Block struct {
-	Body   []Statement
-	result Type
+type StructInstance struct {
+	Name   string
+	Fields map[string]Expression
+	_type  *StructDef
+}
+
+func (s StructInstance) Type() Type {
+	return s._type
 }
 
 func isMutable(expr Expression) bool {
-	if id, ok := expr.(Identifier); ok {
-		return id.symbol.(variable).mut
+	if v, ok := expr.(*Variable); ok {
+		return v.isMutable()
 	}
-	if prop, ok := expr.(InstanceProperty); ok {
+	if prop, ok := expr.(*InstanceProperty); ok {
 		return isMutable(prop.Subject)
 	}
-	return true
+	return false
 }
 
 type checker struct {
 	diagnostics []Diagnostic
-	imports     map[string]Package
 	scope       *scope
+	program     *Program
 }
 
-func (c *checker) addDiagnostic(d Diagnostic) {
-	c.diagnostics = append(c.diagnostics, d)
+func (c *checker) addError(msg string, location ast.Location) {
+	c.diagnostics = append(c.diagnostics, Diagnostic{
+		Kind:     Error,
+		Message:  msg,
+		location: location,
+	})
 }
 
-func Check(program *ast.Program) (Program, []Diagnostic) {
-	checker := checker{
-		diagnostics: []Diagnostic{},
-		imports:     map[string]Package{},
-		scope:       newScope(nil),
+func (c *checker) addWarning(msg string, location ast.Location) {
+	c.diagnostics = append(c.diagnostics, Diagnostic{
+		Kind:     Warn,
+		Message:  msg,
+		location: location,
+	})
+}
+
+func Check(input *ast.Program) (*Program, []Diagnostic) {
+	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
+	c.program = &Program{
+		StdImports: map[string]StdPackage{},
+		Imports:    map[string]ExtPackage{},
+		Statements: []Statement{},
 	}
-	statements := []Statement{}
 
-	for _, imp := range program.Imports {
-		if _, ok := checker.imports[imp.Name]; ok {
-			checker.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("%s Duplicate package name: %s", imp.GetStart(), imp.Name),
-				location: imp.GetLocation(),
-			})
-		} else {
-			var pkg Package
-			if strings.HasPrefix(imp.Path, "ard/") {
-				pkg = findStdLib(imp.Path, imp.Name)
-				if pkg == nil {
-					checker.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						location: imp.GetLocation(),
-						Message:  fmt.Sprintf("Unknown package: %s", imp.Path),
-					})
-					continue
-				}
+	for _, imp := range input.Imports {
+		if _, dup := c.program.StdImports[imp.Name]; dup {
+			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
+			continue
+		}
+		if _, dup := c.program.Imports[imp.Name]; dup {
+			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
+			continue
+		}
+
+		if strings.HasPrefix(imp.Path, "ard/") {
+			if pkg, ok := findInStdLib(imp.Path, imp.Name); ok {
+				c.program.StdImports[imp.Name] = pkg
 			} else {
-				pkg = newExternalPackage(imp.Path, imp.Name)
+				c.addError(fmt.Sprintf("Unknown package: %s", imp.Path), imp.GetLocation())
 			}
-			checker.imports[pkg.GetName()] = pkg
-			checker.scope.declare(pkg)
+		} else {
+			c.program.Imports[imp.Name] = ExtPackage{Path: imp.Path, Name: imp.Name}
 		}
 	}
 
-	for _, stmt := range program.Statements {
-		statement := checker.checkStatement(stmt)
-		if statement != nil {
-			statements = append(statements, statement)
+	for i := range input.Statements {
+		if stmt := c.checkStmt(&input.Statements[i]); stmt != nil {
+			c.program.Statements = append(c.program.Statements, *stmt)
 		}
 	}
 
-	return Program{
-		Imports:    checker.imports,
-		Statements: statements,
-	}, checker.diagnostics
+	return c.program, c.diagnostics
 }
 
-func (c *checker) checkStatement(stmt ast.Statement) Statement {
-	switch s := stmt.(type) {
-	case *ast.VariableDeclaration:
-		if s.Type == nil {
-			var value Expression
-			switch astVal := s.Value.(type) {
-			case *ast.ListLiteral:
-				value = c.checkList(astVal, nil)
-			default:
-				value = c.checkExpression(astVal)
-				if IsVoid(value.GetType()) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						location: s.Value.GetLocation(),
-						Message:  "Cannot assign a void value",
-					})
-					return nil
-				}
+func findInStdLib(path, name string) (StdPackage, bool) {
+	switch path {
+	case "ard/io", "ard/json", "ard/maybe", "ard/fs":
+		return StdPackage{Path: path, Name: name}, true
+	}
+	return StdPackage{}, false
+}
 
-				if strings.HasPrefix(value.GetType().String(), "$") {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						location: s.Value.GetLocation(),
-						Message:  "Unknown: Cannot infer type of a generic. Declare the variable type.",
-					})
-					return nil
-				}
+func (c *checker) resolvePkg(name string) *StdPackage {
+	if pkg, ok := c.program.StdImports[name]; ok {
+		return &pkg
+	}
+
+	if pkg, ok := preludePkgs[name]; ok {
+		return pkg
+	}
+
+	return nil
+}
+
+func (c *checker) resolveType(t ast.DeclaredType) Type {
+	var baseType Type
+	switch ty := t.(type) {
+	case *ast.StringType:
+		baseType = Str
+	case *ast.IntType:
+		baseType = Int
+	case *ast.FloatType:
+		baseType = Float
+	case *ast.BooleanType:
+		baseType = Bool
+	case *ast.List:
+		of := c.resolveType(ty.Element)
+		baseType = MakeList(of)
+	case *ast.Map:
+		key := c.resolveType(ty.Key)
+		value := c.resolveType(ty.Value)
+		baseType = MakeMap(key, value)
+	case *ast.CustomType:
+		if sym := c.scope.get(t.GetName()); sym != nil {
+			// Check if it's an enum
+			if enum, ok := sym.(*Enum); ok {
+				baseType = enum
+				break
 			}
 
-			c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: value.GetType()})
-			return VariableBinding{Name: s.Name, Value: value, mut: s.Mutable}
-		}
-
-		expectedType := c.resolveDeclaredType(s.Type)
-		if IsVoid(expectedType) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: s.Value.GetLocation(),
-				Message:  "Cannot assign a void value",
-			})
-		}
-
-		var value Expression
-		switch literal := s.Value.(type) {
-		case *ast.ListLiteral:
-			value = c.checkList(literal, expectedType)
-		case *ast.MapLiteral:
-			value = c.checkMap(literal, expectedType)
-		default:
-			value = c.checkExpression(s.Value)
-			if _, expectingFloat := expectedType.(Float); expectingFloat {
-				if _, isInt := value.(IntLiteral); isInt {
-					value = FloatLiteral{Value: float64(value.(IntLiteral).Value)}
-				}
+			// Check if it's a union type
+			if union, ok := sym.(*Union); ok {
+				baseType = union
+				break
 			}
-			if !AreCoherent(expectedType, value.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", expectedType, value.GetType()),
-					location: s.Value.GetLocation(),
-				})
-				return nil
+
+			// Check if it's a struct type
+			if structType, ok := sym.(*StructDef); ok {
+				baseType = structType
+				break
 			}
 		}
+		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
+		return nil
+	default:
+		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
+	}
 
-		c.scope.addVariable(variable{name: s.Name, mut: s.Mutable, _type: expectedType})
-		return VariableBinding{Name: s.Name, Value: value, mut: s.Mutable}
-	case *ast.VariableAssignment:
-		switch target := s.Target.(type) {
-		case *ast.Identifier:
-			symbol := c.scope.find(target.Name)
-			if symbol == nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Undefined: %s", target.Name),
-					location: s.GetLocation(),
-				})
-				return nil
-			}
+	// If the type is nullable, wrap it in a Maybe
+	if t.IsNullable() {
+		return &Maybe{of: baseType}
+	}
 
-			variable, ok := (*symbol).(variable)
-			if !ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Undefined: %s", target.Name),
-					location: s.GetLocation(),
-				})
-				return nil
-			}
-			if variable.isParam {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Cannot assign to parameter: %s", target.Name),
-					location: s.GetLocation(),
-				})
-				return nil
-			} else if !variable.mut {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Immutable variable: %s", target.Name),
-					location: s.GetLocation(),
-				})
-				return nil
-			}
+	return baseType
+}
 
-			value := c.checkExpression(s.Value)
-			// if value is nil, it means there was an error in the expression
-			if value == nil {
-				return nil
-			}
+func typeMismatch(expected, got Type) string {
+	return fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, got)
+}
 
-			if s.Operator == ast.Increment || s.Operator == ast.Decrement {
-				if !AreCoherent(variable._type, Int{}) || !AreCoherent(value.GetType(), Int{}) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  "Increment and decrement operators can only be used on numbers",
-						location: s.GetLocation(),
-					})
-					return nil
-				}
-
-				var operator BinaryOperator
-				if s.Operator == ast.Increment {
-					operator = Add
-				} else {
-					operator = Sub
-				}
-
-				value = BinaryExpr{
-					Op:    operator,
-					Left:  Identifier{Name: target.Name, symbol: variable},
-					Right: c.checkExpression(s.Value),
-				}
-				return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
-			}
-
-			if !AreCoherent(variable._type, value.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", variable._type, value.GetType()),
-					location: s.Value.GetLocation(),
-				})
-				return nil
-			}
-			return VariableAssignment{Target: Identifier{Name: target.Name}, Value: value}
-
-		case *ast.InstanceProperty:
-			subject := c.checkExpression(target)
-			if !isMutable(subject) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Cannot reassign in immutables",
-					location: target.GetLocation(),
-				})
-				return nil
-			}
-			value := c.checkExpression(s.Value)
-
-			if !AreCoherent(subject.GetType(), value.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", subject.GetType(), value.GetType()),
-					location: s.Value.GetLocation(),
-				})
-				return nil
-			}
-			return VariableAssignment{Target: subject, Value: value}
-		default:
-			panic(fmt.Errorf("Unsupported assignment subject: %s", target))
-		}
-	case *ast.IfStatement:
-		var condition Expression
-		initialize := func() {
-			if s.Condition != nil {
-				condition = c.checkExpression(s.Condition)
-				if condition.GetType() != (Bool{}) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  "If conditions must be boolean expressions",
-						location: s.Condition.GetLocation(),
-					})
-				}
-			}
-		}
-
-		block := c.checkBlock(s.Body, initialize)
-
-		var elseClause Statement = nil
-		if s.Else != nil {
-			elseClause = c.checkStatement(s.Else)
-		}
-		return IfStatement{Condition: condition, Body: block.Body, Else: elseClause}
+func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
+	switch s := (*stmt).(type) {
 	case *ast.Comment:
 		return nil
 	case *ast.Break:
-		return Break{}
-	case *ast.RangeLoop:
-		cursor := variable{name: s.Cursor.Name, mut: false, _type: Int{}}
-		start := c.checkExpression(s.Start)
-		end := c.checkExpression(s.End)
+		return &Statement{Break: true}
+	case *ast.TypeDeclaration:
+		{
+			// Handle type declaration (type unions/aliases)
+			types := make([]Type, len(s.Type))
+			for i, declType := range s.Type {
+				resolvedType := c.resolveType(declType)
+				if resolvedType == nil {
+					c.addError(fmt.Sprintf("Unrecognized type: %s", declType.GetName()), declType.GetLocation())
+					return nil
+				}
+				types[i] = resolvedType
+			}
 
-		startType := start.GetType()
-		endType := end.GetType()
-		if !AreCoherent(startType, Int{}) || !AreCoherent(startType, endType) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Invalid range: %s..%s", startType, endType),
-				location: s.Start.GetLocation(),
-			})
+			// Create a union type (even if it only contains one type)
+			unionType := &Union{
+				Name:  s.Name.Name,
+				Types: types,
+			}
+
+			// Register the type in the scope with the given name
+			c.scope.add(unionType)
 			return nil
 		}
-		block := c.checkBlock(s.Body, func() {
-			c.scope.addVariable(cursor)
-		})
-		return ForRange{
-			Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
-			Start:  start,
-			End:    end,
-			Body:   block.Body,
+	case *ast.VariableDeclaration:
+		{
+			var val Expression
+			if s.Type == nil {
+				switch literal := s.Value.(type) {
+				case *ast.ListLiteral:
+					if expr := c.checkList(nil, literal); expr != nil {
+						val = expr
+					}
+				case *ast.MapLiteral:
+					if expr := c.checkMap(nil, literal); expr != nil {
+						val = expr
+					}
+				default:
+					val = c.checkExpr(s.Value)
+				}
+			} else {
+				expected := c.resolveType(s.Type)
+				if expected == Void {
+					c.addError("Cannot assign a void value", s.Value.GetLocation())
+					return nil
+				}
+
+				switch literal := s.Value.(type) {
+				case *ast.ListLiteral:
+					if expr := c.checkList(expected, literal); expr != nil {
+						val = expr
+					}
+				case *ast.MapLiteral:
+					if expr := c.checkMap(expected, literal); expr != nil {
+						val = expr
+					}
+				default:
+					val = c.checkExpr(s.Value)
+				}
+			}
+
+			if val == nil {
+				return nil
+			}
+
+			__type := val.Type()
+
+			if s.Type != nil {
+				if expected := c.resolveType(s.Type); expected != nil {
+					if !expected.equal(val.Type()) {
+						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
+						return nil
+					}
+					__type = expected
+
+					// if val is a function call returning a generic + there is a declared type
+					// coerce the function call to the declared type
+					if strings.HasPrefix(val.Type().String(), "$") {
+						if coercable, ok := val.(*PackageFunctionCall); ok {
+							coercable.Coerce(expected)
+						}
+						if coercable, ok := val.(*FunctionCall); ok {
+							coercable.Coerce(expected)
+						}
+					}
+				}
+			}
+
+			v := &VariableDef{
+				Mutable: s.Mutable,
+				Name:    s.Name,
+				Value:   val,
+				__type:  __type,
+			}
+			c.scope.add(v)
+			return &Statement{
+				Stmt: v,
+			}
+		}
+	case *ast.VariableAssignment:
+		{
+			// todo: not always a variable
+			if id, ok := s.Target.(*ast.Identifier); ok {
+				target := c.scope.get(id.Name)
+				if target == nil {
+					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
+					return nil
+				}
+				value := c.checkExpr(s.Value)
+				if value == nil {
+					return nil
+				}
+
+				if binding, ok := target.(*VariableDef); ok {
+					if !binding.Mutable {
+						c.addError(fmt.Sprintf("Immutable variable: %s", binding.Name), s.Target.GetLocation())
+						return nil
+					}
+					if !target._type().equal(value.Type()) {
+						c.addError(typeMismatch(target._type(), value.Type()), s.Value.GetLocation())
+						return nil
+					}
+
+					return &Statement{
+						Stmt: &Reassignment{Target: &Variable{target}, Value: value},
+					}
+				}
+			}
+
+			if ip, ok := s.Target.(*ast.InstanceProperty); ok {
+				subject := c.checkExpr(ip)
+				if subject == nil {
+					return nil
+				}
+				value := c.checkExpr(s.Value)
+				if value == nil {
+					return nil
+				}
+
+				if !isMutable(subject) {
+					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+					return nil
+				}
+
+				return &Statement{
+					Stmt: &Reassignment{Target: subject, Value: value},
+				}
+			}
+
+			panic(fmt.Sprintf("Unimplemented reassignment target: %T", s.Target))
+		}
+	case *ast.WhileLoop:
+		{
+			// Check the condition expression
+			condition := c.checkExpr(s.Condition)
+			if condition == nil {
+				return nil
+			}
+
+			// Condition must be a boolean expression
+			if condition.Type() != Bool {
+				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
+				return nil
+			}
+
+			// Check the body of the loop
+			body := c.checkBlock(s.Body, nil)
+
+			// Create and return the while loop
+			loop := &WhileLoop{
+				Condition: condition,
+				Body:      body,
+			}
+
+			return &Statement{Stmt: loop}
+		}
+	case *ast.ForLoop:
+		{
+			// Create a new scope for the loop body and initialization
+			scope := newScope(c.scope)
+			c.scope = scope
+			defer func() {
+				c.scope = c.scope.parent
+			}()
+
+			// Check the initialization statement - handle it as a variable declaration
+			initDeclStmt := ast.Statement(s.Init)
+			initStmt := c.checkStmt(&initDeclStmt)
+			if initStmt == nil || initStmt.Stmt == nil {
+				c.addError("Invalid for loop initialization", s.Init.GetLocation())
+				return nil
+			}
+			initVarDef, ok := initStmt.Stmt.(*VariableDef)
+			if !ok {
+				c.addError("For loop initialization must be a variable declaration", s.Init.GetLocation())
+				return nil
+			}
+
+			// Check the condition expression
+			condition := c.checkExpr(s.Condition)
+			if condition == nil {
+				return nil
+			}
+
+			// Condition must be a boolean expression
+			if condition.Type() != Bool {
+				c.addError("For loop condition must be a boolean expression", s.Condition.GetLocation())
+				return nil
+			}
+
+			// Check the update statement - handle it as a variable assignment
+			incrStmt := ast.Statement(s.Incrementer)
+			updateStmt := c.checkStmt(&incrStmt)
+			if updateStmt == nil || updateStmt.Stmt == nil {
+				c.addError("Invalid for loop update expression", s.Incrementer.GetLocation())
+				return nil
+			}
+			update, ok := updateStmt.Stmt.(*Reassignment)
+			if !ok {
+				c.addError("For loop update must be a reassignment", s.Incrementer.GetLocation())
+				return nil
+			}
+
+			// Check the body of the loop
+			body := c.checkBlock(s.Body, nil)
+
+			// Create and return the for loop
+			loop := &ForLoop{
+				Init:      initVarDef,
+				Condition: condition,
+				Update:    update,
+				Body:      body,
+			}
+
+			return &Statement{Stmt: loop}
+		}
+	case *ast.RangeLoop:
+		{
+			start, end := c.checkExpr(s.Start), c.checkExpr(s.End)
+			if start == nil || end == nil {
+				return nil
+			}
+			if start.Type() != end.Type() {
+				c.addError(fmt.Sprintf("Invalid range: %s..%s", start.Type(), end.Type()), s.Start.GetLocation())
+				return nil
+			}
+
+			if start.Type() == Int {
+				loop := &ForIntRange{
+					Cursor: s.Cursor.Name,
+					Start:  start,
+					End:    end,
+				}
+				body := c.checkBlock(s.Body, func() {
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  start.Type(),
+					})
+				})
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
+			panic(fmt.Errorf("Cannot create range of %s", start.Type()))
 		}
 	case *ast.ForInLoop:
-		iterable := c.checkExpression(s.Iterable)
-		cursor := variable{name: s.Cursor.Name, mut: false, _type: iterable.GetType()}
-		// getBody func allows lazy evaluation so that cursor can be updated within the switch below
-		getBody := func() []Statement {
-			return c.checkBlock(s.Body, func() {
-				c.scope.addVariable(cursor)
-			}).Body
-		}
+		{
+			iterValue := c.checkExpr(s.Iterable)
+			if iterValue == nil {
+				return nil
+			}
 
-		switch iterable.GetType().(type) {
-		case Int:
-			return ForRange{
-				Cursor: Identifier{Name: s.Cursor.Name, symbol: cursor},
-				Start:  IntLiteral{Value: 0},
-				End:    iterable,
-				Body:   getBody(),
+			// Handle strings specifically
+			if iterValue.Type() == Str {
+				loop := &ForInStr{
+					Cursor: s.Cursor.Name,
+					Value:  iterValue,
+				}
+
+				// Create a new scope for the loop body where the cursor is defined
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursor variable to the scope as a string
+					// Each character in a string is also a string
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  Str,
+					})
+				})
+
+				loop.Body = body
+				return &Statement{Stmt: loop}
 			}
-		case Str:
-			return ForIn{
-				Cursor:   Identifier{Name: s.Cursor.Name, symbol: cursor},
-				Iterable: iterable,
-				Body:     getBody(),
+
+			// Handle integer iteration (for i in n - sugar for 0..n)
+			if iterValue.Type() == Int {
+				// This is syntax sugar for a range from 0 to n
+				loop := &ForIntRange{
+					Cursor: s.Cursor.Name,
+					Start:  &IntLiteral{0}, // Start from 0
+					End:    iterValue,      // End at the specified number
+				}
+
+				// Create a new scope for the loop body where the cursor is defined
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursor variable to the scope
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  Int,
+					})
+				})
+
+				loop.Body = body
+				return &Statement{Stmt: loop}
 			}
-		case Bool:
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  "Cannot iterate over a Bool",
-				location: s.Iterable.GetLocation(),
-			})
+
+			if listType, ok := iterValue.Type().(*List); ok {
+				// This is syntax sugar for a range from 0 to n
+				loop := &ForInList{
+					Cursor: s.Cursor.Name,
+					List:   iterValue,
+				}
+
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursor variable to the scope
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  listType.of,
+					})
+				})
+
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
+			// Here we would handle other iterable types (like lists, etc.)
+			// Currently we only support string and integer iteration
+			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
 			return nil
-		case List:
-			listType := iterable.GetType().(List)
-			cursor._type = listType.element
-			return ForIn{
-				Cursor:   Identifier{Name: s.Cursor.Name, symbol: cursor},
-				Iterable: iterable,
-				Body:     getBody(),
-			}
-		default:
-			panic(fmt.Sprintf("Unhandled iterable type: %T", iterable.GetType()))
 		}
-
-	case *ast.ForLoop:
-		var init VariableBinding
-		var condition Expression
-		var step Statement
-
-		setup := func() {
-			init = c.checkStatement(s.Init).(VariableBinding)
-			condition = c.checkExpression(s.Condition)
-			step = c.checkStatement(s.Incrementer)
-		}
-
-		block := c.checkBlock(s.Body, setup)
-
-		return ForLoop{
-			Init:      init,
-			Condition: condition,
-			Step:      step,
-			Body:      block,
-		}
-
-	case *ast.WhileLoop:
-		condition := c.checkExpression(s.Condition)
-		if condition.GetType() != (Bool{}) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  "While conditions must be boolean expressions",
-				location: s.Condition.GetLocation(),
-			})
-		}
-
-		block := c.checkBlock(s.Body, nil)
-
-		return WhileLoop{
-			Condition: condition,
-			Body:      block.Body,
-		}
-	case *ast.FunctionDeclaration:
-		return c.checkFunctionDeclaration(s)
-	case ast.FunctionDeclaration:
-		return c.checkFunctionDeclaration(&s)
 	case *ast.EnumDefinition:
-		if len(s.Variants) == 0 {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  "Enums must have at least one variant",
-				location: s.GetLocation(),
-			})
-		}
-		uniqueVariants := map[string]bool{}
-		for _, variant := range s.Variants {
-			if _, ok := uniqueVariants[variant]; ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Duplicate variant: %s", variant),
-					location: s.GetLocation(),
-				})
+		{
+			if len(s.Variants) == 0 {
+				c.addError("Enums must have at least one variant", s.GetLocation())
+				return nil
 			}
-			uniqueVariants[variant] = true
+
+			// Check for duplicate variant names
+			seenVariants := make(map[string]bool)
+			for _, variant := range s.Variants {
+				if seenVariants[variant] {
+					c.addError(fmt.Sprintf("Duplicate variant: %s", variant), s.GetLocation())
+					return nil
+				}
+				seenVariants[variant] = true
+			}
+
+			enum := &Enum{
+				Name:     s.Name,
+				Variants: s.Variants,
+			}
+			c.scope.add(enum)
+			return nil
 		}
-		enum := Enum{
-			Name:     s.Name,
-			Variants: s.Variants,
-		}
-		c.scope.declare(enum)
-		return enum
 	case *ast.StructDefinition:
-		fields := map[string]Type{}
-		for _, field := range s.Fields {
-			name := field.Name.Name
-			if _, ok := fields[name]; ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Duplicate field: %s", name),
-					location: field.Name.GetLocation(),
-				})
-			} else {
-				fields[name] = c.resolveDeclaredType(field.Type)
+		{
+			def := &StructDef{
+				Name:   s.Name.Name,
+				Fields: make(map[string]Type),
 			}
-		}
+			for _, field := range s.Fields {
+				fieldType := c.resolveType(field.Type)
+				if fieldType == nil {
+					return nil
+				}
 
-		strct := &Struct{
-			Name:    s.Name.Name,
-			Fields:  fields,
-			methods: map[string]FunctionDeclaration{},
-		}
-		if ok := c.scope.declareStruct(strct); !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Duplicate struct declaration: %s", s.Name.Name),
-				location: s.Name.GetLocation(),
-			})
+				if _, dup := def.Fields[field.Name.Name]; dup {
+					c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
+					return nil
+				}
+				def.Fields[field.Name.Name] = fieldType
+			}
+			c.scope.add(def)
 			return nil
 		}
-		return strct
 	case *ast.ImplBlock:
-		_struct, ok := c.scope.getStruct(s.Self.Type.GetName())
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", s.Self.Type.GetName()),
-				location: s.GetLocation(),
-			})
+		{
+			t := c.resolveType(s.Self.Type)
+			if t == nil {
+				return nil
+			}
+
+			structDef, ok := t.(*StructDef)
+			if !ok {
+				c.addError(fmt.Sprintf("Expected struct type, got %s", t), s.Self.Type.GetLocation())
+				return nil
+			}
+
+			for _, method := range s.Methods {
+				fnDef := c.checkFunction(&method, func() {
+					c.scope.add(&VariableDef{
+						Name:    s.Self.Name,
+						__type:  structDef,
+						Mutable: s.Self.Mutable,
+					})
+				})
+				fnDef.Mutates = s.Self.Mutable
+				structDef.Fields[method.Name] = fnDef
+				fnDef.SelfName = s.Self.Name
+			}
 			return nil
 		}
-
-		new_scope := newScope(c.scope)
-		c.scope = new_scope
-		defer func() { c.scope = new_scope.parent }()
-		new_scope.declare(variable{name: s.Self.Name, mut: s.Self.Mutable, _type: _struct})
-
-		for _, method := range s.Methods {
-			stmt := c.checkStatement(method)
-			meth := stmt.(FunctionDeclaration)
-			meth.mutates = s.Self.Mutable
-			_struct.addMethod(s.Self.Name, meth)
-		}
-		return nil
-	case *ast.TypeDeclaration:
-		types := make([]Type, len(s.Type))
-		for i, t := range s.Type {
-			types[i] = c.resolveDeclaredType(t)
-		}
-		union := Union{name: s.Name.Name, types: types}
-		c.scope.declare(union)
-		return nil
 	default:
-		return c.checkExpression(s)
+		expr := c.checkExpr((ast.Expression)(*stmt))
+		if expr == nil {
+			return nil
+		}
+		return &Statement{Expr: expr}
 	}
 }
 
-func (c *checker) checkFunctionDeclaration(s *ast.FunctionDeclaration) FunctionDeclaration {
-	parameters := make([]Parameter, len(s.Parameters))
-	blockVariables := make([]variable, len(s.Parameters))
-	for i, p := range s.Parameters {
-		parameters[i] = Parameter{
-			Name:    p.Name,
-			Type:    c.resolveDeclaredType(p.Type),
-			Mutable: p.Mutable,
+func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiteral {
+	if declaredType != nil {
+		expectedElementType := declaredType.(*List).of
+		elements := make([]Expression, len(expr.Items))
+		for i := range expr.Items {
+			item := expr.Items[i]
+			element := c.checkExpr(item)
+			if !expectedElementType.equal(element.Type()) {
+				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
+				return nil
+			}
+			elements[i] = element
 		}
-		blockVariables[i] = variable{name: p.Name, mut: p.Mutable, isParam: true, _type: parameters[i].Type}
-	}
 
-	declaredReturnType := c.resolveDeclaredType(s.ReturnType)
-	fn := function{
-		name:       s.Name,
-		parameters: blockVariables,
-		returns:    declaredReturnType,
-	}
-	c.scope.declare(fn)
-
-	block := c.checkBlock(s.Body, func() {
-		for _, p := range blockVariables {
-			c.scope.addVariable(p)
+		return &ListLiteral{
+			Elements: elements,
+			_type:    declaredType.(*List),
 		}
-	})
-	if _, isVoid := declaredReturnType.(Void); !isVoid && !AreCoherent(declaredReturnType, block.result) {
-		c.addDiagnostic(Diagnostic{
-			Kind: Error,
-			Message: fmt.Sprintf(
-				"Type mismatch: Expected %s, got %s",
-				declaredReturnType,
-				block.result),
-			location: s.ReturnType.GetLocation(),
-		})
 	}
 
-	return FunctionDeclaration{
-		Name:       s.Name,
-		Parameters: parameters,
-		Body:       block.Body,
-		Return:     declaredReturnType,
+	if len(expr.Items) == 0 {
+		c.addError("Empty lists need an explicit type", expr.GetLocation())
+		return nil
+	}
+
+	hasError := false
+	var elementType Type
+	elements := make([]Expression, len(expr.Items))
+	for i := range expr.Items {
+		item := expr.Items[i]
+		element := c.checkExpr(item)
+		if element == nil {
+			continue
+		}
+
+		if i == 0 {
+			elementType = element.Type()
+		} else if elementType != element.Type() {
+			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
+			hasError = true
+			continue
+		}
+
+		elements[i] = element
+	}
+
+	if hasError {
+		return nil
+	}
+
+	return &ListLiteral{
+		Elements: elements,
+		_type:    MakeList(elementType),
 	}
 }
 
-func (c *checker) checkBlock(block []ast.Statement, setup func()) Block {
-	new_scope := newScope(c.scope)
-	c.scope = new_scope
-	defer func() { c.scope = new_scope.parent }()
+func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
+	if len(stmts) == 0 {
+		return &Block{Stmts: []Statement{}}
+	}
+
+	scope := newScope(c.scope)
+	c.scope = scope
+	defer func() {
+		c.scope = c.scope.parent
+	}()
 
 	if setup != nil {
 		setup()
 	}
 
-	var result Type = Void{}
-	statements := []Statement{}
-	for _, s := range block {
-		stmt := c.checkStatement(s)
-		if stmt != nil {
-			statements = append(statements, stmt)
-			if expr, ok := stmt.(Expression); ok {
-				result = expr.GetType()
-			}
+	block := &Block{Stmts: make([]Statement, len(stmts))}
+	for i := range stmts {
+		if stmt := c.checkStmt(&stmts[i]); stmt != nil {
+			block.Stmts[i] = *stmt
 		}
 	}
-	return Block{Body: statements, result: result}
+	return block
 }
 
-func (c *checker) checkExpression(expr ast.Expression) Expression {
-	switch e := expr.(type) {
-	case nil:
-		return nil
-	case *ast.Identifier:
-		sym := c.scope.find(e.Name)
-		if sym == nil {
-			panic(fmt.Sprintf("Undefined: %s", e.Name))
-		}
-		return Identifier{
-			Name:   e.Name,
-			symbol: *sym,
-		}
-	case *ast.StrLiteral:
-		return StrLiteral{Value: strings.Trim(e.Value, `"`)}
-	case *ast.NumLiteral:
-		if strings.Contains(e.Value, ".") {
-			value, err := strconv.ParseFloat(e.Value, 64)
-			if err != nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Invalid float: %s", e.Value),
-					location: e.GetLocation(),
-				})
-				return nil
-			}
-			return FloatLiteral{Value: value}
-		}
-		value, err := strconv.Atoi(e.Value)
-		if err != nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Invalid int: %s", e.Value),
-				location: e.GetLocation(),
-			})
-			return nil
-		}
-		return IntLiteral{Value: value}
-	case *ast.BoolLiteral:
-		return BoolLiteral{Value: e.Value}
-	case *ast.InstanceProperty:
-		return c.checkInstanceProperty(c.checkExpression(e.Target), e.Property)
-	case *ast.InstanceMethod:
-		return c.checkInstanceMethod(c.checkExpression(e.Target), e.Method)
-	case *ast.StaticProperty:
-		return c.checkStaticProperty(c.checkStaticExpression(e.Target), e.Property)
-	case *ast.StaticFunction:
-		return c.checkStaticFunction(c.checkStaticExpression(e.Target), e.Function)
-	case *ast.UnaryExpression:
-		expr := c.checkExpression(e.Operand)
-		switch e.Operator {
-		case ast.Minus:
-			if !AreCoherent(Int{}, expr.GetType()) && !AreCoherent(Float{}, expr.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "The '-' operator can only be used on numbers",
-					location: e.Operand.GetLocation(),
-				})
-				return nil
-			}
-			return Negation{Value: expr}
-		case ast.Not:
-			if !AreCoherent(expr.GetType(), Bool{}) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "The 'not' keyword can only be used on booleans",
-					location: e.Operand.GetLocation(),
-				})
-				return nil
-			}
-			return Not{Value: expr}
-		}
-		panic(fmt.Sprintf("Unhandled unary operator: %d", e.Operator))
-	case *ast.BinaryExpression:
-		left := c.checkExpression(e.Left)
-		right := c.checkExpression(e.Right)
-		operator := c.resolveBinaryOperator(e.Operator)
-
-		if left == nil || left.GetType() == nil {
-			panic(fmt.Errorf("problem: %s", e.Left))
-		}
-
-		diagnostic := Diagnostic{
-			Kind:     Error,
-			location: e.GetLocation(),
-			Message: fmt.Sprintf(
-				"Invalid operation: %s %s %s",
-				left.GetType(),
-				operator,
-				right.GetType()),
-		}
-		switch operator {
-		case And, Or:
-			if !AreCoherent(left.GetType(), Bool{}) || !AreCoherent(left.GetType(), right.GetType()) {
-				c.addDiagnostic(diagnostic)
-				return nil
-			}
-		case Equal, NotEqual:
-			if !areComparable(left.GetType(), right.GetType()) {
-				c.addDiagnostic(diagnostic)
-				return nil
-			}
-		case GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual:
-			notNum := !AreCoherent(Float{}, left.GetType()) && !AreCoherent(Int{}, left.GetType())
-			if notNum || !AreCoherent(left.GetType(), right.GetType()) {
-				c.addDiagnostic(diagnostic)
-				return nil
-			}
-		case Mod:
-			if AreCoherent(Float{}, left.GetType()) || AreCoherent(Float{}, right.GetType()) {
-				diagnostic.Message = "% is not supported on Float"
-				c.addDiagnostic(diagnostic)
-				return nil
-			}
-			if !AreCoherent(Int{}, left.GetType()) || !AreCoherent(Int{}, right.GetType()) {
-				c.addDiagnostic(diagnostic)
-				return nil
-			}
-		default:
-			notNum := !AreCoherent(Float{}, left.GetType()) && !AreCoherent(Int{}, left.GetType())
-			if notNum || !AreCoherent(left.GetType(), right.GetType()) {
-				c.addDiagnostic(diagnostic)
-				return nil
-			}
-		}
-
-		return BinaryExpr{Op: operator, Left: left, Right: right}
-	case *ast.InterpolatedStr:
-		parts := make([]Expression, len(e.Chunks))
-		for i, chunk := range e.Chunks {
-			part := c.checkExpression(chunk)
-			if !AreCoherent(part.GetType(), Str{}) && !AreCoherent(part.GetType(), MakeMaybe(Str{})) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected Str, got %s", part.GetType()),
-					location: chunk.GetLocation(),
-				})
-			} else {
-				parts[i] = part
-			}
-		}
-		return InterpolatedStr{Parts: parts}
-	case *ast.FunctionCall:
-		sym := c.scope.find(e.Name)
-		if sym == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", e.Name),
-				location: e.GetLocation(),
-			})
-			return nil
-		}
-		fn, ok := (*sym).asFunction()
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Not a function: %s", e.Name),
-				location: e.GetLocation(),
-			})
-			return nil
-		}
-
-		args := make([]Expression, len(e.Args))
-		if len(e.Args) != len(fn.parameters) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(e.Args)),
-				location: e.GetLocation(),
-			})
-		} else {
-			for i, arg := range e.Args {
-				expr := c.checkExpression(arg)
-				if !AreCoherent(fn.parameters[i]._type, expr.GetType()) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, expr.GetType()),
-						location: arg.GetLocation(),
-					})
-				} else {
-					if fn.parameters[i].mut && !isMutable(expr) {
-						c.addDiagnostic(Diagnostic{
-							Kind:     Error,
-							Message:  fmt.Sprintf("Type mismatch: Expected mutable %s, got %s", fn.parameters[i]._type, expr.GetType()),
-							location: arg.GetLocation(),
-						})
-					} else {
-						args[i] = expr
-					}
-				}
-			}
-		}
-
-		return FunctionCall{Name: e.Name, Args: args, symbol: fn}
-	case *ast.AnonymousFunction:
-		parameters := make([]Parameter, len(e.Parameters))
-		blockVariables := make([]variable, len(e.Parameters))
-		for i, p := range e.Parameters {
-			parameters[i] = Parameter{
-				Name: p.Name,
-				Type: c.resolveDeclaredType(p.Type),
-			}
-			blockVariables[i] = variable{name: p.Name, mut: false, _type: parameters[i].Type}
-		}
-		declaredReturnType := c.resolveDeclaredType(e.ReturnType)
-		block := c.checkBlock(e.Body, func() {
-			for _, p := range blockVariables {
-				c.scope.addVariable(p)
-			}
-		})
-		if !IsVoid(declaredReturnType) {
-			if !AreCoherent(declaredReturnType, block.result) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					location: e.ReturnType.GetLocation(),
-					Message: fmt.Sprintf(
-						"Type mismatch: Expected %s, got %s",
-						declaredReturnType,
-						block.result),
-				})
-			}
-		}
-		return FunctionLiteral{
-			Parameters: parameters,
-			Return:     declaredReturnType,
-			Body:       block.Body,
-		}
-	case *ast.ListLiteral:
-		return c.checkList(e, nil)
-	case *ast.MatchExpression:
-		subject := c.checkExpression(e.Subject)
-		switch sub := subject.GetType().(type) {
-		case Enum:
-			return c.checkEnumMatch(e, subject, sub)
-		case Bool:
-			return c.checkBoolMatch(e, subject)
-		case *Maybe:
-			return c.checkMaybeMatch(e, subject)
-		case Union:
-			return c.checkUnionMatch(e, subject)
-		default:
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: e.GetLocation(),
-				Message:  fmt.Sprintf("Cannot match on %s", sub),
-			})
-			return nil
-		}
-
-	case *ast.StructInstance:
-		_struct, ok := c.scope.getStruct(e.Name.Name)
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: %s", e.Name.Name),
-				location: e.GetLocation(),
-			})
-			return nil
-		}
-
-		fields := map[string]Expression{}
-		for _, field := range e.Properties {
-			if _struct.GetProperty(field.Name.Name) == nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					location: field.Name.GetLocation(),
-					Message:  fmt.Sprintf("Unknown field: %s", field.Name.Name),
-				})
-			} else {
-				fields[field.Name.Name] = c.checkExpression(field.Value)
-			}
-		}
-
-		for name := range _struct.Fields {
-			if _, ok := fields[name]; !ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					location: e.GetLocation(),
-					Message:  fmt.Sprintf("Missing field: %s", name),
-				})
-			}
-		}
-
-		instance := StructInstance{
-			Name:   e.Name.Name,
-			Fields: fields,
-			_type:  _struct,
-		}
-		return instance
-	case *ast.MapLiteral:
-		return c.checkMap(e, nil)
-	default:
-		panic(fmt.Sprintf("Unhandled expression: %T", e))
-	}
-}
-
-func (c *checker) checkStaticExpression(expr ast.Expression) Static {
-	switch e := expr.(type) {
-	case *ast.Identifier:
-		if e.Name == "Int" {
-			return Int{}
-		}
-		if e.Name == "Float" {
-			return Float{}
-		}
-
-		sym := c.scope.find(e.Name)
-		if sym == nil {
-			strct, ok := c.scope.getStruct(e.Name)
-			if !ok {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Undefined: %s", e.Name),
-					location: e.GetLocation(),
-				})
-				return nil
-			}
-			return strct
-		}
-
-		if enum, ok := (*sym).(Enum); ok {
-			return enum
-		}
-		return nil
-	default:
-		panic(fmt.Sprintf("Unhandled static expression: %T", e))
-	}
-}
-
-func (c *checker) checkList(expr *ast.ListLiteral, declaredType Type) Expression {
-	if declaredType != nil {
-		elements := make([]Expression, len(expr.Items))
-		for i, item := range expr.Items {
-			element := c.checkExpression(item)
-			if !AreCoherent(declaredType.(List).element, element.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredType, element.GetType()),
-					location: item.GetLocation(),
-				})
-			}
-			elements[i] = element
-		}
-
-		return ListLiteral{
-			Elements: elements,
-			_type:    declaredType.(List),
-		}
-	}
-
-	if len(expr.Items) == 0 {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  "Empty lists need an explicit type",
-			location: expr.GetLocation(),
-		})
-		return ListLiteral{}
-	}
-
-	var elementType Type
-	elements := make([]Expression, len(expr.Items))
-	for i, item := range expr.Items {
-		elements[i] = c.checkExpression(item)
-		_type := elements[i].GetType()
-		if i == 0 {
-			elementType = _type
-		} else if !AreCoherent(_type, elementType) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: item.GetLocation(),
-				Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", elementType, _type),
-			})
-		}
-	}
-	return ListLiteral{
-		Elements: elements,
-		_type:    List{element: elementType},
-	}
-}
-
-func (c *checker) checkMap(expr *ast.MapLiteral, declaredType Type) Expression {
-	entries := map[Expression]Expression{}
-	if declaredType != nil {
-		for _, entry := range expr.Entries {
-			key := c.checkExpression(entry.Key)
-			value := c.checkExpression(entry.Value)
-			declaredKeyType := declaredType.(Map).key
-			declaredValType := declaredType.(Map).value
-			if !AreCoherent(declaredKeyType, key.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredKeyType, key.GetType()),
-					location: entry.Key.GetLocation(),
-				})
-			}
-			if !AreCoherent(declaredValType, value.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", declaredValType, value.GetType()),
-					location: entry.Value.GetLocation(),
-				})
-			}
-			entries[key] = value
-		}
-
-		return MapLiteral{
-			Entries: entries,
-			_type:   declaredType.(Map),
-		}
-	}
-
+func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral {
+	// Handle empty map with declared type
 	if len(expr.Entries) == 0 {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  "Empty maps need an explicit type",
-			location: expr.GetLocation(),
-		})
-		return MapLiteral{}
-	}
-
-	var keyType Type = Void{}
-	var valType Type = Void{}
-	for i, entry := range expr.Entries {
-		key := c.checkExpression(entry.Key)
-		value := c.checkExpression(entry.Value)
-		if i == 0 {
-			keyType = key.GetType()
-			valType = value.GetType()
-		} else {
-			if !AreCoherent(keyType, key.GetType()) || !AreCoherent(valType, value.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Map error: All entries must have the same type",
-					location: expr.GetLocation(),
-				})
-				return MapLiteral{}
+		if declaredType != nil {
+			mapType, ok := declaredType.(*Map)
+			if !ok {
+				c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
+				return nil
 			}
-		}
 
-		entries[key] = value
-	}
-
-	return MapLiteral{
-		Entries: entries,
-		_type:   Map{key: keyType, value: valType},
-	}
-}
-
-func (c *checker) checkEnumMatch(expr *ast.MatchExpression, subject Expression, enum Enum) EnumMatch {
-	expectedCases := make([]bool, len(enum.Variants))
-	for i := range enum.Variants {
-		expectedCases[i] = false
-	}
-
-	var pattern Expression
-	var catchAll MatchCase
-	cases := []Block{}
-
-	var _type Type = Void{}
-	for i, arm := range expr.Cases {
-		variables := []variable{}
-		var isCatchAll bool = false
-
-		if id, ok := arm.Pattern.(*ast.Identifier); ok {
-			if i != len(expr.Cases)-1 {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Catch-all case must be last",
-					location: arm.Pattern.GetLocation(),
-				})
-				return EnumMatch{}
-			}
-			pattern = nil
-			if id.Name != "_" {
-				variables = append(variables, variable{
-					name:  id.Name,
-					mut:   false,
-					_type: enum,
-				})
-				pattern = Identifier{Name: id.Name, symbol: variables[0]}
-			}
-			isCatchAll = true
-		} else {
-			pattern = c.checkExpression(arm.Pattern)
-			variant := pattern.(EnumVariant)
-			if expectedCases[variant.Value] {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Duplicate case: %s", variant),
-					location: arm.Pattern.GetLocation(),
-				})
-				return EnumMatch{}
-			}
-			expectedCases[variant.Value] = true
-		}
-
-		block := c.checkBlock(arm.Body, func() {
-			for _, v := range variables {
-				c.scope.addVariable(v)
-			}
-		})
-		if i == 0 {
-			_type = block.result
-		} else if !AreCoherent(block.result, _type) {
-			c.addDiagnostic(Diagnostic{
-				Kind: Error,
-				Message: fmt.Sprintf(
-					"Type mismatch: Expected %s, got %s",
-					_type,
-					block.result),
-				location: arm.Body[len(arm.Body)-1].GetLocation(),
-			})
-		}
-		if isCatchAll {
-			catchAll = MatchCase{
-				Pattern: pattern,
-				Body:    block.Body,
+			// Return empty map with the declared type
+			return &MapLiteral{
+				Keys:   []Expression{},
+				Values: []Expression{},
+				_type:  mapType,
 			}
 		} else {
-			cases = append(cases, block)
-		}
-	}
-
-	nonExhaustive := false
-	if catchAll.Body == nil {
-		for value, name := range enum.Variants {
-			if !expectedCases[value] {
-				nonExhaustive = true
-				c.addDiagnostic(Diagnostic{
-					Kind: Error,
-					Message: fmt.Sprintf(
-						"Incomplete match: missing case for '%s'",
-						enum.Name+"::"+name),
-					location: expr.GetLocation(),
-				})
-			}
-		}
-	}
-
-	if nonExhaustive {
-		return EnumMatch{}
-	}
-
-	return EnumMatch{
-		Subject:  subject,
-		Cases:    cases,
-		CatchAll: catchAll,
-	}
-}
-
-func (c *checker) checkBoolMatch(expr *ast.MatchExpression, subject Expression) Expression {
-	var trueCase Block
-	var falseCase Block
-
-	var result Type = Void{}
-	for i, arm := range expr.Cases {
-		if _, isIdentifier := arm.Pattern.(*ast.Identifier); isIdentifier {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: arm.Pattern.GetLocation(),
-				Message:  "Catch-all case is not allowed for boolean matches",
-			})
+			// Empty map without a declared type is an error
+			c.addError("Empty maps need an explicit type", expr.GetLocation())
 			return nil
 		}
-		pattern := c.checkExpression(arm.Pattern)
+	}
 
-		if _, isLiteral := pattern.(BoolLiteral); !isLiteral {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  "Expected either `true` or `false`",
-				location: arm.Pattern.GetLocation(),
-			})
+	// Handle non-empty map
+	if declaredType != nil {
+		mapType, ok := declaredType.(*Map)
+		if !ok {
+			c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
 			return nil
 		}
 
-		block := c.checkBlock(arm.Body, nil)
+		expectedKeyType := mapType.key
+		expectedValueType := mapType.value
 
-		if pattern.(BoolLiteral).Value {
-			if trueCase.Body != nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Duplicate case: 'true'",
-					location: arm.Pattern.GetLocation(),
-				})
-			} else {
-				trueCase = block
-			}
-		} else {
-			if falseCase.Body != nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Duplicate case: 'false'",
-					location: arm.Pattern.GetLocation(),
-				})
-			} else {
-				falseCase = block
-			}
-		}
+		keys := make([]Expression, len(expr.Entries))
+		values := make([]Expression, len(expr.Entries))
 
-		if i == 0 {
-			result = block.result
-		} else {
-			if !AreCoherent(block.result, result) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					location: arm.GetLocation(),
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, block.result),
-				})
-			}
-		}
-	}
-
-	var missingCase string
-	if trueCase.Body == nil {
-		missingCase = "true"
-	} else if falseCase.Body == nil {
-		missingCase = "false"
-	}
-
-	if missingCase != "" {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			location: expr.GetLocation(),
-			Message:  fmt.Sprintf("Incomplete match: Missing case for '%s'", missingCase),
-		})
-	}
-
-	return BoolMatch{
-		Subject: subject,
-		True:    trueCase,
-		False:   falseCase,
-	}
-}
-
-func (c *checker) checkMaybeMatch(expr *ast.MatchExpression, subject Expression) OptionMatch {
-	var someCase MatchCase
-	var noneCase Block
-
-	var result Type = nil
-	for _, arm := range expr.Cases {
-		id, isIdentifier := arm.Pattern.(*ast.Identifier)
-		if !isIdentifier {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: arm.Pattern.GetLocation(),
-				Message:  "Pattern must be either a variable name for the value or _ for the empty case",
-			})
-			return OptionMatch{}
-		}
-
-		if id.Name == "_" {
-			if noneCase.Body != nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Duplicate case: empty path",
-					location: arm.Pattern.GetLocation(),
-				})
+		hasError := false
+		for i, entry := range expr.Entries {
+			// Type check the key
+			key := c.checkExpr(entry.Key)
+			if key == nil {
+				hasError = true
 				continue
 			}
-			noneCase = c.checkBlock(arm.Body, nil)
-			if result == nil {
-				result = noneCase.result
-			} else {
-				if !AreCoherent(noneCase.result, result) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						location: arm.GetLocation(),
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, noneCase.result),
-					})
-				}
+			if !expectedKeyType.equal(key.Type()) {
+				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
+				hasError = true
+				continue
 			}
-		} else {
-			if someCase.Body != nil {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Duplicate case: happy path",
-					location: arm.Pattern.GetLocation(),
-				})
-			} else {
-				block := c.checkBlock(arm.Body, func() {
-					c.scope.addVariable(variable{
-						name:  id.Name,
-						mut:   false,
-						_type: *subject.GetType().(*Maybe).inner,
-					})
-				})
-				someCase = MatchCase{
-					Pattern: Identifier{Name: id.Name},
-					Body:    block.Body,
-					_type:   block.result,
-				}
+			keys[i] = key
 
-				if result == nil {
-					result = block.result
-				} else {
-					if !AreCoherent(block.result, result) {
-						c.addDiagnostic(Diagnostic{
-							Kind:     Error,
-							location: arm.GetLocation(),
-							Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, noneCase.result),
-						})
-					}
-				}
+			// Type check the value
+			value := c.checkExpr(entry.Value)
+			if value == nil {
+				hasError = true
+				continue
 			}
+			if !expectedValueType.equal(value.Type()) {
+				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
+				hasError = true
+				continue
+			}
+			values[i] = value
+		}
+
+		if hasError {
+			return nil
+		}
+
+		return &MapLiteral{
+			Keys:   keys,
+			Values: values,
+			_type:  mapType,
 		}
 	}
 
-	var missingCase string
-	if someCase.Body == nil {
-		missingCase = "happy path"
-	} else if noneCase.Body == nil {
-		missingCase = "empty path"
+	// Type inference for non-empty maps without declared type
+	keys := make([]Expression, len(expr.Entries))
+	values := make([]Expression, len(expr.Entries))
+
+	// Check the first entry to determine key and value types
+	firstKey := c.checkExpr(expr.Entries[0].Key)
+	firstValue := c.checkExpr(expr.Entries[0].Value)
+
+	if firstKey == nil || firstValue == nil {
+		return nil
 	}
 
-	if missingCase != "" {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			location: expr.GetLocation(),
-			Message:  fmt.Sprintf("Incomplete match: Missing case for '%s'", missingCase),
-		})
-	}
+	keyType := firstKey.Type()
+	valueType := firstValue.Type()
+	keys[0] = firstKey
+	values[0] = firstValue
 
-	return OptionMatch{
-		Subject: subject,
-		None:    noneCase,
-		Some:    someCase,
-	}
-}
-
-func (c *checker) checkUnionMatch(expr *ast.MatchExpression, subject Expression) UnionMatch {
-	cases := map[Type]Block{}
-	var catchAll Block
-
-	var result Type = nil
-	for i, arm := range expr.Cases {
-		id, isIdentifier := arm.Pattern.(*ast.Identifier)
-		if !isIdentifier {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				location: arm.Pattern.GetLocation(),
-				Message:  "Pattern must be a type",
-			})
-			return UnionMatch{}
-		}
-
-		if id.Name == "_" {
-			if i != len(expr.Cases)-1 {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  "Catch-all case must be last",
-					location: arm.Pattern.GetLocation(),
-				})
-				return UnionMatch{}
-			}
-			catchAll = c.checkBlock(arm.Body, nil)
+	// Check that all entries have consistent types
+	hasError := false
+	for i := 1; i < len(expr.Entries); i++ {
+		key := c.checkExpr(expr.Entries[i].Key)
+		if key == nil {
+			hasError = true
 			continue
 		}
+		if !keyType.equal(key.Type()) {
+			c.addError(fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type()), expr.Entries[i].Key.GetLocation())
+			hasError = true
+			continue
+		}
+		keys[i] = key
 
-		union := subject.GetType().(Union)
-		if it_type := union.getFor(id.Name); it_type == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Unexpected: %s is not in %s", id.Name, union),
-				location: arm.Pattern.GetLocation(),
-			})
-			return UnionMatch{}
-		} else {
-			block := c.checkBlock(arm.Body, func() {
-				c.scope.addVariable(variable{name: "it", mut: false, _type: it_type})
-			})
-			cases[it_type] = block
-			if result == nil {
-				result = block.result
-			} else {
-				if !AreCoherent(result, block.result) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						location: arm.GetLocation(),
-						Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", result, block.result),
-					})
+		value := c.checkExpr(expr.Entries[i].Value)
+		if value == nil {
+			hasError = true
+			continue
+		}
+		if !valueType.equal(value.Type()) {
+			c.addError(fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type()), expr.Entries[i].Value.GetLocation())
+			hasError = true
+			continue
+		}
+		values[i] = value
+	}
+
+	if hasError {
+		return nil
+	}
+
+	// Create and return the map
+	return &MapLiteral{
+		Keys:   keys,
+		Values: values,
+		_type:  MakeMap(keyType, valueType),
+	}
+}
+
+func (c *checker) checkExpr(expr ast.Expression) Expression {
+	switch s := (expr).(type) {
+	case *ast.StrLiteral:
+		return &StrLiteral{s.Value}
+	case *ast.BoolLiteral:
+		return &BoolLiteral{s.Value}
+	case *ast.NumLiteral:
+		{
+			if strings.Contains(s.Value, ".") {
+				value, err := strconv.ParseFloat(s.Value, 64)
+				if err != nil {
+					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
+					return nil
+				}
+				return &FloatLiteral{Value: value}
+			}
+			value, err := strconv.Atoi(s.Value)
+			if err != nil {
+				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
+			}
+			return &IntLiteral{value}
+		}
+	case *ast.InterpolatedStr:
+		{
+			chunks := make([]Expression, len(s.Chunks))
+			for i := range s.Chunks {
+				cx := c.checkExpr(s.Chunks[i])
+				if cx == nil {
+					return nil
+				}
+				if !Str.equal(cx.Type()) {
+					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
+					return nil
+				}
+				chunks[i] = cx
+			}
+			return &TemplateStr{chunks}
+		}
+	case *ast.Identifier:
+		if sym := c.scope.get(s.Name); sym != nil {
+			return &Variable{sym}
+		}
+		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
+		return nil
+	case *ast.FunctionCall:
+		{
+			// Find the function in the scope
+			fnSym := c.scope.get(s.Name)
+			if fnSym == nil {
+				c.addError(fmt.Sprintf("Undefined function: %s", s.Name), s.GetLocation())
+				return nil
+			}
+
+			// Cast to FunctionDef
+			fnDef, ok := fnSym.(*FunctionDef)
+			if !ok {
+				if anon, ok := fnSym.(*VariableDef).Value.(*FunctionDef); ok {
+					fnDef = anon
+				} else {
+					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+					return nil
 				}
 			}
-		}
 
-	}
-
-	return UnionMatch{
-		Subject:  subject,
-		Cases:    cases,
-		CatchAll: catchAll,
-	}
-}
-
-func (c *checker) checkInstanceProperty(subject Expression, member ast.Identifier) Expression {
-	sig := subject.GetType().GetProperty(member.Name)
-	if sig == nil {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  fmt.Sprintf("Undefined: %s.%s", subject, member.Name),
-			location: member.GetLocation(),
-		})
-		return nil
-	}
-	return InstanceProperty{
-		Subject: subject,
-		Property: Identifier{
-			Name: member.Name,
-			symbol: variable{
-				name:  member.Name,
-				_type: sig,
-			}},
-	}
-}
-
-func (c *checker) checkInstanceMethod(subject Expression, member ast.FunctionCall) Expression {
-	if subject == nil || subject.GetType() == nil {
-		panic(fmt.Sprintf("problem: %s", subject))
-	}
-	sig := subject.GetType().GetProperty(member.Name)
-	if sig == nil {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  fmt.Sprintf("Undefined: %s.%s", subject, member.Name),
-			location: member.GetLocation(),
-		})
-		return nil
-	}
-	fn, ok := sig.(function)
-	if !ok {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  fmt.Sprintf("Not a function: %s.%s", subject, member.Name),
-			location: member.GetLocation(),
-		})
-		return nil
-	}
-
-	if fn.mutates && !isMutable(subject) {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subject, member.Name),
-			location: member.GetLocation(),
-		})
-		return nil
-	}
-
-	args := make([]Expression, len(member.Args))
-	if len(member.Args) != len(fn.parameters) {
-		c.addDiagnostic(Diagnostic{
-			Kind:     Error,
-			Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
-			location: member.GetLocation(),
-		})
-	} else {
-		for i, arg := range member.Args {
-			args[i] = c.checkExpression(arg)
-			if !AreCoherent(fn.parameters[i]._type, args[i].GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", fn.parameters[i]._type, args[i].GetType()),
-					location: arg.GetLocation(),
-				})
-			} else {
-				if fn.parameters[i].mut && !isMutable(args[i]) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Type mismatch: Expected mutable %s, got %s", fn.parameters[i]._type, args[i].GetType()),
-						location: arg.GetLocation(),
-					})
-				}
-			}
-		}
-	}
-
-	if pkg, ok := subject.GetType().(Package); ok {
-		return PackageAccess{
-			Package:  pkg,
-			Property: FunctionCall{Name: member.Name, Args: args, symbol: fn},
-		}
-	}
-
-	return InstanceMethod{
-		Subject: subject,
-		Method:  FunctionCall{Name: member.Name, Args: args, symbol: fn},
-	}
-}
-
-func (c *checker) checkStaticProperty(subject Static, member ast.Identifier) Expression {
-	switch s := subject.(type) {
-	case Enum:
-		if variant, ok := s.GetVariant(member.Name); ok {
-			return variant
-		}
-
-		c.addDiagnostic(Diagnostic{
-			Kind: Error,
-			Message: fmt.Sprintf(
-				"Undefined: %s::%s",
-				subject,
-				member.Name),
-			location: member.GetLocation(),
-		})
-		return nil
-	default:
-		panic(fmt.Sprintf("Undefined %s::%s", s, member))
-	}
-}
-
-func (c *checker) checkStaticFunction(subject Static, member ast.FunctionCall) Expression {
-	switch s := subject.(type) {
-	case Int:
-		prop := s.GetStaticProperty(member.Name)
-		if prop == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: Int::%s", member.Name),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-		fn, ok := prop.(function)
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Not a function: Int::%s", member.Name),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-
-		if len(member.Args) != len(fn.parameters) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-
-		args := make([]Expression, len(member.Args))
-		for i, param := range fn.parameters {
-			arg := c.checkExpression(member.Args[i])
-			if !AreCoherent(param._type, arg.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
-					location: member.Args[i].GetLocation(),
-				})
+			// Check argument count
+			if len(s.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Args)), s.GetLocation())
 				return nil
-			} else {
-				args[i] = arg
 			}
-		}
 
-		return StaticFunctionCall{
-			Subject:  s,
-			Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
-		}
-
-	case Float:
-		prop := s.GetStaticProperty(member.Name)
-		if prop == nil {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Undefined: Float::%s", member.Name),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-		fn, ok := prop.(function)
-		if !ok {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Not a function: Float::%s", member.Name),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-
-		if len(member.Args) != len(fn.parameters) {
-			c.addDiagnostic(Diagnostic{
-				Kind:     Error,
-				Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
-				location: member.GetLocation(),
-			})
-			return nil
-		}
-
-		args := make([]Expression, len(member.Args))
-		for i, param := range fn.parameters {
-			arg := c.checkExpression(member.Args[i])
-			if !AreCoherent(param._type, arg.GetType()) {
-				c.addDiagnostic(Diagnostic{
-					Kind:     Error,
-					Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
-					location: member.Args[i].GetLocation(),
-				})
-				return nil
-			} else {
-				args[i] = arg
-			}
-		}
-
-		return StaticFunctionCall{
-			Subject:  s,
-			Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
-		}
-	default:
-		// assuming it's a struct
-		if _struct, ok := s.(*Struct); ok {
-			if prop := _struct.GetStaticProperty(member.Name); prop != nil {
-				fn, ok := prop.(function)
-				if !ok {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Not a function: %s::%s", _struct.Name, member.Name),
-						location: member.GetLocation(),
-					})
+			// Check and process arguments
+			args := make([]Expression, len(s.Args))
+			for i, arg := range s.Args {
+				checkedArg := c.checkExpr(arg)
+				if checkedArg == nil {
 					return nil
 				}
 
-				if len(member.Args) != len(fn.parameters) {
-					c.addDiagnostic(Diagnostic{
-						Kind:     Error,
-						Message:  fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fn.parameters), len(member.Args)),
-						location: member.GetLocation(),
-					})
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if !paramType.equal(checkedArg.Type()) {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
 
-				args := make([]Expression, len(member.Args))
-				for i, param := range fn.parameters {
-					arg := c.checkExpression(member.Args[i])
-					if !AreCoherent(param._type, arg.GetType()) {
-						c.addDiagnostic(Diagnostic{
-							Kind:     Error,
-							Message:  fmt.Sprintf("Type mismatch: Expected %s, got %s", param._type, arg.GetType()),
-							location: member.Args[i].GetLocation(),
-						})
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable {
+					// For now, we don't do additional checks for mutable parameters
+					// This might involve checking that the argument is a mutable variable
+				}
+
+				args[i] = checkedArg
+			}
+
+			// Create and return the function call node
+			return &FunctionCall{
+				Name: s.Name,
+				Args: args,
+				fn:   fnDef,
+			}
+		}
+	case *ast.InstanceProperty:
+		{
+			subj := c.checkExpr(s.Target)
+			if subj == nil {
+				panic(fmt.Errorf("Cannot access %s on nil", s.Property))
+			}
+
+			propType := subj.Type().get(s.Property.Name)
+			if propType == nil {
+				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
+				return nil
+			}
+			return &InstanceProperty{
+				Subject:  subj,
+				Property: s.Property.Name,
+				_type:    propType,
+			}
+		}
+	case *ast.InstanceMethod:
+		{
+			subj := c.checkExpr(s.Target)
+			if subj == nil {
+				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			sig := subj.Type().get(s.Method.Name)
+			if sig == nil {
+				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			fnDef, ok := sig.(*FunctionDef)
+			if !ok {
+				c.addError(fmt.Sprintf("%s.%s is not a function", subj, s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			if fnDef.Mutates && !isMutable(subj) {
+				c.addError(fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subj, s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+
+			if len(s.Method.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Method.Args)), s.GetLocation())
+				return nil
+			}
+
+			// Check and process arguments
+			args := make([]Expression, len(s.Method.Args))
+			for i, arg := range s.Method.Args {
+				checkedArg := c.checkExpr(arg)
+				if checkedArg == nil {
+					return nil
+				}
+
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if !paramType.equal(checkedArg.Type()) {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					return nil
+				}
+
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+				}
+
+				args[i] = checkedArg
+			}
+			// Create function call
+			call := &FunctionCall{
+				Name: s.Method.Name,
+				Args: args,
+				fn:   fnDef,
+			}
+
+			return &InstanceMethod{
+				Subject: subj,
+				Method:  call,
+			}
+		}
+	case *ast.UnaryExpression:
+		{
+			value := c.checkExpr(s.Operand)
+			if value == nil {
+				return nil
+			}
+			if s.Operator == ast.Minus {
+				if value.Type() != Int && value.Type() != Float {
+					c.addError("Only numbers can be negated with '-'", s.GetLocation())
+					return nil
+				}
+				return &Negation{value}
+			}
+
+			if value.Type() != Bool {
+				c.addError("Only booleans can be negated with 'not'", s.GetLocation())
+				return nil
+			}
+			return &Not{value}
+		}
+	case *ast.BinaryExpression:
+		{
+			switch s.Operator {
+			case ast.Plus:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
 						return nil
-					} else {
-						args[i] = arg
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot add different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntAddition{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatAddition{left, right}
+					}
+					if left.Type() == Str {
+						return &StrAddition{left, right}
+					}
+					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Minus:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot subtract different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntSubtraction{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatSubtraction{left, right}
+					}
+					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Multiply:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot multiply different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntMultiplication{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatMultiplication{left, right}
+					}
+					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Divide:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot divide different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntDivision{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatDivision{left, right}
+					}
+					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Modulo:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot modulo different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntModulo{left, right}
+					}
+					c.addError("The '%' operator can only be used for Int", s.GetLocation())
+					return nil
+				}
+			case ast.GreaterThan:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntGreater{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatGreater{left, right}
+					}
+					c.addError("The '>' operator can only be used for Int", s.GetLocation())
+					return nil
+				}
+			case ast.GreaterThanOrEqual:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntGreaterEqual{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatGreaterEqual{left, right}
+					}
+					c.addError("The '>=' operator can only be used for Int", s.GetLocation())
+					return nil
+				}
+			case ast.LessThan:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntLess{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatLess{left, right}
+					}
+					c.addError("The '<' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.LessThanOrEqual:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != right.Type() {
+						c.addError("Cannot compare different types", s.GetLocation())
+						return nil
+					}
+					if left.Type() == Int {
+						return &IntLessEqual{left, right}
+					}
+					if left.Type() == Float {
+						return &FloatLessEqual{left, right}
+					}
+					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
+					return nil
+				}
+			case ast.Equal:
+				{
+					left, right := c.checkExpr(s.Left), c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if !left.Type().equal(right.Type()) {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						return nil
+					}
+
+					isMaybe := func(val Type) bool {
+						_, ok := val.(*Maybe)
+						return ok
+					}
+					if isMaybe(left.Type()) {
+						return &Equality{left, right}
+					}
+					allowedTypes := []Type{Int, Float, Str, Bool}
+					if !slices.Contains(allowedTypes, left.Type()) || !slices.Contains(allowedTypes, right.Type()) {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						return nil
+					}
+					return &Equality{left, right}
+				}
+			case ast.And:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != Bool || right.Type() != Bool {
+						c.addError("The 'and' operator can only be used between Bools", s.GetLocation())
+						return nil
+					}
+
+					return &And{left, right}
+				}
+			case ast.Or:
+				{
+					left := c.checkExpr(s.Left)
+					right := c.checkExpr(s.Right)
+					if left == nil || right == nil {
+						return nil
+					}
+
+					if left.Type() != Bool || right.Type() != Bool {
+						c.addError("The 'or' operator can only be used with Boolean values", s.GetLocation())
+						return nil
+					}
+
+					return &Or{left, right}
+				}
+			default:
+				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))
+			}
+		}
+	case *ast.StaticFunction:
+		{
+			// Process package function calls like io::print()
+			packageName := s.Target.(*ast.Identifier).Name
+
+			pkg := c.resolvePkg(packageName)
+			if pkg == nil {
+				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				return nil
+			}
+
+			sym := getInPackage(pkg.Path, s.Function.Name)
+			if sym == nil {
+				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			fnDef, ok := sym.(*FunctionDef)
+			if !ok {
+				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			// Check argument count
+			if len(s.Function.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+				return nil
+			}
+
+			// Check and process arguments
+			args := make([]Expression, len(s.Function.Args))
+			for i, arg := range s.Function.Args {
+				checkedArg := c.checkExpr(arg)
+				if checkedArg == nil {
+					return nil
+				}
+
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if !checkedArg.Type().equal(paramType) {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					return nil
+				}
+
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+				}
+
+				args[i] = checkedArg
+			}
+
+			if fnDef.hasGenerics() {
+				// Create a mapping of generic parameters to concrete types
+				typeMap := make(map[string]Type)
+				// Infer types from arguments
+				for i, param := range fnDef.Parameters {
+					if anyType, ok := param.Type.(*Any); ok {
+						if existing, exists := typeMap[anyType.name]; exists {
+							// Ensure consistent types for the same generic parameter
+							if !existing.equal(args[i].Type()) {
+								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
+								return nil
+							}
+						} else {
+							// Bind the generic parameter to the argument type
+							typeMap[anyType.name] = args[i].Type()
+						}
 					}
 				}
 
-				return StaticFunctionCall{
-					Subject:  s,
-					Function: FunctionCall{Name: member.Name, Args: args, symbol: fn},
+				// Create specialized function with generic parameters substituted
+				specialized := &FunctionDef{
+					Name:       fnDef.Name,
+					Parameters: make([]Parameter, len(fnDef.Parameters)),
+					ReturnType: substituteType(fnDef.ReturnType, typeMap),
+					Body:       fnDef.Body,
+				}
+
+				// Substitute types in parameters
+				for i, param := range fnDef.Parameters {
+					specialized.Parameters[i] = Parameter{
+						Name:    param.Name,
+						Type:    substituteType(param.Type, typeMap),
+						Mutable: param.Mutable,
+					}
+				}
+
+				// Return function call with specialized function
+				return &PackageFunctionCall{
+					Package: pkg.Path,
+					Call: &FunctionCall{
+						Name: s.Function.Name,
+						Args: args,
+						fn:   specialized,
+					},
+				}
+			}
+
+			// Create function call
+			call := &FunctionCall{
+				Name: s.Function.Name,
+				Args: args,
+				fn:   fnDef,
+			}
+
+			// Create package function call
+			return &PackageFunctionCall{
+				Package: pkg.Path,
+				Call:    call,
+			}
+		}
+	case *ast.IfStatement:
+		{
+			cond := c.checkExpr(s.Condition)
+			if cond == nil {
+				return nil
+			}
+			if cond.Type() != Bool {
+				c.addError("If conditions must be boolean expressions", s.GetLocation())
+				return nil
+			}
+
+			body := c.checkBlock(s.Body, nil)
+
+			var elseIf *If
+			var elseBody *Block
+
+			// does not recurse. reach into AST for each level since it's fixed
+			if s.Else != nil {
+				next := s.Else.(*ast.IfStatement)
+				if next.Condition != nil {
+					cond := c.checkExpr(next.Condition)
+					if cond == nil {
+						return nil
+					}
+					if cond.Type() != Bool {
+						c.addError("If conditions must be boolean expressions", next.GetLocation())
+						return nil
+					}
+
+					elseIfBody := c.checkBlock(next.Body, nil)
+					if elseIfBody.Type() != body.Type() {
+						c.addError("All branches must have the same result type", next.GetLocation())
+						return nil
+					}
+
+					elseIf = &If{
+						Condition: cond,
+						Body:      elseIfBody,
+					}
+
+					if next, ok := next.Else.(*ast.IfStatement); ok {
+						elseBody = c.checkBlock(next.Body, nil)
+					}
+				} else {
+					b := c.checkBlock(next.Body, nil)
+					if b.Type() != body.Type() {
+						c.addError("All branches must have the same result type", next.GetLocation())
+						return nil
+					}
+					elseBody = b
+				}
+			}
+
+			return &If{
+				Condition: cond,
+				Body:      body,
+				ElseIf:    elseIf,
+				Else:      elseBody,
+			}
+		}
+	case *ast.FunctionDeclaration:
+		return c.checkFunction(s, nil)
+	case *ast.AnonymousFunction:
+		{
+			// Process parameters
+			params := make([]Parameter, len(s.Parameters))
+			for i, param := range s.Parameters {
+				var paramType Type = Void
+				if param.Type != nil {
+					paramType = c.resolveType(param.Type)
+				}
+
+				params[i] = Parameter{
+					Name:    param.Name,
+					Type:    paramType,
+					Mutable: param.Mutable,
+				}
+			}
+
+			// Determine return type
+			var returnType Type = Void
+			if s.ReturnType != nil {
+				returnType = c.resolveType(s.ReturnType)
+			}
+
+			// Check function body with a setup function that adds parameters to scope
+			body := c.checkBlock(s.Body, func() {
+				for _, param := range params {
+					c.scope.add(&VariableDef{
+						Mutable: param.Mutable,
+						Name:    param.Name,
+						__type:  param.Type,
+					})
+				}
+			})
+
+			// Check that the function's return type matches its body's type
+			if returnType != Void && body.Type() != returnType {
+				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				return nil
+			}
+
+			// Create function definition
+			// Generate a unique name for the anonymous function
+			uniqueName := fmt.Sprintf("anon_func_%p", s)
+
+			fn := &FunctionDef{
+				Name:       uniqueName,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       body,
+			}
+
+			// Add function to scope
+			c.scope.add(fn)
+
+			return fn
+		}
+	case *ast.ListLiteral:
+		return c.checkList(nil, s)
+	case *ast.MapLiteral:
+		return c.checkMap(nil, s)
+	case *ast.MatchExpression:
+		// Check the subject
+		subject := c.checkExpr(s.Subject)
+		if subject == nil {
+			return nil
+		}
+
+		// For Maybe types, generate an OptionMatch
+		if maybeType, ok := subject.Type().(*Maybe); ok {
+			var patternIdent *Identifier
+			var someBody *Block
+			var noneBody *Block
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				// Check if it's the default case (_)
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						// This is the None case
+						noneBody = c.checkBlock(matchCase.Body, nil)
+					} else {
+						// This is the Some case with a variable binding
+						// Create a new scope for the body with the pattern bound to the unwrapped value
+						someBody = c.checkBlock(matchCase.Body, func() {
+							// Add the pattern name as a variable in the scope with the inner type
+							// For example, if the Maybe is Str?, the pattern should be a Str
+							c.scope.add(&VariableDef{
+								Mutable: false,
+								Name:    id.Name,
+								__type:  maybeType.of,
+							})
+						})
+
+						// Create an identifier to use in the Match struct
+						patternIdent = &Identifier{Name: id.Name}
+					}
+				} else {
+					c.addError("Pattern in Maybe match must be an identifier", matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Ensure we have both some and none cases
+			if someBody == nil {
+				c.addError("Match on a Maybe type must include a binding case", s.GetLocation())
+				return nil
+			}
+
+			if noneBody == nil {
+				c.addError("Match on a Maybe type must include a wildcard (_) case", s.GetLocation())
+				return nil
+			}
+
+			// Create the OptionMatch
+			return &OptionMatch{
+				Subject: subject,
+				Some: &Match{
+					Pattern: patternIdent,
+					Body:    someBody,
+				},
+				None: noneBody,
+			}
+		}
+
+		// For Enum types, generate an EnumMatch
+		if enumType, ok := subject.Type().(*Enum); ok {
+			// Map to track which variants we've seen
+			seenVariants := make(map[string]bool)
+			// Track whether we've seen a catch-all case
+			hasCatchAll := false
+			// Cases in the match statement mapped to enum variants
+			cases := make([]*Block, len(enumType.Variants))
+			var catchAllBody *Block
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						// This is a catch-all case
+						if hasCatchAll {
+							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+							return nil
+						}
+
+						hasCatchAll = true
+						catchAllBody = c.checkBlock(matchCase.Body, nil)
+						continue
+					}
+				}
+
+				// Handle enum variant case - the pattern should be a static property reference like Enum::Variant
+				if staticProp, ok := matchCase.Pattern.(*ast.StaticProperty); ok {
+					// Get the enum name from the target
+					if enumId, ok := staticProp.Target.(*ast.Identifier); ok {
+						// Verify the enum name matches
+						if enumId.Name != enumType.Name {
+							c.addError(fmt.Sprintf("Expected %s::<variant>, got %s::%s",
+								enumType.Name, enumId.Name, staticProp.Property.Name), staticProp.GetLocation())
+							return nil
+						}
+
+						// Find the variant in the enum
+						variantName := staticProp.Property.Name
+						variantIndex := enumType.variant(variantName)
+						if variantIndex == -1 {
+							c.addError(fmt.Sprintf("Undefined: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+							return nil
+						}
+
+						// Check for duplicate cases
+						if seenVariants[variantName] {
+							c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+							return nil
+						}
+						seenVariants[variantName] = true
+
+						// Check the body for this case
+						body := c.checkBlock(matchCase.Body, nil)
+						cases[variantIndex] = body
+					} else {
+						c.addError("Invalid pattern in enum match", matchCase.Pattern.GetLocation())
+						return nil
+					}
+				} else {
+					c.addError("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Check if the match is exhaustive
+			if !hasCatchAll {
+				for i, variant := range enumType.Variants {
+					if cases[i] == nil {
+						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, variant), s.GetLocation())
+					}
+				}
+			}
+
+			// Ensure all cases return the same type
+			if len(cases) > 0 {
+				// Find the first non-nil case to use as reference type
+				var referenceType Type
+				for _, caseBody := range cases {
+					if caseBody != nil {
+						referenceType = caseBody.Type()
+						break
+					}
+				}
+
+				if referenceType != nil {
+					if catchAllBody != nil && !referenceType.equal(catchAllBody.Type()) {
+						c.addError(typeMismatch(referenceType, catchAllBody.Type()), s.GetLocation())
+						return nil
+					}
+
+					for _, caseBody := range cases {
+						if caseBody != nil && !referenceType.equal(caseBody.Type()) {
+							c.addError(typeMismatch(referenceType, caseBody.Type()), s.GetLocation())
+							return nil
+						}
+					}
+				}
+			}
+
+			// Create the EnumMatch
+			enumMatch := &EnumMatch{
+				Subject:  subject,
+				Cases:    cases,
+				CatchAll: catchAllBody,
+			}
+
+			return enumMatch
+		}
+
+		// For Bool types, generate a BoolMatch
+		if subject.Type() == Bool {
+			var trueBody, falseBody *Block
+			// Track which cases we've seen
+			seenTrue, seenFalse := false, false
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						// Catch-all cases aren't allowed for boolean matches
+						c.addError("Catch-all case is not allowed for boolean matches", matchCase.Pattern.GetLocation())
+						return nil
+					}
+				}
+
+				// Handle boolean literal case
+				if boolLit, ok := matchCase.Pattern.(*ast.BoolLiteral); ok {
+					// Check for duplicates
+					if boolLit.Value && seenTrue {
+						c.addError("Duplicate case: 'true'", matchCase.Pattern.GetLocation())
+						return nil
+					}
+					if !boolLit.Value && seenFalse {
+						c.addError("Duplicate case: 'false'", matchCase.Pattern.GetLocation())
+						return nil
+					}
+
+					// Process the body
+					body := c.checkBlock(matchCase.Body, nil)
+
+					// Store the body in the appropriate field
+					if boolLit.Value {
+						seenTrue = true
+						trueBody = body
+					} else {
+						seenFalse = true
+						falseBody = body
+					}
+				} else {
+					c.addError("Pattern in boolean match must be a boolean literal (true or false)", matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Check exhaustiveness
+			if !seenTrue || !seenFalse {
+				if !seenTrue {
+					c.addError("Incomplete match: Missing case for 'true'", s.GetLocation())
+				} else {
+					c.addError("Incomplete match: Missing case for 'false'", s.GetLocation())
+				}
+				return nil
+			}
+
+			// Ensure both branches return the same type
+			if !trueBody.Type().equal(falseBody.Type()) {
+				c.addError(typeMismatch(trueBody.Type(), falseBody.Type()), s.GetLocation())
+				return nil
+			}
+
+			// Create and return the BoolMatch
+			return &BoolMatch{
+				Subject: subject,
+				True:    trueBody,
+				False:   falseBody,
+			}
+		}
+
+		// For other types, handle according to their type...
+		// For Union types, generate a UnionMatch
+		if unionType, ok := subject.Type().(*Union); ok {
+			// Track which union types we've seen and their corresponding bodies
+			typeCases := make(map[string]*Block)
+			var catchAllBody *Block
+
+			// Record all types in the union
+			unionTypeSet := make(map[string]Type)
+			for _, t := range unionType.Types {
+				unionTypeSet[t.String()] = t
+			}
+
+			// Process the cases
+			for _, matchCase := range s.Cases {
+				// Check for catch-all case (_)
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					if id.Name == "_" {
+						if catchAllBody != nil {
+							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+							return nil
+						}
+						catchAllBody = c.checkBlock(matchCase.Body, nil)
+						continue
+					}
+				}
+
+				// Handle type pattern - should be an identifier matching a type in the union
+				if typeId, ok := matchCase.Pattern.(*ast.Identifier); ok {
+					typeName := typeId.Name
+
+					// Check if the type exists in the union
+					_, found := unionTypeSet[typeName]
+					if !found {
+						c.addError(fmt.Sprintf("Type %s is not part of union %s", typeName, unionType),
+							matchCase.Pattern.GetLocation())
+						return nil
+					}
+
+					// Check for duplicates
+					if _, exists := typeCases[typeName]; exists {
+						c.addError(fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation())
+						return nil
+					}
+
+					// Get the actual type object
+					matchedType := unionTypeSet[typeName]
+
+					// Process the body with the matched type binding
+					body := c.checkBlock(matchCase.Body, func() {
+						// Add "it" variable to the scope with the union element's type
+						c.scope.add(&VariableDef{
+							Mutable: false,
+							Name:    "it",
+							__type:  matchedType,
+							Value:   nil, // Will be set at runtime
+						})
+					})
+					typeCases[typeName] = body
+				} else {
+					c.addError("Pattern in union match must be a type name or catch-all (_)",
+						matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			// Check exhaustiveness if no catch-all is provided
+			if catchAllBody == nil {
+				for typeName := range unionTypeSet {
+					if _, covered := typeCases[typeName]; !covered {
+						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s'", typeName),
+							s.GetLocation())
+						return nil
+					}
+				}
+			}
+
+			// Ensure all cases return the same type
+			var referenceType Type
+			for _, caseBody := range typeCases {
+				if caseBody != nil {
+					referenceType = caseBody.Type()
+					break
+				}
+			}
+
+			if referenceType != nil {
+				if catchAllBody != nil && !referenceType.equal(catchAllBody.Type()) {
+					c.addError(typeMismatch(referenceType, catchAllBody.Type()), s.GetLocation())
+					return nil
+				}
+
+				for _, caseBody := range typeCases {
+					if caseBody != nil && !referenceType.equal(caseBody.Type()) {
+						c.addError(typeMismatch(referenceType, caseBody.Type()), s.GetLocation())
+						return nil
+					}
+				}
+			}
+
+			// Create and return the UnionMatch
+			return &UnionMatch{
+				Subject:   subject,
+				TypeCases: typeCases,
+				CatchAll:  catchAllBody,
+			}
+		}
+
+		c.addError("Currently only Maybe, Enum, Bool, and Union types are supported in match expressions", s.GetLocation())
+		return nil
+	case *ast.StaticProperty:
+		{
+			if id, ok := s.Target.(*ast.Identifier); ok {
+				sym := c.scope.get(id.Name)
+				if sym == nil {
+					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
+					return nil
+				}
+				enum, ok := sym.(*Enum)
+				if !ok {
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property), id.GetLocation())
+					return nil
+				}
+
+				var variant int8 = -1
+				for i := range enum.Variants {
+					if enum.Variants[i] == s.Property.Name {
+						variant = int8(i)
+						break
+					}
+				}
+				if variant == -1 {
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property.Name), id.GetLocation())
+					return nil
+				}
+
+				return &EnumVariant{enum: enum, Variant: variant}
+			}
+			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
+		}
+	case *ast.StructInstance:
+		name := s.Name.Name
+		sym := c.scope.get(name)
+		if sym == nil {
+			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
+			return nil
+		}
+
+		structType, ok := sym.(*StructDef)
+		if !ok {
+			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
+			return nil
+		}
+
+		instance := &StructInstance{Name: name, _type: structType}
+		fields := make(map[string]Expression)
+		for _, prop := range s.Properties {
+			if structType.Fields[prop.Name.Name] == nil {
+				c.addError(fmt.Sprintf("Unknown field: %s", prop.Name.Name), prop.GetLocation())
+			} else {
+				fields[prop.Name.Name] = c.checkExpr(prop.Value)
+			}
+		}
+
+		missing := []string{}
+		for name, t := range structType.Fields {
+			if _, isMethod := t.(*FunctionDef); !isMethod {
+				if _, exists := fields[name]; !exists {
+					missing = append(missing, name)
 				}
 			}
 		}
-		panic(fmt.Sprintf("Undefined %s::%s", s, member.Name))
+		if len(missing) > 0 {
+			c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), s.GetLocation())
+			return nil
+		}
+
+		instance.Fields = fields
+		return instance
+	default:
+		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}
 }
 
-func (c checker) resolveDeclaredType(t ast.DeclaredType) Type {
-	if t == nil {
-		return Void{}
+func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {
+	if init != nil {
+		init()
 	}
 
-	var _type Type
-	switch tt := t.(type) {
-	case *ast.StringType:
-		_type = Str{}
-	case *ast.IntType:
-		_type = Int{}
-	case *ast.FloatType:
-		_type = Float{}
-	case *ast.BooleanType:
-		_type = Bool{}
-	case *ast.List:
-		_type = List{
-			element: c.resolveDeclaredType(tt.Element),
+	// Process parameters
+	params := make([]Parameter, len(def.Parameters))
+	for i, param := range def.Parameters {
+		var paramType Type = Void
+		if param.Type != nil {
+			paramType = c.resolveType(param.Type)
 		}
-	case *ast.Map:
-		_type = Map{
-			key:   c.resolveDeclaredType(tt.Key),
-			value: c.resolveDeclaredType(tt.Value),
+
+		params[i] = Parameter{
+			Name:    param.Name,
+			Type:    paramType,
+			Mutable: param.Mutable,
 		}
-	case *ast.CustomType:
-		if name := c.scope.find(tt.GetName()); name != nil {
-			if custom, isType := (*name).(Type); isType {
-				_type = custom
-				break
-			}
-		}
-		if _struct, ok := c.scope.getStruct(tt.GetName()); ok {
-			_type = _struct
-			break
-		}
-		c.addDiagnostic(Diagnostic{
-			Kind:    Error,
-			Message: fmt.Sprintf(`Undefined: %s`, tt.GetName()),
-		})
-	default:
-		panic(fmt.Sprintf("Unhandled declared type: %T", t))
 	}
 
-	if t.IsNullable() {
-		return MakeMaybe(_type)
+	// Determine return type
+	var returnType Type = Void
+	if def.ReturnType != nil {
+		returnType = c.resolveType(def.ReturnType)
 	}
-	return _type
+
+	// Check function body with a setup function that adds parameters to scope
+	body := c.checkBlock(def.Body, func() {
+		for _, param := range params {
+			c.scope.add(&VariableDef{
+				Mutable: param.Mutable,
+				Name:    param.Name,
+				__type:  param.Type,
+			})
+		}
+	})
+
+	// Check that the function's return type matches its body's type
+	if returnType != Void && body.Type() != returnType {
+		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
+		return nil
+	}
+
+	// Create function definition
+	fn := &FunctionDef{
+		Name:       def.Name,
+		Parameters: params,
+		ReturnType: returnType,
+		Body:       body,
+	}
+
+	// Add function to scope
+	c.scope.add(fn)
+
+	return fn
 }
 
-func (c *checker) resolveBinaryOperator(op ast.Operator) BinaryOperator {
-	switch op {
-	case ast.Plus:
-		return Add
-	case ast.Minus:
-		return Sub
-	case ast.Multiply:
-		return Mul
-	case ast.Divide:
-		return Div
-	case ast.Modulo:
-		return Mod
-	case ast.Equal:
-		return Equal
-	case ast.NotEqual:
-		return NotEqual
-	case ast.GreaterThan:
-		return GreaterThan
-	case ast.GreaterThanOrEqual:
-		return GreaterThanOrEqual
-	case ast.LessThan:
-		return LessThan
-	case ast.LessThanOrEqual:
-		return LessThanOrEqual
-	case ast.And:
-		return And
-	case ast.Or:
-		return Or
+// Substitute generic parameters in a type
+func substituteType(t Type, typeMap map[string]Type) Type {
+	switch typ := t.(type) {
+	case *Any:
+		if concrete, exists := typeMap[typ.name]; exists {
+			typ.actual = concrete
+		}
+		return typ
+	case *Maybe:
+		return &Maybe{of: substituteType(typ.of, typeMap)}
+	// Handle other compound types
 	default:
-		panic(fmt.Sprintf("Unsupported binary operator: %d", op))
+		return t
+	}
+}
+
+// Refine a generic as a concrete type
+func refine(t Type, expected Type) Type {
+	switch typ := t.(type) {
+	case *Any:
+		typ.actual = expected
+		return typ
+	case *Maybe:
+		if m, ok := expected.(*Maybe); ok {
+			typ.of = m.of
+			return typ
+		}
+		return typ
+	// Handle other compound types
+	default:
+		return t
 	}
 }

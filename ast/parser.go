@@ -470,7 +470,7 @@ func (p *parser) parseType() DeclaredType {
 			return &BooleanType{nullable: nullable}
 		default:
 			return &CustomType{
-				Name:     p.previous().text,
+				Name:     id.text,
 				nullable: nullable,
 			}
 		}

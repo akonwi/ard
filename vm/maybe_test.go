@@ -8,7 +8,7 @@ func TestMaybes(t *testing.T) {
 			name: "Equality comparison returns false when each are different",
 			input: `
 				use ard/maybe
-				maybe.some("hello") == maybe.none()
+				maybe::some("hello") == maybe::none()
 			`,
 			want: false,
 		},
@@ -16,7 +16,7 @@ func TestMaybes(t *testing.T) {
 			name: "Equality comparison returns true when both are the same",
 			input: `
 				use ard/maybe
-				maybe.some("hello") == maybe.some("hello")
+				maybe::some("hello") == maybe::some("hello")
 			`,
 			want: true,
 		},
@@ -24,7 +24,7 @@ func TestMaybes(t *testing.T) {
 			name: "Equality comparison returns true when both are none",
 			input: `
 				use ard/maybe
-				maybe.none() == maybe.none()
+				maybe::none() == maybe::none()
 			`,
 			want: true,
 		},
@@ -32,7 +32,7 @@ func TestMaybes(t *testing.T) {
 			name: ".or() can be used to read and fallback to a default value",
 			input: `
 				use ard/maybe
-				let a: Str? = maybe.none()
+				let a: Str? = maybe::none()
 				a.or("foo")
 			`,
 			want: "foo",

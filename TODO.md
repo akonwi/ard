@@ -1,6 +1,10 @@
 ## TODO
 
-- [ ] decoding/json
+- [ ] parse syntax for annotating Generics in calls `json.decode<Person>(str)`
+- [ ] parse syntax for declaring Generics in fns `fn decode() $Out {}`
+- [ ] support escape sequences in strings
+- [ ] remove need for naming self in impl blocks
+  - [ ] use @ for accessing props
 - [ ] networking
 - [ ] methods on enums?
 - [ ] matching on numbers

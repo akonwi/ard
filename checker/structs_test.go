@@ -1,9 +1,11 @@
-package checker
+package checker_test
 
 import (
 	"fmt"
 	"strings"
 	"testing"
+
+	checker "github.com/akonwi/ard/checker"
 )
 
 func TestStructs(t *testing.T) {
@@ -14,23 +16,12 @@ func TestStructs(t *testing.T) {
 		"  employed: Bool",
 		"}",
 	}, "\n")
-	personStruct := &Struct{
-		Name: "Person",
-		Fields: map[string]Type{
-			"name":     Str{},
-			"age":      Int{},
-			"employed": Bool{},
-		},
-	}
-
 	run(t, []test{
 		{
 			name:  "Valid struct definition",
 			input: personStructInput,
-			output: Program{
-				Statements: []Statement{
-					personStruct,
-				},
+			output: &checker.Program{
+				Statements: []checker.Statement{},
 			},
 		},
 		{
@@ -41,8 +32,8 @@ func TestStructs(t *testing.T) {
 				"  height: Int",
 				"}",
 			}, "\n"),
-			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Duplicate field: height"},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Duplicate field: height"},
 			},
 		},
 		{
@@ -50,23 +41,26 @@ func TestStructs(t *testing.T) {
 			input: personStructInput + "\n" +
 				`let alice = Person{ name: "Alice", age: 30, employed: true }` + "\n" +
 				`alice.name`,
-			output: Program{
-				Statements: []Statement{
-					personStruct,
-					VariableBinding{
-						Name: "alice",
-						Value: StructInstance{
-							Name: "Person",
-							Fields: map[string]Expression{
-								"name":     StrLiteral{Value: "Alice"},
-								"age":      IntLiteral{Value: 30},
-								"employed": BoolLiteral{Value: true},
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "alice",
+							Value: &checker.StructInstance{
+								Name: "Person",
+								Fields: map[string]checker.Expression{
+									"name":     &checker.StrLiteral{"Alice"},
+									"age":      &checker.IntLiteral{30},
+									"employed": &checker.BoolLiteral{true},
+								},
 							},
 						},
 					},
-					InstanceProperty{
-						Subject:  Identifier{Name: "alice"},
-						Property: Identifier{Name: "name"},
+					{
+						Expr: &checker.InstanceProperty{
+							Subject:  &checker.Variable{},
+							Property: "name",
+						},
 					},
 				},
 			},
@@ -77,9 +71,9 @@ func TestStructs(t *testing.T) {
 				`Person{ name: "Alice", age: 30 }`,
 				`Person{ color: "blue", name: "Alice", age: 30, employed: true }`,
 			}, "\n"),
-			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Missing field: employed"},
-				{Kind: Error, Message: "Unknown field: color"},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Missing field: employed"},
+				{Kind: checker.Error, Message: "Unknown field: color"},
 			},
 		},
 		{
@@ -88,8 +82,8 @@ func TestStructs(t *testing.T) {
 				`let p = Person{ name: "Alice", age: 30, employed: true }`,
 				`p.height`,
 			}, "\n"),
-			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Undefined: p.height"},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: p.height"},
 			},
 		},
 		{
@@ -97,23 +91,30 @@ func TestStructs(t *testing.T) {
 			input: fmt.Sprintf(`%s
 				mut p = Person{name: "Alice", age: 30, employed: true}
 				p.age = 31`, personStructInput),
-			output: Program{
-				Statements: []Statement{
-					personStruct,
-					VariableBinding{
-						Name: "p",
-						Value: StructInstance{
-							Name: "Person",
-							Fields: map[string]Expression{
-								"name":     StrLiteral{Value: "Alice"},
-								"age":      IntLiteral{Value: 30},
-								"employed": BoolLiteral{Value: true},
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Mutable: true,
+							Name:    "p",
+							Value: &checker.StructInstance{
+								Name: "Person",
+								Fields: map[string]checker.Expression{
+									"name":     &checker.StrLiteral{"Alice"},
+									"age":      &checker.IntLiteral{30},
+									"employed": &checker.BoolLiteral{true},
+								},
 							},
 						},
 					},
-					VariableAssignment{
-						Target: InstanceProperty{Subject: Identifier{Name: "p"}, Property: Identifier{Name: "age"}},
-						Value:  IntLiteral{Value: 31},
+					{
+						Stmt: &checker.Reassignment{
+							Target: &checker.InstanceProperty{
+								Subject:  &checker.Variable{},
+								Property: "age",
+							},
+							Value: &checker.IntLiteral{31},
+						},
 					},
 				},
 			},
@@ -123,8 +124,8 @@ func TestStructs(t *testing.T) {
 			input: fmt.Sprintf(`%s
 						let p = Person{name: "Alice", age: 30, employed: true}
 						p.age = 31`, personStructInput),
-			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Cannot reassign in immutables"},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Immutable: p.age"},
 			},
 		},
 	})
@@ -147,16 +148,8 @@ func TestMethods(t *testing.T) {
 						self.width * self.height
 					}
 				}`, shapeCode),
-			output: Program{
-				Statements: []Statement{
-					&Struct{
-						Name: "Shape",
-						Fields: map[string]Type{
-							"width":  Int{},
-							"height": Int{},
-						},
-					},
-				},
+			output: &checker.Program{
+				Statements: []checker.Statement{},
 			},
 		},
 		{
@@ -169,9 +162,9 @@ func TestMethods(t *testing.T) {
 						self.height = h
 					}
 				}`, shapeCode),
-			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Cannot reassign in immutables"},
-				{Kind: Error, Message: "Cannot reassign in immutables"},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Immutable: self.width"},
+				{Kind: checker.Error, Message: "Immutable: self.height"},
 			},
 		},
 		{
@@ -187,8 +180,8 @@ func TestMethods(t *testing.T) {
 
 				let square = Shape{width: 5, height: 5}
 				square.resize(8,8)`, shapeCode),
-			diagnostics: []Diagnostic{
-				{Kind: Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
 			},
 		},
 	})
