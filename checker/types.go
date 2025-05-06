@@ -83,6 +83,10 @@ func (i *_int) equal(other Type) bool {
 		}
 		return i.equal(any.actual)
 	}
+
+	if union, ok := other.(*Union); ok {
+		return union.equal(i)
+	}
 	return false
 }
 
