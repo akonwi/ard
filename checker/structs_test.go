@@ -1,11 +1,11 @@
-package checker_v2_test
+package checker_test
 
 import (
 	"fmt"
 	"strings"
 	"testing"
 
-	checker "github.com/akonwi/ard/checker_v2"
+	checker "github.com/akonwi/ard/checker"
 )
 
 func TestStructs(t *testing.T) {

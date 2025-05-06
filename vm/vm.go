@@ -3,7 +3,7 @@ package vm
 import (
 	"fmt"
 
-	"github.com/akonwi/ard/checker_v2"
+	"github.com/akonwi/ard/checker"
 )
 
 type VM struct {
@@ -23,29 +23,9 @@ func (vm *VM) popScope() {
 	vm.scope = vm.scope.parent
 }
 
-func (vm *VM) addVariable(name string, value *object) {
-	vm.scope.bindings[name] = value
-}
-
 type object struct {
 	raw   any
 	_type any
-}
-
-func areEqual(a, b *object) bool {
-	if a.raw == b.raw {
-		if a._type == b._type {
-			return true
-		}
-
-		return a._type.(checker_v2.Type).String() == b._type.(checker_v2.Type).String()
-	}
-	return false
-}
-
-func (o *object) isCallable() bool {
-	_, isFunc := o.raw.(func(args ...object) object)
-	return isFunc
 }
 
 func (o object) String() string {
@@ -55,10 +35,10 @@ func (o object) String() string {
 func (o *object) premarshal() any {
 	switch o._type.(type) {
 	default:
-		if o._type == checker_v2.Str || o._type == checker_v2.Int || o._type == checker_v2.Float || o._type == checker_v2.Bool {
+		if o._type == checker.Str || o._type == checker.Int || o._type == checker.Float || o._type == checker.Bool {
 			return o.raw
 		}
-		if _, isStruct := o._type.(*checker_v2.StructDef); isStruct {
+		if _, isStruct := o._type.(*checker.StructDef); isStruct {
 			m := o.raw.(map[string]*object)
 			rawMap := make(map[string]any)
 			for key, value := range m {

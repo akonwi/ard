@@ -1,4 +1,4 @@
-package checker_v2
+package checker
 
 var preludePkgs = map[string]*StdPackage{
 	"Float": {Name: "Int", Path: "ard/float"},

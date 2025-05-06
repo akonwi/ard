@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/akonwi/ard/ast"
-	"github.com/akonwi/ard/checker_v2"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/vm"
 )
 
@@ -46,7 +46,7 @@ func main() {
 			return
 		}
 
-		program, diagnostics := checker_v2.Check(ast)
+		program, diagnostics := checker.Check(ast)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
 				fmt.Println(diagnostic)

@@ -1,4 +1,4 @@
-package checker_v2
+package checker
 
 type scope struct {
 	parent  *scope

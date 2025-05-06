@@ -1,11 +1,11 @@
-package checker_v2_test
+package checker_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/ast"
-	checker "github.com/akonwi/ard/checker_v2"
+	checker "github.com/akonwi/ard/checker"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )

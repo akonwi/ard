@@ -5,7 +5,7 @@ This document outlines the specific implementation details for adding support fo
 ## Maybe Type Implementation
 
 ```go
-// In checker_v2/types.go
+// In checker/types.go
 type Maybe struct {
   of Type  // The inner type
 }
@@ -65,7 +65,7 @@ func (g *GenericType) equal(other Type) bool {
   if g.solution != nil {
     return g.solution.equal(other)
   }
-  
+
   // An unresolved generic type can be equal to any concrete type
   // This allows for initial binding during type checking
   return true
@@ -75,7 +75,7 @@ func (g *GenericType) equal(other Type) bool {
 ## Enhancements to the Type Checker
 
 ```go
-// In checker_v2/checker_v2.go
+// In checker/checker.go
 
 // Add a map to track generic parameters in scope
 type checker struct {
@@ -88,21 +88,21 @@ func (c *checker) checkFunction(fn *ast.FunctionDeclaration) *FunctionDef {
   // Create a new scope for generic parameters
   oldGenericParams := c.genericParams
   c.genericParams = make(map[string]*GenericType)
-  
+
   // Process parameter types and look for generic parameters ($T, etc.)
   for _, param := range fn.Parameters {
     c.collectGenericParams(param.Type)
   }
-  
+
   // Process return type for generic parameters
   c.collectGenericParams(fn.ReturnType)
-  
+
   // Check the function body with generic parameters in scope
   // ...
-  
+
   // Restore previous generic parameter scope
   c.genericParams = oldGenericParams
-  
+
   // Return function definition
 }
 
@@ -115,7 +115,7 @@ func (c *checker) collectGenericParams(t ast.Type) {
       c.genericParams[name] = &GenericType{name: name}
     }
   }
-  
+
   // Recursively check nested types (like in Maybe<$T>)
   // ...
 }
@@ -131,7 +131,7 @@ func (c *checker) resolveType(astType ast.DeclaredType) Type {
     // Error - generic type not in scope
     return nil
   }
-  
+
   // Handle regular types as before
   // ...
 }
@@ -140,7 +140,7 @@ func (c *checker) resolveType(astType ast.DeclaredType) Type {
 ## Standard Library Maybe Functions
 
 ```go
-// In checker_v2/std_lib.go
+// In checker/std_lib.go
 
 // Update package functions for Maybe
 func getInMaybe(name string) symbol {
@@ -152,7 +152,7 @@ func getInMaybe(name string) symbol {
       Parameters: []Parameter{},
       ReturnType: &Maybe{of: &GenericType{name: "T"}},
     }
-  
+
   case "some":
     // Create a generic type that gets bound to the argument type
     genericT := &GenericType{name: "T"}
@@ -161,7 +161,7 @@ func getInMaybe(name string) symbol {
       Parameters: []Parameter{{Name: "value", Type: genericT}},
       ReturnType: &Maybe{of: genericT}, // Use the same generic type
     }
-  
+
   default:
     return nil
   }
@@ -178,12 +178,12 @@ func (c *checker) checkFunctionCall(call *ast.FunctionCall, fn *FunctionDef) Exp
   for i, arg := range call.Args {
     argExprs[i] = c.checkExpr(arg)
   }
-  
+
   // If function has generic parameters, create a specialized version
   if hasGenericParams(fn) {
     // Create a mapping of generic parameters to concrete types
     typeMap := make(map[string]Type)
-    
+
     // Infer types from arguments
     for i, param := range fn.Parameters {
       if genType, ok := param.Type.(*GenericType); ok {
@@ -199,10 +199,10 @@ func (c *checker) checkFunctionCall(call *ast.FunctionCall, fn *FunctionDef) Exp
         }
       }
     }
-    
+
     // Create specialized function with generic parameters substituted
     specializedFn := specializeFn(fn, typeMap)
-    
+
     // Return function call with specialized function
     return &FunctionCall{
       Name: call.Name,
@@ -210,7 +210,7 @@ func (c *checker) checkFunctionCall(call *ast.FunctionCall, fn *FunctionDef) Exp
       fn: specializedFn,
     }
   }
-  
+
   // Normal function call processing
   // ...
 }
@@ -223,7 +223,7 @@ func specializeFn(fn *FunctionDef, typeMap map[string]Type) *FunctionDef {
     ReturnType: substituteType(fn.ReturnType, typeMap),
     Body: fn.Body, // Body remains the same
   }
-  
+
   // Substitute types in parameters
   for i, param := range fn.Parameters {
     specialized.Parameters[i] = Parameter{
@@ -232,7 +232,7 @@ func specializeFn(fn *FunctionDef, typeMap map[string]Type) *FunctionDef {
       Mutable: param.Mutable,
     }
   }
-  
+
   return specialized
 }
 
@@ -266,14 +266,14 @@ func (c *checker) checkMaybeNone(call *ast.FunctionCall, expectedType Type) Expr
       Parameters: []Parameter{},
       ReturnType: &Maybe{of: expectedMaybe.of},
     }
-    
+
     return &FunctionCall{
-      Name: "none", 
+      Name: "none",
       Args: []Expression{},
       fn: specializedNone,
     }
   }
-  
+
   // If no context, return a generic none
   return &FunctionCall{
     Name: "none",

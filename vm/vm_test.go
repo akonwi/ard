@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/ast"
-	"github.com/akonwi/ard/checker_v2"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/vm"
 )
 
@@ -24,7 +24,7 @@ func run(t *testing.T, input string) any {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, diagnostics := checker_v2.Check(tree)
+	program, diagnostics := checker.Check(tree)
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}

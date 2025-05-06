@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/checker_v2"
+	"github.com/akonwi/ard/checker"
 )
 
-var void = &object{nil, checker_v2.Void}
+var void = &object{nil, checker.Void}
 
 // compareKey is a wrapper around an object to use for map keys
 // enabling proper equality comparison
@@ -20,7 +20,7 @@ type compareKey struct {
 	strKey string
 }
 
-func Run2(program *checker_v2.Program) (any, error) {
+func Run2(program *checker.Program) (any, error) {
 	vm := New()
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
@@ -28,7 +28,7 @@ func Run2(program *checker_v2.Program) (any, error) {
 	return vm.result.raw, nil
 }
 
-func (vm *VM) do(stmt checker_v2.Statement) *object {
+func (vm *VM) do(stmt checker.Statement) *object {
 	if stmt.Break {
 		vm.scope._break()
 		return void
@@ -38,11 +38,11 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 	}
 
 	switch s := stmt.Stmt.(type) {
-	case *checker_v2.Enum:
+	case *checker.Enum:
 		return void
-	case *checker_v2.StructDef:
+	case *checker.StructDef:
 		return void
-	case *checker_v2.VariableDef:
+	case *checker.VariableDef:
 		val := vm.eval(s.Value)
 		if !s.Mutable {
 			original := val.raw
@@ -52,14 +52,14 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 		}
 		vm.scope.add(s.Name, val)
 		return void
-	case *checker_v2.Reassignment:
+	case *checker.Reassignment:
 		target := vm.eval(s.Target)
 		val := vm.eval(s.Value)
 		target.raw = val.raw
 		return void
-	case *checker_v2.ForLoop:
-		init := func() { vm.do(checker_v2.Statement{Stmt: s.Init}) }
-		update := func() { vm.do(checker_v2.Statement{Stmt: s.Update}) }
+	case *checker.ForLoop:
+		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }
+		update := func() { vm.do(checker.Statement{Stmt: s.Update}) }
 		for init(); vm.eval(s.Condition).raw.(bool); update() {
 			_, broke := vm.evalBlock2(s.Body, func() { vm.scope.breakable = true })
 			if broke {
@@ -67,13 +67,13 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 			}
 		}
 		return void
-	case *checker_v2.ForIntRange:
+	case *checker.ForIntRange:
 		i := vm.eval(s.Start).raw.(int)
 		end := vm.eval(s.End).raw.(int)
 		for i <= end {
 			_, broke := vm.evalBlock2(s.Body, func() {
 				vm.scope.breakable = true
-				vm.scope.add(s.Cursor, &object{i, checker_v2.Int})
+				vm.scope.add(s.Cursor, &object{i, checker.Int})
 			})
 			if broke {
 				break
@@ -81,19 +81,19 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 			i++
 		}
 		return void
-	case *checker_v2.ForInStr:
+	case *checker.ForInStr:
 		val := vm.eval(s.Value).raw.(string)
 		for _, c := range val {
 			_, broke := vm.evalBlock2(s.Body, func() {
 				vm.scope.breakable = true
-				vm.scope.add(s.Cursor, &object{string(c), checker_v2.Str})
+				vm.scope.add(s.Cursor, &object{string(c), checker.Str})
 			})
 			if broke {
 				break
 			}
 		}
 		return void
-	case *checker_v2.ForInList:
+	case *checker.ForInList:
 		val := vm.eval(s.List).raw.([]*object)
 		for i := range val {
 			_, broke := vm.evalBlock2(s.Body, func() {
@@ -105,7 +105,7 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 			}
 		}
 		return void
-	case *checker_v2.WhileLoop:
+	case *checker.WhileLoop:
 		for vm.eval(s.Condition).raw.(bool) {
 			_, broke := vm.evalBlock2(s.Body, func() { vm.scope.breakable = true })
 			if broke {
@@ -118,127 +118,127 @@ func (vm *VM) do(stmt checker_v2.Statement) *object {
 	}
 }
 
-func (vm *VM) eval(expr checker_v2.Expression) *object {
+func (vm *VM) eval(expr checker.Expression) *object {
 	switch e := expr.(type) {
-	case *checker_v2.StrLiteral:
+	case *checker.StrLiteral:
 		return &object{e.Value, e.Type()}
-	case *checker_v2.BoolLiteral:
+	case *checker.BoolLiteral:
 		return &object{e.Value, e.Type()}
-	case *checker_v2.IntLiteral:
+	case *checker.IntLiteral:
 		return &object{e.Value, e.Type()}
-	case *checker_v2.FloatLiteral:
+	case *checker.FloatLiteral:
 		return &object{e.Value, e.Type()}
-	case *checker_v2.TemplateStr:
+	case *checker.TemplateStr:
 		sb := strings.Builder{}
 		for i := range e.Chunks {
 			chunk := vm.eval(e.Chunks[i])
 			sb.WriteString(chunk.raw.(string))
 		}
-		return &object{sb.String(), checker_v2.Str}
-	case *checker_v2.Variable:
+		return &object{sb.String(), checker.Str}
+	case *checker.Variable:
 		val, ok := vm.scope.get(e.Name())
 		if !ok {
 			panic(fmt.Errorf("variable not found: %s", e.Name()))
 		}
 		return val
-	case *checker_v2.Not:
+	case *checker.Not:
 		val := vm.eval(e.Value)
 		return &object{!val.raw.(bool), val._type}
 
-	case *checker_v2.Negation:
+	case *checker.Negation:
 		val := vm.eval(e.Value)
 		if num, isInt := val.raw.(int); isInt {
 			return &object{-num, val._type}
 		}
 		return &object{-val.raw.(float64), val._type}
-	case *checker_v2.IntAddition:
+	case *checker.IntAddition:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) + right.raw.(int),
 			left._type,
 		}
-	case *checker_v2.IntSubtraction:
+	case *checker.IntSubtraction:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) - right.raw.(int),
 			left._type,
 		}
-	case *checker_v2.IntMultiplication:
+	case *checker.IntMultiplication:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) * right.raw.(int),
 			left._type,
 		}
-	case *checker_v2.IntDivision:
+	case *checker.IntDivision:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) / right.raw.(int),
 			left._type,
 		}
-	case *checker_v2.IntModulo:
+	case *checker.IntModulo:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) % right.raw.(int),
 			left._type,
 		}
-	case *checker_v2.IntGreater:
+	case *checker.IntGreater:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) > right.raw.(int),
-			checker_v2.Bool,
+			checker.Bool,
 		}
-	case *checker_v2.IntGreaterEqual:
+	case *checker.IntGreaterEqual:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) >= right.raw.(int),
-			checker_v2.Bool,
+			checker.Bool,
 		}
-	case *checker_v2.IntLess:
+	case *checker.IntLess:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) < right.raw.(int),
-			checker_v2.Bool,
+			checker.Bool,
 		}
-	case *checker_v2.IntLessEqual:
+	case *checker.IntLessEqual:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(int) <= right.raw.(int),
-			checker_v2.Bool,
+			checker.Bool,
 		}
-	case *checker_v2.FloatDivision:
+	case *checker.FloatDivision:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(float64) / right.raw.(float64),
 			left._type,
 		}
-	case *checker_v2.FloatMultiplication:
+	case *checker.FloatMultiplication:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(float64) * right.raw.(float64),
 			left._type,
 		}
-	case *checker_v2.FloatSubtraction:
+	case *checker.FloatSubtraction:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(float64) - right.raw.(float64),
 			left._type,
 		}
-	case *checker_v2.FloatAddition:
+	case *checker.FloatAddition:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
 			left.raw.(float64) + right.raw.(float64),
 			left._type,
 		}
-	case *checker_v2.Equality:
+	case *checker.Equality:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
-		return &object{left.raw == right.raw, checker_v2.Bool}
-	case *checker_v2.And:
+		return &object{left.raw == right.raw, checker.Bool}
+	case *checker.And:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
-		return &object{left.raw.(bool) && right.raw.(bool), checker_v2.Bool}
-	case *checker_v2.Or:
+		return &object{left.raw.(bool) && right.raw.(bool), checker.Bool}
+	case *checker.Or:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
-		return &object{left.raw.(bool) || right.raw.(bool), checker_v2.Bool}
-	case *checker_v2.If:
+		return &object{left.raw.(bool) || right.raw.(bool), checker.Bool}
+	case *checker.If:
 		if cond := vm.eval(e.Condition); cond.raw.(bool) {
 			res, _ := vm.evalBlock2(e.Body, nil)
 			return res
@@ -252,7 +252,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			return res
 		}
 		return void
-	case *checker_v2.FunctionDef:
+	case *checker.FunctionDef:
 		raw := func(args ...*object) *object {
 			res, _ := vm.evalBlock2(e.Body, func() {
 				for i := range args {
@@ -264,7 +264,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 		obj := &object{raw, e.Type()}
 		vm.scope.add(e.Name, obj)
 		return obj
-	case *checker_v2.FunctionCall:
+	case *checker.FunctionCall:
 		sig, ok := vm.scope.get(e.Name)
 		if !ok {
 			panic(fmt.Errorf("Undefined: %s", e.Name))
@@ -280,52 +280,52 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 		}
 
 		return fn(args...)
-	case *checker_v2.InstanceProperty:
+	case *checker.InstanceProperty:
 		{
 			subj := vm.eval(e.Subject)
-			if _, ok := subj._type.(*checker_v2.StructDef); ok {
+			if _, ok := subj._type.(*checker.StructDef); ok {
 				raw := subj.raw.(map[string]*object)
 				return raw[e.Property]
 			}
 
 			switch subj._type {
-			case checker_v2.Str:
+			case checker.Str:
 				return vm.evalStrProperty(subj, e.Property)
 			default:
 				panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj._type, e.Property))
 			}
 		}
-	case *checker_v2.InstanceMethod:
+	case *checker.InstanceMethod:
 		{
 			subj := vm.eval(e.Subject)
-			if subj._type == checker_v2.Str {
+			if subj._type == checker.Str {
 				return vm.evalStrMethod(subj, e.Method)
 			}
-			if subj._type == checker_v2.Int {
+			if subj._type == checker.Int {
 				return vm.evalIntMethod(subj, e)
 			}
-			if subj._type == checker_v2.Float {
+			if subj._type == checker.Float {
 				return vm.evalFloatMethod(subj, e.Method)
 			}
-			if subj._type == checker_v2.Bool {
+			if subj._type == checker.Bool {
 				return vm.evalBoolMethod(subj, e)
 			}
-			if _, ok := subj._type.(*checker_v2.List); ok {
+			if _, ok := subj._type.(*checker.List); ok {
 				return vm.evalListMethod(subj, e)
 			}
-			if _, ok := subj._type.(*checker_v2.Map); ok {
+			if _, ok := subj._type.(*checker.Map); ok {
 				return vm.evalMapMethod(subj, e)
 			}
-			if _, ok := subj._type.(*checker_v2.Maybe); ok {
+			if _, ok := subj._type.(*checker.Maybe); ok {
 				return vm.evalMaybeMethod(subj, e)
 			}
-			if _, ok := subj._type.(*checker_v2.StructDef); ok {
+			if _, ok := subj._type.(*checker.StructDef); ok {
 				return vm.evalStructMethod(subj, e.Method)
 			}
 
 			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", subj._type, e.Method.Name, subj._type))
 		}
-	case *checker_v2.PackageFunctionCall:
+	case *checker.PackageFunctionCall:
 		{
 			if e.Package == "ard/ints" {
 				switch e.Call.Name {
@@ -457,9 +457,9 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 						result := &object{nil, e.Call.Type()}
 						jsonBytes := []byte(vm.eval(e.Call.Args[0]).raw.(string))
 
-						inner := result._type.(*checker_v2.Maybe).Of()
+						inner := result._type.(*checker.Maybe).Of()
 						switch subj := inner.(type) {
-						case *checker_v2.StructDef:
+						case *checker.StructDef:
 							{
 								_map := make(map[string]any)
 								err := json.Unmarshal(jsonBytes, &_map)
@@ -472,7 +472,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 								fields := make(map[string]*object)
 								for name, fType := range subj.Fields {
 									val := _map[name]
-									if f64, ok := val.(float64); ok && fType == (checker_v2.Int) {
+									if f64, ok := val.(float64); ok && fType == (checker.Int) {
 										val = int(f64)
 									}
 									fields[name] = &object{val, fType}
@@ -481,7 +481,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 								result.raw = fields
 								return result
 							}
-						case *checker_v2.List:
+						case *checker.List:
 							{
 								array := []any{}
 								err := json.Unmarshal([]byte(jsonBytes), &array)
@@ -523,7 +523,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
 		}
-	case *checker_v2.ListLiteral:
+	case *checker.ListLiteral:
 		{
 			raw := make([]*object, len(e.Elements))
 			for i, el := range e.Elements {
@@ -531,7 +531,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			}
 			return &object{raw, e.Type()}
 		}
-	case *checker_v2.MapLiteral:
+	case *checker.MapLiteral:
 		{
 			raw := make(map[string]*object)
 			for i := range e.Keys {
@@ -558,7 +558,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			}
 			return &object{raw, e.Type()}
 		}
-	case *checker_v2.OptionMatch:
+	case *checker.OptionMatch:
 		{
 			subject := vm.eval(e.Subject)
 			if subject.raw == nil {
@@ -569,13 +569,13 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				// Some case - bind the value and evaluate the Some block
 				res, _ := vm.evalBlock2(e.Some.Body, func() {
 					// Bind the pattern name to the value
-					subject := &object{subject.raw, subject._type.(*checker_v2.Maybe).Of()}
+					subject := &object{subject.raw, subject._type.(*checker.Maybe).Of()}
 					vm.scope.add(e.Some.Pattern.Name, subject)
 				})
 				return res
 			}
 		}
-	case *checker_v2.EnumMatch:
+	case *checker.EnumMatch:
 		{
 			subject := vm.eval(e.Subject)
 			variantIndex := subject.raw.(int8)
@@ -596,9 +596,9 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			// because it ensures the match is exhaustive
 			panic(fmt.Errorf("No matching case for enum variant %d", variantIndex))
 		}
-	case *checker_v2.EnumVariant:
+	case *checker.EnumVariant:
 		return &object{e.Variant, e.Type()}
-	case *checker_v2.BoolMatch:
+	case *checker.BoolMatch:
 		{
 			subject := vm.eval(e.Subject)
 			value := subject.raw.(bool)
@@ -612,12 +612,12 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 				return res
 			}
 		}
-	case *checker_v2.UnionMatch:
+	case *checker.UnionMatch:
 		{
 			subject := vm.eval(e.Subject)
 
 			// Get the concrete type name as a string
-			typeName := subject._type.(checker_v2.Type).String()
+			typeName := subject._type.(checker.Type).String()
 
 			// If we have a case for this specific type
 			if block, ok := e.TypeCases[typeName]; ok {
@@ -638,7 +638,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 			// because it ensures the match is exhaustive
 			panic(fmt.Errorf("No matching case for union type %s", typeName))
 		}
-	case *checker_v2.StructInstance:
+	case *checker.StructInstance:
 		{
 			raw := map[string]*object{}
 			for name, val := range e.Fields {
@@ -651,7 +651,7 @@ func (vm *VM) eval(expr checker_v2.Expression) *object {
 	}
 }
 
-func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) (*object, bool) {
+func (vm *VM) evalBlock2(block *checker.Block, init func()) (*object, bool) {
 	vm.pushScope()
 	defer vm.popScope()
 
@@ -675,53 +675,53 @@ func (vm *VM) evalBlock2(block *checker_v2.Block, init func()) (*object, bool) {
 func (vm *VM) evalStrProperty(subj *object, name string) *object {
 	switch name {
 	case "size":
-		return &object{len(subj.raw.(string)), checker_v2.Int}
+		return &object{len(subj.raw.(string)), checker.Int}
 	default:
 		return void
 	}
 }
 
-func (vm *VM) evalStrMethod(subj *object, m *checker_v2.FunctionCall) *object {
+func (vm *VM) evalStrMethod(subj *object, m *checker.FunctionCall) *object {
 	switch m.Name {
 	case "size":
-		return &object{len(subj.raw.(string)), checker_v2.Int}
+		return &object{len(subj.raw.(string)), checker.Int}
 	case "is_empty":
-		return &object{len(subj.raw.(string)) == 0, checker_v2.Bool}
+		return &object{len(subj.raw.(string)) == 0, checker.Bool}
 	case "contains":
-		return &object{strings.Contains(subj.raw.(string), vm.eval(m.Args[0]).raw.(string)), checker_v2.Bool}
+		return &object{strings.Contains(subj.raw.(string), vm.eval(m.Args[0]).raw.(string)), checker.Bool}
 	default:
 		return void
 	}
 }
 
-func (vm *VM) evalIntMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+func (vm *VM) evalIntMethod(subj *object, m *checker.InstanceMethod) *object {
 	switch m.Method.Name {
 	case "to_str":
-		return &object{strconv.Itoa(subj.raw.(int)), checker_v2.Str}
+		return &object{strconv.Itoa(subj.raw.(int)), checker.Str}
 	default:
 		return void
 	}
 }
 
-func (vm *VM) evalFloatMethod(subj *object, m *checker_v2.FunctionCall) *object {
+func (vm *VM) evalFloatMethod(subj *object, m *checker.FunctionCall) *object {
 	switch m.Name {
 	case "to_str":
-		return &object{strconv.FormatFloat(subj.raw.(float64), 'f', 2, 64), checker_v2.Str}
+		return &object{strconv.FormatFloat(subj.raw.(float64), 'f', 2, 64), checker.Str}
 	default:
 		return void
 	}
 }
 
-func (vm *VM) evalBoolMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+func (vm *VM) evalBoolMethod(subj *object, m *checker.InstanceMethod) *object {
 	switch m.Method.Name {
 	case "to_str":
-		return &object{strconv.FormatBool(subj.raw.(bool)), checker_v2.Str}
+		return &object{strconv.FormatBool(subj.raw.(bool)), checker.Str}
 	default:
 		return void
 	}
 }
 
-func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+func (vm *VM) evalListMethod(subj *object, m *checker.InstanceMethod) *object {
 	raw := subj.raw.([]*object)
 	switch m.Method.Name {
 	case "at":
@@ -730,14 +730,14 @@ func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object
 	case "set":
 		index := vm.eval(m.Method.Args[0]).raw.(int)
 		value := vm.eval(m.Method.Args[1])
-		result := &object{false, checker_v2.Bool}
+		result := &object{false, checker.Bool}
 		if index <= len(raw) {
 			raw[index] = value
 			result.raw = true
 		}
 		return result
 	case "size":
-		return &object{len(raw), checker_v2.Int}
+		return &object{len(raw), checker.Int}
 	case "push":
 		subj.raw = append(raw, vm.eval(m.Method.Args[0]))
 		return subj
@@ -746,11 +746,11 @@ func (vm *VM) evalListMethod(subj *object, m *checker_v2.InstanceMethod) *object
 	}
 }
 
-func (vm *VM) evalMapMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+func (vm *VM) evalMapMethod(subj *object, m *checker.InstanceMethod) *object {
 	raw := subj.raw.(map[string]*object)
 	switch m.Method.Name {
 	case "size":
-		return &object{len(raw), checker_v2.Int}
+		return &object{len(raw), checker.Int}
 	case "get":
 		keyArg := vm.eval(m.Method.Args[0])
 
@@ -798,7 +798,7 @@ func (vm *VM) evalMapMethod(subj *object, m *checker_v2.InstanceMethod) *object 
 		// Add or update the entry
 		raw[keyStr] = valueArg
 		// Return success
-		return &object{true, checker_v2.Bool}
+		return &object{true, checker.Bool}
 	case "drop":
 		keyArg := vm.eval(m.Method.Args[0])
 
@@ -840,13 +840,13 @@ func (vm *VM) evalMapMethod(subj *object, m *checker_v2.InstanceMethod) *object 
 
 		// Check if the key exists
 		_, found := raw[keyStr]
-		return &object{found, checker_v2.Bool}
+		return &object{found, checker.Bool}
 	default:
 		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
 	}
 }
 
-func (vm *VM) evalMaybeMethod(subj *object, m *checker_v2.InstanceMethod) *object {
+func (vm *VM) evalMaybeMethod(subj *object, m *checker.InstanceMethod) *object {
 	switch m.Method.Name {
 	case "or":
 		if subj.raw == nil {
@@ -858,14 +858,14 @@ func (vm *VM) evalMaybeMethod(subj *object, m *checker_v2.InstanceMethod) *objec
 	}
 }
 
-func (vm *VM) evalStructMethod(subj *object, call *checker_v2.FunctionCall) *object {
-	istruct := subj._type.(*checker_v2.StructDef)
+func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object {
+	istruct := subj._type.(*checker.StructDef)
 	sig, ok := istruct.Fields[call.Name]
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))
 	}
 
-	fnDef, ok := sig.(*checker_v2.FunctionDef)
+	fnDef, ok := sig.(*checker.FunctionDef)
 	if !ok {
 		panic(fmt.Errorf("Not a function: %s.%s", istruct.Name, call.Name))
 	}
