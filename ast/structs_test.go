@@ -59,7 +59,6 @@ func TestStructDefinitions(t *testing.T) {
 				Statements: []Statement{
 					&ImplBlock{
 						Self: Parameter{
-							Name: "@",
 							Type: &CustomType{Name: "Shape"},
 						},
 						Methods: []FunctionDeclaration{

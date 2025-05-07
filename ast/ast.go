@@ -277,6 +277,7 @@ func (s StructDefinition) String() string {
 
 type ImplBlock struct {
 	Location
+	// todo: remove Self
 	Self    Parameter
 	Methods []FunctionDeclaration
 }
@@ -369,9 +370,9 @@ func (i IfStatement) String() string {
 
 type FunctionCall struct {
 	Location
-	Name         string
-	TypeArgs     []DeclaredType
-	Args         []Expression
+	Name     string
+	TypeArgs []DeclaredType
+	Args     []Expression
 }
 
 func (f FunctionCall) String() string {

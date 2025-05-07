@@ -367,7 +367,6 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 
 	impl.Self = Parameter{
 		Mutable: isMutable,
-		Name:    "@", // Use @ as the self name
 		Type:    typeDecl,
 	}
 
