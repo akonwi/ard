@@ -197,6 +197,15 @@ func (i *InstanceProperty) Type() Type {
 	return i._type
 }
 
+// String returns a string representation of the instance property
+func (i *InstanceProperty) String() string {
+	// Special case for self-reference using @
+	if v, ok := i.Subject.(*Variable); ok && v.Name() == "@" {
+		return fmt.Sprintf("@%s", i.Property)
+	}
+	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
+}
+
 type InstanceMethod struct {
 	Subject Expression
 	Method  *FunctionCall
@@ -560,8 +569,7 @@ type FunctionDef struct {
 	ReturnType Type
 	Mutates    bool
 	Body       *Block
-	// todo: delete
-	SelfName string
+	SelfName   string
 }
 
 func (f FunctionDef) String() string {
@@ -765,7 +773,7 @@ func (def StructDef) get(name string) Type {
 	return field
 }
 func (def StructDef) equal(other Type) bool {
-	if otherDef, ok := other.(StructDef); ok {
+	if otherDef, ok := other.(*StructDef); ok {
 		if def.Name != otherDef.Name {
 			return false
 		}
@@ -1332,31 +1340,36 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 	case *ast.ImplBlock:
 		{
-			t := c.resolveType(s.Self.Type)
-			if t == nil {
+			sym := c.scope.get(s.Target.Name)
+			if sym == nil {
+				c.addError(fmt.Sprintf("Undefined: %s", s.Target), s.Target.GetLocation())
 				return nil
 			}
 
-			structDef, ok := t.(*StructDef)
+			structDef, ok := sym.(*StructDef)
 			if !ok {
-				c.addError(fmt.Sprintf("Expected struct type, got %s", t), s.Self.Type.GetLocation())
+				c.addError(fmt.Sprintf("Expected struct type, got %s", sym), s.Target.GetLocation())
 				return nil
 			}
+
+			selfName := "@"
 
 			for _, method := range s.Methods {
 				fnDef := c.checkFunction(&method, func() {
 					c.scope.add(&VariableDef{
-						Name:    s.Self.Name,
+						Name:    selfName,
 						__type:  structDef,
-						Mutable: s.Self.Mutable,
+						Mutable: method.Mutates,
 					})
 				})
-				fnDef.Mutates = s.Self.Mutable
+				fnDef.Mutates = method.Mutates
 				structDef.Fields[method.Name] = fnDef
-				fnDef.SelfName = s.Self.Name
+				fnDef.SelfName = selfName
 			}
 			return nil
 		}
+	case nil:
+		return nil
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
 		if expr == nil {

@@ -1,9 +1,11 @@
 ## TODO
 
-- [x] support escape sequences in strings
-  - `io::print("line 1\nline 2")` should print two lines
-- [ ] remove need for naming self in impl blocks
-  - [ ] use @ for accessing props
+- [x] remove need for naming self in impl blocks
+  - [x] syntax becomes `impl Name {}`
+  - [x] use '@' as a keyword for self
+  - [x] use '@prop' as shorthand for `self.prop`
+  - [x] 'fn mut' syntax for mutating methods
+  - [x] delete code for old syntax
 - [ ] simplify interpolation syntax to `"{name}"` instead of `{{name}}`
 - [ ] networking
 - [ ] methods on enums?

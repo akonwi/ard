@@ -240,6 +240,7 @@ func (p Parameter) String() string {
 type FunctionDeclaration struct {
 	Location
 	Name       string
+	Mutates    bool
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
@@ -277,12 +278,12 @@ func (s StructDefinition) String() string {
 
 type ImplBlock struct {
 	Location
-	Self    Parameter
+	Target  Identifier
 	Methods []FunctionDeclaration
 }
 
 func (i ImplBlock) String() string {
-	return fmt.Sprintf("ImplBlock(%s)", i.Self)
+	return fmt.Sprintf("ImplBlock(%s)", i.Target)
 }
 
 type StructValue struct {
@@ -369,9 +370,9 @@ func (i IfStatement) String() string {
 
 type FunctionCall struct {
 	Location
-	Name         string
-	TypeArgs     []DeclaredType
-	Args         []Expression
+	Name     string
+	TypeArgs []DeclaredType
+	Args     []Expression
 }
 
 func (f FunctionCall) String() string {
@@ -385,6 +386,10 @@ type InstanceProperty struct {
 }
 
 func (ip InstanceProperty) String() string {
+	// Special case for self-reference using @
+	if id, ok := ip.Target.(*Identifier); ok && id.Name == "@" {
+		return fmt.Sprintf("@%s", ip.Property)
+	}
 	return fmt.Sprintf("%s.%s", ip.Target, ip.Property)
 }
 

@@ -5,16 +5,14 @@ struct Board {
   cells: [Str]
 }
 
-impl (mut b: Board) {
-  fn play(player: Str, pos: Int) {
-    b.cells.set(pos, player)
+impl Board {
+  fn mut play(player: Str, pos: Int) {
+    @cells.set(pos, player)
   }
-}
 
-impl (b: Board) {
   fn is_full() Bool {
     mut full = true
-    for cell in b.cells {
+    for cell in @cells {
       if cell.is_empty() {
         full = false
         break
@@ -24,15 +22,15 @@ impl (b: Board) {
   }
 
   fn draw() {
-    io::print("{{b.cells.at(0)}} | {{b.cells.at(1)}} | {{b.cells.at(2)}}")
+    io::print("{{@cells.at(0)}} | {{@cells.at(1)}} | {{@cells.at(2)}}")
     io::print("-------")
-    io::print("{{b.cells.at(3)}} | {{b.cells.at(4)}} | {{b.cells.at(5)}}")
+    io::print("{{@cells.at(3)}} | {{@cells.at(4)}} | {{@cells.at(5)}}")
     io::print("-------")
-    io::print("{{b.cells.at(6)}} | {{b.cells.at(7)}} | {{b.cells.at(8)}}")
+    io::print("{{@cells.at(6)}} | {{@cells.at(7)}} | {{@cells.at(8)}}")
   }
 
   fn can_play(pos: Int) Bool {
-    match b.cells.at(pos) {
+    match @cells.at(pos) {
       s => s.is_empty(),
       _ => false
     }
@@ -41,40 +39,40 @@ impl (b: Board) {
   fn get_winner() Str? {
     mut res: Str? = maybe::none()
 
-    if not b.cells.at(0).or("").is_empty() {
+    if not @cells.at(0).or("").is_empty() {
       // check top row
-      if b.cells.at(0) == b.cells.at(1) and b.cells.at(0) == b.cells.at(2) {
-        res = b.cells.at(0)
+      if @cells.at(0) == @cells.at(1) and @cells.at(0) == @cells.at(2) {
+        res = @cells.at(0)
       // check left column
-      } else if b.cells.at(0) == b.cells.at(3) and b.cells.at(0) == b.cells.at(6) {
-        res = b.cells.at(0)
+      } else if @cells.at(0) == @cells.at(3) and @cells.at(0) == @cells.at(6) {
+        res = @cells.at(0)
       // check top-left to bottom-right
-      } else if b.cells.at(0) == b.cells.at(4) and b.cells.at(0) == b.cells.at(8) {
-        res = b.cells.at(0)
+      } else if @cells.at(0) == @cells.at(4) and @cells.at(0) == @cells.at(8) {
+        res = @cells.at(0)
       }
     }
 
     // check middle column
-    if not b.cells.at(1).or("").is_empty() {
-      if b.cells.at(1) == b.cells.at(4) and b.cells.at(1) == b.cells.at(7) {
-        res = b.cells.at(1)
+    if not @cells.at(1).or("").is_empty() {
+      if @cells.at(1) == @cells.at(4) and @cells.at(1) == @cells.at(7) {
+        res = @cells.at(1)
       }
     }
 
-    if not b.cells.at(2).or("").is_empty() {
+    if not @cells.at(2).or("").is_empty() {
       // check right column
-      if b.cells.at(2) == b.cells.at(5) and b.cells.at(2) == b.cells.at(8) {
-        res = b.cells.at(2)
+      if @cells.at(2) == @cells.at(5) and @cells.at(2) == @cells.at(8) {
+        res = @cells.at(2)
       // check top-right to bottom-left
-      } else if b.cells.at(2) == b.cells.at(4) and b.cells.at(2) == b.cells.at(6) {
-        res = b.cells.at(2)
+      } else if @cells.at(2) == @cells.at(4) and @cells.at(2) == @cells.at(6) {
+        res = @cells.at(2)
       }
     }
 
     // check middle row
-    if not b.cells.at(3).or("").is_empty() {
-      if b.cells.at(3) == b.cells.at(4) and b.cells.at(3) == b.cells.at(5) {
-        res = b.cells.at(3)
+    if not @cells.at(3).or("").is_empty() {
+      if @cells.at(3) == @cells.at(4) and @cells.at(3) == @cells.at(5) {
+        res = @cells.at(3)
       }
     }
 
