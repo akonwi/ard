@@ -825,6 +825,33 @@ func TestLexing(t *testing.T) {
 				{kind: eof},
 			},
 		},
+		{
+			name: "escape sequences in strings",
+			input: strings.Join([]string{
+				`"line 1\nline 2"`,
+				`"tab\tspaced"`,
+				`"carriage\rreturn"`,
+				`"backslash \\ and quote \" together"`,
+				`"bell\b, form feed\f, vertical tab\v"`,
+			}, "\n"),
+			want: []token{
+				{kind: string_, line: 1, column: 1, text: "line 1\nline 2"},
+				{kind: new_line, line: 1, column: 17},
+				
+				{kind: string_, line: 2, column: 1, text: "tab\tspaced"},
+				{kind: new_line, line: 2, column: 14},
+				
+				{kind: string_, line: 3, column: 1, text: "carriage\rreturn"},
+				{kind: new_line, line: 3, column: 19},
+				
+				{kind: string_, line: 4, column: 1, text: "backslash \\ and quote \" together"},
+				{kind: new_line, line: 4, column: 37},
+				
+				{kind: string_, line: 5, column: 1, text: "bell\b, form feed\f, vertical tab\v"},
+				
+				{kind: eof},
+			},
+		},
 
 		{
 			name: "member access",

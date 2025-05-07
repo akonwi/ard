@@ -1,7 +1,6 @@
 package ast
 
 import (
-	"slices"
 	"strings"
 )
 
@@ -363,10 +362,34 @@ func (l *lexer) takeString(openQuote *char) (token, bool) {
 			}, true
 		}
 		last := l.advance()
-		if last.raw == '\\' && slices.Contains([]byte{'"', '\\'}, l.peek().raw) {
-			last = l.advance()
+		if last.raw == '\\' && l.hasMore() {
+			// Handle escape sequences
+			escapeChar := l.advance()
+			switch escapeChar.raw {
+			case 'n':
+				sb.WriteByte('\n')
+			case 't':
+				sb.WriteByte('\t')
+			case 'r':
+				sb.WriteByte('\r')
+			case '"':
+				sb.WriteByte('"')
+			case '\\':
+				sb.WriteByte('\\')
+			case 'b':
+				sb.WriteByte('\b')
+			case 'f':
+				sb.WriteByte('\f')
+			case 'v':
+				sb.WriteByte('\v')
+			default:
+				// If not a recognized escape sequence, just output both chars
+				sb.WriteByte('\\')
+				sb.WriteByte(escapeChar.raw)
+			}
+		} else {
+			sb.WriteByte(last.raw)
 		}
-		sb.WriteByte(last.raw)
 	}
 
 	// take end quote

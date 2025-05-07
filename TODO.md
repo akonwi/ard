@@ -1,6 +1,7 @@
 ## TODO
 
-- [ ] support escape sequences in strings
+- [x] support escape sequences in strings
+  - `io::print("line 1\nline 2")` should print two lines
 - [ ] remove need for naming self in impl blocks
   - [ ] use @ for accessing props
 - [ ] simplify interpolation syntax to `"{name}"` instead of `{{name}}`
