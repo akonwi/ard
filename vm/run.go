@@ -114,6 +114,8 @@ func (vm *VM) do(stmt checker.Statement) *object {
 			}
 		}
 		return void
+	case nil:
+		return void
 	default:
 		panic(fmt.Errorf("Unimplemented statement: %T", s))
 	}

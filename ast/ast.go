@@ -385,6 +385,10 @@ type InstanceProperty struct {
 }
 
 func (ip InstanceProperty) String() string {
+	// Special case for self-reference using @
+	if id, ok := ip.Target.(*Identifier); ok && id.Name == "@" {
+		return fmt.Sprintf("@%s", ip.Property)
+	}
 	return fmt.Sprintf("%s.%s", ip.Target, ip.Property)
 }
 

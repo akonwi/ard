@@ -143,9 +143,9 @@ func TestMethods(t *testing.T) {
 			name: "Valid impl block",
 			input: fmt.Sprintf(
 				`%s
-				impl (self: Shape) {
+				impl Shape {
 				  fn get_area() Int {
-						self.width * self.height
+						@width * @height
 					}
 				}`, shapeCode),
 			output: &checker.Program{
@@ -156,25 +156,25 @@ func TestMethods(t *testing.T) {
 			name: "The instance can't be mutated in a non-mutable impl block",
 			input: fmt.Sprintf(
 				`%s
-				impl (self: Shape) {
+				impl Shape {
 				  fn resize(h: Int, w: Int) {
-						self.width = w
-						self.height = h
+						@width = w
+						@height = h
 					}
 				}`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: self.width"},
-				{Kind: checker.Error, Message: "Immutable: self.height"},
+				{Kind: checker.Error, Message: "Immutable: @width"},
+				{Kind: checker.Error, Message: "Immutable: @height"},
 			},
 		},
 		{
 			name: "A mutable impl block",
 			input: fmt.Sprintf(
 				`%s
-				impl (mut self: Shape) {
+				impl mut Shape {
 				  fn resize(width: Int, height: Int) {
-						self.width = width
-						self.height = height
+						@width = width
+						@height = height
 					}
 				}
 

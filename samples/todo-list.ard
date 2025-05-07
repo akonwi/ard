@@ -5,13 +5,13 @@ struct Todo {
   completed: Bool
 }
 
-impl (it: Todo) {
+impl Todo {
   fn get_str() Str {
-    let box = match (it.completed) {
+    let box = match (@completed) {
       true => "[x]",
       false => "[ ]"
     }
-    "{{box}} {{it.title}}"
+    "{{box}} {{@title}}"
   }
 }
 

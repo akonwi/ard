@@ -197,6 +197,15 @@ func (i *InstanceProperty) Type() Type {
 	return i._type
 }
 
+// String returns a string representation of the instance property
+func (i *InstanceProperty) String() string {
+	// Special case for self-reference using @
+	if v, ok := i.Subject.(*Variable); ok && v.Name() == "@" {
+		return fmt.Sprintf("@%s", i.Property)
+	}
+	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
+}
+
 type InstanceMethod struct {
 	Subject Expression
 	Method  *FunctionCall
@@ -1343,20 +1352,25 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
+			// Use the self name as provided - this could be either an explicit name or "@" from the parser
+			selfName := s.Self.Name
+
 			for _, method := range s.Methods {
 				fnDef := c.checkFunction(&method, func() {
 					c.scope.add(&VariableDef{
-						Name:    s.Self.Name,
+						Name:    selfName,
 						__type:  structDef,
 						Mutable: s.Self.Mutable,
 					})
 				})
 				fnDef.Mutates = s.Self.Mutable
 				structDef.Fields[method.Name] = fnDef
-				fnDef.SelfName = s.Self.Name
+				fnDef.SelfName = selfName
 			}
 			return nil
 		}
+	case nil:
+		return nil
 	default:
 		expr := c.checkExpr((ast.Expression)(*stmt))
 		if expr == nil {

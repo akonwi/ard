@@ -358,17 +358,34 @@ func (p *parser) structDef() (Statement, error) {
 
 func (p *parser) implBlock() (*ImplBlock, error) {
 	impl := &ImplBlock{}
-	p.consume(left_paren, "Expected '('")
-	isMutable := p.match(mut)
-	selfToken := p.consume(identifier, "Expected self parameter")
-	p.consume(colon, "Expected ':'")
-	typeDecl := p.parseType()
-	p.consume(right_paren, "Expected ')'")
 
-	impl.Self = Parameter{
-		Mutable: isMutable,
-		Name:    selfToken.text,
-		Type:    typeDecl,
+	// Check if we have the new syntax (impl Type {}) or the old syntax (impl (self: Type) {})
+	if p.match(left_paren) {
+		// Old syntax with explicit self parameter
+		isMutable := p.match(mut)
+		selfToken := p.consume(identifier, "Expected self parameter")
+		p.consume(colon, "Expected ':'")
+		typeDecl := p.parseType()
+		p.consume(right_paren, "Expected ')'")
+
+		impl.Self = Parameter{
+			Mutable: isMutable,
+			Name:    selfToken.text,
+			Type:    typeDecl,
+		}
+	} else {
+		// New syntax with implicit self
+		isMutable := p.match(mut) // Check for "impl mut Type {}" syntax
+		typeToken := p.consume(identifier, "Expected type name after 'impl'")
+		typeDecl := &CustomType{
+			Name: typeToken.text,
+		}
+
+		impl.Self = Parameter{
+			Mutable: isMutable,
+			Name:    "@", // Use @ as the self name
+			Type:    typeDecl,
+		}
 	}
 
 	p.consume(left_brace, "Expected '{'")
@@ -459,7 +476,7 @@ func (p *parser) parseType() DeclaredType {
 	if p.match(identifier) {
 		id := p.previous()
 		nullable := p.match(question_mark)
-		
+
 		// Check if this is a generic type parameter (starts with $)
 		if len(id.text) > 0 && id.text[0] == '$' {
 			return &GenericType{
@@ -467,7 +484,7 @@ func (p *parser) parseType() DeclaredType {
 				nullable: nullable,
 			}
 		}
-		
+
 		switch id.text {
 		case "Int":
 			return &IntType{nullable: nullable}
@@ -842,6 +859,26 @@ func (p *parser) memberAccess() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if id, ok := expr.(*Identifier); ok && id.Name == "@" {
+		call, err := p.call()
+		if err != nil {
+			return nil, err
+		}
+
+		switch prop := call.(type) {
+		case *Identifier:
+			expr = &InstanceProperty{
+				Target:   expr,
+				Property: *prop,
+			}
+		case *FunctionCall:
+			expr = &InstanceMethod{
+				Target: expr,
+				Method: *prop,
+			}
+		}
+	}
 	for p.match(dot, colon_colon) {
 		if p.previous().kind == dot {
 			call, err := p.call()
@@ -866,25 +903,25 @@ func (p *parser) memberAccess() (Expression, error) {
 			if p.check(identifier, less_than) {
 				// This is a static function call with type arguments
 				funcName := p.consume(identifier, "Expected function name")
-				
+
 				// Parse type arguments
 				p.consume(less_than, "Expected '<'")
 				typeArgs := []DeclaredType{}
-				
+
 				typeArg := p.parseType()
 				typeArgs = append(typeArgs, typeArg)
-				
+
 				for p.match(comma) {
 					typeArg = p.parseType()
 					typeArgs = append(typeArgs, typeArg)
 				}
-				
+
 				p.consume(greater_than, "Expected '>' after type arguments")
-				
+
 				// Parse arguments
 				p.consume(left_paren, "Expected '(' after type arguments")
 				args := []Expression{}
-				
+
 				for !p.check(right_paren) {
 					arg, err := p.parseExpression()
 					if err != nil {
@@ -893,9 +930,9 @@ func (p *parser) memberAccess() (Expression, error) {
 					args = append(args, arg)
 					p.match(comma)
 				}
-				
+
 				p.consume(right_paren, "Expected ')' to close function call")
-				
+
 				// Create the StaticFunction with type arguments
 				expr = &StaticFunction{
 					Target: expr,
@@ -941,30 +978,30 @@ func (p *parser) call() (Expression, error) {
 
 	// todo: to support chaining, wrap in for loop
 	// ex: foo()()()
-	
+
 	// Check if it's a function call with potential type arguments
 	// Only parse as type arguments if we have an identifier followed by <
 	_, isIdentifier := expr.(*Identifier)
-	
+
 	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, identifier, less_than) {
 		// Look ahead to see if this is a type argument or a comparison
 		p.advance() // consume the '<'
-		
+
 		// Save position so we can rewind if this isn't a type argument
 		savedIndex := p.index
-		
+
 		// Try to parse as a type
 		typeArg := p.parseType()
-		
+
 		// If we have a '>' after parsing the type, this is probably a type argument
 		if p.check(greater_than) {
 			p.advance() // consume the '>'
-			
+
 			// If a left parenthesis follows, this is definitely a generic function call
 			if p.check(left_paren) {
 				// This is a function call with generic type arguments
 				typeArgs := []DeclaredType{typeArg}
-				
+
 				// Parse arguments
 				p.consume(left_paren, "Expected '(' after type arguments")
 				args := []Expression{}
@@ -977,7 +1014,7 @@ func (p *parser) call() (Expression, error) {
 					p.match(comma)
 				}
 				p.consume(right_paren, "Unclosed function call")
-				
+
 				return &FunctionCall{
 					Name:     expr.(*Identifier).Name,
 					TypeArgs: typeArgs,
@@ -989,11 +1026,11 @@ func (p *parser) call() (Expression, error) {
 				}, nil
 			}
 		}
-		
+
 		// Rewind if this wasn't a type argument
 		p.index = savedIndex - 1 // go back to before the '<'
 	}
-	
+
 	if p.match(left_paren) {
 		// Regular function call without type arguments
 		args := []Expression{}
@@ -1035,6 +1072,17 @@ func (p *parser) primary() (Expression, error) {
 	if p.match(true_, false_) {
 		return &BoolLiteral{
 			Value: p.previous().text == "true",
+		}, nil
+	}
+	if p.match(at_sign) {
+		// Handle @ token as a special identifier
+		tok := p.previous()
+		return &Identifier{
+			Name: "@",
+			Location: Location{
+				Start: Point{Row: tok.line, Col: tok.column},
+				End:   Point{Row: tok.line, Col: tok.column},
+			},
 		}, nil
 	}
 	if p.match(identifier) {
