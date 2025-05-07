@@ -168,11 +168,11 @@ func TestMethods(t *testing.T) {
 			},
 		},
 		{
-			name: "A mutable impl block",
+			name: "A mutable method can only mutate a mutable instance",
 			input: fmt.Sprintf(
 				`%s
-				impl mut Shape {
-				  fn resize(width: Int, height: Int) {
+				impl Shape {
+				  fn mut resize(width: Int, height: Int) {
 						@width = width
 						@height = height
 					}

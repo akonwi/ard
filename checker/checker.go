@@ -1358,10 +1358,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					c.scope.add(&VariableDef{
 						Name:    selfName,
 						__type:  structDef,
-						Mutable: s.Self.Mutable,
+						Mutable: method.Mutates,
 					})
 				})
-				fnDef.Mutates = s.Self.Mutable
+				fnDef.Mutates = method.Mutates
 				structDef.Fields[method.Name] = fnDef
 				fnDef.SelfName = selfName
 			}

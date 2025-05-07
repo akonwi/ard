@@ -378,7 +378,7 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		if p.match(new_line) {
 			continue
 		}
-		stmt, err := p.functionDef()
+		stmt, err := p.functionDef(true)
 		if err != nil {
 			return nil, err
 		}
@@ -558,13 +558,17 @@ func (p *parser) matchExpr() (Expression, error) {
 		return matchExpr, nil
 	}
 
-	return p.functionDef()
+	return p.functionDef(false)
 }
 
-func (p *parser) functionDef() (Statement, error) {
+func (p *parser) functionDef(asMethod bool) (Statement, error) {
 	if p.match(fn) {
 		keyword := p.previous()
 		name := ""
+		mutates := p.match(mut)
+		if !asMethod {
+			// todo: signal warning of unnecessary `mut`
+		}
 		if p.check(identifier) {
 			name = p.consume("identifier", "Expected function name after 'fn'").text
 		}
@@ -603,6 +607,7 @@ func (p *parser) functionDef() (Statement, error) {
 
 		return &FunctionDeclaration{
 			Name:       name,
+			Mutates:    asMethod && mutates,
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       statements,

@@ -240,6 +240,7 @@ func (p Parameter) String() string {
 type FunctionDeclaration struct {
 	Location
 	Name       string
+	Mutates    bool
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement

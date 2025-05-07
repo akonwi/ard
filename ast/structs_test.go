@@ -53,6 +53,8 @@ func TestStructDefinitions(t *testing.T) {
 						fn area() Int {
 							@height * @width
 						}
+
+						fn mut set_height(h: Int) {}
 					}`,
 			output: Program{
 				Imports: []Import{},
@@ -79,6 +81,14 @@ func TestStructDefinitions(t *testing.T) {
 										},
 									},
 								},
+							},
+							{
+								Name:    "set_height",
+								Mutates: true,
+								Parameters: []Parameter{
+									{Name: "h", Type: &IntType{}},
+								},
+								Body: []Statement{},
 							},
 						},
 					},
