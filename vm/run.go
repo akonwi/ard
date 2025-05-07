@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -434,6 +435,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 					}
 					fmt.Println(string)
 					return void
+				case "read_line":
+					scanner := bufio.NewScanner(os.Stdin)
+					scanner.Scan()
+					return &object{scanner.Text(), e.Call.Type()}
 				default:
 					panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
 				}

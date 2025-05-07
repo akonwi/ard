@@ -108,6 +108,12 @@ func getInIO(name string) symbol {
 			ReturnType: Void,
 		}
 		return fn
+	case "read_line":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
 	default:
 		return nil
 	}

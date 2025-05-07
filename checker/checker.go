@@ -765,7 +765,7 @@ func (def StructDef) get(name string) Type {
 	return field
 }
 func (def StructDef) equal(other Type) bool {
-	if otherDef, ok := other.(StructDef); ok {
+	if otherDef, ok := other.(*StructDef); ok {
 		if def.Name != otherDef.Name {
 			return false
 		}

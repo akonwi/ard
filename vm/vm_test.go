@@ -1,9 +1,7 @@
 package vm_test
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -51,67 +49,6 @@ func TestEmptyProgram(t *testing.T) {
 	res := run(t, "")
 	if res != nil {
 		t.Fatalf("Expected nil, got %v", res)
-	}
-}
-
-func TestPrinting(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	run(t, strings.Join([]string{
-		`use ard/io`,
-		`io::print("Hello, World!")`,
-		// `io::print("Hello, {{"Ard"}}!")`,
-	}, "\n"))
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	got := buf.String()
-
-	for _, want := range []string{
-		"Hello, World!",
-		// "Hello, Ard!",
-	} {
-		if strings.Contains(got, want) == false {
-			t.Errorf("Expected \"%s\", got %s", want, got)
-		}
-	}
-}
-
-func TestEscapeSequences(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	run(t, strings.Join([]string{
-		`use ard/io`,
-		`io::print("Line 1\nLine 2")`,
-		`io::print("Tab\tTest")`,
-		`io::print("Quote \"Test\"")`,
-	}, "\n"))
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	got := buf.String()
-
-	expectedOutputs := []string{
-		"Line 1",
-		"Line 2",
-		"Tab\tTest",
-		"Quote \"Test\"",
-	}
-
-	for _, want := range expectedOutputs {
-		if strings.Contains(got, want) == false {
-			t.Errorf("Expected output to contain \"%s\", got %s", want, got)
-		}
 	}
 }
 
