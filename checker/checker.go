@@ -1340,14 +1340,15 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 	case *ast.ImplBlock:
 		{
-			t := c.resolveType(s.Self.Type)
-			if t == nil {
+			sym := c.scope.get(s.Target.Name)
+			if sym == nil {
+				c.addError(fmt.Sprintf("Undefined: %s", s.Target), s.Target.GetLocation())
 				return nil
 			}
 
-			structDef, ok := t.(*StructDef)
+			structDef, ok := sym.(*StructDef)
 			if !ok {
-				c.addError(fmt.Sprintf("Expected struct type, got %s", t), s.Self.Type.GetLocation())
+				c.addError(fmt.Sprintf("Expected struct type, got %s", sym), s.Target.GetLocation())
 				return nil
 			}
 

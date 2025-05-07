@@ -60,8 +60,8 @@ func TestStructDefinitions(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&ImplBlock{
-						Self: Parameter{
-							Type: &CustomType{Name: "Shape"},
+						Target: Identifier{
+							Name: "Shape",
 						},
 						Methods: []FunctionDeclaration{
 							{

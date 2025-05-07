@@ -278,13 +278,12 @@ func (s StructDefinition) String() string {
 
 type ImplBlock struct {
 	Location
-	// todo: remove Self
-	Self    Parameter
+	Target  Identifier
 	Methods []FunctionDeclaration
 }
 
 func (i ImplBlock) String() string {
-	return fmt.Sprintf("ImplBlock(%s)", i.Self)
+	return fmt.Sprintf("ImplBlock(%s)", i.Target)
 }
 
 type StructValue struct {

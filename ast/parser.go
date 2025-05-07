@@ -359,15 +359,13 @@ func (p *parser) structDef() (Statement, error) {
 func (p *parser) implBlock() (*ImplBlock, error) {
 	impl := &ImplBlock{}
 
-	isMutable := p.match(mut) // Check for "impl mut Type {}" syntax
-	typeToken := p.consume(identifier, "Expected type name after 'impl'")
-	typeDecl := &CustomType{
-		Name: typeToken.text,
-	}
-
-	impl.Self = Parameter{
-		Mutable: isMutable,
-		Type:    typeDecl,
+	nameToken := p.consume(identifier, "Expected type name after 'impl'")
+	impl.Target = Identifier{
+		Name: nameToken.text,
+		Location: Location{
+			Start: Point{nameToken.line, nameToken.column},
+			End:   Point{nameToken.line, nameToken.column + len(nameToken.text)},
+		},
 	}
 
 	p.consume(left_brace, "Expected '{'")
