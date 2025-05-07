@@ -49,9 +49,9 @@ func TestStructDefinitions(t *testing.T) {
 		{
 			name: "Method definitions",
 			input: `
-					impl (s: Shape) {
+					impl Shape {
 						fn area() Int {
-							s.height * s.width
+							@height * @width
 						}
 					}`,
 			output: Program{
@@ -59,7 +59,7 @@ func TestStructDefinitions(t *testing.T) {
 				Statements: []Statement{
 					&ImplBlock{
 						Self: Parameter{
-							Name: "s",
+							Name: "@",
 							Type: &CustomType{Name: "Shape"},
 						},
 						Methods: []FunctionDeclaration{
@@ -71,11 +71,11 @@ func TestStructDefinitions(t *testing.T) {
 									&BinaryExpression{
 										Operator: Multiply,
 										Left: &InstanceProperty{
-											Target:   &Identifier{Name: "s"},
+											Target:   &Identifier{Name: "@"},
 											Property: Identifier{Name: "height"},
 										},
 										Right: &InstanceProperty{
-											Target:   &Identifier{Name: "s"},
+											Target:   &Identifier{Name: "@"},
 											Property: Identifier{Name: "width"},
 										},
 									},

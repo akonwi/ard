@@ -359,33 +359,16 @@ func (p *parser) structDef() (Statement, error) {
 func (p *parser) implBlock() (*ImplBlock, error) {
 	impl := &ImplBlock{}
 
-	// Check if we have the new syntax (impl Type {}) or the old syntax (impl (self: Type) {})
-	if p.match(left_paren) {
-		// Old syntax with explicit self parameter
-		isMutable := p.match(mut)
-		selfToken := p.consume(identifier, "Expected self parameter")
-		p.consume(colon, "Expected ':'")
-		typeDecl := p.parseType()
-		p.consume(right_paren, "Expected ')'")
+	isMutable := p.match(mut) // Check for "impl mut Type {}" syntax
+	typeToken := p.consume(identifier, "Expected type name after 'impl'")
+	typeDecl := &CustomType{
+		Name: typeToken.text,
+	}
 
-		impl.Self = Parameter{
-			Mutable: isMutable,
-			Name:    selfToken.text,
-			Type:    typeDecl,
-		}
-	} else {
-		// New syntax with implicit self
-		isMutable := p.match(mut) // Check for "impl mut Type {}" syntax
-		typeToken := p.consume(identifier, "Expected type name after 'impl'")
-		typeDecl := &CustomType{
-			Name: typeToken.text,
-		}
-
-		impl.Self = Parameter{
-			Mutable: isMutable,
-			Name:    "@", // Use @ as the self name
-			Type:    typeDecl,
-		}
+	impl.Self = Parameter{
+		Mutable: isMutable,
+		Name:    "@", // Use @ as the self name
+		Type:    typeDecl,
 	}
 
 	p.consume(left_brace, "Expected '{'")

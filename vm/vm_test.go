@@ -473,9 +473,9 @@ func TestStructs(t *testing.T) {
 					y: Int,
 				}
 
-				impl (p: Point) {
+				impl Point {
 					fn print() Str {
-						"{{p.x.to_str()}},{{p.y.to_str()}}"
+						"{{@x.to_str()}},{{@y.to_str()}}"
 					}
 				}
 
