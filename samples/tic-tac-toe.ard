@@ -5,13 +5,11 @@ struct Board {
   cells: [Str]
 }
 
-impl mut Board {
-  fn play(player: Str, pos: Int) {
+impl Board {
+  fn mut play(player: Str, pos: Int) {
     @cells.set(pos, player)
   }
-}
 
-impl Board {
   fn is_full() Bool {
     mut full = true
     for cell in @cells {
