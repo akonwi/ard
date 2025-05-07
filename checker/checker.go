@@ -569,8 +569,7 @@ type FunctionDef struct {
 	ReturnType Type
 	Mutates    bool
 	Body       *Block
-	// todo: delete
-	SelfName string
+	SelfName   string
 }
 
 func (f FunctionDef) String() string {
@@ -1352,8 +1351,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
-			// Use the self name as provided - this could be either an explicit name or "@" from the parser
-			selfName := s.Self.Name
+			selfName := "@"
 
 			for _, method := range s.Methods {
 				fnDef := c.checkFunction(&method, func() {
