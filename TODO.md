@@ -5,9 +5,12 @@
 - [ ] matching on numbers
 - [ ] two part cursor in loops
   - `for person,index in employees { io.print(index) }`
-- [ ] named parameters
-- [ ] concurrency (Task?)
-- [ ] error handling
+- [ ] calling functions with named arguments
+- [ ] Errors and handling
+  - Decide whether to use an Error type or Result like Rust
+  - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `
+  - try? syntax to create a maybe: `let maybe_num: Int = try? dangerous_op()`
+  - try! to return error: `let num = try! dangerous()`
 - [ ] matching on strings?
 - [ ] traits
   - String - use for printables and interpolatables
@@ -16,3 +19,4 @@
   - ?: use reflection to call into packages?
 - [ ] loops as expressions (comprehensions?)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
+- [ ] concurrency (Task?)
