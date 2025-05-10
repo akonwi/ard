@@ -150,3 +150,45 @@ func TestUsingStructs(t *testing.T) {
 		},
 	})
 }
+
+func TestReferencingStructsFromPackage(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "using static properties as types",
+			input: `
+				let req: http::Request? = maybe::none()
+			`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "req",
+						Type: &CustomType{
+							Type: StaticProperty{
+								Target:   Identifier{Name: "http"},
+								Property: Identifier{Name: "Request"},
+							},
+						},
+						Value: &StaticFunction{
+							Target:   &Identifier{Name: "maybe"},
+							Function: FunctionCall{Name: "none", Args: []Expression{}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "instantiating static structs",
+			input: `http::Request{}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StaticProperty{
+						Target:   Identifier{Name: "http"},
+						Property: &StructInstance{Name: Identifier{Name: "Request"}, Properties: []StructValue{}},
+					},
+				},
+			},
+		},
+	})
+}

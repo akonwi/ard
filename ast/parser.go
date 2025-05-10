@@ -453,6 +453,15 @@ func (p *parser) assignment() (Statement, error) {
 }
 
 func (p *parser) parseType() DeclaredType {
+	static := p.parseStaticPath()
+	if static != nil {
+		return &CustomType{
+			Location: static.Location,
+			Type:     *static,
+			nullable: p.match(question_mark),
+		}
+	}
+
 	if p.match(identifier) {
 		id := p.previous()
 		nullable := p.match(question_mark)
@@ -500,6 +509,48 @@ func (p *parser) parseType() DeclaredType {
 		}
 	}
 	return nil
+}
+
+func (p *parser) parseStaticPath() *StaticProperty {
+	if !p.check(identifier, colon_colon, identifier) {
+		return nil
+	}
+
+	namespace := p.advance()
+	joint := p.advance()
+	propName := p.advance()
+
+	prop := &StaticProperty{}
+	prop.Target = Identifier{
+		Location: Location{
+			Start: Point{namespace.line, namespace.column},
+			End:   Point{joint.line, joint.column - 1},
+		},
+		Name: namespace.text,
+	}
+	prop.Property = Identifier{
+		Location: Location{
+			Start: Point{propName.line, propName.column},
+			End:   Point{propName.line, propName.column + len(propName.text)},
+		},
+		Name: propName.text,
+	}
+
+	for p.match(colon_colon) {
+		propName := p.consume(identifier, "Expected an identifier after '::'")
+		prop = &StaticProperty{
+			Target: prop,
+			Property: Identifier{
+				Location: Location{
+					Start: Point{propName.line, propName.column},
+					End:   Point{propName.line, propName.column + len(propName.text)},
+				},
+				Name: propName.text,
+			},
+		}
+	}
+
+	return prop
 }
 
 func (p *parser) parseExpression() (Expression, error) {
@@ -620,6 +671,12 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 }
 
 func (p *parser) structInstance() (Expression, error) {
+	index := p.index
+	static := p.parseStaticPath()
+	if static != nil {
+		p.index = p.index - 1
+	}
+
 	if p.check(identifier, left_brace) {
 		nameToken := p.consume(identifier, "Expected struct name")
 		p.consume(left_brace, "Expected '{'")
@@ -645,7 +702,16 @@ func (p *parser) structInstance() (Expression, error) {
 			p.match(comma)
 		}
 		instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+
+		if static != nil {
+			static.Property = instance
+			return static, nil
+		}
+
 		return instance, nil
+	} else {
+		// rewind after static parsing
+		p.index = index
 	}
 
 	return p.iterRange()
