@@ -220,6 +220,11 @@ for item in stuff {
 }
 ```
 
+### Qualified static paths
+A static path is a sequence of `name::thing`. Ard has a preference for simple paths, i.e. only one `::`.
+In order to reach further into a package for something, make that import explicit with `use name::nested`,
+so that code can then do `nested::thing` references with a single namespace qualification.
+
 #### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ### TODO: Callbacks
