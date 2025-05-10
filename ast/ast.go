@@ -174,6 +174,7 @@ func (v Map) IsNullable() bool {
 type CustomType struct {
 	Location
 	Name     string
+	Type     StaticProperty
 	nullable bool
 }
 
@@ -406,7 +407,7 @@ func (im InstanceMethod) String() string {
 type StaticProperty struct {
 	Location
 	Target   Expression
-	Property Identifier
+	Property Expression
 }
 
 func (s StaticProperty) String() string {

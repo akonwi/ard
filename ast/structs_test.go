@@ -150,3 +150,32 @@ func TestUsingStructs(t *testing.T) {
 		},
 	})
 }
+
+func TestReferencingStructsFromPackage(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: `it can be used as a type`,
+			input: `
+				let req: http::Request? = maybe::none()
+			`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "req",
+						Type: &CustomType{
+							Type: StaticProperty{
+								Target:   Identifier{Name: "http"},
+								Property: Identifier{Name: "Request"},
+							},
+						},
+						Value: &StaticFunction{
+							Target:   &Identifier{Name: "maybe"},
+							Function: FunctionCall{Name: "none", Args: []Expression{}},
+						},
+					},
+				},
+			},
+		},
+	})
+}

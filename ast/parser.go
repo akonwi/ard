@@ -453,6 +453,19 @@ func (p *parser) assignment() (Statement, error) {
 }
 
 func (p *parser) parseType() DeclaredType {
+	index := p.index
+	static := p.parseStaticType()
+	if static != nil {
+		return &CustomType{
+			Location: static.Location,
+			Type:     *static,
+			nullable: p.match(question_mark),
+		}
+	} else {
+		// rewind and continue
+		p.index = index
+	}
+
 	if p.match(identifier) {
 		id := p.previous()
 		nullable := p.match(question_mark)
@@ -500,6 +513,48 @@ func (p *parser) parseType() DeclaredType {
 		}
 	}
 	return nil
+}
+
+func (p *parser) parseStaticType() *StaticProperty {
+	if !p.check(identifier, colon_colon, identifier) {
+		return nil
+	}
+
+	namespace := p.advance()
+	joint := p.advance()
+	propName := p.advance()
+
+	prop := &StaticProperty{}
+	prop.Target = Identifier{
+		Location: Location{
+			Start: Point{namespace.line, namespace.column},
+			End:   Point{joint.line, joint.column - 1},
+		},
+		Name: namespace.text,
+	}
+	prop.Property = Identifier{
+		Location: Location{
+			Start: Point{propName.line, propName.column},
+			End:   Point{propName.line, propName.column + len(propName.text)},
+		},
+		Name: propName.text,
+	}
+
+	for p.match(colon_colon) {
+		propName := p.consume(identifier, "Expected an identifier after '::'")
+		prop = &StaticProperty{
+			Target: prop,
+			Property: Identifier{
+				Location: Location{
+					Start: Point{propName.line, propName.column},
+					End:   Point{propName.line, propName.column + len(propName.text)},
+				},
+				Name: propName.text,
+			},
+		}
+	}
+
+	return prop
 }
 
 func (p *parser) parseExpression() (Expression, error) {
