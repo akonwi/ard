@@ -66,6 +66,40 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "Using a package struct",
+			input: `use ard/http` + "\n" +
+				`let req = http::Request{url:"google.com", headers: [:]}` + "\n" +
+				`req.url`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"http": {Name: "http", Path: "ard/http"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "req",
+							Value: &checker.PackageStructInstance{
+								Package: "ard/http",
+								Property: &checker.StructInstance{
+									Name: "Request",
+									Fields: map[string]checker.Expression{
+										"url":     &checker.StrLiteral{"google.com"},
+										"headers": &checker.MapLiteral{Keys: []checker.Expression{}, Values: []checker.Expression{}},
+									},
+								},
+							},
+						},
+					},
+					{
+						Expr: &checker.InstanceProperty{
+							Subject:  &checker.Variable{},
+							Property: "url",
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "Cannot instantiate with incorrect fields",
 			input: personStructInput + "\n" + strings.Join([]string{
 				`Person{ name: "Alice", age: 30 }`,

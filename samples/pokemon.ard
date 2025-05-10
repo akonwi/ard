@@ -1,15 +1,16 @@
+use ard/io
 use ard/http
+
+struct PokemonRespEntry {
+  name: Str,
+  url: Str,
+}
 
 struct PokemonResp {
   count: Int,
   next: Str?,
   previous: Str?,
   results:  [PokemonRespEntry],
-}
-
-struct PokemonRespEntry {
-  name: Str,
-  url: Str,
 }
 
 let res = http::get(http::Request{
@@ -19,16 +20,15 @@ let res = http::get(http::Request{
 
 match res {
   res => {
-    match res.status {
-      200 => {
-        match res.json<PokemonResp>() {
-          data => {
-            // todo
-          },
-          _ => io::print("couldn't deserialize response body")
-        }
-      },
-      _ => io::print("Response not ok: {{res.status.to_str()}}")
+    if res.is_ok() {
+      match res.json<PokemonResp>() {
+        data => {
+          // todo
+        },
+        _ => io::print("couldn't deserialize response body")
+      }
+    } else {
+     io::print("Response not ok: {{res.status.to_str()}}")
     }
   },
   _ => io::print("unable to make request")

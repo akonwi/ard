@@ -1,5 +1,11 @@
 package checker
 
+func buildHttpPkgScope(scope *scope) {
+	scope.symbols["Request"] = HttpRequestDef
+	scope.symbols["Response"] = HttpResponseDef
+	scope.symbols["get"] = HttpGetFn
+}
+
 // Define a struct for HTTP Response with a json method
 var HttpResponseDef = &StructDef{
 	Name: "Response",
@@ -7,6 +13,11 @@ var HttpResponseDef = &StructDef{
 		"status":  Int,
 		"headers": MakeMap(Str, Str),
 		"body":    Str,
+		"is_ok": &FunctionDef{
+			Name:       "is_ok",
+			Parameters: []Parameter{},
+			ReturnType: Bool,
+		},
 	},
 }
 
@@ -17,6 +28,14 @@ var HttpRequestDef = &StructDef{
 		"url":     Str,
 		"headers": MakeMap(Str, Str),
 	},
+}
+
+var HttpGetFn = &FunctionDef{
+	Name: "get",
+	Parameters: []Parameter{
+		{Name: "request", Type: HttpRequestDef},
+	},
+	ReturnType: &Maybe{of: HttpResponseDef},
 }
 
 // Add the json method to the Response struct
@@ -38,13 +57,7 @@ func getInHTTP(name string) symbol {
 		return HttpResponseDef
 	case "get":
 		// Define the get function which returns Maybe<Response>
-		return &FunctionDef{
-			Name: name,
-			Parameters: []Parameter{
-				{Name: "request", Type: HttpRequestDef},
-			},
-			ReturnType: &Maybe{of: HttpResponseDef},
-		}
+		return HttpGetFn
 	default:
 		return nil
 	}
