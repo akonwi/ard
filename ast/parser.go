@@ -521,14 +521,14 @@ func (p *parser) parseStaticPath() *StaticProperty {
 	propName := p.advance()
 
 	prop := &StaticProperty{}
-	prop.Target = Identifier{
+	prop.Target = &Identifier{
 		Location: Location{
 			Start: Point{namespace.line, namespace.column},
 			End:   Point{joint.line, joint.column - 1},
 		},
 		Name: namespace.text,
 	}
-	prop.Property = Identifier{
+	prop.Property = &Identifier{
 		Location: Location{
 			Start: Point{propName.line, propName.column},
 			End:   Point{propName.line, propName.column + len(propName.text)},
@@ -540,7 +540,7 @@ func (p *parser) parseStaticPath() *StaticProperty {
 		propName := p.consume(identifier, "Expected an identifier after '::'")
 		prop = &StaticProperty{
 			Target: prop,
-			Property: Identifier{
+			Property: &Identifier{
 				Location: Location{
 					Start: Point{propName.line, propName.column},
 					End:   Point{propName.line, propName.column + len(propName.text)},

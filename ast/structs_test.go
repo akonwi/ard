@@ -165,8 +165,8 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 						Name: "req",
 						Type: &CustomType{
 							Type: StaticProperty{
-								Target:   Identifier{Name: "http"},
-								Property: Identifier{Name: "Request"},
+								Target:   &Identifier{Name: "http"},
+								Property: &Identifier{Name: "Request"},
 							},
 						},
 						Value: &StaticFunction{
@@ -186,7 +186,7 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&StaticProperty{
-						Target: Identifier{Name: "http"},
+						Target: &Identifier{Name: "http"},
 						Property: &StructInstance{
 							Name: Identifier{Name: "Request"},
 							Properties: []StructValue{
