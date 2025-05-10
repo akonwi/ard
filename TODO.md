@@ -11,6 +11,8 @@
   - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `
   - try? syntax to create a maybe: `let maybe_num: Int = try? dangerous_op()`
   - try! to return error: `let num = try! dangerous()`
+- [ ] eloquent relative conditions
+  - `200 <= status <= 300`
 - [ ] ?: make less scripty
   - [ ] introduce `main()` function for execution start
   - [ ] allow non-linear declarations at the top level
