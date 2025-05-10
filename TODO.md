@@ -11,6 +11,10 @@
   - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `
   - try? syntax to create a maybe: `let maybe_num: Int = try? dangerous_op()`
   - try! to return error: `let num = try! dangerous()`
+- [ ] ?: make less scripty
+  - [ ] introduce `main()` function for execution start
+  - [ ] allow non-linear declarations at the top level
+    -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] matching on strings?
 - [ ] traits
   - String - use for printables and interpolatables
