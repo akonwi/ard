@@ -453,17 +453,13 @@ func (p *parser) assignment() (Statement, error) {
 }
 
 func (p *parser) parseType() DeclaredType {
-	index := p.index
-	static := p.parseStaticType()
+	static := p.parseStaticPath()
 	if static != nil {
 		return &CustomType{
 			Location: static.Location,
 			Type:     *static,
 			nullable: p.match(question_mark),
 		}
-	} else {
-		// rewind and continue
-		p.index = index
 	}
 
 	if p.match(identifier) {
@@ -515,7 +511,7 @@ func (p *parser) parseType() DeclaredType {
 	return nil
 }
 
-func (p *parser) parseStaticType() *StaticProperty {
+func (p *parser) parseStaticPath() *StaticProperty {
 	if !p.check(identifier, colon_colon, identifier) {
 		return nil
 	}
@@ -675,6 +671,12 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 }
 
 func (p *parser) structInstance() (Expression, error) {
+	index := p.index
+	static := p.parseStaticPath()
+	if static != nil {
+		p.index = p.index - 1
+	}
+
 	if p.check(identifier, left_brace) {
 		nameToken := p.consume(identifier, "Expected struct name")
 		p.consume(left_brace, "Expected '{'")
@@ -700,7 +702,16 @@ func (p *parser) structInstance() (Expression, error) {
 			p.match(comma)
 		}
 		instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+
+		if static != nil {
+			static.Property = instance
+			return static, nil
+		}
+
 		return instance, nil
+	} else {
+		// rewind after static parsing
+		p.index = index
 	}
 
 	return p.iterRange()
