@@ -528,6 +528,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
+			if e.Package == "ard/http" {
+				return evalInHTTP(vm, e.Call)
+			}
+
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
 		}
 	case *checker.ListLiteral:
@@ -867,6 +871,12 @@ func (vm *VM) evalMaybeMethod(subj *object, m *checker.InstanceMethod) *object {
 
 func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object {
 	istruct := subj._type.(*checker.StructDef)
+
+	// Special handling for HTTP Response methods
+	if istruct == checker.HttpResponseDef {
+		return vm.evalHttpResponseMethod(subj, call)
+	}
+
 	sig, ok := istruct.Fields[call.Name]
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))

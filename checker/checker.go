@@ -622,6 +622,14 @@ type FunctionCall struct {
 	fn   *FunctionDef
 }
 
+func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
+	return &FunctionCall{
+		Name: name,
+		Args: args,
+		fn:   &fn,
+	}
+}
+
 func (f *FunctionCall) Type() Type {
 	return f.fn.ReturnType
 }
@@ -876,14 +884,6 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 	}
 
 	return c.program, c.diagnostics
-}
-
-func findInStdLib(path, name string) (StdPackage, bool) {
-	switch path {
-	case "ard/io", "ard/json", "ard/maybe", "ard/fs":
-		return StdPackage{Path: path, Name: name}, true
-	}
-	return StdPackage{}, false
 }
 
 func (c *checker) resolvePkg(name string) *StdPackage {

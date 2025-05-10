@@ -1,0 +1,35 @@
+use ard/http
+
+struct PokemonResp {
+  count: Int,
+  next: Str?,
+  previous: Str?,
+  results:  [PokemonRespEntry],
+}
+
+struct PokemonRespEntry {
+  name: Str,
+  url: Str,
+}
+
+let res = http::get(http::Request{
+  url: "https://pokeapi.co/api/v2/pokemon"
+  headers: [:]
+})
+
+match res {
+  res => {
+    match res.status {
+      200 => {
+        match res.json<PokemonResp>() {
+          data => {
+            // todo
+          },
+          _ => io::print("couldn't deserialize response body")
+        }
+      },
+      _ => io::print("Response not ok: {{res.status.to_str()}}")
+    }
+  },
+  _ => io::print("unable to make request")
+}

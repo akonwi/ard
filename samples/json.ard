@@ -20,4 +20,6 @@ fn decode(in: Str) $Out! {...}
 fn encode(in: $In) Str! {...}
 
 
-json::decode<Todo>(string) else
+json::decode<Todo>(string) else (e) {
+
+}
