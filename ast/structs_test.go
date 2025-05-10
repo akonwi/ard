@@ -178,14 +178,24 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 			},
 		},
 		{
-			name:  "instantiating static structs",
-			input: `http::Request{}`,
+			name: "instantiating static structs",
+			input: `http::Request{
+			  url: "foobar.com"
+			}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&StaticProperty{
-						Target:   Identifier{Name: "http"},
-						Property: &StructInstance{Name: Identifier{Name: "Request"}, Properties: []StructValue{}},
+						Target: Identifier{Name: "http"},
+						Property: &StructInstance{
+							Name: Identifier{Name: "Request"},
+							Properties: []StructValue{
+								{
+									Name:  Identifier{Name: "url"},
+									Value: &StrLiteral{Value: "foobar.com"},
+								},
+							},
+						},
 					},
 				},
 			},
