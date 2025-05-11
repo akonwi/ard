@@ -99,46 +99,53 @@ func processHttpGet(vm *VM, call *checker.FunctionCall) *object {
 		"body":    &object{bodyStr, checker.Str},
 	}
 
-	return &object{respMap, checker.HttpResponseDef}
+	return &object{respMap, call.Type()}
 }
 
 // Handle HTTP Response json method
 func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall) *object {
-	// We only support the "json" method now
-	if method.Name != "json" {
-		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
-	}
-
-	// Get response map and body
+	// Get raw response struct
 	respMap, ok := resp.raw.(map[string]*object)
 	if !ok {
 		fmt.Println("HTTP Error: Response is not correctly formatted")
 		return &object{nil, method.Type()}
 	}
 
-	// Get the body
-	bodyObj, ok := respMap["body"]
-	if !ok || bodyObj == nil {
-		fmt.Println("HTTP Error: Response missing body")
-		return &object{nil, method.Type()}
-	}
+	switch method.Name {
+	case "is_ok":
+		{
+			status := respMap["status"].raw.(int)
+			return &object{status >= 200 && status <= 300, method.Type()}
+		}
+	case "json":
+		{
+			// Get the body
+			bodyObj, ok := respMap["body"]
+			if !ok || bodyObj == nil {
+				fmt.Println("HTTP Error: Response missing body")
+				return &object{nil, method.Type()}
+			}
 
-	// Cast body to string
-	bodyStr, ok := bodyObj.raw.(string)
-	if !ok || bodyStr == "" {
-		fmt.Println("HTTP Error: Response body is not a string or is empty")
-		return &object{nil, method.Type()}
-	}
+			// Cast body to string
+			bodyStr, ok := bodyObj.raw.(string)
+			if !ok || bodyStr == "" {
+				fmt.Println("HTTP Error: Response body is not a string or is empty")
+				return &object{nil, method.Type()}
+			}
 
-	// Use the existing JSON decoding logic
-	// Create a synthetic function call to reuse the existing JSON decode logic
-	return vm.eval(&checker.PackageFunctionCall{
-		Package: "ard/json",
-		Call: checker.CreateCall("decode",
-			[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
-			checker.FunctionDef{
-				ReturnType: method.Type(),
-			},
-		),
-	})
+			// Use the existing JSON decoding logic
+			// Create a synthetic function call to reuse the existing JSON decode logic
+			return vm.eval(&checker.PackageFunctionCall{
+				Package: "ard/json",
+				Call: checker.CreateCall("decode",
+					[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
+					checker.FunctionDef{
+						ReturnType: method.Type(),
+					},
+				),
+			})
+		}
+	default:
+		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
+	}
 }

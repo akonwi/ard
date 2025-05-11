@@ -135,7 +135,8 @@ func TestUsingStructs(t *testing.T) {
 			name: "Referencing fields",
 			input: `
 					p.age
-					p.employed = false`,
+					p.employed = false
+					p.speak()`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -144,6 +145,13 @@ func TestUsingStructs(t *testing.T) {
 						Target:   &InstanceProperty{Target: &Identifier{Name: "p"}, Property: Identifier{Name: "employed"}},
 						Operator: Assign,
 						Value:    &BoolLiteral{Value: false},
+					},
+					&InstanceMethod{
+						Target: &Identifier{Name: "p"},
+						Method: FunctionCall{
+							Name: "speak",
+							Args: []Expression{},
+						},
 					},
 				},
 			},

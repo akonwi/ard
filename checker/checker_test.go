@@ -2419,5 +2419,22 @@ func TestGenerics(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Providing type arguments to methods",
+			input: `
+				use ard/json
+			  struct Foo {
+					body: Str
+				}
+				impl Foo {
+				  fn bar() $T {
+					  json::decode<$T>(@body)
+					}
+				}
+			  let foo = Foo{body: "200"}
+				let num = foo.bar<Int>()
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }

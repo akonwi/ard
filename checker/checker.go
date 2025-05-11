@@ -1853,6 +1853,87 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				args[i] = checkedArg
 			}
+
+			if fnDef.hasGenerics() {
+				if len(s.Method.TypeArgs) > 0 {
+					// collect generics
+					generics := []Type{}
+					for _, param := range fnDef.Parameters {
+						if strings.HasPrefix(param.Type.String(), "$") {
+							if !slices.ContainsFunc(generics, func(g Type) bool {
+								return g.String() == param.Type.String()
+							}) {
+								generics = append(generics, param.Type)
+							}
+						}
+					}
+					if strings.HasPrefix(fnDef.ReturnType.String(), "$") {
+						if !slices.ContainsFunc(generics, func(g Type) bool {
+							return g.String() == fnDef.ReturnType.String()
+						}) {
+							generics = append(generics, fnDef.ReturnType)
+						}
+					}
+					if len(s.Method.TypeArgs) != len(generics) {
+						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Method.GetLocation())
+						return nil
+					}
+
+					for i, any := range generics {
+						actual := c.resolveType(s.Method.TypeArgs[i])
+						if actual == nil {
+							return nil
+						}
+						refine(any, actual)
+					}
+				}
+
+				// Create a mapping of generic parameters to concrete types
+				typeMap := make(map[string]Type)
+				// Infer types from arguments
+				for i, param := range fnDef.Parameters {
+					if anyType, ok := param.Type.(*Any); ok {
+						if existing, exists := typeMap[anyType.name]; exists {
+							// Ensure consistent types for the same generic parameter
+							if !existing.equal(args[i].Type()) {
+								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Method.Args[i].GetLocation())
+								return nil
+							}
+						} else {
+							// Bind the generic parameter to the argument type
+							typeMap[anyType.name] = args[i].Type()
+						}
+					}
+				}
+
+				// Create specialized function with generic parameters substituted
+				specialized := &FunctionDef{
+					Name:       fnDef.Name,
+					Parameters: make([]Parameter, len(fnDef.Parameters)),
+					ReturnType: substituteType(fnDef.ReturnType, typeMap),
+					Body:       fnDef.Body,
+				}
+
+				// Substitute types in parameters
+				for i, param := range fnDef.Parameters {
+					specialized.Parameters[i] = Parameter{
+						Name:    param.Name,
+						Type:    substituteType(param.Type, typeMap),
+						Mutable: param.Mutable,
+					}
+				}
+
+				// Return function call with specialized function
+				return &InstanceMethod{
+					Subject: subj,
+					Method: &FunctionCall{
+						Name: s.Method.Name,
+						Args: args,
+						fn:   specialized,
+					},
+				}
+			}
+
 			// Create function call
 			call := &FunctionCall{
 				Name: s.Method.Name,
@@ -3064,71 +3145,6 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				Subject:  subj,
 				Property: s.Property.Name,
 				_type:    propType,
-			}
-		}
-	case *ast.InstanceMethod:
-		{
-			subj := c.checkExpr(s.Target)
-			if subj == nil {
-				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
-				return nil
-			}
-
-			sig := subj.Type().get(s.Method.Name)
-			if sig == nil {
-				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
-				return nil
-			}
-
-			fnDef, ok := sig.(*FunctionDef)
-			if !ok {
-				c.addError(fmt.Sprintf("%s.%s is not a function", subj, s.Method.Name), s.Method.GetLocation())
-				return nil
-			}
-
-			if fnDef.Mutates && !isMutable(subj) {
-				c.addError(fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subj, s.Method.Name), s.Method.GetLocation())
-				return nil
-			}
-
-			if len(s.Method.Args) != len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(s.Method.Args)), s.GetLocation())
-				return nil
-			}
-
-			// Check and process arguments
-			args := make([]Expression, len(s.Method.Args))
-			for i, arg := range s.Method.Args {
-				checkedArg := c.checkExpr(arg)
-				if checkedArg == nil {
-					return nil
-				}
-
-				// Type check the argument against the parameter type
-				paramType := fnDef.Parameters[i].Type
-				if !paramType.equal(checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
-					return nil
-				}
-
-				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
-				}
-
-				args[i] = checkedArg
-			}
-			// Create function call
-			call := &FunctionCall{
-				Name: s.Method.Name,
-				Args: args,
-				fn:   fnDef,
-			}
-
-			return &InstanceMethod{
-				Subject: subj,
-				Method:  call,
 			}
 		}
 	case *ast.UnaryExpression:

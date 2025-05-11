@@ -657,6 +657,13 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			}
 			return &object{raw, e.Type()}
 		}
+	case *checker.PackageStructInstance:
+		{
+			if e.Package == "ard/http" {
+				return vm.eval(e.Property)
+			}
+			panic(fmt.Errorf("Unimplemented in package: %s", e.Package))
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
