@@ -274,6 +274,18 @@ func (m *Maybe) String() string {
 }
 func (m *Maybe) get(name string) Type {
 	switch name {
+	case "is_none":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Bool,
+		}
+	case "is_some":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Bool,
+		}
 	case "or":
 		return &FunctionDef{
 			Name:       name,

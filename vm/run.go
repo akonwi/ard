@@ -866,6 +866,10 @@ func (vm *VM) evalMapMethod(subj *object, m *checker.InstanceMethod) *object {
 
 func (vm *VM) evalMaybeMethod(subj *object, m *checker.InstanceMethod) *object {
 	switch m.Method.Name {
+	case "is_none":
+		return &object{subj.raw == nil, m.Type()}
+	case "is_some":
+		return &object{subj.raw != nil, m.Type()}
 	case "or":
 		if subj.raw == nil {
 			return vm.eval(m.Method.Args[0])

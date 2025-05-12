@@ -37,5 +37,21 @@ func TestMaybes(t *testing.T) {
 			`,
 			want: "foo",
 		},
+		{
+			name: ".is_none() returns true for nones",
+			input: `
+				use ard/maybe
+				maybe::none().is_none()
+			`,
+			want: true,
+		},
+		{
+			name: ".is_some() returns true for somes",
+			input: `
+				use ard/maybe
+				maybe::some(1).is_some()
+			`,
+			want: true,
+		},
 	})
 }
