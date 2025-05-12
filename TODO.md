@@ -3,6 +3,8 @@
 - [ ] networking
 - [ ] methods on enums?
 - [ ] matching on numbers
+- [ ] `?` sugar for propagating maybes
+  - `res?.json()` -> `match res { r => r.json(), _ => maybe::non() }`
 - [ ] two part cursor in loops
   - `for person,index in employees { io.print(index) }`
 - [ ] calling functions with named arguments
