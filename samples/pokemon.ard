@@ -23,7 +23,8 @@ match res {
     if res.is_ok() {
       match res.json<PokemonResp>() {
         data => {
-          io::print("received {{data.count.to_str()}} pokemon")
+          io::print("res.count = {{data.count.to_str()}}")
+          io::print("res.results.size = {{data.results.size().to_str()}}")
         },
         _ => io::print("couldn't deserialize response body")
       }
