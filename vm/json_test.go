@@ -104,7 +104,7 @@ func TestJsonDecodeNestedStructWithList(t *testing.T) {
 		let input = "{ \"people\": [ { \"name\": \"John\", \"id\": 1 } ] }"
 		let result = json::decode<Payload>(input)
 		match result {
-		  res => res.people.size()
+		  res => res.people.size(),
 			_ => 0
 		}
 	`)
