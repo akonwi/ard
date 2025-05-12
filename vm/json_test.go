@@ -64,8 +64,8 @@ func TestJsonDecodeStruct(t *testing.T) {
 		}
 	`)
 
-	if result == false {
-		t.Errorf("Got wrong decoded result")
+	if result != true {
+		t.Errorf("Wanted %v, got %v", true, result)
 	}
 }
 

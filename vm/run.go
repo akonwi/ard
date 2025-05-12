@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -461,10 +462,17 @@ func (vm *VM) eval(expr checker.Expression) *object {
 					}
 				case "decode":
 					{
+						none := &object{nil, e.Call.Type()}
 						result := &object{nil, e.Call.Type()}
-						jsonBytes := []byte(vm.eval(e.Call.Args[0]).raw.(string))
+						jsonString := vm.eval(e.Call.Args[0]).raw.(string)
+						jsonBytes := []byte(jsonString)
 
 						inner := result._type.(*checker.Maybe).Of()
+
+						if inner == checker.Str {
+							return &object{jsonString, e.Call.Type()}
+						}
+
 						switch subj := inner.(type) {
 						case *checker.StructDef:
 							{
@@ -473,17 +481,95 @@ func (vm *VM) eval(expr checker.Expression) *object {
 								if err != nil {
 									// todo: build error handling
 									fmt.Printf("Error unmarshalling: %s\n", err)
-									return result
+									return none
 								}
 
 								fields := make(map[string]*object)
-								for name, fType := range subj.Fields {
-									val := _map[name]
-									if f64, ok := val.(float64); ok && fType == (checker.Int) {
-										val = int(f64)
-									}
-									fields[name] = &object{val, fType}
+								decoder := json.NewDecoder(strings.NewReader(jsonString))
+
+								if t, err := decoder.Token(); err != nil {
+									panic(fmt.Errorf("Error taking opening brace: [%w] %T - %v\n", err, t, t))
 								}
+
+								for decoder.More() {
+									keyToken, err := decoder.Token()
+									if err != nil {
+										log.Fatal(fmt.Errorf("Error decoding key: [%w] %T - %v\n", err, keyToken, keyToken))
+										return none
+									}
+									valToken, err := decoder.Token()
+									if err != nil {
+										log.Fatal(fmt.Errorf("Error decoding value: [%w] %T - %v\n", err, valToken, valToken))
+										return none
+									}
+									key := keyToken.(string)
+
+									switch val := valToken.(type) {
+									case string:
+										valType := subj.Fields[key]
+										var decodeAs *checker.Maybe
+										maybe, isMaybe := valType.(*checker.Maybe)
+										// unless we're expecting a Maybe, wrap the expected in a Maybe for the call to json::decode
+										if isMaybe {
+											decodeAs = maybe
+										} else {
+											decodeAs = checker.MakeMaybe(valType)
+										}
+
+										decoded := vm.eval(&checker.PackageFunctionCall{
+											Package: "ard/json",
+											Call: checker.CreateCall("decode",
+												[]checker.Expression{&checker.StrLiteral{Value: val}},
+												checker.FunctionDef{
+													ReturnType: decodeAs,
+												},
+											),
+										})
+										if !isMaybe {
+											decoded._type = decodeAs.Of()
+										}
+										fields[key] = decoded
+									case float64:
+										if subj.Fields[key] == checker.Float {
+											fields[key] = &object{val, checker.Float}
+										} else if subj.Fields[key] == checker.Int {
+											fields[key] = &object{int(val), checker.Int}
+										} else {
+											return none
+										}
+									case bool:
+										if subj.Fields[key] != checker.Bool {
+											return none
+										}
+										fields[key] = &object{val, checker.Bool}
+									case nil:
+										if maybe, isMaybe := subj.Fields[key].(*checker.Maybe); !isMaybe {
+											return none
+										} else {
+											fields[key] = &object{val, maybe}
+										}
+									default:
+										panic(fmt.Errorf("unexpected: %v", val))
+									}
+								}
+
+								for name, fType := range subj.Fields {
+									if _, ok := fields[name]; !ok {
+										maybe, isMaybe := fType.(*checker.Maybe)
+										if !isMaybe {
+											return none
+										}
+										fields[name] = &object{nil, maybe}
+									}
+								}
+
+								// for name, fType := range subj.Fields {
+								// 	val := _map[name]
+								// 	if f64, ok := val.(float64); ok && fType == (checker.Int) {
+								// 		val = int(f64)
+								// 	}
+								// 	fields[name] = &object{val, fType}
+								// }
 
 								result.raw = fields
 								return result

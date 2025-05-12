@@ -269,6 +269,10 @@ type Maybe struct {
 	of Type
 }
 
+func MakeMaybe(of Type) *Maybe {
+	return &Maybe{of}
+}
+
 func (m *Maybe) String() string {
 	return m.of.String() + "?"
 }
