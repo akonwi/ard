@@ -548,6 +548,33 @@ func (vm *VM) eval(expr checker.Expression) *object {
 										} else {
 											fields[key] = &object{val, maybe}
 										}
+									case json.Delim:
+										if val.String() == "[" {
+											listType, ok := subj.Fields[key].(*checker.List)
+											if !ok {
+												return none
+											}
+											list := []*object{}
+											for decoder.More() {
+												var v any
+												if err := decoder.Decode(&v); err != nil {
+													return none
+												}
+												obj := enforceSchema(vm, v, listType.Of())
+												if obj == nil {
+													return none
+												}
+												list = append(list, obj)
+											}
+											if t, err := decoder.Token(); err != nil {
+												log.Fatal(fmt.Errorf("Error taking closing ]: [%w] %T - %v\n", err, t, t))
+												return none
+											}
+
+											fields[key] = &object{list, listType}
+										} else {
+											panic("TODO: handle other json delimiters - " + val.String())
+										}
 									default:
 										panic(fmt.Errorf("unexpected: %v", val))
 									}

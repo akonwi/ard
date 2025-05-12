@@ -89,3 +89,27 @@ func TestJsonDecodeStructsWithMaybes(t *testing.T) {
 		t.Errorf("Wanted %v, got %v", true, result)
 	}
 }
+
+func TestJsonDecodeNestedStructWithList(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		struct Person {
+			name: Str,
+			id: Int,
+		}
+		struct Payload {
+		  people: [Person]
+		}
+
+		let input = "{ \"people\": [ { \"name\": \"John\", \"id\": 1 } ] }"
+		let result = json::decode<Payload>(input)
+		match result {
+		  res => res.people.size()
+			_ => 0
+		}
+	`)
+
+	if result != 1 {
+		t.Errorf("Wanted %v, got %v", 1, result)
+	}
+}
