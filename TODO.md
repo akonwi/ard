@@ -1,18 +1,19 @@
 ## TODO
 
 - [ ] networking
-- [ ] methods on enums?
-- [ ] matching on numbers
-- [ ] `?` sugar for propagating maybes
-  - `res?.json()` -> `match res { r => r.json(), _ => maybe::non() }`
-- [ ] two part cursor in loops
-  - `for person,index in employees { io.print(index) }`
-- [ ] calling functions with named arguments
 - [ ] Errors and handling
   - Decide whether to use an Error type or Result like Rust
   - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `
   - try? syntax to create a maybe: `let maybe_num: Int = try? dangerous_op()`
   - try! to return error: `let num = try! dangerous()`
+- [ ] methods on enums?
+- [ ] matching on numbers
+- [ ] `?` sugar for propagating maybes
+  - `res?.json()` -> `match res { r => r.json(), _ => maybe::non() }`
+- [ ] simplify while loop syntax to `for`, like go
+- [ ] two part cursor in loops
+  - `for person,index in employees { io.print(index) }`
+- [ ] calling functions with named arguments
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
 - [ ] ?: make less scripty
