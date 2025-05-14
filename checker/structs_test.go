@@ -220,3 +220,17 @@ func TestMethods(t *testing.T) {
 		},
 	})
 }
+
+func TestStructsWithMaybeFields(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Maybe fields can be omitted",
+			input: `struct Message {
+				kind: Str,
+				stuff: Int?
+			}
+			Message{kind: "info"}
+			`,
+		},
+	})
+}

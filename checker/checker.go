@@ -2932,7 +2932,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		for name, t := range structType.Fields {
 			if _, isMethod := t.(*FunctionDef); !isMethod {
 				if _, exists := fields[name]; !exists {
-					missing = append(missing, name)
+					if _, isMaybe := t.(*Maybe); !isMaybe {
+						missing = append(missing, name)
+					}
 				}
 			}
 		}

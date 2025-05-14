@@ -764,9 +764,16 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 	case *checker.StructInstance:
 		{
+			strct := e.Type().(*checker.StructDef)
 			raw := map[string]*object{}
-			for name, val := range e.Fields {
-				raw[name] = vm.eval(val)
+			for name, ftype := range strct.Fields {
+				val, ok := e.Fields[name]
+				if ok {
+					raw[name] = vm.eval(val)
+				} else {
+					// assume it's a Maybe<T> if the checker allowed it
+					raw[name] = &object{nil, ftype}
+				}
 			}
 			return &object{raw, e.Type()}
 		}

@@ -6,7 +6,6 @@ func buildHttpPkgScope(scope *scope) {
 	scope.symbols["get"] = HttpGetFn
 }
 
-// Define a struct for HTTP Response with a json method
 var HttpResponseDef = &StructDef{
 	Name: "Response",
 	Fields: map[string]Type{
@@ -18,15 +17,20 @@ var HttpResponseDef = &StructDef{
 			Parameters: []Parameter{},
 			ReturnType: Bool,
 		},
+		"json": &FunctionDef{
+			Name:       "json",
+			Parameters: []Parameter{},
+			ReturnType: &Maybe{of: &Any{name: "T"}},
+		},
 	},
 }
 
-// Define HTTP Request structure
 var HttpRequestDef = &StructDef{
 	Name: "Request",
 	Fields: map[string]Type{
 		"url":     Str,
 		"headers": MakeMap(Str, Str),
+		"body":    MakeMaybe(Str),
 	},
 }
 
@@ -38,13 +42,12 @@ var HttpGetFn = &FunctionDef{
 	ReturnType: &Maybe{of: HttpResponseDef},
 }
 
-// Add the json method to the Response struct
-func init() {
-	HttpResponseDef.Fields["json"] = &FunctionDef{
-		Name:       "json",
-		Parameters: []Parameter{},
-		ReturnType: &Maybe{of: &Any{name: "T"}},
-	}
+var HttpPostFn = &FunctionDef{
+	Name: "post",
+	Parameters: []Parameter{
+		{Name: "request", Type: HttpRequestDef},
+	},
+	ReturnType: &Maybe{of: HttpResponseDef},
 }
 
 func getInHTTP(name string) symbol {
