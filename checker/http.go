@@ -53,14 +53,13 @@ var HttpPostFn = &FunctionDef{
 func getInHTTP(name string) symbol {
 	switch name {
 	case "Request":
-		// Return the Request struct definition
 		return HttpRequestDef
 	case "Response":
-		// Return the Response struct with the json method
 		return HttpResponseDef
 	case "get":
-		// Define the get function which returns Maybe<Response>
 		return HttpGetFn
+	case "post":
+		return HttpPostFn
 	default:
 		return nil
 	}

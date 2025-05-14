@@ -1,5 +1,6 @@
 use ard/io
 use ard/http
+use ard/maybe
 
 struct PokemonRespEntry {
   name: Str,
@@ -14,8 +15,8 @@ struct PokemonResp {
 }
 
 let res = http::get(http::Request{
-  url: "https://pokeapi.co/api/v2/pokemon"
-  headers: [:]
+  url: "https://pokeapi.co/api/v2/pokemon",
+  headers: [:],
 })
 
 match res {
@@ -29,8 +30,19 @@ match res {
         _ => io::print("couldn't deserialize response body")
       }
     } else {
-     io::print("Response not ok: {{res.status.to_str()}}")
+      io::print("Received a {{res.status.to_str()}}")
     }
   },
   _ => io::print("unable to make request")
+}
+
+io::print("http::post() to echoing api")
+let post_res = http::post(http::Request{
+  url: "https://postman-echo.com/post",
+  headers: ["content-type":"text/plain"],
+  body: maybe::some("raw text")
+})
+match res {
+  res => io::print("got a {{res.status.to_str()}}"),
+  _ => {},
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/akonwi/ard/checker"
@@ -12,14 +13,15 @@ import (
 func evalInHTTP(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "get":
-		return processHttpGet(vm, call)
+		return evalHttpGet(vm, call)
+	case "post":
+		return evalHttpPost(vm, call)
 	default:
 		panic(fmt.Errorf("Unimplemented: http::%s()", call.Name))
 	}
 }
 
-// Process HTTP get request and return Maybe<Response>
-func processHttpGet(vm *VM, call *checker.FunctionCall) *object {
+func evalHttpGet(vm *VM, call *checker.FunctionCall) *object {
 	request := vm.eval(call.Args[0])
 	// Extract the request parameters
 	requestMap := request.raw.(map[string]*object)
@@ -102,6 +104,89 @@ func processHttpGet(vm *VM, call *checker.FunctionCall) *object {
 	return &object{respMap, call.Type()}
 }
 
+func evalHttpPost(vm *VM, call *checker.FunctionCall) *object {
+	request := vm.eval(call.Args[0])
+	requestMap := request.raw.(map[string]*object)
+
+	urlObj, urlOk := requestMap["url"]
+	if !urlOk || urlObj == nil {
+		fmt.Println("HTTP Error: Missing required 'url' parameter in request")
+		return &object{nil, call.Type()}
+	}
+	url, ok := urlObj.raw.(string)
+	if !ok {
+		fmt.Println("HTTP Error: 'url' parameter must be a string")
+		return &object{nil, call.Type()}
+	}
+
+	headersObj, headersOk := requestMap["headers"]
+	if !headersOk || headersObj == nil {
+		fmt.Println("HTTP Error: Missing required 'headers' parameter in request")
+		return &object{nil, call.Type()}
+	}
+
+	var body io.Reader = nil
+
+	if bodyObj, ok := requestMap["body"]; ok {
+		body = strings.NewReader(bodyObj.raw.(string))
+	}
+
+	headers := make(http.Header)
+	if rawHeaders, ok := headersObj.raw.(map[string]*object); ok {
+		for k, v := range rawHeaders {
+			if strVal, ok := v.raw.(string); ok {
+				headers.Set(k, strVal)
+			}
+		}
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		fmt.Printf("HTTP Error creating request: %v\n", err)
+		return &object{nil, call.Type()}
+	}
+
+	// Add headers to request
+	req.Header = headers
+
+	// Execute the request
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("HTTP Error executing request: %v\n", err)
+		return &object{nil, call.Type()}
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("HTTP Error reading response body: %v\n", err)
+		return &object{nil, call.Type()}
+	}
+	bodyStr := string(bodyBytes)
+
+	// Create response headers map
+	respHeadersMap := make(map[string]*object)
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			respHeadersMap[k] = &object{v[0], checker.Str}
+		}
+	}
+
+	// Create the response object
+	respMap := map[string]*object{
+		"status":  &object{resp.StatusCode, checker.Int},
+		"headers": &object{respHeadersMap, checker.MakeMap(checker.Str, checker.Str)},
+		"body":    &object{bodyStr, checker.Str},
+	}
+
+	return &object{respMap, call.Type()}
+}
+
 // Handle HTTP Response json method
 func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall) *object {
 	// Get raw response struct
@@ -133,9 +218,11 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 				return &object{nil, method.Type()}
 			}
 
+			// fmt.Printf("bodyStr:\n\t%s\n", bodyStr)
+
 			// Use the existing JSON decoding logic
 			// Create a synthetic function call to reuse the existing JSON decode logic
-			return vm.eval(&checker.PackageFunctionCall{
+			res := vm.eval(&checker.PackageFunctionCall{
 				Package: "ard/json",
 				Call: checker.CreateCall("decode",
 					[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
@@ -144,6 +231,7 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 					},
 				),
 			})
+			return res
 		}
 	default:
 		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
