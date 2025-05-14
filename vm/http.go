@@ -16,6 +16,8 @@ func evalInHTTP(vm *VM, call *checker.FunctionCall) *object {
 		return evalHttpGet(vm, call)
 	case "post":
 		return evalHttpPost(vm, call)
+	case "put":
+		return evalHttpPut(vm, call)
 	default:
 		panic(fmt.Errorf("Unimplemented: http::%s()", call.Name))
 	}
@@ -145,6 +147,89 @@ func evalHttpPost(vm *VM, call *checker.FunctionCall) *object {
 	}
 
 	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		fmt.Printf("HTTP Error creating request: %v\n", err)
+		return &object{nil, call.Type()}
+	}
+
+	// Add headers to request
+	req.Header = headers
+
+	// Execute the request
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("HTTP Error executing request: %v\n", err)
+		return &object{nil, call.Type()}
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("HTTP Error reading response body: %v\n", err)
+		return &object{nil, call.Type()}
+	}
+	bodyStr := string(bodyBytes)
+
+	// Create response headers map
+	respHeadersMap := make(map[string]*object)
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			respHeadersMap[k] = &object{v[0], checker.Str}
+		}
+	}
+
+	// Create the response object
+	respMap := map[string]*object{
+		"status":  &object{resp.StatusCode, checker.Int},
+		"headers": &object{respHeadersMap, checker.MakeMap(checker.Str, checker.Str)},
+		"body":    &object{bodyStr, checker.Str},
+	}
+
+	return &object{respMap, call.Type()}
+}
+
+func evalHttpPut(vm *VM, call *checker.FunctionCall) *object {
+	request := vm.eval(call.Args[0])
+	requestMap := request.raw.(map[string]*object)
+
+	urlObj, urlOk := requestMap["url"]
+	if !urlOk || urlObj == nil {
+		fmt.Println("HTTP Error: Missing required 'url' parameter in request")
+		return &object{nil, call.Type()}
+	}
+	url, ok := urlObj.raw.(string)
+	if !ok {
+		fmt.Println("HTTP Error: 'url' parameter must be a string")
+		return &object{nil, call.Type()}
+	}
+
+	headersObj, headersOk := requestMap["headers"]
+	if !headersOk || headersObj == nil {
+		fmt.Println("HTTP Error: Missing required 'headers' parameter in request")
+		return &object{nil, call.Type()}
+	}
+
+	var body io.Reader = nil
+
+	if bodyObj, ok := requestMap["body"]; ok {
+		body = strings.NewReader(bodyObj.raw.(string))
+	}
+
+	headers := make(http.Header)
+	if rawHeaders, ok := headersObj.raw.(map[string]*object); ok {
+		for k, v := range rawHeaders {
+			if strVal, ok := v.raw.(string); ok {
+				headers.Set(k, strVal)
+			}
+		}
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequest("PUT", url, body)
 	if err != nil {
 		fmt.Printf("HTTP Error creating request: %v\n", err)
 		return &object{nil, call.Type()}

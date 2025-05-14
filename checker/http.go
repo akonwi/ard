@@ -49,6 +49,13 @@ var HttpPostFn = &FunctionDef{
 	},
 	ReturnType: &Maybe{of: HttpResponseDef},
 }
+var HttpPutFn = &FunctionDef{
+	Name: "put",
+	Parameters: []Parameter{
+		{Name: "request", Type: HttpRequestDef},
+	},
+	ReturnType: &Maybe{of: HttpResponseDef},
+}
 
 func getInHTTP(name string) symbol {
 	switch name {
@@ -60,6 +67,8 @@ func getInHTTP(name string) symbol {
 		return HttpGetFn
 	case "post":
 		return HttpPostFn
+	case "put":
+		return HttpPutFn
 	default:
 		return nil
 	}

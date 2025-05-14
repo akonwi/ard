@@ -19,6 +19,22 @@ let res = http::get(http::Request{
   headers: [:],
 })
 
+//// todo: alternative with ? sugar
+//match res?.json<PokemonResp>() {
+//  data => {
+//    io::print("res.count = {{data.count.to_str()}}")
+//    io::print("res.results.size = {{data.results.size().to_str()}}")
+//  },
+//  _ => {
+//    if res.is_none() {
+//      io::print("unable to make request")
+//    } else {
+//      io::print("couldn't deserialize response body")
+//    }
+//  }
+//}
+
+io::print("http::get() from pokemon api")
 match res {
   res => {
     if res.is_ok() {
@@ -39,6 +55,17 @@ match res {
 io::print("http::post() to echoing api")
 let post_res = http::post(http::Request{
   url: "https://postman-echo.com/post",
+  headers: ["content-type":"text/plain"],
+  body: maybe::some("raw text")
+})
+match res {
+  res => io::print("got a {{res.status.to_str()}}"),
+  _ => {},
+}
+
+io::print("http::put() to echoing api")
+let put_res = http::put(http::Request{
+  url: "https://postman-echo.com/put",
   headers: ["content-type":"text/plain"],
   body: maybe::some("raw text")
 })
