@@ -34,8 +34,24 @@ var HttpRequestDef = &StructDef{
 	},
 }
 
+var HttpDelFn = &FunctionDef{
+	Name: "del",
+	Parameters: []Parameter{
+		{Name: "request", Type: HttpRequestDef},
+	},
+	ReturnType: &Maybe{of: HttpResponseDef},
+}
+
 var HttpGetFn = &FunctionDef{
 	Name: "get",
+	Parameters: []Parameter{
+		{Name: "request", Type: HttpRequestDef},
+	},
+	ReturnType: &Maybe{of: HttpResponseDef},
+}
+
+var HttpPatchFn = &FunctionDef{
+	Name: "patch",
 	Parameters: []Parameter{
 		{Name: "request", Type: HttpRequestDef},
 	},
@@ -49,6 +65,7 @@ var HttpPostFn = &FunctionDef{
 	},
 	ReturnType: &Maybe{of: HttpResponseDef},
 }
+
 var HttpPutFn = &FunctionDef{
 	Name: "put",
 	Parameters: []Parameter{
@@ -63,8 +80,12 @@ func getInHTTP(name string) symbol {
 		return HttpRequestDef
 	case "Response":
 		return HttpResponseDef
+	case "del":
+		return HttpDelFn
 	case "get":
 		return HttpGetFn
+	case "patch":
+		return HttpPatchFn
 	case "post":
 		return HttpPostFn
 	case "put":
