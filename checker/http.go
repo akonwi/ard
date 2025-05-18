@@ -3,7 +3,17 @@ package checker
 func buildHttpPkgScope(scope *scope) {
 	scope.symbols["Request"] = HttpRequestDef
 	scope.symbols["Response"] = HttpResponseDef
-	scope.symbols["get"] = HttpGetFn
+	scope.symbols["send"] = HttpSendFn
+}
+
+var HttpRequestDef = &StructDef{
+	Name: "Request",
+	Fields: map[string]Type{
+		"method":  Str,
+		"url":     Str,
+		"headers": MakeMap(Str, Str),
+		"body":    MakeMaybe(Str),
+	},
 }
 
 var HttpResponseDef = &StructDef{
@@ -25,49 +35,8 @@ var HttpResponseDef = &StructDef{
 	},
 }
 
-var HttpRequestDef = &StructDef{
-	Name: "Request",
-	Fields: map[string]Type{
-		"url":     Str,
-		"headers": MakeMap(Str, Str),
-		"body":    MakeMaybe(Str),
-	},
-}
-
-var HttpDelFn = &FunctionDef{
-	Name: "del",
-	Parameters: []Parameter{
-		{Name: "request", Type: HttpRequestDef},
-	},
-	ReturnType: &Maybe{of: HttpResponseDef},
-}
-
-var HttpGetFn = &FunctionDef{
-	Name: "get",
-	Parameters: []Parameter{
-		{Name: "request", Type: HttpRequestDef},
-	},
-	ReturnType: &Maybe{of: HttpResponseDef},
-}
-
-var HttpPatchFn = &FunctionDef{
-	Name: "patch",
-	Parameters: []Parameter{
-		{Name: "request", Type: HttpRequestDef},
-	},
-	ReturnType: &Maybe{of: HttpResponseDef},
-}
-
-var HttpPostFn = &FunctionDef{
-	Name: "post",
-	Parameters: []Parameter{
-		{Name: "request", Type: HttpRequestDef},
-	},
-	ReturnType: &Maybe{of: HttpResponseDef},
-}
-
-var HttpPutFn = &FunctionDef{
-	Name: "put",
+var HttpSendFn = &FunctionDef{
+	Name: "send",
 	Parameters: []Parameter{
 		{Name: "request", Type: HttpRequestDef},
 	},
@@ -80,16 +49,8 @@ func getInHTTP(name string) symbol {
 		return HttpRequestDef
 	case "Response":
 		return HttpResponseDef
-	case "del":
-		return HttpDelFn
-	case "get":
-		return HttpGetFn
-	case "patch":
-		return HttpPatchFn
-	case "post":
-		return HttpPostFn
-	case "put":
-		return HttpPutFn
+	case "send":
+		return HttpSendFn
 	default:
 		return nil
 	}
