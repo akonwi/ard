@@ -5,12 +5,22 @@ var preludePkgs = map[string]*StdPackage{
 	"Int":   {Name: "Int", Path: "ard/ints"},
 }
 
+func findInStdLib(path, name string) (StdPackage, bool) {
+	switch path {
+	case "ard/io", "ard/json", "ard/maybe", "ard/fs", "ard/http":
+		return StdPackage{Path: path, Name: name}, true
+	}
+	return StdPackage{}, false
+}
+
 func getInPackage(pkgPath, name string) symbol {
 	switch pkgPath {
 	case "ard/float":
 		return getInFloat(name)
 	case "ard/fs":
 		return getInFS(name)
+	case "ard/http":
+		return getInHTTP(name)
 	case "ard/ints":
 		return getInInts(name)
 	case "ard/io":

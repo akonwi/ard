@@ -1,0 +1,66 @@
+use ard/io
+use ard/http
+use ard/maybe
+
+struct PokemonRespEntry {
+  name: Str,
+  url: Str,
+}
+
+struct PokemonResp {
+  count: Int,
+  next: Str?,
+  previous: Str?,
+  results:  [PokemonRespEntry],
+}
+
+let res = http::send(http::Request{
+  method: "GET",
+  url: "https://pokeapi.co/api/v2/pokemon",
+  headers: [:],
+})
+
+//// todo: alternative with ? sugar
+//match res?.json<PokemonResp>() {
+//  data => {
+//    io::print("res.count = {{data.count.to_str()}}")
+//    io::print("res.results.size = {{data.results.size().to_str()}}")
+//  },
+//  _ => {
+//    if res.is_none() {
+//      io::print("unable to make request")
+//    } else {
+//      io::print("couldn't deserialize response body")
+//    }
+//  }
+//}
+
+io::print("GET from pokemon api")
+match res {
+  res => {
+    if res.is_ok() {
+      match res.json<PokemonResp>() {
+        data => {
+          io::print("res.count = {{data.count.to_str()}}")
+          io::print("res.results.size = {{data.results.size().to_str()}}")
+        },
+        _ => io::print("couldn't deserialize response body")
+      }
+    } else {
+      io::print("Received a {{res.status.to_str()}}")
+    }
+  },
+  _ => io::print("unable to make request")
+}
+
+io::print("http::post() to echoing api")
+let post_res = http::send(http::Request{
+  method: "POST",
+  url: "https://postman-echo.com/post",
+  headers: ["content-type":"text/plain"],
+  body: maybe::some("raw text")
+})
+match res {
+  res => io::print("got a {{res.status.to_str()}}"),
+  _ => {},
+}

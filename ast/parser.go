@@ -521,14 +521,14 @@ func (p *parser) parseStaticPath() *StaticProperty {
 	propName := p.advance()
 
 	prop := &StaticProperty{}
-	prop.Target = Identifier{
+	prop.Target = &Identifier{
 		Location: Location{
 			Start: Point{namespace.line, namespace.column},
 			End:   Point{joint.line, joint.column - 1},
 		},
 		Name: namespace.text,
 	}
-	prop.Property = Identifier{
+	prop.Property = &Identifier{
 		Location: Location{
 			Start: Point{propName.line, propName.column},
 			End:   Point{propName.line, propName.column + len(propName.text)},
@@ -540,7 +540,7 @@ func (p *parser) parseStaticPath() *StaticProperty {
 		propName := p.consume(identifier, "Expected an identifier after '::'")
 		prop = &StaticProperty{
 			Target: prop,
-			Property: Identifier{
+			Property: &Identifier{
 				Location: Location{
 					Start: Point{propName.line, propName.column},
 					End:   Point{propName.line, propName.column + len(propName.text)},
@@ -674,6 +674,7 @@ func (p *parser) structInstance() (Expression, error) {
 	index := p.index
 	static := p.parseStaticPath()
 	if static != nil {
+		// go back 1 so the last identifier can be checked as starting the below expression
 		p.index = p.index - 1
 	}
 
@@ -688,6 +689,8 @@ func (p *parser) structInstance() (Expression, error) {
 			},
 		}
 
+		p.match(new_line)
+
 		for !p.match(right_brace) {
 			propToken := p.consume(identifier, "Expected name")
 			p.consume(colon, "Expected ':'")
@@ -700,6 +703,7 @@ func (p *parser) structInstance() (Expression, error) {
 				Value: val,
 			})
 			p.match(comma)
+			p.match(new_line)
 		}
 		instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 
@@ -1276,8 +1280,8 @@ func (p *parser) consume(kind kind, message string) token {
 		return p.advance()
 	}
 
-	panic(fmt.Errorf("%s at line %d, column %d",
-		message, p.tokens[p.index].line, p.tokens[p.index].column))
+	panic(fmt.Errorf("%s at line %d, column %d. (Actual: %s)",
+		message, p.tokens[p.index].line, p.tokens[p.index].column, p.peek().kind))
 }
 
 /* conditionally advance if the current token is one of those provided */

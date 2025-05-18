@@ -64,7 +64,52 @@ func TestJsonDecodeStruct(t *testing.T) {
 		}
 	`)
 
-	if result == false {
-		t.Errorf("Got wrong decoded result")
+	if result != true {
+		t.Errorf("Wanted %v, got %v", true, result)
+	}
+}
+
+func TestJsonDecodeStructsWithMaybes(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		struct Person {
+			name: Str?,
+			age: Int?,
+		  employed: Bool?
+		}
+		let john_str = "{\"name\": \"John\", \"age\": null}"
+		let result = json::decode<Person>(john_str)
+		match result {
+		  john => john.name.or("") == "John" and john.age.or(0) == 0 and john.employed.or(false) == false,
+			_ => false
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Wanted %v, got %v", true, result)
+	}
+}
+
+func TestJsonDecodeNestedStructWithList(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		struct Person {
+			name: Str,
+			id: Int,
+		}
+		struct Payload {
+		  people: [Person]
+		}
+
+		let input = "{ \"people\": [ { \"name\": \"John\", \"id\": 1 } ] }"
+		let result = json::decode<Payload>(input)
+		match result {
+		  res => res.people.size(),
+			_ => 0
+		}
+	`)
+
+	if result != 1 {
+		t.Errorf("Wanted %v, got %v", 1, result)
 	}
 }

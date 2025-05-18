@@ -66,6 +66,41 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "Using a package struct",
+			input: `use ard/http` + "\n" +
+				`let req = http::Request{method:"GET", url:"google.com", headers: [:]}` + "\n" +
+				`req.url`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"http": {Name: "http", Path: "ard/http"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "req",
+							Value: &checker.PackageStructInstance{
+								Package: "ard/http",
+								Property: &checker.StructInstance{
+									Name: "Request",
+									Fields: map[string]checker.Expression{
+										"method":  &checker.StrLiteral{"GET"},
+										"url":     &checker.StrLiteral{"google.com"},
+										"headers": &checker.MapLiteral{Keys: []checker.Expression{}, Values: []checker.Expression{}},
+									},
+								},
+							},
+						},
+					},
+					{
+						Expr: &checker.InstanceProperty{
+							Subject:  &checker.Variable{},
+							Property: "url",
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "Cannot instantiate with incorrect fields",
 			input: personStructInput + "\n" + strings.Join([]string{
 				`Person{ name: "Alice", age: 30 }`,
@@ -183,6 +218,20 @@ func TestMethods(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
 			},
+		},
+	})
+}
+
+func TestStructsWithMaybeFields(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Maybe fields can be omitted",
+			input: `struct Message {
+				kind: Str,
+				stuff: Int?
+			}
+			Message{kind: "info"}
+			`,
 		},
 	})
 }

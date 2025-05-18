@@ -135,7 +135,8 @@ func TestUsingStructs(t *testing.T) {
 			name: "Referencing fields",
 			input: `
 					p.age
-					p.employed = false`,
+					p.employed = false
+					p.speak()`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -144,6 +145,13 @@ func TestUsingStructs(t *testing.T) {
 						Target:   &InstanceProperty{Target: &Identifier{Name: "p"}, Property: Identifier{Name: "employed"}},
 						Operator: Assign,
 						Value:    &BoolLiteral{Value: false},
+					},
+					&InstanceMethod{
+						Target: &Identifier{Name: "p"},
+						Method: FunctionCall{
+							Name: "speak",
+							Args: []Expression{},
+						},
 					},
 				},
 			},
@@ -165,8 +173,8 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 						Name: "req",
 						Type: &CustomType{
 							Type: StaticProperty{
-								Target:   Identifier{Name: "http"},
-								Property: Identifier{Name: "Request"},
+								Target:   &Identifier{Name: "http"},
+								Property: &Identifier{Name: "Request"},
 							},
 						},
 						Value: &StaticFunction{
@@ -178,14 +186,24 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 			},
 		},
 		{
-			name:  "instantiating static structs",
-			input: `http::Request{}`,
+			name: "instantiating static structs",
+			input: `http::Request{
+			  url: "foobar.com"
+			}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&StaticProperty{
-						Target:   Identifier{Name: "http"},
-						Property: &StructInstance{Name: Identifier{Name: "Request"}, Properties: []StructValue{}},
+						Target: &Identifier{Name: "http"},
+						Property: &StructInstance{
+							Name: Identifier{Name: "Request"},
+							Properties: []StructValue{
+								{
+									Name:  Identifier{Name: "url"},
+									Value: &StrLiteral{Value: "foobar.com"},
+								},
+							},
+						},
 					},
 				},
 			},
