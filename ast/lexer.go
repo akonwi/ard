@@ -120,6 +120,7 @@ type lexer struct {
 	start int
 	// position in the source
 	line, column int
+	inTemplate   bool
 }
 
 func NewLexer(source []byte) *lexer {
@@ -222,12 +223,12 @@ func (l *lexer) take() (token, bool) {
 	case ')':
 		return currentChar.asToken(right_paren), true
 	case '{':
-		if l.matchNext('{') != nil {
+		if l.inTemplate {
 			return currentChar.asToken(expr_open), true
 		}
 		return currentChar.asToken(left_brace), true
 	case '}':
-		if l.matchNext('}') != nil {
+		if l.inTemplate {
 			l.tokens = append(l.tokens, currentChar.asToken(expr_close))
 			return l.takeString(nil)
 		}
@@ -354,17 +355,22 @@ func (l *lexer) takeString(openQuote *char) (token, bool) {
 	if openQuote == nil {
 		start = l.peek()
 	}
+
 	for l.hasMore() && !l.check(`"`) {
-		if l.check(`{{`) {
+		if brace := l.matchNext('{'); brace != nil {
+			l.inTemplate = true
 			text := sb.String()
 
-			return token{
+			str := token{
 				kind:   string_,
 				line:   start.line,
 				column: start.col,
 				text:   strings.TrimPrefix(text, string('"')),
-			}, true
+			}
+			l.tokens = append(l.tokens, str)
+			return brace.asToken(expr_open), true
 		}
+
 		last := l.advance()
 		if last.raw == '\\' && l.hasMore() {
 			// Handle escape sequences
@@ -386,6 +392,8 @@ func (l *lexer) takeString(openQuote *char) (token, bool) {
 				sb.WriteByte('\f')
 			case 'v':
 				sb.WriteByte('\v')
+			case '{':
+				sb.WriteByte('{')
 			default:
 				// If not a recognized escape sequence, just output both chars
 				sb.WriteByte('\\')
