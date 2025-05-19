@@ -572,7 +572,7 @@ func TestInterpolatedStrings(t *testing.T) {
 	runTests(t, []test{
 		{
 			name:  "Interpolated string",
-			input: `"Hello, {{name}}"`,
+			input: `"Hello, {name}"`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{

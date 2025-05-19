@@ -12,4 +12,4 @@ io::print("Bell\b, form-feed\f, and vertical-tab\v characters")
 
 // Test escape sequences with string interpolation
 let name = "World"
-io::print("Hello, {{name}}!\nWelcome to \tArd!")
+io::print("Hello, {name}!\nWelcome to \tArd!")

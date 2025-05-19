@@ -47,7 +47,7 @@ func TestForInLoops(t *testing.T) {
 			input: `
 				mut res = ""
 				for c in "hello" {
-					res = "{{c}}{{res}}"
+					res = "{c}{res}"
 				}
 				res`,
 			want: "olleh",

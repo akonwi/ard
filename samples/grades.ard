@@ -13,9 +13,9 @@ let students: [Student] = [
 
 mut sum = 0
 for student in students {
-  io::print("{{student.name}} got a {{student.grade.to_str()}}")
+  io::print("{student.name} got a {student.grade.to_str()}")
   sum = sum + student.grade
 }
 
 let average = sum / students.size()
-io::print("Class average is {{average.to_str()}}")
+io::print("Class average is {average.to_str()}")

@@ -22,11 +22,11 @@ impl Board {
   }
 
   fn draw() {
-    io::print("{{@cells.at(0)}} | {{@cells.at(1)}} | {{@cells.at(2)}}")
+    io::print("{@cells.at(0)} | {@cells.at(1)} | {@cells.at(2)}")
     io::print("-------")
-    io::print("{{@cells.at(3)}} | {{@cells.at(4)}} | {{@cells.at(5)}}")
+    io::print("{@cells.at(3)} | {@cells.at(4)} | {@cells.at(5)}")
     io::print("-------")
-    io::print("{{@cells.at(6)}} | {{@cells.at(7)}} | {{@cells.at(8)}}")
+    io::print("{@cells.at(6)} | {@cells.at(7)} | {@cells.at(8)}")
   }
 
   fn can_play(pos: Int) Bool {
@@ -103,7 +103,7 @@ board.draw()
 mut finished = false
 while not board.is_full() or finished {
   for player in players {
-    io::print("Player {{player}}: Your move")
+    io::print("Player {player}: Your move")
     mut move = read_move(player)
     while move < 0 {
       io::print("Invalid move")
@@ -116,14 +116,14 @@ while not board.is_full() or finished {
 
     board.play(player, move)
     io::print("---------------")
-    io::print("Player {{player}} played")
+    io::print("Player {player} played")
     io::print("---------------")
     board.draw()
     io::print("---------------")
 
     match board.get_winner() {
       winner => {
-        io::print("Player {{winner}} wins!")
+        io::print("Player {winner} wins!")
         finished = true
         break
       },

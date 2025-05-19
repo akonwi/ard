@@ -120,6 +120,8 @@ type lexer struct {
 	start int
 	// position in the source
 	line, column int
+	inString     bool
+	inTemplate   bool
 }
 
 func NewLexer(source []byte) *lexer {
@@ -137,6 +139,29 @@ func (l lexer) isAtEnd() bool {
 }
 func (l lexer) hasMore() bool {
 	return !l.isAtEnd()
+}
+
+func (l *lexer) match(byte byte) bool {
+	peek := l.peek()
+	if peek != nil && peek.raw == byte {
+		l.advance()
+		return true
+	}
+
+	return false
+}
+
+func (l *lexer) previous() *char {
+	if l.cursor == 0 {
+		return nil
+	}
+	raw := l.source[l.cursor-1]
+	return &char{
+		raw:   raw,
+		line:  l.line,
+		col:   l.column,
+		index: l.cursor - 1,
+	}
 }
 
 func (l *lexer) matchNext(byte byte) *char {
@@ -181,6 +206,9 @@ func (l *lexer) check(string string) bool {
 }
 
 func (l *lexer) advance() *char {
+	if l.cursor == len(l.source) {
+		return nil
+	}
 	char := &char{
 		raw:   l.source[l.cursor],
 		line:  l.line,
@@ -222,14 +250,27 @@ func (l *lexer) take() (token, bool) {
 	case ')':
 		return currentChar.asToken(right_paren), true
 	case '{':
-		if l.matchNext('{') != nil {
+		if l.inTemplate {
 			return currentChar.asToken(expr_open), true
 		}
 		return currentChar.asToken(left_brace), true
 	case '}':
-		if l.matchNext('}') != nil {
+		if l.inTemplate {
+			// Add the expr_close token with correct position
 			l.tokens = append(l.tokens, currentChar.asToken(expr_close))
-			return l.takeString(nil)
+
+			// Continue from the current position after the closing brace
+			l.inTemplate = false
+
+			// Create a new char with the column correctly positioned for the next string part
+			stringStart := char{
+				line:  l.line,
+				col:   l.column,
+				index: l.cursor,
+				// raw: // unused property
+			}
+
+			return l.takeString(stringStart)
 		}
 		return currentChar.asToken(right_brace), true
 	case '[':
@@ -313,7 +354,7 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(equal), true
 	case '"':
-		return l.takeString(currentChar)
+		return l.takeString(*currentChar)
 	default:
 		if currentChar.isAlpha() {
 			if path, ok := l.takePath(currentChar); ok {
@@ -348,56 +389,93 @@ func (l *lexer) blockComment(start *char) token {
 	return token{kind: block_comment, line: start.line, column: start.col, text: text}
 }
 
-func (l *lexer) takeString(openQuote *char) (token, bool) {
+func (l *lexer) takeString(start char) (token, bool) {
 	sb := strings.Builder{}
-	start := openQuote
-	if openQuote == nil {
-		start = l.peek()
-	}
-	for l.hasMore() && !l.check(`"`) {
-		if l.check(`{{`) {
-			text := sb.String()
 
-			return token{
+	// Start a new state to track the string contents
+	inString := true
+
+	for inString && l.hasMore() {
+		currChar := l.peek()
+		if currChar == nil {
+			break
+		}
+
+		// Handle escape sequences
+		if currChar.raw == '\\' {
+			l.advance() // Consume the backslash
+			if l.hasMore() {
+				escChar := l.advance() // Get the escaped character
+				switch escChar.raw {
+				case 'n':
+					sb.WriteByte('\n')
+				case 't':
+					sb.WriteByte('\t')
+				case 'r':
+					sb.WriteByte('\r')
+				case '"':
+					sb.WriteByte('"')
+				case '\\':
+					sb.WriteByte('\\')
+				case 'b':
+					sb.WriteByte('\b')
+				case 'f':
+					sb.WriteByte('\f')
+				case 'v':
+					sb.WriteByte('\v')
+				case '{':
+					// Escaped opening brace - just add it literally
+					sb.WriteByte('{')
+				default:
+					// For unrecognized escapes, output both chars
+					sb.WriteByte('\\')
+					sb.WriteByte(escChar.raw)
+				}
+			}
+			continue
+		}
+
+		// Check for interpolation start
+		if currChar.raw == '{' {
+			// This is an interpolation expression
+			str := token{
 				kind:   string_,
 				line:   start.line,
 				column: start.col,
-				text:   strings.TrimPrefix(text, string('"')),
-			}, true
-		}
-		last := l.advance()
-		if last.raw == '\\' && l.hasMore() {
-			// Handle escape sequences
-			escapeChar := l.advance()
-			switch escapeChar.raw {
-			case 'n':
-				sb.WriteByte('\n')
-			case 't':
-				sb.WriteByte('\t')
-			case 'r':
-				sb.WriteByte('\r')
-			case '"':
-				sb.WriteByte('"')
-			case '\\':
-				sb.WriteByte('\\')
-			case 'b':
-				sb.WriteByte('\b')
-			case 'f':
-				sb.WriteByte('\f')
-			case 'v':
-				sb.WriteByte('\v')
-			default:
-				// If not a recognized escape sequence, just output both chars
-				sb.WriteByte('\\')
-				sb.WriteByte(escapeChar.raw)
+				text:   sb.String(),
 			}
+
+			// Add the string content token
+			l.tokens = append(l.tokens, str)
+
+			// Add the expression open token
+			exprChar := l.advance() // Consume the '{'
+			l.tokens = append(l.tokens, exprChar.asToken(expr_open))
+
+			// Set template mode so the next } will be treated as expr_close
+			l.inTemplate = true
+			return token{}, false
+		}
+
+		// Check for end of string
+		if currChar.raw == '"' {
+			l.advance() // Consume the closing quote
+			inString = false
+			break
+		}
+
+		// Handle newlines properly
+		if currChar.raw == '\n' {
+			sb.WriteByte(currChar.raw)
+			l.advance()
+			l.line++
+			l.column = 1
 		} else {
-			sb.WriteByte(last.raw)
+			// Regular character
+			sb.WriteByte(currChar.raw)
+			l.advance()
 		}
 	}
-
-	// take end quote
-	l.advance()
 
 	return token{
 		kind:   string_,

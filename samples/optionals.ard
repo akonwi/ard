@@ -9,6 +9,6 @@ name = maybe::some("Akonwi")
 
 // read the value
 match name {
-  n => io::print("name is: {{n}}"),
+  n => io::print("name is: {n}"),
   _ => io::print("no name")
 }

@@ -11,7 +11,7 @@ impl Todo {
       true => "[x]",
       false => "[ ]"
     }
-    "{{box}} {{@title}}"
+    "{box} {@title}"
   }
 }
 

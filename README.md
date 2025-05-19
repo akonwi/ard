@@ -56,7 +56,7 @@ There is no `++` or `--`.
 
 ```ard
 fn greet(name: Str) Str {
-  "Hello, {{name}}!"
+  "Hello, {name}!"
 }
 ```
 
@@ -145,11 +145,11 @@ Structs can have methods. Use a `impl` block to define methods on a struct:
 ```ard
 impl (p: Person) {
   fn get_intro() Str {
-    "My name is {{p.name}}"
+    "My name is {p.name}"
   }
 
   fn greet(other: Person) Str {
-    "Hello, {{other.name}}"
+    "Hello, {other.name}"
   }
 }
 
@@ -194,7 +194,7 @@ mut maybe_name: Str? = maybe::none()
 maybe_name = maybe::some("Joe")
 
 match maybe_name {
-  n => "Hello, {{n}}",
+  n => "Hello, {n}",
   _ => "Hello, stranger"
 }
 ```
@@ -214,8 +214,8 @@ To do conditional logic on a value of a type union, use a match expression and w
 ```ard
 for item in stuff {
   match item {
-    Str => io::print("String: {{it}}"),
-    Int => io::print("Number: {{it.to_str()}}")
+    Str => io::print("String: {it}"),
+    Int => io::print("Number: {it.to_str()}")
   }
 }
 ```
