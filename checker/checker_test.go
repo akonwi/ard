@@ -139,8 +139,8 @@ func TestPrimitiveLiterals(t *testing.T) {
 			name: "interpolated strings",
 			input: strings.Join([]string{
 				`let name = "world"`,
-				`"Hello, {{name}}"`,
-				`"Hello, {{3}}"`,
+				`"Hello, {name}"`,
+				`"Hello, {3}"`,
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
@@ -1668,7 +1668,7 @@ func TestOptionals(t *testing.T) {
 
 				mut name: Str? = maybe::none()
 				match name {
-				  value => io::print("name is {{value}}"),
+				  value => io::print("name is {value}"),
 					_ => io::print("no name")
 				}`,
 			output: &checker.Program{

@@ -234,7 +234,7 @@ func TestFunctions(t *testing.T) {
 		{
 			name: "one arg",
 			input: `
-				fn greet(name: Str) { "Hello, {{name}}!" }
+				fn greet(name: Str) { "Hello, {name}!" }
 				greet("Alice")`,
 			want: "Hello, Alice!",
 		},
@@ -368,7 +368,7 @@ func TestMapApi(t *testing.T) {
 			input: `
 				let ages = ["Alice":40, "Bob":30]
 				match ages.get("Alice") {
-				  age => "Alice is {{age.to_str()}}",
+				  age => "Alice is {age.to_str()}",
 					_ => "Not found"
 				}`,
 			want: "Alice is 40",
@@ -388,7 +388,7 @@ func TestMapApi(t *testing.T) {
 				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Bob", 31)
 				match ages.get("Bob") {
-				  age => "Bob is {{age.to_str()}}",
+				  age => "Bob is {age.to_str()}",
 					_ => "Not found"
 				}`,
 			want: "Bob is 31",
@@ -410,7 +410,7 @@ func TestMapApi(t *testing.T) {
 				let ages = ["Alice":40, "Bob":30]
 				let has_alice = ages.has("Alice").to_str()
 				let has_charlie = ages.has("Charlie").to_str()
-				"{{has_alice}},{{has_charlie}}"
+				"{has_alice},{has_charlie}"
 				`,
 			want: "true,false",
 		},
@@ -475,7 +475,7 @@ func TestStructs(t *testing.T) {
 
 				impl Point {
 					fn print() Str {
-						"{{@x.to_str()}},{{@y.to_str()}}"
+						"{@x.to_str()},{@y.to_str()}"
 					}
 				}
 

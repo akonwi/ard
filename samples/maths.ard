@@ -9,4 +9,4 @@ fn multiply(x: Int, y: Int) Int {
 }
 
 let result = add(multiply(3, 4), 5)
-io::print("Expected: 17, Got: {{result.to_str()}}")
+io::print("Expected: 17, Got: {result.to_str()}")

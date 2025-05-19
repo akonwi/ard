@@ -56,7 +56,7 @@ func TestJsonDecodeStruct(t *testing.T) {
 			age: Int,
 		  employed: Bool
 		}
-		let john_str = "{\"name\": \"John\", \"age\": 30, \"employed\": true}"
+		let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true}"
 		let result = json::decode<Person>(john_str)
 		match result {
 		  john => john.name == "John" and john.age == 30 and john.employed == true,
@@ -77,7 +77,7 @@ func TestJsonDecodeStructsWithMaybes(t *testing.T) {
 			age: Int?,
 		  employed: Bool?
 		}
-		let john_str = "{\"name\": \"John\", \"age\": null}"
+		let john_str = "\{\"name\": \"John\", \"age\": null}"
 		let result = json::decode<Person>(john_str)
 		match result {
 		  john => john.name.or("") == "John" and john.age.or(0) == 0 and john.employed.or(false) == false,
@@ -101,7 +101,7 @@ func TestJsonDecodeNestedStructWithList(t *testing.T) {
 		  people: [Person]
 		}
 
-		let input = "{ \"people\": [ { \"name\": \"John\", \"id\": 1 } ] }"
+		let input = "\{ \"people\": [ \{ \"name\": \"John\", \"id\": 1 } ] }"
 		let result = json::decode<Payload>(input)
 		match result {
 		  res => res.people.size(),

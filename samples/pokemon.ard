@@ -23,8 +23,8 @@ let res = http::send(http::Request{
 //// todo: alternative with ? sugar
 //match res?.json<PokemonResp>() {
 //  data => {
-//    io::print("res.count = {{data.count.to_str()}}")
-//    io::print("res.results.size = {{data.results.size().to_str()}}")
+//    io::print("res.count = {data.count.to_str()}")
+//    io::print("res.results.size = {data.results.size().to_str()}")
 //  },
 //  _ => {
 //    if res.is_none() {
@@ -41,13 +41,13 @@ match res {
     if res.is_ok() {
       match res.json<PokemonResp>() {
         data => {
-          io::print("res.count = {{data.count.to_str()}}")
-          io::print("res.results.size = {{data.results.size().to_str()}}")
+          io::print("res.count = {data.count.to_str()}")
+          io::print("res.results.size = {data.results.size().to_str()}")
         },
         _ => io::print("couldn't deserialize response body")
       }
     } else {
-      io::print("Received a {{res.status.to_str()}}")
+      io::print("Received a {res.status.to_str()}")
     }
   },
   _ => io::print("unable to make request")
@@ -61,6 +61,6 @@ let post_res = http::send(http::Request{
   body: maybe::some("raw text")
 })
 match res {
-  res => io::print("got a {{res.status.to_str()}}"),
+  res => io::print("got a {res.status.to_str()}"),
   _ => {},
 }

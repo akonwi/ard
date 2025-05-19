@@ -764,7 +764,7 @@ func TestLexing(t *testing.T) {
 		},
 
 		{
-			name: "string interpolation with single braces",
+			name: "string interpolation",
 			input: strings.Join([]string{
 				`"hello, {name}!"`,
 				`"{(1 + 1).to_str()}"`,
