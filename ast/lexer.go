@@ -270,7 +270,7 @@ func (l *lexer) take() (token, bool) {
 				// raw: // unused property
 			}
 
-			return l.takeString2(stringStart)
+			return l.takeString(stringStart)
 		}
 		return currentChar.asToken(right_brace), true
 	case '[':
@@ -354,7 +354,7 @@ func (l *lexer) take() (token, bool) {
 		}
 		return currentChar.asToken(equal), true
 	case '"':
-		return l.takeString2(*currentChar)
+		return l.takeString(*currentChar)
 	default:
 		if currentChar.isAlpha() {
 			if path, ok := l.takePath(currentChar); ok {
@@ -389,7 +389,7 @@ func (l *lexer) blockComment(start *char) token {
 	return token{kind: block_comment, line: start.line, column: start.col, text: text}
 }
 
-func (l *lexer) takeString2(start char) (token, bool) {
+func (l *lexer) takeString(start char) (token, bool) {
 	sb := strings.Builder{}
 
 	// Start a new state to track the string contents
