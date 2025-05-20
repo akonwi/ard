@@ -1,10 +1,22 @@
 ## TODO
 
+- [ ] support type unions as return Type
+  - signature: `Result<$Val, $Err>`
+    ```
+    fn do_thing() Result<Int, Str> {
+      match some_val {
+        true => Result::ok(200),
+        false => Result::fail("There was a problem"),
+      }
+    }
+    ```
 - [ ] Errors and handling
   - Decide whether to use an Error type or Result like Rust
   - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `
   - try? syntax to create a maybe: `let maybe_num: Int = try? dangerous_op()`
   - try! to return error: `let num = try! dangerous()`
+- [ ] syntax for generics on structs
+  - `struct Box { item: $T }`
 - [ ] methods on enums?
 - [ ] matching on numbers
 - [ ] `?` sugar for propagating maybes
