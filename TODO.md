@@ -1,15 +1,8 @@
 ## TODO
 
 - [ ] support type unions as return Type
-  - signature: `Result<$Val, $Err>`
-    ```
-    fn do_thing() Result<Int, Str> {
-      match some_val {
-        true => Result::ok(200),
-        false => Result::fail("There was a problem"),
-      }
-    }
-    ```
+  - built-in signature: `Result<$Val, $Err>`
+  - details in README.md
 - [ ] Errors and handling
   - Decide whether to use an Error type or Result like Rust
   - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `

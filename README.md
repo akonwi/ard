@@ -225,6 +225,34 @@ A static path is a sequence of `name::thing`. Ard has a preference for simple pa
 In order to reach further into a package for something, make that import explicit with `use name::nested`,
 so that code can then do `nested::thing` references with a single namespace qualification.
 
+### Errors
+Ard does not have exceptions. Instead, errors can be represented as values. The built-in `Result<$Val, $Err>` type can be used to represent a union of a success value and an error.
+
+```ard
+fn divide(a: Int, b: Int) Result<Int, Str> {
+  match b == 0 {
+    true => Result::err("Cannot divide by zero"),
+    false => Result::ok(200),
+  }
+}
+```
+
+Similar to type unions, results can be matched to control conditional execution.
+
+```ard
+match divide(42, 0) {
+  ok => io::print(ok.to_str()),
+  err => io::print(err),
+}
+```
+
+The only way to ignore errors is to use the `.or()` method to provide a default value if the result is not ok
+
+```ard
+let res = divide(a, b).or(0)
+io::print("got {res.to_str()})
+```
+
 #### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ### TODO: Callbacks
