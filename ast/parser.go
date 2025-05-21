@@ -464,29 +464,56 @@ func (p *parser) parseType() DeclaredType {
 
 	if p.match(identifier) {
 		id := p.previous()
-		nullable := p.match(question_mark)
-
-		// Check if this is a generic type parameter (starts with $)
-		if len(id.text) > 0 && id.text[0] == '$' {
-			return &GenericType{
-				Name:     id.text[1:], // Remove the leading '$'
+		nullable := false
+		
+		// Check for Result<T, E> type
+		if id.text == "Result" && p.match(less_than) {
+			// Parse the value type
+			valType := p.parseType()
+			p.consume(comma, "Expected comma after value type in Result")
+			
+			// Parse the error type
+			errType := p.parseType()
+			p.consume(greater_than, "Expected '>' after Result type parameters")
+			
+			// Check for nullable
+			nullable = p.match(question_mark)
+			
+			// Return ResultType
+			return &ResultType{
+				Val:      valType,
+				Err:      errType,
 				nullable: nullable,
+				Location: Location{
+					Start: Point{Row: id.line, Col: id.column},
+					End:   Point{Row: p.previous().line, Col: p.previous().column},
+				},
 			}
-		}
+		} else {
+			nullable = p.match(question_mark)
 
-		switch id.text {
-		case "Int":
-			return &IntType{nullable: nullable}
-		case "Float":
-			return &FloatType{nullable: nullable}
-		case "Str":
-			return &StringType{nullable: nullable}
-		case "Bool":
-			return &BooleanType{nullable: nullable}
-		default:
-			return &CustomType{
-				Name:     id.text,
-				nullable: nullable,
+			// Check if this is a generic type parameter (starts with $)
+			if len(id.text) > 0 && id.text[0] == '$' {
+				return &GenericType{
+					Name:     id.text[1:], // Remove the leading '$'
+					nullable: nullable,
+				}
+			}
+
+			switch id.text {
+			case "Int":
+				return &IntType{nullable: nullable}
+			case "Float":
+				return &FloatType{nullable: nullable}
+			case "Str":
+				return &StringType{nullable: nullable}
+			case "Bool":
+				return &BooleanType{nullable: nullable}
+			default:
+				return &CustomType{
+					Name:     id.text,
+					nullable: nullable,
+				}
 			}
 		}
 	}

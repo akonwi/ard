@@ -232,7 +232,7 @@ Ard does not have exceptions. Instead, errors can be represented as values. The 
 fn divide(a: Int, b: Int) Result<Int, Str> {
   match b == 0 {
     true => Result::err("Cannot divide by zero"),
-    false => Result::ok(200),
+    false => Result::ok(a/b),
   }
 }
 ```

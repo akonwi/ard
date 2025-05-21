@@ -3,6 +3,9 @@
 - [ ] support type unions as return Type
   - built-in signature: `Result<$Val, $Err>`
   - details in README.md
+  - [ ] `.or()` method
+  - [ ] matching on results
+  - [x] parse angle-brackets in Type declarations
 - [ ] Errors and handling
   - Decide whether to use an Error type or Result like Rust
   - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `

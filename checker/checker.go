@@ -825,6 +825,12 @@ func (s StructInstance) Type() Type {
 	return s._type
 }
 
+type ResultMatch struct {
+	Subject Expression
+	Ok      Block
+	Err     Block
+}
+
 func isMutable(expr Expression) bool {
 	if v, ok := expr.(*Variable); ok {
 		return v.isMutable()

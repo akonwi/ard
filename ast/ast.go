@@ -207,6 +207,19 @@ func (g GenericType) String() string {
 	return g.Name
 }
 
+type ResultType struct {
+	Location
+	Val, Err DeclaredType
+	nullable bool
+}
+
+func (r ResultType) GetName() string {
+	return "Result"
+}
+func (r ResultType) IsNullable() bool {
+	return r.nullable
+}
+
 func (v VariableDeclaration) String() string {
 	binding := "let"
 	if v.Mutable {

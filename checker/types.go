@@ -339,3 +339,44 @@ func (a *Any) equal(other Type) bool {
 	}
 	return a.actual.equal(other)
 }
+
+type Result struct {
+	val Type
+	err Type
+}
+
+func MakeResult(val, err Type) *Result {
+	return &Result{val, err}
+}
+
+func (r Result) String() string {
+	return fmt.Sprintf("Result<%s, %s>", r.val.String(), r.err.String())
+}
+
+func (r Result) get(name string) Type {
+	switch name {
+	case "or":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "default", Type: r.val}},
+			ReturnType: r.val,
+		}
+	default:
+		return nil
+	}
+}
+
+func (r *Result) equal(other Type) bool {
+	if o, ok := other.(*Result); ok {
+		return r.val.equal(o.val) && r.err.equal(o.err)
+	}
+	return false
+}
+
+func (r *Result) Val() Type {
+	return r.val
+}
+
+func (r *Result) Err() Type {
+	return r.err
+}

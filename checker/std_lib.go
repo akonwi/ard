@@ -1,13 +1,14 @@
 package checker
 
 var preludePkgs = map[string]*StdPackage{
-	"Float": {Name: "Int", Path: "ard/float"},
-	"Int":   {Name: "Int", Path: "ard/ints"},
+	"Float":  {Name: "Int", Path: "ard/float"},
+	"Int":    {Name: "Int", Path: "ard/ints"},
+	"Result": {Name: "Result", Path: "ard/result"},
 }
 
 func findInStdLib(path, name string) (StdPackage, bool) {
 	switch path {
-	case "ard/io", "ard/json", "ard/maybe", "ard/fs", "ard/http":
+	case "ard/io", "ard/json", "ard/maybe", "ard/fs", "ard/http", "ard/result":
 		return StdPackage{Path: path, Name: name}, true
 	}
 	return StdPackage{}, false
@@ -29,6 +30,8 @@ func getInPackage(pkgPath, name string) symbol {
 		return getInJson(name)
 	case "ard/maybe":
 		return getInMaybe(name)
+	case "ard/result":
+		return getInResult(name)
 	default:
 		return nil
 	}
@@ -165,6 +168,33 @@ func getInMaybe(name string) symbol {
 			Name:       name,
 			Parameters: []Parameter{{Name: "val", Type: any}},
 			ReturnType: &Maybe{any},
+		}
+	default:
+		return nil
+	}
+}
+
+func getInResult(name string) symbol {
+	switch name {
+	case "ok":
+		// This function returns Result<T, E> where T is the type of the parameter
+		// and E is a generic type parameter
+		valType := &Any{name: "Val"}
+		errType := &Any{name: "Err"}
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "val", Type: valType}},
+			ReturnType: MakeResult(valType, errType),
+		}
+	case "err":
+		// This function returns Result<T, E> where E is the type of the parameter
+		// and T is a generic type parameter
+		valType := &Any{name: "Val"}
+		errType := &Any{name: "Err"}
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "err", Type: errType}},
+			ReturnType: MakeResult(valType, errType),
 		}
 	default:
 		return nil
