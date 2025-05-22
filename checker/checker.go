@@ -931,6 +931,10 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
 		baseType = MakeMap(key, value)
+	case *ast.ResultType:
+		val := c.resolveType(ty.Val)
+		err := c.resolveType(ty.Err)
+		baseType = MakeResult(val, err)
 	case *ast.CustomType:
 		if sym := c.scope.get(t.GetName()); sym != nil {
 			// Check if it's an enum
