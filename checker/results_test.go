@@ -77,5 +77,24 @@ func TestResults(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Results must match declarations",
+			input: `
+			let result: Result<Int, Str> = Result::ok(true)
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: `Type mismatch: Expected Result<Int, Str>, got Result<Bool, $Err>`},
+			},
+		},
+		{
+			name: "Results must match return declaration",
+			input: `
+			fn foo() Result<Int, Str> {
+				Result::err(true)
+			}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: `Type mismatch: Expected Result<Int, Str>, got Result<$Val, Bool>`},
+			},
+		},
 	})
 }

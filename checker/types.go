@@ -129,6 +129,16 @@ func (b _bool) get(name string) Type {
 	}
 }
 func (b *_bool) equal(other Type) bool {
+	if any, ok := other.(*Any); ok {
+		if any.actual == nil {
+			return true
+		}
+		return b.equal(any.actual)
+	}
+
+	if union, ok := other.(*Union); ok {
+		return union.equal(b)
+	}
 	return b == other
 }
 
