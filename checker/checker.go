@@ -2967,6 +2967,68 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 		return c.checkList(expectedType, s)
 	case *ast.MapLiteral:
 		return c.checkMap(expectedType, s)
+	case *ast.StaticFunction:
+		{
+			resultType, expectResult := expectedType.(*Result)
+			if !expectResult &&
+				s.Target.(*ast.Identifier).Name != "Result" &&
+				(s.Function.Name != "ok" && s.Function.Name != "err") {
+				return c.checkExpr(s)
+			}
+
+			packageName := s.Target.(*ast.Identifier).Name
+			pkg := c.resolvePkg(packageName)
+			if pkg == nil {
+				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				return nil
+			}
+
+			sym := getInPackage(pkg.Path, s.Function.Name)
+			if sym == nil {
+				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			fnDef, isFunc := sym.(*FunctionDef)
+			if !isFunc {
+				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			if len(s.Function.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+				return nil
+			}
+
+			var arg Expression = nil
+			if fnDef.name() == "ok" {
+				arg = c.checkExpr(s.Function.Args[0])
+				if !resultType.Val().equal(arg.Type()) {
+					fmt.Printf("arg: %s - $Val: %s\n", arg.Type(), resultType.Val())
+					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].GetLocation())
+					return nil
+				}
+			}
+			if fnDef.name() == "err" {
+				arg = c.checkExpr(s.Function.Args[0])
+				if !resultType.Err().equal(arg.Type()) {
+					fmt.Printf("arg: %s - $Err: %s\n", arg.Type(), resultType.Val())
+					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].GetLocation())
+					return nil
+				}
+			}
+
+			fnDef.ReturnType = resultType
+			return &PackageFunctionCall{
+				Package: packageName,
+				Call: &FunctionCall{
+					Name: fnDef.name(),
+					Args: []Expression{arg},
+					fn:   fnDef,
+				},
+			}
+		}
 	}
 
 	// todo?: assert against expectedType

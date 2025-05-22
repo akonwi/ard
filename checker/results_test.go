@@ -83,7 +83,7 @@ func TestResults(t *testing.T) {
 			let result: Result<Int, Str> = Result::ok(true)
 			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: `Type mismatch: Expected Result<Int, Str>, got Result<Bool, $Err>`},
+				{Kind: checker.Error, Message: `Type mismatch: Expected Int, got Bool`},
 			},
 		},
 		{
