@@ -96,5 +96,74 @@ func TestResults(t *testing.T) {
 				{Kind: checker.Error, Message: `Type mismatch: Expected Result<Int, Str>, got Result<$Val, Bool>`},
 			},
 		},
+		{
+			name: "Result.or() unwraps with a default",
+			input: `
+			fn foo() Int {
+				let res: Result<Int, Str> = Result::err("foo")
+				res.or(10)
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Matching on results",
+			input: `
+			use ard/io
+
+			let res: Result<Int, Str> = Result::err("foo")
+			match res {
+				ok => ok,
+				err => {
+				  io::print("failed: " + err)
+					-1
+				}
+			}`,
+			output: &checker.Program{
+				StdImports: map[string]checker.StdPackage{
+					"io": checker.StdPackage{Name: "io", Path: "ard/io"},
+				},
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name: "res",
+							Value: &checker.PackageFunctionCall{
+								Package: "Result",
+								Call: &checker.FunctionCall{
+									Name: "err",
+									Args: []checker.Expression{&checker.StrLiteral{"foo"}},
+								},
+							},
+						},
+					},
+					{
+						Expr: &checker.ResultMatch{
+							Subject: &checker.Variable{},
+							Ok: &checker.Match{
+								Pattern: &checker.Identifier{Name: "ok"},
+								Body: &checker.Block{Stmts: []checker.Statement{
+									{Expr: &checker.Variable{}},
+								}},
+							},
+							Err: &checker.Match{
+								Pattern: &checker.Identifier{Name: "err"},
+								Body: &checker.Block{Stmts: []checker.Statement{
+									{Expr: &checker.PackageFunctionCall{
+										Package: "ard/io",
+										Call: &checker.FunctionCall{
+											Name: "print",
+											Args: []checker.Expression{
+												&checker.StrAddition{&checker.StrLiteral{"failed: "}, &checker.Variable{}},
+											},
+										},
+									}},
+									{Expr: &checker.Negation{&checker.IntLiteral{1}}},
+								}},
+							},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }

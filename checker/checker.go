@@ -827,8 +827,12 @@ func (s StructInstance) Type() Type {
 
 type ResultMatch struct {
 	Subject Expression
-	Ok      Block
-	Err     Block
+	Ok      *Match
+	Err     *Match
+}
+
+func (r ResultMatch) Type() Type {
+	return r.Ok.Body.Type()
 }
 
 func isMutable(expr Expression) bool {
@@ -2847,7 +2851,56 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 		}
 
-		c.addError("Currently only Maybe, Enum, Bool, and Union types are supported in match expressions", s.GetLocation())
+		if resultType, ok := subject.Type().(*Result); ok {
+			if len(s.Cases) > 2 {
+				c.addError("Too many cases in match", s.GetLocation())
+				return nil
+			}
+
+			var okCase *Match
+			var errCase *Match
+			for _, node := range s.Cases {
+				if node.Pattern.(*ast.Identifier).Name == "ok" {
+					okCase = &Match{
+						Pattern: &Identifier{Name: "ok"},
+						Body: c.checkBlock(node.Body, func() {
+							c.scope.add(&VariableDef{
+								Name:   "ok",
+								__type: resultType.Val(),
+							})
+						}),
+					}
+				}
+				if node.Pattern.(*ast.Identifier).Name == "err" {
+					errCase = &Match{
+						Pattern: &Identifier{Name: "err"},
+						Body: c.checkBlock(node.Body, func() {
+							c.scope.add(&VariableDef{
+								Name:   "err",
+								__type: resultType.Err(),
+							})
+						}),
+					}
+				}
+			}
+
+			if okCase == nil {
+				c.addError("Missing ok case", s.GetLocation())
+				return nil
+			}
+			if errCase == nil {
+				c.addError("Missing err case", s.GetLocation())
+				return nil
+			}
+
+			return &ResultMatch{
+				Subject: subject,
+				Ok:      okCase,
+				Err:     errCase,
+			}
+		}
+
+		c.addError(fmt.Sprintf("Cannot match on %s", subject.Type()), s.GetLocation())
 		return nil
 	case *ast.StaticProperty:
 		{
@@ -3005,7 +3058,6 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			if fnDef.name() == "ok" {
 				arg = c.checkExpr(s.Function.Args[0])
 				if !resultType.Val().equal(arg.Type()) {
-					fmt.Printf("arg: %s - $Val: %s\n", arg.Type(), resultType.Val())
 					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].GetLocation())
 					return nil
 				}
@@ -3013,7 +3065,6 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			if fnDef.name() == "err" {
 				arg = c.checkExpr(s.Function.Args[0])
 				if !resultType.Err().equal(arg.Type()) {
-					fmt.Printf("arg: %s - $Err: %s\n", arg.Type(), resultType.Val())
 					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].GetLocation())
 					return nil
 				}
