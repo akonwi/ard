@@ -27,6 +27,9 @@ func Run2(program *checker.Program) (any, error) {
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
 	}
+	if r, ok := vm.result.raw.(*object); ok {
+		return r.raw, nil
+	}
 	return vm.result.raw, nil
 }
 
@@ -325,6 +328,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			}
 			if _, ok := subj._type.(*checker.StructDef); ok {
 				return vm.evalStructMethod(subj, e.Method)
+			}
+
+			if _, ok := subj._type.(*checker.Result); ok {
+				return vm.evalResultMethod(subj, e.Method)
 			}
 
 			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", subj._type, e.Method.Name, subj._type))
@@ -645,6 +652,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				return evalInHTTP(vm, e.Call)
 			}
 
+			if e.Package == "ard/result" {
+				return evalInResult(vm, e.Call)
+			}
+
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
 		}
 	case *checker.ListLiteral:
@@ -783,6 +794,25 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				return vm.eval(e.Property)
 			}
 			panic(fmt.Errorf("Unimplemented in package: %s", e.Package))
+		}
+	case *checker.ResultMatch:
+		{
+			subj := vm.eval(e.Subject)
+			resultType := subj._type.(*checker.Result)
+
+			raw := subj.raw.(*object)
+
+			fmt.Printf("raw: %s == val: %s\n", raw._type, resultType.Val())
+			if raw._type == resultType.Val() {
+				res, _ := vm.evalBlock2(e.Ok.Body, func() {
+					vm.scope.add("ok", subj)
+				})
+				return res
+			}
+			res, _ := vm.evalBlock2(e.Err.Body, func() {
+				vm.scope.add("err", subj)
+			})
+			return res
 		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
