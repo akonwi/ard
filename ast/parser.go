@@ -465,20 +465,20 @@ func (p *parser) parseType() DeclaredType {
 	if p.match(identifier) {
 		id := p.previous()
 		nullable := false
-		
+
 		// Check for Result<T, E> type
 		if id.text == "Result" && p.match(less_than) {
 			// Parse the value type
 			valType := p.parseType()
 			p.consume(comma, "Expected comma after value type in Result")
-			
+
 			// Parse the error type
 			errType := p.parseType()
 			p.consume(greater_than, "Expected '>' after Result type parameters")
-			
+
 			// Check for nullable
 			nullable = p.match(question_mark)
-			
+
 			// Return ResultType
 			return &ResultType{
 				Val:      valType,
@@ -643,7 +643,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		name := ""
 		mutates := p.match(mut)
 		if !asMethod {
-			// todo: signal warning of unnecessary `mut`
+			// todo: signal warning of unnecessary `mut` in checker
 		}
 		if p.check(identifier) {
 			name = p.consume("identifier", "Expected function name after 'fn'").text
