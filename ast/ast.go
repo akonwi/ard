@@ -487,8 +487,6 @@ type BinaryExpression struct {
 	Location
 	Operator    Operator
 	Left, Right Expression
-	// todo: drop this field
-	HasPrecedence bool
 }
 
 func (b BinaryExpression) String() string {
