@@ -30,7 +30,7 @@ var HttpResponseDef = &StructDef{
 		"json": &FunctionDef{
 			Name:       "json",
 			Parameters: []Parameter{},
-			ReturnType: &Maybe{of: &Any{name: "T"}},
+			ReturnType: MakeResult(&Any{name: "T"}, Str),
 		},
 	},
 }

@@ -85,7 +85,7 @@ func evalHttpSend(vm *VM, call *checker.FunctionCall) *object {
 	return &object{respMap, call.Type()}
 }
 
-// Handle HTTP Response json method
+// Handle HTTP Response method
 func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall) *object {
 	// Get raw response struct
 	respMap, ok := resp.raw.(map[string]*object)
@@ -116,10 +116,7 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 				return &object{nil, method.Type()}
 			}
 
-			// fmt.Printf("bodyStr:\n\t%s\n", bodyStr)
-
-			// Use the existing JSON decoding logic
-			// Create a synthetic function call to reuse the existing JSON decode logic
+			// Create a synthetic function call to json::decode()
 			res := vm.eval(&checker.PackageFunctionCall{
 				Package: "ard/json",
 				Call: checker.CreateCall("decode",

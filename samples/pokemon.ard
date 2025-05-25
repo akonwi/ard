@@ -40,11 +40,11 @@ match res {
   res => {
     if res.is_ok() {
       match res.json<PokemonResp>() {
-        data => {
-          io::print("res.count = {data.count.to_str()}")
-          io::print("res.results.size = {data.results.size().to_str()}")
+        ok => {
+          io::print("res.count = {ok.count.to_str()}")
+          io::print("res.results.size = {ok.results.size().to_str()}")
         },
-        _ => io::print("couldn't deserialize response body")
+        err => io::print(err)
       }
     } else {
       io::print("Received a {res.status.to_str()}")

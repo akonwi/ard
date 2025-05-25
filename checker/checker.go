@@ -1715,21 +1715,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// collect generics
 					generics := []Type{}
 					for _, param := range fnDef.Parameters {
-						if strings.Contains(param.Type.String(), "$") {
-							if !slices.ContainsFunc(generics, func(g Type) bool {
-								return g.String() == param.Type.String()
-							}) {
-								generics = append(generics, param.Type)
-							}
-						}
+						generics = append(generics, getGenerics(param.Type)...)
 					}
-					if strings.Contains(fnDef.ReturnType.String(), "$") {
-						if !slices.ContainsFunc(generics, func(g Type) bool {
-							return g.String() == fnDef.ReturnType.String()
-						}) {
-							generics = append(generics, fnDef.ReturnType)
-						}
-					}
+					generics = append(generics, getGenerics(fnDef.ReturnType)...)
 
 					if len(s.TypeArgs) != len(generics) {
 						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.GetLocation())
@@ -1873,24 +1861,17 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// collect generics
 					generics := []Type{}
 					for _, param := range fnDef.Parameters {
-						if strings.Contains(param.Type.String(), "$") {
-							if !slices.ContainsFunc(generics, func(g Type) bool {
-								return g.String() == param.Type.String()
-							}) {
-								generics = append(generics, param.Type)
-							}
-						}
+						generics = append(generics, getGenerics(param.Type)...)
 					}
-					if strings.Contains(fnDef.ReturnType.String(), "$") {
-						if !slices.ContainsFunc(generics, func(g Type) bool {
-							return g.String() == fnDef.ReturnType.String()
-						}) {
-							generics = append(generics, fnDef.ReturnType)
+					generics = append(generics, getGenerics(fnDef.ReturnType)...)
+
+					if len(generics) == 0 && len(s.Method.TypeArgs) > 0 {
+						// c.addWarning("Unnecessary type arguments", s.Method.GetLocation())
+					} else {
+						if len(s.Method.TypeArgs) != len(generics) {
+							c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Method.GetLocation())
+							return nil
 						}
-					}
-					if len(s.Method.TypeArgs) != len(generics) {
-						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Method.GetLocation())
-						return nil
 					}
 
 					for i, any := range generics {
@@ -2288,7 +2269,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			if fnDef.hasGenerics() {
 				if len(s.Function.TypeArgs) > 0 {
 					// collect generics
-					// todo: do this in the other places too
 					generics := []Type{}
 					for _, param := range fnDef.Parameters {
 						generics = append(generics, getGenerics(param.Type)...)
