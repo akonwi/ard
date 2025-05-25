@@ -804,10 +804,9 @@ func (def StructDef) equal(other Type) bool {
 		}
 		return true
 	}
-	// todo: is this really necessary while the substitution is in place?
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			// o.actual = def
+			fmt.Printf("here: %s.equal(%s)\n", def, o)
 			return true
 		}
 		return def.equal(o.actual)
@@ -3129,6 +3128,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 }
 
 // Refine a generic as a concrete type
+// todo: is this still needed?
 func refine(t Type, expected Type) Type {
 	switch typ := t.(type) {
 	case *Any:

@@ -643,7 +643,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		name := ""
 		mutates := p.match(mut)
 		if !asMethod {
-			// todo: signal warning of unnecessary `mut` in checker
+			// should this signal warning of unnecessary `mut`?
 		}
 		if p.check(identifier) {
 			name = p.consume("identifier", "Expected function name after 'fn'").text
