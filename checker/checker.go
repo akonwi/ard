@@ -1074,7 +1074,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 	case *ast.VariableAssignment:
 		{
-			// todo: not always a variable
 			if id, ok := s.Target.(*ast.Identifier); ok {
 				target := c.scope.get(id.Name)
 				if target == nil {
@@ -1122,7 +1121,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 			}
 
-			panic(fmt.Sprintf("Unimplemented reassignment target: %T", s.Target))
+			panic(fmt.Sprintf("Unsupported reassignment target: %T", s.Target))
 		}
 	case *ast.WhileLoop:
 		{
