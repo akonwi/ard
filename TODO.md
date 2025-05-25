@@ -1,16 +1,7 @@
 ## TODO
 
-- [ ] support type unions as return Type
-  - built-in signature: `Result<$Val, $Err>`
-  - details in README.md
-  - [ ] `.or()` method
-  - [ ] matching on results
-  - [x] parse angle-brackets in Type declarations
-- [ ] Errors and handling
-  - Decide whether to use an Error type or Result like Rust
-  - try syntax with a block/expression to provide fallback: `let number: Int = try dangerous_op() else 0 `
-  - try? syntax to create a maybe: `let maybe_num: Int = try? dangerous_op()`
-  - try! to return error: `let num = try! dangerous()`
+- [ ] `try?` syntax to turn a Result into a Maybe: `let maybe_num: Int = try? dangerous_op()`
+- [ ] `try!` syntax to unwrap value or immediately return error Result: `let num = try! dangerous()`
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?

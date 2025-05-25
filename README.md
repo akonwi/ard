@@ -226,7 +226,7 @@ In order to reach further into a package for something, make that import explici
 so that code can then do `nested::thing` references with a single namespace qualification.
 
 ### Errors
-Ard does not have exceptions. Instead, errors can be represented as values. The built-in `Result<$Val, $Err>` type can be used to represent a union of a success value and an error.
+Ard does not have exceptions. Instead, errors are represented as values. The built-in `Result<$Val, $Err>` type can be used as a special type union of a success value and an error value.
 
 ```ard
 fn divide(a: Int, b: Int) Result<Int, Str> {
@@ -246,7 +246,7 @@ match divide(42, 0) {
 }
 ```
 
-The only way to ignore errors is to use the `.or()` method to provide a default value if the result is not ok
+The only way to ignore errors is to use the `.or()` method to provide a default value if the result is not ok.
 
 ```ard
 let res = divide(a, b).or(0)
@@ -265,124 +265,42 @@ greet("John") => (msg) {
 }
 ```
 
-## 3. Error Handling
+## Error Handling
 
-Ard uses a unique error handling mechanism centered around the `else` keyword.
-
-### Throwing Functions
-
-Functions that can throw errors must be marked with `throws` in their signature:
-
-```ard
-func riskyOperation() throws -> String {
-    if someCondition {
-        throw Error("Operation failed")
-    }
-    return "Success"
-}
-```
-
-### Handling Errors
-
-The `else` keyword is used after potentially throwing operations to handle errors. It can be used in two forms:
-
-1. Early Return or Throw Block:
-
-```ard
-func processData() -> String {
-    let data = riskyOperation() else {
-        return "Failed to process data"
-    }
-    return "Processed: " + data
-}
-```
-
-2. Fallback Value:
-
-```ard
-let username: String = getUserName() else "Anonymous"
-```
+idea: `else` keyword for fallbacks or as a hook on error
 
 ### Using `try` and `try?`
 
-The `try` keyword is used to propagate errors up the call stack:
+The `try` keyword is used to propagate error results up the call stack:
 
 ```ard
-func performOperation() throws {
-    let result = try riskyOperation()
-    console.log(result)
+fn performOperation() Result<Int, Str> {
+  let result = try riskyOperation()
+  200
 }
 ```
 
-The `try?` operator can be used to convert a throwing expression to a maybe value:
+The `try?` operator can be used to convert an error result to a maybe:
 
 ```ard
 let result: String? = try? riskyOperation()
 ```
 
-## 4. Asynchronous Programming
+## Asynchronous Programming
 
-Ard uses the `async` and `await` keywords for handling asynchronous operations.
-
-### Async Functions
-
-Async functions are declared using the `async` keyword:
-
-```ard
-async func fetchData() -> String {
-    // implementation
-}
-```
-
-### Await and Error Handling
-
-The `await` keyword signifies a JavaScript Promise. All `await` expressions require an `else` block for error handling, unless used with `try await` or `try? await`.
-
-```ard
-async func getData() -> String {
-    let data = await fetchData() else {
-        return "Failed to fetch data"
-    }
-    return data
-}
-
-async func riskyGet() throws -> String {
-    let data = try await fetchData()
-    return data
-}
-```
+Work in progress. Ideas for inspiration:
+- risor
+- inko
+- rust
 
 ## 5. Module System
 
 ### Module Definition and Exports
 
-In Ard, every file is implicitly a module. By default, all declarations in a file are exported and available to other modules.
-
-Use the `internal` keyword before any declaration to make it private to the module:
-
-```ard
-internal let secretKey = "1234567890"
-internal func helperFunction() {
-    // This function is only available within this module
-}
-```
+In Ard, every file is implicitly a module / package
 
 ### Import Syntax and Mechanisms
 
-Ard uses the `import` keyword to bring declarations from other files into the current scope.
-
-Basic import syntax:
-
-```ard
-import { functionName, TypeName } from "filename"
-```
-
-The compiler will look for a file named `filename.ard` in the same directory as the current file.
-
-Renaming imports:
-
-```ard
-import { originalName: newName } from "filename"
-```
+Ard uses the `use` keyword to import other packages
 
 This specification provides an overview of the Ard language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
