@@ -16,8 +16,8 @@ func TestJsonEncode(t *testing.T) {
 		let john = Person{name: "John", age: 30, employed: true}
 		let result = json::encode(john)
 		match result {
-		  str => str,
-			_ => ""
+		  ok => ok,
+			err => err
 		}
 	`)
 

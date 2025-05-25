@@ -459,18 +459,17 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				case "encode":
 					{
 						val := vm.eval(e.Call.Args[0])
-						result := &object{nil, e.Call.Type()}
+						resultType := e.Call.Type().(*checker.Result)
 						bytes, err := json.Marshal(val.premarshal())
 						if err != nil {
-							return result
+							return makeErr(&object{err.Error(), checker.Str}, resultType)
 						}
-						result.raw = string(bytes)
-						return result
+						return makeOk(&object{string(bytes), checker.Str}, resultType)
 					}
 				case "decode":
 					{
-						none := &object{nil, e.Call.Type()}
 						resultType := e.Call.Type().(*checker.Result)
+						errorResult := makeErr(&object{"Parsing Error", checker.Str}, resultType)
 						result := makeOk(nil, resultType)
 						jsonString := vm.eval(e.Call.Args[0]).raw.(string)
 						jsonBytes := []byte(jsonString)
@@ -582,16 +581,16 @@ func (vm *VM) eval(expr checker.Expression) *object {
 										} else if subj.Fields[key] == checker.Int {
 											fields[key] = &object{int(val), checker.Int}
 										} else {
-											return none
+											return errorResult
 										}
 									case bool:
 										if subj.Fields[key] != checker.Bool {
-											return none
+											return errorResult
 										}
 										fields[key] = &object{val, checker.Bool}
 									case nil:
 										if maybe, isMaybe := subj.Fields[key].(*checker.Maybe); !isMaybe {
-											return none
+											return errorResult
 										} else {
 											fields[key] = &object{val, maybe}
 										}
@@ -599,23 +598,23 @@ func (vm *VM) eval(expr checker.Expression) *object {
 										if val.String() == "[" {
 											listType, ok := subj.Fields[key].(*checker.List)
 											if !ok {
-												return none
+												return errorResult
 											}
 											list := []*object{}
 											for decoder.More() {
 												var v any
 												if err := decoder.Decode(&v); err != nil {
-													return none
+													return errorResult
 												}
 												obj := enforceSchema(vm, v, listType.Of())
 												if obj == nil {
-													return none
+													return errorResult
 												}
 												list = append(list, obj)
 											}
 											if t, err := decoder.Token(); err != nil {
 												log.Fatal(fmt.Errorf("Error taking closing ]: [%w] %T - %v\n", err, t, t))
-												return none
+												return errorResult
 											}
 
 											fields[key] = &object{list, listType}

@@ -6,7 +6,7 @@ func getInJson(name string) symbol {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "value", Type: &Any{name: "In"}}},
-			ReturnType: &Maybe{Str},
+			ReturnType: MakeResult(Str, Str),
 		}
 	case "decode":
 		return &FunctionDef{
