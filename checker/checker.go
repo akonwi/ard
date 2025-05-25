@@ -1715,7 +1715,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// collect generics
 					generics := []Type{}
 					for _, param := range fnDef.Parameters {
-						if strings.HasPrefix(param.Type.String(), "$") {
+						if strings.Contains(param.Type.String(), "$") {
 							if !slices.ContainsFunc(generics, func(g Type) bool {
 								return g.String() == param.Type.String()
 							}) {
@@ -1723,7 +1723,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							}
 						}
 					}
-					if strings.HasPrefix(fnDef.ReturnType.String(), "$") {
+					if strings.Contains(fnDef.ReturnType.String(), "$") {
 						if !slices.ContainsFunc(generics, func(g Type) bool {
 							return g.String() == fnDef.ReturnType.String()
 						}) {
@@ -1873,7 +1873,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// collect generics
 					generics := []Type{}
 					for _, param := range fnDef.Parameters {
-						if strings.HasPrefix(param.Type.String(), "$") {
+						if strings.Contains(param.Type.String(), "$") {
 							if !slices.ContainsFunc(generics, func(g Type) bool {
 								return g.String() == param.Type.String()
 							}) {
@@ -1881,7 +1881,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							}
 						}
 					}
-					if strings.HasPrefix(fnDef.ReturnType.String(), "$") {
+					if strings.Contains(fnDef.ReturnType.String(), "$") {
 						if !slices.ContainsFunc(generics, func(g Type) bool {
 							return g.String() == fnDef.ReturnType.String()
 						}) {
@@ -2288,23 +2288,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			if fnDef.hasGenerics() {
 				if len(s.Function.TypeArgs) > 0 {
 					// collect generics
+					// todo: do this in the other places too
 					generics := []Type{}
 					for _, param := range fnDef.Parameters {
-						if strings.HasPrefix(param.Type.String(), "$") {
-							if !slices.ContainsFunc(generics, func(g Type) bool {
-								return g.String() == param.Type.String()
-							}) {
-								generics = append(generics, param.Type)
-							}
-						}
+						generics = append(generics, getGenerics(param.Type)...)
 					}
-					if strings.HasPrefix(fnDef.ReturnType.String(), "$") {
-						if !slices.ContainsFunc(generics, func(g Type) bool {
-							return g.String() == fnDef.ReturnType.String()
-						}) {
-							generics = append(generics, fnDef.ReturnType)
-						}
-					}
+					generics = append(generics, getGenerics(fnDef.ReturnType)...)
+
 					if len(s.Function.TypeArgs) != len(generics) {
 						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
 						return nil

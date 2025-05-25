@@ -36,11 +36,9 @@ func TestJsonEncode(t *testing.T) {
 func TestJsonDecodeList(t *testing.T) {
 	result := run(t, `
 		use ard/json
+		let empty: [Int] = []
 		let nums = json::decode<[Int]>("[1,2,3]")
-		match nums {
-		  ns => ns.size(),
-			_ => 0
-		}
+		nums.or(empty).size()
 	`)
 
 	if result != 3 {
@@ -59,8 +57,8 @@ func TestJsonDecodeStruct(t *testing.T) {
 		let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true}"
 		let result = json::decode<Person>(john_str)
 		match result {
-		  john => john.name == "John" and john.age == 30 and john.employed == true,
-			_ => false
+		  ok => ok.name == "John" and ok.age == 30 and ok.employed == true,
+			err => false
 		}
 	`)
 
@@ -80,8 +78,8 @@ func TestJsonDecodeStructsWithMaybes(t *testing.T) {
 		let john_str = "\{\"name\": \"John\", \"age\": null}"
 		let result = json::decode<Person>(john_str)
 		match result {
-		  john => john.name.or("") == "John" and john.age.or(0) == 0 and john.employed.or(false) == false,
-			_ => false
+		  ok => ok.name.or("") == "John" and ok.age.or(0) == 0 and ok.employed.or(false) == false,
+			err => false
 		}
 	`)
 
@@ -104,8 +102,8 @@ func TestJsonDecodeNestedStructWithList(t *testing.T) {
 		let input = "\{ \"people\": [ \{ \"name\": \"John\", \"id\": 1 } ] }"
 		let result = json::decode<Payload>(input)
 		match result {
-		  res => res.people.size(),
-			_ => 0
+		  ok => ok.people.size(),
+			err => 0
 		}
 	`)
 

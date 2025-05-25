@@ -27,8 +27,8 @@ func Run2(program *checker.Program) (any, error) {
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
 	}
-	if r, ok := vm.result.raw.(*object); ok {
-		return r.raw, nil
+	if r, isResult := vm.result.raw.(_result); isResult {
+		return r.raw.raw, nil
 	}
 	return vm.result.raw, nil
 }
@@ -470,14 +470,32 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				case "decode":
 					{
 						none := &object{nil, e.Call.Type()}
-						result := &object{nil, e.Call.Type()}
+						resultType := e.Call.Type().(*checker.Result)
+						result := makeOk(nil, resultType)
 						jsonString := vm.eval(e.Call.Args[0]).raw.(string)
 						jsonBytes := []byte(jsonString)
 
-						inner := result._type.(*checker.Maybe).Of()
+						inner := resultType.Val()
+						anyType, isAny := inner.(*checker.Any)
+						maybeType, isMaybe := inner.(*checker.Maybe)
+						// if inner is a generic, reach all the way to the core
+						for (isAny && anyType.Actual() != nil) || (isMaybe) {
+							if isAny && anyType.Actual() != nil {
+								inner = anyType.Actual()
+							} else {
+								inner = maybeType.Of()
+							}
+							anyType, isAny = inner.(*checker.Any)
+							maybeType, isMaybe = inner.(*checker.Maybe)
+						}
 
 						if inner == checker.Str {
-							return &object{jsonString, e.Call.Type()}
+							res := &_result{ok: true, raw: &object{jsonString, checker.Str}}
+							if isMaybe {
+								res.raw._type = maybeType
+							}
+							result.raw = *res
+							return result
 						}
 
 						switch subj := inner.(type) {
@@ -486,56 +504,78 @@ func (vm *VM) eval(expr checker.Expression) *object {
 								_map := make(map[string]any)
 								err := json.Unmarshal(jsonBytes, &_map)
 								if err != nil {
-									// todo: build error handling
-									fmt.Printf("Error unmarshalling: %s\n", err)
-									return none
+									result.raw = _result{raw: &object{err.Error(), checker.Str}}
+									return result
 								}
 
 								fields := make(map[string]*object)
 								decoder := json.NewDecoder(strings.NewReader(jsonString))
 
 								if t, err := decoder.Token(); err != nil {
-									panic(fmt.Errorf("Error taking opening brace: [%w] %T - %v\n", err, t, t))
+									result.raw = _result{
+										raw: &object{
+											fmt.Errorf("Error taking opening brace: [%w] %T - %v\n", err, t, t),
+											checker.Str,
+										},
+									}
+									return result
 								}
 
 								for decoder.More() {
 									keyToken, err := decoder.Token()
 									if err != nil {
-										log.Fatal(fmt.Errorf("Error decoding key: [%w] %T - %v\n", err, keyToken, keyToken))
-										return none
+										result.raw = _result{
+											raw: &object{
+												fmt.Errorf("Error decoding key: [%w] %T - %v\n", err, keyToken, keyToken),
+												checker.Str,
+											},
+										}
+										return result
 									}
 									valToken, err := decoder.Token()
 									if err != nil {
-										log.Fatal(fmt.Errorf("Error decoding value: [%w] %T - %v\n", err, valToken, valToken))
-										return none
+										result.raw = _result{
+											raw: &object{
+												fmt.Errorf("Error decoding value: [%w] %T - %v\n", err, valToken, valToken),
+												checker.Str,
+											},
+										}
+										return result
 									}
 									key := keyToken.(string)
 
 									switch val := valToken.(type) {
 									case string:
 										valType := subj.Fields[key]
-										var decodeAs *checker.Maybe
-										maybe, isMaybe := valType.(*checker.Maybe)
-										// unless we're expecting a Maybe, wrap the expected in a Maybe for the call to json::decode
-										if isMaybe {
-											decodeAs = maybe
-										} else {
-											decodeAs = checker.MakeMaybe(valType)
-										}
+										var decodeAs checker.Type = valType
+										// maybe, isMaybe := valType.(*checker.Maybe)
+										// if isMaybe {
+										// 	decodeAs = maybe
+										// } else {
+										// 	decodeAs = valType
+										// }
 
 										decoded := vm.eval(&checker.PackageFunctionCall{
 											Package: "ard/json",
 											Call: checker.CreateCall("decode",
 												[]checker.Expression{&checker.StrLiteral{Value: val}},
 												checker.FunctionDef{
-													ReturnType: decodeAs,
+													ReturnType: checker.MakeResult(decodeAs, checker.Str),
 												},
 											),
 										})
-										if !isMaybe {
-											decoded._type = decodeAs.Of()
+										// if err
+										if !decoded.raw.(_result).ok {
+											return decoded
 										}
-										fields[key] = decoded
+										// if !isMaybe {
+										// 	decoded._type = decodeAs.Of()
+										// }
+										raw := decoded.raw.(_result).raw
+										if maybe, isMaybe := valType.(*checker.Maybe); isMaybe {
+											raw._type = maybe
+										}
+										fields[key] = raw
 									case float64:
 										if subj.Fields[key] == checker.Float {
 											fields[key] = &object{val, checker.Float}
@@ -591,7 +631,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 									if _, ok := fields[name]; !ok {
 										maybe, isMaybe := fType.(*checker.Maybe)
 										if !isMaybe {
-											return none
+											return makeErr(&object{"Missing required property: " + name, checker.Str}, resultType)
 										}
 										fields[name] = &object{nil, maybe}
 									}
@@ -605,7 +645,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 								// 	fields[name] = &object{val, fType}
 								// }
 
-								result.raw = fields
+								result.raw = _result{ok: true, raw: &object{fields, subj}}
 								return result
 							}
 						case *checker.List:
@@ -613,8 +653,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 								array := []any{}
 								err := json.Unmarshal([]byte(jsonBytes), &array)
 								if err != nil {
-									// todo: build error handling
-									fmt.Printf("Error unmarshalling: %s\n", err)
+									result.raw = &object{err.Error(), checker.Str}
 									return result
 								}
 
@@ -623,7 +662,8 @@ func (vm *VM) eval(expr checker.Expression) *object {
 									raw[i] = &object{array[i], subj.Of()}
 								}
 
-								result.raw = raw
+								rawObj := &object{raw, subj}
+								result.raw = _result{ok: true, raw: rawObj}
 								return result
 							}
 						default:
@@ -798,19 +838,16 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	case *checker.ResultMatch:
 		{
 			subj := vm.eval(e.Subject)
-			resultType := subj._type.(*checker.Result)
+			raw := subj.raw.(_result)
 
-			raw := subj.raw.(*object)
-
-			fmt.Printf("raw: %s == val: %s\n", raw._type, resultType.Val())
-			if raw._type == resultType.Val() {
+			if raw.ok {
 				res, _ := vm.evalBlock2(e.Ok.Body, func() {
-					vm.scope.add("ok", subj)
+					vm.scope.add("ok", raw.raw)
 				})
 				return res
 			}
 			res, _ := vm.evalBlock2(e.Err.Body, func() {
-				vm.scope.add("err", subj)
+				vm.scope.add("err", raw.raw)
 			})
 			return res
 		}

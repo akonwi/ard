@@ -132,25 +132,6 @@ func getInIO(name string) symbol {
 	}
 }
 
-func getInJson(name string) symbol {
-	switch name {
-	case "encode":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "value", Type: &Any{name: "In"}}},
-			ReturnType: &Maybe{Str},
-		}
-	case "decode":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: Str}},
-			ReturnType: &Maybe{&Any{name: "Out"}},
-		}
-	default:
-		return nil
-	}
-}
-
 func getInMaybe(name string) symbol {
 	switch name {
 	case "none":

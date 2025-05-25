@@ -25,7 +25,7 @@ func (vm *VM) popScope() {
 
 type object struct {
 	raw   any
-	_type any
+	_type checker.Type
 }
 
 func (o object) String() string {

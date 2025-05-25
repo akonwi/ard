@@ -2341,11 +2341,7 @@ func TestGenerics(t *testing.T) {
 			name: "Providing type arguments to static functions",
 			input: `
 				use ard/json
-				let int = json::decode<Int>("1")
-				match int {
-				  i => i + 10,
-					_ => -1
-				}
+				let result = json::decode<Int>("1")
 			`,
 			output: &checker.Program{
 				StdImports: map[string]checker.StdPackage{
@@ -2354,33 +2350,12 @@ func TestGenerics(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
-							Name: "int",
+							Name: "result",
 							Value: &checker.PackageFunctionCall{
 								Package: "ard/json",
 								Call: &checker.FunctionCall{
 									Name: "decode",
 									Args: []checker.Expression{&checker.StrLiteral{"1"}},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.OptionMatch{
-							Subject: &checker.Variable{},
-							Some: &checker.Match{
-								Pattern: &checker.Identifier{Name: "i"},
-								Body: &checker.Block{
-									Stmts: []checker.Statement{
-										{Expr: &checker.IntAddition{
-											&checker.Variable{},
-											&checker.IntLiteral{10},
-										}},
-									},
-								},
-							},
-							None: &checker.Block{
-								Stmts: []checker.Statement{
-									{Expr: &checker.Negation{&checker.IntLiteral{1}}},
 								},
 							},
 						},
