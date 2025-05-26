@@ -11,7 +11,6 @@ import (
 )
 
 type Program struct {
-	StdImports map[string]StdPackage
 	Imports    map[string]Package
 	Statements []Statement
 }
@@ -875,13 +874,12 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 func Check(input *ast.Program) (*Program, []Diagnostic) {
 	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
 	c.program = &Program{
-		StdImports: map[string]StdPackage{},
 		Imports:    map[string]Package{},
 		Statements: []Statement{},
 	}
 
 	for _, imp := range input.Imports {
-		if _, dup := c.program.StdImports[imp.Name]; dup {
+		if _, dup := c.program.Imports[imp.Name]; dup {
 			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
 			continue
 		}
