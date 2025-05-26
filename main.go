@@ -54,7 +54,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if _, err := vm.Run2(program); err != nil {
+		if _, err := vm.Run(program); err != nil {
 			fmt.Printf("Runtime error: %v\n", err)
 			os.Exit(1)
 		}

@@ -22,7 +22,7 @@ type compareKey struct {
 	strKey string
 }
 
-func Run2(program *checker.Program) (any, error) {
+func Run(program *checker.Program) (any, error) {
 	vm := New()
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
