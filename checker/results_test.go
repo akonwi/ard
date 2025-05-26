@@ -119,8 +119,8 @@ func TestResults(t *testing.T) {
 				}
 			}`,
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"io": checker.StdPackage{Name: "io", Path: "ard/io"},
+				Imports: map[string]checker.Package{
+					"io": checker.IoPkg{},
 				},
 				Statements: []checker.Statement{
 					{

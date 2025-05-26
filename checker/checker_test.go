@@ -76,13 +76,13 @@ func TestImports(t *testing.T) {
 				`use github.com/tree-sitter/tree-sitter as ts`,
 			}, "\n"),
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"io": {Name: "io", Path: "ard/io"},
+				Imports: map[string]checker.Package{
+					"io": checker.IoPkg{},
 				},
-				Imports: map[string]checker.ExtPackage{
-					"cmp": {Path: "github.com/google/go-cmp/cmp", Name: "cmp"},
-					"ts":  {Path: "github.com/tree-sitter/tree-sitter", Name: "ts"},
-				},
+				// Imports: map[string]checker.ExtPackage{
+				// 	"cmp": {Path: "github.com/google/go-cmp/cmp", Name: "cmp"},
+				// 	"ts":  {Path: "github.com/tree-sitter/tree-sitter", Name: "ts"},
+				// },
 			},
 		},
 		{
@@ -101,8 +101,8 @@ func TestImports(t *testing.T) {
 		{
 			name: "name collisions are caught",
 			input: strings.Join([]string{
-				`use std/fs`,
-				`use my/files as fs`,
+				`use ard/fs`,
+				`use ard/io as fs`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Warn, Message: "[2:1] Duplicate import: fs"},
@@ -1517,8 +1517,8 @@ func TestCallingPackageFunctions(t *testing.T) {
 				`io::print(200)`,
 			}, "\n"),
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"io": {Name: "io", Path: "ard/io"},
+				Imports: map[string]checker.Package{
+					"io": checker.IoPkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -1563,7 +1563,7 @@ func TestCallingInstanceMethods(t *testing.T) {
 	})
 }
 
-func TestOptionals(t *testing.T) {
+func TestMaybes(t *testing.T) {
 	run(t, []test{
 		{
 			name: "Declaring nullables",
@@ -1572,8 +1572,8 @@ func TestOptionals(t *testing.T) {
 				mut name: Str? = maybe::none()
 				mut name2 = maybe::some("Bob")`,
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"maybe": {"maybe", "ard/maybe"},
+				Imports: map[string]checker.Package{
+					"maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -1614,8 +1614,8 @@ func TestOptionals(t *testing.T) {
 			  name = "Alice"
 				name = maybe::none()`,
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"maybe": {Name: "maybe", Path: "ard/maybe"},
+				Imports: map[string]checker.Package{
+					"maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -1673,9 +1673,9 @@ func TestOptionals(t *testing.T) {
 					_ => io::print("no name")
 				}`,
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"io":    {Name: "io", Path: "ard/io"},
-					"maybe": {Name: "maybe", Path: "ard/maybe"},
+				Imports: map[string]checker.Package{
+					"io":    checker.IoPkg{},
+					"maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -2344,8 +2344,8 @@ func TestGenerics(t *testing.T) {
 				let result = json::decode<Int>("1")
 			`,
 			output: &checker.Program{
-				StdImports: map[string]checker.StdPackage{
-					"json": {Name: "json", Path: "ard/json"},
+				Imports: map[string]checker.Package{
+					"json": checker.JsonPkg{},
 				},
 				Statements: []checker.Statement{
 					{

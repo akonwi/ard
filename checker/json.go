@@ -1,5 +1,17 @@
 package checker
 
+type JsonPkg struct {
+}
+
+func (pkg JsonPkg) Path() string {
+	return "ard/json"
+}
+func (pkg JsonPkg) buildScope(scope *scope) {
+}
+func (pkg JsonPkg) get(name string) symbol {
+	return getInJson(name)
+}
+
 func getInJson(name string) symbol {
 	switch name {
 	case "encode":

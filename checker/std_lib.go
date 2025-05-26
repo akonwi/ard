@@ -1,17 +1,27 @@
 package checker
 
-var preludePkgs = map[string]*StdPackage{
-	"Float":  {Name: "Int", Path: "ard/float"},
-	"Int":    {Name: "Int", Path: "ard/ints"},
-	"Result": {Name: "Result", Path: "ard/result"},
+var preludePkgs = map[string]Package{
+	"Float":  FloatPkg{},
+	"Int":    IntPkg{},
+	"Result": ResultPkg{},
 }
 
-func findInStdLib(path, name string) (StdPackage, bool) {
+func findInStdLib(path string) (Package, bool) {
 	switch path {
-	case "ard/io", "ard/json", "ard/maybe", "ard/fs", "ard/http", "ard/result":
-		return StdPackage{Path: path, Name: name}, true
+	case "ard/fs":
+		return FsPkg{}, true
+	case "ard/io":
+		return IoPkg{}, true
+	case "ard/http":
+		return HttpPkg{}, true
+	case "ard/json":
+		return JsonPkg{}, true
+	case "ard/maybe":
+		return MaybePkg{}, true
+	case "ard/result":
+		return ResultPkg{}, true
 	}
-	return StdPackage{}, false
+	return nil, false
 }
 
 func getInPackage(pkgPath, name string) symbol {
@@ -37,6 +47,16 @@ func getInPackage(pkgPath, name string) symbol {
 	}
 }
 
+/* ard/float */
+type FloatPkg struct{}
+
+func (pkg FloatPkg) Path() string {
+	return "ard/float"
+}
+func (pkg FloatPkg) buildScope(scope *scope) {}
+func (pkg FloatPkg) get(name string) symbol {
+	return getInFloat(name)
+}
 func getInFloat(name string) symbol {
 	switch name {
 	case "from_int":
@@ -54,6 +74,17 @@ func getInFloat(name string) symbol {
 	default:
 		return nil
 	}
+}
+
+/* ard/fs */
+type FsPkg struct{}
+
+func (pkg FsPkg) Path() string {
+	return "ard/fs"
+}
+func (pkg FsPkg) buildScope(scope *scope) {}
+func (pkg FsPkg) get(name string) symbol {
+	return getInFS(name)
 }
 
 func getInFS(name string) symbol {
@@ -99,6 +130,16 @@ func getInFS(name string) symbol {
 	}
 }
 
+/* ard/ints */
+type IntPkg struct{}
+
+func (pkg IntPkg) Path() string {
+	return "ard/ints"
+}
+func (pkg IntPkg) buildScope(scope *scope) {}
+func (pkg IntPkg) get(name string) symbol {
+	return getInInts(name)
+}
 func getInInts(name string) symbol {
 	switch name {
 	case "from_str":
@@ -112,6 +153,17 @@ func getInInts(name string) symbol {
 	}
 }
 
+/* ard/io */
+type IoPkg struct{}
+
+func (pkg IoPkg) Path() string {
+	return "ard/io"
+}
+func (pkg IoPkg) buildScope(scope *scope) {
+}
+func (pkg IoPkg) get(name string) symbol {
+	return getInIO(name)
+}
 func getInIO(name string) symbol {
 	switch name {
 	case "print":
@@ -130,6 +182,18 @@ func getInIO(name string) symbol {
 	default:
 		return nil
 	}
+}
+
+/* ard/maybe */
+type MaybePkg struct{}
+
+func (pkg MaybePkg) Path() string {
+	return "ard/maybe"
+}
+func (pkg MaybePkg) get(name string) symbol {
+	return getInMaybe(name)
+}
+func (pkg MaybePkg) buildScope(scope *scope) {
 }
 
 func getInMaybe(name string) symbol {
@@ -153,6 +217,17 @@ func getInMaybe(name string) symbol {
 	default:
 		return nil
 	}
+}
+
+type ResultPkg struct {
+}
+
+func (pkg ResultPkg) Path() string {
+	return "ard/result"
+}
+func (pkg ResultPkg) buildScope(scope *scope) {}
+func (pkg ResultPkg) get(name string) symbol {
+	return getInResult(name)
 }
 
 func getInResult(name string) symbol {

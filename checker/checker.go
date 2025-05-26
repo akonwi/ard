@@ -12,8 +12,14 @@ import (
 
 type Program struct {
 	StdImports map[string]StdPackage
-	Imports    map[string]ExtPackage
+	Imports    map[string]Package
 	Statements []Statement
+}
+
+type Package interface {
+	Path() string
+	buildScope(scope *scope)
+	get(name string) symbol
 }
 
 type StdPackage struct {
@@ -870,7 +876,7 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
 	c.program = &Program{
 		StdImports: map[string]StdPackage{},
-		Imports:    map[string]ExtPackage{},
+		Imports:    map[string]Package{},
 		Statements: []Statement{},
 	}
 
@@ -885,13 +891,11 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
-			if pkg, ok := findInStdLib(imp.Path, imp.Name); ok {
-				c.program.StdImports[imp.Name] = pkg
+			if pkg, ok := findInStdLib(imp.Path); ok {
+				c.program.Imports[imp.Name] = pkg
 			} else {
 				c.addError(fmt.Sprintf("Unknown package: %s", imp.Path), imp.GetLocation())
 			}
-		} else {
-			c.program.Imports[imp.Name] = ExtPackage{Path: imp.Path, Name: imp.Name}
 		}
 	}
 
@@ -904,9 +908,9 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 	return c.program, c.diagnostics
 }
 
-func (c *checker) resolvePkg(name string) *StdPackage {
-	if pkg, ok := c.program.StdImports[name]; ok {
-		return &pkg
+func (c *checker) resolvePkg(name string) Package {
+	if pkg, ok := c.program.Imports[name]; ok {
+		return pkg
 	}
 
 	if pkg, ok := preludePkgs[name]; ok {
@@ -2222,7 +2226,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			sym := getInPackage(pkg.Path, s.Function.Name)
+			sym := pkg.get(s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
 				return nil
@@ -2324,7 +2328,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Return function call with specialized function
 				return &PackageFunctionCall{
-					Package: pkg.Path,
+					Package: pkg.Path(),
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -2342,7 +2346,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Create package function call
 			return &PackageFunctionCall{
-				Package: pkg.Path,
+				Package: pkg.Path(),
 				Call:    call,
 			}
 		}
@@ -2874,37 +2878,34 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
 				// first check if this is accessing a package
-				if pkg, ok := c.program.StdImports[id.Name]; ok {
-					// todo: make Package an interface, with implementations for the std lib
-					if pkg.Path == "ard/http" {
-						switch prop := s.Property.(type) {
-						case *ast.StructInstance:
-							/* in order to simply reuse existing checking,
-							we need a new scope pushed on, with the symbols of the package.
-							todo: this should be part of the Package interface
-							*/
-							c.scope = newScope(c.scope)
-							defer func() {
-								c.scope = c.scope.parent
-							}()
 
-							buildHttpPkgScope(c.scope)
-							// note: in order to get more exact diagnostic messages,
-							// extract more helper methods out of checkExpr()
-							instance := c.checkExpr(prop)
-							if instance == nil {
-								return nil
-							}
+				if pkg := c.resolvePkg(id.Name); pkg != nil {
+					/* in order to simply reuse existing checking,
+					we need a new scope pushed on, with the symbols of the package.
+					todo: this should be part of the Package interface
+					*/
+					c.scope = newScope(c.scope)
+					defer func() {
+						c.scope = c.scope.parent
+					}()
+					pkg.buildScope(c.scope)
+					switch prop := s.Property.(type) {
+					case *ast.StructInstance:
+						// note: in order to get more exact diagnostic messages,
+						// extract more helper methods out of checkExpr()
+						instance := c.checkExpr(prop)
+						if instance == nil {
+							return nil
+						}
 
-							casted := instance.(*StructInstance)
-							return &PackageStructInstance{
-								Package:  pkg.Path,
-								Property: casted,
-							}
+						casted := instance.(*StructInstance)
+						return &PackageStructInstance{
+							Package:  pkg.Path(),
+							Property: casted,
 						}
 					}
 
-					c.addError(fmt.Sprintf("Undefined reference in '%s'", pkg.Name), s.Property.GetLocation())
+					c.addError(fmt.Sprintf("Undefined reference in '%s'", id.Name), s.Property.GetLocation())
 					return nil
 				}
 
@@ -3004,7 +3005,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return nil
 			}
 
-			sym := getInPackage(pkg.Path, s.Function.Name)
+			sym := getInPackage(pkg.Path(), s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
 				return nil

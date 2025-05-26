@@ -1,9 +1,18 @@
 package checker
 
-func buildHttpPkgScope(scope *scope) {
+/* ard/http */
+type HttpPkg struct{}
+
+func (pkg HttpPkg) Path() string {
+	return "ard/http"
+}
+func (pkg HttpPkg) buildScope(scope *scope) {
 	scope.symbols["Request"] = HttpRequestDef
 	scope.symbols["Response"] = HttpResponseDef
 	scope.symbols["send"] = HttpSendFn
+}
+func (pkg HttpPkg) get(name string) symbol {
+	return getInHTTP(name)
 }
 
 var HttpRequestDef = &StructDef{
