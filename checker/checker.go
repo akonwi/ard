@@ -17,7 +17,7 @@ type Program struct {
 }
 
 type Package interface {
-	Path() string
+	path() string
 	buildScope(scope *scope)
 	get(name string) symbol
 }
@@ -2328,7 +2328,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Return function call with specialized function
 				return &PackageFunctionCall{
-					Package: pkg.Path(),
+					Package: pkg.path(),
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -2346,7 +2346,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Create package function call
 			return &PackageFunctionCall{
-				Package: pkg.Path(),
+				Package: pkg.path(),
 				Call:    call,
 			}
 		}
@@ -2878,11 +2878,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
 				// first check if this is accessing a package
-
 				if pkg := c.resolvePkg(id.Name); pkg != nil {
-					/* in order to simply reuse existing checking,
-					we need a new scope pushed on, with the symbols of the package.
-					todo: this should be part of the Package interface
+					/* in order to reuse existing checking,
+					pushed a new scope, with the symbols of the package, and check it
 					*/
 					c.scope = newScope(c.scope)
 					defer func() {
@@ -2900,7 +2898,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 						casted := instance.(*StructInstance)
 						return &PackageStructInstance{
-							Package:  pkg.Path(),
+							Package:  pkg.path(),
 							Property: casted,
 						}
 					}
@@ -3005,7 +3003,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return nil
 			}
 
-			sym := getInPackage(pkg.Path(), s.Function.Name)
+			sym := pkg.get(s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
 				return nil

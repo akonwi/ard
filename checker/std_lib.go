@@ -24,40 +24,14 @@ func findInStdLib(path string) (Package, bool) {
 	return nil, false
 }
 
-func getInPackage(pkgPath, name string) symbol {
-	switch pkgPath {
-	case "ard/float":
-		return getInFloat(name)
-	case "ard/fs":
-		return getInFS(name)
-	case "ard/http":
-		return getInHTTP(name)
-	case "ard/ints":
-		return getInInts(name)
-	case "ard/io":
-		return getInIO(name)
-	case "ard/json":
-		return getInJson(name)
-	case "ard/maybe":
-		return getInMaybe(name)
-	case "ard/result":
-		return getInResult(name)
-	default:
-		return nil
-	}
-}
-
 /* ard/float */
 type FloatPkg struct{}
 
-func (pkg FloatPkg) Path() string {
+func (pkg FloatPkg) path() string {
 	return "ard/float"
 }
 func (pkg FloatPkg) buildScope(scope *scope) {}
 func (pkg FloatPkg) get(name string) symbol {
-	return getInFloat(name)
-}
-func getInFloat(name string) symbol {
 	switch name {
 	case "from_int":
 		return &FunctionDef{
@@ -79,15 +53,11 @@ func getInFloat(name string) symbol {
 /* ard/fs */
 type FsPkg struct{}
 
-func (pkg FsPkg) Path() string {
+func (pkg FsPkg) path() string {
 	return "ard/fs"
 }
 func (pkg FsPkg) buildScope(scope *scope) {}
 func (pkg FsPkg) get(name string) symbol {
-	return getInFS(name)
-}
-
-func getInFS(name string) symbol {
 	switch name {
 	case "append":
 		return &FunctionDef{
@@ -133,14 +103,11 @@ func getInFS(name string) symbol {
 /* ard/ints */
 type IntPkg struct{}
 
-func (pkg IntPkg) Path() string {
+func (pkg IntPkg) path() string {
 	return "ard/ints"
 }
 func (pkg IntPkg) buildScope(scope *scope) {}
 func (pkg IntPkg) get(name string) symbol {
-	return getInInts(name)
-}
-func getInInts(name string) symbol {
 	switch name {
 	case "from_str":
 		return &FunctionDef{
@@ -156,15 +123,12 @@ func getInInts(name string) symbol {
 /* ard/io */
 type IoPkg struct{}
 
-func (pkg IoPkg) Path() string {
+func (pkg IoPkg) path() string {
 	return "ard/io"
 }
 func (pkg IoPkg) buildScope(scope *scope) {
 }
 func (pkg IoPkg) get(name string) symbol {
-	return getInIO(name)
-}
-func getInIO(name string) symbol {
 	switch name {
 	case "print":
 		fn := &FunctionDef{
@@ -187,16 +151,12 @@ func getInIO(name string) symbol {
 /* ard/maybe */
 type MaybePkg struct{}
 
-func (pkg MaybePkg) Path() string {
+func (pkg MaybePkg) path() string {
 	return "ard/maybe"
-}
-func (pkg MaybePkg) get(name string) symbol {
-	return getInMaybe(name)
 }
 func (pkg MaybePkg) buildScope(scope *scope) {
 }
-
-func getInMaybe(name string) symbol {
+func (pkg MaybePkg) get(name string) symbol {
 	switch name {
 	case "none":
 		return &FunctionDef{
@@ -222,15 +182,11 @@ func getInMaybe(name string) symbol {
 type ResultPkg struct {
 }
 
-func (pkg ResultPkg) Path() string {
+func (pkg ResultPkg) path() string {
 	return "ard/result"
 }
 func (pkg ResultPkg) buildScope(scope *scope) {}
 func (pkg ResultPkg) get(name string) symbol {
-	return getInResult(name)
-}
-
-func getInResult(name string) symbol {
 	switch name {
 	case "ok":
 		// This function returns Result<T, E> where T is the type of the parameter
