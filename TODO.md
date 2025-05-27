@@ -1,5 +1,6 @@
 ## TODO
 
+- [ ] `panic("reason")` for exiting
 - [ ] `try?` syntax to turn a Result into a Maybe: `let maybe_num: Int = try? dangerous_op()`
 - [ ] `try!` syntax to unwrap value or immediately return error Result: `let num = try! dangerous()`
 - [ ] syntax for generics on structs
@@ -15,7 +16,7 @@
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
 - [ ] ?: make less scripty
-  - [ ] introduce `main()` function for execution start
+  - [ ] `main()` function for execution start
   - [ ] allow non-linear declarations at the top level
     -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] matching on strings?

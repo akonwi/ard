@@ -1,0 +1,7 @@
+use ard/io
+
+io::print("Guess the number!\nPlease input your guess:")
+match io::read_line() {
+  ok(guess) => io::print("You guessed: {guess}"),
+  err => io::print("Failed to read line: {err}")
+}
