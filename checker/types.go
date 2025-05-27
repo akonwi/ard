@@ -39,6 +39,12 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Int,
 		}
+	case "trim":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
 	default:
 		return nil
 	}

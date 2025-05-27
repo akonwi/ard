@@ -890,13 +890,16 @@ func (vm *VM) evalStrProperty(subj *object, name string) *object {
 }
 
 func (vm *VM) evalStrMethod(subj *object, m *checker.FunctionCall) *object {
+	raw := subj.raw.(string)
 	switch m.Name {
 	case "size":
-		return &object{len(subj.raw.(string)), checker.Int}
+		return &object{len(raw), m.Type()}
 	case "is_empty":
-		return &object{len(subj.raw.(string)) == 0, checker.Bool}
+		return &object{len(raw) == 0, m.Type()}
 	case "contains":
-		return &object{strings.Contains(subj.raw.(string), vm.eval(m.Args[0]).raw.(string)), checker.Bool}
+		return &object{strings.Contains(raw, vm.eval(m.Args[0]).raw.(string)), m.Type()}
+	case "trim":
+		return &object{strings.Trim(raw, " "), m.Type()}
 	default:
 		return void
 	}
