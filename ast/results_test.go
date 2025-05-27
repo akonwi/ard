@@ -35,7 +35,7 @@ func TestResultTypeInSignature(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&FunctionDeclaration{
-						Name: "foo",
+						Name:       "foo",
 						Parameters: []Parameter{},
 						ReturnType: &ResultType{
 							Val: &IntType{},

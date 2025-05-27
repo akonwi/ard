@@ -241,7 +241,7 @@ Similar to type unions, results can be matched to control conditional execution.
 
 ```ard
 match divide(42, 0) {
-  ok => io::print(ok.to_str()),
+  ok(num) => io::print(num.to_str()),
   err => io::print(err),
 }
 ```

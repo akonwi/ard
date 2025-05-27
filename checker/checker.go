@@ -2830,26 +2830,60 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			var okCase *Match
 			var errCase *Match
 			for _, node := range s.Cases {
-				if node.Pattern.(*ast.Identifier).Name == "ok" {
-					okCase = &Match{
-						Pattern: &Identifier{Name: "ok"},
-						Body: c.checkBlock(node.Body, func() {
-							c.scope.add(&VariableDef{
-								Name:   "ok",
-								__type: resultType.Val(),
-							})
-						}),
+				switch p := node.Pattern.(type) {
+				case *ast.Identifier:
+					{
+						if p.Name == "ok" {
+							okCase = &Match{
+								Pattern: &Identifier{Name: "ok"},
+								Body: c.checkBlock(node.Body, func() {
+									c.scope.add(&VariableDef{
+										Name:   "ok",
+										__type: resultType.Val(),
+									})
+								}),
+							}
+						} else if p.Name == "err" {
+							errCase = &Match{
+								Pattern: &Identifier{Name: "err"},
+								Body: c.checkBlock(node.Body, func() {
+									c.scope.add(&VariableDef{
+										Name:   "err",
+										__type: resultType.Err(),
+									})
+								}),
+							}
+						} else {
+							c.addWarning("Ignored pattern", p.GetLocation())
+						}
 					}
-				}
-				if node.Pattern.(*ast.Identifier).Name == "err" {
-					errCase = &Match{
-						Pattern: &Identifier{Name: "err"},
-						Body: c.checkBlock(node.Body, func() {
-							c.scope.add(&VariableDef{
-								Name:   "err",
-								__type: resultType.Err(),
-							})
-						}),
+				case *ast.FunctionCall: // use FunctionCall node as aliasing variable
+					{
+						varName := p.Args[0].(*ast.Identifier).Name
+						if p.Name == "ok" {
+							varName := p.Args[0].(*ast.Identifier).Name
+							okCase = &Match{
+								Pattern: &Identifier{Name: varName},
+								Body: c.checkBlock(node.Body, func() {
+									c.scope.add(&VariableDef{
+										Name:   varName,
+										__type: resultType.Val(),
+									})
+								}),
+							}
+						} else if p.Name == "err" {
+							errCase = &Match{
+								Pattern: &Identifier{Name: varName},
+								Body: c.checkBlock(node.Body, func() {
+									c.scope.add(&VariableDef{
+										Name:   varName,
+										__type: resultType.Err(),
+									})
+								}),
+							}
+						} else {
+							c.addWarning("Ignored pattern", p.GetLocation())
+						}
 					}
 				}
 			}

@@ -845,12 +845,12 @@ func (vm *VM) eval(expr checker.Expression) *object {
 
 			if raw.ok {
 				res, _ := vm.evalBlock(e.Ok.Body, func() {
-					vm.scope.add("ok", raw.raw)
+					vm.scope.add(e.Ok.Pattern.Name, raw.raw)
 				})
 				return res
 			}
 			res, _ := vm.evalBlock(e.Err.Body, func() {
-				vm.scope.add("err", raw.raw)
+				vm.scope.add(e.Err.Pattern.Name, raw.raw)
 			})
 			return res
 		}

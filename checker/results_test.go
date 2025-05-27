@@ -112,7 +112,7 @@ func TestResults(t *testing.T) {
 
 			let res: Result<Int, Str> = Result::err("foo")
 			match res {
-				ok => ok,
+				ok(num) => num,
 				err => {
 				  io::print("failed: " + err)
 					-1
@@ -139,7 +139,7 @@ func TestResults(t *testing.T) {
 						Expr: &checker.ResultMatch{
 							Subject: &checker.Variable{},
 							Ok: &checker.Match{
-								Pattern: &checker.Identifier{Name: "ok"},
+								Pattern: &checker.Identifier{Name: "num"},
 								Body: &checker.Block{Stmts: []checker.Statement{
 									{Expr: &checker.Variable{}},
 								}},
