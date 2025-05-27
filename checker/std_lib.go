@@ -141,7 +141,7 @@ func (pkg IoPkg) get(name string) symbol {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{},
-			ReturnType: Str,
+			ReturnType: MakeResult(Str, Str),
 		}
 	default:
 		return nil

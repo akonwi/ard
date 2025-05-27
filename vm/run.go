@@ -448,7 +448,11 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				case "read_line":
 					scanner := bufio.NewScanner(os.Stdin)
 					scanner.Scan()
-					return &object{scanner.Text(), e.Call.Type()}
+					resultType := e.Call.Type().(*checker.Result)
+					if err := scanner.Err(); err != nil {
+						return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+					}
+					return makeOk(&object{scanner.Text(), resultType.Val()}, resultType)
 				default:
 					panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
 				}
