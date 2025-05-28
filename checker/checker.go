@@ -1760,7 +1760,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						if actual == nil {
 							return nil
 						}
-						refine(any, actual)
+						typeMap := make(map[string]Type)
+						typeMap[any.(*Any).name] = actual
+						substituteType(any, typeMap)
 					}
 				}
 
@@ -1910,7 +1912,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						if actual == nil {
 							return nil
 						}
-						refine(any, actual)
+						typeMap := make(map[string]Type)
+						typeMap[any.(*Any).name] = actual
+						substituteType(any, typeMap)
 					}
 				}
 
@@ -2316,7 +2320,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						if actual == nil {
 							return nil
 						}
-						refine(any, actual)
+						typeMap := make(map[string]Type)
+						typeMap[any.(*Any).name] = actual
+						substituteType(any, typeMap)
 					}
 				}
 
@@ -3192,22 +3198,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		return typ
 	case *Maybe:
 		return &Maybe{of: substituteType(typ.of, typeMap)}
-	// Handle other compound types
-	default:
-		return t
-	}
-}
-
-// Refine a generic as a concrete type
-// todo: is this still needed?
-func refine(t Type, expected Type) Type {
-	switch typ := t.(type) {
-	case *Any:
-		typ.actual = expected
-		return typ
-	case *Maybe:
-		typ.of = expected
-		return typ
 	// Handle other compound types
 	default:
 		return t
