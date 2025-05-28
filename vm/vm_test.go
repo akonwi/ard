@@ -33,6 +33,25 @@ func run(t *testing.T, input string) any {
 	return res
 }
 
+func expectPanic(t *testing.T, substring, input string) {
+	t.Helper()
+	tree, err := ast.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Error parsing program: %v", err)
+	}
+	program, diagnostics := checker.Check(tree)
+	if len(diagnostics) > 0 {
+		t.Fatalf("Diagnostics found: %v", diagnostics)
+	}
+	_, err = vm.Run(program)
+	if err == nil {
+		t.Fatal("Expected a panic")
+	}
+	if !strings.Contains(err.Error(), substring) {
+		t.Fatalf("Expected a panic containing: %s\nInstead received `%s`", substring, err)
+	}
+}
+
 func runTests(t *testing.T, tests []test) {
 	t.Helper()
 	for _, test := range tests {
@@ -531,4 +550,14 @@ func TestUnions(t *testing.T) {
 			want: "20",
 		},
 	})
+}
+
+func TestPanic(t *testing.T) {
+	expectPanic(t, "This is an error", `
+		fn speak() {
+		  panic("This is an error")
+		}
+		speak()
+		1 + 1
+	`)
 }

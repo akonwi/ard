@@ -839,6 +839,19 @@ func (r ResultMatch) Type() Type {
 	return r.Ok.Body.Type()
 }
 
+type Panic struct {
+	Message Expression
+	node    *ast.FunctionCall
+}
+
+func (p Panic) GetLocation() ast.Location {
+	return p.node.GetLocation()
+}
+
+func (p Panic) Type() Type {
+	return Void
+}
+
 func isMutable(expr Expression) bool {
 	if v, ok := expr.(*Variable); ok {
 		return v.isMutable()
@@ -1662,6 +1675,22 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		return nil
 	case *ast.FunctionCall:
 		{
+			if s.Name == "panic" {
+				if len(s.Args) != 1 {
+					c.addError("Incorrect number of arguments: 'panic' requires a message", s.GetLocation())
+					return nil
+				}
+				message := c.checkExpr(s.Args[0])
+				if message == nil {
+					return nil
+				}
+
+				return &Panic{
+					Message: message,
+					node:    s,
+				}
+			}
+
 			// Find the function in the scope
 			fnSym := c.scope.get(s.Name)
 			if fnSym == nil {

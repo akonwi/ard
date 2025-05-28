@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -22,7 +23,17 @@ type compareKey struct {
 	strKey string
 }
 
-func Run(program *checker.Program) (any, error) {
+func Run(program *checker.Program) (val any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if msg, ok := r.(string); ok {
+				err = errors.New(msg)
+			} else {
+				panic(r)
+			}
+		}
+	}()
+
 	vm := New()
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
@@ -271,6 +282,9 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		obj := &object{raw, e.Type()}
 		vm.scope.add(e.Name, obj)
 		return obj
+	case *checker.Panic:
+		msg := vm.eval(e.Message)
+		panic(fmt.Sprintf("panic at %s:\n%s", e.GetLocation().Start, msg.raw))
 	case *checker.FunctionCall:
 		sig, ok := vm.scope.get(e.Name)
 		if !ok {
