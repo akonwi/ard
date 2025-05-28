@@ -2325,6 +2325,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						substituteType(any, typeMap)
 					}
 				}
+				// technically could be an else block
 
 				// Create a mapping of generic parameters to concrete types
 				typeMap := make(map[string]Type)

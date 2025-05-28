@@ -50,8 +50,6 @@ func (s str) get(name string) Type {
 	}
 }
 func (s *str) equal(other Type) bool {
-	// coerce other if it's an open Any
-	// todo: implement in other Types
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
 			o.actual = s
@@ -114,7 +112,20 @@ func (f float) get(name string) Type {
 	}
 }
 func (f *float) equal(other Type) bool {
-	return f == other
+	if f == other {
+		return true
+	}
+	if o, ok := other.(*Any); ok {
+		if o.actual == nil {
+			o.actual = f
+			return true
+		}
+		return f == o.actual
+	}
+	if union, ok := other.(*Union); ok {
+		return union.equal(f)
+	}
+	return false
 }
 
 var Float = &float{}
@@ -135,17 +146,20 @@ func (b _bool) get(name string) Type {
 	}
 }
 func (b *_bool) equal(other Type) bool {
-	if any, ok := other.(*Any); ok {
-		if any.actual == nil {
+	if b == other {
+		return true
+	}
+	if o, ok := other.(*Any); ok {
+		if o.actual == nil {
+			o.actual = b
 			return true
 		}
-		return b.equal(any.actual)
+		return b == o.actual
 	}
-
 	if union, ok := other.(*Union); ok {
 		return union.equal(b)
 	}
-	return b == other
+	return false
 }
 
 var Bool = &_bool{}
@@ -208,9 +222,13 @@ func (l *List) equal(other Type) bool {
 	}
 	if any, ok := other.(*Any); ok {
 		if any.actual == nil {
+			any.actual = l
 			return true
 		}
 		return l.equal(any.actual)
+	}
+	if union, ok := other.(*Union); ok {
+		return union.equal(l)
 	}
 
 	return false
@@ -235,7 +253,17 @@ func (m Map) equal(other Type) bool {
 	if o, ok := other.(*Map); ok {
 		return m.key.equal(o.key) && m.value.equal(o.value)
 	}
+	if any, ok := other.(*Any); ok {
+		if any.actual == nil {
+			any.actual = m
+			return true
+		}
+		return m.equal(any.actual)
+	}
 
+	if union, ok := other.(*Union); ok {
+		return union.equal(m)
+	}
 	return false
 }
 func (m Map) get(name string) Type {
