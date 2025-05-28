@@ -3112,8 +3112,17 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 		}
 	}
 
-	// todo?: assert against expectedType
-	return c.checkExpr(expr)
+	checked := c.checkExpr(expr)
+	if checked == nil {
+		return nil
+	}
+
+	if !expectedType.equal(checked.Type()) {
+		c.addError(typeMismatch(expectedType, checked.Type()), expr.GetLocation())
+		return nil
+	}
+
+	return checked
 }
 
 func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {
