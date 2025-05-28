@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] `panic("reason")` for exiting
 - [ ] `try?` syntax to turn a Result into a Maybe: `let maybe_num: Int = try? dangerous_op()`
 - [ ] `try!` syntax to unwrap value or immediately return error Result: `let num = try! dangerous()`
 - [ ] syntax for generics on structs

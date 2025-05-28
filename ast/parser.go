@@ -217,11 +217,17 @@ func (p *parser) ifStatement() (Statement, error) {
 }
 
 func (p *parser) whileLoop() (Statement, error) {
-	condition, err := p.or()
-	if err != nil {
-		return nil, err
+	var condition Expression
+
+	// skip condition for infinite loop - `while { foo() }`
+	if !p.match(left_brace) {
+		or, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		condition = or
+		p.consume(left_brace, "Expected '{' after while condition")
 	}
-	p.consume(left_brace, "Expected '{' after while condition")
 
 	statements := []Statement{}
 	for !p.check(right_brace) {

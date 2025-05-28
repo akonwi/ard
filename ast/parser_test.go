@@ -138,7 +138,8 @@ func TestWhileLoop(t *testing.T) {
 			name: "while loops",
 			input: `
 					while count <= 9 {}
-					while has_more {}`,
+					while has_more {}
+					while {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -152,6 +153,10 @@ func TestWhileLoop(t *testing.T) {
 					},
 					&WhileLoop{
 						Condition: &Identifier{Name: "has_more"},
+						Body:      []Statement{},
+					},
+					&WhileLoop{
+						Condition: nil,
 						Body:      []Statement{},
 					},
 				},

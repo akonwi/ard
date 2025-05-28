@@ -1140,9 +1140,11 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.WhileLoop:
 		{
 			// Check the condition expression
-			condition := c.checkExpr(s.Condition)
-			if condition == nil {
-				return nil
+			var condition Expression
+			if s.Condition == nil {
+				condition = &BoolLiteral{true}
+			} else {
+				condition = c.checkExpr(s.Condition)
 			}
 
 			// Condition must be a boolean expression

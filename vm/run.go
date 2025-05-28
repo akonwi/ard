@@ -260,12 +260,12 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		if cond := vm.eval(e.Condition); cond.raw.(bool) {
 			res, _ := vm.evalBlock(e.Body, nil)
 			return res
-		} else if e.ElseIf != nil {
-			if cond := vm.eval(e.ElseIf.Condition); cond.raw.(bool) {
-				res, _ := vm.evalBlock(e.ElseIf.Body, nil)
-				return res
-			}
-		} else if e.Else != nil {
+		}
+		if e.ElseIf != nil && vm.eval(e.ElseIf.Condition).raw.(bool) {
+			res, _ := vm.evalBlock(e.ElseIf.Body, nil)
+			return res
+		}
+		if e.Else != nil {
 			res, _ := vm.evalBlock(e.Else, nil)
 			return res
 		}
