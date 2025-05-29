@@ -403,6 +403,20 @@ func TestComments(t *testing.T) {
 			},
 		},
 		{
+			name:  "Inline comment",
+			input: "let x = 200 // this is a comment",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:  "x",
+						Value: &NumLiteral{Value: "200"},
+					},
+					&Comment{Value: "// this is a comment"},
+				},
+			},
+		},
+		{
 			name:  "Block comment",
 			input: "/* this is comment line 1" + "\n" + "this is a comment line 2*/",
 			output: Program{
