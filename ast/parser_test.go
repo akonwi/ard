@@ -20,7 +20,9 @@ var compareOptions = cmp.Options{
 		Map{},
 		CustomType{},
 		GenericType{},
-		ResultType{}),
+		ResultType{},
+		Try{},
+	),
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Location"
 	}, cmp.Ignore()),

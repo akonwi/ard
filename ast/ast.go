@@ -590,3 +590,15 @@ type MatchCase struct {
 func (m MatchCase) String() string {
 	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
 }
+
+type Try struct {
+	keyword    Identifier
+	Expression Expression
+}
+
+func (t Try) String() string {
+	return fmt.Sprintf("try %s", t.Expression)
+}
+func (t Try) GetLocation() Location {
+	return t.keyword.Location
+}

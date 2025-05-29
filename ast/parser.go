@@ -640,6 +640,29 @@ func (p *parser) matchExpr() (Expression, error) {
 		return matchExpr, nil
 	}
 
+	return p.try()
+}
+
+func (p *parser) try() (Expression, error) {
+	if p.check(identifier) && p.peek().text == "try" {
+		idToken := p.advance()
+		keyword := Identifier{
+			Name: idToken.text,
+			Location: Location{
+				Start: Point{Row: idToken.line, Col: idToken.column},
+				End:   Point{Row: idToken.line, Col: idToken.column + 3},
+			},
+		}
+		expr, err := p.functionDef(false)
+		if err != nil {
+			return nil, err
+		}
+
+		return &Try{
+			keyword:    keyword,
+			Expression: expr,
+		}, nil
+	}
 	return p.functionDef(false)
 }
 

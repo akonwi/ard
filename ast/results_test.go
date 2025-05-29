@@ -48,3 +48,23 @@ func TestResultTypeInSignature(t *testing.T) {
 		},
 	})
 }
+
+func TestTryKeyword(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "try a result",
+			input: `try get_result()`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Try{
+						Expression: &FunctionCall{
+							Name: "get_result",
+							Args: []Expression{},
+						},
+					},
+				},
+			},
+		},
+	})
+}
