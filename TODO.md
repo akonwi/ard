@@ -8,7 +8,6 @@
 - [ ] matching on numbers
 - [ ] `?` sugar for propagating maybes
   - `res?.json()` -> `match res { r => r.json(), _ => maybe::non() }`
-- [ ] simplify while loop syntax to `for`, like go
 - [ ] two part cursor in loops
   - `for person,index in employees { io.print(index) }`
 - [ ] calling functions with named arguments
@@ -27,3 +26,11 @@
 - [ ] loops as expressions (comprehensions?)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
 - [ ] concurrency (Task?)
+- [ ] inline block as expression
+  ```
+  let foo = {
+    // do stuff here
+    let stuff = get_stuff()
+    stuff + 5
+  }
+  ```
