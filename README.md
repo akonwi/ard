@@ -249,9 +249,23 @@ match divide(42, 0) {
 The only way to ignore errors is to use the `.or()` method to provide a default value if the result is not ok.
 
 ```ard
-let res = divide(a, b).or(0)
-io::print("got {res.to_str()})
+let num = divide(a, b).or(0)
+io::print("got {num.to_str()})
 ```
+
+Another alternative to ignoring the error is to propagate it to callers. This can be achieved with the `try` keyword.
+
+```ard
+// attempt at (a / b) + 10
+fn do_math(a Int, b Int) Result<Int, Str> {
+  let num = try divide(a, b)
+  Result::ok(num + 10)
+}
+```
+
+The `try` keyword will unwrap the result and if the result is an error, it will act as an early return to pass on the failure result.
+
+Note: `try` can only be used in function blocks
 
 #### 👇🏿 everything below this line is a work in progress 👇🏿
 

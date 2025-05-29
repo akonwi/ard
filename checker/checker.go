@@ -862,6 +862,19 @@ func isMutable(expr Expression) bool {
 	return false
 }
 
+type TryOp struct {
+	expr Expression
+	ok   Type
+}
+
+func (t TryOp) Expr() Expression {
+	return t.expr
+}
+
+func (t TryOp) Type() Type {
+	return t.ok
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
@@ -3045,6 +3058,38 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 		instance.Fields = fields
 		return instance
+	case *ast.Try:
+		{
+			expr := c.checkExpr(s.Expression)
+			if expr == nil {
+				return nil
+			}
+
+			if c.scope.returnType == nil {
+				c.addError("The `try` keyword can only be used in a function body", s.GetLocation())
+				return nil
+			}
+
+			switch _type := expr.Type().(type) {
+			case *Result:
+				if !_type.equal(c.scope.returnType) {
+					c.addError(typeMismatch(c.scope.returnType, _type), s.Expression.GetLocation())
+				}
+
+				return &TryOp{
+					expr: expr,
+					ok:   _type.val,
+				}
+			case *Maybe:
+				return &TryOp{
+					expr: expr,
+					ok:   _type.of,
+				}
+			default:
+				c.addError("todo: Unsupported try expression type: "+expr.Type().String(), s.Expression.GetLocation())
+				return nil
+			}
+		}
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}
@@ -3158,8 +3203,11 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		returnType = c.resolveType(def.ReturnType)
 	}
 
-	// Check function body with a setup function that adds parameters to scope
+	// Check function body
 	body := c.checkBlock(def.Body, func() {
+		// set the expected return type to the scope
+		c.scope.returnType = returnType
+		// add parameters to scope
 		for _, param := range params {
 			c.scope.add(&VariableDef{
 				Mutable: param.Mutable,

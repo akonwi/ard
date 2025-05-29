@@ -60,6 +60,10 @@ func (vm *VM) do(stmt checker.Statement) *object {
 		return void
 	case *checker.VariableDef:
 		val := vm.eval(s.Value)
+		// can be broken by `try`
+		if vm.scope.broken {
+			return val
+		}
 		if !s.Mutable {
 			original := val.raw
 			var copy any = new(any)
@@ -867,6 +871,22 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				vm.scope.add(e.Err.Pattern.Name, raw.raw)
 			})
 			return res
+		}
+	case *checker.TryOp:
+		{
+			subj := vm.eval(e.Expr())
+			switch _type := subj._type.(type) {
+			case *checker.Result:
+				raw := subj.raw.(_result)
+				if !raw.ok {
+					vm.scope.broken = true
+					return subj
+				}
+
+				return raw.raw
+			default:
+				panic(fmt.Errorf("Cannot match on %s", _type))
+			}
 		}
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))

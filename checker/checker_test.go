@@ -33,6 +33,7 @@ var compareOptions = cmp.Options{
 		checker.MapLiteral{},
 		checker.StructInstance{},
 		checker.Result{},
+		checker.TryOp{},
 	),
 }
 

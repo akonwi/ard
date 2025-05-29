@@ -1,8 +1,9 @@
 package checker
 
 type scope struct {
-	parent  *scope
-	symbols map[string]symbol
+	parent     *scope
+	symbols    map[string]symbol
+	returnType Type
 }
 
 type symbol interface {

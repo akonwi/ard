@@ -167,3 +167,76 @@ func TestResults(t *testing.T) {
 		},
 	})
 }
+
+func TestTry(t *testing.T) {
+	run(t, []test{
+		{
+			name: "trying a result",
+			input: `
+				fn do_stuff() Result<Int, Bool> {
+					let res: Result<Int, Bool> = Result::ok(2)
+					let num = try res
+					res
+				}`,
+			output: &checker.Program{
+				Imports: map[string]checker.Package{},
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.FunctionDef{
+							Name:       "do_stuff",
+							Parameters: []checker.Parameter{},
+							ReturnType: checker.MakeResult(checker.Int, checker.Bool),
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Stmt: &checker.VariableDef{
+											Name: "res",
+											Value: &checker.PackageFunctionCall{
+												Package: "Result",
+												Call: &checker.FunctionCall{
+													Name: "ok",
+													Args: []checker.Expression{&checker.IntLiteral{2}},
+												},
+											},
+										},
+									},
+									{
+										Stmt: &checker.VariableDef{
+											Name:  "num",
+											Value: &checker.TryOp{},
+										},
+									},
+									{
+										Expr: &checker.Variable{},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "the function return type must match the result",
+			input: `
+				fn do_stuff() Result<Str, Bool> {
+					let res: Result<Int, Bool> = Result::ok(2)
+					let num = try res
+					Result::ok(num.to_str())
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Result<Str, Bool>, got Result<Int, Bool>"},
+			},
+		},
+		{
+			name: "try can only be used in functions",
+			input: `
+					let res: Result<Int, Bool> = Result::ok(2)
+					let num = try res
+				`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "The `try` keyword can only be used in a function body"},
+			},
+		},
+	})
+}
