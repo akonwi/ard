@@ -26,7 +26,7 @@
 - [ ] concurrency (Task?)
 - [ ] inline block as expression
   ```
-  let foo = {
+  let foo: Int = {
     // do stuff here
     let stuff = get_stuff()
     stuff + 5
