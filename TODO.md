@@ -1,15 +1,13 @@
 ## TODO
 
-- [ ] `try?` syntax to turn a Result into a Maybe: `let maybe_num: Int = try? dangerous_op()`
-- [ ] `try!` syntax to unwrap value or immediately return error Result: `let num = try! dangerous()`
+- [ ] `?` sugar for safely unwrapping maybes
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?
 - [ ] matching on numbers
-- [ ] `?` sugar for propagating maybes
-  - `res?.json()` -> `match res { r => r.json(), _ => maybe::non() }`
 - [ ] two part cursor in loops
-  - `for person,index in employees { io.print(index) }`
+  - optional second index when looping over lists: `for person, index in employees { io.print(index) }`
+  - looping over maps: `for key, value in map { io.print("{key}: {value}") }`
 - [ ] calling functions with named arguments
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
