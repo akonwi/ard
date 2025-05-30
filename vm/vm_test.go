@@ -334,6 +334,11 @@ func TestStrApi(t *testing.T) {
 			input: `"foobar".contains("oba")`,
 			want:  true,
 		},
+		{
+			name:  "Str.split()",
+			input: `"hello world".split(" ").at(1)`,
+			want:  "world",
+		},
 	}
 	runTests(t, tests)
 }
@@ -381,6 +386,13 @@ func TestMapApi(t *testing.T) {
 				let jobs: [Str:Int] = [:]
 				ages.size() + jobs.size()`,
 			want: 2,
+		},
+		{
+			name: "Map::keys",
+			input: `
+						let ages = ["Alice":40, "Bob":30]
+						ages.keys().at(0)`,
+			want: "Alice",
 		},
 		{
 			name: "Map::get reads entries",

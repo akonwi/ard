@@ -932,10 +932,20 @@ func (vm *VM) evalStrMethod(subj *object, m *checker.FunctionCall) *object {
 		return &object{len(raw) == 0, m.Type()}
 	case "contains":
 		return &object{strings.Contains(raw, vm.eval(m.Args[0]).raw.(string)), m.Type()}
+	case "split":
+		sep := vm.eval(m.Args[0]).raw.(string)
+		_list := strings.Split(raw, sep)
+		list := make([]*object, len(_list))
+
+		for i, str := range _list {
+			list[i] = &object{str, checker.Str}
+		}
+
+		return &object{list, m.Type()}
 	case "trim":
 		return &object{strings.Trim(raw, " "), m.Type()}
 	default:
-		return void
+		panic(fmt.Errorf(`Undefined method: "%s".%s()`, raw, m.Name))
 	}
 }
 
@@ -994,6 +1004,14 @@ func (vm *VM) evalListMethod(subj *object, m *checker.InstanceMethod) *object {
 func (vm *VM) evalMapMethod(subj *object, m *checker.InstanceMethod) *object {
 	raw := subj.raw.(map[string]*object)
 	switch m.Method.Name {
+	case "keys":
+		keys := make([]*object, len(raw))
+		i := 0
+		for k := range raw {
+			keys[i] = &object{k, checker.Str}
+			i += 1
+		}
+		return &object{keys, m.Type()}
 	case "size":
 		return &object{len(raw), checker.Int}
 	case "get":

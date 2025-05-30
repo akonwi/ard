@@ -39,6 +39,14 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Int,
 		}
+	case "split":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "delimeter", Type: Str},
+			},
+			ReturnType: MakeList(Str),
+		}
 	case "trim":
 		return &FunctionDef{
 			Name:       name,
@@ -273,6 +281,12 @@ func (m Map) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{{Name: "key", Type: m.key}},
 			ReturnType: &Maybe{m.value},
+		}
+	case "keys":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: MakeList(m.key),
 		}
 	case "set":
 		return &FunctionDef{

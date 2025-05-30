@@ -1,0 +1,39 @@
+use ard/io
+
+fn count_words(words: [Str]) [Str:Int] {
+  mut counts: [Str:Int] = [:]
+
+  for word in words {
+    counts.set(word, counts.get(word).or(0) + 1)
+  }
+
+  counts
+}
+
+fn main() {
+  io::print("Enter some text to analyze:")
+  match io::read_line() {
+    ok(text) => {
+      let words = text.split(" ")
+      let word_counts = count_words(words)
+
+      io::print("\nWord Frequency Analysis:")
+      io::print("------------------------")
+      io::print("Total words: {words.size().to_str()}")
+      io::print("Unique words: {word_counts.size().to_str()}")
+
+      // io::print("\nMost frequent words:")
+      // Sort by count in descending order
+      // Note: This would require a sort method implementation
+      // Since we don't have that yet, let's print all words
+      io::print("\nCounts:")
+      for word in word_counts.keys() {
+        let count = word_counts.get(word).or(0)
+        io::print("{word}: {count.to_str()}")
+      }
+    },
+    err => io::print("Unable to read input: {err}")
+  }
+}
+
+main()
