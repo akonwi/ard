@@ -26,7 +26,7 @@ fn main() {
       // Sort by count in descending order
       // Note: This would require a sort method implementation
       // Since we don't have that yet, let's print all words
-      io::print("\nCounts:")
+      io::print("Counts:")
       for word in word_counts.keys() {
         let count = word_counts.get(word).or(0)
         io::print("{word}: {count.to_str()}")
