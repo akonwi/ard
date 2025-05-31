@@ -1,4 +1,4 @@
-# How Generics Are Resolved
+# Generics in Ardlang
 
 ## Syntax
 

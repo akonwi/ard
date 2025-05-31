@@ -1,6 +1,7 @@
 ## TODO
 
-- [ ] `?` sugar for safely unwrapping maybes
+- [ ] traits
+  - String - use for printables and interpolatables
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?
@@ -16,11 +17,10 @@
   - [ ] allow non-linear declarations at the top level
     -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] matching on strings?
-- [ ] traits
-  - String - use for printables and interpolatables
 - [ ] packages
   - follow Go; folder is package
   - ?: use reflection to call into packages?
+- [ ] `?` sugar for safely unwrapping maybes
 - [ ] loops as expressions (comprehensions?)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
 - [ ] concurrency (Task?)
