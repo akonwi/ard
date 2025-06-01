@@ -127,6 +127,31 @@ func TestFunctionDeclaration(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Static paths to types",
+			input: `fn print(thing: Str::ToString) Str { }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "print",
+						Parameters: []Parameter{
+							{
+								Name: "thing",
+								Type: &CustomType{
+									Type: StaticProperty{
+										Target:   &Identifier{Name: "Str"},
+										Property: &Identifier{Name: "ToString"},
+									},
+								},
+							},
+						},
+						ReturnType: &StringType{},
+						Body:       []Statement{},
+					},
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)
