@@ -1,0 +1,48 @@
+use ard/io
+
+// Define a trait for something that can be converted to a string
+trait Printable {
+  fn to_str() Str
+}
+
+// Define a Person struct
+struct Person {
+  name: Str
+  age: Int
+}
+
+// Implement the String trait for Person
+impl Printable for Person {
+  fn to_str() Str {
+    "Person: {@name}, {@age.to_str()} years old"
+  }
+}
+
+// Define another struct that will implement the same trait
+struct Book {
+  title: Str
+  author: Str
+}
+
+// Implement String for Book
+impl Printable for Book {
+  fn to_str() Str {
+    "Book: " + @title + " by " + @author
+  }
+}
+
+// Create a person
+let person = Person{name: "Alice", age: 30}
+io::print(person.to_str())
+
+// Create a book
+let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
+io::print(book.to_str())
+
+// TODO: using traits as parameter types
+// fn show(item: Printable) {
+//   io::print(item.to_str())
+// }
+
+// show(person)
+// show(book)
