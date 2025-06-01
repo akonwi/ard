@@ -144,7 +144,16 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(struct_) {
 		return p.structDef()
 	}
+	if p.match(trait) {
+		return p.traitDef()
+	}
 	if p.match(impl) {
+		if p.check(identifier) {
+			// Look ahead to see if there's a "for" keyword after the identifier
+			if p.peek2().kind == for_ {
+				return p.traitImpl()
+			}
+		}
 		return p.implBlock()
 	}
 	return p.assignment()
@@ -364,6 +373,7 @@ func (p *parser) structDef() (Statement, error) {
 
 func (p *parser) implBlock() (*ImplBlock, error) {
 	impl := &ImplBlock{}
+	implToken := p.previous()
 
 	nameToken := p.consume(identifier, "Expected type name after 'impl'")
 	impl.Target = Identifier{
@@ -393,7 +403,140 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		impl.Methods = append(impl.Methods, *fn)
 	}
 
+	// Set location
+	impl.Location = Location{
+		Start: Point{implToken.line, implToken.column},
+		End:   Point{p.previous().line, p.previous().column},
+	}
+
 	return impl, nil
+}
+
+func (p *parser) traitDef() (*TraitDefinition, error) {
+	traitToken := p.previous()
+	traitDef := &TraitDefinition{}
+
+	nameToken := p.consume(identifier, "Expected trait name after 'trait'")
+	traitDef.Name = Identifier{
+		Name: nameToken.text,
+		Location: Location{
+			Start: Point{nameToken.line, nameToken.column},
+			End:   Point{nameToken.line, nameToken.column + len(nameToken.text)},
+		},
+	}
+
+	p.consume(left_brace, "Expected '{'")
+	p.consume(new_line, "Expected new line")
+
+	for !p.match(right_brace) {
+		if p.match(new_line) {
+			continue
+		}
+		// Parse function declaration without body (signature only)
+		fnToken := p.consume(fn, "Expected function declaration in trait block")
+		name := p.consume(identifier, "Expected function name")
+		p.consume(left_paren, "Expected '(' after function name")
+
+		// Parse parameters
+		params := []Parameter{}
+		for !p.check(right_paren) {
+			if len(params) > 0 {
+				p.consume(comma, "Expected ',' between parameters")
+			}
+			paramName := p.consume(identifier, "Expected parameter name")
+			p.consume(colon, "Expected ':' after parameter name")
+			paramType := p.parseType()
+			params = append(params, Parameter{
+				Name: paramName.text,
+				Type: paramType,
+			})
+		}
+		p.consume(right_paren, "Expected ')' after parameters")
+
+		// Parse return type
+		var returnType DeclaredType = nil
+		if !p.check(new_line) {
+			returnType = p.parseType()
+		}
+
+		fnLocation := Location{
+			Start: Point{fnToken.line, fnToken.column},
+			End:   Point{p.previous().line, p.previous().column},
+		}
+
+		// Add method to trait definition (without body since it's just a signature)
+		traitDef.Methods = append(traitDef.Methods, FunctionDeclaration{
+			Location:   fnLocation,
+			Name:       name.text,
+			Parameters: params,
+			ReturnType: returnType,
+			Body:       nil, // No body for trait method signatures
+		})
+
+		p.match(new_line)
+	}
+
+	// Set location
+	traitDef.Location = Location{
+		Start: Point{traitToken.line, traitToken.column},
+		End:   Point{p.previous().line, p.previous().column},
+	}
+
+	return traitDef, nil
+}
+
+func (p *parser) traitImpl() (*TraitImplementation, error) {
+	implToken := p.previous()
+	traitImpl := &TraitImplementation{}
+
+	// Parse trait name (already consumed 'impl' token)
+	traitToken := p.consume(identifier, "Expected trait name after 'impl'")
+	traitImpl.Trait = Identifier{
+		Name: traitToken.text,
+		Location: Location{
+			Start: Point{traitToken.line, traitToken.column},
+			End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
+		},
+	}
+
+	// Parse 'for'
+	p.consume(for_, "Expected 'for' after trait name")
+
+	// Parse type name
+	typeToken := p.consume(identifier, "Expected type name after 'for'")
+	traitImpl.ForType = Identifier{
+		Name: typeToken.text,
+		Location: Location{
+			Start: Point{typeToken.line, typeToken.column},
+			End:   Point{typeToken.line, typeToken.column + len(typeToken.text)},
+		},
+	}
+
+	p.consume(left_brace, "Expected '{' after type name")
+	p.consume(new_line, "Expected new line")
+
+	for !p.match(right_brace) {
+		if p.match(new_line) {
+			continue
+		}
+		stmt, err := p.functionDef(true)
+		if err != nil {
+			return nil, err
+		}
+		fn, ok := stmt.(*FunctionDeclaration)
+		if !ok {
+			return nil, fmt.Errorf("Expected function declaration in trait implementation block")
+		}
+		traitImpl.Methods = append(traitImpl.Methods, *fn)
+	}
+
+	// Set location
+	traitImpl.Location = Location{
+		Start: Point{implToken.line, implToken.column},
+		End:   Point{p.previous().line, p.previous().column},
+	}
+
+	return traitImpl, nil
 }
 
 func (p *parser) block() ([]Statement, error) {
@@ -1367,6 +1510,13 @@ func (p *parser) peek() *token {
 		return nil
 	}
 	return &p.tokens[p.index]
+}
+
+func (p *parser) peek2() *token {
+	if p.index+1 >= len(p.tokens) {
+		return nil
+	}
+	return &p.tokens[p.index+1]
 }
 
 func (p *parser) previous() *token {

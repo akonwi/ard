@@ -58,6 +58,7 @@ const (
 	struct_ = "struct"
 	enum    = "enum"
 	impl    = "impl"
+	trait   = "trait"
 	fn      = "fn"
 	let     = "let"
 	mut     = "mut"
@@ -550,6 +551,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(enum)
 	case "impl":
 		return makeKeyword(impl)
+	case "trait":
+		return makeKeyword(trait)
 	case "fn":
 		return makeKeyword(fn)
 	case "let":
