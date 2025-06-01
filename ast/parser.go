@@ -148,6 +148,11 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.traitDef()
 	}
 	if p.match(impl) {
+		// if implementing a static reference, it's a trait
+		if p.check(identifier, colon_colon) {
+			return p.traitImpl()
+		}
+		// if implementing a local reference, could be a regular impl or trait impl
 		if p.check(identifier) {
 			// Look ahead to see if there's a "for" keyword after the identifier
 			if p.peek2().kind == for_ {
@@ -490,13 +495,17 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 	traitImpl := &TraitImplementation{}
 
 	// Parse trait name (already consumed 'impl' token)
-	traitToken := p.consume(identifier, "Expected trait name after 'impl'")
-	traitImpl.Trait = Identifier{
-		Name: traitToken.text,
-		Location: Location{
-			Start: Point{traitToken.line, traitToken.column},
-			End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
-		},
+	if path := p.parseStaticPath(); path != nil {
+		traitImpl.Trait = *path
+	} else {
+		traitToken := p.consume(identifier, "Expected trait name after 'impl'")
+		traitImpl.Trait = Identifier{
+			Name: traitToken.text,
+			Location: Location{
+				Start: Point{traitToken.line, traitToken.column},
+				End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
+			},
+		}
 	}
 
 	// Parse 'for'

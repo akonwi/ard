@@ -87,3 +87,20 @@ func TestTraitDefinitions(t *testing.T) {
 		},
 	})
 }
+
+func TestUsingPackageTraits(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Implementing Str::ToString",
+			input: `
+			struct Person { name: Str }
+
+			impl Str::ToString for Person {
+			  fn to_str() Str {
+					"Person: {@name}"
+				}
+			}
+			`,
+		},
+	})
+}

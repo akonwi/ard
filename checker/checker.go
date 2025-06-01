@@ -17,7 +17,7 @@ type Program struct {
 
 type Package interface {
 	path() string
-	buildScope(scope *scope)
+	buildScope(scope *scope) // todo: this is not needed
 	get(name string) symbol
 }
 
@@ -1083,14 +1083,32 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 	case *ast.TraitImplementation:
 		{
-			sym := c.scope.get(s.Trait.Name)
+			var sym symbol = nil
+			switch name := s.Trait.(type) {
+			case ast.Identifier:
+				sym = c.scope.get(name.Name)
+			case ast.StaticProperty:
+				pkg := c.resolvePkg(name.Target.(*ast.Identifier).Name)
+				if pkg != nil {
+					if propId, ok := name.Property.(*ast.Identifier); ok {
+						sym = pkg.get(propId.Name)
+					} else {
+						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
+						return nil
+					}
+				}
+			default:
+				panic(fmt.Errorf("Unsupported trait node: %s", name))
+			}
+
 			if sym == nil {
-				c.addError(fmt.Sprintf("Undefined trait: %s", s.Trait.Name), s.Trait.GetLocation())
+				c.addError(fmt.Sprintf("Undefined trait: %s", s.Trait), s.Trait.GetLocation())
 				return nil
 			}
+
 			trait, ok := sym.(*Trait)
 			if !ok {
-				c.addError(fmt.Sprintf("%s is not a trait", s.Trait.Name), s.Trait.GetLocation())
+				c.addError(fmt.Sprintf("%s is not a trait", s.Trait), s.Trait.GetLocation())
 				return nil
 			}
 

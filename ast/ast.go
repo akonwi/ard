@@ -304,7 +304,7 @@ type TraitDefinition struct {
 
 type TraitImplementation struct {
 	Location
-	Trait   Identifier
+	Trait   Expression // Identifier | StaticProperty
 	ForType Identifier
 	Methods []FunctionDeclaration
 }
