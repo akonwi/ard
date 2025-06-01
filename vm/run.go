@@ -173,6 +173,12 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			return &object{-num, val._type}
 		}
 		return &object{-val.raw.(float64), val._type}
+	case *checker.StrAddition:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(string) + right.raw.(string),
+			left._type,
+		}
 	case *checker.IntAddition:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
