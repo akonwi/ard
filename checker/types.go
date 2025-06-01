@@ -14,6 +14,51 @@ type Type interface {
 	 	In this scenario, the generic is the `other` argument, so that the callee type can fill in the resolved type.
 	*/
 	equal(other Type) bool
+
+	// hasTrait checks if this type implements the given trait
+	hasTrait(trait Trait) bool
+}
+
+type Trait struct {
+	Name    string
+	methods []FunctionDef
+}
+
+func (t Trait) String() string {
+	return t.Name
+}
+
+func (t Trait) name() string {
+	return t.Name
+}
+
+func (t Trait) _type() Type {
+	return t
+}
+
+func (t Trait) get(name string) Type {
+	for _, method := range t.methods {
+		if method.Name == name {
+			return &method
+		}
+	}
+	return nil
+}
+
+// TODO: improve this
+func (t Trait) equal(other Type) bool {
+	if o, ok := other.(Trait); ok {
+		return t.Name == o.Name
+	}
+	return false
+}
+
+func (t Trait) GetMethods() []FunctionDef {
+	return t.methods
+}
+
+func (t Trait) hasTrait(trait Trait) bool {
+	return t.equal(trait)
 }
 
 type str struct{}
@@ -68,6 +113,11 @@ func (s *str) equal(other Type) bool {
 	return s == other
 }
 
+func (s *str) hasTrait(trait Trait) bool {
+	// todo: support built-in String
+	return false
+}
+
 var Str = &str{}
 
 type _int struct{}
@@ -99,6 +149,10 @@ func (i *_int) equal(other Type) bool {
 	if union, ok := other.(*Union); ok {
 		return union.equal(i)
 	}
+	return false
+}
+
+func (i *_int) hasTrait(trait Trait) bool {
 	return false
 }
 
@@ -136,6 +190,10 @@ func (f *float) equal(other Type) bool {
 	return false
 }
 
+func (f *float) hasTrait(trait Trait) bool {
+	return false
+}
+
 var Float = &float{}
 
 type _bool struct{}
@@ -170,13 +228,18 @@ func (b *_bool) equal(other Type) bool {
 	return false
 }
 
+func (b *_bool) hasTrait(trait Trait) bool {
+	return false
+}
+
 var Bool = &_bool{}
 
 type void struct{}
 
-func (v void) String() string         { return "Void" }
-func (v void) get(name string) Type   { return nil }
-func (v *void) equal(other Type) bool { return v == other }
+func (v void) String() string             { return "Void" }
+func (v void) get(name string) Type       { return nil }
+func (v *void) equal(other Type) bool     { return v == other }
+func (v *void) hasTrait(trait Trait) bool { return false }
 
 var Void = &void{}
 
@@ -241,6 +304,10 @@ func (l *List) equal(other Type) bool {
 
 	return false
 }
+
+func (l *List) hasTrait(trait Trait) bool {
+	return false // Lists don't implement any traits by default
+}
 func (l List) Of() Type {
 	return l.of
 }
@@ -273,6 +340,10 @@ func (m Map) equal(other Type) bool {
 		return union.equal(m)
 	}
 	return false
+}
+
+func (m Map) hasTrait(trait Trait) bool {
+	return false // Maps don't implement any traits by default
 }
 func (m Map) get(name string) Type {
 	switch name {
@@ -365,6 +436,10 @@ func (m *Maybe) equal(other Type) bool {
 
 	return false
 }
+
+func (m *Maybe) hasTrait(trait Trait) bool {
+	return false // Maybe types don't implement traits by default
+}
 func (m *Maybe) Of() Type {
 	return m.of
 }
@@ -398,6 +473,13 @@ func (a *Any) equal(other Type) bool {
 	return a.actual.equal(other)
 }
 
+func (a *Any) hasTrait(trait Trait) bool {
+	if a.actual == nil {
+		return false
+	}
+	return a.actual.hasTrait(trait)
+}
+
 type Result struct {
 	val Type
 	err Type
@@ -429,6 +511,10 @@ func (r *Result) equal(other Type) bool {
 		return r.val.equal(o.val) && r.err.equal(o.err)
 	}
 	return false
+}
+
+func (r *Result) hasTrait(trait Trait) bool {
+	return false // Result types don't implement traits by default
 }
 
 func (r *Result) Val() Type {
