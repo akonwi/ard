@@ -123,5 +123,21 @@ func TestTraitsAsTypes(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
 			},
 		},
+		{
+			name: "functions with Trait return",
+			input: `
+			struct Foo {}
+
+			fn valid() Str::ToString {
+			  100
+			}
+			fn invalid(item: Str::ToString) Str::ToString {
+			  Foo{}
+			}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
+			},
+		},
 	})
 }

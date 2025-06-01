@@ -10,8 +10,7 @@ func areCompatible(expected Type, actual Type) bool {
 		return actual.hasTrait(trait)
 	}
 
-	// calling this way so `actual` can refine `expected` in case it's a generic
-	return actual.equal(expected)
+	return expected.equal(actual)
 }
 
 type Type interface {

@@ -3417,7 +3417,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 	})
 
 	// Check that the function's return type matches its body's type
-	if returnType != Void && !returnType.equal(body.Type()) {
+	if returnType != Void && !areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 		return nil
 	}
