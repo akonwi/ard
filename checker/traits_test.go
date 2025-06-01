@@ -104,3 +104,24 @@ func TestUsingPackageTraits(t *testing.T) {
 		},
 	})
 }
+
+func TestTraitsAsTypes(t *testing.T) {
+	run(t, []test{
+		{
+			name: "functions with Trait params",
+			input: `
+			use ard/io
+			struct Foo {}
+
+			fn display(item: Str::ToString) {
+			  io::print(item.to_str())
+			}
+			display(100)
+			display(Foo{})
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
+			},
+		},
+	})
+}

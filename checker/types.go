@@ -1,6 +1,18 @@
 package checker
 
-import "fmt"
+import (
+	"fmt"
+)
+
+// todo: this can return an error with improved messaging
+func areCompatible(expected Type, actual Type) bool {
+	if trait, ok := expected.(*Trait); ok {
+		return actual.hasTrait(trait)
+	}
+
+	// calling this way so `actual` can refine `expected` in case it's a generic
+	return actual.equal(expected)
+}
 
 type Type interface {
 	String() string
@@ -16,7 +28,7 @@ type Type interface {
 	equal(other Type) bool
 
 	// hasTrait checks if this type implements the given trait
-	hasTrait(trait Trait) bool
+	hasTrait(trait *Trait) bool
 }
 
 type Trait struct {
@@ -45,19 +57,30 @@ func (t Trait) get(name string) Type {
 	return nil
 }
 
-// TODO: improve this
 func (t Trait) equal(other Type) bool {
-	if o, ok := other.(Trait); ok {
-		return t.Name == o.Name
+	o, ok := other.(*Trait)
+	if !ok {
+		return false
 	}
-	return false
+	if t.Name != o.Name {
+		return false
+	}
+	if len(t.methods) != len(o.methods) {
+		return false
+	}
+	for i := range t.methods {
+		if !t.methods[i].equal(o.methods[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (t Trait) GetMethods() []FunctionDef {
 	return t.methods
 }
 
-func (t Trait) hasTrait(trait Trait) bool {
+func (t Trait) hasTrait(trait *Trait) bool {
 	return t.equal(trait)
 }
 
@@ -113,7 +136,7 @@ func (s *str) equal(other Type) bool {
 	return s == other
 }
 
-func (s *str) hasTrait(trait Trait) bool {
+func (s *str) hasTrait(trait *Trait) bool {
 	// todo: support built-in String
 	return false
 }
@@ -149,11 +172,14 @@ func (i *_int) equal(other Type) bool {
 	if union, ok := other.(*Union); ok {
 		return union.equal(i)
 	}
+	if trait, ok := other.(*Trait); ok {
+		return i.hasTrait(trait)
+	}
 	return false
 }
 
-func (i *_int) hasTrait(trait Trait) bool {
-	return false
+func (i *_int) hasTrait(trait *Trait) bool {
+	return trait == strPkg.symbols["ToString"]
 }
 
 var Int = &_int{}
@@ -190,7 +216,7 @@ func (f *float) equal(other Type) bool {
 	return false
 }
 
-func (f *float) hasTrait(trait Trait) bool {
+func (f *float) hasTrait(trait *Trait) bool {
 	return false
 }
 
@@ -228,7 +254,7 @@ func (b *_bool) equal(other Type) bool {
 	return false
 }
 
-func (b *_bool) hasTrait(trait Trait) bool {
+func (b *_bool) hasTrait(trait *Trait) bool {
 	return false
 }
 
@@ -236,10 +262,10 @@ var Bool = &_bool{}
 
 type void struct{}
 
-func (v void) String() string             { return "Void" }
-func (v void) get(name string) Type       { return nil }
-func (v *void) equal(other Type) bool     { return v == other }
-func (v *void) hasTrait(trait Trait) bool { return false }
+func (v void) String() string              { return "Void" }
+func (v void) get(name string) Type        { return nil }
+func (v *void) equal(other Type) bool      { return v == other }
+func (v *void) hasTrait(trait *Trait) bool { return false }
 
 var Void = &void{}
 
@@ -305,7 +331,7 @@ func (l *List) equal(other Type) bool {
 	return false
 }
 
-func (l *List) hasTrait(trait Trait) bool {
+func (l *List) hasTrait(trait *Trait) bool {
 	return false // Lists don't implement any traits by default
 }
 func (l List) Of() Type {
@@ -342,7 +368,7 @@ func (m Map) equal(other Type) bool {
 	return false
 }
 
-func (m Map) hasTrait(trait Trait) bool {
+func (m Map) hasTrait(trait *Trait) bool {
 	return false // Maps don't implement any traits by default
 }
 func (m Map) get(name string) Type {
@@ -437,7 +463,7 @@ func (m *Maybe) equal(other Type) bool {
 	return false
 }
 
-func (m *Maybe) hasTrait(trait Trait) bool {
+func (m *Maybe) hasTrait(trait *Trait) bool {
 	return false // Maybe types don't implement traits by default
 }
 func (m *Maybe) Of() Type {
@@ -473,7 +499,7 @@ func (a *Any) equal(other Type) bool {
 	return a.actual.equal(other)
 }
 
-func (a *Any) hasTrait(trait Trait) bool {
+func (a *Any) hasTrait(trait *Trait) bool {
 	if a.actual == nil {
 		return false
 	}
@@ -513,7 +539,7 @@ func (r *Result) equal(other Type) bool {
 	return false
 }
 
-func (r *Result) hasTrait(trait Trait) bool {
+func (r *Result) hasTrait(trait *Trait) bool {
 	return false // Result types don't implement traits by default
 }
 

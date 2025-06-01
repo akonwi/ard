@@ -612,7 +612,7 @@ func (f FunctionDef) equal(other Type) bool {
 	return false
 }
 
-func (f FunctionDef) hasTrait(trait Trait) bool {
+func (f FunctionDef) hasTrait(trait *Trait) bool {
 	return false
 }
 func (f *FunctionDef) hasGenerics() bool {
@@ -709,7 +709,7 @@ func (e Enum) equal(other Type) bool {
 }
 func (e Enum) get(name string) Type { return nil }
 
-func (e Enum) hasTrait(trait Trait) bool {
+func (e Enum) hasTrait(trait *Trait) bool {
 	return false
 }
 
@@ -722,7 +722,7 @@ func (ev EnumVariant) Type() Type {
 	return ev.enum
 }
 
-func (ev EnumVariant) hasTrait(trait Trait) bool {
+func (ev EnumVariant) hasTrait(trait *Trait) bool {
 	return ev.enum.hasTrait(trait)
 }
 
@@ -781,7 +781,7 @@ func (u Union) equal(other Type) bool {
 	return false
 }
 
-func (u Union) hasTrait(trait Trait) bool {
+func (u Union) hasTrait(trait *Trait) bool {
 	// A union has a trait only if all of its types have that trait
 	for _, t := range u.Types {
 		if !t.hasTrait(trait) {
@@ -840,7 +840,7 @@ func (def StructDef) equal(other Type) bool {
 	return false
 }
 
-func (def StructDef) hasTrait(trait Trait) bool {
+func (def StructDef) hasTrait(trait *Trait) bool {
 	for _, t := range def.Traits {
 		if t.equal(trait) {
 			return true
@@ -1940,7 +1940,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !checkedArg.Type().equal(paramType) {
+				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -2088,7 +2088,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !paramType.equal(checkedArg.Type()) {
+				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -2500,7 +2500,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !checkedArg.Type().equal(paramType) {
+				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}

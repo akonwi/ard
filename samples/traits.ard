@@ -26,16 +26,13 @@ impl Str::ToString for Book {
 
 // Create a person
 let person = Person{name: "Alice", age: 30}
-io::print(person.to_str())
 
 // Create a book
 let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
-io::print(book.to_str())
 
-// TODO: using traits as parameter types
-// fn show(item: Printable) {
-//   io::print(item.to_str())
-// }
+fn show(item: Str::ToString) {
+  io::print(item.to_str())
+}
 
-// show(person)
-// show(book)
+show(person)
+show(book)
