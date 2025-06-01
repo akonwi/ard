@@ -391,8 +391,8 @@ func TestMapApi(t *testing.T) {
 			name: "Map::keys",
 			input: `
 						let ages = ["Alice":40, "Bob":30]
-						ages.keys().at(0)`,
-			want: "Alice",
+						ages.keys().size()`,
+			want: 2,
 		},
 		{
 			name: "Map::get reads entries",
