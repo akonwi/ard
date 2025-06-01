@@ -1,38 +1,20 @@
 use ard/io
 
-struct Person {
-  name: Str
-  age: Int
-}
-
-// Implement the Str::ToString trait for Person
-impl Str::ToString for Person {
-  fn to_str() Str {
-    "Person: {@name}, {@age.to_str()} years old"
-  }
-}
-
 struct Book {
   title: Str
   author: Str
 }
 
-// Implement Str::ToString for Book
 impl Str::ToString for Book {
   fn to_str() Str {
     "Book: " + @title + " by " + @author
   }
 }
 
-// Create a person
-let person = Person{name: "Alice", age: 30}
-
-// Create a book
 let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
 
 fn show(item: Str::ToString) {
   io::print(item.to_str())
 }
 
-show(person)
 show(book)
