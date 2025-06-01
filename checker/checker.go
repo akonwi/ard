@@ -1016,6 +1016,18 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 				break
 			}
 		}
+		if ty.Type.Target != nil {
+			pkg := c.resolvePkg(ty.Type.Target.(*ast.Identifier).Name)
+			if pkg != nil {
+				// at some point, this will need to unwrap the property down to root for nested paths: `pkg::sym::more`
+				sym := pkg.get(ty.Type.Property.(*ast.Identifier).Name)
+				if sym != nil {
+					if symType, ok := sym.(Type); ok {
+						return symType
+					}
+				}
+			}
+		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return nil
 	case *ast.GenericType:
