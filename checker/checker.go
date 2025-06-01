@@ -833,7 +833,6 @@ func (def StructDef) equal(other Type) bool {
 	}
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			fmt.Printf("here: %s.equal(%s)\n", def, o)
 			return true
 		}
 		return def.equal(o.actual)
