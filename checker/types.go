@@ -68,7 +68,7 @@ func (t Trait) equal(other Type) bool {
 		return false
 	}
 	for i := range t.methods {
-		if !t.methods[i].equal(o.methods[i]) {
+		if !t.methods[i].equal(&o.methods[i]) {
 			return false
 		}
 	}

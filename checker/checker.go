@@ -841,7 +841,8 @@ func (def StructDef) equal(other Type) bool {
 }
 
 func (def StructDef) hasTrait(trait *Trait) bool {
-	for _, t := range def.Traits {
+	for i := range def.Traits {
+		t := def.Traits[i]
 		if t.equal(trait) {
 			return true
 		}

@@ -1,7 +1,6 @@
 ## TODO
 
 - [ ] traits
-  - using traits in signatures
   - String - use for printables and interpolatables
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
