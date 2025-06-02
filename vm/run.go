@@ -468,13 +468,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			if e.Package == "ard/io" {
 				switch e.Call.Name {
 				case "print":
-					arg := vm.eval(e.Call.Args[0])
+					toPrint := vm.eval(&checker.InstanceMethod{
+						Subject: e.Call.Args[0],
+						Method: &checker.FunctionCall{
+							Name: "to_str",
+							Args: []checker.Expression{},
+						},
+					}).raw.(string)
 
-					string, ok := arg.raw.(string)
-					if !ok {
-						panic(fmt.Errorf("Unprintable arg to print: %s", arg))
-					}
-					fmt.Println(string)
+					fmt.Println(toPrint)
 					return void
 				case "read_line":
 					scanner := bufio.NewScanner(os.Stdin)

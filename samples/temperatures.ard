@@ -8,6 +8,6 @@ fn fahrenheit_to_celsius(f: Float) Float {
 for temp in 0..220 {
     if temp % 20 == 0 {
         let celsius = fahrenheit_to_celsius(Float::from_int(temp))
-        io::print("{temp.to_str()} F = {celsius.to_str()} C")
+        io::print("{temp} F = {celsius.to_str()} C")
     }
 }
