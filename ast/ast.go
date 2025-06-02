@@ -296,8 +296,29 @@ type ImplBlock struct {
 	Methods []FunctionDeclaration
 }
 
+type TraitDefinition struct {
+	Location
+	Name    Identifier
+	Methods []FunctionDeclaration
+}
+
+type TraitImplementation struct {
+	Location
+	Trait   Expression // Identifier | StaticProperty
+	ForType Identifier
+	Methods []FunctionDeclaration
+}
+
 func (i ImplBlock) String() string {
 	return fmt.Sprintf("ImplBlock(%s)", i.Target)
+}
+
+func (t TraitDefinition) String() string {
+	return fmt.Sprintf("TraitDefinition(%s)", t.Name)
+}
+
+func (t TraitImplementation) String() string {
+	return fmt.Sprintf("TraitImplementation(%s for %s)", t.Trait, t.ForType)
 }
 
 type StructValue struct {

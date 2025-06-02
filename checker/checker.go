@@ -17,7 +17,7 @@ type Program struct {
 
 type Package interface {
 	path() string
-	buildScope(scope *scope)
+	buildScope(scope *scope) // todo: this is not needed
 	get(name string) symbol
 }
 
@@ -609,7 +609,10 @@ func (f FunctionDef) equal(other Type) bool {
 		}
 		return f.Mutates == oFn.Mutates && f.ReturnType.equal(oFn.ReturnType)
 	}
+	return false
+}
 
+func (f FunctionDef) hasTrait(trait *Trait) bool {
 	return false
 }
 func (f *FunctionDef) hasGenerics() bool {
@@ -706,6 +709,10 @@ func (e Enum) equal(other Type) bool {
 }
 func (e Enum) get(name string) Type { return nil }
 
+func (e Enum) hasTrait(trait *Trait) bool {
+	return false
+}
+
 type EnumVariant struct {
 	enum    *Enum
 	Variant int8
@@ -713,6 +720,10 @@ type EnumVariant struct {
 
 func (ev EnumVariant) Type() Type {
 	return ev.enum
+}
+
+func (ev EnumVariant) hasTrait(trait *Trait) bool {
+	return ev.enum.hasTrait(trait)
 }
 
 func (ev EnumVariant) String() string {
@@ -770,10 +781,21 @@ func (u Union) equal(other Type) bool {
 	return false
 }
 
+func (u Union) hasTrait(trait *Trait) bool {
+	// A union has a trait only if all of its types have that trait
+	for _, t := range u.Types {
+		if !t.hasTrait(trait) {
+			return false
+		}
+	}
+	return len(u.Types) > 0
+}
+
 type StructDef struct {
 	Name   string
 	Fields map[string]Type
 	Self   string
+	Traits []*Trait
 }
 
 func (def StructDef) NonProducing() {}
@@ -811,10 +833,19 @@ func (def StructDef) equal(other Type) bool {
 	}
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			fmt.Printf("here: %s.equal(%s)\n", def, o)
 			return true
 		}
 		return def.equal(o.actual)
+	}
+	return false
+}
+
+func (def StructDef) hasTrait(trait *Trait) bool {
+	for i := range def.Traits {
+		t := def.Traits[i]
+		if t.equal(trait) {
+			return true
+		}
 	}
 	return false
 }
@@ -986,6 +1017,18 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 				break
 			}
 		}
+		if ty.Type.Target != nil {
+			pkg := c.resolvePkg(ty.Type.Target.(*ast.Identifier).Name)
+			if pkg != nil {
+				// at some point, this will need to unwrap the property down to root for nested paths: `pkg::sym::more`
+				sym := pkg.get(ty.Type.Property.(*ast.Identifier).Name)
+				if sym != nil {
+					if symType, ok := sym.(Type); ok {
+						return symType
+					}
+				}
+			}
+		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return nil
 	case *ast.GenericType:
@@ -1012,6 +1055,163 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		return nil
 	case *ast.Break:
 		return &Statement{Break: true}
+	case *ast.TraitDefinition:
+		{
+			methods := make([]FunctionDef, len(s.Methods))
+			for i, method := range s.Methods {
+				params := make([]Parameter, len(method.Parameters))
+				for j, param := range method.Parameters {
+					paramType := c.resolveType(param.Type)
+					if paramType == nil {
+						c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
+						continue
+					}
+					params[j] = Parameter{Name: param.Name, Type: paramType}
+				}
+
+				var returnType Type = Void
+				if method.ReturnType != nil {
+					returnType = c.resolveType(method.ReturnType)
+					if returnType == nil {
+						c.addError(fmt.Sprintf("Unrecognized return type: %s", method.ReturnType.GetName()), method.ReturnType.GetLocation())
+						continue
+					}
+				}
+
+				methods[i] = FunctionDef{
+					Name:       method.Name,
+					Parameters: params,
+					ReturnType: returnType,
+				}
+			}
+
+			trait := &Trait{
+				Name:    s.Name.Name,
+				methods: methods,
+			}
+
+			c.scope.add(trait)
+			return nil
+		}
+	case *ast.TraitImplementation:
+		{
+			var sym symbol = nil
+			switch name := s.Trait.(type) {
+			case ast.Identifier:
+				sym = c.scope.get(name.Name)
+			case ast.StaticProperty:
+				pkg := c.resolvePkg(name.Target.(*ast.Identifier).Name)
+				if pkg != nil {
+					if propId, ok := name.Property.(*ast.Identifier); ok {
+						sym = pkg.get(propId.Name)
+					} else {
+						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
+						return nil
+					}
+				}
+			default:
+				panic(fmt.Errorf("Unsupported trait node: %s", name))
+			}
+
+			if sym == nil {
+				c.addError(fmt.Sprintf("Undefined trait: %s", s.Trait), s.Trait.GetLocation())
+				return nil
+			}
+
+			trait, ok := sym.(*Trait)
+			if !ok {
+				c.addError(fmt.Sprintf("%s is not a trait", s.Trait), s.Trait.GetLocation())
+				return nil
+			}
+
+			// Check that the type exists
+			typeSym := c.scope.get(s.ForType.Name)
+			if typeSym == nil {
+				c.addError(fmt.Sprintf("Undefined type: %s", s.ForType.Name), s.ForType.GetLocation())
+				return nil
+			}
+
+			structType, ok := typeSym.(*StructDef)
+			if !ok {
+				c.addError(fmt.Sprintf("%s is not a struct type", s.ForType.Name), s.ForType.GetLocation())
+				return nil
+			}
+
+			// Verify that all required methods are implemented
+			traitMethods := trait.GetMethods()
+			implementedMethods := make(map[string]bool)
+
+			// Check each method in the implementation
+			for _, method := range s.Methods {
+				implementedMethods[method.Name] = true
+
+				// Find the corresponding trait method
+				var traitMethod *FunctionDef
+				for _, m := range traitMethods {
+					if m.Name == method.Name {
+						traitMethod = &m
+						break
+					}
+				}
+
+				if traitMethod == nil {
+					c.addError(fmt.Sprintf("Method %s is not required by trait %s", method.Name, trait.name()), method.GetLocation())
+					continue
+				}
+
+				// Check parameter count
+				if len(method.Parameters) != len(traitMethod.Parameters) {
+					c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+					continue
+				}
+
+				params := make([]Parameter, len(method.Parameters))
+				for i, param := range method.Parameters {
+					paramType := c.resolveType(param.Type)
+					expectedType := traitMethod.Parameters[i].Type
+					if !paramType.equal(expectedType) {
+						c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+					}
+
+					params[i] = Parameter{Name: param.Name, Type: paramType}
+				}
+
+				// Check return type
+				var returnType Type = Void
+				if method.ReturnType != nil {
+					returnType = c.resolveType(method.ReturnType)
+				}
+				if !traitMethod.ReturnType.equal(returnType) {
+					c.addError(fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType), method.GetLocation())
+					continue
+				}
+
+				// if we made it this far, it's a valid implementation
+				fnDef := c.checkFunction(&method, func() {
+					c.scope.add(&VariableDef{
+						Name:    "@",
+						__type:  structType,
+						Mutable: method.Mutates,
+					})
+				})
+				fnDef.Mutates = method.Mutates
+				fnDef.SelfName = "@"
+				// add the method to the struct
+				structType.Fields[method.Name] = fnDef
+			}
+
+			// Check if all required methods are implemented
+			for _, method := range traitMethods {
+				if !implementedMethods[method.Name] {
+					c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
+				}
+			}
+
+			// Add the trait to the struct type's traits list
+			structType.Traits = append(structType.Traits, trait)
+
+			return nil
+		}
 	case *ast.TypeDeclaration:
 		{
 			// Handle type declaration (type unions/aliases)
@@ -1674,7 +1874,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !Str.equal(cx.Type()) {
+				if !cx.Type().hasTrait(strPkg.get("ToString").(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -1741,7 +1941,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !checkedArg.Type().equal(paramType) {
+				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -1889,7 +2089,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !paramType.equal(checkedArg.Type()) {
+				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -2301,7 +2501,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
-				if !checkedArg.Type().equal(paramType) {
+				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
 					return nil
 				}
@@ -3218,7 +3418,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 	})
 
 	// Check that the function's return type matches its body's type
-	if returnType != Void && !returnType.equal(body.Type()) {
+	if returnType != Void && !areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 		return nil
 	}

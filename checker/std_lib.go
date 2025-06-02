@@ -4,6 +4,7 @@ var preludePkgs = map[string]Package{
 	"Float":  FloatPkg{},
 	"Int":    IntPkg{},
 	"Result": ResultPkg{},
+	"Str":    strPkg,
 }
 
 func findInStdLib(path string) (Package, bool) {
@@ -133,7 +134,7 @@ func (pkg IoPkg) get(name string) symbol {
 	case "print":
 		fn := &FunctionDef{
 			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: Str}},
+			Parameters: []Parameter{{Name: "string", Type: strPkg.symbols["ToString"].(*Trait)}},
 			ReturnType: Void,
 		}
 		return fn
@@ -211,4 +212,31 @@ func (pkg ResultPkg) get(name string) symbol {
 	default:
 		return nil
 	}
+}
+
+type _StrPkg struct {
+	symbols map[string]symbol
+}
+
+var strPkg = _StrPkg{
+	symbols: map[string]symbol{
+		"ToString": &Trait{
+			Name: "ToString",
+			methods: []FunctionDef{
+				{
+					Name:       "to_str",
+					Parameters: []Parameter{},
+					ReturnType: Str,
+				},
+			},
+		},
+	},
+}
+
+func (pkg _StrPkg) path() string {
+	return "ard/string"
+}
+func (pkg _StrPkg) buildScope(scope *scope) {}
+func (pkg _StrPkg) get(name string) symbol {
+	return pkg.symbols[name]
 }

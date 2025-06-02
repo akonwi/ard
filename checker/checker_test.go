@@ -157,10 +157,15 @@ func TestPrimitiveLiterals(t *testing.T) {
 							},
 						},
 					},
+					{
+						Expr: &checker.TemplateStr{
+							Chunks: []checker.Expression{
+								&checker.StrLiteral{"Hello, "},
+								&checker.IntLiteral{3},
+							},
+						},
+					},
 				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 	})
@@ -1533,10 +1538,18 @@ func TestCallingPackageFunctions(t *testing.T) {
 							},
 						},
 					},
+					{
+						Expr: &checker.PackageFunctionCall{
+							Package: "ard/io",
+							Call: &checker.FunctionCall{
+								Name: "print",
+								Args: []checker.Expression{
+									&checker.IntLiteral{200},
+								},
+							},
+						},
+					},
 				},
-			},
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
 	})

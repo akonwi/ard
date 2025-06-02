@@ -153,8 +153,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	case *checker.TemplateStr:
 		sb := strings.Builder{}
 		for i := range e.Chunks {
-			chunk := vm.eval(e.Chunks[i])
-			sb.WriteString(chunk.raw.(string))
+			// chunks implement Str::ToString
+			chunk := vm.eval(&checker.InstanceMethod{
+				Subject: e.Chunks[i],
+				Method: &checker.FunctionCall{
+					Name: "to_str",
+					Args: []checker.Expression{},
+				},
+			}).raw.(string)
+			sb.WriteString(chunk)
 		}
 		return &object{sb.String(), checker.Str}
 	case *checker.Variable:
@@ -173,6 +180,12 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			return &object{-num, val._type}
 		}
 		return &object{-val.raw.(float64), val._type}
+	case *checker.StrAddition:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(string) + right.raw.(string),
+			left._type,
+		}
 	case *checker.IntAddition:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
@@ -455,13 +468,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			if e.Package == "ard/io" {
 				switch e.Call.Name {
 				case "print":
-					arg := vm.eval(e.Call.Args[0])
+					toPrint := vm.eval(&checker.InstanceMethod{
+						Subject: e.Call.Args[0],
+						Method: &checker.FunctionCall{
+							Name: "to_str",
+							Args: []checker.Expression{},
+						},
+					}).raw.(string)
 
-					string, ok := arg.raw.(string)
-					if !ok {
-						panic(fmt.Errorf("Unprintable arg to print: %s", arg))
-					}
-					fmt.Println(string)
+					fmt.Println(toPrint)
 					return void
 				case "read_line":
 					scanner := bufio.NewScanner(os.Stdin)
@@ -942,6 +957,8 @@ func (vm *VM) evalStrMethod(subj *object, m *checker.FunctionCall) *object {
 		}
 
 		return &object{list, m.Type()}
+	case "to_str":
+		return subj
 	case "trim":
 		return &object{strings.Trim(raw, " "), m.Type()}
 	default:
