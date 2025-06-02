@@ -10,26 +10,37 @@ fn count_words(words: [Str]) [Str:Int] {
   counts
 }
 
+// super inefficient
+fn sort_desc(mut counts: [Str:Int]) [Str] {
+  mut res: [Str] = []
+  while res.size() < counts.keys().size() {
+    mut top = counts.keys().at(0).or("")
+    for key in counts.keys() {
+      if counts.get(key).or(0) > counts.get(top).or(0) {
+        top = key
+      }
+    }
+    res.push("{top}: {counts.get(top).or(0)}")
+    counts.drop(top)
+  }
+  res
+}
+
 fn main() {
   io::print("Enter some text to analyze:")
   match io::read_line() {
     ok(text) => {
       let words = text.split(" ")
-      let word_counts = count_words(words)
+      mut word_counts = count_words(words)
 
       io::print("\nWord Frequency Analysis:")
       io::print("------------------------")
       io::print("Total words: {words.size()}")
       io::print("Unique words: {word_counts.size()}")
 
-      // io::print("\nMost frequent words:")
-      // Sort by count in descending order
-      // Note: This would require a sort method implementation
-      // Since we don't have that yet, let's print all words
-      io::print("Counts:")
-      for word in word_counts.keys() {
-        let count = word_counts.get(word).or(0)
-        io::print("{word}: {count}")
+      io::print("\nMost frequent words:")
+      for result in sort_desc(word_counts) {
+        io::print("* {result}")
       }
     },
     err => io::print("Unable to read input: {err}")

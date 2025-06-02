@@ -1539,8 +1539,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
-			// Here we would handle other iterable types (like lists, etc.)
-			// Currently we only support string and integer iteration
+			// Currently we only support string, integer, and List iteration
 			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
 			return nil
 		}
