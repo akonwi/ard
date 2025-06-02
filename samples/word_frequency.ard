@@ -19,8 +19,8 @@ fn main() {
 
       io::print("\nWord Frequency Analysis:")
       io::print("------------------------")
-      io::print("Total words: {words.size().to_str()}")
-      io::print("Unique words: {word_counts.size().to_str()}")
+      io::print("Total words: {words.size()}")
+      io::print("Unique words: {word_counts.size()}")
 
       // io::print("\nMost frequent words:")
       // Sort by count in descending order
@@ -29,7 +29,7 @@ fn main() {
       io::print("Counts:")
       for word in word_counts.keys() {
         let count = word_counts.get(word).or(0)
-        io::print("{word}: {count.to_str()}")
+        io::print("{word}: {count}")
       }
     },
     err => io::print("Unable to read input: {err}")
