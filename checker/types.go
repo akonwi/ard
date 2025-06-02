@@ -313,6 +313,16 @@ func (l List) get(name string) Type {
 			Name:       name,
 			ReturnType: Int,
 		}
+	case "swap":
+		return &FunctionDef{
+			Mutates: true,
+			Name:    name,
+			Parameters: []Parameter{
+				{Name: "l", Type: Int},
+				{Name: "r", Type: Int},
+			},
+			ReturnType: Void,
+		}
 	default:
 		return nil
 	}

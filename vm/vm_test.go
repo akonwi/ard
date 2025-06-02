@@ -374,6 +374,14 @@ func TestListApi(t *testing.T) {
 				list.at(1)`,
 			want: 10,
 		},
+		{
+			name: "List::swap swaps values at the given indexes",
+			input: `
+				mut list = [1,2,3]
+				list.swap(0,2)
+				list.at(0)`,
+			want: 3,
+		},
 	})
 }
 

@@ -993,12 +993,15 @@ func (vm *VM) evalBoolMethod(subj *object, m *checker.InstanceMethod) *object {
 	}
 }
 
-func (vm *VM) evalListMethod(subj *object, m *checker.InstanceMethod) *object {
-	raw := subj.raw.([]*object)
+func (vm *VM) evalListMethod(self *object, m *checker.InstanceMethod) *object {
+	raw := self.raw.([]*object)
 	switch m.Method.Name {
 	case "at":
 		index := vm.eval(m.Method.Args[0]).raw.(int)
 		return &object{raw[index].raw, m.Type()}
+	case "push":
+		self.raw = append(raw, vm.eval(m.Method.Args[0]))
+		return self
 	case "set":
 		index := vm.eval(m.Method.Args[0]).raw.(int)
 		value := vm.eval(m.Method.Args[1])
@@ -1010,11 +1013,15 @@ func (vm *VM) evalListMethod(subj *object, m *checker.InstanceMethod) *object {
 		return result
 	case "size":
 		return &object{len(raw), checker.Int}
-	case "push":
-		subj.raw = append(raw, vm.eval(m.Method.Args[0]))
-		return subj
+	case "swap":
+		l := vm.eval(m.Method.Args[0]).raw.(int)
+		r := vm.eval(m.Method.Args[1]).raw.(int)
+		_l, _r := raw[l], raw[r]
+		raw[l] = _r
+		raw[r] = _l
+		return void
 	default:
-		panic(fmt.Errorf("Unimplemented: %s.%s()", subj._type, m.Method.Name))
+		panic(fmt.Errorf("Unimplemented: %s.%s()", self._type, m.Method.Name))
 	}
 }
 
