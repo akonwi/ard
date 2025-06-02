@@ -221,7 +221,7 @@ func (f *float) equal(other Type) bool {
 }
 
 func (f *float) hasTrait(trait *Trait) bool {
-	return false
+	return trait == strPkg.symbols["ToString"]
 }
 
 var Float = &float{}
