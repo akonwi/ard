@@ -114,6 +114,12 @@ func (s str) get(name string) Type {
 			},
 			ReturnType: MakeList(Str),
 		}
+	case "to_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
 	case "trim":
 		return &FunctionDef{
 			Name:       name,
@@ -136,8 +142,7 @@ func (s *str) equal(other Type) bool {
 }
 
 func (s *str) hasTrait(trait *Trait) bool {
-	// todo: support built-in String
-	return false
+	return trait == strPkg.symbols["ToString"]
 }
 
 var Str = &str{}
@@ -254,7 +259,7 @@ func (b *_bool) equal(other Type) bool {
 }
 
 func (b *_bool) hasTrait(trait *Trait) bool {
-	return false
+	return trait == strPkg.symbols["ToString"]
 }
 
 var Bool = &_bool{}

@@ -134,7 +134,7 @@ func (pkg IoPkg) get(name string) symbol {
 	case "print":
 		fn := &FunctionDef{
 			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: Str}},
+			Parameters: []Parameter{{Name: "string", Type: strPkg.symbols["ToString"].(*Trait)}},
 			ReturnType: Void,
 		}
 		return fn

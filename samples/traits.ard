@@ -13,6 +13,9 @@ impl Str::ToString for Book {
 
 let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
 
+/*
+  This is a contrived example with the same signature as `io::print()`
+*/
 fn show(item: Str::ToString) {
   io::print(item.to_str())
 }

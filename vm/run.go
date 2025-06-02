@@ -153,8 +153,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	case *checker.TemplateStr:
 		sb := strings.Builder{}
 		for i := range e.Chunks {
-			chunk := vm.eval(e.Chunks[i])
-			sb.WriteString(chunk.raw.(string))
+			// chunks implement Str::ToString
+			chunk := vm.eval(&checker.InstanceMethod{
+				Subject: e.Chunks[i],
+				Method: &checker.FunctionCall{
+					Name: "to_str",
+					Args: []checker.Expression{},
+				},
+			}).raw.(string)
+			sb.WriteString(chunk)
 		}
 		return &object{sb.String(), checker.Str}
 	case *checker.Variable:
@@ -948,6 +955,8 @@ func (vm *VM) evalStrMethod(subj *object, m *checker.FunctionCall) *object {
 		}
 
 		return &object{list, m.Type()}
+	case "to_str":
+		return subj
 	case "trim":
 		return &object{strings.Trim(raw, " "), m.Type()}
 	default:

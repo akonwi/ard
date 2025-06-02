@@ -1874,7 +1874,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !Str.equal(cx.Type()) {
+				if !cx.Type().hasTrait(strPkg.get("ToString").(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
