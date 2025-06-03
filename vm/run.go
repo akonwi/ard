@@ -336,36 +336,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	case *checker.InstanceMethod:
 		{
 			subj := vm.eval(e.Subject)
-			if subj._type == checker.Str {
-				return vm.evalStrMethod(subj, e.Method)
-			}
-			if subj._type == checker.Int {
-				return vm.evalIntMethod(subj, e)
-			}
-			if subj._type == checker.Float {
-				return vm.evalFloatMethod(subj, e.Method)
-			}
-			if subj._type == checker.Bool {
-				return vm.evalBoolMethod(subj, e)
-			}
-			if _, ok := subj._type.(*checker.List); ok {
-				return vm.evalListMethod(subj, e)
-			}
-			if _, ok := subj._type.(*checker.Map); ok {
-				return vm.evalMapMethod(subj, e)
-			}
-			if _, ok := subj._type.(*checker.Maybe); ok {
-				return vm.evalMaybeMethod(subj, e)
-			}
-			if _, ok := subj._type.(*checker.StructDef); ok {
-				return vm.evalStructMethod(subj, e.Method)
-			}
-
-			if _, ok := subj._type.(*checker.Result); ok {
-				return vm.evalResultMethod(subj, e.Method)
-			}
-
-			panic(fmt.Errorf("Unimplemented: %s.%s() on %T", subj._type, e.Method.Name, subj._type))
+			return vm.evalInstanceMethod(subj, e)
 		}
 	case *checker.PackageFunctionCall:
 		{
@@ -936,6 +907,44 @@ func (vm *VM) evalStrProperty(subj *object, name string) *object {
 	default:
 		return void
 	}
+}
+
+func (vm *VM) evalInstanceMethod(self *object, e *checker.InstanceMethod) *object {
+	if self._type == checker.Str {
+		return vm.evalStrMethod(self, e.Method)
+	}
+	if self._type == checker.Int {
+		return vm.evalIntMethod(self, e)
+	}
+	if self._type == checker.Float {
+		return vm.evalFloatMethod(self, e.Method)
+	}
+	if self._type == checker.Bool {
+		return vm.evalBoolMethod(self, e)
+	}
+	if _, ok := self._type.(*checker.List); ok {
+		return vm.evalListMethod(self, e)
+	}
+	if _, ok := self._type.(*checker.Map); ok {
+		return vm.evalMapMethod(self, e)
+	}
+	if _, ok := self._type.(*checker.Maybe); ok {
+		return vm.evalMaybeMethod(self, e)
+	}
+	if _, ok := self._type.(*checker.StructDef); ok {
+		return vm.evalStructMethod(self, e.Method)
+	}
+	if _, ok := self._type.(*checker.Result); ok {
+		return vm.evalResultMethod(self, e.Method)
+	}
+	if any, ok := self._type.(*checker.Any); ok {
+		self._type = any.Actual()
+		res := vm.evalInstanceMethod(self, e)
+		self._type = any
+		return res
+	}
+
+	panic(fmt.Errorf("Unimplemented: %s.%s() on %T", self._type, e.Method.Name, self._type))
 }
 
 func (vm *VM) evalStrMethod(subj *object, m *checker.FunctionCall) *object {

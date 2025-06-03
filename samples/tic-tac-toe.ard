@@ -30,49 +30,52 @@ impl Board {
   }
 
   fn can_play(pos: Int) Bool {
-    match @cells.at(pos) {
-      s => s.is_empty(),
-      _ => false
+    match pos < @cells.size() {
+      true => @cells.at(pos).is_empty(),
+      false => false
     }
   }
 
   fn get_winner() Str? {
     mut res: Str? = maybe::none()
 
-    if not @cells.at(0).or("").is_empty() {
+    if not @cells.at(0).is_empty() {
       // check top row
       if @cells.at(0) == @cells.at(1) and @cells.at(0) == @cells.at(2) {
-        res = @cells.at(0)
+        res = maybe::some(@cells.at(0))
+      }
       // check left column
-      } else if @cells.at(0) == @cells.at(3) and @cells.at(0) == @cells.at(6) {
-        res = @cells.at(0)
+      if @cells.at(0) == @cells.at(3) and @cells.at(0) == @cells.at(6) {
+        res = maybe::some(@cells.at(0))
+      }
       // check top-left to bottom-right
-      } else if @cells.at(0) == @cells.at(4) and @cells.at(0) == @cells.at(8) {
-        res = @cells.at(0)
+      if @cells.at(0) == @cells.at(4) and @cells.at(0) == @cells.at(8) {
+        res = maybe::some(@cells.at(0))
       }
     }
 
     // check middle column
-    if not @cells.at(1).or("").is_empty() {
+    if not @cells.at(1).is_empty() {
       if @cells.at(1) == @cells.at(4) and @cells.at(1) == @cells.at(7) {
-        res = @cells.at(1)
+        res = maybe::some(@cells.at(1))
       }
     }
 
-    if not @cells.at(2).or("").is_empty() {
+    if not @cells.at(2).is_empty() {
       // check right column
       if @cells.at(2) == @cells.at(5) and @cells.at(2) == @cells.at(8) {
-        res = @cells.at(2)
+        res = maybe::some(@cells.at(2))
+      }
       // check top-right to bottom-left
-      } else if @cells.at(2) == @cells.at(4) and @cells.at(2) == @cells.at(6) {
-        res = @cells.at(2)
+      if @cells.at(2) == @cells.at(4) and @cells.at(2) == @cells.at(6) {
+        res = maybe::some(@cells.at(2))
       }
     }
 
     // check middle row
-    if not @cells.at(3).or("").is_empty() {
+    if not @cells.at(3).is_empty() {
       if @cells.at(3) == @cells.at(4) and @cells.at(3) == @cells.at(5) {
-        res = @cells.at(3)
+        res = maybe::some(@cells.at(3))
       }
     }
 
@@ -84,7 +87,8 @@ fn read_move(player: Str) Int {
   io::print("Enter a number between 1 and 9")
   io::print("---------------")
 
-  let input = Int::from_str(io::read_line()).or(-1)
+  let input_str = io::read_line().or("")
+  let input = Int::from_str(input_str).or(-1)
   match input >= 1 and input <= 9 {
     true => input - 1,
     false => -1
