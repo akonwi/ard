@@ -63,6 +63,17 @@ func TestForInLoops(t *testing.T) {
 			`,
 			want: 15,
 		},
+		{
+			name: "looping over a map",
+			input: `
+				mut sum = 0 // sum of the values
+				for k,count in ["key":3, "foobar":6] {
+					sum =+ count
+				}
+				sum
+			`,
+			want: 9,
+		},
 	})
 }
 

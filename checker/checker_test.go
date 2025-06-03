@@ -1216,6 +1216,48 @@ func TestForLoops(t *testing.T) {
 	})
 }
 
+func TestLoopingOverMaps(t *testing.T) {
+	run(t, []test{
+		{
+			name: "valid",
+			input: `
+			for key, val in ["hello":5, "world": 5] {
+				"{key} = {val}"
+			}`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.ForInMap{
+							Key: "key",
+							Val: "val",
+							Map: &checker.MapLiteral{
+								Keys:   []checker.Expression{&checker.StrLiteral{"hello"}, &checker.StrLiteral{"world"}},
+								Values: []checker.Expression{&checker.IntLiteral{5}, &checker.IntLiteral{5}},
+							},
+							Body: &checker.Block{
+								Stmts: []checker.Statement{
+									{
+										Expr: &checker.TemplateStr{
+											Chunks: []checker.Expression{
+												&checker.StrLiteral{},
+												&checker.Variable{},
+												&checker.TemplateStr{Chunks: []checker.Expression{
+													&checker.StrLiteral{" = "},
+													&checker.Variable{},
+												}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestTraditionalForLoop(t *testing.T) {
 	run(t, []test{
 		{

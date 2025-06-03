@@ -91,6 +91,10 @@ for item in array {
   // ...
 }
 
+for key, val in map {
+  io::print("key: {key} = value({val})")
+}
+
 // check condition, then do block
 while condition {
   // ...

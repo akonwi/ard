@@ -126,6 +126,51 @@ func (vm *VM) do(stmt checker.Statement) *object {
 			}
 		}
 		return void
+	case *checker.ForInMap:
+		{
+			mapObj := vm.eval(s.Map)
+			_map := mapObj.raw.(map[string]*object)
+			for k, v := range _map {
+				_, broke := vm.evalBlock(s.Body, func() {
+					vm.scope.breakable = true
+
+					// parse raw key string into Ard type
+					keyType := mapObj._type.(*checker.Map).Key()
+					key := &object{nil, keyType}
+
+					switch keyType.String() {
+					case checker.Str.String():
+						key.raw = k
+					case checker.Int.String():
+						if _num, err := strconv.Atoi(k); err != nil {
+							panic(fmt.Errorf("Couldn't turn map key %s into int", k))
+						} else {
+							key.raw = _num
+						}
+					case checker.Bool.String():
+						if _bool, err := strconv.ParseBool(k); err != nil {
+							panic(fmt.Errorf("Couldn't turn map key %s into bool", k))
+						} else {
+							key.raw = _bool
+						}
+					case checker.Float.String():
+						if _float, err := strconv.ParseFloat(k, 64); err != nil {
+							panic(fmt.Errorf("Couldn't turn map key %s into float", k))
+						} else {
+							key.raw = _float
+						}
+					default:
+						panic(fmt.Errorf("Unsupported map key: %s", keyType))
+					}
+					vm.scope.add(s.Key, key)
+					vm.scope.add(s.Val, v)
+				})
+				if broke {
+					break
+				}
+			}
+			return void
+		}
 	case *checker.WhileLoop:
 		for vm.eval(s.Condition).raw.(bool) {
 			_, broke := vm.evalBlock(s.Body, func() { vm.scope.breakable = true })

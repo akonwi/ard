@@ -546,6 +546,15 @@ type ForInList struct {
 
 func (f ForInList) NonProducing() {}
 
+type ForInMap struct {
+	Key  string
+	Val  string
+	Map  Expression
+	Body *Block
+}
+
+func (f ForInMap) NonProducing() {}
+
 type ForLoop struct {
 	Init      *VariableDef
 	Condition Expression
@@ -1554,6 +1563,36 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Mutable: false,
 						Name:    s.Cursor.Name,
 						__type:  listType.of,
+					})
+				})
+
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
+			if mapType, ok := iterValue.Type().(*Map); ok {
+				iterable := c.checkExpr(s.Iterable)
+				if iterable == nil {
+					return nil
+				}
+
+				loop := &ForInMap{
+					Key: s.Cursor.Name,
+					Val: s.Cursor2.Name,
+					Map: iterable,
+				}
+
+				body := c.checkBlock(s.Body, func() {
+					// Add the cursors to the scope
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor.Name,
+						__type:  mapType.key,
+					})
+					c.scope.add(&VariableDef{
+						Mutable: false,
+						Name:    s.Cursor2.Name,
+						__type:  mapType.value,
 					})
 				})
 

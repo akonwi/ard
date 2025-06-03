@@ -444,6 +444,10 @@ func (m Map) get(name string) Type {
 	}
 }
 
+func (m *Map) Key() Type {
+	return m.key
+}
+
 func (m *Map) Value() Type {
 	return m.value
 }

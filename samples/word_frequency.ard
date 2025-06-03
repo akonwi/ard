@@ -13,8 +13,8 @@ fn count_words(words: [Str]) [WordCount] {
   }
 
   mut res: [WordCount] = []
-  for word in counts.keys() {
-    res.push(WordCount{ word: word, count: counts.get(word).or(0) })
+  for word, count in counts {
+    res.push(WordCount{ word: word, count: count })
   }
   res
 }
