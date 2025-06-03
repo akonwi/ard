@@ -14,7 +14,7 @@ fn count_words(words: [Str]) [Str:Int] {
 fn sort_desc(mut counts: [Str:Int]) [Str] {
   mut res: [Str] = []
   while res.size() < counts.keys().size() {
-    mut top = counts.keys().at(0).or("")
+    mut top = counts.keys().at(0)
     for key in counts.keys() {
       if counts.get(key).or(0) > counts.get(top).or(0) {
         top = key

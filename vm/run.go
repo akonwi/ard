@@ -998,6 +998,9 @@ func (vm *VM) evalListMethod(self *object, m *checker.InstanceMethod) *object {
 	switch m.Method.Name {
 	case "at":
 		index := vm.eval(m.Method.Args[0]).raw.(int)
+		if index >= len(raw) {
+			panic(fmt.Errorf("Index out of range (%d) on list of length %d", index, len(raw)))
+		}
 		return &object{raw[index].raw, m.Type()}
 	case "push":
 		self.raw = append(raw, vm.eval(m.Method.Args[0]))

@@ -289,7 +289,7 @@ func (l List) get(name string) Type {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "index", Type: Int}},
-			ReturnType: &Maybe{l.of},
+			ReturnType: l.of,
 		}
 	case "push":
 		return &FunctionDef{
