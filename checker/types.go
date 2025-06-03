@@ -313,6 +313,20 @@ func (l List) get(name string) Type {
 			Name:       name,
 			ReturnType: Int,
 		}
+	case "sort":
+		param := Parameter{
+			Name: "cmp",
+			Type: &FunctionDef{
+				Parameters: []Parameter{{Name: "a", Type: l.of}, {Name: "b", Type: l.of}},
+				ReturnType: Bool,
+			},
+		}
+		return &FunctionDef{
+			Mutates:    true,
+			Name:       name,
+			Parameters: []Parameter{param},
+			ReturnType: Void,
+		}
 	case "swap":
 		return &FunctionDef{
 			Mutates: true,

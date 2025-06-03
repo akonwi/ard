@@ -375,6 +375,15 @@ func TestListApi(t *testing.T) {
 			want: 10,
 		},
 		{
+			name: "List.sort()",
+			input: `
+				mut list = [3,7,8,5,2,9,5,4]
+				list.sort(fn(a: Int, b: Int) Bool { a < b })
+				list.at(0) + list.at(7) // 2 + 9 = 11
+			`,
+			want: 11,
+		},
+		{
 			name: "List::swap swaps values at the given indexes",
 			input: `
 				mut list = [1,2,3]

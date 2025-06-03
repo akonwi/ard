@@ -1,27 +1,20 @@
 use ard/io
 
-fn count_words(words: [Str]) [Str:Int] {
+struct WordCount {
+  word: Str,
+  count: Int
+}
+
+fn count_words(words: [Str]) [WordCount] {
   mut counts: [Str:Int] = [:]
 
   for word in words {
     counts.set(word, counts.get(word).or(0) + 1)
   }
 
-  counts
-}
-
-// super inefficient
-fn sort_desc(mut counts: [Str:Int]) [Str] {
-  mut res: [Str] = []
-  while res.size() < counts.keys().size() {
-    mut top = counts.keys().at(0)
-    for key in counts.keys() {
-      if counts.get(key).or(0) > counts.get(top).or(0) {
-        top = key
-      }
-    }
-    res.push("{top}: {counts.get(top).or(0)}")
-    counts.drop(top)
+  mut res: [WordCount] = []
+  for word in counts.keys() {
+    res.push(WordCount{ word: word, count: counts.get(word).or(0) })
   }
   res
 }
@@ -39,8 +32,12 @@ fn main() {
       io::print("Unique words: {word_counts.size()}")
 
       io::print("\nMost frequent words:")
-      for result in sort_desc(word_counts) {
-        io::print("* {result}")
+      word_counts.sort(fn(a: WordCount, b: WordCount) Bool {
+        a.count > b.count
+      })
+
+      for entry in word_counts {
+        io::print("* {entry.word}: {entry.count}")
       }
     },
     err => io::print("Unable to read input: {err}")

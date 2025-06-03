@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -1025,6 +1026,17 @@ func (vm *VM) evalListMethod(self *object, m *checker.InstanceMethod) *object {
 		return result
 	case "size":
 		return &object{len(raw), checker.Int}
+	case "sort":
+		{
+			_isLess := vm.eval(m.Method.Args[0]).raw.(func(args ...*object) *object)
+			slices.SortFunc(raw, func(a, b *object) int {
+				if _isLess(a, b).raw.(bool) {
+					return -1
+				}
+				return 0
+			})
+			return void
+		}
 	case "swap":
 		l := vm.eval(m.Method.Args[0]).raw.(int)
 		r := vm.eval(m.Method.Args[1]).raw.(int)

@@ -591,26 +591,26 @@ func (f FunctionDef) get(name string) Type { return nil }
 func (f FunctionDef) name() string {
 	return f.Name
 }
-func (f FunctionDef) _type() Type {
+func (f *FunctionDef) _type() Type {
 	return f
 }
-func (f FunctionDef) Type() Type {
+func (f *FunctionDef) Type() Type {
 	return f
 }
 func (f FunctionDef) equal(other Type) bool {
 	// Check if it's another FunctionDef
-	if fnDef, ok := other.(*FunctionDef); ok {
-		if len(f.Parameters) != len(fnDef.Parameters) {
+	if otherF, ok := other.(*FunctionDef); ok {
+		if len(f.Parameters) != len(otherF.Parameters) {
 			return false
 		}
 
 		for i := range f.Parameters {
-			if !f.Parameters[i].Type.equal(fnDef.Parameters[i].Type) {
+			if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
 				return false
 			}
 		}
 
-		return f.Mutates == fnDef.Mutates && f.ReturnType.equal(fnDef.ReturnType)
+		return f.Mutates == otherF.Mutates && f.ReturnType.equal(otherF.ReturnType)
 	}
 
 	return false
