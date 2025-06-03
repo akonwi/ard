@@ -321,6 +321,21 @@ func TestForInLoops(t *testing.T) {
 			},
 		},
 		{
+			name:  "Iterating over a map",
+			input: `for key, val in map {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ForInLoop{
+						Cursor:   Identifier{Name: "key"},
+						Cursor2:  Identifier{Name: "val"},
+						Iterable: &Identifier{Name: "map"},
+						Body:     []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name:  "Iterating over a list of struct literals",
 			input: `for shape in [Shape{height: 1, width: 2}, Shape{height: 2, width: 2}] {}`,
 			output: Program{

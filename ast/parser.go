@@ -264,7 +264,24 @@ func (p *parser) whileLoop() (Statement, error) {
 
 func (p *parser) forLoop() (Statement, error) {
 	if p.match(identifier) {
-		cursor := Identifier{Name: p.previous().text}
+		id := p.previous()
+		cursor := Identifier{
+			Name: id.text,
+			// todo: token.getLocation()
+			Location: Location{
+				Start: Point{Row: id.line, Col: id.column},
+				End:   Point{Row: id.line, Col: id.column + len(id.text)},
+			},
+		}
+		cursor2 := Identifier{}
+		if p.match(comma) {
+			id := p.consume(identifier, "Expected a name after ','")
+			cursor2.Name = id.text
+			cursor2.Location = Location{
+				Start: Point{Row: id.line, Col: id.column},
+				End:   Point{Row: id.line, Col: id.column + len(id.text)},
+			}
+		}
 		p.consume(in, "Expected 'in' after cursor name")
 		seq, err := p.iterRange()
 		if err != nil {
@@ -285,6 +302,7 @@ func (p *parser) forLoop() (Statement, error) {
 
 		return &ForInLoop{
 			Cursor:   cursor,
+			Cursor2:  cursor2,
 			Iterable: seq,
 			Body:     body,
 		}, nil

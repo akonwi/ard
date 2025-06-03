@@ -387,6 +387,7 @@ func (r RangeLoop) String() string {
 type ForInLoop struct {
 	Location
 	Cursor   Identifier
+	Cursor2  Identifier
 	Iterable Expression
 	Body     []Statement
 }
