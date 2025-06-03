@@ -60,6 +60,20 @@ fn greet(name: Str) Str {
 }
 ```
 
+Functions can also be used as arguments
+
+```ard
+fn map(list: [Int], do: fn(Int) Int) [Int] {
+  let mapped: [Int] = []
+  for i in list {
+    mapped.push(do(i))
+  }
+  mapped
+}
+
+map([1,2,3], fn(i) { i*2 })
+```
+
 ### Control Flow
 
 Ard supports common control flow structures:

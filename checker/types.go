@@ -329,7 +329,7 @@ func (l List) get(name string) Type {
 }
 func (l *List) equal(other Type) bool {
 	if o, ok := other.(*List); ok {
-		return o.of.equal(o.of)
+		return l.of.equal(o.of)
 	}
 	if any, ok := other.(*Any); ok {
 		if any.actual == nil {

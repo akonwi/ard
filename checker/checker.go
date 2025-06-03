@@ -598,17 +598,21 @@ func (f FunctionDef) Type() Type {
 	return f
 }
 func (f FunctionDef) equal(other Type) bool {
-	if oFn, ok := other.(*FunctionDef); ok {
-		if len(f.Parameters) != len(oFn.Parameters) {
+	// Check if it's another FunctionDef
+	if fnDef, ok := other.(*FunctionDef); ok {
+		if len(f.Parameters) != len(fnDef.Parameters) {
 			return false
 		}
+
 		for i := range f.Parameters {
-			if !f.Parameters[i].Type.equal(oFn.Parameters[i].Type) {
+			if !f.Parameters[i].Type.equal(fnDef.Parameters[i].Type) {
 				return false
 			}
 		}
-		return f.Mutates == oFn.Mutates && f.ReturnType.equal(oFn.ReturnType)
+
+		return f.Mutates == fnDef.Mutates && f.ReturnType.equal(fnDef.ReturnType)
 	}
+
 	return false
 }
 
@@ -986,6 +990,24 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		baseType = Float
 	case *ast.BooleanType:
 		baseType = Bool
+
+	case *ast.FunctionType:
+		// Convert each parameter type and return type
+		params := make([]Parameter, len(ty.Params))
+		for i, param := range ty.Params {
+			params[i] = Parameter{
+				Name: fmt.Sprintf("arg%d", i),
+				Type: c.resolveType(param),
+			}
+		}
+		returnType := c.resolveType(ty.Return)
+
+		// Create a FunctionDef from the function type syntax
+		baseType = &FunctionDef{
+			Name:       "<function>",
+			Parameters: params,
+			ReturnType: returnType,
+		}
 	case *ast.List:
 		of := c.resolveType(ty.Element)
 		baseType = MakeList(of)
@@ -1913,10 +1935,25 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			// Cast to FunctionDef
-			fnDef, ok := fnSym.(*FunctionDef)
+			var fnDef *FunctionDef
+			var ok bool
+
+			// Try different types for the function symbol
+			fnDef, ok = fnSym.(*FunctionDef)
 			if !ok {
-				if anon, ok := fnSym.(*VariableDef).Value.(*FunctionDef); ok {
-					fnDef = anon
+				// Check if it's a variable that holds a function
+				if varDef, ok := fnSym.(*VariableDef); ok {
+					// Try to get a FunctionDef directly
+					if anon, ok := varDef.Value.(*FunctionDef); ok {
+						fnDef = anon
+					} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
+						// FunctionDef can be used directly
+						// This handles the case where a variable holds a function
+						fnDef = existingFnDef
+					} else {
+						c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+						return nil
+					}
 				} else {
 					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
 					return nil

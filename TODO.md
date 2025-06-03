@@ -1,5 +1,7 @@
 ## TODO
 
+- [ ] Function as Type
+  - enables using fn as parameter
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?

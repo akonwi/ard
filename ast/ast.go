@@ -94,6 +94,21 @@ func (s StringType) GetName() string {
 	return "String"
 }
 
+type FunctionType struct {
+	Location
+	nullable bool
+	Params   []DeclaredType
+	Return   DeclaredType
+}
+
+func (f FunctionType) IsNullable() bool {
+	return f.nullable
+}
+
+func (f FunctionType) GetName() string {
+	return "Function"
+}
+
 type IntType struct {
 	Location
 	nullable bool

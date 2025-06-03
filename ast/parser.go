@@ -620,6 +620,41 @@ func (p *parser) parseType() DeclaredType {
 		}
 	}
 
+	// Check for function type: fn(ParamType) ReturnType
+	if p.match(fn) {
+		fnToken := p.previous()
+		p.consume(left_paren, "Expected '(' after 'fn' in function type")
+
+		// Parse parameter types
+		paramTypes := []DeclaredType{}
+		if !p.check(right_paren) {
+			for {
+				paramType := p.parseType()
+				paramTypes = append(paramTypes, paramType)
+				if !p.match(comma) {
+					break
+				}
+			}
+		}
+		p.consume(right_paren, "Expected ')' after function parameters")
+
+		// Parse return type
+		returnType := p.parseType()
+
+		// Check for nullable
+		nullable := p.match(question_mark)
+
+		return &FunctionType{
+			Params:   paramTypes,
+			Return:   returnType,
+			nullable: nullable,
+			Location: Location{
+				Start: Point{Row: fnToken.line, Col: fnToken.column},
+				End:   Point{Row: p.previous().line, Col: p.previous().column},
+			},
+		}
+	}
+
 	if p.match(identifier) {
 		id := p.previous()
 		nullable := false
@@ -834,8 +869,20 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		for !p.match(right_paren) {
 			isMutable := p.match(mut)
 			nameToken := p.consume(identifier, "Expected parameter name")
-			p.consume(colon, "Expected ':' after parameter name")
-			paramType := p.parseType()
+
+			// Check if this is a simple parameter list in an anonymous function
+			// In case of anonymous functions with unnamed params, we don't need types
+			var paramType DeclaredType
+			if p.check(colon) {
+				p.consume(colon, "Expected ':' after parameter name")
+				paramType = p.parseType()
+			} else if name == "" { // Anonymous function with untyped params
+				// For anonymous functions, allow simple parameter names without types
+				paramType = &StringType{} // Default to string type for now
+			} else {
+				return nil, fmt.Errorf("Expected ':' after parameter name")
+			}
+
 			params = append(params, Parameter{
 				Mutable: isMutable,
 				Name:    nameToken.text,
@@ -843,7 +890,13 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			})
 			p.match(comma)
 		}
-		returnType := p.parseType()
+
+		// Return type is required for all functions - except for simple anonymous functions
+		var returnType DeclaredType = nil
+		if (name == "" && !p.check(left_brace)) || name != "" {
+			// Function with explicit return type
+			returnType = p.parseType()
+		}
 
 		statements, err := p.block()
 		if err != nil {
