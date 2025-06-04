@@ -1,12 +1,9 @@
 ## TODO
 
-- [ ] two part cursor in looping over arrays
-  - optional second index when looping over list/string/range: `for person, index in employees { io.print(index) }`
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?
 - [ ] matching on numbers
-  - looping over maps: `for key, value in map { io.print("{key}: {value}") }`
 - [ ] calling functions with named arguments
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
