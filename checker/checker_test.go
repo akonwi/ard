@@ -1847,12 +1847,13 @@ func TestLists(t *testing.T) {
 		},
 		{
 			name:  "Looping over a list",
-			input: `for i in [1,2,3] { i }`,
+			input: `for num,index in [1,2,3] { num }`,
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.ForInList{
-							Cursor: "i",
+							Cursor: "num",
+							Index:  "index",
 							List: &checker.ListLiteral{
 								Elements: []checker.Expression{
 									&checker.IntLiteral{Value: 1},

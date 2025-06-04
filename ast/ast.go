@@ -374,10 +374,11 @@ func (w WhileLoop) String() string {
 
 type RangeLoop struct {
 	Location
-	Cursor Identifier
-	Start  Expression
-	End    Expression
-	Body   []Statement
+	Cursor  Identifier
+	Cursor2 Identifier
+	Start   Expression
+	End     Expression
+	Body    []Statement
 }
 
 func (r RangeLoop) String() string {

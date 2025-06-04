@@ -523,6 +523,7 @@ func (i *If) Type() Type {
 
 type ForIntRange struct {
 	Cursor string
+	Index  string
 	Start  Expression
 	End    Expression
 	Body   *Block
@@ -532,6 +533,7 @@ func (f ForIntRange) NonProducing() {}
 
 type ForInStr struct {
 	Cursor string
+	Index  string
 	Value  Expression
 	Body   *Block
 }
@@ -540,6 +542,7 @@ func (f ForInStr) NonProducing() {}
 
 type ForInList struct {
 	Cursor string
+	Index  string
 	List   Expression
 	Body   *Block
 }
@@ -1482,6 +1485,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			if start.Type() == Int {
 				loop := &ForIntRange{
 					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
 					Start:  start,
 					End:    end,
 				}
@@ -1491,6 +1495,13 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Name:    s.Cursor.Name,
 						__type:  start.Type(),
 					})
+					if loop.Index != "" {
+						c.scope.add(&VariableDef{
+							Mutable: false,
+							Name:    loop.Index,
+							__type:  Int,
+						})
+					}
 				})
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -1509,6 +1520,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			if iterValue.Type() == Str {
 				loop := &ForInStr{
 					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
 					Value:  iterValue,
 				}
 
@@ -1521,6 +1533,13 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Name:    s.Cursor.Name,
 						__type:  Str,
 					})
+					if loop.Index != "" {
+						c.scope.add(&VariableDef{
+							Mutable: false,
+							Name:    loop.Index,
+							__type:  Int,
+						})
+					}
 				})
 
 				loop.Body = body
@@ -1532,6 +1551,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				// This is syntax sugar for a range from 0 to n
 				loop := &ForIntRange{
 					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
 					Start:  &IntLiteral{0}, // Start from 0
 					End:    iterValue,      // End at the specified number
 				}
@@ -1544,6 +1564,13 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Name:    s.Cursor.Name,
 						__type:  Int,
 					})
+					if loop.Index != "" {
+						c.scope.add(&VariableDef{
+							Mutable: false,
+							Name:    loop.Index,
+							__type:  Int,
+						})
+					}
 				})
 
 				loop.Body = body
@@ -1554,6 +1581,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				// This is syntax sugar for a range from 0 to n
 				loop := &ForInList{
 					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
 					List:   iterValue,
 				}
 
@@ -1564,6 +1592,13 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						Name:    s.Cursor.Name,
 						__type:  listType.of,
 					})
+					if loop.Index != "" {
+						c.scope.add(&VariableDef{
+							Mutable: false,
+							Name:    loop.Index,
+							__type:  Int,
+						})
+					}
 				})
 
 				loop.Body = body

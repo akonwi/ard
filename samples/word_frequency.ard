@@ -36,8 +36,8 @@ fn main() {
         a.count > b.count
       })
 
-      for entry in word_counts {
-        io::print("* {entry.word}: {entry.count}")
+      for entry, rank in word_counts {
+        io::print("{rank+1}. {entry.word}: {entry.count}")
       }
     },
     err => io::print("Unable to read input: {err}")

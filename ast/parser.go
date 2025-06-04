@@ -293,10 +293,11 @@ func (p *parser) forLoop() (Statement, error) {
 		}
 		if seq, ok := seq.(*RangeExpression); ok {
 			return &RangeLoop{
-				Cursor: cursor,
-				Start:  seq.Start,
-				End:    seq.End,
-				Body:   body,
+				Cursor:  cursor,
+				Cursor2: cursor2,
+				Start:   seq.Start,
+				End:     seq.End,
+				Body:    body,
 			}, nil
 		}
 

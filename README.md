@@ -50,9 +50,9 @@ There is no `++` or `--`.
 ### Functions
 
 - Use `fn` keyword to define functions
-- Return type is specified after the parameter list
-  - Return types are required. Without a return type, the function return is `Void` and ignored
-- There is no return keyword. The last expression is the returned value
+- A Return type is specified after the parameter list
+  - In order to declare the function as non-returning, omit the return type
+- There is no `return` keyword. The last expression is the returned value
 
 ```ard
 fn greet(name: Str) Str {
@@ -71,7 +71,7 @@ fn map(list: [Int], do: fn(Int) Int) [Int] {
   mapped
 }
 
-map([1,2,3], fn(i) { i*2 })
+map([1,2,3], fn(i: Int) Int { i*2 })
 ```
 
 ### Control Flow

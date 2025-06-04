@@ -91,23 +91,31 @@ func (vm *VM) do(stmt checker.Statement) *object {
 	case *checker.ForIntRange:
 		i := vm.eval(s.Start).raw.(int)
 		end := vm.eval(s.End).raw.(int)
+		iteration := 0
 		for i <= end {
 			_, broke := vm.evalBlock(s.Body, func() {
 				vm.scope.breakable = true
 				vm.scope.add(s.Cursor, &object{i, checker.Int})
+				if s.Index != "" {
+					vm.scope.add(s.Index, &object{iteration, checker.Int})
+				}
 			})
 			if broke {
 				break
 			}
 			i++
+			iteration++
 		}
 		return void
 	case *checker.ForInStr:
 		val := vm.eval(s.Value).raw.(string)
-		for _, c := range val {
+		for i, c := range val {
 			_, broke := vm.evalBlock(s.Body, func() {
 				vm.scope.breakable = true
 				vm.scope.add(s.Cursor, &object{string(c), checker.Str})
+				if s.Index != "" {
+					vm.scope.add(s.Index, &object{i, checker.Int})
+				}
 			})
 			if broke {
 				break
@@ -120,6 +128,9 @@ func (vm *VM) do(stmt checker.Statement) *object {
 			_, broke := vm.evalBlock(s.Body, func() {
 				vm.scope.breakable = true
 				vm.scope.add(s.Cursor, val[i])
+				if s.Index != "" {
+					vm.scope.add(s.Index, &object{i, checker.Int})
+				}
 			})
 			if broke {
 				break
