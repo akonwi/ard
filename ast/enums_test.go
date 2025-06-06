@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-var colorCode = `
-enum Color {
+var colorCode = `enum Color {
 	Red,
 	Green,
 	Yellow
@@ -28,6 +27,20 @@ func TestEnumDefinitions(t *testing.T) {
 					&EnumDefinition{
 						Name:     "Color",
 						Variants: []string{"Red", "Green", "Yellow"},
+					},
+				},
+			},
+		},
+		{
+			name:  "Public enum",
+			input: `pub ` + colorCode,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&EnumDefinition{
+						Name:     "Color",
+						Variants: []string{"Red", "Green", "Yellow"},
+						Public:   true,
 					},
 				},
 			},

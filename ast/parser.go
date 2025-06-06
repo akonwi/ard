@@ -135,17 +135,41 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(for_) {
 		return p.forLoop()
 	}
+
+	if p.check(pub, type_) {
+		p.match(pub)
+		p.match(type_)
+		return p.typeUnion(true)
+	}
 	if p.match(type_) {
-		return p.typeUnion()
+		return p.typeUnion(false)
+	}
+
+	if p.check(pub, enum) {
+		p.match(pub)
+		p.match(enum)
+		return p.enumDef(true)
 	}
 	if p.match(enum) {
-		return p.enumDef()
+		return p.enumDef(false)
+	}
+
+	if p.check(pub, struct_) {
+		p.match(pub)
+		p.match(struct_)
+		return p.structDef(true)
 	}
 	if p.match(struct_) {
-		return p.structDef()
+		return p.structDef(false)
+	}
+
+	if p.check(pub, trait) {
+		p.match(pub)
+		p.match(trait)
+		return p.traitDef(true)
 	}
 	if p.match(trait) {
-		return p.traitDef()
+		return p.traitDef(false)
 	}
 	if p.match(impl) {
 		// if implementing a static reference, it's a trait
@@ -337,8 +361,8 @@ func (p *parser) forLoop() (Statement, error) {
 	}, nil
 }
 
-func (p *parser) typeUnion() (Statement, error) {
-	decl := &TypeDeclaration{Type: []DeclaredType{}}
+func (p *parser) typeUnion(public bool) (Statement, error) {
+	decl := &TypeDeclaration{Public: true, Type: []DeclaredType{}}
 	nameToken := p.consume(identifier, "Expected name after 'type'")
 	decl.Name = Identifier{Name: nameToken.text}
 	p.consume(equal, "Expected '=' after type name")
@@ -357,9 +381,9 @@ func (p *parser) typeUnion() (Statement, error) {
 	return decl, nil
 }
 
-func (p *parser) enumDef() (Statement, error) {
+func (p *parser) enumDef(public bool) (Statement, error) {
 	nameToken := p.consume(identifier, "Expected name after 'enum'")
-	enum := &EnumDefinition{Name: nameToken.text}
+	enum := &EnumDefinition{Name: nameToken.text, Public: public}
 	p.consume(left_brace, "Expected '{'")
 	p.match(new_line)
 	for !p.match(right_brace) {
@@ -372,9 +396,10 @@ func (p *parser) enumDef() (Statement, error) {
 	return enum, nil
 }
 
-func (p *parser) structDef() (Statement, error) {
+func (p *parser) structDef(public bool) (Statement, error) {
 	nameToken := p.consume(identifier, "Expected name")
 	structDef := &StructDefinition{
+		Public: public,
 		Name:   Identifier{Name: nameToken.text},
 		Fields: []StructField{},
 	}
@@ -436,9 +461,9 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 	return impl, nil
 }
 
-func (p *parser) traitDef() (*TraitDefinition, error) {
+func (p *parser) traitDef(public bool) (*TraitDefinition, error) {
 	traitToken := p.previous()
-	traitDef := &TraitDefinition{}
+	traitDef := &TraitDefinition{Public: public}
 
 	nameToken := p.consume(identifier, "Expected trait name after 'trait'")
 	traitDef.Name = Identifier{
@@ -873,6 +898,7 @@ func (p *parser) try() (Expression, error) {
 }
 
 func (p *parser) functionDef(asMethod bool) (Statement, error) {
+	public := p.match(pub)
 	if p.match(fn) {
 		keyword := p.previous()
 		name := ""
@@ -935,6 +961,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		}
 
 		return &FunctionDeclaration{
+			Public:     public,
 			Name:       name,
 			Mutates:    asMethod && mutates,
 			Parameters: params,

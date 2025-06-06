@@ -21,6 +21,21 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
+			name:  "Public function",
+			input: `pub fn empty() {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Public:     true,
+						Name:       "empty",
+						Parameters: []Parameter{},
+						Body:       []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name:  "Function with generics",
 			input: `fn decode(str: $In) $Out {}`,
 			output: Program{

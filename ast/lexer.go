@@ -72,6 +72,7 @@ const (
 	if_     = "if"
 	else_   = "else"
 	type_   = "type"
+	pub     = "pub"
 
 	// Types
 	int_  = "int"
@@ -579,6 +580,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(else_)
 	case "type":
 		return makeKeyword(type_)
+	case "pub":
+		return makeKeyword(pub)
 	default:
 		return makeIdentifier(identifier)
 	}
