@@ -37,12 +37,13 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 
 ## Phase 3: Symbol Extraction & Checker Integration ✅ TODO
 
-### 3.1 Extract public symbols from imported modules
-- [ ] Run type checking on imported modules first (dependency order)
-- [ ] Extract public symbols (functions, types, structs, etc.) from imported modules
-- [ ] Create `UserModule` objects containing only public symbols
-- [ ] Add to `c.program.Imports` map like standard library modules
-- [ ] Add tests for symbol extraction
+### 3.1 Extract public symbols from imported modules ✅ COMPLETE
+- [x] Modify `Check()` function to return a `Module` representing the checked program
+- [x] Create `UserModule` struct implementing `Module` interface with `get()` method for symbol access
+- [x] Add `Public` fields to `FunctionDef` and `StructDef` types for visibility control
+- [x] Extract only public symbols in `UserModule.get()` - return nil for private/missing symbols
+- [x] Use global scope symbols instead of program statements for symbol extraction
+- [x] Add tests for symbol extraction and caching
 
 ### 3.2 Update symbol resolution
 - [ ] Modify identifier lookup to check imported modules via `::` syntax
@@ -86,7 +87,9 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 ## Implementation Notes
 
 ### Technical Decisions
-- **Caching strategy**: Cache parsed AST and checked modules by file path
+- **Caching strategy**: Cache parsed AST and checked modules by file path (avoid recursive type checking)
+- **Module interface**: `Check()` returns `Module` objects cached in `moduleCache` 
+- **Symbol visibility**: `Module.get()` method handles public/private access automatically
 - **Error handling**: Collect all import errors before failing
 - **Performance**: Lazy loading of modules (only when imported)
 - **Threading**: Single-threaded for now (can parallelize later)
@@ -104,7 +107,8 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 - ✅ Duplicate import detection
 - ✅ Project discovery and file path resolution
 - ✅ Module loading, caching, and circular dependency detection
-- 🚧 Symbol extraction and checker integration (current work)
+- ✅ Symbol extraction from checked modules (Phase 3.1 complete)
+- 🚧 Symbol resolution and import validation (current work)
 
 ## Related Files
 - `docs/imports.md` - Import specification

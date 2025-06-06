@@ -54,7 +54,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		program, diagnostics := checker.Check(ast, moduleResolver)
+		program, _, diagnostics := checker.Check(ast, moduleResolver)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
 				fmt.Println(diagnostic)

@@ -115,7 +115,7 @@ func TestUserModuleCheckerIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, diagnostics := checker.Check(astTree, resolver)
+	_, _, diagnostics := checker.Check(astTree, resolver)
 	if len(diagnostics) == 0 {
 		t.Error("Expected error for unimplemented user module loading")
 	}
@@ -178,7 +178,7 @@ func TestUserModuleErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, diagnostics := checker.Check(astTree, resolver)
+			_, _, diagnostics := checker.Check(astTree, resolver)
 			if len(diagnostics) == 0 {
 				t.Error("Expected error but got none")
 				return
@@ -587,5 +587,90 @@ pub fn func_b() Int { 2 }`,
 	// Should have 1 import (module_b)
 	if len(program.Imports) != 1 {
 		t.Errorf("Expected 1 import, got %d", len(program.Imports))
+	}
+}
+
+func TestSymbolExtraction(t *testing.T) {
+	// Create test module with public and private symbols
+	moduleContent := `
+pub fn public_function() Int {
+    42
+}
+
+fn private_function() Int {
+    24
+}
+
+pub struct PublicStruct {
+    field: Int
+}
+
+struct PrivateStruct {
+    field: Str
+}
+`
+
+	// Parse and check the module
+	astTree, err := ast.Parse([]byte(moduleContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, module, diagnostics := checker.Check(astTree, resolver)
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+
+	// Cast to UserModule for testing
+	userModule, ok := module.(*checker.UserModule)
+	if !ok {
+		t.Fatal("Expected UserModule")
+	}
+
+	// Test public symbol access
+	publicFunc := userModule.Get("public_function")
+	if publicFunc == nil {
+		t.Error("Expected to find public_function")
+	}
+	if funcDef, ok := publicFunc.(*checker.FunctionDef); ok {
+		if !funcDef.Public {
+			t.Error("Expected public_function to have Public=true")
+		}
+	} else {
+		t.Error("Expected public_function to be a FunctionDef")
+	}
+
+	publicStruct := userModule.Get("PublicStruct")
+	if publicStruct == nil {
+		t.Error("Expected to find PublicStruct")
+	}
+	if structDef, ok := publicStruct.(*checker.StructDef); ok {
+		if !structDef.Public {
+			t.Error("Expected PublicStruct to have Public=true")
+		}
+	} else {
+		t.Error("Expected PublicStruct to be a StructDef")
+	}
+
+	// Test private symbol access (should return nil)
+	privateFunc := userModule.Get("private_function")
+	if privateFunc != nil {
+		t.Error("Expected private_function to be nil (not accessible)")
+	}
+
+	privateStruct := userModule.Get("PrivateStruct")
+	if privateStruct != nil {
+		t.Error("Expected PrivateStruct to be nil (not accessible)")
+	}
+
+	// Test non-existent symbol
+	nonExistent := userModule.Get("nonexistent")
+	if nonExistent != nil {
+		t.Error("Expected nonexistent symbol to be nil")
 	}
 }

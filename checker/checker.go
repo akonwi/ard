@@ -577,6 +577,7 @@ type FunctionDef struct {
 	Mutates    bool
 	Body       *Block
 	SelfName   string
+	Public     bool
 }
 
 func (f FunctionDef) String() string {
@@ -802,6 +803,7 @@ type StructDef struct {
 	Fields map[string]Type
 	Self   string
 	Traits []*Trait
+	Public bool
 }
 
 func (def StructDef) NonProducing() {}
@@ -934,7 +936,7 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 	})
 }
 
-func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, []Diagnostic) {
+func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module, []Diagnostic) {
 	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -982,7 +984,10 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, []Diag
 		}
 	}
 
-	return c.program, c.diagnostics
+	// Create UserModule from the checked program
+	userModule := NewUserModule("", c.program, c.scope)
+	
+	return c.program, userModule, c.diagnostics
 }
 
 func (c *checker) resolvePkg(name string) Module {
@@ -1672,9 +1677,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.StructDefinition:
 		{
 			def := &StructDef{
-				Name:   s.Name.Name,
-				Fields: make(map[string]Type),
-			}
+			Name:   s.Name.Name,
+			Fields: make(map[string]Type),
+			 Public: s.Public,
+		}
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
 				if fieldType == nil {
@@ -3545,6 +3551,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		Parameters: params,
 		ReturnType: returnType,
 		Body:       body,
+		Public:     def.Public,
 	}
 
 	// Add function to scope
