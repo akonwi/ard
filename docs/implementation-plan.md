@@ -5,7 +5,7 @@ This document tracks the implementation of importing from other files in the Ard
 ## Overview
 Enable importing from user-defined `.ard` files using the existing `use` keyword syntax, following the module resolution strategy defined in [imports.md](./imports.md).
 
-## Phase 1: Refactoring & Project Discovery ✅ TODO
+## Phase 1: Refactoring & Project Discovery ✅ COMPLETE
 
 ### 1.1 Rename Package to Module
 - [x] Rename `Package` interface to `Module` in `checker/checker.go`
@@ -26,31 +26,31 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 - [x] Validate that resolved files exist and are readable
 - [x] Add tests for path resolution
 
-## Phase 2: Module Loading & Caching ✅ TODO
+## Phase 2: Module Loading & Caching ✅ COMPLETE
 
 ### 2.1 Create module loading system
-- [ ] Add function to load and parse `.ard` files on demand
-- [ ] Cache parsed AST to avoid re-parsing the same file
-- [ ] Handle circular dependency detection
-- [ ] Track import chain for better error messages
-- [ ] Add tests for module loading
+- [x] Add function to load and parse `.ard` files on demand
+- [x] Cache parsed AST to avoid re-parsing the same file
+- [x] Handle circular dependency detection
+- [x] Track import chain for better error messages
+- [x] Add tests for module loading
 
-### 2.2 Extend checker to process imported modules
+## Phase 3: Symbol Extraction & Checker Integration ✅ TODO
+
+### 3.1 Extract public symbols from imported modules
 - [ ] Run type checking on imported modules first (dependency order)
 - [ ] Extract public symbols (functions, types, structs, etc.) from imported modules
 - [ ] Create `UserModule` objects containing only public symbols
 - [ ] Add to `c.program.Imports` map like standard library modules
 - [ ] Add tests for symbol extraction
 
-## Phase 3: Symbol Resolution & Scoping ✅ TODO
-
-### 3.1 Update symbol resolution
+### 3.2 Update symbol resolution
 - [ ] Modify identifier lookup to check imported modules via `::` syntax
 - [ ] Handle namespace conflicts and ambiguous imports
 - [ ] Ensure private symbols are not accessible from other modules
 - [ ] Add tests for symbol resolution
 
-### 3.2 Add import validation
+### 3.3 Add import validation
 - [ ] Verify imported symbols actually exist and are public
 - [ ] Better error messages for import failures
 - [ ] Detect unused imports (warnings)
@@ -74,9 +74,9 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 ### 5.1 Create comprehensive test files
 - [ ] Multi-file test scenarios
 - [ ] Public/private visibility tests
-- [ ] Circular dependency error tests
-- [ ] `ard.toml` parsing tests
-- [ ] Nested module structure tests
+- [x] Circular dependency error tests
+- [x] `ard.toml` parsing tests
+- [x] Nested module structure tests
 
 ### 5.2 Integration testing
 - [ ] End-to-end tests with sample projects
@@ -102,7 +102,9 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 - ✅ AST and parser support for `pub` keyword and `use` statements
 - ✅ Standard library import system (`ard/*` modules)
 - ✅ Duplicate import detection
-- 🚧 User file import support (this implementation)
+- ✅ Project discovery and file path resolution
+- ✅ Module loading, caching, and circular dependency detection
+- 🚧 Symbol extraction and checker integration (current work)
 
 ## Related Files
 - `docs/imports.md` - Import specification
