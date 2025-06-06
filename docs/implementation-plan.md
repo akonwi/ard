@@ -14,17 +14,17 @@ Enable importing from user-defined `.ard` files using the existing `use` keyword
 - [x] Update tests to use new terminology
 
 ### 1.2 Add project root discovery
-- [ ] Add function to find `ard.toml` file by walking up directory tree
-- [ ] Parse `ard.toml` to extract project name (simple TOML parsing or regex)
-- [ ] Fallback to directory name if no `ard.toml` found
-- [ ] Cache project root and name for performance
-- [ ] Add tests for project discovery
+- [x] Add function to find `ard.toml` file by walking up directory tree
+- [x] Parse `ard.toml` to extract project name (simple TOML parsing or regex)
+- [x] Fallback to directory name if no `ard.toml` found
+- [x] Cache project root and name for performance
+- [x] Add tests for project discovery
 
 ### 1.3 Add file path resolution
-- [ ] Convert import path like `my_project/utils` to filesystem path `utils.ard`
-- [ ] Convert nested paths like `my_project/math/operations` to `math/operations.ard`
-- [ ] Validate that resolved files exist and are readable
-- [ ] Add tests for path resolution
+- [x] Convert import path like `my_project/utils` to filesystem path `utils.ard`
+- [x] Convert nested paths like `my_project/math/operations` to `math/operations.ard`
+- [x] Validate that resolved files exist and are readable
+- [x] Add tests for path resolution
 
 ## Phase 2: Module Loading & Caching ✅ TODO
 

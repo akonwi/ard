@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/akonwi/ard/ast"
 	"github.com/akonwi/ard/checker"
@@ -46,7 +47,14 @@ func main() {
 			return
 		}
 
-		program, diagnostics := checker.Check(ast)
+		workingDir := filepath.Dir(inputPath)
+		moduleResolver, err := checker.NewModuleResolver(workingDir)
+		if err != nil {
+			fmt.Printf("Error initializing module resolver: %v\n", err)
+			os.Exit(1)
+		}
+
+		program, diagnostics := checker.Check(ast, moduleResolver)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
 				fmt.Println(diagnostic)

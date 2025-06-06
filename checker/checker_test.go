@@ -44,7 +44,7 @@ func run(t *testing.T, tests []test) {
 			if err != nil {
 				t.Fatalf("Error parsing input: %v", err)
 			}
-			program, diagnostics := checker.Check(ast)
+			program, diagnostics := checker.Check(ast, nil)
 			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {
 				if diff := cmp.Diff(tt.diagnostics, diagnostics, compareOptions); diff != "" {
 					t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
@@ -71,19 +71,11 @@ func TestImports(t *testing.T) {
 	run(t, []test{
 		{
 			name: "importing modules",
-			input: strings.Join([]string{
-				`use ard/io`,
-				`use github.com/google/go-cmp/cmp`,
-				`use github.com/tree-sitter/tree-sitter as ts`,
-			}, "\n"),
+			input: `use ard/io`,
 			output: &checker.Program{
 			Imports: map[string]checker.Module{
 			"io": checker.IoPkg{},
 			},
-				// Imports: map[string]checker.ExtPackage{
-				// 	"cmp": {Path: "github.com/google/go-cmp/cmp", Name: "cmp"},
-				// 	"ts":  {Path: "github.com/tree-sitter/tree-sitter", Name: "ts"},
-				// },
 			},
 		},
 		{

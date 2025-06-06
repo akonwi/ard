@@ -934,7 +934,7 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 	})
 }
 
-func Check(input *ast.Program) (*Program, []Diagnostic) {
+func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, []Diagnostic) {
 	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -952,11 +952,27 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
+			// Handle standard library imports
 			if pkg, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = pkg
 			} else {
 				c.addError(fmt.Sprintf("Unknown package: %s", imp.Path), imp.GetLocation())
 			}
+		} else {
+			// Handle user module imports
+			if moduleResolver == nil {
+				panic(fmt.Sprintf("No module resolver provided for user import: %s", imp.Path))
+			}
+
+			filePath, err := moduleResolver.ResolveImportPath(imp.Path)
+			if err != nil {
+				c.addError(fmt.Sprintf("Failed to resolve import '%s': %v", imp.Path, err), imp.GetLocation())
+				continue
+			}
+
+			// TODO: Load and process the module file
+			// For now, just add a placeholder
+			c.addError(fmt.Sprintf("User module loading not yet implemented: %s", filePath), imp.GetLocation())
 		}
 	}
 

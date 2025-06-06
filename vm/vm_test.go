@@ -22,7 +22,7 @@ func run(t *testing.T, input string) any {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, diagnostics := checker.Check(tree)
+	program, diagnostics := checker.Check(tree, nil)
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
@@ -39,7 +39,7 @@ func expectPanic(t *testing.T, substring, input string) {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, diagnostics := checker.Check(tree)
+	program, diagnostics := checker.Check(tree, nil)
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
