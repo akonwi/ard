@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/akonwi/ard/ast"
 )
 
 // ProjectInfo holds information about the current project
@@ -16,8 +18,9 @@ type ProjectInfo struct {
 
 // ModuleResolver handles finding and loading user modules
 type ModuleResolver struct {
-	project    *ProjectInfo
-	moduleCache map[string]Module // cache loaded modules by file path
+	project     *ProjectInfo
+	moduleCache map[string]Module     // cache loaded modules by file path
+	astCache    map[string]*ast.Program // cache parsed ASTs by file path
 }
 
 // findProjectRoot walks up the directory tree to find ard.toml or falls back to directory name
@@ -85,6 +88,7 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 	return &ModuleResolver{
 		project:     project,
 		moduleCache: make(map[string]Module),
+		astCache:    make(map[string]*ast.Program),
 	}, nil
 }
 
@@ -127,4 +131,35 @@ func (mr *ModuleResolver) ResolveImportPath(importPath string) (string, error) {
 // GetProjectInfo returns the current project information
 func (mr *ModuleResolver) GetProjectInfo() *ProjectInfo {
 	return mr.project
+}
+
+// LoadModule loads and parses a module file from the given import path
+func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
+	// Resolve import path to filesystem path
+	filePath, err := mr.ResolveImportPath(importPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check cache first
+	if cachedAST, exists := mr.astCache[filePath]; exists {
+		return cachedAST, nil
+	}
+
+	// Read the module file
+	sourceCode, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read module file %s: %w", filePath, err)
+	}
+
+	// Parse the module
+	program, err := ast.Parse(sourceCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse module %s: %w", filePath, err)
+	}
+
+	// Cache the parsed AST
+	mr.astCache[filePath] = program
+
+	return program, nil
 }

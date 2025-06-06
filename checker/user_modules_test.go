@@ -236,3 +236,193 @@ func TestModuleResolverWithoutArdToml(t *testing.T) {
 		t.Errorf("Expected path '%s', got '%s'", expectedPath, filePath)
 	}
 }
+
+func TestLoadModule(t *testing.T) {
+	// Create a temporary project for testing
+	tempDir, err := os.MkdirTemp("", "ard_load_module_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create ard.toml
+	tomlContent := `name = "load_test"`
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a valid module file
+	moduleContent := `pub fn add(a: Int, b: Int) Int {
+	a + b
+}
+
+fn private_helper() Str {
+	"helper"
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte(moduleContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create module resolver
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test loading the module
+	program, err := resolver.LoadModule("load_test/math")
+	if err != nil {
+		t.Fatalf("Failed to load module: %v", err)
+	}
+
+	// Verify the program was parsed correctly
+	if program == nil {
+		t.Fatal("Expected parsed program, got nil")
+	}
+
+	// Should have 2 statements (pub function and private function)
+	if len(program.Statements) != 2 {
+		t.Errorf("Expected 2 statements, got %d", len(program.Statements))
+	}
+
+	// No imports in this simple module
+	if len(program.Imports) != 0 {
+		t.Errorf("Expected 0 imports, got %d", len(program.Imports))
+	}
+}
+
+func TestLoadModuleErrors(t *testing.T) {
+	// Create a temporary project for testing
+	tempDir, err := os.MkdirTemp("", "ard_load_error_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create ard.toml
+	tomlContent := `name = "error_test"`
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a module with invalid syntax
+	invalidContent := `pub fn broken( Int {  // missing parameter name
+	42
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "broken.ard"), []byte(invalidContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create module resolver
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		importPath  string
+		expectError string
+	}{
+		{
+			name:        "non-existent module",
+			importPath:  "error_test/nonexistent",
+			expectError: "module file not found",
+		},
+		{
+			name:        "invalid syntax",
+			importPath:  "error_test/broken",
+			expectError: "failed to parse module",
+		},
+		{
+			name:        "wrong project name",
+			importPath:  "wrong_project/math",
+			expectError: "does not match project name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resolver.LoadModule(tt.importPath)
+			if err == nil {
+				t.Error("Expected error but got none")
+				return
+			}
+
+			if !strings.Contains(err.Error(), tt.expectError) {
+				t.Errorf("Expected error containing '%s', got: %v", tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestModuleAST_Caching(t *testing.T) {
+	// Create a temporary project for testing
+	tempDir, err := os.MkdirTemp("", "ard_caching_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create ard.toml
+	tomlContent := `name = "cache_test"`
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a module file
+	moduleContent := `pub fn cached_function() Int {
+	42
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "cached.ard"), []byte(moduleContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create module resolver
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Load module first time
+	program1, err := resolver.LoadModule("cache_test/cached")
+	if err != nil {
+		t.Fatalf("Failed to load module first time: %v", err)
+	}
+
+	// Load module second time (should come from cache)
+	program2, err := resolver.LoadModule("cache_test/cached")
+	if err != nil {
+		t.Fatalf("Failed to load module second time: %v", err)
+	}
+
+	// Both should be the exact same pointer (cached)
+	if program1 != program2 {
+		t.Error("Expected cached AST to return same pointer, but got different pointers")
+	}
+
+	// Verify the content is correct
+	if len(program1.Statements) != 1 {
+		t.Errorf("Expected 1 statement, got %d", len(program1.Statements))
+	}
+
+	if len(program1.Imports) != 0 {
+		t.Errorf("Expected 0 imports, got %d", len(program1.Imports))
+	}
+
+	// Test multiple calls return same pointer
+	program3, err := resolver.LoadModule("cache_test/cached")
+	if err != nil {
+		t.Fatalf("Failed to load module third time: %v", err)
+	}
+
+	if program3 != program1 {
+		t.Error("Expected third call to also return cached pointer")
+	}
+}
