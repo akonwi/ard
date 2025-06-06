@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"slices"
+
 	"github.com/akonwi/ard/ast"
 )
 
@@ -18,9 +20,10 @@ type ProjectInfo struct {
 
 // ModuleResolver handles finding and loading user modules
 type ModuleResolver struct {
-	project     *ProjectInfo
-	moduleCache map[string]Module     // cache loaded modules by file path
-	astCache    map[string]*ast.Program // cache parsed ASTs by file path
+	project      *ProjectInfo
+	moduleCache  map[string]Module       // cache loaded modules by file path
+	astCache     map[string]*ast.Program // cache parsed ASTs by file path
+	loadingChain []string                // track import paths currently being loaded for circular dependency detection
 }
 
 // findProjectRoot walks up the directory tree to find ard.toml or falls back to directory name
@@ -86,9 +89,10 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 	}
 
 	return &ModuleResolver{
-		project:     project,
-		moduleCache: make(map[string]Module),
-		astCache:    make(map[string]*ast.Program),
+		project:      project,
+		moduleCache:  make(map[string]Module),
+		astCache:     make(map[string]*ast.Program),
+		loadingChain: make([]string, 0),
 	}, nil
 }
 
@@ -160,6 +164,52 @@ func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
 
 	// Cache the parsed AST
 	mr.astCache[filePath] = program
+
+	return program, nil
+}
+
+// LoadModuleWithDependencies loads a module and all its dependencies, detecting circular dependencies
+func (mr *ModuleResolver) LoadModuleWithDependencies(importPath string) (*ast.Program, error) {
+	return mr.loadModuleRecursive(importPath)
+}
+
+// loadModuleRecursive is the internal method that handles recursive loading with cycle detection
+func (mr *ModuleResolver) loadModuleRecursive(importPath string) (*ast.Program, error) {
+	// Check for circular dependency using import path (not file path)
+	if slices.Contains(mr.loadingChain, importPath) {
+		chain := append(mr.loadingChain, importPath)
+		return nil, fmt.Errorf("circular dependency detected: %s", strings.Join(chain, " -> "))
+	}
+
+	// Add to loading chain
+	mr.loadingChain = append(mr.loadingChain, importPath)
+
+	// Ensure we remove from loading chain when done
+	defer func() {
+		if len(mr.loadingChain) > 0 {
+			mr.loadingChain = mr.loadingChain[:len(mr.loadingChain)-1]
+		}
+	}()
+
+	// Load the module (this will use cache if available)
+	program, err := mr.LoadModule(importPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Now recursively load its dependencies
+	for _, imp := range program.Imports {
+		// Skip standard library imports
+		if strings.HasPrefix(imp.Path, "ard/") {
+			continue
+		}
+
+		// Load the imported module recursively
+		_, err := mr.loadModuleRecursive(imp.Path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load dependency %s: %w", imp.Path, err)
+		}
+	}
 
 	return program, nil
 }

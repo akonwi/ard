@@ -426,3 +426,166 @@ func TestModuleAST_Caching(t *testing.T) {
 		t.Error("Expected third call to also return cached pointer")
 	}
 }
+
+func TestCircularDependencyDetection(t *testing.T) {
+	// Create a temporary project for testing
+	tempDir, err := os.MkdirTemp("", "ard_circular_dep_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create ard.toml
+	tomlContent := `name = "circular_test"`
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create module A that imports B
+	moduleA := `use circular_test/module_b
+
+pub fn func_a() Int {
+	42
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "module_a.ard"), []byte(moduleA), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create module B that imports A (circular dependency)
+	moduleB := `use circular_test/module_a
+
+pub fn func_b() Int {
+	24
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "module_b.ard"), []byte(moduleB), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create module resolver
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to load module A with dependencies, which should detect circular dependency
+	_, err = resolver.LoadModuleWithDependencies("circular_test/module_a")
+	if err == nil {
+		t.Error("Expected circular dependency error, but got none")
+		return
+	}
+
+	if !strings.Contains(err.Error(), "circular dependency detected") {
+		t.Errorf("Expected circular dependency error, got: %v", err)
+	}
+
+	// Error message should show the dependency chain
+	if !strings.Contains(err.Error(), "->") {
+		t.Errorf("Expected dependency chain in error message, got: %v", err)
+	}
+}
+
+func TestComplexCircularDependency(t *testing.T) {
+	// Test A -> B -> C -> A circular dependency
+	tempDir, err := os.MkdirTemp("", "ard_complex_circular_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create ard.toml
+	tomlContent := `name = "complex_circular"`
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create A -> B -> C -> A chain
+	modules := map[string]string{
+		"module_a": `use complex_circular/module_b
+pub fn func_a() Int { 1 }`,
+		"module_b": `use complex_circular/module_c
+pub fn func_b() Int { 2 }`,
+		"module_c": `use complex_circular/module_a
+pub fn func_c() Int { 3 }`,
+	}
+
+	for name, content := range modules {
+		err = os.WriteFile(filepath.Join(tempDir, name+".ard"), []byte(content), 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create module resolver
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to load module A, should detect circular dependency
+	_, err = resolver.LoadModuleWithDependencies("complex_circular/module_a")
+	if err == nil {
+		t.Error("Expected circular dependency error, but got none")
+		return
+	}
+
+	if !strings.Contains(err.Error(), "circular dependency detected") {
+		t.Errorf("Expected circular dependency error, got: %v", err)
+	}
+}
+
+func TestNonCircularDependencies(t *testing.T) {
+	// Test that valid dependency chains work fine
+	tempDir, err := os.MkdirTemp("", "ard_valid_deps_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create ard.toml
+	tomlContent := `name = "valid_deps"`
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create valid dependency chain: A -> B -> C (no cycles)
+	modules := map[string]string{
+		"module_a": `use valid_deps/module_b
+pub fn func_a() Int { 1 }`,
+		"module_b": `use valid_deps/module_c
+pub fn func_b() Int { 2 }`,
+		"module_c": `pub fn func_c() Int { 3 }`, // No imports
+	}
+
+	for name, content := range modules {
+		err = os.WriteFile(filepath.Join(tempDir, name+".ard"), []byte(content), 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create module resolver
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Load module A, should work fine
+	program, err := resolver.LoadModuleWithDependencies("valid_deps/module_a")
+	if err != nil {
+		t.Fatalf("Expected valid dependency chain to work, got error: %v", err)
+	}
+
+	if program == nil {
+		t.Fatal("Expected parsed program, got nil")
+	}
+
+	// Should have 1 import (module_b)
+	if len(program.Imports) != 1 {
+		t.Errorf("Expected 1 import, got %d", len(program.Imports))
+	}
+}
