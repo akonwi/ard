@@ -972,9 +972,38 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module
 				continue
 			}
 
-			// TODO: Load and process the module file
-			// For now, just add a placeholder
-			c.addError(fmt.Sprintf("User module loading not yet implemented: %s", filePath), imp.GetLocation())
+			// Check if module is already cached
+			if cachedModule, ok := moduleResolver.moduleCache[filePath]; ok {
+				c.program.Imports[imp.Name] = cachedModule
+				continue
+			}
+
+			// Load and parse the module file using import path
+			ast, err := moduleResolver.LoadModule(imp.Path)
+			if err != nil {
+				c.addError(fmt.Sprintf("Failed to load module %s: %v", filePath, err), imp.GetLocation())
+				continue
+			}
+
+			// Type-check the imported module
+			_, userModule, diagnostics := Check(ast, moduleResolver)
+			if len(diagnostics) > 0 {
+				// Add all diagnostics from the imported module
+				for _, diag := range diagnostics {
+					// todo: diagnostics should know which file they're for
+					c.diagnostics = append(c.diagnostics, diag)
+				}
+				continue
+			}
+
+			// Set the correct file path for the module
+			if um, ok := userModule.(*UserModule); ok {
+				um.setFilePath(filePath)
+			}
+
+			// Cache and add to imports
+			moduleResolver.moduleCache[filePath] = userModule
+			c.program.Imports[imp.Name] = userModule
 		}
 	}
 
@@ -986,7 +1015,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module
 
 	// Create UserModule from the checked program
 	userModule := NewUserModule("", c.program, c.scope)
-	
+
 	return c.program, userModule, c.diagnostics
 }
 
@@ -1677,10 +1706,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.StructDefinition:
 		{
 			def := &StructDef{
-			Name:   s.Name.Name,
-			Fields: make(map[string]Type),
-			 Public: s.Public,
-		}
+				Name:   s.Name.Name,
+				Fields: make(map[string]Type),
+				Public: s.Public,
+			}
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
 				if fieldType == nil {

@@ -28,6 +28,11 @@ func (m *UserModule) Get(name string) symbol {
 	return m.get(name)
 }
 
+// setFilePath sets the file path for this module
+func (m *UserModule) setFilePath(path string) {
+	m.filePath = path
+}
+
 // NewUserModule creates a UserModule from a checked program, extracting only public symbols
 func NewUserModule(filePath string, program *Program, globalScope *scope) *UserModule {
 	publicSymbols := make(map[string]symbol)

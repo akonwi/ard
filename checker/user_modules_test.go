@@ -108,28 +108,258 @@ func TestUserModuleCheckerIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Test checker integration (should fail with "not yet implemented" for now)
-	input := `use my_calculator/utils`
+	// Test checker integration with user module import
+	input := `use my_calculator/utils
+fn main() Int {
+    utils::helper()
+}`
 	astTree, err := ast.Parse([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	program, _, diagnostics := checker.Check(astTree, resolver)
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+
+	// Should have imported the utils module
+	if len(program.Imports) != 1 {
+		t.Errorf("Expected 1 import, got %d", len(program.Imports))
+	}
+
+	// Should be able to access the utils module
+	if _, ok := program.Imports["utils"]; !ok {
+		t.Error("Expected 'utils' module to be imported")
+	}
+
+	// Test that the module provides the public function
+	utilsModule := program.Imports["utils"]
+	if userMod, ok := utilsModule.(*checker.UserModule); ok {
+		helperFunc := userMod.Get("helper")
+		if helperFunc == nil {
+			t.Error("Expected to find 'helper' function in utils module")
+		}
+	} else {
+		t.Error("Expected utils module to be a UserModule")
+	}
+}
+
+func TestUserModuleSymbolResolution(t *testing.T) {
+	// Create temporary directory structure
+	tempDir, err := os.MkdirTemp("", "ard_symbol_resolution_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project structure
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create the math module with public and private functions
+	mathContent := `pub fn add(a: Int, b: Int) Int {
+    a + b
+}
+
+pub fn multiply(x: Int, y: Int) Int {
+    x * y
+}
+
+fn private_divide(a: Int, b: Int) Int {
+    a / b
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte(mathContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a source file that uses :: syntax to call functions from the imported module
+	mainContent := `use test_project/math
+fn main() Int { 
+    let sum: Int = math::add(5, 3)
+    let product: Int = math::multiply(2, 4)
+    sum + product
+}`
+	
+	astTree, err := ast.Parse([]byte(mainContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	program, _, diagnostics := checker.Check(astTree, resolver)
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+
+	// Should have imported the math module
+	if len(program.Imports) != 1 {
+		t.Errorf("Expected 1 import, got %d", len(program.Imports))
+	}
+
+	// Should be able to access the math module
+	if _, ok := program.Imports["math"]; !ok {
+		t.Error("Expected 'math' module to be imported")
+	}
+
+	// Test that public functions are accessible
+	mathModule := program.Imports["math"]
+	if userMod, ok := mathModule.(*checker.UserModule); ok {
+		addFunc := userMod.Get("add")
+		if addFunc == nil {
+			t.Error("Expected to find 'add' function in math module")
+		}
+
+		multiplyFunc := userMod.Get("multiply")
+		if multiplyFunc == nil {
+			t.Error("Expected to find 'multiply' function in math module")
+		}
+
+		// Test that private functions are not accessible
+		privateFunc := userMod.Get("private_divide")
+		if privateFunc != nil {
+			t.Error("Expected private function to not be accessible")
+		}
+	} else {
+		t.Error("Expected math module to be a UserModule")
+	}
+}
+
+func TestUserModulePrivateAccessError(t *testing.T) {
+	// Create temporary directory structure
+	tempDir, err := os.MkdirTemp("", "ard_private_access_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project structure
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a module with only private functions
+	utilsContent := `fn private_helper() Int {
+    42
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(utilsContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to access the private function - should fail
+	mainContent := `use test_project/utils
+fn main() Int { 
+    utils::private_helper()
+}`
+	
+	astTree, err := ast.Parse([]byte(mainContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	_, _, diagnostics := checker.Check(astTree, resolver)
 	if len(diagnostics) == 0 {
-		t.Error("Expected error for unimplemented user module loading")
+		t.Error("Expected error when accessing private function")
 	}
 
-	// Should contain "not yet implemented" message
+	// Should contain "Undefined" error for the private function
 	found := false
 	for _, diag := range diagnostics {
-		if strings.Contains(diag.Message, "not yet implemented") {
+		if strings.Contains(diag.Message, "Undefined: utils::private_helper") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("Expected 'not yet implemented' error message, got: %v", diagnostics)
+		t.Errorf("Expected 'Undefined: utils::private_helper' error, got: %v", diagnostics)
+	}
+}
+
+func TestUserModuleCaching(t *testing.T) {
+	// Create temporary directory structure
+	tempDir, err := os.MkdirTemp("", "ard_caching_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project structure
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create the shared module
+	sharedContent := `pub fn shared_function() Int {
+    100
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "shared.ard"), []byte(sharedContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First import of the shared module
+	content1 := `use test_project/shared
+fn func1() Int { 
+    shared::shared_function()
+}`
+	
+	astTree1, err := ast.Parse([]byte(content1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	program1, _, diagnostics1 := checker.Check(astTree1, resolver)
+	if len(diagnostics1) > 0 {
+		t.Fatalf("Unexpected diagnostics in first check: %v", diagnostics1)
+	}
+
+	// Second import of the same module - should use cache
+	content2 := `use test_project/shared
+fn func2() Int { 
+    shared::shared_function() + 50
+}`
+	
+	astTree2, err := ast.Parse([]byte(content2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	program2, _, diagnostics2 := checker.Check(astTree2, resolver)
+	if len(diagnostics2) > 0 {
+		t.Fatalf("Unexpected diagnostics in second check: %v", diagnostics2)
+	}
+
+	// Both should have the shared module imported
+	if len(program1.Imports) != 1 || len(program2.Imports) != 1 {
+		t.Error("Expected both programs to have 1 import")
+	}
+
+	// The module instances should be the same (cached)
+	module1 := program1.Imports["shared"]
+	module2 := program2.Imports["shared"]
+	
+	if module1 != module2 {
+		t.Error("Expected modules to be the same instance (cached)")
 	}
 }
 
