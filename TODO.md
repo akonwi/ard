@@ -1,7 +1,7 @@
 ## TODO
 
 - [ ] importing from other files (see ./docs/imports.md)
-  - [ ] support `pub` keyword in AST and parser
+  - [x] support `pub` keyword in AST and parser
   - [ ] support imports from other files in checker
   - [ ] handle imports in interpreter
 - [ ] syntax for generics on structs

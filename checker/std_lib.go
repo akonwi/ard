@@ -1,13 +1,13 @@
 package checker
 
-var preludePkgs = map[string]Package{
+var preludePkgs = map[string]Module{
 	"Float":  FloatPkg{},
 	"Int":    IntPkg{},
 	"Result": ResultPkg{},
 	"Str":    strPkg,
 }
 
-func findInStdLib(path string) (Package, bool) {
+func findInStdLib(path string) (Module, bool) {
 	switch path {
 	case "ard/fs":
 		return FsPkg{}, true

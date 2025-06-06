@@ -395,9 +395,9 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			subj := vm.eval(e.Subject)
 			return vm.evalInstanceMethod(subj, e)
 		}
-	case *checker.PackageFunctionCall:
+	case *checker.ModuleFunctionCall:
 		{
-			if e.Package == "ard/ints" {
+			if e.Module == "ard/ints" {
 				switch e.Call.Name {
 				case "from_str":
 					input := vm.eval(e.Call.Args[0]).raw.(string)
@@ -412,7 +412,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Package == "ard/float" {
+			if e.Module == "ard/float" {
 				switch e.Call.Name {
 				case "from_int":
 					input := vm.eval(e.Call.Args[0]).raw.(int)
@@ -430,7 +430,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Package == "ard/fs" {
+			if e.Module == "ard/fs" {
 				switch e.Call.Name {
 				case "append":
 					path := vm.eval(e.Call.Args[0]).raw.(string)
@@ -493,7 +493,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Package == "ard/io" {
+			if e.Module == "ard/io" {
 				switch e.Call.Name {
 				case "print":
 					toPrint := vm.eval(&checker.InstanceMethod{
@@ -519,7 +519,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Package == "ard/json" {
+			if e.Module == "ard/json" {
 				switch e.Call.Name {
 				case "encode":
 					{
@@ -619,8 +619,8 @@ func (vm *VM) eval(expr checker.Expression) *object {
 										// 	decodeAs = valType
 										// }
 
-										decoded := vm.eval(&checker.PackageFunctionCall{
-											Package: "ard/json",
+										decoded := vm.eval(&checker.ModuleFunctionCall{
+										Module: "ard/json",
 											Call: checker.CreateCall("decode",
 												[]checker.Expression{&checker.StrLiteral{Value: val}},
 												checker.FunctionDef{
@@ -739,7 +739,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Package == "ard/maybe" {
+			if e.Module == "ard/maybe" {
 				switch e.Call.Name {
 				case "none":
 					return &object{nil, e.Call.Type()}
@@ -752,15 +752,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Package == "ard/http" {
+			if e.Module == "ard/http" {
 				return evalInHTTP(vm, e.Call)
 			}
 
-			if e.Package == "ard/result" {
+			if e.Module == "ard/result" {
 				return evalInResult(vm, e.Call)
 			}
 
-			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Package, e.Call.Name))
+			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
 		}
 	case *checker.ListLiteral:
 		{
@@ -892,12 +892,12 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			}
 			return &object{raw, e.Type()}
 		}
-	case *checker.PackageStructInstance:
+	case *checker.ModuleStructInstance:
 		{
-			if e.Package == "ard/http" {
+			if e.Module == "ard/http" {
 				return vm.eval(e.Property)
 			}
-			panic(fmt.Errorf("Unimplemented in package: %s", e.Package))
+			panic(fmt.Errorf("Unimplemented in package: %s", e.Module))
 		}
 	case *checker.ResultMatch:
 		{

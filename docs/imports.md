@@ -6,16 +6,43 @@ The import path is a qualified path to the target module, without the file type 
 
 ```ard
 use ard/io
-use pkg/thing as stuff
+use my_project/utils as helpers
 
 io::print("")
-stuff::get(1)
+helpers::calculate(42)
 ```
 
 By default, Ard makes the imported module available by the last segment of the path.
 This can be renamed with the `as name` syntax demonstrated above.
 
 The Ard standard library is a collection of modules in the `ard/*` path.
+
+## Module Resolution
+
+Import paths are always absolute from the project root. There are no relative imports.
+The project root is determined by the presence of an `ard.toml` file, which specifies
+the project name.
+
+For example, with this project structure:
+```
+my_calculator/
+├── ard.toml          # contains: name = "my_calculator"
+├── main.ard
+├── utils.ard
+└── math/
+    └── operations.ard
+```
+
+You would import modules like this:
+```ard
+use my_calculator/utils
+use my_calculator/math/operations
+
+utils::helper_function()
+operations::add(1, 2)
+```
+
+If no `ard.toml` file is present, the project name defaults to the root directory name.
 
 ## Controlling what can be exported
 Just like in Rust or Gleam, every declaration in a module is by default, only accessible within the same file.

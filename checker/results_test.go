@@ -38,8 +38,8 @@ func TestResults(t *testing.T) {
 											True: &checker.Block{
 												Stmts: []checker.Statement{
 													{
-														Expr: &checker.PackageFunctionCall{
-															Package: "ard/result",
+														Expr: &checker.ModuleFunctionCall{
+														Module: "ard/result",
 															Call: &checker.FunctionCall{
 																Name: "err",
 																Args: []checker.Expression{
@@ -53,8 +53,8 @@ func TestResults(t *testing.T) {
 											False: &checker.Block{
 												Stmts: []checker.Statement{
 													{
-														Expr: &checker.PackageFunctionCall{
-															Package: "ard/result",
+														Expr: &checker.ModuleFunctionCall{
+														Module: "ard/result",
 															Call: &checker.FunctionCall{
 																Name: "ok",
 																Args: []checker.Expression{
@@ -119,15 +119,15 @@ func TestResults(t *testing.T) {
 				}
 			}`,
 			output: &checker.Program{
-				Imports: map[string]checker.Package{
+				Imports: map[string]checker.Module{
 					"io": checker.IoPkg{},
 				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
 							Name: "res",
-							Value: &checker.PackageFunctionCall{
-								Package: "Result",
+							Value: &checker.ModuleFunctionCall{
+							Module: "Result",
 								Call: &checker.FunctionCall{
 									Name: "err",
 									Args: []checker.Expression{&checker.StrLiteral{"foo"}},
@@ -147,8 +147,8 @@ func TestResults(t *testing.T) {
 							Err: &checker.Match{
 								Pattern: &checker.Identifier{Name: "err"},
 								Body: &checker.Block{Stmts: []checker.Statement{
-									{Expr: &checker.PackageFunctionCall{
-										Package: "ard/io",
+									{Expr: &checker.ModuleFunctionCall{
+									Module: "ard/io",
 										Call: &checker.FunctionCall{
 											Name: "print",
 											Args: []checker.Expression{
@@ -179,7 +179,7 @@ func TestTry(t *testing.T) {
 					res
 				}`,
 			output: &checker.Program{
-				Imports: map[string]checker.Package{},
+				Imports: map[string]checker.Module{},
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FunctionDef{
@@ -191,8 +191,8 @@ func TestTry(t *testing.T) {
 									{
 										Stmt: &checker.VariableDef{
 											Name: "res",
-											Value: &checker.PackageFunctionCall{
-												Package: "Result",
+											Value: &checker.ModuleFunctionCall{
+											Module: "Result",
 												Call: &checker.FunctionCall{
 													Name: "ok",
 													Args: []checker.Expression{&checker.IntLiteral{2}},

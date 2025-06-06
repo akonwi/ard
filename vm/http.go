@@ -117,8 +117,8 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 			}
 
 			// Create a synthetic function call to json::decode()
-			res := vm.eval(&checker.PackageFunctionCall{
-				Package: "ard/json",
+			res := vm.eval(&checker.ModuleFunctionCall{
+			Module: "ard/json",
 				Call: checker.CreateCall("decode",
 					[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
 					checker.FunctionDef{

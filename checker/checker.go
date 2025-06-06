@@ -11,24 +11,14 @@ import (
 )
 
 type Program struct {
-	Imports    map[string]Package
+	Imports    map[string]Module
 	Statements []Statement
 }
 
-type Package interface {
+type Module interface {
 	path() string
-	buildScope(scope *scope) // todo: this is not needed
+	buildScope(scope *scope)
 	get(name string) symbol
-}
-
-type StdPackage struct {
-	Name string
-	Path string
-}
-
-type ExtPackage struct {
-	Name string
-	Path string
 }
 
 type DiagnosticKind string
@@ -658,21 +648,21 @@ func (f *FunctionCall) Type() Type {
 	return f.fn.ReturnType
 }
 
-type PackageStructInstance struct {
-	Package  string
+type ModuleStructInstance struct {
+	Module   string
 	Property *StructInstance
 }
 
-func (p *PackageStructInstance) Type() Type {
+func (p *ModuleStructInstance) Type() Type {
 	return p.Property._type
 }
 
-type PackageFunctionCall struct {
-	Package string
-	Call    *FunctionCall
+type ModuleFunctionCall struct {
+	Module string
+	Call   *FunctionCall
 }
 
-func (p *PackageFunctionCall) Type() Type {
+func (p *ModuleFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
@@ -947,7 +937,7 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 func Check(input *ast.Program) (*Program, []Diagnostic) {
 	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
 	c.program = &Program{
-		Imports:    map[string]Package{},
+		Imports:    map[string]Module{},
 		Statements: []Statement{},
 	}
 
@@ -979,7 +969,7 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 	return c.program, c.diagnostics
 }
 
-func (c *checker) resolvePkg(name string) Package {
+func (c *checker) resolvePkg(name string) Module {
 	if pkg, ok := c.program.Imports[name]; ok {
 		return pkg
 	}
@@ -2686,8 +2676,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Return function call with specialized function
-				return &PackageFunctionCall{
-					Package: pkg.path(),
+				return &ModuleFunctionCall{
+					Module: pkg.path(),
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -2704,9 +2694,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			// Create package function call
-			return &PackageFunctionCall{
-				Package: pkg.path(),
-				Call:    call,
+			return &ModuleFunctionCall{
+				Module: pkg.path(),
+				Call:   call,
 			}
 		}
 	case *ast.IfStatement:
@@ -3290,8 +3280,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						}
 
 						casted := instance.(*StructInstance)
-						return &PackageStructInstance{
-							Package:  pkg.path(),
+						return &ModuleStructInstance{
+							Module:   pkg.path(),
 							Property: casted,
 						}
 					}
@@ -3463,8 +3453,8 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			}
 
 			fnDef.ReturnType = resultType
-			return &PackageFunctionCall{
-				Package: packageName,
+			return &ModuleFunctionCall{
+				Module: packageName,
 				Call: &FunctionCall{
 					Name: fnDef.name(),
 					Args: []Expression{arg},
