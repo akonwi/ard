@@ -5,8 +5,10 @@ This file provides guidance to a coding agent.
 ## Project Summary
 This is the source code for the parser, compiler, and interpreter of a programming language called Ard
 The language spec is in the README.md
+  - Use this and the documentation files in ./docs to understand the language syntax and features
+  - There is runnable sample in ./samples/*.ard
+    - Also use as a reference
 The backlog of work is a simple todo list in TODO.md
-Runnable sample code can be found in ./samples/*.ard
 
 ## Build/Test Commands
 - Build: `go build`
