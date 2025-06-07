@@ -36,6 +36,7 @@ func Run(program *checker.Program) (val any, err error) {
 	}()
 
 	vm := New()
+	vm.imports = program.Imports
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
 	}
@@ -43,6 +44,39 @@ func Run(program *checker.Program) (val any, err error) {
 		return r.raw.raw, nil
 	}
 	return vm.result.raw, nil
+}
+
+// evalUserModuleFunction evaluates a function call from a user-defined module
+func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.FunctionCall) *object {
+	// Look up the function in the module
+	symbol := module.Get(call.Name)
+	if symbol == nil {
+		panic(fmt.Errorf("Function %s not found in module %s", call.Name, module.Path()))
+	}
+
+	// Verify it's a function
+	functionDef, ok := symbol.(*checker.FunctionDef)
+	if !ok {
+		panic(fmt.Errorf("%s is not a function in module %s", call.Name, module.Path()))
+	}
+
+	// Create Go function closure using the same pattern as line 391
+	fn := func(args ...*object) *object {
+		res, _ := vm.evalBlock(functionDef.Body, func() {
+			for i := range args {
+				vm.scope.add(functionDef.Parameters[i].Name, args[i])
+			}
+		})
+		return res
+	}
+
+	// Evaluate arguments and call the function (same pattern as FunctionCall case)
+	args := make([]*object, len(call.Args))
+	for i := range call.Args {
+		args[i] = vm.eval(call.Args[i])
+	}
+
+	return fn(args...)
 }
 
 func (vm *VM) do(stmt checker.Statement) *object {
@@ -397,7 +431,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 	case *checker.ModuleFunctionCall:
 		{
-			if e.Module == "ard/ints" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/ints" {
 				switch e.Call.Name {
 				case "from_str":
 					input := vm.eval(e.Call.Args[0]).raw.(string)
@@ -412,7 +446,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Module == "ard/float" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/float" {
 				switch e.Call.Name {
 				case "from_int":
 					input := vm.eval(e.Call.Args[0]).raw.(int)
@@ -430,7 +464,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Module == "ard/fs" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/fs" {
 				switch e.Call.Name {
 				case "append":
 					path := vm.eval(e.Call.Args[0]).raw.(string)
@@ -493,7 +527,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Module == "ard/io" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/io" {
 				switch e.Call.Name {
 				case "print":
 					toPrint := vm.eval(&checker.InstanceMethod{
@@ -519,7 +553,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Module == "ard/json" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/json" {
 				switch e.Call.Name {
 				case "encode":
 					{
@@ -619,8 +653,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 										// 	decodeAs = valType
 										// }
 
+										// For recursive decode calls, use the same module as the current call
+										// This ensures consistent module resolution whether called via "json::decode" or "ard/json"
 										decoded := vm.eval(&checker.ModuleFunctionCall{
-										Module: "ard/json",
+											Module: e.Module, // Use the same module name as the current call
 											Call: checker.CreateCall("decode",
 												[]checker.Expression{&checker.StrLiteral{Value: val}},
 												checker.FunctionDef{
@@ -739,7 +775,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Module == "ard/maybe" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/maybe" {
 				switch e.Call.Name {
 				case "none":
 					return &object{nil, e.Call.Type()}
@@ -752,15 +788,63 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if e.Module == "ard/http" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/http" {
 				return evalInHTTP(vm, e.Call)
 			}
 
-			if e.Module == "ard/result" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/result" {
 				return evalInResult(vm, e.Call)
 			}
 
-			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
+			// Check for prelude modules (Result, Int, Float, Str)
+			switch e.Module {
+			case "Result":
+				return evalInResult(vm, e.Call)
+			case "Int":
+				switch e.Call.Name {
+				case "from_str":
+					input := vm.eval(e.Call.Args[0]).raw.(string)
+					res := &object{nil, e.Call.Type()}
+					if num, err := strconv.Atoi(input); err == nil {
+						res.raw = num
+					}
+					return res
+				default:
+					panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
+				}
+			case "Float":
+				switch e.Call.Name {
+				case "from_int":
+					input := vm.eval(e.Call.Args[0]).raw.(int)
+					return &object{float64(input), e.Call.Type()}
+				case "from_str":
+					input := vm.eval(e.Call.Args[0]).raw.(string)
+					res := &object{nil, e.Call.Type()}
+					if num, err := strconv.ParseFloat(input, 64); err == nil {
+						res.raw = num
+					}
+					return res
+				default:
+					panic(fmt.Errorf("Unimplemented: Float::%s()", e.Call.Name))
+				}
+			}
+
+			// Check for user modules (modules with function bodies)
+			if module, ok := vm.imports[e.Module]; ok {
+				// Check if this is a user module by seeing if the function has a body
+				if symbol := module.Get(e.Call.Name); symbol != nil {
+					if functionDef, ok := symbol.(*checker.FunctionDef); ok && functionDef.Body != nil {
+						return vm.evalUserModuleFunction(module, e.Call)
+					}
+				}
+			}
+
+			// Get the actual module path for error messages
+			modulePath := e.Module
+			if module, ok := vm.imports[e.Module]; ok {
+				modulePath = module.Path()
+			}
+			panic(fmt.Errorf("Unimplemented: %s::%s()", modulePath, e.Call.Name))
 		}
 	case *checker.ListLiteral:
 		{
@@ -894,7 +978,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 	case *checker.ModuleStructInstance:
 		{
-			if e.Module == "ard/http" {
+			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/http" {
 				return vm.eval(e.Property)
 			}
 			panic(fmt.Errorf("Unimplemented in package: %s", e.Module))

@@ -1,0 +1,8 @@
+use ard/io
+use samples/maths
+
+fn main() {
+  io::print(maths::add(1, 20))
+}
+
+main()

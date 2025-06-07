@@ -39,7 +39,7 @@ func TestResults(t *testing.T) {
 												Stmts: []checker.Statement{
 													{
 														Expr: &checker.ModuleFunctionCall{
-														Module: "ard/result",
+														Module: "Result",
 															Call: &checker.FunctionCall{
 																Name: "err",
 																Args: []checker.Expression{
@@ -54,7 +54,7 @@ func TestResults(t *testing.T) {
 												Stmts: []checker.Statement{
 													{
 														Expr: &checker.ModuleFunctionCall{
-														Module: "ard/result",
+														Module: "Result",
 															Call: &checker.FunctionCall{
 																Name: "ok",
 																Args: []checker.Expression{
@@ -148,7 +148,7 @@ func TestResults(t *testing.T) {
 								Pattern: &checker.Identifier{Name: "err"},
 								Body: &checker.Block{Stmts: []checker.Statement{
 									{Expr: &checker.ModuleFunctionCall{
-									Module: "ard/io",
+									Module: "io",
 										Call: &checker.FunctionCall{
 											Name: "print",
 											Args: []checker.Expression{

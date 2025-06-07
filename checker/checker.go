@@ -16,9 +16,9 @@ type Program struct {
 }
 
 type Module interface {
-	path() string
-	buildScope(scope *scope)
-	get(name string) symbol
+	Path() string
+	BuildScope(scope *scope)
+	Get(name string) symbol
 }
 
 type DiagnosticKind string
@@ -1095,7 +1095,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			pkg := c.resolvePkg(ty.Type.Target.(*ast.Identifier).Name)
 			if pkg != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `pkg::sym::more`
-				sym := pkg.get(ty.Type.Property.(*ast.Identifier).Name)
+				sym := pkg.Get(ty.Type.Property.(*ast.Identifier).Name)
 				if sym != nil {
 					if symType, ok := sym.(Type); ok {
 						return symType
@@ -1177,7 +1177,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				pkg := c.resolvePkg(name.Target.(*ast.Identifier).Name)
 				if pkg != nil {
 					if propId, ok := name.Property.(*ast.Identifier); ok {
-						sym = pkg.get(propId.Name)
+						sym = pkg.Get(propId.Name)
 					} else {
 						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
 						return nil
@@ -2010,7 +2010,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !cx.Type().hasTrait(strPkg.get("ToString").(*Trait)) {
+				if !cx.Type().hasTrait(strPkg.Get("ToString").(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -2623,7 +2623,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			sym := pkg.get(s.Function.Name)
+			sym := pkg.Get(s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
 				return nil
@@ -2728,7 +2728,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Return function call with specialized function
 				return &ModuleFunctionCall{
-					Module: pkg.path(),
+					Module: packageName,
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -2746,7 +2746,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Create package function call
 			return &ModuleFunctionCall{
-				Module: pkg.path(),
+				Module: packageName,
 				Call:   call,
 			}
 		}
@@ -3320,7 +3320,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					defer func() {
 						c.scope = c.scope.parent
 					}()
-					pkg.buildScope(c.scope)
+					pkg.BuildScope(c.scope)
 					switch prop := s.Property.(type) {
 					case *ast.StructInstance:
 						// note: in order to get more exact diagnostic messages,
@@ -3332,7 +3332,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 						casted := instance.(*StructInstance)
 						return &ModuleStructInstance{
-							Module:   pkg.path(),
+							Module:   id.Name,
 							Property: casted,
 						}
 					}
@@ -3469,7 +3469,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return nil
 			}
 
-			sym := pkg.get(s.Function.Name)
+			sym := pkg.Get(s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
 				return nil

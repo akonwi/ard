@@ -1563,7 +1563,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.ModuleFunctionCall{
-							Module: "ard/io",
+							Module: "io",
 							Call: &checker.FunctionCall{
 								Name: "print",
 								Args: []checker.Expression{
@@ -1574,7 +1574,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 					},
 					{
 						Expr: &checker.ModuleFunctionCall{
-							Module: "ard/io",
+							Module: "io",
 							Call: &checker.FunctionCall{
 								Name: "print",
 								Args: []checker.Expression{
@@ -1629,7 +1629,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1642,7 +1642,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name2",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
@@ -1671,7 +1671,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Joe"}},
@@ -1683,7 +1683,7 @@ func TestMaybes(t *testing.T) {
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
@@ -1695,7 +1695,7 @@ func TestMaybes(t *testing.T) {
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1731,7 +1731,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1748,7 +1748,7 @@ func TestMaybes(t *testing.T) {
 									Stmts: []checker.Statement{
 										{
 											Expr: &checker.ModuleFunctionCall{
-												Module: "ard/io",
+												Module: "io",
 												Call: &checker.FunctionCall{
 													Name: "print",
 													Args: []checker.Expression{
@@ -1769,7 +1769,7 @@ func TestMaybes(t *testing.T) {
 								Stmts: []checker.Statement{
 									{
 										Expr: &checker.ModuleFunctionCall{
-											Module: "ard/io",
+											Module: "io",
 											Call: &checker.FunctionCall{
 												Name: "print",
 												Args: []checker.Expression{
@@ -2401,7 +2401,7 @@ func TestGenerics(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Name: "result",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/json",
+								Module: "json",
 								Call: &checker.FunctionCall{
 									Name: "decode",
 									Args: []checker.Expression{&checker.StrLiteral{"1"}},

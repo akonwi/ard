@@ -6,26 +6,21 @@ type UserModule struct {
 	publicSymbols map[string]symbol // only public symbols from the checked program
 }
 
-// path returns the file path for this module
-func (m *UserModule) path() string {
+// Path returns the file path for this module
+func (m *UserModule) Path() string {
 	return m.filePath
 }
 
-// buildScope adds this module's public symbols to the given scope
-func (m *UserModule) buildScope(scope *scope) {
+// BuildScope adds this module's public symbols to the given scope
+func (m *UserModule) BuildScope(scope *scope) {
 	for _, sym := range m.publicSymbols {
 		scope.add(sym)
 	}
 }
 
-// get returns a public symbol by name, or nil if not found or private
-func (m *UserModule) get(name string) symbol {
-	return m.publicSymbols[name] // returns nil if not found
-}
-
-// Get is the exported version of get for testing
+// Get returns a public symbol by name, or nil if not found or private
 func (m *UserModule) Get(name string) symbol {
-	return m.get(name)
+	return m.publicSymbols[name] // returns nil if not found
 }
 
 // setFilePath sets the file path for this module

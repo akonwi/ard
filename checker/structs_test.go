@@ -79,7 +79,7 @@ func TestStructs(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Name: "req",
 							Value: &checker.ModuleStructInstance{
-								Module: "ard/http",
+								Module: "http",
 								Property: &checker.StructInstance{
 									Name: "Request",
 									Fields: map[string]checker.Expression{

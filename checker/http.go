@@ -40,15 +40,15 @@ var HttpSendFn = &FunctionDef{
 /* ard/http */
 type HttpPkg struct{}
 
-func (pkg HttpPkg) path() string {
+func (pkg HttpPkg) Path() string {
 	return "ard/http"
 }
-func (pkg HttpPkg) buildScope(scope *scope) {
+func (pkg HttpPkg) BuildScope(scope *scope) {
 	scope.symbols["Request"] = HttpRequestDef
 	scope.symbols["Response"] = HttpResponseDef
 	scope.symbols["send"] = HttpSendFn
 }
-func (pkg HttpPkg) get(name string) symbol {
+func (pkg HttpPkg) Get(name string) symbol {
 	switch name {
 	case "Request":
 		return HttpRequestDef

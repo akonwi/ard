@@ -7,8 +7,9 @@ import (
 )
 
 type VM struct {
-	scope  *scope
-	result object
+	scope   *scope
+	result  object
+	imports map[string]checker.Module
 }
 
 func New() *VM {
