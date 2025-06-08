@@ -981,7 +981,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/http" {
 				return vm.eval(e.Property)
 			}
-			panic(fmt.Errorf("Unimplemented in package: %s", e.Module))
+			panic(fmt.Errorf("Unimplemented in module: %s", e.Module))
 		}
 	case *checker.ResultMatch:
 		{
