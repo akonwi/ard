@@ -3311,36 +3311,73 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 	case *ast.StaticProperty:
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
-				// first check if this is accessing a package
+				// Check if this is accessing a module/package
 				if pkg := c.resolvePkg(id.Name); pkg != nil {
-					/* in order to reuse existing checking,
-					pushed a new scope, with the symbols of the package, and check it
-					*/
-					c.scope = newScope(c.scope)
-					defer func() {
-						c.scope = c.scope.parent
-					}()
-					pkg.BuildScope(c.scope)
 					switch prop := s.Property.(type) {
 					case *ast.StructInstance:
-						// note: in order to get more exact diagnostic messages,
-						// extract more helper methods out of checkExpr()
-						instance := c.checkExpr(prop)
-						if instance == nil {
+						// Look up the struct symbol directly from the module
+						sym := pkg.Get(prop.Name.Name)
+						if sym == nil {
+							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
 						}
 
-						casted := instance.(*StructInstance)
+						structType, ok := sym.(*StructDef)
+						if !ok {
+							c.addError(fmt.Sprintf("%s::%s is not a struct", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							return nil
+						}
+
+						// Create the struct instance using the found struct type
+						instance := &StructInstance{Name: prop.Name.Name, _type: structType}
+						fields := make(map[string]Expression)
+						for _, property := range prop.Properties {
+							if field, ok := structType.Fields[property.Name.Name]; !ok {
+								c.addError(fmt.Sprintf("Unknown field: %s", property.Name.Name), property.GetLocation())
+							} else {
+								fields[property.Name.Name] = c.checkExprAs(property.Value, field)
+							}
+						}
+
+						// Check for missing required fields
+						missing := []string{}
+						for name, t := range structType.Fields {
+							if _, isMethod := t.(*FunctionDef); !isMethod {
+								if _, exists := fields[name]; !exists {
+									if _, isMaybe := t.(*Maybe); !isMaybe {
+										missing = append(missing, name)
+									}
+								}
+							}
+						}
+						if len(missing) > 0 {
+							c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), prop.GetLocation())
+							return nil
+						}
+
+						instance.Fields = fields
 						return &ModuleStructInstance{
 							Module:   id.Name,
-							Property: casted,
+							Property: instance,
 						}
+					case *ast.Identifier:
+						// Look up other symbols (like enum variants, etc.)
+						sym := pkg.Get(prop.Name)
+						if sym == nil {
+							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+							return nil
+						}
+						// For now, we don't handle other module symbols besides structs
+						// This could be extended for constants, etc.
+						c.addError(fmt.Sprintf("Cannot access %s::%s in this context", id.Name, prop.Name), prop.GetLocation())
+						return nil
+					default:
+						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, prop), s.Property.GetLocation())
+						return nil
 					}
-
-					c.addError(fmt.Sprintf("Undefined reference in '%s'", id.Name), s.Property.GetLocation())
-					return nil
 				}
 
+				// Handle local enum variants (not from modules)
 				sym := c.scope.get(id.Name)
 				if sym == nil {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
