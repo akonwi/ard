@@ -958,7 +958,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module
 			if pkg, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = pkg
 			} else {
-				c.addError(fmt.Sprintf("Unknown package: %s", imp.Path), imp.GetLocation())
+				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
 			}
 		} else {
 			// Handle user module imports
@@ -1019,7 +1019,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module
 	return c.program, userModule, c.diagnostics
 }
 
-func (c *checker) resolvePkg(name string) Module {
+func (c *checker) resolveModule(name string) Module {
 	if pkg, ok := c.program.Imports[name]; ok {
 		return pkg
 	}
@@ -1092,7 +1092,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			}
 		}
 		if ty.Type.Target != nil {
-			pkg := c.resolvePkg(ty.Type.Target.(*ast.Identifier).Name)
+			pkg := c.resolveModule(ty.Type.Target.(*ast.Identifier).Name)
 			if pkg != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `pkg::sym::more`
 				sym := pkg.Get(ty.Type.Property.(*ast.Identifier).Name)
@@ -1174,7 +1174,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			case ast.Identifier:
 				sym = c.scope.get(name.Name)
 			case ast.StaticProperty:
-				pkg := c.resolvePkg(name.Target.(*ast.Identifier).Name)
+				pkg := c.resolveModule(name.Target.(*ast.Identifier).Name)
 				if pkg != nil {
 					if propId, ok := name.Property.(*ast.Identifier); ok {
 						sym = pkg.Get(propId.Name)
@@ -1984,7 +1984,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 func (c *checker) validateStructInstance(structType *StructDef, properties []ast.StructValue, structName string, loc ast.Location) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
-	
+
 	// Check all provided properties
 	for _, property := range properties {
 		if field, ok := structType.Fields[property.Name.Name]; !ok {
@@ -2648,24 +2648,24 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.StaticFunction:
 		{
-			// Process package function calls like io::print()
-			packageName := s.Target.(*ast.Identifier).Name
+			// Process module function calls like io::print()
+			moduleName := s.Target.(*ast.Identifier).Name
 
-			pkg := c.resolvePkg(packageName)
+			pkg := c.resolveModule(moduleName)
 			if pkg == nil {
-				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
 				return nil
 			}
 
 			sym := pkg.Get(s.Function.Name)
 			if sym == nil {
-				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
 			fnDef, ok := sym.(*FunctionDef)
 			if !ok {
-				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
@@ -2762,7 +2762,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Return function call with specialized function
 				return &ModuleFunctionCall{
-					Module: packageName,
+					Module: moduleName,
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -2778,9 +2778,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				fn:   fnDef,
 			}
 
-			// Create package function call
+			// Create module function call
 			return &ModuleFunctionCall{
-				Module: packageName,
+				Module: moduleName,
 				Call:   call,
 			}
 		}
@@ -3345,12 +3345,12 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 	case *ast.StaticProperty:
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
-				// Check if this is accessing a module/package
-				if pkg := c.resolvePkg(id.Name); pkg != nil {
+				// Check if this is accessing a module
+				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
 					case *ast.StructInstance:
 						// Look up the struct symbol directly from the module
-						sym := pkg.Get(prop.Name.Name)
+						sym := mod.Get(prop.Name.Name)
 						if sym == nil {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
@@ -3374,7 +3374,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						}
 					case *ast.Identifier:
 						// Look up other symbols (like enum variants, etc.)
-						sym := pkg.Get(prop.Name)
+						sym := mod.Get(prop.Name)
 						if sym == nil {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
@@ -3486,22 +3486,22 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return c.checkExpr(s)
 			}
 
-			packageName := s.Target.(*ast.Identifier).Name
-			pkg := c.resolvePkg(packageName)
+			moduleName := s.Target.(*ast.Identifier).Name
+			pkg := c.resolveModule(moduleName)
 			if pkg == nil {
-				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
 				return nil
 			}
 
 			sym := pkg.Get(s.Function.Name)
 			if sym == nil {
-				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
 			fnDef, isFunc := sym.(*FunctionDef)
 			if !isFunc {
-				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
@@ -3529,7 +3529,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 
 			fnDef.ReturnType = resultType
 			return &ModuleFunctionCall{
-				Module: packageName,
+				Module: moduleName,
 				Call: &FunctionCall{
 					Name: fnDef.name(),
 					Args: []Expression{arg},
