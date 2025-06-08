@@ -667,18 +667,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/maybe" {
-				switch e.Call.Name {
-				case "none":
-					return &object{nil, e.Call.Type()}
-				case "some":
-					arg := vm.eval(e.Call.Args[0])
-					arg._type = e.Call.Type()
-					return arg
-				default:
-					panic(fmt.Errorf("Unimplemented: maybe::%s()", e.Call.Name))
-				}
-			}
+
 
 			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/http" {
 				return evalInHTTP(vm, e.Call)
