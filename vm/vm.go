@@ -38,6 +38,8 @@ func (vm *VM) initModuleRegistry() {
 	vm.moduleRegistry.Register(&HTTPModule{})
 	// Register Result module (handles both Result prelude and ard/result)
 	vm.moduleRegistry.Register(&ResultModule{})
+	// Register JSON module (handles ard/json)
+	vm.moduleRegistry.Register(&JSONModule{})
 }
 
 func (vm *VM) pushScope() {
