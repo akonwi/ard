@@ -26,6 +26,8 @@ func New() *VM {
 func (vm *VM) initModuleRegistry() {
 	// Register Int module (handles both Int prelude and ard/ints)
 	vm.moduleRegistry.Register(&IntModule{})
+	// Register Float module (handles both Float prelude and ard/float)
+	vm.moduleRegistry.Register(&FloatModule{})
 }
 
 func (vm *VM) pushScope() {

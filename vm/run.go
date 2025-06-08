@@ -443,24 +443,6 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/float" {
-				switch e.Call.Name {
-				case "from_int":
-					input := vm.eval(e.Call.Args[0]).raw.(int)
-					return &object{float64(input), e.Call.Type()}
-				case "from_str":
-					input := vm.eval(e.Call.Args[0]).raw.(string)
-
-					res := &object{nil, e.Call.Type()}
-					if num, err := strconv.ParseFloat(input, 64); err == nil {
-						res.raw = num
-					}
-					return res
-				default:
-					panic(fmt.Errorf("Unimplemented: Float::%s()", e.Call.Name))
-				}
-			}
-
 			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/fs" {
 				switch e.Call.Name {
 				case "append":
@@ -793,25 +775,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				return evalInResult(vm, e.Call)
 			}
 
-			// Check for prelude modules (Result, Float, Str)
+			// Check for prelude modules (Result, Str)
 			switch e.Module {
 			case "Result":
 				return evalInResult(vm, e.Call)
-			case "Float":
-				switch e.Call.Name {
-				case "from_int":
-					input := vm.eval(e.Call.Args[0]).raw.(int)
-					return &object{float64(input), e.Call.Type()}
-				case "from_str":
-					input := vm.eval(e.Call.Args[0]).raw.(string)
-					res := &object{nil, e.Call.Type()}
-					if num, err := strconv.ParseFloat(input, 64); err == nil {
-						res.raw = num
-					}
-					return res
-				default:
-					panic(fmt.Errorf("Unimplemented: Float::%s()", e.Call.Name))
-				}
 			}
 
 			// Check for user modules (modules with function bodies)
