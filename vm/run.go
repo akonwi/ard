@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -506,31 +505,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/io" {
-				switch e.Call.Name {
-				case "print":
-					toPrint := vm.eval(&checker.InstanceMethod{
-						Subject: e.Call.Args[0],
-						Method: &checker.FunctionCall{
-							Name: "to_str",
-							Args: []checker.Expression{},
-						},
-					}).raw.(string)
 
-					fmt.Println(toPrint)
-					return void
-				case "read_line":
-					scanner := bufio.NewScanner(os.Stdin)
-					scanner.Scan()
-					resultType := e.Call.Type().(*checker.Result)
-					if err := scanner.Err(); err != nil {
-						return makeErr(&object{err.Error(), resultType.Err()}, resultType)
-					}
-					return makeOk(&object{scanner.Text(), resultType.Val()}, resultType)
-				default:
-					panic(fmt.Errorf("Unimplemented: io::%s()", e.Call.Name))
-				}
-			}
 
 			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/json" {
 				switch e.Call.Name {

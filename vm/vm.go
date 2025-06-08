@@ -28,6 +28,8 @@ func (vm *VM) initModuleRegistry() {
 	vm.moduleRegistry.Register(&IntModule{})
 	// Register Float module (handles both Float prelude and ard/float)
 	vm.moduleRegistry.Register(&FloatModule{})
+	// Register IO module (handles ard/io)
+	vm.moduleRegistry.Register(&IOModule{})
 }
 
 func (vm *VM) pushScope() {
