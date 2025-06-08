@@ -7,13 +7,25 @@ import (
 )
 
 type VM struct {
-	scope   *scope
-	result  object
-	imports map[string]checker.Module
+	scope          *scope
+	result         object
+	imports        map[string]checker.Module
+	moduleRegistry *ModuleRegistry
 }
 
 func New() *VM {
-	return &VM{scope: newScope(nil)}
+	vm := &VM{
+		scope:          newScope(nil),
+		moduleRegistry: NewModuleRegistry(),
+	}
+	vm.initModuleRegistry()
+	return vm
+}
+
+// initModuleRegistry initializes all built-in module handlers
+func (vm *VM) initModuleRegistry() {
+	// Register Int module (handles both Int prelude and ard/ints)
+	vm.moduleRegistry.Register(&IntModule{})
 }
 
 func (vm *VM) pushScope() {
@@ -22,6 +34,11 @@ func (vm *VM) pushScope() {
 
 func (vm *VM) popScope() {
 	vm.scope = vm.scope.parent
+}
+
+// Eval implements VMEvaluator interface
+func (vm *VM) Eval(expr checker.Expression) *object {
+	return vm.eval(expr)
 }
 
 type object struct {

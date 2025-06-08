@@ -431,18 +431,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 	case *checker.ModuleFunctionCall:
 		{
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/ints" {
-				switch e.Call.Name {
-				case "from_str":
-					input := vm.eval(e.Call.Args[0]).raw.(string)
-
-					res := &object{nil, e.Call.Type()}
-					if num, err := strconv.Atoi(input); err == nil {
-						res.raw = num
-					}
-					return res
-				default:
-					panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
+			// Check if module is in the registry (handles both ard/ints and Int prelude)
+			if vm.moduleRegistry.HasModule(e.Module) || 
+			   (vm.imports[e.Module] != nil && vm.moduleRegistry.HasModule(vm.imports[e.Module].Path())) {
+				moduleName := e.Module
+				if vm.imports[e.Module] != nil {
+					moduleName = vm.imports[e.Module].Path()
+				}
+				if vm.moduleRegistry.HasModule(moduleName) {
+					return vm.moduleRegistry.Handle(moduleName, vm, e.Call)
 				}
 			}
 
@@ -796,22 +793,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				return evalInResult(vm, e.Call)
 			}
 
-			// Check for prelude modules (Result, Int, Float, Str)
+			// Check for prelude modules (Result, Float, Str)
 			switch e.Module {
 			case "Result":
 				return evalInResult(vm, e.Call)
-			case "Int":
-				switch e.Call.Name {
-				case "from_str":
-					input := vm.eval(e.Call.Args[0]).raw.(string)
-					res := &object{nil, e.Call.Type()}
-					if num, err := strconv.Atoi(input); err == nil {
-						res.raw = num
-					}
-					return res
-				default:
-					panic(fmt.Errorf("Unimplemented: Int::%s()", e.Call.Name))
-				}
 			case "Float":
 				switch e.Call.Name {
 				case "from_int":
