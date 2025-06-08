@@ -287,6 +287,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 
 				methods[i] = FunctionDef{
+					Public:     true,
 					Name:       method.Name,
 					Parameters: params,
 					ReturnType: returnType,
@@ -294,6 +295,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			trait := &Trait{
+				public:  s.Public,
 				Name:    s.Name.Name,
 				methods: methods,
 			}
@@ -831,6 +833,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			enum := &Enum{
+				public:   s.Public,
 				Name:     s.Name,
 				Variants: s.Variants,
 			}

@@ -31,7 +31,7 @@ func (m *UserModule) setFilePath(path string) {
 // NewUserModule creates a UserModule from a checked program, extracting only public symbols
 func NewUserModule(filePath string, program *Program, globalScope *scope) *UserModule {
 	publicSymbols := make(map[string]symbol)
-	
+
 	// Extract public symbols from the global scope
 	for _, sym := range globalScope.symbols {
 		switch s := sym.(type) {
@@ -43,10 +43,17 @@ func NewUserModule(filePath string, program *Program, globalScope *scope) *UserM
 			if s.Public {
 				publicSymbols[s.Name] = s
 			}
-		// TODO: Add other symbol types (TypeDef, TraitDef, etc.) when they have Public fields
+		case *Trait:
+			if s.public {
+				publicSymbols[s.Name] = s
+			}
+		case *Enum:
+			if s.public {
+				publicSymbols[s.Name] = s
+			}
 		}
 	}
-	
+
 	return &UserModule{
 		filePath:      filePath,
 		publicSymbols: publicSymbols,

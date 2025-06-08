@@ -641,6 +641,7 @@ func (p *ModuleFunctionCall) Type() Type {
 type Enum struct {
 	Name     string
 	Variants []string
+	public   bool
 }
 
 func (e Enum) variant(name string) int8 {
