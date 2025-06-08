@@ -430,8 +430,8 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	case *checker.ModuleFunctionCall:
 		{
 			// Check if module is in the registry (handles both ard/ints and Int prelude)
-			if vm.moduleRegistry.HasModule(e.Module) || 
-			   (vm.imports[e.Module] != nil && vm.moduleRegistry.HasModule(vm.imports[e.Module].Path())) {
+			if vm.moduleRegistry.HasModule(e.Module) ||
+				(vm.imports[e.Module] != nil && vm.moduleRegistry.HasModule(vm.imports[e.Module].Path())) {
 				moduleName := e.Module
 				if vm.imports[e.Module] != nil {
 					moduleName = vm.imports[e.Module].Path()
@@ -440,10 +440,6 @@ func (vm *VM) eval(expr checker.Expression) *object {
 					return vm.moduleRegistry.Handle(moduleName, vm, e.Call)
 				}
 			}
-
-
-
-
 
 			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/json" {
 				switch e.Call.Name {
@@ -668,20 +664,6 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			}
 
 
-
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/http" {
-				return evalInHTTP(vm, e.Call)
-			}
-
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/result" {
-				return evalInResult(vm, e.Call)
-			}
-
-			// Check for prelude modules (Result, Str)
-			switch e.Module {
-			case "Result":
-				return evalInResult(vm, e.Call)
-			}
 
 			// Check for user modules (modules with function bodies)
 			if module, ok := vm.imports[e.Module]; ok {

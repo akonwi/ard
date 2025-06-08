@@ -10,14 +10,7 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-func evalInHTTP(vm *VM, call *checker.FunctionCall) *object {
-	switch call.Name {
-	case "send":
-		return evalHttpSend(vm, call)
-	default:
-		panic(fmt.Errorf("Unimplemented: http::%s()", call.Name))
-	}
-}
+
 
 func evalHttpSend(vm *VM, call *checker.FunctionCall) *object {
 	request := vm.eval(call.Args[0])

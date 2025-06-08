@@ -34,6 +34,10 @@ func (vm *VM) initModuleRegistry() {
 	vm.moduleRegistry.Register(&FSModule{})
 	// Register Maybe module (handles ard/maybe)
 	vm.moduleRegistry.Register(&MaybeModule{})
+	// Register HTTP module (handles ard/http)
+	vm.moduleRegistry.Register(&HTTPModule{})
+	// Register Result module (handles both Result prelude and ard/result)
+	vm.moduleRegistry.Register(&ResultModule{})
 }
 
 func (vm *VM) pushScope() {
