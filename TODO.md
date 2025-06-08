@@ -1,9 +1,5 @@
 ## TODO
 
-- [ ] importing from other files (see ./docs/imports.md)
-  - [x] support `pub` keyword in AST and parser
-  - [x] support imports from other files in checker
-  - [x] handle imports in interpreter
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?
