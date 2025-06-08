@@ -30,6 +30,8 @@ func (vm *VM) initModuleRegistry() {
 	vm.moduleRegistry.Register(&FloatModule{})
 	// Register IO module (handles ard/io)
 	vm.moduleRegistry.Register(&IOModule{})
+	// Register FS module (handles ard/fs)
+	vm.moduleRegistry.Register(&FSModule{})
 }
 
 func (vm *VM) pushScope() {

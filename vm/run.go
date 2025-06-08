@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -442,68 +441,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/fs" {
-				switch e.Call.Name {
-				case "append":
-					path := vm.eval(e.Call.Args[0]).raw.(string)
-					content := vm.eval(e.Call.Args[1]).raw.(string)
-					res := &object{false, e.Call.Type()}
-					if file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-						if _, err := file.WriteString(content); err == nil {
-							res.raw = true
-						}
-						file.Close()
-					}
-					return res
-				case "create_file":
-					path := vm.eval(e.Call.Args[0]).raw.(string)
-					res := &object{false, e.Call.Type()}
-					if file, err := os.Create(path); err == nil {
-						file.Close()
-						res.raw = true
-					}
-					return res
-				case "delete":
-					path := vm.eval(e.Call.Args[0]).raw.(string)
-					res := &object{false, e.Call.Type()}
-					if err := os.Remove(path); err == nil {
-						res.raw = true
-					}
-					return res
-				case "exists":
-					path := vm.eval(e.Call.Args[0]).raw.(string)
-					res := &object{false, e.Call.Type()}
-					if _, err := os.Stat(path); err == nil {
-						res.raw = true
-					}
-					return res
-				case "read":
-					path := vm.eval(e.Call.Args[0]).raw.(string)
 
-					res := &object{nil, e.Call.Type()}
-					if content, err := os.ReadFile(path); err == nil {
-						res.raw = string(content)
-					}
-					return res
-				case "write":
-					path := vm.eval(e.Call.Args[0]).raw.(string)
-					content := vm.eval(e.Call.Args[1]).raw.(string)
-
-					res := &object{false, e.Call.Type()}
-
-					/* file permissions:
-					- `6` (owner): read (4) + write (2) = 6
-					- `4` (group): read only
-					- `4` (others): read only
-					*/
-					if err := os.WriteFile(path, []byte(content), 0644); err == nil {
-						res.raw = true
-					}
-					return res
-				default:
-					panic(fmt.Errorf("Unimplemented: fs::%s()", e.Call.Name))
-				}
-			}
 
 
 
