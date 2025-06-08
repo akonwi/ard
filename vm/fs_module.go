@@ -14,10 +14,6 @@ func (m *FSModule) Path() string {
 	return "ard/fs"
 }
 
-func (m *FSModule) Functions() []string {
-	return []string{"append", "create_file", "delete", "exists", "read", "write"}
-}
-
 func (m *FSModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "append":

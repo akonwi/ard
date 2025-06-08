@@ -16,10 +16,6 @@ func (m *JSONModule) Path() string {
 	return "ard/json"
 }
 
-func (m *JSONModule) Functions() []string {
-	return []string{"encode", "decode"}
-}
-
 func (m *JSONModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
 	// Cast back to *VM to access full functionality needed for complex JSON operations
 	vmInstance, ok := vm.(*VM)

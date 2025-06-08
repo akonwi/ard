@@ -17,10 +17,6 @@ func (m *HTTPModule) Path() string {
 	return "ard/http"
 }
 
-func (m *HTTPModule) Functions() []string {
-	return []string{"send"}
-}
-
 func (m *HTTPModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "send":

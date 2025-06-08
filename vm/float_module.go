@@ -14,10 +14,6 @@ func (m *FloatModule) Path() string {
 	return "ard/float"
 }
 
-func (m *FloatModule) Functions() []string {
-	return []string{"from_int", "from_str"}
-}
-
 func (m *FloatModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "from_int":

@@ -14,10 +14,6 @@ func (m *IntModule) Path() string {
 	return "ard/ints"
 }
 
-func (m *IntModule) Functions() []string {
-	return []string{"from_str"}
-}
-
 func (m *IntModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "from_str":

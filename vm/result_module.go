@@ -13,10 +13,6 @@ func (m *ResultModule) Path() string {
 	return "ard/result"
 }
 
-func (m *ResultModule) Functions() []string {
-	return []string{"ok", "err"}
-}
-
 func (m *ResultModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "ok", "err":

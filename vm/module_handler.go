@@ -15,7 +15,6 @@ type VMEvaluator interface {
 type ModuleHandler interface {
 	Handle(vm VMEvaluator, call *checker.FunctionCall) *object
 	Path() string
-	Functions() []string // For documentation/validation
 }
 
 // ModuleRegistry manages built-in module handlers
