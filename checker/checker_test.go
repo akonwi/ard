@@ -70,12 +70,12 @@ func run(t *testing.T, tests []test) {
 func TestImports(t *testing.T) {
 	run(t, []test{
 		{
-			name: "importing modules",
+			name:  "importing modules",
 			input: `use ard/io`,
 			output: &checker.Program{
-			Imports: map[string]checker.Module{
-			"io": checker.IoPkg{},
-			},
+				Imports: map[string]checker.Module{
+					"io": checker.IoPkg{},
+				},
 			},
 		},
 		{
@@ -87,7 +87,7 @@ func TestImports(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Unknown package: ard/foobar",
+					Message: "Unknown module: ard/foobar",
 				},
 			},
 		},
