@@ -1980,6 +1980,40 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 	}
 }
 
+// validateStructInstance validates struct instantiation and returns the instance or nil if errors
+func (c *checker) validateStructInstance(structType *StructDef, properties []ast.StructValue, structName string, loc ast.Location) *StructInstance {
+	instance := &StructInstance{Name: structName, _type: structType}
+	fields := make(map[string]Expression)
+	
+	// Check all provided properties
+	for _, property := range properties {
+		if field, ok := structType.Fields[property.Name.Name]; !ok {
+			c.addError(fmt.Sprintf("Unknown field: %s", property.Name.Name), property.GetLocation())
+		} else {
+			fields[property.Name.Name] = c.checkExprAs(property.Value, field)
+		}
+	}
+
+	// Check for missing required fields
+	missing := []string{}
+	for name, t := range structType.Fields {
+		if _, isMethod := t.(*FunctionDef); !isMethod {
+			if _, exists := fields[name]; !exists {
+				if _, isMaybe := t.(*Maybe); !isMaybe {
+					missing = append(missing, name)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), loc)
+		return nil
+	}
+
+	instance.Fields = fields
+	return instance
+}
+
 func (c *checker) checkExpr(expr ast.Expression) Expression {
 	switch s := (expr).(type) {
 	case *ast.StrLiteral:
@@ -3328,34 +3362,12 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							return nil
 						}
 
-						// Create the struct instance using the found struct type
-						instance := &StructInstance{Name: prop.Name.Name, _type: structType}
-						fields := make(map[string]Expression)
-						for _, property := range prop.Properties {
-							if field, ok := structType.Fields[property.Name.Name]; !ok {
-								c.addError(fmt.Sprintf("Unknown field: %s", property.Name.Name), property.GetLocation())
-							} else {
-								fields[property.Name.Name] = c.checkExprAs(property.Value, field)
-							}
-						}
-
-						// Check for missing required fields
-						missing := []string{}
-						for name, t := range structType.Fields {
-							if _, isMethod := t.(*FunctionDef); !isMethod {
-								if _, exists := fields[name]; !exists {
-									if _, isMaybe := t.(*Maybe); !isMaybe {
-										missing = append(missing, name)
-									}
-								}
-							}
-						}
-						if len(missing) > 0 {
-							c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), prop.GetLocation())
+						// Use helper function for validation
+						instance := c.validateStructInstance(structType, prop.Properties, prop.Name.Name, prop.GetLocation())
+						if instance == nil {
 							return nil
 						}
 
-						instance.Fields = fields
 						return &ModuleStructInstance{
 							Module:   id.Name,
 							Property: instance,
@@ -3419,33 +3431,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return nil
 		}
 
-		instance := &StructInstance{Name: name, _type: structType}
-		fields := make(map[string]Expression)
-		for _, prop := range s.Properties {
-			if field, ok := structType.Fields[prop.Name.Name]; !ok {
-				c.addError(fmt.Sprintf("Unknown field: %s", prop.Name.Name), prop.GetLocation())
-			} else {
-				fields[prop.Name.Name] = c.checkExprAs(prop.Value, field)
-			}
-		}
-
-		missing := []string{}
-		for name, t := range structType.Fields {
-			if _, isMethod := t.(*FunctionDef); !isMethod {
-				if _, exists := fields[name]; !exists {
-					if _, isMaybe := t.(*Maybe); !isMaybe {
-						missing = append(missing, name)
-					}
-				}
-			}
-		}
-		if len(missing) > 0 {
-			c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), s.GetLocation())
-			return nil
-		}
-
-		instance.Fields = fields
-		return instance
+		// Use helper function for validation
+		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation())
 	case *ast.Try:
 		{
 			expr := c.checkExpr(s.Expression)
