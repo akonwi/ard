@@ -31,11 +31,12 @@ const (
 type Diagnostic struct {
 	Kind     DiagnosticKind
 	Message  string
+	filePath string
 	location ast.Location
 }
 
 func (d Diagnostic) String() string {
-	return fmt.Sprintf("%s %s", d.location.Start, d.Message)
+	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
 func isMutable(expr Expression) bool {
@@ -52,10 +53,11 @@ type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
 	program     *Program
+	filePath    string
 }
 
-func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module, []Diagnostic) {
-	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
+func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (*Program, Module, []Diagnostic) {
+	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil), filePath: filePath}
 	c.program = &Program{
 		Imports:    map[string]Module{},
 		Statements: []Statement{},
@@ -104,11 +106,10 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver) (*Program, Module
 			}
 
 			// Type-check the imported module
-			_, userModule, diagnostics := Check(ast, moduleResolver)
+			_, userModule, diagnostics := Check(ast, moduleResolver, imp.Path+".ard")
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
-					// todo: diagnostics should know which file they're for
 					c.diagnostics = append(c.diagnostics, diag)
 				}
 				continue
@@ -141,6 +142,7 @@ func (c *checker) addError(msg string, location ast.Location) {
 	c.diagnostics = append(c.diagnostics, Diagnostic{
 		Kind:     Error,
 		Message:  msg,
+		filePath: c.filePath,
 		location: location,
 	})
 }
@@ -149,6 +151,7 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 	c.diagnostics = append(c.diagnostics, Diagnostic{
 		Kind:     Warn,
 		Message:  msg,
+		filePath: c.filePath,
 		location: location,
 	})
 }

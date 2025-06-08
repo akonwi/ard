@@ -24,7 +24,7 @@ func run(t *testing.T, input string) any {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, _, diagnostics := checker.Check(tree, nil)
+	program, _, diagnostics := checker.Check(tree, nil, "test.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
@@ -41,7 +41,7 @@ func expectPanic(t *testing.T, substring, input string) {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, _, diagnostics := checker.Check(tree, nil)
+	program, _, diagnostics := checker.Check(tree, nil, "test.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
@@ -630,7 +630,7 @@ math::add(10, 20)`
 		t.Fatal(err)
 	}
 
-	program, _, diagnostics := checker.Check(astTree, resolver)
+	program, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}

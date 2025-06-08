@@ -54,7 +54,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		program, _, diagnostics := checker.Check(ast, moduleResolver)
+		// Get relative path for diagnostics
+		relPath, err := filepath.Rel(workingDir, inputPath)
+		if err != nil {
+			relPath = inputPath // fallback to absolute path
+		}
+
+		program, _, diagnostics := checker.Check(ast, moduleResolver, relPath)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
 				fmt.Println(diagnostic)

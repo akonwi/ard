@@ -118,7 +118,7 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	program, _, diagnostics := checker.Check(astTree, resolver)
+	program, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}
@@ -194,7 +194,7 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	program, _, diagnostics := checker.Check(astTree, resolver)
+	program, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}
@@ -271,7 +271,7 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	_, _, diagnostics := checker.Check(astTree, resolver)
+	_, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) == 0 {
 		t.Error("Expected error when accessing private function")
 	}
@@ -328,7 +328,7 @@ fn func1() Int {
 		t.Fatal(err)
 	}
 
-	program1, _, diagnostics1 := checker.Check(astTree1, resolver)
+	program1, _, diagnostics1 := checker.Check(astTree1, resolver, "main1.ard")
 	if len(diagnostics1) > 0 {
 		t.Fatalf("Unexpected diagnostics in first check: %v", diagnostics1)
 	}
@@ -344,7 +344,7 @@ fn func2() Int {
 		t.Fatal(err)
 	}
 
-	program2, _, diagnostics2 := checker.Check(astTree2, resolver)
+	program2, _, diagnostics2 := checker.Check(astTree2, resolver, "main2.ard")
 	if len(diagnostics2) > 0 {
 		t.Fatalf("Unexpected diagnostics in second check: %v", diagnostics2)
 	}
@@ -408,7 +408,7 @@ func TestUserModuleErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, _, diagnostics := checker.Check(astTree, resolver)
+			_, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
 			if len(diagnostics) == 0 {
 				t.Error("Expected error but got none")
 				return
@@ -851,7 +851,7 @@ struct PrivateStruct {
 		t.Fatal(err)
 	}
 
-	_, module, diagnostics := checker.Check(astTree, resolver)
+	_, module, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}
