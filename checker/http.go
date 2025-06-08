@@ -43,11 +43,6 @@ type HttpPkg struct{}
 func (pkg HttpPkg) Path() string {
 	return "ard/http"
 }
-func (pkg HttpPkg) BuildScope(scope *scope) {
-	scope.symbols["Request"] = HttpRequestDef
-	scope.symbols["Response"] = HttpResponseDef
-	scope.symbols["send"] = HttpSendFn
-}
 func (pkg HttpPkg) Get(name string) symbol {
 	switch name {
 	case "Request":

@@ -6,8 +6,6 @@ type JsonPkg struct {
 func (pkg JsonPkg) Path() string {
 	return "ard/json"
 }
-func (pkg JsonPkg) BuildScope(scope *scope) {
-}
 func (pkg JsonPkg) Get(name string) symbol {
 	switch name {
 	case "encode":

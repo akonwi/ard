@@ -17,7 +17,6 @@ type Program struct {
 
 type Module interface {
 	Path() string
-	BuildScope(scope *scope)
 	Get(name string) symbol
 }
 

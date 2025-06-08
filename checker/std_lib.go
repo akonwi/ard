@@ -31,7 +31,6 @@ type FloatPkg struct{}
 func (pkg FloatPkg) Path() string {
 	return "ard/float"
 }
-func (pkg FloatPkg) BuildScope(scope *scope) {}
 func (pkg FloatPkg) Get(name string) symbol {
 	switch name {
 	case "from_int":
@@ -57,7 +56,6 @@ type FsPkg struct{}
 func (pkg FsPkg) Path() string {
 	return "ard/fs"
 }
-func (pkg FsPkg) BuildScope(scope *scope) {}
 func (pkg FsPkg) Get(name string) symbol {
 	switch name {
 	case "append":
@@ -107,7 +105,6 @@ type IntPkg struct{}
 func (pkg IntPkg) Path() string {
 	return "ard/ints"
 }
-func (pkg IntPkg) BuildScope(scope *scope) {}
 func (pkg IntPkg) Get(name string) symbol {
 	switch name {
 	case "from_str":
@@ -126,8 +123,6 @@ type IoPkg struct{}
 
 func (pkg IoPkg) Path() string {
 	return "ard/io"
-}
-func (pkg IoPkg) BuildScope(scope *scope) {
 }
 func (pkg IoPkg) Get(name string) symbol {
 	switch name {
@@ -154,8 +149,6 @@ type MaybePkg struct{}
 
 func (pkg MaybePkg) Path() string {
 	return "ard/maybe"
-}
-func (pkg MaybePkg) BuildScope(scope *scope) {
 }
 func (pkg MaybePkg) Get(name string) symbol {
 	switch name {
@@ -186,7 +179,6 @@ type ResultPkg struct {
 func (pkg ResultPkg) Path() string {
 	return "ard/result"
 }
-func (pkg ResultPkg) BuildScope(scope *scope) {}
 func (pkg ResultPkg) Get(name string) symbol {
 	switch name {
 	case "ok":
@@ -236,7 +228,6 @@ var strPkg = _StrPkg{
 func (pkg _StrPkg) Path() string {
 	return "ard/string"
 }
-func (pkg _StrPkg) BuildScope(scope *scope) {}
 func (pkg _StrPkg) Get(name string) symbol {
 	return pkg.symbols[name]
 }

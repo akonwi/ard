@@ -11,13 +11,6 @@ func (m *UserModule) Path() string {
 	return m.filePath
 }
 
-// BuildScope adds this module's public symbols to the given scope
-func (m *UserModule) BuildScope(scope *scope) {
-	for _, sym := range m.publicSymbols {
-		scope.add(sym)
-	}
-}
-
 // Get returns a public symbol by name, or nil if not found or private
 func (m *UserModule) Get(name string) symbol {
 	return m.publicSymbols[name] // returns nil if not found
