@@ -13,7 +13,7 @@ func (m *MaybeModule) Path() string {
 	return "ard/maybe"
 }
 
-func (m *MaybeModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
+func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "none":
 		return &object{nil, call.Type()}

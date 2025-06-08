@@ -6,14 +6,9 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-// VMEvaluator interface for module handlers to evaluate expressions
-type VMEvaluator interface {
-	Eval(expr checker.Expression) *object
-}
-
 // ModuleHandler defines the interface for built-in module implementations
 type ModuleHandler interface {
-	Handle(vm VMEvaluator, call *checker.FunctionCall) *object
+	Handle(vm *VM, call *checker.FunctionCall) *object
 	Path() string
 }
 
@@ -41,7 +36,7 @@ func (r *ModuleRegistry) Register(handler ModuleHandler) {
 }
 
 // Handle dispatches a function call to the appropriate module handler
-func (r *ModuleRegistry) Handle(moduleName string, vm VMEvaluator, call *checker.FunctionCall) *object {
+func (r *ModuleRegistry) Handle(moduleName string, vm *VM, call *checker.FunctionCall) *object {
 	// Check if it's an alias (prelude module)
 	if fullPath, isAlias := r.aliases[moduleName]; isAlias {
 		moduleName = fullPath

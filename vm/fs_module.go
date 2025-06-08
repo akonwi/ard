@@ -14,7 +14,7 @@ func (m *FSModule) Path() string {
 	return "ard/fs"
 }
 
-func (m *FSModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
+func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "append":
 		path := vm.Eval(call.Args[0]).raw.(string)

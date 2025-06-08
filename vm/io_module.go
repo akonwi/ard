@@ -15,7 +15,7 @@ func (m *IOModule) Path() string {
 	return "ard/io"
 }
 
-func (m *IOModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
+func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "print":
 		toPrint := vm.Eval(&checker.InstanceMethod{

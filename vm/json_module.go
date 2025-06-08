@@ -16,17 +16,11 @@ func (m *JSONModule) Path() string {
 	return "ard/json"
 }
 
-func (m *JSONModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
-	// Cast back to *VM to access full functionality needed for complex JSON operations
-	vmInstance, ok := vm.(*VM)
-	if !ok {
-		panic(fmt.Errorf("JSON module requires full VM instance"))
-	}
-
+func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "encode":
 		{
-			val := vmInstance.eval(call.Args[0])
+			val := vm.eval(call.Args[0])
 			resultType := call.Type().(*checker.Result)
 			bytes, err := json.Marshal(val.premarshal())
 			if err != nil {
@@ -39,7 +33,7 @@ func (m *JSONModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object 
 			resultType := call.Type().(*checker.Result)
 			errorResult := makeErr(&object{"Parsing Error", checker.Str}, resultType)
 			result := makeOk(nil, resultType)
-			jsonString := vmInstance.eval(call.Args[0]).raw.(string)
+			jsonString := vm.eval(call.Args[0]).raw.(string)
 			jsonBytes := []byte(jsonString)
 
 			inner := resultType.Val()
@@ -125,9 +119,9 @@ func (m *JSONModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object 
 							// For recursive decode calls, we need to handle the module name properly
 							// Since we're inside the JSON module, we need to reference ourselves
 							moduleName := "ard/json"
-							if vmInstance.imports != nil {
+							if vm.imports != nil {
 								// Find the module name that resolves to ard/json
-								for importName, module := range vmInstance.imports {
+								for importName, module := range vm.imports {
 									if module.Path() == "ard/json" {
 										moduleName = importName
 										break
@@ -135,7 +129,7 @@ func (m *JSONModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object 
 								}
 							}
 
-							decoded := vmInstance.eval(&checker.ModuleFunctionCall{
+							decoded := vm.eval(&checker.ModuleFunctionCall{
 								Module: moduleName,
 								Call: checker.CreateCall("decode",
 									[]checker.Expression{&checker.StrLiteral{Value: val}},
@@ -187,7 +181,7 @@ func (m *JSONModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object 
 									if err := decoder.Decode(&v); err != nil {
 										return errorResult
 									}
-									obj := enforceSchema(vmInstance, v, listType.Of())
+									obj := enforceSchema(vm, v, listType.Of())
 									if obj == nil {
 										return errorResult
 									}

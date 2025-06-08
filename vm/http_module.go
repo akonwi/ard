@@ -17,7 +17,7 @@ func (m *HTTPModule) Path() string {
 	return "ard/http"
 }
 
-func (m *HTTPModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
+func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "send":
 		// Cast back to *VM to access the original evalHttpSend function

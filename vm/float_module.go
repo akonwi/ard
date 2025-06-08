@@ -14,7 +14,7 @@ func (m *FloatModule) Path() string {
 	return "ard/float"
 }
 
-func (m *FloatModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
+func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "from_int":
 		input := vm.Eval(call.Args[0]).raw.(int)

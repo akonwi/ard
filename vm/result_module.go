@@ -13,7 +13,7 @@ func (m *ResultModule) Path() string {
 	return "ard/result"
 }
 
-func (m *ResultModule) Handle(vm VMEvaluator, call *checker.FunctionCall) *object {
+func (m *ResultModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	switch call.Name {
 	case "ok", "err":
 		resultType := call.Type().(*checker.Result)
