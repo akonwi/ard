@@ -663,8 +663,6 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-
-
 			// Check for user modules (modules with function bodies)
 			if module, ok := vm.imports[e.Module]; ok {
 				// Check if this is a user module by seeing if the function has a body

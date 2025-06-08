@@ -10,8 +10,6 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-
-
 func evalHttpSend(vm *VM, call *checker.FunctionCall) *object {
 	request := vm.eval(call.Args[0])
 	requestMap := request.raw.(map[string]*object)
@@ -109,9 +107,12 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 				return &object{nil, method.Type()}
 			}
 
+			// autoimport ard/json so we can call json::decode
+			vm.imports["ard/json"] = checker.JsonPkg{}
+
 			// Create a synthetic function call to json::decode()
 			res := vm.eval(&checker.ModuleFunctionCall{
-			Module: "ard/json",
+				Module: "ard/json",
 				Call: checker.CreateCall("decode",
 					[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
 					checker.FunctionDef{
