@@ -74,7 +74,7 @@ func TestImports(t *testing.T) {
 			input: `use ard/io`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"io": checker.IoPkg{},
+					"ard/io": checker.IoPkg{},
 				},
 			},
 		},
@@ -1558,12 +1558,12 @@ func TestCallingPackageFunctions(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"io": checker.IoPkg{},
+					"ard/io": checker.IoPkg{},
 				},
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.ModuleFunctionCall{
-							Module: "io",
+							Module: "ard/io",
 							Call: &checker.FunctionCall{
 								Name: "print",
 								Args: []checker.Expression{
@@ -1574,7 +1574,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 					},
 					{
 						Expr: &checker.ModuleFunctionCall{
-							Module: "io",
+							Module: "ard/io",
 							Call: &checker.FunctionCall{
 								Name: "print",
 								Args: []checker.Expression{
@@ -1621,7 +1621,7 @@ func TestMaybes(t *testing.T) {
 				mut name2 = maybe::some("Bob")`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"maybe": checker.MaybePkg{},
+					"ard/maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -1629,7 +1629,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "maybe",
+								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1642,7 +1642,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name2",
 							Value: &checker.ModuleFunctionCall{
-								Module: "maybe",
+								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
@@ -1663,7 +1663,7 @@ func TestMaybes(t *testing.T) {
 				name = maybe::none()`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"maybe": checker.MaybePkg{},
+					"ard/maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -1671,7 +1671,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "maybe",
+								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Joe"}},
@@ -1683,7 +1683,7 @@ func TestMaybes(t *testing.T) {
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
 							Value: &checker.ModuleFunctionCall{
-								Module: "maybe",
+								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
@@ -1695,7 +1695,7 @@ func TestMaybes(t *testing.T) {
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
 							Value: &checker.ModuleFunctionCall{
-								Module: "maybe",
+								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1722,8 +1722,8 @@ func TestMaybes(t *testing.T) {
 				}`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"io":    checker.IoPkg{},
-					"maybe": checker.MaybePkg{},
+					"ard/io":    checker.IoPkg{},
+					"ard/maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{
 					{
@@ -1731,7 +1731,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "maybe",
+								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1748,7 +1748,7 @@ func TestMaybes(t *testing.T) {
 									Stmts: []checker.Statement{
 										{
 											Expr: &checker.ModuleFunctionCall{
-												Module: "io",
+												Module: "ard/io",
 												Call: &checker.FunctionCall{
 													Name: "print",
 													Args: []checker.Expression{
@@ -1769,7 +1769,7 @@ func TestMaybes(t *testing.T) {
 								Stmts: []checker.Statement{
 									{
 										Expr: &checker.ModuleFunctionCall{
-											Module: "io",
+											Module: "ard/io",
 											Call: &checker.FunctionCall{
 												Name: "print",
 												Args: []checker.Expression{
@@ -2394,14 +2394,14 @@ func TestGenerics(t *testing.T) {
 			`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"json": checker.JsonPkg{},
+					"ard/json": checker.JsonPkg{},
 				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
 							Name: "result",
 							Value: &checker.ModuleFunctionCall{
-								Module: "json",
+								Module: "ard/json",
 								Call: &checker.FunctionCall{
 									Name: "decode",
 									Args: []checker.Expression{&checker.StrLiteral{"1"}},

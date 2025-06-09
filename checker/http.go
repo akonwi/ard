@@ -21,7 +21,7 @@ var HttpResponseDef = &StructDef{
 			Parameters: []Parameter{},
 			ReturnType: Bool,
 		},
-		"json": &FunctionDef{
+		"ard/json": &FunctionDef{
 			Name:       "json",
 			Parameters: []Parameter{},
 			ReturnType: MakeResult(&Any{name: "T"}, Str),

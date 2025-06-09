@@ -72,7 +72,7 @@ func TestStructs(t *testing.T) {
 				`req.url`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"http": checker.HttpPkg{},
+					"ard/http": checker.HttpPkg{},
 				},
 				Statements: []checker.Statement{
 					{

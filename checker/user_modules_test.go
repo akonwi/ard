@@ -80,7 +80,7 @@ func TestUserModulePathResolution(t *testing.T) {
 	}
 }
 
-func TestUserModuleCheckerIntegration(t *testing.T) {
+func TestUserModuleImports(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_checker_integration_*")
 	if err != nil {
@@ -129,12 +129,12 @@ fn main() Int {
 	}
 
 	// Should be able to access the utils module
-	if _, ok := program.Imports["utils"]; !ok {
-		t.Error("Expected 'utils' module to be imported")
+	utilsModule, ok := program.Imports["my_calculator/utils"]
+	if !ok {
+		t.Fatal("Expected 'utils' module to be imported")
 	}
 
 	// Test that the module provides the public function
-	utilsModule := program.Imports["utils"]
 	if userMod, ok := utilsModule.(*checker.UserModule); ok {
 		helperFunc := userMod.Get("helper")
 		if helperFunc == nil {
@@ -178,12 +178,12 @@ fn private_divide(a: Int, b: Int) Int {
 
 	// Create a source file that uses :: syntax to call functions from the imported module
 	mainContent := `use test_project/math
-fn main() Int { 
+fn main() Int {
     let sum: Int = math::add(5, 3)
     let product: Int = math::multiply(2, 4)
     sum + product
 }`
-	
+
 	astTree, err := ast.Parse([]byte(mainContent))
 	if err != nil {
 		t.Fatal(err)
@@ -205,12 +205,12 @@ fn main() Int {
 	}
 
 	// Should be able to access the math module
-	if _, ok := program.Imports["math"]; !ok {
-		t.Error("Expected 'math' module to be imported")
+	mathModule, ok := program.Imports["test_project/math"]
+	if !ok {
+		t.Fatal("Expected 'math' module to be imported")
 	}
 
 	// Test that public functions are accessible
-	mathModule := program.Imports["math"]
 	if userMod, ok := mathModule.(*checker.UserModule); ok {
 		addFunc := userMod.Get("add")
 		if addFunc == nil {
@@ -257,10 +257,10 @@ func TestUserModulePrivateAccessError(t *testing.T) {
 
 	// Try to access the private function - should fail
 	mainContent := `use test_project/utils
-fn main() Int { 
+fn main() Int {
     utils::private_helper()
 }`
-	
+
 	astTree, err := ast.Parse([]byte(mainContent))
 	if err != nil {
 		t.Fatal(err)
@@ -319,10 +319,10 @@ func TestUserModuleCaching(t *testing.T) {
 
 	// First import of the shared module
 	content1 := `use test_project/shared
-fn func1() Int { 
+fn func1() Int {
     shared::shared_function()
 }`
-	
+
 	astTree1, err := ast.Parse([]byte(content1))
 	if err != nil {
 		t.Fatal(err)
@@ -335,10 +335,10 @@ fn func1() Int {
 
 	// Second import of the same module - should use cache
 	content2 := `use test_project/shared
-fn func2() Int { 
+fn func2() Int {
     shared::shared_function() + 50
 }`
-	
+
 	astTree2, err := ast.Parse([]byte(content2))
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +357,7 @@ fn func2() Int {
 	// The module instances should be the same (cached)
 	module1 := program1.Imports["shared"]
 	module2 := program2.Imports["shared"]
-	
+
 	if module1 != module2 {
 		t.Error("Expected modules to be the same instance (cached)")
 	}

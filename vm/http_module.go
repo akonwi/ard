@@ -105,7 +105,7 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 			status := respMap["status"].raw.(int)
 			return &object{status >= 200 && status <= 300, method.Type()}
 		}
-	case "json":
+	case "ard/json":
 		{
 			// Get the body
 			bodyObj, ok := respMap["body"]

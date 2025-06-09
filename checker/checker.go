@@ -116,7 +116,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 
 			// Set the correct file path for the module
 			if um, ok := userModule.(*UserModule); ok {
-				um.setFilePath(filePath)
+				um.setFilePath(imp.Path)
 			}
 
 			// Cache and add to imports
@@ -134,6 +134,11 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 	// Create UserModule from the checked program
 	userModule := NewUserModule("", c.program, c.scope)
 
+	// now that we're done with the aliases, use module paths for the import keys
+	for alias, mod := range c.program.Imports {
+		delete(c.program.Imports, alias)
+		c.program.Imports[mod.Path()] = mod
+	}
 	return c.program, userModule, c.diagnostics
 }
 
@@ -1901,7 +1906,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Return function call with specialized function
 				return &ModuleFunctionCall{
-					Module: moduleName,
+					Module: mod.Path(),
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -1919,7 +1924,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Create module function call
 			return &ModuleFunctionCall{
-				Module: moduleName,
+				Module: mod.Path(),
 				Call:   call,
 			}
 		}
@@ -2668,7 +2673,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 
 			fnDef.ReturnType = resultType
 			return &ModuleFunctionCall{
-				Module: moduleName,
+				Module: mod.Path(),
 				Call: &FunctionCall{
 					Name: fnDef.name(),
 					Args: []Expression{arg},

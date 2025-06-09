@@ -39,7 +39,7 @@ func TestResults(t *testing.T) {
 												Stmts: []checker.Statement{
 													{
 														Expr: &checker.ModuleFunctionCall{
-														Module: "Result",
+															Module: "ard/result",
 															Call: &checker.FunctionCall{
 																Name: "err",
 																Args: []checker.Expression{
@@ -54,7 +54,7 @@ func TestResults(t *testing.T) {
 												Stmts: []checker.Statement{
 													{
 														Expr: &checker.ModuleFunctionCall{
-														Module: "Result",
+															Module: "ard/result",
 															Call: &checker.FunctionCall{
 																Name: "ok",
 																Args: []checker.Expression{
@@ -120,14 +120,14 @@ func TestResults(t *testing.T) {
 			}`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"io": checker.IoPkg{},
+					"ard/io": checker.IoPkg{},
 				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
 							Name: "res",
 							Value: &checker.ModuleFunctionCall{
-							Module: "Result",
+								Module: "ard/result",
 								Call: &checker.FunctionCall{
 									Name: "err",
 									Args: []checker.Expression{&checker.StrLiteral{"foo"}},
@@ -148,7 +148,7 @@ func TestResults(t *testing.T) {
 								Pattern: &checker.Identifier{Name: "err"},
 								Body: &checker.Block{Stmts: []checker.Statement{
 									{Expr: &checker.ModuleFunctionCall{
-									Module: "io",
+										Module: "ard/io",
 										Call: &checker.FunctionCall{
 											Name: "print",
 											Args: []checker.Expression{
@@ -192,7 +192,7 @@ func TestTry(t *testing.T) {
 										Stmt: &checker.VariableDef{
 											Name: "res",
 											Value: &checker.ModuleFunctionCall{
-											Module: "Result",
+												Module: "ard/result",
 												Call: &checker.FunctionCall{
 													Name: "ok",
 													Args: []checker.Expression{&checker.IntLiteral{2}},
