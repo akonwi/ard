@@ -23,6 +23,7 @@ func New() *VM {
 }
 
 // initModuleRegistry initializes all built-in module handlers
+// todo: only register the explicitly imported ones + prelude
 func (vm *VM) initModuleRegistry() {
 	// Register Int module (handles both Int prelude and ard/ints)
 	vm.moduleRegistry.Register(&IntModule{})
