@@ -2513,7 +2513,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						}
 
 						return &ModuleStructInstance{
-							Module:   id.Name,
+							Module:   mod.Path(),
 							Property: instance,
 						}
 					case *ast.Identifier:
