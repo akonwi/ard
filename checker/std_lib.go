@@ -103,7 +103,7 @@ func (pkg FsPkg) Get(name string) symbol {
 type IntPkg struct{}
 
 func (pkg IntPkg) Path() string {
-	return "ard/ints"
+	return "ard/int"
 }
 func (pkg IntPkg) Get(name string) symbol {
 	switch name {

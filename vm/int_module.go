@@ -11,7 +11,7 @@ import (
 type IntModule struct{}
 
 func (m *IntModule) Path() string {
-	return "ard/ints"
+	return "ard/int"
 }
 
 func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall) *object {

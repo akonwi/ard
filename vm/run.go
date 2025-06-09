@@ -31,8 +31,8 @@ func Run(program *checker.Program) (val any, err error) {
 		}
 	}()
 
-	vm := New()
-	vm.imports = program.Imports
+	vm := New(program.Imports)
+
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
 	}
