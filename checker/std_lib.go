@@ -206,11 +206,11 @@ func (pkg ResultPkg) Get(name string) symbol {
 	}
 }
 
-type _StrPkg struct {
+type StrMod struct {
 	symbols map[string]symbol
 }
 
-var strMod = _StrPkg{
+var strMod = StrMod{
 	symbols: map[string]symbol{
 		"ToString": &Trait{
 			Name: "ToString",
@@ -225,9 +225,9 @@ var strMod = _StrPkg{
 	},
 }
 
-func (pkg _StrPkg) Path() string {
+func (pkg StrMod) Path() string {
 	return "ard/string"
 }
-func (pkg _StrPkg) Get(name string) symbol {
+func (pkg StrMod) Get(name string) symbol {
 	return pkg.symbols[name]
 }
