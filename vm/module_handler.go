@@ -26,6 +26,7 @@ func NewModuleRegistry() *ModuleRegistry {
 			"Int":    "ard/ints",
 			"Float":  "ard/float",
 			"Result": "ard/result",
+			"Str":    "ard/string",
 		},
 	}
 }
