@@ -71,15 +71,15 @@ func TestStructs(t *testing.T) {
 				`let req = http::Request{method:"GET", url:"google.com", headers: [:]}` + "\n" +
 				`req.url`,
 			output: &checker.Program{
-				Imports: map[string]checker.Package{
+				Imports: map[string]checker.Module{
 					"http": checker.HttpPkg{},
 				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
 							Name: "req",
-							Value: &checker.PackageStructInstance{
-								Package: "ard/http",
+							Value: &checker.ModuleStructInstance{
+								Module: "http",
 								Property: &checker.StructInstance{
 									Name: "Request",
 									Fields: map[string]checker.Expression{

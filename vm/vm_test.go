@@ -2,6 +2,8 @@ package vm_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,7 +24,7 @@ func run(t *testing.T, input string) any {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, diagnostics := checker.Check(tree)
+	program, _, diagnostics := checker.Check(tree, nil, "test.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
@@ -39,7 +41,7 @@ func expectPanic(t *testing.T, substring, input string) {
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
-	program, diagnostics := checker.Check(tree)
+	program, _, diagnostics := checker.Check(tree, nil, "test.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
@@ -589,4 +591,59 @@ func TestPanic(t *testing.T) {
 		speak()
 		1 + 1
 	`)
+}
+
+func TestUserModuleVMIntegration(t *testing.T) {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "ard_vm_test_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project files
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mathContent := `pub fn add(a: Int, b: Int) Int {
+    a + b
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte(mathContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test content that imports and uses math::add
+	mainContent := `use test_project/math
+math::add(10, 20)`
+
+	// Parse and check
+	astTree, err := ast.Parse([]byte(mainContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	program, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+
+	// Run with VM
+	result, err := vm.Run(program)
+	if err != nil {
+		t.Fatalf("VM error: %v", err)
+	}
+
+	// Should return 30
+	t.Logf("Result type: %T, value: %v", result, result)
+	if result != 30 {
+		t.Errorf("Expected 30, got %v", result)
+	}
 }

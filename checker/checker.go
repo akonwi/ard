@@ -11,24 +11,13 @@ import (
 )
 
 type Program struct {
-	Imports    map[string]Package
+	Imports    map[string]Module
 	Statements []Statement
 }
 
-type Package interface {
-	path() string
-	buildScope(scope *scope) // todo: this is not needed
-	get(name string) symbol
-}
-
-type StdPackage struct {
-	Name string
-	Path string
-}
-
-type ExtPackage struct {
-	Name string
-	Path string
+type Module interface {
+	Path() string
+	Get(name string) symbol
 }
 
 type DiagnosticKind string
@@ -41,862 +30,12 @@ const (
 type Diagnostic struct {
 	Kind     DiagnosticKind
 	Message  string
+	filePath string
 	location ast.Location
 }
 
 func (d Diagnostic) String() string {
-	return fmt.Sprintf("%s %s", d.location.Start, d.Message)
-}
-
-/* can either produce a value or not */
-type Statement struct {
-	Break bool
-	Expr  Expression
-	Stmt  NonProducing
-}
-
-type NonProducing interface {
-	NonProducing()
-}
-
-type Expression interface {
-	Type() Type
-}
-
-type StrLiteral struct {
-	Value string
-}
-
-func (s *StrLiteral) String() string {
-	return fmt.Sprintf(`"%s"`, s.Value)
-}
-func (s *StrLiteral) Type() Type {
-	return Str
-}
-
-type TemplateStr struct {
-	Chunks []Expression
-}
-
-func (t *TemplateStr) String() string {
-	return "TemplateStr"
-}
-func (t *TemplateStr) Type() Type {
-	return Str
-}
-
-type BoolLiteral struct {
-	Value bool
-}
-
-func (b *BoolLiteral) String() string {
-	return strconv.FormatBool(b.Value)
-}
-
-func (b *BoolLiteral) Type() Type {
-	return Bool
-}
-
-type IntLiteral struct {
-	Value int
-}
-
-func (i *IntLiteral) String() string {
-	return strconv.Itoa(i.Value)
-}
-
-func (i *IntLiteral) Type() Type {
-	return Int
-}
-
-type FloatLiteral struct {
-	Value float64
-}
-
-func (f *FloatLiteral) String() string {
-	return strconv.FormatFloat(f.Value, 'g', 10, 64)
-}
-
-func (f *FloatLiteral) Type() Type {
-	return Float
-}
-
-type ListLiteral struct {
-	Elements []Expression
-	_type    Type
-}
-
-func (l *ListLiteral) Type() Type {
-	return l._type
-}
-
-type MapLiteral struct {
-	Keys   []Expression
-	Values []Expression
-	_type  Type
-}
-
-func (m *MapLiteral) Type() Type {
-	return m._type
-}
-
-type VariableDef struct {
-	Mutable bool
-	Name    string
-	__type  Type
-	Value   Expression
-}
-
-func (v *VariableDef) NonProducing() {}
-func (v *VariableDef) name() string {
-	return v.Name
-}
-func (v *VariableDef) _type() Type {
-	return v.__type
-}
-
-type Reassignment struct {
-	Target Expression
-	Value  Expression
-}
-
-func (r *Reassignment) NonProducing() {}
-
-type Identifier struct {
-	Name string
-	sym  symbol
-}
-
-func (i *Identifier) Type() Type {
-	return i.sym._type()
-}
-
-type Variable struct {
-	sym symbol
-}
-
-func (v *Variable) isMutable() bool {
-	if def, ok := v.sym.(*VariableDef); ok {
-		return def.Mutable
-	}
-	return false
-}
-
-func (v Variable) String() string {
-	return v.Name()
-}
-func (v Variable) Name() string {
-	return v.sym.name()
-}
-func (v *Variable) Type() Type {
-	return v.sym._type()
-}
-
-type InstanceProperty struct {
-	Subject  Expression
-	Property string
-	_type    Type
-}
-
-func (i *InstanceProperty) Type() Type {
-	return i._type
-}
-
-// String returns a string representation of the instance property
-func (i *InstanceProperty) String() string {
-	// Special case for self-reference using @
-	if v, ok := i.Subject.(*Variable); ok && v.Name() == "@" {
-		return fmt.Sprintf("@%s", i.Property)
-	}
-	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
-}
-
-type InstanceMethod struct {
-	Subject Expression
-	Method  *FunctionCall
-}
-
-func (i *InstanceMethod) Type() Type {
-	return i.Method.Type()
-}
-
-type Negation struct {
-	Value Expression
-}
-
-func (n *Negation) String() string {
-	return fmt.Sprintf("-%s", n.Value)
-}
-func (n *Negation) Type() Type {
-	return n.Value.Type()
-}
-
-type Not struct {
-	Value Expression
-}
-
-func (n *Not) String() string {
-	return fmt.Sprintf("not %s", n.Value)
-}
-func (n *Not) Type() Type {
-	return Bool
-}
-
-type IntAddition struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntAddition) Type() Type {
-	return Int
-}
-
-type IntSubtraction struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntSubtraction) Type() Type {
-	return Int
-}
-
-type IntMultiplication struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntMultiplication) Type() Type {
-	return Int
-}
-
-type IntDivision struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntDivision) Type() Type {
-	return Int
-}
-
-type IntModulo struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntModulo) Type() Type {
-	return Int
-}
-
-type IntGreater struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntGreater) Type() Type {
-	return Bool
-}
-
-type IntGreaterEqual struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntGreaterEqual) Type() Type {
-	return Bool
-}
-
-type IntLess struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntLess) Type() Type {
-	return Bool
-}
-
-type IntLessEqual struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *IntLessEqual) Type() Type {
-	return Bool
-}
-
-type FloatAddition struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatAddition) Type() Type {
-	return Float
-}
-
-type Match struct {
-	Pattern *Identifier
-	Body    *Block
-}
-
-type OptionMatch struct {
-	Subject Expression
-	Some    *Match
-	None    *Block
-}
-
-func (o *OptionMatch) Type() Type {
-	return o.Some.Body.Type()
-}
-
-type EnumMatch struct {
-	Subject  Expression
-	Cases    []*Block
-	CatchAll *Block
-}
-
-func (e *EnumMatch) Type() Type {
-	// Find the first non-nil case
-	for _, c := range e.Cases {
-		if c != nil {
-			return c.Type()
-		}
-	}
-	// If all cases are nil, use the catch-all
-	if e.CatchAll != nil {
-		return e.CatchAll.Type()
-	}
-	return Void
-}
-
-type BoolMatch struct {
-	Subject Expression
-	True    *Block
-	False   *Block
-}
-
-func (b *BoolMatch) Type() Type {
-	return b.True.Type()
-}
-
-type UnionMatch struct {
-	Subject   Expression
-	TypeCases map[string]*Block
-	CatchAll  *Block
-}
-
-func (u *UnionMatch) Type() Type {
-	// Find the first non-nil case and return its type
-	for _, block := range u.TypeCases {
-		if block != nil {
-			return block.Type()
-		}
-	}
-
-	// If no type cases are defined, use the catch-all case type
-	if u.CatchAll != nil {
-		return u.CatchAll.Type()
-	}
-
-	return Void
-}
-
-type FloatSubtraction struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatSubtraction) Type() Type {
-	return Float
-}
-
-type FloatMultiplication struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatMultiplication) Type() Type {
-	return Float
-}
-
-type FloatDivision struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatDivision) Type() Type {
-	return Float
-}
-
-type FloatGreater struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatGreater) Type() Type {
-	return Bool
-}
-
-type FloatGreaterEqual struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatGreaterEqual) Type() Type {
-	return Bool
-}
-
-type FloatLess struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatLess) Type() Type {
-	return Bool
-}
-
-type FloatLessEqual struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *FloatLessEqual) Type() Type {
-	return Bool
-}
-
-type StrAddition struct {
-	Left  Expression
-	Right Expression
-}
-
-func (n *StrAddition) Type() Type {
-	return Str
-}
-
-type Equality struct {
-	Left, Right Expression
-}
-
-func (n *Equality) Type() Type {
-	return Bool
-}
-
-type And struct {
-	Left, Right Expression
-}
-
-func (a *And) Type() Type {
-	return Bool
-}
-
-type Or struct {
-	Left, Right Expression
-}
-
-func (o *Or) Type() Type {
-	return Bool
-}
-
-type Block struct {
-	Stmts []Statement
-}
-
-func (b *Block) Type() Type {
-	if len(b.Stmts) == 0 {
-		return Void
-	}
-	last := b.Stmts[len(b.Stmts)-1]
-	if last.Expr != nil {
-		return last.Expr.Type()
-	}
-	return Void
-}
-
-type If struct {
-	Condition Expression
-	Body      *Block
-	ElseIf    *If
-	Else      *Block
-}
-
-func (i *If) Type() Type {
-	return i.Body.Type()
-}
-
-type ForIntRange struct {
-	Cursor string
-	Index  string
-	Start  Expression
-	End    Expression
-	Body   *Block
-}
-
-func (f ForIntRange) NonProducing() {}
-
-type ForInStr struct {
-	Cursor string
-	Index  string
-	Value  Expression
-	Body   *Block
-}
-
-func (f ForInStr) NonProducing() {}
-
-type ForInList struct {
-	Cursor string
-	Index  string
-	List   Expression
-	Body   *Block
-}
-
-func (f ForInList) NonProducing() {}
-
-type ForInMap struct {
-	Key  string
-	Val  string
-	Map  Expression
-	Body *Block
-}
-
-func (f ForInMap) NonProducing() {}
-
-type ForLoop struct {
-	Init      *VariableDef
-	Condition Expression
-	Update    *Reassignment
-	Body      *Block
-}
-
-func (f ForLoop) NonProducing() {}
-
-type WhileLoop struct {
-	Condition Expression
-	Body      *Block
-}
-
-func (w WhileLoop) NonProducing() {}
-
-type Parameter struct {
-	Name    string
-	Type    Type
-	Mutable bool
-}
-
-type FunctionDef struct {
-	Name       string
-	Parameters []Parameter
-	ReturnType Type
-	Mutates    bool
-	Body       *Block
-	SelfName   string
-}
-
-func (f FunctionDef) String() string {
-	paramStrs := make([]string, len(f.Parameters))
-	for i := range f.Parameters {
-		paramStrs[i] = f.Parameters[i].Type.String()
-	}
-
-	return fmt.Sprintf("fn (%s) %s", strings.Join(paramStrs, ","), f.ReturnType.String())
-}
-
-func (f FunctionDef) get(name string) Type { return nil }
-
-func (f FunctionDef) name() string {
-	return f.Name
-}
-func (f *FunctionDef) _type() Type {
-	return f
-}
-func (f *FunctionDef) Type() Type {
-	return f
-}
-func (f FunctionDef) equal(other Type) bool {
-	// Check if it's another FunctionDef
-	if otherF, ok := other.(*FunctionDef); ok {
-		if len(f.Parameters) != len(otherF.Parameters) {
-			return false
-		}
-
-		for i := range f.Parameters {
-			if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
-				return false
-			}
-		}
-
-		return f.Mutates == otherF.Mutates && f.ReturnType.equal(otherF.ReturnType)
-	}
-
-	return false
-}
-
-func (f FunctionDef) hasTrait(trait *Trait) bool {
-	return false
-}
-func (f *FunctionDef) hasGenerics() bool {
-	for i := range f.Parameters {
-		if strings.HasPrefix(f.Parameters[i].Type.String(), "$") {
-			return true
-		}
-	}
-	return strings.Contains(f.ReturnType.String(), "$")
-}
-
-type FunctionCall struct {
-	Name string
-	Args []Expression
-	fn   *FunctionDef
-}
-
-func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
-	return &FunctionCall{
-		Name: name,
-		Args: args,
-		fn:   &fn,
-	}
-}
-
-func (f *FunctionCall) Type() Type {
-	return f.fn.ReturnType
-}
-
-type PackageStructInstance struct {
-	Package  string
-	Property *StructInstance
-}
-
-func (p *PackageStructInstance) Type() Type {
-	return p.Property._type
-}
-
-type PackageFunctionCall struct {
-	Package string
-	Call    *FunctionCall
-}
-
-func (p *PackageFunctionCall) Type() Type {
-	return p.Call.Type()
-}
-
-type Enum struct {
-	Name     string
-	Variants []string
-}
-
-func (e Enum) variant(name string) int8 {
-	for i, v := range e.Variants {
-		if v == name {
-			return int8(i)
-		}
-	}
-	return -1
-}
-
-func (e Enum) NonProducing() {}
-
-func (e Enum) _type() Type {
-	return e
-}
-func (e Enum) name() string {
-	return e.Name
-}
-
-func (e Enum) Type() Type {
-	return e
-}
-func (e Enum) String() string {
-	return e.Name
-}
-func (e Enum) equal(other Type) bool {
-	o, ok := other.(*Enum)
-	if !ok {
-		return false
-	}
-	if e.Name != o.Name {
-		return false
-	}
-	if len(e.Variants) != len(o.Variants) {
-		return false
-	}
-	for i := range e.Variants {
-		if e.Variants[i] != o.Variants[i] {
-			return false
-		}
-	}
-	return true
-}
-func (e Enum) get(name string) Type { return nil }
-
-func (e Enum) hasTrait(trait *Trait) bool {
-	return false
-}
-
-type EnumVariant struct {
-	enum    *Enum
-	Variant int8
-}
-
-func (ev EnumVariant) Type() Type {
-	return ev.enum
-}
-
-func (ev EnumVariant) hasTrait(trait *Trait) bool {
-	return ev.enum.hasTrait(trait)
-}
-
-func (ev EnumVariant) String() string {
-	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Variants[ev.Variant])
-}
-
-type Union struct {
-	Name  string
-	Types []Type
-}
-
-func (u Union) NonProducing() {}
-func (u Union) String() string {
-	strs := make([]string, len(u.Types))
-	for i, t := range u.Types {
-		strs[i] = t.String()
-	}
-	return strings.Join(strs, "|")
-}
-func (u Union) get(name string) Type { return nil }
-
-// Implement the symbol interface
-func (u Union) name() string {
-	return u.Name
-}
-func (u Union) _type() Type {
-	return u
-}
-func (u Union) Type() Type {
-	return u
-}
-func (u Union) equal(other Type) bool {
-	if otherUnion, ok := other.(*Union); ok {
-		if len(u.Types) != len(otherUnion.Types) {
-			return false
-		}
-
-		// Check that all types in the union match
-		for _, uType := range u.Types {
-			found := slices.ContainsFunc(otherUnion.Types, uType.equal)
-			if !found {
-				return false
-			}
-		}
-		return true
-	}
-
-	// Check if the other type matches any type in this union
-	for _, t := range u.Types {
-		if t.equal(other) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (u Union) hasTrait(trait *Trait) bool {
-	// A union has a trait only if all of its types have that trait
-	for _, t := range u.Types {
-		if !t.hasTrait(trait) {
-			return false
-		}
-	}
-	return len(u.Types) > 0
-}
-
-type StructDef struct {
-	Name   string
-	Fields map[string]Type
-	Self   string
-	Traits []*Trait
-}
-
-func (def StructDef) NonProducing() {}
-
-func (def *StructDef) name() string {
-	return def.Name
-}
-func (def StructDef) _type() Type {
-	return def
-}
-func (def StructDef) String() string {
-	return def.name()
-}
-func (def StructDef) get(name string) Type {
-	field, ok := def.Fields[name]
-	if !ok {
-		return nil
-	}
-	return field
-}
-func (def StructDef) equal(other Type) bool {
-	if otherDef, ok := other.(*StructDef); ok {
-		if def.Name != otherDef.Name {
-			return false
-		}
-		if len(def.Fields) != len(otherDef.Fields) {
-			return false
-		}
-		for name, fieldType := range def.Fields {
-			if otherFieldType, ok := otherDef.Fields[name]; !ok || !fieldType.equal(otherFieldType) {
-				return false
-			}
-		}
-		return true
-	}
-	if o, ok := other.(*Any); ok {
-		if o.actual == nil {
-			return true
-		}
-		return def.equal(o.actual)
-	}
-	return false
-}
-
-func (def StructDef) hasTrait(trait *Trait) bool {
-	for i := range def.Traits {
-		t := def.Traits[i]
-		if t.equal(trait) {
-			return true
-		}
-	}
-	return false
-}
-
-type StructInstance struct {
-	Name   string
-	Fields map[string]Expression
-	_type  *StructDef
-}
-
-func (s StructInstance) Type() Type {
-	return s._type
-}
-
-type ResultMatch struct {
-	Subject Expression
-	Ok      *Match
-	Err     *Match
-}
-
-func (r ResultMatch) Type() Type {
-	return r.Ok.Body.Type()
-}
-
-type Panic struct {
-	Message Expression
-	node    *ast.FunctionCall
-}
-
-func (p Panic) GetLocation() ast.Location {
-	return p.node.GetLocation()
-}
-
-func (p Panic) Type() Type {
-	return Void
+	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
 func isMutable(expr Expression) bool {
@@ -909,45 +48,17 @@ func isMutable(expr Expression) bool {
 	return false
 }
 
-type TryOp struct {
-	expr Expression
-	ok   Type
-}
-
-func (t TryOp) Expr() Expression {
-	return t.expr
-}
-
-func (t TryOp) Type() Type {
-	return t.ok
-}
-
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *scope
 	program     *Program
+	filePath    string
 }
 
-func (c *checker) addError(msg string, location ast.Location) {
-	c.diagnostics = append(c.diagnostics, Diagnostic{
-		Kind:     Error,
-		Message:  msg,
-		location: location,
-	})
-}
-
-func (c *checker) addWarning(msg string, location ast.Location) {
-	c.diagnostics = append(c.diagnostics, Diagnostic{
-		Kind:     Warn,
-		Message:  msg,
-		location: location,
-	})
-}
-
-func Check(input *ast.Program) (*Program, []Diagnostic) {
-	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil)}
+func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (*Program, Module, []Diagnostic) {
+	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil), filePath: filePath}
 	c.program = &Program{
-		Imports:    map[string]Package{},
+		Imports:    map[string]Module{},
 		Statements: []Statement{},
 	}
 
@@ -962,11 +73,55 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
+			// Handle standard library imports
 			if pkg, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = pkg
 			} else {
-				c.addError(fmt.Sprintf("Unknown package: %s", imp.Path), imp.GetLocation())
+				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
 			}
+		} else {
+			// Handle user module imports
+			if moduleResolver == nil {
+				panic(fmt.Sprintf("No module resolver provided for user import: %s", imp.Path))
+			}
+
+			filePath, err := moduleResolver.ResolveImportPath(imp.Path)
+			if err != nil {
+				c.addError(fmt.Sprintf("Failed to resolve import '%s': %v", imp.Path, err), imp.GetLocation())
+				continue
+			}
+
+			// Check if module is already cached
+			if cachedModule, ok := moduleResolver.moduleCache[filePath]; ok {
+				c.program.Imports[imp.Name] = cachedModule
+				continue
+			}
+
+			// Load and parse the module file using import path
+			ast, err := moduleResolver.LoadModule(imp.Path)
+			if err != nil {
+				c.addError(fmt.Sprintf("Failed to load module %s: %v", filePath, err), imp.GetLocation())
+				continue
+			}
+
+			// Type-check the imported module
+			_, userModule, diagnostics := Check(ast, moduleResolver, imp.Path+".ard")
+			if len(diagnostics) > 0 {
+				// Add all diagnostics from the imported module
+				for _, diag := range diagnostics {
+					c.diagnostics = append(c.diagnostics, diag)
+				}
+				continue
+			}
+
+			// Set the correct file path for the module
+			if um, ok := userModule.(*UserModule); ok {
+				um.setFilePath(filePath)
+			}
+
+			// Cache and add to imports
+			moduleResolver.moduleCache[filePath] = userModule
+			c.program.Imports[imp.Name] = userModule
 		}
 	}
 
@@ -976,10 +131,31 @@ func Check(input *ast.Program) (*Program, []Diagnostic) {
 		}
 	}
 
-	return c.program, c.diagnostics
+	// Create UserModule from the checked program
+	userModule := NewUserModule("", c.program, c.scope)
+
+	return c.program, userModule, c.diagnostics
 }
 
-func (c *checker) resolvePkg(name string) Package {
+func (c *checker) addError(msg string, location ast.Location) {
+	c.diagnostics = append(c.diagnostics, Diagnostic{
+		Kind:     Error,
+		Message:  msg,
+		filePath: c.filePath,
+		location: location,
+	})
+}
+
+func (c *checker) addWarning(msg string, location ast.Location) {
+	c.diagnostics = append(c.diagnostics, Diagnostic{
+		Kind:     Warn,
+		Message:  msg,
+		filePath: c.filePath,
+		location: location,
+	})
+}
+
+func (c *checker) resolveModule(name string) Module {
 	if pkg, ok := c.program.Imports[name]; ok {
 		return pkg
 	}
@@ -1052,10 +228,10 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			}
 		}
 		if ty.Type.Target != nil {
-			pkg := c.resolvePkg(ty.Type.Target.(*ast.Identifier).Name)
+			pkg := c.resolveModule(ty.Type.Target.(*ast.Identifier).Name)
 			if pkg != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `pkg::sym::more`
-				sym := pkg.get(ty.Type.Property.(*ast.Identifier).Name)
+				sym := pkg.Get(ty.Type.Property.(*ast.Identifier).Name)
 				if sym != nil {
 					if symType, ok := sym.(Type); ok {
 						return symType
@@ -1113,6 +289,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 
 				methods[i] = FunctionDef{
+					Public:     true,
 					Name:       method.Name,
 					Parameters: params,
 					ReturnType: returnType,
@@ -1120,6 +297,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			trait := &Trait{
+				public:  s.Public,
 				Name:    s.Name.Name,
 				methods: methods,
 			}
@@ -1134,10 +312,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			case ast.Identifier:
 				sym = c.scope.get(name.Name)
 			case ast.StaticProperty:
-				pkg := c.resolvePkg(name.Target.(*ast.Identifier).Name)
+				pkg := c.resolveModule(name.Target.(*ast.Identifier).Name)
 				if pkg != nil {
 					if propId, ok := name.Property.(*ast.Identifier); ok {
-						sym = pkg.get(propId.Name)
+						sym = pkg.Get(propId.Name)
 					} else {
 						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
 						return nil
@@ -1657,6 +835,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			enum := &Enum{
+				public:   s.Public,
 				Name:     s.Name,
 				Variants: s.Variants,
 			}
@@ -1668,6 +847,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			def := &StructDef{
 				Name:   s.Name.Name,
 				Fields: make(map[string]Type),
+				Public: s.Public,
 			}
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
@@ -1939,6 +1119,40 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 	}
 }
 
+// validateStructInstance validates struct instantiation and returns the instance or nil if errors
+func (c *checker) validateStructInstance(structType *StructDef, properties []ast.StructValue, structName string, loc ast.Location) *StructInstance {
+	instance := &StructInstance{Name: structName, _type: structType}
+	fields := make(map[string]Expression)
+
+	// Check all provided properties
+	for _, property := range properties {
+		if field, ok := structType.Fields[property.Name.Name]; !ok {
+			c.addError(fmt.Sprintf("Unknown field: %s", property.Name.Name), property.GetLocation())
+		} else {
+			fields[property.Name.Name] = c.checkExprAs(property.Value, field)
+		}
+	}
+
+	// Check for missing required fields
+	missing := []string{}
+	for name, t := range structType.Fields {
+		if _, isMethod := t.(*FunctionDef); !isMethod {
+			if _, exists := fields[name]; !exists {
+				if _, isMaybe := t.(*Maybe); !isMaybe {
+					missing = append(missing, name)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), loc)
+		return nil
+	}
+
+	instance.Fields = fields
+	return instance
+}
+
 func (c *checker) checkExpr(expr ast.Expression) Expression {
 	switch s := (expr).(type) {
 	case *ast.StrLiteral:
@@ -1969,7 +1183,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !cx.Type().hasTrait(strPkg.get("ToString").(*Trait)) {
+				if !cx.Type().hasTrait(strPkg.Get("ToString").(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -2573,24 +1787,24 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.StaticFunction:
 		{
-			// Process package function calls like io::print()
-			packageName := s.Target.(*ast.Identifier).Name
+			// Process module function calls like io::print()
+			moduleName := s.Target.(*ast.Identifier).Name
 
-			pkg := c.resolvePkg(packageName)
+			pkg := c.resolveModule(moduleName)
 			if pkg == nil {
-				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
 				return nil
 			}
 
-			sym := pkg.get(s.Function.Name)
+			sym := pkg.Get(s.Function.Name)
 			if sym == nil {
-				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
 			fnDef, ok := sym.(*FunctionDef)
 			if !ok {
-				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
@@ -2686,8 +1900,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Return function call with specialized function
-				return &PackageFunctionCall{
-					Package: pkg.path(),
+				return &ModuleFunctionCall{
+					Module: moduleName,
 					Call: &FunctionCall{
 						Name: s.Function.Name,
 						Args: args,
@@ -2703,10 +1917,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				fn:   fnDef,
 			}
 
-			// Create package function call
-			return &PackageFunctionCall{
-				Package: pkg.path(),
-				Call:    call,
+			// Create module function call
+			return &ModuleFunctionCall{
+				Module: moduleName,
+				Call:   call,
 			}
 		}
 	case *ast.IfStatement:
@@ -3270,36 +2484,51 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 	case *ast.StaticProperty:
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
-				// first check if this is accessing a package
-				if pkg := c.resolvePkg(id.Name); pkg != nil {
-					/* in order to reuse existing checking,
-					pushed a new scope, with the symbols of the package, and check it
-					*/
-					c.scope = newScope(c.scope)
-					defer func() {
-						c.scope = c.scope.parent
-					}()
-					pkg.buildScope(c.scope)
+				// Check if this is accessing a module
+				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
 					case *ast.StructInstance:
-						// note: in order to get more exact diagnostic messages,
-						// extract more helper methods out of checkExpr()
-						instance := c.checkExpr(prop)
+						// Look up the struct symbol directly from the module
+						sym := mod.Get(prop.Name.Name)
+						if sym == nil {
+							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							return nil
+						}
+
+						structType, ok := sym.(*StructDef)
+						if !ok {
+							c.addError(fmt.Sprintf("%s::%s is not a struct", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							return nil
+						}
+
+						// Use helper function for validation
+						instance := c.validateStructInstance(structType, prop.Properties, prop.Name.Name, prop.GetLocation())
 						if instance == nil {
 							return nil
 						}
 
-						casted := instance.(*StructInstance)
-						return &PackageStructInstance{
-							Package:  pkg.path(),
-							Property: casted,
+						return &ModuleStructInstance{
+							Module:   id.Name,
+							Property: instance,
 						}
+					case *ast.Identifier:
+						// Look up other symbols (like enum variants, etc.)
+						sym := mod.Get(prop.Name)
+						if sym == nil {
+							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+							return nil
+						}
+						// For now, we don't handle other module symbols besides structs
+						// This could be extended for constants, etc.
+						c.addError(fmt.Sprintf("Cannot access %s::%s in this context", id.Name, prop.Name), prop.GetLocation())
+						return nil
+					default:
+						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, prop), s.Property.GetLocation())
+						return nil
 					}
-
-					c.addError(fmt.Sprintf("Undefined reference in '%s'", id.Name), s.Property.GetLocation())
-					return nil
 				}
 
+				// Handle local enum variants (not from modules)
 				sym := c.scope.get(id.Name)
 				if sym == nil {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
@@ -3341,33 +2570,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return nil
 		}
 
-		instance := &StructInstance{Name: name, _type: structType}
-		fields := make(map[string]Expression)
-		for _, prop := range s.Properties {
-			if field, ok := structType.Fields[prop.Name.Name]; !ok {
-				c.addError(fmt.Sprintf("Unknown field: %s", prop.Name.Name), prop.GetLocation())
-			} else {
-				fields[prop.Name.Name] = c.checkExprAs(prop.Value, field)
-			}
-		}
-
-		missing := []string{}
-		for name, t := range structType.Fields {
-			if _, isMethod := t.(*FunctionDef); !isMethod {
-				if _, exists := fields[name]; !exists {
-					if _, isMaybe := t.(*Maybe); !isMaybe {
-						missing = append(missing, name)
-					}
-				}
-			}
-		}
-		if len(missing) > 0 {
-			c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), s.GetLocation())
-			return nil
-		}
-
-		instance.Fields = fields
-		return instance
+		// Use helper function for validation
+		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation())
 	case *ast.Try:
 		{
 			expr := c.checkExpr(s.Expression)
@@ -3421,22 +2625,22 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return c.checkExpr(s)
 			}
 
-			packageName := s.Target.(*ast.Identifier).Name
-			pkg := c.resolvePkg(packageName)
+			moduleName := s.Target.(*ast.Identifier).Name
+			pkg := c.resolveModule(moduleName)
 			if pkg == nil {
-				c.addError(fmt.Sprintf("Undefined: %s", packageName), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
 				return nil
 			}
 
-			sym := pkg.get(s.Function.Name)
+			sym := pkg.Get(s.Function.Name)
 			if sym == nil {
-				c.addError(fmt.Sprintf("Undefined: %s::%s", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
 			fnDef, isFunc := sym.(*FunctionDef)
 			if !isFunc {
-				c.addError(fmt.Sprintf("%s::%s is not a function", packageName, s.Function.Name), s.GetLocation())
+				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
@@ -3463,8 +2667,8 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			}
 
 			fnDef.ReturnType = resultType
-			return &PackageFunctionCall{
-				Package: packageName,
+			return &ModuleFunctionCall{
+				Module: moduleName,
 				Call: &FunctionCall{
 					Name: fnDef.name(),
 					Args: []Expression{arg},
@@ -3539,6 +2743,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		Parameters: params,
 		ReturnType: returnType,
 		Body:       body,
+		Public:     def.Public,
 	}
 
 	// Add function to scope

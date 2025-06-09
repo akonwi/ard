@@ -31,19 +31,7 @@ func makeErr(raw *object, resultType *checker.Result) *object {
 	}
 }
 
-func evalInResult(vm *VM, call *checker.FunctionCall) *object {
-	switch call.Name {
-	case "ok", "err":
-		resultType := call.Type().(*checker.Result)
-		res := vm.eval(call.Args[0])
-		if call.Name == "ok" {
-			return makeOk(res, resultType)
-		}
-		return makeErr(res, resultType)
-	default:
-		panic(fmt.Errorf("unimplemented: Result::%s", call.Name))
-	}
-}
+
 
 func (vm *VM) evalResultMethod(subj *object, call *checker.FunctionCall) *object {
 	switch call.Name {

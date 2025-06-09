@@ -1,0 +1,27 @@
+package vm
+
+import (
+	"fmt"
+
+	"github.com/akonwi/ard/checker"
+)
+
+// MaybeModule handles ard/maybe module functions
+type MaybeModule struct{}
+
+func (m *MaybeModule) Path() string {
+	return "ard/maybe"
+}
+
+func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+	switch call.Name {
+	case "none":
+		return &object{nil, call.Type()}
+	case "some":
+		arg := vm.Eval(call.Args[0])
+		arg._type = call.Type()
+		return arg
+	default:
+		panic(fmt.Errorf("Unimplemented: maybe::%s()", call.Name))
+	}
+}
