@@ -74,8 +74,8 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
-			if pkg, ok := findInStdLib(imp.Path); ok {
-				c.program.Imports[imp.Name] = pkg
+			if mod, ok := findInStdLib(imp.Path); ok {
+				c.program.Imports[imp.Name] = mod
 			} else {
 				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
 			}
@@ -156,12 +156,12 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 }
 
 func (c *checker) resolveModule(name string) Module {
-	if pkg, ok := c.program.Imports[name]; ok {
-		return pkg
+	if mod, ok := c.program.Imports[name]; ok {
+		return mod
 	}
 
-	if pkg, ok := preludePkgs[name]; ok {
-		return pkg
+	if mod, ok := prelude[name]; ok {
+		return mod
 	}
 
 	return nil
@@ -228,10 +228,10 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			}
 		}
 		if ty.Type.Target != nil {
-			pkg := c.resolveModule(ty.Type.Target.(*ast.Identifier).Name)
-			if pkg != nil {
-				// at some point, this will need to unwrap the property down to root for nested paths: `pkg::sym::more`
-				sym := pkg.Get(ty.Type.Property.(*ast.Identifier).Name)
+			mod := c.resolveModule(ty.Type.Target.(*ast.Identifier).Name)
+			if mod != nil {
+				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
+				sym := mod.Get(ty.Type.Property.(*ast.Identifier).Name)
 				if sym != nil {
 					if symType, ok := sym.(Type); ok {
 						return symType
@@ -312,10 +312,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			case ast.Identifier:
 				sym = c.scope.get(name.Name)
 			case ast.StaticProperty:
-				pkg := c.resolveModule(name.Target.(*ast.Identifier).Name)
-				if pkg != nil {
+				mod := c.resolveModule(name.Target.(*ast.Identifier).Name)
+				if mod != nil {
 					if propId, ok := name.Property.(*ast.Identifier); ok {
-						sym = pkg.Get(propId.Name)
+						sym = mod.Get(propId.Name)
 					} else {
 						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
 						return nil
@@ -1183,7 +1183,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !cx.Type().hasTrait(strPkg.Get("ToString").(*Trait)) {
+				if !cx.Type().hasTrait(strMod.Get("ToString").(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -1790,13 +1790,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Process module function calls like io::print()
 			moduleName := s.Target.(*ast.Identifier).Name
 
-			pkg := c.resolveModule(moduleName)
-			if pkg == nil {
+			mod := c.resolveModule(moduleName)
+			if mod == nil {
 				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
 				return nil
 			}
 
-			sym := pkg.Get(s.Function.Name)
+			sym := mod.Get(s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
@@ -2626,13 +2626,13 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			}
 
 			moduleName := s.Target.(*ast.Identifier).Name
-			pkg := c.resolveModule(moduleName)
-			if pkg == nil {
+			mod := c.resolveModule(moduleName)
+			if mod == nil {
 				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
 				return nil
 			}
 
-			sym := pkg.Get(s.Function.Name)
+			sym := mod.Get(s.Function.Name)
 			if sym == nil {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil

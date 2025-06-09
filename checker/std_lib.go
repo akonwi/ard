@@ -1,10 +1,10 @@
 package checker
 
-var preludePkgs = map[string]Module{
+var prelude = map[string]Module{
 	"Float":  FloatPkg{},
 	"Int":    IntPkg{},
 	"Result": ResultPkg{},
-	"Str":    strPkg,
+	"Str":    strMod,
 }
 
 func findInStdLib(path string) (Module, bool) {
@@ -129,7 +129,7 @@ func (pkg IoPkg) Get(name string) symbol {
 	case "print":
 		fn := &FunctionDef{
 			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: strPkg.symbols["ToString"].(*Trait)}},
+			Parameters: []Parameter{{Name: "string", Type: strMod.symbols["ToString"].(*Trait)}},
 			ReturnType: Void,
 		}
 		return fn
@@ -210,7 +210,7 @@ type _StrPkg struct {
 	symbols map[string]symbol
 }
 
-var strPkg = _StrPkg{
+var strMod = _StrPkg{
 	symbols: map[string]symbol{
 		"ToString": &Trait{
 			Name: "ToString",
