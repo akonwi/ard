@@ -142,9 +142,6 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 							if !decoded.raw.(_result).ok {
 								return decoded
 							}
-							// if !isMaybe {
-							// 	decoded._type = decodeAs.Of()
-							// }
 							raw := decoded.raw.(_result).raw
 							if maybe, isMaybe := valType.(*checker.Maybe); isMaybe {
 								raw._type = maybe

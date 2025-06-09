@@ -122,7 +122,7 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 			}
 
 			// autoimport ard/json so we can call json::decode
-			vm.imports["ard/json"] = checker.JsonPkg{}
+			vm.moduleRegistry.Register(&JSONModule{})
 
 			// Create a synthetic function call to json::decode()
 			res := vm.eval(&checker.ModuleFunctionCall{

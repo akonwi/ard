@@ -1527,6 +1527,7 @@ func (p *parser) map_() (Expression, error) {
 			Value: val,
 		})
 		p.match(comma)
+		p.match(new_line)
 	}
 	return &MapLiteral{
 		Entries: entries,
