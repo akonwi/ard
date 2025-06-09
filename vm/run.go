@@ -427,19 +427,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 	case *checker.ModuleFunctionCall:
 		{
-			// Check if module is in the registry (handles both ard/ints and Int prelude)
-			if vm.moduleRegistry.HasModule(e.Module) ||
-				(vm.imports[e.Module] != nil && vm.moduleRegistry.HasModule(vm.imports[e.Module].Path())) {
-				moduleName := e.Module
-				if vm.imports[e.Module] != nil {
-					moduleName = vm.imports[e.Module].Path()
-				}
-				if vm.moduleRegistry.HasModule(moduleName) {
-					return vm.moduleRegistry.Handle(moduleName, vm, e.Call)
-				}
+			// first check in std lib
+			if vm.moduleRegistry.HasModule(e.Module) {
+				return vm.moduleRegistry.Handle(e.Module, vm, e.Call)
 			}
-
-
 
 			// Check for user modules (modules with function bodies)
 			if module, ok := vm.imports[e.Module]; ok {
@@ -451,12 +442,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				}
 			}
 
-			// Get the actual module path for error messages
-			modulePath := e.Module
-			if module, ok := vm.imports[e.Module]; ok {
-				modulePath = module.Path()
-			}
-			panic(fmt.Errorf("Unimplemented: %s::%s()", modulePath, e.Call.Name))
+			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
 		}
 	case *checker.ListLiteral:
 		{
@@ -590,7 +576,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 	case *checker.ModuleStructInstance:
 		{
-			if module, ok := vm.imports[e.Module]; ok && module.Path() == "ard/http" {
+			if e.Module == (&HTTPModule{}).Path() {
 				return vm.eval(e.Property)
 			}
 			panic(fmt.Errorf("Unimplemented in module: %s", e.Module))
