@@ -102,12 +102,12 @@ func TestJsonDecodeNestedStructWithList(t *testing.T) {
 		let input = "\{ \"people\": [ \{ \"name\": \"John\", \"id\": 1 } ] }"
 		let result = json::decode<Payload>(input)
 		match result {
-		  ok => ok.people.size(),
-			err => 0
+		  ok => ok.people.at(0).name,
+			err => panic(err)
 		}
 	`)
 
-	if result != 1 {
-		t.Errorf("Wanted %v, got %v", 1, result)
+	if result != "John" {
+		t.Errorf("Wanted %v, got %v", "John", result)
 	}
 }
