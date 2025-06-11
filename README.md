@@ -161,9 +161,9 @@ person.name // "Alton"
 Structs can have methods. Use a `impl` block to define methods on a struct:
 
 ```ard
-impl (p: Person) {
+impl Person {
   fn get_intro() Str {
-    "My name is {p.name}"
+    "My name is {@name}"
   }
 
   fn greet(other: Person) Str {
