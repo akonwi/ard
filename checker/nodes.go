@@ -338,6 +338,28 @@ func (b *BoolMatch) Type() Type {
 	return b.True.Type()
 }
 
+type IntMatch struct {
+	Subject     Expression
+	IntCases    map[int]*Block // keys are integer values
+	CatchAll    *Block
+}
+
+func (i *IntMatch) Type() Type {
+	// Find the first non-nil case and return its type
+	for _, block := range i.IntCases {
+		if block != nil {
+			return block.Type()
+		}
+	}
+	
+	// If no int cases are defined, use the catch-all case type
+	if i.CatchAll != nil {
+		return i.CatchAll.Type()
+	}
+	
+	return Void
+}
+
 type UnionMatch struct {
 	Subject   Expression
 	TypeCases map[string]*Block

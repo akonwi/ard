@@ -597,6 +597,26 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			})
 			return res
 		}
+	case *checker.IntMatch:
+		{
+			subject := vm.eval(e.Subject)
+			intValue := subject.raw.(int)
+
+			// Check if we have a specific case for this integer
+			if caseBlock, exists := e.IntCases[intValue]; exists {
+				res, _ := vm.evalBlock(caseBlock, nil)
+				return res
+			}
+
+			// If no specific case found, use catch-all if available
+			if e.CatchAll != nil {
+				res, _ := vm.evalBlock(e.CatchAll, nil)
+				return res
+			}
+
+			// This should never happen if the type checker is working correctly
+			panic(fmt.Errorf("No matching case for int value %d", intValue))
+		}
 	case *checker.TryOp:
 		{
 			subj := vm.eval(e.Expr())

@@ -2484,6 +2484,37 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 		}
 
+		// Check for Int matching
+		if subject.Type() == Int {
+			intCases := make(map[int]*Block)
+			var catchAll *Block
+
+			for _, matchCase := range s.Cases {
+				// Check if it's the default case (_)
+				if id, ok := matchCase.Pattern.(*ast.Identifier); ok && id.Name == "_" {
+					catchAll = c.checkBlock(matchCase.Body, nil)
+				} else if literal, ok := matchCase.Pattern.(*ast.NumLiteral); ok {
+					// Convert string to int
+					value, err := strconv.Atoi(literal.Value)
+					if err != nil {
+						c.addError(fmt.Sprintf("Invalid integer literal: %s", literal.Value), matchCase.Pattern.GetLocation())
+						return nil
+					}
+					caseBlock := c.checkBlock(matchCase.Body, nil)
+					intCases[value] = caseBlock
+				} else {
+					c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			return &IntMatch{
+				Subject:  subject,
+				IntCases: intCases,
+				CatchAll: catchAll,
+			}
+		}
+
 		c.addError(fmt.Sprintf("Cannot match on %s", subject.Type()), s.GetLocation())
 		return nil
 	case *ast.StaticProperty:
