@@ -1,9 +1,10 @@
 ## TODO
 
+- [ ] keywords should still be allowed as variable names
+- [ ] `Maybe.expect()` and `Result.expect()` for panic shorthands
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?
-- [ ] matching on numbers
 - [ ] calling functions with named arguments
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
