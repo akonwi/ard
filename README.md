@@ -105,6 +105,25 @@ let string = match some_bool {
   true => "It's true"
   false => "It's false"
 }
+
+// matching on integers
+let grade = match score {
+  0..59 => "F"
+  60..69 => "D"  
+  70..79 => "C"
+  80..89 => "B"
+  90..100 => "A"
+  _ => "Invalid score"
+}
+
+// mixing specific values and ranges
+let message = match value {
+  0 => "zero"
+  1..10 => "small number"
+  42 => "the answer"
+  100..1000 => "big number"
+  _ => "something else"
+}
 ```
 
 ### Iteration
@@ -237,6 +256,34 @@ for item in stuff {
   }
 }
 ```
+
+### Pattern Matching
+
+Ard supports powerful pattern matching with the `match` expression. Different types support different patterns:
+
+#### Integer Matching
+
+Match on specific integer values or ranges:
+
+```ard
+let category = match age {
+  0..12 => "child"
+  13..19 => "teenager" 
+  21 => "legal drinking age"
+  65..120 => "senior"
+  _ => "adult"
+}
+```
+
+Integer ranges are inclusive (`1..10` includes both 1 and 10). When patterns overlap, the first match wins.
+
+#### Other Pattern Types
+
+- **Booleans**: Match on `true` or `false`
+- **Enums**: Match on enum variants like `Status::active`
+- **Maybe types**: Match on value binding or `_` for none
+- **Type unions**: Match on type with `it` binding
+- **Results**: Match on `ok(value)` or `err` patterns
 
 ### Qualified static paths
 A static path is a sequence of `name::thing`. Ard has a preference for simple paths, i.e. only one `::`.
