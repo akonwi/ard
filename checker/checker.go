@@ -2487,6 +2487,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		// Check for Int matching
 		if subject.Type() == Int {
 			intCases := make(map[int]*Block)
+			rangeCases := make(map[IntRange]*Block)
 			var catchAll *Block
 
 			for _, matchCase := range s.Cases {
@@ -2502,6 +2503,35 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 					caseBlock := c.checkBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
+				} else if rangeExpr, ok := matchCase.Pattern.(*ast.RangeExpression); ok {
+					// Handle range pattern like 1..10
+					startLiteral, startOk := rangeExpr.Start.(*ast.NumLiteral)
+					endLiteral, endOk := rangeExpr.End.(*ast.NumLiteral)
+					
+					if !startOk || !endOk {
+						c.addError("Range patterns must use integer literals", matchCase.Pattern.GetLocation())
+						return nil
+					}
+					
+					startValue, err := strconv.Atoi(startLiteral.Value)
+					if err != nil {
+						c.addError(fmt.Sprintf("Invalid start value in range: %s", startLiteral.Value), rangeExpr.Start.GetLocation())
+						return nil
+					}
+					
+					endValue, err := strconv.Atoi(endLiteral.Value)
+					if err != nil {
+						c.addError(fmt.Sprintf("Invalid end value in range: %s", endLiteral.Value), rangeExpr.End.GetLocation())
+						return nil
+					}
+					
+					if startValue > endValue {
+						c.addError("Range start must be less than or equal to end", matchCase.Pattern.GetLocation())
+						return nil
+					}
+					
+					caseBlock := c.checkBlock(matchCase.Body, nil)
+					rangeCases[IntRange{Start: startValue, End: endValue}] = caseBlock
 				} else {
 					c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
 					return nil
@@ -2509,9 +2539,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			return &IntMatch{
-				Subject:  subject,
-				IntCases: intCases,
-				CatchAll: catchAll,
+				Subject:    subject,
+				IntCases:   intCases,
+				RangeCases: rangeCases,
+				CatchAll:   catchAll,
 			}
 		}
 

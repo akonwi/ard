@@ -839,7 +839,7 @@ func (p *parser) matchExpr() (Expression, error) {
 			if p.match(new_line) {
 				continue
 			}
-			pattern, err := p.or()
+			pattern, err := p.iterRange()
 			if err != nil {
 				return nil, err
 			}

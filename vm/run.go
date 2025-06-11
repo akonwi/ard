@@ -608,7 +608,15 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				return res
 			}
 
-			// If no specific case found, use catch-all if available
+			// Check if the value falls within any range
+			for rangePattern, caseBlock := range e.RangeCases {
+				if intValue >= rangePattern.Start && intValue <= rangePattern.End {
+					res, _ := vm.evalBlock(caseBlock, nil)
+					return res
+				}
+			}
+
+			// If no specific case or range found, use catch-all if available
 			if e.CatchAll != nil {
 				res, _ := vm.evalBlock(e.CatchAll, nil)
 				return res

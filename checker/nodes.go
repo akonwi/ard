@@ -338,15 +338,27 @@ func (b *BoolMatch) Type() Type {
 	return b.True.Type()
 }
 
+type IntRange struct {
+	Start int
+	End   int
+}
+
 type IntMatch struct {
-	Subject     Expression
-	IntCases    map[int]*Block // keys are integer values
-	CatchAll    *Block
+	Subject      Expression
+	IntCases     map[int]*Block      // keys are integer values
+	RangeCases   map[IntRange]*Block // keys are integer ranges
+	CatchAll     *Block
 }
 
 func (i *IntMatch) Type() Type {
 	// Find the first non-nil case and return its type
 	for _, block := range i.IntCases {
+		if block != nil {
+			return block.Type()
+		}
+	}
+	
+	for _, block := range i.RangeCases {
 		if block != nil {
 			return block.Type()
 		}
