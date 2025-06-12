@@ -20,7 +20,7 @@ type compareKey struct {
 	strKey string
 }
 
-func Run(program *checker.Program) (val any, err error) {
+func Interpret(program *checker.Program) (val any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if msg, ok := r.(string); ok {
