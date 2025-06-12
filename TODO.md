@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] keywords should still be allowed as variable names
 - [ ] `Maybe.expect()` and `Result.expect()` for panic shorthands
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`

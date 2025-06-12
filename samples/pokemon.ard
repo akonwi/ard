@@ -37,7 +37,7 @@ let res = http::send(http::Request{
 
 io::print("GET from pokemon api")
 match res {
-  res => {
+  ok(res) => {
     if res.is_ok() {
       match res.json<PokemonResp>() {
         ok => {
@@ -50,7 +50,7 @@ match res {
       io::print("Received a {res.status}")
     }
   },
-  _ => io::print("unable to make request")
+  err => io::print("unable to make request: {err}")
 }
 
 io::print("http::post() to echoing api")
@@ -61,6 +61,6 @@ let post_res = http::send(http::Request{
   body: maybe::some("raw text")
 })
 match res {
-  res => io::print("got a {res.status}"),
-  _ => {},
+  ok(res) => io::print("got a {res.status}"),
+  err => io::print("unable to make request: {err}")
 }

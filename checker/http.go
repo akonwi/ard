@@ -34,7 +34,7 @@ var HttpSendFn = &FunctionDef{
 	Parameters: []Parameter{
 		{Name: "request", Type: HttpRequestDef},
 	},
-	ReturnType: &Maybe{of: HttpResponseDef},
+	ReturnType: MakeResult(HttpResponseDef, Str),
 }
 
 /* ard/http */

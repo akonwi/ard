@@ -46,26 +46,25 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 			Timeout: 30 * time.Second,
 		}
 
+		resultType := call.Type().(*checker.Result)
+
 		req, err := http.NewRequest(method, url, body)
 		if err != nil {
-			fmt.Printf("HTTP Error creating request: %v\n", err)
-			return &object{nil, call.Type()}
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 
 		req.Header = headers
 
 		resp, err := client.Do(req)
 		if err != nil {
-			fmt.Printf("HTTP Error executing request: %v\n", err)
-			return &object{nil, call.Type()}
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 		defer resp.Body.Close()
 
 		// Read the response body
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Printf("HTTP Error reading response body: %v\n", err)
-			return &object{nil, call.Type()}
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 		bodyStr := string(bodyBytes)
 
@@ -84,7 +83,7 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 			"body":    &object{bodyStr, checker.Str},
 		}
 
-		return &object{respMap, call.Type()}
+		return makeOk(&object{respMap, resultType.Val()}, resultType)
 	default:
 		panic(fmt.Errorf("Unimplemented: http::%s()", call.Name))
 	}
