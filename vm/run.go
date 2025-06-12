@@ -944,7 +944,12 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 
 	// Special handling for HTTP Response methods
 	if istruct == checker.HttpResponseDef {
-		return vm.evalHttpResponseMethod(subj, call)
+		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
+		args := make([]*object, len(call.Args))
+		for i := range call.Args {
+			args[i] = vm.eval(call.Args[i])
+		}
+		return http.evalHttpResponseMethod(subj, call, args)
 	}
 
 	sig, ok := istruct.Fields[call.Name]

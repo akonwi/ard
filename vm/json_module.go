@@ -195,28 +195,13 @@ func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj 
 			// 	decodeAs = valType
 			// }
 
-			// For recursive decode calls, we need to handle the module name properly
-			// Since we're inside the JSON module, we need to reference ourselves
-			moduleName := "ard/json"
-			if vm.imports != nil {
-				// Find the module name that resolves to ard/json
-				for importName, module := range vm.imports {
-					if module.Path() == "ard/json" {
-						moduleName = importName
-						break
-					}
-				}
-			}
+			decoded := m.Handle(vm, checker.CreateCall("decode",
+				[]checker.Expression{&checker.StrLiteral{Value: val}},
+				checker.FunctionDef{
+					ReturnType: checker.MakeResult(decodeAs, checker.Str),
+				},
+			), []*object{&object{val, checker.Str}})
 
-			decoded := vm.eval(&checker.ModuleFunctionCall{
-				Module: moduleName,
-				Call: checker.CreateCall("decode",
-					[]checker.Expression{&checker.StrLiteral{Value: val}},
-					checker.FunctionDef{
-						ReturnType: checker.MakeResult(decodeAs, checker.Str),
-					},
-				),
-			})
 			// if err
 			if !decoded.raw.(_result).ok {
 				return decoded

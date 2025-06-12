@@ -90,9 +90,9 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 }
 
 // do HTTP::Response methods
-func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall) *object {
+func (mod *HTTPModule) evalHttpResponseMethod(response *object, method *checker.FunctionCall, args []*object) *object {
 	// Get raw response struct
-	respMap, ok := resp.raw.(map[string]*object)
+	respMap, ok := response.raw.(map[string]*object)
 	if !ok {
 		fmt.Println("HTTP Error: Response is not correctly formatted")
 		return &object{nil, method.Type()}
@@ -120,20 +120,15 @@ func (vm *VM) evalHttpResponseMethod(resp *object, method *checker.FunctionCall)
 				return &object{nil, method.Type()}
 			}
 
-			// autoimport ard/json so we can call json::decode
-			vm.moduleRegistry.Register(&JSONModule{})
-
 			// Create a synthetic function call to json::decode()
-			res := vm.eval(&checker.ModuleFunctionCall{
-				Module: "ard/json",
-				Call: checker.CreateCall("decode",
-					[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
-					checker.FunctionDef{
-						ReturnType: method.Type(),
-					},
-				),
-			})
-			return res
+			jsonMod := &JSONModule{}
+			vm := New(map[string]checker.Module{})
+			return jsonMod.Handle(vm, checker.CreateCall("decode",
+				[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
+				checker.FunctionDef{
+					ReturnType: method.Type(),
+				},
+			), []*object{&object{bodyStr, checker.Str}})
 		}
 	default:
 		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
