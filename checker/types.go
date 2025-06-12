@@ -554,6 +554,12 @@ func (r Result) String() string {
 
 func (r Result) get(name string) Type {
 	switch name {
+	case "expect":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "message", Type: Str}},
+			ReturnType: r.val,
+		}
 	case "or":
 		return &FunctionDef{
 			Name:       name,

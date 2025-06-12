@@ -1,6 +1,6 @@
 ## TODO
 
-- [ ] `Maybe.expect()` and `Result.expect()` for panic shorthands
+- [ ] `Maybe.expect()` for panic shorthands
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?

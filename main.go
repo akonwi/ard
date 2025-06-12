@@ -69,7 +69,7 @@ func main() {
 		}
 
 		if _, err := vm.Run(program); err != nil {
-			fmt.Printf("Runtime error: %v\n", err)
+			fmt.Printf("Panic: %v\n", err)
 			os.Exit(1)
 		}
 

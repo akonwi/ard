@@ -31,14 +31,22 @@ func makeErr(raw *object, resultType *checker.Result) *object {
 	}
 }
 
-
-
 func (vm *VM) evalResultMethod(subj *object, call *checker.FunctionCall) *object {
+	self := subj.raw.(_result)
 	switch call.Name {
+	case "expect":
+		if !self.ok {
+			actual := ""
+			if self.raw._type == checker.Str {
+				actual = self.raw.raw.(string)
+			}
+			_msg := vm.eval(call.Args[0]).raw.(string)
+			panic(_msg + ": " + actual)
+		}
+		return self.raw
 	case "or":
-		rawObj := subj.raw.(_result)
-		if rawObj.ok {
-			return rawObj.raw
+		if self.ok {
+			return self.raw
 		}
 		return vm.eval(call.Args[0])
 	}
