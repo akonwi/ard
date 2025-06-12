@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -35,23 +36,16 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err != nil {
-			fmt.Println("Error parsing source code with tree-sitter")
-			os.Exit(1)
-		}
-
 		ast, err := ast.Parse(sourceCode)
 		if err != nil {
-			fmt.Printf("Error parsing tree: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("Error parsing code: %v\n", err)
 			return
 		}
 
 		workingDir := filepath.Dir(inputPath)
 		moduleResolver, err := checker.NewModuleResolver(workingDir)
 		if err != nil {
-			fmt.Printf("Error initializing module resolver: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("Error initializing module resolver: %v\n", err)
 		}
 
 		// Get relative path for diagnostics
@@ -69,12 +63,10 @@ func main() {
 		}
 
 		if _, err := vm.Run(program); err != nil {
-			fmt.Printf("Panic: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("Panic: %v\n", err)
 		}
 
 	default:
-		fmt.Printf("Unknown command: %s\n", os.Args[1])
-		os.Exit(1)
+		log.Fatalf("Unknown command: %s\n", os.Args[1])
 	}
 }

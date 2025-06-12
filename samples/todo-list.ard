@@ -30,7 +30,7 @@ mut running = true
 while running {
   render(list)
   io::print("What's your next todo?")
-  let title = io::read_line()
+  let title = io::read_line().expect("Failed to read line")
   if title.is_empty() {
     running = false
   } else {
