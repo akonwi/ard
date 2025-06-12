@@ -14,13 +14,13 @@ func (m *FloatModule) Path() string {
 	return "ard/float"
 }
 
-func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "from_int":
-		input := vm.Eval(call.Args[0]).raw.(int)
+		input := args[0].raw.(int)
 		return &object{float64(input), call.Type()}
 	case "from_str":
-		input := vm.Eval(call.Args[0]).raw.(string)
+		input := args[0].raw.(string)
 		res := &object{nil, call.Type()}
 		if num, err := strconv.ParseFloat(input, 64); err == nil {
 			res.raw = num

@@ -8,7 +8,7 @@ import (
 
 // Any built-in module should satisfy this interface
 type ModuleHandler interface {
-	Handle(vm *VM, call *checker.FunctionCall) *object
+	Handle(vm *VM, call *checker.FunctionCall, args []*object) *object
 	Path() string
 }
 
@@ -32,7 +32,13 @@ func (r *ModuleRegistry) Handle(moduleName string, vm *VM, call *checker.Functio
 		panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
 	}
 
-	return handler.Handle(vm, call)
+	// evaluate arguments in current vm context because the function called will be evaluated in another context
+	args := make([]*object, len(call.Args))
+	for i, arg := range call.Args {
+		args[i] = vm.Eval(arg)
+	}
+
+	return handler.Handle(vm, call, args)
 }
 
 func (r *ModuleRegistry) HasModule(moduleName string) bool {

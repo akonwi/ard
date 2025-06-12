@@ -15,10 +15,10 @@ func (m *IOModule) Path() string {
 	return "ard/io"
 }
 
-func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "print":
-		toPrint := vm.Eval(&checker.InstanceMethod{
+		toPrint := vm.evalInstanceMethod(args[0], &checker.InstanceMethod{
 			Subject: call.Args[0],
 			Method: &checker.FunctionCall{
 				Name: "to_str",

@@ -17,12 +17,12 @@ func (m *HTTPModule) Path() string {
 	return "ard/http"
 }
 
-func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "send":
 		// Cast back to *VM to access the original evalHttpSend function
 		// This preserves the existing complex HTTP logic
-		request := vm.Eval(call.Args[0])
+		request := args[0]
 		requestMap := request.raw.(map[string]*object)
 
 		method := requestMap["method"].raw.(string)

@@ -13,12 +13,12 @@ func (m *MaybeModule) Path() string {
 	return "ard/maybe"
 }
 
-func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "none":
 		return &object{nil, call.Type()}
 	case "some":
-		arg := vm.Eval(call.Args[0])
+		arg := args[0]
 		arg._type = call.Type()
 		return arg
 	default:

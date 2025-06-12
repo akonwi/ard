@@ -14,10 +14,10 @@ func (m *IntModule) Path() string {
 	return "ard/int"
 }
 
-func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "from_str":
-		input := vm.Eval(call.Args[0]).raw.(string)
+		input := args[0].raw.(string)
 		res := &object{nil, call.Type()}
 		if num, err := strconv.Atoi(input); err == nil {
 			res.raw = num

@@ -16,13 +16,12 @@ func (m *JSONModule) Path() string {
 	return "ard/json"
 }
 
-func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall) *object {
+func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "encode":
 		{
-			val := vm.eval(call.Args[0])
 			resultType := call.Type().(*checker.Result)
-			bytes, err := json.Marshal(val.premarshal())
+			bytes, err := json.Marshal(args[0].premarshal())
 			if err != nil {
 				return makeErr(&object{err.Error(), checker.Str}, resultType)
 			}
