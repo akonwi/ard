@@ -191,7 +191,7 @@ func (p *parser) parseStatement() (Statement, error) {
 func (p *parser) parseVariableDef() (Statement, error) {
 	start := p.previous()
 	kind := start.kind
-	name := p.consume(identifier, fmt.Sprintf("Expected identifier after '%s'", string(kind)))
+	name := p.consumeVariableName(fmt.Sprintf("Expected identifier after '%s'", string(kind)))
 	var declaredType DeclaredType = nil
 	if p.match(colon) {
 		declaredType = p.parseType()
@@ -287,52 +287,67 @@ func (p *parser) whileLoop() (Statement, error) {
 }
 
 func (p *parser) forLoop() (Statement, error) {
-	if p.match(identifier) {
-		id := p.previous()
-		cursor := Identifier{
-			Name: id.text,
-			// todo: token.getLocation()
-			Location: Location{
-				Start: Point{Row: id.line, Col: id.column},
-				End:   Point{Row: id.line, Col: id.column + len(id.text)},
-			},
-		}
-		cursor2 := Identifier{}
-		if p.match(comma) {
-			id := p.consume(identifier, "Expected a name after ','")
-			cursor2.Name = id.text
-			cursor2.Location = Location{
-				Start: Point{Row: id.line, Col: id.column},
-				End:   Point{Row: id.line, Col: id.column + len(id.text)},
+	// Try to parse a for-in loop by looking ahead
+	current := p.peek()
+	if current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind) {
+		// Look ahead to see if this is a for-in loop (variable followed by ',' or 'in')
+		savedIndex := p.index
+		_ = p.advance() // consume the potential variable name
+
+		// Check for for-in pattern: variable [, variable] in ...
+		isForIn := p.check(in) || p.check(comma)
+
+		// Restore position
+		p.index = savedIndex
+
+		if isForIn {
+			id := p.consumeVariableName("Expected variable name")
+			cursor := Identifier{
+				Name: id.text,
+				// todo: token.getLocation()
+				Location: Location{
+					Start: Point{Row: id.line, Col: id.column},
+					End:   Point{Row: id.line, Col: id.column + len(id.text)},
+				},
 			}
-		}
-		p.consume(in, "Expected 'in' after cursor name")
-		seq, err := p.iterRange()
-		if err != nil {
-			return nil, err
-		}
-		body, err := p.block()
-		if err != nil {
-			return nil, err
-		}
-		if seq, ok := seq.(*RangeExpression); ok {
-			return &RangeLoop{
-				Cursor:  cursor,
-				Cursor2: cursor2,
-				Start:   seq.Start,
-				End:     seq.End,
-				Body:    body,
+			cursor2 := Identifier{}
+			if p.match(comma) {
+				id := p.consumeVariableName("Expected a name after ','")
+				cursor2.Name = id.text
+				cursor2.Location = Location{
+					Start: Point{Row: id.line, Col: id.column},
+					End:   Point{Row: id.line, Col: id.column + len(id.text)},
+				}
+			}
+			p.consume(in, "Expected 'in' after cursor name")
+			seq, err := p.iterRange()
+			if err != nil {
+				return nil, err
+			}
+			body, err := p.block()
+			if err != nil {
+				return nil, err
+			}
+			if seq, ok := seq.(*RangeExpression); ok {
+				return &RangeLoop{
+					Cursor:  cursor,
+					Cursor2: cursor2,
+					Start:   seq.Start,
+					End:     seq.End,
+					Body:    body,
+				}, nil
+			}
+
+			return &ForInLoop{
+				Cursor:   cursor,
+				Cursor2:  cursor2,
+				Iterable: seq,
+				Body:     body,
 			}, nil
 		}
-
-		return &ForInLoop{
-			Cursor:   cursor,
-			Cursor2:  cursor2,
-			Iterable: seq,
-			Body:     body,
-		}, nil
 	}
 
+	// Parse C-style for loop: for [let|mut] variable = ...; condition; update
 	p.match(let, mut)
 	initial, err := p.parseVariableDef()
 	if err != nil {
@@ -406,7 +421,7 @@ func (p *parser) structDef(public bool) (Statement, error) {
 	p.consume(left_brace, "Expected '{'")
 	p.match(new_line)
 	for !p.match(right_brace) {
-		fieldName := p.consume(identifier, "Expected field name")
+		fieldName := p.consumeVariableName("Expected field name")
 		p.consume(colon, "Expected ':'")
 		fieldType := p.parseType()
 		structDef.Fields = append(structDef.Fields, StructField{
@@ -492,7 +507,7 @@ func (p *parser) traitDef(public bool) (*TraitDefinition, error) {
 			if len(params) > 0 {
 				p.consume(comma, "Expected ',' between parameters")
 			}
-			paramName := p.consume(identifier, "Expected parameter name")
+			paramName := p.consumeVariableName("Expected parameter name")
 			p.consume(colon, "Expected ':' after parameter name")
 			paramType := p.parseType()
 			params = append(params, Parameter{
@@ -913,7 +928,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		params := []Parameter{}
 		for !p.match(right_paren) {
 			isMutable := p.match(mut)
-			nameToken := p.consume(identifier, "Expected parameter name")
+			nameToken := p.consumeVariableName("Expected parameter name")
 
 			// Check if this is a simple parameter list in an anonymous function
 			// In case of anonymous functions with unnamed params, we don't need types
@@ -999,7 +1014,7 @@ func (p *parser) structInstance() (Expression, error) {
 		p.match(new_line)
 
 		for !p.match(right_brace) {
-			propToken := p.consume(identifier, "Expected name")
+			propToken := p.consumeVariableName("Expected name")
 			p.consume(colon, "Expected ':'")
 			val, err := p.or()
 			if err != nil {
@@ -1469,10 +1484,21 @@ func (p *parser) primary() (Expression, error) {
 		return p.list()
 	}
 	switch tok := p.peek(); tok.kind {
-	// will i regret this?
-	case and, or, fn, match:
-		name := string(p.advance().kind)
-		return &Identifier{Name: name}, nil
+	// Handle keywords as identifiers when used as variables
+	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
+		break_, match, while_, for_, use, as, in, if_, else_, type_, pub:
+		tok := p.advance()
+		name := tok.text
+		if name == "" {
+			name = string(tok.kind)
+		}
+		return &Identifier{
+			Name: name,
+			Location: Location{
+				Start: Point{Row: tok.line, Col: tok.column},
+				End:   Point{Row: tok.line, Col: tok.column + len(name) - 1},
+			},
+		}, nil
 	default:
 		peek := p.peek()
 		panic(fmt.Errorf("unmatched primary expression at %d,%d: %s", peek.line, peek.column, peek.kind))
@@ -1577,6 +1603,37 @@ func (p *parser) advance() token {
 		p.index++
 	}
 	return p.tokens[p.index-1]
+}
+
+/* consume a token that can be used as a variable name (identifier or keyword) */
+func (p *parser) consumeVariableName(message string) token {
+	if p.isAtEnd() {
+		panic(fmt.Errorf("Unexpected end of input"))
+	}
+
+	current := p.peek()
+	// Allow both identifiers and keywords as variable names
+	if current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind) {
+		token := p.advance()
+		// For keywords, we need to set the text to be the keyword string
+		if token.text == "" {
+			token.text = string(token.kind)
+		}
+		return token
+	}
+
+	panic(fmt.Errorf("%s at line %d, column %d. (Actual: %s)",
+		message, p.tokens[p.index].line, p.tokens[p.index].column, current.kind))
+}
+
+/* check if a token kind is an allowed keyword */
+/* `match` is excluded because it can be confusing in assignments `let foo = match.thing` */
+func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
+	keywords := []kind{
+		and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
+		break_, while_, for_, use, as, in, if_, else_, type_, pub,
+	}
+	return slices.Contains(keywords, k)
 }
 
 /* assert that the current token is the provided kind and return it */
