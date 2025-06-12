@@ -62,19 +62,19 @@ func (pkg FsPkg) Get(name string) symbol {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
-			ReturnType: Bool,
+			ReturnType: MakeResult(Void, Str),
 		}
 	case "create_file":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "path", Type: Str}},
-			ReturnType: Bool,
+			ReturnType: MakeResult(Void, Str),
 		}
 	case "delete":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "path", Type: Str}},
-			ReturnType: Bool,
+			ReturnType: MakeResult(Void, Str),
 		}
 	case "exists":
 		return &FunctionDef{
@@ -92,7 +92,7 @@ func (pkg FsPkg) Get(name string) symbol {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
-			ReturnType: Bool,
+			ReturnType: MakeResult(Void, Str),
 		}
 	default:
 		return nil

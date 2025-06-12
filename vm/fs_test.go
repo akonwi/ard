@@ -19,26 +19,26 @@ func TestVM(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "fs::create_file returns a Bool indicating success",
+			name: "fs::create_file returns Result<Void, Str>",
 			input: `
 				use ard/fs
 				fs::create_file("./fixtures/fake.file")
 				`,
-			want: true,
+			want: nil,
 		},
 		{
-			name: "fs::write returns a Bool indicating success",
+			name: "fs::write returns Result<Void, Str>",
 			input: `
 				use ard/fs
 				fs::write("./fixtures/fake.file", "content")`,
-			want: true,
+			want: nil,
 		},
 		{
-			name: "fs::append returns a Bool indicating success",
+			name: "fs::append returns Result<Void, Str>",
 			input: `
 				use ard/fs
 				fs::append("./fixtures/fake.file", "-appended")`,
-			want: true,
+			want: nil,
 		},
 		{
 			name: "fs::read returns maybe.some with the file contents, when there is a file at the given path",
@@ -61,11 +61,11 @@ func TestVM(t *testing.T) {
 			want: "no file",
 		},
 		{
-			name: "fs::delete returns a Bool indicating success",
+			name: "fs::delete returns Result<Void, Str>",
 			input: `
 				use ard/fs
 				fs::delete("./fixtures/fake.file")`,
-			want: true,
+			want: nil,
 		},
 	})
 }

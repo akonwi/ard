@@ -19,27 +19,33 @@ func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	case "append":
 		path := vm.Eval(call.Args[0]).raw.(string)
 		content := vm.Eval(call.Args[1]).raw.(string)
-		res := &object{false, call.Type()}
-		if file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-			if _, err := file.WriteString(content); err == nil {
-				res.raw = true
+		resultType := call.Type().(*checker.Result)
+		res := makeOk(void, resultType)
+		if file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644); err != nil {
+			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+		} else {
+			if _, err := file.WriteString(content); err != nil {
+				res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
 			}
 			file.Close()
 		}
 		return res
 	case "create_file":
 		path := vm.Eval(call.Args[0]).raw.(string)
-		res := &object{false, call.Type()}
-		if file, err := os.Create(path); err == nil {
+		resultType := call.Type().(*checker.Result)
+		res := makeOk(void, resultType)
+		if file, err := os.Create(path); err != nil {
+			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+		} else {
 			file.Close()
-			res.raw = true
 		}
 		return res
 	case "delete":
 		path := vm.Eval(call.Args[0]).raw.(string)
-		res := &object{false, call.Type()}
-		if err := os.Remove(path); err == nil {
-			res.raw = true
+		resultType := call.Type().(*checker.Result)
+		res := makeOk(void, resultType)
+		if err := os.Remove(path); err != nil {
+			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 		return res
 	case "exists":
@@ -59,14 +65,15 @@ func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall) *object {
 	case "write":
 		path := vm.Eval(call.Args[0]).raw.(string)
 		content := vm.Eval(call.Args[1]).raw.(string)
-		res := &object{false, call.Type()}
+		resultType := call.Type().(*checker.Result)
+		res := makeOk(void, resultType)
 		/* file permissions:
 		- `6` (owner): read (4) + write (2) = 6
 		- `4` (group): read only
 		- `4` (others): read only
 		*/
-		if err := os.WriteFile(path, []byte(content), 0644); err == nil {
-			res.raw = true
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 		return res
 	default:
