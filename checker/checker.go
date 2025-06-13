@@ -2784,6 +2784,18 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		returnType = c.resolveType(def.ReturnType)
 	}
 
+	// Create function definition early (before checking body)
+	fn := &FunctionDef{
+		Name:       def.Name,
+		Parameters: params,
+		ReturnType: returnType,
+		Body:       nil, // Will be set after checking
+		Public:     def.Public,
+	}
+
+	// Add function to scope BEFORE checking body to support recursion
+	c.scope.add(fn)
+
 	// Check function body
 	body := c.checkBlock(def.Body, func() {
 		// set the expected return type to the scope
@@ -2804,17 +2816,8 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		return nil
 	}
 
-	// Create function definition
-	fn := &FunctionDef{
-		Name:       def.Name,
-		Parameters: params,
-		ReturnType: returnType,
-		Body:       body,
-		Public:     def.Public,
-	}
-
-	// Add function to scope
-	c.scope.add(fn)
+	// Set the body now that it's been checked
+	fn.Body = body
 
 	return fn
 }
