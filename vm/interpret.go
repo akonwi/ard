@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -20,18 +19,16 @@ type compareKey struct {
 	strKey string
 }
 
-func Interpret(program *checker.Program) (val any, err error) {
+func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if msg, ok := r.(string); ok {
-				err = errors.New(msg)
+				err = fmt.Errorf("Panic: %s", msg)
 			} else {
 				panic(r)
 			}
 		}
 	}()
-
-	vm := New(program.Imports)
 
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
@@ -40,6 +37,21 @@ func Interpret(program *checker.Program) (val any, err error) {
 		return r.raw.raw, nil
 	}
 	return vm.result.raw, nil
+}
+
+func (vm *VM) callMain() error {
+	_, err := vm.Interpret(&checker.Program{
+		Statements: []checker.Statement{
+			{
+				Expr: &checker.FunctionCall{
+					Name: "main",
+					Args: []checker.Expression{},
+				},
+			},
+		},
+	})
+
+	return err
 }
 
 // evalUserModuleFunction evaluates a function call from a user-defined module

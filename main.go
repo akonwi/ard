@@ -62,8 +62,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		if _, err := vm.Interpret(program); err != nil {
-			log.Fatalf("Panic: %v\n", err)
+		if err := vm.Run(program); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
 		}
 
 	default:

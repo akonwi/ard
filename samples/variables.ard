@@ -1,10 +1,13 @@
 use ard/io
 
-mut name: Str = "Alice"
-io::print("name = {name}")
+fn main() {
+  io::print("Hello, World!")
 
-let age: Int = 30
-io::print("age = {age}")
+  let name: Str = "Alice"
+  let age: Int = 30
+  let is_student: Bool = true
 
-let is_student: Bool = true
-io::print("is_student = {is_student}")
+  io::print("name = {name}")
+  io::print("age = {age}")
+  io::print("is_student = {is_student}")
+}
