@@ -8,7 +8,6 @@
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
 - [ ] ?: make less scripty
-  - [ ] `main()` function for execution start
   - [ ] allow non-linear declarations at the top level
     -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] matching on strings?

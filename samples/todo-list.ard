@@ -22,20 +22,22 @@ fn render(list: [Todo]) {
   }
 }
 
-mut list: [Todo] = [
-  Todo{ title: "Buy milk", completed: true }
-]
+fn main() {
+  mut list: [Todo] = [
+    Todo{ title: "Buy milk", completed: true }
+  ]
 
-mut running = true
-while running {
-  render(list)
-  io::print("What's your next todo?")
-  let title = io::read_line().expect("Failed to read line")
-  if title.is_empty() {
-    running = false
-  } else {
-    let todo = Todo { title: title, completed: false }
-    list.push(todo)
-    io::print("------")
+  mut running = true
+  while running {
+    render(list)
+    io::print("What's your next todo?")
+    let title = io::read_line().expect("Failed to read line")
+    if title.is_empty() {
+      running = false
+    } else {
+      let todo = Todo { title: title, completed: false }
+      list.push(todo)
+      io::print("------")
+    }
   }
 }

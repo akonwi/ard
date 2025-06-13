@@ -1,15 +1,15 @@
 use ard/io
 
-// escape-sequences.ard - Tests escape sequences in strings
-
 // Print examples of different escape sequences
-io::print("Testing escape sequences:")
-io::print("line 1\nline 2")
-io::print("Tabbed\ttext\tshows\talignment")
-io::print("Quotes: \"This is in quotes\"")
-io::print("Backslash: This is a backslash -> \\ <- see?")
-io::print("Bell\b, form-feed\f, and vertical-tab\v characters")
+fn main() {
+  io::print("Testing escape sequences:")
+  io::print("line 1\nline 2")
+  io::print("Tabbed\ttext\tshows\talignment")
+  io::print("Quotes: \"This is in quotes\"")
+  io::print("Backslash: This is a backslash -> \\ <- see?")
+  io::print("Bell\b, form-feed\f, and vertical-tab\v characters")
 
-// Test escape sequences with string interpolation
-let name = "World"
-io::print("Hello, {name}!\nWelcome to \tArd!")
+  // Test escape sequences with string interpolation
+  let name = "World"
+  io::print("Hello, {name}!\nWelcome to \tArd!")
+}

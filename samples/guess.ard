@@ -1,8 +1,9 @@
 use ard/io
 
-let target = 47
-
 fn main() {
+  let target = 47
+  io::print("Guess the number!")
+
   while {
     io::print("Please input your guess:")
     match io::read_line() {
@@ -29,7 +30,3 @@ fn main() {
     }
   }
 }
-
-io::print("Guess the number!")
-
-main()

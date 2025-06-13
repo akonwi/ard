@@ -17,4 +17,6 @@ fn get_meaning(light: Color) Str {
   }
 }
 
-io::print("Yellow means {get_meaning(Color::Yellow)}")
+fn main() {
+  io::print("Yellow means {get_meaning(Color::Yellow)}")
+}

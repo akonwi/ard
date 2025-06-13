@@ -11,11 +11,12 @@ impl Str::ToString for Book {
   }
 }
 
-let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
-
-//  This is a contrived example with the same signature as `io::print()`
+// This is a contrived example with the same signature as `io::print()`
 fn show(item: Str::ToString) {
   io::print(item)
 }
 
-show(book)
+fn main() {
+  let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
+  show(book)
+}

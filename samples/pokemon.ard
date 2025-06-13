@@ -14,33 +14,35 @@ struct PokemonResp {
   results:  [PokemonRespEntry],
 }
 
-io::print("GET from pokemon api")
-let res = http::send(http::Request{
-  method: "GET",
-  url: "https://pokeapi.co/api/v2/pokemon",
-  headers: [:],
-}).expect("Unable to make request")
+fn main() {
+  io::print("GET from pokemon api")
+  let res = http::send(http::Request{
+    method: "GET",
+    url: "https://pokeapi.co/api/v2/pokemon",
+    headers: [:],
+  }).expect("Unable to make request")
 
-if res.is_ok() {
-  match res.json<PokemonResp>() {
-    ok => {
-      io::print("res.count = {ok.count}")
-      io::print("res.results.size = {ok.results.size()}")
-    },
-    err => io::print(err)
+  if res.is_ok() {
+    match res.json<PokemonResp>() {
+      ok => {
+        io::print("res.count = {ok.count}")
+        io::print("res.results.size = {ok.results.size()}")
+      },
+      err => io::print(err)
+    }
+  } else {
+    io::print("Received a {res.status}")
   }
-} else {
-  io::print("Received a {res.status}")
-}
 
-io::print("http::post() to echoing api")
-let post_res = http::send(http::Request{
-  method: "POST",
-  url: "https://postman-echo.com/post",
-  headers: ["content-type":"text/plain"],
-  body: maybe::some("raw text")
-})
-match post_res {
-  ok(res) => io::print("got a {res.status}"),
-  err => io::print("unable to make request: {err}")
+  io::print("http::post() to echoing api")
+  let post_res = http::send(http::Request{
+    method: "POST",
+    url: "https://postman-echo.com/post",
+    headers: ["content-type":"text/plain"],
+    body: maybe::some("raw text")
+  })
+  match post_res {
+    ok(res) => io::print("got a {res.status}"),
+    err => io::print("unable to make request: {err}")
+  }
 }
