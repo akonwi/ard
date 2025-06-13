@@ -1515,7 +1515,7 @@ func (p *parser) list() (Expression, error) {
 	start := p.index
 	items := []Expression{}
 	for !p.match(right_bracket) {
-		item, err := p.structInstance()
+		item, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
 		}
@@ -1544,7 +1544,7 @@ func (p *parser) map_() (Expression, error) {
 			return nil, err
 		}
 		p.consume(colon, "Expected ':' after map key")
-		val, err := p.or()
+		val, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
 		}

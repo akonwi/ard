@@ -1,0 +1,12 @@
+use ard/http
+
+fn main() {
+  http::serve(3000, [
+    "/": fn(req: http::Request) http::Response {
+      http::respond(200, "Hello, World!")
+    },
+    "/me": fn(req: http::Request) http::Response {
+      http::respond(200, "this is {req.path().expect("Invalid path")}")
+    },
+  ])
+}

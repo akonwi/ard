@@ -7,6 +7,11 @@ var HttpRequestDef = &StructDef{
 		"url":     Str,
 		"headers": MakeMap(Str, Str),
 		"body":    MakeMaybe(Str),
+		"path": &FunctionDef{
+			Name:       "path",
+			Parameters: []Parameter{},
+			ReturnType: MakeResult(Str, Str),
+		},
 	},
 }
 
@@ -37,6 +42,32 @@ var HttpSendFn = &FunctionDef{
 	ReturnType: MakeResult(HttpResponseDef, Str),
 }
 
+var HttpServeFn = &FunctionDef{
+	Name: "serve",
+	Parameters: []Parameter{
+		{Name: "port", Type: Int},
+		{
+			Name: "handlers",
+			Type: MakeMap(
+				Str,
+				&FunctionDef{
+					Parameters: []Parameter{{Name: "req", Type: HttpRequestDef}},
+					ReturnType: HttpResponseDef,
+				}),
+		},
+	},
+	ReturnType: Void,
+}
+
+var HttpRespondFn = &FunctionDef{
+	Name: "respond",
+	Parameters: []Parameter{
+		{Name: "status", Type: Int},
+		{Name: "body", Type: Str},
+	},
+	ReturnType: HttpResponseDef,
+}
+
 /* ard/http */
 type HttpPkg struct{}
 
@@ -51,6 +82,10 @@ func (pkg HttpPkg) Get(name string) symbol {
 		return HttpResponseDef
 	case "send":
 		return HttpSendFn
+	case "serve":
+		return HttpServeFn
+	case "respond":
+		return HttpRespondFn
 	default:
 		return nil
 	}

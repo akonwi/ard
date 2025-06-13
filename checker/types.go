@@ -525,6 +525,9 @@ func (a Any) get(name string) Type {
 	panic(fmt.Errorf("Cannot look up symbols in unrefined %s", a.String()))
 }
 func (a *Any) equal(other Type) bool {
+	if a == other {
+		return true
+	}
 	if a.actual == nil {
 		a.actual = other
 		return true

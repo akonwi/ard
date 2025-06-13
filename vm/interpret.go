@@ -963,6 +963,14 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 		}
 		return http.evalHttpResponseMethod(subj, call, args)
 	}
+	if istruct == checker.HttpRequestDef {
+		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
+		args := make([]*object, len(call.Args))
+		for i := range call.Args {
+			args[i] = vm.eval(call.Args[i])
+		}
+		return http.evalHttpRequestMethod(subj, call, args)
+	}
 
 	sig, ok := istruct.Fields[call.Name]
 	if !ok {
