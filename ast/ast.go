@@ -282,6 +282,15 @@ func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType.GetName())
 }
 
+type StaticFunctionDeclaration struct {
+	FunctionDeclaration
+	Path StaticProperty
+}
+
+func (f StaticFunctionDeclaration) String() string {
+	return fmt.Sprintf("%s(%v) %s", f.Path, f.Parameters, f.ReturnType.GetName())
+}
+
 type AnonymousFunction struct {
 	Location
 	Parameters []Parameter

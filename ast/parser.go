@@ -916,14 +916,18 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 	public := p.match(pub)
 	if p.match(fn) {
 		keyword := p.previous()
-		name := ""
+		var name any = ""
 		mutates := p.match(mut)
 		if !asMethod {
 			// should this signal warning of unnecessary `mut`?
 		}
-		if p.check(identifier) {
+
+		if path := p.parseStaticPath(); path != nil {
+			name = path
+		} else if p.check(identifier) {
 			name = p.consume("identifier", "Expected function name after 'fn'").text
 		}
+
 		p.consume(left_paren, "Expected parameters list")
 		params := []Parameter{}
 		for !p.match(right_paren) {
@@ -975,9 +979,8 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			}, nil
 		}
 
-		return &FunctionDeclaration{
+		fnDef := &FunctionDeclaration{
 			Public:     public,
-			Name:       name,
 			Mutates:    asMethod && mutates,
 			Parameters: params,
 			ReturnType: returnType,
@@ -986,7 +989,18 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				Start: Point{Row: keyword.line, Col: keyword.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
 			},
-		}, nil
+		}
+
+		switch name := name.(type) {
+		case string:
+			fnDef.Name = name
+			return fnDef, nil
+		case *StaticProperty:
+			return &StaticFunctionDeclaration{
+				FunctionDeclaration: *fnDef,
+				Path:                *name,
+			}, nil
+		}
 	}
 
 	return p.structInstance()

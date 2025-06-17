@@ -167,6 +167,28 @@ func TestFunctionDeclaration(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Function with a qualified path",
+			input: `fn Person::new(name: Str) Person { }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StaticFunctionDeclaration{
+						Path: StaticProperty{Target: &Identifier{Name: "Person"}, Property: &Identifier{Name: "new"}},
+						FunctionDeclaration: FunctionDeclaration{
+							Parameters: []Parameter{
+								{
+									Name: "name",
+									Type: &StringType{},
+								},
+							},
+							ReturnType: &CustomType{Name: "Person"},
+							Body:       []Statement{},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)
