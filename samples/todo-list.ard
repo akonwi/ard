@@ -15,6 +15,10 @@ impl Todo {
   }
 }
 
+fn Todo::new(title: Str) Todo {
+  Todo { title: title, completed: false }
+}
+
 fn render(list: [Todo]) {
   io::print("Todo List:")
   for todo in list {
@@ -35,8 +39,7 @@ fn main() {
     if title.is_empty() {
       running = false
     } else {
-      let todo = Todo { title: title, completed: false }
-      list.push(todo)
+      list.push(Todo::new(title))
       io::print("------")
     }
   }

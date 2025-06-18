@@ -2051,7 +2051,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					Args: args,
 					fn:   fnDef,
 				}
-				return call
+				return &StaticFunctionCall{
+					Scope: strct,
+					Call:  call,
+				}
 			}
 		}
 	case *ast.IfStatement:

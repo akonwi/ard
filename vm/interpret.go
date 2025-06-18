@@ -99,8 +99,6 @@ func (vm *VM) do(stmt checker.Statement) *object {
 	switch s := stmt.Stmt.(type) {
 	case *checker.Enum:
 		return void
-	case *checker.StructDef:
-		return void
 	case *checker.VariableDef:
 		val := vm.eval(s.Value)
 		// can be broken by `try`
@@ -456,6 +454,32 @@ func (vm *VM) eval(expr checker.Expression) *object {
 
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
 		}
+	case *checker.StaticFunctionCall:
+		{
+			// retrieve static definition
+			def, ok := e.Scope.Statics[e.Call.Name]
+			if !ok {
+				panic(fmt.Errorf("Undefined function: %s()", e.Call.Name))
+			}
+
+			path := e.Scope.Name + "::" + e.Call.Name
+
+			// if it's not yet in scope, add it
+			obj, ok := vm.scope.get(path)
+			if !ok {
+				obj = vm.eval(def)
+				vm.scope.add(path, obj)
+			}
+
+			// cast to a func
+			fn := obj.raw.(func(args ...*object) *object)
+
+			args := make([]*object, len(e.Call.Args))
+			for i := range e.Call.Args {
+				args[i] = vm.eval(e.Call.Args[i])
+			}
+			return fn(args...)
+		}
 	case *checker.ListLiteral:
 		{
 			raw := make([]*object, len(e.Elements))
@@ -550,7 +574,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			subject := vm.eval(e.Subject)
 
 			// Get the concrete type name as a string
-			typeName := subject._type.(checker.Type).String()
+			typeName := subject._type.String()
 
 			// If we have a case for this specific type
 			if block, ok := e.TypeCases[typeName]; ok {
