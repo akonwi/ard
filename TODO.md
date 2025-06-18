@@ -1,5 +1,6 @@
 ## TODO
 
+- [ ] infer types in anonymous functions
 - [ ] `Maybe.expect()` for panic shorthands
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
