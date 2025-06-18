@@ -25,3 +25,7 @@ func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object)
 		panic(fmt.Errorf("Unimplemented: maybe::%s()", call.Name))
 	}
 }
+
+func (m *MaybeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: maybe::%s::%s()", structName, call.Name))
+}

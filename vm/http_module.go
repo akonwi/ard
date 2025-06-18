@@ -175,6 +175,39 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 	}
 }
 
+func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	switch structName {
+	case "Response":
+		return m.handleResponseStatic(call, args)
+	default:
+		panic(fmt.Errorf("Unimplemented: http::%s::%s()", structName, call.Name))
+	}
+}
+
+func (m *HTTPModule) handleResponseStatic(call *checker.FunctionCall, args []*object) *object {
+	switch call.Name {
+	case "new":
+		// Response::new(status: Int, body: Str) -> Response
+		if len(args) != 2 {
+			panic(fmt.Errorf("Response::new expects 2 arguments, got %d", len(args)))
+		}
+
+		status := args[0].raw.(int)
+		body := args[1].raw.(string)
+
+		// Create response object structure
+		respMap := map[string]*object{
+			"status":  &object{status, checker.Int},
+			"headers": &object{make(map[string]*object), checker.MakeMap(checker.Str, checker.Str)},
+			"body":    &object{body, checker.Str},
+		}
+
+		return &object{respMap, checker.HttpResponseDef}
+	default:
+		panic(fmt.Errorf("Unimplemented: Response::%s()", call.Name))
+	}
+}
+
 // do HTTP::Response methods
 func (mod *HTTPModule) evalHttpResponseMethod(response *object, method *checker.FunctionCall, args []*object) *object {
 	// Get raw response struct

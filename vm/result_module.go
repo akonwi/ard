@@ -26,3 +26,7 @@ func (m *ResultModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		panic(fmt.Errorf("unimplemented: Result::%s", call.Name))
 	}
 }
+
+func (m *ResultModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: result::%s::%s()", structName, call.Name))
+}

@@ -30,3 +30,7 @@ func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*object)
 		panic(fmt.Errorf("Unimplemented: Float::%s()", call.Name))
 	}
 }
+
+func (m *FloatModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: float::%s::%s()", structName, call.Name))
+}

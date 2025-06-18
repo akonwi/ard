@@ -53,5 +53,13 @@ func TestStaticFunctions(t *testing.T) {
 				p.x`,
 			want: 10,
 		},
+		{
+			name: "deeply nested",
+			input: `
+				use ard/http
+				let res = http::Response::new(200, "ok")
+				res.status`,
+			want: 200,
+		},
 	})
 }

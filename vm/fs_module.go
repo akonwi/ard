@@ -80,3 +80,7 @@ func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *o
 		panic(fmt.Errorf("Unimplemented: fs::%s()", call.Name))
 	}
 }
+
+func (m *FSModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: fs::%s::%s()", structName, call.Name))
+}

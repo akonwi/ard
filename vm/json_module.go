@@ -290,3 +290,7 @@ func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj 
 	result.raw = _result{ok: true, raw: &object{fields, subj}}
 	return result
 }
+
+func (m *JSONModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: json::%s::%s()", structName, call.Name))
+}

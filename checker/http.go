@@ -15,6 +15,13 @@ var HttpRequestDef = &StructDef{
 	},
 }
 
+var ResponseNew = &FunctionDef{
+	Name:       "new",
+	Parameters: []Parameter{{Name: "status", Type: Int}, {Name: "body", Type: Str}},
+	ReturnType: HttpResponseDef,
+	Public:     true,
+}
+
 var HttpResponseDef = &StructDef{
 	Name: "Response",
 	Fields: map[string]Type{
@@ -32,6 +39,12 @@ var HttpResponseDef = &StructDef{
 			ReturnType: MakeResult(&Any{name: "T"}, Str),
 		},
 	},
+	Statics: map[string]*FunctionDef{},
+}
+
+// workaround circular references to HttpResponseDef
+func init() {
+	HttpResponseDef.Statics["new"] = ResponseNew
 }
 
 var HttpSendFn = &FunctionDef{

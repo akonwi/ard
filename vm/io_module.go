@@ -40,3 +40,7 @@ func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *o
 		panic(fmt.Errorf("Unimplemented: io::%s()", call.Name))
 	}
 }
+
+func (m *IOModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: io::%s::%s()", structName, call.Name))
+}

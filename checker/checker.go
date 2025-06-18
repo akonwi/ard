@@ -260,6 +260,31 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 	return baseType
 }
 
+// resolveStaticPath resolves a nested static path to its final module and property name
+func (c *checker) resolveStaticPath(expr ast.Expression) (Module, string) {
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		// Simple case: single identifier refers to a module
+		if mod := c.resolveModule(e.Name); mod != nil {
+			return mod, ""
+		}
+		return nil, ""
+	case *ast.StaticProperty:
+		// Nested case: recursively resolve the target
+		targetModule, _ := c.resolveStaticPath(e.Target)
+		if targetModule == nil {
+			return nil, ""
+		}
+		
+		// The property should be an identifier
+		if propId, ok := e.Property.(*ast.Identifier); ok {
+			return targetModule, propId.Name
+		}
+		return nil, ""
+	}
+	return nil, ""
+}
+
 func typeMismatch(expected, got Type) string {
 	return fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, got)
 }
@@ -1793,20 +1818,50 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.StaticFunction:
 		{
-			// Process module function calls like io::print()
-			qualifier := s.Target.(*ast.Identifier).Name
+			// Process module function calls like io::print() or http::Response::new()
+			mod, structName := c.resolveStaticPath(s.Target)
+			
+			if mod != nil {
+				var fnDef *FunctionDef
+				
+				if structName != "" {
+					// We have a nested path like http::Response::new, resolve the struct first
+					structSymbol := mod.Get(structName)
+					if structSymbol == nil {
+						c.addError(fmt.Sprintf("Undefined: %s", structName), s.GetLocation())
+						return nil
+					}
+					
+					structDef, ok := structSymbol.(*StructDef)
+					if !ok {
+						c.addError(fmt.Sprintf("%s is not a struct", structName), s.GetLocation())
+						return nil
+					}
+					
+					// Look for the static function in the struct
+					staticFn, exists := structDef.Statics[s.Function.Name]
+					if !exists {
+						targetName := s.Target.String()
+						c.addError(fmt.Sprintf("Undefined static function: %s::%s", targetName, s.Function.Name), s.GetLocation())
+						return nil
+					}
+					fnDef = staticFn
+				} else {
+					// Simple case like io::print(), look for function directly in module
+					sym := mod.Get(s.Function.Name)
+					if sym == nil {
+						targetName := s.Target.String()
+						c.addError(fmt.Sprintf("Undefined: %s::%s", targetName, s.Function.Name), s.GetLocation())
+						return nil
+					}
 
-			if mod := c.resolveModule(qualifier); mod != nil {
-				sym := mod.Get(s.Function.Name)
-				if sym == nil {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", qualifier, s.Function.Name), s.GetLocation())
-					return nil
-				}
-
-				fnDef, ok := sym.(*FunctionDef)
-				if !ok {
-					c.addError(fmt.Sprintf("%s::%s is not a function", qualifier, s.Function.Name), s.GetLocation())
-					return nil
+					var ok bool
+					fnDef, ok = sym.(*FunctionDef)
+					if !ok {
+						targetName := s.Target.String()
+						c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
+						return nil
+					}
 				}
 
 				// Check argument count
@@ -1918,28 +1973,45 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					fn:   fnDef,
 				}
 
-				// Create module function call
-				return &ModuleFunctionCall{
-					Module: mod.Path(),
-					Call:   call,
+				// Create module static function call if struct is involved, otherwise regular module function call
+				if structName != "" {
+					return &ModuleStaticFunctionCall{
+						Module: mod.Path(),
+						Struct: structName,
+						Call:   call,
+					}
+				} else {
+					return &ModuleFunctionCall{
+						Module: mod.Path(),
+						Call:   call,
+					}
 				}
 			} else {
-				sym := c.scope.get(qualifier)
+				// Handle local static functions (non-module case)
+				// For now, we only support simple identifiers for local static functions
+				var fnDef *FunctionDef
+				if id, ok := s.Target.(*ast.Identifier); ok {
+					sym := c.scope.get(id.Name)
 
-				if sym == nil {
-					c.addError(fmt.Sprintf("Undefined: %s", qualifier), s.Target.GetLocation())
-					return nil
-				}
+					if sym == nil {
+						c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
+						return nil
+					}
 
-				strct, ok := sym.(*StructDef)
-				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s", qualifier), s.GetLocation())
-					return nil
-				}
+					strct, ok := sym.(*StructDef)
+					if !ok {
+						c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.GetLocation())
+						return nil
+					}
 
-				fnDef, ok := strct.Statics[s.Function.Name]
-				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", qualifier, s.Function.Name), s.GetLocation())
+					var exists bool
+					fnDef, exists = strct.Statics[s.Function.Name]
+					if !exists {
+						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, s.Function.Name), s.GetLocation())
+						return nil
+					}
+				} else {
+					c.addError("Unsupported static function target", s.Target.GetLocation())
 					return nil
 				}
 
@@ -2051,8 +2123,16 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					Args: args,
 					fn:   fnDef,
 				}
+				// Get the struct definition for the scope
+				var scopeStruct *StructDef
+				if id, ok := s.Target.(*ast.Identifier); ok {
+					if sym := c.scope.get(id.Name); sym != nil {
+						scopeStruct, _ = sym.(*StructDef)
+					}
+				}
+				
 				return &StaticFunctionCall{
-					Scope: strct,
+					Scope: scopeStruct,
 					Call:  call,
 				}
 			}

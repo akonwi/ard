@@ -454,6 +454,16 @@ func (vm *VM) eval(expr checker.Expression) *object {
 
 			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
 		}
+	case *checker.ModuleStaticFunctionCall:
+		{
+			// Handle module static function calls like http::Response::new()
+			if vm.moduleRegistry.HasModule(e.Module) {
+				// Pass the struct context to the module handler
+				return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
+			}
+			
+			panic(fmt.Errorf("Unimplemented: %s::%s::%s()", e.Module, e.Struct, e.Call.Name))
+		}
 	case *checker.StaticFunctionCall:
 		{
 			// retrieve static definition

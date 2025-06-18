@@ -681,6 +681,16 @@ func (p *StaticFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ModuleStaticFunctionCall struct {
+	Module string
+	Struct string
+	Call   *FunctionCall
+}
+
+func (p *ModuleStaticFunctionCall) Type() Type {
+	return p.Call.Type()
+}
+
 type Enum struct {
 	Name     string
 	Variants []string

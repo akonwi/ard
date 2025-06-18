@@ -27,3 +27,7 @@ func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *
 		panic(fmt.Errorf("Unimplemented: Int::%s()", call.Name))
 	}
 }
+
+func (m *IntModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+	panic(fmt.Errorf("Unimplemented: int::%s::%s()", structName, call.Name))
+}
