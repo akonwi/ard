@@ -850,9 +850,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.StructDefinition:
 		{
 			def := &StructDef{
-				Name:   s.Name.Name,
-				Fields: make(map[string]Type),
-				Public: s.Public,
+				Name:    s.Name.Name,
+				Fields:  make(map[string]Type),
+				Public:  s.Public,
+				Statics: map[string]*FunctionDef{},
 			}
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
@@ -1793,139 +1794,264 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 	case *ast.StaticFunction:
 		{
 			// Process module function calls like io::print()
-			moduleName := s.Target.(*ast.Identifier).Name
+			qualifier := s.Target.(*ast.Identifier).Name
 
-			mod := c.resolveModule(moduleName)
-			if mod == nil {
-				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
-				return nil
-			}
-
-			sym := mod.Get(s.Function.Name)
-			if sym == nil {
-				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
-				return nil
-			}
-
-			fnDef, ok := sym.(*FunctionDef)
-			if !ok {
-				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
-				return nil
-			}
-
-			// Check argument count
-			if len(s.Function.Args) != len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
-				return nil
-			}
-
-			// Check and process arguments
-			args := make([]Expression, len(s.Function.Args))
-			for i, arg := range s.Function.Args {
-				checkedArg := c.checkExpr(arg)
-				if checkedArg == nil {
+			if mod := c.resolveModule(qualifier); mod != nil {
+				sym := mod.Get(s.Function.Name)
+				if sym == nil {
+					c.addError(fmt.Sprintf("Undefined: %s::%s", qualifier, s.Function.Name), s.GetLocation())
 					return nil
 				}
 
-				// Type check the argument against the parameter type
-				paramType := fnDef.Parameters[i].Type
-				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+				fnDef, ok := sym.(*FunctionDef)
+				if !ok {
+					c.addError(fmt.Sprintf("%s::%s is not a function", qualifier, s.Function.Name), s.GetLocation())
 					return nil
 				}
 
-				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+				// Check argument count
+				if len(s.Function.Args) != len(fnDef.Parameters) {
+					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+						len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+					return nil
 				}
 
-				args[i] = checkedArg
-			}
-
-			if fnDef.hasGenerics() {
-				if len(s.Function.TypeArgs) > 0 {
-					// collect generics
-					generics := []Type{}
-					for _, param := range fnDef.Parameters {
-						generics = append(generics, getGenerics(param.Type)...)
-					}
-					generics = append(generics, getGenerics(fnDef.ReturnType)...)
-
-					if len(s.Function.TypeArgs) != len(generics) {
-						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
+				// Check and process arguments
+				args := make([]Expression, len(s.Function.Args))
+				for i, arg := range s.Function.Args {
+					checkedArg := c.checkExpr(arg)
+					if checkedArg == nil {
 						return nil
 					}
 
-					for i, any := range generics {
-						actual := c.resolveType(s.Function.TypeArgs[i])
-						if actual == nil {
+					// Type check the argument against the parameter type
+					paramType := fnDef.Parameters[i].Type
+					if !areCompatible(paramType, checkedArg.Type()) {
+						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+						return nil
+					}
+
+					// Check mutability constraints if needed
+					if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+					}
+
+					args[i] = checkedArg
+				}
+
+				if fnDef.hasGenerics() {
+					if len(s.Function.TypeArgs) > 0 {
+						// collect generics
+						generics := []Type{}
+						for _, param := range fnDef.Parameters {
+							generics = append(generics, getGenerics(param.Type)...)
+						}
+						generics = append(generics, getGenerics(fnDef.ReturnType)...)
+
+						if len(s.Function.TypeArgs) != len(generics) {
+							c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
 							return nil
 						}
-						typeMap := make(map[string]Type)
-						typeMap[any.(*Any).name] = actual
-						substituteType(any, typeMap)
-					}
-				}
-				// technically could be an else block
 
-				// Create a mapping of generic parameters to concrete types
-				typeMap := make(map[string]Type)
-				// Infer types from arguments
-				for i, param := range fnDef.Parameters {
-					if anyType, ok := param.Type.(*Any); ok {
-						if existing, exists := typeMap[anyType.name]; exists {
-							// Ensure consistent types for the same generic parameter
-							if !existing.equal(args[i].Type()) {
-								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
+						for i, any := range generics {
+							actual := c.resolveType(s.Function.TypeArgs[i])
+							if actual == nil {
 								return nil
 							}
-						} else {
-							// Bind the generic parameter to the argument type
-							typeMap[anyType.name] = args[i].Type()
+							typeMap := make(map[string]Type)
+							typeMap[any.(*Any).name] = actual
+							substituteType(any, typeMap)
 						}
 					}
-				}
+					// technically could be an else block
 
-				// Create specialized function with generic parameters substituted
-				specialized := &FunctionDef{
-					Name:       fnDef.Name,
-					Parameters: make([]Parameter, len(fnDef.Parameters)),
-					ReturnType: substituteType(fnDef.ReturnType, typeMap),
-					Body:       fnDef.Body,
-				}
+					// Create a mapping of generic parameters to concrete types
+					typeMap := make(map[string]Type)
+					// Infer types from arguments
+					for i, param := range fnDef.Parameters {
+						if anyType, ok := param.Type.(*Any); ok {
+							if existing, exists := typeMap[anyType.name]; exists {
+								// Ensure consistent types for the same generic parameter
+								if !existing.equal(args[i].Type()) {
+									c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
+									return nil
+								}
+							} else {
+								// Bind the generic parameter to the argument type
+								typeMap[anyType.name] = args[i].Type()
+							}
+						}
+					}
 
-				// Substitute types in parameters
-				for i, param := range fnDef.Parameters {
-					specialized.Parameters[i] = Parameter{
-						Name:    param.Name,
-						Type:    substituteType(param.Type, typeMap),
-						Mutable: param.Mutable,
+					// Create specialized function with generic parameters substituted
+					specialized := &FunctionDef{
+						Name:       fnDef.Name,
+						Parameters: make([]Parameter, len(fnDef.Parameters)),
+						ReturnType: substituteType(fnDef.ReturnType, typeMap),
+						Body:       fnDef.Body,
+					}
+
+					// Substitute types in parameters
+					for i, param := range fnDef.Parameters {
+						specialized.Parameters[i] = Parameter{
+							Name:    param.Name,
+							Type:    substituteType(param.Type, typeMap),
+							Mutable: param.Mutable,
+						}
+					}
+
+					// Return function call with specialized function
+					return &ModuleFunctionCall{
+						Module: mod.Path(),
+						Call: &FunctionCall{
+							Name: s.Function.Name,
+							Args: args,
+							fn:   specialized,
+						},
 					}
 				}
 
-				// Return function call with specialized function
+				// Create function call
+				call := &FunctionCall{
+					Name: s.Function.Name,
+					Args: args,
+					fn:   fnDef,
+				}
+
+				// Create module function call
 				return &ModuleFunctionCall{
 					Module: mod.Path(),
-					Call: &FunctionCall{
-						Name: s.Function.Name,
-						Args: args,
-						fn:   specialized,
-					},
+					Call:   call,
 				}
-			}
+			} else {
+				sym := c.scope.get(qualifier)
 
-			// Create function call
-			call := &FunctionCall{
-				Name: s.Function.Name,
-				Args: args,
-				fn:   fnDef,
-			}
+				if sym == nil {
+					c.addError(fmt.Sprintf("Undefined: %s", qualifier), s.Target.GetLocation())
+					return nil
+				}
 
-			// Create module function call
-			return &ModuleFunctionCall{
-				Module: mod.Path(),
-				Call:   call,
+				strct, ok := sym.(*StructDef)
+				if !ok {
+					c.addError(fmt.Sprintf("Undefined: %s", qualifier), s.GetLocation())
+					return nil
+				}
+
+				fnDef, ok := strct.Statics[s.Function.Name]
+				if !ok {
+					c.addError(fmt.Sprintf("Undefined: %s::%s", qualifier, s.Function.Name), s.GetLocation())
+					return nil
+				}
+
+				// Check argument count
+				if len(s.Function.Args) != len(fnDef.Parameters) {
+					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+						len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+					return nil
+				}
+
+				// Check and process arguments
+				args := make([]Expression, len(s.Function.Args))
+				for i, arg := range s.Function.Args {
+					checkedArg := c.checkExpr(arg)
+					if checkedArg == nil {
+						return nil
+					}
+
+					// Type check the argument against the parameter type
+					paramType := fnDef.Parameters[i].Type
+					if !areCompatible(paramType, checkedArg.Type()) {
+						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+						return nil
+					}
+
+					// Check mutability constraints if needed
+					if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+					}
+
+					args[i] = checkedArg
+				}
+
+				if fnDef.hasGenerics() {
+					if len(s.Function.TypeArgs) > 0 {
+						// collect generics
+						generics := []Type{}
+						for _, param := range fnDef.Parameters {
+							generics = append(generics, getGenerics(param.Type)...)
+						}
+						generics = append(generics, getGenerics(fnDef.ReturnType)...)
+
+						if len(s.Function.TypeArgs) != len(generics) {
+							c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
+							return nil
+						}
+
+						for i, any := range generics {
+							actual := c.resolveType(s.Function.TypeArgs[i])
+							if actual == nil {
+								return nil
+							}
+							typeMap := make(map[string]Type)
+							typeMap[any.(*Any).name] = actual
+							substituteType(any, typeMap)
+						}
+					}
+					// technically could be an else block
+
+					// Create a mapping of generic parameters to concrete types
+					typeMap := make(map[string]Type)
+					// Infer types from arguments
+					for i, param := range fnDef.Parameters {
+						if anyType, ok := param.Type.(*Any); ok {
+							if existing, exists := typeMap[anyType.name]; exists {
+								// Ensure consistent types for the same generic parameter
+								if !existing.equal(args[i].Type()) {
+									c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
+									return nil
+								}
+							} else {
+								// Bind the generic parameter to the argument type
+								typeMap[anyType.name] = args[i].Type()
+							}
+						}
+					}
+
+					// Create specialized function with generic parameters substituted
+					specialized := &FunctionDef{
+						Name:       fnDef.Name,
+						Parameters: make([]Parameter, len(fnDef.Parameters)),
+						ReturnType: substituteType(fnDef.ReturnType, typeMap),
+						Body:       fnDef.Body,
+					}
+
+					// Substitute types in parameters
+					for i, param := range fnDef.Parameters {
+						specialized.Parameters[i] = Parameter{
+							Name:    param.Name,
+							Type:    substituteType(param.Type, typeMap),
+							Mutable: param.Mutable,
+						}
+					}
+
+					// Return function call with specialized function
+					return &ModuleFunctionCall{
+						Module: mod.Path(),
+						Call: &FunctionCall{
+							Name: s.Function.Name,
+							Args: args,
+							fn:   specialized,
+						},
+					}
+				}
+
+				// Create function call
+				call := &FunctionCall{
+					Name: s.Function.Name,
+					Args: args,
+					fn:   fnDef,
+				}
+				return call
 			}
 		}
 	case *ast.IfStatement:
@@ -2046,6 +2172,33 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			return fn
 		}
+	case *ast.StaticFunctionDeclaration:
+		qualifier := s.Path.Target.(*ast.Identifier)
+		sym := c.scope.get(qualifier.Name)
+		if sym == nil {
+			c.addError(fmt.Sprintf("Undefined: %s", qualifier), qualifier.GetLocation())
+			return nil
+		}
+
+		strct, ok := sym.(*StructDef)
+		if !ok {
+			c.addError(fmt.Sprintf("Not a struct: %s", sym), s.GetLocation())
+			return nil
+		}
+
+		segment := s.Path.Property.(*ast.Identifier)
+		if _, ok := strct.Statics[segment.Name]; ok {
+			c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Path), s.Path.GetLocation())
+			return nil
+		}
+
+		fn := c.checkFunction(&s.FunctionDeclaration, nil)
+		if fn != nil {
+			fn.Name = s.Path.String()
+			strct.Statics[segment.Name] = fn
+		}
+
+		return nil
 	case *ast.ListLiteral:
 		return c.checkList(nil, s)
 	case *ast.MapLiteral:
@@ -2507,29 +2660,29 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Handle range pattern like 1..10
 					startLiteral, startOk := rangeExpr.Start.(*ast.NumLiteral)
 					endLiteral, endOk := rangeExpr.End.(*ast.NumLiteral)
-					
+
 					if !startOk || !endOk {
 						c.addError("Range patterns must use integer literals", matchCase.Pattern.GetLocation())
 						return nil
 					}
-					
+
 					startValue, err := strconv.Atoi(startLiteral.Value)
 					if err != nil {
 						c.addError(fmt.Sprintf("Invalid start value in range: %s", startLiteral.Value), rangeExpr.Start.GetLocation())
 						return nil
 					}
-					
+
 					endValue, err := strconv.Atoi(endLiteral.Value)
 					if err != nil {
 						c.addError(fmt.Sprintf("Invalid end value in range: %s", endLiteral.Value), rangeExpr.End.GetLocation())
 						return nil
 					}
-					
+
 					if startValue > endValue {
 						c.addError("Range start must be less than or equal to end", matchCase.Pattern.GetLocation())
 						return nil
 					}
-					
+
 					caseBlock := c.checkBlock(matchCase.Body, nil)
 					rangeCases[IntRange{Start: startValue, End: endValue}] = caseBlock
 				} else {

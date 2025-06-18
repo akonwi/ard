@@ -344,10 +344,10 @@ type IntRange struct {
 }
 
 type IntMatch struct {
-	Subject      Expression
-	IntCases     map[int]*Block      // keys are integer values
-	RangeCases   map[IntRange]*Block // keys are integer ranges
-	CatchAll     *Block
+	Subject    Expression
+	IntCases   map[int]*Block      // keys are integer values
+	RangeCases map[IntRange]*Block // keys are integer ranges
+	CatchAll   *Block
 }
 
 func (i *IntMatch) Type() Type {
@@ -357,18 +357,18 @@ func (i *IntMatch) Type() Type {
 			return block.Type()
 		}
 	}
-	
+
 	for _, block := range i.RangeCases {
 		if block != nil {
 			return block.Type()
 		}
 	}
-	
+
 	// If no int cases are defined, use the catch-all case type
 	if i.CatchAll != nil {
 		return i.CatchAll.Type()
 	}
-	
+
 	return Void
 }
 
@@ -805,11 +805,12 @@ func (u Union) hasTrait(trait *Trait) bool {
 }
 
 type StructDef struct {
-	Name   string
-	Fields map[string]Type
-	Self   string
-	Traits []*Trait
-	Public bool
+	Name    string
+	Fields  map[string]Type
+	Self    string
+	Traits  []*Trait
+	Public  bool
+	Statics map[string]*FunctionDef
 }
 
 func (def StructDef) NonProducing() {}
