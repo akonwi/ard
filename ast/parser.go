@@ -1347,7 +1347,7 @@ func (p *parser) memberAccess() (Expression, error) {
 				case *Identifier:
 					expr = &StaticProperty{
 						Target:   expr,
-						Property: *prop,
+						Property: prop,
 					}
 				case *FunctionCall:
 					expr = &StaticFunction{

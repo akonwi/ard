@@ -462,3 +462,30 @@ func TestTypeUnion(t *testing.T) {
 		},
 	})
 }
+
+func TestStaticPaths(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "deep",
+			input: `http::Response::new(200, "ok")`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StaticFunction{
+						Target: &StaticProperty{
+							Target:   &Identifier{Name: "http"},
+							Property: &Identifier{Name: "Response"},
+						},
+						Function: FunctionCall{
+							Name: "new",
+							Args: []Expression{
+								&NumLiteral{Value: "200"},
+								&StrLiteral{Value: "ok"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}

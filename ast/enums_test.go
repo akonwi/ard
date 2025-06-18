@@ -67,14 +67,14 @@ func TestMatchingOnEnums(t *testing.T) {
 							{
 								Pattern: &StaticProperty{
 									Target:   &Identifier{Name: "Color"},
-									Property: Identifier{Name: "Yellow"},
+									Property: &Identifier{Name: "Yellow"},
 								},
 								Body: []Statement{&StrLiteral{Value: "Yield"}},
 							},
 							{
 								Pattern: &StaticProperty{
 									Target:   &Identifier{Name: "Color"},
-									Property: Identifier{Name: "Green"},
+									Property: &Identifier{Name: "Green"},
 								},
 								Body: []Statement{&StrLiteral{Value: "Go"}},
 							},

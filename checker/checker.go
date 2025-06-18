@@ -2308,7 +2308,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						}
 
 						// Find the variant in the enum
-						variantName := staticProp.Property.(ast.Identifier).Name
+						variantName := staticProp.Property.(*ast.Identifier).Name
 						variantIndex := enumType.variant(variantName)
 						if variantIndex == -1 {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
@@ -2765,13 +2765,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				var variant int8 = -1
 				for i := range enum.Variants {
-					if enum.Variants[i] == s.Property.(ast.Identifier).Name {
+					if enum.Variants[i] == s.Property.(*ast.Identifier).Name {
 						variant = int8(i)
 						break
 					}
 				}
 				if variant == -1 {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property.(ast.Identifier).Name), id.GetLocation())
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property.(*ast.Identifier).Name), id.GetLocation())
 					return nil
 				}
 

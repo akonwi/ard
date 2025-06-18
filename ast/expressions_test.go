@@ -560,7 +560,7 @@ func TestMemberAccess(t *testing.T) {
 				Statements: []Statement{
 					&StaticProperty{
 						Target:   &Identifier{Name: "Color"},
-						Property: Identifier{Name: "blue"},
+						Property: &Identifier{Name: "blue"},
 					},
 				},
 			},
