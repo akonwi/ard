@@ -2899,7 +2899,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					ok:   _type.of,
 				}
 			default:
-				c.addError("todo: Unsupported try expression type: "+expr.Type().String(), s.Expression.GetLocation())
+				c.addError("Unsupported try expression type: "+expr.Type().String(), s.Expression.GetLocation())
 				return nil
 			}
 		}
