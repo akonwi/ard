@@ -735,6 +735,51 @@ func (p *parser) parseType() DeclaredType {
 				},
 			}
 		} else {
+			// Check for Result sugar syntax: Type!ErrorType
+			if p.match(bang) {
+				// Parse the error type
+				errType := p.parseType()
+				
+				// Check for nullable
+				nullable := p.match(question_mark)
+				
+				// Create the value type based on the identifier
+				var valType DeclaredType
+				if len(id.text) > 0 && id.text[0] == '$' {
+					valType = &GenericType{
+						Name:     id.text[1:], // Remove the leading '$'
+						nullable: false,
+					}
+				} else {
+					switch id.text {
+					case "Int":
+						valType = &IntType{nullable: false}
+					case "Float":
+						valType = &FloatType{nullable: false}
+					case "Str":
+						valType = &StringType{nullable: false}
+					case "Bool":
+						valType = &BooleanType{nullable: false}
+					default:
+						valType = &CustomType{
+							Name:     id.text,
+							nullable: false,
+						}
+					}
+				}
+				
+				// Return ResultType using sugar syntax
+				return &ResultType{
+					Val:      valType,
+					Err:      errType,
+					nullable: nullable,
+					Location: Location{
+						Start: id.getLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
+				}
+			}
+
 			nullable = p.match(question_mark)
 
 			// Check if this is a generic type parameter (starts with $)

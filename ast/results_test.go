@@ -46,6 +46,60 @@ func TestResultTypeInSignature(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Result sugar syntax in return declaration",
+			input: `fn foo() Int!Str {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &IntType{},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
+			name:  "Result sugar syntax with custom types",
+			input: `fn foo() User!Error {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &CustomType{Name: "User"},
+							Err: &CustomType{Name: "Error"},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
+			name:  "Result sugar syntax with generic type",
+			input: `fn foo() $T!Str {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &GenericType{Name: "T"},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
 	})
 }
 
