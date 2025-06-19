@@ -109,7 +109,7 @@ let string = match some_bool {
 // matching on integers
 let grade = match score {
   0..59 => "F"
-  60..69 => "D"  
+  60..69 => "D"
   70..79 => "C"
   80..89 => "B"
   90..100 => "A"
@@ -177,7 +177,8 @@ let person = Person {
 person.name // "Alton"
 ```
 
-Structs can have methods. Use a `impl` block to define methods on a struct:
+Structs can have methods. Use an `impl` block to define methods on a struct.
+Within a method, its properties can be accessed with the `@` prefix
 
 ```ard
 impl Person {
@@ -191,6 +192,22 @@ impl Person {
 }
 
 person.get_intro() // "My name is Alton"
+```
+
+Static functions can be scoped to a struct by declaring the function with a name prefixed with the struct name:
+
+```ard
+struct Todo {
+  title: Str,
+  completed: Bool
+}
+
+// a helper function for a constructor
+fn Todo::new(title: Str) Todo {
+  Todo { title: title, completed: false }
+}
+
+let first = Todo::new("clean")
 ```
 
 ### Enums
@@ -268,7 +285,7 @@ Match on specific integer values or ranges:
 ```ard
 let category = match age {
   0..12 => "child"
-  13..19 => "teenager" 
+  13..19 => "teenager"
   21 => "legal drinking age"
   65..120 => "senior"
   _ => "adult"
