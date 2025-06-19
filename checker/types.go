@@ -552,7 +552,7 @@ func MakeResult(val, err Type) *Result {
 }
 
 func (r Result) String() string {
-	return fmt.Sprintf("Result<%s, %s>", r.val.String(), r.err.String())
+	return fmt.Sprintf("%s!%s", r.val.String(), r.err.String())
 }
 
 func (r Result) get(name string) Type {

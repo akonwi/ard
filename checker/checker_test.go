@@ -2452,7 +2452,7 @@ func TestGenerics(t *testing.T) {
 					body: Str
 				}
 				impl Foo {
-				  fn bar() Result<$T, Str> {
+				  fn bar() $T!Str {
 					  json::decode<$T>(@body)
 					}
 				}

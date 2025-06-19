@@ -19,7 +19,7 @@ func TestVM(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "fs::create_file returns Result<Void, Str>",
+			name: "fs::create_file returns Void!Str",
 			input: `
 				use ard/fs
 				fs::create_file("./fixtures/fake.file")
@@ -27,14 +27,14 @@ func TestVM(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "fs::write returns Result<Void, Str>",
+			name: "fs::write returns Void!Str",
 			input: `
 				use ard/fs
 				fs::write("./fixtures/fake.file", "content")`,
 			want: nil,
 		},
 		{
-			name: "fs::append returns Result<Void, Str>",
+			name: "fs::append returns Void!Str",
 			input: `
 				use ard/fs
 				fs::append("./fixtures/fake.file", "-appended")`,
@@ -61,7 +61,7 @@ func TestVM(t *testing.T) {
 			want: "no file",
 		},
 		{
-			name: "fs::delete returns Result<Void, Str>",
+			name: "fs::delete returns Void!Str",
 			input: `
 				use ard/fs
 				fs::delete("./fixtures/fake.file")`,

@@ -310,8 +310,17 @@ so that code can then do `nested::thing` references with a single namespace qual
 ### Errors
 Ard does not have exceptions. Instead, errors are represented as values. The built-in `Result<$Val, $Err>` type can be used as a special type union of a success value and an error value.
 
+#### Result Declaration Sugar
+For convenience, `Result<T, E>` can be written using the sugar syntax `T!E`. Both forms are equivalent:
+
 ```ard
-fn divide(a: Int, b: Int) Result<Int, Str> {
+// These are equivalent:
+fn divide_verbose(a: Int, b: Int) Result<Int, Str> { ... }
+fn divide_concise(a: Int, b: Int) Int!Str { ... }
+```
+
+```ard
+fn divide(a: Int, b: Int) Int!Str {
   match b == 0 {
     true => Result::err("Cannot divide by zero"),
     false => Result::ok(a/b),
@@ -339,7 +348,7 @@ Another alternative to ignoring the error is to propagate it to callers. This ca
 
 ```ard
 // attempt at (a / b) + 10
-fn do_math(a Int, b Int) Result<Int, Str> {
+fn do_math(a Int, b Int) Int!Str {
   let num = try divide(a, b)
   Result::ok(num + 10)
 }
@@ -370,7 +379,7 @@ idea: `else` keyword for fallbacks or as a hook on error
 The `try` keyword is used to propagate error results up the call stack:
 
 ```ard
-fn performOperation() Result<Int, Str> {
+fn performOperation() Int!Str {
   let result = try riskyOperation()
   200
 }

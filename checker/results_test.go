@@ -11,7 +11,7 @@ func TestResults(t *testing.T) {
 		{
 			name: "creating results",
 			input: `
-			fn divide(a: Int, b: Int) Result<Int, Str> {
+			fn divide(a: Int, b: Int) Int!Str {
 			  match b == 0 {
 			    true => Result::err("division by zero"),
 			    false => Result::ok(a / b)
@@ -80,7 +80,7 @@ func TestResults(t *testing.T) {
 		{
 			name: "Results must match declarations",
 			input: `
-			let result: Result<Int, Str> = Result::ok(true)
+			let result: Int!Str = Result::ok(true)
 			`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: `Type mismatch: Expected Int, got Bool`},
@@ -89,18 +89,18 @@ func TestResults(t *testing.T) {
 		{
 			name: "Results must match return declaration",
 			input: `
-			fn foo() Result<Int, Str> {
+			fn foo() Int!Str {
 				Result::err(true)
 			}`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: `Type mismatch: Expected Result<Int, Str>, got Result<$Val, Bool>`},
+				{Kind: checker.Error, Message: `Type mismatch: Expected Int!Str, got $Val!Bool`},
 			},
 		},
 		{
 			name: "Result.or() unwraps with a default",
 			input: `
 			fn foo() Int {
-				let res: Result<Int, Str> = Result::err("foo")
+				let res: Int!Str = Result::err("foo")
 				res.or(10)
 			}`,
 			diagnostics: []checker.Diagnostic{},
@@ -110,7 +110,7 @@ func TestResults(t *testing.T) {
 			input: `
 			use ard/io
 
-			let res: Result<Int, Str> = Result::err("foo")
+			let res: Int!Str = Result::err("foo")
 			match res {
 				ok(num) => num,
 				err => {
@@ -173,8 +173,8 @@ func TestTry(t *testing.T) {
 		{
 			name: "trying a result",
 			input: `
-				fn do_stuff() Result<Int, Bool> {
-					let res: Result<Int, Bool> = Result::ok(2)
+				fn do_stuff() Int!Bool {
+					let res: Int!Bool = Result::ok(2)
 					let num = try res
 					res
 				}`,
@@ -219,19 +219,19 @@ func TestTry(t *testing.T) {
 		{
 			name: "the function return type must match the result",
 			input: `
-				fn do_stuff() Result<Str, Bool> {
-					let res: Result<Int, Bool> = Result::ok(2)
+				fn do_stuff() Str!Bool {
+					let res: Int!Bool = Result::ok(2)
 					let num = try res
 					Result::ok(num.to_str())
 				}`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Result<Str, Bool>, got Result<Int, Bool>"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Bool, got Int!Bool"},
 			},
 		},
 		{
 			name: "try can only be used in functions",
 			input: `
-					let res: Result<Int, Bool> = Result::ok(2)
+					let res: Int!Bool = Result::ok(2)
 					let num = try res
 				`,
 			diagnostics: []checker.Diagnostic{

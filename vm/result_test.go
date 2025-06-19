@@ -19,7 +19,7 @@ func TestResults(t *testing.T) {
 		{
 			name: "Matching a result",
 			input: `
-				fn divide(a: Int, b: Int) Result<Int, Str> {
+				fn divide(a: Int, b: Int) Int!Str {
 					match b == 0 {
 					  true => Result::err("cannot divide by 0"),
 					  false => Result::ok(a / b),
@@ -35,7 +35,7 @@ func TestResults(t *testing.T) {
 		{
 			name: "Result.or()",
 			input: `
-				fn divide(a: Int, b: Int) Result<Int, Str> {
+				fn divide(a: Int, b: Int) Int!Str {
 					match b == 0 {
 					  true => Result::err("cannot divide by 0"),
 					  false => Result::ok(a / b),
@@ -53,13 +53,13 @@ func TestTry(t *testing.T) {
 		{
 			name: "trying an ok result",
 			input: `
-			  fn divide(a: Int, b: Int) Result<Int, Str> {
+			  fn divide(a: Int, b: Int) Int!Str {
 				  match b == 0 {
 				    true => Result::err("cannot divide by 0"),
 				    false => Result::ok(a / b),
 				  }
 			  }
-				fn divide_plus_10(a: Int, b: Int) Result<Int, Str> {
+				fn divide_plus_10(a: Int, b: Int) Int!Str {
 					let res = try divide(a, b)
 					Result::ok(res + 10)
 				}
@@ -71,13 +71,13 @@ func TestTry(t *testing.T) {
 		{
 			name: "trying an error result",
 			input: `
-			  fn divide(a: Int, b: Int) Result<Int, Str> {
+			  fn divide(a: Int, b: Int) Int!Str {
 				  match b == 0 {
 				    true => Result::err("cannot divide by 0"),
 				    false => Result::ok(a / b),
 				  }
 			  }
-				fn divide_plus_10(a: Int, b: Int) Result<Int, Str> {
+				fn divide_plus_10(a: Int, b: Int) Int!Str {
 					let res = try divide(a, b)
 					Result::ok(res + 10)
 				}
