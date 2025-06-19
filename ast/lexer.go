@@ -98,6 +98,13 @@ type token struct {
 	text   string
 }
 
+func (t token) getLocation() Location {
+	return Location{
+		Start: Point{Row: t.line, Col: t.column},
+		End:   Point{Row: t.line, Col: t.column + len(t.text) - 1},
+	}
+}
+
 type char struct {
 	raw   byte
 	index int

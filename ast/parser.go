@@ -67,7 +67,7 @@ func (p *parser) parse() (*Program, error) {
 func (p *parser) parseImport() (*Import, error) {
 	useToken := p.previous()
 	pathToken := p.consume(path, "Expected a module path after 'use'")
-	start := Point{Row: useToken.line, Col: useToken.column}
+	start := useToken.getLocation().Start
 
 	var name string
 	if p.match(as) {
@@ -105,7 +105,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		return &Comment{
 			Value: tok.text,
 			Location: Location{
-				Start: Point{Row: tok.line, Col: tok.column},
+				Start: tok.getLocation().Start,
 				End:   Point{Row: p.peek().line, Col: p.peek().column - 1},
 			},
 		}, nil
@@ -118,7 +118,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		new_line := p.consume(new_line, "Expected new line")
 		return &Break{
 			Location: Location{
-				Start: Point{Row: tok.line, Col: tok.column},
+				Start: tok.getLocation().Start,
 				End:   Point{Row: tok.line, Col: new_line.column - 1},
 			},
 		}, nil
@@ -303,21 +303,14 @@ func (p *parser) forLoop() (Statement, error) {
 		if isForIn {
 			id := p.consumeVariableName("Expected variable name")
 			cursor := Identifier{
-				Name: id.text,
-				// todo: token.getLocation()
-				Location: Location{
-					Start: Point{Row: id.line, Col: id.column},
-					End:   Point{Row: id.line, Col: id.column + len(id.text)},
-				},
+				Name:     id.text,
+				Location: id.getLocation(),
 			}
 			cursor2 := Identifier{}
 			if p.match(comma) {
 				id := p.consumeVariableName("Expected a name after ','")
 				cursor2.Name = id.text
-				cursor2.Location = Location{
-					Start: Point{Row: id.line, Col: id.column},
-					End:   Point{Row: id.line, Col: id.column + len(id.text)},
-				}
+				cursor2.Location = id.getLocation()
 			}
 			p.consume(in, "Expected 'in' after cursor name")
 			seq, err := p.iterRange()
@@ -893,11 +886,8 @@ func (p *parser) try() (Expression, error) {
 	if p.check(identifier) && p.peek().text == "try" {
 		idToken := p.advance()
 		keyword := Identifier{
-			Name: idToken.text,
-			Location: Location{
-				Start: Point{Row: idToken.line, Col: idToken.column},
-				End:   Point{Row: idToken.line, Col: idToken.column + 3},
-			},
+			Name:     idToken.text,
+			Location: idToken.getLocation(),
 		}
 		expr, err := p.functionDef(false)
 		if err != nil {
@@ -1449,12 +1439,10 @@ func (p *parser) call() (Expression, error) {
 
 func (p *parser) primary() (Expression, error) {
 	if p.match(number) {
+		tok := p.previous()
 		return &NumLiteral{
-			Value: p.previous().text,
-			Location: Location{
-				Start: Point{Row: p.previous().line, Col: p.previous().column},
-				End:   Point{Row: p.previous().line, Col: p.previous().column + len(p.previous().text) - 1},
-			},
+			Value:    tok.text,
+			Location: tok.getLocation(),
 		}, nil
 	}
 	if p.match(string_) {
@@ -1469,21 +1457,15 @@ func (p *parser) primary() (Expression, error) {
 		// Handle @ token as a special identifier
 		tok := p.previous()
 		return &Identifier{
-			Name: "@",
-			Location: Location{
-				Start: Point{Row: tok.line, Col: tok.column},
-				End:   Point{Row: tok.line, Col: tok.column},
-			},
+			Name:     "@",
+			Location: tok.getLocation(),
 		}, nil
 	}
 	if p.match(identifier) {
 		tok := p.previous()
 		return &Identifier{
-			Name: tok.text,
-			Location: Location{
-				Start: Point{Row: tok.line, Col: tok.column},
-				End:   Point{Row: tok.line, Col: tok.column + len(tok.text) - 1},
-			},
+			Name:     tok.text,
+			Location: tok.getLocation(),
 		}, nil
 	}
 	if p.match(left_paren) {
@@ -1507,11 +1489,8 @@ func (p *parser) primary() (Expression, error) {
 			name = string(tok.kind)
 		}
 		return &Identifier{
-			Name: name,
-			Location: Location{
-				Start: Point{Row: tok.line, Col: tok.column},
-				End:   Point{Row: tok.line, Col: tok.column + len(name) - 1},
-			},
+			Name:     name,
+			Location: tok.getLocation(),
 		}, nil
 	default:
 		peek := p.peek()
@@ -1575,12 +1554,10 @@ func (p *parser) map_() (Expression, error) {
 }
 
 func (p *parser) string() (Expression, error) {
+	tok := p.previous()
 	str := &StrLiteral{
-		Value: p.previous().text,
-		Location: Location{
-			Start: Point{Row: p.previous().line, Col: p.previous().column},
-			End:   Point{Row: p.previous().line, Col: p.previous().column + len(p.previous().text) - 1},
-		},
+		Value:    tok.text,
+		Location: tok.getLocation(),
 	}
 	if p.match(expr_open) {
 		chunks := []Expression{str}
