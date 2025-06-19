@@ -275,7 +275,7 @@ func (c *checker) resolveStaticPath(expr ast.Expression) (Module, string) {
 		if targetModule == nil {
 			return nil, ""
 		}
-		
+
 		// The property should be an identifier
 		if propId, ok := e.Property.(*ast.Identifier); ok {
 			return targetModule, propId.Name
@@ -437,7 +437,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					})
 				})
 				fnDef.Mutates = method.Mutates
-				fnDef.SelfName = "@"
 				// add the method to the struct
 				structType.Fields[method.Name] = fnDef
 			}
@@ -909,19 +908,16 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
-			selfName := "@"
-
 			for _, method := range s.Methods {
 				fnDef := c.checkFunction(&method, func() {
 					c.scope.add(&VariableDef{
-						Name:    selfName,
+						Name:    "@",
 						__type:  structDef,
 						Mutable: method.Mutates,
 					})
 				})
 				fnDef.Mutates = method.Mutates
 				structDef.Fields[method.Name] = fnDef
-				fnDef.SelfName = selfName
 			}
 			return nil
 		}
@@ -1820,10 +1816,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		{
 			// Process module function calls like io::print() or http::Response::new()
 			mod, structName := c.resolveStaticPath(s.Target)
-			
+
 			if mod != nil {
 				var fnDef *FunctionDef
-				
+
 				if structName != "" {
 					// We have a nested path like http::Response::new, resolve the struct first
 					structSymbol := mod.Get(structName)
@@ -1831,13 +1827,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(fmt.Sprintf("Undefined: %s", structName), s.GetLocation())
 						return nil
 					}
-					
+
 					structDef, ok := structSymbol.(*StructDef)
 					if !ok {
 						c.addError(fmt.Sprintf("%s is not a struct", structName), s.GetLocation())
 						return nil
 					}
-					
+
 					// Look for the static function in the struct
 					staticFn, exists := structDef.Statics[s.Function.Name]
 					if !exists {
@@ -2130,7 +2126,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						scopeStruct, _ = sym.(*StructDef)
 					}
 				}
-				
+
 				return &StaticFunctionCall{
 					Scope: scopeStruct,
 					Call:  call,

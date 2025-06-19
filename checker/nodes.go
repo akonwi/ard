@@ -581,7 +581,6 @@ type FunctionDef struct {
 	ReturnType Type
 	Mutates    bool
 	Body       *Block
-	SelfName   string
 	Public     bool
 }
 

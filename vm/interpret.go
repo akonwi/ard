@@ -461,7 +461,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				// Pass the struct context to the module handler
 				return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
 			}
-			
+
 			panic(fmt.Errorf("Unimplemented: %s::%s::%s()", e.Module, e.Struct, e.Call.Name))
 		}
 	case *checker.StaticFunctionCall:
@@ -1018,7 +1018,7 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 
 	fn := func(args ...*object) *object {
 		res, _ := vm.evalBlock(fnDef.Body, func() {
-			vm.scope.add(fnDef.SelfName, subj)
+			vm.scope.add("@", subj)
 			for i := range args {
 				vm.scope.add(fnDef.Parameters[i].Name, args[i])
 			}
