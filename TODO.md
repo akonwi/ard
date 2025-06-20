@@ -1,5 +1,11 @@
 ## TODO
 
+- [ ] ffi
+  - sort of like gleam
+  - #external attribute on functions with external fn name
+  - look for ffi defs in `./ffi` folder
+  - only allow primitives across boundaries
+  - all FFI functions must return `Result<$V, Str>`
 - [ ] infer types in anonymous functions
 - [ ] `Maybe.expect()` for panic shorthands
 - [ ] syntax for generics on structs
@@ -8,9 +14,8 @@
 - [ ] calling functions with named arguments
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
-- [ ] ?: make less scripty
-  - [ ] allow non-linear declarations at the top level
-    -  i.e. a type declared at the top of the file, can reference one declared below
+- [ ] allow non-linear declarations at the top level
+  -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] matching on strings?
 - [ ] `?` sugar for safely unwrapping maybes
 - [ ] loops as expressions (comprehensions?)
