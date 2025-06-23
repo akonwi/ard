@@ -1005,6 +1005,15 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 		}
 		return http.evalHttpRequestMethod(subj, call, args)
 	}
+	// Special handling for SQLite Database methods
+	if istruct == checker.DatabaseDef {
+		sqlite := vm.moduleRegistry.handlers[checker.SQLitePkg{}.Path()].(*SQLiteModule)
+		args := make([]*object, len(call.Args))
+		for i := range call.Args {
+			args[i] = vm.eval(call.Args[i])
+		}
+		return sqlite.evalDatabaseMethod(subj, call, args)
+	}
 
 	sig, ok := istruct.Fields[call.Name]
 	if !ok {

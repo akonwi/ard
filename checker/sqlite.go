@@ -1,0 +1,49 @@
+package checker
+
+var DatabaseDef = &StructDef{
+	Name: "Database",
+	Fields: map[string]Type{
+		"exec": &FunctionDef{
+			Name:       "exec",
+			Parameters: []Parameter{{Name: "sql", Type: Str}},
+			ReturnType: MakeMaybe(Str),
+		},
+		"insert": &FunctionDef{
+			Name:       "insert",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
+			ReturnType: MakeMaybe(Str),
+		},
+		"get": &FunctionDef{
+			Name:       "get",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
+			ReturnType: MakeList(&Any{name: "T"}),
+		},
+	},
+	Statics: map[string]*FunctionDef{},
+}
+
+var SQLiteOpenFn = &FunctionDef{
+	Name: "open",
+	Parameters: []Parameter{
+		{Name: "file_path", Type: Str},
+	},
+	ReturnType: DatabaseDef,
+}
+
+/* ard/sqlite */
+type SQLitePkg struct{}
+
+func (pkg SQLitePkg) Path() string {
+	return "ard/sqlite"
+}
+
+func (pkg SQLitePkg) Get(name string) symbol {
+	switch name {
+	case "Database":
+		return DatabaseDef
+	case "open":
+		return SQLiteOpenFn
+	default:
+		return nil
+	}
+}
