@@ -3,6 +3,8 @@ package vm
 import (
 	"database/sql"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 	_ "github.com/mattn/go-sqlite3"
@@ -30,24 +32,24 @@ func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		if err != nil {
 			panic(fmt.Errorf("Failed to open database: %v", err))
 		}
-		
+
 		// Test the connection
 		if err := conn.Ping(); err != nil {
 			panic(fmt.Errorf("Failed to connect to database: %v", err))
 		}
-		
+
 		// Create our Database wrapper
 		database := &Database{
 			conn:     conn,
 			filePath: filePath,
 		}
-		
+
 		// Create a Database object with the correct type
 		dbObject := &object{
 			raw:   database,
 			_type: checker.DatabaseDef,
 		}
-		
+
 		return dbObject
 	default:
 		panic(fmt.Errorf("Unimplemented: sqlite::%s()", call.Name))
@@ -76,7 +78,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 	case "exec":
 		// fn exec(sql: Str) Str?
 		sql := args[0].raw.(string)
-		
+
 		// Execute the SQL
 		_, err := db.conn.Exec(sql)
 		if err != nil {
@@ -84,7 +86,53 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 			errorMsg := &object{err.Error(), checker.Str}
 			return &object{errorMsg, method.Type()}
 		}
-		
+
+		// Return None (no error)
+		return &object{nil, method.Type()}
+	case "insert":
+		// fn insert(table: Str, values: $V) Str?
+		tableName := args[0].raw.(string)
+		structObj := args[1]
+
+		// Extract fields from the struct
+		structFields, ok := structObj.raw.(map[string]*object)
+		if !ok {
+			panic(fmt.Errorf("SQLite Error: insert expects a struct object"))
+		}
+
+		// Build INSERT statement
+		var columns []string
+		var placeholders []string
+		var values []any
+
+		// Sort column names for consistent ordering
+		for columnName := range structFields {
+			columns = append(columns, columnName)
+		}
+		sort.Strings(columns)
+
+		// Build values in same order as columns
+		for _, columnName := range columns {
+			fieldObj := structFields[columnName]
+			placeholders = append(placeholders, "?")
+			values = append(values, fieldObj.raw)
+		}
+
+		// Construct SQL
+		sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+			tableName,
+			strings.Join(columns, ", "),
+			strings.Join(placeholders, ", "),
+		)
+
+		// Execute the INSERT
+		_, err := db.conn.Exec(sql, values...)
+		if err != nil {
+			// Return Some(error_message)
+			errorMsg := &object{err.Error(), checker.Str}
+			return &object{errorMsg, method.Type()}
+		}
+
 		// Return None (no error)
 		return &object{nil, method.Type()}
 	default:

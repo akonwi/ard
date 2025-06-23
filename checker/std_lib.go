@@ -21,6 +21,8 @@ func findInStdLib(path string) (Module, bool) {
 		return MaybePkg{}, true
 	case "ard/result":
 		return ResultPkg{}, true
+	case "ard/sqlite":
+		return SQLitePkg{}, true
 	}
 	return nil, false
 }
