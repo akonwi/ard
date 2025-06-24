@@ -418,16 +418,22 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	case *checker.InstanceProperty:
 		{
 			subj := vm.eval(e.Subject)
-			if _, ok := subj._type.(*checker.StructDef); ok {
+			_type := subj._type
+			// todo: do this in a loop until we find a non-any type
+			if a, ok := _type.(*checker.Any); ok {
+				_type = a.Actual()
+			}
+
+			if _, ok := _type.(*checker.StructDef); ok {
 				raw := subj.raw.(map[string]*object)
 				return raw[e.Property]
 			}
 
-			switch subj._type {
+			switch _type {
 			case checker.Str:
 				return vm.evalStrProperty(subj, e.Property)
 			default:
-				panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj._type, e.Property))
+				panic(fmt.Errorf("Unimplemented instance property: %s.%s", _type, e.Property))
 			}
 		}
 	case *checker.InstanceMethod:

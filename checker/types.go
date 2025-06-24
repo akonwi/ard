@@ -597,6 +597,8 @@ func getGenerics(types ...Type) []Type {
 	all := []Type{}
 	for _, t := range types {
 		switch t := t.(type) {
+		case *List:
+			all = append(all, getGenerics(t.of)...)
 		case *Result:
 			all = append(all, getGenerics(t.val, t.err)...)
 		case *Any:
