@@ -1,0 +1,22 @@
+use ard/io
+use ard/sqlite
+
+fn main() {
+  let db = sqlite::open("./db.sqlite")
+  db.exec("create table if not exists players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+  struct Player {
+    id: Int,
+    name: Str,
+    number: Int,
+  }
+
+  db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+  db.insert("players", Player{ id: 2, name: "James Reece", number: 2 })
+  db.insert("players", Player{ id: 2, name: "Michael Jordan", number: 23 })
+
+  let twos = db.get<Player>("players", "number = 2")
+  for player in twos {
+    io::print("{player.name} is number {player.number}")
+  }
+}
