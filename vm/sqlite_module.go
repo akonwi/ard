@@ -153,16 +153,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		
 		targetStructType, ok := inner.(*checker.StructDef)
 		if !ok {
-			// TEMPORARY WORKAROUND: For now, create a basic Player struct for testing
-			// TODO: Fix type argument resolution properly
-			targetStructType = &checker.StructDef{
-				Name: "Player",
-				Fields: map[string]checker.Type{
-					"id":     checker.Int,
-					"name":   checker.Str,
-					"number": checker.Int,
-				},
-			}
+			panic(fmt.Errorf("SQLite Error: get method expects a struct type, got %T", inner))
 		}
 		
 		// Build SELECT statement
@@ -209,36 +200,73 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 				
 				// Convert the raw value to the appropriate type
 				var fieldValue interface{}
+				var actualFieldType checker.Type = fieldType
 				rawValue := values[i]
 				
-				if rawValue == nil {
-					fieldValue = nil
+				// Check if field type is Maybe
+				if maybeType, isMaybe := fieldType.(*checker.Maybe); isMaybe {
+					actualFieldType = maybeType.Of()
+					if rawValue == nil {
+						// NULL value -> create none
+						fieldValue = nil
+					} else {
+						// Non-NULL value -> create some(value) after conversion
+						var convertedValue interface{}
+						switch actualFieldType {
+						case checker.Int:
+							if v, ok := rawValue.(int64); ok {
+								convertedValue = int(v)
+							} else {
+								convertedValue = rawValue
+							}
+						case checker.Str:
+							if v, ok := rawValue.([]byte); ok {
+								convertedValue = string(v)
+							} else {
+								convertedValue = rawValue
+							}
+						case checker.Bool:
+							if v, ok := rawValue.(int64); ok {
+								convertedValue = v != 0
+							} else {
+								convertedValue = rawValue
+							}
+						case checker.Float:
+							convertedValue = rawValue
+						default:
+							convertedValue = rawValue
+						}
+						fieldValue = convertedValue
+					}
 				} else {
-					switch fieldType {
-					case checker.Int:
-						// SQLite stores integers as int64
-						if v, ok := rawValue.(int64); ok {
-							fieldValue = int(v)
-						} else {
+					// Non-Maybe field
+					if rawValue == nil {
+						fieldValue = nil
+					} else {
+						switch fieldType {
+						case checker.Int:
+							if v, ok := rawValue.(int64); ok {
+								fieldValue = int(v)
+							} else {
+								fieldValue = rawValue
+							}
+						case checker.Str:
+							if v, ok := rawValue.([]byte); ok {
+								fieldValue = string(v)
+							} else {
+								fieldValue = rawValue
+							}
+						case checker.Bool:
+							if v, ok := rawValue.(int64); ok {
+								fieldValue = v != 0
+							} else {
+								fieldValue = rawValue
+							}
+						case checker.Float:
+							fieldValue = rawValue
+						default:
 							fieldValue = rawValue
 						}
-					case checker.Str:
-						if v, ok := rawValue.([]byte); ok {
-							fieldValue = string(v)
-						} else {
-							fieldValue = rawValue
-						}
-					case checker.Bool:
-						// SQLite doesn't have native boolean, usually stored as int
-						if v, ok := rawValue.(int64); ok {
-							fieldValue = v != 0
-						} else {
-							fieldValue = rawValue
-						}
-					case checker.Float:
-						fieldValue = rawValue
-					default:
-						fieldValue = rawValue
 					}
 				}
 				

@@ -213,3 +213,153 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 		t.Errorf("Expected field access to work correctly, got %v", result)
 	}
 }
+
+func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_maybe.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/maybe
+		struct User {
+			id: Int,
+			name: Str,
+			email: Str?
+		}
+		
+		let db = sqlite::open("test_maybe.db")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+		
+		// Insert user with email
+		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
+		let result1 = db.insert("users", user1)
+		
+		// Insert user without email (none)
+		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
+		let result2 = db.insert("users", user2)
+		
+		// Both should succeed (return None)
+		match result1 {
+			error => false,
+			_ => match result2 {
+				error => false,
+				_ => true
+			}
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected both inserts with Maybe types to succeed, got %v", result)
+	}
+}
+
+func TestSQLiteGetWithMaybeTypes(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_maybe_get.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/maybe
+		struct User {
+			id: Int,
+			name: Str,
+			email: Str?
+		}
+		
+		let db = sqlite::open("test_maybe_get.db")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+		
+		// Insert users with and without email
+		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
+		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
+		db.insert("users", user1)
+		db.insert("users", user2)
+		
+		// Get all users 
+		let users = db.get<User>("users", "1=1")
+		let first = users.at(0)
+		let second = users.at(1)
+		
+		// Check that Maybe fields work correctly
+		first.email.or("") == "john@example.com" and second.email.or("") == ""
+	`)
+
+	if result != true {
+		t.Errorf("Expected Maybe field retrieval to work correctly, got %v", result)
+	}
+}
+
+func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_maybe_roundtrip.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/maybe
+		struct Product {
+			id: Int,
+			name: Str,
+			description: Str?,
+			price: Float?,
+			in_stock: Bool?
+		}
+		
+		let db = sqlite::open("test_maybe_roundtrip.db")
+		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, price REAL, in_stock INTEGER)")
+		
+		// Insert products with various Maybe field combinations
+		let product1 = Product{ 
+			id: 1, 
+			name: "Widget", 
+			description: maybe::some("A useful widget"), 
+			price: maybe::some(19.99),
+			in_stock: maybe::some(true)
+		}
+		let product2 = Product{ 
+			id: 2, 
+			name: "Gadget", 
+			description: maybe::none(), 
+			price: maybe::none(),
+			in_stock: maybe::some(false)
+		}
+		let product3 = Product{ 
+			id: 3, 
+			name: "Thing", 
+			description: maybe::some("Another thing"), 
+			price: maybe::some(5.0),
+			in_stock: maybe::none()
+		}
+		
+		db.insert("products", product1)
+		db.insert("products", product2)
+		db.insert("products", product3)
+		
+		// Retrieve and verify
+		let products = db.get<Product>("products", "1=1")
+		let p1 = products.at(0)
+		let p2 = products.at(1)
+		let p3 = products.at(2)
+		
+		// Test all combinations
+		let p1_desc_ok = p1.description.or("") == "A useful widget"
+		let p1_price_ok = p1.price.or(0.0) == 19.99
+		let p1_stock_ok = p1.in_stock.or(false) == true
+		
+		let p2_desc_ok = p2.description.or("default") == "default"
+		let p2_price_ok = p2.price.or(-1.0) == -1.0
+		let p2_stock_ok = p2.in_stock.or(true) == false
+		
+		let p3_desc_ok = p3.description.or("") == "Another thing"
+		let p3_price_ok = p3.price.or(0.0) == 5.0
+		let p3_stock_ok = p3.in_stock.or(true) == true
+		
+		(p1_desc_ok and p1_price_ok and p1_stock_ok and p2_desc_ok and p2_price_ok and p2_stock_ok and p3_desc_ok and p3_price_ok and p3_stock_ok)
+	`)
+
+	if result != true {
+		t.Errorf("Expected comprehensive Maybe types round-trip to work correctly, got %v", result)
+	}
+}

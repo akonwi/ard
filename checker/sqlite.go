@@ -9,7 +9,9 @@ var DatabaseDef = &StructDef{
 			ReturnType: MakeMaybe(Str),
 		},
 		"insert": &FunctionDef{
-			Name:       "insert",
+			Name: "insert",
+			// these singleton types are problematic because it means the Any gets refined to a single type
+			// instead of allowing multiple types
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
 			ReturnType: MakeMaybe(Str),
 		},
