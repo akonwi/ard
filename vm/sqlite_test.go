@@ -13,7 +13,7 @@ func TestSQLiteBasicOperations(t *testing.T) {
 	// Test opening database and creating table
 	result := run(t, `
 		use ard/sqlite
-		let db = sqlite::open("test.db")
+		let db = sqlite::open("test.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
 	`)
 
@@ -36,7 +36,7 @@ func TestSQLiteInsertStruct(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_insert.db")
+		let db = sqlite::open("test_insert.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
@@ -62,7 +62,7 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_multi.db")
+		let db = sqlite::open("test_multi.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
@@ -99,7 +99,7 @@ func TestSQLiteInsertError(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_error.db")
+		let db = sqlite::open("test_error.db").expect("Failed to open database")
 		// Don't create the table - this should cause an error
 
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
@@ -130,7 +130,7 @@ func TestSQLiteGetBasic(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_get.db")
+		let db = sqlite::open("test_get.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test data
@@ -162,7 +162,7 @@ func TestSQLiteGetWithCondition(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_get_condition.db")
+		let db = sqlite::open("test_get_condition.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test data
@@ -196,7 +196,7 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_get_fields.db")
+		let db = sqlite::open("test_get_fields.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test data
@@ -227,18 +227,18 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 			name: Str,
 			email: Str?
 		}
-		
-		let db = sqlite::open("test_maybe.db")
+
+		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
-		
+
 		// Insert user with email
 		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
 		let result1 = db.insert("users", user1)
-		
+
 		// Insert user without email (none)
 		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
 		let result2 = db.insert("users", user2)
-		
+
 		// Both should succeed (return None)
 		match result1 {
 			error => false,
@@ -267,21 +267,21 @@ func TestSQLiteGetWithMaybeTypes(t *testing.T) {
 			name: Str,
 			email: Str?
 		}
-		
-		let db = sqlite::open("test_maybe_get.db")
+
+		let db = sqlite::open("test_maybe_get.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
-		
+
 		// Insert users with and without email
 		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
 		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
 		db.insert("users", user1)
 		db.insert("users", user2)
-		
-		// Get all users 
+
+		// Get all users
 		let users = db.get<User>("users", "1=1")
 		let first = users.at(0)
 		let second = users.at(1)
-		
+
 		// Check that Maybe fields work correctly
 		first.email.or("") == "john@example.com" and second.email.or("") == ""
 	`)
@@ -306,56 +306,56 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 			price: Float?,
 			in_stock: Bool?
 		}
-		
-		let db = sqlite::open("test_maybe_roundtrip.db")
+
+		let db = sqlite::open("test_maybe_roundtrip.db").expect("Failed to open database")
 		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, price REAL, in_stock INTEGER)")
-		
+
 		// Insert products with various Maybe field combinations
-		let product1 = Product{ 
-			id: 1, 
-			name: "Widget", 
-			description: maybe::some("A useful widget"), 
+		let product1 = Product{
+			id: 1,
+			name: "Widget",
+			description: maybe::some("A useful widget"),
 			price: maybe::some(19.99),
 			in_stock: maybe::some(true)
 		}
-		let product2 = Product{ 
-			id: 2, 
-			name: "Gadget", 
-			description: maybe::none(), 
+		let product2 = Product{
+			id: 2,
+			name: "Gadget",
+			description: maybe::none(),
 			price: maybe::none(),
 			in_stock: maybe::some(false)
 		}
-		let product3 = Product{ 
-			id: 3, 
-			name: "Thing", 
-			description: maybe::some("Another thing"), 
+		let product3 = Product{
+			id: 3,
+			name: "Thing",
+			description: maybe::some("Another thing"),
 			price: maybe::some(5.0),
 			in_stock: maybe::none()
 		}
-		
+
 		db.insert("products", product1)
 		db.insert("products", product2)
 		db.insert("products", product3)
-		
+
 		// Retrieve and verify
 		let products = db.get<Product>("products", "1=1")
 		let p1 = products.at(0)
 		let p2 = products.at(1)
 		let p3 = products.at(2)
-		
+
 		// Test all combinations
 		let p1_desc_ok = p1.description.or("") == "A useful widget"
 		let p1_price_ok = p1.price.or(0.0) == 19.99
 		let p1_stock_ok = p1.in_stock.or(false) == true
-		
+
 		let p2_desc_ok = p2.description.or("default") == "default"
 		let p2_price_ok = p2.price.or(-1.0) == -1.0
 		let p2_stock_ok = p2.in_stock.or(true) == false
-		
+
 		let p3_desc_ok = p3.description.or("") == "Another thing"
 		let p3_price_ok = p3.price.or(0.0) == 5.0
 		let p3_stock_ok = p3.in_stock.or(true) == true
-		
+
 		(p1_desc_ok and p1_price_ok and p1_stock_ok and p2_desc_ok and p2_price_ok and p2_stock_ok and p3_desc_ok and p3_price_ok and p3_stock_ok)
 	`)
 

@@ -2,7 +2,7 @@ use ard/io
 use ard/sqlite
 
 fn main() {
-  let db = sqlite::open("./db.sqlite")
+  let db = sqlite::open("./db.sqlite").expect("Failed to open database")
   db.exec("create table if not exists players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
   struct Player {

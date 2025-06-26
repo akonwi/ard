@@ -29,7 +29,7 @@ var SQLiteOpenFn = &FunctionDef{
 	Parameters: []Parameter{
 		{Name: "file_path", Type: Str},
 	},
-	ReturnType: DatabaseDef,
+	ReturnType: MakeResult(DatabaseDef, Str),
 }
 
 /* ard/sqlite */

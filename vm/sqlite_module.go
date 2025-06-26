@@ -26,16 +26,16 @@ func (m *SQLiteModule) Path() string {
 func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "open":
-		// fn open(file_path: Str) sqlite::Database
+		resultType := call.Type().(*checker.Result)
 		filePath := args[0].raw.(string)
 		conn, err := sql.Open("sqlite3", filePath)
 		if err != nil {
-			panic(fmt.Errorf("Failed to open database: %v", err))
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 
 		// Test the connection
 		if err := conn.Ping(); err != nil {
-			panic(fmt.Errorf("Failed to connect to database: %v", err))
+			return makeErr(&object{fmt.Sprintf("Failed to connect to database: %s", err), resultType.Err()}, resultType)
 		}
 
 		// Create our Database wrapper
@@ -47,10 +47,10 @@ func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		// Create a Database object with the correct type
 		dbObject := &object{
 			raw:   database,
-			_type: checker.DatabaseDef,
+			_type: resultType.Val(),
 		}
 
-		return dbObject
+		return makeOk(dbObject, resultType)
 	default:
 		panic(fmt.Errorf("Unimplemented: sqlite::%s()", call.Name))
 	}
