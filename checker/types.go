@@ -134,7 +134,6 @@ func (s str) get(name string) Type {
 func (s *str) equal(other Type) bool {
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			o.actual = s
 			return true
 		}
 		return s == o.actual
@@ -210,7 +209,6 @@ func (f *float) equal(other Type) bool {
 	}
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			o.actual = f
 			return true
 		}
 		return f == o.actual
@@ -248,7 +246,6 @@ func (b *_bool) equal(other Type) bool {
 	}
 	if o, ok := other.(*Any); ok {
 		if o.actual == nil {
-			o.actual = b
 			return true
 		}
 		return b == o.actual
@@ -348,7 +345,6 @@ func (l *List) equal(other Type) bool {
 	}
 	if any, ok := other.(*Any); ok {
 		if any.actual == nil {
-			any.actual = l
 			return true
 		}
 		return l.equal(any.actual)
@@ -385,7 +381,6 @@ func (m Map) equal(other Type) bool {
 	}
 	if any, ok := other.(*Any); ok {
 		if any.actual == nil {
-			any.actual = m
 			return true
 		}
 		return m.equal(any.actual)
@@ -529,7 +524,6 @@ func (a *Any) equal(other Type) bool {
 		return true
 	}
 	if a.actual == nil {
-		a.actual = other
 		return true
 	}
 	return a.actual.equal(other)
