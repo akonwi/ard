@@ -1306,32 +1306,38 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			if fnDef.hasGenerics() {
+				// Create a mapping of generic parameters to concrete types
+				typeMap := make(map[string]Type)
+
 				if len(s.TypeArgs) > 0 {
 					// collect generics
-					generics := []Type{}
+					generics := []Type{}                // need array to index by position
+					genericMap := make(map[string]Type) // need map to index by unique names
 					for _, param := range fnDef.Parameters {
-						generics = append(generics, getGenerics(param.Type)...)
+						for _, generic := range getGenerics(param.Type) {
+							genericMap[generic.(*Any).name] = generic
+							generics = append(generics, generic)
+						}
 					}
-					generics = append(generics, getGenerics(fnDef.ReturnType)...)
+					for _, generic := range getGenerics(fnDef.ReturnType) {
+						genericMap[generic.(*Any).name] = generic
+						generics = append(generics, generic)
+					}
 
-					if len(s.TypeArgs) != len(generics) {
-						c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.GetLocation())
+					if len(s.TypeArgs) != len(genericMap) {
+						c.addError(fmt.Sprintf("Expected %d type arguments", len(genericMap)), s.GetLocation())
 						return nil
 					}
 
-					for i, any := range generics {
-						actual := c.resolveType(s.TypeArgs[i])
+					for i, arg := range s.TypeArgs {
+						actual := c.resolveType(arg)
 						if actual == nil {
 							return nil
 						}
-						typeMap := make(map[string]Type)
-						typeMap[any.(*Any).name] = actual
-						substituteType(any, typeMap)
+						typeMap[generics[i].(*Any).name] = actual
 					}
 				}
 
-				// Create a mapping of generic parameters to concrete types
-				typeMap := make(map[string]Type)
 				// Infer types from arguments
 				for i, param := range fnDef.Parameters {
 					if anyType, ok := param.Type.(*Any); ok {
@@ -1454,36 +1460,40 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			if fnDef.hasGenerics() {
-				if len(s.Method.TypeArgs) > 0 {
-					// collect generics
-					generics := []Type{}
-					for _, param := range fnDef.Parameters {
-						generics = append(generics, getGenerics(param.Type)...)
-					}
-					generics = append(generics, getGenerics(fnDef.ReturnType)...)
+				// Create a mapping of generic parameters to concrete types
+				typeMap := make(map[string]Type)
 
-					if len(generics) == 0 && len(s.Method.TypeArgs) > 0 {
-						// c.addWarning("Unnecessary type arguments", s.Method.GetLocation())
-					} else {
-						if len(s.Method.TypeArgs) != len(generics) {
-							c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Method.GetLocation())
-							return nil
+				if len(s.Method.TypeArgs) > 0 {
+
+					// collect generics
+					generics := []Type{}                // need array to index by position
+					genericMap := make(map[string]Type) // need map to index by unique names
+					for _, param := range fnDef.Parameters {
+						for _, generic := range getGenerics(param.Type) {
+							genericMap[generic.(*Any).name] = generic
+							generics = append(generics, generic)
 						}
 					}
+					for _, generic := range getGenerics(fnDef.ReturnType) {
+						genericMap[generic.(*Any).name] = generic
+						generics = append(generics, generic)
+					}
 
-					for i, any := range generics {
-						actual := c.resolveType(s.Method.TypeArgs[i])
+					if len(s.Method.TypeArgs) != len(genericMap) {
+						c.addError(fmt.Sprintf("Expected %d type arguments", len(genericMap)), s.GetLocation())
+						return nil
+					}
+
+					for i, arg := range s.Method.TypeArgs {
+						actual := c.resolveType(arg)
 						if actual == nil {
 							return nil
 						}
-						typeMap := make(map[string]Type)
-						typeMap[any.(*Any).name] = actual
-						substituteType(any, typeMap)
+						typeMap[generics[i].(*Any).name] = actual
 					}
+
 				}
 
-				// Create a mapping of generic parameters to concrete types
-				typeMap := make(map[string]Type)
 				// Infer types from arguments
 				for i, param := range fnDef.Parameters {
 					if anyType, ok := param.Type.(*Any); ok {
@@ -1891,6 +1901,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				if fnDef.hasGenerics() {
+					// Create a mapping of generic parameters to concrete types
+					typeMap := make(map[string]Type)
+
 					if len(s.Function.TypeArgs) > 0 {
 						// collect generics
 						generics := []Type{}
@@ -1909,15 +1922,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							if actual == nil {
 								return nil
 							}
-							typeMap := make(map[string]Type)
 							typeMap[any.(*Any).name] = actual
-							substituteType(any, typeMap)
 						}
 					}
 					// technically could be an else block
 
-					// Create a mapping of generic parameters to concrete types
-					typeMap := make(map[string]Type)
 					// Infer types from arguments
 					for i, param := range fnDef.Parameters {
 						if anyType, ok := param.Type.(*Any); ok {
@@ -2042,33 +2051,39 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				if fnDef.hasGenerics() {
+					// Create a mapping of generic parameters to concrete types
+					typeMap := make(map[string]Type)
+
 					if len(s.Function.TypeArgs) > 0 {
 						// collect generics
-						generics := []Type{}
+						generics := []Type{}                // need array to index by position
+						genericMap := make(map[string]Type) // need map to index by unique names
 						for _, param := range fnDef.Parameters {
-							generics = append(generics, getGenerics(param.Type)...)
+							for _, generic := range getGenerics(param.Type) {
+								genericMap[generic.(*Any).name] = generic
+								generics = append(generics, generic)
+							}
 						}
-						generics = append(generics, getGenerics(fnDef.ReturnType)...)
+						for _, generic := range getGenerics(fnDef.ReturnType) {
+							genericMap[generic.(*Any).name] = generic
+							generics = append(generics, generic)
+						}
 
-						if len(s.Function.TypeArgs) != len(generics) {
-							c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
+						if len(s.Function.TypeArgs) != len(genericMap) {
+							c.addError(fmt.Sprintf("Expected %d type arguments", len(genericMap)), s.GetLocation())
 							return nil
 						}
 
-						for i, any := range generics {
-							actual := c.resolveType(s.Function.TypeArgs[i])
+						for i, arg := range s.Function.TypeArgs {
+							actual := c.resolveType(arg)
 							if actual == nil {
 								return nil
 							}
-							typeMap := make(map[string]Type)
-							typeMap[any.(*Any).name] = actual
-							substituteType(any, typeMap)
+							typeMap[generics[i].(*Any).name] = actual
 						}
 					}
 					// technically could be an else block
 
-					// Create a mapping of generic parameters to concrete types
-					typeMap := make(map[string]Type)
 					// Infer types from arguments
 					for i, param := range fnDef.Parameters {
 						if anyType, ok := param.Type.(*Any); ok {
@@ -3059,11 +3074,19 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	switch typ := t.(type) {
 	case *Any:
 		if concrete, exists := typeMap[typ.name]; exists {
-			typ.actual = concrete
+			return concrete
+			// typ.actual = concrete
 		}
 		return typ
 	case *Maybe:
 		return &Maybe{of: substituteType(typ.of, typeMap)}
+	case *Result:
+		return MakeResult(
+			substituteType(typ.val, typeMap),
+			substituteType(typ.err, typeMap),
+		)
+	case *List:
+		return &List{of: substituteType(typ.of, typeMap)}
 	// Handle other compound types
 	default:
 		return t
