@@ -18,7 +18,7 @@ var DatabaseDef = &StructDef{
 		"get": &FunctionDef{
 			Name:       "get",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
-			ReturnType: MakeList(&Any{name: "T"}),
+			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
 		},
 	},
 	Statics: map[string]*FunctionDef{},

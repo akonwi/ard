@@ -140,7 +140,7 @@ func TestSQLiteGetBasic(t *testing.T) {
 		db.insert("players", player2)
 
 		// Get all players
-		let players = db.get<Player>("players", "1=1")
+		let players = db.get<Player>("players", "1=1").expect("Failed to get players")
 		players.size()
 	`)
 
@@ -174,7 +174,7 @@ func TestSQLiteGetWithCondition(t *testing.T) {
 		db.insert("players", player3)
 
 		// Get players with number = 2
-		let twos = db.get<Player>("players", "number = 2")
+		let twos = db.get<Player>("players", "number = 2").expect("Failed to get players with number=2")
 		twos.size()
 	`)
 
@@ -204,7 +204,7 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 		db.insert("players", player)
 
 		// Get player and check field access
-		let players = db.get<Player>("players", "id = 1")
+		let players = db.get<Player>("players", "id = 1").expect("Failed to get player with id=1")
 		let first = players.at(0)
 		first.name == "John Doe" and first.number == 2
 	`)
@@ -278,7 +278,7 @@ func TestSQLiteGetWithMaybeTypes(t *testing.T) {
 		db.insert("users", user2)
 
 		// Get all users
-		let users = db.get<User>("users", "1=1")
+		let users = db.get<User>("users", "1=1").expect("Failed to get users")
 		let first = users.at(0)
 		let second = users.at(1)
 
@@ -338,7 +338,7 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 		db.insert("products", product3)
 
 		// Retrieve and verify
-		let products = db.get<Product>("products", "1=1")
+		let products = db.get<Product>("products", "1=1").expect("Failed to get products")
 		let p1 = products.at(0)
 		let p2 = products.at(1)
 		let p3 = products.at(2)

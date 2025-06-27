@@ -140,8 +140,9 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		tableName := args[0].raw.(string)
 		whereClause := args[1].raw.(string)
 
+		resultType := method.Type().(*checker.Result)
 		// Get the target struct type from the method's return type
-		listType := method.Type().(*checker.List)
+		listType := resultType.Val().(*checker.List)
 		inner := listType.Of()
 
 		// Handle generic types by resolving to actual type
@@ -154,7 +155,8 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		targetStructType, ok := inner.(*checker.StructDef)
 		if !ok {
-			panic(fmt.Errorf("SQLite Error: get method expects a struct type, got %T", inner))
+			err := fmt.Errorf("SQLite Error: get method expects a struct type, got %T", inner)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 
 		// Build SELECT statement
@@ -163,14 +165,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Execute the query
 		rows, err := db.conn.Query(sql)
 		if err != nil {
-			panic(fmt.Errorf("SQLite Error: failed to execute query: %v", err))
+			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 		defer rows.Close()
 
 		// Get column names
 		columns, err := rows.Columns()
 		if err != nil {
-			panic(fmt.Errorf("SQLite Error: failed to get column names: %v", err))
+			err := fmt.Errorf("SQLite Error: failed to get column names: %v", err)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 
 		// Build result list
@@ -178,15 +182,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		for rows.Next() {
 			// Create scan targets for each column
-			values := make([]interface{}, len(columns))
-			scanTargets := make([]interface{}, len(columns))
+			values := make([]any, len(columns))
+			scanTargets := make([]any, len(columns))
 			for i := range values {
 				scanTargets[i] = &values[i]
 			}
 
 			// Scan the row
 			if err := rows.Scan(scanTargets...); err != nil {
-				panic(fmt.Errorf("SQLite Error: failed to scan row: %v", err))
+				err := fmt.Errorf("SQLite Error: failed to scan row: %v", err)
+				return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 			}
 
 			// Map columns to struct fields
@@ -200,7 +205,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 				}
 
 				// Convert the raw value to the appropriate type
-				var fieldValue interface{}
+				var fieldValue any
 				var actualFieldType checker.Type = fieldType
 				rawValue := values[i]
 
@@ -212,7 +217,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 						fieldValue = nil
 					} else {
 						// Non-NULL value -> create some(value) after conversion
-						var convertedValue interface{}
+						var convertedValue any
 						switch actualFieldType {
 						case checker.Int:
 							if v, ok := rawValue.(int64); ok {
@@ -280,11 +285,12 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		}
 
 		if err := rows.Err(); err != nil {
-			panic(fmt.Errorf("SQLite Error: row iteration error: %v", err))
+			err := fmt.Errorf("SQLite Error: row iteration error: %v", err)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
 		}
 
 		// Return list of structs
-		return &object{results, method.Type()}
+		return makeOk(&object{results, listType}, resultType)
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}
