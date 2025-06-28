@@ -1,5 +1,10 @@
 ## TODO
 
+- [ ] calling functions with named arguments
+  ```ard
+  fn foo(bar: Int, baz: Str) { }
+  foo(baz: "hello", bar: 5)
+  ```
 - [ ] ffi
   - sort of like gleam
   - #external attribute on functions with external fn name
@@ -11,7 +16,6 @@
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] methods on enums?
-- [ ] calling functions with named arguments
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
 - [ ] allow non-linear declarations at the top level
