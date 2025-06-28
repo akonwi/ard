@@ -17,7 +17,7 @@ var DatabaseDef = &StructDef{
 		},
 		"update": &FunctionDef{
 			Name:       "update",
-			Parameters: []Parameter{{Name: "where", Type: Str}, {Name: "record", Type: &Any{name: "T"}}},
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}, {Name: "record", Type: &Any{name: "T"}}},
 			ReturnType: MakeResult(Void, Str),
 		},
 		"get": &FunctionDef{

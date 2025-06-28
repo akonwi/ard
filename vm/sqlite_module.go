@@ -136,19 +136,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Return None (no error)
 		return &object{nil, method.Type()}
 	case "update":
-		// fn update(where: Str, record: $T) Result<Void, Str>
-		whereClause := args[0].raw.(string)
-		structObj := args[1]
+		// fn update(table: Str, where: Str, record: $T) Result<Void, Str>
+		tableName := args[0].raw.(string)
+		whereClause := args[1].raw.(string)
+		structObj := args[2]
 		
 		// Extract fields from the struct
 		structFields, ok := structObj.raw.(map[string]*object)
 		if !ok {
 			return makeErr(&object{"Update expects a struct object", checker.Str}, method.Type().(*checker.Result))
 		}
-		
-		// Find the table name from the struct type
-		structType := structObj._type.(*checker.StructDef)
-		tableName := strings.ToLower(structType.Name) + "s" // Simple pluralization: Player -> players
 		
 		// Build UPDATE statement
 		var setPairs []string

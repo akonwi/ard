@@ -16,7 +16,7 @@ fn main() {
   db.insert("players", Player{ id: 3, name: "Michael Jordan", number: 23 })
 
   // Update a player's number
-  db.update("id = 1", Player{ id: 1, name: "John Doe", number: 10 })
+  db.update("players", "id = 1", Player{ id: 1, name: "John Doe", number: 10 })
 
   // Delete a player
   db.delete("players", "number = 23").expect("Failed to delete player")

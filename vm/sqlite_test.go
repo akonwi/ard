@@ -386,7 +386,7 @@ func TestSQLiteUpdate(t *testing.T) {
 
 		// Update the record
 		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
-		let result = db.update("id = 1", updated_player)
+		let result = db.update("players", "id = 1", updated_player)
 
 		// Should succeed
 		match result {
@@ -422,7 +422,7 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 
 		// Update the record
 		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
-		db.update("id = 1", updated_player)
+		db.update("players", "id = 1", updated_player)
 
 		// Verify the update worked
 		match db.get<Player>("players", "id = 1") {
@@ -458,7 +458,7 @@ func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
 
 		// Try to update non-existent record
 		let player = Player{ id: 999, name: "Ghost Player", number: 99 }
-		let result = db.update("id = 999", player)
+		let result = db.update("players", "id = 999", player)
 
 		// Should fail
 		match result {
@@ -495,7 +495,7 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 
 		// Update to remove email (set to none)
 		let updated_user = User{ id: 1, name: "John Smith", email: maybe::none() }
-		let result = db.update("id = 1", updated_user)
+		let result = db.update("users", "id = 1", updated_user)
 
 		match result {
 					ok => {
