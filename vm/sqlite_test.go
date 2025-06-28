@@ -699,7 +699,7 @@ func TestSQLiteCount(t *testing.T) {
 		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
 
 		// Count all players
-		let all_count = db.count("players", "1 = 1").expect("Failed to count all players")
+		let all_count = db.count("players", "").expect("Failed to count all players")
 		
 		// Count players with number 2
 		let twos_count = db.count("players", "number = 2").expect("Failed to count players with number 2")
@@ -725,7 +725,7 @@ func TestSQLiteCountInvalidTable(t *testing.T) {
 		let db = sqlite::open("test_count_invalid.db").expect("Failed to open database")
 
 		// Try to count from non-existent table
-		let result = db.count("non_existent_table", "1 = 1")
+		let result = db.count("non_existent_table", "")
 
 		// Should fail
 		match result {
@@ -761,7 +761,7 @@ func TestSQLiteExists(t *testing.T) {
 		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
 
 		// Check if any players exist
-		let any_exist = db.exists("players", "1 = 1").expect("Failed to check if any players exist")
+		let any_exist = db.exists("players", "").expect("Failed to check if any players exist")
 		
 		// Check if players with number 2 exist
 		let twos_exist = db.exists("players", "number = 2").expect("Failed to check if players with number 2 exist")
@@ -787,7 +787,7 @@ func TestSQLiteExistsInvalidTable(t *testing.T) {
 		let db = sqlite::open("test_exists_invalid.db").expect("Failed to open database")
 
 		// Try to check existence in non-existent table
-		let result = db.exists("non_existent_table", "1 = 1")
+		let result = db.exists("non_existent_table", "")
 
 		// Should fail
 		match result {
@@ -812,12 +812,49 @@ func TestSQLiteExistsEmptyTable(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Check if any players exist in empty table
-		let exists = db.exists("players", "1 = 1").expect("Failed to check existence in empty table")
+		let exists = db.exists("players", "").expect("Failed to check existence in empty table")
 
 		exists == false
 	`)
 
 	if result != true {
 		t.Errorf("Expected exists in empty table to return false, got %v", result)
+	}
+}
+
+func TestSQLiteEmptyWhereClause(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_empty_where.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_empty_where.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert test records
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 })
+
+		// Get all players using empty where clause
+		let all_players = db.get<Player>("players", "").expect("Failed to get all players")
+		
+		// Count all players using empty where clause
+		let count = db.count("players", "").expect("Failed to count all players")
+		
+		// Check if any players exist using empty where clause
+		let exists = db.exists("players", "").expect("Failed to check if any players exist")
+
+		count == 2 and exists == true and all_players.at(0).name == "John Doe" and all_players.at(1).name == "Jane Smith"
+	`)
+
+	if result != true {
+		t.Errorf("Expected empty where clauses to work correctly, got %v", result)
 	}
 }

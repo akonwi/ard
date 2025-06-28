@@ -225,7 +225,12 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		}
 
 		// Build SELECT statement
-		sql := fmt.Sprintf("SELECT * FROM %s WHERE %s", tableName, whereClause)
+		var sql string
+		if whereClause == "" {
+			sql = fmt.Sprintf("SELECT * FROM %s", tableName)
+		} else {
+			sql = fmt.Sprintf("SELECT * FROM %s WHERE %s", tableName, whereClause)
+		}
 
 		// Execute the query
 		rows, err := db.conn.Query(sql)
@@ -362,7 +367,12 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		whereClause := args[1].raw.(string)
 
 		// Construct SQL
-		sql := fmt.Sprintf("DELETE FROM %s WHERE %s", tableName, whereClause)
+		var sql string
+		if whereClause == "" {
+			sql = fmt.Sprintf("DELETE FROM %s", tableName)
+		} else {
+			sql = fmt.Sprintf("DELETE FROM %s WHERE %s", tableName, whereClause)
+		}
 
 		// Execute the DELETE
 		result, err := db.conn.Exec(sql)
@@ -395,7 +405,12 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		whereClause := args[1].raw.(string)
 
 		// Construct SQL
-		sql := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, whereClause)
+		var sql string
+		if whereClause == "" {
+			sql = fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+		} else {
+			sql = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, whereClause)
+		}
 
 		// Execute the COUNT query
 		var count int64
@@ -412,7 +427,12 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		whereClause := args[1].raw.(string)
 
 		// Construct SQL - using EXISTS for efficiency
-		sql := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s)", tableName, whereClause)
+		var sql string
+		if whereClause == "" {
+			sql = fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s)", tableName)
+		} else {
+			sql = fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s)", tableName, whereClause)
+		}
 
 		// Execute the EXISTS query
 		var exists bool
