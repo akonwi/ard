@@ -40,6 +40,11 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(Int, Str),
 		},
+		"exists": &FunctionDef{
+			Name:       "exists",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
+			ReturnType: MakeResult(Bool, Str),
+		},
 	},
 	Statics: map[string]*FunctionDef{},
 }

@@ -738,3 +738,86 @@ func TestSQLiteCountInvalidTable(t *testing.T) {
 		t.Errorf("Expected count on invalid table to fail, got %v", result)
 	}
 }
+
+func TestSQLiteExists(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_exists.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_exists.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert test records
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 })
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+
+		// Check if any players exist
+		let any_exist = db.exists("players", "1 = 1").expect("Failed to check if any players exist")
+		
+		// Check if players with number 2 exist
+		let twos_exist = db.exists("players", "number = 2").expect("Failed to check if players with number 2 exist")
+		
+		// Check if players with non-existent condition exist
+		let none_exist = db.exists("players", "number = 999").expect("Failed to check if players with number 999 exist")
+
+		any_exist == true and twos_exist == true and none_exist == false
+	`)
+
+	if result != true {
+		t.Errorf("Expected exists operations to return correct values, got %v", result)
+	}
+}
+
+func TestSQLiteExistsInvalidTable(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_exists_invalid.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		let db = sqlite::open("test_exists_invalid.db").expect("Failed to open database")
+
+		// Try to check existence in non-existent table
+		let result = db.exists("non_existent_table", "1 = 1")
+
+		// Should fail
+		match result {
+			ok => false,
+			err => true
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected exists on invalid table to fail, got %v", result)
+	}
+}
+
+func TestSQLiteExistsEmptyTable(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_exists_empty.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		let db = sqlite::open("test_exists_empty.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Check if any players exist in empty table
+		let exists = db.exists("players", "1 = 1").expect("Failed to check existence in empty table")
+
+		exists == false
+	`)
+
+	if result != true {
+		t.Errorf("Expected exists in empty table to return false, got %v", result)
+	}
+}

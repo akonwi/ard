@@ -25,6 +25,10 @@ fn main() {
   let total_count = db.count("players", "1 = 1").expect("Failed to count players")
   io::print("Total players: {total_count}")
 
+  // Check if any players with number 23 still exist
+  let high_numbers_exist = db.exists("players", "number = 23").expect("Failed to check existence")
+  io::print("High numbered players exist: {high_numbers_exist}")
+
   let twos = db.get<Player>("players", "number = 2").expect("Failed to get players")
   for player in twos {
     io::print("{player.name} is number {player.number}")

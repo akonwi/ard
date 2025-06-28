@@ -406,6 +406,23 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(count)
 		return makeOk(&object{int(count), checker.Int}, method.Type().(*checker.Result))
+	case "exists":
+		// fn exists(table: Str, where: Str) Result<Bool, Str>
+		tableName := args[0].raw.(string)
+		whereClause := args[1].raw.(string)
+
+		// Construct SQL - using EXISTS for efficiency
+		sql := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s)", tableName, whereClause)
+
+		// Execute the EXISTS query
+		var exists bool
+		err := db.conn.QueryRow(sql).Scan(&exists)
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+
+		// Return Ok(exists)
+		return makeOk(&object{exists, checker.Bool}, method.Type().(*checker.Result))
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}
