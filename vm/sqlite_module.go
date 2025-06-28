@@ -135,6 +135,74 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return None (no error)
 		return &object{nil, method.Type()}
+	case "update":
+		// fn update(where: Str, record: $T) Result<Void, Str>
+		whereClause := args[0].raw.(string)
+		structObj := args[1]
+		
+		// Extract fields from the struct
+		structFields, ok := structObj.raw.(map[string]*object)
+		if !ok {
+			return makeErr(&object{"Update expects a struct object", checker.Str}, method.Type().(*checker.Result))
+		}
+		
+		// Find the table name from the struct type
+		structType := structObj._type.(*checker.StructDef)
+		tableName := strings.ToLower(structType.Name) + "s" // Simple pluralization: Player -> players
+		
+		// Build UPDATE statement
+		var setPairs []string
+		var values []interface{}
+		
+		// Sort column names for consistent ordering
+		var columns []string
+		for columnName := range structFields {
+			columns = append(columns, columnName)
+		}
+		sort.Strings(columns)
+		
+		// Build SET clauses
+		for _, columnName := range columns {
+			fieldObj := structFields[columnName]
+			setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
+			
+			// Handle Maybe types for update
+			if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
+				if fieldObj.raw == nil {
+					values = append(values, nil)
+				} else {
+					values = append(values, fieldObj.raw)
+				}
+			} else {
+				values = append(values, fieldObj.raw)
+			}
+		}
+		
+		// Construct SQL
+		sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+			tableName,
+			strings.Join(setPairs, ", "),
+			whereClause,
+		)
+		
+		// Execute the UPDATE
+		result, err := db.conn.Exec(sql, values...)
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+		
+		// Check if any rows were affected
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+		
+		if rowsAffected == 0 {
+			return makeErr(&object{"No records found matching the where clause", checker.Str}, method.Type().(*checker.Result))
+		}
+		
+		// Return Ok(void)
+		return makeOk(&object{nil, checker.Void}, method.Type().(*checker.Result))
 	case "get":
 		// fn get(table: Str, where: Str) [T]
 		tableName := args[0].raw.(string)

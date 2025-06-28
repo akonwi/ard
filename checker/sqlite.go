@@ -15,6 +15,11 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
 			ReturnType: MakeMaybe(Str),
 		},
+		"update": &FunctionDef{
+			Name:       "update",
+			Parameters: []Parameter{{Name: "where", Type: Str}, {Name: "record", Type: &Any{name: "T"}}},
+			ReturnType: MakeResult(Void, Str),
+		},
 		"get": &FunctionDef{
 			Name:       "get",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},

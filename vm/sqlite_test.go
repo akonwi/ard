@@ -363,3 +363,157 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 		t.Errorf("Expected comprehensive Maybe types round-trip to work correctly, got %v", result)
 	}
 }
+
+func TestSQLiteUpdate(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_update.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_update.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert initial record
+		let player = Player{ id: 1, name: "John Doe", number: 2 }
+		db.insert("players", player)
+
+		// Update the record
+		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
+		let result = db.update("id = 1", updated_player)
+
+		// Should succeed
+		match result {
+			ok => true,
+			err => false
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected update to succeed, got %v", result)
+	}
+}
+
+func TestSQLiteUpdateVerification(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_update_verify.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_update_verify.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert initial record
+		let player = Player{ id: 1, name: "John Doe", number: 2 }
+		db.insert("players", player)
+
+		// Update the record
+		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
+		db.update("id = 1", updated_player)
+
+		// Verify the update worked
+		match db.get<Player>("players", "id = 1") {
+			ok => {
+				let players = ok
+				let retrieved = players.at(0)
+				retrieved.name == "John Smith" and retrieved.number == 10
+			},
+			err => false
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected update verification to pass, got %v", result)
+	}
+}
+
+func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_update_missing.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_update_missing.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Try to update non-existent record
+		let player = Player{ id: 999, name: "Ghost Player", number: 99 }
+		let result = db.update("id = 999", player)
+
+		// Should fail
+		match result {
+			ok => false,
+			err => true
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected update of non-existent record to fail, got %v", result)
+	}
+}
+
+func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_update_maybe.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/maybe
+		struct User {
+			id: Int,
+			name: Str,
+			email: Str?
+		}
+
+		let db = sqlite::open("test_update_maybe.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+
+		// Insert initial record with email
+		let user = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
+		db.insert("users", user)
+
+		// Update to remove email (set to none)
+		let updated_user = User{ id: 1, name: "John Smith", email: maybe::none() }
+		let result = db.update("id = 1", updated_user)
+
+		match result {
+					ok => {
+						// Verify the update worked
+						match db.get<User>("users", "id = 1") {
+							ok => {
+								let users = ok
+								let retrieved = users.at(0)
+								retrieved.name == "John Smith" and retrieved.email.or("default") == "default"
+							},
+							err => false
+						}
+					},
+					err => false
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected update with Maybe types to work correctly, got %v", result)
+	}
+}
