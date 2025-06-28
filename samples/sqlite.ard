@@ -25,4 +25,7 @@ fn main() {
   for player in twos {
     io::print("{player.name} is number {player.number}")
   }
+
+  // Close the database connection properly
+  db.close().expect("Failed to close database")
 }

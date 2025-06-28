@@ -140,29 +140,29 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		tableName := args[0].raw.(string)
 		whereClause := args[1].raw.(string)
 		structObj := args[2]
-		
+
 		// Extract fields from the struct
 		structFields, ok := structObj.raw.(map[string]*object)
 		if !ok {
 			return makeErr(&object{"Update expects a struct object", checker.Str}, method.Type().(*checker.Result))
 		}
-		
+
 		// Build UPDATE statement
 		var setPairs []string
 		var values []interface{}
-		
+
 		// Sort column names for consistent ordering
 		var columns []string
 		for columnName := range structFields {
 			columns = append(columns, columnName)
 		}
 		sort.Strings(columns)
-		
+
 		// Build SET clauses
 		for _, columnName := range columns {
 			fieldObj := structFields[columnName]
 			setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
-			
+
 			// Handle Maybe types for update
 			if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
 				if fieldObj.raw == nil {
@@ -174,30 +174,30 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 				values = append(values, fieldObj.raw)
 			}
 		}
-		
+
 		// Construct SQL
 		sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
 			tableName,
 			strings.Join(setPairs, ", "),
 			whereClause,
 		)
-		
+
 		// Execute the UPDATE
 		result, err := db.conn.Exec(sql, values...)
 		if err != nil {
 			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
 		}
-		
+
 		// Check if any rows were affected
 		rowsAffected, err := result.RowsAffected()
 		if err != nil {
 			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
 		}
-		
+
 		if rowsAffected == 0 {
 			return makeErr(&object{"No records found matching the where clause", checker.Str}, method.Type().(*checker.Result))
 		}
-		
+
 		// Return Ok(void)
 		return makeOk(&object{nil, checker.Void}, method.Type().(*checker.Result))
 	case "get":
@@ -379,6 +379,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Return Ok(true) if rows were deleted, Ok(false) if no rows matched
 		deleted := rowsAffected > 0
 		return makeOk(&object{deleted, checker.Bool}, method.Type().(*checker.Result))
+	case "close":
+		// fn close() Result<Void, Str>
+		// Close the database connection
+		err := db.conn.Close()
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+
+		// Return Ok(void)
+		return makeOk(void, method.Type().(*checker.Result))
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}
