@@ -18,6 +18,9 @@ fn main() {
   // Update a player's number
   db.update("id = 1", Player{ id: 1, name: "John Doe", number: 10 })
 
+  // Delete a player
+  db.delete("players", "number = 23").expect("Failed to delete player")
+
   let twos = db.get<Player>("players", "number = 2").expect("Failed to get players")
   for player in twos {
     io::print("{player.name} is number {player.number}")

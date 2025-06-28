@@ -25,6 +25,11 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
 		},
+		"delete": &FunctionDef{
+			Name:       "delete",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
+			ReturnType: MakeResult(Bool, Str),
+		},
 	},
 	Statics: map[string]*FunctionDef{},
 }

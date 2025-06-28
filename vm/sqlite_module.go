@@ -359,6 +359,29 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return list of structs
 		return makeOk(&object{results, listType}, resultType)
+	case "delete":
+		// fn delete(table: Str, where: Str) Result<Bool, Str>
+		tableName := args[0].raw.(string)
+		whereClause := args[1].raw.(string)
+
+		// Construct SQL
+		sql := fmt.Sprintf("DELETE FROM %s WHERE %s", tableName, whereClause)
+
+		// Execute the DELETE
+		result, err := db.conn.Exec(sql)
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+
+		// Check if any rows were affected
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+
+		// Return Ok(true) if rows were deleted, Ok(false) if no rows matched
+		deleted := rowsAffected > 0
+		return makeOk(&object{deleted, checker.Bool}, method.Type().(*checker.Result))
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}

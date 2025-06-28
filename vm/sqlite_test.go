@@ -517,3 +517,96 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 		t.Errorf("Expected update with Maybe types to work correctly, got %v", result)
 	}
 }
+
+func TestSQLiteDelete(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_delete.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_delete.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert test records
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 })
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+
+		// Delete one record
+		let result = db.delete("players", "id = 2")
+
+		// Should succeed - expect Ok(true) since record should be deleted
+		match result {
+			ok => {
+				ok == true
+			},
+			err => false
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected delete to succeed, got %v", result)
+	}
+}
+
+func TestSQLiteDeleteNonExistent(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_delete_missing.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_delete_missing.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Try to delete non-existent record
+		db.delete("players", "id = 999")
+	`)
+
+	if result != false {
+		t.Errorf("Expected delete of non-existent record to return Ok(false), got %v", result)
+	}
+}
+
+func TestSQLiteDeleteMultiple(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_delete_multiple.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_delete_multiple.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert test records
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 })
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+
+		// Delete multiple records with same number
+		db.delete("players", "number = 2")
+	`)
+
+	if result != true {
+		t.Errorf("Expected delete multiple to succeed, got %v", result)
+	}
+}
