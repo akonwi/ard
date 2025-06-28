@@ -389,6 +389,23 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(void)
 		return makeOk(void, method.Type().(*checker.Result))
+	case "count":
+		// fn count(table: Str, where: Str) Result<Int, Str>
+		tableName := args[0].raw.(string)
+		whereClause := args[1].raw.(string)
+
+		// Construct SQL
+		sql := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, whereClause)
+
+		// Execute the COUNT query
+		var count int64
+		err := db.conn.QueryRow(sql).Scan(&count)
+		if err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+		}
+
+		// Return Ok(count)
+		return makeOk(&object{int(count), checker.Int}, method.Type().(*checker.Result))
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}

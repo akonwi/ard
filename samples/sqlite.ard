@@ -21,6 +21,10 @@ fn main() {
   // Delete a player
   db.delete("players", "number = 23").expect("Failed to delete player")
 
+  // Count remaining players
+  let total_count = db.count("players", "1 = 1").expect("Failed to count players")
+  io::print("Total players: {total_count}")
+
   let twos = db.get<Player>("players", "number = 2").expect("Failed to get players")
   for player in twos {
     io::print("{player.name} is number {player.number}")

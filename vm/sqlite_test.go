@@ -676,3 +676,65 @@ func TestSQLiteCloseMultipleTimes(t *testing.T) {
 		t.Errorf("Expected multiple closes to succeed, got %v", result)
 	}
 }
+
+func TestSQLiteCount(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_count.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_count.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+
+		// Insert test records
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 })
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+
+		// Count all players
+		let all_count = db.count("players", "1 = 1").expect("Failed to count all players")
+		
+		// Count players with number 2
+		let twos_count = db.count("players", "number = 2").expect("Failed to count players with number 2")
+		
+		// Count players with non-existent condition
+		let none_count = db.count("players", "number = 999").expect("Failed to count non-existent players")
+
+		all_count == 3 and twos_count == 2 and none_count == 0
+	`)
+
+	if result != true {
+		t.Errorf("Expected count operations to return correct values, got %v", result)
+	}
+}
+
+func TestSQLiteCountInvalidTable(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_count_invalid.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		let db = sqlite::open("test_count_invalid.db").expect("Failed to open database")
+
+		// Try to count from non-existent table
+		let result = db.count("non_existent_table", "1 = 1")
+
+		// Should fail
+		match result {
+			ok => false,
+			err => true
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected count on invalid table to fail, got %v", result)
+	}
+}
