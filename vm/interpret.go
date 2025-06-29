@@ -117,6 +117,11 @@ func (vm *VM) do(stmt checker.Statement) *object {
 		target := vm.eval(s.Target)
 		val := vm.eval(s.Value)
 		target.raw = val.raw
+
+		// in the case of unrefined generics in the target, upgrade to the refined value's type
+		if any, ok := (val._type).(*checker.Any); !ok || any.Actual() != nil {
+			target._type = val._type
+		}
 		return void
 	case *checker.ForLoop:
 		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }

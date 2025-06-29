@@ -53,5 +53,18 @@ func TestMaybes(t *testing.T) {
 			`,
 			want: true,
 		},
+		{
+			name: "reassigning maybes",
+			input: `
+				use ard/maybe
+				mut a: Str? = maybe::none()
+				a = maybe::some("hello")
+				match a {
+					s => s,
+					_ => "",
+				}
+			`,
+			want: "hello",
+		},
 	})
 }
