@@ -1,7 +1,5 @@
 ## TODO
 
-- [ ] imports within a user module aren't accounted for
-  - evals of a user module should be a new VM
 - [ ] parser errors should report correct file
 - [ ] allow comments inside struct def
 - [ ] when a diagnostic error is encountered, don't skip current statement
