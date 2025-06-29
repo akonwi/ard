@@ -30,7 +30,9 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 	case "decode":
 		{
 			resultType := call.Type().(*checker.Result)
-			errorResult := makeErr(&object{"Parsing Error", checker.Str}, resultType)
+			toErr := func(msg string) *object {
+				return makeErr(&object{msg, checker.Str}, resultType)
+			}
 			result := makeOk(nil, resultType)
 			jsonString := vm.eval(call.Args[0]).raw.(string)
 			jsonBytes := []byte(jsonString)
@@ -80,7 +82,7 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 						return result
 					}
 
-					return m.decodeAsStruct(result, decoder, subj, vm, errorResult, resultType)
+					return m.decodeAsStruct(result, decoder, subj, vm, toErr, resultType)
 				}
 			case *checker.List:
 				{
@@ -149,7 +151,7 @@ func skipOver(decoder *json.Decoder, delim string) {
 	}
 }
 
-func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj *checker.StructDef, vm *VM, errorResult *object, resultType *checker.Result) *object {
+func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj *checker.StructDef, vm *VM, toErr func(msg string) *object, resultType *checker.Result) *object {
 	fields := make(map[string]*object)
 
 	for decoder.More() {
@@ -200,7 +202,7 @@ func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj 
 				checker.FunctionDef{
 					ReturnType: checker.MakeResult(decodeAs, checker.Str),
 				},
-			), []*object{&object{val, checker.Str}})
+			), []*object{{val, checker.Str}})
 
 			// if err
 			if !decoded.raw.(_result).ok {
@@ -217,16 +219,16 @@ func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj 
 			} else if subj.Fields[key] == checker.Int {
 				fields[key] = &object{int(val), checker.Int}
 			} else {
-				return errorResult
+				return toErr(fmt.Sprintf("Parsing error: Invalid type - Encountered a number instead of %s", subj.Fields[key]))
 			}
 		case bool:
 			if subj.Fields[key] != checker.Bool {
-				return errorResult
+				return toErr(fmt.Sprintf("Parsing error: Invalid type - Encountered a boolean instead of %s", subj.Fields[key]))
 			}
 			fields[key] = &object{val, checker.Bool}
 		case nil:
 			if maybe, isMaybe := subj.Fields[key].(*checker.Maybe); !isMaybe {
-				return errorResult
+				return toErr(fmt.Sprintf("Parsing error: Invalid type - Encountered a nil instead of %s", subj.Fields[key]))
 			} else {
 				fields[key] = &object{val, maybe}
 			}
@@ -234,23 +236,23 @@ func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj 
 			if val.String() == "[" {
 				listType, ok := subj.Fields[key].(*checker.List)
 				if !ok {
-					return errorResult
+					return toErr(fmt.Sprintf("Parsing error: Invalid type - Encountered a list instead of %s", subj.Fields[key]))
 				}
 				list := []*object{}
 				for decoder.More() {
 					var v any
 					if err := decoder.Decode(&v); err != nil {
-						return errorResult
+						return toErr(fmt.Sprintf("Parsing error: Failed to decode list element: %v", err))
 					}
 					obj := enforceSchema(vm, v, listType.Of())
 					if obj == nil {
-						return errorResult
+						return toErr(fmt.Sprintf("Parsing error: Failed to decode schema list element %v as %s", v, listType.Of()))
 					}
 					list = append(list, obj)
 				}
 				if t, err := decoder.Token(); err != nil {
 					log.Fatal(fmt.Errorf("Error taking closing ]: [%w] %T - %v\n", err, t, t))
-					return errorResult
+					return toErr("Parsing error: Failed to take closing bracket")
 				}
 
 				fields[key] = &object{list, listType}
@@ -258,10 +260,9 @@ func (m *JSONModule) decodeAsStruct(result *object, decoder *json.Decoder, subj 
 				// otherwise it's an object
 				nestedTarget, ok := subj.Fields[key].(*checker.StructDef)
 				if !ok {
-					errorResult.raw = fmt.Sprintf("%s cannot be decoded into %s", key, subj.Fields[key])
-					return errorResult
+					return toErr(fmt.Sprintf("%s cannot be decoded into %s", key, subj.Fields[key]))
 				}
-				decoded := m.decodeAsStruct(result, decoder, nestedTarget, vm, errorResult, resultType)
+				decoded := m.decodeAsStruct(result, decoder, nestedTarget, vm, toErr, resultType)
 
 				value, ok := decoded.raw.(_result)
 				if !ok {

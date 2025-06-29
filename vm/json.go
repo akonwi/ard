@@ -51,7 +51,14 @@ func enforceSchema(vm *VM, val any, as checker.Type) *object {
 
 			return &object{fields, as}
 		}
+	case *checker.Maybe:
+		if val == nil {
+			return &object{nil, as}
+		}
+		return enforceSchema(vm, val, as.Of())
+	default:
+		// todo: return as error
+		panic("There's an unhandled ard Type in decoding: " + as.String())
 	}
 
-	panic("There's an unhandled ard Type in decoding: " + as.String())
 }
