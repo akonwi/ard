@@ -63,28 +63,23 @@ func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.Functi
 	}
 
 	// Verify it's a function
-	functionDef, ok := symbol.(*checker.FunctionDef)
+	_, ok := symbol.(*checker.FunctionDef)
 	if !ok {
 		panic(fmt.Errorf("%s is not a function in module %s", call.Name, module.Path()))
 	}
 
-	// Create Go function closure using the same pattern as line 391
-	fn := func(args ...*object) *object {
-		res, _ := vm.evalBlock(functionDef.Body, func() {
-			for i := range args {
-				vm.scope.add(functionDef.Parameters[i].Name, args[i])
-			}
-		})
-		return res
-	}
-
-	// Evaluate arguments and call the function (same pattern as FunctionCall case)
+	// Evaluate arguments
 	args := make([]*object, len(call.Args))
 	for i := range call.Args {
 		args[i] = vm.eval(call.Args[i])
 	}
 
-	return fn(args...)
+	// create new vm for module
+	mvm := New(module.Program().Imports)
+	// build up the module's environment
+	mvm.Interpret(module.Program())
+	// call the function
+	return mvm.evalFunctionCall(call, args...)
 }
 
 func (vm *VM) do(stmt checker.Statement) *object {
@@ -405,21 +400,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		msg := vm.eval(e.Message)
 		panic(fmt.Sprintf("panic at %s:\n%s", e.GetLocation().Start, msg.raw))
 	case *checker.FunctionCall:
-		sig, ok := vm.scope.get(e.Name)
-		if !ok {
-			panic(fmt.Errorf("Undefined: %s", e.Name))
-		}
-		fn, ok := sig.raw.(func(args ...*object) *object)
-		if !ok {
-			panic(fmt.Errorf("Not a function: %s: %s", e.Name, sig._type))
-		}
-
-		args := make([]*object, len(e.Args))
-		for i := range e.Args {
-			args[i] = vm.eval(e.Args[i])
-		}
-
-		return fn(args...)
+		return vm.evalFunctionCall(e)
 	case *checker.InstanceProperty:
 		{
 			subj := vm.eval(e.Subject)
@@ -701,6 +682,30 @@ func (vm *VM) eval(expr checker.Expression) *object {
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}
+}
+
+// _args can be provided by caller from different module scopes
+func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*object) *object {
+	sig, ok := vm.scope.get(call.Name)
+	if !ok {
+		panic(fmt.Errorf("Undefined: %s", call.Name))
+	}
+	fn, ok := sig.raw.(func(args ...*object) *object)
+	if !ok {
+		panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig._type))
+	}
+
+	args := _args
+	// if no args are provided but the function has parameters, use the call.Args
+	if len(args) == 0 && len(sig._type.(*checker.FunctionDef).Parameters) > 0 {
+		args = make([]*object, len(call.Args))
+
+		for i := range call.Args {
+			args[i] = vm.eval(call.Args[i])
+		}
+	}
+
+	return fn(args...)
 }
 
 func (vm *VM) evalBlock(block *checker.Block, init func()) (*object, bool) {
