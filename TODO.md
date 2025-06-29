@@ -1,5 +1,11 @@
 ## TODO
 
+- [ ] imports within a user module aren't accounted for
+  - evals of a user module should be a new VM
+- [ ] parser errors should report correct file
+- [ ] allow comments inside struct def
+- [ ] when a diagnostic error is encountered, don't skip current statement
+- [ ] omitting Maybe fields in structs will default to `None`
 - [ ] calling functions with named arguments
   ```ard
   fn foo(bar: Int, baz: Str) { }
