@@ -14,7 +14,7 @@ func TestSQLiteBasicOperations(t *testing.T) {
 	result := run(t, `
 		use ard/sqlite
 		let db = sqlite::open("test.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
 	`)
 
 	// Should return None (no error)
@@ -37,7 +37,7 @@ func TestSQLiteInsertStruct(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_insert.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
 		db.insert("players", player)
@@ -63,7 +63,7 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_multi.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
 		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
@@ -131,7 +131,7 @@ func TestSQLiteGetBasic(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_get.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
@@ -163,7 +163,7 @@ func TestSQLiteGetWithCondition(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_get_condition.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
@@ -197,7 +197,7 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_get_fields.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
@@ -229,7 +229,7 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert user with email
 		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
@@ -269,7 +269,7 @@ func TestSQLiteGetWithMaybeTypes(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_maybe_get.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert users with and without email
 		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
@@ -308,7 +308,7 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_maybe_roundtrip.db").expect("Failed to open database")
-		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, price REAL, in_stock INTEGER)")
+		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, price REAL, in_stock INTEGER)").expect("Failed to create table")
 
 		// Insert products with various Maybe field combinations
 		let product1 = Product{
@@ -378,7 +378,7 @@ func TestSQLiteUpdate(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_update.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert initial record
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
@@ -414,7 +414,7 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_update_verify.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert initial record
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
@@ -454,7 +454,7 @@ func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_update_missing.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Try to update non-existent record
 		let player = Player{ id: 999, name: "Ghost Player", number: 99 }
@@ -487,7 +487,7 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_update_maybe.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert initial record with email
 		let user = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
@@ -532,7 +532,7 @@ func TestSQLiteDelete(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_delete.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
 		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
@@ -570,7 +570,7 @@ func TestSQLiteDeleteNonExistent(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_delete_missing.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Try to delete non-existent record
 		db.delete("players", "id = 999")
@@ -595,7 +595,7 @@ func TestSQLiteDeleteMultiple(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_delete_multiple.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
 		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
@@ -625,7 +625,7 @@ func TestSQLiteClose(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_close.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert a test record
 		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
@@ -656,7 +656,7 @@ func TestSQLiteCloseMultipleTimes(t *testing.T) {
 
 		// Close the database once
 		let first_close = db.close()
-		
+
 		// Try to close again - SQLite should handle this gracefully
 		let second_close = db.close()
 
@@ -700,10 +700,10 @@ func TestSQLiteCount(t *testing.T) {
 
 		// Count all players
 		let all_count = db.count("players", "").expect("Failed to count all players")
-		
+
 		// Count players with number 2
 		let twos_count = db.count("players", "number = 2").expect("Failed to count players with number 2")
-		
+
 		// Count players with non-existent condition
 		let none_count = db.count("players", "number = 999").expect("Failed to count non-existent players")
 
@@ -762,10 +762,10 @@ func TestSQLiteExists(t *testing.T) {
 
 		// Check if any players exist
 		let any_exist = db.exists("players", "").expect("Failed to check if any players exist")
-		
+
 		// Check if players with number 2 exist
 		let twos_exist = db.exists("players", "number = 2").expect("Failed to check if players with number 2 exist")
-		
+
 		// Check if players with non-existent condition exist
 		let none_exist = db.exists("players", "number = 999").expect("Failed to check if players with number 999 exist")
 
@@ -836,7 +836,7 @@ func TestSQLiteEmptyWhereClause(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_empty_where.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
 		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
@@ -844,10 +844,10 @@ func TestSQLiteEmptyWhereClause(t *testing.T) {
 
 		// Get all players using empty where clause
 		let all_players = db.get<Player>("players", "").expect("Failed to get all players")
-		
+
 		// Count all players using empty where clause
 		let count = db.count("players", "").expect("Failed to count all players")
-		
+
 		// Check if any players exist using empty where clause
 		let exists = db.exists("players", "").expect("Failed to check if any players exist")
 

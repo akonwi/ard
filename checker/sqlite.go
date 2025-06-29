@@ -6,7 +6,7 @@ var DatabaseDef = &StructDef{
 		"exec": &FunctionDef{
 			Name:       "exec",
 			Parameters: []Parameter{{Name: "sql", Type: Str}},
-			ReturnType: MakeMaybe(Str),
+			ReturnType: MakeResult(Void, Str),
 		},
 		"insert": &FunctionDef{
 			Name: "insert",

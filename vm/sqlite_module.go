@@ -76,19 +76,20 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 	switch method.Name {
 	case "exec":
-		// fn exec(sql: Str) Str?
+		// fn exec(sql: Str) Void!Str
+		resultType := method.Type().(*checker.Result)
 		sql := args[0].raw.(string)
 
 		// Execute the SQL
 		_, err := db.conn.Exec(sql)
 		if err != nil {
-			// Return Some(error_message)
-			errorMsg := &object{err.Error(), checker.Str}
-			return &object{errorMsg, method.Type()}
+			// Return Err(Str)
+			errorMsg := &object{err.Error(), resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
-		// Return None (no error)
-		return &object{nil, method.Type()}
+		// Return Ok(Void)
+		return makeOk(void, resultType)
 	case "insert":
 		// fn insert(table: Str, values: $V) Str?
 		tableName := args[0].raw.(string)
