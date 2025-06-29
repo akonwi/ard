@@ -91,14 +91,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Return Ok(Void)
 		return makeOk(void, resultType)
 	case "insert":
-		// fn insert(table: Str, values: $V) Str?
+		// fn insert(table: Str, values: $V) Void!Str
+		resultType := method.Type().(*checker.Result)
 		tableName := args[0].raw.(string)
 		structObj := args[1]
 
 		// Extract fields from the struct
 		structFields, ok := structObj.raw.(map[string]*object)
 		if !ok {
-			panic(fmt.Errorf("SQLite Error: insert expects a struct object"))
+			errorMsg := &object{"SQLite Error: insert expects a struct object", resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
 		// Build INSERT statement
@@ -129,13 +131,13 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Execute the INSERT
 		_, err := db.conn.Exec(sql, values...)
 		if err != nil {
-			// Return Some(error_message)
-			errorMsg := &object{err.Error(), checker.Str}
-			return &object{errorMsg, method.Type()}
+			// Return Err(Str)
+			errorMsg := &object{err.Error(), resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
-		// Return None (no error)
-		return &object{nil, method.Type()}
+		// Return Ok(Void)
+		return makeOk(void, resultType)
 	case "update":
 		// fn update(table: Str, where: Str, record: $T) Result<Void, Str>
 		tableName := args[0].raw.(string)

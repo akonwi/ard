@@ -43,7 +43,7 @@ func TestSQLiteInsertStruct(t *testing.T) {
 		db.insert("players", player)
 	`)
 
-	// Should return None (no error)
+	// Should return Void!Str
 	if result != nil {
 		t.Errorf("Expected nil (no error), got %v", result)
 	}
@@ -54,7 +54,7 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 	testDB := "test_multi.db"
 	defer os.Remove(testDB)
 
-	result := run(t, `
+	run(t, `
 		use ard/sqlite
 		struct Player {
 			id: Int,
@@ -68,22 +68,9 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
 		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
 
-		let result1 = db.insert("players", player1)
-		let result2 = db.insert("players", player2)
-
-		// Both should succeed (return None)
-		match result1 {
-			error => false,
-			_ => match result2 {
-				error => false,
-				_ => true
-			}
-		}
+		db.insert("players", player1).expect("Failed to insert player 1")
+		db.insert("players", player2).expect("Failed to insert player 2")
 	`)
-
-	if result != true {
-		t.Errorf("Expected both inserts to succeed, got %v", result)
-	}
 }
 
 func TestSQLiteInsertError(t *testing.T) {
@@ -103,16 +90,10 @@ func TestSQLiteInsertError(t *testing.T) {
 		// Don't create the table - this should cause an error
 
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		let result = db.insert("players", player)
-
-		// Should return Some(error_message)
-		match result {
-			error => true,
-			_ => false
-		}
+		db.insert("players", player)
 	`)
 
-	if result != true {
+	if result == nil {
 		t.Errorf("Expected insert to fail with error, got %v", result)
 	}
 }
@@ -136,8 +117,8 @@ func TestSQLiteGetBasic(t *testing.T) {
 		// Insert test data
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
 		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
-		db.insert("players", player1)
-		db.insert("players", player2)
+		db.insert("players", player1).expect("Failed to insert player")
+		db.insert("players", player2).expect("Failed to insert player")
 
 		// Get all players
 		let players = db.get<Player>("players", "1=1").expect("Failed to get players")
@@ -169,9 +150,9 @@ func TestSQLiteGetWithCondition(t *testing.T) {
 		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
 		let player2 = Player{ id: 2, name: "Jane Smith", number: 2 }
 		let player3 = Player{ id: 3, name: "Bob Wilson", number: 5 }
-		db.insert("players", player1)
-		db.insert("players", player2)
-		db.insert("players", player3)
+		db.insert("players", player1).expect("Failed to insert player 1")
+		db.insert("players", player2).expect("Failed to insert player 2")
+		db.insert("players", player3).expect("Failed to insert player 3")
 
 		// Get players with number = 2
 		let twos = db.get<Player>("players", "number = 2").expect("Failed to get players with number=2")
@@ -201,7 +182,7 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 
 		// Insert test data
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player)
+		db.insert("players", player).expect("Failed to insert player")
 
 		// Get player and check field access
 		let players = db.get<Player>("players", "id = 1").expect("Failed to get player with id=1")
@@ -219,7 +200,7 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 	testDB := "test_maybe.db"
 	defer os.Remove(testDB)
 
-	result := run(t, `
+	run(t, `
 		use ard/sqlite
 		use ard/maybe
 		struct User {
@@ -233,25 +214,12 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 
 		// Insert user with email
 		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
-		let result1 = db.insert("users", user1)
+		db.insert("users", user1).expect("Failed to insert user 1")
 
 		// Insert user without email (none)
 		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
-		let result2 = db.insert("users", user2)
-
-		// Both should succeed (return None)
-		match result1 {
-			error => false,
-			_ => match result2 {
-				error => false,
-				_ => true
-			}
-		}
+		db.insert("users", user2).expect("Failed to insert user 2")
 	`)
-
-	if result != true {
-		t.Errorf("Expected both inserts with Maybe types to succeed, got %v", result)
-	}
 }
 
 func TestSQLiteGetWithMaybeTypes(t *testing.T) {
@@ -274,8 +242,8 @@ func TestSQLiteGetWithMaybeTypes(t *testing.T) {
 		// Insert users with and without email
 		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
 		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
-		db.insert("users", user1)
-		db.insert("users", user2)
+		db.insert("users", user1).expect("Failed to insert user 1")
+		db.insert("users", user2).expect("Failed to insert user 2")
 
 		// Get all users
 		let users = db.get<User>("users", "1=1").expect("Failed to get users")
@@ -333,9 +301,9 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 			in_stock: maybe::none()
 		}
 
-		db.insert("products", product1)
-		db.insert("products", product2)
-		db.insert("products", product3)
+		db.insert("products", product1).expect("Failed to insert product 1")
+		db.insert("products", product2).expect("Failed to insert product 2")
+		db.insert("products", product3).expect("Failed to insert product 3")
 
 		// Retrieve and verify
 		let products = db.get<Product>("products", "1=1").expect("Failed to get products")
@@ -382,7 +350,7 @@ func TestSQLiteUpdate(t *testing.T) {
 
 		// Insert initial record
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player)
+		db.insert("players", player).expect("Failed to insert player")
 
 		// Update the record
 		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
@@ -418,7 +386,7 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 
 		// Insert initial record
 		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player)
+		db.insert("players", player).expect("Failed to insert player")
 
 		// Update the record
 		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
@@ -491,7 +459,7 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 
 		// Insert initial record with email
 		let user = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
-		db.insert("users", user)
+		db.insert("users", user).expect("Failed to insert user")
 
 		// Update to remove email (set to none)
 		let updated_user = User{ id: 1, name: "John Smith", email: maybe::none() }
@@ -535,9 +503,9 @@ func TestSQLiteDelete(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 })
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
 
 		// Delete one record
 		let result = db.delete("players", "id = 2")
@@ -598,9 +566,9 @@ func TestSQLiteDeleteMultiple(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 })
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
 
 		// Delete multiple records with same number
 		db.delete("players", "number = 2")
@@ -628,7 +596,7 @@ func TestSQLiteClose(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert a test record
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
 
 		// Close the database
 		let result = db.close()
@@ -694,9 +662,9 @@ func TestSQLiteCount(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 })
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
 
 		// Count all players
 		let all_count = db.count("players", "").expect("Failed to count all players")
@@ -756,9 +724,9 @@ func TestSQLiteExists(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 })
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 })
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
 
 		// Check if any players exist
 		let any_exist = db.exists("players", "").expect("Failed to check if any players exist")
@@ -839,8 +807,8 @@ func TestSQLiteEmptyWhereClause(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 })
+		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
+		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 }).expect("Failed to insert player")
 
 		// Get all players using empty where clause
 		let all_players = db.get<Player>("players", "").expect("Failed to get all players")
