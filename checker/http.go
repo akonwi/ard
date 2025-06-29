@@ -87,6 +87,10 @@ type HttpPkg struct{}
 func (pkg HttpPkg) Path() string {
 	return "ard/http"
 }
+
+func (pkg HttpPkg) Program() *Program {
+	return nil
+}
 func (pkg HttpPkg) Get(name string) symbol {
 	switch name {
 	case "Request":

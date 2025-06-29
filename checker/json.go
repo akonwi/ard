@@ -6,6 +6,10 @@ type JsonPkg struct {
 func (pkg JsonPkg) Path() string {
 	return "ard/json"
 }
+
+func (pkg JsonPkg) Program() *Program {
+	return nil
+}
 func (pkg JsonPkg) Get(name string) symbol {
 	switch name {
 	case "encode":

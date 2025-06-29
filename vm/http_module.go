@@ -18,6 +18,10 @@ func (m *HTTPModule) Path() string {
 	return "ard/http"
 }
 
+func (m *HTTPModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "serve":

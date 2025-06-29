@@ -13,6 +13,10 @@ func (m *ResultModule) Path() string {
 	return "ard/result"
 }
 
+func (m *ResultModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *ResultModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "ok", "err":

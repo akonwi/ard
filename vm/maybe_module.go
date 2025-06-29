@@ -13,6 +13,10 @@ func (m *MaybeModule) Path() string {
 	return "ard/maybe"
 }
 
+func (m *MaybeModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "none":

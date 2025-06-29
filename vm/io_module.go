@@ -15,6 +15,10 @@ func (m *IOModule) Path() string {
 	return "ard/io"
 }
 
+func (m *IOModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "print":

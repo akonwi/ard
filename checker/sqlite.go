@@ -64,6 +64,10 @@ func (pkg SQLitePkg) Path() string {
 	return "ard/sqlite"
 }
 
+func (pkg SQLitePkg) Program() *Program {
+	return nil
+}
+
 func (pkg SQLitePkg) Get(name string) symbol {
 	switch name {
 	case "Database":

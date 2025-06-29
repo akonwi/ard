@@ -45,7 +45,8 @@ func run(t *testing.T, tests []test) {
 			if err != nil {
 				t.Fatalf("Error parsing input: %v", err)
 			}
-			program, _, diagnostics := checker.Check(ast, nil, "test.ard")
+			module, diagnostics := checker.Check(ast, nil, "test.ard")
+			program := module.Program()
 			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {
 				if diff := cmp.Diff(tt.diagnostics, diagnostics, compareOptions); diff != "" {
 					t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)

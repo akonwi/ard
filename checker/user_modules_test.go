@@ -118,10 +118,11 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	program, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}
+	program := module.Program()
 
 	// Should have imported the utils module
 	if len(program.Imports) != 1 {
@@ -194,10 +195,11 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	program, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}
+	program := module.Program()
 
 	// Should have imported the math module
 	if len(program.Imports) != 1 {
@@ -271,7 +273,7 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	_, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	_, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) == 0 {
 		t.Error("Expected error when accessing private function")
 	}
@@ -328,10 +330,11 @@ fn func1() Int {
 		t.Fatal(err)
 	}
 
-	program1, _, diagnostics1 := checker.Check(astTree1, resolver, "main1.ard")
+	module1, diagnostics1 := checker.Check(astTree1, resolver, "main1.ard")
 	if len(diagnostics1) > 0 {
 		t.Fatalf("Unexpected diagnostics in first check: %v", diagnostics1)
 	}
+	program1 := module1.Program()
 
 	// Second import of the same module - should use cache
 	content2 := `use test_project/shared
@@ -344,10 +347,11 @@ fn func2() Int {
 		t.Fatal(err)
 	}
 
-	program2, _, diagnostics2 := checker.Check(astTree2, resolver, "main2.ard")
+	module2, diagnostics2 := checker.Check(astTree2, resolver, "main2.ard")
 	if len(diagnostics2) > 0 {
 		t.Fatalf("Unexpected diagnostics in second check: %v", diagnostics2)
 	}
+	program2 := module2.Program()
 
 	// Both should have the shared module imported
 	if len(program1.Imports) != 1 || len(program2.Imports) != 1 {
@@ -355,10 +359,10 @@ fn func2() Int {
 	}
 
 	// The module instances should be the same (cached)
-	module1 := program1.Imports["shared"]
-	module2 := program2.Imports["shared"]
+	importedModule1 := program1.Imports["shared"]
+	importedModule2 := program2.Imports["shared"]
 
-	if module1 != module2 {
+	if importedModule1 != importedModule2 {
 		t.Error("Expected modules to be the same instance (cached)")
 	}
 }
@@ -408,7 +412,7 @@ func TestUserModuleErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, _, diagnostics := checker.Check(astTree, resolver, "main.ard")
+			_, diagnostics := checker.Check(astTree, resolver, "main.ard")
 			if len(diagnostics) == 0 {
 				t.Error("Expected error but got none")
 				return
@@ -851,7 +855,7 @@ struct PrivateStruct {
 		t.Fatal(err)
 	}
 
-	_, module, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
 	}

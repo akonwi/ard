@@ -16,6 +16,10 @@ func (m *JSONModule) Path() string {
 	return "ard/json"
 }
 
+func (m *JSONModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "encode":

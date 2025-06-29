@@ -54,7 +54,7 @@ func main() {
 			relPath = inputPath // fallback to absolute path
 		}
 
-		program, _, diagnostics := checker.Check(ast, moduleResolver, relPath)
+		module, diagnostics := checker.Check(ast, moduleResolver, relPath)
 		if len(diagnostics) > 0 {
 			for _, diagnostic := range diagnostics {
 				fmt.Println(diagnostic)
@@ -62,7 +62,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err := vm.Run(program); err != nil {
+		if err := vm.Run(module.Program()); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}

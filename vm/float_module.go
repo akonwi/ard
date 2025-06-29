@@ -14,6 +14,10 @@ func (m *FloatModule) Path() string {
 	return "ard/float"
 }
 
+func (m *FloatModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "from_int":

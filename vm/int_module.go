@@ -14,6 +14,10 @@ func (m *IntModule) Path() string {
 	return "ard/int"
 }
 
+func (m *IntModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "from_str":

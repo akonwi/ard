@@ -33,6 +33,10 @@ type FloatPkg struct{}
 func (pkg FloatPkg) Path() string {
 	return "ard/float"
 }
+
+func (pkg FloatPkg) Program() *Program {
+	return nil
+}
 func (pkg FloatPkg) Get(name string) symbol {
 	switch name {
 	case "from_int":
@@ -57,6 +61,10 @@ type FsPkg struct{}
 
 func (pkg FsPkg) Path() string {
 	return "ard/fs"
+}
+
+func (pkg FsPkg) Program() *Program {
+	return nil
 }
 func (pkg FsPkg) Get(name string) symbol {
 	switch name {
@@ -107,6 +115,10 @@ type IntPkg struct{}
 func (pkg IntPkg) Path() string {
 	return "ard/int"
 }
+
+func (pkg IntPkg) Program() *Program {
+	return nil
+}
 func (pkg IntPkg) Get(name string) symbol {
 	switch name {
 	case "from_str":
@@ -125,6 +137,10 @@ type IoPkg struct{}
 
 func (pkg IoPkg) Path() string {
 	return "ard/io"
+}
+
+func (pkg IoPkg) Program() *Program {
+	return nil
 }
 func (pkg IoPkg) Get(name string) symbol {
 	switch name {
@@ -151,6 +167,10 @@ type MaybePkg struct{}
 
 func (pkg MaybePkg) Path() string {
 	return "ard/maybe"
+}
+
+func (pkg MaybePkg) Program() *Program {
+	return nil
 }
 func (pkg MaybePkg) Get(name string) symbol {
 	switch name {
@@ -180,6 +200,10 @@ type ResultPkg struct {
 
 func (pkg ResultPkg) Path() string {
 	return "ard/result"
+}
+
+func (pkg ResultPkg) Program() *Program {
+	return nil
 }
 func (pkg ResultPkg) Get(name string) symbol {
 	switch name {
@@ -230,6 +254,11 @@ var strMod = StrMod{
 func (pkg StrMod) Path() string {
 	return "ard/string"
 }
+
+func (pkg StrMod) Program() *Program {
+	return nil
+}
+
 func (pkg StrMod) Get(name string) symbol {
 	return pkg.symbols[name]
 }

@@ -18,6 +18,7 @@ type Program struct {
 type Module interface {
 	Path() string
 	Get(name string) symbol
+	Program() *Program
 }
 
 type DiagnosticKind string
@@ -55,7 +56,7 @@ type checker struct {
 	filePath    string
 }
 
-func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (*Program, Module, []Diagnostic) {
+func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil), filePath: filePath}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -105,7 +106,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 			}
 
 			// Type-check the imported module
-			_, userModule, diagnostics := Check(ast, moduleResolver, imp.Path+".ard")
+			userModule, diagnostics := Check(ast, moduleResolver, imp.Path+".ard")
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
@@ -139,7 +140,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		delete(c.program.Imports, alias)
 		c.program.Imports[mod.Path()] = mod
 	}
-	return c.program, userModule, c.diagnostics
+	return userModule, c.diagnostics
 }
 
 func (c *checker) addError(msg string, location ast.Location) {

@@ -23,6 +23,10 @@ func (m *SQLiteModule) Path() string {
 	return "ard/sqlite"
 }
 
+func (m *SQLiteModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "open":

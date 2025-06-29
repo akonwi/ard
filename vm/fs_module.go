@@ -14,6 +14,10 @@ func (m *FSModule) Path() string {
 	return "ard/fs"
 }
 
+func (m *FSModule) Program() *checker.Program {
+	return nil
+}
+
 func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "append":
