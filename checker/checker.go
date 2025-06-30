@@ -1108,35 +1108,28 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 	values[0] = firstValue
 
 	// Check that all entries have consistent types
-	hasError := false
 	for i := 1; i < len(expr.Entries); i++ {
 		key := c.checkExpr(expr.Entries[i].Key)
 		if key == nil {
-			hasError = true
+			keyType = Void
 			continue
 		}
 		if !keyType.equal(key.Type()) {
 			c.addError(fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type()), expr.Entries[i].Key.GetLocation())
-			hasError = true
 			continue
 		}
 		keys[i] = key
 
 		value := c.checkExpr(expr.Entries[i].Value)
 		if value == nil {
-			hasError = true
+			valueType = Void
 			continue
 		}
 		if !valueType.equal(value.Type()) {
 			c.addError(fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type()), expr.Entries[i].Value.GetLocation())
-			hasError = true
 			continue
 		}
 		values[i] = value
-	}
-
-	if hasError {
-		return nil
 	}
 
 	// Create and return the map
