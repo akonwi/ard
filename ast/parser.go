@@ -415,7 +415,12 @@ func (p *parser) structDef(public bool) (Statement, error) {
 	}
 	p.consume(left_brace, "Expected '{'")
 	p.match(new_line)
-	for !p.match(right_brace) {
+	for !p.check(right_brace) {
+		// Skip single-line comments and newlines
+		if p.match(comment, new_line) {
+			continue
+		}
+		
 		fieldName := p.consumeVariableName("Expected field name")
 		p.consume(colon, "Expected ':'")
 		fieldType := p.parseType()
@@ -426,6 +431,7 @@ func (p *parser) structDef(public bool) (Statement, error) {
 		p.match(comma)
 		p.match(new_line)
 	}
+	p.consume(right_brace, "Expected '}'")	
 
 	return structDef, nil
 }

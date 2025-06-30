@@ -1,7 +1,5 @@
 ## TODO
 
-- [ ] parser errors should report correct file
-- [ ] allow comments inside struct def
 - [ ] when a diagnostic error is encountered, don't skip current statement
 - [ ] omitting Maybe fields in structs will default to `None`
 - [ ] calling functions with named arguments
