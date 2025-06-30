@@ -54,6 +54,7 @@ type checker struct {
 	scope       *scope
 	program     *Program
 	filePath    string
+	halted      bool
 }
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
@@ -129,6 +130,9 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 	for i := range input.Statements {
 		if stmt := c.checkStmt(&input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
+		}
+		if c.halted {
+			break
 		}
 	}
 
@@ -955,7 +959,8 @@ func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 
 	if len(expr.Items) == 0 {
 		c.addError("Empty lists need an explicit type", expr.GetLocation())
-		return nil
+		c.halted = true
+		return &ListLiteral{_type: MakeList(Void), Elements: []Expression{}}
 	}
 
 	hasError := false
@@ -1009,6 +1014,9 @@ func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 		if stmt := c.checkStmt(&stmts[i]); stmt != nil {
 			block.Stmts[i] = *stmt
 		}
+		if c.halted {
+			break
+		}
 	}
 	return block
 }
@@ -1032,6 +1040,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 		} else {
 			// Empty map without a declared type is an error
 			c.addError("Empty maps need an explicit type", expr.GetLocation())
+			c.halted = true
 			return &MapLiteral{_type: MakeMap(Void, Void), Keys: []Expression{}, Values: []Expression{}}
 		}
 	}
