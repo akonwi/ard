@@ -36,7 +36,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		ast, err := ast.Parse(sourceCode)
+		ast, err := ast.Parse(sourceCode, inputPath)
 		if err != nil {
 			log.Fatalf("Error parsing code: %v\n", err)
 			return

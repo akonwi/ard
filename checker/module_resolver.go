@@ -157,7 +157,7 @@ func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
 	}
 
 	// Parse the module
-	program, err := ast.Parse(sourceCode)
+	program, err := ast.Parse(sourceCode, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse module %s: %w", filePath, err)
 	}

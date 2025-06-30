@@ -55,7 +55,7 @@ type test struct {
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ast, err := Parse([]byte(tt.input))
+			ast, err := Parse([]byte(tt.input), "test.ard")
 			if err != nil {
 				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
 			}

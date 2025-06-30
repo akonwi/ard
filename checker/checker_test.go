@@ -41,7 +41,7 @@ var compareOptions = cmp.Options{
 func run(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ast, err := ast.Parse([]byte(tt.input))
+			ast, err := ast.Parse([]byte(tt.input), "test.ard")
 			if err != nil {
 				t.Fatalf("Error parsing input: %v", err)
 			}

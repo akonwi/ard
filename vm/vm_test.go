@@ -20,7 +20,7 @@ type test struct {
 
 func run(t *testing.T, input string) any {
 	t.Helper()
-	tree, err := ast.Parse([]byte(input))
+	tree, err := ast.Parse([]byte(input), "test.ard")
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
@@ -39,7 +39,7 @@ func run(t *testing.T, input string) any {
 
 func expectPanic(t *testing.T, substring, input string) {
 	t.Helper()
-	tree, err := ast.Parse([]byte(input))
+	tree, err := ast.Parse([]byte(input), "test.ard")
 	if err != nil {
 		t.Fatalf("Error parsing program: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestUserModuleVMIntegration(t *testing.T) {
 math::add(10, 20)`
 
 	// Parse and check
-	astTree, err := ast.Parse([]byte(mainContent))
+	astTree, err := ast.Parse([]byte(mainContent), "main.ard")
 	if err != nil {
 		t.Fatal(err)
 	}

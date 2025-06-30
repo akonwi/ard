@@ -12,19 +12,21 @@ type node struct {
 }
 
 type parser struct {
-	tokens []token
-	index  int
+	tokens   []token
+	index    int
+	fileName string
 }
 
-func Parse(source []byte) (*Program, error) {
-	p := new(NewLexer(source).Scan())
+func Parse(source []byte, fileName string) (*Program, error) {
+	p := new(NewLexer(source).Scan(), fileName)
 	return p.parse()
 }
 
-func new(tokens []token) *parser {
+func new(tokens []token, fileName string) *parser {
 	return &parser{
-		tokens: tokens,
-		index:  0,
+		tokens:   tokens,
+		index:    0,
+		fileName: fileName,
 	}
 }
 
@@ -376,7 +378,7 @@ func (p *parser) typeUnion(public bool) (Statement, error) {
 	p.consume(equal, "Expected '=' after type name")
 
 	if p.check(new_line) {
-		return nil, fmt.Errorf("Expected type definition after '='")
+		return nil, p.makeError(p.peek(), "Expected type definition after '='")
 	}
 
 	hasMore := true
@@ -455,7 +457,7 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		}
 		fn, ok := stmt.(*FunctionDeclaration)
 		if !ok {
-			return nil, fmt.Errorf("Expected function declaration in impl block")
+			return nil, p.makeError(p.peek(), "Expected function declaration in impl block")
 		}
 		impl.Methods = append(impl.Methods, *fn)
 	}
@@ -586,7 +588,7 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		}
 		fn, ok := stmt.(*FunctionDeclaration)
 		if !ok {
-			return nil, fmt.Errorf("Expected function declaration in trait implementation block")
+			return nil, p.makeError(p.peek(), "Expected function declaration in trait implementation block")
 		}
 		traitImpl.Methods = append(traitImpl.Methods, *fn)
 	}
@@ -739,10 +741,10 @@ func (p *parser) parseType() DeclaredType {
 			if p.match(bang) {
 				// Parse the error type
 				errType := p.parseType()
-				
+
 				// Check for nullable
 				nullable := p.match(question_mark)
-				
+
 				// Create the value type based on the identifier
 				var valType DeclaredType
 				if len(id.text) > 0 && id.text[0] == '$' {
@@ -767,7 +769,7 @@ func (p *parser) parseType() DeclaredType {
 						}
 					}
 				}
-				
+
 				// Return ResultType using sugar syntax
 				return &ResultType{
 					Val:      valType,
@@ -979,7 +981,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				// For anonymous functions, allow simple parameter names without types
 				paramType = &StringType{} // Default to string type for now
 			} else {
-				return nil, fmt.Errorf("Expected ':' after parameter name")
+				return nil, p.makeError(p.peek(), "Expected ':' after parameter name")
 			}
 
 			params = append(params, Parameter{
@@ -1539,7 +1541,7 @@ func (p *parser) primary() (Expression, error) {
 		}, nil
 	default:
 		peek := p.peek()
-		panic(fmt.Errorf("unmatched primary expression at %d,%d: %s", peek.line, peek.column, peek.kind))
+		panic(p.makeError(peek, fmt.Sprintf("unmatched primary expression: %s", peek.kind)))
 	}
 }
 
@@ -1644,7 +1646,7 @@ func (p *parser) advance() token {
 /* consume a token that can be used as a variable name (identifier or keyword) */
 func (p *parser) consumeVariableName(message string) token {
 	if p.isAtEnd() {
-		panic(fmt.Errorf("Unexpected end of input"))
+		panic(p.makeEOFError())
 	}
 
 	current := p.peek()
@@ -1658,8 +1660,7 @@ func (p *parser) consumeVariableName(message string) token {
 		return token
 	}
 
-	panic(fmt.Errorf("%s at line %d, column %d. (Actual: %s)",
-		message, p.tokens[p.index].line, p.tokens[p.index].column, current.kind))
+	panic(p.makeErrorWithActual(current, message, current.kind))
 }
 
 /* check if a token kind is an allowed keyword */
@@ -1675,14 +1676,26 @@ func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 /* assert that the current token is the provided kind and return it */
 func (p *parser) consume(kind kind, message string) token {
 	if p.isAtEnd() {
-		panic(fmt.Errorf("Unexpected end of input"))
+		panic(p.makeEOFError())
 	}
 	if p.peek().kind == kind {
 		return p.advance()
 	}
 
-	panic(fmt.Errorf("%s at line %d, column %d. (Actual: %s)",
-		message, p.tokens[p.index].line, p.tokens[p.index].column, p.peek().kind))
+	panic(p.makeErrorWithActual(p.peek(), message, p.peek().kind))
+}
+
+/* Error creation helpers */
+func (p *parser) makeError(at *token, msg string) error {
+	return fmt.Errorf("%s:%d:%d: %s", p.fileName, at.line, at.column, msg)
+}
+
+func (p *parser) makeErrorWithActual(at *token, msg string, actual kind) error {
+	return fmt.Errorf("%s:%d:%d: %s (Actual: %s)", p.fileName, at.line, at.column, msg, actual)
+}
+
+func (p *parser) makeEOFError() error {
+	return fmt.Errorf("%s: Unexpected end of input", p.fileName)
 }
 
 /* conditionally advance if the current token is one of those provided */

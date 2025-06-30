@@ -113,7 +113,7 @@ func TestUserModuleImports(t *testing.T) {
 fn main() Int {
     utils::helper()
 }`
-	astTree, err := ast.Parse([]byte(input))
+	astTree, err := ast.Parse([]byte(input), "main.ard")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ fn main() Int {
     sum + product
 }`
 
-	astTree, err := ast.Parse([]byte(mainContent))
+	astTree, err := ast.Parse([]byte(mainContent), "main.ard")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ fn main() Int {
     utils::private_helper()
 }`
 
-	astTree, err := ast.Parse([]byte(mainContent))
+	astTree, err := ast.Parse([]byte(mainContent), "main.ard")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ fn func1() Int {
     shared::shared_function()
 }`
 
-	astTree1, err := ast.Parse([]byte(content1))
+	astTree1, err := ast.Parse([]byte(content1), "main1.ard")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ fn func2() Int {
     shared::shared_function() + 50
 }`
 
-	astTree2, err := ast.Parse([]byte(content2))
+	astTree2, err := ast.Parse([]byte(content2), "main2.ard")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestUserModuleErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			astTree, err := ast.Parse([]byte(tt.input))
+			astTree, err := ast.Parse([]byte(tt.input), "main.ard")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -845,7 +845,7 @@ struct PrivateStruct {
 `
 
 	// Parse and check the module
-	astTree, err := ast.Parse([]byte(moduleContent))
+	astTree, err := ast.Parse([]byte(moduleContent), "main.ard")
 	if err != nil {
 		t.Fatal(err)
 	}
