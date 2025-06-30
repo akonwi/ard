@@ -1,6 +1,8 @@
 ## TODO
 
-- [ ] when a diagnostic error is encountered, don't skip current statement
+- [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
+  - halt (c.halted = true)
+  - return a complete node with void where necessary
 - [ ] omitting Maybe fields in structs will default to `None`
 - [ ] calling functions with named arguments
   ```ard
