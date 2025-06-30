@@ -1032,7 +1032,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 		} else {
 			// Empty map without a declared type is an error
 			c.addError("Empty maps need an explicit type", expr.GetLocation())
-			return nil
+			return &MapLiteral{_type: MakeMap(Void, Void), Keys: []Expression{}, Values: []Expression{}}
 		}
 	}
 

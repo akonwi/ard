@@ -420,7 +420,7 @@ func (p *parser) structDef(public bool) (Statement, error) {
 		if p.match(comment, new_line) {
 			continue
 		}
-		
+
 		fieldName := p.consumeVariableName("Expected field name")
 		p.consume(colon, "Expected ':'")
 		fieldType := p.parseType()
@@ -431,7 +431,7 @@ func (p *parser) structDef(public bool) (Statement, error) {
 		p.match(comma)
 		p.match(new_line)
 	}
-	p.consume(right_brace, "Expected '}'")	
+	p.consume(right_brace, "Expected '}'")
 
 	return structDef, nil
 }
@@ -1578,12 +1578,16 @@ func (p *parser) list() (Expression, error) {
 }
 
 func (p *parser) map_() (Expression, error) {
+	startToken := p.previous()
+	node := &MapLiteral{
+		Location: startToken.getLocation(),
+		Entries:  []MapEntry{},
+	}
 	if p.match(colon) {
 		p.consume(right_bracket, "Expected ']' after ':' in empty map")
-		return &MapLiteral{Entries: []MapEntry{}}, nil
+		return node, nil
 	}
 
-	entries := []MapEntry{}
 	for !p.match(right_bracket) {
 		key, err := p.primary()
 		if err != nil {
@@ -1594,16 +1598,15 @@ func (p *parser) map_() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, MapEntry{
+		node.Entries = append(node.Entries, MapEntry{
 			Key:   key,
 			Value: val,
 		})
 		p.match(comma)
 		p.match(new_line)
 	}
-	return &MapLiteral{
-		Entries: entries,
-	}, nil
+
+	return node, nil
 }
 
 func (p *parser) string() (Expression, error) {
