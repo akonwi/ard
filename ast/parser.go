@@ -1331,6 +1331,8 @@ func (p *parser) memberAccess() (Expression, error) {
 					Target: expr,
 					Method: *prop,
 				}
+				// match line break for multi-line chaining
+				p.match(new_line)
 			}
 		} else {
 			// Check for type arguments in static function calls
@@ -1466,6 +1468,7 @@ func (p *parser) call() (Expression, error) {
 	}
 
 	if p.match(left_paren) {
+		p.match(new_line)
 		// Regular function call without type arguments
 		args := []Expression{}
 		for !p.check(right_paren) {
@@ -1475,6 +1478,7 @@ func (p *parser) call() (Expression, error) {
 			}
 			args = append(args, arg)
 			p.match(comma)
+			p.match(new_line)
 		}
 		p.consume(right_paren, "Unclosed function call")
 		return &FunctionCall{
@@ -1710,6 +1714,15 @@ func (p *parser) makeEOFError() error {
 /* conditionally advance if the current token is one of those provided */
 func (p *parser) match(kinds ...kind) bool {
 	if slices.Contains(kinds, p.peek().kind) {
+		p.advance()
+		return true
+	}
+	return false
+}
+
+func (p *parser) match2(kinds ...kind) bool {
+	if slices.Contains(kinds, p.peek().kind) && slices.Contains(kinds, p.peek2().kind) {
+		p.advance()
 		p.advance()
 		return true
 	}

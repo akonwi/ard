@@ -275,6 +275,101 @@ func TestFunctionCalls(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Calls that break after opening paren lines",
+			input: `
+				fn add(x: Int, y: Int) Int { x + y }
+				add(
+					1, 2)`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "add",
+						Parameters: []Parameter{
+							{Name: "x", Type: &IntType{}},
+							{Name: "y", Type: &IntType{}},
+						},
+						ReturnType: &IntType{},
+						Body: []Statement{
+							&BinaryExpression{
+								Left:     &Identifier{Name: "x"},
+								Operator: Plus,
+								Right:    &Identifier{Name: "y"},
+							},
+						},
+					},
+					&FunctionCall{
+						Name: "add",
+						Args: []Expression{
+							&NumLiteral{Value: "1"},
+							&NumLiteral{Value: "2"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Calls that span multiple lines",
+			input: `
+				fn add(x: Int, y: Int) Int { x + y }
+				add(
+					1,
+					2
+				)`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "add",
+						Parameters: []Parameter{
+							{Name: "x", Type: &IntType{}},
+							{Name: "y", Type: &IntType{}},
+						},
+						ReturnType: &IntType{},
+						Body: []Statement{
+							&BinaryExpression{
+								Left:     &Identifier{Name: "x"},
+								Operator: Plus,
+								Right:    &Identifier{Name: "y"},
+							},
+						},
+					},
+					&FunctionCall{
+						Name: "add",
+						Args: []Expression{
+							&NumLiteral{Value: "1"},
+							&NumLiteral{Value: "2"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Chaining calls across lines",
+			input: `
+			 	foo.bar()
+					.baz()
+				`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&InstanceMethod{
+						Target: &InstanceMethod{
+							Target: &Identifier{Name: "foo"},
+							Method: FunctionCall{
+								Name: "bar",
+								Args: []Expression{},
+							},
+						},
+						Method: FunctionCall{
+							Name: "baz",
+							Args: []Expression{},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	runTests(t, tests)
