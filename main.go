@@ -21,6 +21,23 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "check":
+		{
+			buildCmd.Parse(os.Args[2:])
+
+			if buildCmd.NArg() < 1 {
+				fmt.Println("Expected filepath argument")
+				os.Exit(1)
+			}
+
+			inputPath := buildCmd.Arg(0)
+			if !check(inputPath) {
+				os.Exit(1)
+			}
+
+			fmt.Println("✅ No errors found")
+			os.Exit(0)
+		}
 	case "run":
 		buildCmd.Parse(os.Args[2:])
 
@@ -70,4 +87,40 @@ func main() {
 	default:
 		log.Fatalf("Unknown command: %s\n", os.Args[1])
 	}
+}
+
+func check(inputPath string) bool {
+	sourceCode, err := os.ReadFile(inputPath)
+	if err != nil {
+		fmt.Printf("Error reading file %s - %v\n", inputPath, err)
+		return false
+	}
+
+	ast, err := ast.Parse(sourceCode, inputPath)
+	if err != nil {
+		log.Fatalf("Error parsing code: %v\n", err)
+		return false
+	}
+
+	workingDir := filepath.Dir(inputPath)
+	moduleResolver, err := checker.NewModuleResolver(workingDir)
+	if err != nil {
+		log.Fatalf("Error initializing module resolver: %v\n", err)
+	}
+
+	// Get relative path for diagnostics
+	relPath, err := filepath.Rel(workingDir, inputPath)
+	if err != nil {
+		relPath = inputPath // fallback to absolute path
+	}
+
+	_, diagnostics := checker.Check(ast, moduleResolver, relPath)
+	if len(diagnostics) > 0 {
+		for _, diagnostic := range diagnostics {
+			fmt.Println(diagnostic)
+		}
+		return false
+	}
+
+	return true
 }
