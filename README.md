@@ -380,18 +380,7 @@ greet("John") => (msg) {
 
 ## Error Handling
 
-idea: `else` keyword for fallbacks or as a hook on error
-
-### Using `try` and `try?`
-
-The `try` keyword is used to propagate error results up the call stack:
-
-```ard
-fn performOperation() Int!Str {
-  let result = try riskyOperation()
-  200
-}
-```
+> is this better than having built-in methods on the Result type?
 
 The `try?` operator can be used to convert an error result to a maybe:
 
