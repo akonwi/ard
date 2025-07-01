@@ -581,7 +581,7 @@ type FunctionDef struct {
 	ReturnType Type
 	Mutates    bool
 	Body       *Block
-	Public     bool
+	Private    bool
 }
 
 func (f FunctionDef) String() string {
@@ -693,7 +693,7 @@ func (p *ModuleStaticFunctionCall) Type() Type {
 type Enum struct {
 	Name     string
 	Variants []string
-	public   bool
+	private  bool
 }
 
 func (e Enum) variant(name string) int8 {
@@ -827,7 +827,7 @@ type StructDef struct {
 	Fields  map[string]Type
 	Self    string
 	Traits  []*Trait
-	Public  bool
+	Private bool
 	Statics map[string]*FunctionDef
 }
 

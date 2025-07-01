@@ -21,13 +21,13 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
-			name:  "Public function",
-			input: `pub fn empty() {}`,
+			name:  "Private function",
+			input: `private fn empty() {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&FunctionDeclaration{
-						Public:     true,
+						Private:    true,
 						Name:       "empty",
 						Parameters: []Parameter{},
 						Body:       []Statement{},

@@ -149,9 +149,9 @@ func (v BooleanType) IsNullable() bool {
 
 type TypeDeclaration struct {
 	Location
-	Name   Identifier
-	Type   []DeclaredType
-	Public bool
+	Name    Identifier
+	Type    []DeclaredType
+	Private bool
 }
 
 func (t TypeDeclaration) String() string {
@@ -192,7 +192,7 @@ type CustomType struct {
 	Name     string
 	Type     StaticProperty
 	nullable bool
-	Public   bool
+	Private  bool
 }
 
 func (u CustomType) GetName() string {
@@ -275,7 +275,7 @@ type FunctionDeclaration struct {
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
-	Public     bool
+	Private    bool
 }
 
 func (f FunctionDeclaration) String() string {
@@ -304,9 +304,9 @@ func (a AnonymousFunction) String() string {
 
 type StructDefinition struct {
 	Location
-	Name   Identifier
-	Fields []StructField
-	Public bool
+	Name    Identifier
+	Fields  []StructField
+	Private bool
 }
 
 type StructField struct {
@@ -328,7 +328,7 @@ type TraitDefinition struct {
 	Location
 	Name    Identifier
 	Methods []FunctionDeclaration
-	Public  bool
+	Private bool
 }
 
 type TraitImplementation struct {
@@ -370,7 +370,7 @@ type EnumDefinition struct {
 	Location
 	Name     string
 	Variants []string
-	Public   bool
+	Private  bool
 }
 
 func (e EnumDefinition) String() string {

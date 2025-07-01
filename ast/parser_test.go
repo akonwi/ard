@@ -448,13 +448,13 @@ func TestTypeUnion(t *testing.T) {
 	runTests(t, []test{
 		{
 			name:  "Type union",
-			input: `pub type Value = Int | Bool`,
+			input: `private type Value = Int | Bool`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&TypeDeclaration{
-						Public: true,
-						Name:   Identifier{Name: "Value"},
+						Private: true,
+						Name:    Identifier{Name: "Value"},
 						Type:   []DeclaredType{&IntType{}, &BooleanType{}},
 					},
 				},

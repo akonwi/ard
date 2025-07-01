@@ -576,7 +576,7 @@ func TestUserModuleVMIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mathContent := `pub fn add(a: Int, b: Int) Int {
+	mathContent := `fn add(a: Int, b: Int) Int {
     a + b
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte(mathContent), 0644)

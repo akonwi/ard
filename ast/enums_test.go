@@ -32,15 +32,15 @@ func TestEnumDefinitions(t *testing.T) {
 			},
 		},
 		{
-			name:  "Public enum",
-			input: `pub ` + colorCode,
+			name:  "Private enum",
+			input: `private ` + colorCode,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&EnumDefinition{
 						Name:     "Color",
 						Variants: []string{"Red", "Green", "Yellow"},
-						Public:   true,
+						Private:  true,
 					},
 				},
 			},

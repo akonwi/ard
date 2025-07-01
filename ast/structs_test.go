@@ -37,15 +37,15 @@ func TestStructDefinitions(t *testing.T) {
 			},
 		},
 		{
-			name:  "A public struct",
-			input: `pub struct Box {}`,
+			name:  "A private struct",
+			input: `private struct Box {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&StructDefinition{
-						Public: true,
-						Name:   Identifier{Name: "Box"},
-						Fields: []StructField{},
+						Private: true,
+						Name:    Identifier{Name: "Box"},
+						Fields:  []StructField{},
 					},
 				},
 			},
@@ -68,7 +68,7 @@ func TestStructDefinitions(t *testing.T) {
 							@height * @width
 						}
 
-						pub fn mut set_height(h: Int) {}
+						private fn mut set_height(h: Int) {}
 					}`,
 			output: Program{
 				Imports: []Import{},
@@ -97,7 +97,7 @@ func TestStructDefinitions(t *testing.T) {
 								},
 							},
 							{
-								Public:  true,
+								Private: true,
 								Name:    "set_height",
 								Mutates: true,
 								Parameters: []Parameter{

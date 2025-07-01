@@ -1429,15 +1429,15 @@ func TestFunctions(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-						Expr: &checker.FunctionDef{
-							Name:       "noop",
-							Parameters: []checker.Parameter{},
-							ReturnType: checker.Void,
-							Body: &checker.Block{
-								Stmts: []checker.Statement{},
-							},
-						},
+					Expr: &checker.FunctionDef{
+					Name:       "noop",
+					Parameters: []checker.Parameter{},
+					ReturnType: checker.Void,
+					Body: &checker.Block{
+					Stmts: []checker.Statement{},
 					},
+					 },
+				},
 					{
 						Expr: &checker.FunctionCall{
 							Name: "noop",

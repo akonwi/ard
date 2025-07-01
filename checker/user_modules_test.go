@@ -26,7 +26,7 @@ func TestUserModulePathResolution(t *testing.T) {
 	}
 
 	// Create a simple module file
-	moduleContent := `pub fn helper() Int { 42 }`
+	moduleContent := `fn helper() Int { 42 }`
 	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(moduleContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestUserModulePathResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nestedContent := `pub fn add(a: Int, b: Int) Int { a + b }`
+	nestedContent := `fn add(a: Int, b: Int) Int { a + b }`
 	err = os.WriteFile(filepath.Join(mathDir, "operations.ard"), []byte(nestedContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func TestUserModuleImports(t *testing.T) {
 	}
 
 	// Create a simple module file
-	moduleContent := `pub fn helper() Int { 42 }`
+	moduleContent := `fn helper() Int { 42 }`
 	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(moduleContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -161,15 +161,15 @@ func TestUserModuleSymbolResolution(t *testing.T) {
 	}
 
 	// Create the math module with public and private functions
-	mathContent := `pub fn add(a: Int, b: Int) Int {
+	mathContent := `fn add(a: Int, b: Int) Int {
     a + b
 }
 
-pub fn multiply(x: Int, y: Int) Int {
+fn multiply(x: Int, y: Int) Int {
     x * y
 }
 
-fn private_divide(a: Int, b: Int) Int {
+private fn private_divide(a: Int, b: Int) Int {
     a / b
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte(mathContent), 0644)
@@ -249,7 +249,7 @@ func TestUserModulePrivateAccessError(t *testing.T) {
 	}
 
 	// Create a module with only private functions
-	utilsContent := `fn private_helper() Int {
+	utilsContent := `private fn private_helper() Int {
     42
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(utilsContent), 0644)
@@ -306,7 +306,7 @@ func TestUserModuleCaching(t *testing.T) {
 	}
 
 	// Create the shared module
-	sharedContent := `pub fn shared_function() Int {
+	sharedContent := `fn shared_function() Int {
     100
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "shared.ard"), []byte(sharedContent), 0644)
@@ -441,7 +441,7 @@ func TestModuleResolverWithoutArdToml(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create a module file
-	moduleContent := `pub fn helper() -> Int { 42 }`
+	moduleContent := `fn helper() -> Int { 42 }`
 	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(moduleContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -487,11 +487,11 @@ func TestLoadModule(t *testing.T) {
 	}
 
 	// Create a valid module file
-	moduleContent := `pub fn add(a: Int, b: Int) Int {
+	moduleContent := `fn add(a: Int, b: Int) Int {
 	a + b
 }
 
-fn private_helper() Str {
+private fn private_helper() Str {
 	"helper"
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte(moduleContent), 0644)
@@ -543,9 +543,9 @@ func TestLoadModuleErrors(t *testing.T) {
 	}
 
 	// Create a module with invalid syntax
-	invalidContent := `pub fn broken( Int {  // missing parameter name
+	invalidContent := `fn broken( Int {  // missing parameter name
 	42
-}`
+	}`
 	err = os.WriteFile(filepath.Join(tempDir, "broken.ard"), []byte(invalidContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -610,9 +610,9 @@ func TestModuleAST_Caching(t *testing.T) {
 	}
 
 	// Create a module file
-	moduleContent := `pub fn cached_function() Int {
+	moduleContent := `fn cached_function() Int {
 	42
-}`
+	}`
 	err = os.WriteFile(filepath.Join(tempDir, "cached.ard"), []byte(moduleContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -679,7 +679,7 @@ func TestCircularDependencyDetection(t *testing.T) {
 	// Create module A that imports B
 	moduleA := `use circular_test/module_b
 
-pub fn func_a() Int {
+fn func_a() Int {
 	42
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "module_a.ard"), []byte(moduleA), 0644)
@@ -690,7 +690,7 @@ pub fn func_a() Int {
 	// Create module B that imports A (circular dependency)
 	moduleB := `use circular_test/module_a
 
-pub fn func_b() Int {
+fn func_b() Int {
 	24
 }`
 	err = os.WriteFile(filepath.Join(tempDir, "module_b.ard"), []byte(moduleB), 0644)
@@ -739,11 +739,11 @@ func TestComplexCircularDependency(t *testing.T) {
 	// Create A -> B -> C -> A chain
 	modules := map[string]string{
 		"module_a": `use complex_circular/module_b
-pub fn func_a() Int { 1 }`,
+fn func_a() Int { 1 }`,
 		"module_b": `use complex_circular/module_c
-pub fn func_b() Int { 2 }`,
+fn func_b() Int { 2 }`,
 		"module_c": `use complex_circular/module_a
-pub fn func_c() Int { 3 }`,
+fn func_c() Int { 3 }`,
 	}
 
 	for name, content := range modules {
@@ -789,10 +789,10 @@ func TestNonCircularDependencies(t *testing.T) {
 	// Create valid dependency chain: A -> B -> C (no cycles)
 	modules := map[string]string{
 		"module_a": `use valid_deps/module_b
-pub fn func_a() Int { 1 }`,
+fn func_a() Int { 1 }`,
 		"module_b": `use valid_deps/module_c
-pub fn func_b() Int { 2 }`,
-		"module_c": `pub fn func_c() Int { 3 }`, // No imports
+fn func_b() Int { 2 }`,
+		"module_c": `fn func_c() Int { 3 }`, // No imports
 	}
 
 	for name, content := range modules {
@@ -827,19 +827,19 @@ pub fn func_b() Int { 2 }`,
 func TestSymbolExtraction(t *testing.T) {
 	// Create test module with public and private symbols
 	moduleContent := `
-pub fn public_function() Int {
+fn public_function() Int {
     42
 }
 
-fn private_function() Int {
+private fn private_function() Int {
     24
 }
 
-pub struct PublicStruct {
+struct PublicStruct {
     field: Int
 }
 
-struct PrivateStruct {
+private struct PrivateStruct {
     field: Str
 }
 `
@@ -872,7 +872,7 @@ struct PrivateStruct {
 		t.Error("Expected to find public_function")
 	}
 	if funcDef, ok := publicFunc.(*checker.FunctionDef); ok {
-		if !funcDef.Public {
+		if funcDef.Private {
 			t.Error("Expected public_function to have Public=true")
 		}
 	} else {
@@ -884,7 +884,7 @@ struct PrivateStruct {
 		t.Error("Expected to find PublicStruct")
 	}
 	if structDef, ok := publicStruct.(*checker.StructDef); ok {
-		if !structDef.Public {
+		if structDef.Private {
 			t.Error("Expected PublicStruct to have Public=true")
 		}
 	} else {

@@ -35,20 +35,20 @@ func NewUserModule(filePath string, program *Program, globalScope *scope) *UserM
 	for _, sym := range globalScope.symbols {
 		switch s := sym.(type) {
 		case *FunctionDef:
-			if s.Public {
-				publicSymbols[s.Name] = s
+			if !s.Private {
+			publicSymbols[s.Name] = s
 			}
 		case *StructDef:
-			if s.Public {
-				publicSymbols[s.Name] = s
+			if !s.Private {
+			publicSymbols[s.Name] = s
 			}
 		case *Trait:
-			if s.public {
-				publicSymbols[s.Name] = s
+			if !s.private {
+			publicSymbols[s.Name] = s
 			}
 		case *Enum:
-			if s.public {
-				publicSymbols[s.Name] = s
+			if !s.private {
+			publicSymbols[s.Name] = s
 			}
 		}
 	}

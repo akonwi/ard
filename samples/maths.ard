@@ -1,12 +1,11 @@
 use ard/io
 
-pub fn add(x: Int, y: Int) Int {
-    x + y
+// this is a module just for math functions
+
+fn add(x: Int, y: Int) Int {
+  x + y
 }
 
-pub fn multiply(x: Int, y: Int) Int {
-    x * y
+private fn multiply(x: Int, y: Int) Int {
+  x * y
 }
-
-let result = add(multiply(3, 4), 5)
-io::print("Expected: 17, Got: {result}")

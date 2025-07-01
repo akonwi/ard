@@ -45,19 +45,19 @@ operations::add(1, 2)
 If no `ard.toml` file is present, the project name defaults to the root directory name.
 
 ## Controlling what can be exported
-Just like in Rust or Gleam, every declaration in a module is by default, only accessible within the same file.
-In order to reuse a declaration in another module, the declaration must be preceded with the `pub` keyword to signal that it is "public".
+By default, every declaration in a module is public and accessible from other modules.
+To make a declaration private (only accessible within the same file), it must be preceded with the `private` keyword.
 
 ```ard
-/* this cannot be referenced outside of the current file */
-fn do_here(num: Int) {}
-
 /* this can be called from another file */
-pub fn do_things(with: Int) {
+fn do_things(with: Int) {
   do_here(with)
 }
+
+/* this cannot be referenced outside of the current file */
+private fn do_here(num: Int) {}
 ```
 
 ## Struct fields
-A public struct's fields are always public.
-Its methods are private though and can be made public.
+All struct fields are public by default.
+Methods are also public by default but can be made private with the `private` keyword.

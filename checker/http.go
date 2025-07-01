@@ -19,7 +19,7 @@ var ResponseNew = &FunctionDef{
 	Name:       "new",
 	Parameters: []Parameter{{Name: "status", Type: Int}, {Name: "body", Type: Str}},
 	ReturnType: HttpResponseDef,
-	Public:     true,
+	Private:    false,
 }
 
 var HttpResponseDef = &StructDef{

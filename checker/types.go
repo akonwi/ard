@@ -33,7 +33,7 @@ type Type interface {
 type Trait struct {
 	Name    string
 	methods []FunctionDef
-	public  bool
+	private bool
 }
 
 func (t Trait) String() string {

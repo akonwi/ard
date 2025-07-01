@@ -324,7 +324,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 
 				methods[i] = FunctionDef{
-					Public:     true,
+					Private:    false,
 					Name:       method.Name,
 					Parameters: params,
 					ReturnType: returnType,
@@ -332,7 +332,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			trait := &Trait{
-				public:  s.Public,
+				private: s.Private,
 				Name:    s.Name.Name,
 				methods: methods,
 			}
@@ -869,7 +869,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			enum := &Enum{
-				public:   s.Public,
+				private:  s.Private,
 				Name:     s.Name,
 				Variants: s.Variants,
 			}
@@ -881,7 +881,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			def := &StructDef{
 				Name:    s.Name.Name,
 				Fields:  make(map[string]Type),
-				Public:  s.Public,
+				Private: s.Private,
 				Statics: map[string]*FunctionDef{},
 			}
 			for _, field := range s.Fields {
@@ -3040,7 +3040,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		Parameters: params,
 		ReturnType: returnType,
 		Body:       nil, // Will be set after checking
-		Public:     def.Public,
+		Private:    def.Private,
 	}
 
 	// Add function to scope BEFORE checking body to support recursion

@@ -138,8 +138,8 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.forLoop()
 	}
 
-	if p.check(pub, type_) {
-		p.match(pub)
+	if p.check(private, type_) {
+		p.match(private)
 		p.match(type_)
 		return p.typeUnion(true)
 	}
@@ -147,8 +147,8 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.typeUnion(false)
 	}
 
-	if p.check(pub, enum) {
-		p.match(pub)
+	if p.check(private, enum) {
+		p.match(private)
 		p.match(enum)
 		return p.enumDef(true)
 	}
@@ -156,8 +156,8 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.enumDef(false)
 	}
 
-	if p.check(pub, struct_) {
-		p.match(pub)
+	if p.check(private, struct_) {
+		p.match(private)
 		p.match(struct_)
 		return p.structDef(true)
 	}
@@ -165,8 +165,8 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.structDef(false)
 	}
 
-	if p.check(pub, trait) {
-		p.match(pub)
+	if p.check(private, trait) {
+		p.match(private)
 		p.match(trait)
 		return p.traitDef(true)
 	}
@@ -371,8 +371,8 @@ func (p *parser) forLoop() (Statement, error) {
 	}, nil
 }
 
-func (p *parser) typeUnion(public bool) (Statement, error) {
-	decl := &TypeDeclaration{Public: true, Type: []DeclaredType{}}
+func (p *parser) typeUnion(private bool) (Statement, error) {
+	decl := &TypeDeclaration{Private: private, Type: []DeclaredType{}}
 	nameToken := p.consume(identifier, "Expected name after 'type'")
 	decl.Name = Identifier{Name: nameToken.text}
 	p.consume(equal, "Expected '=' after type name")
@@ -391,9 +391,9 @@ func (p *parser) typeUnion(public bool) (Statement, error) {
 	return decl, nil
 }
 
-func (p *parser) enumDef(public bool) (Statement, error) {
+func (p *parser) enumDef(private bool) (Statement, error) {
 	nameToken := p.consume(identifier, "Expected name after 'enum'")
-	enum := &EnumDefinition{Name: nameToken.text, Public: public}
+	enum := &EnumDefinition{Name: nameToken.text, Private: private}
 	p.consume(left_brace, "Expected '{'")
 	p.match(new_line)
 	for !p.match(right_brace) {
@@ -406,10 +406,10 @@ func (p *parser) enumDef(public bool) (Statement, error) {
 	return enum, nil
 }
 
-func (p *parser) structDef(public bool) (Statement, error) {
+func (p *parser) structDef(private bool) (Statement, error) {
 	nameToken := p.consume(identifier, "Expected name")
 	structDef := &StructDefinition{
-		Public: public,
+		Private: private,
 		Name:   Identifier{Name: nameToken.text},
 		Fields: []StructField{},
 	}
@@ -477,9 +477,9 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 	return impl, nil
 }
 
-func (p *parser) traitDef(public bool) (*TraitDefinition, error) {
+func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
 	traitToken := p.previous()
-	traitDef := &TraitDefinition{Public: public}
+	traitDef := &TraitDefinition{Private: private}
 
 	nameToken := p.consume(identifier, "Expected trait name after 'trait'")
 	traitDef.Name = Identifier{
@@ -956,7 +956,7 @@ func (p *parser) try() (Expression, error) {
 }
 
 func (p *parser) functionDef(asMethod bool) (Statement, error) {
-	public := p.match(pub)
+	private := p.match(private)
 	if p.match(fn) {
 		keyword := p.previous()
 		var name any = ""
@@ -1023,7 +1023,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		}
 
 		fnDef := &FunctionDeclaration{
-			Public:     public,
+			Private:    private,
 			Mutates:    asMethod && mutates,
 			Parameters: params,
 			ReturnType: returnType,
@@ -1539,7 +1539,7 @@ func (p *parser) primary() (Expression, error) {
 	switch tok := p.peek(); tok.kind {
 	// Handle keywords as identifiers when used as variables
 	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
-		break_, match, while_, for_, use, as, in, if_, else_, type_, pub:
+		break_, match, while_, for_, use, as, in, if_, else_, type_, private:
 		tok := p.advance()
 		name := tok.text
 		if name == "" {
@@ -1681,7 +1681,7 @@ func (p *parser) consumeVariableName(message string) token {
 func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 	keywords := []kind{
 		and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
-		break_, while_, for_, use, as, in, if_, else_, type_, pub,
+		break_, while_, for_, use, as, in, if_, else_, type_, private,
 	}
 	return slices.Contains(keywords, k)
 }
