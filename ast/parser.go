@@ -410,8 +410,8 @@ func (p *parser) structDef(private bool) (Statement, error) {
 	nameToken := p.consume(identifier, "Expected name")
 	structDef := &StructDefinition{
 		Private: private,
-		Name:   Identifier{Name: nameToken.text},
-		Fields: []StructField{},
+		Name:    Identifier{Name: nameToken.text},
+		Fields:  []StructField{},
 	}
 	p.consume(left_brace, "Expected '{'")
 	p.match(new_line)
@@ -816,6 +816,7 @@ func (p *parser) parseType() DeclaredType {
 		}
 	}
 	if p.match(left_bracket) {
+		bracket := p.previous()
 		elementType := p.parseType()
 		if p.match(colon) {
 			valElementType := p.parseType()
@@ -829,6 +830,7 @@ func (p *parser) parseType() DeclaredType {
 		p.consume(right_bracket, "Expected ']'")
 
 		return &List{
+			Location: bracket.getLocation(),
 			Element:  elementType,
 			nullable: p.match(question_mark),
 		}
@@ -1556,6 +1558,7 @@ func (p *parser) primary() (Expression, error) {
 }
 
 func (p *parser) list() (Expression, error) {
+	startToken := p.previous()
 	if p.check(colon) {
 		return p.map_()
 	}
@@ -1578,7 +1581,7 @@ func (p *parser) list() (Expression, error) {
 		p.match(comma)
 		p.match(new_line)
 	}
-	return &ListLiteral{Items: items}, nil
+	return &ListLiteral{Items: items, Location: startToken.getLocation()}, nil
 }
 
 func (p *parser) map_() (Expression, error) {
