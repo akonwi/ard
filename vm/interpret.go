@@ -34,9 +34,9 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 		vm.result = *vm.do(statement)
 	}
 	if r, isResult := vm.result.raw.(_result); isResult {
-		return r.raw.raw, nil
+		return r.raw.premarshal(), nil
 	}
-	return vm.result.raw, nil
+	return vm.result.premarshal(), nil
 }
 
 func (vm *VM) callMain() error {

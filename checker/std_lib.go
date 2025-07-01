@@ -3,6 +3,7 @@ package checker
 var prelude = map[string]Module{
 	"Float":  FloatPkg{},
 	"Int":    IntPkg{},
+	"List":   ListPkg{},
 	"Result": ResultPkg{},
 	"Str":    strMod,
 }
@@ -156,6 +157,30 @@ func (pkg IoPkg) Get(name string) symbol {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: MakeResult(Str, Str),
+		}
+	default:
+		return nil
+	}
+}
+
+/* ard/list */
+
+type ListPkg struct{}
+
+func (pkg ListPkg) Path() string {
+	return "ard/list"
+}
+
+func (pkg ListPkg) Program() *Program {
+	return nil
+}
+func (pkg ListPkg) Get(name string) symbol {
+	switch name {
+	case "new":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: &List{&Any{name: "T"}},
 		}
 	default:
 		return nil

@@ -352,6 +352,14 @@ func TestStrApi(t *testing.T) {
 func TestListApi(t *testing.T) {
 	runTests(t, []test{
 		{
+			name: "List::new",
+			input: `mut nums = List::new<Int>()
+			nums.push(1)
+			nums.push(2)
+			nums.size()`,
+			want: 2,
+		},
+		{
 			name:  "List.size",
 			input: "[1,2,3].size()",
 			want:  3,

@@ -1429,15 +1429,15 @@ func TestFunctions(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-					Expr: &checker.FunctionDef{
-					Name:       "noop",
-					Parameters: []checker.Parameter{},
-					ReturnType: checker.Void,
-					Body: &checker.Block{
-					Stmts: []checker.Statement{},
+						Expr: &checker.FunctionDef{
+							Name:       "noop",
+							Parameters: []checker.Parameter{},
+							ReturnType: checker.Void,
+							Body: &checker.Block{
+								Stmts: []checker.Statement{},
+							},
+						},
 					},
-					 },
-				},
 					{
 						Expr: &checker.FunctionCall{
 							Name: "noop",
@@ -1808,8 +1808,11 @@ func TestLists(t *testing.T) {
 			},
 		},
 		{
-			name:  "Empty lists must have declared type",
-			input: `let empty = []`,
+			name: "Empty lists must have declared type",
+			input: `
+			let empty = List::new()
+			let uninferred = []
+			`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Empty lists need an explicit type"},
 			},
