@@ -253,6 +253,14 @@ match maybe_name {
 }
 ```
 
+Maybe types have `is_some()` and `is_none()` methods to peek at presence without consuming the value.
+To access the value, without the need for a `match` expression, use the `or(default: $V)` method, which returns the value if it is present, or the provided default value.
+
+```ard
+let maybe_name: Str? = maybe::some("Joe")
+let name: Str = maybe_name.or("Anonymous")
+```
+
 ### Type Unions
 
 Type unions are used to define a type that can be one of several types.
@@ -303,9 +311,9 @@ Integer ranges are inclusive (`1..10` includes both 1 and 10). When patterns ove
 - **Results**: Match on `ok(value)` or `err` patterns
 
 ### Qualified static paths
-A static path is a sequence of `name::thing`. Ard has a preference for simple paths, i.e. only one `::`.
-In order to reach further into a package for something, make that import explicit with `use name::nested`,
-so that code can then do `nested::thing` references with a single namespace qualification.
+A static path is a sequence of `name::thing`. Ard has a preference for simple paths where possible, i.e. only one `::`.
+In order to reach further into a package for something, make that import explicit with `use name/thing/nested`,
+so that deeply nested access can be simply called with `nested::thing`.
 
 ### Errors
 Ard does not have exceptions. Instead, errors are represented as values. The built-in `Result<$Val, $Err>` type can be used as a special type union of a success value and an error value.
