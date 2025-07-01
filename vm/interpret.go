@@ -405,8 +405,8 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		{
 			subj := vm.eval(e.Subject)
 			_type := subj._type
-			// todo: do this in a loop until we find a non-any type
-			if a, ok := _type.(*checker.Any); ok {
+			// Loop until we find a non-any type
+			for a, ok := _type.(*checker.Any); ok; a, ok = _type.(*checker.Any) {
 				_type = a.Actual()
 			}
 
