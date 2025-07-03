@@ -366,6 +366,9 @@ The `try` keyword will unwrap the result and if the result is an error, it will 
 
 Note: `try` can only be used in function blocks
 
+### Modules
+See the docs in [modules](./modules)
+
 #### 👇🏿 everything below this line is a work in progress 👇🏿
 
 ### TODO: Callbacks
@@ -394,15 +397,5 @@ Work in progress. Ideas for inspiration:
 - risor
 - inko
 - rust
-
-## 5. Module System
-
-### Module Definition and Exports
-
-In Ard, every file is implicitly a module / package
-
-### Import Syntax and Mechanisms
-
-Ard uses the `use` keyword to import other packages
 
 This specification provides an overview of the Ard language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
