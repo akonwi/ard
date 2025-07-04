@@ -10,6 +10,8 @@ var prelude = map[string]Module{
 
 func findInStdLib(path string) (Module, bool) {
 	switch path {
+	case "ard/async":
+		return AsyncPkg{}, true
 	case "ard/fs":
 		return FsPkg{}, true
 	case "ard/io":

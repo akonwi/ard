@@ -45,6 +45,8 @@ func (vm *VM) initModuleRegistry() {
 			vm.moduleRegistry.Register(&JSONModule{})
 		case "ard/sqlite":
 			vm.moduleRegistry.Register(&SQLiteModule{})
+		case "ard/async":
+			vm.moduleRegistry.Register(&AsyncModule{})
 		}
 	}
 }

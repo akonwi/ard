@@ -1030,6 +1030,15 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 		}
 		return sqlite.evalDatabaseMethod(subj, call, args)
 	}
+	// Special handling for Fiber methods
+	if istruct == checker.Fiber {
+		async := vm.moduleRegistry.handlers["ard/async"].(*AsyncModule)
+		args := make([]*object, len(call.Args))
+		for i := range call.Args {
+			args[i] = vm.eval(call.Args[i])
+		}
+		return async.EvalFiberMethod(subj, call, args)
+	}
 
 	sig, ok := istruct.Fields[call.Name]
 	if !ok {
