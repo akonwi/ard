@@ -82,6 +82,8 @@ func (o *object) premarshal() any {
 	}
 
 	switch o._type.(type) {
+	case *checker.FunctionDef:
+		return o._type.String()
 	case *checker.Enum:
 		return o.raw
 	case *checker.Maybe:
