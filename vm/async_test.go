@@ -18,7 +18,7 @@ func TestAsyncSleep(t *testing.T) {
 	}
 }
 
-func TestConcurrentSleep(t *testing.T) {
+func TestWaitingOnFibers(t *testing.T) {
 	start := time.Now()
 
 	run(t, `
