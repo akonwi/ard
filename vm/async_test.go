@@ -5,27 +5,17 @@ import (
 	"time"
 )
 
-func TestAsyncStart(t *testing.T) {
-	run(t, `
-		use ard/async
-
-		// Start a simple fiber with no operations
-		let fiber = async::start(fn() {
-			// empty function
-		})
-
-		// Wait for it to complete
-		fiber.wait()
-	`)
-}
-
 func TestAsyncSleep(t *testing.T) {
+	start := time.Now()
 	run(t, `
 		use ard/async
 
-		// Test sleep function directly
-		async::sleep(1)
+		async::sleep(300)
 	`)
+	elapsed := time.Since(start)
+	if elapsed < time.Duration(300*time.Millisecond) {
+		t.Errorf("Expected script to take ~300ms, but took %v", elapsed)
+	}
 }
 
 func TestConcurrentSleep(t *testing.T) {

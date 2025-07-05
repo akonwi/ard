@@ -1032,7 +1032,7 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 	}
 	// Special handling for Fiber methods
 	if istruct == checker.Fiber {
-		async := vm.moduleRegistry.handlers["ard/async"].(*AsyncModule)
+		async := vm.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
 		args := make([]*object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])
