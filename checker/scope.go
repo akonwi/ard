@@ -4,6 +4,7 @@ type scope struct {
 	parent     *scope
 	symbols    map[string]symbol
 	returnType Type
+	isolated   bool
 }
 
 type symbol interface {
@@ -24,6 +25,9 @@ func (s *scope) add(sym symbol) {
 func (s *scope) get(name string) symbol {
 	if sym, ok := s.symbols[name]; ok {
 		return sym
+	}
+	if s.isolated {
+		return nil
 	}
 	if s.parent != nil {
 		return s.parent.get(name)

@@ -999,10 +999,10 @@ func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 		return &Block{Stmts: []Statement{}}
 	}
 
-	scope := newScope(c.scope)
-	c.scope = scope
+	parent := c.scope
+	c.scope = newScope(parent)
 	defer func() {
-		c.scope = c.scope.parent
+		c.scope = parent
 	}()
 
 	if setup != nil {
@@ -1979,6 +1979,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					Name: s.Function.Name,
 					Args: args,
 					fn:   fnDef,
+				}
+
+				// Special validation for async::start calls
+				if mod.Path() == "ard/async" && s.Function.Name == "start" {
+					c.validateFiberFunction(s.Function.Args[0])
 				}
 
 				// Create module static function call if struct is involved, otherwise regular module function call
