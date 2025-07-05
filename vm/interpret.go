@@ -394,7 +394,9 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			return res
 		}
 		obj := &object{raw, e.Type()}
-		vm.scope.add(e.Name, obj)
+		if e.Name != "" {
+			vm.scope.add(e.Name, obj)
+		}
 		return obj
 	case *checker.Panic:
 		msg := vm.eval(e.Message)
