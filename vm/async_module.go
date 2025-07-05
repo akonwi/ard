@@ -93,7 +93,7 @@ func (m *AsyncModule) EvalFiberMethod(subj *object, call *checker.FunctionCall, 
 	}
 
 	switch call.Name {
-	case "wait":
+	case "join":
 		fiber.wg.Wait()
 		return void
 	default:

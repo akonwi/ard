@@ -36,9 +36,9 @@ func TestWaitingOnFibers(t *testing.T) {
 		})
 
 		// Wait for all fibers to complete
-		fiber1.wait()
-		fiber2.wait()
-		fiber3.wait()
+		fiber1.join()
+		fiber2.join()
+		fiber3.join()
 	`)
 
 	elapsed := time.Since(start)

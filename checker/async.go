@@ -3,8 +3,8 @@ package checker
 var Fiber = &StructDef{
 	Name: "Fiber",
 	Fields: map[string]Type{
-		"wait": &FunctionDef{
-			Name:       "wait",
+		"join": &FunctionDef{
+			Name:       "join",
 			Parameters: []Parameter{},
 			ReturnType: Void,
 		},
