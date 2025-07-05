@@ -1,19 +1,6 @@
 ## TODO
 
-- [ ] `ard/async` module
-  - this module provides functionality for asynchronous execution:
-    ```ard
-    struct Fiber {}
-    impl Fiber {
-      fn wait() { /* #external */ }
-    }
-
-    fn start(worker: fn()) Fiber {
-      // #external
-    }
-    // sleep for number milliseconds
-    fn sleep(number: Int) {}
-    ```
+- [ ] include stdlib .ard files in compilation
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
@@ -23,7 +10,6 @@
   fn foo(bar: Int, baz: Str) { }
   foo(baz: "hello", bar: 5)
   ```
-- [ ] include stdlib .ard files in compilation
 - [ ] ffi
   - sort of like gleam
   - #external attribute on functions with external fn name
