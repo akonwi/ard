@@ -2,6 +2,7 @@ package vm
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"log"
@@ -62,6 +63,15 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 					res.raw._type = maybeType
 				}
 				result.raw = *res
+				return result
+			}
+
+			if inner == checker.Int {
+				var int object
+				if err := jsonv2.Unmarshal([]byte(jsonString), &int, jsonv2.WithUnmarshalers(intUnmarshaler)); err != nil {
+					return toErr(err)
+				}
+				result.raw = &int
 				return result
 			}
 

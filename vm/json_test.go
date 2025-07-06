@@ -33,6 +33,27 @@ func TestJsonEncode(t *testing.T) {
 	}
 }
 
+func TestJsonDecode(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "decoding string",
+			input: `
+				use ard/json
+				json::decode<Str>("hello")
+			`,
+			want: "hello",
+		},
+		{
+			name: "decoding ints",
+			input: `
+				use ard/json
+				json::decode<Int>("200")
+			`,
+			want: 200,
+		},
+	})
+}
+
 func TestJsonDecodeList(t *testing.T) {
 	result := run(t, `
 		use ard/json

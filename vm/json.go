@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"encoding/json/v2"
 	"fmt"
+	"strconv"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -64,3 +66,14 @@ func enforceSchema(vm *VM, val any, as checker.Type) (*object, error) {
 		return nil, fmt.Errorf("Unexpected ard Type for JSON decoding: %s", as)
 	}
 }
+
+var intUnmarshaler = json.UnmarshalFunc(
+	func(data []byte, val *object) error {
+		num, err := strconv.Atoi(string(data))
+		if err != nil {
+			return fmt.Errorf("Unable to decode \"%s\" as Int: %w", data, err)
+		}
+		*val = object{num, checker.Int}
+		return nil
+	},
+)
