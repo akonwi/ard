@@ -77,3 +77,20 @@ var intUnmarshaler = json.UnmarshalFunc(
 		return nil
 	},
 )
+
+func json_decodeInt(bytes []byte) (object, error) {
+	var int object
+	if err := json.Unmarshal(bytes, &int, json.WithUnmarshalers(intUnmarshaler)); err != nil {
+		return int, err
+	}
+	return int, nil
+}
+
+func json_decodeBool(bytes []byte) (object, error) {
+	bool := object{false, checker.Bool}
+	if err := json.Unmarshal(bytes, &bool.raw); err != nil {
+		return bool, fmt.Errorf("Unable to decode \"%s\" as Bool: %w", bytes, err)
+	}
+
+	return bool, nil
+}

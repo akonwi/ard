@@ -33,10 +33,10 @@ func TestJsonEncode(t *testing.T) {
 	}
 }
 
-func TestJsonDecode(t *testing.T) {
+func TestJsonDecodePrimitives(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "decoding string",
+			name: "decoding Str",
 			input: `
 				use ard/json
 				json::decode<Str>("hello")
@@ -44,12 +44,20 @@ func TestJsonDecode(t *testing.T) {
 			want: "hello",
 		},
 		{
-			name: "decoding ints",
+			name: "decoding Int",
 			input: `
 				use ard/json
 				json::decode<Int>("200")
 			`,
 			want: 200,
+		},
+		{
+			name: "decoding Bool",
+			input: `
+						use ard/json
+						json::decode<Bool>("true")
+					`,
+			want: true,
 		},
 	})
 }
