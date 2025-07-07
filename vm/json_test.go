@@ -90,12 +90,12 @@ func TestJsonDecodeList(t *testing.T) {
 	result := run(t, `
 		use ard/json
 		let empty: [Int] = []
-		let nums = json::decode<[Int]>("[1,2,3]")
-		nums.or(empty).size()
+		let nums = json::decode<[Int]>("[1,2,3]").expect("")
+		nums.at(1)
 	`)
 
-	if result != 3 {
-		t.Errorf("Expected 3, got %v", result)
+	if result != 2 {
+		t.Errorf("Expected 2, got %v", result)
 	}
 }
 
