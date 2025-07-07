@@ -5,34 +5,6 @@ import (
 	"testing"
 )
 
-func TestJsonEncode(t *testing.T) {
-	result := run(t, `
-		use ard/json
-		struct Person {
-			name: Str,
-			age: Int,
-		  employed: Bool
-		}
-		let john = Person{name: "John", age: 30, employed: true}
-		let result = json::encode(john)
-		match result {
-		  ok => ok,
-			err => err
-		}
-	`)
-
-	got := result.(string)
-	if !strings.Contains(got, `"name":"John"`) {
-		t.Errorf("Result json string does not contain 'name': %s", got)
-	}
-	if !strings.Contains(got, `"age":30`) {
-		t.Errorf("Result json string does not contain 'age': %s", got)
-	}
-	if !strings.Contains(got, `"employed":true`) {
-		t.Errorf("Result json string does not contain 'employed': %s", got)
-	}
-}
-
 func TestJsonDecodePrimitives(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -99,26 +71,54 @@ func TestJsonDecodeList(t *testing.T) {
 	}
 }
 
-// func TestJsonDecodeStruct(t *testing.T) {
-// 	result := run(t, `
-// 		use ard/json
-// 		struct Person {
-// 			name: Str,
-// 			age: Int,
-// 		  employed: Bool
-// 		}
-// 		let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true}"
-// 		let result = json::decode<Person>(john_str)
-// 		match result {
-// 		  ok => ok.name == "John" and ok.age == 30 and ok.employed == true,
-// 			err => false
-// 		}
-// 	`)
-
-// 	if result != true {
-// 		t.Errorf("Wanted %v, got %v", true, result)
-// 	}
-// }
+func TestJsonDecodeStruct(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "simple decoding",
+			input: `
+				use ard/json
+				struct Person {
+					name: Str,
+					age: Int,
+		  		employed: Bool
+				}
+				let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true}"
+				let john = json::decode<Person>(john_str).expect("")
+				john.name == "John" and john.age == 30 and john.employed == true
+			`,
+			want: true,
+		},
+		{
+			name: "unexpected fields are ignored",
+			input: `
+				use ard/json
+				struct Person {
+					name: Str,
+					age: Int,
+		  		employed: Bool
+				}
+				let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true, \"id\": 42}"
+				let john = json::decode<Person>(john_str).expect("")
+				json::encode(john).expect("")
+			`,
+			want: `{"age":30,"employed":true,"name":"John"}`,
+		},
+		{
+			name: "non-nullable fields are required",
+			input: `
+				use ard/json
+				struct Person {
+					name: Str,
+					age: Int,
+		  		employed: Bool
+				}
+				let john_str = "\{\"name\": \"John\", \"age\": 30}"
+				json::decode<Person>(john_str).expect("Missing 'employed' field")
+			`,
+			panic: "Missing field",
+		},
+	})
+}
 
 // func TestJsonDecodeStructsWithMaybes(t *testing.T) {
 // 	result := run(t, `
@@ -164,3 +164,31 @@ func TestJsonDecodeList(t *testing.T) {
 // 		t.Errorf("Wanted %v, got %v", "John", result)
 // 	}
 // }
+
+func TestJsonEncode(t *testing.T) {
+	result := run(t, `
+		use ard/json
+		struct Person {
+			name: Str,
+			age: Int,
+		  employed: Bool
+		}
+		let john = Person{name: "John", age: 30, employed: true}
+		let result = json::encode(john)
+		match result {
+		  ok => ok,
+			err => err
+		}
+	`)
+
+	got := result.(string)
+	if !strings.Contains(got, `"name":"John"`) {
+		t.Errorf("Result json string does not contain 'name': %s", got)
+	}
+	if !strings.Contains(got, `"age":30`) {
+		t.Errorf("Result json string does not contain 'age': %s", got)
+	}
+	if !strings.Contains(got, `"employed":true`) {
+		t.Errorf("Result json string does not contain 'employed': %s", got)
+	}
+}

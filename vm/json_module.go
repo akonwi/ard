@@ -41,7 +41,7 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			jsonBytes := []byte(jsonString)
 
 			inner := checker.UnwrapType(resultType.Val())
-			val, err := decode(inner, jsonBytes)
+			val, err := json_decode(inner, jsonBytes)
 			if err != nil {
 				return toErr(err)
 			}
@@ -49,31 +49,7 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			return makeOk(&val, resultType)
 
 			// switch subj := inner.(type) {
-			// case *checker.StructDef:
-			// 	{
-			// 		decoder := json.NewDecoder(strings.NewReader(jsonString))
-			// 		if t, err := decoder.Token(); err != nil {
-			// 			result.raw = _result{
-			// 				raw: &object{
-			// 					fmt.Errorf("Expected opening brace at %v: [%w]", t, err),
-			// 					checker.Str,
-			// 				},
-			// 			}
-			// 			return result
-			// 		} else if delim, _ := t.(json.Delim); delim.String() != "{" {
-			// 			result.raw = _result{
-			// 				raw: &object{
-			// 					fmt.Errorf("Expected opening brace at %v: [%w]", t, err),
-			// 					checker.Str,
-			// 				},
-			// 			}
-			// 			return result
-			// 		}
-
-			// 		return m.decodeAsStruct(result, decoder, subj, vm, toErr, resultType)
-			// 	}
 			// default:
-			// 	panic(fmt.Errorf("unable to decode into %s", subj))
 			// }
 		}
 	default:
@@ -81,7 +57,7 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 	}
 }
 
-func decode(as checker.Type, data []byte) (object, error) {
+func json_decode(as checker.Type, data []byte) (object, error) {
 	maybeType, isMaybe := as.(*checker.Maybe)
 	if isMaybe {
 		return json_decodeMaybe(maybeType.Of(), data)
@@ -102,9 +78,11 @@ func decode(as checker.Type, data []byte) (object, error) {
 	switch as := as.(type) {
 	case *checker.List:
 		return json_decodeList(checker.UnwrapType(as.Of()), data)
+	case *checker.StructDef:
+		return json_decodeStruct(as, data)
+	default:
+		panic(fmt.Errorf("unable to decode into %s: \"%s\"", as, data))
 	}
-
-	return object{}, nil
 }
 
 // this function needs to call decoder.Token() until it passes over the closing delimeter for the provided delim

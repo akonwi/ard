@@ -107,7 +107,7 @@ func json_decodeMaybe(of checker.Type, data []byte) (object, error) {
 		return object{nil, checker.MakeMaybe(of)}, nil
 	}
 
-	val, err := decode(of, data)
+	val, err := json_decode(of, data)
 	val._type = checker.MakeMaybe(val._type)
 	return val, err
 }
@@ -121,7 +121,7 @@ func json_decodeList(of checker.Type, data []byte) (object, error) {
 			if err != nil {
 				return err
 			}
-			val, err := decode(of, v)
+			val, err := json_decode(of, v)
 			if err != nil {
 				return err
 			}
@@ -130,4 +130,59 @@ func json_decodeList(of checker.Type, data []byte) (object, error) {
 		})),
 	)
 	return object{items, checker.MakeList(of)}, err
+}
+
+func json_decodeStruct(as *checker.StructDef, data []byte) (object, error) {
+	var fields map[string]*object
+
+	var valType checker.Type
+	err := json.Unmarshal(data, &fields, json.WithUnmarshalers(
+		json.JoinUnmarshalers(
+			json.UnmarshalFunc(func(data []byte, out *string) error {
+				// decode keys
+				str, err := json_decodeStr(data)
+				if err != nil {
+					return err
+				}
+				key := str.raw.(string)
+				*out = key
+				valType = as.Fields[key]
+				return nil
+			}),
+			json.UnmarshalFromFunc(func(decoder *jsontext.Decoder, out *object) error {
+				// decode value at a time
+				v, err := decoder.ReadValue()
+				if err != nil {
+					return err
+				}
+
+				// skip unexpected values
+				if valType == nil {
+					return nil
+				}
+
+				val, err := json_decode(valType, v)
+				if err != nil {
+					return err
+				}
+				*out = val
+				return nil
+			}))),
+	)
+
+	// delete unexpected keys
+	for key := range fields {
+		if _, ok := as.Fields[key]; !ok {
+			delete(fields, key)
+		}
+	}
+
+	// check for required keys
+	for key := range as.Fields {
+		if _, ok := fields[key]; !ok {
+			return object{}, fmt.Errorf("Missing field in input JSON: %s", key)
+		}
+	}
+
+	return object{fields, as}, err
 }

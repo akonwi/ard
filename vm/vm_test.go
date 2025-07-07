@@ -16,6 +16,7 @@ type test struct {
 	name  string
 	input string
 	want  any
+	panic string
 }
 
 func run(t *testing.T, input string) any {
@@ -51,7 +52,7 @@ func expectPanic(t *testing.T, substring, input string) {
 	vm := vm.New(program.Imports)
 	_, err = vm.Interpret(program)
 	if err == nil {
-		t.Fatal("Expected a panic")
+		t.Fatalf("Did not encounter expcted panic: %s", substring)
 	}
 	if !strings.Contains(err.Error(), substring) {
 		t.Fatalf("Expected a panic containing: %s\nInstead received `%s`", substring, err)
@@ -62,6 +63,10 @@ func runTests(t *testing.T, tests []test) {
 	t.Helper()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if test.panic != "" {
+				expectPanic(t, test.panic, test.input)
+				return
+			}
 			if res := run(t, test.input); test.want != res {
 				t.Logf("Expected %v, got %v", test.want, res)
 				t.Fail()
