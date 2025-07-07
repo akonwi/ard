@@ -67,15 +67,8 @@ func enforceSchema(vm *VM, val any, as checker.Type) (*object, error) {
 	}
 }
 
-func json_decodeStr(bytes []byte, isMaybe bool) (object, error) {
+func json_decodeStr(bytes []byte) (object, error) {
 	str := object{nil, checker.Str}
-	if isMaybe {
-		str._type = checker.MakeMaybe(str._type)
-		if string(bytes) == "null" {
-			return str, nil
-		}
-	}
-
 	if err := json.Unmarshal(bytes, &str.raw); err != nil {
 		return str, err
 	}
@@ -93,33 +86,31 @@ var intUnmarshaler = json.UnmarshalFunc(
 	},
 )
 
-func json_decodeInt(bytes []byte, isMaybe bool) (object, error) {
+func json_decodeInt(bytes []byte) (object, error) {
 	int := object{nil, checker.Int}
-	if isMaybe {
-		int._type = checker.MakeMaybe(int._type)
-		if string(bytes) == "null" {
-			return int, nil
-		}
-	}
-
-	if err := json.Unmarshal(bytes, &int, json.WithUnmarshalers(intUnmarshaler)); err != nil {
-		return int, err
-	}
-	return int, nil
+	err := json.Unmarshal(bytes, &int, json.WithUnmarshalers(intUnmarshaler))
+	return int, err
 }
 
-func json_decodeBool(bytes []byte, isMaybe bool) (object, error) {
+func json_decodeBool(bytes []byte) (object, error) {
 	bool := object{nil, checker.Bool}
-	if isMaybe {
-		bool._type = checker.MakeMaybe(bool._type)
-		if string(bytes) == "null" {
-			return bool, nil
-		}
-	}
-
 	if err := json.Unmarshal(bytes, &bool.raw); err != nil {
 		return bool, fmt.Errorf("Unable to decode \"%s\" as Bool: %w", bytes, err)
 	}
 
 	return bool, nil
+}
+
+func json_decodeMaybe(of checker.Type, data []byte) (object, error) {
+	if string(data) == "null" {
+		return object{nil, checker.MakeMaybe(of)}, nil
+	}
+
+	val, err := decode(of, data)
+	val._type = checker.MakeMaybe(val._type)
+	return val, err
+}
+
+func json_decodeList(of checker.Type, isMaybe bool, bytes []byte) (object, error) {
+	return object{}, nil
 }

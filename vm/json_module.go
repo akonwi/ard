@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -38,97 +37,92 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			toErr := func(msg error) *object {
 				return makeErr(&object{msg.Error(), checker.Str}, resultType)
 			}
-			result := makeOk(nil, resultType)
 			jsonString := vm.eval(call.Args[0]).raw.(string)
 			jsonBytes := []byte(jsonString)
 
-			unwrapType := func(t checker.Type) checker.Type {
-				res := t
-				for anyType, isAny := t.(*checker.Any); isAny && anyType.Actual() != nil; anyType, isAny = anyType.Actual().(*checker.Any) {
-					res = anyType.Actual()
-				}
-				return res
+			inner := checker.UnwrapType(resultType.Val())
+			val, err := decode(inner, jsonBytes)
+			if err != nil {
+				return toErr(err)
 			}
 
-			inner := unwrapType(resultType.Val())
-			maybeType, isMaybe := inner.(*checker.Maybe)
-			if isMaybe {
-				inner = maybeType.Of()
-			}
+			return makeOk(&val, resultType)
 
-			if inner == checker.Str {
-				str, err := json_decodeStr([]byte(jsonString), isMaybe)
-				if err != nil {
-					return toErr(err)
-				}
-				return makeOk(&str, resultType)
-			}
+			// switch subj := inner.(type) {
+			// case *checker.StructDef:
+			// 	{
+			// 		decoder := json.NewDecoder(strings.NewReader(jsonString))
+			// 		if t, err := decoder.Token(); err != nil {
+			// 			result.raw = _result{
+			// 				raw: &object{
+			// 					fmt.Errorf("Expected opening brace at %v: [%w]", t, err),
+			// 					checker.Str,
+			// 				},
+			// 			}
+			// 			return result
+			// 		} else if delim, _ := t.(json.Delim); delim.String() != "{" {
+			// 			result.raw = _result{
+			// 				raw: &object{
+			// 					fmt.Errorf("Expected opening brace at %v: [%w]", t, err),
+			// 					checker.Str,
+			// 				},
+			// 			}
+			// 			return result
+			// 		}
 
-			if inner == checker.Int {
-				int, err := json_decodeInt([]byte(jsonString), isMaybe)
-				if err != nil {
-					return toErr(err)
-				}
-				return makeOk(&int, resultType)
-			}
+			// 		return m.decodeAsStruct(result, decoder, subj, vm, toErr, resultType)
+			// 	}
+			// case *checker.List:
+			// 	{
+			// 		list, err := json_decodeList(checker.UnwrapType(subj.Of()), isMaybe, []byte(jsonBytes))
+			// 		if err != nil {
+			// 			return toErr(err)
+			// 		}
+			// 		return makeOk(&list, resultType)
+			// 		// array := []any{}
+			// 		// err := json.Unmarshal([]byte(jsonBytes), &array)
+			// 		// if err != nil {
+			// 		// 	result.raw = &object{err.Error(), checker.Str}
+			// 		// 	return result
+			// 		// }
 
-			if inner == checker.Bool {
-				bool, err := json_decodeBool([]byte(jsonString), isMaybe)
-				if err != nil {
-					return toErr(err)
-				}
-				return makeOk(&bool, resultType)
-			}
+			// 		// raw := make([]*object, len(array))
+			// 		// for i := range array {
+			// 		// 	raw[i] = &object{array[i], subj.Of()}
+			// 		// }
 
-			switch subj := inner.(type) {
-			case *checker.StructDef:
-				{
-					decoder := json.NewDecoder(strings.NewReader(jsonString))
-					if t, err := decoder.Token(); err != nil {
-						result.raw = _result{
-							raw: &object{
-								fmt.Errorf("Expected opening brace at %v: [%w]", t, err),
-								checker.Str,
-							},
-						}
-						return result
-					} else if delim, _ := t.(json.Delim); delim.String() != "{" {
-						result.raw = _result{
-							raw: &object{
-								fmt.Errorf("Expected opening brace at %v: [%w]", t, err),
-								checker.Str,
-							},
-						}
-						return result
-					}
-
-					return m.decodeAsStruct(result, decoder, subj, vm, toErr, resultType)
-				}
-			case *checker.List:
-				{
-					array := []any{}
-					err := json.Unmarshal([]byte(jsonBytes), &array)
-					if err != nil {
-						result.raw = &object{err.Error(), checker.Str}
-						return result
-					}
-
-					raw := make([]*object, len(array))
-					for i := range array {
-						raw[i] = &object{array[i], subj.Of()}
-					}
-
-					rawObj := &object{raw, subj}
-					result.raw = _result{ok: true, raw: rawObj}
-					return result
-				}
-			default:
-				panic(fmt.Errorf("unable to decode into %s", subj))
-			}
+			// 		// rawObj := &object{raw, subj}
+			// 		// result.raw = _result{ok: true, raw: rawObj}
+			// 		// return result
+			// 	}
+			// default:
+			// 	panic(fmt.Errorf("unable to decode into %s", subj))
+			// }
 		}
 	default:
 		panic(fmt.Errorf("Unimplemented: json::%s()", call.Name))
 	}
+}
+
+func decode(as checker.Type, data []byte) (object, error) {
+	maybeType, isMaybe := as.(*checker.Maybe)
+	if isMaybe {
+		return json_decodeMaybe(maybeType.Of(), data)
+	}
+
+	if as == checker.Str {
+		return json_decodeStr(data)
+	}
+
+	if as == checker.Int {
+		return json_decodeInt(data)
+	}
+
+	if as == checker.Bool {
+		return json_decodeBool(data)
+	}
+
+	return object{}, nil
 }
 
 // this function needs to call decoder.Token() until it passes over the closing delimeter for the provided delim

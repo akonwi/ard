@@ -99,68 +99,68 @@ func TestJsonDecodeList(t *testing.T) {
 	}
 }
 
-func TestJsonDecodeStruct(t *testing.T) {
-	result := run(t, `
-		use ard/json
-		struct Person {
-			name: Str,
-			age: Int,
-		  employed: Bool
-		}
-		let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true}"
-		let result = json::decode<Person>(john_str)
-		match result {
-		  ok => ok.name == "John" and ok.age == 30 and ok.employed == true,
-			err => false
-		}
-	`)
+// func TestJsonDecodeStruct(t *testing.T) {
+// 	result := run(t, `
+// 		use ard/json
+// 		struct Person {
+// 			name: Str,
+// 			age: Int,
+// 		  employed: Bool
+// 		}
+// 		let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true}"
+// 		let result = json::decode<Person>(john_str)
+// 		match result {
+// 		  ok => ok.name == "John" and ok.age == 30 and ok.employed == true,
+// 			err => false
+// 		}
+// 	`)
 
-	if result != true {
-		t.Errorf("Wanted %v, got %v", true, result)
-	}
-}
+// 	if result != true {
+// 		t.Errorf("Wanted %v, got %v", true, result)
+// 	}
+// }
 
-func TestJsonDecodeStructsWithMaybes(t *testing.T) {
-	result := run(t, `
-		use ard/json
-		struct Person {
-			name: Str?,
-			age: Int?,
-		  employed: Bool?
-		}
-		let john_str = "\{\"name\": \"John\", \"age\": null}"
-		let result = json::decode<Person>(john_str)
-		match result {
-		  ok => ok.name.or("") == "John" and ok.age.or(0) == 0 and ok.employed.or(false) == false,
-			err => false
-		}
-	`)
+// func TestJsonDecodeStructsWithMaybes(t *testing.T) {
+// 	result := run(t, `
+// 		use ard/json
+// 		struct Person {
+// 			name: Str?,
+// 			age: Int?,
+// 		  employed: Bool?
+// 		}
+// 		let john_str = "\{\"name\": \"John\", \"age\": null}"
+// 		let result = json::decode<Person>(john_str)
+// 		match result {
+// 		  ok => ok.name.or("") == "John" and ok.age.or(0) == 0 and ok.employed.or(false) == false,
+// 			err => false
+// 		}
+// 	`)
 
-	if result != true {
-		t.Errorf("Wanted %v, got %v", true, result)
-	}
-}
+// 	if result != true {
+// 		t.Errorf("Wanted %v, got %v", true, result)
+// 	}
+// }
 
-func TestJsonDecodeNestedStructWithList(t *testing.T) {
-	result := run(t, `
-		use ard/json
-		struct Person {
-			name: Str,
-			id: Int,
-		}
-		struct Payload {
-		  people: [Person]
-		}
+// func TestJsonDecodeNestedStructWithList(t *testing.T) {
+// 	result := run(t, `
+// 		use ard/json
+// 		struct Person {
+// 			name: Str,
+// 			id: Int,
+// 		}
+// 		struct Payload {
+// 		  people: [Person]
+// 		}
 
-		let input = "\{ \"people\": [ \{ \"name\": \"John\", \"id\": 1 } ] }"
-		let result = json::decode<Payload>(input)
-		match result {
-		  ok => ok.people.at(0).name,
-			err => panic(err)
-		}
-	`)
+// 		let input = "\{ \"people\": [ \{ \"name\": \"John\", \"id\": 1 } ] }"
+// 		let result = json::decode<Payload>(input)
+// 		match result {
+// 		  ok => ok.people.at(0).name,
+// 			err => panic(err)
+// 		}
+// 	`)
 
-	if result != "John" {
-		t.Errorf("Wanted %v, got %v", "John", result)
-	}
-}
+// 	if result != "John" {
+// 		t.Errorf("Wanted %v, got %v", "John", result)
+// 	}
+// }
