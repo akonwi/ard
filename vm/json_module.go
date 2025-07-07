@@ -42,45 +42,42 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			jsonString := vm.eval(call.Args[0]).raw.(string)
 			jsonBytes := []byte(jsonString)
 
-			inner := resultType.Val()
-			anyType, isAny := inner.(*checker.Any)
-			maybeType, isMaybe := inner.(*checker.Maybe)
-			// if inner is a generic, reach all the way to the core
-			for (isAny && anyType.Actual() != nil) || (isMaybe) {
-				if isAny && anyType.Actual() != nil {
-					inner = anyType.Actual()
-				} else {
-					inner = maybeType.Of()
+			unwrapType := func(t checker.Type) checker.Type {
+				res := t
+				for anyType, isAny := t.(*checker.Any); isAny && anyType.Actual() != nil; anyType, isAny = anyType.Actual().(*checker.Any) {
+					res = anyType.Actual()
 				}
-				anyType, isAny = inner.(*checker.Any)
-				maybeType, isMaybe = inner.(*checker.Maybe)
+				return res
+			}
+
+			inner := unwrapType(resultType.Val())
+			maybeType, isMaybe := inner.(*checker.Maybe)
+			if isMaybe {
+				inner = maybeType.Of()
 			}
 
 			if inner == checker.Str {
-				res := &_result{ok: true, raw: &object{jsonString, checker.Str}}
-				if isMaybe {
-					res.raw._type = maybeType
+				str, err := json_decodeStr([]byte(jsonString), isMaybe)
+				if err != nil {
+					return toErr(err)
 				}
-				result.raw = *res
-				return result
+				return makeOk(&str, resultType)
 			}
 
 			if inner == checker.Int {
-				int, err := json_decodeInt([]byte(jsonString))
+				int, err := json_decodeInt([]byte(jsonString), isMaybe)
 				if err != nil {
 					return toErr(err)
 				}
-				result.raw = &int
-				return result
+				return makeOk(&int, resultType)
 			}
 
 			if inner == checker.Bool {
-				bool, err := json_decodeBool([]byte(jsonString))
+				bool, err := json_decodeBool([]byte(jsonString), isMaybe)
 				if err != nil {
 					return toErr(err)
 				}
-				result.raw = &bool
-				return result
+				return makeOk(&bool, resultType)
 			}
 
 			switch subj := inner.(type) {

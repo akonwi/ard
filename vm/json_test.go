@@ -39,7 +39,7 @@ func TestJsonDecodePrimitives(t *testing.T) {
 			name: "decoding Str",
 			input: `
 				use ard/json
-				json::decode<Str>("hello")
+				json::decode<Str>("\"hello\"")
 			`,
 			want: "hello",
 		},
@@ -54,9 +54,33 @@ func TestJsonDecodePrimitives(t *testing.T) {
 		{
 			name: "decoding Bool",
 			input: `
-						use ard/json
-						json::decode<Bool>("true")
-					`,
+				use ard/json
+				json::decode<Bool>("true")
+			`,
+			want: true,
+		},
+		{
+			name: "decoding Int?",
+			input: `
+				use ard/json
+				json::decode<Int?>("null").expect("").is_none()
+			`,
+			want: true,
+		},
+		{
+			name: "decoding Str?",
+			input: `
+				use ard/json
+				json::decode<Str?>("null").expect("").is_none()
+			`,
+			want: true,
+		},
+		{
+			name: "decoding Bool?",
+			input: `
+				use ard/json
+				json::decode<Bool?>("null").expect("").is_none()
+			`,
 			want: true,
 		},
 	})
