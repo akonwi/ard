@@ -164,9 +164,14 @@ func json_decodeStruct(as *checker.StructDef, data []byte) (object, error) {
 	}
 
 	// check for required keys
-	for key := range as.Fields {
+	for key, t := range as.Fields {
 		if _, ok := fields[key]; !ok {
-			return object{}, fmt.Errorf("Missing field in input JSON: %s", key)
+			if checker.IsMaybe(t) {
+				// missing Maybe fields default to maybe::none()
+				fields[key] = &object{nil, t}
+			} else {
+				return object{}, fmt.Errorf("Missing field in input JSON: %s", key)
+			}
 		}
 	}
 

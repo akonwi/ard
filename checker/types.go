@@ -452,6 +452,11 @@ type Maybe struct {
 	of Type
 }
 
+func IsMaybe(t Type) bool {
+	_, ok := t.(*Maybe)
+	return ok
+}
+
 func MakeMaybe(of Type) *Maybe {
 	return &Maybe{of}
 }

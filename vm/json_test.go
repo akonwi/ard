@@ -141,53 +141,23 @@ func TestJsonDecodeStruct(t *testing.T) {
 			`,
 			panic: "Missing field",
 		},
+		{
+			name: "structs with nullable fields",
+			input: `
+				use ard/json
+				struct Person {
+					name: Str,
+					age: Int,
+		  		employed: Bool?
+				}
+				let john_str = "\{\"name\": \"John\", \"age\": 30}"
+				let john = json::decode<Person>(john_str).expect("")
+				john.name == "John" and not john.employed.or(false)
+			`,
+			want: true,
+		},
 	})
 }
-
-// func TestJsonDecodeStructsWithMaybes(t *testing.T) {
-// 	result := run(t, `
-// 		use ard/json
-// 		struct Person {
-// 			name: Str?,
-// 			age: Int?,
-// 		  employed: Bool?
-// 		}
-// 		let john_str = "\{\"name\": \"John\", \"age\": null}"
-// 		let result = json::decode<Person>(john_str)
-// 		match result {
-// 		  ok => ok.name.or("") == "John" and ok.age.or(0) == 0 and ok.employed.or(false) == false,
-// 			err => false
-// 		}
-// 	`)
-
-// 	if result != true {
-// 		t.Errorf("Wanted %v, got %v", true, result)
-// 	}
-// }
-
-// func TestJsonDecodeNestedStructWithList(t *testing.T) {
-// 	result := run(t, `
-// 		use ard/json
-// 		struct Person {
-// 			name: Str,
-// 			id: Int,
-// 		}
-// 		struct Payload {
-// 		  people: [Person]
-// 		}
-
-// 		let input = "\{ \"people\": [ \{ \"name\": \"John\", \"id\": 1 } ] }"
-// 		let result = json::decode<Payload>(input)
-// 		match result {
-// 		  ok => ok.people.at(0).name,
-// 			err => panic(err)
-// 		}
-// 	`)
-
-// 	if result != "John" {
-// 		t.Errorf("Wanted %v, got %v", "John", result)
-// 	}
-// }
 
 func TestJsonEncode(t *testing.T) {
 	result := run(t, `
