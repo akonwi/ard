@@ -68,6 +68,34 @@ func enforceSchema(vm *VM, val any, as checker.Type) (*object, error) {
 	}
 }
 
+func json_decode(as checker.Type, data []byte) (object, error) {
+	maybeType, isMaybe := as.(*checker.Maybe)
+	if isMaybe {
+		return json_decodeMaybe(maybeType.Of(), data)
+	}
+
+	if as == checker.Str {
+		return json_decodeStr(data)
+	}
+
+	if as == checker.Int {
+		return json_decodeInt(data)
+	}
+
+	if as == checker.Bool {
+		return json_decodeBool(data)
+	}
+
+	switch as := as.(type) {
+	case *checker.List:
+		return json_decodeList(checker.UnwrapType(as.Of()), data)
+	case *checker.StructDef:
+		return json_decodeStruct(as, data)
+	default:
+		panic(fmt.Errorf("unable to decode into %s: \"%s\"", as, data))
+	}
+}
+
 func json_decodeStr(bytes []byte) (object, error) {
 	str := object{nil, checker.Str}
 	if err := json.Unmarshal(bytes, &str.raw); err != nil {
