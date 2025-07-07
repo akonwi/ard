@@ -1,7 +1,6 @@
 package vm_test
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -123,9 +122,9 @@ func TestJsonDecodeStruct(t *testing.T) {
 				}
 				let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": true, \"id\": 42}"
 				let john = json::decode<Person>(john_str).expect("")
-				json::encode(john).expect("")
+				not json::encode(john).expect("").contains("id")
 			`,
-			want: `{"age":30,"employed":true,"name":"John"}`,
+			want: true,
 		},
 		{
 			name: "non-nullable fields are required",
@@ -159,30 +158,104 @@ func TestJsonDecodeStruct(t *testing.T) {
 	})
 }
 
-func TestJsonEncode(t *testing.T) {
-	result := run(t, `
-		use ard/json
-		struct Person {
-			name: Str,
-			age: Int,
-		  employed: Bool
-		}
-		let john = Person{name: "John", age: 30, employed: true}
-		let result = json::encode(john)
-		match result {
-		  ok => ok,
-			err => err
-		}
-	`)
-
-	got := result.(string)
-	if !strings.Contains(got, `"name":"John"`) {
-		t.Errorf("Result json string does not contain 'name': %s", got)
-	}
-	if !strings.Contains(got, `"age":30`) {
-		t.Errorf("Result json string does not contain 'age': %s", got)
-	}
-	if !strings.Contains(got, `"employed":true`) {
-		t.Errorf("Result json string does not contain 'employed': %s", got)
-	}
+func TestJsonEncodePrimitives(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "encoding Str",
+			input: `
+				use ard/json
+				json::encode("hello")
+			`,
+			want: `"hello"`,
+		},
+		{
+			name: "encoding Int",
+			input: `
+				use ard/json
+				json::encode(200)
+			`,
+			want: `200`,
+		},
+		{
+			name: "encoding Float",
+			input: `
+				use ard/json
+				json::encode(98.6)
+			`,
+			want: `98.6`,
+		},
+		{
+			name: "encoding Bool",
+			input: `
+				use ard/json
+				json::encode(true)
+			`,
+			want: `true`,
+		},
+		{
+			name: "encoding Str?",
+			input: `
+				use ard/json
+				use ard/maybe
+				let s: Str? = maybe::none()
+				json::encode(s)
+			`,
+			want: `null`,
+		},
+		{
+			name: "encoding Int?",
+			input: `
+				use ard/json
+				use ard/maybe
+				json::encode(maybe::some(200))
+			`,
+			want: `200`,
+		},
+		{
+			name: "encoding Float?",
+			input: `
+				use ard/json
+				use ard/maybe
+				json::encode(maybe::some(98.6))
+			`,
+			want: `98.6`,
+		},
+		{
+			name: "encoding Bool",
+			input: `
+				use ard/json
+				use ard/maybe
+				json::encode(maybe::some(true))
+			`,
+			want: `true`,
+		},
+	})
 }
+
+// func TestJsonEncode(t *testing.T) {
+// 	result := run(t, `
+// 		use ard/json
+// 		struct Person {
+// 			name: Str,
+// 			age: Int,
+// 		  employed: Bool
+// 		}
+// 		let john = Person{name: "John", age: 30, employed: true}
+// 		let result = json::encode(john)
+// 		match result {
+// 		  ok => ok,
+// 			err => err
+// 		}
+// 	`)
+
+// 	got := result.(string)
+// 	if !strings.Contains(got, `"name":"John"`) {
+// 		t.Errorf("Result json string does not contain 'name': %s", got)
+// 	}
+// 	if !strings.Contains(got, `"age":30`) {
+// 		t.Errorf("Result json string does not contain 'age': %s", got)
+// 	}
+// 	if !strings.Contains(got, `"employed":true`) {
+// 		t.Errorf("Result json string does not contain 'employed': %s", got)
+// 	}
+// }

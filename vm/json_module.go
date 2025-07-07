@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
@@ -23,7 +22,8 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 	case "encode":
 		{
 			resultType := call.Type().(*checker.Result)
-			bytes, err := json.Marshal(args[0].premarshal())
+			o := args[0]
+			bytes, err := json_encode(o.raw, checker.UnwrapType(o._type))
 			if err != nil {
 				return makeErr(&object{err.Error(), checker.Str}, resultType)
 			}
