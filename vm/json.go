@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
@@ -111,6 +112,22 @@ func json_decodeMaybe(of checker.Type, data []byte) (object, error) {
 	return val, err
 }
 
-func json_decodeList(of checker.Type, isMaybe bool, bytes []byte) (object, error) {
-	return object{}, nil
+func json_decodeList(of checker.Type, data []byte) (object, error) {
+	var items []*object
+	err := json.Unmarshal(data, &items, json.WithUnmarshalers(
+		json.UnmarshalFromFunc(func(decoder *jsontext.Decoder, out *object) error {
+			// decode one value at a time
+			v, err := decoder.ReadValue()
+			if err != nil {
+				return err
+			}
+			val, err := decode(of, v)
+			if err != nil {
+				return err
+			}
+			*out = val
+			return nil
+		})),
+	)
+	return object{items, checker.MakeList(of)}, err
 }

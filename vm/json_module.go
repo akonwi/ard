@@ -72,29 +72,6 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 
 			// 		return m.decodeAsStruct(result, decoder, subj, vm, toErr, resultType)
 			// 	}
-			// case *checker.List:
-			// 	{
-			// 		list, err := json_decodeList(checker.UnwrapType(subj.Of()), isMaybe, []byte(jsonBytes))
-			// 		if err != nil {
-			// 			return toErr(err)
-			// 		}
-			// 		return makeOk(&list, resultType)
-			// 		// array := []any{}
-			// 		// err := json.Unmarshal([]byte(jsonBytes), &array)
-			// 		// if err != nil {
-			// 		// 	result.raw = &object{err.Error(), checker.Str}
-			// 		// 	return result
-			// 		// }
-
-			// 		// raw := make([]*object, len(array))
-			// 		// for i := range array {
-			// 		// 	raw[i] = &object{array[i], subj.Of()}
-			// 		// }
-
-			// 		// rawObj := &object{raw, subj}
-			// 		// result.raw = _result{ok: true, raw: rawObj}
-			// 		// return result
-			// 	}
 			// default:
 			// 	panic(fmt.Errorf("unable to decode into %s", subj))
 			// }
@@ -120,6 +97,11 @@ func decode(as checker.Type, data []byte) (object, error) {
 
 	if as == checker.Bool {
 		return json_decodeBool(data)
+	}
+
+	switch as := as.(type) {
+	case *checker.List:
+		return json_decodeList(checker.UnwrapType(as.Of()), data)
 	}
 
 	return object{}, nil
