@@ -24,6 +24,22 @@ func TestJsonDecodePrimitives(t *testing.T) {
 			want: 200,
 		},
 		{
+			name: "decoding Int as Float",
+			input: `
+				use ard/json
+				json::decode<Float>("200")
+			`,
+			want: float64(200),
+		},
+		{
+			name: "decoding Int as Float",
+			input: `
+				use ard/json
+				json::decode<Float>("98.6")
+			`,
+			want: 98.6,
+		},
+		{
 			name: "decoding Bool",
 			input: `
 				use ard/json
@@ -36,6 +52,14 @@ func TestJsonDecodePrimitives(t *testing.T) {
 			input: `
 				use ard/json
 				json::decode<Int?>("null").expect("").is_none()
+			`,
+			want: true,
+		},
+		{
+			name: "decoding Float?",
+			input: `
+				use ard/json
+				json::decode<Float?>("98.6").expect("").is_some()
 			`,
 			want: true,
 		},
