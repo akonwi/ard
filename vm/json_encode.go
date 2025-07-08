@@ -15,6 +15,8 @@ func json_encode(data any, t checker.Type) ([]byte, error) {
 	}
 
 	switch t.(type) {
+	case *checker.Enum:
+		return json.Marshal(data)
 	case *checker.List:
 		raw := data.([]*object)
 		_array := make([]any, len(raw))
@@ -45,6 +47,9 @@ func json_encode(data any, t checker.Type) ([]byte, error) {
 			}
 		}
 		return json.Marshal(_struct)
+	case *checker.Result:
+		inner := data.(_result).raw
+		return json_encode(inner.raw, inner._type)
 	default:
 		panic(fmt.Sprintf("Encoding error: Unhandled type %s", t))
 	}

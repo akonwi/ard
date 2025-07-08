@@ -275,3 +275,40 @@ func TestJsonEncodeStruct(t *testing.T) {
 		t.Errorf("Result json string does not contain 'employed': %s", got)
 	}
 }
+
+func TestJsonEncodeResult(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "ok",
+			input: `
+				use ard/json
+				let result: Int!Bool = Result::ok(200)
+				json::encode(result).expect("")
+			`,
+			want: "200",
+		},
+		{
+			name: "err",
+			input: `
+				use ard/json
+				let result: Int!Bool = Result::err(false)
+				json::encode(result).expect("")
+			`,
+			want: "false",
+		},
+	})
+}
+
+func TestJsonEncodeEnums(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "simple",
+			input: `
+				use ard/json
+				enum Color { blue, green, red }
+				json::encode(Color::green)
+			`,
+			want: "1",
+		},
+	})
+}
