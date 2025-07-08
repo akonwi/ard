@@ -64,6 +64,27 @@ func (vm *VM) Eval(expr checker.Expression) *object {
 	return vm.eval(expr)
 }
 
+/*
+ * fns that are bound to a particular execution scope (*VM)
+ */
+type Closure struct {
+	vm   *VM
+	expr checker.FunctionDef
+}
+
+func (c Closure) eval(args ...*object) *object {
+	res, _ := c.vm.evalBlock(c.expr.Body, func() {
+		for i := range args {
+			c.vm.scope.add(c.expr.Parameters[i].Name, args[i])
+		}
+	})
+	return res
+}
+
+func (c Closure) Type() checker.Type {
+	return c.expr.Type()
+}
+
 type object struct {
 	raw   any
 	_type checker.Type

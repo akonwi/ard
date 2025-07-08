@@ -385,15 +385,8 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 		return void
 	case *checker.FunctionDef:
-		raw := func(args ...*object) *object {
-			res, _ := vm.evalBlock(e.Body, func() {
-				for i := range args {
-					vm.scope.add(e.Parameters[i].Name, args[i])
-				}
-			})
-			return res
-		}
-		obj := &object{raw, e.Type()}
+		closure := &Closure{vm: vm, expr: *e}
+		obj := &object{closure, closure.Type()}
 		if e.Name != "" {
 			vm.scope.add(e.Name, obj)
 		}
@@ -476,13 +469,13 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			}
 
 			// cast to a func
-			fn := obj.raw.(func(args ...*object) *object)
+			fn := obj.raw.(*Closure)
 
 			args := make([]*object, len(e.Call.Args))
 			for i := range e.Call.Args {
 				args[i] = vm.eval(e.Call.Args[i])
 			}
-			return fn(args...)
+			return fn.eval(args...)
 		}
 	case *checker.ListLiteral:
 		{
@@ -692,7 +685,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*object) *ob
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s", call.Name))
 	}
-	fn, ok := sig.raw.(func(args ...*object) *object)
+	closure, ok := sig.raw.(*Closure)
 	if !ok {
 		panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig._type))
 	}
@@ -707,7 +700,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*object) *ob
 		}
 	}
 
-	return fn(args...)
+	return closure.eval(args...)
 }
 
 func (vm *VM) evalBlock(block *checker.Block, init func()) (*object, bool) {
@@ -858,9 +851,9 @@ func (vm *VM) evalListMethod(self *object, m *checker.InstanceMethod) *object {
 		return &object{len(raw), checker.Int}
 	case "sort":
 		{
-			_isLess := vm.eval(m.Method.Args[0]).raw.(func(args ...*object) *object)
+			_isLess := vm.eval(m.Method.Args[0]).raw.(*Closure)
 			slices.SortFunc(raw, func(a, b *object) int {
-				if _isLess(a, b).raw.(bool) {
+				if _isLess.eval(a, b).raw.(bool) {
 					return -1
 				}
 				return 0

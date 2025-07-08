@@ -20,14 +20,12 @@ func (m *AsyncModule) Path() string {
 	return "ard/async"
 }
 
-func (m *AsyncModule) Handle(_ *VM, call *checker.FunctionCall, args []*object) *object {
-	// create new vm for module
-	vm := New(map[string]checker.Module{})
+func (m *AsyncModule) Handle(caller *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "start":
-		return m.handleStart(vm, args)
+		return m.handleStart(caller, args)
 	case "sleep":
-		return m.handleSleep(vm, call, args)
+		return m.handleSleep(args)
 	default:
 		panic(fmt.Errorf("Unimplemented: async::%s()", call.Name))
 	}
@@ -37,7 +35,7 @@ func (m *AsyncModule) HandleStatic(structName string, vm *VM, call *checker.Func
 	panic(fmt.Errorf("Unimplemented: async::%s::%s()", structName, call.Name))
 }
 
-func (m *AsyncModule) handleStart(_ *VM, args []*object) *object {
+func (m *AsyncModule) handleStart(caller *VM, args []*object) *object {
 	workerFn := args[0]
 
 	// Create a new WaitGroup for this fiber
@@ -50,8 +48,9 @@ func (m *AsyncModule) handleStart(_ *VM, args []*object) *object {
 
 	// Execute the worker function in the current VM context first
 	// This will handle the parsing and setup
-	if fn, ok := workerFn.raw.(func(args ...*object) *object); ok {
-		// fn was defined in a different vm and we need to change its internals to eval with this module's vm
+	if fn, ok := workerFn.raw.(*Closure); ok {
+		// create a new VM for isolation
+		fn.vm = New(caller.imports)
 		// Start the goroutine with the evaluated function
 		go func() {
 			defer wg.Done()
@@ -63,7 +62,7 @@ func (m *AsyncModule) handleStart(_ *VM, args []*object) *object {
 			}()
 
 			// Call the function - this should work since it's already evaluated
-			fn()
+			fn.eval()
 		}()
 	}
 
@@ -74,7 +73,7 @@ func (m *AsyncModule) handleStart(_ *VM, args []*object) *object {
 	}
 }
 
-func (m *AsyncModule) handleSleep(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *AsyncModule) handleSleep(args []*object) *object {
 	duration := args[0].raw.(int)
 	time.Sleep(time.Duration(duration) * time.Millisecond)
 	return void
