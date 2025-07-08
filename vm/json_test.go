@@ -150,9 +150,9 @@ func TestJsonDecodeStruct(t *testing.T) {
 					age: Int,
 		  		employed: Bool?
 				}
-				let john_str = "\{\"name\": \"John\", \"age\": 30}"
+				let john_str = "\{\"name\": \"John\", \"age\": 30, \"employed\": null}"
 				let john = json::decode<Person>(john_str).expect("")
-				john.name == "John" and not john.employed.or(false)
+				john.name == "John" and john.employed.is_none()
 			`,
 			want: true,
 		},
