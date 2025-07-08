@@ -10,8 +10,7 @@ import (
 
 // Fiber represents a running async operation
 type Fiber struct {
-	wg     *sync.WaitGroup
-	result *object
+	wg *sync.WaitGroup
 }
 
 // AsyncModule handles ard/async module functions
@@ -46,8 +45,7 @@ func (m *AsyncModule) handleStart(_ *VM, args []*object) *object {
 	wg.Add(1)
 
 	fiber := &Fiber{
-		wg:     wg,
-		result: void,
+		wg: wg,
 	}
 
 	// Execute the worker function in the current VM context first
@@ -65,10 +63,7 @@ func (m *AsyncModule) handleStart(_ *VM, args []*object) *object {
 			}()
 
 			// Call the function - this should work since it's already evaluated
-			result := fn()
-			if result != nil {
-				fiber.result = result
-			}
+			fn()
 		}()
 	}
 
