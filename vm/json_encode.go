@@ -8,27 +8,44 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-func (o *object) MarshalSONTo(enc *jsontext.Encoder) error {
-	if o._type == checker.Str || o._type == checker.Int || o._type == checker.Float || o._type == checker.Bool {
-		str, err := json.Marshal(&o.raw)
-		fmt.Printf("marshalling: %v = %s\n", o.raw, str)
-		if err != nil {
-			return err
-		}
-		enc.WriteValue(jsontext.Value(str))
-		return nil
-	}
-	return nil
-}
-
 func json_encode(data any, t checker.Type) ([]byte, error) {
-	fmt.Printf("marshalling: %v: %s\n", data, t)
-	// if m, ok := t.(*checker.Maybe); ok {
-	// return json.Marshal(data)
-	// }
 	if t == checker.Str || t == checker.Int || t == checker.Float || t == checker.Bool || checker.IsMaybe(t) {
 		str, err := json.Marshal(data)
 		return str, err
 	}
-	return []byte{}, nil
+
+	switch t.(type) {
+	case *checker.List:
+		raw := data.([]*object)
+		_array := make([]any, len(raw))
+		for i, item := range raw {
+			if item._type == checker.Str || item._type == checker.Int || item._type == checker.Float || item._type == checker.Bool || checker.IsMaybe(item._type) {
+				_array[i] = item.raw
+			} else {
+				e, err := json_encode(item.raw, item._type)
+				if err != nil {
+					return nil, err
+				}
+				_array[i] = jsontext.Value(e)
+			}
+		}
+		return json.Marshal(_array)
+	case *checker.StructDef:
+		raw := data.(map[string]*object)
+		_struct := make(map[string]any)
+		for field, val := range raw {
+			if val._type == checker.Str || val._type == checker.Int || val._type == checker.Float || val._type == checker.Bool || checker.IsMaybe(val._type) {
+				_struct[field] = val.raw
+			} else {
+				e, err := json_encode(val.raw, val._type)
+				if err != nil {
+					return nil, err
+				}
+				_struct[field] = jsontext.Value(e)
+			}
+		}
+		return json.Marshal(_struct)
+	default:
+		panic(fmt.Sprintf("Encoding error: Unhandled type %s", t))
+	}
 }
