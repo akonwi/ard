@@ -45,10 +45,6 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			}
 
 			return makeOk(&val, resultType)
-
-			// switch subj := inner.(type) {
-			// default:
-			// }
 		}
 	default:
 		panic(fmt.Errorf("Unimplemented: json::%s()", call.Name))
