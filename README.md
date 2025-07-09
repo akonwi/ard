@@ -369,33 +369,5 @@ Note: `try` can only be used in function blocks
 ### Modules
 See the docs in [modules](./modules)
 
-#### 👇🏿 everything below this line is a work in progress 👇🏿
-
-### TODO: Callbacks
-- could be a way to handle async return values as an attached statement
-  - side-effecty, no control over when it's executed
-
-```ard
-greet("John") => (msg) {
-  print "Received $msg"
-}
-```
-
-## Error Handling
-
-> is this better than having built-in methods on the Result type?
-
-The `try?` operator can be used to convert an error result to a maybe:
-
-```ard
-let result: String? = try? riskyOperation()
-```
-
-## Asynchronous Programming
-
-Work in progress. Ideas for inspiration:
-- risor
-- inko
-- rust
-
-This specification provides an overview of the Ard language. It covers the basic syntax, type system, error handling, asynchronous programming, pattern matching, and module system. As the language evolves, this specification will be updated to reflect new features and changes.
+### Async Programs
+See the docs in [async](./async)

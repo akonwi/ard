@@ -1,5 +1,6 @@
 ## TODO
 
+- [ ] comparing Maybes
 - [ ] include stdlib .ard files in compilation
 - [ ] Database.upsert
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
