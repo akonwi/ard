@@ -1,0 +1,11 @@
+fn from_hours(h: Int) Int {
+  h * 3600 * 1000
+}
+
+fn from_seconds(s: Int) Int {
+  s * 1000
+}
+
+fn from_minutes(m: Int) Int {
+  m * 60 * 1000
+}

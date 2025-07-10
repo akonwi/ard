@@ -26,6 +26,11 @@ func findInStdLib(path string) (Module, bool) {
 		return ResultPkg{}, true
 	case "ard/sqlite":
 		return SQLitePkg{}, true
+	default:
+		// Check if it's an embedded .ard module
+		if mod, ok := findEmbeddedModule(path); ok {
+			return mod, true
+		}
 	}
 	return nil, false
 }
