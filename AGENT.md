@@ -11,6 +11,9 @@ The language spec is in the README.md
 The backlog of work is a simple todo list in TODO.md
 
 ## Build/Test Commands
+> for all these commands use the 1.25rc1 version of go and add "--tags=goexperiment.jsonv2"
+> example - `go1.25rc1 test ./...--tags=goexperiment.jsonv2`
+
 - Build: `go build`
 - Run Ard program: `go run main.go run samples/[file].ard`
 - Run all tests: `go test ./...`
