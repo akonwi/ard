@@ -1,6 +1,6 @@
 ## TODO
 
-- [ ] Database.upsert
+- [ ] support FFI in stdlib OR add an `external` escape for definitions
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
