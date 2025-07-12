@@ -450,6 +450,118 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(exists)
 		return makeOk(&object{exists, checker.Bool}, method.Type().(*checker.Result))
+	case "upsert":
+		// fn upsert(table: Str, where: Str, record: $T) Result<Bool, Str>
+		tableName := args[0].raw.(string)
+		whereClause := args[1].raw.(string)
+		structObj := args[2]
+
+		resultType := method.Type().(*checker.Result)
+
+		// Extract fields from the struct
+		structFields, ok := structObj.raw.(map[string]*object)
+		if !ok {
+			errorMsg := &object{"Upsert expects a struct object", resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		// Check if record exists
+		checkSQL := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s)", tableName, whereClause)
+		var exists bool
+		err := db.conn.QueryRow(checkSQL).Scan(&exists)
+		if err != nil {
+			errorMsg := &object{err.Error(), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		if exists {
+			// Record exists - perform UPDATE
+			var setPairs []string
+			var values []interface{}
+
+			// Sort column names for consistent ordering
+			var columns []string
+			for columnName := range structFields {
+				columns = append(columns, columnName)
+			}
+			sort.Strings(columns)
+
+			// Build SET clauses
+			for _, columnName := range columns {
+				fieldObj := structFields[columnName]
+				setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
+
+				// Handle Maybe types for update
+				if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
+					if fieldObj.raw == nil {
+						values = append(values, nil)
+					} else {
+						values = append(values, fieldObj.raw)
+					}
+				} else {
+					values = append(values, fieldObj.raw)
+				}
+			}
+
+			// Construct UPDATE SQL
+			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+				tableName,
+				strings.Join(setPairs, ", "),
+				whereClause,
+			)
+
+			// Execute the UPDATE
+			_, err := db.conn.Exec(sql, values...)
+			if err != nil {
+				errorMsg := &object{err.Error(), resultType.Err()}
+				return makeErr(errorMsg, resultType)
+			}
+		} else {
+			// Record doesn't exist - perform INSERT
+			var columns []string
+			var placeholders []string
+			var values []any
+
+			// Sort column names for consistent ordering
+			for columnName := range structFields {
+				columns = append(columns, columnName)
+			}
+			sort.Strings(columns)
+
+			// Build values in same order as columns
+			for _, columnName := range columns {
+				fieldObj := structFields[columnName]
+				placeholders = append(placeholders, "?")
+				
+				// Handle Maybe types
+				if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
+					if fieldObj.raw == nil {
+						values = append(values, nil)
+					} else {
+						values = append(values, fieldObj.raw)
+					}
+				} else {
+					values = append(values, fieldObj.raw)
+				}
+			}
+
+			// Construct INSERT SQL
+			sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+				tableName,
+				strings.Join(columns, ", "),
+				strings.Join(placeholders, ", "),
+			)
+
+			// Execute the INSERT
+			_, err := db.conn.Exec(sql, values...)
+			if err != nil {
+				errorMsg := &object{err.Error(), resultType.Err()}
+				return makeErr(errorMsg, resultType)
+			}
+		}
+
+		// Return Ok(true) - upsert succeeded
+		return makeOk(&object{true, checker.Bool}, resultType)
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}

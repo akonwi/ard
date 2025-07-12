@@ -826,3 +826,143 @@ func TestSQLiteEmptyWhereClause(t *testing.T) {
 		t.Errorf("Expected empty where clauses to work correctly, got %v", result)
 	}
 }
+
+func TestSQLiteUpsert(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_upsert.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_upsert.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+
+		// Test insert (new record)
+		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
+		let insert_result = db.upsert("players", "id = 1", player1).expect("Failed to upsert new player")
+
+		// Test update (existing record)
+		let updated_player1 = Player{ id: 1, name: "John Smith", number: 10 }
+		let update_result = db.upsert("players", "id = 1", updated_player1).expect("Failed to upsert existing player")
+
+		// Verify the update worked
+		let players = db.get<Player>("players", "id = 1").expect("Failed to get player")
+		let retrieved = players.at(0)
+		
+		insert_result == true and update_result == true and retrieved.name == "John Smith" and retrieved.number == 10
+	`)
+
+	if result != true {
+		t.Errorf("Expected upsert operations to work correctly, got %v", result)
+	}
+}
+
+func TestSQLiteUpsertMultipleKeys(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_upsert_multi.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Score {
+			player_id: Int,
+			game_id: Int,
+			score: Int,
+		}
+
+		let db = sqlite::open("test_upsert_multi.db").expect("Failed to open database")
+		db.exec("CREATE TABLE scores (player_id INTEGER, game_id INTEGER, score INTEGER, PRIMARY KEY (player_id, game_id))").expect("Failed to create table")
+
+		// Test insert with composite key
+		let score1 = Score{ player_id: 1, game_id: 1, score: 100 }
+		let insert_result = db.upsert("scores", "player_id = 1 AND game_id = 1", score1).expect("Failed to upsert new score")
+
+		// Test update with composite key
+		let updated_score1 = Score{ player_id: 1, game_id: 1, score: 150 }
+		let update_result = db.upsert("scores", "player_id = 1 AND game_id = 1", updated_score1).expect("Failed to upsert existing score")
+
+		// Verify the update worked
+		let scores = db.get<Score>("scores", "player_id = 1 AND game_id = 1").expect("Failed to get score")
+		let retrieved = scores.at(0)
+		
+		insert_result == true and update_result == true and retrieved.score == 150
+	`)
+
+	if result != true {
+		t.Errorf("Expected upsert with multiple keys to work correctly, got %v", result)
+	}
+}
+
+func TestSQLiteUpsertWithMaybeTypes(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_upsert_maybe.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/maybe
+		struct User {
+			id: Int,
+			name: Str,
+			email: Str?
+		}
+
+		let db = sqlite::open("test_upsert_maybe.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
+
+		// Insert user with email
+		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
+		db.upsert("users", "id = 1", user1).expect("Failed to upsert user with email")
+
+		// Update user to remove email
+		let user1_no_email = User{ id: 1, name: "John Doe", email: maybe::none() }
+		db.upsert("users", "id = 1", user1_no_email).expect("Failed to upsert user without email")
+
+		// Verify the update worked
+		let users = db.get<User>("users", "id = 1").expect("Failed to get user")
+		let retrieved = users.at(0)
+		
+		retrieved.name == "John Doe" and retrieved.email.or("default") == "default"
+	`)
+
+	if result != true {
+		t.Errorf("Expected upsert with Maybe types to work correctly, got %v", result)
+	}
+}
+
+func TestSQLiteUpsertError(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_upsert_error.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_upsert_error.db").expect("Failed to open database")
+		// Don't create the table - this should cause an error
+
+		let player = Player{ id: 1, name: "John Doe", number: 2 }
+		let result = db.upsert("players", "id = 1", player)
+
+		// Should fail
+		match result {
+			ok => false,
+			err => true
+		}
+	`)
+
+	if result != true {
+		t.Errorf("Expected upsert to fail with missing table, got %v", result)
+	}
+}

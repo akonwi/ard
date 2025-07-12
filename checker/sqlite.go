@@ -3,33 +3,6 @@ package checker
 var DatabaseDef = &StructDef{
 	Name: "Database",
 	Fields: map[string]Type{
-		"exec": &FunctionDef{
-			Name:       "exec",
-			Parameters: []Parameter{{Name: "sql", Type: Str}},
-			ReturnType: MakeResult(Void, Str),
-		},
-		"insert": &FunctionDef{
-			Name: "insert",
-			// these singleton types are problematic because it means the Any gets refined to a single type
-			// instead of allowing multiple types
-			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
-			ReturnType: MakeResult(Void, Str),
-		},
-		"update": &FunctionDef{
-			Name:       "update",
-			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}, {Name: "record", Type: &Any{name: "T"}}},
-			ReturnType: MakeResult(Void, Str),
-		},
-		"get": &FunctionDef{
-			Name:       "get",
-			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
-			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
-		},
-		"delete": &FunctionDef{
-			Name:       "delete",
-			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
-			ReturnType: MakeResult(Bool, Str),
-		},
 		"close": &FunctionDef{
 			Name:       "close",
 			Parameters: []Parameter{},
@@ -40,9 +13,49 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(Int, Str),
 		},
+		"delete": &FunctionDef{
+			Name:       "delete",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
+			ReturnType: MakeResult(Bool, Str),
+		},
+		"exec": &FunctionDef{
+			Name:       "exec",
+			Parameters: []Parameter{{Name: "sql", Type: Str}},
+			ReturnType: MakeResult(Void, Str),
+		},
 		"exists": &FunctionDef{
 			Name:       "exists",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
+			ReturnType: MakeResult(Bool, Str),
+		},
+		"get": &FunctionDef{
+			Name:       "get",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
+			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
+		},
+		"insert": &FunctionDef{
+			Name: "insert",
+			// these singleton types are problematic because it means the Any gets refined to a single type
+			// instead of allowing multiple types
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
+			ReturnType: MakeResult(Void, Str),
+		},
+		"update": &FunctionDef{
+			Name: "update",
+			Parameters: []Parameter{
+				{Name: "table", Type: Str},
+				{Name: "where", Type: Str},
+				{Name: "record", Type: &Any{name: "T"}},
+			},
+			ReturnType: MakeResult(Void, Str),
+		},
+		"upsert": &FunctionDef{
+			Name: "upsert",
+			Parameters: []Parameter{
+				{Name: "table", Type: Str},
+				{Name: "where", Type: Str},
+				{Name: "record", Type: &Any{name: "T"}},
+			},
 			ReturnType: MakeResult(Bool, Str),
 		},
 	},
