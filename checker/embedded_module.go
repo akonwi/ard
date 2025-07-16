@@ -9,7 +9,7 @@ import (
 type EmbeddedModule struct {
 	path          string
 	program       *Program
-	publicSymbols map[string]symbol
+	publicSymbols map[string]Symbol
 }
 
 func (m EmbeddedModule) Path() string {
@@ -20,7 +20,7 @@ func (m EmbeddedModule) Program() *Program {
 	return m.program
 }
 
-func (m EmbeddedModule) Get(name string) symbol {
+func (m EmbeddedModule) Get(name string) Symbol {
 	return m.publicSymbols[name]
 }
 

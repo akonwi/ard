@@ -125,32 +125,25 @@ func (r *Reassignment) NonProducing() {}
 
 type Identifier struct {
 	Name string
-	sym  symbol
+	sym  Symbol
 }
 
 func (i *Identifier) Type() Type {
-	return i.sym._type()
+	return i.sym.Type
 }
 
 type Variable struct {
-	sym symbol
-}
-
-func (v *Variable) isMutable() bool {
-	if def, ok := v.sym.(*VariableDef); ok {
-		return def.Mutable
-	}
-	return false
+	sym Symbol
 }
 
 func (v Variable) String() string {
 	return v.Name()
 }
 func (v Variable) Name() string {
-	return v.sym.name()
+	return v.sym.Name
 }
 func (v Variable) Type() Type {
-	return v.sym._type()
+	return v.sym.Type
 }
 
 type InstanceProperty struct {

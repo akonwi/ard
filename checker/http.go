@@ -91,19 +91,19 @@ func (pkg HttpPkg) Path() string {
 func (pkg HttpPkg) Program() *Program {
 	return nil
 }
-func (pkg HttpPkg) Get(name string) symbol {
+func (pkg HttpPkg) Get(name string) Symbol {
 	switch name {
 	case "Request":
-		return HttpRequestDef
+		return Symbol{Name: name, Type: HttpRequestDef}
 	case "Response":
-		return HttpResponseDef
+		return Symbol{Name: name, Type: HttpResponseDef}
 	case "send":
-		return HttpSendFn
+		return Symbol{Name: name, Type: HttpSendFn}
 	case "serve":
-		return HttpServeFn
+		return Symbol{Name: name, Type: HttpServeFn}
 	case "respond":
-		return HttpRespondFn
+		return Symbol{Name: name, Type: HttpRespondFn}
 	default:
-		return nil
+		return Symbol{}
 	}
 }

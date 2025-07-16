@@ -138,7 +138,7 @@ fn main() Int {
 	// Test that the module provides the public function
 	if userMod, ok := utilsModule.(*checker.UserModule); ok {
 		helperFunc := userMod.Get("helper")
-		if helperFunc == nil {
+		if helperFunc.IsZero() {
 			t.Error("Expected to find 'helper' function in utils module")
 		}
 	} else {
@@ -215,18 +215,18 @@ fn main() Int {
 	// Test that public functions are accessible
 	if userMod, ok := mathModule.(*checker.UserModule); ok {
 		addFunc := userMod.Get("add")
-		if addFunc == nil {
+		if addFunc.IsZero() {
 			t.Error("Expected to find 'add' function in math module")
 		}
 
 		multiplyFunc := userMod.Get("multiply")
-		if multiplyFunc == nil {
+		if multiplyFunc.IsZero() {
 			t.Error("Expected to find 'multiply' function in math module")
 		}
 
 		// Test that private functions are not accessible
 		privateFunc := userMod.Get("private_divide")
-		if privateFunc != nil {
+		if !privateFunc.IsZero() {
 			t.Error("Expected private function to not be accessible")
 		}
 	} else {
@@ -868,10 +868,10 @@ private struct PrivateStruct {
 
 	// Test public symbol access
 	publicFunc := userModule.Get("public_function")
-	if publicFunc == nil {
+	if publicFunc.IsZero() {
 		t.Error("Expected to find public_function")
 	}
-	if funcDef, ok := publicFunc.(*checker.FunctionDef); ok {
+	if funcDef, ok := publicFunc.Type.(*checker.FunctionDef); ok {
 		if funcDef.Private {
 			t.Error("Expected public_function to have Public=true")
 		}
@@ -880,10 +880,10 @@ private struct PrivateStruct {
 	}
 
 	publicStruct := userModule.Get("PublicStruct")
-	if publicStruct == nil {
+	if publicStruct.IsZero() {
 		t.Error("Expected to find PublicStruct")
 	}
-	if structDef, ok := publicStruct.(*checker.StructDef); ok {
+	if structDef, ok := publicStruct.Type.(*checker.StructDef); ok {
 		if structDef.Private {
 			t.Error("Expected PublicStruct to have Public=true")
 		}
@@ -893,18 +893,18 @@ private struct PrivateStruct {
 
 	// Test private symbol access (should return nil)
 	privateFunc := userModule.Get("private_function")
-	if privateFunc != nil {
+	if !privateFunc.IsZero() {
 		t.Error("Expected private_function to be nil (not accessible)")
 	}
 
 	privateStruct := userModule.Get("PrivateStruct")
-	if privateStruct != nil {
+	if !privateStruct.IsZero() {
 		t.Error("Expected PrivateStruct to be nil (not accessible)")
 	}
 
 	// Test non-existent symbol
 	nonExistent := userModule.Get("nonexistent")
-	if nonExistent != nil {
+	if !nonExistent.IsZero() {
 		t.Error("Expected nonexistent symbol to be nil")
 	}
 }

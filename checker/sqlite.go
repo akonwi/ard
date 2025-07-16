@@ -81,13 +81,13 @@ func (pkg SQLitePkg) Program() *Program {
 	return nil
 }
 
-func (pkg SQLitePkg) Get(name string) symbol {
+func (pkg SQLitePkg) Get(name string) Symbol {
 	switch name {
 	case "Database":
-		return DatabaseDef
+		return Symbol{Name: name, Type: DatabaseDef}
 	case "open":
-		return SQLiteOpenFn
+		return Symbol{Name: name, Type: SQLiteOpenFn}
 	default:
-		return nil
+		return Symbol{}
 	}
 }

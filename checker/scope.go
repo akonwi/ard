@@ -17,13 +17,8 @@ type Symbol struct {
 	mutable bool
 }
 
-// temporarily implement legacy symbol interface while that interface gets refactored out
-func (s *Symbol) name() string {
-	return s.Name
-}
-
-func (s *Symbol) _type() Type {
-	return s.Type
+func (s Symbol) IsZero() bool {
+	return s == Symbol{}
 }
 
 func makeScope(parent *SymbolTable) SymbolTable {
@@ -63,9 +58,4 @@ func (st *SymbolTable) expectReturn(returnType Type) {
 
 func (st *SymbolTable) isolate() {
 	st.isolated = true
-}
-
-type symbol interface {
-	name() string
-	_type() Type
 }

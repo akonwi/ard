@@ -47,16 +47,19 @@ func (mod EnvMod) Path() string {
 func (mod EnvMod) Program() *Program {
 	return nil
 }
-func (mod EnvMod) Get(name string) symbol {
+func (mod EnvMod) Get(name string) Symbol {
 	switch name {
 	case "get":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "key", Type: Str}},
-			ReturnType: &Maybe{Str},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "key", Type: Str}},
+				ReturnType: &Maybe{Str},
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -70,22 +73,28 @@ func (pkg FloatPkg) Path() string {
 func (pkg FloatPkg) Program() *Program {
 	return nil
 }
-func (pkg FloatPkg) Get(name string) symbol {
+func (pkg FloatPkg) Get(name string) Symbol {
 	switch name {
 	case "from_int":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "int", Type: Int}},
-			ReturnType: Float,
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "int", Type: Int}},
+				ReturnType: Float,
+			},
 		}
 	case "from_str":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: Str}},
-			ReturnType: &Maybe{Float},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "string", Type: Str}},
+				ReturnType: &Maybe{Float},
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -99,46 +108,64 @@ func (pkg FsPkg) Path() string {
 func (pkg FsPkg) Program() *Program {
 	return nil
 }
-func (pkg FsPkg) Get(name string) symbol {
+func (pkg FsPkg) Get(name string) Symbol {
 	switch name {
 	case "append":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
-			ReturnType: MakeResult(Void, Str),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
+				ReturnType: MakeResult(Void, Str),
+			},
 		}
 	case "create_file":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "path", Type: Str}},
-			ReturnType: MakeResult(Void, Str),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "path", Type: Str}},
+				ReturnType: MakeResult(Void, Str),
+			},
 		}
 	case "delete":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "path", Type: Str}},
-			ReturnType: MakeResult(Void, Str),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "path", Type: Str}},
+				ReturnType: MakeResult(Void, Str),
+			},
 		}
 	case "exists":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "path", Type: Str}},
-			ReturnType: Bool,
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "path", Type: Str}},
+				ReturnType: Bool,
+			},
 		}
 	case "read":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "path", Type: Str}},
-			ReturnType: &Maybe{Str},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "path", Type: Str}},
+				ReturnType: &Maybe{Str},
+			},
 		}
 	case "write":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
-			ReturnType: MakeResult(Void, Str),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
+				ReturnType: MakeResult(Void, Str),
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -152,16 +179,19 @@ func (pkg IntPkg) Path() string {
 func (pkg IntPkg) Program() *Program {
 	return nil
 }
-func (pkg IntPkg) Get(name string) symbol {
+func (pkg IntPkg) Get(name string) Symbol {
 	switch name {
 	case "from_str":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: Str}},
-			ReturnType: &Maybe{Int},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "string", Type: Str}},
+				ReturnType: &Maybe{Int},
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -175,25 +205,28 @@ func (pkg IoPkg) Path() string {
 func (pkg IoPkg) Program() *Program {
 	return nil
 }
-func (pkg IoPkg) Get(name string) symbol {
+func (pkg IoPkg) Get(name string) Symbol {
 	switch name {
 	case "print":
 		fn := &FunctionDef{
 			Name: name,
 			Parameters: []Parameter{
-				{Name: "string", Type: strMod.symbols["ToString"]._type()},
+				{Name: "string", Type: strMod.symbols["ToString"].Type},
 			},
 			ReturnType: Void,
 		}
-		return fn
+		return Symbol{Name: name, Type: fn}
 	case "read_line":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: MakeResult(Str, Str),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{},
+				ReturnType: MakeResult(Str, Str),
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -208,16 +241,19 @@ func (pkg ListPkg) Path() string {
 func (pkg ListPkg) Program() *Program {
 	return nil
 }
-func (pkg ListPkg) Get(name string) symbol {
+func (pkg ListPkg) Get(name string) Symbol {
 	switch name {
 	case "new":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: &List{&Any{name: "T"}},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{},
+				ReturnType: &List{&Any{name: "T"}},
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -231,26 +267,32 @@ func (pkg MaybePkg) Path() string {
 func (pkg MaybePkg) Program() *Program {
 	return nil
 }
-func (pkg MaybePkg) Get(name string) symbol {
+func (pkg MaybePkg) Get(name string) Symbol {
 	switch name {
 	case "none":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: &Maybe{&Any{name: "T"}},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{},
+				ReturnType: &Maybe{&Any{name: "T"}},
+			},
 		}
 	case "some":
 		// This function returns Maybe<T> where T is the type of the parameter
 		// We use Any as a placeholder, but the type checker should infer
 		// the actual type based on the argument type
 		any := &Any{name: "T"}
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "val", Type: any}},
-			ReturnType: &Maybe{any},
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "val", Type: any}},
+				ReturnType: &Maybe{any},
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
@@ -264,40 +306,46 @@ func (pkg ResultPkg) Path() string {
 func (pkg ResultPkg) Program() *Program {
 	return nil
 }
-func (pkg ResultPkg) Get(name string) symbol {
+func (pkg ResultPkg) Get(name string) Symbol {
 	switch name {
 	case "ok":
 		// This function returns Result<T, E> where T is the type of the parameter
 		// and E is a generic type parameter
 		valType := &Any{name: "Val"}
 		errType := &Any{name: "Err"}
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "val", Type: valType}},
-			ReturnType: MakeResult(valType, errType),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "val", Type: valType}},
+				ReturnType: MakeResult(valType, errType),
+			},
 		}
 	case "err":
 		// This function returns Result<T, E> where E is the type of the parameter
 		// and T is a generic type parameter
 		valType := &Any{name: "Val"}
 		errType := &Any{name: "Err"}
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "err", Type: errType}},
-			ReturnType: MakeResult(valType, errType),
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "err", Type: errType}},
+				ReturnType: MakeResult(valType, errType),
+			},
 		}
 	default:
-		return nil
+		return Symbol{}
 	}
 }
 
 type StrMod struct {
-	symbols map[string]symbol
+	symbols map[string]Symbol
 }
 
 var strMod = StrMod{
-	symbols: map[string]symbol{
-		"ToString": &Symbol{
+	symbols: map[string]Symbol{
+		"ToString": Symbol{
 			Name: "ToString",
 			Type: &Trait{
 				Name: "ToString",
@@ -321,6 +369,6 @@ func (pkg StrMod) Program() *Program {
 	return nil
 }
 
-func (pkg StrMod) Get(name string) symbol {
+func (pkg StrMod) Get(name string) Symbol {
 	return pkg.symbols[name]
 }

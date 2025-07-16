@@ -58,12 +58,12 @@ func (vm *VM) callMain() error {
 func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.FunctionCall) *object {
 	// Look up the function in the module
 	symbol := module.Get(call.Name)
-	if symbol == nil {
+	if symbol.IsZero() {
 		panic(fmt.Errorf("Function %s not found in module %s", call.Name, module.Path()))
 	}
 
 	// Verify it's a function
-	_, ok := symbol.(*checker.FunctionDef)
+	_, ok := symbol.Type.(*checker.FunctionDef)
 	if !ok {
 		panic(fmt.Errorf("%s is not a function in module %s", call.Name, module.Path()))
 	}
@@ -432,8 +432,8 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			// Check for user modules (modules with function bodies)
 			if module, ok := vm.imports[e.Module]; ok {
 				// Check if this is a user module by seeing if the function has a body
-				if symbol := module.Get(e.Call.Name); symbol != nil {
-					if functionDef, ok := symbol.(*checker.FunctionDef); ok && functionDef.Body != nil {
+				if symbol := module.Get(e.Call.Name); !symbol.IsZero() {
+					if functionDef, ok := symbol.Type.(*checker.FunctionDef); ok && functionDef.Body != nil {
 						return vm.evalUserModuleFunction(module, e.Call)
 					}
 				}

@@ -37,17 +37,20 @@ func (pkg AsyncPkg) Path() string {
 func (pkg AsyncPkg) Program() *Program {
 	return nil
 }
-func (pkg AsyncPkg) Get(name string) symbol {
+func (pkg AsyncPkg) Get(name string) Symbol {
 	switch name {
 	case "sleep":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "duration", Type: Int}},
-			ReturnType: Void,
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "duration", Type: Int}},
+				ReturnType: Void,
+			},
 		}
 	case "start":
-		return AsyncStart
+		return Symbol{Name: name, Type: AsyncStart}
 	default:
-		return nil
+		return Symbol{}
 	}
 }

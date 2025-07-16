@@ -17,7 +17,7 @@ type Program struct {
 
 type Module interface {
 	Path() string
-	Get(name string) symbol
+	Get(name string) Symbol
 	Program() *Program
 }
 
@@ -42,7 +42,7 @@ func (d Diagnostic) String() string {
 func (c checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
-		return e.sym.(*Symbol).mutable
+		return e.sym.mutable
 	case *InstanceProperty:
 		return c.isMutable(e.Subject)
 	}
@@ -240,8 +240,8 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
 				sym := mod.Get(ty.Type.Property.(*ast.Identifier).Name)
-				if sym != nil {
-					return sym._type()
+				if !sym.IsZero() {
+					return sym.Type
 				}
 			}
 		}
@@ -338,11 +338,11 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		}
 	case *ast.TraitImplementation:
 		{
-			var sym symbol = nil
+			var sym Symbol
 			switch name := s.Trait.(type) {
 			case ast.Identifier:
 				if s, ok := c.scope.get(name.Name); ok {
-					sym = s
+					sym = *s
 				}
 			case ast.StaticProperty:
 				mod := c.resolveModule(name.Target.(*ast.Identifier).Name)
@@ -358,14 +358,14 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				panic(fmt.Errorf("Unsupported trait node: %s", name))
 			}
 
-			if sym == nil {
+			if sym.IsZero() {
 				c.addError(fmt.Sprintf("Undefined trait: %s", s.Trait), s.Trait.GetLocation())
 				return nil
 			}
 
-			trait, ok := sym._type().(*Trait)
+			trait, ok := sym.Type.(*Trait)
 			if !ok {
-				c.addError(fmt.Sprintf("%T is not a trait", sym._type()), s.Trait.GetLocation())
+				c.addError(fmt.Sprintf("%T is not a trait", sym.Type), s.Trait.GetLocation())
 				return nil
 			}
 
@@ -566,7 +566,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 
 				return &Statement{
-					Stmt: &Reassignment{Target: &Variable{target}, Value: value},
+					Stmt: &Reassignment{Target: &Variable{*target}, Value: value},
 				}
 			}
 
@@ -1166,7 +1166,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !cx.Type().hasTrait(strMod.Get("ToString")._type().(*Trait)) {
+				if !cx.Type().hasTrait(strMod.Get("ToString").Type.(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -1176,7 +1176,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
-			return &Variable{sym}
+			return &Variable{*sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
 		return nil
@@ -1793,12 +1793,12 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if structName != "" {
 					// We have a nested path like http::Response::new, resolve the struct first
 					structSymbol := mod.Get(structName)
-					if structSymbol == nil {
+					if structSymbol.IsZero() {
 						c.addError(fmt.Sprintf("Undefined: %s", structName), s.GetLocation())
 						return nil
 					}
 
-					structDef, ok := structSymbol.(*StructDef)
+					structDef, ok := structSymbol.Type.(*StructDef)
 					if !ok {
 						c.addError(fmt.Sprintf("%s is not a struct", structName), s.GetLocation())
 						return nil
@@ -1815,14 +1815,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				} else {
 					// Simple case like io::print(), look for function directly in module
 					sym := mod.Get(s.Function.Name)
-					if sym == nil {
+					if sym.IsZero() {
 						targetName := s.Target.String()
 						c.addError(fmt.Sprintf("Undefined: %s::%s", targetName, s.Function.Name), s.GetLocation())
 						return nil
 					}
 
 					var ok bool
-					fnDef, ok = sym.(*FunctionDef)
+					fnDef, ok = sym.Type.(*FunctionDef)
 					if !ok {
 						targetName := s.Target.String()
 						c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
@@ -2237,7 +2237,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 		strct, ok := sym.Type.(*StructDef)
 		if !ok {
-			c.addError(fmt.Sprintf("Not a struct: %s", sym.name()), s.GetLocation())
+			c.addError(fmt.Sprintf("Not a struct: %s", sym.Name), s.GetLocation())
 			return nil
 		}
 
@@ -2746,12 +2746,12 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					case *ast.StructInstance:
 						// Look up the struct symbol directly from the module
 						sym := mod.Get(prop.Name.Name)
-						if sym == nil {
+						if sym.IsZero() {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
 						}
 
-						structType, ok := sym.(*StructDef)
+						structType, ok := sym.Type.(*StructDef)
 						if !ok {
 							c.addError(fmt.Sprintf("%s::%s is not a struct", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
@@ -2770,7 +2770,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					case *ast.Identifier:
 						// Look up other symbols (like enum variants, etc.)
 						sym := mod.Get(prop.Name)
-						if sym == nil {
+						if sym.IsZero() {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
@@ -2792,7 +2792,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 				enum, ok := sym.Type.(*Enum)
 				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.name(), s.Property), id.GetLocation())
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property), id.GetLocation())
 					return nil
 				}
 
@@ -2804,7 +2804,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 				}
 				if variant == -1 {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.name(), s.Property.(*ast.Identifier).Name), id.GetLocation())
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property.(*ast.Identifier).Name), id.GetLocation())
 					return nil
 				}
 
@@ -2889,12 +2889,12 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			}
 
 			sym := mod.Get(s.Function.Name)
-			if sym == nil {
+			if sym.IsZero() {
 				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
-			fnDef, isFunc := sym.(*FunctionDef)
+			fnDef, isFunc := sym.Type.(*FunctionDef)
 			if !isFunc {
 				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
