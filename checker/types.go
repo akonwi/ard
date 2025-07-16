@@ -142,7 +142,7 @@ func (s *str) equal(other Type) bool {
 }
 
 func (s *str) hasTrait(trait *Trait) bool {
-	return trait == strMod.symbols["ToString"]
+	return trait == strMod.symbols["ToString"]._type()
 }
 
 var Str = &str{}
@@ -183,7 +183,7 @@ func (i *_int) equal(other Type) bool {
 }
 
 func (i *_int) hasTrait(trait *Trait) bool {
-	return trait == strMod.symbols["ToString"]
+	return trait == strMod.symbols["ToString"]._type()
 }
 
 var Int = &_int{}
@@ -220,7 +220,7 @@ func (f *float) equal(other Type) bool {
 }
 
 func (f *float) hasTrait(trait *Trait) bool {
-	return trait == strMod.symbols["ToString"]
+	return trait == strMod.symbols["ToString"]._type()
 }
 
 var Float = &float{}
@@ -257,7 +257,7 @@ func (b *_bool) equal(other Type) bool {
 }
 
 func (b *_bool) hasTrait(trait *Trait) bool {
-	return trait == strMod.symbols["ToString"]
+	return trait == strMod.symbols["ToString"]._type()
 }
 
 var Bool = &_bool{}

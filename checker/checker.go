@@ -39,12 +39,12 @@ func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
-func isMutable(expr Expression) bool {
-	if v, ok := expr.(*Variable); ok {
-		return v.isMutable()
-	}
-	if prop, ok := expr.(*InstanceProperty); ok {
-		return isMutable(prop.Subject)
+func (c checker) isMutable(expr Expression) bool {
+	switch e := expr.(type) {
+	case *Variable:
+		return e.sym.(*Symbol).mutable
+	case *InstanceProperty:
+		return c.isMutable(e.Subject)
 	}
 	return false
 }
@@ -241,9 +241,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
 				sym := mod.Get(ty.Type.Property.(*ast.Identifier).Name)
 				if sym != nil {
-					if symType, ok := sym.(Type); ok {
-						return symType
-					}
+					return sym._type()
 				}
 			}
 		}
@@ -329,13 +327,13 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 			}
 
-			trait := &Trait{
+			trait := Trait{
 				private: s.Private,
 				Name:    s.Name.Name,
 				methods: methods,
 			}
 
-			c.scope.add(trait.name(), trait, false)
+			c.scope.add(trait.name(), &trait, false)
 			return nil
 		}
 	case *ast.TraitImplementation:
@@ -365,9 +363,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
-			trait, ok := sym.(*Trait)
+			trait, ok := sym._type().(*Trait)
 			if !ok {
-				c.addError(fmt.Sprintf("%s is not a trait", s.Trait), s.Trait.GetLocation())
+				c.addError(fmt.Sprintf("%T is not a trait", sym._type()), s.Trait.GetLocation())
 				return nil
 			}
 
@@ -582,7 +580,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					return nil
 				}
 
-				if !isMutable(subject) {
+				if !c.isMutable(subject) {
 					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
 					return nil
 				}
@@ -624,10 +622,11 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.ForLoop:
 		{
 			// Create a new scope for the loop body and initialization
-			scope := makeScope(&c.scope)
+			parent := c.scope
+			scope := makeScope(&parent)
 			c.scope = scope
 			defer func() {
-				c.scope = *c.scope.parent
+				c.scope = parent
 			}()
 
 			// Check the initialization statement - handle it as a variable declaration
@@ -1167,7 +1166,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !cx.Type().hasTrait(strMod.Get("ToString").(*Trait)) {
+				if !cx.Type().hasTrait(strMod.Get("ToString")._type().(*Trait)) {
 					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
@@ -1256,7 +1255,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
 					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
 				}
 
@@ -1371,6 +1370,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
+			if subj.Type() == nil {
+				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
+			}
 			sig := subj.Type().get(s.Method.Name)
 			if sig == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
@@ -1383,7 +1385,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			if fnDef.Mutates && !isMutable(subj) {
+			if fnDef.Mutates && !c.isMutable(subj) {
 				c.addError(fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subj, s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
@@ -1410,7 +1412,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
 					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
 				}
 
@@ -1851,7 +1853,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 
 					// Check mutability constraints if needed
-					if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
 						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
 					}
 
@@ -2006,7 +2008,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 
 					// Check mutability constraints if needed
-					if fnDef.Parameters[i].Mutable && !isMutable(checkedArg) {
+					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
 						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
 					}
 
@@ -2956,6 +2958,9 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 		var paramType Type = Void
 		if param.Type != nil {
 			paramType = c.resolveType(param.Type)
+			if paramType == nil {
+				panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+			}
 		}
 
 		params[i] = Parameter{

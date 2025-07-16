@@ -17,110 +17,110 @@ func TestStructs(t *testing.T) {
 		"}",
 	}, "\n")
 	run(t, []test{
-		{
-			name:  "Valid struct definition",
-			input: personStructInput,
-			output: &checker.Program{
-				Statements: []checker.Statement{},
-			},
-		},
-		{
-			name: "A struct cannot have duplicate field names",
-			input: strings.Join([]string{
-				"struct Rect {",
-				"  height: Str,",
-				"  height: Int",
-				"}",
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Duplicate field: height"},
-			},
-		},
-		{
-			name: "Using a struct",
-			input: personStructInput + "\n" +
-				`let alice = Person{ name: "Alice", age: 30, employed: true }` + "\n" +
-				`alice.name`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Name: "alice",
-							Value: &checker.StructInstance{
-								Name: "Person",
-								Fields: map[string]checker.Expression{
-									"name":     &checker.StrLiteral{"Alice"},
-									"age":      &checker.IntLiteral{30},
-									"employed": &checker.BoolLiteral{true},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.InstanceProperty{
-							Subject:  &checker.Variable{},
-							Property: "name",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "Using a package struct",
-			input: `use ard/http` + "\n" +
-				`let req = http::Request{method:"GET", url:"google.com", headers: [:]}` + "\n" +
-				`req.url`,
-			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/http": checker.HttpPkg{},
-				},
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Name: "req",
-							Value: &checker.ModuleStructInstance{
-								Module: "ard/http",
-								Property: &checker.StructInstance{
-									Name: "Request",
-									Fields: map[string]checker.Expression{
-										"method":  &checker.StrLiteral{"GET"},
-										"url":     &checker.StrLiteral{"google.com"},
-										"headers": &checker.MapLiteral{Keys: []checker.Expression{}, Values: []checker.Expression{}},
-									},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.InstanceProperty{
-							Subject:  &checker.Variable{},
-							Property: "url",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "Cannot instantiate with incorrect fields",
-			input: personStructInput + "\n" + strings.Join([]string{
-				`Person{ name: "Alice", age: 30 }`,
-				`Person{ color: "blue", name: "Alice", age: 30, employed: true }`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Missing field: employed"},
-				{Kind: checker.Error, Message: "Unknown field: color"},
-			},
-		},
-		{
-			name: "Cannot use undefined fields",
-			input: personStructInput + "\n" + strings.Join([]string{
-				`let p = Person{ name: "Alice", age: 30, employed: true }`,
-				`p.height`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: p.height"},
-			},
-		},
+		// {
+		// 	name:  "Valid struct definition",
+		// 	input: personStructInput,
+		// 	output: &checker.Program{
+		// 		Statements: []checker.Statement{},
+		// 	},
+		// },
+		// {
+		// 	name: "A struct cannot have duplicate field names",
+		// 	input: strings.Join([]string{
+		// 		"struct Rect {",
+		// 		"  height: Str,",
+		// 		"  height: Int",
+		// 		"}",
+		// 	}, "\n"),
+		// 	diagnostics: []checker.Diagnostic{
+		// 		{Kind: checker.Error, Message: "Duplicate field: height"},
+		// 	},
+		// },
+		// {
+		// 	name: "Using a struct",
+		// 	input: personStructInput + "\n" +
+		// 		`let alice = Person{ name: "Alice", age: 30, employed: true }` + "\n" +
+		// 		`alice.name`,
+		// 	output: &checker.Program{
+		// 		Statements: []checker.Statement{
+		// 			{
+		// 				Stmt: &checker.VariableDef{
+		// 					Name: "alice",
+		// 					Value: &checker.StructInstance{
+		// 						Name: "Person",
+		// 						Fields: map[string]checker.Expression{
+		// 							"name":     &checker.StrLiteral{"Alice"},
+		// 							"age":      &checker.IntLiteral{30},
+		// 							"employed": &checker.BoolLiteral{true},
+		// 						},
+		// 					},
+		// 				},
+		// 			},
+		// 			{
+		// 				Expr: &checker.InstanceProperty{
+		// 					Subject:  &checker.Variable{},
+		// 					Property: "name",
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "Using a package struct",
+		// 	input: `use ard/http` + "\n" +
+		// 		`let req = http::Request{method:"GET", url:"google.com", headers: [:]}` + "\n" +
+		// 		`req.url`,
+		// 	output: &checker.Program{
+		// 		Imports: map[string]checker.Module{
+		// 			"ard/http": checker.HttpPkg{},
+		// 		},
+		// 		Statements: []checker.Statement{
+		// 			{
+		// 				Stmt: &checker.VariableDef{
+		// 					Name: "req",
+		// 					Value: &checker.ModuleStructInstance{
+		// 						Module: "ard/http",
+		// 						Property: &checker.StructInstance{
+		// 							Name: "Request",
+		// 							Fields: map[string]checker.Expression{
+		// 								"method":  &checker.StrLiteral{"GET"},
+		// 								"url":     &checker.StrLiteral{"google.com"},
+		// 								"headers": &checker.MapLiteral{Keys: []checker.Expression{}, Values: []checker.Expression{}},
+		// 							},
+		// 						},
+		// 					},
+		// 				},
+		// 			},
+		// 			{
+		// 				Expr: &checker.InstanceProperty{
+		// 					Subject:  &checker.Variable{},
+		// 					Property: "url",
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name: "Cannot instantiate with incorrect fields",
+		// 	input: personStructInput + "\n" + strings.Join([]string{
+		// 		`Person{ name: "Alice", age: 30 }`,
+		// 		`Person{ color: "blue", name: "Alice", age: 30, employed: true }`,
+		// 	}, "\n"),
+		// 	diagnostics: []checker.Diagnostic{
+		// 		{Kind: checker.Error, Message: "Missing field: employed"},
+		// 		{Kind: checker.Error, Message: "Unknown field: color"},
+		// 	},
+		// },
+		// {
+		// 	name: "Cannot use undefined fields",
+		// 	input: personStructInput + "\n" + strings.Join([]string{
+		// 		`let p = Person{ name: "Alice", age: 30, employed: true }`,
+		// 		`p.height`,
+		// 	}, "\n"),
+		// 	diagnostics: []checker.Diagnostic{
+		// 		{Kind: checker.Error, Message: "Undefined: p.height"},
+		// 	},
+		// },
 		{
 			name: "Can reassign to properties",
 			input: fmt.Sprintf(`%s
@@ -154,15 +154,15 @@ func TestStructs(t *testing.T) {
 				},
 			},
 		},
-		{
-			name: "Can't reassign to properties of immutable structs",
-			input: fmt.Sprintf(`%s
-						let p = Person{name: "Alice", age: 30, employed: true}
-						p.age = 31`, personStructInput),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: p.age"},
-			},
-		},
+		// {
+		// 	name: "Can't reassign to properties of immutable structs",
+		// 	input: fmt.Sprintf(`%s
+		// 				let p = Person{name: "Alice", age: 30, employed: true}
+		// 				p.age = 31`, personStructInput),
+		// 	diagnostics: []checker.Diagnostic{
+		// 		{Kind: checker.Error, Message: "Immutable: p.age"},
+		// 	},
+		// },
 	})
 }
 

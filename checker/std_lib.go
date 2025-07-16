@@ -179,8 +179,10 @@ func (pkg IoPkg) Get(name string) symbol {
 	switch name {
 	case "print":
 		fn := &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: strMod.symbols["ToString"].(*Trait)}},
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "string", Type: strMod.symbols["ToString"]._type()},
+			},
 			ReturnType: Void,
 		}
 		return fn
@@ -295,13 +297,16 @@ type StrMod struct {
 
 var strMod = StrMod{
 	symbols: map[string]symbol{
-		"ToString": &Trait{
+		"ToString": &Symbol{
 			Name: "ToString",
-			methods: []FunctionDef{
-				{
-					Name:       "to_str",
-					Parameters: []Parameter{},
-					ReturnType: Str,
+			Type: &Trait{
+				Name: "ToString",
+				methods: []FunctionDef{
+					{
+						Name:       "to_str",
+						Parameters: []Parameter{},
+						ReturnType: Str,
+					},
 				},
 			},
 		},

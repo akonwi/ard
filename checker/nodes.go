@@ -149,7 +149,7 @@ func (v Variable) String() string {
 func (v Variable) Name() string {
 	return v.sym.name()
 }
-func (v *Variable) Type() Type {
+func (v Variable) Type() Type {
 	return v.sym._type()
 }
 

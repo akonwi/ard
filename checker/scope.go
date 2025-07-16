@@ -15,7 +15,6 @@ type Symbol struct {
 	Name    string
 	Type    Type
 	mutable bool
-	private bool
 }
 
 // temporarily implement legacy symbol interface while that interface gets refactored out
@@ -43,12 +42,7 @@ func (st *SymbolTable) add(name string, type_ Type, mutable bool) {
 	st.symbols[name] = &sym
 }
 
-func (st *SymbolTable) addPrivate(name string, type_ Type, mutable bool) {
-	st.add(name, type_, mutable)
-	st.symbols[name].private = true
-}
-
-func (st *SymbolTable) get(name string) (*Symbol, bool) {
+func (st SymbolTable) get(name string) (*Symbol, bool) {
 	if sym, ok := st.symbols[name]; ok {
 		return sym, true
 	}
