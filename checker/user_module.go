@@ -28,27 +28,27 @@ func (m *UserModule) setFilePath(path string) {
 }
 
 // NewUserModule creates a UserModule from a checked program, extracting only public symbols
-func NewUserModule(filePath string, program *Program, globalScope *scope) *UserModule {
+func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) *UserModule {
 	publicSymbols := make(map[string]symbol)
 
 	// Extract public symbols from the global scope
 	for _, sym := range globalScope.symbols {
-		switch s := sym.(type) {
+		switch s := sym.Type.(type) {
 		case *FunctionDef:
 			if !s.Private {
-			publicSymbols[s.Name] = s
+				publicSymbols[s.Name] = s
 			}
 		case *StructDef:
 			if !s.Private {
-			publicSymbols[s.Name] = s
+				publicSymbols[s.Name] = s
 			}
 		case *Trait:
 			if !s.private {
-			publicSymbols[s.Name] = s
+				publicSymbols[s.Name] = s
 			}
 		case *Enum:
 			if !s.private {
-			publicSymbols[s.Name] = s
+				publicSymbols[s.Name] = s
 			}
 		}
 	}

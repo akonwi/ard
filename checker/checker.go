@@ -51,14 +51,18 @@ func isMutable(expr Expression) bool {
 
 type checker struct {
 	diagnostics []Diagnostic
-	scope       *scope
+	scope       SymbolTable
 	program     *Program
 	filePath    string
 	halted      bool
 }
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
-	c := &checker{diagnostics: []Diagnostic{}, scope: newScope(nil), filePath: filePath}
+	c := &checker{
+		diagnostics: []Diagnostic{},
+		scope:       makeScope(nil),
+		filePath:    filePath,
+	}
 	c.program = &Program{
 		Imports:    map[string]Module{},
 		Statements: []Statement{},
@@ -137,7 +141,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 	}
 
 	// Create UserModule from the checked program
-	userModule := NewUserModule("", c.program, c.scope)
+	userModule := NewUserModule("", c.program, &c.scope)
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
@@ -218,24 +222,18 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		err := c.resolveType(ty.Err)
 		baseType = MakeResult(val, err)
 	case *ast.CustomType:
-		if sym := c.scope.get(t.GetName()); sym != nil {
-			// Check if it's an enum
-			if enum, ok := sym.(*Enum); ok {
-				baseType = enum
-				break
+		if sym, ok := c.scope.get(t.GetName()); ok {
+			switch s := sym.Type.(type) {
+			case *Enum:
+				baseType = s
+			case *Union:
+				baseType = s
+			case *StructDef:
+				baseType = s
+			default:
+				panic(fmt.Sprintf("Unhandled match for ast.CustomType: %T", t))
 			}
-
-			// Check if it's a union type
-			if union, ok := sym.(*Union); ok {
-				baseType = union
-				break
-			}
-
-			// Check if it's a struct type
-			if structType, ok := sym.(*StructDef); ok {
-				baseType = structType
-				break
-			}
+			break
 		}
 		if ty.Type.Target != nil {
 			mod := c.resolveModule(ty.Type.Target.(*ast.Identifier).Name)
@@ -337,7 +335,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				methods: methods,
 			}
 
-			c.scope.add(trait)
+			c.scope.add(trait.name(), trait, false)
 			return nil
 		}
 	case *ast.TraitImplementation:
@@ -345,7 +343,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			var sym symbol = nil
 			switch name := s.Trait.(type) {
 			case ast.Identifier:
-				sym = c.scope.get(name.Name)
+				if s, ok := c.scope.get(name.Name); ok {
+					sym = s
+				}
 			case ast.StaticProperty:
 				mod := c.resolveModule(name.Target.(*ast.Identifier).Name)
 				if mod != nil {
@@ -372,13 +372,13 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Check that the type exists
-			typeSym := c.scope.get(s.ForType.Name)
-			if typeSym == nil {
+			typeSym, ok := c.scope.get(s.ForType.Name)
+			if !ok {
 				c.addError(fmt.Sprintf("Undefined type: %s", s.ForType.Name), s.ForType.GetLocation())
 				return nil
 			}
 
-			structType, ok := typeSym.(*StructDef)
+			structType, ok := typeSym.Type.(*StructDef)
 			if !ok {
 				c.addError(fmt.Sprintf("%s is not a struct type", s.ForType.Name), s.ForType.GetLocation())
 				return nil
@@ -435,11 +435,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 				// if we made it this far, it's a valid implementation
 				fnDef := c.checkFunction(&method, func() {
-					c.scope.add(&VariableDef{
-						Name:    "@",
-						__type:  structType,
-						Mutable: method.Mutates,
-					})
+					c.scope.add("@", structType, method.Mutates)
 				})
 				fnDef.Mutates = method.Mutates
 				// add the method to the struct
@@ -478,7 +474,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Register the type in the scope with the given name
-			c.scope.add(unionType)
+			c.scope.add(unionType.name(), unionType, false)
 			return nil
 		}
 	case *ast.VariableDeclaration:
@@ -514,7 +510,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						val = expr
 					}
 				default:
-					val = c.checkExprAs(s.Value, expected)
+					if expected != nil {
+						val = c.checkExprAs(s.Value, expected)
+					}
 				}
 			}
 
@@ -540,7 +538,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Value:   val,
 				__type:  __type,
 			}
-			c.scope.add(v)
+			c.scope.add(v.Name, v.__type, v.Mutable)
 			return &Statement{
 				Stmt: v,
 			}
@@ -548,29 +546,29 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.VariableAssignment:
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {
-				target := c.scope.get(id.Name)
-				if target == nil {
+				target, ok := c.scope.get(id.Name)
+				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
 					return nil
 				}
+
+				if !target.mutable {
+					c.addError(fmt.Sprintf("Immutable variable: %s", target.Name), s.Target.GetLocation())
+					return nil
+				}
+
 				value := c.checkExpr(s.Value)
 				if value == nil {
 					return nil
 				}
 
-				if binding, ok := target.(*VariableDef); ok {
-					if !binding.Mutable {
-						c.addError(fmt.Sprintf("Immutable variable: %s", binding.Name), s.Target.GetLocation())
-						return nil
-					}
-					if !target._type().equal(value.Type()) {
-						c.addError(typeMismatch(target._type(), value.Type()), s.Value.GetLocation())
-						return nil
-					}
+				if !target.Type.equal(value.Type()) {
+					c.addError(typeMismatch(target.Type, value.Type()), s.Value.GetLocation())
+					return nil
+				}
 
-					return &Statement{
-						Stmt: &Reassignment{Target: &Variable{target}, Value: value},
-					}
+				return &Statement{
+					Stmt: &Reassignment{Target: &Variable{target}, Value: value},
 				}
 			}
 
@@ -626,10 +624,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	case *ast.ForLoop:
 		{
 			// Create a new scope for the loop body and initialization
-			scope := newScope(c.scope)
+			scope := makeScope(&c.scope)
 			c.scope = scope
 			defer func() {
-				c.scope = c.scope.parent
+				c.scope = *c.scope.parent
 			}()
 
 			// Check the initialization statement - handle it as a variable declaration
@@ -702,17 +700,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					End:    end,
 				}
 				body := c.checkBlock(s.Body, func() {
-					c.scope.add(&VariableDef{
-						Mutable: false,
-						Name:    s.Cursor.Name,
-						__type:  start.Type(),
-					})
+					c.scope.add(s.Cursor.Name, start.Type(), false)
 					if loop.Index != "" {
-						c.scope.add(&VariableDef{
-							Mutable: false,
-							Name:    loop.Index,
-							__type:  Int,
-						})
+						c.scope.add(loop.Index, Int, false)
 					}
 				})
 				loop.Body = body
@@ -740,17 +730,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope as a string
 					// Each character in a string is also a string
-					c.scope.add(&VariableDef{
-						Mutable: false,
-						Name:    s.Cursor.Name,
-						__type:  Str,
-					})
+					c.scope.add(s.Cursor.Name, Str, false)
 					if loop.Index != "" {
-						c.scope.add(&VariableDef{
-							Mutable: false,
-							Name:    loop.Index,
-							__type:  Int,
-						})
+						c.scope.add(loop.Index, Int, false)
 					}
 				})
 
@@ -771,17 +753,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(&VariableDef{
-						Mutable: false,
-						Name:    s.Cursor.Name,
-						__type:  Int,
-					})
+					c.scope.add(s.Cursor.Name, Int, false)
 					if loop.Index != "" {
-						c.scope.add(&VariableDef{
-							Mutable: false,
-							Name:    loop.Index,
-							__type:  Int,
-						})
+						c.scope.add(loop.Index, Int, false)
 					}
 				})
 
@@ -799,17 +773,9 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(&VariableDef{
-						Mutable: false,
-						Name:    s.Cursor.Name,
-						__type:  listType.of,
-					})
+					c.scope.add(s.Cursor.Name, listType.of, false)
 					if loop.Index != "" {
-						c.scope.add(&VariableDef{
-							Mutable: false,
-							Name:    loop.Index,
-							__type:  Int,
-						})
+						c.scope.add(loop.Index, Int, false)
 					}
 				})
 
@@ -831,16 +797,8 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursors to the scope
-					c.scope.add(&VariableDef{
-						Mutable: false,
-						Name:    s.Cursor.Name,
-						__type:  mapType.key,
-					})
-					c.scope.add(&VariableDef{
-						Mutable: false,
-						Name:    s.Cursor2.Name,
-						__type:  mapType.value,
-					})
+					c.scope.add(loop.Key, mapType.Key(), false)
+					c.scope.add(loop.Val, mapType.Value(), false)
 				})
 
 				loop.Body = body
@@ -873,7 +831,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Name:     s.Name,
 				Variants: s.Variants,
 			}
-			c.scope.add(enum)
+			c.scope.add(enum.name(), enum, false)
 			return nil
 		}
 	case *ast.StructDefinition:
@@ -896,30 +854,26 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 				def.Fields[field.Name.Name] = fieldType
 			}
-			c.scope.add(def)
+			c.scope.add(def.name(), def, false)
 			return nil
 		}
 	case *ast.ImplBlock:
 		{
-			sym := c.scope.get(s.Target.Name)
-			if sym == nil {
+			sym, ok := c.scope.get(s.Target.Name)
+			if !ok {
 				c.addError(fmt.Sprintf("Undefined: %s", s.Target), s.Target.GetLocation())
 				return nil
 			}
 
-			structDef, ok := sym.(*StructDef)
+			structDef, ok := sym.Type.(*StructDef)
 			if !ok {
-				c.addError(fmt.Sprintf("Expected struct type, got %s", sym), s.Target.GetLocation())
+				c.addError(fmt.Sprintf("Expected struct type, got %s", sym.Type), s.Target.GetLocation())
 				return nil
 			}
 
 			for _, method := range s.Methods {
 				fnDef := c.checkFunction(&method, func() {
-					c.scope.add(&VariableDef{
-						Name:    "@",
-						__type:  structDef,
-						Mutable: method.Mutates,
-					})
+					c.scope.add("@", structDef, method.Mutates)
 				})
 				fnDef.Mutates = method.Mutates
 				structDef.Fields[method.Name] = fnDef
@@ -1000,7 +954,7 @@ func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 	}
 
 	parent := c.scope
-	c.scope = newScope(parent)
+	c.scope = makeScope(&parent)
 	defer func() {
 		c.scope = parent
 	}()
@@ -1222,7 +1176,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return &TemplateStr{chunks}
 		}
 	case *ast.Identifier:
-		if sym := c.scope.get(s.Name); sym != nil {
+		if sym, ok := c.scope.get(s.Name); ok {
 			return &Variable{sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
@@ -1246,8 +1200,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			// Find the function in the scope
-			fnSym := c.scope.get(s.Name)
-			if fnSym == nil {
+			fnSym, got := c.scope.get(s.Name)
+			if !got {
 				c.addError(fmt.Sprintf("Undefined function: %s", s.Name), s.GetLocation())
 				return nil
 			}
@@ -1257,25 +1211,26 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			var ok bool
 
 			// Try different types for the function symbol
-			fnDef, ok = fnSym.(*FunctionDef)
+			fnDef, ok = fnSym.Type.(*FunctionDef)
 			if !ok {
+				//// technically, the below isn't possible anymore
 				// Check if it's a variable that holds a function
-				if varDef, ok := fnSym.(*VariableDef); ok {
-					// Try to get a FunctionDef directly
-					if anon, ok := varDef.Value.(*FunctionDef); ok {
-						fnDef = anon
-					} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
-						// FunctionDef can be used directly
-						// This handles the case where a variable holds a function
-						fnDef = existingFnDef
-					} else {
-						c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-						return nil
-					}
-				} else {
-					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-					return nil
-				}
+				// if varDef, ok := fnSym.(*VariableDef); ok {
+				// 	// Try to get a FunctionDef directly
+				// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
+				// 		fnDef = anon
+				// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
+				// 		// FunctionDef can be used directly
+				// 		// This handles the case where a variable holds a function
+				// 		fnDef = existingFnDef
+				// 	} else {
+				// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+				// 		return nil
+				// 	}
+				// } else {
+				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+				return nil
+				// }
 			}
 
 			// Check argument count
@@ -2004,14 +1959,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// For now, we only support simple identifiers for local static functions
 				var fnDef *FunctionDef
 				if id, ok := s.Target.(*ast.Identifier); ok {
-					sym := c.scope.get(id.Name)
+					sym, ok := c.scope.get(id.Name)
 
-					if sym == nil {
+					if !ok {
 						c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
 						return nil
 					}
 
-					strct, ok := sym.(*StructDef)
+					strct, ok := sym.Type.(*StructDef)
 					if !ok {
 						c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.GetLocation())
 						return nil
@@ -2145,8 +2100,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// Get the struct definition for the scope
 				var scopeStruct *StructDef
 				if id, ok := s.Target.(*ast.Identifier); ok {
-					if sym := c.scope.get(id.Name); sym != nil {
-						scopeStruct, _ = sym.(*StructDef)
+					if sym, ok := c.scope.get(id.Name); ok {
+						scopeStruct, _ = sym.Type.(*StructDef)
 					}
 				}
 
@@ -2244,11 +2199,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Check function body with a setup function that adds parameters to scope
 			body := c.checkBlock(s.Body, func() {
 				for _, param := range params {
-					c.scope.add(&VariableDef{
-						Mutable: param.Mutable,
-						Name:    param.Name,
-						__type:  param.Type,
-					})
+					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
 			})
 
@@ -2270,21 +2221,21 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			// Add function to scope
-			c.scope.add(fn)
+			c.scope.add(uniqueName, fn, false)
 
 			return fn
 		}
 	case *ast.StaticFunctionDeclaration:
 		qualifier := s.Path.Target.(*ast.Identifier)
-		sym := c.scope.get(qualifier.Name)
-		if sym == nil {
+		sym, ok := c.scope.get(qualifier.Name)
+		if !ok {
 			c.addError(fmt.Sprintf("Undefined: %s", qualifier), qualifier.GetLocation())
 			return nil
 		}
 
-		strct, ok := sym.(*StructDef)
+		strct, ok := sym.Type.(*StructDef)
 		if !ok {
-			c.addError(fmt.Sprintf("Not a struct: %s", sym), s.GetLocation())
+			c.addError(fmt.Sprintf("Not a struct: %s", sym.name()), s.GetLocation())
 			return nil
 		}
 
@@ -2331,11 +2282,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						someBody = c.checkBlock(matchCase.Body, func() {
 							// Add the pattern name as a variable in the scope with the inner type
 							// For example, if the Maybe is Str?, the pattern should be a Str
-							c.scope.add(&VariableDef{
-								Mutable: false,
-								Name:    id.Name,
-								__type:  maybeType.of,
-							})
+							c.scope.add(id.Name, maybeType.of, false)
 						})
 
 						// Create an identifier to use in the Match struct
@@ -2599,12 +2546,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Process the body with the matched type binding
 					body := c.checkBlock(matchCase.Body, func() {
 						// Add "it" variable to the scope with the union element's type
-						c.scope.add(&VariableDef{
-							Mutable: false,
-							Name:    "it",
-							__type:  matchedType,
-							Value:   nil, // Will be set at runtime
-						})
+						c.scope.add("it", matchedType, false)
 					})
 					typeCases[typeName] = body
 				} else {
@@ -2668,55 +2610,45 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				switch p := node.Pattern.(type) {
 				case *ast.Identifier:
 					{
-						if p.Name == "ok" {
+						switch p.Name {
+						case "ok":
 							okCase = &Match{
 								Pattern: &Identifier{Name: "ok"},
 								Body: c.checkBlock(node.Body, func() {
-									c.scope.add(&VariableDef{
-										Name:   "ok",
-										__type: resultType.Val(),
-									})
+									c.scope.add("ok", resultType.Val(), false)
 								}),
 							}
-						} else if p.Name == "err" {
+						case "err":
 							errCase = &Match{
 								Pattern: &Identifier{Name: "err"},
 								Body: c.checkBlock(node.Body, func() {
-									c.scope.add(&VariableDef{
-										Name:   "err",
-										__type: resultType.Err(),
-									})
+									c.scope.add("err", resultType.Err(), false)
 								}),
 							}
-						} else {
+						default:
 							c.addWarning("Ignored pattern", p.GetLocation())
 						}
 					}
 				case *ast.FunctionCall: // use FunctionCall node as aliasing variable
 					{
 						varName := p.Args[0].(*ast.Identifier).Name
-						if p.Name == "ok" {
+						switch p.Name {
+						case "ok":
 							varName := p.Args[0].(*ast.Identifier).Name
 							okCase = &Match{
 								Pattern: &Identifier{Name: varName},
 								Body: c.checkBlock(node.Body, func() {
-									c.scope.add(&VariableDef{
-										Name:   varName,
-										__type: resultType.Val(),
-									})
+									c.scope.add(varName, resultType.Val(), false)
 								}),
 							}
-						} else if p.Name == "err" {
+						case "err":
 							errCase = &Match{
 								Pattern: &Identifier{Name: varName},
 								Body: c.checkBlock(node.Body, func() {
-									c.scope.add(&VariableDef{
-										Name:   varName,
-										__type: resultType.Err(),
-									})
+									c.scope.add(varName, resultType.Err(), false)
 								}),
 							}
-						} else {
+						default:
 							c.addWarning("Ignored pattern", p.GetLocation())
 						}
 					}
@@ -2851,14 +2783,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Handle local enum variants (not from modules)
-				sym := c.scope.get(id.Name)
-				if sym == nil {
+				sym, ok := c.scope.get(id.Name)
+				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
 					return nil
 				}
-				enum, ok := sym.(*Enum)
+				enum, ok := sym.Type.(*Enum)
 				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property), id.GetLocation())
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.name(), s.Property), id.GetLocation())
 					return nil
 				}
 
@@ -2870,7 +2802,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 				}
 				if variant == -1 {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym, s.Property.(*ast.Identifier).Name), id.GetLocation())
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.name(), s.Property.(*ast.Identifier).Name), id.GetLocation())
 					return nil
 				}
 
@@ -2880,13 +2812,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.StructInstance:
 		name := s.Name.Name
-		sym := c.scope.get(name)
-		if sym == nil {
+		sym, ok := c.scope.get(name)
+		if !ok {
 			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
 			return nil
 		}
 
-		structType, ok := sym.(*StructDef)
+		structType, ok := sym.Type.(*StructDef)
 		if !ok {
 			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
 			return nil
@@ -3049,19 +2981,15 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 	}
 
 	// Add function to scope BEFORE checking body to support recursion
-	c.scope.add(fn)
+	c.scope.add(def.Name, fn, false)
 
 	// Check function body
 	body := c.checkBlock(def.Body, func() {
 		// set the expected return type to the scope
-		c.scope.returnType = returnType
+		c.scope.expectReturn(returnType)
 		// add parameters to scope
 		for _, param := range params {
-			c.scope.add(&VariableDef{
-				Mutable: param.Mutable,
-				Name:    param.Name,
-				__type:  param.Type,
-			})
+			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
 	})
 

@@ -299,7 +299,7 @@ type AnonymousFunction struct {
 }
 
 func (a AnonymousFunction) String() string {
-	return fmt.Sprintf("AnonymousFunction")
+	return "AnonymousFunction"
 }
 
 type StructDefinition struct {

@@ -11,13 +11,13 @@ func (c *checker) validateFiberFunction(fnNode ast.Expression) {
 	case *ast.AnonymousFunction:
 		c.checkBlock(node.Body, func() {
 			// do not inherit parent scope
-			c.scope.isolated = true
+			c.scope.isolate()
 		})
 	case *ast.FunctionDeclaration:
 		{
 			c.checkBlock(node.Body, func() {
 				// do not inherit parent scope
-				c.scope.isolated = true
+				c.scope.isolate()
 			})
 		}
 	default:
