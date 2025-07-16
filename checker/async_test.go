@@ -9,11 +9,11 @@ import (
 func TestFibers(t *testing.T) {
 	run(t, []test{
 		{
-			name: "Fibers cannot reference outside variables",
+			name: "Fibers cannot reference mutable variables in outer scopes",
 			input: `
 			use ard/async
 
-			let duration = 20
+			mut duration = 20
 			async::start(fn() {
 				duration + 1
 			})
@@ -22,6 +22,18 @@ func TestFibers(t *testing.T) {
 				/* todo: need more specific in error message */
 				{Kind: checker.Error, Message: "Undefined variable: duration"},
 			},
+		},
+		{
+			name: "Fibers can reference read-only variables in outer scopes",
+			input: `
+			use ard/async
+
+			let duration = 20
+			async::start(fn() {
+				duration + 1
+			})
+			`,
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Valid fiber functions work",

@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] in Fibers, allow immutable references in outer scopes
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
@@ -40,3 +39,4 @@
     stuff + 5
   }
   ```
+- [ ] private variables
