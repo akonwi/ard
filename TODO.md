@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] ard/env - `fn get(name: Str) Str?`
 - [ ] in Fibers, allow immutable references in outer scopes
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
