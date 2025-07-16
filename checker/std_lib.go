@@ -12,6 +12,8 @@ func findInStdLib(path string) (Module, bool) {
 	switch path {
 	case "ard/async":
 		return AsyncPkg{}, true
+	case "ard/env":
+		return EnvMod{}, true
 	case "ard/fs":
 		return FsPkg{}, true
 	case "ard/io":
@@ -33,6 +35,29 @@ func findInStdLib(path string) (Module, bool) {
 		}
 	}
 	return nil, false
+}
+
+/* ard/env */
+type EnvMod struct{}
+
+func (mod EnvMod) Path() string {
+	return "ard/env"
+}
+
+func (mod EnvMod) Program() *Program {
+	return nil
+}
+func (mod EnvMod) Get(name string) symbol {
+	switch name {
+	case "get":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "key", Type: Str}},
+			ReturnType: &Maybe{Str},
+		}
+	default:
+		return nil
+	}
 }
 
 /* ard/float */

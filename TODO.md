@@ -1,15 +1,18 @@
 ## TODO
 
-- [ ] support FFI in stdlib OR add an `external` escape for definitions
+- [ ] ard/env - `fn get(name: Str) Str?`
+- [ ] in Fibers, allow immutable references in outer scopes
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
+- [ ] Use ECS for the type database
 - [ ] omitting Maybe fields in structs will default to `None`
 - [ ] calling functions with named arguments
   ```ard
   fn foo(bar: Int, baz: Str) { }
   foo(baz: "hello", bar: 5)
   ```
+- [ ] support FFI in stdlib OR add an `external` escape for definitions
 - [ ] ffi
   - sort of like gleam
   - #external attribute on functions with external fn name
