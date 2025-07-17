@@ -113,10 +113,8 @@ func (vm *VM) do(stmt checker.Statement) *object {
 		val := vm.eval(s.Value)
 		target.raw = val.raw
 
-		// in the case of unrefined generics in the target, upgrade to the refined value's type
-		if any, ok := (val._type).(*checker.Any); !ok || any.Actual() != nil {
-			target._type = val._type
-		}
+		// Update target type to match value type
+		target._type = val._type
 		return void
 	case *checker.ForLoop:
 		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }
@@ -400,10 +398,6 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		{
 			subj := vm.eval(e.Subject)
 			_type := subj._type
-			// Loop until we find a non-any type
-			for a, ok := _type.(*checker.Any); ok; a, ok = _type.(*checker.Any) {
-				_type = a.Actual()
-			}
 
 			if _, ok := _type.(*checker.StructDef); ok {
 				raw := subj.raw.(map[string]*object)
@@ -760,12 +754,6 @@ func (vm *VM) evalInstanceMethod(self *object, e *checker.InstanceMethod) *objec
 	}
 	if _, ok := self._type.(*checker.Result); ok {
 		return vm.evalResultMethod(self, e.Method)
-	}
-	if any, ok := self._type.(*checker.Any); ok {
-		self._type = any.Actual()
-		res := vm.evalInstanceMethod(self, e)
-		self._type = any
-		return res
 	}
 
 	panic(fmt.Errorf("Unimplemented: %s.%s() on %T", self._type, e.Method.Name, self._type))

@@ -508,14 +508,6 @@ type Any struct {
 	actual Type
 }
 
-func UnwrapType(t Type) Type {
-	res := t
-	for anyType, isAny := t.(*Any); isAny && anyType.Actual() != nil; anyType, isAny = anyType.Actual().(*Any) {
-		res = anyType.Actual()
-	}
-	return res
-}
-
 func (a Any) String() string {
 	if a.actual != nil {
 		return a.actual.String()

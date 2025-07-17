@@ -23,7 +23,7 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 		{
 			resultType := call.Type().(*checker.Result)
 			o := args[0]
-			bytes, err := json_encode(o.raw, checker.UnwrapType(o._type))
+			bytes, err := json_encode(o.raw, o._type)
 			if err != nil {
 				return makeErr(&object{err.Error(), checker.Str}, resultType)
 			}
@@ -38,7 +38,7 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			jsonString := vm.eval(call.Args[0]).raw.(string)
 			jsonBytes := []byte(jsonString)
 
-			inner := checker.UnwrapType(resultType.Val())
+			inner := resultType.Val()
 			val, err := json_decode(inner, jsonBytes)
 			if err != nil {
 				return toErr(err)

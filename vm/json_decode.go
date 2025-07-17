@@ -33,7 +33,7 @@ func json_decode(as checker.Type, data []byte) (object, error) {
 
 	switch as := as.(type) {
 	case *checker.List:
-		return json_decodeList(checker.UnwrapType(as.Of()), data)
+		return json_decodeList(as.Of(), data)
 	case *checker.StructDef:
 		return json_decodeStruct(as, data)
 	default:
