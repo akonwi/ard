@@ -1262,73 +1262,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				args[i] = checkedArg
 			}
 
+			// Use new generic resolution system
 			if fnDef.hasGenerics() {
-				// Create a mapping of generic parameters to concrete types
-				typeMap := make(map[string]Type)
-
-				if len(s.TypeArgs) > 0 {
-					// collect generics
-					generics := []Type{}                // need array to index by position
-					genericMap := make(map[string]Type) // need map to index by unique names
-					for _, param := range fnDef.Parameters {
-						for _, generic := range getGenerics(param.Type) {
-							genericMap[generic.(*Any).name] = generic
-							generics = append(generics, generic)
-						}
-					}
-					for _, generic := range getGenerics(fnDef.ReturnType) {
-						genericMap[generic.(*Any).name] = generic
-						generics = append(generics, generic)
-					}
-
-					if len(s.TypeArgs) != len(genericMap) {
-						c.addError(fmt.Sprintf("Expected %d type arguments", len(genericMap)), s.GetLocation())
-						return nil
-					}
-
-					for i, arg := range s.TypeArgs {
-						actual := c.resolveType(arg)
-						if actual == nil {
-							return nil
-						}
-						typeMap[generics[i].(*Any).name] = actual
-					}
+				specialized, err := c.resolveGenericFunction(fnDef, args, s.TypeArgs, s.GetLocation())
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
 				}
-
-				// Infer types from arguments
-				for i, param := range fnDef.Parameters {
-					if anyType, ok := param.Type.(*Any); ok {
-						if existing, exists := typeMap[anyType.name]; exists {
-							// Ensure consistent types for the same generic parameter
-							if !existing.equal(args[i].Type()) {
-								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Args[i].GetLocation())
-								return nil
-							}
-						} else {
-							// Bind the generic parameter to the argument type
-							typeMap[anyType.name] = args[i].Type()
-						}
-					}
-				}
-
-				// Create specialized function with generic parameters substituted
-				specialized := &FunctionDef{
-					Name:       fnDef.Name,
-					Parameters: make([]Parameter, len(fnDef.Parameters)),
-					ReturnType: substituteType(fnDef.ReturnType, typeMap),
-					Body:       fnDef.Body,
-				}
-
-				// Substitute types in parameters
-				for i, param := range fnDef.Parameters {
-					specialized.Parameters[i] = Parameter{
-						Name:    param.Name,
-						Type:    substituteType(param.Type, typeMap),
-						Mutable: param.Mutable,
-					}
-				}
-
-				// Return function call with specialized function
+				
 				return &FunctionCall{
 					Name: s.Name,
 					Args: args,
@@ -1419,75 +1360,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				args[i] = checkedArg
 			}
 
+			// Use new generic resolution system
 			if fnDef.hasGenerics() {
-				// Create a mapping of generic parameters to concrete types
-				typeMap := make(map[string]Type)
-
-				if len(s.Method.TypeArgs) > 0 {
-
-					// collect generics
-					generics := []Type{}                // need array to index by position
-					genericMap := make(map[string]Type) // need map to index by unique names
-					for _, param := range fnDef.Parameters {
-						for _, generic := range getGenerics(param.Type) {
-							genericMap[generic.(*Any).name] = generic
-							generics = append(generics, generic)
-						}
-					}
-					for _, generic := range getGenerics(fnDef.ReturnType) {
-						genericMap[generic.(*Any).name] = generic
-						generics = append(generics, generic)
-					}
-
-					if len(s.Method.TypeArgs) != len(genericMap) {
-						c.addError(fmt.Sprintf("Expected %d type arguments", len(genericMap)), s.GetLocation())
-						return nil
-					}
-
-					for i, arg := range s.Method.TypeArgs {
-						actual := c.resolveType(arg)
-						if actual == nil {
-							return nil
-						}
-						typeMap[generics[i].(*Any).name] = actual
-					}
-
+				specialized, err := c.resolveGenericFunction(fnDef, args, s.Method.TypeArgs, s.GetLocation())
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
 				}
-
-				// Infer types from arguments
-				for i, param := range fnDef.Parameters {
-					if anyType, ok := param.Type.(*Any); ok {
-						if existing, exists := typeMap[anyType.name]; exists {
-							// Ensure consistent types for the same generic parameter
-							if !existing.equal(args[i].Type()) {
-								c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Method.Args[i].GetLocation())
-								return nil
-							}
-						} else {
-							// Bind the generic parameter to the argument type
-							typeMap[anyType.name] = args[i].Type()
-						}
-					}
-				}
-
-				// Create specialized function with generic parameters substituted
-				specialized := &FunctionDef{
-					Name:       fnDef.Name,
-					Parameters: make([]Parameter, len(fnDef.Parameters)),
-					ReturnType: substituteType(fnDef.ReturnType, typeMap),
-					Body:       fnDef.Body,
-				}
-
-				// Substitute types in parameters
-				for i, param := range fnDef.Parameters {
-					specialized.Parameters[i] = Parameter{
-						Name:    param.Name,
-						Type:    substituteType(param.Type, typeMap),
-						Mutable: param.Mutable,
-					}
-				}
-
-				// Return function call with specialized function
+				
 				return &InstanceMethod{
 					Subject: subj,
 					Method: &FunctionCall{
@@ -1860,67 +1740,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					args[i] = checkedArg
 				}
 
+				// Use new generic resolution system
 				if fnDef.hasGenerics() {
-					// Create a mapping of generic parameters to concrete types
-					typeMap := make(map[string]Type)
-
-					if len(s.Function.TypeArgs) > 0 {
-						// collect generics
-						generics := []Type{}
-						for _, param := range fnDef.Parameters {
-							generics = append(generics, getGenerics(param.Type)...)
-						}
-						generics = append(generics, getGenerics(fnDef.ReturnType)...)
-
-						if len(s.Function.TypeArgs) != len(generics) {
-							c.addError(fmt.Sprintf("Expected %d type arguments", len(generics)), s.Function.GetLocation())
-							return nil
-						}
-
-						for i, any := range generics {
-							actual := c.resolveType(s.Function.TypeArgs[i])
-							if actual == nil {
-								return nil
-							}
-							typeMap[any.(*Any).name] = actual
-						}
+					specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
+					if err != nil {
+						c.addError(err.Error(), s.GetLocation())
+						return nil
 					}
-					// technically could be an else block
-
-					// Infer types from arguments
-					for i, param := range fnDef.Parameters {
-						if anyType, ok := param.Type.(*Any); ok {
-							if existing, exists := typeMap[anyType.name]; exists {
-								// Ensure consistent types for the same generic parameter
-								if !existing.equal(args[i].Type()) {
-									c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
-									return nil
-								}
-							} else {
-								// Bind the generic parameter to the argument type
-								typeMap[anyType.name] = args[i].Type()
-							}
-						}
-					}
-
-					// Create specialized function with generic parameters substituted
-					specialized := &FunctionDef{
-						Name:       fnDef.Name,
-						Parameters: make([]Parameter, len(fnDef.Parameters)),
-						ReturnType: substituteType(fnDef.ReturnType, typeMap),
-						Body:       fnDef.Body,
-					}
-
-					// Substitute types in parameters
-					for i, param := range fnDef.Parameters {
-						specialized.Parameters[i] = Parameter{
-							Name:    param.Name,
-							Type:    substituteType(param.Type, typeMap),
-							Mutable: param.Mutable,
-						}
-					}
-
-					// Return function call with specialized function
+					
 					return &ModuleFunctionCall{
 						Module: mod.Path(),
 						Call: &FunctionCall{
@@ -2015,74 +1842,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					args[i] = checkedArg
 				}
 
+				// Use new generic resolution system
 				if fnDef.hasGenerics() {
-					// Create a mapping of generic parameters to concrete types
-					typeMap := make(map[string]Type)
-
-					if len(s.Function.TypeArgs) > 0 {
-						// collect generics
-						generics := []Type{}                // need array to index by position
-						genericMap := make(map[string]Type) // need map to index by unique names
-						for _, param := range fnDef.Parameters {
-							for _, generic := range getGenerics(param.Type) {
-								genericMap[generic.(*Any).name] = generic
-								generics = append(generics, generic)
-							}
-						}
-						for _, generic := range getGenerics(fnDef.ReturnType) {
-							genericMap[generic.(*Any).name] = generic
-							generics = append(generics, generic)
-						}
-
-						if len(s.Function.TypeArgs) != len(genericMap) {
-							c.addError(fmt.Sprintf("Expected %d type arguments", len(genericMap)), s.GetLocation())
-							return nil
-						}
-
-						for i, arg := range s.Function.TypeArgs {
-							actual := c.resolveType(arg)
-							if actual == nil {
-								return nil
-							}
-							typeMap[generics[i].(*Any).name] = actual
-						}
+					specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
+					if err != nil {
+						c.addError(err.Error(), s.GetLocation())
+						return nil
 					}
-					// technically could be an else block
-
-					// Infer types from arguments
-					for i, param := range fnDef.Parameters {
-						if anyType, ok := param.Type.(*Any); ok {
-							if existing, exists := typeMap[anyType.name]; exists {
-								// Ensure consistent types for the same generic parameter
-								if !existing.equal(args[i].Type()) {
-									c.addError(fmt.Sprintf("Type mismatch for $%s: Expected %s, got %s", anyType.name, anyType.actual, args[i].Type()), s.Function.Args[i].GetLocation())
-									return nil
-								}
-							} else {
-								// Bind the generic parameter to the argument type
-								typeMap[anyType.name] = args[i].Type()
-							}
-						}
-					}
-
-					// Create specialized function with generic parameters substituted
-					specialized := &FunctionDef{
-						Name:       fnDef.Name,
-						Parameters: make([]Parameter, len(fnDef.Parameters)),
-						ReturnType: substituteType(fnDef.ReturnType, typeMap),
-						Body:       fnDef.Body,
-					}
-
-					// Substitute types in parameters
-					for i, param := range fnDef.Parameters {
-						specialized.Parameters[i] = Parameter{
-							Name:    param.Name,
-							Type:    substituteType(param.Type, typeMap),
-							Mutable: param.Mutable,
-						}
-					}
-
-					// Return function call with specialized function
+					
 					return &ModuleFunctionCall{
 						Module: mod.Path(),
 						Call: &FunctionCall{
@@ -3031,5 +2798,104 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	// Handle other compound types
 	default:
 		return t
+	}
+}
+
+// New generic resolution using the enhanced symbol table
+func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []ast.DeclaredType, location ast.Location) (*FunctionDef, error) {
+	if !fnDef.hasGenerics() {
+		return fnDef, nil
+	}
+
+	// Extract generic parameter names (unique)
+	genericNames := make(map[string]bool)
+	for _, param := range fnDef.Parameters {
+		extractGenericNames(param.Type, genericNames)
+	}
+	extractGenericNames(fnDef.ReturnType, genericNames)
+	
+	genericParams := make([]string, 0, len(genericNames))
+	for name := range genericNames {
+		genericParams = append(genericParams, name)
+	}
+
+	// Create generic context scope
+	genericScope := c.scope.createGenericScope(genericParams)
+	
+	// Handle explicit type arguments
+	if len(typeArgs) > 0 {
+		if len(typeArgs) != len(genericParams) {
+			return nil, fmt.Errorf("Expected %d type arguments, got %d", len(genericParams), len(typeArgs))
+		}
+		
+		for i, arg := range typeArgs {
+			actual := c.resolveType(arg)
+			if actual == nil {
+				return nil, fmt.Errorf("Could not resolve type argument")
+			}
+			
+			if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Infer types from arguments
+	for i, param := range fnDef.Parameters {
+		if anyType, ok := param.Type.(*Any); ok {
+			if err := genericScope.bindGeneric(anyType.name, args[i].Type()); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Allow unresolved generics - they will be resolved through context
+	// (e.g., variable assignment, return type inference)
+	// Don't require all generics to be resolved at function call time
+
+	// Create specialized function with resolved generics
+	bindings := genericScope.getGenericBindings()
+	
+	// Only specialize if we have resolved some generics
+	if len(bindings) == 0 {
+		return fnDef, nil
+	}
+	
+	specialized := &FunctionDef{
+		Name:       fnDef.Name,
+		Parameters: make([]Parameter, len(fnDef.Parameters)),
+		ReturnType: substituteType(fnDef.ReturnType, bindings),
+		Body:       fnDef.Body,
+		Mutates:    fnDef.Mutates,
+		Private:    fnDef.Private,
+	}
+
+	// Replace generics in parameters
+	for i, param := range fnDef.Parameters {
+		specialized.Parameters[i] = Parameter{
+			Name:    param.Name,
+			Type:    substituteType(param.Type, bindings),
+			Mutable: param.Mutable,
+		}
+	}
+
+	return specialized, nil
+}
+
+// Helper function to extract generic names from a type
+func extractGenericNames(t Type, names map[string]bool) {
+	switch t := t.(type) {
+	case *Any:
+		names[t.name] = true
+	case *List:
+		extractGenericNames(t.of, names)
+	case *Map:
+		extractGenericNames(t.key, names)
+		extractGenericNames(t.value, names)
+	case *Maybe:
+		extractGenericNames(t.of, names)
+	case *Result:
+		extractGenericNames(t.val, names)
+		extractGenericNames(t.err, names)
 	}
 }

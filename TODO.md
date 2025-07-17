@@ -3,7 +3,6 @@
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
-- [ ] Use ECS for the type database
 - [ ] omitting Maybe fields in structs will default to `None`
 - [ ] calling functions with named arguments
   ```ard
