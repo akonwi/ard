@@ -435,11 +435,17 @@ func (i IfStatement) String() string {
 	return "IfStatement"
 }
 
+type Argument struct {
+	Location
+	Name  string
+	Value Expression
+}
+
 type FunctionCall struct {
 	Location
 	Name     string
 	TypeArgs []DeclaredType
-	Args     []Expression
+	Args     []Argument
 }
 
 func (f FunctionCall) String() string {

@@ -508,7 +508,7 @@ func TestMemberAccess(t *testing.T) {
 						},
 						Method: FunctionCall{
 							Name: "at",
-							Args: []Expression{&NumLiteral{Value: "0"}},
+							Args: []Argument{{Name: "", Value: &NumLiteral{Value: "0"}}},
 						},
 					},
 					&InstanceProperty{
@@ -525,7 +525,7 @@ func TestMemberAccess(t *testing.T) {
 						},
 						Method: FunctionCall{
 							Name: "at",
-							Args: []Expression{&NumLiteral{Value: "0"}},
+							Args: []Argument{{Name: "", Value: &NumLiteral{Value: "0"}}},
 						},
 					},
 					&InstanceProperty{
@@ -535,7 +535,7 @@ func TestMemberAccess(t *testing.T) {
 							},
 							Method: FunctionCall{
 								Name: "take",
-								Args: []Expression{&NumLiteral{Value: "3"}},
+								Args: []Argument{{Name: "", Value: &NumLiteral{Value: "3"}}},
 							},
 						},
 						Property: Identifier{Name: "size"},
@@ -546,7 +546,7 @@ func TestMemberAccess(t *testing.T) {
 						},
 						Method: FunctionCall{
 							Name: "to_str",
-							Args: []Expression{},
+							Args: []Argument{},
 						},
 					},
 				},

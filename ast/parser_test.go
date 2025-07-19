@@ -455,7 +455,7 @@ func TestTypeUnion(t *testing.T) {
 					&TypeDeclaration{
 						Private: true,
 						Name:    Identifier{Name: "Value"},
-						Type:   []DeclaredType{&IntType{}, &BooleanType{}},
+						Type:    []DeclaredType{&IntType{}, &BooleanType{}},
 					},
 				},
 			},
@@ -478,9 +478,9 @@ func TestStaticPaths(t *testing.T) {
 						},
 						Function: FunctionCall{
 							Name: "new",
-							Args: []Expression{
-								&NumLiteral{Value: "200"},
-								&StrLiteral{Value: "ok"},
+							Args: []Argument{
+								{Name: "", Value: &NumLiteral{Value: "200"}},
+								{Name: "", Value: &StrLiteral{Value: "ok"}},
 							},
 						},
 					},

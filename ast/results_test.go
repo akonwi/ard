@@ -114,7 +114,7 @@ func TestTryKeyword(t *testing.T) {
 					&Try{
 						Expression: &FunctionCall{
 							Name: "get_result",
-							Args: []Expression{},
+							Args: []Argument{},
 						},
 					},
 				},

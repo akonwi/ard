@@ -212,7 +212,7 @@ func TestFunctionCalls(t *testing.T) {
 					},
 					&FunctionCall{
 						Name: "get_name",
-						Args: []Expression{},
+						Args: []Argument{},
 					},
 				},
 			},
@@ -235,8 +235,8 @@ func TestFunctionCalls(t *testing.T) {
 					},
 					&FunctionCall{
 						Name: "greet",
-						Args: []Expression{
-							&StrLiteral{Value: "Alice"},
+						Args: []Argument{
+							{Name: "", Value: &StrLiteral{Value: "Alice"}},
 						},
 					},
 				},
@@ -267,9 +267,9 @@ func TestFunctionCalls(t *testing.T) {
 					},
 					&FunctionCall{
 						Name: "add",
-						Args: []Expression{
-							&NumLiteral{Value: "1"},
-							&NumLiteral{Value: "2"},
+						Args: []Argument{
+							{Name: "", Value: &NumLiteral{Value: "1"}},
+							{Name: "", Value: &NumLiteral{Value: "2"}},
 						},
 					},
 				},
@@ -301,9 +301,9 @@ func TestFunctionCalls(t *testing.T) {
 					},
 					&FunctionCall{
 						Name: "add",
-						Args: []Expression{
-							&NumLiteral{Value: "1"},
-							&NumLiteral{Value: "2"},
+						Args: []Argument{
+							{Name: "", Value: &NumLiteral{Value: "1"}},
+							{Name: "", Value: &NumLiteral{Value: "2"}},
 						},
 					},
 				},
@@ -337,9 +337,9 @@ func TestFunctionCalls(t *testing.T) {
 					},
 					&FunctionCall{
 						Name: "add",
-						Args: []Expression{
-							&NumLiteral{Value: "1"},
-							&NumLiteral{Value: "2"},
+						Args: []Argument{
+							{Name: "", Value: &NumLiteral{Value: "1"}},
+							{Name: "", Value: &NumLiteral{Value: "2"}},
 						},
 					},
 				},
@@ -359,12 +359,12 @@ func TestFunctionCalls(t *testing.T) {
 							Target: &Identifier{Name: "foo"},
 							Method: FunctionCall{
 								Name: "bar",
-								Args: []Expression{},
+								Args: []Argument{},
 							},
 						},
 						Method: FunctionCall{
 							Name: "baz",
-							Args: []Expression{},
+							Args: []Argument{},
 						},
 					},
 				},
@@ -407,8 +407,8 @@ func TestFunctionsWithGenerics(t *testing.T) {
 							TypeArgs: []DeclaredType{
 								&CustomType{Name: "Person"},
 							},
-							Args: []Expression{
-								&Identifier{Name: "str"},
+							Args: []Argument{
+								{Name: "", Value: &Identifier{Name: "str"}},
 							},
 						},
 					},

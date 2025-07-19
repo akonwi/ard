@@ -60,7 +60,25 @@ fn greet(name: Str) Str {
 }
 ```
 
-Functions can also be used as arguments
+#### Named Arguments
+
+Functions can be called with named arguments allowing them to be in any order.
+
+```ard
+fn greet(name: Str, age: Int) Str {
+  "Hello, {name}! You are {age.to_str()} years old."
+}
+
+// positional arguments (order matters)
+greet("Alice", 25)
+
+// named arguments (order doesn't matter)
+greet(age: 30, name: "Bob")
+```
+
+When using named arguments, all arguments must be named. Mixing positional arguments with named arguments is not supported.
+
+Functions are first class and can therefore be used as arguments
 
 ```ard
 fn map(list: [Int], do: fn(Int) Int) [Int] {

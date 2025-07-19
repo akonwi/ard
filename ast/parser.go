@@ -1358,15 +1358,10 @@ func (p *parser) memberAccess() (Expression, error) {
 
 				// Parse arguments
 				p.consume(left_paren, "Expected '(' after type arguments")
-				args := []Expression{}
-
-				for !p.check(right_paren) {
-					arg, err := p.parseExpression()
-					if err != nil {
-						return nil, err
-					}
-					args = append(args, arg)
-					p.match(comma)
+				p.match(new_line)
+				args, err := p.parseFunctionArguments()
+				if err != nil {
+					return nil, err
 				}
 
 				p.consume(right_paren, "Expected ')' to close function call")
@@ -1442,14 +1437,9 @@ func (p *parser) call() (Expression, error) {
 
 				// Parse arguments
 				p.consume(left_paren, "Expected '(' after type arguments")
-				args := []Expression{}
-				for !p.check(right_paren) {
-					arg, err := p.parseExpression()
-					if err != nil {
-						return nil, err
-					}
-					args = append(args, arg)
-					p.match(comma)
+				args, err := p.parseFunctionArguments()
+				if err != nil {
+					return nil, err
 				}
 				p.consume(right_paren, "Unclosed function call")
 
@@ -1472,15 +1462,9 @@ func (p *parser) call() (Expression, error) {
 	if p.match(left_paren) {
 		p.match(new_line)
 		// Regular function call without type arguments
-		args := []Expression{}
-		for !p.check(right_paren) {
-			arg, err := p.parseExpression()
-			if err != nil {
-				return nil, err
-			}
-			args = append(args, arg)
-			p.match(comma)
-			p.match(new_line)
+		args, err := p.parseFunctionArguments()
+		if err != nil {
+			return nil, err
 		}
 		p.consume(right_paren, "Unclosed function call")
 		return &FunctionCall{
@@ -1768,4 +1752,55 @@ func (p *parser) previous() *token {
 
 func (p *parser) isAtEnd() bool {
 	return p.tokens[p.index].kind == eof
+}
+
+func (p *parser) parseFunctionArguments() ([]Argument, error) {
+	args := []Argument{}
+	hasNamedArgs := false
+
+	for !p.check(right_paren) {
+		// Check if this is a named argument (identifier followed by colon)
+		if p.check(identifier) && p.peek2() != nil && p.peek2().kind == colon {
+			hasNamedArgs = true
+			start := p.peek().getLocation().Start
+			name := p.advance().text
+			p.consume(colon, "Expected ':' after parameter name")
+
+			value, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+
+			args = append(args, Argument{
+				Location: Location{
+					Start: start,
+					End:   value.GetLocation().End,
+				},
+				Name:  name,
+				Value: value,
+			})
+		} else {
+			// Check if we've already seen named arguments
+			if hasNamedArgs {
+				return nil, fmt.Errorf("positional arguments cannot follow named arguments")
+			}
+
+			arg, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+
+			// Add as Argument with empty name (positional)
+			args = append(args, Argument{
+				Location: arg.GetLocation(),
+				Name:     "",
+				Value:    arg,
+			})
+		}
+
+		p.match(comma)
+		p.match(new_line)
+	}
+
+	return args, nil
 }

@@ -165,7 +165,7 @@ func TestUsingStructs(t *testing.T) {
 						Target: &Identifier{Name: "p"},
 						Method: FunctionCall{
 							Name: "speak",
-							Args: []Expression{},
+							Args: []Argument{},
 						},
 					},
 				},
@@ -194,7 +194,7 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 						},
 						Value: &StaticFunction{
 							Target:   &Identifier{Name: "maybe"},
-							Function: FunctionCall{Name: "none", Args: []Expression{}},
+							Function: FunctionCall{Name: "none", Args: []Argument{}},
 						},
 					},
 				},

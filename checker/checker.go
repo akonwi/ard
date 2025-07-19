@@ -1187,7 +1187,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					c.addError("Incorrect number of arguments: 'panic' requires a message", s.GetLocation())
 					return nil
 				}
-				message := c.checkExpr(s.Args[0])
+				message := c.checkExpr(s.Args[0].Value)
 				if message == nil {
 					return nil
 				}
@@ -1232,16 +1232,23 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// }
 			}
 
+			// Resolve named arguments to positional arguments
+			resolvedArgs, err := c.resolveArguments(s.Args, fnDef.Parameters)
+			if err != nil {
+				c.addError(err.Error(), s.GetLocation())
+				return nil
+			}
+
 			// Check argument count
-			if len(s.Args) != len(fnDef.Parameters) {
+			if len(resolvedArgs) != len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(s.Args)), s.GetLocation())
+					len(fnDef.Parameters), len(resolvedArgs)), s.GetLocation())
 				return nil
 			}
 
 			// Check and process arguments
-			args := make([]Expression, len(s.Args))
-			for i, arg := range s.Args {
+			args := make([]Expression, len(resolvedArgs))
+			for i, arg := range resolvedArgs {
 				checkedArg := c.checkExpr(arg)
 				if checkedArg == nil {
 					return nil
@@ -1269,7 +1276,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					c.addError(err.Error(), s.GetLocation())
 					return nil
 				}
-				
+
 				return &FunctionCall{
 					Name: s.Name,
 					Args: args,
@@ -1340,7 +1347,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Check and process arguments
 			args := make([]Expression, len(s.Method.Args))
 			for i, arg := range s.Method.Args {
-				checkedArg := c.checkExpr(arg)
+				checkedArg := c.checkExpr(arg.Value)
 				if checkedArg == nil {
 					return nil
 				}
@@ -1348,13 +1355,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
 				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
 					return nil
 				}
 
 				// Check mutability constraints if needed
 				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
 				}
 
 				args[i] = checkedArg
@@ -1367,7 +1374,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					c.addError(err.Error(), s.GetLocation())
 					return nil
 				}
-				
+
 				return &InstanceMethod{
 					Subject: subj,
 					Method: &FunctionCall{
@@ -1720,7 +1727,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// Check and process arguments
 				args := make([]Expression, len(s.Function.Args))
 				for i, arg := range s.Function.Args {
-					checkedArg := c.checkExpr(arg)
+					checkedArg := c.checkExpr(arg.Value)
 					if checkedArg == nil {
 						return nil
 					}
@@ -1728,13 +1735,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Type check the argument against the parameter type
 					paramType := fnDef.Parameters[i].Type
 					if !areCompatible(paramType, checkedArg.Type()) {
-						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
 						return nil
 					}
 
 					// Check mutability constraints if needed
 					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
 					}
 
 					args[i] = checkedArg
@@ -1747,7 +1754,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(err.Error(), s.GetLocation())
 						return nil
 					}
-					
+
 					return &ModuleFunctionCall{
 						Module: mod.Path(),
 						Call: &FunctionCall{
@@ -1767,7 +1774,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Special validation for async::start calls
 				if mod.Path() == "ard/async" && s.Function.Name == "start" {
-					c.validateFiberFunction(s.Function.Args[0])
+					c.validateFiberFunction(s.Function.Args[0].Value)
 				}
 
 				// Create module static function call if struct is involved, otherwise regular module function call
@@ -1822,7 +1829,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// Check and process arguments
 				args := make([]Expression, len(s.Function.Args))
 				for i, arg := range s.Function.Args {
-					checkedArg := c.checkExpr(arg)
+					checkedArg := c.checkExpr(arg.Value)
 					if checkedArg == nil {
 						return nil
 					}
@@ -1830,13 +1837,13 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Type check the argument against the parameter type
 					paramType := fnDef.Parameters[i].Type
 					if !areCompatible(paramType, checkedArg.Type()) {
-						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
 						return nil
 					}
 
 					// Check mutability constraints if needed
 					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
 					}
 
 					args[i] = checkedArg
@@ -1849,7 +1856,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(err.Error(), s.GetLocation())
 						return nil
 					}
-					
+
 					return &ModuleFunctionCall{
 						Module: mod.Path(),
 						Call: &FunctionCall{
@@ -2400,10 +2407,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 				case *ast.FunctionCall: // use FunctionCall node as aliasing variable
 					{
-						varName := p.Args[0].(*ast.Identifier).Name
+						varName := p.Args[0].Value.(*ast.Identifier).Name
 						switch p.Name {
 						case "ok":
-							varName := p.Args[0].(*ast.Identifier).Name
+							varName := p.Args[0].Value.(*ast.Identifier).Name
 							okCase = &Match{
 								Pattern: &Identifier{Name: varName},
 								Body: c.checkBlock(node.Body, func() {
@@ -2675,16 +2682,16 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 
 			var arg Expression = nil
 			if fnDef.name() == "ok" {
-				arg = c.checkExpr(s.Function.Args[0])
+				arg = c.checkExpr(s.Function.Args[0].Value)
 				if !resultType.Val().equal(arg.Type()) {
-					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].GetLocation())
+					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
 			}
 			if fnDef.name() == "err" {
-				arg = c.checkExpr(s.Function.Args[0])
+				arg = c.checkExpr(s.Function.Args[0].Value)
 				if !resultType.Err().equal(arg.Type()) {
-					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].GetLocation())
+					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
 			}
@@ -2813,7 +2820,7 @@ func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		extractGenericNames(param.Type, genericNames)
 	}
 	extractGenericNames(fnDef.ReturnType, genericNames)
-	
+
 	genericParams := make([]string, 0, len(genericNames))
 	for name := range genericNames {
 		genericParams = append(genericParams, name)
@@ -2821,19 +2828,19 @@ func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 
 	// Create generic context scope
 	genericScope := c.scope.createGenericScope(genericParams)
-	
+
 	// Handle explicit type arguments
 	if len(typeArgs) > 0 {
 		if len(typeArgs) != len(genericParams) {
 			return nil, fmt.Errorf("Expected %d type arguments, got %d", len(genericParams), len(typeArgs))
 		}
-		
+
 		for i, arg := range typeArgs {
 			actual := c.resolveType(arg)
 			if actual == nil {
 				return nil, fmt.Errorf("Could not resolve type argument")
 			}
-			
+
 			if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
 				return nil, err
 			}
@@ -2855,12 +2862,12 @@ func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 
 	// Create specialized function with resolved generics
 	bindings := genericScope.getGenericBindings()
-	
+
 	// Only specialize if we have resolved some generics
 	if len(bindings) == 0 {
 		return fnDef, nil
 	}
-	
+
 	specialized := &FunctionDef{
 		Name:       fnDef.Name,
 		Parameters: make([]Parameter, len(fnDef.Parameters)),
@@ -2898,4 +2905,69 @@ func extractGenericNames(t Type, names map[string]bool) {
 		extractGenericNames(t.val, names)
 		extractGenericNames(t.err, names)
 	}
+}
+
+// resolveArguments converts unified argument list to positional arguments
+func (c *checker) resolveArguments(args []ast.Argument, params []Parameter) ([]ast.Expression, error) {
+	// Separate positional and named arguments
+	var positionalArgs []ast.Expression
+	var namedArgs []ast.Argument
+
+	for _, arg := range args {
+		if arg.Name == "" {
+			// Positional argument
+			positionalArgs = append(positionalArgs, arg.Value)
+		} else {
+			// Named argument
+			namedArgs = append(namedArgs, arg)
+		}
+	}
+
+	// If no named arguments, just return positional arguments
+	if len(namedArgs) == 0 {
+		return positionalArgs, nil
+	}
+
+	// Create a map of parameter names to indices
+	paramMap := make(map[string]int)
+	for i, param := range params {
+		paramMap[param.Name] = i
+	}
+
+	// Create result array
+	result := make([]ast.Expression, len(params))
+	used := make([]bool, len(params))
+
+	// Fill in positional arguments first
+	for i, arg := range positionalArgs {
+		if i >= len(params) {
+			return nil, fmt.Errorf("too many positional arguments")
+		}
+		result[i] = arg
+		used[i] = true
+	}
+
+	// Fill in named arguments
+	for _, namedArg := range namedArgs {
+		paramIndex, exists := paramMap[namedArg.Name]
+		if !exists {
+			return nil, fmt.Errorf("unknown parameter name: %s", namedArg.Name)
+		}
+
+		if used[paramIndex] {
+			return nil, fmt.Errorf("parameter %s specified multiple times", namedArg.Name)
+		}
+
+		result[paramIndex] = namedArg.Value
+		used[paramIndex] = true
+	}
+
+	// Check that all parameters are provided
+	for i, param := range params {
+		if !used[i] {
+			return nil, fmt.Errorf("missing argument for parameter: %s", param.Name)
+		}
+	}
+
+	return result, nil
 }
