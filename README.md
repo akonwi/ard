@@ -8,16 +8,15 @@
 
 ## Language Description
 
-Ard is a modern, statically-typed programming language designed for clarity, safety, and ease.
-It combines features from JavaScript, Swift, and Go while introducing its own unique characteristics.
+Ard is a modern, programming language designed for legibility, simplicity, and type-safety.
+It combines elements from JavaScript, Swift, Go, and Rust.
 
 ## Goals
 
 - **Readability**: Ard code should be easy to read and understand.
 - **Simple**: There should be one obvious way to do things.
-- **Safety**: The compiler should catch errors at compile time.
-- **Reliable**: Runtime is in Go, so it's fast and efficient.
-  - [Future] Compiles to Go for portability.
+- **Safety**: Type errors are caught at compile time and runtime errors must be handled.
+- **Reliable**: Built on Go's runtime, so programs can be fast and efficient.
 
 ## Basic Syntax
 

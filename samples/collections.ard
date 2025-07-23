@@ -2,16 +2,16 @@ use ard/io
 
 fn main() {
   mut numbers: [Int] = []
-  io::print("numbers.size = {numbers.size().to_str()}")
+  io::print("numbers.size = {numbers.size()}")
 
   io::print("adding numbers from 0 to 10")
   for i in 0..10 {
     numbers.push(i)
   }
 
-  io::print("numbers.size = {numbers.size().to_str()}")
+  io::print("numbers.size = {numbers.size()}")
   for n in numbers {
-    io::print(n.to_str())
+    io::print(n)
   }
 
   io::print("7th element = {numbers.at(6)}")
