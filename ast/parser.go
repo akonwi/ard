@@ -673,6 +673,29 @@ func (p *parser) assignment() (Statement, error) {
 func (p *parser) parseType() DeclaredType {
 	static := p.parseStaticPath()
 	if static != nil {
+		// Check for Result sugar syntax
+		if p.match(bang) {
+			// Parse the error type
+			errType := p.parseType()
+			// Check for nullable
+			nullable := p.match(question_mark)
+			// Create the value type as a CustomType with StaticProperty
+			valType := &CustomType{
+				Location: static.Location,
+				Type:     *static,
+				nullable: false,
+			}
+			// Return ResultType using sugar syntax
+			return &ResultType{
+				Val:      valType,
+				Err:      errType,
+				nullable: nullable,
+				Location: Location{
+					Start: static.Location.Start,
+					End:   Point{Row: p.previous().line, Col: p.previous().column},
+				},
+			}
+		}
 		return &CustomType{
 			Location: static.Location,
 			Type:     *static,

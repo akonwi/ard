@@ -100,6 +100,41 @@ func TestResultTypeInSignature(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Result sugar with qualified types",
+			input: `
+			fn foo() db::Conn!Str {}
+			fn foo() Bool!bar::Qux {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &CustomType{Type: StaticProperty{
+								Target:   &Identifier{Name: "db"},
+								Property: &Identifier{Name: "Conn"},
+							}},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &BooleanType{},
+							Err: &CustomType{Type: StaticProperty{
+								Target:   &Identifier{Name: "bar"},
+								Property: &Identifier{Name: "Qux"},
+							}},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
 	})
 }
 
