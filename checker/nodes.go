@@ -683,10 +683,20 @@ func (p *ModuleStaticFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ModuleSymbol struct {
+	Module string
+	Symbol Symbol
+}
+
+func (p *ModuleSymbol) Type() Type {
+	return p.Symbol.Type
+}
+
 type Enum struct {
 	Name     string
 	Variants []string
 	private  bool
+	Traits   []*Trait
 }
 
 func (e Enum) variant(name string) int8 {
@@ -731,9 +741,29 @@ func (e Enum) equal(other Type) bool {
 	}
 	return true
 }
-func (e Enum) get(name string) Type { return nil }
+func (e Enum) get(name string) Type {
+	switch name {
+	case "to_str":
+		// Check if the enum has the ToString trait
+		for _, trait := range e.Traits {
+			if trait.Name == "ToString" {
+				return &FunctionDef{
+					Name:       name,
+					Parameters: []Parameter{},
+					ReturnType: Str,
+				}
+			}
+		}
+	}
+	return nil
+}
 
 func (e Enum) hasTrait(trait *Trait) bool {
+	for _, t := range e.Traits {
+		if t.equal(trait) {
+			return true
+		}
+	}
 	return false
 }
 

@@ -68,7 +68,7 @@ func TestStructs(t *testing.T) {
 		{
 			name: "Using a package struct",
 			input: `use ard/http` + "\n" +
-				`let req = http::Request{method:"GET", url:"google.com", headers: [:]}` + "\n" +
+				`let req = http::Request{method:http::Method::Get, url:"google.com", headers: [:]}` + "\n" +
 				`req.url`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
@@ -83,7 +83,7 @@ func TestStructs(t *testing.T) {
 								Property: &checker.StructInstance{
 									Name: "Request",
 									Fields: map[string]checker.Expression{
-										"method":  &checker.StrLiteral{"GET"},
+										"method":  &checker.EnumVariant{},
 										"url":     &checker.StrLiteral{"google.com"},
 										"headers": &checker.MapLiteral{Keys: []checker.Expression{}, Values: []checker.Expression{}},
 									},

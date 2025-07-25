@@ -17,7 +17,7 @@ struct PokemonResp {
 fn main() {
   io::print("GET from pokemon api")
   let res = http::send(http::Request{
-    method: "GET",
+    method: http::Method::Get,
     url: "https://pokeapi.co/api/v2/pokemon",
     headers: [:],
   }).expect("Unable to make request")
@@ -36,7 +36,7 @@ fn main() {
 
   io::print("http::post() to echoing api")
   let post_res = http::send(http::Request{
-    method: "POST",
+    method: http::Method::Post,
     url: "https://postman-echo.com/post",
     headers: ["content-type":"text/plain"],
     body: maybe::some("raw text")

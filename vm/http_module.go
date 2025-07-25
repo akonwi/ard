@@ -52,8 +52,25 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 					body = &object{"", checker.Str}
 				}
 
+				// Convert HTTP method string to Method enum
+				var methodEnum *object
+				switch r.Method {
+				case "GET":
+					methodEnum = &object{int8(0), checker.HttpMethodDef} // Get variant
+				case "POST":
+					methodEnum = &object{int8(1), checker.HttpMethodDef} // Post variant
+				case "PUT":
+					methodEnum = &object{int8(2), checker.HttpMethodDef} // Put variant
+				case "DELETE":
+					methodEnum = &object{int8(3), checker.HttpMethodDef} // Del variant
+				case "PATCH":
+					methodEnum = &object{int8(4), checker.HttpMethodDef} // Patch variant
+				default:
+					methodEnum = &object{int8(0), checker.HttpMethodDef} // Default to Get
+				}
+
 				requestMap := map[string]*object{
-					"method":  {r.Method, checker.Str},
+					"method":  methodEnum,
 					"url":     {r.URL.String(), checker.Str},
 					"headers": {headers, checker.MakeMap(checker.Str, checker.Str)},
 					"body":    body,
@@ -65,11 +82,11 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 				request := &object{requestMap, checker.HttpRequestDef}
 
 				// Call the Ard handler function
-				handle, ok := handler.raw.(func(args ...*object) *object)
+				handle, ok := handler.raw.(*Closure)
 				if !ok {
 					panic(fmt.Errorf("Handler for '%s' is not a function", path))
 				}
-				response := handle(request)
+				response := handle.eval(request)
 
 				// Convert Ard Response to Go HTTP response
 				respMap := response.raw.(map[string]*object)
@@ -115,7 +132,23 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 		request := args[0]
 		requestMap := request.raw.(map[string]*object)
 
-		method := requestMap["method"].raw.(string)
+		// Convert Method enum to string
+		methodEnum := requestMap["method"]
+		var method string
+		switch methodEnum.raw.(int8) {
+		case 0: // Get
+			method = "GET"
+		case 1: // Post
+			method = "POST"
+		case 2: // Put
+			method = "PUT"
+		case 3: // Del
+			method = "DELETE"
+		case 4: // Patch
+			method = "PATCH"
+		default:
+			method = "GET"
+		}
 		url := requestMap["url"].raw.(string)
 
 		var body io.Reader = nil

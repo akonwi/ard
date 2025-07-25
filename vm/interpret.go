@@ -755,6 +755,9 @@ func (vm *VM) evalInstanceMethod(self *object, e *checker.InstanceMethod) *objec
 	if _, ok := self._type.(*checker.Result); ok {
 		return vm.evalResultMethod(self, e.Method)
 	}
+	if enum, ok := self._type.(*checker.Enum); ok {
+		return vm.evalEnumMethod(self, e.Method, enum)
+	}
 
 	panic(fmt.Errorf("Unimplemented: %s.%s() on %T", self._type, e.Method.Name, self._type))
 }
@@ -1049,4 +1052,36 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 	}
 
 	return fn(args...)
+}
+
+func (vm *VM) evalEnumMethod(self *object, method *checker.FunctionCall, enum *checker.Enum) *object {
+	switch method.Name {
+	case "to_str":
+		// Special handling for http::Method enum
+		if enum.Name == "Method" {
+			variantIndex := self.raw.(int8)
+			if variantIndex >= 0 && int(variantIndex) < len(enum.Variants) {
+				// Map enum variants to HTTP method strings
+				methodStrings := map[string]string{
+					"Get":   "GET",
+					"Post":  "POST",
+					"Put":   "PUT", 
+					"Del":   "DELETE",
+					"Patch": "PATCH",
+				}
+				variantName := enum.Variants[variantIndex]
+				if methodStr, ok := methodStrings[variantName]; ok {
+					return &object{methodStr, checker.Str}
+				}
+			}
+		}
+		// Default behavior: return the variant name as string
+		variantIndex := self.raw.(int8)
+		if variantIndex >= 0 && int(variantIndex) < len(enum.Variants) {
+			return &object{enum.Variants[variantIndex], checker.Str}
+		}
+		return &object{"", checker.Str}
+	default:
+		panic(fmt.Errorf("Undefined method: %s.%s()", enum.Name, method.Name))
+	}
 }

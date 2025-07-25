@@ -2120,37 +2120,40 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Handle enum variant case - the pattern should be a static property reference like Enum::Variant
 				if staticProp, ok := matchCase.Pattern.(*ast.StaticProperty); ok {
-					// Get the enum name from the target
-					if enumId, ok := staticProp.Target.(*ast.Identifier); ok {
-						// Verify the enum name matches
-						if enumId.Name != enumType.Name {
-							c.addError(fmt.Sprintf("Expected %s::<variant>, got %s::%s",
-								enumType.Name, enumId.Name, staticProp.Property), staticProp.GetLocation())
-							return nil
-						}
+					// Resolve the pattern using existing expression resolution logic
+					patternExpr := c.checkExpr(staticProp)
+					if patternExpr == nil {
+						return nil // Error already reported by checkExpr
+					}
 
-						// Find the variant in the enum
-						variantName := staticProp.Property.(*ast.Identifier).Name
-						variantIndex := enumType.variant(variantName)
-						if variantIndex == -1 {
-							c.addError(fmt.Sprintf("Undefined: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
-							return nil
-						}
-
-						// Check for duplicate cases
-						if seenVariants[variantName] {
-							c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
-							return nil
-						}
-						seenVariants[variantName] = true
-
-						// Check the body for this case
-						body := c.checkBlock(matchCase.Body, nil)
-						cases[variantIndex] = body
-					} else {
-						c.addError("Invalid pattern in enum match", matchCase.Pattern.GetLocation())
+					// Check if the pattern resolves to an enum variant
+					enumVariant, ok := patternExpr.(*EnumVariant)
+					if !ok {
+						c.addError("Pattern in enum match must be an enum variant", staticProp.GetLocation())
 						return nil
 					}
+
+					// Verify that the variant's enum matches the subject's enum
+					if !enumVariant.enum.equal(enumType) {
+						c.addError(fmt.Sprintf("Cannot match %s variant against %s enum", 
+							enumVariant.enum.Name, enumType.Name), staticProp.GetLocation())
+						return nil
+					}
+
+					// Get the variant name and index
+					variantName := enumType.Variants[enumVariant.Variant]
+					variantIndex := int(enumVariant.Variant)
+
+					// Check for duplicate cases
+					if seenVariants[variantName] {
+						c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+						return nil
+					}
+					seenVariants[variantName] = true
+
+					// Check the body for this case
+					body := c.checkBlock(matchCase.Body, nil)
+					cases[variantIndex] = body
 				} else {
 					c.addError("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation())
 					return nil
@@ -2542,14 +2545,17 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							Property: instance,
 						}
 					case *ast.Identifier:
-						// Look up other symbols (like enum variants, etc.)
+						// Look up other symbols (like enums, etc.)
 						sym := mod.Get(prop.Name)
 						if sym.IsZero() {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						// For now, we don't handle other module symbols besides structs
-						// This could be extended for constants, etc.
+						// Check if it's an enum - return it directly for further processing
+						if enum, ok := sym.Type.(*Enum); ok {
+							return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: enum}}
+						}
+						// For now, we don't handle other module symbols besides structs and enums
 						c.addError(fmt.Sprintf("Cannot access %s::%s in this context", id.Name, prop.Name), prop.GetLocation())
 						return nil
 					default:
@@ -2583,6 +2589,35 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				return &EnumVariant{enum: enum, Variant: variant}
+			}
+			// Handle nested static properties like http::Method::Get
+			if _, ok := s.Target.(*ast.StaticProperty); ok {
+				// First resolve the nested static property (e.g., http::Method)
+				nestedSym := c.checkExpr(s.Target)
+				if nestedSym == nil {
+					return nil
+				}
+				
+				// Check if it's an enum type
+				if enum, ok := nestedSym.Type().(*Enum); ok {
+					// Find the variant
+					var variant int8 = -1
+					for i := range enum.Variants {
+						if enum.Variants[i] == s.Property.(*ast.Identifier).Name {
+							variant = int8(i)
+							break
+						}
+					}
+					if variant == -1 {
+						c.addError(fmt.Sprintf("Undefined: %s::%s", enum.Name, s.Property.(*ast.Identifier).Name), s.Property.GetLocation())
+						return nil
+					}
+					
+					return &EnumVariant{enum: enum, Variant: variant}
+				}
+				
+				c.addError(fmt.Sprintf("Cannot access property on %T", nestedSym.Type()), s.Property.GetLocation())
+				return nil
 			}
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}

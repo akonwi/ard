@@ -1,9 +1,21 @@
 package checker
 
+var HttpMethodDef = &Enum{
+	Name: "Method",
+	Variants: []string{
+		"Get",
+		"Post",
+		"Put",
+		"Del",
+		"Patch",
+	},
+	Traits: []*Trait{},
+}
+
 var HttpRequestDef = &StructDef{
 	Name: "Request",
 	Fields: map[string]Type{
-		"method":  Str,
+		"method":  HttpMethodDef,
 		"url":     Str,
 		"headers": MakeMap(Str, Str),
 		"body":    MakeMaybe(Str),
@@ -45,6 +57,8 @@ var HttpResponseDef = &StructDef{
 // workaround circular references to HttpResponseDef
 func init() {
 	HttpResponseDef.Statics["new"] = ResponseNew
+	// Add ToString trait to Method enum
+	HttpMethodDef.Traits = append(HttpMethodDef.Traits, strMod.symbols["ToString"].Type.(*Trait))
 }
 
 var HttpSendFn = &FunctionDef{
@@ -93,6 +107,8 @@ func (pkg HttpPkg) Program() *Program {
 }
 func (pkg HttpPkg) Get(name string) Symbol {
 	switch name {
+	case "Method":
+		return Symbol{Name: name, Type: HttpMethodDef}
 	case "Request":
 		return Symbol{Name: name, Type: HttpRequestDef}
 	case "Response":
