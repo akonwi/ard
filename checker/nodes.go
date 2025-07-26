@@ -699,20 +699,8 @@ type Enum struct {
 	Traits   []*Trait
 }
 
-func (e Enum) variant(name string) int8 {
-	for i, v := range e.Variants {
-		if v == name {
-			return int8(i)
-		}
-	}
-	return -1
-}
-
 func (e Enum) NonProducing() {}
 
-func (e Enum) _type() Type {
-	return e
-}
 func (e Enum) name() string {
 	return e.Name
 }

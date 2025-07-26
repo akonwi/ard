@@ -496,16 +496,6 @@ func (s StaticFunction) String() string {
 	return fmt.Sprintf("%s::%s", s.Target, s.Function)
 }
 
-type EnumAccess struct {
-	Location
-	Enum    Identifier
-	Variant Identifier
-}
-
-func (m EnumAccess) String() string {
-	return fmt.Sprintf("EnumAccess(%s::%s)", m.Enum, m.Variant)
-}
-
 type Operator int
 
 const (
