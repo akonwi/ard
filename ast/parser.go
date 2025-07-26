@@ -844,6 +844,27 @@ func (p *parser) parseType() DeclaredType {
 		if p.match(colon) {
 			valElementType := p.parseType()
 			p.consume(right_bracket, "Expected ']'")
+			
+			// Check for Result sugar syntax: [Key:Value]!ErrorType
+			if p.match(bang) {
+				errType := p.parseType()
+				nullable := p.match(question_mark)
+				mapType := &Map{
+					Key:      elementType,
+					Value:    valElementType,
+					nullable: false,
+				}
+				return &ResultType{
+					Val:      mapType,
+					Err:      errType,
+					nullable: nullable,
+					Location: Location{
+						Start: bracket.getLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
+				}
+			}
+			
 			return &Map{
 				Key:      elementType,
 				Value:    valElementType,
@@ -851,6 +872,26 @@ func (p *parser) parseType() DeclaredType {
 			}
 		}
 		p.consume(right_bracket, "Expected ']'")
+
+		// Check for Result sugar syntax: [Type]!ErrorType
+		if p.match(bang) {
+			errType := p.parseType()
+			nullable := p.match(question_mark)
+			listType := &List{
+				Location: bracket.getLocation(),
+				Element:  elementType,
+				nullable: false,
+			}
+			return &ResultType{
+				Val:      listType,
+				Err:      errType,
+				nullable: nullable,
+				Location: Location{
+					Start: bracket.getLocation().Start,
+					End:   Point{Row: p.previous().line, Col: p.previous().column},
+				},
+			}
+		}
 
 		return &List{
 			Location: bracket.getLocation(),

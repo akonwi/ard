@@ -1,8 +1,5 @@
 ## TODO
 
-- [ ] Remove `Enum` in AST. it should just be the static paths and resolved as an enum by the checker
-- [ ] parse `[Foo]!Type` and `[Int:str]!Type` in result sugar
-  - support list and map types in result sugar
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades

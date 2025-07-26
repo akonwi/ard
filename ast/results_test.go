@@ -135,6 +135,70 @@ func TestResultTypeInSignature(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Result sugar with list types",
+			input: `fn foo() [Int]!Str {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &List{Element: &IntType{}},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
+			name: "Result sugar with map types",
+			input: `fn foo() [Int:Str]!Bool {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &Map{Key: &IntType{}, Value: &StringType{}},
+							Err: &BooleanType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
+			name: "Result sugar with complex nested types",
+			input: `fn foo() [User]!Str {}
+			fn bar() [Int:[User]]!Bool {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &List{Element: &CustomType{Name: "User"}},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+					&FunctionDeclaration{
+						Name:       "bar",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &Map{Key: &IntType{}, Value: &List{Element: &CustomType{Name: "User"}}},
+							Err: &BooleanType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
 	})
 }
 
