@@ -3,6 +3,7 @@
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
+- [ ] `Database.query_row<$V>(table: Str, expr: Str)`
 - [ ] support FFI in stdlib OR add an `external` escape for definitions
 - [ ] ffi
   - sort of like gleam
@@ -14,7 +15,6 @@
 - [ ] `Maybe.expect()` for panic shorthands
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
-- [ ] methods on enums?
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
 - [ ] allow non-linear declarations at the top level
@@ -23,7 +23,6 @@
 - [ ] `?` sugar for safely unwrapping maybes
 - [ ] loops as expressions (comprehensions?)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
-- [ ] concurrency (Task?)
 - [ ] inline block as expression
   ```
   let foo: Int = {
