@@ -24,16 +24,11 @@ func (m *HTTPModule) Program() *checker.Program {
 
 /*
  * examples
- * - "/foo/bar" -> "/foo/bar/"
+ * - "/foo/bar" -> "/foo/bar"
  * - "/foo/:bar" -> "/foo/{bar}"
  * - "/foo/:bar/:qux" -> "/foo/{bar}/{qux}"
  */
 func convertToGoPattern(path string) string {
-	// Add trailing slash if path doesn't end with one and doesn't contain parameters
-	if !strings.HasSuffix(path, "/") && !strings.Contains(path, ":") {
-		path = path + "/"
-	}
-
 	// Convert :param to {param} format
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
