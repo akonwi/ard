@@ -844,7 +844,7 @@ func (p *parser) parseType() DeclaredType {
 		if p.match(colon) {
 			valElementType := p.parseType()
 			p.consume(right_bracket, "Expected ']'")
-			
+
 			// Check for Result sugar syntax: [Key:Value]!ErrorType
 			if p.match(bang) {
 				errType := p.parseType()
@@ -864,7 +864,7 @@ func (p *parser) parseType() DeclaredType {
 					},
 				}
 			}
-			
+
 			return &Map{
 				Key:      elementType,
 				Value:    valElementType,
@@ -1644,6 +1644,10 @@ func (p *parser) map_() (Expression, error) {
 	}
 
 	for !p.match(right_bracket) {
+		if p.match(new_line) {
+			continue
+		}
+
 		key, err := p.primary()
 		if err != nil {
 			return nil, err
