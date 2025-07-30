@@ -24,6 +24,10 @@ var HttpRequestDef = &StructDef{
 			Parameters: []Parameter{},
 			ReturnType: MakeResult(Str, Str),
 		},
+		"path_param": &FunctionDef{
+			Parameters: []Parameter{{Name: "name", Type: Str}},
+			ReturnType: Str,
+		},
 	},
 }
 

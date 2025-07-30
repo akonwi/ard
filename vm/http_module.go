@@ -22,6 +22,29 @@ func (m *HTTPModule) Program() *checker.Program {
 	return nil
 }
 
+/*
+ * examples
+ * - "/foo/bar" -> "/foo/bar/"
+ * - "/foo/:bar" -> "/foo/{bar}"
+ * - "/foo/:bar/:qux" -> "/foo/{bar}/{qux}"
+ */
+func convertToGoPattern(path string) string {
+	// Add trailing slash if path doesn't end with one and doesn't contain parameters
+	if !strings.HasSuffix(path, "/") && !strings.Contains(path, ":") {
+		path = path + "/"
+	}
+
+	// Convert :param to {param} format
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if strings.HasPrefix(part, ":") {
+			parts[i] = "{" + part[1:] + "}"
+		}
+	}
+
+	return strings.Join(parts, "/")
+}
+
 func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
 	switch call.Name {
 	case "serve":
@@ -30,7 +53,7 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 
 		_mux := http.NewServeMux()
 		for path, handler := range handlers {
-			_mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			_mux.HandleFunc(convertToGoPattern(path), func(w http.ResponseWriter, r *http.Request) {
 				// Convert Go request to  http::Request
 				headers := make(map[string]*object)
 				for k, v := range r.Header {
@@ -77,6 +100,10 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 					"path": {func() *object {
 						return &object{r.URL.Path, checker.Str}
 					}, checker.HttpRequestDef.Fields["path"]},
+					"path_param": {func(args ...*object) *object {
+						name := args[0].raw.(string)
+						return &object{r.PathValue(name), checker.Str}
+					}, checker.HttpRequestDef.Fields["path_param"]},
 				}
 
 				request := &object{requestMap, checker.HttpRequestDef}
@@ -310,6 +337,13 @@ func (mod *HTTPModule) evalHttpRequestMethod(request *object, method *checker.Fu
 			return makeOk(&object{parsed.Path, resultType.Val()}, resultType)
 		}
 	default:
-		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
+		if raw, ok := reqMap[method.Name]; ok {
+			fn, ok := raw.raw.(func(...*object) *object)
+			if !ok {
+				panic(fmt.Errorf("HTTP Error: Request method is not a function: %s", method.Name))
+			}
+			return fn(args...)
+		}
 	}
+	panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
 }
