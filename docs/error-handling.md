@@ -1,0 +1,193 @@
+# Error Handling with Result Types and try
+
+Ard provides a robust error handling system based on Result types and the `try` keyword. This system encourages explicit error handling while providing convenient syntax for error propagation and transformation.
+
+## Result Types
+
+Result types represent operations that can either succeed with a value or fail with an error. They are written as `ValueType!ErrorType`:
+
+```ard
+fn divide(a: Int, b: Int) Int!Str {
+    match b == 0 {
+        true => Result::err("division by zero"),
+        false => Result::ok(a / b)
+    }
+}
+```
+
+### Creating Results
+
+Use the standard library functions to create Result values:
+- `Result::ok(value)` - creates a successful result
+- `Result::err(error)` - creates an error result
+
+### Working with Results
+
+Results can be handled using pattern matching:
+
+```ard
+let result = divide(10, 2)
+match result {
+    ok(value) => io::print("Result: {value}"),
+    err(message) => io::print("Error: {message}")
+}
+```
+
+Or use the `.or(default)` method to provide a fallback value:
+
+```ard
+let safe_result = divide(10, 0).or(-1)  // Returns -1 on error
+```
+
+## The try Keyword
+
+The `try` keyword provides early return semantics for working with Result types, eliminating the need for explicit error checking in many cases.
+
+### Basic Usage
+
+```ard
+fn calculate() Int!Str {
+    let x = try divide(10, 2)  // If divide fails, return early with error
+    let y = try divide(x, 3)   // If this fails, return early with error
+    Result::ok(y + 1)          // If we get here, both operations succeeded
+}
+```
+
+### Restrictions
+
+- `try` can only be used within function bodies
+- `try` can only be applied to Result types
+- When used without a catch clause, the function must return a compatible Result type with the same error type
+
+## Error Transformation with Catch Blocks
+
+When your function's return type doesn't match the Result's error type, you can use catch blocks to transform errors:
+
+```ard
+fn process_data() Str {
+    let num = try parse_number("abc") -> err {
+        "Failed to parse: {err}"
+    }
+    "Number is: {num}"
+}
+```
+
+### Catch Block Semantics
+
+- **Success case**: The Result is unwrapped and execution continues normally
+- **Error case**: The catch block executes and its result is returned early from the function
+
+### Function Reference Shorthand
+
+For simple error transformations, you can reference a function directly:
+
+```ard
+fn format_error(msg: Str) Str {
+    "Error: {msg}"
+}
+
+fn process() Str {
+    let result = try risky_operation() -> format_error
+    "Success: {result}"
+}
+```
+
+This is equivalent to:
+
+```ard
+fn process() Str {
+    let result = try risky_operation() -> err {
+        format_error(err)
+    }
+    "Success: {result}"
+}
+```
+
+## Complete Example
+
+Here's a comprehensive example showing different error handling patterns:
+
+```ard
+use ard/io
+
+struct Person { name: Str, age: Int }
+
+fn parse_age(s: Str) Int!Str {
+    // Simulate parsing that can fail
+    match s {
+        "invalid" => Result::err("not a number"),
+        _ => Result::ok(25)
+    }
+}
+
+fn create_person(name: Str, age_str: Str) Person!Str {
+    let age = try parse_age(age_str)  // Early return on parse error
+    Result::ok(Person { name: name, age: age })
+}
+
+fn safe_create_person(name: Str, age_str: Str) Person {
+    let age = try parse_age(age_str) -> err {
+        io::print("Age parsing failed: {err}")
+        return Person { name: name, age: 0 }  // Default age on error
+    }
+    Person { name: name, age: age }
+}
+
+fn format_parse_error(msg: Str) Str {
+    "Invalid age provided: {msg}"
+}
+
+fn create_person_with_message(name: Str, age_str: Str) Str {
+    let person = try create_person(name, age_str) -> format_parse_error
+    "Created person: {person.name}, age {person.age}"
+}
+```
+
+## Best Practices
+
+### 1. Use try for Happy Path Code
+
+The `try` keyword is designed to let you write code that focuses on the success case:
+
+```ard
+fn process_file() Str!Str {
+    let content = try read_file("data.txt")
+    let parsed = try parse_json(content)
+    let result = try transform_data(parsed)
+    Result::ok(result)
+}
+```
+
+### 2. Transform Errors Appropriately
+
+Use catch blocks to convert errors into appropriate types for your context:
+
+```ard
+fn user_friendly_operation() Str {
+    try internal_operation() -> err {
+        "Sorry, something went wrong. Please try again."
+    }
+}
+```
+
+### 3. Propagate Errors When Possible
+
+When functions can naturally propagate errors, prefer `try` without catch:
+
+```ard
+fn chain_operations() DataType!ErrorType {
+    let step1 = try first_operation()
+    let step2 = try second_operation(step1)
+    let step3 = try third_operation(step2)
+    Result::ok(step3)
+}
+```
+
+## Error Handling vs Exceptions
+
+Ard's error handling system differs from exception-based systems:
+
+- **Explicit**: Errors are part of the type system and must be handled explicitly
+- **Predictable**: No hidden control flow - errors only propagate through `try`
+
+This approach encourages writing robust code while maintaining expressiveness.
