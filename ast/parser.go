@@ -1016,22 +1016,55 @@ func (p *parser) try() (Expression, error) {
 		var catchVar *Identifier
 		var catchBlock []Statement
 
-		// Check for catch clause: -> varname { ... }
+		// Check for catch clause: -> varname { ... } or -> function_name
 		if p.match(thin_arrow) {
 			if !p.check(identifier) {
 				return nil, p.makeError(p.peek(), "Expected identifier after '->' in try-catch")
 			}
-			varToken := p.advance()
-			catchVar = &Identifier{
-				Name:     varToken.text,
-				Location: varToken.getLocation(),
-			}
+			idToken := p.advance()
 			
-			block, err := p.block()
-			if err != nil {
-				return nil, err
+			// Check if this is a function reference (no block) or variable binding (with block)
+			if p.check(left_brace) {
+				// Block syntax: -> var { ... }
+				catchVar = &Identifier{
+					Name:     idToken.text,
+					Location: idToken.getLocation(),
+				}
+				
+				block, err := p.block()
+				if err != nil {
+					return nil, err
+				}
+				catchBlock = block
+			} else {
+				// Function syntax: -> function_name
+				// Desugar to: -> err { function_name(err) }
+				catchVar = &Identifier{
+					Name:     "err",
+					Location: idToken.getLocation(),
+				}
+				
+				// Create function call: function_name(err)
+				funcCall := &FunctionCall{
+					Location: idToken.getLocation(),
+					Name:     idToken.text,
+					Args: []Argument{
+						{
+							Location: idToken.getLocation(),
+							Name:     "",
+							Value: &Identifier{
+								Name:     "err",
+								Location: idToken.getLocation(),
+							},
+						},
+					},
+				}
+				
+				// Wrap in a statement
+				catchBlock = []Statement{
+					funcCall,
+				}
 			}
-			catchBlock = block
 		}
 
 		return &Try{

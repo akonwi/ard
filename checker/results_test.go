@@ -250,5 +250,30 @@ func TestTry(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
 			},
 		},
+		{
+			name: "try-catch function must have correct signature",
+			input: `
+				fn bad_handler(code: Int) Str {
+					"Error: {code}"
+				}
+				fn test_func() Str {
+					try Result::err("error") -> bad_handler
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
+			},
+		},
+		{
+			name: "try-catch function must exist",
+			input: `
+				fn test_func() Str {
+					try Result::err("error") -> nonexistent_func
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined function: nonexistent_func"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
+			},
+		},
 	})
 }

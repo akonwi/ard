@@ -108,3 +108,49 @@ func TestTryCatchNestedCalls(t *testing.T) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
+
+func TestTryCatchWithFunction(t *testing.T) {
+	input := `
+	fn make_error_message(code: Str) Str {
+		"Failed with code: {code}"
+	}
+
+	fn foobar() Int!Str {
+		Result::err("something went wrong")
+	}
+
+	fn do_thing() Str {
+		try foobar() -> make_error_message
+	}
+
+	do_thing()
+	`
+	result := run(t, input)
+	expected := "Failed with code: something went wrong"
+	if result != expected {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func TestTryCatchWithFunctionSuccess(t *testing.T) {
+	input := `
+	fn make_error_message(code: Str) Int {
+		0
+	}
+
+	fn foobar() Int!Str {
+		Result::ok(42)
+	}
+
+	fn do_thing() Int {
+		try foobar() -> make_error_message
+	}
+
+	do_thing()
+	`
+	result := run(t, input)
+	expected := 42
+	if result != expected {
+		t.Errorf("Expected %d, got %v", expected, result)
+	}
+}
