@@ -11,8 +11,8 @@ The language spec is in the README.md
 The backlog of work is a simple todo list in TODO.md
 
 ## Build/Test Commands
-> for all these commands use the 1.25rc1 version of go and add "--tags=goexperiment.jsonv2"
-> example - `go1.25rc1 test ./...--tags=goexperiment.jsonv2`
+> for all these commands use the 1.25rc2 version of go and add "--tags=goexperiment.jsonv2"
+> example - `go1.25rc2 test ./... --tags=goexperiment.jsonv2`
 
 - Build: `go build`
 - Run Ard program: `go run main.go run samples/[file].ard`
@@ -27,6 +27,7 @@ The backlog of work is a simple todo list in TODO.md
 - **Error Handling**: Use diagnostics for compiler errors with source locations
 - **Types**: Follow the type system in README.md for the Ard language spec
 - **Testing**: Table-driven tests with descriptive names
+  - when adding new features or fixing bugs, recreate them with a test where possible instead of creating sample programs
 - **Formatting**: Standard Go formatting (`gofmt`)
 - **Project Structure**: Compiler follows ast → checker → vm pipeline
 - **Development Tracking**: Use TODO.md for feature development progress
