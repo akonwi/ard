@@ -680,7 +680,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 					}
 				}
 
-				// Success case: return the unwrapped value for continued execution
+				// Success case: always continue execution with unwrapped value
 				return raw.raw
 			default:
 				panic(fmt.Errorf("Cannot match on %s", _type))

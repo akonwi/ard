@@ -2135,7 +2135,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 					// Verify that the variant's enum matches the subject's enum
 					if !enumVariant.enum.equal(enumType) {
-						c.addError(fmt.Sprintf("Cannot match %s variant against %s enum", 
+						c.addError(fmt.Sprintf("Cannot match %s variant against %s enum",
 							enumVariant.enum.Name, enumType.Name), staticProp.GetLocation())
 						return nil
 					}
@@ -2597,7 +2597,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if nestedSym == nil {
 					return nil
 				}
-				
+
 				// Check if it's an enum type
 				if enum, ok := nestedSym.Type().(*Enum); ok {
 					// Find the variant
@@ -2612,10 +2612,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(fmt.Sprintf("Undefined: %s::%s", enum.Name, s.Property.(*ast.Identifier).Name), s.Property.GetLocation())
 						return nil
 					}
-					
+
 					return &EnumVariant{enum: enum, Variant: variant}
 				}
-				
+
 				c.addError(fmt.Sprintf("Cannot access property on %T", nestedSym.Type()), s.Property.GetLocation())
 				return nil
 			}
@@ -2650,7 +2650,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			var catchBlock []Statement
-			
+
 			switch _type := expr.Type().(type) {
 			case *Result:
 				// Handle catch clause if present
@@ -2660,10 +2660,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					newScope := makeScope(&prevScope)
 					newScope.returnType = prevScope.returnType
 					c.scope = newScope
-					
+
 					// Add error variable to scope with the error type
 					c.scope.add(s.CatchVar.Name, _type.err, false)
-					
+
 					// Check catch block statements
 					for _, stmt := range s.CatchBlock {
 						checkedStmt := c.checkStmt(&stmt)
@@ -2671,11 +2671,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							catchBlock = append(catchBlock, *checkedStmt)
 						}
 					}
-					
+
 					// Restore previous scope
 					c.scope = prevScope
-					
-					// Check that the catch block's return type matches the function's return type
+
+					// Create the block
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					if !blockType.equal(c.scope.returnType) {
@@ -2686,7 +2686,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// On error, it early returns with the catch block result
 					return &TryOp{
 						expr:       expr,
-						ok:         _type.val, // The unwrapped value type, not the function return type
+						ok:         _type.val, // Returns unwrapped value for continued execution
 						CatchBlock: block,
 						CatchVar:   s.CatchVar.Name,
 					}
@@ -2701,7 +2701,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							ok:   _type.val,
 						}
 					}
-					
+
 					// Error types must match for direct propagation
 					if !_type.err.equal(fnReturnResult.err) {
 						c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String()), s.Expression.GetLocation())
@@ -2721,10 +2721,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 			default:
 				c.addError("try can only be used on Result types, got: "+expr.Type().String(), s.Expression.GetLocation())
-				// Return a try op with the unwrapped type to avoid cascading errors  
+				// Return a try op with the expr type to avoid cascading errors
 				return &TryOp{
 					expr: expr,
-					ok:   Void, // Use Void as a fallback since we don't have a valid unwrapped type
+					ok:   expr.Type(),
 				}
 			}
 		}

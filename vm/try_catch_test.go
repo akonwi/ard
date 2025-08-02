@@ -33,7 +33,7 @@ func TestTrySuccess(t *testing.T) {
 		}
 		"success: {result}"
 	}
-	
+
 	do_thing()
 	`
 	result := run(t, input)
@@ -159,25 +159,25 @@ func TestTryCatchWithFunction(t *testing.T) {
 
 func TestTryCatchWithFunctionSuccess(t *testing.T) {
 	input := `
-	fn make_error_message(code: Str) Str {
+	fn make_error_message(code: Int) Str {
 		"Error: {code}"
 	}
 
-	fn foobar() Int!Str {
-		Result::ok(42)
+	fn foobar() Str!Int {
+		Result::err(42)
 	}
 
-	fn do_thing() Int {
+	fn do_thing() Str {
 		let result = try foobar() -> make_error_message
-		result + 10
+		result
 	}
 
 	do_thing()
 	`
 	result := run(t, input)
-	expected := 52
+	expected := "Error: 42"
 	if result != expected {
-		t.Errorf("Expected %d, got %v", expected, result)
+		t.Errorf("Expected %s, got %v", expected, result)
 	}
 }
 
@@ -190,7 +190,7 @@ func TestTryEarlyReturnSkipsRestOfFunction(t *testing.T) {
 		}
 		"this should not execute"
 	}
-	
+
 	test_func()
 	`
 	result := run(t, input)

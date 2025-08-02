@@ -20,13 +20,13 @@ func TestResults(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-					Expr: &checker.FunctionDef{
-					Name: "divide",
-					Parameters: []checker.Parameter{
-					{Name: "a", Type: checker.Int},
-					{Name: "b", Type: checker.Int},
-					},
-					ReturnType: checker.MakeResult(checker.Int, checker.Str),
+						Expr: &checker.FunctionDef{
+							Name: "divide",
+							Parameters: []checker.Parameter{
+								{Name: "a", Type: checker.Int},
+								{Name: "b", Type: checker.Int},
+							},
+							ReturnType: checker.MakeResult(checker.Int, checker.Str),
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{
@@ -182,10 +182,10 @@ func TestTry(t *testing.T) {
 				Imports: map[string]checker.Module{},
 				Statements: []checker.Statement{
 					{
-					Expr: &checker.FunctionDef{
-					Name:       "do_stuff",
-					Parameters: []checker.Parameter{},
-					ReturnType: checker.MakeResult(checker.Int, checker.Bool),
+						Expr: &checker.FunctionDef{
+							Name:       "do_stuff",
+							Parameters: []checker.Parameter{},
+							ReturnType: checker.MakeResult(checker.Int, checker.Bool),
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{
@@ -307,7 +307,8 @@ func TestTry(t *testing.T) {
 			input: `
 				fn test_func() Int!Int {
 					let res: Int!Str = Result::ok(42)
-					try res
+					let int = try res
+					Result::ok(int)
 				}`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Error type mismatch: Expected Int, got Str"},
