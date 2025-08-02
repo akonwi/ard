@@ -312,3 +312,35 @@ func TestJsonEncodeEnums(t *testing.T) {
 		},
 	})
 }
+
+func TestJsonEncodeMap(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "string to int map",
+			input: `
+				use ard/json
+				mut m: [Str:Int] = [:]
+				m.set("foo", 42)
+				m.set("bar", 24)
+				let result = json::encode(m).expect("")
+				result.contains("foo") and result.contains("42") and result.contains("bar") and result.contains("24")
+			`,
+			want: true,
+		},
+		{
+			name: "nested map with structs",
+			input: `
+				use ard/json
+				struct Person {
+					name: Str,
+					age: Int
+				}
+				mut people: [Str:Person] = [:]
+				people.set("john", Person{name: "John", age: 30})
+				let result = json::encode(people).expect("")
+				result.contains("john") and result.contains("John") and result.contains("30")
+			`,
+			want: true,
+		},
+	})
+}
