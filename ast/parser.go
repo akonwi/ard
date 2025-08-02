@@ -1013,9 +1013,32 @@ func (p *parser) try() (Expression, error) {
 			return nil, err
 		}
 
+		var catchVar *Identifier
+		var catchBlock []Statement
+
+		// Check for catch clause: -> varname { ... }
+		if p.match(thin_arrow) {
+			if !p.check(identifier) {
+				return nil, p.makeError(p.peek(), "Expected identifier after '->' in try-catch")
+			}
+			varToken := p.advance()
+			catchVar = &Identifier{
+				Name:     varToken.text,
+				Location: varToken.getLocation(),
+			}
+			
+			block, err := p.block()
+			if err != nil {
+				return nil, err
+			}
+			catchBlock = block
+		}
+
 		return &Try{
 			keyword:    keyword,
 			Expression: expr,
+			CatchVar:   catchVar,
+			CatchBlock: catchBlock,
 		}, nil
 	}
 	return p.functionDef(false)

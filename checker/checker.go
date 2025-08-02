@@ -2649,17 +2649,63 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
+			var catchBlock []Statement
+			
 			switch _type := expr.Type().(type) {
 			case *Result:
-				if !_type.equal(c.scope.returnType) {
-					c.addError(typeMismatch(c.scope.returnType, _type), s.Expression.GetLocation())
-				}
+				// Handle catch clause if present
+				if s.CatchVar != nil && s.CatchBlock != nil {
+					// Create new scope for catch block with error variable
+					prevScope := c.scope
+					newScope := makeScope(&prevScope)
+					newScope.returnType = prevScope.returnType
+					c.scope = newScope
+					
+					// Add error variable to scope with the error type
+					c.scope.add(s.CatchVar.Name, _type.err, false)
+					
+					// Check catch block statements
+					for _, stmt := range s.CatchBlock {
+						checkedStmt := c.checkStmt(&stmt)
+						if checkedStmt != nil {
+							catchBlock = append(catchBlock, *checkedStmt)
+						}
+					}
+					
+					// Restore previous scope
+					c.scope = prevScope
+					
+					// Check that the catch block's return type matches the function's return type
+					block := &Block{Stmts: catchBlock}
+					blockType := block.Type()
+					if !blockType.equal(c.scope.returnType) {
+						c.addError(typeMismatch(c.scope.returnType, blockType), s.GetLocation())
+					}
+					
+					// With catch clause, the try expression returns the function's return type
+					return &TryOp{
+						expr:       expr,
+						ok:         c.scope.returnType,
+						CatchBlock: block,
+						CatchVar:   s.CatchVar.Name,
+					}
+				} else {
+					// Original behavior: propagate error, return value type
+					if !_type.equal(c.scope.returnType) {
+						c.addError(typeMismatch(c.scope.returnType, _type), s.Expression.GetLocation())
+					}
 
-				return &TryOp{
-					expr: expr,
-					ok:   _type.val,
+					return &TryOp{
+						expr: expr,
+						ok:   _type.val,
+					}
 				}
 			case *Maybe:
+				if s.CatchVar != nil {
+					c.addError("Catch clause not supported for Maybe types (only Result types)", s.GetLocation())
+					return nil
+				}
+				
 				return &TryOp{
 					expr: expr,
 					ok:   _type.of,

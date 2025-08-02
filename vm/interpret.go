@@ -659,8 +659,23 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			case *checker.Result:
 				raw := subj.raw.(_result)
 				if !raw.ok {
-					vm.scope.broken = true
-					return subj
+					// If there's a catch block, execute it instead of propagating error
+					if e.CatchBlock != nil {
+						// Execute catch block with error variable in scope
+						result, broken := vm.evalBlock(e.CatchBlock, func() {
+							vm.scope.add(e.CatchVar, raw.raw)
+						})
+						
+						if broken {
+							return result
+						}
+						
+						return result
+					} else {
+						// Original behavior: propagate error
+						vm.scope.broken = true
+						return subj
+					}
 				}
 
 				return raw.raw

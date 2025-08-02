@@ -928,8 +928,10 @@ func (p Panic) Type() Type {
 }
 
 type TryOp struct {
-	expr Expression
-	ok   Type
+	expr       Expression
+	ok         Type
+	CatchBlock *Block
+	CatchVar   string
 }
 
 func (t TryOp) Expr() Expression {

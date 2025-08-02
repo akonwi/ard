@@ -238,5 +238,17 @@ func TestTry(t *testing.T) {
 				{Kind: checker.Error, Message: "The `try` keyword can only be used in a function body"},
 			},
 		},
+		{
+			name: "try-catch block must return compatible type",
+			input: `
+				fn test_func() Str {
+					try Result::err("error") -> err {
+						42
+					}
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+			},
+		},
 	})
 }
