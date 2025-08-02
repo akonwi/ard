@@ -659,25 +659,28 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			case *checker.Result:
 				raw := subj.raw.(_result)
 				if !raw.ok {
-					// If there's a catch block, execute it instead of propagating error
+					// Error case: early return from function
 					if e.CatchBlock != nil {
-						// Execute catch block with error variable in scope
+						// Execute catch block and early return its result
 						result, broken := vm.evalBlock(e.CatchBlock, func() {
 							vm.scope.add(e.CatchVar, raw.raw)
 						})
 						
+						// Early return: the catch block's result becomes the function's return value
+						vm.scope.broken = true
 						if broken {
 							return result
 						}
-						
 						return result
 					} else {
-						// Original behavior: propagate error
+						// No catch block: propagate error by early returning
+						// Create a new Result with the same error for the function's return type
 						vm.scope.broken = true
 						return subj
 					}
 				}
 
+				// Success case: return the unwrapped value for continued execution
 				return raw.raw
 			default:
 				panic(fmt.Errorf("Cannot match on %s", _type))

@@ -171,12 +171,12 @@ func TestResults(t *testing.T) {
 func TestTry(t *testing.T) {
 	run(t, []test{
 		{
-			name: "trying a result",
+			name: "trying a result with compatible error types",
 			input: `
 				fn do_stuff() Int!Bool {
 					let res: Int!Bool = Result::ok(2)
 					let num = try res
-					res
+					Result::ok(num)
 				}`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{},
@@ -207,7 +207,13 @@ func TestTry(t *testing.T) {
 										},
 									},
 									{
-										Expr: &checker.Variable{},
+										Expr: &checker.ModuleFunctionCall{
+											Module: "ard/result",
+											Call: &checker.FunctionCall{
+												Name: "ok",
+												Args: []checker.Expression{&checker.Variable{}},
+											},
+										},
 									},
 								},
 							},
@@ -217,16 +223,14 @@ func TestTry(t *testing.T) {
 			},
 		},
 		{
-			name: "the function return type must match the result",
+			name: "try works when error types match even if value types differ",
 			input: `
 				fn do_stuff() Str!Bool {
 					let res: Int!Bool = Result::ok(2)
 					let num = try res
 					Result::ok(num.to_str())
 				}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Bool, got Int!Bool"},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "try can only be used in functions",
@@ -236,6 +240,18 @@ func TestTry(t *testing.T) {
 				`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "The `try` keyword can only be used in a function body"},
+			},
+		},
+		{
+			name: "try without catch requires Result return type",
+			input: `
+				fn test_func() Str {
+					let res: Int!Str = Result::ok(42)
+					let num = try res
+					num.to_str()
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "try without catch clause requires function to return a Result type"},
 			},
 		},
 		{
@@ -273,6 +289,28 @@ func TestTry(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined function: nonexistent_func"},
 				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
+			},
+		},
+		{
+			name: "try can only be used on Result types",
+			input: `
+				fn test_func() Str {
+					let val = "hello"
+					try val
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "try can only be used on Result types, got: Str"},
+			},
+		},
+		{
+			name: "try with mismatched error types",
+			input: `
+				fn test_func() Int!Int {
+					let res: Int!Str = Result::ok(42)
+					try res
+				}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Error type mismatch: Expected Int, got Str"},
 			},
 		},
 	})

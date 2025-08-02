@@ -2682,37 +2682,50 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(typeMismatch(c.scope.returnType, blockType), s.GetLocation())
 					}
 					
-					// With catch clause, the try expression returns the function's return type
+					// With catch clause, try returns the unwrapped value type on success
+					// On error, it early returns with the catch block result
 					return &TryOp{
 						expr:       expr,
-						ok:         c.scope.returnType,
+						ok:         _type.val, // The unwrapped value type, not the function return type
 						CatchBlock: block,
 						CatchVar:   s.CatchVar.Name,
 					}
 				} else {
-					// Original behavior: propagate error, return value type
-					if !_type.equal(c.scope.returnType) {
-						c.addError(typeMismatch(c.scope.returnType, _type), s.Expression.GetLocation())
+					// No catch clause: function must return a compatible Result type
+					fnReturnResult, ok := c.scope.returnType.(*Result)
+					if !ok {
+						c.addError("try without catch clause requires function to return a Result type", s.GetLocation())
+						// Return a try op with the unwrapped type to avoid cascading errors
+						return &TryOp{
+							expr: expr,
+							ok:   _type.val,
+						}
+					}
+					
+					// Error types must match for direct propagation
+					if !_type.err.equal(fnReturnResult.err) {
+						c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String()), s.Expression.GetLocation())
+						// Return a try op with the unwrapped type to avoid cascading errors
+						return &TryOp{
+							expr: expr,
+							ok:   _type.val,
+						}
 					}
 
+					// Success: returns the unwrapped value
+					// Error: early returns the error wrapped in the function's Result type
 					return &TryOp{
 						expr: expr,
 						ok:   _type.val,
 					}
 				}
-			case *Maybe:
-				if s.CatchVar != nil {
-					c.addError("Catch clause not supported for Maybe types (only Result types)", s.GetLocation())
-					return nil
-				}
-				
+			default:
+				c.addError("try can only be used on Result types, got: "+expr.Type().String(), s.Expression.GetLocation())
+				// Return a try op with the unwrapped type to avoid cascading errors  
 				return &TryOp{
 					expr: expr,
-					ok:   _type.of,
+					ok:   Void, // Use Void as a fallback since we don't have a valid unwrapped type
 				}
-			default:
-				c.addError("Unsupported try expression type: "+expr.Type().String(), s.Expression.GetLocation())
-				return nil
 			}
 		}
 	default:
