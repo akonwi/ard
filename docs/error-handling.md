@@ -55,7 +55,6 @@ fn calculate() Int!Str {
 
 ### Restrictions
 
-- `try` can only be used within function bodies
 - `try` can only be applied to Result types
 - When used without a catch clause, the function must return a compatible Result type with the same error type
 

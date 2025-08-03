@@ -381,8 +381,6 @@ fn do_math(a Int, b Int) Int!Str {
 
 The `try` keyword will unwrap the result and if the result is an error, it will act as an early return to pass on the failure result.
 
-Note: `try` can only be used in function blocks
-
 ### Modules
 See the docs in [modules](./modules)
 

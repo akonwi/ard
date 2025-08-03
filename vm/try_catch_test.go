@@ -199,3 +199,128 @@ func TestTryEarlyReturnSkipsRestOfFunction(t *testing.T) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
+
+func TestTryInMatchBlocks(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "try in enum match success case",
+			input: `
+				enum Status { active, inactive }
+				
+				fn get_result() Int!Str {
+					Result::ok(42)
+				}
+				
+				fn process_status(status: Status) Int!Str {
+					match status {
+						Status::active => {
+							let value = try get_result()
+							Result::ok(value + 1)
+						}
+						Status::inactive => Result::err("inactive")
+					}
+				}
+				
+				process_status(Status::active).expect("")
+			`,
+			want: 43,
+		},
+		{
+			name: "try in enum match error case",
+			input: `
+				enum Status { active, inactive }
+				
+				fn get_error() Int!Str {
+					Result::err("failed")
+				}
+				
+				fn process_status(status: Status) Int!Str {
+					match status {
+						Status::active => {
+							let value = try get_error()
+							Result::ok(value + 1)
+						}
+						Status::inactive => Result::err("inactive")
+					}
+				}
+				
+				process_status(Status::active).or(-1)
+			`,
+			want: -1,
+		},
+		{
+			name: "try in maybe match success",
+			input: `
+				use ard/maybe
+				
+				fn get_result() Int!Str {
+					Result::ok(100)
+				}
+				
+				fn process_maybe(maybe_val: Int?) Int!Str {
+					match maybe_val {
+						val => {
+							let result = try get_result()
+							Result::ok(result + val)
+						}
+						_ => Result::err("no value")
+					}
+				}
+				
+				process_maybe(maybe::some(5)).expect("")
+			`,
+			want: 105,
+		},
+		{
+			name: "try with catch in match blocks",
+			input: `
+				fn risky_operation() Str!Str {
+					Result::err("operation failed")
+				}
+				
+				fn process_with_catch(flag: Bool) Str {
+					match flag {
+						true => {
+							try risky_operation() -> err {
+								"caught: {err}"
+							}
+						}
+						false => "no operation"
+					}
+				}
+				
+				process_with_catch(true)
+			`,
+			want: "caught: operation failed",
+		},
+		{
+			name: "try in nested match blocks",
+			input: `
+				use ard/maybe
+				enum Status { active, inactive }
+				
+				fn get_result() Int!Str {
+					Result::ok(50)
+				}
+				
+				fn process_nested(status: Status, maybe_val: Int?) Int!Str {
+					match status {
+						Status::active => {
+							match maybe_val {
+								val => {
+									let result = try get_result()
+									Result::ok(result + val)
+								}
+								_ => Result::err("no value")
+							}
+						}
+						Status::inactive => Result::err("inactive")
+					}
+				}
+				
+				process_nested(Status::active, maybe::some(25)).expect("")
+			`,
+			want: 75,
+		},
+	})
+}

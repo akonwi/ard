@@ -316,3 +316,115 @@ func TestTry(t *testing.T) {
 		},
 	})
 }
+
+func TestTryInMatchBlocks(t *testing.T) {
+	run(t, []test{
+		{
+			name: "try works in enum match arms",
+			input: `
+				enum Status { active, inactive }
+				
+				fn get_result() Int!Str {
+					Result::ok(42)
+				}
+				
+				fn process_status(status: Status) Int!Str {
+					match status {
+						Status::active => {
+							let value = try get_result()
+							Result::ok(value + 1)
+						}
+						Status::inactive => Result::err("inactive")
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try works in maybe match arms",
+			input: `
+				fn get_result() Int!Str {
+					Result::ok(42)
+				}
+				
+				fn process_maybe(maybe_val: Int?) Int!Str {
+					match maybe_val {
+						val => {
+							let result = try get_result()
+							Result::ok(result + val)
+						}
+						_ => Result::err("no value")
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try with catch works in match arms",
+			input: `
+				fn risky_operation() Str!Str {
+					Result::err("failed")
+				}
+				
+				fn process_with_catch(flag: Bool) Str {
+					match flag {
+						true => {
+							try risky_operation() -> err {
+								"caught error: {err}"
+							}
+						}
+						false => "no operation"
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try in nested match blocks",
+			input: `
+				enum Status { active, inactive }
+				
+				fn get_result() Int!Str {
+					Result::ok(42)
+				}
+				
+				fn process_nested(status: Status, maybe_val: Int?) Int!Str {
+					match status {
+						Status::active => {
+							match maybe_val {
+								val => {
+									let result = try get_result()
+									Result::ok(result + val)
+								}
+								_ => Result::err("no value")
+							}
+						}
+						Status::inactive => Result::err("inactive")
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try still requires compatible return type in match arms",
+			input: `
+				fn get_result() Int!Bool {
+					Result::ok(42)
+				}
+				
+				fn wrong_error_type(flag: Bool) Int!Str {
+					match flag {
+						true => {
+							let value = try get_result()  // Error: Bool vs Str mismatch
+							Result::ok(value)
+						}
+						false => Result::ok(0)
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Error type mismatch: Expected Str, got Bool"},
+			},
+		},
+	})
+}

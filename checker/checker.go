@@ -2644,9 +2644,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			if c.scope.returnType == nil {
-				c.addError("The `try` keyword can only be used in a function body", s.GetLocation())
-				return nil
+			if c.scope.getReturnType() == nil {
+			c.addError("The `try` keyword can only be used in a function body", s.GetLocation())
+			return nil
 			}
 
 			var catchBlock []Statement
@@ -2658,7 +2658,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Create new scope for catch block with error variable
 					prevScope := c.scope
 					newScope := makeScope(&prevScope)
-					newScope.returnType = prevScope.returnType
 					c.scope = newScope
 
 					// Add error variable to scope with the error type
@@ -2678,8 +2677,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Create the block
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
-					if !blockType.equal(c.scope.returnType) {
-						c.addError(typeMismatch(c.scope.returnType, blockType), s.GetLocation())
+					returnType := c.scope.getReturnType()
+					if !blockType.equal(returnType) {
+						c.addError(typeMismatch(returnType, blockType), s.GetLocation())
 					}
 					
 					// With catch clause, try returns the unwrapped value type on success
@@ -2692,7 +2692,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 				} else {
 					// No catch clause: function must return a compatible Result type
-					fnReturnResult, ok := c.scope.returnType.(*Result)
+					fnReturnResult, ok := c.scope.getReturnType().(*Result)
 					if !ok {
 						c.addError("try without catch clause requires function to return a Result type", s.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors

@@ -71,6 +71,17 @@ func (st *SymbolTable) expectReturn(returnType Type) {
 	st.returnType = returnType
 }
 
+// getReturnType traverses up the scope hierarchy to find the first non-nil returnType
+func (st *SymbolTable) getReturnType() Type {
+	if st.returnType != nil {
+		return st.returnType
+	}
+	if st.parent != nil {
+		return st.parent.getReturnType()
+	}
+	return nil
+}
+
 func (st *SymbolTable) isolate() {
 	st.isolated = true
 }
