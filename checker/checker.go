@@ -51,16 +51,17 @@ func (c checker) isMutable(expr Expression) bool {
 
 type checker struct {
 	diagnostics []Diagnostic
-	scope       SymbolTable
+	scope       *SymbolTable
 	program     *Program
 	filePath    string
 	halted      bool
 }
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
+	globalScope := makeScope(nil)
 	c := &checker{
 		diagnostics: []Diagnostic{},
-		scope:       makeScope(nil),
+		scope:       &globalScope,
 		filePath:    filePath,
 	}
 	c.program = &Program{
@@ -141,7 +142,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 	}
 
 	// Create UserModule from the checked program
-	userModule := NewUserModule("", c.program, &c.scope)
+	userModule := NewUserModule("", c.program, c.scope)
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
@@ -623,8 +624,8 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 		{
 			// Create a new scope for the loop body and initialization
 			parent := c.scope
-			scope := makeScope(&parent)
-			c.scope = scope
+			scope := makeScope(parent)
+			c.scope = &scope
 			defer func() {
 				c.scope = parent
 			}()
@@ -953,7 +954,8 @@ func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 	}
 
 	parent := c.scope
-	c.scope = makeScope(&parent)
+	newScope := makeScope(parent)
+	c.scope = &newScope
 	defer func() {
 		c.scope = parent
 	}()
@@ -1974,6 +1976,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Check function body with a setup function that adds parameters to scope
 			body := c.checkBlock(s.Body, func() {
+				// set the expected return type to the scope
+				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
@@ -2657,8 +2661,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if s.CatchVar != nil && s.CatchBlock != nil {
 					// Create new scope for catch block with error variable
 					prevScope := c.scope
-					newScope := makeScope(&prevScope)
-					c.scope = newScope
+					newScope := makeScope(prevScope)
+					c.scope = &newScope
 
 					// Add error variable to scope with the error type
 					c.scope.add(s.CatchVar.Name, _type.err, false)
