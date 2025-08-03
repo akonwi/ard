@@ -639,9 +639,17 @@ func (p *parser) assignment() (Statement, error) {
 		switch opToken.kind {
 		case increment:
 			return &VariableAssignment{
+				Location: Location{
+					Start: expr.GetLocation().Start,
+					End:   value.GetLocation().End,
+				},
 				Operator: Assign,
 				Target:   expr,
 				Value: &BinaryExpression{
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   value.GetLocation().End,
+					},
 					Operator: Plus,
 					Left:     expr,
 					Right:    value,
@@ -649,9 +657,17 @@ func (p *parser) assignment() (Statement, error) {
 			}, nil
 		case decrement:
 			return &VariableAssignment{
+				Location: Location{
+					Start: expr.GetLocation().Start,
+					End:   value.GetLocation().End,
+				},
 				Operator: Assign,
 				Target:   expr,
 				Value: &BinaryExpression{
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   value.GetLocation().End,
+					},
 					Operator: Minus,
 					Left:     expr,
 					Right:    value,
@@ -659,6 +675,10 @@ func (p *parser) assignment() (Statement, error) {
 			}, nil
 		default:
 			return &VariableAssignment{
+				Location: Location{
+					Start: expr.GetLocation().Start,
+					End:   value.GetLocation().End,
+				},
 				Operator: Assign,
 				Target:   expr,
 				Value:    value,
@@ -816,6 +836,7 @@ func (p *parser) parseType() DeclaredType {
 			// Check if this is a generic type parameter (starts with $)
 			if len(id.text) > 0 && id.text[0] == '$' {
 				return &GenericType{
+					Location: id.getLocation(),
 					Name:     id.text[1:], // Remove the leading '$'
 					nullable: nullable,
 				}
@@ -823,15 +844,28 @@ func (p *parser) parseType() DeclaredType {
 
 			switch id.text {
 			case "Int":
-				return &IntType{nullable: nullable}
+				return &IntType{
+					Location: id.getLocation(),
+					nullable: nullable,
+				}
 			case "Float":
-				return &FloatType{nullable: nullable}
+				return &FloatType{
+					Location: id.getLocation(),
+					nullable: nullable,
+				}
 			case "Str":
-				return &StringType{nullable: nullable}
+				return &StringType{
+					Location: id.getLocation(),
+					nullable: nullable,
+				}
 			case "Bool":
-				return &BooleanType{nullable: nullable}
+				return &BooleanType{
+					Location: id.getLocation(),
+					nullable: nullable,
+				}
 			default:
 				return &CustomType{
+					Location: id.getLocation(),
 					Name:     id.text,
 					nullable: nullable,
 				}
@@ -1022,7 +1056,7 @@ func (p *parser) try() (Expression, error) {
 				return nil, p.makeError(p.peek(), "Expected identifier after '->' in try-catch")
 			}
 			idToken := p.advance()
-			
+
 			// Check if this is a function reference (no block) or variable binding (with block)
 			if p.check(left_brace) {
 				// Block syntax: -> var { ... }
@@ -1030,7 +1064,7 @@ func (p *parser) try() (Expression, error) {
 					Name:     idToken.text,
 					Location: idToken.getLocation(),
 				}
-				
+
 				block, err := p.block()
 				if err != nil {
 					return nil, err
@@ -1043,7 +1077,7 @@ func (p *parser) try() (Expression, error) {
 					Name:     "err",
 					Location: idToken.getLocation(),
 				}
-				
+
 				// Create function call: function_name(err)
 				funcCall := &FunctionCall{
 					Location: idToken.getLocation(),
@@ -1059,7 +1093,7 @@ func (p *parser) try() (Expression, error) {
 						},
 					},
 				}
-				
+
 				// Wrap in a statement
 				catchBlock = []Statement{
 					funcCall,
@@ -1255,6 +1289,10 @@ func (p *parser) or() (Expression, error) {
 			return nil, err
 		}
 		return &BinaryExpression{
+			Location: Location{
+				Start: left.GetLocation().Start,
+				End:   right.GetLocation().End,
+			},
 			Operator: Or,
 			Left:     left,
 			Right:    right,
@@ -1274,6 +1312,10 @@ func (p *parser) and() (Expression, error) {
 			return nil, err
 		}
 		return &BinaryExpression{
+			Location: Location{
+				Start: left.GetLocation().Start,
+				End:   right.GetLocation().End,
+			},
 			Operator: And,
 			Left:     left,
 			Right:    right,
@@ -1307,6 +1349,10 @@ func (p *parser) comparison() (Expression, error) {
 			return nil, err
 		}
 		left = &BinaryExpression{
+			Location: Location{
+				Start: left.GetLocation().Start,
+				End:   right.GetLocation().End,
+			},
 			Operator: operator,
 			Left:     left,
 			Right:    right,
@@ -1326,6 +1372,10 @@ func (p *parser) modulo() (Expression, error) {
 			return nil, err
 		}
 		return &BinaryExpression{
+			Location: Location{
+				Start: left.GetLocation().Start,
+				End:   right.GetLocation().End,
+			},
 			Operator: Modulo,
 			Left:     left,
 			Right:    right,
@@ -1351,6 +1401,10 @@ func (p *parser) addition() (Expression, error) {
 			return nil, err
 		}
 		left = &BinaryExpression{
+			Location: Location{
+				Start: left.GetLocation().Start,
+				End:   right.GetLocation().End,
+			},
 			Operator: operator,
 			Left:     left,
 			Right:    right,
@@ -1376,6 +1430,10 @@ func (p *parser) multiplication() (Expression, error) {
 			return nil, err
 		}
 		left = &BinaryExpression{
+			Location: Location{
+				Start: left.GetLocation().Start,
+				End:   right.GetLocation().End,
+			},
 			Operator: operator,
 			Left:     left,
 			Right:    right,
@@ -1612,8 +1670,10 @@ func (p *parser) primary() (Expression, error) {
 		return p.string()
 	}
 	if p.match(true_, false_) {
+		tok := p.previous()
 		return &BoolLiteral{
-			Value: p.previous().text == "true",
+			Value:    tok.text == "true",
+			Location: tok.getLocation(),
 		}, nil
 	}
 	if p.match(at_sign) {
