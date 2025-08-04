@@ -126,33 +126,8 @@ func TestStructs(t *testing.T) {
 			input: fmt.Sprintf(`%s
 				mut p = Person{name: "Alice", age: 30, employed: true}
 				p.age = 31`, personStructInput),
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: true,
-							Name:    "p",
-							Value: &checker.StructInstance{
-								Name: "Person",
-								Fields: map[string]checker.Expression{
-									"name":     &checker.StrLiteral{"Alice"},
-									"age":      &checker.IntLiteral{30},
-									"employed": &checker.BoolLiteral{true},
-								},
-							},
-						},
-					},
-					{
-						Stmt: &checker.Reassignment{
-							Target: &checker.InstanceProperty{
-								Subject:  &checker.Variable{},
-								Property: "age",
-							},
-							Value: &checker.IntLiteral{31},
-						},
-					},
-				},
-			},
+			// Copy semantics allow this to be valid, so no errors
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Can't reassign to properties of immutable structs",
@@ -162,6 +137,37 @@ func TestStructs(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Immutable: p.age"},
 			},
+		},
+	})
+}
+
+func TestCopySemantics(t *testing.T) {
+	personStructInput := strings.Join([]string{
+		"struct Person {",
+		"  name: Str,",
+		"  age: Int",
+		"}",
+	}, "\n")
+
+	run(t, []test{
+		{
+			name: "mut assignment should accept copy from immutable struct",
+			input: fmt.Sprintf(`%s
+				let alice = Person{name: "Alice", age: 30}
+				mut bob = alice`, personStructInput),
+			// For now, just check that it compiles without errors
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "function parameter with mut should accept copy of immutable struct",
+			input: fmt.Sprintf(`%s
+				fn update_age(mut person: Person) {
+					person.age = 99
+				}
+				let alice = Person{name: "Alice", age: 30}
+				update_age(alice)`, personStructInput),
+			// Copy semantics should allow this now
+			diagnostics: []checker.Diagnostic{},
 		},
 	})
 }

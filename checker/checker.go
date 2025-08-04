@@ -49,6 +49,26 @@ func (c checker) isMutable(expr Expression) bool {
 	return false
 }
 
+// isCopyable returns true if the type can be copied for mut parameters
+func (c checker) isCopyable(t Type) bool {
+	// In Ard, all types are copyable by default
+	// Future: might exclude external resources like file handles
+	return true
+}
+
+// shouldCopyForMutableAssignment determines if we should copy for mut variable assignments
+// This is more conservative than isCopyable to avoid unnecessary copying of primitives
+func (c checker) shouldCopyForMutableAssignment(t Type) bool {
+	switch t.(type) {
+	case *StructDef, *List, *Map:
+		// Complex types that benefit from copy semantics
+		return true
+	default:
+		// Primitives (Int, Str, Bool, etc.) are immutable anyway, no need to copy
+		return false
+	}
+}
+
 type checker struct {
 	diagnostics []Diagnostic
 	scope       *SymbolTable
@@ -528,6 +548,15 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 						return nil
 					}
 					__type = expected
+				}
+			}
+
+			// Apply copy semantics for mutable variable assignments
+			if s.Mutable && c.shouldCopyForMutableAssignment(val.Type()) {
+				// Always wrap in copy expression for mutable assignment of copyable types
+				val = &CopyExpression{
+					Expr:  val,
+					Type_: val.Type(),
 				}
 			}
 
@@ -1265,10 +1294,19 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Check mutability constraints if needed
 				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+					// Check if the type is copyable (structs for now)
+					if c.isCopyable(checkedArg.Type()) {
+						// Wrap in copy expression instead of erroring
+						args[i] = &CopyExpression{
+							Expr:  checkedArg,
+							Type_: checkedArg.Type(),
+						}
+					} else {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+					}
+				} else {
+					args[i] = checkedArg
 				}
-
-				args[i] = checkedArg
 			}
 
 			// Use new generic resolution system
@@ -1363,10 +1401,19 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Check mutability constraints if needed
 				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
+					// Check if the type is copyable (structs for now)
+					if c.isCopyable(checkedArg.Type()) {
+						// Wrap in copy expression instead of erroring
+						args[i] = &CopyExpression{
+							Expr:  checkedArg,
+							Type_: checkedArg.Type(),
+						}
+					} else {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
+					}
+				} else {
+					args[i] = checkedArg
 				}
-
-				args[i] = checkedArg
 			}
 
 			// Use new generic resolution system

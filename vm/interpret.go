@@ -11,6 +11,57 @@ import (
 
 var void = &object{nil, checker.Void}
 
+// deepCopy creates a deep copy of an object
+func deepCopy(obj *object) *object {
+	switch obj._type.(type) {
+	case *checker.StructDef:
+		// Deep copy struct
+		originalMap := obj.raw.(map[string]*object)
+		copiedMap := make(map[string]*object)
+		for key, value := range originalMap {
+			copiedMap[key] = deepCopy(value)
+		}
+		return &object{copiedMap, obj._type}
+	case *checker.List:
+		// Deep copy list
+		originalSlice := obj.raw.([]*object)
+		copiedSlice := make([]*object, len(originalSlice))
+		for i, value := range originalSlice {
+			copiedSlice[i] = deepCopy(value)
+		}
+		return &object{copiedSlice, obj._type}
+	case *checker.Map:
+		// Deep copy map
+		originalMap := obj.raw.(map[string]*object)
+		copiedMap := make(map[string]*object)
+		for key, value := range originalMap {
+			copiedMap[key] = deepCopy(value)
+		}
+		return &object{copiedMap, obj._type}
+	case *checker.Maybe:
+		// Deep copy Maybe - if value is nil (None), copy as-is, otherwise deep copy the value
+		if obj.raw == nil {
+			return &object{nil, obj._type}
+		} else {
+			return &object{deepCopy(obj.raw.(*object)).raw, obj._type}
+		}
+	case *checker.Result:
+		// Deep copy Result - the value is an object containing either the success or error value
+		return &object{deepCopy(obj.raw.(*object)).raw, obj._type}
+	case *checker.Enum:
+		// Enums are typically represented as integers or simple values, safe to copy
+		return &object{obj.raw, obj._type}
+	case *checker.FunctionDef:
+		// Functions cannot be copied - return the same function object
+		// Functions are immutable so sharing them is safe
+		return obj
+	default:
+		// For primitives (Str, Int, Float, Bool), return a new object with same value
+		// These are immutable in Ard, so we can just create a new object
+		return &object{obj.raw, obj._type}
+	}
+}
+
 // compareKey is a wrapper around an object to use for map keys
 // enabling proper equality comparison
 type compareKey struct {
@@ -686,6 +737,10 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				panic(fmt.Errorf("Cannot match on %s", _type))
 			}
 		}
+	case *checker.CopyExpression:
+		// Evaluate the expression and return a deep copy
+		original := vm.eval(e.Expr)
+		return deepCopy(original)
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}

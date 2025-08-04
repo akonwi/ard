@@ -1,5 +1,17 @@
 ## TODO
 
+- [ ] copy semantics
+  ideas:
+  A: create implicit copy when using `mut` keyword on read-only reference
+  ```
+  let map = [1: "one", 2: "two"] // immutable
+
+  // as an argument
+  foo(mut map) // foo receives a copy of `map` and the original stays in tact
+  mut map2 = map // new binding to `map2` copies `map`
+  ```
+  works if the main use case is to maintain a consistent source and starting point for changing.
+  where does it not work?
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades
