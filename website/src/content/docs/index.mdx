@@ -1,0 +1,64 @@
+---
+title: Ard Language
+description: Ard is a modern, programming language designed for legibility, simplicity, and type-safety.
+template: splash
+hero:
+  tagline: A Really Dope Language
+  image:
+    file: ../../assets/logo.webp
+  actions:
+    - text: Learn More
+      link: /getting-started/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/akonwi/ard
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is Ard?
+
+Ard is a general-purpose programming language designed for legibility, simplicity, and type-safety.
+It combines elements from JavaScript, Swift, Go, and Rust.
+
+<CardGrid>
+	<Card title="Readable" icon="pencil">
+		Ard code should be easy to read and understand with clear, expressive syntax designed for readability.
+	</Card>
+	<Card title="Simple" icon="approve-check">
+		There should be one obvious way to do things. Ard follows Go's philosophy for left-to-right readability.
+	</Card>
+	<Card title="Safe" icon="warning">
+		The compiler catches type errors and there are no unexpected runtime failures.
+	</Card>
+	<Card title="Reliable" icon="star">
+		Built on Go's runtime, making it fast and efficient.
+	</Card>
+</CardGrid>
+
+## Quick Example
+
+```ard
+use ard/io
+
+fn main() {
+  mut numbers: [Int] = []
+  io::print("numbers.size = {numbers.size()}")
+
+  io::print("adding numbers from 0 to 10")
+  for i in 0..10 {
+    numbers.push(i)
+  }
+
+  io::print("numbers.size = {numbers.size()}")
+  for n in numbers {
+    io::print(n)
+  }
+
+  io::print("7th element = {numbers.at(6)}")
+}
+```
+
+Read the [introduction guide](/getting-started/introduction/) to learn more.

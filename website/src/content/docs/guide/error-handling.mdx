@@ -1,0 +1,103 @@
+---
+title: Error Handling
+description: Learn about Ard's approach to error handling using Result types and the try keyword.
+---
+
+## No Exceptions
+
+Ard does not have exceptions. Instead, errors are represented as values using the built-in `Result<$Val, $Err>` type. This approach makes error handling explicit and predictable.
+
+## Result Type
+
+The `Result` type represents either a successful value or an error:
+
+```ard
+// Function that might fail
+fn divide(a: Int, b: Int) Result<Int, Str> {
+  match b == 0 {
+    true => Result::err("Cannot divide by zero")
+    false => Result::ok(a / b)
+  }
+}
+```
+
+## Result Declaration Sugar
+
+For convenience, `Result<T, E>` can be written using the sugar syntax `T!E`:
+
+```ard
+// These are equivalent:
+fn divide_verbose(a: Int, b: Int) Result<Int, Str> { ... }
+fn divide_concise(a: Int, b: Int) Int!Str { ... }
+```
+
+The `!` syntax is more concise and commonly used.
+
+## Handling Results with Match
+
+Use match expressions to handle both success and error cases:
+
+```ard
+fn safe_divide(x: Int, y: Int) {
+  match divide(x, y) {
+    ok(result) => io::print("Result: {result}")
+    err(error) => io::print("Error: {error}")
+  }
+}
+
+// Usage
+safe_divide(10, 2)  // "Result: 5"
+safe_divide(10, 0)  // "Error: Cannot divide by zero"
+```
+
+## Ignoring Errors with `.or()`
+
+To provide a default value when a result is an error:
+
+```ard
+let result = divide(10, 0).or(0)  // Returns 0 on error
+io::print("Got: {result}")  // "Got: 0"
+
+let safe_result = divide(10, 2).or(999)  // Returns 5 (success value)
+io::print("Got: {safe_result}")  // "Got: 5"
+```
+
+## Error Propagation with `try`
+
+The `try` keyword allows propagating errors to the calling function:
+
+```ard
+fn do_math(a: Int, b: Int) Int!Str {
+  let quotient = try divide(a, b)  // If error, return early
+  Result::ok(quotient + 10)        // Continue with success value
+}
+
+// Usage
+match do_math(10, 2) {
+  ok(value) => io::print("Final result: {value}")  // "Final result: 15"
+  err(error) => io::print("Math failed: {error}")
+}
+
+match do_math(10, 0) {
+  ok(value) => io::print("Final result: {value}")
+  err(error) => io::print("Math failed: {error}")  // "Math failed: Cannot divide by zero"
+}
+```
+
+> ⚠️ `try` can only be used within function bodies that return the same result type.
+
+## Result Helper Functions
+
+Common patterns for working with Results:
+
+```ard
+// Check if result is success without consuming it
+let result = divide(10, 2)
+if result.is_ok() {
+  io::print("Operation succeeded")
+}
+
+if result.is_err() {
+  io::print("Operation failed")
+}
+```
