@@ -1263,24 +1263,47 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// }
 			}
 
-			// Resolve named arguments to positional arguments
-			resolvedArgs, err := c.resolveArguments(s.Args, fnDef.Parameters)
+			// Resolve named arguments to positional arguments (for expressions only)
+			resolvedExprs, err := c.resolveArguments(s.Args, fnDef.Parameters)
 			if err != nil {
 				c.addError(err.Error(), s.GetLocation())
 				return nil
 			}
 
-			// Check argument count
-			if len(resolvedArgs) != len(fnDef.Parameters) {
+			// Check argument count after resolving
+			if len(resolvedExprs) != len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(resolvedArgs)), s.GetLocation())
+					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
 				return nil
+			}
+
+			// We need to also resolve the arguments with mutability info
+			resolvedArgs := make([]ast.Argument, len(fnDef.Parameters))
+			if len(s.Args) > 0 && s.Args[0].Name != "" {
+				// Handle named arguments - need to reorder them
+				paramMap := make(map[string]int)
+				for i, param := range fnDef.Parameters {
+					paramMap[param.Name] = i
+				}
+				for _, arg := range s.Args {
+					if index, exists := paramMap[arg.Name]; exists {
+						resolvedArgs[index] = ast.Argument{
+							Location: arg.Location,
+							Name:     "",
+							Value:    arg.Value,
+							Mutable:  arg.Mutable,
+						}
+					}
+				}
+			} else {
+				// Positional arguments - direct copy
+				copy(resolvedArgs, s.Args)
 			}
 
 			// Check and process arguments
 			args := make([]Expression, len(resolvedArgs))
 			for i, arg := range resolvedArgs {
-				checkedArg := c.checkExpr(arg)
+				checkedArg := c.checkExpr(resolvedExprs[i])
 				if checkedArg == nil {
 					return nil
 				}
@@ -1288,21 +1311,25 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				// Type check the argument against the parameter type
 				paramType := fnDef.Parameters[i].Type
 				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.GetLocation())
+					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
 					return nil
 				}
 
 				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					// Check if the type is copyable (structs for now)
-					if c.isCopyable(checkedArg.Type()) {
-						// Wrap in copy expression instead of erroring
+				if fnDef.Parameters[i].Mutable {
+					if arg.Mutable {
+						// User provided `mut` - create a copy
 						args[i] = &CopyExpression{
 							Expr:  checkedArg,
 							Type_: checkedArg.Type(),
 						}
+					} else if c.isMutable(checkedArg) {
+						// Argument is already mutable
+						args[i] = checkedArg
 					} else {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.GetLocation())
+						// Not mutable and no `mut` keyword - error
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
+						return nil
 					}
 				} else {
 					args[i] = checkedArg

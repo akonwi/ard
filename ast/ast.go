@@ -437,8 +437,9 @@ func (i IfStatement) String() string {
 
 type Argument struct {
 	Location
-	Name  string
-	Value Expression
+	Name    string
+	Value   Expression
+	Mutable bool
 }
 
 type FunctionCall struct {

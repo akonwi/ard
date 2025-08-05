@@ -1943,10 +1943,13 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 	hasNamedArgs := false
 
 	for !p.check(right_paren) {
+		// Check for mut keyword first
+		start := p.peek().getLocation().Start
+		isMutable := p.match(mut)
+
 		// Check if this is a named argument (identifier followed by colon)
 		if p.check(identifier) && p.peek2() != nil && p.peek2().kind == colon {
 			hasNamedArgs = true
-			start := p.peek().getLocation().Start
 			name := p.advance().text
 			p.consume(colon, "Expected ':' after parameter name")
 
@@ -1960,8 +1963,9 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 					Start: start,
 					End:   value.GetLocation().End,
 				},
-				Name:  name,
-				Value: value,
+				Name:    name,
+				Value:   value,
+				Mutable: isMutable,
 			})
 		} else {
 			// Check if we've already seen named arguments
@@ -1976,9 +1980,13 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 
 			// Add as Argument with empty name (positional)
 			args = append(args, Argument{
-				Location: arg.GetLocation(),
-				Name:     "",
-				Value:    arg,
+				Location: Location{
+					Start: start,
+					End:   arg.GetLocation().End,
+				},
+				Name:    "",
+				Value:   arg,
+				Mutable: isMutable,
 			})
 		}
 

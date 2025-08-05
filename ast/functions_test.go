@@ -415,6 +415,30 @@ func TestFunctionsWithGenerics(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Function call with mut argument",
+			input: `
+				fn update(mut person: Person) {}
+				update(mut alice)`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "update",
+						Parameters: []Parameter{
+							{Name: "person", Type: &CustomType{Name: "Person"}, Mutable: true},
+						},
+						Body: []Statement{},
+					},
+					&FunctionCall{
+						Name: "update",
+						Args: []Argument{
+							{Name: "", Value: &Identifier{Name: "alice"}, Mutable: true},
+						},
+					},
+				},
+			},
+		},
 	})
 }
 

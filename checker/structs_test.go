@@ -158,17 +158,6 @@ func TestCopySemantics(t *testing.T) {
 			// For now, just check that it compiles without errors
 			diagnostics: []checker.Diagnostic{},
 		},
-		{
-			name: "function parameter with mut should accept copy of immutable struct",
-			input: fmt.Sprintf(`%s
-				fn update_age(mut person: Person) {
-					person.age = 99
-				}
-				let alice = Person{name: "Alice", age: 30}
-				update_age(alice)`, personStructInput),
-			// Copy semantics should allow this now
-			diagnostics: []checker.Diagnostic{},
-		},
 	})
 }
 
