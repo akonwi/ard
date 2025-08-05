@@ -36,17 +36,17 @@ mut age = 30
 
 #### Copy Semantics
 
-Ard uses automatic copy semantics to ensure data safety:
+Ard uses explicit copy semantics to ensure data safety:
 
-**Function Parameters**: When passing values to mutable function parameters, Ard automatically creates copies:
+**Function Parameters**: When a function parameter is mutable, you must use the `mut` keyword to create a copy:
 ```ard
 fn update_person(mut person: Person) {
     person.age = 99  // Only affects the copy
 }
 
 let alice = Person { name: "Alice", age: 30 }
-update_person(alice)  // alice is automatically copied
-// alice.age is still 30
+update_person(mut alice)  // Explicitly request a copy with `mut`
+// alice.age is still 30 (original unchanged)
 ```
 
 **Variable Assignment**: When assigning complex types (structs, lists, maps) to mutable variables, Ard creates copies:
@@ -59,7 +59,7 @@ copy.age = 31
 
 **Identity vs Equality**: Copied values are equal in content but not identical in memory. This prevents accidental mutation of shared data while maintaining value semantics.
 
-**Note**: Primitives (Int, Str, Bool, etc.) and functions are immutable, so they don't trigger copying for simple assignments but will still be copied when passed to mutable parameters for consistency.
+**Note**: Primitives (Int, Str, Bool, etc.) and functions are immutable, so they don't trigger copying for simple assignments. When passed to mutable parameters with the `mut` keyword, they are copied for consistency.
 
 #### Increment/Decrement short hand
 

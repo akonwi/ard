@@ -83,6 +83,47 @@ if some_condition {
 // 'inner' is out of scope
 ```
 
+## Copy Semantics
+
+Ard uses explicit copy semantics to ensure data safety and prevent accidental mutation of shared data.
+
+### Variable Assignment
+
+When assigning complex types (structs, lists, maps) to mutable variables, Ard creates deep copies:
+
+```ard
+struct Person { name: Str, age: Int }
+
+let original = Person { name: "Alice", age: 30 }
+mut copy = original  // Creates a deep copy
+copy.age = 31
+// original.age is still 30, copy.age is 31
+```
+
+### Function Parameters
+
+When a function parameter is mutable, you must use the `mut` keyword to explicitly create a copy:
+
+```ard
+fn update_person(mut person: Person) {
+    person.age = 99  // Only affects the copy
+}
+
+let alice = Person { name: "Alice", age: 30 }
+update_person(mut alice)  // Explicitly request a copy with `mut`
+// alice.age is still 30 (original unchanged)
+```
+
+Without the `mut` keyword, passing an immutable value to a mutable parameter will result in a compile-time error.
+
+### Identity vs Equality
+
+Copied values are equal in content but not identical in memory. This prevents accidental mutation of shared data while maintaining value semantics.
+
+### Primitives
+
+Primitives (Int, Str, Bool, etc.) and functions are immutable, so they don't trigger copying for simple assignments. When passed to mutable parameters with the `mut` keyword, they are copied for consistency.
+
 ## Shadowing
 
 Redeclaring a variable with the same name in the same scope is allowed.
