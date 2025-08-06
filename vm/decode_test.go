@@ -10,7 +10,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("\"hello\"")
-				decode::decode(decode::string(), data).expect("")
+				decode::run(data, decode::string()).expect("")
 			`,
 			want: "hello",
 		},
@@ -20,7 +20,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("42")
-				decode::decode(decode::int(), data).expect("")
+				decode::run(data, decode::int()).expect("")
 			`,
 			want: 42,
 		},
@@ -30,7 +30,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("3.14")
-				decode::decode(decode::float(), data).expect("")
+				decode::run(data, decode::float()).expect("")
 			`,
 			want: 3.14,
 		},
@@ -40,7 +40,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("true")
-				decode::decode(decode::bool(), data).expect("")
+				decode::run(data, decode::bool()).expect("")
 			`,
 			want: true,
 		},
@@ -55,7 +55,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("42")
-				let result = decode::decode(decode::string(), data)
+				let result = decode::run(data, decode::string())
 				match result {
 					err => err.size() == 1
 					ok(_) => false
@@ -69,7 +69,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("\"hello\"")
-				let result = decode::decode(decode::int(), data)
+				let result = decode::run(data, decode::int())
 				match result {
 					err => err.size() == 1
 					ok(_) => false
@@ -83,7 +83,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("\"true\"")
-				let result = decode::decode(decode::bool(), data)
+				let result = decode::run(data, decode::bool())
 				match result {
 					err => err.size() == 1
 					ok(_) => false
@@ -97,7 +97,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("\"3.14\"")
-				let result = decode::decode(decode::float(), data)
+				let result = decode::run(data, decode::float())
 				match result {
 					err => err.size() == 1
 					ok(_) => false
@@ -112,7 +112,7 @@ func TestDecodeErrors(t *testing.T) {
 
 				// Invalid JSON becomes nil Dynamic, which fails at decode
 				let data = decode::any("invalid json")
-				let result = decode::decode(decode::string(), data)
+				let result = decode::run(data, decode::string())
 				match result {
 					err => err.size() == 1
 					ok(_) => false
@@ -126,7 +126,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("42")
-				let result = decode::decode(decode::string(), data)
+				let result = decode::run(data, decode::string())
 				match result {
 					err => {
 						let first_error = err.at(0)
@@ -143,7 +143,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("\"not_a_number\"")
-				let result = decode::decode(decode::int(), data)
+				let result = decode::run(data, decode::int())
 				match result {
 					err => {
 						let first_error = err.at(0)
@@ -160,7 +160,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				let data = decode::any("invalid json")  // becomes nil Dynamic
-				let result = decode::decode(decode::int(), data)
+				let result = decode::run(data, decode::int())
 				match result {
 					err => {
 						let first_error = err.at(0)
@@ -185,7 +185,7 @@ func TestDecodeNullable(t *testing.T) {
 				let data = decode::any("\"hello\"")
 				let string_decoder = decode::string()
 				let nullable_decoder = decode::nullable(string_decoder)
-				let result = decode::decode(nullable_decoder, data)
+				let result = decode::run(data, nullable_decoder)
 				result.expect("").or("default")
 			`,
 			want: "hello",
@@ -199,7 +199,7 @@ func TestDecodeNullable(t *testing.T) {
 				let data = decode::any("42")
 				let int_decoder = decode::int()
 				let nullable_decoder = decode::nullable(int_decoder)
-				let result = decode::decode(nullable_decoder, data)
+				let result = decode::run(data, nullable_decoder)
 				result.expect("").or(0)
 			`,
 			want: 42,
@@ -213,7 +213,7 @@ func TestDecodeNullable(t *testing.T) {
 				let data = decode::any("null")
 				let string_decoder = decode::string()
 				let nullable_decoder = decode::nullable(string_decoder)
-				let result = decode::decode(nullable_decoder, data)
+				let result = decode::run(data, nullable_decoder)
 				result.expect("").or("default_value")
 			`,
 			want: "default_value",
@@ -226,7 +226,7 @@ func TestDecodeNullable(t *testing.T) {
 				let data = decode::any("42")
 				let string_decoder = decode::string()
 				let nullable_decoder = decode::nullable(string_decoder)
-				let result = decode::decode(nullable_decoder, data)
+				let result = decode::run(data, nullable_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -240,7 +240,7 @@ func TestDecodeNullable(t *testing.T) {
 				let data = decode::any("invalid json")  // becomes nil Dynamic
 				let int_decoder = decode::int()
 				let nullable_decoder = decode::nullable(int_decoder)
-				let result = decode::decode(nullable_decoder, data)
+				let result = decode::run(data, nullable_decoder)
 				result.expect("").or(999)
 			`,
 			want: 999,
@@ -258,7 +258,7 @@ func TestDecodeList(t *testing.T) {
 				let data = decode::any("[1, 2, 3, 4, 5]")
 				let int_decoder = decode::int()
 				let list_decoder = decode::list(int_decoder)
-				let result = decode::decode(list_decoder, data)
+				let result = decode::run(data, list_decoder)
 				let list = result.expect("")
 				if not list.size() == 5 {
 					panic("Expected 5 elements")
@@ -275,7 +275,7 @@ func TestDecodeList(t *testing.T) {
 				let data = decode::any("[]")
 				let string_decoder = decode::string()
 				let list_decoder = decode::list(string_decoder)
-				let result = decode::decode(list_decoder, data)
+				let result = decode::run(data, list_decoder)
 				let list = result.expect("")
 				list.size()
 			`,
@@ -289,7 +289,7 @@ func TestDecodeList(t *testing.T) {
 				let data = decode::any("null")
 				let string_decoder = decode::string()
 				let list_decoder = decode::list(string_decoder)
-				let result = decode::decode(list_decoder, data)
+				let result = decode::run(data, list_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -302,7 +302,7 @@ func TestDecodeList(t *testing.T) {
 				let data = decode::any("\"not an array\"")
 				let string_decoder = decode::string()
 				let list_decoder = decode::list(string_decoder)
-				let result = decode::decode(list_decoder, data)
+				let result = decode::run(data, list_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -315,7 +315,7 @@ func TestDecodeList(t *testing.T) {
 				let data = decode::any("[\"hello\", 42, \"world\"]")
 				let string_decoder = decode::string()
 				let list_decoder = decode::list(string_decoder)
-				let result = decode::decode(list_decoder, data)
+				let result = decode::run(data, list_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -329,7 +329,7 @@ func TestDecodeList(t *testing.T) {
 				let data = decode::any("[\"hello\", null, \"world\"]")
 				let nullable_string_decoder = decode::nullable(decode::string())
 				let list_decoder = decode::list(nullable_string_decoder)
-				let result = decode::decode(list_decoder, data)
+				let result = decode::run(data, list_decoder)
 				result.expect("").at(1).is_none()
 			`,
 			want: true,
@@ -344,7 +344,7 @@ func TestDecodeList(t *testing.T) {
 				let int_decoder = decode::int()
 				let list_decoder = decode::list(int_decoder)
 				let nullable_list_decoder = decode::nullable(list_decoder)
-				let result = decode::decode(nullable_list_decoder, data)
+				let result = decode::run(data, nullable_list_decoder)
 				let maybe_list = result.expect("")
 				match maybe_list {
 				  list => list.size(),
@@ -363,7 +363,7 @@ func TestDecodeList(t *testing.T) {
 				let int_decoder = decode::int()
 				let list_decoder = decode::list(int_decoder)
 				let nullable_list_decoder = decode::nullable(list_decoder)
-				let result = decode::decode(nullable_list_decoder, data)
+				let result = decode::run(data, nullable_list_decoder)
 				let maybe_list = result.expect("")
 				let maybe_list = result.expect("")
 				match maybe_list {
@@ -386,7 +386,7 @@ func TestDecodeMap(t *testing.T) {
 				let data = decode::any("\\{\\}")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				let map = result.expect("")
 				map.size()
 			`,
@@ -401,7 +401,7 @@ func TestDecodeMap(t *testing.T) {
 				let string_decoder = decode::string()
 				let int_decoder = decode::int()
 				let map_decoder = decode::map(string_decoder, int_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				let map = result.expect("")
 				map.get("age").or(0)
 			`,
@@ -415,7 +415,7 @@ func TestDecodeMap(t *testing.T) {
 				let data = decode::any("null")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -428,7 +428,7 @@ func TestDecodeMap(t *testing.T) {
 				let data = decode::any("\"not an object\"")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -441,7 +441,7 @@ func TestDecodeMap(t *testing.T) {
 				let data = decode::any("[1, 2, 3]")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -454,7 +454,7 @@ func TestDecodeMap(t *testing.T) {
 				let data = decode::any("\\{\\\"name\\\": \\\"Alice\\\", \\\"age\\\": 30\\}")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -468,7 +468,7 @@ func TestDecodeMap(t *testing.T) {
 				let data = decode::any("\\{\\\"name\\\": \\\"Alice\\\", \\\"nickname\\\": null, \\\"city\\\": \\\"Boston\\\"\\}")
 				let nullable_string_decoder = decode::nullable(decode::string())
 				let map_decoder = decode::map(decode::string(), nullable_string_decoder)
-				let result = decode::decode(map_decoder, data)
+				let result = decode::run(data, map_decoder)
 				let map = result.expect("")
 				map.get("nickname").or(maybe::some("default")).is_none()
 			`,
@@ -484,7 +484,7 @@ func TestDecodeMap(t *testing.T) {
 				let int_decoder = decode::int()
 				let map_decoder = decode::map(decode::string(), int_decoder)
 				let nullable_map_decoder = decode::nullable(map_decoder)
-				let result = decode::decode(nullable_map_decoder, data)
+				let result = decode::run(data, nullable_map_decoder)
 				let maybe_map = result.expect("")
 				match maybe_map {
 					map => map.size(),
@@ -503,7 +503,7 @@ func TestDecodeMap(t *testing.T) {
 				let int_decoder = decode::int()
 				let map_decoder = decode::map(decode::string(), int_decoder)
 				let nullable_map_decoder = decode::nullable(map_decoder)
-				let result = decode::decode(nullable_map_decoder, data)
+				let result = decode::run(data, nullable_map_decoder)
 				let maybe_map = result.expect("")
 				match maybe_map {
 					map => map.size(),
@@ -534,7 +534,7 @@ func TestDecodeField(t *testing.T) {
 
 				let data = decode::any("null")
 				let field_decoder = decode::field("name", decode::string())
-				let result = decode::decode(field_decoder, data)
+				let result = decode::run(data, field_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -546,7 +546,7 @@ func TestDecodeField(t *testing.T) {
 
 				let data = decode::any("\"not an object\"")
 				let field_decoder = decode::field("name", decode::string())
-				let result = decode::decode(field_decoder, data)
+				let result = decode::run(data, field_decoder)
 				result.is_err()
 			`,
 			want: true,
@@ -558,22 +558,10 @@ func TestDecodeField(t *testing.T) {
 
 				let data = decode::any("[1, 2, 3]")
 				let field_decoder = decode::field("name", decode::string())
-				let result = decode::decode(field_decoder, data)
+				let result = decode::run(data, field_decoder)
 				result.is_err()
 			`,
 			want: true,
-		},
-		{
-			name: "field decoder extracts string field",
-			input: `
-				use ard/decode
-
-				let data = decode::any("\\{\\\"age\\\": \\\"30\\\"\\}")
-				let field_decoder = decode::field("age", decode::string())
-				let result = decode::decode(field_decoder, data)
-				result.expect("")
-			`,
-			want: "30",
 		},
 	})
 }

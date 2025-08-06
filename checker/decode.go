@@ -105,7 +105,7 @@ func (pkg DecodePkg) Get(name string) Symbol {
 				ReturnType: MakeResult(Bool, MakeList(DecodeErrorDef)),
 			},
 		}}
-	case "decode":
+	case "run":
 		// Create a generic type parameter for the decoder's return type
 		genericT := &Any{name: "T"}
 		decoderType := &FunctionDef{
@@ -117,8 +117,8 @@ func (pkg DecodePkg) Get(name string) Symbol {
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{
-				{Name: "decoder", Type: decoderType}, // Concrete function type
-				{Name: "data", Type: Dynamic},
+				{Name: "data", Type: Dynamic},      // Data comes first
+				{Name: "decoder", Type: decoderType}, // Decoder comes second
 			},
 			ReturnType: MakeResult(genericT, MakeList(DecodeErrorDef)), // Same T
 		}}

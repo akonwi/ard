@@ -74,10 +74,10 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			raw:   decodeAsBool,
 			_type: decoderType,
 		}
-	case "decode":
+	case "run":
 		// Apply the decoder function to the data
-		decoder := args[0] 
-		data := args[1]
+		data := args[0]    // Data comes first now
+		decoder := args[1] // Decoder comes second
 		
 		// The decoder should be a function, call it with data
 		if fn, ok := decoder.raw.(func(*object, *checker.Result) *object); ok {

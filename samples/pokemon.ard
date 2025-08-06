@@ -1,18 +1,7 @@
 use ard/io
 use ard/http
 use ard/maybe
-
-struct PokemonRespEntry {
-  name: Str,
-  url: Str,
-}
-
-struct PokemonResp {
-  count: Int,
-  next: Str?,
-  previous: Str?,
-  results:  [PokemonRespEntry],
-}
+use ard/decode
 
 fn main() {
   io::print("GET from pokemon api")
@@ -23,12 +12,26 @@ fn main() {
   }).expect("Unable to make request")
 
   if res.is_ok() {
-    match res.json<PokemonResp>() {
-      ok => {
-        io::print("res.count = {ok.count}")
-        io::print("res.results.size = {ok.results.size()}")
-      },
-      err => io::print(err)
+    // Create dynamic data from response body
+    let data = decode::any(res.body)
+    
+    // Extract count field
+    let count_result = decode::run(data, decode::field("count", decode::int()))
+    
+    // Extract results array
+    let results_decoder = decode::list(
+      decode::map(decode::string(), decode::string())
+    )
+    let results_result = decode::run(data, decode::field("results", results_decoder))
+    
+    match count_result {
+      ok(count) => io::print("res.count = {count}"),
+      err(errors) => io::print("Failed to extract count")
+    }
+    
+    match results_result {
+      ok(results) => io::print("res.results.size = {results.size()}"),
+      err(errors) => io::print("Failed to extract results")
     }
   } else {
     io::print("Received a {res.status}")

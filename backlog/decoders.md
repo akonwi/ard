@@ -41,7 +41,7 @@ fn float() Decoder<Float>
 fn bool() Decoder<Bool>
 
 // Entry point function - IMPLEMENTED
-fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![Error]
+fn run<$T>(data: Dynamic, decoder: Decoder<$T>) $T![Error]
 
 // External data parser - IMPLEMENTED
 fn any(external_data: Str) Dynamic  // Parses JSON, invalid becomes nil
@@ -54,20 +54,20 @@ use ard/decode
 
 // Decode primitive values from external data (JSON strings, database values, etc.)
 let name_data = decode::any("\"Alice\"")
-let name = decode::decode(decode::string(), name_data).expect("")
+let name = decode::run(name_data, decode::string()).expect("")
 // name is "Alice"
 
 let age_data = decode::any("30")  
-let age = decode::decode(decode::int(), age_data).expect("")
+let age = decode::run(age_data, decode::int()).expect("")
 // age is 30
 
 let active_data = decode::any("true")
-let active = decode::decode(decode::bool(), active_data).expect("")
+let active = decode::run(active_data, decode::bool()).expect("")
 // active is true
 
 // Invalid data fails at decode time, not parse time
 let invalid_data = decode::any("invalid json")  // Always succeeds
-let result = decode::decode(decode::string(), invalid_data)  // Fails here
+let result = decode::run(invalid_data, decode::string())  // Fails here
 if result.is_err() {
     // Handle invalid data
 }
@@ -90,7 +90,7 @@ fn nullable<$T>(as: Decoder<$T>) NullableDecoder<$T?>
 // Usage Example (fully functional):
 let data = decode::any("\"hello\"")
 let nullable_decoder = decode::nullable(decode::string())
-let result = decode::decode(nullable_decoder, data)
+let result = decode::run(data, nullable_decoder)
 result.expect("").or("default")  // Returns "hello"
 ```
 
@@ -110,7 +110,7 @@ fn list<$T>(element_decoder: Decoder<$T>) ListDecoder<[$T]>
 // Usage Example (fully functional):
 let data = decode::any("[1, 2, 3, 4, 5]")
 let list_decoder = decode::list(decode::int())
-let result = decode::decode(list_decoder, data)
+let result = decode::run(data, list_decoder)
 let list = result.expect("")
 list.size()  // Returns 5
 ```
@@ -133,13 +133,13 @@ let data = decode::any("{\"name\": \"Alice\", \"age\": \"30\"}")
 
 // String keys to string values
 let string_map_decoder = decode::map(decode::string(), decode::string())
-let result1 = decode::decode(string_map_decoder, data)
+let result1 = decode::run(data, string_map_decoder)
 let map1 = result1.expect("")
 map1.get("name").or("default")  // Returns "Alice"
 
 // String keys to integer values  
 let mixed_map_decoder = decode::map(decode::string(), decode::int())
-let result2 = decode::decode(mixed_map_decoder, data)
+let result2 = decode::run(data, mixed_map_decoder)
 // Would fail because "Alice" can't be decoded as Int, proper error with path info
 
 // Compositional with nullable values
