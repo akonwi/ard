@@ -157,8 +157,8 @@ func decodeAsString(data *object, resultType *checker.Result) *object {
 	// For Dynamic objects, check the raw value type
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
-			expected := "String"
-			found := "null"
+			expected := "Str"
+			found := "Void"
 			decodeErrList := makeDecodeErrorList(expected, found)
 			return makeErr(decodeErrList, resultType)
 		}
@@ -169,7 +169,7 @@ func decodeAsString(data *object, resultType *checker.Result) *object {
 		return makeOk(data, resultType)
 	}
 	
-	expected := "String"
+	expected := "Str"
 	found := data._type.String()
 	decodeErrList := makeDecodeErrorList(expected, found)
 	return makeErr(decodeErrList, resultType)
@@ -181,7 +181,7 @@ func decodeAsInt(data *object, resultType *checker.Result) *object {
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
 			expected := "Int"
-			found := "null"
+			found := "Void"
 			decodeErrList := makeDecodeErrorList(expected, found)
 			return makeErr(decodeErrList, resultType)
 		}
@@ -210,7 +210,7 @@ func decodeAsFloat(data *object, resultType *checker.Result) *object {
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
 			expected := "Float"
-			found := "null"
+			found := "Void"
 			decodeErrList := makeDecodeErrorList(expected, found)
 			return makeErr(decodeErrList, resultType)
 		}
@@ -237,7 +237,7 @@ func decodeAsBool(data *object, resultType *checker.Result) *object {
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
 			expected := "Bool"
-			found := "null"
+			found := "Void"
 			decodeErrList := makeDecodeErrorList(expected, found)
 			return makeErr(decodeErrList, resultType)
 		}

@@ -130,7 +130,7 @@ func TestDecodeErrors(t *testing.T) {
 				match result {
 					err => {
 						let first_error = err.at(0)
-						first_error.expected == "String" && first_error.found == "Dynamic"
+						first_error.expected == "Str" && first_error.found == "Dynamic"
 					}
 					ok(_) => false
 				}
@@ -164,7 +164,7 @@ func TestDecodeErrors(t *testing.T) {
 				match result {
 					err => {
 						let first_error = err.at(0)
-						first_error.expected == "Int" && first_error.found == "null"
+						first_error.expected == "Int" && first_error.found == "Void"
 					}
 					ok(_) => false
 				}
