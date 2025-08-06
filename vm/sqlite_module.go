@@ -562,6 +562,59 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(true) - upsert succeeded
 		return makeOk(&object{true, checker.Bool}, resultType)
+	case "query":
+		// fn query(sql: Str) Dynamic!Str
+		resultType := method.Type().(*checker.Result)
+		sql := args[0].raw.(string)
+
+		// Execute the query
+		rows, err := db.conn.Query(sql)
+		if err != nil {
+			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+		}
+		defer rows.Close()
+
+		// Get column names
+		columns, err := rows.Columns()
+		if err != nil {
+			err := fmt.Errorf("SQLite Error: failed to get column names: %v", err)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+		}
+
+		// Build result list - each row is a map[string]interface{}
+		var results []interface{}
+
+		for rows.Next() {
+			// Create scan targets for each column
+			values := make([]any, len(columns))
+			scanTargets := make([]any, len(columns))
+			for i := range values {
+				scanTargets[i] = &values[i]
+			}
+
+			// Scan the row
+			if err := rows.Scan(scanTargets...); err != nil {
+				err := fmt.Errorf("SQLite Error: failed to scan row: %v", err)
+				return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			}
+
+			// Create map for this row
+			rowMap := make(map[string]interface{})
+			for i, columnName := range columns {
+				rowMap[columnName] = values[i]
+			}
+
+			results = append(results, rowMap)
+		}
+
+		if err := rows.Err(); err != nil {
+			err := fmt.Errorf("SQLite Error: row iteration error: %v", err)
+			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+		}
+
+		// Return Dynamic object containing list of row maps
+		return makeOk(&object{results, checker.Dynamic}, resultType)
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}
