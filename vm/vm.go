@@ -45,6 +45,8 @@ func (vm *VM) initModuleRegistry() {
 			vm.moduleRegistry.Register(&HTTPModule{})
 		case "ard/json":
 			vm.moduleRegistry.Register(&JSONModule{})
+		case "ard/decode":
+			vm.moduleRegistry.Register(&DecodeModule{})
 		case "ard/sqlite":
 			vm.moduleRegistry.Register(&SQLiteModule{})
 		case "ard/async":

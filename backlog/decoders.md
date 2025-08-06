@@ -12,7 +12,7 @@ This document outlines the implementation of Gleam-style decoding for Ard, provi
 // ard/decode module
 
 // Core decoder type - just a function
-type Decoder<$T> = fn(Dynamic) $T![DecodeError]
+type Decoder<$T> = fn(Dynamic) $T![[DecodeError]]
 
 // Use existing Dynamic type (alias for convenience)
 type Dynamic = Any // Will use existing VM object system
@@ -29,10 +29,10 @@ struct DecodeError {
 
 ```ard
 // Core conversion functions (what primitive decoders use internally)
-fn as_string(d: Dynamic) Str![DecodeError]
-fn as_int(d: Dynamic) Int![DecodeError] 
-fn as_float(d: Dynamic) Float![DecodeError]
-fn as_bool(d: Dynamic) Bool![DecodeError]
+fn as_string(d: Dynamic) Str![[DecodeError]]
+fn as_int(d: Dynamic) Int![[DecodeError]] 
+fn as_float(d: Dynamic) Float![[DecodeError]]
+fn as_bool(d: Dynamic) Bool![[DecodeError]]
 
 // Primitive decoders
 fn string() Decoder<Str> { as_string }
@@ -41,7 +41,7 @@ fn float() Decoder<Float> { as_float }
 fn bool() Decoder<Bool> { as_bool }
 
 // Entry point
-fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![DecodeError] {
+fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![[DecodeError]] {
   decoder(data)
 }
 ```
@@ -50,20 +50,26 @@ fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![DecodeError] {
 
 ```ard
 use ard/decode
-use ard/json
 
-// Decode primitive values
-let name_data = json::parse_to_dynamic("\"Alice\"").expect("")
+// Decode primitive values from external data (JSON strings, database values, etc.)
+let name_data = decode::any("\"Alice\"")
 let name = decode::decode(decode::string(), name_data).expect("")
 // name is "Alice"
 
-let age_data = json::parse_to_dynamic("30").expect("")  
+let age_data = decode::any("30")  
 let age = decode::decode(decode::int(), age_data).expect("")
 // age is 30
 
-let active_data = json::parse_to_dynamic("true").expect("")
+let active_data = decode::any("true")
 let active = decode::decode(decode::bool(), active_data).expect("")
 // active is true
+
+// Invalid data fails at decode time, not parse time
+let invalid_data = decode::any("invalid json")  // Always succeeds
+let result = decode::decode(decode::string(), invalid_data)  // Fails here
+if result.is_err() {
+    // Handle invalid data
+}
 ```
 
 ## Future Phase 2: Compositional Decoders
@@ -127,17 +133,18 @@ func asDynamicInt(args ...*object) *object {
 
 ### 2. JSON Integration
 
-**Add Dynamic Support to JSON Module:**
+**Add Dynamic Support to Decode Module:**
 ```ard
-// std_lib/json/json.ard - add new function
-fn parse_to_dynamic(json_str: Str) Dynamic![ParseError] {
-  // Implementation parses JSON into existing VM objects
-  // Returns them as Dynamic (which is just Any)
+// ard/decode module functions
+fn any(external_data: Str) Dynamic {
+  // Implementation parses external data (JSON, CSV, XML, etc.) into Dynamic objects
+  // Currently supports JSON parsing, but extensible to other formats
+  // Invalid data becomes nil Dynamic, errors surface at decode time
 }
 
-// Keep existing decode for backward compatibility  
+// JSON module keeps existing decode for backward compatibility  
 fn decode<$T>(json_str: Str) $T![ParseError] {
-  // Current implementation unchanged
+  // Current implementation unchanged in json module
 }
 ```
 
@@ -196,10 +203,9 @@ let data = json::decode<Response>(json_string).expect("")
 ### New ard/decode (Phase 1 - Flexible Access)  
 ```ard
 use ard/decode
-use ard/json
 
-// Can extract individual fields without knowing full structure
-let json_obj = json::parse_to_dynamic(json_string).expect("")
+// Can extract individual values from external data without knowing structure
+let json_obj = decode::any(json_string)
 
 // Extract just what you need
 let success = decode::decode(decode::bool(), json_obj).expect("")
@@ -207,6 +213,10 @@ let count = decode::decode(decode::int(), json_obj).expect("")
 
 // Or handle errors gracefully
 let message = decode::decode(decode::string(), json_obj).or("No message")
+
+// Works with any external data format - JSON, CSV, XML, database values, etc.
+let database_value = decode::any(row_data)
+let parsed_value = decode::decode(decode::string(), database_value).expect("")
 ```
 
 ## Implementation Steps
