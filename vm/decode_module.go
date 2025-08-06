@@ -31,7 +31,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 	case "as_bool":
 		return decodeAsBool(args[0], call.Type().(*checker.Result))
 	case "string":
-		// Return a decoder function (as_string)
+		// Return the decoder function directly
 		decoderType := &checker.FunctionDef{
 			Name:       "Decoder",
 			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},

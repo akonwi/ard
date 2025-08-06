@@ -54,20 +54,20 @@ use ard/decode
 
 // Decode primitive values from external data (JSON strings, database values, etc.)
 let name_data = decode::any("\"Alice\"")
-let name = decode::run(name_data, decode::string()).expect("")
+let name = decode::run(name_data, decode::string).expect("")
 // name is "Alice"
 
 let age_data = decode::any("30")  
-let age = decode::run(age_data, decode::int()).expect("")
+let age = decode::run(age_data, decode::int).expect("")
 // age is 30
 
 let active_data = decode::any("true")
-let active = decode::run(active_data, decode::bool()).expect("")
+let active = decode::run(active_data, decode::bool).expect("")
 // active is true
 
 // Invalid data fails at decode time, not parse time
 let invalid_data = decode::any("invalid json")  // Always succeeds
-let result = decode::run(invalid_data, decode::string())  // Fails here
+let result = decode::run(invalid_data, decode::string)  // Fails here
 if result.is_err() {
     // Handle invalid data
 }
@@ -89,7 +89,7 @@ fn nullable<$T>(as: Decoder<$T>) NullableDecoder<$T?>
 
 // Usage Example (fully functional):
 let data = decode::any("\"hello\"")
-let nullable_decoder = decode::nullable(decode::string())
+let nullable_decoder = decode::nullable(decode::string)
 let result = decode::run(data, nullable_decoder)
 result.expect("").or("default")  // Returns "hello"
 ```
@@ -109,7 +109,7 @@ fn list<$T>(element_decoder: Decoder<$T>) ListDecoder<[$T]>
 
 // Usage Example (fully functional):
 let data = decode::any("[1, 2, 3, 4, 5]")
-let list_decoder = decode::list(decode::int())
+let list_decoder = decode::list(decode::int)
 let result = decode::run(data, list_decoder)
 let list = result.expect("")
 list.size()  // Returns 5
@@ -132,18 +132,18 @@ fn map<$K, $V>(key: Decoder<$K>, val: Decoder<$V>) MapDecoder<[$K:$V]>
 let data = decode::any("{\"name\": \"Alice\", \"age\": \"30\"}")
 
 // String keys to string values
-let string_map_decoder = decode::map(decode::string(), decode::string())
+let string_map_decoder = decode::map(decode::string, decode::string)
 let result1 = decode::run(data, string_map_decoder)
 let map1 = result1.expect("")
 map1.get("name").or("default")  // Returns "Alice"
 
 // String keys to integer values  
-let mixed_map_decoder = decode::map(decode::string(), decode::int())
+let mixed_map_decoder = decode::map(decode::string, decode::int)
 let result2 = decode::run(data, mixed_map_decoder)
 // Would fail because "Alice" can't be decoded as Int, proper error with path info
 
 // Compositional with nullable values
-let nullable_map_decoder = decode::map(decode::string(), decode::nullable(decode::string()))
+let nullable_map_decoder = decode::map(decode::string, decode::nullable(decode::string))
 // Handles: {"name": "Alice", "nickname": null, "city": "Boston"}
 ```
 
@@ -164,14 +164,14 @@ fn field<$T>(key: Str, as: Decoder<$T>) Decoder<$T>
 let data = decode::any("\{\"user\": \{\"name\": \"Alice\", \"age\": 30\}\}")
 
 // Extract nested field using composition
-let user_decoder = decode::field("user", decode::map(decode::string(), decode::int()))
+let user_decoder = decode::field("user", decode::map(decode::string, decode::int))
 let user_result = decode::run(data, user_decoder)
 let user_map = user_result.expect("")
 user_map.get("age").or(0)  // Returns 30
 
 // Real-world example from pokemon.ard:
-let count = decode::run(data, decode::field("count", decode::int()))
-let results = decode::run(data, decode::field("results", decode::list(decode::map(decode::string(), decode::string()))))
+let count = decode::run(data, decode::field("count", decode::int))
+let results = decode::run(data, decode::field("results", decode::list(decode::map(decode::string, decode::string))))
 ```
 
 ### ✅ Generic Type System: Fixed!
@@ -193,7 +193,7 @@ nullableDecoder := &FunctionDef{
 ```
 
 **Result**: The type system can now properly resolve generic types through function composition chains:
-1. `decode::string()` → `Decoder<Str>`  
+1. `decode::string` → `Decoder<Str>`  
 2. `decode::nullable(string_decoder)` → `NullableDecoder<Str?>`
 3. `result.expect("")` → works because result type is `Result<Str?, [Error]>`
 
@@ -224,11 +224,11 @@ fn nullable<$T>(as: Decoder<$T>) Decoder<$T?>
 ```
 
 **Key Point**: Compositional decoders accept decoders for their elements, just like Gleam:
-- ✅ `nullable(string())` - nullable string (null -> none(), "Alice" -> some("Alice"))
-- ✅ `list(string())` - list of strings  
-- ✅ `map(string(), int())` - map with string keys and integer values
-- ✅ `field("name", string())` - string field named "name"  
-- ✅ `nullable(int()).or(0)` - optional integer with default 0
+- ✅ `nullable(string)` - nullable string (null -> none(), "Alice" -> some("Alice"))
+- ✅ `list(string)` - list of strings  
+- ✅ `map(string, int)` - map with string keys and integer values
+- ✅ `field("name", string)` - string field named "name"  
+- ✅ `nullable(int).or(0)` - optional integer with default 0
 
 This enables building complex decoders from simple ones:
 
@@ -236,9 +236,9 @@ This enables building complex decoders from simple ones:
 // Future example - person decoder built from primitives
 fn person_decoder() Decoder<Person> {
   fn(data: Dynamic) {
-    let name = try field("name", string())(data)
-    let age = try field("age", int())(data)
-    let hobbies = try field("hobbies", list(string()))(data)
+    let name = try field("name", string)(data)
+    let age = try field("age", int)(data)
+    let hobbies = try field("hobbies", list(string))(data)
     
     Person { name: name, age: age, hobbies: hobbies }
   }
@@ -346,15 +346,15 @@ use ard/decode
 let json_obj = decode::any(json_string)
 
 // Extract just what you need
-let success = decode::decode(decode::bool(), json_obj).expect("")
-let count = decode::decode(decode::int(), json_obj).expect("")
+let success = decode::decode(decode::bool, json_obj).expect("")
+let count = decode::decode(decode::int, json_obj).expect("")
 
 // Or handle errors gracefully
-let message = decode::decode(decode::string(), json_obj).or("No message")
+let message = decode::decode(decode::string, json_obj).or("No message")
 
 // Works with any external data format - JSON, CSV, XML, database values, etc.
 let database_value = decode::any(row_data)
-let parsed_value = decode::decode(decode::string(), database_value).expect("")
+let parsed_value = decode::decode(decode::string, database_value).expect("")
 ```
 
 ## ✅ Completed Implementation Steps

@@ -99,12 +99,12 @@ let rows = db.query("SELECT id, name FROM users").expect("Query failed")
 
 // Extract single field from first row
 let first_id = decode::run(rows, 
-    decode::index(0, decode::field("id", decode::int()))
+    decode::index(0, decode::field("id", decode::int))
 ).expect("Decode failed")
 
 // Extract all names
 let names = decode::run(rows, 
-    decode::list(decode::field("name", decode::string()))
+    decode::list(decode::field("name", decode::string))
 ).expect("Decode failed")
 ```
 
@@ -125,8 +125,8 @@ let rows = db.query("SELECT id, email FROM users").expect("Query failed")
 let users = decode::run(rows, decode::list(
     // Combine required and optional fields
     decode::combine(
-        decode::field("id", decode::int()),
-        decode::field("email", decode::nullable(decode::string()))
+        decode::field("id", decode::int),
+        decode::field("email", decode::nullable(decode::string))
     )
 )).expect("Decode failed")
 ```
