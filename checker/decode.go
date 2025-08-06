@@ -120,6 +120,12 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "external_data", Type: Str}},
 			ReturnType: Dynamic,
 		}}
+	case "nullable":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{{Name: "as", Type: &Any{name: "Decoder"}}},
+			ReturnType: &Any{name: "MaybeDecoder"},
+		}}
 	default:
 		return Symbol{}
 	}

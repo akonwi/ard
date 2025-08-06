@@ -120,6 +120,33 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 		
 		return dynamicObj
+	case "nullable":
+		// Return a nullable decoder function that wraps the inner decoder
+		innerDecoder := args[0]
+		
+		// Extract the inner decoder's type to determine the Maybe type
+		innerDecoderType := innerDecoder._type.(*checker.FunctionDef)
+		innerReturnType := innerDecoderType.ReturnType.(*checker.Result)
+		innerValueType := innerReturnType.Val()
+		
+		// Create Maybe type of the inner value type
+		maybeType := checker.MakeMaybe(innerValueType)
+		
+		nullableDecoderType := &checker.FunctionDef{
+			Name:       "Decoder",
+			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
+			ReturnType: checker.MakeResult(maybeType, checker.MakeList(checker.DecodeErrorDef)),
+		}
+		
+		// Create a closure that captures the inner decoder
+		nullableDecoderFn := func(data *object, resultType *checker.Result) *object {
+			return decodeAsNullable(innerDecoder, data, resultType)
+		}
+		
+		return &object{
+			raw:   nullableDecoderFn,
+			_type: nullableDecoderType,
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented: decode::%s()", call.Name))
 	}
@@ -252,6 +279,41 @@ func decodeAsBool(data *object, resultType *checker.Result) *object {
 	found := data._type.String()
 	decodeErrList := makeDecodeErrorList(expected, found)
 	return makeErr(decodeErrList, resultType)
+}
+
+// decodeAsNullable handles nullable decoding by checking for null and delegating to inner decoder
+func decodeAsNullable(innerDecoder *object, data *object, resultType *checker.Result) *object {
+	// If data is null (nil raw value in Dynamic), return maybe::none()
+	if data._type == checker.Dynamic && data.raw == nil {
+		maybeType := resultType.Val().(*checker.Maybe)
+		noneValue := &object{raw: nil, _type: maybeType}
+		return makeOk(noneValue, resultType)
+	}
+	
+	// Otherwise, call the inner decoder
+	if fn, ok := innerDecoder.raw.(func(*object, *checker.Result) *object); ok {
+		// Get the inner decoder's result type
+		innerDecoderType := innerDecoder._type.(*checker.FunctionDef)
+		innerResultType := innerDecoderType.ReturnType.(*checker.Result)
+		
+		// Call the inner decoder
+		innerResult := fn(data, innerResultType)
+		innerResultValue := innerResult.raw.(_result)
+		
+		if innerResultValue.ok {
+			// Success - wrap the decoded value in maybe::some()
+			maybeType := resultType.Val().(*checker.Maybe)
+			decodedValue := innerResultValue.raw
+			someValue := &object{raw: decodedValue.raw, _type: maybeType}
+			return makeOk(someValue, resultType)
+		} else {
+			// Error - propagate the error list as-is
+			errorList := innerResultValue.raw
+			return makeErr(errorList, resultType)
+		}
+	} else {
+		panic(fmt.Errorf("Inner decoder is not a function: got %T", innerDecoder.raw))
+	}
 }
 
 // parseJsonToDynamic parses JSON into a Dynamic object

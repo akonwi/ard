@@ -173,3 +173,77 @@ func TestDecodeErrors(t *testing.T) {
 		},
 	})
 }
+
+func TestDecodeNullable(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "nullable string decoder with valid string returns some",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("\"hello\"")
+				let string_decoder = decode::string()
+				let nullable_decoder = decode::nullable(string_decoder)
+				let result = decode::decode(nullable_decoder, data)
+				result.expect("").or("default")
+			`,
+			want: "hello",
+		},
+		{
+			name: "nullable int decoder with valid int returns some",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("42")
+				let int_decoder = decode::int()
+				let nullable_decoder = decode::nullable(int_decoder)
+				let result = decode::decode(nullable_decoder, data)
+				result.expect("").or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: "nullable decoder with null data returns none - uses default",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("null")
+				let string_decoder = decode::string()  
+				let nullable_decoder = decode::nullable(string_decoder)
+				let result = decode::decode(nullable_decoder, data)
+				result.expect("").or("default_value")
+			`,
+			want: "default_value",
+		},
+		{
+			name: "nullable decoder propagates inner decoder errors",
+			input: `
+				use ard/decode
+
+				let data = decode::any("42")
+				let string_decoder = decode::string()
+				let nullable_decoder = decode::nullable(string_decoder) 
+				let result = decode::decode(nullable_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "invalid JSON becomes null - nullable returns default",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("invalid json")  // becomes nil Dynamic
+				let int_decoder = decode::int()
+				let nullable_decoder = decode::nullable(int_decoder)
+				let result = decode::decode(nullable_decoder, data)  
+				result.expect("").or(999)
+			`,
+			want: 999,
+		},
+	})
+}
