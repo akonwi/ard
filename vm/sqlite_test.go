@@ -966,3 +966,153 @@ func TestSQLiteUpsertError(t *testing.T) {
 		t.Errorf("Expected upsert to fail with missing table, got %v", result)
 	}
 }
+
+func TestSQLiteQueryWithDecode(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_decode.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/decode
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+
+		// Insert test data
+		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
+		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
+		db.insert("players", player1).expect("Failed to insert player")
+		db.insert("players", player2).expect("Failed to insert player")
+
+		// Query the data
+		let rows = db.query("SELECT id, name, number FROM players").expect("Failed to query players")
+		
+		// Decode using the new API - extract just the count first
+		let player_list = decode::run(rows, decode::list(
+			decode::field("name", decode::string())
+		)).expect("Failed to decode")
+		
+		player_list.size()
+	`)
+
+	if result != 2 {
+		t.Errorf("Expected 2 decoded players, got %v", result)
+	}
+}
+
+func TestSQLiteQueryDecodeFields(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_fields.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/decode
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_query_fields.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+
+		// Insert test data
+		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
+		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
+		db.insert("players", player1).expect("Failed to insert player")
+		db.insert("players", player2).expect("Failed to insert player")
+
+		// Query the data
+		let rows = db.query("SELECT id, name, number FROM players ORDER BY id").expect("Failed to query players")
+		
+		// Decode all player names
+		let player_names = decode::run(rows, decode::list(
+			decode::field("name", decode::string())
+		)).expect("Failed to decode player names")
+		
+		player_names.at(0) == "John Doe"
+	`)
+
+	if result != true {
+		t.Errorf("Expected first player name to be 'John Doe', got %v", result)
+	}
+}
+
+func TestSQLiteQueryWithNullValues(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_null.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/decode
+		use ard/maybe
+
+		let db = sqlite::open("test_query_null.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
+
+		// Insert data with and without email
+		db.exec("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')").expect("Failed to insert")
+		db.exec("INSERT INTO users (id, name, email) VALUES (2, 'Jane', NULL)").expect("Failed to insert")
+
+		// Query the data
+		let rows = db.query("SELECT id, name, email FROM users ORDER BY id").expect("Failed to query users")
+		
+		// Decode email with nullable handling
+		let emails = decode::run(rows, decode::list(
+			decode::field("email", decode::nullable(decode::string()))
+		)).expect("Failed to decode emails")
+		
+		// First email should be "john@example.com", second should be none
+		let first_email = emails.at(0).or("default")
+		let second_email = emails.at(1).or("default")
+		
+		first_email == "john@example.com" and second_email == "default"
+	`)
+
+	if result != true {
+		t.Errorf("Expected proper NULL handling, got %v", result)
+	}
+}
+
+func TestSQLiteQueryComprehensive(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_comprehensive.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/decode
+		use ard/maybe
+
+		let db = sqlite::open("test_query_comprehensive.db").expect("Failed to open database")
+		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, active INTEGER, description TEXT)").expect("Failed to create table")
+
+		// Insert test data with different types
+		db.exec("INSERT INTO products (id, name, price, active, description) VALUES (1, 'Widget', 19.99, 1, 'A useful widget')").expect("Failed to insert")
+		db.exec("INSERT INTO products (id, name, price, active, description) VALUES (2, 'Gadget', 29.50, 0, NULL)").expect("Failed to insert")
+		db.exec("INSERT INTO products (id, name, price, active, description) VALUES (3, 'Tool', 15.00, 1, 'Handy tool')").expect("Failed to insert")
+
+		// Query active products only
+		let rows = db.query("SELECT name, price, description FROM products WHERE active = 1 ORDER BY price").expect("Failed to query")
+		
+		// Decode using compositional decoders
+		let products = decode::run(rows, decode::list(
+			decode::field("name", decode::string())
+		)).expect("Failed to decode products")
+		
+		// Should get "Tool" (15.00) and "Widget" (19.99) in price order
+		products.size() == 2 and products.at(0) == "Tool" and products.at(1) == "Widget"
+	`)
+
+	if result != true {
+		t.Errorf("Expected comprehensive query and decode to work correctly, got %v", result)
+	}
+}

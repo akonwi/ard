@@ -49,6 +49,16 @@ func (vm *VM) evalResultMethod(subj *object, call *checker.FunctionCall) *object
 			return self.raw
 		}
 		return vm.eval(call.Args[0])
+	case "is_ok":
+		return &object{
+			raw:   self.ok,
+			_type: checker.Bool,
+		}
+	case "is_err":
+		return &object{
+			raw:   !self.ok,
+			_type: checker.Bool,
+		}
 	}
 
 	panic(fmt.Errorf("unimplemented: %s.%s", subj._type, call.Name))

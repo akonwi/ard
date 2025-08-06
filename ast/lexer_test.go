@@ -818,12 +818,12 @@ func TestLexing(t *testing.T) {
 		{
 			name: "escaped braces in strings",
 			input: strings.Join([]string{
-				`"Text with \{escaped braces}"`,
-				`"Mixed {interp} with \{escaped}"`,
+				`"Text with \{escaped braces\}"`,
+				`"Mixed {interp} with \{escaped\}"`,
 			}, "\n"),
 			want: []token{
 				{kind: string_, line: 1, column: 1, text: "Text with {escaped braces}"},
-				{kind: new_line, line: 1, column: 30},
+				{kind: new_line, line: 1, column: 31},
 
 				{kind: string_, line: 2, column: 1, text: "Mixed "},
 				{kind: expr_open, line: 2, column: 8},

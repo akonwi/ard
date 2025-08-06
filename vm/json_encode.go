@@ -1,3 +1,5 @@
+//go:build goexperiment.jsonv2
+
 package vm
 
 import (
@@ -7,8 +9,6 @@ import (
 
 	"github.com/akonwi/ard/checker"
 )
-
-// go:build goexperiment.jsonv2
 
 func json_encode(data any, t checker.Type) ([]byte, error) {
 	if t == checker.Str || t == checker.Int || t == checker.Float || t == checker.Bool || checker.IsMaybe(t) {

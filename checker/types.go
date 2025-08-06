@@ -568,6 +568,18 @@ func (r Result) get(name string) Type {
 			Parameters: []Parameter{{Name: "default", Type: r.val}},
 			ReturnType: r.val,
 		}
+	case "is_ok":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Bool,
+		}
+	case "is_err":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Bool,
+		}
 	default:
 		return nil
 	}

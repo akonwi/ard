@@ -1,5 +1,7 @@
 ## TODO
 
+- [ ] support for referencing qualified functions as values
+- [ ] allow omitting nullable arguments in function calls
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
   - halt (c.halted = true) if it's a critical error and prevent cascades

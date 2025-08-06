@@ -2974,6 +2974,24 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		)
 	case *List:
 		return &List{of: substituteType(typ.of, typeMap)}
+	case *FunctionDef:
+		// Substitute generics in function parameters and return type
+		substitutedParams := make([]Parameter, len(typ.Parameters))
+		for i, param := range typ.Parameters {
+			substitutedParams[i] = Parameter{
+				Name:    param.Name,
+				Type:    substituteType(param.Type, typeMap),
+				Mutable: param.Mutable,
+			}
+		}
+		return &FunctionDef{
+			Name:       typ.Name,
+			Parameters: substitutedParams,
+			ReturnType: substituteType(typ.ReturnType, typeMap),
+			Body:       typ.Body,
+			Mutates:    typ.Mutates,
+			Private:    typ.Private,
+		}
 	// Handle other compound types
 	default:
 		return t
@@ -3021,10 +3039,8 @@ func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 
 	// Infer types from arguments
 	for i, param := range fnDef.Parameters {
-		if anyType, ok := param.Type.(*Any); ok {
-			if err := genericScope.bindGeneric(anyType.name, args[i].Type()); err != nil {
-				return nil, err
-			}
+		if err := c.unifyTypes(param.Type, args[i].Type(), genericScope); err != nil {
+			return nil, err
 		}
 	}
 
@@ -3061,6 +3077,58 @@ func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	return specialized, nil
 }
 
+// unifyTypes attempts to unify two types by binding generics in the scope
+func (c *checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
+	switch expectedType := expected.(type) {
+	case *Any:
+		// Generic type - bind it to the actual type
+		return genericScope.bindGeneric(expectedType.name, actual)
+	case *FunctionDef:
+		// Function type unification
+		if actualFn, ok := actual.(*FunctionDef); ok {
+			// Check parameter count
+			if len(expectedType.Parameters) != len(actualFn.Parameters) {
+				return fmt.Errorf("parameter count mismatch")
+			}
+			
+			// Unify parameters
+			for i, expectedParam := range expectedType.Parameters {
+				if err := c.unifyTypes(expectedParam.Type, actualFn.Parameters[i].Type, genericScope); err != nil {
+					return err
+				}
+			}
+			
+			// Unify return types
+			return c.unifyTypes(expectedType.ReturnType, actualFn.ReturnType, genericScope)
+		}
+		return fmt.Errorf("expected function, got %T", actual)
+	case *Result:
+		if actualResult, ok := actual.(*Result); ok {
+			if err := c.unifyTypes(expectedType.val, actualResult.val, genericScope); err != nil {
+				return err
+			}
+			return c.unifyTypes(expectedType.err, actualResult.err, genericScope)
+		}
+		return fmt.Errorf("expected result type, got %T", actual)
+	case *Maybe:
+		if actualMaybe, ok := actual.(*Maybe); ok {
+			return c.unifyTypes(expectedType.of, actualMaybe.of, genericScope)
+		}
+		return fmt.Errorf("expected maybe type, got %T", actual)
+	case *List:
+		if actualList, ok := actual.(*List); ok {
+			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
+		}
+		return fmt.Errorf("expected list type, got %T", actual)
+	default:
+		// Concrete types - must match exactly
+		if !expected.equal(actual) {
+			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+		}
+		return nil
+	}
+}
+
 // Helper function to extract generic names from a type
 func extractGenericNames(t Type, names map[string]bool) {
 	switch t := t.(type) {
@@ -3076,6 +3144,12 @@ func extractGenericNames(t Type, names map[string]bool) {
 	case *Result:
 		extractGenericNames(t.val, names)
 		extractGenericNames(t.err, names)
+	case *FunctionDef:
+		// Extract generics from function parameters and return type
+		for _, param := range t.Parameters {
+			extractGenericNames(param.Type, names)
+		}
+		extractGenericNames(t.ReturnType, names)
 	}
 }
 
