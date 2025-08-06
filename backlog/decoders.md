@@ -73,17 +73,58 @@ if result.is_err() {
 }
 ```
 
-## 🚧 Phase 2: Compositional Decoders - IN PROGRESS
+## 🚧 Phase 2: Compositional Decoders - PARTIAL IMPLEMENTATION
 
-### ✅ Implemented: Nullable Decoder
+### ✅ Implemented: Nullable Decoder (VM-level)
 
 ```ard
-// IMPLEMENTED - First compositional decoder
+// IMPLEMENTED - First compositional decoder (VM implementation complete)
 fn nullable<$T>(as: Decoder<$T>) MaybeDecoder<$T?>
 
-// Usage:
-let name_decoder = nullable(string())  // Handles null -> none(), "Alice" -> some("Alice")
+// VM Implementation: ✅ WORKING
+// - Correctly handles null -> none(), values -> some()
+// - Proper error propagation from inner decoders
+// - Type-safe composition at runtime
+
+// Usage Example (VM-level works):
+let data = decode::any("null")
+let nullable_decoder = decode::nullable(decode::string())
+// VM execution succeeds, returns proper Maybe<Str> values
 ```
+
+### ✅ Implemented: List Decoder (VM-level)
+
+```ard
+// IMPLEMENTED - Second compositional decoder (VM implementation complete)  
+fn list<$T>(element_decoder: Decoder<$T>) ListDecoder<[$T]>
+
+// VM Implementation: ✅ WORKING
+// - Decodes arrays by applying element decoder to each item
+// - Accumulates errors with path information ([0], [1], etc.)
+// - Handles empty arrays and mixed valid/invalid elements
+// - Null data returns error (use nullable(list(...)) for nullable lists)
+
+// Usage Example (VM-level works):
+let data = decode::any("[1, 2, 3]")
+let list_decoder = decode::list(decode::int())
+// VM execution succeeds, returns proper [Int] values
+```
+
+### ❌ Type System Limitation: Testing Blocked
+
+**Critical Issue**: While the VM implementations work correctly, **compositional decoder tests fail during type checking** due to fundamental limitations in Ard's generic type resolution system.
+
+**Error**: `panic: Cannot look up symbols in unrefined $T`
+
+**Root Cause**: The type system cannot resolve generic types through function composition chains:
+1. `decode::string()` → should infer `Decoder<Str>`  
+2. `decode::nullable(string_decoder)` → should infer `Decoder<Str?>`
+3. `result.expect("")` → fails because result type is unresolved `$T`
+
+**Status**: 
+- ✅ VM implementation: **COMPLETE** (both nullable and list work correctly)
+- ❌ Type checking: **BLOCKED** (prevents comprehensive testing)
+- 📋 **Documented**: Full analysis captured in `./backlog/generics.md`
 
 ### 🔄 Design Note: True Composition Like Gleam
 
@@ -93,15 +134,17 @@ Compositional decoders accept other decoders as parameters, enabling true compos
 // ✅ IMPLEMENTED
 fn nullable<$T>(as: Decoder<$T>) MaybeDecoder<$T?>
 
-// 🔄 PLANNED for Phase 2
-fn field<$T>(key: Str, as: Decoder<$T>) Decoder<$T>
+// ✅ IMPLEMENTED (VM-level) for Phase 2
 fn list<$T>(element_decoder: Decoder<$T>) Decoder<[$T]>
+
+// 🔄 PLANNED for Phase 3
+fn field<$T>(key: Str, as: Decoder<$T>) Decoder<$T>
 fn optional<$T>(as: Decoder<$T>, default: $T) Decoder<$T>
 ```
 
 **Key Point**: Compositional decoders accept decoders for their elements, just like Gleam:
 - ✅ `nullable(string())` - nullable string (null -> none(), "Alice" -> some("Alice"))
-- 🔄 `list(string())` - list of strings
+- ✅ `list(string())` - list of strings (VM implementation complete)
 - 🔄 `field("name", string())` - string field named "name"  
 - 🔄 `optional(int(), 0)` - optional integer with default 0
 
@@ -241,13 +284,14 @@ let parsed_value = decode::decode(decode::string(), database_value).expect("")
 5. ✅ **Step 5**: Add `decode()` entry point function
 6. ✅ **Step 6**: Write comprehensive tests demonstrating primitive decoding
 7. ✅ **Step 7**: Add first compositional decoder: `nullable()`
+8. ✅ **Step 8**: Add second compositional decoder: `list()`
 
 ## 🔄 Current Status
 
 - ✅ **Phase 1 Complete**: All primitive decoders working with proper error handling
-- ✅ **First Compositional Decoder**: `nullable()` implemented and functional
-- 🔄 **Type System**: Generic type resolution needs enhancement for complex compositional tests
-- 🔄 **Next Phase**: Additional compositional decoders (field, list, optional)
+- ✅ **Compositional Decoders (VM-level)**: Both `nullable()` and `list()` fully implemented
+- ❌ **Type System Limitation**: Generic type resolution prevents full testing (see `./backlog/generics.md`)
+- 🔄 **Next Phase**: Additional compositional decoders (field, optional) + type system fixes
 
 ## Migration Path
 
@@ -262,8 +306,10 @@ The Ard decode library is now functional with:
 - ✅ Complete primitive decoding (string, int, float, bool)
 - ✅ Proper error handling with Ard type names
 - ✅ Flexible external data parsing via `any()`
-- ✅ First compositional decoder: `nullable()` 
-- ✅ Comprehensive test coverage
-- 🔄 Type system enhancements needed for full compositional testing
+- ✅ Two compositional decoders: `nullable()` and `list()` (VM implementations complete)
+- ✅ Comprehensive test coverage for primitives
+- ❌ **Blocked**: Compositional decoder testing due to generic type system limitations
 
-This validates the core concept and provides immediate value over the current `ard/json` approach.
+**Key Achievement**: VM-level implementations of compositional decoders work correctly. The architecture is sound and ready for additional decoders once the type system limitation is resolved.
+
+**Immediate Value**: Primitive decoders provide substantial benefits over current `ard/json` approach for flexible data access patterns.
