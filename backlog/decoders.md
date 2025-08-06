@@ -12,7 +12,7 @@ This document outlines the implementation of Gleam-style decoding for Ard, provi
 // ard/decode module
 
 // Core decoder type - just a function
-type Decoder<$T> = fn(Dynamic) $T![[DecodeError]]
+type Decoder<$T> = fn(Dynamic) $T![DecodeError]
 
 // Use existing Dynamic type (alias for convenience)
 type Dynamic = Any // Will use existing VM object system
@@ -29,19 +29,20 @@ struct DecodeError {
 
 ```ard
 // Core conversion functions (what primitive decoders use internally)
-fn as_string(d: Dynamic) Str![[DecodeError]]
-fn as_int(d: Dynamic) Int![[DecodeError]] 
-fn as_float(d: Dynamic) Float![[DecodeError]]
-fn as_bool(d: Dynamic) Bool![[DecodeError]]
+fn as_string(d: Dynamic) Str![DecodeError]
+fn as_int(d: Dynamic) Int![DecodeError] 
+fn as_float(d: Dynamic) Float![DecodeError]
+fn as_bool(d: Dynamic) Bool![DecodeError]
 
-// Primitive decoders
+// Primitive decoders - return single-error decoders
 fn string() Decoder<Str> { as_string }
 fn int() Decoder<Int> { as_int }
 fn float() Decoder<Float> { as_float }
 fn bool() Decoder<Bool> { as_bool }
 
-// Entry point
+// Entry point - accumulates errors from multiple decoders
 fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![[DecodeError]] {
+  // Converts single error to list for compositional error handling
   decoder(data)
 }
 ```

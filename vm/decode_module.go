@@ -81,9 +81,25 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		
 		// The decoder should be a function, call it with data
 		if fn, ok := decoder.raw.(func(*object, *checker.Result) *object); ok {
-			// For primitive decoders, use the call's result type
-			resultType := call.Type().(*checker.Result)
-			return fn(data, resultType)
+			// Get the result type for the decoder call (list-based errors)
+			decoderFnType := decoder._type.(*checker.FunctionDef)
+			listErrorResultType := decoderFnType.ReturnType.(*checker.Result)
+			
+			// Call the decoder function
+			decoderResult := fn(data, listErrorResultType)
+			
+			// Decoder already returns list-based errors, just return the result
+			resultWithList := call.Type().(*checker.Result)
+			decoderResultValue := decoderResult.raw.(_result)
+			
+			if decoderResultValue.ok {
+				// Success - return the value
+				return makeOk(decoderResultValue.raw, resultWithList)
+			} else {
+				// Error - decoder already returns error list
+				errorList := decoderResultValue.raw
+				return makeErr(errorList, resultWithList)
+			}
 		} else {
 			// Handle Ard function calls
 			panic(fmt.Errorf("Complex decoder functions not yet supported: got %T", decoder.raw))
@@ -134,6 +150,7 @@ func makeDecodeErrorList(expected, found string) *object {
 		_type: checker.MakeList(checker.DecodeErrorDef),
 	}
 }
+
 
 // as_string decoder implementation
 func decodeAsString(data *object, resultType *checker.Result) *object {
