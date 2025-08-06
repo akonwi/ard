@@ -514,3 +514,66 @@ func TestDecodeMap(t *testing.T) {
 		},
 	})
 }
+
+func TestDecodeField(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "field function exists",
+			input: `
+				use ard/decode
+				
+				let field_decoder = decode::field("name", decode::string())
+				"field_exists"
+			`,
+			want: "field_exists",
+		},
+		{
+			name: "field decoder with null data returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("null")
+				let field_decoder = decode::field("name", decode::string())
+				let result = decode::decode(field_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "field decoder with non-object data returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\"not an object\"")
+				let field_decoder = decode::field("name", decode::string())
+				let result = decode::decode(field_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "field decoder with array data returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("[1, 2, 3]")
+				let field_decoder = decode::field("name", decode::string())
+				let result = decode::decode(field_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "field decoder extracts string field",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\\{\\\"age\\\": \\\"30\\\"\\}")
+				let field_decoder = decode::field("age", decode::string())
+				let result = decode::decode(field_decoder, data)
+				result.expect("")
+			`,
+			want: "30",
+		},
+	})
+}

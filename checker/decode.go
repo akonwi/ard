@@ -200,6 +200,30 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			},
 			ReturnType: mapDecoder,
 		}}
+	case "field":
+		// Create generic type parameter for field value
+		innerT := &Any{name: "T"}
+		valueDecoder := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
+		}
+		
+		// Field decoder returns same type as inner value decoder  
+		fieldDecoder := &FunctionDef{
+			Name:       "FieldDecoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
+		}
+		
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "key", Type: Str},
+				{Name: "as", Type: valueDecoder},
+			},
+			ReturnType: fieldDecoder,
+		}}
 	default:
 		return Symbol{}
 	}

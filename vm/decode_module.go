@@ -207,6 +207,32 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			raw:   mapDecoderFn,
 			_type: mapDecoderType,
 		}
+	case "field":
+		// Return a field decoder function that extracts a specific field
+		fieldKey := vm.eval(call.Args[0]).raw.(string) // The field name to extract
+		valueDecoder := args[1]                       // Decoder for the field's value
+		
+		// Extract type information
+		valueDecoderType := valueDecoder._type.(*checker.FunctionDef)
+		valueReturnType := valueDecoderType.ReturnType.(*checker.Result)
+		valueValueType := valueReturnType.Val()
+		
+		// Create field decoder type
+		fieldDecoderType := &checker.FunctionDef{
+			Name:       "Decoder",
+			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
+			ReturnType: checker.MakeResult(valueValueType, checker.MakeList(checker.DecodeErrorDef)),
+		}
+		
+		// Create closure that captures field key and value decoder
+		fieldDecoderFn := func(data *object, resultType *checker.Result) *object {
+			return decodeAsField(fieldKey, valueDecoder, data, resultType)
+		}
+		
+		return &object{
+			raw:   fieldDecoderFn,
+			_type: fieldDecoderType,
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented: decode::%s()", call.Name))
 	}
@@ -561,6 +587,77 @@ func convertToMapKey(keyObj *object) string {
 	default:
 		// For other types, use a string representation
 		return fmt.Sprintf("%v", keyObj.raw)
+	}
+}
+
+// decodeAsField extracts a specific field from an object and decodes it
+func decodeAsField(fieldKey string, valueDecoder *object, data *object, resultType *checker.Result) *object {
+	// Check if data is Dynamic and contains object-like structure
+	if data._type == checker.Dynamic {
+		if data.raw == nil {
+			// Null data - return error
+			expected := "Object"
+			found := "Void"
+			decodeErrList := makeDecodeErrorList(expected, found)
+			return makeErr(decodeErrList, resultType)
+		}
+		
+		// Check if raw data is a map (JSON object becomes map[string]interface{})
+		if rawMap, ok := data.raw.(map[string]interface{}); ok {
+			return extractField(fieldKey, valueDecoder, rawMap, resultType)
+		}
+	}
+	
+	// Not object-like data
+	expected := "Object"
+	found := data._type.String()
+	decodeErrList := makeDecodeErrorList(expected, found)
+	return makeErr(decodeErrList, resultType)
+}
+
+// extractField handles the actual field extraction and value decoding
+func extractField(fieldKey string, valueDecoder *object, rawMap map[string]interface{}, resultType *checker.Result) *object {
+	// Get value decoder function
+	valueDecoderFn := valueDecoder.raw.(func(*object, *checker.Result) *object)
+	valueDecoderType := valueDecoder._type.(*checker.FunctionDef)
+	valueResultType := valueDecoderType.ReturnType.(*checker.Result)
+	
+	// Check if field exists
+	rawValue, exists := rawMap[fieldKey]
+	if !exists {
+		// Missing field error with path
+		decodeErr := &object{
+			raw: map[string]*object{
+				"expected": {raw: "field '" + fieldKey + "'", _type: checker.Str},
+				"found":    {raw: "missing", _type: checker.Str},
+				"path":     {raw: []*object{{raw: fieldKey, _type: checker.Str}}, _type: checker.MakeList(checker.Str)},
+			},
+			_type: checker.DecodeErrorDef,
+		}
+		errorList := &object{raw: []*object{decodeErr}, _type: checker.MakeList(checker.DecodeErrorDef)}
+		return makeErr(errorList, resultType)
+	}
+	
+	// Field exists, decode its value
+	valueData := &object{raw: rawValue, _type: checker.Dynamic}
+	valueResult := valueDecoderFn(valueData, valueResultType)
+	valueResultValue := valueResult.raw.(_result)
+	
+	if valueResultValue.ok {
+		return makeOk(valueResultValue.raw, resultType)
+	} else {
+		// Propagate errors with field name in path
+		valueErrors := valueResultValue.raw.raw.([]*object)
+		for _, err := range valueErrors {
+			errStruct := err.raw.(map[string]*object)
+			path := errStruct["path"].raw.([]*object)
+			fieldStr := &object{raw: fieldKey, _type: checker.Str}
+			newPath := append([]*object{fieldStr}, path...)
+			errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
+		}
+		
+		errorList := &object{raw: valueErrors, _type: checker.MakeList(checker.DecodeErrorDef)}
+		return makeErr(errorList, resultType)
 	}
 }
 
