@@ -106,13 +106,21 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			},
 		}}
 	case "decode":
+		// Create a generic type parameter for the decoder's return type
+		genericT := &Any{name: "T"}
+		decoderType := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(genericT, MakeList(DecodeErrorDef)),
+		}
+		
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{
-				{Name: "decoder", Type: &Any{name: "Decoder"}},
+				{Name: "decoder", Type: decoderType}, // Concrete function type
 				{Name: "data", Type: Dynamic},
 			},
-			ReturnType: MakeResult(&Any{name: "T"}, MakeList(DecodeErrorDef)),
+			ReturnType: MakeResult(genericT, MakeList(DecodeErrorDef)), // Same T
 		}}
 	case "any":
 		return Symbol{Name: name, Type: &FunctionDef{
@@ -121,16 +129,46 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			ReturnType: Dynamic,
 		}}
 	case "nullable":
+		// Create generic type parameters
+		innerT := &Any{name: "T"}
+		innerDecoder := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
+		}
+		// Nullable decoder returns Maybe<T>
+		maybeT := MakeMaybe(innerT)
+		nullableDecoder := &FunctionDef{
+			Name:       "NullableDecoder", 
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(maybeT, MakeList(DecodeErrorDef)),
+		}
+		
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name: name,
-			Parameters: []Parameter{{Name: "as", Type: &Any{name: "Decoder"}}},
-			ReturnType: &Any{name: "MaybeDecoder"},
+			Parameters: []Parameter{{Name: "as", Type: innerDecoder}},
+			ReturnType: nullableDecoder,
 		}}
 	case "list":
+		// Create generic type parameters
+		innerT := &Any{name: "T"}
+		innerDecoder := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
+		}
+		// List decoder returns [T]
+		listT := MakeList(innerT)
+		listDecoder := &FunctionDef{
+			Name:       "ListDecoder", 
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(listT, MakeList(DecodeErrorDef)),
+		}
+		
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name: name,
-			Parameters: []Parameter{{Name: "as", Type: &Any{name: "Decoder"}}},
-			ReturnType: &Any{name: "ListDecoder"},
+			Parameters: []Parameter{{Name: "as", Type: innerDecoder}},
+			ReturnType: listDecoder,
 		}}
 	default:
 		return Symbol{}

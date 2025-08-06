@@ -260,7 +260,10 @@ func TestDecodeList(t *testing.T) {
 				let list_decoder = decode::list(int_decoder)
 				let result = decode::decode(list_decoder, data)
 				let list = result.expect("")
-				list.size()
+				if not list.size() == 5 {
+					panic("Expected 5 elements")
+				}
+				list.at(4)
 			`,
 			want: 5,
 		},
@@ -343,8 +346,10 @@ func TestDecodeList(t *testing.T) {
 				let nullable_list_decoder = decode::nullable(list_decoder)
 				let result = decode::decode(nullable_list_decoder, data)
 				let maybe_list = result.expect("")
-				let list = maybe_list.or([])
-				list.size()
+				match maybe_list {
+				  list => list.size(),
+					_ => 0
+				}
 			`,
 			want: 3,
 		},
@@ -360,8 +365,11 @@ func TestDecodeList(t *testing.T) {
 				let nullable_list_decoder = decode::nullable(list_decoder)
 				let result = decode::decode(nullable_list_decoder, data)
 				let maybe_list = result.expect("")
-				let list = maybe_list.or([])
-				list.size()
+				let maybe_list = result.expect("")
+				match maybe_list {
+				  list => list.size(),
+					_ => 0
+				}
 			`,
 			want: 0,
 		},
