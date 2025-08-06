@@ -105,6 +105,9 @@ func (o *object) premarshal() any {
 	if o._type == checker.Str || o._type == checker.Int || o._type == checker.Float || o._type == checker.Bool {
 		return o.raw
 	}
+	if o._type == checker.Dynamic {
+		return o.raw
+	}
 
 	switch o._type.(type) {
 	case *checker.FunctionDef:
@@ -138,5 +141,15 @@ func (o *object) premarshal() any {
 		}
 		return rawMap
 	}
+	
+	if _, isMap := o._type.(*checker.Map); isMap {
+		m := o.raw.(map[string]*object)
+		rawMap := make(map[string]any)
+		for key, value := range m {
+			rawMap[key] = value.premarshal()
+		}
+		return rawMap
+	}
+	
 	panic(fmt.Sprintf("Cannot marshall type: %T", o._type))
 }

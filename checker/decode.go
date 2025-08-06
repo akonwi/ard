@@ -170,6 +170,36 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "as", Type: innerDecoder}},
 			ReturnType: listDecoder,
 		}}
+	case "map":
+		// Create generic type parameters
+		keyT := &Any{name: "K"}
+		valueT := &Any{name: "V"}
+		keyDecoder := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(keyT, MakeList(DecodeErrorDef)),
+		}
+		valueDecoder := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(valueT, MakeList(DecodeErrorDef)),
+		}
+		// Map decoder returns [K:V] (map with K keys and V values)
+		mapT := MakeMap(keyT, valueT)
+		mapDecoder := &FunctionDef{
+			Name:       "MapDecoder", 
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(mapT, MakeList(DecodeErrorDef)),
+		}
+		
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "key", Type: keyDecoder},
+				{Name: "val", Type: valueDecoder},
+			},
+			ReturnType: mapDecoder,
+		}}
 	default:
 		return Symbol{}
 	}

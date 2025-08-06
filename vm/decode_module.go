@@ -174,6 +174,39 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			raw:   listDecoderFn,
 			_type: listDecoderType,
 		}
+	case "map":
+		// Return a map decoder function that wraps both key and value decoders
+		keyDecoder := args[0]
+		valueDecoder := args[1]
+		
+		// Extract the key decoder's type to determine the key type
+		keyDecoderType := keyDecoder._type.(*checker.FunctionDef)
+		keyReturnType := keyDecoderType.ReturnType.(*checker.Result)
+		keyValueType := keyReturnType.Val()
+		
+		// Extract the value decoder's type to determine the value type
+		valueDecoderType := valueDecoder._type.(*checker.FunctionDef)
+		valueReturnType := valueDecoderType.ReturnType.(*checker.Result)
+		valueValueType := valueReturnType.Val()
+		
+		// Create Map type with K keys and V values
+		mapType := checker.MakeMap(keyValueType, valueValueType)
+		
+		mapDecoderType := &checker.FunctionDef{
+			Name:       "Decoder",
+			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
+			ReturnType: checker.MakeResult(mapType, checker.MakeList(checker.DecodeErrorDef)),
+		}
+		
+		// Create a closure that captures both decoders
+		mapDecoderFn := func(data *object, resultType *checker.Result) *object {
+			return decodeAsMap(keyDecoder, valueDecoder, data, resultType)
+		}
+		
+		return &object{
+			raw:   mapDecoderFn,
+			_type: mapDecoderType,
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented: decode::%s()", call.Name))
 	}
@@ -411,6 +444,124 @@ func decodeArrayElements(elementDecoder *object, rawSlice []interface{}, resultT
 	listType := resultType.Val().(*checker.List)
 	listObject := &object{raw: decodedElements, _type: listType}
 	return makeOk(listObject, resultType)
+}
+
+// decodeAsMap handles map decoding by checking for object data and delegating to key/value decoders
+func decodeAsMap(keyDecoder *object, valueDecoder *object, data *object, resultType *checker.Result) *object {
+	// Check if data is Dynamic and contains object-like structure
+	if data._type == checker.Dynamic {
+		if data.raw == nil {
+			// Null data - return error (use nullable(map(...)) for nullable maps)
+			expected := "Object"
+			found := "Void"
+			decodeErrList := makeDecodeErrorList(expected, found)
+			return makeErr(decodeErrList, resultType)
+		}
+		
+		// Check if raw data is a map (JSON object becomes map[string]interface{})
+		if rawMap, ok := data.raw.(map[string]interface{}); ok {
+			return decodeMapValues(keyDecoder, valueDecoder, rawMap, resultType)
+		}
+	}
+	
+	// Not object-like data
+	expected := "Object"
+	found := data._type.String()
+	decodeErrList := makeDecodeErrorList(expected, found)
+	return makeErr(decodeErrList, resultType)
+}
+
+// decodeMapValues decodes each key and value in the object using their respective decoders
+func decodeMapValues(keyDecoder *object, valueDecoder *object, rawMap map[string]interface{}, resultType *checker.Result) *object {
+	// Get decoder functions
+	keyDecoderFn := keyDecoder.raw.(func(*object, *checker.Result) *object)
+	keyDecoderType := keyDecoder._type.(*checker.FunctionDef)
+	keyResultType := keyDecoderType.ReturnType.(*checker.Result)
+	
+	valueDecoderFn := valueDecoder.raw.(func(*object, *checker.Result) *object)
+	valueDecoderType := valueDecoder._type.(*checker.FunctionDef)
+	valueResultType := valueDecoderType.ReturnType.(*checker.Result)
+	
+	// Create a new map to store decoded keys and values
+	decodedMap := make(map[string]*object)
+	var errors []*object
+	
+	// Decode each key-value pair
+	for rawKey, rawValue := range rawMap {
+		// Decode key
+		keyData := &object{raw: rawKey, _type: checker.Dynamic}
+		keyResult := keyDecoderFn(keyData, keyResultType)
+		keyResultValue := keyResult.raw.(_result)
+		
+		// Decode value
+		valueData := &object{raw: rawValue, _type: checker.Dynamic}
+		valueResult := valueDecoderFn(valueData, valueResultType)
+		valueResultValue := valueResult.raw.(_result)
+		
+		if keyResultValue.ok && valueResultValue.ok {
+			// Both key and value decoded successfully
+			// Convert decoded key to string for map storage
+			decodedKey := convertToMapKey(keyResultValue.raw)
+			decodedMap[decodedKey] = valueResultValue.raw
+		} else {
+			// Add errors with path information
+			if !keyResultValue.ok {
+				keyErrors := keyResultValue.raw.raw.([]*object)
+				for _, err := range keyErrors {
+					// Add key path information
+					errStruct := err.raw.(map[string]*object)
+					path := errStruct["path"].raw.([]*object)
+					keyStr := &object{raw: fmt.Sprintf("key(%s)", rawKey), _type: checker.Str}
+					newPath := append([]*object{keyStr}, path...)
+					errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
+					errors = append(errors, err)
+				}
+			}
+			if !valueResultValue.ok {
+				valueErrors := valueResultValue.raw.raw.([]*object)
+				for _, err := range valueErrors {
+					// Add value path information
+					errStruct := err.raw.(map[string]*object)
+					path := errStruct["path"].raw.([]*object)
+					keyStr := &object{raw: fmt.Sprintf("value(%s)", rawKey), _type: checker.Str}
+					newPath := append([]*object{keyStr}, path...)
+					errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
+					errors = append(errors, err)
+				}
+			}
+		}
+	}
+	
+	if len(errors) > 0 {
+		// Return accumulated errors
+		errorList := &object{raw: errors, _type: checker.MakeList(checker.DecodeErrorDef)}
+		return makeErr(errorList, resultType)
+	}
+	
+	// Success - create map object
+	mapType := resultType.Val().(*checker.Map)
+	mapObject := &object{raw: decodedMap, _type: mapType}
+	return makeOk(mapObject, resultType)
+}
+
+// convertToMapKey converts a decoded key object to a string for map storage
+func convertToMapKey(keyObj *object) string {
+	switch keyObj._type {
+	case checker.Str:
+		return keyObj.raw.(string)
+	case checker.Int:
+		return fmt.Sprintf("%d", keyObj.raw.(int))
+	case checker.Float:
+		return fmt.Sprintf("%g", keyObj.raw.(float64))
+	case checker.Bool:
+		if keyObj.raw.(bool) {
+			return "true"
+		}
+		return "false"
+	default:
+		// For other types, use a string representation
+		return fmt.Sprintf("%v", keyObj.raw)
+	}
 }
 
 // parseJsonToDynamic parses JSON into a Dynamic object
