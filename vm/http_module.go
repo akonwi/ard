@@ -298,15 +298,8 @@ func (mod *HTTPModule) evalHttpResponseMethod(response *object, method *checker.
 				return &object{nil, method.Type()}
 			}
 
-			// Create a synthetic function call to json::decode()
-			jsonMod := &JSONModule{}
-			vm := New(map[string]checker.Module{})
-			return jsonMod.Handle(vm, checker.CreateCall("decode",
-				[]checker.Expression{&checker.StrLiteral{Value: bodyStr}},
-				checker.FunctionDef{
-					ReturnType: method.Type(),
-				},
-			), []*object{&object{bodyStr, checker.Str}})
+			// Decode JSON response
+			return mod.decodeJsonResponse(bodyStr, method.Type())
 		}
 	default:
 		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))

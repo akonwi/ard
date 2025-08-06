@@ -2,6 +2,11 @@ package vm_test
 
 import "testing"
 
+// NOTE: The JSON strings in these tests use escaped braces (e.g., "\{\"key\": \"value\"\}")
+// This is required because Ard uses curly braces for string interpolation.
+// To include literal braces in strings, they must be escaped with backslashes.
+// Real-world usage works with this same escaping syntax.
+
 func TestDecodeBasicPrimitives(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -379,11 +384,11 @@ func TestDecodeList(t *testing.T) {
 func TestDecodeMap(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "empty map - returns size 0", 
+			name: "empty map - returns size 0",
 			input: `
 				use ard/decode
 
-				let data = decode::any("\\{\\}")
+				let data = decode::any("\{\}")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
 				let result = decode::run(data, map_decoder)
@@ -397,7 +402,7 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::any("\\{\\\"age\\\": 30, \\\"score\\\": 95\\}")
+				let data = decode::any("\{\"age\": 30, \"score\": 95\}")
 				let string_decoder = decode::string()
 				let int_decoder = decode::int()
 				let map_decoder = decode::map(string_decoder, int_decoder)
@@ -451,7 +456,7 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::any("\\{\\\"name\\\": \\\"Alice\\\", \\\"age\\\": 30\\}")
+				let data = decode::any("\{\"name\": \"Alice\", \"age\": 30\}")
 				let string_decoder = decode::string()
 				let map_decoder = decode::map(string_decoder, string_decoder)
 				let result = decode::run(data, map_decoder)
@@ -465,12 +470,12 @@ func TestDecodeMap(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::any("\\{\\\"name\\\": \\\"Alice\\\", \\\"nickname\\\": null, \\\"city\\\": \\\"Boston\\\"\\}")
+				let data = decode::any("\{\"name\": \"Alice\", \"nickname\": null, \"city\": \"Boston\"\}")
 				let nullable_string_decoder = decode::nullable(decode::string())
 				let map_decoder = decode::map(decode::string(), nullable_string_decoder)
 				let result = decode::run(data, map_decoder)
 				let map = result.expect("")
-				map.get("nickname").or(maybe::some("default")).is_none()
+				map.get("nickname").is_none()
 			`,
 			want: true,
 		},
@@ -480,7 +485,7 @@ func TestDecodeMap(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::any("\\{\\\"count\\\": 42\\}")
+				let data = decode::any("\{\"count\": 42\}")
 				let int_decoder = decode::int()
 				let map_decoder = decode::map(decode::string(), int_decoder)
 				let nullable_map_decoder = decode::nullable(map_decoder)
@@ -521,7 +526,7 @@ func TestDecodeField(t *testing.T) {
 			name: "field function exists",
 			input: `
 				use ard/decode
-				
+
 				let field_decoder = decode::field("name", decode::string())
 				"field_exists"
 			`,

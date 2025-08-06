@@ -435,6 +435,9 @@ func (l *lexer) takeString(start char) (token, bool) {
 				case '{':
 					// Escaped opening brace - just add it literally
 					sb.WriteByte('{')
+				case '}':
+					// Escaped closing brace - just add it literally
+					sb.WriteByte('}')
 				default:
 					// For unrecognized escapes, output both chars
 					sb.WriteByte('\\')
