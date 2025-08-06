@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] support gleam style decoding of arbitrary data
 - [ ] support for referencing qualified functions as values
 - [ ] allow omitting nullable arguments in function calls
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
