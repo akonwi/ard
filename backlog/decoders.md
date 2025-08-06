@@ -1,50 +1,50 @@
-# Ard Decode Library: Implementation Plan
+# Ard Decode Library: Implementation Status
 
 ## Overview
 
-This document outlines the implementation of Gleam-style decoding for Ard, providing a flexible alternative to the current `ard/json` module that requires defining structs upfront. The decode library will enable type-safe transformation of external data (JSON, database rows, etc.) into Ard values using composable decoder functions.
+This document tracks the implementation of Gleam-style decoding for Ard, providing a flexible alternative to the current `ard/json` module that requires defining structs upfront. The decode library enables type-safe transformation of external data (JSON, database rows, etc.) into Ard values using composable decoder functions.
 
-## Phase 1: Core Primitives Only
+## ✅ Phase 1: Core Primitives - COMPLETED
 
 ### Core API Design
 
 ```ard
-// ard/decode module
+// ard/decode module - IMPLEMENTED
 
 // Core decoder type - just a function
-type Decoder<$T> = fn(Dynamic) $T![DecodeError]
+type Decoder<$T> = fn(Dynamic) $T![Error]
 
-// Use existing Dynamic type (alias for convenience)
-type Dynamic = Any // Will use existing VM object system
+// Dynamic type for external/untyped data
+type Dynamic = Dynamic // Opaque type implemented in VM
 
-// Error information with automatic path tracking
-struct DecodeError {
-  expected: Str,  // "Int", "String", etc.
-  found: Str,     // "null", "Boolean", etc.
-  path: [Str]     // ["user", "profile", "age"]
+// Error information with path tracking
+struct Error {
+  expected: Str,  // "Str", "Int", "Bool", etc. (uses Ard type names)
+  found: Str,     // "Void", "Dynamic", etc.
+  path: [Str]     // ["user", "profile", "age"] - empty for primitives
 }
 ```
 
-### Dynamic Data Access (Primitives Only)
+### ✅ Implemented Primitive Decoders
 
 ```ard
-// Core conversion functions (what primitive decoders use internally)
-fn as_string(d: Dynamic) Str![DecodeError]
-fn as_int(d: Dynamic) Int![DecodeError] 
-fn as_float(d: Dynamic) Float![DecodeError]
-fn as_bool(d: Dynamic) Bool![DecodeError]
+// Core conversion functions (what primitive decoders use internally) - IMPLEMENTED
+fn as_string(d: Dynamic) Str![Error]
+fn as_int(d: Dynamic) Int![Error] 
+fn as_float(d: Dynamic) Float![Error]
+fn as_bool(d: Dynamic) Bool![Error]
 
-// Primitive decoders - return single-error decoders
-fn string() Decoder<Str> { as_string }
-fn int() Decoder<Int> { as_int }
-fn float() Decoder<Float> { as_float }
-fn bool() Decoder<Bool> { as_bool }
+// Primitive decoders - IMPLEMENTED
+fn string() Decoder<Str>
+fn int() Decoder<Int> 
+fn float() Decoder<Float>
+fn bool() Decoder<Bool>
 
-// Entry point - accumulates errors from multiple decoders
-fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![[DecodeError]] {
-  // Converts single error to list for compositional error handling
-  decoder(data)
-}
+// Entry point function - IMPLEMENTED
+fn decode<$T>(decoder: Decoder<$T>, data: Dynamic) $T![Error]
+
+// External data parser - IMPLEMENTED
+fn any(external_data: Str) Dynamic  // Parses JSON, invalid becomes nil
 ```
 
 ### Basic Usage Example (Primitives Only)
@@ -73,23 +73,37 @@ if result.is_err() {
 }
 ```
 
-## Future Phase 2: Compositional Decoders
+## 🚧 Phase 2: Compositional Decoders - IN PROGRESS
 
-### Design Note: True Composition Like Gleam
-
-Compositional decoders should accept other decoders as parameters, enabling true composition:
+### ✅ Implemented: Nullable Decoder
 
 ```ard
-// These will be implemented in Phase 2
-fn field<$T>(key: Str, decoder: Decoder<$T>) Decoder<$T>
+// IMPLEMENTED - First compositional decoder
+fn nullable<$T>(as: Decoder<$T>) MaybeDecoder<$T?>
+
+// Usage:
+let name_decoder = nullable(string())  // Handles null -> none(), "Alice" -> some("Alice")
+```
+
+### 🔄 Design Note: True Composition Like Gleam
+
+Compositional decoders accept other decoders as parameters, enabling true composition:
+
+```ard
+// ✅ IMPLEMENTED
+fn nullable<$T>(as: Decoder<$T>) MaybeDecoder<$T?>
+
+// 🔄 PLANNED for Phase 2
+fn field<$T>(key: Str, as: Decoder<$T>) Decoder<$T>
 fn list<$T>(element_decoder: Decoder<$T>) Decoder<[$T]>
-fn optional<$T>(decoder: Decoder<$T>, default: $T) Decoder<$T>
+fn optional<$T>(as: Decoder<$T>, default: $T) Decoder<$T>
 ```
 
 **Key Point**: Compositional decoders accept decoders for their elements, just like Gleam:
-- `list(string())` - list of strings
-- `field("name", string())` - string field named "name"  
-- `optional(int(), 0)` - optional integer with default 0
+- ✅ `nullable(string())` - nullable string (null -> none(), "Alice" -> some("Alice"))
+- 🔄 `list(string())` - list of strings
+- 🔄 `field("name", string())` - string field named "name"  
+- 🔄 `optional(int(), 0)` - optional integer with default 0
 
 This enables building complex decoders from simple ones:
 
@@ -170,16 +184,14 @@ DecodeError {
 }
 ```
 
-### 4. File Structure
+### 4. ✅ Implemented File Structure
 
 ```
-std_lib/
-├── decode/
-│   ├── decode.ard      # Core decoder functions (primitives only)
-│   └── decode.go       # VM implementation of conversion functions
-├── json/
-│   ├── json.ard        # Add parse_to_dynamic function
-│   └── json.go         # Implementation
+checker/
+├── decode.go           # ✅ DecodePkg with Error struct, Dynamic type, function signatures
+vm/
+├── decode_module.go    # ✅ DecodeModule with primitive + nullable decoder implementations
+├── decode_test.go      # ✅ Comprehensive tests for primitives and nullable decoder
 ```
 
 ## Benefits Over Current ard/json (Even With Just Primitives)
@@ -220,21 +232,38 @@ let database_value = decode::any(row_data)
 let parsed_value = decode::decode(decode::string(), database_value).expect("")
 ```
 
-## Implementation Steps
+## ✅ Completed Implementation Steps
 
-1. **Step 1**: Implement `DecodeError` struct in checker/VM
-2. **Step 2**: Add `as_string`, `as_int`, `as_bool`, `as_float` builtin functions  
-3. **Step 3**: Implement primitive decoder functions in `std_lib/decode/decode.ard`
-4. **Step 4**: Add `parse_to_dynamic` to JSON module
-5. **Step 5**: Add `decode` entry point function
-6. **Step 6**: Write tests demonstrating primitive decoding
-7. **Future**: Add compositional decoders (field, list, optional) in Phase 2
+1. ✅ **Step 1**: Implement `Error` struct in checker/VM
+2. ✅ **Step 2**: Add `as_string`, `as_int`, `as_bool`, `as_float` builtin functions  
+3. ✅ **Step 3**: Implement primitive decoder functions in VM DecodeModule
+4. ✅ **Step 4**: Add `any()` function to decode module (parses JSON to Dynamic)
+5. ✅ **Step 5**: Add `decode()` entry point function
+6. ✅ **Step 6**: Write comprehensive tests demonstrating primitive decoding
+7. ✅ **Step 7**: Add first compositional decoder: `nullable()`
+
+## 🔄 Current Status
+
+- ✅ **Phase 1 Complete**: All primitive decoders working with proper error handling
+- ✅ **First Compositional Decoder**: `nullable()` implemented and functional
+- 🔄 **Type System**: Generic type resolution needs enhancement for complex compositional tests
+- 🔄 **Next Phase**: Additional compositional decoders (field, list, optional)
 
 ## Migration Path
 
-- **Backward Compatibility**: Existing `ard/json` remains unchanged
-- **Gradual Adoption**: Users can try decode library for specific use cases
-- **Future Enhancement**: Phase 2 will add full compositional capabilities
-- **External Data**: Architecture ready for database rows, HTTP params, etc.
+- ✅ **Backward Compatibility**: Existing `ard/json` remains unchanged
+- ✅ **Gradual Adoption**: Users can use decode library for flexible JSON parsing
+- ✅ **Foundation Ready**: Architecture supports external data (JSON, database rows, HTTP params)
+- 🔄 **Future Enhancement**: Additional compositional capabilities (field, list, optional)
 
-This phased approach allows us to validate the core concept with primitives before building the full compositional system.
+## Summary
+
+The Ard decode library is now functional with:
+- ✅ Complete primitive decoding (string, int, float, bool)
+- ✅ Proper error handling with Ard type names
+- ✅ Flexible external data parsing via `any()`
+- ✅ First compositional decoder: `nullable()` 
+- ✅ Comprehensive test coverage
+- 🔄 Type system enhancements needed for full compositional testing
+
+This validates the core concept and provides immediate value over the current `ard/json` approach.

@@ -126,6 +126,12 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "as", Type: &Any{name: "Decoder"}}},
 			ReturnType: &Any{name: "MaybeDecoder"},
 		}}
+	case "list":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{{Name: "as", Type: &Any{name: "Decoder"}}},
+			ReturnType: &Any{name: "ListDecoder"},
+		}}
 	default:
 		return Symbol{}
 	}

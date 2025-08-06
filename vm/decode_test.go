@@ -211,7 +211,7 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/maybe
 
 				let data = decode::any("null")
-				let string_decoder = decode::string()  
+				let string_decoder = decode::string()
 				let nullable_decoder = decode::nullable(string_decoder)
 				let result = decode::decode(nullable_decoder, data)
 				result.expect("").or("default_value")
@@ -225,7 +225,7 @@ func TestDecodeNullable(t *testing.T) {
 
 				let data = decode::any("42")
 				let string_decoder = decode::string()
-				let nullable_decoder = decode::nullable(string_decoder) 
+				let nullable_decoder = decode::nullable(string_decoder)
 				let result = decode::decode(nullable_decoder, data)
 				result.is_err()
 			`,
@@ -240,10 +240,130 @@ func TestDecodeNullable(t *testing.T) {
 				let data = decode::any("invalid json")  // becomes nil Dynamic
 				let int_decoder = decode::int()
 				let nullable_decoder = decode::nullable(int_decoder)
-				let result = decode::decode(nullable_decoder, data)  
+				let result = decode::decode(nullable_decoder, data)
 				result.expect("").or(999)
 			`,
 			want: 999,
+		},
+	})
+}
+
+func TestDecodeList(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "list of integers - returns size",
+			input: `
+				use ard/decode
+
+				let data = decode::any("[1, 2, 3, 4, 5]")
+				let int_decoder = decode::int()
+				let list_decoder = decode::list(int_decoder)
+				let result = decode::decode(list_decoder, data)
+				let list = result.expect("")
+				list.size()
+			`,
+			want: 5,
+		},
+		{
+			name: "empty list - returns size 0",
+			input: `
+				use ard/decode
+
+				let data = decode::any("[]")
+				let string_decoder = decode::string()
+				let list_decoder = decode::list(string_decoder)
+				let result = decode::decode(list_decoder, data)
+				let list = result.expect("")
+				list.size()
+			`,
+			want: 0,
+		},
+		{
+			name: "list decoder with null data returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("null")
+				let string_decoder = decode::string()
+				let list_decoder = decode::list(string_decoder)
+				let result = decode::decode(list_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "list decoder with non-array data returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\"not an array\"")
+				let string_decoder = decode::string()
+				let list_decoder = decode::list(string_decoder)
+				let result = decode::decode(list_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "list with invalid elements returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("[\"hello\", 42, \"world\"]")
+				let string_decoder = decode::string()
+				let list_decoder = decode::list(string_decoder)
+				let result = decode::decode(list_decoder, data)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "list of nullable strings with mixed content",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("[\"hello\", null, \"world\"]")
+				let nullable_string_decoder = decode::nullable(decode::string())
+				let list_decoder = decode::list(nullable_string_decoder)
+				let result = decode::decode(list_decoder, data)
+				result.expect("").at(1).is_none()
+			`,
+			want: true,
+		},
+		{
+			name: "nullable list with array data returns some",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("[1, 2, 3]")
+				let int_decoder = decode::int()
+				let list_decoder = decode::list(int_decoder)
+				let nullable_list_decoder = decode::nullable(list_decoder)
+				let result = decode::decode(nullable_list_decoder, data)
+				let maybe_list = result.expect("")
+				let list = maybe_list.or([])
+				list.size()
+			`,
+			want: 3,
+		},
+		{
+			name: "nullable list with null data returns none - uses empty default",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				let data = decode::any("null")
+				let int_decoder = decode::int()
+				let list_decoder = decode::list(int_decoder)
+				let nullable_list_decoder = decode::nullable(list_decoder)
+				let result = decode::decode(nullable_list_decoder, data)
+				let maybe_list = result.expect("")
+				let list = maybe_list.or([])
+				list.size()
+			`,
+			want: 0,
 		},
 	})
 }
