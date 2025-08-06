@@ -73,58 +73,107 @@ if result.is_err() {
 }
 ```
 
-## 🚧 Phase 2: Compositional Decoders - PARTIAL IMPLEMENTATION
+## ✅ Phase 2: Compositional Decoders - COMPLETE
 
-### ✅ Implemented: Nullable Decoder (VM-level)
+### ✅ Implemented: Nullable Decoder
 
 ```ard
-// IMPLEMENTED - First compositional decoder (VM implementation complete)
-fn nullable<$T>(as: Decoder<$T>) MaybeDecoder<$T?>
+// FULLY IMPLEMENTED - First compositional decoder
+fn nullable<$T>(as: Decoder<$T>) NullableDecoder<$T?>
 
-// VM Implementation: ✅ WORKING
-// - Correctly handles null -> none(), values -> some()
+// Complete Implementation: ✅ WORKING
+// - Type system correctly resolves generic parameters
+// - VM correctly handles null -> none(), values -> some()  
 // - Proper error propagation from inner decoders
-// - Type-safe composition at runtime
+// - Full test coverage with complex compositions
 
-// Usage Example (VM-level works):
-let data = decode::any("null")
+// Usage Example (fully functional):
+let data = decode::any("\"hello\"")
 let nullable_decoder = decode::nullable(decode::string())
-// VM execution succeeds, returns proper Maybe<Str> values
+let result = decode::decode(nullable_decoder, data)
+result.expect("").or("default")  // Returns "hello"
 ```
 
-### ✅ Implemented: List Decoder (VM-level)
+### ✅ Implemented: List Decoder
 
 ```ard
-// IMPLEMENTED - Second compositional decoder (VM implementation complete)  
+// FULLY IMPLEMENTED - Second compositional decoder  
 fn list<$T>(element_decoder: Decoder<$T>) ListDecoder<[$T]>
 
-// VM Implementation: ✅ WORKING
-// - Decodes arrays by applying element decoder to each item
+// Complete Implementation: ✅ WORKING
+// - Type system correctly resolves generic parameters
+// - VM decodes arrays by applying element decoder to each item
 // - Accumulates errors with path information ([0], [1], etc.)
 // - Handles empty arrays and mixed valid/invalid elements
-// - Null data returns error (use nullable(list(...)) for nullable lists)
+// - Full test coverage including error cases
 
-// Usage Example (VM-level works):
-let data = decode::any("[1, 2, 3]")
+// Usage Example (fully functional):
+let data = decode::any("[1, 2, 3, 4, 5]")
 let list_decoder = decode::list(decode::int())
-// VM execution succeeds, returns proper [Int] values
+let result = decode::decode(list_decoder, data)
+let list = result.expect("")
+list.size()  // Returns 5
 ```
 
-### ❌ Type System Limitation: Testing Blocked
+### ✅ Implemented: Map Decoder
 
-**Critical Issue**: While the VM implementations work correctly, **compositional decoder tests fail during type checking** due to fundamental limitations in Ard's generic type resolution system.
+```ard
+// FULLY IMPLEMENTED - Third compositional decoder with key/value support
+fn map<$K, $V>(key: Decoder<$K>, val: Decoder<$V>) MapDecoder<[$K:$V]>
 
-**Error**: `panic: Cannot look up symbols in unrefined $T`
+// Complete Implementation: ✅ WORKING
+// - Type system correctly resolves dual generic parameters K and V
+// - VM decodes JSON objects by applying key decoder to keys, value decoder to values
+// - Supports flexible key types (Str, Int, Float, Bool) with automatic string conversion
+// - Enhanced error reporting distinguishes between key and value decoding errors
+// - Full test coverage including error cases and compositional patterns
 
-**Root Cause**: The type system cannot resolve generic types through function composition chains:
-1. `decode::string()` → should infer `Decoder<Str>`  
-2. `decode::nullable(string_decoder)` → should infer `Decoder<Str?>`
-3. `result.expect("")` → fails because result type is unresolved `$T`
+// Usage Examples (fully functional):
+let data = decode::any("{\"name\": \"Alice\", \"age\": \"30\"}")
+
+// String keys to string values
+let string_map_decoder = decode::map(decode::string(), decode::string())
+let result1 = decode::decode(string_map_decoder, data)
+let map1 = result1.expect("")
+map1.get("name").or("default")  // Returns "Alice"
+
+// String keys to integer values  
+let mixed_map_decoder = decode::map(decode::string(), decode::int())
+let result2 = decode::decode(mixed_map_decoder, data)
+// Would fail because "Alice" can't be decoded as Int, proper error with path info
+
+// Compositional with nullable values
+let nullable_map_decoder = decode::map(decode::string(), decode::nullable(decode::string()))
+// Handles: {"name": "Alice", "nickname": null, "city": "Boston"}
+```
+
+### ✅ Generic Type System: Fixed!
+
+**Resolution**: The generic type limitation has been **successfully resolved** through a restructuring of the function type definitions.
+
+**The Fix**: Instead of using unresolvable `Any` types, the checker now uses concrete `FunctionDef` structures with shared generic parameters:
+
+```go
+// Before (broken): &Any{name: "MaybeDecoder"} 
+// After (working):
+innerT := &Any{name: "T"}  // Shared generic parameter
+innerDecoder := &FunctionDef{
+    ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),  // Uses T
+}
+nullableDecoder := &FunctionDef{
+    ReturnType: MakeResult(MakeMaybe(innerT), ...), // Uses Maybe<T> - same T!
+}
+```
+
+**Result**: The type system can now properly resolve generic types through function composition chains:
+1. `decode::string()` → `Decoder<Str>`  
+2. `decode::nullable(string_decoder)` → `NullableDecoder<Str?>`
+3. `result.expect("")` → works because result type is `Result<Str?, [Error]>`
 
 **Status**: 
-- ✅ VM implementation: **COMPLETE** (both nullable and list work correctly)
-- ❌ Type checking: **BLOCKED** (prevents comprehensive testing)
-- 📋 **Documented**: Full analysis captured in `./backlog/generics.md`
+- ✅ **Type checking**: **COMPLETE** - all compositional patterns work
+- ✅ **VM implementation**: **COMPLETE** - runtime behavior is correct
+- ✅ **Testing**: **COMPLETE** - comprehensive test coverage achieved
 
 ### 🔄 Design Note: True Composition Like Gleam
 
@@ -134,8 +183,11 @@ Compositional decoders accept other decoders as parameters, enabling true compos
 // ✅ IMPLEMENTED
 fn nullable<$T>(as: Decoder<$T>) MaybeDecoder<$T?>
 
-// ✅ IMPLEMENTED (VM-level) for Phase 2
+// ✅ IMPLEMENTED 
 fn list<$T>(element_decoder: Decoder<$T>) Decoder<[$T]>
+
+// ✅ IMPLEMENTED
+fn map<$K, $V>(key: Decoder<$K>, val: Decoder<$V>) Decoder<[$K:$V]>
 
 // 🔄 PLANNED for Phase 3
 fn field<$T>(key: Str, as: Decoder<$T>) Decoder<$T>
@@ -144,7 +196,8 @@ fn optional<$T>(as: Decoder<$T>, default: $T) Decoder<$T>
 
 **Key Point**: Compositional decoders accept decoders for their elements, just like Gleam:
 - ✅ `nullable(string())` - nullable string (null -> none(), "Alice" -> some("Alice"))
-- ✅ `list(string())` - list of strings (VM implementation complete)
+- ✅ `list(string())` - list of strings  
+- ✅ `map(string(), int())` - map with string keys and integer values
 - 🔄 `field("name", string())` - string field named "name"  
 - 🔄 `optional(int(), 0)` - optional integer with default 0
 
@@ -285,13 +338,14 @@ let parsed_value = decode::decode(decode::string(), database_value).expect("")
 6. ✅ **Step 6**: Write comprehensive tests demonstrating primitive decoding
 7. ✅ **Step 7**: Add first compositional decoder: `nullable()`
 8. ✅ **Step 8**: Add second compositional decoder: `list()`
+9. ✅ **Step 9**: Add third compositional decoder: `map()` with key/value support
 
-## 🔄 Current Status
+## ✅ Current Status
 
 - ✅ **Phase 1 Complete**: All primitive decoders working with proper error handling
-- ✅ **Compositional Decoders (VM-level)**: Both `nullable()` and `list()` fully implemented
-- ❌ **Type System Limitation**: Generic type resolution prevents full testing (see `./backlog/generics.md`)
-- 🔄 **Next Phase**: Additional compositional decoders (field, optional) + type system fixes
+- ✅ **Phase 2 Complete**: Three compositional decoders fully implemented: `nullable()`, `list()`, and `map()`
+- ✅ **Type System Fixed**: Generic type resolution now works correctly for all compositional patterns
+- 🔄 **Next Phase**: Additional compositional decoders (field, optional) for object decoding
 
 ## Migration Path
 
@@ -302,14 +356,18 @@ let parsed_value = decode::decode(decode::string(), database_value).expect("")
 
 ## Summary
 
-The Ard decode library is now functional with:
-- ✅ Complete primitive decoding (string, int, float, bool)
-- ✅ Proper error handling with Ard type names
-- ✅ Flexible external data parsing via `any()`
-- ✅ Two compositional decoders: `nullable()` and `list()` (VM implementations complete)
-- ✅ Comprehensive test coverage for primitives
-- ❌ **Blocked**: Compositional decoder testing due to generic type system limitations
+The Ard decode library is now fully functional with:
+- ✅ **Complete primitive decoding** (string, int, float, bool)
+- ✅ **Proper error handling** with Ard type names and path tracking
+- ✅ **Flexible external data parsing** via `any()`
+- ✅ **Three compositional decoders**: `nullable()`, `list()`, and `map()` with full type safety
+- ✅ **Comprehensive test coverage** for all implemented functionality
+- ✅ **Generic type system** working correctly for all compositional patterns
 
-**Key Achievement**: VM-level implementations of compositional decoders work correctly. The architecture is sound and ready for additional decoders once the type system limitation is resolved.
+**Key Achievement**: Full compositional decoder functionality now works end-to-end, from type checking through VM execution. The architecture demonstrates sophisticated generic type resolution that enables true Gleam-style decoder composition.
 
-**Immediate Value**: Primitive decoders provide substantial benefits over current `ard/json` approach for flexible data access patterns.
+**Immediate Value**: The library provides significant advantages over current `ard/json`:
+- **Flexible data access** without requiring predefined struct definitions
+- **Composable decoders** that can be combined for complex data patterns
+- **Type-safe error handling** with detailed path information
+- **Extensible architecture** ready for additional decoder types
