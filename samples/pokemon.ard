@@ -14,10 +14,10 @@ fn main() {
   if res.is_ok() {
     let data = decode::any(res.body)
 
-    let count = decode::run(data, decode::field("count", decode::int()))
+    let count = decode::run(data, decode::field("count", decode::int))
 
     let results_decoder = decode::list(
-      decode::map(decode::string(), decode::string())
+      decode::map(decode::string, decode::string)
     )
     let items = decode::run(data, decode::field("results", results_decoder))
 

@@ -737,6 +737,20 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				panic(fmt.Errorf("Cannot match on %s", _type))
 			}
 		}
+	case *checker.ModuleSymbol:
+		// Handle module symbol references (like decode::string as a function value)
+		if _, ok := e.Symbol.Type.(*checker.FunctionDef); ok {
+			// For function symbols, we need to get the actual function object from the module
+			if vm.moduleRegistry.HasModule(e.Module) {
+				// Create a function call to get the function object
+				call := checker.CreateCall(e.Symbol.Name, []checker.Expression{}, *e.Symbol.Type.(*checker.FunctionDef))
+				return vm.moduleRegistry.Handle(e.Module, vm, call)
+			}
+			panic(fmt.Errorf("Module not found: %s", e.Module))
+		}
+		// For other symbol types (like enums), we would handle them here
+		// For now, just return the symbol as-is
+		return &object{e.Symbol, e.Symbol.Type}
 	case *checker.CopyExpression:
 		// Evaluate the expression and return a deep copy
 		original := vm.eval(e.Expr)

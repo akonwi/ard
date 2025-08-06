@@ -67,43 +67,27 @@ func (pkg DecodePkg) Get(name string) Symbol {
 		}}
 	case "string":
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: &FunctionDef{
-				Name:       "Decoder",
-				Parameters: []Parameter{{Name: "data", Type: Dynamic}},
-				ReturnType: MakeResult(Str, MakeList(DecodeErrorDef)),
-			},
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(Str, MakeList(DecodeErrorDef)),
 		}}
 	case "int":
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: &FunctionDef{
-				Name:       "Decoder",
-				Parameters: []Parameter{{Name: "data", Type: Dynamic}},
-				ReturnType: MakeResult(Int, MakeList(DecodeErrorDef)),
-			},
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(Int, MakeList(DecodeErrorDef)),
 		}}
 	case "float":
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: &FunctionDef{
-				Name:       "Decoder",
-				Parameters: []Parameter{{Name: "data", Type: Dynamic}},
-				ReturnType: MakeResult(Float, MakeList(DecodeErrorDef)),
-			},
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(Float, MakeList(DecodeErrorDef)),
 		}}
 	case "bool":
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: &FunctionDef{
-				Name:       "Decoder",
-				Parameters: []Parameter{{Name: "data", Type: Dynamic}},
-				ReturnType: MakeResult(Bool, MakeList(DecodeErrorDef)),
-			},
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(Bool, MakeList(DecodeErrorDef)),
 		}}
 	case "run":
 		// Create a generic type parameter for the decoder's return type

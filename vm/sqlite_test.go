@@ -995,7 +995,7 @@ func TestSQLiteQueryWithDecode(t *testing.T) {
 		
 		// Decode using the new API - extract just the count first
 		let player_list = decode::run(rows, decode::list(
-			decode::field("name", decode::string())
+			decode::field("name", decode::string)
 		)).expect("Failed to decode")
 		
 		player_list.size()
@@ -1034,7 +1034,7 @@ func TestSQLiteQueryDecodeFields(t *testing.T) {
 		
 		// Decode all player names
 		let player_names = decode::run(rows, decode::list(
-			decode::field("name", decode::string())
+			decode::field("name", decode::string)
 		)).expect("Failed to decode player names")
 		
 		player_names.at(0) == "John Doe"
@@ -1067,7 +1067,7 @@ func TestSQLiteQueryWithNullValues(t *testing.T) {
 		
 		// Decode email with nullable handling
 		let emails = decode::run(rows, decode::list(
-			decode::field("email", decode::nullable(decode::string()))
+			decode::field("email", decode::nullable(decode::string))
 		)).expect("Failed to decode emails")
 		
 		// First email should be "john@example.com", second should be none
@@ -1105,7 +1105,7 @@ func TestSQLiteQueryComprehensive(t *testing.T) {
 		
 		// Decode using compositional decoders
 		let products = decode::run(rows, decode::list(
-			decode::field("name", decode::string())
+			decode::field("name", decode::string)
 		)).expect("Failed to decode products")
 		
 		// Should get "Tool" (15.00) and "Widget" (19.99) in price order

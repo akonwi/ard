@@ -2623,7 +2623,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							Property: instance,
 						}
 					case *ast.Identifier:
-						// Look up other symbols (like enums, etc.)
+						// Look up other symbols (like enums, functions, etc.)
 						sym := mod.Get(prop.Name)
 						if sym.IsZero() {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
@@ -2633,7 +2633,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						if enum, ok := sym.Type.(*Enum); ok {
 							return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: enum}}
 						}
-						// For now, we don't handle other module symbols besides structs and enums
+						// Check if it's a function - return it as a function reference
+						if fnDef, ok := sym.Type.(*FunctionDef); ok {
+							return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: fnDef}}
+						}
+						// For now, we don't handle other module symbols besides structs, enums, and functions
 						c.addError(fmt.Sprintf("Cannot access %s::%s in this context", id.Name, prop.Name), prop.GetLocation())
 						return nil
 					default:
