@@ -570,3 +570,23 @@ func TestDecodeField(t *testing.T) {
 		},
 	})
 }
+
+func TestDecodeCustomFunctions(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "simple test that custom user-defined decoder function works",
+			input: `
+				use ard/decode
+				use ard/result
+
+				fn custom_decoder(data: decode::Dynamic) Str![decode::Error] {
+					Result::ok("always works")
+				}
+
+				let data = decode::any("\"hello\"")
+				decode::run(data, custom_decoder).expect("")
+			`,
+			want: "always works",
+		},
+	})
+}

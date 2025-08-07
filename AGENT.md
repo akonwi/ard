@@ -6,8 +6,10 @@ This file provides guidance to a coding agent.
 This is the source code for the parser, compiler, and interpreter of a programming language called Ard
 The language spec is in the README.md
   - Use this and the documentation files in ./docs to understand the language syntax and features
-  - There is runnable sample in ./samples/*.ard
+  - There are runnable samples in ./samples/*.ard
     - Also use as a reference
+  - The ./website directory is the documentation website
+    - using Astro and Starlight
 The backlog of work is a simple todo list in TODO.md
 
 The project uses go v1.25rc2 with the `jsonv2` experiment for the new json tools and has build tag directives for it.

@@ -74,11 +74,20 @@ func (vm *VM) Eval(expr checker.Expression) *object {
  * fns that are bound to a particular execution scope (*VM)
  */
 type Closure struct {
-	vm   *VM
-	expr checker.FunctionDef
+	vm        *VM
+	expr      checker.FunctionDef
+	builtinFn func(*object, *checker.Result) *object // for built-in decoder functions
 }
 
 func (c Closure) eval(args ...*object) *object {
+	// Handle built-in functions
+	if c.builtinFn != nil {
+		data := args[0]
+		resultType := c.expr.ReturnType.(*checker.Result)
+		return c.builtinFn(data, resultType)
+	}
+	
+	// Handle regular Ard functions
 	res, _ := c.vm.evalBlock(c.expr.Body, func() {
 		for i := range args {
 			c.vm.scope.add(c.expr.Parameters[i].Name, args[i])
