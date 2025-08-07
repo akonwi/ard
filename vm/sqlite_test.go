@@ -854,7 +854,7 @@ func TestSQLiteUpsert(t *testing.T) {
 		// Verify the update worked
 		let players = db.get<Player>("players", "id = 1").expect("Failed to get player")
 		let retrieved = players.at(0)
-		
+
 		insert_result == true and update_result == true and retrieved.name == "John Smith" and retrieved.number == 10
 	`)
 
@@ -890,7 +890,7 @@ func TestSQLiteUpsertMultipleKeys(t *testing.T) {
 		// Verify the update worked
 		let scores = db.get<Score>("scores", "player_id = 1 AND game_id = 1").expect("Failed to get score")
 		let retrieved = scores.at(0)
-		
+
 		insert_result == true and update_result == true and retrieved.score == 150
 	`)
 
@@ -927,7 +927,7 @@ func TestSQLiteUpsertWithMaybeTypes(t *testing.T) {
 		// Verify the update worked
 		let users = db.get<User>("users", "id = 1").expect("Failed to get user")
 		let retrieved = users.at(0)
-		
+
 		retrieved.name == "John Doe" and retrieved.email.or("default") == "default"
 	`)
 
@@ -992,12 +992,12 @@ func TestSQLiteQueryWithDecode(t *testing.T) {
 
 		// Query the data
 		let rows = db.query("SELECT id, name, number FROM players").expect("Failed to query players")
-		
+
 		// Decode using the new API - extract just the count first
 		let player_list = decode::run(rows, decode::list(
 			decode::field("name", decode::string)
 		)).expect("Failed to decode")
-		
+
 		player_list.size()
 	`)
 
@@ -1031,17 +1031,17 @@ func TestSQLiteQueryDecodeFields(t *testing.T) {
 
 		// Query the data
 		let rows = db.query("SELECT id, name, number FROM players ORDER BY id").expect("Failed to query players")
-		
-		// Decode all player names
-		let player_names = decode::run(rows, decode::list(
-			decode::field("name", decode::string)
-		)).expect("Failed to decode player names")
-		
-		player_names.at(0) == "John Doe"
+
+		// Decode all player IDs
+		let player_ids = decode::run(rows, decode::list(
+			decode::field("id", decode::int)
+		)).expect("Failed to decode player ids")
+
+		player_ids.at(0) == 1
 	`)
 
 	if result != true {
-		t.Errorf("Expected first player name to be 'John Doe', got %v", result)
+		t.Errorf("Expected first player ID to be 1, got %v", result)
 	}
 }
 
@@ -1064,16 +1064,16 @@ func TestSQLiteQueryWithNullValues(t *testing.T) {
 
 		// Query the data
 		let rows = db.query("SELECT id, name, email FROM users ORDER BY id").expect("Failed to query users")
-		
+
 		// Decode email with nullable handling
 		let emails = decode::run(rows, decode::list(
 			decode::field("email", decode::nullable(decode::string))
 		)).expect("Failed to decode emails")
-		
+
 		// First email should be "john@example.com", second should be none
 		let first_email = emails.at(0).or("default")
 		let second_email = emails.at(1).or("default")
-		
+
 		first_email == "john@example.com" and second_email == "default"
 	`)
 
@@ -1102,12 +1102,12 @@ func TestSQLiteQueryComprehensive(t *testing.T) {
 
 		// Query active products only
 		let rows = db.query("SELECT name, price, description FROM products WHERE active = 1 ORDER BY price").expect("Failed to query")
-		
+
 		// Decode using compositional decoders
 		let products = decode::run(rows, decode::list(
 			decode::field("name", decode::string)
 		)).expect("Failed to decode products")
-		
+
 		// Should get "Tool" (15.00) and "Widget" (19.99) in price order
 		products.size() == 2 and products.at(0) == "Tool" and products.at(1) == "Widget"
 	`)

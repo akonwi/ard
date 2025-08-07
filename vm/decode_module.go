@@ -324,6 +324,10 @@ func decodeAsInt(data *object, resultType *checker.Result) *object {
 		if intVal, ok := data.raw.(int); ok {
 			return makeOk(&object{raw: intVal, _type: checker.Int}, resultType)
 		}
+		// SQLite integers come as int64
+		if int64Val, ok := data.raw.(int64); ok {
+			return makeOk(&object{raw: int(int64Val), _type: checker.Int}, resultType)
+		}
 		// JSON numbers might come as float64
 		if floatVal, ok := data.raw.(float64); ok {
 			if floatVal == float64(int(floatVal)) { // Check if it's actually an integer
