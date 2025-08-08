@@ -5,6 +5,7 @@ package vm
 import (
 	"encoding/json/v2"
 	"fmt"
+	"strconv"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -265,6 +266,78 @@ func (m *DecodeModule) HandleStatic(structName string, vm *VM, call *checker.Fun
 	panic(fmt.Errorf("Unimplemented: decode::%s::%s()", structName, call.Name))
 }
 
+// Helper function to format a value for error messages using premarshal
+func formatValueForError(data *object) string {
+	// Use premarshal to get the raw representation consistently
+	rawValue := data.premarshal()
+	return formatRawValueForError(rawValue)
+}
+
+// Helper function to format raw values with smart truncation and previews
+func formatRawValueForError(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		// Truncate very long strings for readability
+		if len(val) > 50 {
+			return fmt.Sprintf("\"%s...\"", val[:47])
+		}
+		return fmt.Sprintf("\"%s\"", val)
+	case int:
+		return strconv.Itoa(val)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(val)
+	case []interface{}:
+		// Show preview of array contents for small arrays
+		if len(val) == 0 {
+			return "[]"
+		} else if len(val) <= 3 {
+			preview := "["
+			for i, item := range val {
+				if i > 0 {
+					preview += ", "
+				}
+				preview += formatRawValueForError(item)
+			}
+			preview += "]"
+			return preview
+		}
+		return fmt.Sprintf("[array with %d elements]", len(val))
+	case map[string]interface{}:
+		// Show preview of object contents for small objects
+		if len(val) == 0 {
+			return "{}"
+		}
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, k)
+		}
+		if len(keys) <= 3 {
+			preview := "{"
+			for i, key := range keys {
+				if i > 0 {
+					preview += ", "
+				}
+				preview += fmt.Sprintf("%s: %s", key, formatRawValueForError(val[key]))
+			}
+			preview += "}"
+			return preview
+		}
+		return fmt.Sprintf("{object with keys: %v}", keys[:3])
+	case nil:
+		return "null"
+	default:
+		str := fmt.Sprintf("%v", val)
+		if len(str) > 50 {
+			return str[:47] + "..."
+		}
+		return str
+	}
+}
+
 // Helper function to create DecodeError
 func makeDecodeError(expected, found string) *object {
 	errorStruct := &object{
@@ -287,15 +360,19 @@ func makeDecodeErrorList(expected, found string) *object {
 	}
 }
 
+// Helper function to create a decode error list from data object (shows actual value)
+func makeDecodeErrorListFromData(expected string, data *object) *object {
+	found := formatValueForError(data)
+	return makeDecodeErrorList(expected, found)
+}
+
 
 // as_string decoder implementation
 func decodeAsString(data *object, resultType *checker.Result) *object {
 	// For Dynamic objects, check the raw value type
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
-			expected := "Str"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Str", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		if str, ok := data.raw.(string); ok {
@@ -305,9 +382,7 @@ func decodeAsString(data *object, resultType *checker.Result) *object {
 		return makeOk(data, resultType)
 	}
 	
-	expected := "Str"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Str", data)
 	return makeErr(decodeErrList, resultType)
 }
 
@@ -316,9 +391,7 @@ func decodeAsInt(data *object, resultType *checker.Result) *object {
 	// For Dynamic objects, check the raw value type
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
-			expected := "Int"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Int", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		if intVal, ok := data.raw.(int); ok {
@@ -338,9 +411,7 @@ func decodeAsInt(data *object, resultType *checker.Result) *object {
 		return makeOk(data, resultType)
 	}
 	
-	expected := "Int"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Int", data)
 	return makeErr(decodeErrList, resultType)
 }
 
@@ -349,9 +420,7 @@ func decodeAsFloat(data *object, resultType *checker.Result) *object {
 	// For Dynamic objects, check the raw value type
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
-			expected := "Float"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Float", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		if floatVal, ok := data.raw.(float64); ok {
@@ -365,9 +434,7 @@ func decodeAsFloat(data *object, resultType *checker.Result) *object {
 		return makeOk(data, resultType)
 	}
 	
-	expected := "Float"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Float", data)
 	return makeErr(decodeErrList, resultType)
 }
 
@@ -376,9 +443,7 @@ func decodeAsBool(data *object, resultType *checker.Result) *object {
 	// For Dynamic objects, check the raw value type
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
-			expected := "Bool"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Bool", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		if boolVal, ok := data.raw.(bool); ok {
@@ -388,9 +453,7 @@ func decodeAsBool(data *object, resultType *checker.Result) *object {
 		return makeOk(data, resultType)
 	}
 	
-	expected := "Bool"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Bool", data)
 	return makeErr(decodeErrList, resultType)
 }
 
@@ -427,9 +490,7 @@ func decodeAsList(elementDecoder *object, data *object, resultType *checker.Resu
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
 			// Null data - return error (use nullable(list(...)) for nullable lists)
-			expected := "Array"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Array", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		
@@ -440,9 +501,7 @@ func decodeAsList(elementDecoder *object, data *object, resultType *checker.Resu
 	}
 	
 	// Not array-like data
-	expected := "Array"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Array", data)
 	return makeErr(decodeErrList, resultType)
 }
 
@@ -495,9 +554,7 @@ func decodeAsMap(keyDecoder *object, valueDecoder *object, data *object, resultT
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
 			// Null data - return error (use nullable(map(...)) for nullable maps)
-			expected := "Object"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Object", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		
@@ -508,9 +565,7 @@ func decodeAsMap(keyDecoder *object, valueDecoder *object, data *object, resultT
 	}
 	
 	// Not object-like data
-	expected := "Object"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Object", data)
 	return makeErr(decodeErrList, resultType)
 }
 
@@ -608,9 +663,7 @@ func decodeAsField(fieldKey string, valueDecoder *object, data *object, resultTy
 	if data._type == checker.Dynamic {
 		if data.raw == nil {
 			// Null data - return error
-			expected := "Object"
-			found := "Void"
-			decodeErrList := makeDecodeErrorList(expected, found)
+			decodeErrList := makeDecodeErrorListFromData("Object", data)
 			return makeErr(decodeErrList, resultType)
 		}
 		
@@ -621,9 +674,7 @@ func decodeAsField(fieldKey string, valueDecoder *object, data *object, resultTy
 	}
 	
 	// Not object-like data
-	expected := "Object"
-	found := data._type.String()
-	decodeErrList := makeDecodeErrorList(expected, found)
+	decodeErrList := makeDecodeErrorListFromData("Object", data)
 	return makeErr(decodeErrList, resultType)
 }
 

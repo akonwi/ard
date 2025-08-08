@@ -135,7 +135,7 @@ func TestDecodeErrors(t *testing.T) {
 				match result {
 					err => {
 						let first_error = err.at(0)
-						first_error.expected == "Str" && first_error.found == "Dynamic"
+						first_error.expected == "Str" && first_error.found == "42"
 					}
 					ok(_) => false
 				}
@@ -169,7 +169,7 @@ func TestDecodeErrors(t *testing.T) {
 				match result {
 					err => {
 						let first_error = err.at(0)
-						first_error.expected == "Int" && first_error.found == "Void"
+						first_error.expected == "Int" && first_error.found == "null"
 					}
 					ok(_) => false
 				}
@@ -567,6 +567,98 @@ func TestDecodeField(t *testing.T) {
 				result.is_err()
 			`,
 			want: true,
+		},
+	})
+}
+
+func TestDecodeErrorToString(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "decode error implements to_str for readable error messages",
+			input: `
+				use ard/decode
+
+				let invalid_data = decode::any("\"hello\"")
+				let result = decode::run(invalid_data, decode::int)
+				match result {
+					ok => "unexpected success",
+					err => {
+						let first_error = err.at(0)
+						first_error.to_str()
+					}
+				}
+			`,
+			want: "Decode error: expected Int, found \"hello\"",
+		},
+		{
+			name: "decode error to_str includes path information",
+			input: `
+				use ard/decode
+
+				let data = decode::any("[\{\"value\": \"not_a_number\"\}]")
+				let result = decode::run(data, decode::list(decode::field("value", decode::int)))
+				match result {
+					ok => "unexpected success", 
+					err => {
+						let first_error = err.at(0)
+						first_error.to_str()
+					}
+				}
+			`,
+			want: "Decode error: expected Int, found \"not_a_number\" at [0].value",
+		},
+		{
+			name: "decode error shows enhanced array formatting for small arrays",
+			input: `
+				use ard/decode
+
+				let array_data = decode::any("[1, 2, 3]")
+				let result = decode::run(array_data, decode::string)
+				match result {
+					ok => "unexpected success",
+					err => {
+						let first_error = err.at(0)
+						first_error.to_str()
+					}
+				}
+			`,
+			want: "Decode error: expected Str, found [1, 2, 3]",
+		},
+
+		{
+			name: "decode error shows empty array formatting",
+			input: `
+				use ard/decode
+
+				let empty_array_data = decode::any("[]")
+				let result = decode::run(empty_array_data, decode::string)
+				match result {
+					ok => "unexpected success",
+					err => {
+						let first_error = err.at(0)
+						first_error.to_str()
+					}
+				}
+			`,
+			want: "Decode error: expected Str, found []",
+		},
+		{
+			name: "decode error handles complex values using premarshal consistently",
+			input: `
+				use ard/decode
+
+				// Test that premarshal handles all types consistently
+				let func_string_data = decode::any("\"Str -> Int\"")  // String that looks like a function type
+				let result = decode::run(func_string_data, decode::int)
+				match result {
+					ok => "unexpected success",
+					err => {
+						let first_error = err.at(0)
+						first_error.to_str()
+					}
+				}
+			`,
+			want: "Decode error: expected Int, found \"Str -> Int\"",
 		},
 	})
 }

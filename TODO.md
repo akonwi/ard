@@ -1,5 +1,7 @@
 ## TODO
 
+- [x] implement ToStr trait on `decode::Error` so that there's default formatting of errors
+- [ ] add `Float::from_int()` to cast ints to float
 - [ ] allow omitting nullable arguments in function calls
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
@@ -33,3 +35,5 @@
   }
   ```
 - [ ] private variables
+- [ ] equivalent of Gleam's `use`
+  - sugar to denest callbacks

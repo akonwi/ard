@@ -1112,6 +1112,28 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 		}
 		return async.EvalFiberMethod(subj, call, args)
 	}
+	// Special handling for decode::Error methods
+	if istruct == checker.DecodeErrorDef {
+		switch call.Name {
+		case "to_str":
+			structMap := subj.raw.(map[string]*object)
+			expected := structMap["expected"].raw.(string)
+			found := structMap["found"].raw.(string)
+			pathList := structMap["path"].raw.([]*object)
+			
+			pathStr := ""
+			if len(pathList) > 0 {
+				pathParts := make([]string, len(pathList))
+				for i, part := range pathList {
+					pathParts[i] = part.raw.(string)
+				}
+				pathStr = " at " + strings.Join(pathParts, ".")
+			}
+			
+			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
+			return &object{errorMsg, checker.Str}
+		}
+	}
 
 	sig, ok := istruct.Fields[call.Name]
 	if !ok {

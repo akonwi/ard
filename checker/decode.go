@@ -8,6 +8,11 @@ var DecodeErrorDef = &StructDef{
 		"expected": Str,
 		"found":    Str,
 		"path":     MakeList(Str),
+		"to_str": &FunctionDef{
+			Name:       "to_str",
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		},
 	},
 }
 
