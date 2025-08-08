@@ -660,6 +660,25 @@ func TestDecodeErrorToString(t *testing.T) {
 			`,
 			want: "Decode error: expected Int, found \"Str -> Int\"",
 		},
+		{
+			name: "decode error shows proper dot notation for nested paths",
+			input: `
+				use ard/decode
+
+				// Test more complex path with nested field access
+				let data = decode::any("[\{\"user\": \{\"profile\": \{\"age\": \"not_a_number\"\}\}\}]")
+				let result = decode::run(data, decode::list(decode::field("user", decode::field("profile", decode::field("age", decode::int)))))
+				match result {
+					ok => "unexpected success",
+					err => {
+						let first_error = err.at(0)
+						first_error.to_str()
+					}
+				}
+			`,
+			want: "Decode error: expected Int, found \"not_a_number\" at [0].user.profile.age",
+		},
+
 	})
 }
 

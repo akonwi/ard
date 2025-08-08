@@ -1123,11 +1123,23 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 			
 			pathStr := ""
 			if len(pathList) > 0 {
-				pathParts := make([]string, len(pathList))
+				var pathBuilder strings.Builder
 				for i, part := range pathList {
-					pathParts[i] = part.raw.(string)
+					partStr := part.raw.(string)
+					if i == 0 {
+						// First element: no leading dot
+						pathBuilder.WriteString(partStr)
+					} else {
+						// Subsequent elements: add dot only if not starting with bracket
+						if strings.HasPrefix(partStr, "[") {
+							pathBuilder.WriteString(partStr)
+						} else {
+							pathBuilder.WriteString(".")
+							pathBuilder.WriteString(partStr)
+						}
+					}
 				}
-				pathStr = " at " + strings.Join(pathParts, ".")
+				pathStr = " at " + pathBuilder.String()
 			}
 			
 			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
