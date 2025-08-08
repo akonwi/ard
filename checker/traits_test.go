@@ -120,7 +120,7 @@ func TestTraitsAsTypes(t *testing.T) {
 			display(Foo{})
 			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of ToString, got Foo"},
 			},
 		},
 		// {

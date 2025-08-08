@@ -598,7 +598,7 @@ func TestDecodeErrorToString(t *testing.T) {
 				let data = decode::any("[\{\"value\": \"not_a_number\"\}]")
 				let result = decode::run(data, decode::list(decode::field("value", decode::int)))
 				match result {
-					ok => "unexpected success", 
+					ok => "unexpected success",
 					err => {
 						let first_error = err.at(0)
 						first_error.to_str()
@@ -678,7 +678,6 @@ func TestDecodeErrorToString(t *testing.T) {
 			`,
 			want: "Decode error: expected Int, found \"not_a_number\" at [0].user.profile.age",
 		},
-
 	})
 }
 

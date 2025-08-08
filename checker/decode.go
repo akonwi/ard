@@ -14,12 +14,15 @@ var DecodeErrorDef = &StructDef{
 			ReturnType: Str,
 		},
 	},
+	Traits: []*Trait{
+		strMod.symbols["ToString"].Type.(*Trait),
+	},
 }
 
 // Dynamic type for external/untyped data
 type dynamicType struct{}
 
-func (d dynamicType) String() string { return "Dynamic" }
+func (d dynamicType) String() string       { return "Dynamic" }
 func (d dynamicType) get(name string) Type { return nil }
 func (d dynamicType) equal(other Type) bool {
 	_, ok := other.(*dynamicType)
@@ -102,11 +105,11 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
 			ReturnType: MakeResult(genericT, MakeList(DecodeErrorDef)),
 		}
-		
+
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name:       name,
+			Name: name,
 			Parameters: []Parameter{
-				{Name: "data", Type: Dynamic},      // Data comes first
+				{Name: "data", Type: Dynamic},        // Data comes first
 				{Name: "decoder", Type: decoderType}, // Decoder comes second
 			},
 			ReturnType: MakeResult(genericT, MakeList(DecodeErrorDef)), // Same T
@@ -128,13 +131,13 @@ func (pkg DecodePkg) Get(name string) Symbol {
 		// Nullable decoder returns Maybe<T>
 		maybeT := MakeMaybe(innerT)
 		nullableDecoder := &FunctionDef{
-			Name:       "NullableDecoder", 
+			Name:       "NullableDecoder",
 			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
 			ReturnType: MakeResult(maybeT, MakeList(DecodeErrorDef)),
 		}
-		
+
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name: name,
+			Name:       name,
 			Parameters: []Parameter{{Name: "as", Type: innerDecoder}},
 			ReturnType: nullableDecoder,
 		}}
@@ -149,13 +152,13 @@ func (pkg DecodePkg) Get(name string) Symbol {
 		// List decoder returns [T]
 		listT := MakeList(innerT)
 		listDecoder := &FunctionDef{
-			Name:       "ListDecoder", 
+			Name:       "ListDecoder",
 			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
 			ReturnType: MakeResult(listT, MakeList(DecodeErrorDef)),
 		}
-		
+
 		return Symbol{Name: name, Type: &FunctionDef{
-			Name: name,
+			Name:       name,
 			Parameters: []Parameter{{Name: "as", Type: innerDecoder}},
 			ReturnType: listDecoder,
 		}}
@@ -176,11 +179,11 @@ func (pkg DecodePkg) Get(name string) Symbol {
 		// Map decoder returns [K:V] (map with K keys and V values)
 		mapT := MakeMap(keyT, valueT)
 		mapDecoder := &FunctionDef{
-			Name:       "MapDecoder", 
+			Name:       "MapDecoder",
 			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
 			ReturnType: MakeResult(mapT, MakeList(DecodeErrorDef)),
 		}
-		
+
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name: name,
 			Parameters: []Parameter{
@@ -197,14 +200,14 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
 			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
 		}
-		
-		// Field decoder returns same type as inner value decoder  
+
+		// Field decoder returns same type as inner value decoder
 		fieldDecoder := &FunctionDef{
 			Name:       "FieldDecoder",
 			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
 			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
 		}
-		
+
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name: name,
 			Parameters: []Parameter{

@@ -308,7 +308,11 @@ func (c *checker) resolveStaticPath(expr ast.Expression) (Module, string) {
 }
 
 func typeMismatch(expected, got Type) string {
-	return fmt.Sprintf("Type mismatch: Expected %s, got %s", expected, got)
+	exMsg := expected.String()
+	if _, isTrait := expected.(*Trait); isTrait {
+		exMsg = "implementation of " + exMsg
+	}
+	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, got)
 }
 
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
@@ -1197,8 +1201,9 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				if cx == nil {
 					return nil
 				}
-				if !cx.Type().hasTrait(strMod.Get("ToString").Type.(*Trait)) {
-					c.addError(typeMismatch(Str, cx.Type()), s.Chunks[i].GetLocation())
+				toStringTrait := strMod.Get("ToString").Type.(*Trait)
+				if !cx.Type().hasTrait(toStringTrait) {
+					c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
 					return nil
 				}
 				chunks[i] = cx
@@ -2727,8 +2732,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 
 			if c.scope.getReturnType() == nil {
-			c.addError("The `try` keyword can only be used in a function body", s.GetLocation())
-			return nil
+				c.addError("The `try` keyword can only be used in a function body", s.GetLocation())
+				return nil
 			}
 
 			var catchBlock []Statement
@@ -2763,7 +2768,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					if !blockType.equal(returnType) {
 						c.addError(typeMismatch(returnType, blockType), s.GetLocation())
 					}
-					
+
 					// With catch clause, try returns the unwrapped value type on success
 					// On error, it early returns with the catch block result
 					return &TryOp{
@@ -3094,14 +3099,14 @@ func (c *checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			if len(expectedType.Parameters) != len(actualFn.Parameters) {
 				return fmt.Errorf("parameter count mismatch")
 			}
-			
+
 			// Unify parameters
 			for i, expectedParam := range expectedType.Parameters {
 				if err := c.unifyTypes(expectedParam.Type, actualFn.Parameters[i].Type, genericScope); err != nil {
 					return err
 				}
 			}
-			
+
 			// Unify return types
 			return c.unifyTypes(expectedType.ReturnType, actualFn.ReturnType, genericScope)
 		}
