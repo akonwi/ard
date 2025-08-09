@@ -1,15 +1,28 @@
+use ard/decode
 use ard/io
 use ard/sqlite
+
+struct Player {
+  id: Int,
+  name: Str,
+  number: Int,
+}
+
+fn decode_player(data: decode::Dynamic) Player![decode::Error] {
+  let id = try decode::run(data, decode::field("id", decode::int))
+  let name = try decode::run(data, decode::field("name", decode::string))
+  let number = try decode::run(data, decode::field("number", decode::int))
+
+  Result::ok(Player{
+    id: id,
+    name: name,
+    number: number,
+  })
+}
 
 fn main() {
   let db = sqlite::open("./db.sqlite").expect("Failed to open database")
   db.exec("create table if not exists players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
-
-  struct Player {
-    id: Int,
-    name: Str,
-    number: Int,
-  }
 
   db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
   db.insert("players", Player{ id: 2, name: "James Reece", number: 2 })
@@ -29,7 +42,8 @@ fn main() {
   let high_numbers_exist = db.exists("players", "number = 23").expect("Failed to check existence")
   io::print("High numbered players exist: {high_numbers_exist}")
 
-  let twos = db.get<Player>("players", "number = 2").expect("Failed to get players")
+  let rows = db.query("select * from players where number = 2").expect("Failed to find players")
+  let twos = decode::run(rows, decode::list(decode_player)).expect("Failed to decode players")
   for player in twos {
     io::print("{player.name} is number {player.number}")
   }
