@@ -75,14 +75,23 @@ type checker struct {
 	program     *Program
 	filePath    string
 	halted      bool
+	ffiRegistry *FFIRegistry
 }
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	globalScope := makeScope(nil)
+	
+	// Get project root for FFI registry
+	projectRoot := "."
+	if moduleResolver != nil && moduleResolver.project != nil {
+		projectRoot = moduleResolver.project.RootPath
+	}
+	
 	c := &checker{
 		diagnostics: []Diagnostic{},
 		scope:       &globalScope,
 		filePath:    filePath,
+		ffiRegistry: NewFFIRegistry(projectRoot),
 	}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -2949,9 +2958,15 @@ func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunc
 	// Resolve return type
 	returnType := c.resolveType(def.ReturnType)
 
-	// Validate external binding format (basic validation)
+	// Validate external binding format and existence
 	if def.ExternalBinding == "" {
 		c.addError("External binding cannot be empty", def.GetLocation())
+		return nil
+	}
+	
+	// Validate that the external binding can be resolved and file exists
+	if err := c.ffiRegistry.ValidateBinding(def.ExternalBinding); err != nil {
+		c.addError(fmt.Sprintf("Invalid external binding: %s", err.Error()), def.GetLocation())
 		return nil
 	}
 

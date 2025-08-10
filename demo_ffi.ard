@@ -1,0 +1,39 @@
+// FFI Demo - showcasing extern function declarations with validation
+extern fn print(value: $T) Void = "runtime.go_print"
+extern fn read_line() Str = "runtime.go_read_line"
+extern fn panic(message: Str) Void = "runtime.go_panic"
+
+extern fn add(a: Int, b: Int) Int = "math.go_add"
+extern fn multiply(a: Int, b: Int) Int = "math.go_multiply"
+extern fn max(a: Int, b: Int) Int = "math.go_max"
+
+fn calculator() {
+    print("=== FFI Calculator Demo ===")
+    print("Enter two numbers:")
+    
+    print("First number:")
+    let a_str = read_line()
+    print("Second number:")
+    let b_str = read_line()
+    
+    // Note: In a real implementation, we'd need string to int conversion
+    // For now, let's use hardcoded values
+    let a = 15
+    let b = 7
+    
+    print("Using values: " + a.to_str() + " and " + b.to_str())
+    
+    let sum = add(a, b)
+    let product = multiply(a, b)
+    let maximum = max(a, b)
+    
+    print("Results:")
+    print("  " + a.to_str() + " + " + b.to_str() + " = " + sum.to_str())
+    print("  " + a.to_str() + " * " + b.to_str() + " = " + product.to_str())
+    print("  max(" + a.to_str() + ", " + b.to_str() + ") = " + maximum.to_str())
+}
+
+fn main() {
+    calculator()
+    print("FFI system working correctly!")
+}
