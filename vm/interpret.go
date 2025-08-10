@@ -716,7 +716,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 						result, broken := vm.evalBlock(e.CatchBlock, func() {
 							vm.scope.add(e.CatchVar, raw.raw)
 						})
-						
+
 						// Early return: the catch block's result becomes the function's return value
 						vm.scope.broken = true
 						if broken {
@@ -1120,7 +1120,7 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 			expected := structMap["expected"].raw.(string)
 			found := structMap["found"].raw.(string)
 			pathList := structMap["path"].raw.([]*object)
-			
+
 			pathStr := ""
 			if len(pathList) > 0 {
 				var pathBuilder strings.Builder
@@ -1141,7 +1141,7 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 				}
 				pathStr = " at " + pathBuilder.String()
 			}
-			
+
 			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
 			return &object{errorMsg, checker.Str}
 		}
@@ -1149,7 +1149,7 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 
 	var sig checker.Type
 	var ok bool
-	
+
 	// Check for methods first
 	if method, exists := istruct.Methods[call.Name]; exists {
 		sig = method
@@ -1158,7 +1158,7 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 		// Fall back to fields (for backward compatibility)
 		sig, ok = istruct.Fields[call.Name]
 	}
-	
+
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))
 	}
@@ -1197,7 +1197,7 @@ func (vm *VM) evalEnumMethod(self *object, method *checker.FunctionCall, enum *c
 				methodStrings := map[string]string{
 					"Get":   "GET",
 					"Post":  "POST",
-					"Put":   "PUT", 
+					"Put":   "PUT",
 					"Del":   "DELETE",
 					"Patch": "PATCH",
 				}

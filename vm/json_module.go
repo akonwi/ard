@@ -56,4 +56,3 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 func (m *JSONModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
 	panic(fmt.Errorf("Unimplemented: json::%s::%s()", structName, call.Name))
 }
-

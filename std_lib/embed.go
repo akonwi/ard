@@ -15,9 +15,9 @@ func Find(path string) ([]byte, error) {
 	if !strings.HasPrefix(path, "ard/") {
 		return nil, fmt.Errorf("invalid std_lib path: %s", path)
 	}
-	
+
 	moduleName := strings.TrimPrefix(path, "ard/")
 	fileName := fmt.Sprintf("%s.ard", moduleName)
-	
+
 	return embeddedFS.ReadFile(fileName)
 }

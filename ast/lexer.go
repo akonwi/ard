@@ -591,7 +591,7 @@ func (l *lexer) takeIdentifier() token {
 	case "type":
 		return makeKeyword(type_)
 	case "private":
-	return makeKeyword(private)
+		return makeKeyword(private)
 	default:
 		return makeIdentifier(identifier)
 	}

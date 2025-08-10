@@ -136,7 +136,7 @@ func TestResultTypeInSignature(t *testing.T) {
 			},
 		},
 		{
-			name: "Result sugar with list types",
+			name:  "Result sugar with list types",
 			input: `fn foo() [Int]!Str {}`,
 			output: Program{
 				Imports: []Import{},
@@ -154,7 +154,7 @@ func TestResultTypeInSignature(t *testing.T) {
 			},
 		},
 		{
-			name: "Result sugar with map types",
+			name:  "Result sugar with map types",
 			input: `fn foo() [Int:Str]!Bool {}`,
 			output: Program{
 				Imports: []Import{},

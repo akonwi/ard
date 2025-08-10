@@ -532,7 +532,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 			for _, columnName := range columns {
 				fieldObj := structFields[columnName]
 				placeholders = append(placeholders, "?")
-				
+
 				// Handle Maybe types
 				if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
 					if fieldObj.raw == nil {

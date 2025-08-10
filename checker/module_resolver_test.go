@@ -95,7 +95,7 @@ func TestResolveImportPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	opsPath := filepath.Join(mathDir, "operations.ard")
 	err = os.WriteFile(opsPath, []byte("// operations module"), 0644)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestResolveImportPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resolved, err := resolver.ResolveImportPath(tt.importPath)
-			
+
 			if tt.shouldErr {
 				if err == nil {
 					t.Errorf("Expected error but got none")

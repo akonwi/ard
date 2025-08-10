@@ -86,7 +86,7 @@ func (c Closure) eval(args ...*object) *object {
 		resultType := c.expr.ReturnType.(*checker.Result)
 		return c.builtinFn(data, resultType)
 	}
-	
+
 	// Handle regular Ard functions
 	res, _ := c.vm.evalBlock(c.expr.Body, func() {
 		for i := range args {
@@ -152,7 +152,7 @@ func (o *object) premarshal() any {
 		}
 		return rawMap
 	}
-	
+
 	if _, isMap := o._type.(*checker.Map); isMap {
 		m := o.raw.(map[string]*object)
 		rawMap := make(map[string]any)
@@ -161,6 +161,6 @@ func (o *object) premarshal() any {
 		}
 		return rawMap
 	}
-	
+
 	panic(fmt.Sprintf("Cannot marshall type: %T", o._type))
 }
