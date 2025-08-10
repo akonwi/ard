@@ -1101,7 +1101,22 @@ func (p *parser) try() (Expression, error) {
 			}
 		}
 
+		// Calculate the end location based on what we parsed
+		endLoc := expr.GetLocation().End
+		if len(catchBlock) > 0 {
+			// If we have a catch block, use the last statement's location
+			lastStmt := catchBlock[len(catchBlock)-1]
+			endLoc = lastStmt.GetLocation().End
+		} else if catchVar != nil {
+			// If we only have a catch variable, use its location
+			endLoc = catchVar.Location.End
+		}
+
 		return &Try{
+			Location: Location{
+				Start: keyword.Location.Start,
+				End:   endLoc,
+			},
 			keyword:    keyword,
 			Expression: expr,
 			CatchVar:   catchVar,

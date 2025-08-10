@@ -642,6 +642,7 @@ func (m MatchCase) String() string {
 }
 
 type Try struct {
+	Location
 	keyword    Identifier
 	Expression Expression
 	CatchVar   *Identifier // nil if no catch clause
@@ -653,7 +654,4 @@ func (t Try) String() string {
 		return fmt.Sprintf("try %s -> %s { ... }", t.Expression, t.CatchVar.Name)
 	}
 	return fmt.Sprintf("try %s", t.Expression)
-}
-func (t Try) GetLocation() Location {
-	return t.keyword.Location
 }
