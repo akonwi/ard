@@ -28,6 +28,10 @@ var HttpRequestDef = &StructDef{
 			Parameters: []Parameter{{Name: "name", Type: Str}},
 			ReturnType: Str,
 		},
+		"query_param": &FunctionDef{
+			Parameters: []Parameter{{Name: "name", Type: Str}},
+			ReturnType: Str,
+		},
 	},
 }
 

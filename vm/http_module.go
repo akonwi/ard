@@ -99,6 +99,10 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 						name := args[0].raw.(string)
 						return &object{r.PathValue(name), checker.Str}
 					}, checker.HttpRequestDef.Fields["path_param"]},
+					"query_param": {func(args ...*object) *object {
+						name := args[0].raw.(string)
+						return &object{r.URL.Query().Get(name), checker.Str}
+					}, checker.HttpRequestDef.Fields["query_param"]},
 				}
 
 				request := &object{requestMap, checker.HttpRequestDef}
