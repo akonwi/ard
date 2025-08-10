@@ -1,7 +1,5 @@
 ## TODO
 
-- [ ] refactor: checker.StructDef should have a separate array for methods
-  - everything in `fields` makes it difficult to distinguish between properties and methods
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] allow omitting nullable arguments in function calls
