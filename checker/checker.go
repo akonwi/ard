@@ -213,6 +213,8 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		baseType = Float
 	case *ast.BooleanType:
 		baseType = Bool
+	case *ast.VoidType:
+		baseType = Void
 
 	case *ast.FunctionType:
 		// Convert each parameter type and return type
@@ -1258,6 +1260,17 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Try different types for the function symbol
 			fnDef, ok = fnSym.Type.(*FunctionDef)
 			if !ok {
+				// Check if it's an external function
+				if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
+					// Convert ExternalFunctionDef to FunctionDef for type checking
+					fnDef = &FunctionDef{
+						Name:       extFnDef.Name,
+						Parameters: extFnDef.Parameters,
+						ReturnType: extFnDef.ReturnType,
+						Body:       nil, // External functions don't have bodies
+						Private:    extFnDef.Private,
+					}
+				} else {
 				//// technically, the below isn't possible anymore
 				// Check if it's a variable that holds a function
 				// if varDef, ok := fnSym.(*VariableDef); ok {
@@ -1276,6 +1289,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
 				return nil
 				// }
+				}
 			}
 
 			// Resolve named arguments to positional arguments (for expressions only)
@@ -2040,6 +2054,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.FunctionDeclaration:
 		return c.checkFunction(s, nil)
+	case *ast.ExternalFunction:
+		return c.checkExternalFunction(s)
 	case *ast.AnonymousFunction:
 		{
 			// Process parameters
@@ -2910,6 +2926,48 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 	}
 
 	return checked
+}
+
+func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunctionDef {
+	// Check for duplicate function names
+	if _, dup := c.scope.get(def.Name); dup {
+		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
+		return nil
+	}
+
+	// Process parameters
+	params := make([]Parameter, len(def.Parameters))
+	for i, param := range def.Parameters {
+		paramType := c.resolveType(param.Type)
+		params[i] = Parameter{
+			Name:    param.Name,
+			Type:    paramType,
+			Mutable: param.Mutable,
+		}
+	}
+
+	// Resolve return type
+	returnType := c.resolveType(def.ReturnType)
+
+	// Validate external binding format (basic validation)
+	if def.ExternalBinding == "" {
+		c.addError("External binding cannot be empty", def.GetLocation())
+		return nil
+	}
+
+	// Create external function definition
+	extFn := &ExternalFunctionDef{
+		Name:            def.Name,
+		Parameters:      params,
+		ReturnType:      returnType,
+		ExternalBinding: def.ExternalBinding,
+		Private:         def.Private,
+	}
+
+	// Add to scope
+	c.scope.add(def.Name, extFn, false)
+
+	return extFn
 }
 
 func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {

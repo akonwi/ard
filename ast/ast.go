@@ -147,6 +147,19 @@ func (v BooleanType) IsNullable() bool {
 	return v.nullable
 }
 
+type VoidType struct {
+	Location
+	nullable bool
+}
+
+func (v VoidType) GetName() string {
+	return "Void"
+}
+
+func (v VoidType) IsNullable() bool {
+	return v.nullable
+}
+
 type TypeDeclaration struct {
 	Location
 	Name    Identifier
@@ -280,6 +293,19 @@ type FunctionDeclaration struct {
 
 func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType.GetName())
+}
+
+type ExternalFunction struct {
+	Location
+	Name            string
+	Parameters      []Parameter
+	ReturnType      DeclaredType
+	ExternalBinding string
+	Private         bool
+}
+
+func (e ExternalFunction) String() string {
+	return fmt.Sprintf("extern fn %s(%v) %s = %q", e.Name, e.Parameters, e.ReturnType.GetName(), e.ExternalBinding)
 }
 
 type StaticFunctionDeclaration struct {

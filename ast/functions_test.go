@@ -7,6 +7,26 @@ import (
 func TestFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{
+			name:  "Extern function",
+			input: `extern fn print(value: $T) Void = "runtime.go_print"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternalFunction{
+						Name: "print",
+						Parameters: []Parameter{
+							{
+								Name: "value",
+								Type: &GenericType{Name: "T"},
+							},
+						},
+						ReturnType:      &VoidType{},
+						ExternalBinding: "runtime.go_print",
+					},
+				},
+			},
+		},
+		{
 			name:  "Empty function",
 			input: `fn empty() {}`,
 			output: Program{
