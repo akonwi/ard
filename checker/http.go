@@ -19,6 +19,8 @@ var HttpRequestDef = &StructDef{
 		"url":     Str,
 		"headers": MakeMap(Str, Str),
 		"body":    MakeMaybe(Str),
+	},
+	Methods: map[string]*FunctionDef{
 		"path": &FunctionDef{
 			Name:       "path",
 			Parameters: []Parameter{},
@@ -48,6 +50,8 @@ var HttpResponseDef = &StructDef{
 		"status":  Int,
 		"headers": MakeMap(Str, Str),
 		"body":    Str,
+	},
+	Methods: map[string]*FunctionDef{
 		"is_ok": &FunctionDef{
 			Name:       "is_ok",
 			Parameters: []Parameter{},

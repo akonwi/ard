@@ -836,6 +836,7 @@ func (u Union) hasTrait(trait *Trait) bool {
 type StructDef struct {
 	Name    string
 	Fields  map[string]Type
+	Methods map[string]*FunctionDef
 	Self    string
 	Traits  []*Trait
 	Private bool
@@ -854,11 +855,15 @@ func (def StructDef) String() string {
 	return def.name()
 }
 func (def StructDef) get(name string) Type {
-	field, ok := def.Fields[name]
-	if !ok {
-		return nil
+	// Check data fields first
+	if field, ok := def.Fields[name]; ok {
+		return field
 	}
-	return field
+	// Check methods
+	if method, ok := def.Methods[name]; ok {
+		return method
+	}
+	return nil
 }
 func (def StructDef) equal(other Type) bool {
 	if otherDef, ok := other.(*StructDef); ok {
@@ -868,8 +873,16 @@ func (def StructDef) equal(other Type) bool {
 		if len(def.Fields) != len(otherDef.Fields) {
 			return false
 		}
+		if len(def.Methods) != len(otherDef.Methods) {
+			return false
+		}
 		for name, fieldType := range def.Fields {
 			if otherFieldType, ok := otherDef.Fields[name]; !ok || !fieldType.equal(otherFieldType) {
+				return false
+			}
+		}
+		for name, methodType := range def.Methods {
+			if otherMethodType, ok := otherDef.Methods[name]; !ok || !methodType.equal(otherMethodType) {
 				return false
 			}
 		}

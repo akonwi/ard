@@ -1147,7 +1147,18 @@ func (vm *VM) evalStructMethod(subj *object, call *checker.FunctionCall) *object
 		}
 	}
 
-	sig, ok := istruct.Fields[call.Name]
+	var sig checker.Type
+	var ok bool
+	
+	// Check for methods first
+	if method, exists := istruct.Methods[call.Name]; exists {
+		sig = method
+		ok = true
+	} else {
+		// Fall back to fields (for backward compatibility)
+		sig, ok = istruct.Fields[call.Name]
+	}
+	
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))
 	}

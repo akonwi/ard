@@ -462,7 +462,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				})
 				fnDef.Mutates = method.Mutates
 				// add the method to the struct
-				structType.Fields[method.Name] = fnDef
+				structType.Methods[method.Name] = fnDef
 			}
 
 			// Check if all required methods are implemented
@@ -872,6 +872,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			def := &StructDef{
 				Name:    s.Name.Name,
 				Fields:  make(map[string]Type),
+				Methods: make(map[string]*FunctionDef),
 				Private: s.Private,
 				Statics: map[string]*FunctionDef{},
 			}
@@ -909,7 +910,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					c.scope.add("@", structDef, method.Mutates)
 				})
 				fnDef.Mutates = method.Mutates
-				structDef.Fields[method.Name] = fnDef
+				structDef.Methods[method.Name] = fnDef
 			}
 			return nil
 		}
@@ -1154,11 +1155,9 @@ func (c *checker) validateStructInstance(structType *StructDef, properties []ast
 	// Check for missing required fields
 	missing := []string{}
 	for name, t := range structType.Fields {
-		if _, isMethod := t.(*FunctionDef); !isMethod {
-			if _, exists := fields[name]; !exists {
-				if _, isMaybe := t.(*Maybe); !isMaybe {
-					missing = append(missing, name)
-				}
+		if _, exists := fields[name]; !exists {
+			if _, isMaybe := t.(*Maybe); !isMaybe {
+				missing = append(missing, name)
 			}
 		}
 	}

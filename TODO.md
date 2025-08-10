@@ -1,5 +1,9 @@
 ## TODO
 
+- [ ] refactor: checker.StructDef should have a separate array for methods
+  - everything in `fields` makes it difficult to distinguish between properties and methods
+- [ ] in ard/sqlite, implement prepared statements
+  - needs API design
 - [ ] allow omitting nullable arguments in function calls
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
@@ -10,10 +14,14 @@
   - sort of like gleam
   - #external attribute on functions with external fn name
   - look for ffi defs in `./ffi` folder
-  - only allow primitives across boundaries
   - all FFI functions must return `Result<$V, Str>`
+- [ ] introduce `ard/encode` package for marshalling into various formats
+  - accept something and stringify as JSON `fn json(any: $A) Str!Error`
+    - support options like casing for object keys; snake_case|kebab-case|pascalCase
+  - probably replaces the `ard/json` package
+- [ ] `try` on Maybe types
+- [ ] support handling fiber panics
 - [ ] infer types in anonymous functions
-- [ ] `Maybe.expect()` for panic shorthands
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] eloquent relative conditions

@@ -1,8 +1,9 @@
 package checker
 
 var DatabaseDef = &StructDef{
-	Name: "Database",
-	Fields: map[string]Type{
+	Name:    "Database",
+	Fields:  map[string]Type{},
+	Methods: map[string]*FunctionDef{
 		"close": &FunctionDef{
 			Name:       "close",
 			Parameters: []Parameter{},

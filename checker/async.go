@@ -1,8 +1,9 @@
 package checker
 
 var Fiber = &StructDef{
-	Name: "Fiber",
-	Fields: map[string]Type{
+	Name:   "Fiber",
+	Fields: map[string]Type{},
+	Methods: map[string]*FunctionDef{
 		"join": &FunctionDef{
 			Name:       "join",
 			Parameters: []Parameter{},
