@@ -13,15 +13,18 @@ type VM struct {
 	result         object
 	imports        map[string]checker.Module
 	moduleRegistry *ModuleRegistry
+	ffiRegistry    *RuntimeFFIRegistry
 }
 
 func New(imports map[string]checker.Module) *VM {
 	vm := &VM{
 		scope:          newScope(nil),
 		moduleRegistry: NewModuleRegistry(),
+		ffiRegistry:    NewRuntimeFFIRegistry(),
 		imports:        imports,
 	}
 	vm.initModuleRegistry()
+	vm.initFFIRegistry()
 	return vm
 }
 
@@ -57,6 +60,13 @@ func (vm *VM) initModuleRegistry() {
 	}
 }
 
+func (vm *VM) initFFIRegistry() {
+	// Register builtin FFI functions
+	if err := vm.ffiRegistry.RegisterBuiltinFFIFunctions(); err != nil {
+		panic(fmt.Errorf("failed to initialize FFI registry: %w", err))
+	}
+}
+
 func (vm *VM) pushScope() {
 	vm.scope = newScope(vm.scope)
 }
@@ -79,6 +89,12 @@ type Closure struct {
 	builtinFn func(*object, *checker.Result) *object // for built-in decoder functions
 }
 
+type ExternalFunctionWrapper struct {
+	vm      *VM
+	binding string
+	def     checker.ExternalFunctionDef
+}
+
 func (c Closure) eval(args ...*object) *object {
 	// Handle built-in functions
 	if c.builtinFn != nil {
@@ -94,6 +110,15 @@ func (c Closure) eval(args ...*object) *object {
 		}
 	})
 	return res
+}
+
+func (e ExternalFunctionWrapper) eval(args ...*object) *object {
+	// Call the external function through the FFI registry
+	result, err := e.vm.ffiRegistry.Call(e.vm, e.binding, args, e.def.ReturnType)
+	if err != nil {
+		panic(fmt.Errorf("FFI call failed for %s: %w", e.binding, err))
+	}
+	return result
 }
 
 func (c Closure) Type() checker.Type {

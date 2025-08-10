@@ -440,6 +440,18 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			vm.scope.add(e.Name, obj)
 		}
 		return obj
+	case *checker.ExternalFunctionDef:
+		// Create an external function wrapper
+		extFn := &ExternalFunctionWrapper{
+			vm:      vm,
+			binding: e.ExternalBinding,
+			def:     *e,
+		}
+		obj := &object{extFn, e}
+		if e.Name != "" {
+			vm.scope.add(e.Name, obj)
+		}
+		return obj
 	case *checker.Panic:
 		msg := vm.eval(e.Message)
 		panic(fmt.Sprintf("panic at %s:\n%s", e.GetLocation().Start, msg.raw))
@@ -766,22 +778,38 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*object) *ob
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s", call.Name))
 	}
-	closure, ok := sig.raw.(*Closure)
-	if !ok {
-		panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig._type))
-	}
 
-	args := _args
-	// if no args are provided but the function has parameters, use the call.Args
-	if len(args) == 0 && len(sig._type.(*checker.FunctionDef).Parameters) > 0 {
-		args = make([]*object, len(call.Args))
+	// Check if it's a regular closure
+	if closure, ok := sig.raw.(*Closure); ok {
+		args := _args
+		// if no args are provided but the function has parameters, use the call.Args
+		if len(args) == 0 && len(sig._type.(*checker.FunctionDef).Parameters) > 0 {
+			args = make([]*object, len(call.Args))
 
-		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
+			for i := range call.Args {
+				args[i] = vm.eval(call.Args[i])
+			}
 		}
+
+		return closure.eval(args...)
 	}
 
-	return closure.eval(args...)
+	// Check if it's an external function
+	if extFn, ok := sig.raw.(*ExternalFunctionWrapper); ok {
+		args := _args
+		// if no args are provided but the function has parameters, use the call.Args
+		if len(args) == 0 && len(extFn.def.Parameters) > 0 {
+			args = make([]*object, len(call.Args))
+
+			for i := range call.Args {
+				args[i] = vm.eval(call.Args[i])
+			}
+		}
+
+		return extFn.eval(args...)
+	}
+
+	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig._type))
 }
 
 func (vm *VM) evalBlock(block *checker.Block, init func()) (*object, bool) {
