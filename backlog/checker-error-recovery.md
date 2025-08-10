@@ -5,7 +5,7 @@
 When the checker encounters an error, it typically calls `addError()` and returns `nil`. This causes cascading failures where:
 
 1. A function call with errors returns `nil`
-2. The variable assignment using that function call fails due to receiving `nil`  
+2. The variable assignment using that function call fails due to receiving `nil`
 3. Further references to that variable also fail since the variable wasn't properly initialized
 4. This creates a cascade of error messages for a single root issue
 
@@ -18,7 +18,7 @@ When the checker encounters an error, it typically calls `addError()` and return
 - **Solution**: Returns `&Any{name: "unknown"}` instead of `nil`
 - **Impact**: Prevents cascading failures in all type-dependent code
 
-**2. Invalid Float Literals (`checkExpr`)** - ✅ FIXED  
+**2. Invalid Float Literals (`checkExpr`)** - ✅ FIXED
 - **Location**: `checker.go:1184-1185`
 - **Solution**: Returns `&FloatLiteral{Value: 0.0}` instead of `nil`
 - **Impact**: Allows expressions using bad floats to continue processing
@@ -162,7 +162,7 @@ return nil
 - **Current**: Returns `nil` when field type can't be resolved
 - **Suggested**: Continue with `Any` type for failed fields
 
-**6. Duplicate Field Names** - TODO  
+**6. Duplicate Field Names** - TODO
 - **Location**: `checker.go:886-887` (in `checkStmt`)
 - **Current**: Returns `nil` for entire struct
 - **Suggested**: Skip duplicate field, continue with struct processing
@@ -185,7 +185,7 @@ return nil
 - **Suggested**: Skip this trait impl, continue with others
 
 **10. Undefined Trait** - TODO
-- **Location**: `checker.go:387-388` 
+- **Location**: `checker.go:387-388`
 - **Current**: Returns `nil` when trait doesn't exist
 - **Suggested**: Could halt (critical) or skip trait impl
 
@@ -196,7 +196,7 @@ return nil
 
 **12. Undefined Type for Trait** - TODO
 - **Location**: `checker.go:400-401`
-- **Current**: Returns `nil` when target type doesn't exist  
+- **Current**: Returns `nil` when target type doesn't exist
 - **Suggested**: Could halt (critical) or skip trait impl
 
 **13. Not a Struct Type for Trait** - TODO
@@ -212,7 +212,7 @@ For **recoverable errors** (type mismatches, parsing issues):
 - Continue processing to find more errors
 - Examples: `&Any{name: "unknown"}`, `&FloatLiteral{Value: 0.0}`, `&StrLiteral{"<error>"}`
 
-### ✅ Critical Error Halting Pattern  
+### ✅ Critical Error Halting Pattern
 For **critical errors** (fundamental missing dependencies):
 - Set `c.halted = true`
 - Add halted checks to `checkExpr()` and `checkStmt()`
