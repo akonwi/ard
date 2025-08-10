@@ -267,7 +267,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			}
 		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
-		return nil
+		return &Any{name: "unknown"}
 	case *ast.GenericType:
 		return &Any{name: ty.Name}
 	default:
@@ -316,6 +316,9 @@ func typeMismatch(expected, got Type) string {
 }
 
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
+	if c.halted {
+		return nil
+	}
 	switch s := (*stmt).(type) {
 	case *ast.Comment:
 		return nil
@@ -1171,6 +1174,9 @@ func (c *checker) validateStructInstance(structType *StructDef, properties []ast
 }
 
 func (c *checker) checkExpr(expr ast.Expression) Expression {
+	if c.halted {
+		return nil
+	}
 	switch s := (expr).(type) {
 	case *ast.StrLiteral:
 		return &StrLiteral{s.Value}
@@ -1182,7 +1188,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				value, err := strconv.ParseFloat(s.Value, 64)
 				if err != nil {
 					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
-					return nil
+					return &FloatLiteral{Value: 0.0}
 				}
 				return &FloatLiteral{Value: value}
 			}
@@ -1198,12 +1204,16 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			for i := range s.Chunks {
 				cx := c.checkExpr(s.Chunks[i])
 				if cx == nil {
-					return nil
+					// Replace failed chunk with placeholder
+					chunks[i] = &StrLiteral{"<error>"}
+					continue
 				}
 				toStringTrait := strMod.Get("ToString").Type.(*Trait)
 				if !cx.Type().hasTrait(toStringTrait) {
 					c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
-					return nil
+					// Replace chunk that can't be converted to string with placeholder
+					chunks[i] = &StrLiteral{"<error>"}
+					continue
 				}
 				chunks[i] = cx
 			}
@@ -1214,6 +1224,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return &Variable{*sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
+		c.halted = true
 		return nil
 	case *ast.FunctionCall:
 		{

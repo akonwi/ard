@@ -2,7 +2,7 @@
 
 - [ ] when a diagnostic error is encountered, don't skip current statement. 2 options:
   - return a complete node with void where necessary
-  - halt (c.halted = true) if it's a critical error and prevent cascades
+  - halt (c.halted = true) if it's a critical error to prevent cascading it
 - [ ] ffi
   - sort of like gleam
   - this needs to work in stdlib so that more of it can be written as Ard with FFI to the runtime
