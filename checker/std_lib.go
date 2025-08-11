@@ -197,40 +197,6 @@ func (pkg IntPkg) Get(name string) Symbol {
 
 
 
-/* ard/io - Legacy test stub */
-type IoPkg struct{}
-
-func (pkg IoPkg) Path() string {
-	return "ard/io"
-}
-
-func (pkg IoPkg) Program() *Program {
-	return nil
-}
-func (pkg IoPkg) Get(name string) Symbol {
-	switch name {
-	case "print":
-		fn := &FunctionDef{
-			Name: name,
-			Parameters: []Parameter{
-				{Name: "string", Type: strMod.symbols["ToString"].Type},
-			},
-			ReturnType: Void,
-		}
-		return Symbol{Name: name, Type: fn}
-	case "read_line":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{},
-				ReturnType: MakeResult(Str, Str),
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
 
 /* ard/list */
 

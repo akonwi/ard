@@ -81,17 +81,26 @@ type checker struct {
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	globalScope := makeScope(nil)
 	
-	// Get project root for FFI registry
-	projectRoot := "."
-	if moduleResolver != nil && moduleResolver.project != nil {
-		projectRoot = moduleResolver.project.RootPath
+	// Create FFI registry only for non-embedded modules
+	var ffiRegistry *FFIRegistry
+	if moduleResolver != nil {
+		// User module - create FFI registry with project root
+		projectRoot := "."
+		if moduleResolver.project != nil {
+			projectRoot = moduleResolver.project.RootPath
+		}
+		ffiRegistry = NewFFIRegistry(projectRoot)
+	} else if !strings.HasPrefix(filePath, "ard/") {
+		// Main program without module resolver - create FFI registry
+		ffiRegistry = NewFFIRegistry(".")
 	}
+	// For embedded modules (filePath starts with "ard/"), ffiRegistry remains nil
 	
 	c := &checker{
 		diagnostics: []Diagnostic{},
 		scope:       &globalScope,
 		filePath:    filePath,
-		ffiRegistry: NewFFIRegistry(projectRoot),
+		ffiRegistry: ffiRegistry,
 	}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -171,7 +180,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 	}
 
 	// Create UserModule from the checked program
-	userModule := NewUserModule("", c.program, c.scope)
+	userModule := NewUserModule(filePath, c.program, c.scope)
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
