@@ -8,7 +8,8 @@ import (
 )
 
 // FFIFunc represents the uniform signature for all FFI functions
-type FFIFunc func(args []*object) (*object, error)
+// Now includes VM access for calling instance methods and other VM operations
+type FFIFunc func(vm *VM, args []*object) (*object, error)
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {
@@ -48,8 +49,8 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 		return nil, fmt.Errorf("FFI function not found: %s", binding)
 	}
 
-	// Direct call - no reflection needed!
-	return fn(args)
+	// Direct call with VM access - no reflection needed!
+	return fn(vm, args)
 }
 
 // RegisterBuiltinFFIFunctions registers the standard FFI functions

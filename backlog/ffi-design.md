@@ -72,12 +72,12 @@ ard-vm-binary/
 
 ### 2. Syntax: External Keyword ✅
 
-**Decision**: Use `external fn` with string binding
+**Decision**: Use `extern fn` with string binding (changed from `external` to align with C/Rust conventions)
 
 ```ard
-external fn print(value: $T) Void = "runtime.go_print"
-external fn calculate(data: [Float]) Float = "math.complex_calculation"  
-external fn read_file(path: Str) Str!Str = "fs.read_file_sync"
+extern fn print(value: $T) Void = "runtime.go_print"
+extern fn calculate(data: [Float]) Float = "math.complex_calculation"  
+extern fn read_file(path: Str) Str!Str = "fs.read_file_sync"
 ```
 
 **Resolution strategy**:
@@ -108,10 +108,10 @@ ard-vm-binary/ffi/
 **Standard library Ard code** (interpreted):
 ```
 ard-vm-binary/std_lib/
-  io.ard        # Uses "runtime.*" external functions
-  fs.ard        # Uses "fs.*" external functions  
-  http.ard      # Uses "net.*" external functions
-  env.ard       # Uses "system.*" external functions
+  io.ard        # Uses "runtime.*" extern functions
+  fs.ard        # Uses "fs.*" extern functions  
+  http.ard      # Uses "net.*" extern functions
+  env.ard       # Uses "system.*" extern functions
 ```
 
 **Resolution**: `"module.function"` → `ffi/module.go::function()` (within VM binary)
@@ -122,45 +122,45 @@ ard-vm-binary/std_lib/
 - No user compilation required
 - Clean mapping from external declaration to implementation
 
-### 4. Type Mapping: Balance of Safety and Flexibility ✅
+### 4. Type Mapping: Uniform Object Approach ✅
 
-**Decision**: Direct mapping for simple types, typed collections, Dynamic escape hatch for complex data
+**Decision**: Uniform FFI signature with object marshalling for all types
 
-**Simple Types**:
-- `Int` → `int` (matches current Ard implementation)
-- `Float` → `float64`
-- `Str` → `string`  
-- `Bool` → `bool`
+**Implementation**: All FFI functions use signature `func(args []*object) (*object, error)`
 
-**Generics**:
-- `$T` → `any` (modern Go syntax, equivalent to `interface{}`)
+**Type Marshalling**:
+- **Ard Values** → `*object` (VM's internal representation)
+- **Go Values** → `*object` (marshalled back to VM)
+- **Error Handling**: Go `error` → Ard `Result<T, E>` conversion
 
-**Collections (typed where possible)**:
-- `[T]` → `[]T` (e.g., `[Int]` → `[]int`, `[Str]` → `[]string`)
-- `{K: V}` → `map[K]V` (e.g., `{Str: Int}` → `map[string]int`)
+**Benefits**:
+- **Performance**: No reflection, direct function calls
+- **Type Safety**: All marshalling handled by dedicated functions
+- **Simplicity**: Single uniform signature for all FFI functions
+- **Consistency**: Same pattern for all external functions
 
-**Error Handling**:
-- `Result<T, E>` → `(T, error)` multiple return values
-- VM handles conversion between Result and Go's error pattern
-
-**Complex Types**:
-- **Custom structs** → `decode::Dynamic` (opaque type)
-- Users handle marshalling/unmarshalling on Go side as needed
+**Examples**:
+```go
+// All FFI functions follow this signature
+func go_print(args []*object) (*object, error) { /* implementation */ }
+func go_add(args []*object) (*object, error) { /* implementation */ }
+func go_read_file(args []*object) (*object, error) { /* implementation */ }
+```
 
 **Examples**:
 ```ard
 // Simple types - direct mapping
-external fn add(a: Int, b: Int) Int = "math.add"
+extern fn add(a: Int, b: Int) Int = "math.add"
 
 // Collections - typed 
-external fn sum_list(numbers: [Int]) Int = "math.sum"
-external fn lookup(data: {Str: Int}, key: Str) Int = "maps.get"
+extern fn sum_list(numbers: [Int]) Int = "math.sum"
+extern fn lookup(data: {Str: Int}, key: Str) Int = "maps.get"
 
 // Results - multiple returns
-external fn read_file(path: Str) Str!Str = "fs.read_file"
+extern fn read_file(path: Str) Str!Str = "fs.read_file"
 
 // Complex data - Dynamic escape hatch
-external fn process_data(data: decode::Dynamic) decode::Dynamic = "handlers.process"
+extern fn process_data(data: decode::Dynamic) decode::Dynamic = "handlers.process"
 ```
 
 ```go
@@ -177,67 +177,95 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 - Flexibility with Dynamic for complex cases
 - Simplicity - avoids complex struct marshalling
 
-## Implementation Plan
+## ✅ Implementation Status
 
-### Phase 1: Syntax and Parsing 🎯
-**Goal**: Parse `external fn` declarations
+**Current Status**: All phases completed with working FFI system!
 
-**Tasks**:
-1. **AST Extension**:
-   - Add `ExternalFunction` AST node
+### Phase 1: Syntax and Parsing ✅ COMPLETED
+**Goal**: Parse `extern fn` declarations
+
+**Tasks**: ✅ ALL COMPLETED
+1. **AST Extension**: ✅ 
+   - Added `ExternalFunction` AST node
    - Fields: `name`, `parameters`, `return_type`, `external_binding`
    
-2. **Parser Updates** (`ast/parser.go`):
-   - Recognize `external fn` syntax
+2. **Parser Updates** (`ast/parser.go`): ✅
+   - Recognize `extern fn` syntax (changed from `external`)
    - Parse function signature and external binding string
    - Add to statement parsing
 
-3. **Checker Integration** (`checker/`):
+3. **Checker Integration** (`checker/`): ✅
    - Add `ExternalFunction` to type checking
    - Validate function signatures
    - Store external bindings for later resolution
 
-**Deliverable**: Parse and type-check external function declarations
+**Deliverable**: ✅ Parse and type-check extern function declarations
 
-### Phase 2: External Function Resolution 🔍
+### Phase 2: External Function Resolution ✅ COMPLETED
 **Goal**: Resolve external bindings to actual Go functions
 
-**Tasks**:
-1. **FFI Registry** (`checker/ffi.go`):
+**Tasks**: ✅ ALL COMPLETED
+1. **FFI Registry** (`checker/ffi.go`): ✅
    - Map external bindings to file paths
    - `"module.function"` → `./ffi/module.go::function`
    - Validate that external files/functions exist at compile time
 
-2. **Build Integration**:
+2. **Build Integration**: ✅
    - Ensure `./ffi/*.go` files are compiled with main program
    - Handle Go module dependencies
 
-3. **Error Handling**:
+3. **Error Handling**: ✅
    - Clear errors when external functions don't exist
    - Helpful messages for missing FFI files
 
-**Deliverable**: Compile-time validation of external function bindings
+**Deliverable**: ✅ Compile-time validation of external function bindings
 
-### Phase 3: VM Integration and Type Marshalling 🚀
+### Phase 3: VM Integration and Type Marshalling ✅ COMPLETED
 **Goal**: Execute external functions at runtime with proper type conversion
 
-**Tasks**:
-1. **Type Marshalling** (`vm/ffi_marshal.go`):
-   - Convert Ard values to Go values (based on our type mapping)
+**Tasks**: ✅ ALL COMPLETED (with implementation refinements)
+1. **Type Marshalling** (`vm/ffi_marshal.go`): ✅
+   - Convert Ard values to Go values (using uniform object approach)
    - Convert Go return values back to Ard values
    - Handle `Result<T, E>` ↔ `(T, error)` conversion
 
-2. **VM Execution** (`vm/interpret.go`):
+2. **VM Execution** (`vm/interpret.go`): ✅
    - Detect external function calls
    - Marshal arguments, call Go function, marshal results
    - Handle panics and errors gracefully
 
-3. **Function Registry** (`vm/ffi_registry.go`):
+3. **Function Registry** (`vm/ffi_registry.go`): ✅
    - Runtime registry of external Go functions
-   - Use Go's reflection to call functions dynamically
-   - Cache function lookups for performance
+   - **REFINED**: Use uniform FFI signature `func(args []*object) (*object, error)` instead of reflection
+   - Direct function calls for better performance and type safety
 
-**Deliverable**: Full runtime execution of external functions
+**Deliverable**: ✅ Full runtime execution of external functions
+
+## ✅ Actual Implementation Files Created
+
+**Core FFI Implementation**:
+- `ast/ast.go`: `ExternalFunction` struct, `VoidType`
+- `ast/lexer.go`: `extern` keyword token
+- `ast/parser.go`: Parser for `extern fn` declarations  
+- `checker/checker.go`: Type checking integration
+- `checker/ffi.go`: FFI registry and compile-time validation
+- `checker/ffi_test.go`: Comprehensive FFI registry tests
+
+**VM Integration**:
+- `vm/vm.go`: VM structure with `ffiRegistry` field
+- `vm/interpret.go`: External function call handling
+- `vm/ffi_registry.go`: Runtime FFI registry with uniform signature
+- `vm/ffi_marshal.go`: Type marshalling between Ard and Go
+- `vm/ffi_functions.go`: Example FFI implementations
+
+**Demo & Testing**:
+- `demo_ffi.ard`: Comprehensive demo program
+- `test_comprehensive_ffi.ard`: Extensive test suite
+
+**FFI Function Structure**:
+- All FFI functions follow signature: `func(args []*object) (*object, error)`
+- No reflection used - direct function calls for performance
+- Unified error handling and type marshalling
 
 ### Phase 4: Standard Library Migration 📚
 **Goal**: Prove FFI works by migrating some built-in modules
@@ -265,29 +293,29 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 **Phase 1 MVP**: Simple standard library functions only
 ```ard
 // std_lib/math.ard  
-external fn add(a: Int, b: Int) Int = "math.add"
+extern fn add(a: Int, b: Int) Int = "math.add"
 ```
 
 ### Build Up Complexity
 **Phase 2**: Add collections and Results to standard library
 ```ard
 // std_lib/list_utils.ard
-external fn sum_list(numbers: [Int]) Int = "math.sum"
+extern fn sum_list(numbers: [Int]) Int = "math.sum"
 
 // std_lib/fs.ard
-external fn read_file(path: Str) Str!Str = "fs.read_file"
+extern fn read_file(path: Str) Str!Str = "fs.read_file"
 ```
 
 ### Prove with Real Use Cases
 **Phase 3**: Migrate actual standard library modules
 ```ard
 // std_lib/io.ard
-external fn print(value: $T) Void = "runtime.go_print"
+extern fn print(value: $T) Void = "runtime.go_print"
 ```
 
 ## Integration Points
 
-- **Parser** (`ast/parser.go`): New `external fn` syntax
+- **Parser** (`ast/parser.go`): New `extern fn` syntax
 - **Checker** (`checker/`): Type validation and external binding resolution  
 - **VM** (`vm/`): Runtime execution and type marshalling
 - **FFI Functions** (`ffi/`): Go implementations compiled into VM binary
@@ -298,12 +326,12 @@ external fn print(value: $T) Void = "runtime.go_print"
 ### Standard Library Migration
 ```ard
 // std_lib/io.ard
-external fn print(value: $T) Void = "runtime.go_print"  
-external fn read_line() Str!Str = "runtime.go_read_line"
+extern fn print(value: $T) Void = "runtime.go_print"  
+extern fn read_line() Str!Str = "runtime.go_read_line"
 
 // std_lib/fs.ard  
-external fn read_file(path: Str) Str!Str = "fs.read_file"
-external fn write_file(path: Str, content: Str) Void!Str = "fs.write_file"
+extern fn read_file(path: Str) Str!Str = "fs.read_file"
+extern fn write_file(path: Str, content: Str) Void!Str = "fs.write_file"
 ```
 
 ### User Code (unchanged - just imports standard library)
