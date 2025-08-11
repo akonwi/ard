@@ -93,3 +93,27 @@ func subtract(vm *VM, args []*object) (*object, error) {
 	result := a - b
 	return &object{raw: result, _type: checker.Int}, nil
 }
+
+// divide divides two integers (can return error for division by zero)
+func divide(vm *VM, args []*object) (*object, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("divide expects 2 arguments, got %d", len(args))
+	}
+
+	a, ok := args[0].raw.(int)
+	if !ok {
+		return nil, fmt.Errorf("divide expects int arguments, got %T for first argument", args[0].raw)
+	}
+
+	b, ok := args[1].raw.(int)
+	if !ok {
+		return nil, fmt.Errorf("divide expects int arguments, got %T for second argument", args[1].raw)
+	}
+
+	if b == 0 {
+		return nil, fmt.Errorf("division by zero")
+	}
+
+	result := a / b
+	return &object{raw: result, _type: checker.Int}, nil
+}

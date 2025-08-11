@@ -18,6 +18,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("math.subtract", subtract); err != nil {
 		return fmt.Errorf("failed to register math.subtract: %w", err)
 	}
+	if err := r.Register("math.divide", divide); err != nil {
+		return fmt.Errorf("failed to register math.divide: %w", err)
+	}
 	if err := r.Register("runtime.print", print); err != nil {
 		return fmt.Errorf("failed to register runtime.print: %w", err)
 	}

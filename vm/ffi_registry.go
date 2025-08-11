@@ -52,7 +52,21 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 	}
 
 	// Direct call with VM access - no reflection needed!
-	return fn(vm, args)
+	result, err := fn(vm, args)
+
+	// If the expected return type is a Result, translate Go error handling to Ard Result
+	if resultType, ok := returnType.(*checker.Result); ok {
+		if err != nil {
+			// Convert Go error to Ard Error result
+			errorObj := &object{raw: err.Error(), _type: checker.Str}
+			return makeErr(errorObj, resultType), nil
+		}
+		// Convert successful result to Ard Ok result
+		return makeOk(result, resultType), nil
+	}
+
+	// For non-Result return types, pass through Go error as-is
+	return result, err
 }
 
 // RegisterBuiltinFFIFunctions registers the standard FFI functions
