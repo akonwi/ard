@@ -48,14 +48,19 @@ func go_read_line(vm *VM, args []*object) (*object, error) {
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
 	
 	// Return Str!Str Result type like IOModule does
 	resultType := checker.MakeResult(checker.Str, checker.Str)
 	
-	if err := scanner.Err(); err != nil {
-		return makeErr(&object{err.Error(), checker.Str}, resultType), nil
+	if !scanner.Scan() {
+		// No more input available or EOF
+		if err := scanner.Err(); err != nil {
+			return makeErr(&object{err.Error(), checker.Str}, resultType), nil
+		}
+		// EOF - return empty string as ok result
+		return makeOk(&object{"", checker.Str}, resultType), nil
 	}
+	
 	return makeOk(&object{scanner.Text(), checker.Str}, resultType), nil
 }
 

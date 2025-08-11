@@ -1822,8 +1822,25 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
+					// Handle both regular functions and external functions
 					var ok bool
-					fnDef, ok = sym.Type.(*FunctionDef)
+					switch fn := sym.Type.(type) {
+					case *FunctionDef:
+						fnDef = fn
+						ok = true
+					case *ExternalFunctionDef:
+						// Convert ExternalFunctionDef to FunctionDef for validation
+						fnDef = &FunctionDef{
+							Name:       fn.Name,
+							Parameters: fn.Parameters,
+							ReturnType: fn.ReturnType,
+							Private:    fn.Private,
+						}
+						ok = true
+					default:
+						ok = false
+					}
+					
 					if !ok {
 						targetName := s.Target.String()
 						c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
@@ -2884,7 +2901,26 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return nil
 			}
 
-			fnDef, isFunc := sym.Type.(*FunctionDef)
+			// Handle both regular functions and external functions
+			var fnDef *FunctionDef
+			var isFunc bool
+			switch fn := sym.Type.(type) {
+			case *FunctionDef:
+				fnDef = fn
+				isFunc = true
+			case *ExternalFunctionDef:
+				// Convert ExternalFunctionDef to FunctionDef for validation
+				fnDef = &FunctionDef{
+					Name:       fn.Name,
+					Parameters: fn.Parameters,
+					ReturnType: fn.ReturnType,
+					Private:    fn.Private,
+				}
+				isFunc = true
+			default:
+				isFunc = false
+			}
+			
 			if !isFunc {
 				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
@@ -2965,9 +3001,12 @@ func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunc
 	}
 	
 	// Validate that the external binding can be resolved and file exists
-	if err := c.ffiRegistry.ValidateBinding(def.ExternalBinding); err != nil {
-		c.addError(fmt.Sprintf("Invalid external binding: %s", err.Error()), def.GetLocation())
-		return nil
+	// Skip validation for embedded modules (when ffiRegistry is nil)
+	if c.ffiRegistry != nil {
+		if err := c.ffiRegistry.ValidateBinding(def.ExternalBinding); err != nil {
+			c.addError(fmt.Sprintf("Invalid external binding: %s", err.Error()), def.GetLocation())
+			return nil
+		}
 	}
 
 	// Create external function definition

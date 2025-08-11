@@ -31,9 +31,15 @@ func (r *FFIRegistry) ResolveBinding(binding string) (filePath string, functionN
 	module := parts[0]
 	function := parts[1]
 	
-	// Map to file path: "runtime" -> "./ffi/runtime.go"
-	ffiDir := filepath.Join(r.projectRoot, "ffi")
-	filePath = filepath.Join(ffiDir, module+".go")
+	// Check if we're processing standard library modules
+	if filepath.Base(r.projectRoot) == "std_lib" {
+		// We're in standard library - FFI functions are in ../vm/ffi_functions.go
+		filePath = filepath.Join(filepath.Dir(r.projectRoot), "vm", "ffi_functions.go")
+	} else {
+		// We're in user project - FFI functions are in ffi/*.go structure
+		ffiDir := filepath.Join(r.projectRoot, "ffi")
+		filePath = filepath.Join(ffiDir, module+".go")
+	}
 	
 	return filePath, function, nil
 }

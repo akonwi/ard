@@ -38,6 +38,10 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 			if !s.Private {
 				publicSymbols[s.Name] = *sym
 			}
+		case *ExternalFunctionDef:
+			if !s.Private {
+				publicSymbols[s.Name] = *sym
+			}
 		case *StructDef:
 			if !s.Private {
 				publicSymbols[s.Name] = *sym

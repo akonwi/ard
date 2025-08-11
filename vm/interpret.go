@@ -486,6 +486,29 @@ func (vm *VM) eval(expr checker.Expression) *object {
 				return vm.moduleRegistry.Handle(e.Module, vm, e.Call)
 			}
 
+			// Check for embedded modules with external functions
+			if module, ok := vm.imports[e.Module]; ok {
+				if symbol := module.Get(e.Call.Name); !symbol.IsZero() {
+					// Check if this is an external function
+					if extFuncDef, ok := symbol.Type.(*checker.ExternalFunctionDef); ok {
+						// Create an ExternalFunctionWrapper and call it
+						wrapper := ExternalFunctionWrapper{
+							vm:      vm,
+							binding: extFuncDef.ExternalBinding,
+							def:     *extFuncDef,
+						}
+						
+						// Convert call arguments to objects
+						args := make([]*object, len(e.Call.Args))
+						for i, arg := range e.Call.Args {
+							args[i] = vm.eval(arg)
+						}
+						
+						return wrapper.eval(args...)
+					}
+				}
+			}
+
 			// Check for user modules (modules with function bodies)
 			if module, ok := vm.imports[e.Module]; ok {
 				// Check if this is a user module by seeing if the function has a body

@@ -9,6 +9,11 @@ var prelude = map[string]Module{
 }
 
 func findInStdLib(path string) (Module, bool) {
+	// First check for embedded .ard modules
+	if mod, ok := findEmbeddedModule(path); ok {
+		return mod, true
+	}
+	
 	switch path {
 	case "ard/async":
 		return AsyncPkg{}, true
@@ -16,8 +21,6 @@ func findInStdLib(path string) (Module, bool) {
 		return EnvMod{}, true
 	case "ard/fs":
 		return FsPkg{}, true
-	case "ard/io":
-		return IoPkg{}, true
 	case "ard/http":
 		return HttpPkg{}, true
 	case "ard/json":
@@ -30,11 +33,6 @@ func findInStdLib(path string) (Module, bool) {
 		return ResultPkg{}, true
 	case "ard/sqlite":
 		return SQLitePkg{}, true
-	default:
-		// Check if it's an embedded .ard module
-		if mod, ok := findEmbeddedModule(path); ok {
-			return mod, true
-		}
 	}
 	return nil, false
 }
@@ -197,7 +195,9 @@ func (pkg IntPkg) Get(name string) Symbol {
 	}
 }
 
-/* ard/io */
+
+
+/* ard/io - Legacy test stub */
 type IoPkg struct{}
 
 func (pkg IoPkg) Path() string {
