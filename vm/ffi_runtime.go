@@ -75,3 +75,26 @@ func panic_with_message(vm *VM, args []*object) (*object, any) {
 
 	panic(message)
 }
+
+// Environment module FFI functions
+
+// get retrieves an environment variable
+func env_get(vm *VM, args []*object) (*object, any) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("get expects 1 argument, got %d", len(args))
+	}
+
+	key, ok := args[0].raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("get expects string argument, got %T", args[0].raw)
+	}
+
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		// VM will convert nil to None based on Maybe return type
+		return nil, nil
+	}
+
+	// VM will convert this to Some(value) based on Maybe return type
+	return &object{raw: value, _type: checker.Str}, nil
+}

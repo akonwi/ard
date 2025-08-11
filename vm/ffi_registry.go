@@ -84,6 +84,16 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 		return makeOk(result, resultType), nil
 	}
 
+	// If the expected return type is a Maybe, automatically wrap result
+	if maybeType, ok := returnType.(*checker.Maybe); ok {
+		if result == nil || result.raw == nil {
+			// Return None for Maybe<T>
+			return &object{raw: nil, _type: maybeType}, nil
+		}
+		// Return Some(value) - the result is already the inner value
+		return result, nil
+	}
+
 	// For non-Result return types, convert any error to Go error
 	if errValue != nil {
 		if goErr, ok := errValue.(error); ok {

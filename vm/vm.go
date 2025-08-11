@@ -38,8 +38,6 @@ func (vm *VM) initModuleRegistry() {
 
 	for path := range vm.imports {
 		switch path {
-		case "ard/env":
-			vm.moduleRegistry.Register(&EnvModule{})
 		case "ard/io":
 			vm.moduleRegistry.Register(&IOModule{})
 		case "ard/fs":

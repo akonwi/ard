@@ -178,4 +178,66 @@ func TestFFIPanicRecovery(t *testing.T) {
 			t.Errorf("Expected int error 42, got: %v", resultObj.raw.raw)
 		}
 	})
+
+	t.Run("automatic Maybe handling", func(t *testing.T) {
+		// Create a test function that returns Maybe
+		maybeTestFunc := func(vm *VM, args []*object) (*object, any) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("maybe_test expects 1 argument")
+			}
+
+			returnType, ok := args[0].raw.(string)
+			if !ok {
+				return nil, fmt.Errorf("maybe_test expects string argument")
+			}
+
+			switch returnType {
+			case "some":
+				return &object{raw: "test_value", _type: checker.Str}, nil
+			case "none":
+				return nil, nil // VM should convert to None
+			default:
+				return nil, fmt.Errorf("unknown type: %s", returnType)
+			}
+		}
+
+		// Register test function
+		err := registry.Register("test.maybe_test", maybeTestFunc)
+		if err != nil {
+			t.Fatalf("Failed to register maybe test function: %v", err)
+		}
+
+		// Test Some case
+		maybeStrType := checker.MakeMaybe(checker.Str)
+		someArgs := []*object{{raw: "some", _type: checker.Str}}
+		result, err := registry.Call(vm, "test.maybe_test", someArgs, maybeStrType)
+
+		if err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+
+		if result.raw.(string) != "test_value" {
+			t.Errorf("Expected 'test_value', got: %v", result.raw)
+		}
+
+		if result._type != checker.Str {
+			t.Errorf("Expected Str type, got: %v", result._type)
+		}
+
+		// Test None case
+		noneArgs := []*object{{raw: "none", _type: checker.Str}}
+		result, err = registry.Call(vm, "test.maybe_test", noneArgs, maybeStrType)
+
+		if err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+
+		if result.raw != nil {
+			t.Errorf("Expected nil for None, got: %v", result.raw)
+		}
+
+		if result._type != maybeStrType {
+			t.Errorf("Expected Maybe<Str> type, got: %v", result._type)
+		}
+	})
 }

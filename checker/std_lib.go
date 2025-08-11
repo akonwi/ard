@@ -17,8 +17,6 @@ func findInStdLib(path string) (Module, bool) {
 	switch path {
 	case "ard/async":
 		return AsyncPkg{}, true
-	case "ard/env":
-		return EnvMod{}, true
 	case "ard/fs":
 		return FsPkg{}, true
 	case "ard/http":
@@ -35,32 +33,6 @@ func findInStdLib(path string) (Module, bool) {
 		return SQLitePkg{}, true
 	}
 	return nil, false
-}
-
-/* ard/env */
-type EnvMod struct{}
-
-func (mod EnvMod) Path() string {
-	return "ard/env"
-}
-
-func (mod EnvMod) Program() *Program {
-	return nil
-}
-func (mod EnvMod) Get(name string) Symbol {
-	switch name {
-	case "get":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "key", Type: Str}},
-				ReturnType: &Maybe{Str},
-			},
-		}
-	default:
-		return Symbol{}
-	}
 }
 
 /* ard/float */

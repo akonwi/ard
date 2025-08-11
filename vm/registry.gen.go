@@ -30,6 +30,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("runtime.panic_with_message", panic_with_message); err != nil {
 		return fmt.Errorf("failed to register runtime.panic_with_message: %w", err)
 	}
+	if err := r.Register("runtime.env_get", env_get); err != nil {
+		return fmt.Errorf("failed to register runtime.env_get: %w", err)
+	}
 
 	return nil
 }
