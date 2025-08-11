@@ -45,14 +45,32 @@ func (r *RuntimeFFIRegistry) Get(binding string) (FFIFunc, bool) {
 }
 
 // Call executes an FFI function with the given arguments
-func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, returnType checker.Type) (*object, error) {
+func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, returnType checker.Type) (result *object, err error) {
 	fn, exists := r.Get(binding)
 	if !exists {
-		return nil, fmt.Errorf("FFI function not found: %s", binding)
+		return nil, fmt.Errorf("External function not found: %s", binding)
 	}
 
+	// Recover from panics in FFI functions and add context
+	defer func() {
+		if r := recover(); r != nil {
+			panicMsg := fmt.Sprintf("panic in FFI function '%s': %v", binding, r)
+
+			// If the expected return type is a Result, convert panic to Ard Error result
+			if resultType, ok := returnType.(*checker.Result); ok {
+				errorObj := &object{raw: panicMsg, _type: checker.Str}
+				result = makeErr(errorObj, resultType)
+				err = nil
+				return
+			}
+
+			// For non-Result return types, re-panic with enhanced context
+			panic(panicMsg)
+		}
+	}()
+
 	// Direct call with VM access - no reflection needed!
-	result, err := fn(vm, args)
+	result, err = fn(vm, args)
 
 	// If the expected return type is a Result, translate Go error handling to Ard Result
 	if resultType, ok := returnType.(*checker.Result); ok {
