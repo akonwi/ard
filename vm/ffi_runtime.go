@@ -10,8 +10,8 @@ import (
 
 // Runtime module FFI functions
 
-// go_print prints a value to stdout
-func go_print(vm *VM, args []*object) (*object, error) {
+// print prints a value to stdout
+func print(vm *VM, args []*object) (*object, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("print expects 1 argument, got %d", len(args))
 	}
@@ -42,17 +42,17 @@ func go_print(vm *VM, args []*object) (*object, error) {
 	return void, nil
 }
 
-// go_read_line reads a line from stdin
-func go_read_line(vm *VM, args []*object) (*object, error) {
+// read_line reads a line from stdin
+func read_line(vm *VM, args []*object) (*object, error) {
 	if len(args) != 0 {
 		return nil, fmt.Errorf("read_line expects 0 arguments, got %d", len(args))
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
-	
+
 	// Return Str!Str Result type like IOModule does
 	resultType := checker.MakeResult(checker.Str, checker.Str)
-	
+
 	if !scanner.Scan() {
 		// No more input available or EOF
 		if err := scanner.Err(); err != nil {
@@ -61,12 +61,12 @@ func go_read_line(vm *VM, args []*object) (*object, error) {
 		// EOF - return empty string as ok result
 		return makeOk(&object{"", checker.Str}, resultType), nil
 	}
-	
+
 	return makeOk(&object{scanner.Text(), checker.Str}, resultType), nil
 }
 
-// go_panic panics with a message
-func go_panic(vm *VM, args []*object) (*object, error) {
+// panic_with_message panics with a message
+func panic_with_message(vm *VM, args []*object) (*object, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("panic expects 1 argument, got %d", len(args))
 	}

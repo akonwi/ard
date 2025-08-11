@@ -15,6 +15,7 @@ The backlog of work is a simple todo list in TODO.md
 The project uses go v1.25rc2 with the `jsonv2` experiment for the new json tools and has build tag directives for it.
 
 - Build: `go build`
+  > Important: do not stage and commit the built binary
 - Run Ard program: `go run main.go run samples/[file].ard`
 - Run all tests: `go test ./...`
 - Run package tests: `go test ./ast` or `go test ./checker` or `go test ./vm`

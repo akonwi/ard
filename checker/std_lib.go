@@ -13,7 +13,7 @@ func findInStdLib(path string) (Module, bool) {
 	if mod, ok := findEmbeddedModule(path); ok {
 		return mod, true
 	}
-	
+
 	switch path {
 	case "ard/async":
 		return AsyncPkg{}, true
@@ -194,9 +194,6 @@ func (pkg IntPkg) Get(name string) Symbol {
 		return Symbol{}
 	}
 }
-
-
-
 
 /* ard/list */
 

@@ -105,8 +105,8 @@ func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 
 // isFFIFunction checks if a function matches the FFI signature
 func isFFIFunction(fn *ast.FuncDecl) bool {
-	// Check if function is exported (starts with lowercase go_ prefix)
-	if !strings.HasPrefix(fn.Name.Name, "go_") {
+	// Skip functions that start with underscore (internal/private functions)
+	if strings.HasPrefix(fn.Name.Name, "_") {
 		return false
 	}
 

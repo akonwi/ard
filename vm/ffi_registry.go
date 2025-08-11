@@ -39,7 +39,7 @@ func (r *RuntimeFFIRegistry) Register(binding string, goFunc FFIFunc) error {
 func (r *RuntimeFFIRegistry) Get(binding string) (FFIFunc, bool) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	
+
 	fn, exists := r.functions[binding]
 	return fn, exists
 }

@@ -80,7 +80,7 @@ type checker struct {
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	globalScope := makeScope(nil)
-	
+
 	// Create FFI registry only for non-embedded modules
 	var ffiRegistry *FFIRegistry
 	if moduleResolver != nil {
@@ -95,7 +95,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		ffiRegistry = NewFFIRegistry(".")
 	}
 	// For embedded modules (filePath starts with "ard/"), ffiRegistry remains nil
-	
+
 	c := &checker{
 		diagnostics: []Diagnostic{},
 		scope:       &globalScope,
@@ -1289,24 +1289,24 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						Private:    extFnDef.Private,
 					}
 				} else {
-				//// technically, the below isn't possible anymore
-				// Check if it's a variable that holds a function
-				// if varDef, ok := fnSym.(*VariableDef); ok {
-				// 	// Try to get a FunctionDef directly
-				// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
-				// 		fnDef = anon
-				// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
-				// 		// FunctionDef can be used directly
-				// 		// This handles the case where a variable holds a function
-				// 		fnDef = existingFnDef
-				// 	} else {
-				// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-				// 		return nil
-				// 	}
-				// } else {
-				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-				return nil
-				// }
+					//// technically, the below isn't possible anymore
+					// Check if it's a variable that holds a function
+					// if varDef, ok := fnSym.(*VariableDef); ok {
+					// 	// Try to get a FunctionDef directly
+					// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
+					// 		fnDef = anon
+					// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
+					// 		// FunctionDef can be used directly
+					// 		// This handles the case where a variable holds a function
+					// 		fnDef = existingFnDef
+					// 	} else {
+					// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+					// 		return nil
+					// 	}
+					// } else {
+					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+					return nil
+					// }
 				}
 			}
 
@@ -1849,7 +1849,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					default:
 						ok = false
 					}
-					
+
 					if !ok {
 						targetName := s.Target.String()
 						c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
@@ -2929,7 +2929,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 			default:
 				isFunc = false
 			}
-			
+
 			if !isFunc {
 				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
@@ -3008,7 +3008,7 @@ func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunc
 		c.addError("External binding cannot be empty", def.GetLocation())
 		return nil
 	}
-	
+
 	// Validate that the external binding can be resolved and file exists
 	// Skip validation for embedded modules (when ffiRegistry is nil)
 	if c.ffiRegistry != nil {

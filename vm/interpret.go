@@ -497,13 +497,13 @@ func (vm *VM) eval(expr checker.Expression) *object {
 							binding: extFuncDef.ExternalBinding,
 							def:     *extFuncDef,
 						}
-						
+
 						// Convert call arguments to objects
 						args := make([]*object, len(e.Call.Args))
 						for i, arg := range e.Call.Args {
 							args[i] = vm.eval(arg)
 						}
-						
+
 						return wrapper.eval(args...)
 					}
 				}

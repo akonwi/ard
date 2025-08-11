@@ -1188,12 +1188,12 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			if name == "" {
 				return nil, p.makeError(p.peek(), "Extern functions must have a name")
 			}
-			
+
 			// Expect "= external_binding"
 			if !p.match(equal) {
 				return nil, p.makeError(p.peek(), "Expected '=' after extern function signature")
 			}
-			
+
 			// Parse the external binding string
 			if !p.check(string_) {
 				return nil, p.makeError(p.peek(), "Expected string literal for external binding")
@@ -1204,7 +1204,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			if len(externalBinding) >= 2 && externalBinding[0] == '"' && externalBinding[len(externalBinding)-1] == '"' {
 				externalBinding = externalBinding[1 : len(externalBinding)-1]
 			}
-			
+
 			extFn := &ExternalFunction{
 				Private:         private,
 				Name:            name.(string), // External functions must have string names
@@ -1216,7 +1216,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 					End:   Point{Row: p.previous().line, Col: p.previous().column},
 				},
 			}
-			
+
 			return extFn, nil
 		}
 

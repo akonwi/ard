@@ -8,8 +8,8 @@ import (
 
 // Math module FFI functions
 
-// go_add adds two integers
-func go_add(vm *VM, args []*object) (*object, error) {
+// add adds two integers
+func add(vm *VM, args []*object) (*object, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("add expects 2 arguments, got %d", len(args))
 	}
@@ -28,8 +28,8 @@ func go_add(vm *VM, args []*object) (*object, error) {
 	return &object{raw: result, _type: checker.Int}, nil
 }
 
-// go_multiply multiplies two integers
-func go_multiply(vm *VM, args []*object) (*object, error) {
+// multiply multiplies two integers
+func multiply(vm *VM, args []*object) (*object, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("multiply expects 2 arguments, got %d", len(args))
 	}
@@ -48,8 +48,8 @@ func go_multiply(vm *VM, args []*object) (*object, error) {
 	return &object{raw: result, _type: checker.Int}, nil
 }
 
-// go_max returns the maximum of two integers
-func go_max(vm *VM, args []*object) (*object, error) {
+// max returns the maximum of two integers
+func max(vm *VM, args []*object) (*object, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("max expects 2 arguments, got %d", len(args))
 	}
@@ -74,8 +74,8 @@ func go_max(vm *VM, args []*object) (*object, error) {
 	return &object{raw: result, _type: checker.Int}, nil
 }
 
-// go_subtract subtracts two integers
-func go_subtract(vm *VM, args []*object) (*object, error) {
+// subtract subtracts two integers
+func subtract(vm *VM, args []*object) (*object, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("subtract expects 2 arguments, got %d", len(args))
 	}

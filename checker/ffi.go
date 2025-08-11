@@ -19,7 +19,7 @@ func NewFFIRegistry(projectRoot string) *FFIRegistry {
 	}
 }
 
-// ResolveBinding takes an external binding like "runtime.go_print" 
+// ResolveBinding takes an external binding like "runtime.go_print"
 // and returns the file path and function name
 func (r *FFIRegistry) ResolveBinding(binding string) (filePath string, functionName string, err error) {
 	// Split binding into module.function format
@@ -27,10 +27,10 @@ func (r *FFIRegistry) ResolveBinding(binding string) (filePath string, functionN
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("invalid external binding format: %q, expected \"module.function\"", binding)
 	}
-	
+
 	module := parts[0]
 	function := parts[1]
-	
+
 	// Check if we're processing standard library modules
 	if filepath.Base(r.projectRoot) == "std_lib" {
 		// We're in standard library - FFI functions are in ../vm/ffi_functions.go
@@ -40,7 +40,7 @@ func (r *FFIRegistry) ResolveBinding(binding string) (filePath string, functionN
 		ffiDir := filepath.Join(r.projectRoot, "ffi")
 		filePath = filepath.Join(ffiDir, module+".go")
 	}
-	
+
 	return filePath, function, nil
 }
 
@@ -50,16 +50,16 @@ func (r *FFIRegistry) ValidateBinding(binding string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Check if the FFI file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return fmt.Errorf("FFI file not found for binding %q: %s", binding, filePath)
 	}
-	
+
 	// For now, we assume the function exists if the file exists
 	// Future enhancement: parse Go file and validate function exists
 	_ = functionName
-	
+
 	return nil
 }
 

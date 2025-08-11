@@ -6,26 +6,26 @@ import "fmt"
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
-	if err := r.Register("math.go_add", go_add); err != nil {
-		return fmt.Errorf("failed to register math.go_add: %w", err)
+	if err := r.Register("math.add", add); err != nil {
+		return fmt.Errorf("failed to register math.add: %w", err)
 	}
-	if err := r.Register("math.go_multiply", go_multiply); err != nil {
-		return fmt.Errorf("failed to register math.go_multiply: %w", err)
+	if err := r.Register("math.multiply", multiply); err != nil {
+		return fmt.Errorf("failed to register math.multiply: %w", err)
 	}
-	if err := r.Register("math.go_max", go_max); err != nil {
-		return fmt.Errorf("failed to register math.go_max: %w", err)
+	if err := r.Register("math.max", max); err != nil {
+		return fmt.Errorf("failed to register math.max: %w", err)
 	}
-	if err := r.Register("math.go_subtract", go_subtract); err != nil {
-		return fmt.Errorf("failed to register math.go_subtract: %w", err)
+	if err := r.Register("math.subtract", subtract); err != nil {
+		return fmt.Errorf("failed to register math.subtract: %w", err)
 	}
-	if err := r.Register("runtime.go_print", go_print); err != nil {
-		return fmt.Errorf("failed to register runtime.go_print: %w", err)
+	if err := r.Register("runtime.print", print); err != nil {
+		return fmt.Errorf("failed to register runtime.print: %w", err)
 	}
-	if err := r.Register("runtime.go_read_line", go_read_line); err != nil {
-		return fmt.Errorf("failed to register runtime.go_read_line: %w", err)
+	if err := r.Register("runtime.read_line", read_line); err != nil {
+		return fmt.Errorf("failed to register runtime.read_line: %w", err)
 	}
-	if err := r.Register("runtime.go_panic", go_panic); err != nil {
-		return fmt.Errorf("failed to register runtime.go_panic: %w", err)
+	if err := r.Register("runtime.panic_with_message", panic_with_message); err != nil {
+		return fmt.Errorf("failed to register runtime.panic_with_message: %w", err)
 	}
 
 	return nil
