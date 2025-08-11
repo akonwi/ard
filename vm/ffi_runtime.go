@@ -11,7 +11,7 @@ import (
 // Runtime module FFI functions
 
 // print prints a value to stdout
-func print(vm *VM, args []*object) (*object, error) {
+func print(vm *VM, args []*object) (*object, any) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("print expects 1 argument, got %d", len(args))
 	}
@@ -43,7 +43,7 @@ func print(vm *VM, args []*object) (*object, error) {
 }
 
 // read_line reads a line from stdin
-func read_line(vm *VM, args []*object) (*object, error) {
+func read_line(vm *VM, args []*object) (*object, any) {
 	if len(args) != 0 {
 		return nil, fmt.Errorf("read_line expects 0 arguments, got %d", len(args))
 	}
@@ -63,7 +63,7 @@ func read_line(vm *VM, args []*object) (*object, error) {
 }
 
 // panic_with_message panics with a message
-func panic_with_message(vm *VM, args []*object) (*object, error) {
+func panic_with_message(vm *VM, args []*object) (*object, any) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("panic expects 1 argument, got %d", len(args))
 	}

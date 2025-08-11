@@ -11,7 +11,8 @@ import (
 
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
-type FFIFunc func(vm *VM, args []*object) (*object, error)
+// Returns (*object, any) where any can be the appropriate Ard error type for Results
+type FFIFunc func(vm *VM, args []*object) (*object, any)
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {
@@ -70,21 +71,27 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 	}()
 
 	// Direct call with VM access - no reflection needed!
-	result, err = fn(vm, args)
+	result, errValue := fn(vm, args)
 
-	// If the expected return type is a Result, translate Go error handling to Ard Result
+	// If the expected return type is a Result, translate error value to Ard Result
 	if resultType, ok := returnType.(*checker.Result); ok {
-		if err != nil {
-			// Convert Go error to Ard Error result
-			errorObj := &object{raw: err.Error(), _type: checker.Str}
+		if errValue != nil {
+			// Trust FFI author to return correct error type - create error object directly
+			errorObj := &object{raw: errValue, _type: resultType.Err()}
 			return makeErr(errorObj, resultType), nil
 		}
 		// Convert successful result to Ard Ok result
 		return makeOk(result, resultType), nil
 	}
 
-	// For non-Result return types, pass through Go error as-is
-	return result, err
+	// For non-Result return types, convert any error to Go error
+	if errValue != nil {
+		if goErr, ok := errValue.(error); ok {
+			return result, goErr
+		}
+		return result, fmt.Errorf("FFI function returned error: %v", errValue)
+	}
+	return result, nil
 }
 
 // RegisterBuiltinFFIFunctions registers the standard FFI functions

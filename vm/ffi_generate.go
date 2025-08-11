@@ -110,7 +110,7 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Check function signature: func(vm *VM, args []*object) (*object, error)
+	// Check function signature: func(vm *VM, args []*object) (*object, any)
 	if fn.Type.Params == nil || len(fn.Type.Params.List) != 2 {
 		return false
 	}
@@ -137,14 +137,14 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Validate return types: (*object, error)
+	// Validate return types: (*object, any)
 	firstReturn := fn.Type.Results.List[0]
 	if !isPointerToType(firstReturn.Type, "object") {
 		return false
 	}
 
 	secondReturn := fn.Type.Results.List[1]
-	if !isErrorType(secondReturn.Type) {
+	if !isAnyType(secondReturn.Type) {
 		return false
 	}
 
@@ -169,9 +169,9 @@ func isSliceOfPointerToType(expr ast.Expr, typeName string) bool {
 	return isPointerToType(array.Elt, typeName)
 }
 
-func isErrorType(expr ast.Expr) bool {
+func isAnyType(expr ast.Expr) bool {
 	ident, ok := expr.(*ast.Ident)
-	return ok && ident.Name == "error"
+	return ok && ident.Name == "any"
 }
 
 // generateRegistry creates the registry.gen.go file

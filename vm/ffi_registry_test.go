@@ -9,7 +9,7 @@ import (
 )
 
 // panic_test_ffi deliberately panics to test panic recovery (test-only function)
-func panic_test_ffi(vm *VM, args []*object) (*object, error) {
+func panic_test_ffi(vm *VM, args []*object) (*object, any) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("panic_test_ffi expects 1 argument, got %d", len(args))
 	}
@@ -23,6 +23,29 @@ func panic_test_ffi(vm *VM, args []*object) (*object, error) {
 	panic("test panic: " + message)
 }
 
+// error_type_test returns different error types to test type flexibility
+func error_type_test(vm *VM, args []*object) (*object, any) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("error_type_test expects 1 argument, got %d", len(args))
+	}
+
+	errorType, ok := args[0].raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("error_type_test expects string argument")
+	}
+
+	switch errorType {
+	case "string":
+		return nil, "this is a string error"
+	case "int":
+		return nil, 42
+	case "bool":
+		return nil, true
+	default:
+		return &object{raw: "success", _type: checker.Str}, nil
+	}
+}
+
 func TestFFIPanicRecovery(t *testing.T) {
 	// Create FFI registry
 	registry := NewRuntimeFFIRegistry()
@@ -31,10 +54,15 @@ func TestFFIPanicRecovery(t *testing.T) {
 		t.Fatalf("Failed to register FFI functions: %v", err)
 	}
 
-	// Register test panic function
+	// Register test functions
 	err = registry.Register("test.panic_test_ffi", panic_test_ffi)
 	if err != nil {
-		t.Fatalf("Failed to register test function: %v", err)
+		t.Fatalf("Failed to register panic test function: %v", err)
+	}
+
+	err = registry.Register("test.error_type_test", error_type_test)
+	if err != nil {
+		t.Fatalf("Failed to register error type test function: %v", err)
 	}
 
 	// Create a mock VM
@@ -109,5 +137,45 @@ func TestFFIPanicRecovery(t *testing.T) {
 
 		// This should re-panic with enhanced context
 		_, _ = registry.Call(vm, "test.panic_test_ffi", args, checker.Str)
+	})
+
+	t.Run("flexible error types", func(t *testing.T) {
+		// Test that FFI functions can return different error types
+
+		// Test string error
+		stringResultType := checker.MakeResult(checker.Str, checker.Str)
+		stringArgs := []*object{{raw: "string", _type: checker.Str}}
+		result, err := registry.Call(vm, "test.error_type_test", stringArgs, stringResultType)
+
+		if err != nil {
+			t.Errorf("Expected no Go error, got: %v", err)
+		}
+
+		resultObj := result.raw.(_result)
+		if resultObj.ok {
+			t.Error("Expected Error result, got Ok result")
+		}
+
+		if resultObj.raw.raw.(string) != "this is a string error" {
+			t.Errorf("Expected string error, got: %v", resultObj.raw.raw)
+		}
+
+		// Test int error
+		intResultType := checker.MakeResult(checker.Str, checker.Int)
+		intArgs := []*object{{raw: "int", _type: checker.Str}}
+		result, err = registry.Call(vm, "test.error_type_test", intArgs, intResultType)
+
+		if err != nil {
+			t.Errorf("Expected no Go error, got: %v", err)
+		}
+
+		resultObj = result.raw.(_result)
+		if resultObj.ok {
+			t.Error("Expected Error result, got Ok result")
+		}
+
+		if resultObj.raw.raw.(int) != 42 {
+			t.Errorf("Expected int error 42, got: %v", resultObj.raw.raw)
+		}
 	})
 }
