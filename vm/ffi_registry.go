@@ -1,5 +1,7 @@
 package vm
 
+//go:generate go run ffi_generate.go
+
 import (
 	"fmt"
 	"sync"
@@ -55,27 +57,5 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 
 // RegisterBuiltinFFIFunctions registers the standard FFI functions
 func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
-	// Register runtime functions
-	if err := r.Register("runtime.go_print", go_print); err != nil {
-		return fmt.Errorf("failed to register runtime.go_print: %w", err)
-	}
-	if err := r.Register("runtime.go_read_line", go_read_line); err != nil {
-		return fmt.Errorf("failed to register runtime.go_read_line: %w", err)
-	}
-	if err := r.Register("runtime.go_panic", go_panic); err != nil {
-		return fmt.Errorf("failed to register runtime.go_panic: %w", err)
-	}
-
-	// Register math functions
-	if err := r.Register("math.go_add", go_add); err != nil {
-		return fmt.Errorf("failed to register math.go_add: %w", err)
-	}
-	if err := r.Register("math.go_multiply", go_multiply); err != nil {
-		return fmt.Errorf("failed to register math.go_multiply: %w", err)
-	}
-	if err := r.Register("math.go_max", go_max); err != nil {
-		return fmt.Errorf("failed to register math.go_max: %w", err)
-	}
-
-	return nil
+	return r.RegisterGeneratedFFIFunctions()
 }
