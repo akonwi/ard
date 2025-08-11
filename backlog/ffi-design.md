@@ -267,18 +267,54 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 - No reflection used - direct function calls for performance
 - Unified error handling and type marshalling
 
-### Phase 4: Standard Library Migration 📚
+### Phase 4: Standard Library Migration 🚧 IN PROGRESS
 **Goal**: Prove FFI works by migrating some built-in modules
 
-**Tasks**:
-1. **Create FFI Runtime** (`ffi/runtime.go`):
-   - Implement `go_print`, `go_read_line`, etc.
-   - Move some functionality from `vm/io_module.go`
+**Current Checkpoint - Architecture Issue Discovered**:
+We successfully:
+- ✅ Updated FFI signature to include `vm *VM` parameter  
+- ✅ Fixed `go_print` to properly handle `to_str()` conversion
+- ✅ Fixed `go_read_line` to return `Str!Str` Result type
+- ✅ Created `std_lib/io.ard` with extern function declarations
+- ✅ Removed hardcoded `IoPkg{}` from `checker/std_lib.go`
 
-2. **Ard Standard Library** (`std_lib/`):
-   - Create `io.ard` with external function declarations
-   - Test that external functions work correctly
-   - Ensure API compatibility with current modules
+**Blocker: Circular Dependency Issue** 🔄
+- FFI validation expects files in `ffi/runtime.go` directory (per design)
+- Creating `ffi` package causes circular dependency: `vm` ↔ `ffi`
+- Root cause: `vm.object` type is unexported and tied to `vm` package
+
+**Required Architecture Refactoring**:
+```
+Phase 4a: Extract Runtime Package (REQUIRED FIRST)
+├── Create runtime/ package 
+├── Move object, void, makeOk, makeErr → runtime/
+├── Export types: Object, Void, MakeOk, MakeErr
+└── Update all vm/ references: *object → *runtime.Object
+
+Phase 4b: Create FFI Package (AFTER 4a) 
+├── Create ffi/runtime.go with proper signatures
+├── FFI functions use: func(vm *VM, args []*runtime.Object) (*runtime.Object, error)
+└── Update vm/ffi_registry.go to import ffi package
+```
+
+**Workaround Applied**: 
+- FFI functions remain in `vm/ffi_functions.go` for now
+- Standard library loads via existing embedded module mechanism
+- Deferred proper `ffi/` directory until runtime package extraction
+
+**Next Steps**: 
+1. **Complete Phase 4 with current architecture** (validate FFI-based IO works)
+2. **Plan Phase 5: Runtime Package Extraction** (major refactoring)  
+3. **Plan Phase 6: Proper FFI Directory Structure**
+
+**Tasks**:
+1. **Fix FFI Validation for Standard Library** 🔧:
+   - Skip file validation for embedded std_lib modules
+   - Or create placeholder `ffi/runtime.go` file
+
+2. **Test FFI-based IO Module** 🧪:
+   - Use `samples/variables.ard` to test `io::print`
+   - Ensure compatibility with existing sample programs
 
 3. **Integration Testing**:
    - Extensive tests for type marshalling
