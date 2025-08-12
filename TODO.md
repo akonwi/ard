@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] drop multi-line comments
 - [ ] drop `json::decode()`
 - [ ] implement `runtime` package and export objects from them
 - [ ] ffi: look for ffi defs in `./ffi` folder
