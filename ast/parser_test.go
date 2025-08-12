@@ -433,16 +433,7 @@ func TestComments(t *testing.T) {
 				},
 			},
 		},
-		{
-			name:  "Block comment",
-			input: "/* this is comment line 1" + "\n" + "this is a comment line 2*/",
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&Comment{Value: "/* this is comment line 1" + "\n" + "this is a comment line 2*/"},
-				},
-			},
-		},
+
 	})
 }
 

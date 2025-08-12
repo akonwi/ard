@@ -112,7 +112,7 @@ let names = decode::run(rows,
 
 ```ard
 // Define decoder for User-like structure
-let user_decoder = /* composition of field decoders */
+let user_decoder = // composition of field decoders
 
 let users = decode::run(rows, decode::list(user_decoder)).expect("Decode failed")
 ```
@@ -177,7 +177,7 @@ The existing decode infrastructure handles this data format automatically:
 ```ard
 let result = db.query("INVALID SQL")
 match result {
-    ok(rows) => /* process rows */,
+    ok(rows) => // process rows,
     err(message) => io::print("SQL Error: {message}")
 }
 ```
@@ -187,7 +187,7 @@ match result {
 ```ard
 let result = decode::run(rows, bad_decoder)
 match result {
-    ok(data) => /* use data */,
+    ok(data) => // use data,
     err(errors) => {
         for error in errors {
             io::print("Decode error at {error.path}: expected {error.expected}, found {error.found}")
