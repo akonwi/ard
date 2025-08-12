@@ -286,25 +286,6 @@ func (mod *HTTPModule) evalHttpResponseMethod(response *object, method *checker.
 			status := respMap["status"].raw.(int)
 			return &object{status >= 200 && status <= 300, method.Type()}
 		}
-	case "json":
-		{
-			// Get the body
-			bodyObj, ok := respMap["body"]
-			if !ok || bodyObj == nil {
-				fmt.Println("HTTP Error: Response missing body")
-				return &object{nil, method.Type()}
-			}
-
-			// Cast body to string
-			bodyStr, ok := bodyObj.raw.(string)
-			if !ok || bodyStr == "" {
-				fmt.Println("HTTP Error: Response body is not a string or is empty")
-				return &object{nil, method.Type()}
-			}
-
-			// Decode JSON response
-			return mod.decodeJsonResponse(bodyStr, method.Type())
-		}
 	default:
 		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
 	}

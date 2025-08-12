@@ -335,7 +335,7 @@ use ard/json
 
 // Must know the exact structure and define types upfront
 struct Response { success: Bool, count: Int, message: Str }
-let data = json::decode<Response>(json_string).expect("")
+// json::decode() has been removed - use ard/decode instead
 ```
 
 ### New ard/decode (Phase 1 - Flexible Access)  
