@@ -8,7 +8,7 @@ import (
 
 // go_print prints a value to stdout
 // Used by extern fn print(value: $T) Void = "runtime.go_print"
-func go_print(value interface{}) {
+func go_print(value any) {
 	fmt.Println(value)
 }
 
@@ -20,10 +20,4 @@ func go_read_line() string {
 		return scanner.Text()
 	}
 	return ""
-}
-
-// go_panic panics with a message
-// Used by extern fn panic(message: Str) Void = "runtime.go_panic"
-func go_panic(message string) {
-	panic(message)
 }
