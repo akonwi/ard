@@ -1,12 +1,9 @@
 ## TODO
 
-- [ ] ffi
-  - sort of like gleam
-  - this needs to work in stdlib so that more of it can be written as Ard with FFI to the runtime
-  - idea: #external attribute on functions with external fn name
-  - idea: look for ffi defs in `./ffi` folder
 - [ ] drop multi-line comments
 - [ ] drop `json::decode()`
+- [ ] implement `runtime` package and export objects from them
+- [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] introduce `ard/encode` package for marshalling into various formats
