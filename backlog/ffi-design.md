@@ -43,19 +43,19 @@ Key insights:
 **FFI enables standard library migration to Ard**:
 ```
 ard-vm-binary/
-├── vm/               # VM implementation  
+├── vm/               # VM implementation
 ├── ffi/              # FFI implementations (compiled into VM)
 │   ├── runtime.go    # go_print, go_read_line
-│   ├── fs.go         # go_read_file, go_write_file  
+│   ├── fs.go         # go_read_file, go_write_file
 │   └── net.go        # go_http_send
 └── std_lib/          # Standard library (interpreted Ard!)
     ├── io.ard        # external fn print(...) = "runtime.go_print"
-    ├── fs.ard        # external fn read_file(...) = "fs.go_read_file"  
+    ├── fs.ard        # external fn read_file(...) = "fs.go_read_file"
     └── http.ard      # external fn send(...) = "net.go_http_send"
 ```
 
 **Execution Flow**:
-1. User runs: `ard run main.ard`  
+1. User runs: `ard run main.ard`
 2. User imports: `use ard/io`
 3. VM loads: `std_lib/io.ard` (interpreted)
 4. User calls: `io::print("hello")`
@@ -76,7 +76,7 @@ ard-vm-binary/
 
 ```ard
 extern fn print(value: $T) Void = "runtime.go_print"
-extern fn calculate(data: [Float]) Float = "math.complex_calculation"  
+extern fn calculate(data: [Float]) Float = "math.complex_calculation"
 extern fn read_file(path: Str) Str!Str = "fs.read_file_sync"
 ```
 
@@ -99,8 +99,8 @@ extern fn read_file(path: Str) Str!Str = "fs.read_file_sync"
 **Standard library FFI pattern** (compiled into VM):
 ```
 ard-vm-binary/ffi/
-  runtime.go    # go_print, go_read_line, go_panic - core runtime
-  fs.go         # go_read_file, go_write_file, go_mkdir - file system  
+  runtime.go    # go_print, go_read_line - core runtime
+  fs.go         # go_read_file, go_write_file, go_mkdir - file system
   net.go        # go_http_send, go_tcp_connect - networking
   system.go     # go_get_env, go_current_time - system info
 ```
@@ -109,7 +109,7 @@ ard-vm-binary/ffi/
 ```
 ard-vm-binary/std_lib/
   io.ard        # Uses "runtime.*" extern functions
-  fs.ard        # Uses "fs.*" extern functions  
+  fs.ard        # Uses "fs.*" extern functions
   http.ard      # Uses "net.*" extern functions
   env.ard       # Uses "system.*" extern functions
 ```
@@ -152,7 +152,7 @@ func go_read_file(args []*object) (*object, error) { /* implementation */ }
 // Simple types - direct mapping
 extern fn add(a: Int, b: Int) Int = "math.add"
 
-// Collections - typed 
+// Collections - typed
 extern fn sum_list(numbers: [Int]) Int = "math.sum"
 extern fn lookup(data: {Str: Int}, key: Str) Int = "maps.get"
 
@@ -185,10 +185,10 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 **Goal**: Parse `extern fn` declarations
 
 **Tasks**: ✅ ALL COMPLETED
-1. **AST Extension**: ✅ 
+1. **AST Extension**: ✅
    - Added `ExternalFunction` AST node
    - Fields: `name`, `parameters`, `return_type`, `external_binding`
-   
+
 2. **Parser Updates** (`ast/parser.go`): ✅
    - Recognize `extern fn` syntax (changed from `external`)
    - Parse function signature and external binding string
@@ -246,7 +246,7 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 **Core FFI Implementation**:
 - `ast/ast.go`: `ExternalFunction` struct, `VoidType`
 - `ast/lexer.go`: `extern` keyword token
-- `ast/parser.go`: Parser for `extern fn` declarations  
+- `ast/parser.go`: Parser for `extern fn` declarations
 - `checker/checker.go`: Type checking integration
 - `checker/ffi.go`: FFI registry and compile-time validation
 - `checker/ffi_test.go`: Comprehensive FFI registry tests
@@ -271,7 +271,7 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 **Goal**: Prove FFI works by migrating one built-in module (`ard/io`)
 
 **✅ SUCCESSFULLY COMPLETED**:
-- ✅ Updated FFI signature to include `vm *VM` parameter  
+- ✅ Updated FFI signature to include `vm *VM` parameter
 - ✅ Fixed `go_print` to properly handle `to_str()` conversion
 - ✅ Fixed `go_read_line` to return `Str!Str` Result type and handle EOF
 - ✅ Created `std_lib/io.ard` with extern function declarations
@@ -298,7 +298,7 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 **Integration Testing Results** ✅:
 - ✅ `samples/variables.ard` - FFI-based IO working perfectly
 - ✅ `samples/fibonacci.ard` - All print statements work
-- ✅ `samples/fizzbuzz.ard` - Complete compatibility maintained  
+- ✅ `samples/fizzbuzz.ard` - Complete compatibility maintained
 - ✅ `demo_ffi.ard` - Direct FFI calls working
 - ✅ All checker tests passing (60+ test cases)
 - ✅ Performance equivalent to previous implementation
@@ -311,7 +311,7 @@ func process(data interface{}) interface{} { /* handle complex types */ }
 
 **What Was Built**:
 1. **Complete FFI Syntax**: `extern fn` declarations with external bindings
-2. **Type-Safe Integration**: Full type checking and validation for external functions  
+2. **Type-Safe Integration**: Full type checking and validation for external functions
 3. **Runtime Execution**: Direct function calls with uniform `func(vm *VM, args []*object) (*object, error)` signature
 4. **Module Migration Proof-of-Concept**: Successfully migrated `ard/io` module from hardcoded Go to FFI-based Ard
 5. **Embedded Module System**: Clean integration between `.ard` standard library files and FFI implementations
@@ -349,7 +349,7 @@ io::print("Hello from FFI-based standard library!")
 
 **Candidates for Future Migration**:
 - `ard/fs` - File system operations
-- `ard/env` - Environment variables  
+- `ard/env` - Environment variables
 - `ard/maybe` - Maybe type utilities
 - `ard/result` - Result type utilities
 - Other built-in modules as needed
@@ -361,7 +361,7 @@ io::print("Hello from FFI-based standard library!")
 ### Start Small
 **Phase 1 MVP**: Simple standard library functions only
 ```ard
-// std_lib/math.ard  
+// std_lib/math.ard
 extern fn add(a: Int, b: Int) Int = "math.add"
 ```
 
@@ -385,7 +385,7 @@ extern fn print(value: $T) Void = "runtime.go_print"
 ## Integration Points
 
 - **Parser** (`ast/parser.go`): New `extern fn` syntax
-- **Checker** (`checker/`): Type validation and external binding resolution  
+- **Checker** (`checker/`): Type validation and external binding resolution
 - **VM** (`vm/`): Runtime execution and type marshalling
 - **FFI Functions** (`ffi/`): Go implementations compiled into VM binary
 - **Standard Library** (`std_lib/`): Ard code using external functions
@@ -395,10 +395,10 @@ extern fn print(value: $T) Void = "runtime.go_print"
 ### Standard Library Migration
 ```ard
 // std_lib/io.ard
-extern fn print(value: $T) Void = "runtime.go_print"  
+extern fn print(value: $T) Void = "runtime.go_print"
 extern fn read_line() Str!Str = "runtime.go_read_line"
 
-// std_lib/fs.ard  
+// std_lib/fs.ard
 extern fn read_file(path: Str) Str!Str = "fs.read_file"
 extern fn write_file(path: Str, content: Str) Void!Str = "fs.write_file"
 ```
