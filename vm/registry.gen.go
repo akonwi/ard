@@ -6,21 +6,6 @@ import "fmt"
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
-	if err := r.Register("math.add", add); err != nil {
-		return fmt.Errorf("failed to register math.add: %w", err)
-	}
-	if err := r.Register("math.multiply", multiply); err != nil {
-		return fmt.Errorf("failed to register math.multiply: %w", err)
-	}
-	if err := r.Register("math.max", max); err != nil {
-		return fmt.Errorf("failed to register math.max: %w", err)
-	}
-	if err := r.Register("math.subtract", subtract); err != nil {
-		return fmt.Errorf("failed to register math.subtract: %w", err)
-	}
-	if err := r.Register("math.divide", divide); err != nil {
-		return fmt.Errorf("failed to register math.divide: %w", err)
-	}
 	if err := r.Register("runtime.print", print); err != nil {
 		return fmt.Errorf("failed to register runtime.print: %w", err)
 	}
