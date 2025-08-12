@@ -102,7 +102,7 @@ func (p *parser) parseImport() (*Import, error) {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
-	if p.match(comment, block_comment) {
+	if p.match(comment) {
 		tok := p.previous()
 		return &Comment{
 			Value: tok.text,

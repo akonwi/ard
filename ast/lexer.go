@@ -86,8 +86,7 @@ const (
 	identifier    = "identifier"
 	number        = "number"
 	string_       = "string"
-	comment       = "comment"
-	block_comment = "block_comment"
+	comment = "comment"
 
 	eof = "eof"
 )
@@ -322,10 +321,6 @@ func (l *lexer) take() (token, bool) {
 		if l.matchNext('/') != nil {
 			return l.comment(currentChar), true
 		}
-		if l.matchNext('*') != nil {
-			return l.blockComment(currentChar), true
-
-		}
 		return currentChar.asToken(slash), true
 	case '%':
 		return currentChar.asToken(percent), true
@@ -390,14 +385,7 @@ func (l *lexer) comment(start *char) token {
 	return token{kind: comment, line: start.line, column: start.col, text: text}
 }
 
-func (l *lexer) blockComment(start *char) token {
-	text := "/*"
-	for l.hasMore() && !l.peekMatch("*/") {
-		text += string(l.peek().raw)
-		l.advance()
-	}
-	return token{kind: block_comment, line: start.line, column: start.col, text: text}
-}
+
 
 func (l *lexer) takeString(start char) (token, bool) {
 	sb := strings.Builder{}

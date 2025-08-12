@@ -49,12 +49,12 @@ By default, every declaration in a module is public and accessible from other mo
 To make a declaration private (only accessible within the same file), it must be preceded with the `private` keyword.
 
 ```ard
-/* this can be called from another file */
+// this can be called from another file
 fn do_things(with: Int) {
   do_here(with)
 }
 
-/* this cannot be referenced outside of the current file */
+// this cannot be referenced outside of the current file
 private fn do_here(num: Int) {}
 ```
 

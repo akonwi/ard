@@ -30,18 +30,9 @@ func TestLexing(t *testing.T) {
 	runLexing(t, []lexTest{
 		{
 			name: "comments",
-			input: strings.Join([]string{
-				"// this is a comment",
-				"/*",
-				"this is a comment",
-				"*/",
-			}, "\n"),
+			input: "// this is a comment",
 			want: []token{
 				{kind: comment, line: 1, column: 1, text: "// this is a comment"},
-				{kind: new_line, line: 1, column: 21},
-
-				{kind: block_comment, line: 2, column: 1, text: "/*\nthis is a comment\n*/"},
-
 				{kind: eof},
 			},
 		},
