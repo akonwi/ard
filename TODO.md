@@ -4,11 +4,12 @@
 - [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
-- [ ] introduce `ard/encode` package for marshalling into various formats
-  - accept something and stringify as JSON `fn json(any: $A) Str!Error`
-    - support options like casing for object keys; snake_case|kebab-case|pascalCase
-  - probably replaces the `ard/json` package
+- [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
+  - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
 - [ ] `try` on Maybe types
+- [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
+  - $Seg could be either strings or ints
+    - as ints, act as an array index
 - [ ] support handling fiber panics
 - [ ] infer types in anonymous functions
 - [ ] syntax for generics on structs
