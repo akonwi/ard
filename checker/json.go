@@ -18,12 +18,6 @@ func (pkg JsonPkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "value", Type: &Any{name: "In"}}},
 			ReturnType: MakeResult(Str, Str),
 		}}
-	case "decode":
-		return Symbol{Name: name, Type: &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "string", Type: Str}},
-			ReturnType: MakeResult(&Any{name: "Out"}, Str),
-		}}
 	default:
 		return Symbol{}
 	}

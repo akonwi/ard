@@ -31,23 +31,6 @@ func (m *JSONModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			}
 			return makeOk(&object{string(bytes), checker.Str}, resultType)
 		}
-	case "decode":
-		{
-			resultType := call.Type().(*checker.Result)
-			toErr := func(msg error) *object {
-				return makeErr(&object{msg.Error(), checker.Str}, resultType)
-			}
-			jsonString := vm.eval(call.Args[0]).raw.(string)
-			jsonBytes := []byte(jsonString)
-
-			inner := resultType.Val()
-			val, err := json_decode(inner, jsonBytes)
-			if err != nil {
-				return toErr(err)
-			}
-
-			return makeOk(&val, resultType)
-		}
 	default:
 		panic(fmt.Errorf("Unimplemented: json::%s()", call.Name))
 	}

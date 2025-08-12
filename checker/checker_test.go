@@ -2198,7 +2198,7 @@ func TestGenerics(t *testing.T) {
 			name: "Providing type arguments to static functions",
 			input: `
 				use ard/json
-				let result = json::decode<Int>("1")
+				let result = json::encode<Int>(42)
 			`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
@@ -2211,8 +2211,8 @@ func TestGenerics(t *testing.T) {
 							Value: &checker.ModuleFunctionCall{
 								Module: "ard/json",
 								Call: &checker.FunctionCall{
-									Name: "decode",
-									Args: []checker.Expression{&checker.StrLiteral{"1"}},
+									Name: "encode",
+									Args: []checker.Expression{&checker.IntLiteral{42}},
 								},
 							},
 						},
@@ -2261,7 +2261,7 @@ func TestGenerics(t *testing.T) {
 				}
 				impl Foo {
 				  fn bar() $T!Str {
-					  json::decode<$T>(@body)
+					  json::encode<$T>(@body)
 					}
 				}
 			  let foo = Foo{body: "200"}

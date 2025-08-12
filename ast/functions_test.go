@@ -416,14 +416,14 @@ func TestFunctionsWithGenerics(t *testing.T) {
 		},
 		{
 			name:  "Static function call with generic type argument",
-			input: `json::decode<Person>(str)`,
+			input: `json::encode<Person>(str)`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&StaticFunction{
 						Target: &Identifier{Name: "json"},
 						Function: FunctionCall{
-							Name: "decode",
+							Name: "encode",
 							TypeArgs: []DeclaredType{
 								&CustomType{Name: "Person"},
 							},

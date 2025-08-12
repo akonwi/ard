@@ -1102,12 +1102,12 @@ func TestLexing(t *testing.T) {
 		{
 			name: "Narrowing generics in function calls",
 			input: strings.Join([]string{
-				`json::decode<Person>(val)`,
+				`json::encode<Person>(val)`,
 			}, "\n"),
 			want: []token{
 				{kind: identifier, line: 1, column: 1, text: "json"},
 				{kind: colon_colon, line: 1, column: 5},
-				{kind: identifier, line: 1, column: 7, text: "decode"},
+				{kind: identifier, line: 1, column: 7, text: "encode"},
 				{kind: less_than, line: 1, column: 13},
 				{kind: identifier, line: 1, column: 14, text: "Person"},
 				{kind: greater_than, line: 1, column: 20},
