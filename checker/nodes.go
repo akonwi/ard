@@ -588,6 +588,84 @@ func (f FunctionDef) String() string {
 
 func (f FunctionDef) get(name string) Type { return nil }
 
+type ExternalFunctionDef struct {
+	Name            string
+	Parameters      []Parameter
+	ReturnType      Type
+	ExternalBinding string
+	Private         bool
+}
+
+func (e ExternalFunctionDef) String() string {
+	paramStrs := make([]string, len(e.Parameters))
+	for i := range e.Parameters {
+		paramStrs[i] = e.Parameters[i].Type.String()
+	}
+
+	return fmt.Sprintf("extern fn (%s) %s = %q", strings.Join(paramStrs, ","), e.ReturnType.String(), e.ExternalBinding)
+}
+
+func (e ExternalFunctionDef) get(name string) Type { return nil }
+
+func (e ExternalFunctionDef) name() string {
+	return e.Name
+}
+
+func (e *ExternalFunctionDef) _type() Type {
+	return e
+}
+
+func (e *ExternalFunctionDef) Type() Type {
+	return e
+}
+
+func (e ExternalFunctionDef) equal(other Type) bool {
+	// Check if it's another ExternalFunctionDef
+	if otherE, ok := other.(*ExternalFunctionDef); ok {
+		if len(e.Parameters) != len(otherE.Parameters) {
+			return false
+		}
+
+		for i := range e.Parameters {
+			if !e.Parameters[i].Type.equal(otherE.Parameters[i].Type) {
+				return false
+			}
+		}
+
+		return e.ReturnType.equal(otherE.ReturnType) && e.ExternalBinding == otherE.ExternalBinding
+	}
+
+	// Also check if it's compatible with a regular FunctionDef (type-wise)
+	if otherF, ok := other.(*FunctionDef); ok {
+		if len(e.Parameters) != len(otherF.Parameters) {
+			return false
+		}
+
+		for i := range e.Parameters {
+			if !e.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
+				return false
+			}
+		}
+
+		return e.ReturnType.equal(otherF.ReturnType)
+	}
+
+	return false
+}
+
+func (e ExternalFunctionDef) hasTrait(trait *Trait) bool {
+	return false
+}
+
+func (e *ExternalFunctionDef) hasGenerics() bool {
+	for i := range e.Parameters {
+		if strings.HasPrefix(e.Parameters[i].Type.String(), "$") {
+			return true
+		}
+	}
+	return strings.Contains(e.ReturnType.String(), "$")
+}
+
 func (f FunctionDef) name() string {
 	return f.Name
 }

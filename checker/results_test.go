@@ -120,7 +120,7 @@ func TestResults(t *testing.T) {
 			}`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"ard/io": checker.IoPkg{},
+					"ard/io": &checker.UserModule{}, // UserModule from embedded system
 				},
 				Statements: []checker.Statement{
 					{

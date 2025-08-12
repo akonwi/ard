@@ -35,6 +35,7 @@ var compareOptions = cmp.Options{
 		checker.StructInstance{},
 		checker.Result{},
 		checker.TryOp{},
+		checker.UserModule{},
 	),
 }
 
@@ -76,7 +77,7 @@ func TestImports(t *testing.T) {
 			input: `use ard/io`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"ard/io": checker.IoPkg{},
+					"ard/io": &checker.UserModule{}, // UserModule from embedded system
 				},
 			},
 		},
@@ -1526,7 +1527,7 @@ func TestMaybes(t *testing.T) {
 				}`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"ard/io":    checker.IoPkg{},
+					"ard/io":    &checker.UserModule{}, // UserModule from embedded system
 					"ard/maybe": checker.MaybePkg{},
 				},
 				Statements: []checker.Statement{

@@ -9,15 +9,16 @@ var prelude = map[string]Module{
 }
 
 func findInStdLib(path string) (Module, bool) {
+	// First check for embedded .ard modules
+	if mod, ok := findEmbeddedModule(path); ok {
+		return mod, true
+	}
+
 	switch path {
 	case "ard/async":
 		return AsyncPkg{}, true
-	case "ard/env":
-		return EnvMod{}, true
 	case "ard/fs":
 		return FsPkg{}, true
-	case "ard/io":
-		return IoPkg{}, true
 	case "ard/http":
 		return HttpPkg{}, true
 	case "ard/json":
@@ -30,39 +31,8 @@ func findInStdLib(path string) (Module, bool) {
 		return ResultPkg{}, true
 	case "ard/sqlite":
 		return SQLitePkg{}, true
-	default:
-		// Check if it's an embedded .ard module
-		if mod, ok := findEmbeddedModule(path); ok {
-			return mod, true
-		}
 	}
 	return nil, false
-}
-
-/* ard/env */
-type EnvMod struct{}
-
-func (mod EnvMod) Path() string {
-	return "ard/env"
-}
-
-func (mod EnvMod) Program() *Program {
-	return nil
-}
-func (mod EnvMod) Get(name string) Symbol {
-	switch name {
-	case "get":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "key", Type: Str}},
-				ReturnType: &Maybe{Str},
-			},
-		}
-	default:
-		return Symbol{}
-	}
 }
 
 /* ard/float */
@@ -190,41 +160,6 @@ func (pkg IntPkg) Get(name string) Symbol {
 				Name:       name,
 				Parameters: []Parameter{{Name: "string", Type: Str}},
 				ReturnType: &Maybe{Int},
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
-
-/* ard/io */
-type IoPkg struct{}
-
-func (pkg IoPkg) Path() string {
-	return "ard/io"
-}
-
-func (pkg IoPkg) Program() *Program {
-	return nil
-}
-func (pkg IoPkg) Get(name string) Symbol {
-	switch name {
-	case "print":
-		fn := &FunctionDef{
-			Name: name,
-			Parameters: []Parameter{
-				{Name: "string", Type: strMod.symbols["ToString"].Type},
-			},
-			ReturnType: Void,
-		}
-		return Symbol{Name: name, Type: fn}
-	case "read_line":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{},
-				ReturnType: MakeResult(Str, Str),
 			},
 		}
 	default:

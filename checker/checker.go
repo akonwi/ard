@@ -75,14 +75,32 @@ type checker struct {
 	program     *Program
 	filePath    string
 	halted      bool
+	ffiRegistry *FFIRegistry
 }
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	globalScope := makeScope(nil)
+
+	// Create FFI registry only for non-embedded modules
+	var ffiRegistry *FFIRegistry
+	if moduleResolver != nil {
+		// User module - create FFI registry with project root
+		projectRoot := "."
+		if moduleResolver.project != nil {
+			projectRoot = moduleResolver.project.RootPath
+		}
+		ffiRegistry = NewFFIRegistry(projectRoot)
+	} else if !strings.HasPrefix(filePath, "ard/") {
+		// Main program without module resolver - create FFI registry
+		ffiRegistry = NewFFIRegistry(".")
+	}
+	// For embedded modules (filePath starts with "ard/"), ffiRegistry remains nil
+
 	c := &checker{
 		diagnostics: []Diagnostic{},
 		scope:       &globalScope,
 		filePath:    filePath,
+		ffiRegistry: ffiRegistry,
 	}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -162,7 +180,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 	}
 
 	// Create UserModule from the checked program
-	userModule := NewUserModule("", c.program, c.scope)
+	userModule := NewUserModule(filePath, c.program, c.scope)
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
@@ -213,6 +231,8 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		baseType = Float
 	case *ast.BooleanType:
 		baseType = Bool
+	case *ast.VoidType:
+		baseType = Void
 
 	case *ast.FunctionType:
 		// Convert each parameter type and return type
@@ -267,7 +287,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 			}
 		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
-		return nil
+		return &Any{name: "unknown"}
 	case *ast.GenericType:
 		return &Any{name: ty.Name}
 	default:
@@ -316,6 +336,9 @@ func typeMismatch(expected, got Type) string {
 }
 
 func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
+	if c.halted {
+		return nil
+	}
 	switch s := (*stmt).(type) {
 	case *ast.Comment:
 		return nil
@@ -1171,6 +1194,9 @@ func (c *checker) validateStructInstance(structType *StructDef, properties []ast
 }
 
 func (c *checker) checkExpr(expr ast.Expression) Expression {
+	if c.halted {
+		return nil
+	}
 	switch s := (expr).(type) {
 	case *ast.StrLiteral:
 		return &StrLiteral{s.Value}
@@ -1182,7 +1208,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				value, err := strconv.ParseFloat(s.Value, 64)
 				if err != nil {
 					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
-					return nil
+					return &FloatLiteral{Value: 0.0}
 				}
 				return &FloatLiteral{Value: value}
 			}
@@ -1198,12 +1224,16 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			for i := range s.Chunks {
 				cx := c.checkExpr(s.Chunks[i])
 				if cx == nil {
-					return nil
+					// Replace failed chunk with placeholder
+					chunks[i] = &StrLiteral{"<error>"}
+					continue
 				}
 				toStringTrait := strMod.Get("ToString").Type.(*Trait)
 				if !cx.Type().hasTrait(toStringTrait) {
 					c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
-					return nil
+					// Replace chunk that can't be converted to string with placeholder
+					chunks[i] = &StrLiteral{"<error>"}
+					continue
 				}
 				chunks[i] = cx
 			}
@@ -1214,6 +1244,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return &Variable{*sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
+		c.halted = true
 		return nil
 	case *ast.FunctionCall:
 		{
@@ -1247,24 +1278,36 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Try different types for the function symbol
 			fnDef, ok = fnSym.Type.(*FunctionDef)
 			if !ok {
-				//// technically, the below isn't possible anymore
-				// Check if it's a variable that holds a function
-				// if varDef, ok := fnSym.(*VariableDef); ok {
-				// 	// Try to get a FunctionDef directly
-				// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
-				// 		fnDef = anon
-				// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
-				// 		// FunctionDef can be used directly
-				// 		// This handles the case where a variable holds a function
-				// 		fnDef = existingFnDef
-				// 	} else {
-				// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-				// 		return nil
-				// 	}
-				// } else {
-				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-				return nil
-				// }
+				// Check if it's an external function
+				if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
+					// Convert ExternalFunctionDef to FunctionDef for type checking
+					fnDef = &FunctionDef{
+						Name:       extFnDef.Name,
+						Parameters: extFnDef.Parameters,
+						ReturnType: extFnDef.ReturnType,
+						Body:       nil, // External functions don't have bodies
+						Private:    extFnDef.Private,
+					}
+				} else {
+					//// technically, the below isn't possible anymore
+					// Check if it's a variable that holds a function
+					// if varDef, ok := fnSym.(*VariableDef); ok {
+					// 	// Try to get a FunctionDef directly
+					// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
+					// 		fnDef = anon
+					// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
+					// 		// FunctionDef can be used directly
+					// 		// This handles the case where a variable holds a function
+					// 		fnDef = existingFnDef
+					// 	} else {
+					// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+					// 		return nil
+					// 	}
+					// } else {
+					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+					return nil
+					// }
+				}
 			}
 
 			// Resolve named arguments to positional arguments (for expressions only)
@@ -1788,8 +1831,25 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
+					// Handle both regular functions and external functions
 					var ok bool
-					fnDef, ok = sym.Type.(*FunctionDef)
+					switch fn := sym.Type.(type) {
+					case *FunctionDef:
+						fnDef = fn
+						ok = true
+					case *ExternalFunctionDef:
+						// Convert ExternalFunctionDef to FunctionDef for validation
+						fnDef = &FunctionDef{
+							Name:       fn.Name,
+							Parameters: fn.Parameters,
+							ReturnType: fn.ReturnType,
+							Private:    fn.Private,
+						}
+						ok = true
+					default:
+						ok = false
+					}
+
 					if !ok {
 						targetName := s.Target.String()
 						c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
@@ -2029,6 +2089,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	case *ast.FunctionDeclaration:
 		return c.checkFunction(s, nil)
+	case *ast.ExternalFunction:
+		return c.checkExternalFunction(s)
 	case *ast.AnonymousFunction:
 		{
 			// Process parameters
@@ -2848,7 +2910,26 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 				return nil
 			}
 
-			fnDef, isFunc := sym.Type.(*FunctionDef)
+			// Handle both regular functions and external functions
+			var fnDef *FunctionDef
+			var isFunc bool
+			switch fn := sym.Type.(type) {
+			case *FunctionDef:
+				fnDef = fn
+				isFunc = true
+			case *ExternalFunctionDef:
+				// Convert ExternalFunctionDef to FunctionDef for validation
+				fnDef = &FunctionDef{
+					Name:       fn.Name,
+					Parameters: fn.Parameters,
+					ReturnType: fn.ReturnType,
+					Private:    fn.Private,
+				}
+				isFunc = true
+			default:
+				isFunc = false
+			}
+
 			if !isFunc {
 				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
 				return nil
@@ -2899,6 +2980,57 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 	}
 
 	return checked
+}
+
+func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunctionDef {
+	// Check for duplicate function names
+	if _, dup := c.scope.get(def.Name); dup {
+		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
+		return nil
+	}
+
+	// Process parameters
+	params := make([]Parameter, len(def.Parameters))
+	for i, param := range def.Parameters {
+		paramType := c.resolveType(param.Type)
+		params[i] = Parameter{
+			Name:    param.Name,
+			Type:    paramType,
+			Mutable: param.Mutable,
+		}
+	}
+
+	// Resolve return type
+	returnType := c.resolveType(def.ReturnType)
+
+	// Validate external binding format and existence
+	if def.ExternalBinding == "" {
+		c.addError("External binding cannot be empty", def.GetLocation())
+		return nil
+	}
+
+	// Validate that the external binding can be resolved and file exists
+	// Skip validation for embedded modules (when ffiRegistry is nil)
+	if c.ffiRegistry != nil {
+		if err := c.ffiRegistry.ValidateBinding(def.ExternalBinding); err != nil {
+			c.addError(fmt.Sprintf("Invalid external binding: %s", err.Error()), def.GetLocation())
+			return nil
+		}
+	}
+
+	// Create external function definition
+	extFn := &ExternalFunctionDef{
+		Name:            def.Name,
+		Parameters:      params,
+		ReturnType:      returnType,
+		ExternalBinding: def.ExternalBinding,
+		Private:         def.Private,
+	}
+
+	// Add to scope
+	c.scope.add(def.Name, extFn, false)
+
+	return extFn
 }
 
 func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {

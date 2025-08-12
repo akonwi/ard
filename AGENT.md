@@ -15,11 +15,13 @@ The backlog of work is a simple todo list in TODO.md
 The project uses go v1.25rc2 with the `jsonv2` experiment for the new json tools and has build tag directives for it.
 
 - Build: `go build`
+  > Important: do not stage and commit the built binary
 - Run Ard program: `go run main.go run samples/[file].ard`
 - Run all tests: `go test ./...`
 - Run package tests: `go test ./ast` or `go test ./checker` or `go test ./vm`
 - Run single test: `go test -run TestName ./[package]`
 - Verbose testing: `go test -v ./...`
+- Generate FFI registry: `go generate ./vm` (run when adding new FFI functions)
 
 ## Code Style Guidelines
 - **Naming**: PascalCase for exported, camelCase for unexported items
@@ -32,3 +34,8 @@ The project uses go v1.25rc2 with the `jsonv2` experiment for the new json tools
 - **Project Structure**: Compiler follows ast → checker → vm pipeline
 - **Development Tracking**: Use TODO.md for feature development progress
 - **Sample Programs**: Reference samples directory for example Ard programs
+- **FFI System**: Standard library modules use Foreign Function Interface (FFI)
+  - FFI functions in vm/ffi_*.go files with signature: `func(vm *VM, args []*object) (*object, any)`
+  - Automatic code generation discovers and registers FFI functions
+  - VM automatically handles Result and Maybe type wrapping
+  - Standard library definitions in std_lib/*.ard using `extern fn` declarations

@@ -73,6 +73,7 @@ const (
 	else_   = "else"
 	type_   = "type"
 	private = "private"
+	extern  = "extern"
 
 	// Types
 	int_  = "int"
@@ -592,6 +593,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(type_)
 	case "private":
 		return makeKeyword(private)
+	case "extern":
+		return makeKeyword(extern)
 	default:
 		return makeIdentifier(identifier)
 	}

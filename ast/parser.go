@@ -863,6 +863,11 @@ func (p *parser) parseType() DeclaredType {
 					Location: id.getLocation(),
 					nullable: nullable,
 				}
+			case "Void":
+				return &VoidType{
+					Location: id.getLocation(),
+					nullable: nullable,
+				}
 			default:
 				return &CustomType{
 					Location: id.getLocation(),
@@ -1101,7 +1106,22 @@ func (p *parser) try() (Expression, error) {
 			}
 		}
 
+		// Calculate the end location based on what we parsed
+		endLoc := expr.GetLocation().End
+		if len(catchBlock) > 0 {
+			// If we have a catch block, use the last statement's location
+			lastStmt := catchBlock[len(catchBlock)-1]
+			endLoc = lastStmt.GetLocation().End
+		} else if catchVar != nil {
+			// If we only have a catch variable, use its location
+			endLoc = catchVar.Location.End
+		}
+
 		return &Try{
+			Location: Location{
+				Start: keyword.Location.Start,
+				End:   endLoc,
+			},
 			keyword:    keyword,
 			Expression: expr,
 			CatchVar:   catchVar,
@@ -1113,6 +1133,7 @@ func (p *parser) try() (Expression, error) {
 
 func (p *parser) functionDef(asMethod bool) (Statement, error) {
 	private := p.match(private)
+	isExtern := p.match(extern)
 	if p.match(fn) {
 		keyword := p.previous()
 		var name any = ""
@@ -1159,6 +1180,44 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		if (name == "" && !p.check(left_brace)) || name != "" {
 			// Function with explicit return type
 			returnType = p.parseType()
+		}
+
+		// Handle extern functions
+		if isExtern {
+			// Extern functions must have a name
+			if name == "" {
+				return nil, p.makeError(p.peek(), "Extern functions must have a name")
+			}
+
+			// Expect "= external_binding"
+			if !p.match(equal) {
+				return nil, p.makeError(p.peek(), "Expected '=' after extern function signature")
+			}
+
+			// Parse the external binding string
+			if !p.check(string_) {
+				return nil, p.makeError(p.peek(), "Expected string literal for external binding")
+			}
+			bindingToken := p.advance()
+			externalBinding := bindingToken.text
+			// Remove quotes from string literal
+			if len(externalBinding) >= 2 && externalBinding[0] == '"' && externalBinding[len(externalBinding)-1] == '"' {
+				externalBinding = externalBinding[1 : len(externalBinding)-1]
+			}
+
+			extFn := &ExternalFunction{
+				Private:         private,
+				Name:            name.(string), // External functions must have string names
+				Parameters:      params,
+				ReturnType:      returnType,
+				ExternalBinding: externalBinding,
+				Location: Location{
+					Start: Point{Row: keyword.line, Col: keyword.column},
+					End:   Point{Row: p.previous().line, Col: p.previous().column},
+				},
+			}
+
+			return extFn, nil
 		}
 
 		statements, err := p.block()
