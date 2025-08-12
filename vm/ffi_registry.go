@@ -91,7 +91,7 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 			return &object{raw: nil, _type: maybeType}, nil
 		}
 		// Return Some(value) - the result is already the inner value
-		return result, nil
+		return &object{raw: result.raw, _type: maybeType}, nil
 	}
 
 	// For non-Result return types, convert any error to Go error

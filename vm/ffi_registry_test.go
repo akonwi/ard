@@ -180,7 +180,7 @@ func TestFFIPanicRecovery(t *testing.T) {
 	})
 
 	t.Run("automatic Maybe handling", func(t *testing.T) {
-		// Create a test function that returns Maybe
+		// Create a test function whose Ard signature returns a Str?
 		maybeTestFunc := func(vm *VM, args []*object) (*object, any) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("maybe_test expects 1 argument")
@@ -220,8 +220,8 @@ func TestFFIPanicRecovery(t *testing.T) {
 			t.Errorf("Expected 'test_value', got: %v", result.raw)
 		}
 
-		if result._type != checker.Str {
-			t.Errorf("Expected Str type, got: %v", result._type)
+		if result._type != maybeStrType {
+			t.Errorf("Expected %s type, got: %v", maybeStrType, result._type)
 		}
 
 		// Test None case
@@ -237,7 +237,7 @@ func TestFFIPanicRecovery(t *testing.T) {
 		}
 
 		if result._type != maybeStrType {
-			t.Errorf("Expected Maybe<Str> type, got: %v", result._type)
+			t.Errorf("Expected %s type, got: %v", maybeStrType, result._type)
 		}
 	})
 }
