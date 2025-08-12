@@ -57,11 +57,6 @@ var HttpResponseDef = &StructDef{
 			Parameters: []Parameter{},
 			ReturnType: Bool,
 		},
-		"json": &FunctionDef{
-			Name:       "json",
-			Parameters: []Parameter{},
-			ReturnType: MakeResult(&Any{name: "T"}, Str),
-		},
 	},
 	Statics: map[string]*FunctionDef{},
 }
