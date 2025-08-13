@@ -196,3 +196,99 @@ func TestJsonEncodeMap(t *testing.T) {
 		},
 	})
 }
+
+func TestJsonEncodeNullableNestedStructs(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "nullable nested struct with value",
+			input: `
+				use ard/json
+				use ard/maybe
+
+				struct Winner {
+					id: Int,
+					name: Str,
+					comment: Str,
+				}
+
+				struct Prediction {
+					advice: Str?,
+					winner: Winner?,
+				}
+
+				let prediction = Prediction{
+					advice: maybe::some("Double chance"),
+					winner: maybe::some(Winner{
+						id: 1598,
+						name: "Orlando City SC",
+						comment: "Win or draw",
+					}),
+				}
+				
+				let result = json::encode(prediction).expect("")
+				result.contains("Orlando City SC") and result.contains("1598") and result.contains("Win or draw") and result.contains("Double chance")
+			`,
+			want: true,
+		},
+		{
+			name: "nullable nested struct with null value",
+			input: `
+				use ard/json
+				use ard/maybe
+
+				struct Winner {
+					id: Int,
+					name: Str,
+					comment: Str,
+				}
+
+				struct Prediction {
+					advice: Str?,
+					winner: Winner?,
+				}
+
+				let prediction = Prediction{
+					advice: maybe::some("No prediction"),
+					winner: maybe::none(),
+				}
+				
+				let result = json::encode(prediction).expect("")
+				result.contains("\"winner\":null") and result.contains("No prediction")
+			`,
+			want: true,
+		},
+		{
+			name: "direct encoding of nullable struct - some value",
+			input: `
+				use ard/json
+				use ard/maybe
+
+				struct Person {
+					name: Str,
+					age: Int,
+				}
+
+				let maybe_person: Person? = maybe::some(Person{name: "Alice", age: 30})
+				let result = json::encode(maybe_person).expect("")
+				result.contains("Alice") and result.contains("30")
+			`,
+			want: true,
+		},
+		{
+			name: "direct encoding of nullable struct - none value",
+			input: `
+				use ard/json
+				use ard/maybe
+
+				struct Person {
+					name: Str,
+					age: Int,
+				}
+
+				let maybe_person: Person? = maybe::none()
+				json::encode(maybe_person).expect("")
+			`,
+			want: "null",
+		},
+	})
+}

@@ -523,16 +523,6 @@ func TestDecodeMap(t *testing.T) {
 func TestDecodeField(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "field function exists",
-			input: `
-				use ard/decode
-
-				let field_decoder = decode::field("name", decode::string)
-				"field_exists"
-			`,
-			want: "field_exists",
-		},
-		{
 			name: "field decoder with null data returns error",
 			input: `
 				use ard/decode
@@ -697,6 +687,113 @@ func TestDecodeCustomFunctions(t *testing.T) {
 				decode::run(data, custom_decoder).expect("")
 			`,
 			want: "always works",
+		},
+		{
+			name: "nullable custom struct decoder with non-null data",
+			input: `
+				use ard/decode
+
+				struct Person {
+					id: Int,
+					name: Str,
+				}
+
+				fn decode_person(data: decode::Dynamic) Person![decode::Error] {
+					let person_id = try decode::run(data, decode::field("id", decode::int))
+					let person_name = try decode::run(data, decode::field("name", decode::string))
+
+					Result::ok(Person{
+						id: person_id,
+						name: person_name,
+					})
+				}
+
+				let data = decode::any("\{\"id\": 123, \"name\": \"Alice\"\}")
+				let result = decode::run(data, decode::nullable(decode_person))
+				match result.expect("") {
+					person => person.name,
+					_ => "none"
+				}
+			`,
+			want: "Alice",
+		},
+		{
+			name: "nullable custom struct decoder with null data",
+			input: `
+				use ard/decode
+				use ard/maybe
+
+				struct Person {
+					id: Int,
+					name: Str,
+				}
+
+				fn decode_person(data: decode::Dynamic) Person![decode::Error] {
+					let person_id = try decode::run(data, decode::field("id", decode::int))
+					let person_name = try decode::run(data, decode::field("name", decode::string))
+
+					Result::ok(Person{
+						id: person_id,
+						name: person_name,
+					})
+				}
+
+				let data = decode::any("null")
+				let result = decode::run(data, decode::nullable(decode_person))
+				match result.expect("") {
+					person => person.name,
+					_ => "none"
+				}
+			`,
+			want: "none",
+		},
+		{
+			name: "nullable custom struct in container struct - mirrors predictions.ard pattern",
+			input: `
+				use ard/decode
+
+				struct Winner {
+					id: Int,
+					name: Str,
+					comment: Str,
+				}
+
+				struct Prediction {
+					advice: Str?,
+					winner: Winner?,
+				}
+
+				fn decode_winner(data: decode::Dynamic) Winner![decode::Error] {
+					let winner_id = try decode::run(data, decode::field("id", decode::int))
+					let winner_name = try decode::run(data, decode::field("name", decode::string))
+					let winner_comment = try decode::run(data, decode::field("comment", decode::string))
+
+					Result::ok(Winner{
+						id: winner_id,
+						name: winner_name,
+						comment: winner_comment,
+					})
+				}
+
+				fn decode_prediction(data: decode::Dynamic) Prediction![decode::Error] {
+					let advice = try decode::run(data, decode::field("advice", decode::nullable(decode::string)))
+					let winner = try decode::run(data, decode::field("winner", decode::nullable(decode_winner)))
+
+					Result::ok(Prediction{
+						advice: advice,
+						winner: winner,
+					})
+				}
+
+				let data = decode::any("\{\"advice\": \"Double chance\", \"winner\": \{\"id\": 1598, \"name\": \"Orlando City SC\", \"comment\": \"Win or draw\"\}\}")
+				let result = decode::run(data, decode_prediction)
+				let prediction = result.expect("")
+				match prediction.winner {
+					winner => winner.name,
+					_ => "no winner"
+				}
+			`,
+			want: "Orlando City SC",
 		},
 	})
 }
