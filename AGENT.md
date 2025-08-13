@@ -12,7 +12,7 @@ The language spec is in the README.md
     - using Astro and Starlight
 The backlog of work is a simple todo list in TODO.md
 
-The project uses go v1.25rc2 with the `jsonv2` experiment for the new json tools and has build tag directives for it.
+The project uses the `jsonv2` experiment for the [new json tools](https://antonz.org/go-json-v2/) and has build tag directives for it.
 
 - Build: `go build`
   > Important: do not stage and commit the built binary
