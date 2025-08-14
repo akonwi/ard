@@ -910,5 +910,43 @@ func TestDecodeCustomFunctions(t *testing.T) {
 			`,
 			want: 3,
 		},
+		{
+			name: "using nested custom decoders",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/json_data.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+
+				// create a decoder that takes the first in a list
+				fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
+					fn(data: decode::Dynamic) $T![decode::Error] {
+						let list = try decode::run(data, decode::list(as))
+						Result::ok(list.at(0))
+					}
+				}
+
+				fn decode_bet_names(data: decode::Dynamic) [Str]![decode::Error] {
+				  let nested = try decode::run(
+						data, decode::field(
+							"response", first(
+								decode::field("bookmakers", first(
+									decode::field("bets", decode::list(decode::field("name", decode::string)))
+								))
+							)
+						)
+					)
+					Result::ok(nested)
+				}
+
+				let json = decode::any(text)
+				match decode_bet_names(json) {
+					ok(names) => names.at(0),
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "Match Winner",
+		},
 	})
 }
