@@ -910,9 +910,11 @@ func TestDecodeCustomFunctions(t *testing.T) {
 			`,
 			want: 3,
 		},
-		{
-			name: "using nested custom decoders",
-			input: `
+	})
+}
+
+func TestDeepCustomDecoders(t *testing.T) {
+	input := `
 				use ard/decode
 				use ard/fs
 
@@ -945,8 +947,9 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					ok(names) => names.at(0),
 					err(errs) => errs.at(0).to_str()
 				}
-			`,
-			want: "Match Winner",
-		},
-	})
+			`
+	out := run(t, input)
+	if out != "Match Winner" {
+		t.Fatalf("Didn't get the expected string. Got '%s'", out)
+	}
 }
