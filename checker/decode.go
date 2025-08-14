@@ -218,6 +218,29 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			},
 			ReturnType: fieldDecoder,
 		}}
+	case "one_of":
+		// Create generic type parameter for common decoder type
+		innerT := &Any{name: "T"}
+		// Individual decoders in the list
+		singleDecoder := &FunctionDef{
+			Name:       "Decoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
+		}
+		// List of decoders
+		decoderList := MakeList(singleDecoder)
+		// Result decoder 
+		resultDecoder := &FunctionDef{
+			Name:       "OneOfDecoder",
+			Parameters: []Parameter{{Name: "data", Type: Dynamic}},
+			ReturnType: MakeResult(innerT, MakeList(DecodeErrorDef)),
+		}
+
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "decoders", Type: decoderList}},
+			ReturnType: resultDecoder,
+		}}
 	default:
 		return Symbol{}
 	}

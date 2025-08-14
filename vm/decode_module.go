@@ -257,6 +257,41 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			},
 			_type: fieldDecoderType,
 		}
+	case "one_of":
+		// Return a decoder that tries multiple decoders in sequence
+		decoderList := args[0] // List of decoders to try
+
+		// Extract the decoder list to get the inner type
+		decoderListObj := decoderList.raw.([]*object)
+		if len(decoderListObj) == 0 {
+			panic(fmt.Errorf("one_of requires at least one decoder"))
+		}
+
+		// All decoders should have the same return type - use the first one
+		firstDecoderType := decoderListObj[0]._type.(*checker.FunctionDef)
+		firstReturnType := firstDecoderType.ReturnType.(*checker.Result)
+		commonValueType := firstReturnType.Val()
+
+		// Create one_of decoder type
+		oneOfDecoderType := &checker.FunctionDef{
+			Name:       "Decoder",
+			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
+			ReturnType: checker.MakeResult(commonValueType, checker.MakeList(checker.DecodeErrorDef)),
+		}
+
+		// Create closure that captures the decoder list
+		oneOfDecoderFn := func(data *object, resultType *checker.Result) *object {
+			return decodeAsOneOf(decoderList, data, resultType)
+		}
+
+		return &object{
+			raw: &Closure{
+				vm:        vm,
+				expr:      *oneOfDecoderType,
+				builtinFn: oneOfDecoderFn,
+			},
+			_type: oneOfDecoderType,
+		}
 	default:
 		panic(fmt.Errorf("Unimplemented: decode::%s()", call.Name))
 	}
@@ -719,6 +754,38 @@ func extractField(fieldKey string, valueDecoder *object, rawMap map[string]inter
 		errorList := &object{raw: valueErrors, _type: checker.MakeList(checker.DecodeErrorDef)}
 		return makeErr(errorList, resultType)
 	}
+}
+
+// decodeAsOneOf tries multiple decoders in sequence until one succeeds
+func decodeAsOneOf(decoderList *object, data *object, resultType *checker.Result) *object {
+	decoders := decoderList.raw.([]*object)
+	
+	if len(decoders) == 0 {
+		panic(fmt.Errorf("one_of requires at least one decoder"))
+	}
+
+	var firstError *object
+
+	// Try each decoder in sequence
+	for i, decoder := range decoders {
+		closure := decoder.raw.(*Closure)
+		result := closure.eval(data)
+		resultValue := result.raw.(_result)
+
+		if resultValue.ok {
+			// Success! Return the result
+			return makeOk(resultValue.raw, resultType)
+		}
+
+		// Store the first error (following Gleam's pattern)
+		if i == 0 {
+			firstError = result
+		}
+	}
+
+	// All decoders failed - return the first error
+	firstErrorValue := firstError.raw.(_result)
+	return makeErr(firstErrorValue.raw, resultType)
 }
 
 // parseJsonToDynamic parses JSON into a Dynamic object

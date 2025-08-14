@@ -671,6 +671,23 @@ func TestDecodeErrorToString(t *testing.T) {
 	})
 }
 
+func TestDecodeOneOf(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "one_of with only string decoder - basic functionality",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\"hello\"")
+				let string_dec = decode::string
+				let decoder = decode::one_of([string_dec])
+				decode::run(data, decoder).expect("")
+			`,
+			want: "hello",
+		},
+	})
+}
+
 func TestDecodeCustomFunctions(t *testing.T) {
 	runTests(t, []test{
 		{
