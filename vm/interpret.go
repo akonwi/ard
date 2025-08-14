@@ -458,7 +458,7 @@ func (vm *VM) eval(expr checker.Expression) *object {
 		}
 		return void
 	case *checker.FunctionDef:
-		closure := &Closure{vm: vm, expr: *e}
+		closure := &Closure{vm: vm, expr: *e, capturedScope: vm.scope}
 		obj := &object{closure, closure.Type()}
 		if e.Name != "" {
 			vm.scope.add(e.Name, obj)

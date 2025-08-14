@@ -82,9 +82,10 @@ func (vm *VM) Eval(expr checker.Expression) *object {
  * fns that are bound to a particular execution scope (*VM)
  */
 type Closure struct {
-	vm        *VM
-	expr      checker.FunctionDef
-	builtinFn func(*object, *checker.Result) *object // for built-in decoder functions
+	vm            *VM
+	expr          checker.FunctionDef
+	builtinFn     func(*object, *checker.Result) *object // for built-in decoder functions
+	capturedScope *scope                                 // scope at closure creation time
 }
 
 type ExternalFunctionWrapper struct {
@@ -102,6 +103,20 @@ func (c Closure) eval(args ...*object) *object {
 	}
 
 	// Handle regular Ard functions
+	// Save current VM scope
+	originalScope := c.vm.scope
+
+	// Ensure scope is restored even if function panics
+	defer func() {
+		c.vm.scope = originalScope
+	}()
+
+	// Set VM scope to captured scope for lexical scoping
+	if c.capturedScope != nil {
+		c.vm.scope = c.capturedScope
+	}
+
+	// Execute function with captured scope as base
 	res, _ := c.vm.evalBlock(c.expr.Body, func() {
 		for i := range args {
 			c.vm.scope.add(c.expr.Parameters[i].Name, args[i])
