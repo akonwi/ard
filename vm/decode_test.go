@@ -723,11 +723,11 @@ func TestDecodeOneOf(t *testing.T) {
 				let data1 = decode::any("\"hello\"")
 				let decoder = decode::one_of([decode::string, int_to_string])
 				let result1 = decode::run(data1, decoder).expect("")
-				
-				// Test int input - second decoder succeeds  
+
+				// Test int input - second decoder succeeds
 				let data2 = decode::any("42")
 				let result2 = decode::run(data2, decoder).expect("")
-				
+
 				result1 + "," + result2
 			`,
 			want: "hello,42",
@@ -890,6 +890,25 @@ func TestDecodeCustomFunctions(t *testing.T) {
 				}
 			`,
 			want: "Orlando City SC",
+		},
+		{
+			name: "a function that decodes the first item in a list",
+			input: `
+			use ard/decode
+
+			fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
+			  fn(data: decode::Dynamic) $T![decode::Error] {
+			    let list = try decode::run(data, decode::list(as))
+			    Result::ok(list.at(0))
+			  }
+			}
+			let data = decode::any("[3,2,1]")
+			match decode::run(data, first(decode::int)) {
+				ok => ok,
+				err(errs) => -1
+			}
+			`,
+			want: 3,
 		},
 	})
 }

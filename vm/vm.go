@@ -163,7 +163,7 @@ func (o *object) premarshal() any {
 		return o._type.String()
 	case *checker.Enum:
 		return o.raw
-	case *checker.Maybe:
+	case *checker.Maybe, *checker.Any:
 		if o.raw == nil {
 			return nil
 		}
