@@ -967,14 +967,8 @@ func (vm *VM) evalFloatMethod(subj *object, m *checker.FunctionCall) *object {
 		return &object{strconv.FormatFloat(subj.raw.(float64), 'f', 2, 64), checker.Str}
 	case "to_int":
 		floatVal := subj.raw.(float64)
-		intVal := int(floatVal)
-		// Check if the conversion is exact (no decimal part lost)
-		if float64(intVal) == floatVal {
-			// Return Some(intVal) - raw value is the int itself
-			return &object{intVal, checker.MakeMaybe(checker.Int)}
-		}
-		// Return None - raw value is nil
-		return &object{nil, checker.MakeMaybe(checker.Int)}
+		intVal := int(floatVal) // Truncates toward zero
+		return &object{intVal, checker.Int}
 	default:
 		return void
 	}

@@ -203,7 +203,7 @@ func (f float) get(name string) Type {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{},
-			ReturnType: MakeMaybe(Int),
+			ReturnType: Int,
 		}
 	default:
 		return nil

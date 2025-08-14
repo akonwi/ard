@@ -331,58 +331,38 @@ func TestFloatApi(t *testing.T) {
 			want:  100.0,
 		},
 		{
-			name: ".to_int() returns Some(Int) for exact conversions",
-			input: `
-				let result = 5.0.to_int()
-				match result {
-					val => val,
-					_ => 999
-				}
-			`,
+			name: ".to_int() converts exact floats",
+			input: `5.0.to_int()`,
 			want: 5,
 		},
 		{
-			name: ".to_int() returns None for inexact conversions",
-			input: `
-				let result = 5.7.to_int()
-				match result {
-					val => val,
-					_ => 999
-				}
-			`,
-			want: 999,
+			name: ".to_int() truncates toward zero for positive decimals",
+			input: `5.7.to_int()`,
+			want: 5,
 		},
 		{
-			name: ".to_int() works with negative exact values",
-			input: `
-				let result = (0.0 - 10.0).to_int()
-				match result {
-					val => val,
-					_ => 999
-				}
-			`,
+			name: ".to_int() truncates toward zero for positive decimals near next integer",
+			input: `5.9.to_int()`,
+			want: 5,
+		},
+		{
+			name: ".to_int() works with negative values",
+			input: `(0.0 - 10.0).to_int()`,
 			want: -10,
 		},
 		{
-			name: ".to_int() returns None for negative inexact values",
-			input: `
-				let result = (0.0 - 3.14).to_int()
-				match result {
-					val => val,
-					_ => 999
-				}
-			`,
-			want: 999,
+			name: ".to_int() truncates toward zero for negative decimals",
+			input: `(0.0 - 3.14).to_int()`,
+			want: -3,
+		},
+		{
+			name: ".to_int() truncates toward zero for negative decimals near next integer",
+			input: `(0.0 - 3.9).to_int()`,
+			want: -3,
 		},
 		{
 			name: ".to_int() works with zero",
-			input: `
-				let result = 0.0.to_int()
-				match result {
-					val => val,
-					_ => 999
-				}
-			`,
+			input: `0.0.to_int()`,
 			want: 0,
 		},
 	})
