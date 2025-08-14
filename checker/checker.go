@@ -2117,6 +2117,20 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				returnType = c.resolveType(s.ReturnType)
 			}
 
+			// Create function definition early (before checking body)
+			// Generate a unique name for the anonymous function
+			uniqueName := fmt.Sprintf("anon_func_%p", s)
+
+			fn := &FunctionDef{
+				Name:       uniqueName,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       nil, // Will be set after checking
+			}
+
+			// Add function to scope BEFORE checking body to support generic resolution
+			c.scope.add(uniqueName, fn, false)
+
 			// Check function body with a setup function that adds parameters to scope
 			body := c.checkBlock(s.Body, func() {
 				// set the expected return type to the scope
@@ -2132,19 +2146,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			// Create function definition
-			// Generate a unique name for the anonymous function
-			uniqueName := fmt.Sprintf("anon_func_%p", s)
-
-			fn := &FunctionDef{
-				Name:       uniqueName,
-				Parameters: params,
-				ReturnType: returnType,
-				Body:       body,
-			}
-
-			// Add function to scope
-			c.scope.add(uniqueName, fn, false)
+			// Set the body now that it's been checked
+			fn.Body = body
 
 			return fn
 		}
