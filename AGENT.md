@@ -29,6 +29,7 @@ The project uses the `jsonv2` experiment for the [new json tools](https://antonz
 - **Error Handling**: Use diagnostics for compiler errors with source locations
 - **Types**: Follow the type system in README.md for the Ard language spec
 - **Testing**: Table-driven tests with descriptive names
+  - use TDD
   - when adding new features or fixing bugs, recreate them with a test where possible instead of creating sample programs
 - **Formatting**: Standard Go formatting (`gofmt`)
 - **Project Structure**: Compiler follows ast → checker → vm pipeline

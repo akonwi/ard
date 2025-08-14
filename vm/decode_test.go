@@ -732,6 +732,38 @@ func TestDecodeOneOf(t *testing.T) {
 			`,
 			want: "hello,42",
 		},
+		{
+			name: "one_of with empty decoder list returns error",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\"hello\"")
+				let empty_decoders: [fn(decode::Dynamic) Str![decode::Error]] = []
+				let decoder = decode::one_of(empty_decoders)
+				let result = decode::run(data, decoder)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "one_of empty decoder error message is descriptive",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\"hello\"")
+				let empty_decoders: [fn(decode::Dynamic) Str![decode::Error]] = []
+				let decoder = decode::one_of(empty_decoders)
+				let result = decode::run(data, decoder)
+				match result {
+					err => {
+						let first_error = err.at(0)
+						first_error.expected == "At least one decoder" && first_error.found == "Empty decoder list"
+					}
+					ok(_) => false
+				}
+			`,
+			want: true,
+		},
 	})
 }
 

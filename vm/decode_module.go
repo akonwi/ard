@@ -264,7 +264,26 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		// Extract the decoder list to get the inner type
 		decoderListObj := decoderList.raw.([]*object)
 		if len(decoderListObj) == 0 {
-			panic(fmt.Errorf("one_of requires at least one decoder"))
+			// Return error instead of panicking - empty decoder lists are not allowed
+			emptyListError := makeDecodeErrorList("At least one decoder", "Empty decoder list")
+			
+			// Create a proper decoder type that returns an error
+			errorDecoderType := &checker.FunctionDef{
+				Name:       "OneOfDecoder",
+				Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
+				ReturnType: checker.MakeResult(checker.Void, checker.MakeList(checker.DecodeErrorDef)),
+			}
+			
+			return &object{
+				raw: &Closure{
+					vm:        vm,
+					expr:      *errorDecoderType,
+					builtinFn: func(data *object, resultType *checker.Result) *object {
+						return makeErr(emptyListError, resultType)
+					},
+				},
+				_type: errorDecoderType,
+			}
 		}
 
 		// All decoders should have the same return type - use the first one
@@ -761,7 +780,9 @@ func decodeAsOneOf(decoderList *object, data *object, resultType *checker.Result
 	decoders := decoderList.raw.([]*object)
 	
 	if len(decoders) == 0 {
-		panic(fmt.Errorf("one_of requires at least one decoder"))
+		// Return error instead of panicking
+		emptyListError := makeDecodeErrorList("At least one decoder", "Empty decoder list")
+		return makeErr(emptyListError, resultType)
 	}
 
 	var firstError *object
