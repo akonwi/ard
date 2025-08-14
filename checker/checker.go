@@ -289,6 +289,9 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return &Any{name: "unknown"}
 	case *ast.GenericType:
+		if existing := c.scope.findGeneric(ty.Name); existing != nil {
+			return existing
+		}
 		return &Any{name: ty.Name}
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))

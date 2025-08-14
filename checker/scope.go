@@ -67,6 +67,23 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 	return nil, false
 }
 
+// findGeneric looks for an existing generic type with the given name in the scope chain
+func (st *SymbolTable) findGeneric(genericName string) *Any {
+	// Check current scope
+	for _, symbol := range st.symbols {
+		if anyType, ok := symbol.Type.(*Any); ok && anyType.name == genericName {
+			return anyType
+		}
+	}
+
+	// Check parent scopes
+	if st.parent != nil {
+		return st.parent.findGeneric(genericName)
+	}
+
+	return nil
+}
+
 func (st *SymbolTable) expectReturn(returnType Type) {
 	st.returnType = returnType
 }
