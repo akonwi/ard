@@ -293,6 +293,19 @@ func TestFunctions(t *testing.T) {
 			sub(30, 8)`,
 			want: 22,
 		},
+		{
+			name: "closure lexical scoping",
+			input: `
+			fn createAdder(base: Int) fn(Int) Int {
+			  fn(x: Int) Int {
+			    base + x
+			  }
+			}
+			
+			let addFive = createAdder(5)
+			addFive(10)`,
+			want: 15,
+		},
 	}
 
 	runTests(t, tests)
@@ -331,39 +344,39 @@ func TestFloatApi(t *testing.T) {
 			want:  100.0,
 		},
 		{
-			name: ".to_int() converts exact floats",
+			name:  ".to_int() converts exact floats",
 			input: `5.0.to_int()`,
-			want: 5,
+			want:  5,
 		},
 		{
-			name: ".to_int() truncates toward zero for positive decimals",
+			name:  ".to_int() truncates toward zero for positive decimals",
 			input: `5.7.to_int()`,
-			want: 5,
+			want:  5,
 		},
 		{
-			name: ".to_int() truncates toward zero for positive decimals near next integer",
+			name:  ".to_int() truncates toward zero for positive decimals near next integer",
 			input: `5.9.to_int()`,
-			want: 5,
+			want:  5,
 		},
 		{
-			name: ".to_int() works with negative values",
+			name:  ".to_int() works with negative values",
 			input: `(0.0 - 10.0).to_int()`,
-			want: -10,
+			want:  -10,
 		},
 		{
-			name: ".to_int() truncates toward zero for negative decimals",
+			name:  ".to_int() truncates toward zero for negative decimals",
 			input: `(0.0 - 3.14).to_int()`,
-			want: -3,
+			want:  -3,
 		},
 		{
-			name: ".to_int() truncates toward zero for negative decimals near next integer",
+			name:  ".to_int() truncates toward zero for negative decimals near next integer",
 			input: `(0.0 - 3.9).to_int()`,
-			want: -3,
+			want:  -3,
 		},
 		{
-			name: ".to_int() works with zero",
+			name:  ".to_int() works with zero",
 			input: `0.0.to_int()`,
-			want: 0,
+			want:  0,
 		},
 	})
 }
