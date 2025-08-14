@@ -1,18 +1,5 @@
 ## TODO
 
-- [ ] lexical scope for returning functions
-  - `as` variable is undefined at line 3
-  ```
-  fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
-    fn(data: decode::Dynamic) $T![decode::Error] {
-      let list = try decode::run(data, decode::list(as))
-      match list.size() {
-        0 => Result::err([decode::Error{path: [""], expected: "non-empty list", found: "empty list"}]),
-        _ => Result::ok(list.at(0))
-      }
-    }
-  }
-  ```
 - [ ] implement `runtime` package and export objects from them
 - [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
@@ -47,3 +34,17 @@
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
 - [ ] `?` sugar for safely unwrapping maybes
+- [ ] selective variable capture for closures
+  - data optimization
+  -👇🏿 the returned fn should only have `as` in its scope, not the entire scope
+  ```
+  fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
+    fn(data: decode::Dynamic) $T![decode::Error] {
+      let list = try decode::run(data, decode::list(as))
+      match list.size() {
+        0 => Result::err([decode::Error{path: [""], expected: "non-empty list", found: "empty list"}]),
+        _ => Result::ok(list.at(0))
+      }
+    }
+  }
+  ```
