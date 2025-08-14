@@ -686,32 +686,6 @@ func TestDecodeOneOf(t *testing.T) {
 			want: "hello",
 		},
 		{
-			name: "one_of with multiple string decoders - first succeeds",
-			input: `
-				use ard/decode
-
-				let data = decode::any("\"hello\"")
-				let str_dec1 = decode::string
-				let str_dec2 = decode::string  
-				let decoder = decode::one_of([str_dec1, str_dec2])
-				decode::run(data, decoder).expect("")
-			`,
-			want: "hello",
-		},
-		{
-			name: "one_of fails when no decoder matches",
-			input: `
-				use ard/decode
-
-				let data = decode::any("42")
-				let str_dec = decode::string
-				let decoder = decode::one_of([str_dec])
-				let result = decode::run(data, decoder)
-				result.is_err()
-			`,
-			want: true,
-		},
-		{
 			name: "one_of returns error from first decoder when all fail",
 			input: `
 				use ard/decode
