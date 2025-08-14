@@ -143,6 +143,17 @@ func TestNumberOperations(t *testing.T) {
 		{input: `30 <= 2`, want: false},
 		{input: `30 <= 30`, want: true},
 		{input: "(72.0 - 32.0) * 5.0 / 9.0", want: 22.22222222222222},
+		// Float comparisons
+		{input: `3.5 > 2.1`, want: true},
+		{input: `2.1 > 3.5`, want: false},
+		{input: `3.5 >= 2.1`, want: true},
+		{input: `3.5 >= 3.5`, want: true},
+		{input: `2.1 >= 3.5`, want: false},
+		{input: `3.5 < 2.1`, want: false},
+		{input: `2.1 < 3.5`, want: true},
+		{input: `3.5 <= 2.1`, want: false},
+		{input: `3.5 <= 3.5`, want: true},
+		{input: `2.1 <= 3.5`, want: true},
 	}
 
 	for _, test := range tests {

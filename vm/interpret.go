@@ -386,6 +386,30 @@ func (vm *VM) eval(expr checker.Expression) *object {
 			left.raw.(int) <= right.raw.(int),
 			checker.Bool,
 		}
+	case *checker.FloatGreater:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) > right.raw.(float64),
+			checker.Bool,
+		}
+	case *checker.FloatGreaterEqual:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) >= right.raw.(float64),
+			checker.Bool,
+		}
+	case *checker.FloatLess:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) < right.raw.(float64),
+			checker.Bool,
+		}
+	case *checker.FloatLessEqual:
+		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		return &object{
+			left.raw.(float64) <= right.raw.(float64),
+			checker.Bool,
+		}
 	case *checker.FloatDivision:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
 		return &object{
