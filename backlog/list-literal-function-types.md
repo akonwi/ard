@@ -1,10 +1,12 @@
-# List Literal Function Type Inference Issue
+# List Literal Function Type Inference Issue - ✅ RESOLVED
 
 ## Summary
 
-The type checker fails to properly infer types for list literals containing function values, resulting in runtime panics due to nil type pointers in `ListLiteral.Type()`.
+The type checker failed to properly infer types for list literals containing function values, resulting in runtime panics due to nil type pointers in `ListLiteral.Type()`.
 
-## Problem Description
+**FIXED**: Changed pointer comparison (`!=`) to structural comparison (`.equal()`) in `checkList()`.
+
+## Problem Description (Historical)
 
 When creating list literals that contain function values (closures, decoders, etc.), the type checker cannot unify the element types, leading to the `_type` field being left as `nil` in the `ListLiteral` AST node.
 
@@ -83,9 +85,29 @@ let decoder = decode::one_of([decode::string])
   let decoder = decode::one_of(decode::string | custom_string_decoder)
   ```
 
+## Resolution - ✅ COMPLETED
+
+**Root Cause**: In `checker/checker.go:989`, the type comparison used pointer equality (`!=`) instead of structural equality.
+
+**Fix**: Changed line 989 from:
+```go
+} else if elementType != element.Type() {
+```
+to:
+```go  
+} else if !elementType.equal(element.Type()) {
+```
+
+This aligns with all other type comparisons in the codebase, which use `.equal()` for structural equality.
+
+**Impact**: All decoder compositional patterns now work correctly, including:
+- `decode::one_of([decode::string, custom_decoder])`
+- Lists of any function types with identical signatures
+- Complex compositional decoder usage
+
 ## Priority
 
-**Medium-High** - This limitation significantly impacts the usability of compositional decoder patterns and other functional programming constructs.
+**✅ RESOLVED** - No longer impacts decoder patterns or functional programming constructs.
 
 ## Related Code
 

@@ -986,7 +986,7 @@ func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 
 		if i == 0 {
 			elementType = element.Type()
-		} else if elementType != element.Type() {
+		} else if !elementType.equal(element.Type()) {
 			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
 			hasError = true
 			continue

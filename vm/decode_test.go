@@ -685,6 +685,79 @@ func TestDecodeOneOf(t *testing.T) {
 			`,
 			want: "hello",
 		},
+		{
+			name: "one_of with multiple string decoders - first succeeds",
+			input: `
+				use ard/decode
+
+				let data = decode::any("\"hello\"")
+				let str_dec1 = decode::string
+				let str_dec2 = decode::string  
+				let decoder = decode::one_of([str_dec1, str_dec2])
+				decode::run(data, decoder).expect("")
+			`,
+			want: "hello",
+		},
+		{
+			name: "one_of fails when no decoder matches",
+			input: `
+				use ard/decode
+
+				let data = decode::any("42")
+				let str_dec = decode::string
+				let decoder = decode::one_of([str_dec])
+				let result = decode::run(data, decoder)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "one_of returns error from first decoder when all fail",
+			input: `
+				use ard/decode
+
+				let data = decode::any("true")
+				let str_dec1 = decode::string
+				let str_dec2 = decode::string
+				let decoder = decode::one_of([str_dec1, str_dec2])
+				let result = decode::run(data, decoder)
+				match result {
+					err => {
+						let first_error = err.at(0)
+						first_error.expected == "Str"
+					}
+					ok(_) => false
+				}
+			`,
+			want: true,
+		},
+		{
+			name: "one_of with different decoder types returning same type",
+			input: `
+				use ard/decode
+
+				// Custom decoder that converts int to string
+				fn int_to_string(data: decode::Dynamic) Str![decode::Error] {
+					let int_result = decode::as_int(data)
+					match int_result {
+						ok(val) => Result::ok(val.to_str()),
+						err(errors) => Result::err(errors)
+					}
+				}
+
+				// Test string input - first decoder succeeds
+				let data1 = decode::any("\"hello\"")
+				let decoder = decode::one_of([decode::string, int_to_string])
+				let result1 = decode::run(data1, decoder).expect("")
+				
+				// Test int input - second decoder succeeds  
+				let data2 = decode::any("42")
+				let result2 = decode::run(data2, decoder).expect("")
+				
+				result1 + "," + result2
+			`,
+			want: "hello,42",
+		},
 	})
 }
 
