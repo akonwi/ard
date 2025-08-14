@@ -319,6 +319,61 @@ func TestFloatApi(t *testing.T) {
 			input: `Float::from_int(100)`,
 			want:  100.0,
 		},
+		{
+			name: ".to_int() returns Some(Int) for exact conversions",
+			input: `
+				let result = 5.0.to_int()
+				match result {
+					val => val,
+					_ => 999
+				}
+			`,
+			want: 5,
+		},
+		{
+			name: ".to_int() returns None for inexact conversions",
+			input: `
+				let result = 5.7.to_int()
+				match result {
+					val => val,
+					_ => 999
+				}
+			`,
+			want: 999,
+		},
+		{
+			name: ".to_int() works with negative exact values",
+			input: `
+				let result = (0.0 - 10.0).to_int()
+				match result {
+					val => val,
+					_ => 999
+				}
+			`,
+			want: -10,
+		},
+		{
+			name: ".to_int() returns None for negative inexact values",
+			input: `
+				let result = (0.0 - 3.14).to_int()
+				match result {
+					val => val,
+					_ => 999
+				}
+			`,
+			want: 999,
+		},
+		{
+			name: ".to_int() works with zero",
+			input: `
+				let result = 0.0.to_int()
+				match result {
+					val => val,
+					_ => 999
+				}
+			`,
+			want: 0,
+		},
 	})
 }
 

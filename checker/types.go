@@ -199,6 +199,12 @@ func (f float) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
+	case "to_int":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: MakeMaybe(Int),
+		}
 	default:
 		return nil
 	}
