@@ -142,6 +142,106 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(Void)
 		return makeOk(void, resultType)
+	case "ins":
+		// fn ins(table: Str, values: [Str: Dynamic]) Result<Dynamic, Str>
+		resultType := method.Type().(*checker.Result)
+		tableName := args[0].raw.(string)
+		valuesMap := args[1]
+
+		// Extract fields from the map
+		mapData, ok := valuesMap.raw.(map[string]*object)
+		if !ok {
+			errorMsg := &object{"SQLite Error: ins expects a map object", resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		// Build INSERT statement
+		var columns []string
+		var placeholders []string
+		var values []any
+
+		// Sort column names for consistent ordering
+		for columnName := range mapData {
+			columns = append(columns, columnName)
+		}
+		sort.Strings(columns)
+
+		// Build values in same order as columns
+		for _, columnName := range columns {
+			fieldObj := mapData[columnName]
+			placeholders = append(placeholders, "?")
+			values = append(values, fieldObj.raw)
+		}
+
+		// Construct SQL
+		sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+			tableName,
+			strings.Join(columns, ", "),
+			strings.Join(placeholders, ", "),
+		)
+
+		// Execute the INSERT
+		_, err := db.conn.Exec(sql, values...)
+		if err != nil {
+			// Return Err(Str)
+			errorMsg := &object{err.Error(), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		// Build SELECT query to get the inserted row back
+		var whereConditions []string
+		var selectValues []any
+		for _, columnName := range columns {
+			whereConditions = append(whereConditions, fmt.Sprintf("%s = ?", columnName))
+			selectValues = append(selectValues, mapData[columnName].raw)
+		}
+
+		selectSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1",
+			tableName,
+			strings.Join(whereConditions, " AND "),
+		)
+
+		// Execute the SELECT to get the inserted row
+		rows, err := db.conn.Query(selectSQL, selectValues...)
+		if err != nil {
+			errorMsg := &object{fmt.Sprintf("Failed to retrieve inserted row: %v", err), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+		defer rows.Close()
+
+		// Get column names from the result
+		resultColumns, err := rows.Columns()
+		if err != nil {
+			errorMsg := &object{fmt.Sprintf("Failed to get result columns: %v", err), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		if !rows.Next() {
+			errorMsg := &object{"Failed to find inserted row", resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		// Scan the row data
+		scanValues := make([]any, len(resultColumns))
+		scanTargets := make([]any, len(resultColumns))
+		for i := range scanValues {
+			scanTargets[i] = &scanValues[i]
+		}
+
+		if err := rows.Scan(scanTargets...); err != nil {
+			errorMsg := &object{fmt.Sprintf("Failed to scan inserted row: %v", err), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		// Build result map
+		resultMap := make(map[string]interface{})
+		for i, columnName := range resultColumns {
+			resultMap[columnName] = scanValues[i]
+		}
+
+		// Return Ok(Dynamic) with the full row data
+		dynamicResult := &object{resultMap, checker.Dynamic}
+		return makeOk(dynamicResult, resultType)
 	case "update":
 		// fn update(table: Str, where: Str, record: $T) Result<Void, Str>
 		tableName := args[0].raw.(string)

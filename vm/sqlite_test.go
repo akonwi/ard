@@ -1162,6 +1162,84 @@ func TestSQLiteFirstNoResults(t *testing.T) {
 	`)
 
 	if result != true {
-		t.Errorf("Expected first() method to return null for empty results, got %v", result)
+	t.Errorf("Expected first() method to return null for empty results, got %v", result)
+	}
+}
+
+func TestSQLiteInsMethod(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_ins.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/decode
+
+		let db = sqlite::open("test_ins.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
+
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("Alice"))
+		values.set("age", decode::from_int(30))
+
+		let inserted_row = db.ins("users", values).expect("Failed to insert with ins method")
+		
+		// ins should return the full row as Dynamic - verify we can access the inserted data
+		let returned_name = decode::run(inserted_row, decode::field("name", decode::string)).expect("Should have name")
+		let returned_age = decode::run(inserted_row, decode::field("age", decode::int)).expect("Should have age")
+		
+		returned_name == "Alice" && returned_age == 30
+	`)
+
+	if result != true {
+		t.Errorf("Expected ins method to work, got %v", result)
+	}
+}
+
+func TestSQLiteInsMethodValidation(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_ins_validation.db"
+	defer os.Remove(testDB)
+
+	result := run(t, `
+		use ard/sqlite
+		use ard/decode
+
+		let db = sqlite::open("test_ins_validation.db").expect("Failed to open database")
+		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, available BOOL)").expect("Failed to create table")
+
+		// Test 1: Insert with multiple types and verify returned data
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("Widget"))
+		values1.set("price", decode::from_float(19.99))
+		values1.set("available", decode::from_bool(true))
+		
+		let row1 = db.ins("products", values1).expect("Failed to insert product 1")
+		
+		// Decode the returned row and verify it contains our data
+		let name1 = decode::run(row1, decode::field("name", decode::string)).expect("Should have name")
+		let price1 = decode::run(row1, decode::field("price", decode::float)).expect("Should have price")
+		// SQLite stores booleans as integers, so decode as int then convert to bool  
+		let available_int = decode::run(row1, decode::field("available", decode::int)).expect("Should have available")
+		let available1 = available_int == 1
+		let id1 = decode::run(row1, decode::field("id", decode::int)).expect("Should have id")
+
+		// Test 2: Insert with partial columns and verify
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Gadget"))
+		values2.set("price", decode::from_float(29.99))
+		
+		let row2 = db.ins("products", values2).expect("Failed to insert product 2")
+		let name2 = decode::run(row2, decode::field("name", decode::string)).expect("Should have name")
+		let price2 = decode::run(row2, decode::field("price", decode::float)).expect("Should have price")
+		let id2 = decode::run(row2, decode::field("id", decode::int)).expect("Should have id")
+
+		// Verify the data matches what we inserted
+		name1 == "Widget" && price1 == 19.99 && available1 == true && id1 > 0 &&
+		name2 == "Gadget" && price2 == 29.99 && id2 > 0
+	`)
+
+	if result != true {
+		t.Errorf("Expected ins method validation to pass, got %v", result)
 	}
 }

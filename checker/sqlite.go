@@ -41,6 +41,11 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
 			ReturnType: MakeResult(Void, Str),
 		},
+		"ins": &FunctionDef{
+			Name:       "ins",
+			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: MakeMap(Str, Dynamic)}},
+			ReturnType: MakeResult(Dynamic, Str),
+		},
 		"query": &FunctionDef{
 			Name:       "query",
 			Parameters: []Parameter{{Name: "sql", Type: Str}},
