@@ -116,7 +116,7 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			},
 			ReturnType: MakeResult(genericT, MakeList(DecodeErrorDef)), // Same T
 		}}
-	case "any":
+	case "json":
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "external_data", Type: Str}},

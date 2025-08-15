@@ -112,7 +112,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			errorList := decoderResultValue.raw
 			return makeErr(errorList, resultWithList)
 		}
-	case "any":
+	case "json":
 		// Parse external data (JSON string) into Dynamic object
 		jsonString := vm.eval(call.Args[0]).raw.(string)
 		jsonBytes := []byte(jsonString)
