@@ -122,6 +122,30 @@ func (pkg DecodePkg) Get(name string) Symbol {
 			Parameters: []Parameter{{Name: "external_data", Type: Str}},
 			ReturnType: Dynamic,
 		}}
+	case "from_str":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: Str}},
+			ReturnType: Dynamic,
+		}}
+	case "from_int":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: Int}},
+			ReturnType: Dynamic,
+		}}
+	case "from_bool":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: Bool}},
+			ReturnType: Dynamic,
+		}}
+	case "from_float":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: Float}},
+			ReturnType: Dynamic,
+		}}
 	case "nullable":
 		// Create generic type parameters
 		innerT := &Any{name: "T"}

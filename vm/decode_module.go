@@ -128,6 +128,34 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		return dynamicObj
+	case "from_str":
+		// Create Dynamic from Str primitive
+		strValue := args[0].raw.(string)
+		return &object{
+			raw:   strValue,
+			_type: checker.Dynamic,
+		}
+	case "from_int":
+		// Create Dynamic from Int primitive
+		intValue := args[0].raw.(int)
+		return &object{
+			raw:   intValue,
+			_type: checker.Dynamic,
+		}
+	case "from_bool":
+		// Create Dynamic from Bool primitive
+		boolValue := args[0].raw.(bool)
+		return &object{
+			raw:   boolValue,
+			_type: checker.Dynamic,
+		}
+	case "from_float":
+		// Create Dynamic from Float primitive
+		floatValue := args[0].raw.(float64)
+		return &object{
+			raw:   floatValue,
+			_type: checker.Dynamic,
+		}
 	case "nullable":
 		// Return a nullable decoder function that wraps the inner decoder
 		innerDecoder := args[0]

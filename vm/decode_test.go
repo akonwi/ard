@@ -14,7 +14,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"hello\"")
+				let data = decode::from_str("hello")
 				decode::run(data, decode::string).expect("")
 			`,
 			want: "hello",
@@ -24,7 +24,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("42")
+				let data = decode::from_int(42)
 				decode::run(data, decode::int).expect("")
 			`,
 			want: 42,
@@ -34,7 +34,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("3.14")
+				let data = decode::from_float(3.14)
 				decode::run(data, decode::float).expect("")
 			`,
 			want: 3.14,
@@ -44,10 +44,76 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("true")
+				let data = decode::from_bool(true)
 				decode::run(data, decode::bool).expect("")
 			`,
 			want: true,
+		},
+	})
+}
+
+func TestDecodeFactoryFunctions(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "from_str creates Dynamic that decodes back to string",
+			input: `
+				use ard/decode
+
+				let dynamic = decode::from_str("hello")
+				decode::run(dynamic, decode::string).expect("")
+			`,
+			want: "hello",
+		},
+		{
+			name: "from_int creates Dynamic that decodes back to int",
+			input: `
+				use ard/decode
+
+				let dynamic = decode::from_int(42)
+				decode::run(dynamic, decode::int).expect("")
+			`,
+			want: 42,
+		},
+		{
+			name: "from_bool creates Dynamic that decodes back to bool",
+			input: `
+				use ard/decode
+
+				let dynamic = decode::from_bool(true)
+				decode::run(dynamic, decode::bool).expect("")
+			`,
+			want: true,
+		},
+		{
+			name: "from_float creates Dynamic that decodes back to float",
+			input: `
+				use ard/decode
+
+				let dynamic = decode::from_float(3.14)
+				decode::run(dynamic, decode::float).expect("")
+			`,
+			want: 3.14,
+		},
+		{
+			name: "from_str fails when decoded as int",
+			input: `
+				use ard/decode
+
+				let dynamic = decode::from_str("not_a_number")
+				let result = decode::run(dynamic, decode::int)
+				result.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "from_int can be decoded as float",
+			input: `
+				use ard/decode
+
+				let dynamic = decode::from_int(42)
+				decode::run(dynamic, decode::float).expect("")
+			`,
+			want: 42.0,
 		},
 	})
 }
@@ -59,7 +125,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("42")
+				let data = decode::from_int(42)
 				let result = decode::run(data, decode::string)
 				match result {
 					err => err.size() == 1
@@ -73,7 +139,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"hello\"")
+				let data = decode::from_str("hello")
 				let result = decode::run(data, decode::int)
 				match result {
 					err => err.size() == 1
