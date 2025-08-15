@@ -929,22 +929,17 @@ func TestDeepCustomDecoders(t *testing.T) {
 					}
 				}
 
-				fn decode_bet_names(data: decode::Dynamic) [Str]![decode::Error] {
-				  let nested = try decode::run(
-						data, decode::field(
-							"response", first(
-								decode::field("bookmakers", first(
-									decode::field("bets", decode::list(decode::field("name", decode::string)))
-								))
-							)
-						)
-					)
-					Result::ok(nested)
-				}
+				let data = decode::any(text)
 
-				let json = decode::any(text)
-				match decode_bet_names(json) {
-					ok(names) => names.at(0),
+				// Extract response[0].bookmakers[0].bets[0].name
+				let res = decode::run(data,
+					decode::field("response",
+						first(decode::field("bookmakers", first(decode::field("bets", first(decode::field("name", decode::string))))))
+					)
+				)
+
+				match res {
+					ok(name) => name,
 					err(errs) => errs.at(0).to_str()
 				}
 			`
