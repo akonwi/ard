@@ -912,3 +912,39 @@ func TestDecodeCustomFunctions(t *testing.T) {
 		},
 	})
 }
+
+func TestDeepCustomDecoders(t *testing.T) {
+	input := `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/json_data.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+
+				// create a decoder that takes the first in a list
+				fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
+					fn(data: decode::Dynamic) $T![decode::Error] {
+						let list = try decode::run(data, decode::list(as))
+						Result::ok(list.at(0))
+					}
+				}
+
+				let data = decode::any(text)
+
+				// Extract response[0].bookmakers[0].bets[0].name
+				let res = decode::run(data,
+					decode::field("response",
+						first(decode::field("bookmakers", first(decode::field("bets", first(decode::field("name", decode::string))))))
+					)
+				)
+
+				match res {
+					ok(name) => name,
+					err(errs) => errs.at(0).to_str()
+				}
+			`
+	out := run(t, input)
+	if out != "Match Winner" {
+		t.Fatalf("Didn't get the expected string. Got '%s'", out)
+	}
+}
