@@ -8,6 +8,7 @@ var HttpMethodDef = &Enum{
 		"Put",
 		"Del",
 		"Patch",
+		"Options",
 	},
 	Traits: []*Trait{},
 }

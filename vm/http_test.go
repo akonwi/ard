@@ -14,7 +14,8 @@ func TestHttpMethodEnum(t *testing.T) {
 					http::Method::Post => "Create new resource",
 					http::Method::Put => "Update entire resource",
 					http::Method::Del => "Remove resource",
-					http::Method::Patch => "Partial update"
+					http::Method::Patch => "Partial update",
+					_ => "probably Preflight"
 				}
 			`,
 			want: "Create new resource",

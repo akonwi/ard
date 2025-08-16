@@ -83,6 +83,8 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 					methodEnum = &object{int8(3), checker.HttpMethodDef} // Del variant
 				case "PATCH":
 					methodEnum = &object{int8(4), checker.HttpMethodDef} // Patch variant
+				case "OPTIONS":
+					methodEnum = &object{int8(5), checker.HttpMethodDef} // Patch variant
 				default:
 					methodEnum = &object{int8(0), checker.HttpMethodDef} // Default to Get
 				}
@@ -172,6 +174,8 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			method = "DELETE"
 		case 4: // Patch
 			method = "PATCH"
+		case 5: // Options
+			method = "OPTIONS"
 		default:
 			method = "GET"
 		}

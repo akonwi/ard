@@ -1274,11 +1274,12 @@ func (vm *VM) evalEnumMethod(self *object, method *checker.FunctionCall, enum *c
 			if variantIndex >= 0 && int(variantIndex) < len(enum.Variants) {
 				// Map enum variants to HTTP method strings
 				methodStrings := map[string]string{
-					"Get":   "GET",
-					"Post":  "POST",
-					"Put":   "PUT",
-					"Del":   "DELETE",
-					"Patch": "PATCH",
+					"Get":     "GET",
+					"Post":    "POST",
+					"Put":     "PUT",
+					"Del":     "DELETE",
+					"Patch":   "PATCH",
+					"Options": "OPTIONS",
 				}
 				variantName := enum.Variants[variantIndex]
 				if methodStr, ok := methodStrings[variantName]; ok {
