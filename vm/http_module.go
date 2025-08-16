@@ -57,17 +57,18 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 					}
 				}
 
+				bodyType := checker.HttpRequestDef.Fields["body"]
 				var body *object
 				if r.Body != nil {
 					bodyBytes, err := io.ReadAll(r.Body)
 					if err == nil {
-						body = &object{string(bodyBytes), checker.Str}
+						body = &object{string(bodyBytes), bodyType}
 					} else {
-						body = &object{"", checker.Str}
+						body = &object{nil, bodyType}
 					}
 					r.Body.Close()
 				} else {
-					body = &object{"", checker.Str}
+					body = &object{nil, bodyType}
 				}
 
 				// Convert HTTP method string to Method enum
