@@ -113,6 +113,17 @@ func TestFunctions(t *testing.T) {
 			},
 		},
 		{
+			name: "Functions can declare Void in return type",
+			input: strings.Join(
+				[]string{
+					`fn no_return() Void { true }`,
+					`fn void_ok() Void!Bool { Result::err(true) }`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Type mismatch in function arguments",
 			input: strings.Join(
 				[]string{

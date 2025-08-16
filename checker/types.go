@@ -270,9 +270,15 @@ var Bool = &_bool{}
 
 type void struct{}
 
-func (v void) String() string              { return "Void" }
-func (v void) get(name string) Type        { return nil }
-func (v *void) equal(other Type) bool      { return v == other }
+func (v void) String() string       { return "Void" }
+func (v void) get(name string) Type { return nil }
+func (v *void) equal(other Type) bool {
+	// pass when comparing with an open generic
+	if any, isAny := other.(*Any); isAny && any.actual == nil {
+		return true
+	}
+	return v == other
+}
 func (v *void) hasTrait(trait *Trait) bool { return false }
 
 var Void = &void{}

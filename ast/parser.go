@@ -811,6 +811,8 @@ func (p *parser) parseType() DeclaredType {
 						valType = &StringType{nullable: false}
 					case "Bool":
 						valType = &BooleanType{nullable: false}
+					case "Void":
+						valType = &VoidType{nullable: false}
 					default:
 						valType = &CustomType{
 							Name:     id.text,
