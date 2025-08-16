@@ -1,12 +1,27 @@
 ## TODO
 
+- [ ] improvements to sqlite::Database
+  - [ ] consolidate Database.insert() with Database.ins()
+    - remove Database.insert()
+    - rename .ins() to .insert()
+  - [ ] change Databases.update() signature
+    `fn update(table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str`
+  - [ ] support .delete
+- [ ] parsing shouldn't panic at errors
+- [ ] empty match case body causes nil panic
+- [ ] unknown methods causes nil panic
+- [ ] thorough checks for union compatibility
+  - should be able to use unions in results
+  - can catch and return with valid union types
 - [ ] implement `runtime` package and export objects from them
 - [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
   - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
+- [ ] `Maybe.expect()` for panicing
 - [ ] `try` on Maybe types
+- [ ] `?` sugar for safely unwrapping maybes
 - [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
   - $Seg could be either strings or ints
     - as ints, act as an array index
@@ -33,7 +48,6 @@
 - [ ] private module variables
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
-- [ ] `?` sugar for safely unwrapping maybes
 - [ ] selective variable capture for closures
   - data optimization
   -👇🏿 the returned fn should only have `as` in its scope, not the entire scope
