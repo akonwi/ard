@@ -1175,7 +1175,9 @@ func (c *checker) validateStructInstance(structType *StructDef, properties []ast
 		if field, ok := structType.Fields[property.Name.Name]; !ok {
 			c.addError(fmt.Sprintf("Unknown field: %s", property.Name.Name), property.GetLocation())
 		} else {
-			fields[property.Name.Name] = c.checkExprAs(property.Value, field)
+			if val := c.checkExprAs(property.Value, field); val != nil {
+				fields[property.Name.Name] = val
+			}
 		}
 	}
 
@@ -1184,13 +1186,14 @@ func (c *checker) validateStructInstance(structType *StructDef, properties []ast
 	for name, t := range structType.Fields {
 		if _, exists := fields[name]; !exists {
 			if _, isMaybe := t.(*Maybe); !isMaybe {
+				// todo: distinguish between provided w/ error + missing to avoid creating 2 errors:
+				// missing field + invalid expression for field
 				missing = append(missing, name)
 			}
 		}
 	}
 	if len(missing) > 0 {
 		c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), loc)
-		return nil
 	}
 
 	instance.Fields = fields

@@ -138,6 +138,16 @@ func TestStructs(t *testing.T) {
 				{Kind: checker.Error, Message: "Immutable: p.age"},
 			},
 		},
+		{
+			name: "When an undefined variable is used as a value",
+			input: fmt.Sprintf(`%s
+						let p = Person{name: "Alice", age: 30, employed: is_employed}
+						p.age = 31`, personStructInput),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined variable: is_employed"},
+				{Kind: checker.Error, Message: "Missing field: employed"},
+			},
+		},
 	})
 }
 
