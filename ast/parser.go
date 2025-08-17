@@ -88,6 +88,13 @@ func (p *parser) skipNewlines() {
 	}
 }
 
+// synchronize skips tokens until reaching a statement boundary or EOF
+func (p *parser) synchronize() {
+	for !p.check(new_line) && !p.isAtEnd() {
+		p.advance()
+	}
+}
+
 func (p *parser) parseComment() *Comment {
 	// If not a comment, return nil
 	if !p.check(comment) {
@@ -158,10 +165,7 @@ func (p *parser) parseImport() *Import {
 	// Check for missing path
 	if !p.check(path) {
 		p.addError(p.peek(), "Expected module path after 'use'")
-		// Skip to end of line for recovery
-		for !p.check(new_line) && !p.isAtEnd() {
-			p.advance()
-		}
+		p.synchronize()
 		return nil
 	}
 
@@ -518,9 +522,21 @@ func (p *parser) forLoop() (Statement, error) {
 
 func (p *parser) typeUnion(private bool) (Statement, error) {
 	decl := &TypeDeclaration{Private: private, Type: []DeclaredType{}}
-	nameToken := p.consume(identifier, "Expected name after 'type'")
+
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected name after 'type'")
+		p.synchronize()
+		return nil, nil
+	}
+	nameToken := p.advance()
 	decl.Name = Identifier{Name: nameToken.text}
-	p.consume(equal, "Expected '=' after type name")
+
+	if !p.check(equal) {
+		p.addError(p.peek(), "Expected '=' after type name")
+		p.synchronize()
+		return nil, nil
+	}
+	p.advance()
 
 	if p.check(new_line) {
 		return nil, p.makeError(p.peek(), "Expected type definition after '='")

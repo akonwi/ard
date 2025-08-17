@@ -1,6 +1,9 @@
 package ast
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseWithRecoveryInfrastructure(t *testing.T) {
 	t.Run("valid code returns no errors", func(t *testing.T) {
@@ -152,6 +155,52 @@ let y = 10`,
 			if len(result.Errors) == 0 && result.Program != nil {
 				t.Logf("Successfully parsed %d imports, %d statements",
 					len(result.Program.Imports), len(result.Program.Statements))
+			}
+		})
+	}
+}
+
+func TestTypeDeclarationErrorRecovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantErrs []string
+	}{
+		{
+			name:     "missing identifier after type",
+			input:    "type = string\nlet x = 5",
+			wantErrs: []string{"Expected name after 'type'"},
+		},
+		{
+			name:     "missing equals after type name",
+			input:    "type MyType string\nlet x = 5",
+			wantErrs: []string{"Expected '=' after type name"},
+		},
+		{
+			name:     "both identifier and equals missing",
+			input:    "type\nlet x = 5",
+			wantErrs: []string{"Expected name after 'type'"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseWithRecovery([]byte(tt.input), "test.ard")
+
+			if len(result.Errors) != len(tt.wantErrs) {
+				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
+				return
+			}
+
+			for i, wantErr := range tt.wantErrs {
+				if !strings.Contains(result.Errors[i].Message, wantErr) {
+					t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
+				}
+			}
+
+			// Should still parse subsequent statements successfully
+			if result.Program != nil && len(result.Program.Statements) > 0 {
+				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
 			}
 		})
 	}
