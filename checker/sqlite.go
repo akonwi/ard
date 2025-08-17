@@ -34,13 +34,7 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
 		},
-		"insert": &FunctionDef{
-			Name: "insert",
-			// these singleton types are problematic because it means the Any gets refined to a single type
-			// instead of allowing multiple types
-			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: &Any{name: "V"}}},
-			ReturnType: MakeResult(Void, Str),
-		},
+
 		"ins": &FunctionDef{
 			Name:       "ins",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: MakeMap(Str, Dynamic)}},

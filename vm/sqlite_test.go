@@ -30,22 +30,27 @@ func TestSQLiteInsertStruct(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
+		use ard/decode
 
 		let db = sqlite::open("test_insert.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
-		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player)
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("number", decode::from_int(2))
+		
+		let inserted_row = db.ins("players", values).expect("Insert should succeed")
+		
+		// Verify the inserted data
+		let name = decode::run(inserted_row, decode::field("name", decode::string)).expect("Should have name")
+		let number = decode::run(inserted_row, decode::field("number", decode::int)).expect("Should have number")
+		
+		name == "John Doe" && number == 2
 	`)
 
-	// Should return Void!Str
-	if result != nil {
-		t.Errorf("Expected nil (no error), got %v", result)
+	// Should return true
+	if result != true {
+		t.Errorf("Expected true, got %v", result)
 	}
 }
 
@@ -56,20 +61,21 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 
 	run(t, `
 		use ard/sqlite
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
+		use ard/decode
 
 		let db = sqlite::open("test_multi.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
-		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
-		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(5))
 
-		db.insert("players", player1).expect("Failed to insert player 1")
-		db.insert("players", player2).expect("Failed to insert player 2")
+		db.ins("players", values1).expect("Failed to insert player 1")
+		db.ins("players", values2).expect("Failed to insert player 2")
 	`)
 }
 

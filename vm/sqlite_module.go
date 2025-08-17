@@ -94,54 +94,6 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(Void)
 		return makeOk(void, resultType)
-	case "insert":
-		// fn insert(table: Str, values: $V) Void!Str
-		resultType := method.Type().(*checker.Result)
-		tableName := args[0].raw.(string)
-		structObj := args[1]
-
-		// Extract fields from the struct
-		structFields, ok := structObj.raw.(map[string]*object)
-		if !ok {
-			errorMsg := &object{"SQLite Error: insert expects a struct object", resultType.Err()}
-			return makeErr(errorMsg, resultType)
-		}
-
-		// Build INSERT statement
-		var columns []string
-		var placeholders []string
-		var values []any
-
-		// Sort column names for consistent ordering
-		for columnName := range structFields {
-			columns = append(columns, columnName)
-		}
-		sort.Strings(columns)
-
-		// Build values in same order as columns
-		for _, columnName := range columns {
-			fieldObj := structFields[columnName]
-			placeholders = append(placeholders, "?")
-			values = append(values, fieldObj.raw)
-		}
-
-		// Construct SQL
-		sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-			tableName,
-			strings.Join(columns, ", "),
-			strings.Join(placeholders, ", "),
-		)
-
-		// Execute the INSERT
-		_, err := db.conn.Exec(sql, values...)
-		if err != nil {
-			// Return Err(Str)
-			errorMsg := &object{err.Error(), resultType.Err()}
-			return makeErr(errorMsg, resultType)
-		}
-
-		// Return Ok(Void)
-		return makeOk(void, resultType)
 	case "ins":
 		// fn ins(table: Str, values: [Str: Dynamic]) Result<Dynamic, Str>
 		resultType := method.Type().(*checker.Result)
