@@ -1,7 +1,6 @@
 package ast
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -49,17 +48,45 @@ var compareOptions = cmp.Options{
 }
 
 type test struct {
-	name   string
-	input  string
-	output Program
+	name     string
+	input    string
+	output   Program
+	wantErrs []string // Expected error messages
 }
 
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ast, err := Parse([]byte(tt.input), "test.ard")
-			if err != nil {
-				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
+			// Use ParseWithRecovery for error testing capability
+			result := ParseWithRecovery([]byte(tt.input), "test.ard")
+
+			// Validate errors if expected
+			if len(tt.wantErrs) > 0 {
+				if len(result.Errors) != len(tt.wantErrs) {
+					t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
+					return
+				}
+
+				for i, wantErr := range tt.wantErrs {
+					if !strings.Contains(result.Errors[i].Message, wantErr) {
+						t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
+					}
+				}
+
+				// For error cases, we don't validate AST structure (it may be partial/incomplete)
+				t.Logf("Successfully validated %d expected errors", len(tt.wantErrs))
+				return
+			}
+
+			// For success cases, ensure no errors occurred
+			if len(result.Errors) > 0 {
+				t.Fatalf("Expected no errors, got %d: %v", len(result.Errors), result.Errors)
+			}
+
+			// Validate AST structure (existing logic)
+			ast := result.Program
+			if ast == nil {
+				t.Fatal("Expected program to be parsed, got nil")
 			}
 
 			if tt.output.Imports != nil {

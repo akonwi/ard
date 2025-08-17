@@ -34,107 +34,41 @@ func TestParseWithRecoveryInfrastructure(t *testing.T) {
 	})
 }
 
-func TestEnumDefinitionErrorRecovery(t *testing.T) {
+func TestParserErrorRecoveryCore(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
 		wantErrs []string
 	}{
 		{
-			name:     "missing enum name",
-			input:    "enum { A, B }\nlet x = 5",
-			wantErrs: []string{"Expected name after 'enum'"},
+			name:     "import missing path",
+			input:    "use\nlet x = 5",
+			wantErrs: []string{"Expected module path after 'use'"},
 		},
 		{
-			name:     "missing opening brace",
-			input:    "enum Color A, B }\nlet x = 5",
+			name:     "import missing alias after as",
+			input:    "use ard/fs as\nlet x = 5",
+			wantErrs: []string{"Expected alias name after 'as'"},
+		},
+		{
+			name:     "break statement missing newline",
+			input:    "break let x = 5",
+			wantErrs: []string{"Expected new line"},
+		},
+		{
+			name:     "variable declaration missing equals",
+			input:    "let x 5\nlet y = 10",
+			wantErrs: []string{"Expected '='"},
+		},
+		{
+			name:     "while loop missing opening brace",
+			input:    "while true\nlet x = 5",
 			wantErrs: []string{"Expected '{'"},
 		},
 		{
-			name:     "empty first variant",
-			input:    "enum Color { , B }\nlet x = 5",
-			wantErrs: []string{},
-		},
-		{
-			name:     "empty middle variant",
-			input:    "enum Color { A, , C }\nlet x = 5",
-			wantErrs: []string{},
-		},
-		{
-			name:     "empty enum",
-			input:    "enum Color { }\nlet x = 5",
-			wantErrs: []string{},
-		},
-		{
-			name:     "trailing comma works",
-			input:    "enum Color { A, B, }\nlet x = 5",
-			wantErrs: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ParseWithRecovery([]byte(tt.input), "test.ard")
-
-			if len(result.Errors) != len(tt.wantErrs) {
-				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
-				return
-			}
-
-			for i, wantErr := range tt.wantErrs {
-				if !strings.Contains(result.Errors[i].Message, wantErr) {
-					t.Errorf("Expected error %d to contain \"%s\", got \"%s\"", i, wantErr, result.Errors[i].Message)
-				}
-			}
-
-			// Should still parse subsequent statements successfully
-			if result.Program != nil && len(result.Program.Statements) > 0 {
-				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
-			}
-		})
-	}
-}
-
-func TestStructDefinitionErrorRecovery(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantErrs []string
-	}{
-		{
-			name:     "missing struct name",
-			input:    "struct { name: string }\nlet x = 5",
-			wantErrs: []string{"Expected name after 'struct'"},
-		},
-		{
-			name:     "missing opening brace",
-			input:    "struct Person name: string }\nlet x = 5",
-			wantErrs: []string{"Expected '{'"},
-		},
-		{
-			name:     "missing colon after field name",
-			input:    "struct Person { name string }\nlet x = 5",
-			wantErrs: []string{"Expected ':' after field name", "Expected '}'"},
-		},
-		{
-			name:     "missing comma between fields",
-			input:    "struct Person { name: string age: int }\nlet x = 5",
-			wantErrs: []string{"Expected ',' or '}' after field type", "Expected '}'"},
-		},
-		{
-			name:     "missing closing brace",
-			input:    "struct Person { name: string\nlet x = 5",
-			wantErrs: []string{"Expected ':' after field name", "Expected '}'"},
-		},
-		{
-			name:     "empty struct works",
-			input:    "struct Person { }\nlet x = 5",
-			wantErrs: []string{},
-		},
-		{
-			name:     "trailing comma works",
-			input:    "struct Person { name: string, }\nlet x = 5",
-			wantErrs: []string{},
+			name:     "multiple variable declaration errors",
+			input:    "let x\nlet y 10\nlet z = 5",
+			wantErrs: []string{"Expected '='", "Expected '='"},
 		},
 	}
 
@@ -153,141 +87,10 @@ func TestStructDefinitionErrorRecovery(t *testing.T) {
 				}
 			}
 
-			// Should still parse subsequent statements successfully
-			if result.Program != nil && len(result.Program.Statements) > 0 {
-				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
-			}
-		})
-	}
-}
-
-func TestImplBlockErrorRecovery(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantErrs []string
-	}{
-		{
-			name:     "missing impl type name",
-			input:    "impl { fn test() {} }\nlet x = 5",
-			wantErrs: []string{"Expected type name after 'impl'"},
-		},
-		{
-			name:     "missing opening brace",
-			input:    "impl Person fn test() {} }\nlet x = 5",
-			wantErrs: []string{"Expected '{'"},
-		},
-		{
-			name:     "missing newline after brace",
-			input:    "impl Person {fn test() {} }\nlet x = 5",
-			wantErrs: []string{"Expected new line after '{'"},
-		},
-		{
-			name:     "valid impl block works",
-			input:    "impl Person {\n    fn test() {}\n}\nlet x = 5",
-			wantErrs: []string{},
-		},
-		{
-			name:     "empty impl block works",
-			input:    "impl Person {\n}\nlet x = 5",
-			wantErrs: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ParseWithRecovery([]byte(tt.input), "test.ard")
-
-			if len(result.Errors) != len(tt.wantErrs) {
-				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
-				return
-			}
-
-			for i, wantErr := range tt.wantErrs {
-				if !strings.Contains(result.Errors[i].Message, wantErr) {
-					t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
-				}
-			}
-
-			// Should still parse subsequent statements successfully
-			if result.Program != nil && len(result.Program.Statements) > 0 {
-				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
-			}
-		})
-	}
-}
-
-func TestTraitDefinitionErrorRecovery(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantErrs []string
-	}{
-		{
-			name:     "missing trait name",
-			input:    "trait { fn test(); }\nlet x = 5",
-			wantErrs: []string{"Expected trait name after 'trait'"},
-		},
-		{
-			name:     "missing opening brace",
-			input:    "trait MyTrait fn test(); }\nlet x = 5",
-			wantErrs: []string{"Expected '{'"},
-		},
-		{
-			name:     "missing newline after brace",
-			input:    "trait MyTrait {fn test(); }\nlet x = 5",
-			wantErrs: []string{"Expected new line after '{'", "Expected function declaration in trait block"},
-		},
-		{
-			name:     "missing fn keyword",
-			input:    "trait MyTrait {\n    test();\n}\nlet x = 5",
-			wantErrs: []string{"Expected function declaration in trait block"},
-		},
-		{
-			name:     "missing function name",
-			input:    "trait MyTrait {\n    fn ();\n}\nlet x = 5",
-			wantErrs: []string{"Expected function name"},
-		},
-		{
-			name:     "missing opening paren",
-			input:    "trait MyTrait {\n    fn test;\n}\nlet x = 5",
-			wantErrs: []string{"Expected '(' after function name"},
-		},
-		{
-			name:     "missing closing paren",
-			input:    "trait MyTrait {\n    fn test(name: string;\n}\nlet x = 5",
-			wantErrs: []string{"Expected ',' between parameters", "Expected ')' after parameters"},
-		},
-		{
-			name:     "valid trait works",
-			input:    "trait MyTrait {\n    fn test()\n}\nlet x = 5",
-			wantErrs: []string{},
-		},
-		{
-			name:     "empty trait works",
-			input:    "trait MyTrait {\n}\nlet x = 5",
-			wantErrs: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ParseWithRecovery([]byte(tt.input), "test.ard")
-
-			if len(result.Errors) != len(tt.wantErrs) {
-				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
-				return
-			}
-
-			for i, wantErr := range tt.wantErrs {
-				if !strings.Contains(result.Errors[i].Message, wantErr) {
-					t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
-				}
-			}
-
-			// Should still parse subsequent statements successfully
-			if result.Program != nil && len(result.Program.Statements) > 0 {
-				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
+			// For debugging: log successful parsing results
+			if len(result.Errors) == 0 && result.Program != nil {
+				t.Logf("Successfully parsed %d imports, %d statements",
+					len(result.Program.Imports), len(result.Program.Statements))
 			}
 		})
 	}
