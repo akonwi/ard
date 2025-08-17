@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+type ParseError struct {
+	Location Location
+	Message  string
+}
+
+type ParseResult struct {
+	Program *Program
+	Errors  []ParseError
+}
+
 type node struct {
 	text       string
 	start, end int
@@ -15,6 +25,7 @@ type parser struct {
 	tokens   []token
 	index    int
 	fileName string
+	errors   []ParseError
 }
 
 func Parse(source []byte, fileName string) (*Program, error) {
@@ -22,11 +33,49 @@ func Parse(source []byte, fileName string) (*Program, error) {
 	return p.parse()
 }
 
+func ParseWithRecovery(source []byte, fileName string) ParseResult {
+	p := new(NewLexer(source).Scan(), fileName)
+	program, err := p.parse()
+
+	result := ParseResult{
+		Program: program,
+		Errors:  p.errors,
+	}
+
+	// If there was a panic-based error, add it to errors
+	if err != nil && len(p.errors) == 0 {
+		result.Errors = append(result.Errors, ParseError{
+			Message: err.Error(),
+		})
+	}
+
+	return result
+}
+
 func new(tokens []token, fileName string) *parser {
 	return &parser{
 		tokens:   tokens,
 		index:    0,
 		fileName: fileName,
+		errors:   []ParseError{},
+	}
+}
+
+func (p *parser) addError(at *token, msg string) {
+	location := Location{}
+	if at != nil {
+		location = at.getLocation()
+	}
+
+	p.errors = append(p.errors, ParseError{
+		Location: location,
+		Message:  msg,
+	})
+}
+
+func (p *parser) skipNewlines() {
+	for p.match(new_line) {
+		// continue
 	}
 }
 
@@ -37,16 +86,14 @@ func (p *parser) parse() (*Program, error) {
 	}
 
 	// Parse imports first
-	for p.check(use) || p.check(new_line) {
-		if p.match(new_line) {
-			continue
+	importing := true
+	for importing {
+		if imp := p.parseImport(); imp != nil {
+			program.Imports = append(program.Imports, *imp)
+		} else {
+			// Continue importing if the current token is an empty line or 'use'
+			importing = p.check(new_line) || p.check(use)
 		}
-		p.consume(use, "Expected 'use' keyword")
-		imp, err := p.parseImport()
-		if err != nil {
-			return nil, err
-		}
-		program.Imports = append(program.Imports, *imp)
 	}
 
 	// Parse statements
@@ -66,15 +113,41 @@ func (p *parser) parse() (*Program, error) {
 	return program, nil
 }
 
-func (p *parser) parseImport() (*Import, error) {
-	useToken := p.previous()
-	pathToken := p.consume(path, "Expected a module path after 'use'")
+func (p *parser) parseImport() *Import {
+	// Skip any leading newlines
+	p.skipNewlines()
+
+	// If not 'use', return nil (end of import section)
+	if !p.check(use) {
+		return nil
+	}
+
+	// We have 'use' - consume it
+	useToken := p.advance()
 	start := useToken.getLocation().Start
 
+	// Check for missing path
+	if !p.check(path) {
+		p.addError(p.peek(), "Expected module path after 'use'")
+		// Skip to end of line for recovery
+		for !p.check(new_line) && !p.isAtEnd() {
+			p.advance()
+		}
+		return nil
+	}
+
+	pathToken := p.advance()
+
+	// Parse optional alias
 	var name string
 	if p.match(as) {
-		alias := p.consume(identifier, "Expected alias name after 'as'")
-		name = alias.text
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected alias name after 'as'")
+			return nil
+		} else {
+			alias := p.advance()
+			name = alias.text
+		}
 	} else {
 		// Default alias is last part of path
 		parts := strings.Split(pathToken.text, "/")
@@ -85,6 +158,7 @@ func (p *parser) parseImport() (*Import, error) {
 		}
 		name = strings.ReplaceAll(name, "-", "_")
 	}
+
 	endCol := p.previous().column
 	if p.match(new_line) {
 		endCol = p.previous().column - 1
@@ -98,7 +172,7 @@ func (p *parser) parseImport() (*Import, error) {
 			Start: start,
 			End:   end,
 		},
-	}, nil
+	}
 }
 
 func (p *parser) parseStatement() (Statement, error) {
