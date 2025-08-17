@@ -1,12 +1,5 @@
 ## TODO
 
-- [ ] improvements to sqlite::Database
-  - [ ] consolidate Database.insert() with Database.ins()
-    - remove Database.insert()
-    - rename .ins() to .insert()
-  - [ ] change Databases.update() signature
-    `fn update(table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str`
-  - [ ] support .delete
 - [ ] parsing shouldn't panic at errors
 - [ ] empty match case body causes nil panic
 - [ ] unknown methods causes nil panic
