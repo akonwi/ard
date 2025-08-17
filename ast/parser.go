@@ -23,9 +23,23 @@ type parser struct {
 	errors   []ParseError
 }
 
+// todo: change return to (*Program, []ParseError) after all panics are gone
 func Parse(source []byte, fileName string) (*Program, error) {
-	p := new(NewLexer(source).Scan(), fileName)
-	return p.parse()
+	result := ParseWithRecovery(source, fileName)
+
+	// Always return the program (even with errors for partial parsing)
+	if len(result.Errors) > 0 {
+		// Return first error for backward compatibility
+		// This maintains existing error behavior while adding recovery
+		firstError := result.Errors[0]
+		return result.Program, fmt.Errorf("%s:%d:%d: %s",
+			fileName,
+			firstError.Location.Start.Row,
+			firstError.Location.Start.Col,
+			firstError.Message)
+	}
+
+	return result.Program, nil
 }
 
 func ParseWithRecovery(source []byte, fileName string) ParseResult {
