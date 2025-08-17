@@ -94,3 +94,69 @@ func TestEnumDefinitionErrorRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestStructDefinitionErrorRecovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantErrs []string
+	}{
+		{
+			name:     "missing struct name",
+			input:    "struct { name: string }\nlet x = 5",
+			wantErrs: []string{"Expected name after 'struct'"},
+		},
+		{
+			name:     "missing opening brace",
+			input:    "struct Person name: string }\nlet x = 5",
+			wantErrs: []string{"Expected '{'"},
+		},
+		{
+			name:     "missing colon after field name",
+			input:    "struct Person { name string }\nlet x = 5",
+			wantErrs: []string{"Expected ':' after field name", "Expected '}'"},
+		},
+		{
+			name:     "missing comma between fields",
+			input:    "struct Person { name: string age: int }\nlet x = 5",
+			wantErrs: []string{"Expected ',' or '}' after field type", "Expected '}'"},
+		},
+		{
+			name:     "missing closing brace",
+			input:    "struct Person { name: string\nlet x = 5",
+			wantErrs: []string{"Expected ':' after field name", "Expected '}'"},
+		},
+		{
+			name:     "empty struct works",
+			input:    "struct Person { }\nlet x = 5",
+			wantErrs: []string{},
+		},
+		{
+			name:     "trailing comma works",
+			input:    "struct Person { name: string, }\nlet x = 5",
+			wantErrs: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseWithRecovery([]byte(tt.input), "test.ard")
+
+			if len(result.Errors) != len(tt.wantErrs) {
+				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
+				return
+			}
+
+			for i, wantErr := range tt.wantErrs {
+				if !strings.Contains(result.Errors[i].Message, wantErr) {
+					t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
+				}
+			}
+
+			// Should still parse subsequent statements successfully
+			if result.Program != nil && len(result.Program.Statements) > 0 {
+				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
+			}
+		})
+	}
+}

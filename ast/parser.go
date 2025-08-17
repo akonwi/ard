@@ -272,10 +272,10 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.check(private, struct_) {
 		p.match(private)
 		p.match(struct_)
-		return p.structDef(true)
+		return p.structDef(true), nil
 	}
 	if p.match(struct_) {
-		return p.structDef(false)
+		return p.structDef(false), nil
 	}
 
 	if p.check(private, trait) {
@@ -588,14 +588,26 @@ func (p *parser) enumDef(private bool) Statement {
 	return enum
 }
 
-func (p *parser) structDef(private bool) (Statement, error) {
-	nameToken := p.consume(identifier, "Expected name")
+func (p *parser) structDef(private bool) Statement {
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected name after 'struct'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	structDef := &StructDefinition{
 		Private: private,
 		Name:    Identifier{Name: nameToken.text},
 		Fields:  []StructField{},
 	}
-	p.consume(left_brace, "Expected '{'")
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
 	p.match(new_line)
 	for !p.check(right_brace) {
 		// Skip single-line comments and newlines
@@ -603,19 +615,58 @@ func (p *parser) structDef(private bool) (Statement, error) {
 			continue
 		}
 
-		fieldName := p.consumeVariableName("Expected field name")
-		p.consume(colon, "Expected ':'")
+		// Check for field name (identifier or allowed keywords)
+		current := p.peek()
+		if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
+			// If we can't parse a field, skip to end of line and continue
+			p.addError(p.peek(), "Expected field name")
+			p.synchronize()
+			break
+		}
+
+		fieldName := p.advance()
+		// For keywords, we need to set the text to be the keyword string
+		if fieldName.text == "" {
+			fieldName.text = string(fieldName.kind)
+		}
+
+		if !p.check(colon) {
+			p.addError(p.peek(), "Expected ':' after field name")
+			// Skip this malformed field and continue with next
+			p.synchronize()
+			break
+		}
+		p.advance()
 		fieldType := p.parseType()
 		structDef.Fields = append(structDef.Fields, StructField{
 			Name: Identifier{Name: fieldName.text},
 			Type: fieldType,
 		})
-		p.match(comma)
-		p.match(new_line)
-	}
-	p.consume(right_brace, "Expected '}'")
 
-	return structDef, nil
+		// After parsing field type, we expect either a comma (more fields) or closing brace (end of struct)
+		if p.check(comma) {
+			p.advance()
+			p.match(new_line)
+		} else if p.check(right_brace) {
+			// End of struct - will be handled by loop condition
+			break
+		} else if p.check(new_line) {
+			// Allow newline without comma for last field
+			p.advance()
+		} else {
+			p.addError(p.peek(), "Expected ',' or '}' after field type")
+			p.synchronize()
+			break
+		}
+	}
+
+	if !p.check(right_brace) {
+		p.addError(p.peek(), "Expected '}'")
+		return structDef
+	}
+	p.advance()
+
+	return structDef
 }
 
 func (p *parser) implBlock() (*ImplBlock, error) {
