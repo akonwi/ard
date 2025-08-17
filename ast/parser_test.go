@@ -62,9 +62,16 @@ func runTests(t *testing.T, tests []test) {
 				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
 			}
 
+			if tt.output.Imports != nil {
+				diff := cmp.Diff(tt.output.Imports, ast.Imports, compareOptions)
+				if diff != "" {
+					t.Errorf("Built AST does not match (-want +got):\n%s", diff)
+				}
+			}
+
 			// allow nil statement arrays
 			if tt.output.Statements != nil {
-				diff := cmp.Diff(&tt.output, ast, compareOptions)
+				diff := cmp.Diff(tt.output.Statements, ast.Statements, compareOptions)
 				if diff != "" {
 					t.Errorf("Built AST does not match (-want +got):\n%s", diff)
 				}
