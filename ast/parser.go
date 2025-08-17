@@ -16,11 +16,6 @@ type ParseResult struct {
 	Errors  []ParseError
 }
 
-type node struct {
-	text       string
-	start, end int
-}
-
 type parser struct {
 	tokens   []token
 	index    int
@@ -372,11 +367,16 @@ func (p *parser) whileLoop() (Statement, error) {
 			return nil, err
 		}
 		condition = or
-		p.consume(left_brace, "Expected '{' after while condition")
+		if !p.check(left_brace) {
+			p.addError(p.peek(), "Expected '{' after while condition")
+			// Recovery: Skip malformed while loop
+			return nil, nil
+		}
+		p.advance() // consume the '{'
 	}
 
 	statements := []Statement{}
-	for !p.check(right_brace) {
+	for !p.check(right_brace) && !p.isAtEnd() {
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -385,7 +385,15 @@ func (p *parser) whileLoop() (Statement, error) {
 			statements = append(statements, stmt)
 		}
 	}
-	p.consume(right_brace, "Unclosed while loop")
+	if !p.check(right_brace) {
+		p.addError(p.peek(), "Unclosed while loop")
+		// Recovery: Create while loop with statements parsed so far
+		return &WhileLoop{
+			Condition: condition,
+			Body:      statements,
+		}, nil
+	}
+	p.advance() // consume the '}'
 	p.match(new_line)
 
 	return &WhileLoop{

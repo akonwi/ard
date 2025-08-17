@@ -96,6 +96,18 @@ let z = 10`,
 				"Expected '=' after variable name",
 			},
 		},
+		{
+			name:           "while loop missing opening brace",
+			input:          `while true let x = 5`,
+			expectedErrors: []string{"Expected '{' after while condition"},
+		},
+		{
+			name: "while loop missing closing brace",
+			input: `while true {
+	let x = 5
+let y = 10`,
+			expectedErrors: []string{"Unclosed while loop"},
+		},
 	}
 
 	for _, tt := range tests {
