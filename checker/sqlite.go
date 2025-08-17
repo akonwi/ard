@@ -55,9 +55,9 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{
 				{Name: "table", Type: Str},
 				{Name: "where", Type: Str},
-				{Name: "record", Type: &Any{name: "T"}},
+				{Name: "values", Type: MakeMap(Str, Dynamic)},
 			},
-			ReturnType: MakeResult(Void, Str),
+			ReturnType: MakeResult(Dynamic, Str),
 		},
 		"upsert": &FunctionDef{
 			Name: "upsert",

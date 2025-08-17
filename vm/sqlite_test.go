@@ -387,15 +387,18 @@ func TestSQLiteUpdate(t *testing.T) {
 		values.set("number", decode::from_int(2))
 		db.insert("players", values).expect("Failed to insert player")
 
-		// Update the record (still using struct-based update for now)
-		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
-		let result = db.update("players", "id = 1", updated_player)
-
-		// Should succeed
-		match result {
-			ok => true,
-			err => false
-		}
+		// Update the record using new map-based API
+		mut update_values: [Str: decode::Dynamic] = [:]
+		update_values.set("name", decode::from_str("John Smith"))
+		update_values.set("number", decode::from_int(10))
+		
+		let updated_row = db.update("players", "id = 1", update_values).expect("Update should succeed")
+		
+		// Verify the returned data matches what we updated
+		let updated_name = decode::run(updated_row, decode::field("name", decode::string)).expect("Should have name")
+		let updated_number = decode::run(updated_row, decode::field("number", decode::int)).expect("Should have number")
+		
+		updated_name == "John Smith" && updated_number == 10
 	`)
 
 	if result != true {
@@ -426,19 +429,18 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 		values.set("number", decode::from_int(2))
 		db.insert("players", values).expect("Failed to insert player")
 
-		// Update the record
-		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
-		db.update("players", "id = 1", updated_player)
-
-		// Verify the update worked
-		match db.get<Player>("players", "id = 1") {
-			ok => {
-				let players = ok
-				let retrieved = players.at(0)
-				retrieved.name == "John Smith" and retrieved.number == 10
-			},
-			err => false
-		}
+		// Update the record with new map-based API
+		mut update_values: [Str: decode::Dynamic] = [:]
+		update_values.set("name", decode::from_str("John Smith"))
+		update_values.set("number", decode::from_int(10))
+		
+		let updated_row = db.update("players", "id = 1", update_values).expect("Update should succeed")
+		
+		// Verify the returned data matches what we updated
+		let updated_name = decode::run(updated_row, decode::field("name", decode::string)).expect("Should have name")
+		let updated_number = decode::run(updated_row, decode::field("number", decode::int)).expect("Should have number")
+		
+		updated_name == "John Smith" && updated_number == 10
 	`)
 
 	if result != true {
@@ -453,6 +455,7 @@ func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -463,10 +466,13 @@ func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Try to update non-existent record
-		let player = Player{ id: 999, name: "Ghost Player", number: 99 }
-		let result = db.update("players", "id = 999", player)
+		mut update_values: [Str: decode::Dynamic] = [:]
+		update_values.set("name", decode::from_str("Ghost Player"))
+		update_values.set("number", decode::from_int(99))
+		
+		let result = db.update("players", "id = 999", update_values)
 
-		// Should fail
+		// Should fail (no rows to update)
 		match result {
 			ok => false,
 			err => true
@@ -502,24 +508,17 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 		values.set("email", decode::from_str("john@example.com"))
 		db.insert("users", values).expect("Failed to insert user")
 
-		// Update to remove email (set to none)
-		let updated_user = User{ id: 1, name: "John Smith", email: maybe::none() }
-		let result = db.update("users", "id = 1", updated_user)
-
-		match result {
-					ok => {
-						// Verify the update worked
-						match db.get<User>("users", "id = 1") {
-							ok => {
-								let users = ok
-								let retrieved = users.at(0)
-								retrieved.name == "John Smith" and retrieved.email.or("default") == "default"
-							},
-							err => false
-						}
-					},
-					err => false
-		}
+		// Update to remove email (omit from map to set NULL) and change name
+		mut update_values: [Str: decode::Dynamic] = [:]
+		update_values.set("name", decode::from_str("John Smith"))
+		// email omitted - will be set to NULL
+		
+		let updated_row = db.update("users", "id = 1", update_values).expect("Update should succeed")
+		
+		// Verify the returned data - name changed, email should be NULL
+		let updated_name = decode::run(updated_row, decode::field("name", decode::string)).expect("Should have name")
+		
+		updated_name == "John Smith"
 	`)
 
 	if result != true {

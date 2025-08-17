@@ -195,15 +195,17 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		dynamicResult := &object{resultMap, checker.Dynamic}
 		return makeOk(dynamicResult, resultType)
 	case "update":
-		// fn update(table: Str, where: Str, record: $T) Result<Void, Str>
+		// fn update(table: Str, where: Str, values: [Str:Dynamic]) Result<Dynamic, Str>
+		resultType := method.Type().(*checker.Result)
 		tableName := args[0].raw.(string)
 		whereClause := args[1].raw.(string)
-		structObj := args[2]
+		valuesMap := args[2]
 
-		// Extract fields from the struct
-		structFields, ok := structObj.raw.(map[string]*object)
+		// Extract fields from the map
+		mapData, ok := valuesMap.raw.(map[string]*object)
 		if !ok {
-			return makeErr(&object{"Update expects a struct object", checker.Str}, method.Type().(*checker.Result))
+			errorMsg := &object{"SQLite Error: update expects a map object", resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
 		// Build UPDATE statement
@@ -212,26 +214,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Sort column names for consistent ordering
 		var columns []string
-		for columnName := range structFields {
+		for columnName := range mapData {
 			columns = append(columns, columnName)
 		}
 		sort.Strings(columns)
 
 		// Build SET clauses
 		for _, columnName := range columns {
-			fieldObj := structFields[columnName]
+			fieldObj := mapData[columnName]
 			setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
-
-			// Handle Maybe types for update
-			if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
-				if fieldObj.raw == nil {
-					values = append(values, nil)
-				} else {
-					values = append(values, fieldObj.raw)
-				}
-			} else {
-				values = append(values, fieldObj.raw)
-			}
+			values = append(values, fieldObj.raw)
 		}
 
 		// Construct SQL
@@ -242,23 +234,59 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		)
 
 		// Execute the UPDATE
-		result, err := db.conn.Exec(sql, values...)
+		_, err := db.conn.Exec(sql, values...)
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			errorMsg := &object{err.Error(), resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
-		// Check if any rows were affected
-		rowsAffected, err := result.RowsAffected()
+		// Build SELECT query to get the updated row(s) back
+		selectSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s",
+			tableName,
+			whereClause,
+		)
+
+		// Execute the SELECT to get the updated row
+		rows, err := db.conn.Query(selectSQL)
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			errorMsg := &object{fmt.Sprintf("Failed to retrieve updated row: %v", err), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+		defer rows.Close()
+
+		// Get column names from the result
+		resultColumns, err := rows.Columns()
+		if err != nil {
+			errorMsg := &object{fmt.Sprintf("Failed to get result columns: %v", err), resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
-		if rowsAffected == 0 {
-			return makeErr(&object{"No records found matching the where clause", checker.Str}, method.Type().(*checker.Result))
+		if !rows.Next() {
+			errorMsg := &object{"No records found matching the where clause", resultType.Err()}
+			return makeErr(errorMsg, resultType)
 		}
 
-		// Return Ok(void)
-		return makeOk(&object{nil, checker.Void}, method.Type().(*checker.Result))
+		// Scan the row data
+		scanValues := make([]any, len(resultColumns))
+		scanTargets := make([]any, len(resultColumns))
+		for i := range scanValues {
+			scanTargets[i] = &scanValues[i]
+		}
+
+		if err := rows.Scan(scanTargets...); err != nil {
+			errorMsg := &object{fmt.Sprintf("Failed to scan updated row: %v", err), resultType.Err()}
+			return makeErr(errorMsg, resultType)
+		}
+
+		// Build result map
+		resultMap := make(map[string]interface{})
+		for i, columnName := range resultColumns {
+			resultMap[columnName] = scanValues[i]
+		}
+
+		// Return Ok(Dynamic) with the updated row data
+		dynamicResult := &object{resultMap, checker.Dynamic}
+		return makeOk(dynamicResult, resultType)
 	case "get":
 		// fn get(table: Str, where: Str) [T]
 		tableName := args[0].raw.(string)
