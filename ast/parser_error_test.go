@@ -78,6 +78,24 @@ use ard/fs
 let x = 5`,
 			expectedErrors: []string{"Expected module path after 'use'"},
 		},
+		{
+			name:           "break statement missing newline",
+			input:          `break let x = 5`,
+			expectedErrors: []string{"Expected new line"},
+		},
+		{
+			name:           "variable declaration missing equals",
+			input:          `let x 5`,
+			expectedErrors: []string{"Expected '=' after variable name"},
+		},
+		{
+			name: "multiple variable declaration errors",
+			input: `let x 5
+let z = 10`,
+			expectedErrors: []string{
+				"Expected '=' after variable name",
+			},
+		},
 	}
 
 	for _, tt := range tests {

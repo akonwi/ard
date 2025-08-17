@@ -204,7 +204,20 @@ func (p *parser) parseStatement() (Statement, error) {
 	}
 	if p.match(break_) {
 		tok := p.previous()
-		new_line := p.consume(new_line, "Expected new line")
+
+		// Check for expected newline
+		if !p.check(new_line) {
+			p.addError(p.peek(), "Expected new line")
+			// Recovery: Create Break without consuming newline, use current position
+			return &Break{
+				Location: Location{
+					Start: tok.getLocation().Start,
+					End:   Point{Row: tok.line, Col: tok.column + len("break")},
+				},
+			}, nil
+		}
+
+		new_line := p.advance()
 		return &Break{
 			Location: Location{
 				Start: tok.getLocation().Start,
@@ -285,7 +298,13 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	if p.match(colon) {
 		declaredType = p.parseType()
 	}
-	p.consume(equal, "Expected '=' after variable name")
+	if !p.check(equal) {
+		p.addError(p.peek(), "Expected '=' after variable name")
+		// Recovery: Skip to next statement boundary - missing '=' makes declaration invalid
+		return nil, nil
+	}
+
+	p.advance() // consume the '='
 	value, err := p.parseExpression()
 	if err != nil {
 		return nil, err
