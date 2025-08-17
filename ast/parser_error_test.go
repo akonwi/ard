@@ -160,3 +160,59 @@ func TestStructDefinitionErrorRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestImplBlockErrorRecovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantErrs []string
+	}{
+		{
+			name:     "missing impl type name",
+			input:    "impl { fn test() {} }\nlet x = 5",
+			wantErrs: []string{"Expected type name after 'impl'"},
+		},
+		{
+			name:     "missing opening brace",
+			input:    "impl Person fn test() {} }\nlet x = 5",
+			wantErrs: []string{"Expected '{'"},
+		},
+		{
+			name:     "missing newline after brace",
+			input:    "impl Person {fn test() {} }\nlet x = 5",
+			wantErrs: []string{"Expected new line after '{'"},
+		},
+		{
+			name:     "valid impl block works",
+			input:    "impl Person {\n    fn test() {}\n}\nlet x = 5",
+			wantErrs: []string{},
+		},
+		{
+			name:     "empty impl block works",
+			input:    "impl Person {\n}\nlet x = 5",
+			wantErrs: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseWithRecovery([]byte(tt.input), "test.ard")
+
+			if len(result.Errors) != len(tt.wantErrs) {
+				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
+				return
+			}
+
+			for i, wantErr := range tt.wantErrs {
+				if !strings.Contains(result.Errors[i].Message, wantErr) {
+					t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
+				}
+			}
+
+			// Should still parse subsequent statements successfully
+			if result.Program != nil && len(result.Program.Statements) > 0 {
+				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
+			}
+		})
+	}
+}

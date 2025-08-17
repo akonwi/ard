@@ -95,6 +95,19 @@ func (p *parser) synchronize() {
 	}
 }
 
+// synchronizeToBlockEnd skips tokens until reaching the matching closing brace, accounting for nested blocks
+func (p *parser) synchronizeToBlockEnd() {
+	braceCount := 1 // We're already inside a block
+	for braceCount > 0 && !p.isAtEnd() {
+		if p.check(left_brace) {
+			braceCount++
+		} else if p.check(right_brace) {
+			braceCount--
+		}
+		p.advance()
+	}
+}
+
 func (p *parser) parseComment() *Comment {
 	// If not a comment, return nil
 	if !p.check(comment) {
@@ -298,7 +311,7 @@ func (p *parser) parseStatement() (Statement, error) {
 				return p.traitImpl()
 			}
 		}
-		return p.implBlock()
+		return p.implBlock(), nil
 	}
 	return p.assignment()
 }
@@ -669,11 +682,16 @@ func (p *parser) structDef(private bool) Statement {
 	return structDef
 }
 
-func (p *parser) implBlock() (*ImplBlock, error) {
+func (p *parser) implBlock() *ImplBlock {
 	impl := &ImplBlock{}
 	implToken := p.previous()
 
-	nameToken := p.consume(identifier, "Expected type name after 'impl'")
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected type name after 'impl'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	impl.Target = Identifier{
 		Name: nameToken.text,
 		Location: Location{
@@ -682,8 +700,19 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		},
 	}
 
-	p.consume(left_brace, "Expected '{'")
-	p.consume(new_line, "Expected new line")
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
+	if !p.check(new_line) {
+		p.addError(p.peek(), "Expected new line after '{'")
+		// Continue parsing - this is not a critical error
+	} else {
+		p.advance()
+	}
 
 	for !p.match(right_brace) {
 		// not using p.parseStatement() in order to be precise
@@ -692,11 +721,16 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		}
 		stmt, err := p.functionDef(true)
 		if err != nil {
-			return nil, err
+			// For now, keep the old error handling until functionDef is converted
+			p.addError(p.peek(), err.Error())
+			p.synchronizeToBlockEnd()
+			break
 		}
 		fn, ok := stmt.(*FunctionDeclaration)
 		if !ok {
-			return nil, p.makeError(p.peek(), "Expected function declaration in impl block")
+			p.addError(p.peek(), "Expected function declaration in impl block")
+			p.synchronizeToBlockEnd()
+			break
 		}
 		impl.Methods = append(impl.Methods, *fn)
 	}
@@ -707,7 +741,7 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		End:   Point{p.previous().line, p.previous().column},
 	}
 
-	return impl, nil
+	return impl
 }
 
 func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
