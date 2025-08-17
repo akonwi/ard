@@ -442,7 +442,12 @@ func (p *parser) forLoop() (Statement, error) {
 				cursor2.Name = id.text
 				cursor2.Location = id.getLocation()
 			}
-			p.consume(in, "Expected 'in' after cursor name")
+			if !p.check(in) {
+				p.addError(p.peek(), "Expected 'in' after cursor name")
+				// Recovery: Skip malformed for-in loop
+				return nil, nil
+			}
+			p.advance() // consume 'in'
 			seq, err := p.iterRange()
 			if err != nil {
 				return nil, err
@@ -476,12 +481,24 @@ func (p *parser) forLoop() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.consume(semicolon, "Expected ';' after loop cursor")
+	if !p.check(semicolon) {
+		p.addError(p.peek(), "Expected ';' after loop cursor")
+		// Recovery: Skip malformed C-style for loop
+		return nil, nil
+	}
+	p.advance() // consume first ';'
+
 	condition, err := p.or()
 	if err != nil {
 		return nil, err
 	}
-	p.consume(semicolon, "Expected ';' after loop condition")
+
+	if !p.check(semicolon) {
+		p.addError(p.peek(), "Expected ';' after loop condition")
+		// Recovery: Skip malformed C-style for loop
+		return nil, nil
+	}
+	p.advance() // consume second ';'
 	incrementer, err := p.parseStatement()
 	if err != nil {
 		return nil, err

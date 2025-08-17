@@ -108,6 +108,16 @@ let z = 10`,
 let y = 10`,
 			expectedErrors: []string{"Unclosed while loop"},
 		},
+		{
+			name:           "for-in loop missing 'in' keyword",
+			input:          `for i, j`,
+			expectedErrors: []string{"Expected 'in' after cursor name"},
+		},
+		{
+			name:           "for loop missing first semicolon",
+			input:          `for let i = 0`,
+			expectedErrors: []string{"Expected ';' after loop cursor"},
+		},
 	}
 
 	for _, tt := range tests {
