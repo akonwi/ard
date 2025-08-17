@@ -294,10 +294,10 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.check(private, trait) {
 		p.match(private)
 		p.match(trait)
-		return p.traitDef(true)
+		return p.traitDef(true), nil
 	}
 	if p.match(trait) {
-		return p.traitDef(false)
+		return p.traitDef(false), nil
 	}
 	if p.match(impl) {
 		// if implementing a static reference, it's a trait
@@ -744,11 +744,16 @@ func (p *parser) implBlock() *ImplBlock {
 	return impl
 }
 
-func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
+func (p *parser) traitDef(private bool) *TraitDefinition {
 	traitToken := p.previous()
 	traitDef := &TraitDefinition{Private: private}
 
-	nameToken := p.consume(identifier, "Expected trait name after 'trait'")
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected trait name after 'trait'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	traitDef.Name = Identifier{
 		Name: nameToken.text,
 		Location: Location{
@@ -757,33 +762,88 @@ func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
 		},
 	}
 
-	p.consume(left_brace, "Expected '{'")
-	p.consume(new_line, "Expected new line")
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
+	if !p.check(new_line) {
+		p.addError(p.peek(), "Expected new line after '{'")
+		// Continue parsing - non-critical error
+	} else {
+		p.advance()
+	}
 
 	for !p.match(right_brace) {
 		if p.match(new_line) {
 			continue
 		}
+
 		// Parse function declaration without body (signature only)
-		fnToken := p.consume(fn, "Expected function declaration in trait block")
-		name := p.consume(identifier, "Expected function name")
-		p.consume(left_paren, "Expected '(' after function name")
+		if !p.check(fn) {
+			p.addError(p.peek(), "Expected function declaration in trait block")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		fnToken := p.advance()
+
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected function name")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		name := p.advance()
+
+		if !p.check(left_paren) {
+			p.addError(p.peek(), "Expected '(' after function name")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		p.advance()
 
 		// Parse parameters
 		params := []Parameter{}
 		for !p.check(right_paren) {
 			if len(params) > 0 {
-				p.consume(comma, "Expected ',' between parameters")
+				if !p.check(comma) {
+					p.addError(p.peek(), "Expected ',' between parameters")
+					break
+				}
+				p.advance()
 			}
-			paramName := p.consumeVariableName("Expected parameter name")
-			p.consume(colon, "Expected ':' after parameter name")
+
+			// Use same logic as struct fields for parameter name parsing
+			current := p.peek()
+			if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
+				p.addError(p.peek(), "Expected parameter name")
+				break
+			}
+			paramName := p.advance()
+			if paramName.text == "" {
+				paramName.text = string(paramName.kind)
+			}
+
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after parameter name")
+				break
+			}
+			p.advance()
+
 			paramType := p.parseType()
 			params = append(params, Parameter{
 				Name: paramName.text,
 				Type: paramType,
 			})
 		}
-		p.consume(right_paren, "Expected ')' after parameters")
+
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ')' after parameters")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		p.advance()
 
 		// Parse return type
 		var returnType DeclaredType = nil
@@ -814,7 +874,7 @@ func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
 		End:   Point{p.previous().line, p.previous().column},
 	}
 
-	return traitDef, nil
+	return traitDef
 }
 
 func (p *parser) traitImpl() (*TraitImplementation, error) {

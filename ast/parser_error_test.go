@@ -216,3 +216,79 @@ func TestImplBlockErrorRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestTraitDefinitionErrorRecovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantErrs []string
+	}{
+		{
+			name:     "missing trait name",
+			input:    "trait { fn test(); }\nlet x = 5",
+			wantErrs: []string{"Expected trait name after 'trait'"},
+		},
+		{
+			name:     "missing opening brace",
+			input:    "trait MyTrait fn test(); }\nlet x = 5",
+			wantErrs: []string{"Expected '{'"},
+		},
+		{
+			name:     "missing newline after brace",
+			input:    "trait MyTrait {fn test(); }\nlet x = 5",
+			wantErrs: []string{"Expected new line after '{'", "Expected function declaration in trait block"},
+		},
+		{
+			name:     "missing fn keyword",
+			input:    "trait MyTrait {\n    test();\n}\nlet x = 5",
+			wantErrs: []string{"Expected function declaration in trait block"},
+		},
+		{
+			name:     "missing function name",
+			input:    "trait MyTrait {\n    fn ();\n}\nlet x = 5",
+			wantErrs: []string{"Expected function name"},
+		},
+		{
+			name:     "missing opening paren",
+			input:    "trait MyTrait {\n    fn test;\n}\nlet x = 5",
+			wantErrs: []string{"Expected '(' after function name"},
+		},
+		{
+			name:     "missing closing paren",
+			input:    "trait MyTrait {\n    fn test(name: string;\n}\nlet x = 5",
+			wantErrs: []string{"Expected ',' between parameters", "Expected ')' after parameters"},
+		},
+		{
+			name:     "valid trait works",
+			input:    "trait MyTrait {\n    fn test()\n}\nlet x = 5",
+			wantErrs: []string{},
+		},
+		{
+			name:     "empty trait works",
+			input:    "trait MyTrait {\n}\nlet x = 5",
+			wantErrs: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseWithRecovery([]byte(tt.input), "test.ard")
+
+			if len(result.Errors) != len(tt.wantErrs) {
+				t.Errorf("Expected %d errors, got %d: %v", len(tt.wantErrs), len(result.Errors), result.Errors)
+				return
+			}
+
+			for i, wantErr := range tt.wantErrs {
+				if !strings.Contains(result.Errors[i].Message, wantErr) {
+					t.Errorf("Expected error %d to contain '%s', got '%s'", i, wantErr, result.Errors[i].Message)
+				}
+			}
+
+			// Should still parse subsequent statements successfully
+			if result.Program != nil && len(result.Program.Statements) > 0 {
+				t.Logf("Successfully recovered and parsed %d statements", len(result.Program.Statements))
+			}
+		})
+	}
+}
