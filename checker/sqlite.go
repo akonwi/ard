@@ -4,53 +4,53 @@ var DatabaseDef = &StructDef{
 	Name:   "Database",
 	Fields: map[string]Type{},
 	Methods: map[string]*FunctionDef{
-		"close": &FunctionDef{
+		"close": {
 			Name:       "close",
 			Parameters: []Parameter{},
 			ReturnType: MakeResult(Void, Str),
 		},
-		"count": &FunctionDef{
+		"count": {
 			Name:       "count",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(Int, Str),
 		},
-		"delete": &FunctionDef{
+		"delete": {
 			Name:       "delete",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(Bool, Str),
 		},
-		"exec": &FunctionDef{
+		"exec": {
 			Name:       "exec",
 			Parameters: []Parameter{{Name: "sql", Type: Str}},
 			ReturnType: MakeResult(Void, Str),
 		},
-		"exists": &FunctionDef{
+		"exists": {
 			Name:       "exists",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(Bool, Str),
 		},
-		"get": &FunctionDef{
+		"get": {
 			Name:       "get",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
 		},
 
-		"insert": &FunctionDef{
+		"insert": {
 			Name:       "insert",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: MakeMap(Str, Dynamic)}},
 			ReturnType: MakeResult(Dynamic, Str),
 		},
-		"query": &FunctionDef{
+		"query": {
 			Name:       "query",
 			Parameters: []Parameter{{Name: "sql", Type: Str}},
 			ReturnType: MakeResult(Dynamic, Str),
 		},
-		"first": &FunctionDef{
+		"first": {
 			Name:       "first",
 			Parameters: []Parameter{{Name: "sql", Type: Str}},
 			ReturnType: MakeResult(Dynamic, Str),
 		},
-		"update": &FunctionDef{
+		"update": {
 			Name: "update",
 			Parameters: []Parameter{
 				{Name: "table", Type: Str},
@@ -59,7 +59,7 @@ var DatabaseDef = &StructDef{
 			},
 			ReturnType: MakeResult(Dynamic, Str),
 		},
-		"upsert": &FunctionDef{
+		"upsert": {
 			Name: "upsert",
 			Parameters: []Parameter{
 				{Name: "table", Type: Str},
