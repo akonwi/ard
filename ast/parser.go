@@ -263,10 +263,10 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.check(private, enum) {
 		p.match(private)
 		p.match(enum)
-		return p.enumDef(true)
+		return p.enumDef(true), nil
 	}
 	if p.match(enum) {
-		return p.enumDef(false)
+		return p.enumDef(false), nil
 	}
 
 	if p.check(private, struct_) {
@@ -552,19 +552,40 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 	return decl, nil
 }
 
-func (p *parser) enumDef(private bool) (Statement, error) {
-	nameToken := p.consume(identifier, "Expected name after 'enum'")
+func (p *parser) enumDef(private bool) Statement {
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected name after 'enum'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	enum := &EnumDefinition{Name: nameToken.text, Private: private}
-	p.consume(left_brace, "Expected '{'")
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
 	p.match(new_line)
 	for !p.match(right_brace) {
-		variantToken := p.consume(identifier, "Expected variant name")
+		if !p.check(identifier) {
+			// Skip empty variant (graceful recovery)
+			if p.match(comma) {
+				p.match(new_line)
+				continue
+			}
+			// If not a comma, we might be at end or have other issues
+			break
+		}
+		variantToken := p.advance()
 		enum.Variants = append(enum.Variants, variantToken.text)
 		p.match(comma)
 		p.match(new_line)
 	}
 
-	return enum, nil
+	return enum
 }
 
 func (p *parser) structDef(private bool) (Statement, error) {
