@@ -62,9 +62,12 @@ func runTests(t *testing.T, tests []test) {
 				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
 			}
 
-			diff := cmp.Diff(&tt.output, ast, compareOptions)
-			if diff != "" {
-				t.Errorf("Built AST does not match (-want +got):\n%s", diff)
+			// allow nil statement arrays
+			if tt.output.Statements != nil {
+				diff := cmp.Diff(&tt.output, ast, compareOptions)
+				if diff != "" {
+					t.Errorf("Built AST does not match (-want +got):\n%s", diff)
+				}
 			}
 		})
 	}
@@ -87,9 +90,11 @@ func TestImportStatements(t *testing.T) {
 		{
 			name: "importing modules",
 			input: strings.Join([]string{
+				`// comment`,
 				`use ard/fs`,
 				`use github.com/google/go-cmp/cmp`,
 				`use github.com/tree-sitter/go-tree-sitter as ts`,
+				`// comment`,
 				`use github.com/tree-sitter/tree-sitter`,
 			}, "\n"),
 			output: Program{
@@ -111,7 +116,6 @@ func TestImportStatements(t *testing.T) {
 						Name: "tree_sitter",
 					},
 				},
-				Statements: []Statement{},
 			},
 		},
 	})

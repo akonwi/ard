@@ -79,6 +79,23 @@ func (p *parser) skipNewlines() {
 	}
 }
 
+func (p *parser) parseComment() *Comment {
+	// If not a comment, return nil
+	if !p.check(comment) {
+		return nil
+	}
+
+	tok := p.advance()
+	line_break := p.advance()
+	return &Comment{
+		Value: tok.text,
+		Location: Location{
+			Start: tok.getLocation().Start,
+			End:   line_break.getLocation().Start,
+		},
+	}
+}
+
 func (p *parser) parse() (*Program, error) {
 	program := &Program{
 		Imports:    []Import{},
@@ -91,8 +108,11 @@ func (p *parser) parse() (*Program, error) {
 		if imp := p.parseImport(); imp != nil {
 			program.Imports = append(program.Imports, *imp)
 		} else {
-			// Continue importing if the current token is an empty line or 'use'
-			importing = p.check(new_line) || p.check(use)
+			if c := p.parseComment(); c != nil {
+				program.Statements = append(program.Statements, c)
+			}
+			// Continue import phase while the current token is an empty line, 'use', or comment
+			importing = p.check(new_line) || p.check(use) || p.check(comment)
 		}
 	}
 
@@ -176,15 +196,8 @@ func (p *parser) parseImport() *Import {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
-	if p.match(comment) {
-		tok := p.previous()
-		return &Comment{
-			Value: tok.text,
-			Location: Location{
-				Start: tok.getLocation().Start,
-				End:   Point{Row: p.peek().line, Col: p.peek().column - 1},
-			},
-		}, nil
+	if c := p.parseComment(); c != nil {
+		return c, nil
 	}
 	if p.match(new_line) {
 		return nil, nil
