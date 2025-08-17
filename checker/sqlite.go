@@ -35,8 +35,8 @@ var DatabaseDef = &StructDef{
 			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
 		},
 
-		"ins": &FunctionDef{
-			Name:       "ins",
+		"insert": &FunctionDef{
+			Name:       "insert",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: MakeMap(Str, Dynamic)}},
 			ReturnType: MakeResult(Dynamic, Str),
 		},

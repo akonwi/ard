@@ -94,8 +94,8 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		// Return Ok(Void)
 		return makeOk(void, resultType)
-	case "ins":
-		// fn ins(table: Str, values: [Str: Dynamic]) Result<Dynamic, Str>
+	case "insert":
+		// fn insert(table: Str, values: [Str: Dynamic]) Result<Dynamic, Str>
 		resultType := method.Type().(*checker.Result)
 		tableName := args[0].raw.(string)
 		valuesMap := args[1]

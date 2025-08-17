@@ -39,7 +39,7 @@ func TestSQLiteInsertStruct(t *testing.T) {
 		values.set("name", decode::from_str("John Doe"))
 		values.set("number", decode::from_int(2))
 		
-		let inserted_row = db.ins("players", values).expect("Insert should succeed")
+		let inserted_row = db.insert("players", values).expect("Insert should succeed")
 		
 		// Verify the inserted data
 		let name = decode::run(inserted_row, decode::field("name", decode::string)).expect("Should have name")
@@ -74,8 +74,8 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(5))
 
-		db.ins("players", values1).expect("Failed to insert player 1")
-		db.ins("players", values2).expect("Failed to insert player 2")
+		db.insert("players", values1).expect("Failed to insert player 1")
+		db.insert("players", values2).expect("Failed to insert player 2")
 	`)
 }
 
@@ -86,17 +86,16 @@ func TestSQLiteInsertError(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
+		use ard/decode
 
 		let db = sqlite::open("test_error.db").expect("Failed to open database")
 		// Don't create the table - this should cause an error
 
-		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player)
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("number", decode::from_int(2))
+		
+		db.insert("players", values)
 	`)
 
 	if result == nil {
@@ -111,6 +110,7 @@ func TestSQLiteGetBasic(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -121,10 +121,16 @@ func TestSQLiteGetBasic(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
-		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
-		db.insert("players", player1).expect("Failed to insert player")
-		db.insert("players", player2).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(5))
+		
+		db.insert("players", values1).expect("Failed to insert player")
+		db.insert("players", values2).expect("Failed to insert player")
 
 		// Get all players
 		let players = db.get<Player>("players", "1=1").expect("Failed to get players")
@@ -143,6 +149,7 @@ func TestSQLiteGetWithCondition(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -153,12 +160,21 @@ func TestSQLiteGetWithCondition(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
-		let player2 = Player{ id: 2, name: "Jane Smith", number: 2 }
-		let player3 = Player{ id: 3, name: "Bob Wilson", number: 5 }
-		db.insert("players", player1).expect("Failed to insert player 1")
-		db.insert("players", player2).expect("Failed to insert player 2")
-		db.insert("players", player3).expect("Failed to insert player 3")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(2))
+		
+		mut values3: [Str: decode::Dynamic] = [:]
+		values3.set("name", decode::from_str("Bob Wilson"))
+		values3.set("number", decode::from_int(5))
+		
+		db.insert("players", values1).expect("Failed to insert player 1")
+		db.insert("players", values2).expect("Failed to insert player 2")
+		db.insert("players", values3).expect("Failed to insert player 3")
 
 		// Get players with number = 2
 		let twos = db.get<Player>("players", "number = 2").expect("Failed to get players with number=2")
@@ -177,6 +193,7 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -187,8 +204,11 @@ func TestSQLiteGetFieldAccess(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player).expect("Failed to insert player")
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("number", decode::from_int(2))
+		
+		db.insert("players", values).expect("Failed to insert player")
 
 		// Get player and check field access
 		let players = db.get<Player>("players", "id = 1").expect("Failed to get player with id=1")
@@ -208,6 +228,7 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 
 	run(t, `
 		use ard/sqlite
+		use ard/decode
 		use ard/maybe
 		struct User {
 			id: Int,
@@ -218,13 +239,16 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
-		// Insert user with email
-		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
-		db.insert("users", user1).expect("Failed to insert user 1")
+		// Insert user with email  
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("email", decode::from_str("john@example.com"))
+		db.insert("users", values1).expect("Failed to insert user 1")
 
-		// Insert user without email (none)
-		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
-		db.insert("users", user2).expect("Failed to insert user 2")
+		// Insert user without email (just don't include the email field)
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		db.insert("users", values2).expect("Failed to insert user 2")
 	`)
 }
 
@@ -235,6 +259,7 @@ func TestSQLiteGetWithMaybeTypes(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		use ard/maybe
 		struct User {
 			id: Int,
@@ -246,10 +271,15 @@ func TestSQLiteGetWithMaybeTypes(t *testing.T) {
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert users with and without email
-		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
-		let user2 = User{ id: 2, name: "Jane Smith", email: maybe::none() }
-		db.insert("users", user1).expect("Failed to insert user 1")
-		db.insert("users", user2).expect("Failed to insert user 2")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("email", decode::from_str("john@example.com"))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		
+		db.insert("users", values1).expect("Failed to insert user 1")
+		db.insert("users", values2).expect("Failed to insert user 2")
 
 		// Get all users
 		let users = db.get<User>("users", "1=1").expect("Failed to get users")
@@ -272,6 +302,7 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		use ard/maybe
 		struct Product {
 			id: Int,
@@ -285,31 +316,26 @@ func TestSQLiteMaybeTypesRoundTrip(t *testing.T) {
 		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, price REAL, in_stock INTEGER)").expect("Failed to create table")
 
 		// Insert products with various Maybe field combinations
-		let product1 = Product{
-			id: 1,
-			name: "Widget",
-			description: maybe::some("A useful widget"),
-			price: maybe::some(19.99),
-			in_stock: maybe::some(true)
-		}
-		let product2 = Product{
-			id: 2,
-			name: "Gadget",
-			description: maybe::none(),
-			price: maybe::none(),
-			in_stock: maybe::some(false)
-		}
-		let product3 = Product{
-			id: 3,
-			name: "Thing",
-			description: maybe::some("Another thing"),
-			price: maybe::some(5.0),
-			in_stock: maybe::none()
-		}
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("Widget"))
+		values1.set("description", decode::from_str("A useful widget"))
+		values1.set("price", decode::from_float(19.99))
+		values1.set("in_stock", decode::from_bool(true))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Gadget"))
+		// description and price omitted (None values)
+		values2.set("in_stock", decode::from_bool(false))
+		
+		mut values3: [Str: decode::Dynamic] = [:]
+		values3.set("name", decode::from_str("Thing"))
+		values3.set("description", decode::from_str("Another thing"))
+		values3.set("price", decode::from_float(5.0))
+		// in_stock omitted (None value)
 
-		db.insert("products", product1).expect("Failed to insert product 1")
-		db.insert("products", product2).expect("Failed to insert product 2")
-		db.insert("products", product3).expect("Failed to insert product 3")
+		db.insert("products", values1).expect("Failed to insert product 1")
+		db.insert("products", values2).expect("Failed to insert product 2")
+		db.insert("products", values3).expect("Failed to insert product 3")
 
 		// Retrieve and verify
 		let products = db.get<Product>("products", "1=1").expect("Failed to get products")
@@ -345,6 +371,7 @@ func TestSQLiteUpdate(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -355,10 +382,12 @@ func TestSQLiteUpdate(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert initial record
-		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player).expect("Failed to insert player")
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("number", decode::from_int(2))
+		db.insert("players", values).expect("Failed to insert player")
 
-		// Update the record
+		// Update the record (still using struct-based update for now)
 		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
 		let result = db.update("players", "id = 1", updated_player)
 
@@ -381,6 +410,7 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -391,8 +421,10 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert initial record
-		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		db.insert("players", player).expect("Failed to insert player")
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("number", decode::from_int(2))
+		db.insert("players", values).expect("Failed to insert player")
 
 		// Update the record
 		let updated_player = Player{ id: 1, name: "John Smith", number: 10 }
@@ -453,6 +485,7 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		use ard/maybe
 		struct User {
 			id: Int,
@@ -464,8 +497,10 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert initial record with email
-		let user = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
-		db.insert("users", user).expect("Failed to insert user")
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("email", decode::from_str("john@example.com"))
+		db.insert("users", values).expect("Failed to insert user")
 
 		// Update to remove email (set to none)
 		let updated_user = User{ id: 1, name: "John Smith", email: maybe::none() }
@@ -499,6 +534,7 @@ func TestSQLiteDelete(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -509,9 +545,20 @@ func TestSQLiteDelete(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		db.insert("players", values1).expect("Failed to insert player")
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(10))
+		db.insert("players", values2).expect("Failed to insert player")
+		
+		mut values3: [Str: decode::Dynamic] = [:]
+		values3.set("name", decode::from_str("Bob Wilson"))
+		values3.set("number", decode::from_int(23))
+		db.insert("players", values3).expect("Failed to insert player")
 
 		// Delete one record
 		let result = db.delete("players", "id = 2")
@@ -562,6 +609,7 @@ func TestSQLiteDeleteMultiple(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -572,9 +620,20 @@ func TestSQLiteDeleteMultiple(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		db.insert("players", values1).expect("Failed to insert player")
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(2))
+		db.insert("players", values2).expect("Failed to insert player")
+		
+		mut values3: [Str: decode::Dynamic] = [:]
+		values3.set("name", decode::from_str("Bob Wilson"))
+		values3.set("number", decode::from_int(23))
+		db.insert("players", values3).expect("Failed to insert player")
 
 		// Delete multiple records with same number
 		db.delete("players", "number = 2")
@@ -592,6 +651,7 @@ func TestSQLiteClose(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -602,7 +662,10 @@ func TestSQLiteClose(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert a test record
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
+		mut values: [Str: decode::Dynamic] = [:]
+		values.set("name", decode::from_str("John Doe"))
+		values.set("number", decode::from_int(2))
+		db.insert("players", values).expect("Failed to insert player")
 
 		// Close the database
 		let result = db.close()
@@ -658,6 +721,7 @@ func TestSQLiteCount(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -668,9 +732,20 @@ func TestSQLiteCount(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		db.insert("players", values1).expect("Failed to insert player")
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(2))
+		db.insert("players", values2).expect("Failed to insert player")
+		
+		mut values3: [Str: decode::Dynamic] = [:]
+		values3.set("name", decode::from_str("Bob Wilson"))
+		values3.set("number", decode::from_int(23))
+		db.insert("players", values3).expect("Failed to insert player")
 
 		// Count all players
 		let all_count = db.count("players", "").expect("Failed to count all players")
@@ -720,6 +795,7 @@ func TestSQLiteExists(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -730,9 +806,20 @@ func TestSQLiteExists(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 3, name: "Bob Wilson", number: 23 }).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		db.insert("players", values1).expect("Failed to insert player")
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(2))
+		db.insert("players", values2).expect("Failed to insert player")
+		
+		mut values3: [Str: decode::Dynamic] = [:]
+		values3.set("name", decode::from_str("Bob Wilson"))
+		values3.set("number", decode::from_int(23))
+		db.insert("players", values3).expect("Failed to insert player")
 
 		// Check if any players exist
 		let any_exist = db.exists("players", "").expect("Failed to check if any players exist")
@@ -803,6 +890,7 @@ func TestSQLiteEmptyWhereClause(t *testing.T) {
 
 	result := run(t, `
 		use ard/sqlite
+		use ard/decode
 		struct Player {
 			id: Int,
 			name: Str,
@@ -813,8 +901,15 @@ func TestSQLiteEmptyWhereClause(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		db.insert("players", Player{ id: 1, name: "John Doe", number: 2 }).expect("Failed to insert player")
-		db.insert("players", Player{ id: 2, name: "Jane Smith", number: 10 }).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		db.insert("players", values1).expect("Failed to insert player")
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(10))
+		db.insert("players", values2).expect("Failed to insert player")
 
 		// Get all players using empty where clause
 		let all_players = db.get<Player>("players", "").expect("Failed to get all players")
@@ -991,10 +1086,16 @@ func TestSQLiteQueryWithDecode(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
-		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
-		db.insert("players", player1).expect("Failed to insert player")
-		db.insert("players", player2).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(5))
+		
+		db.insert("players", values1).expect("Failed to insert player")
+		db.insert("players", values2).expect("Failed to insert player")
 
 		// Query the data
 		let rows = db.query("SELECT id, name, number FROM players").expect("Failed to query players")
@@ -1030,10 +1131,16 @@ func TestSQLiteQueryDecodeFields(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
-		let player2 = Player{ id: 2, name: "Jane Smith", number: 5 }
-		db.insert("players", player1).expect("Failed to insert player")
-		db.insert("players", player2).expect("Failed to insert player")
+		mut values1: [Str: decode::Dynamic] = [:]
+		values1.set("name", decode::from_str("John Doe"))
+		values1.set("number", decode::from_int(2))
+		
+		mut values2: [Str: decode::Dynamic] = [:]
+		values2.set("name", decode::from_str("Jane Smith"))
+		values2.set("number", decode::from_int(5))
+		
+		db.insert("players", values1).expect("Failed to insert player")
+		db.insert("players", values2).expect("Failed to insert player")
 
 		// Query the data
 		let rows = db.query("SELECT id, name, number FROM players ORDER BY id").expect("Failed to query players")
@@ -1188,7 +1295,7 @@ func TestSQLiteInsMethod(t *testing.T) {
 		values.set("name", decode::from_str("Alice"))
 		values.set("age", decode::from_int(30))
 
-		let inserted_row = db.ins("users", values).expect("Failed to insert with ins method")
+		let inserted_row = db.insert("users", values).expect("Failed to insert with ins method")
 		
 		// ins should return the full row as Dynamic - verify we can access the inserted data
 		let returned_name = decode::run(inserted_row, decode::field("name", decode::string)).expect("Should have name")
@@ -1220,7 +1327,7 @@ func TestSQLiteInsMethodValidation(t *testing.T) {
 		values1.set("price", decode::from_float(19.99))
 		values1.set("available", decode::from_bool(true))
 		
-		let row1 = db.ins("products", values1).expect("Failed to insert product 1")
+		let row1 = db.insert("products", values1).expect("Failed to insert product 1")
 		
 		// Decode the returned row and verify it contains our data
 		let name1 = decode::run(row1, decode::field("name", decode::string)).expect("Should have name")
@@ -1235,7 +1342,7 @@ func TestSQLiteInsMethodValidation(t *testing.T) {
 		values2.set("name", decode::from_str("Gadget"))
 		values2.set("price", decode::from_float(29.99))
 		
-		let row2 = db.ins("products", values2).expect("Failed to insert product 2")
+		let row2 = db.insert("products", values2).expect("Failed to insert product 2")
 		let name2 = decode::run(row2, decode::field("name", decode::string)).expect("Should have name")
 		let price2 = decode::run(row2, decode::field("price", decode::float)).expect("Should have price")
 		let id2 = decode::run(row2, decode::field("id", decode::int)).expect("Should have id")
