@@ -24,12 +24,33 @@ fn main() {
   let db = sqlite::open("./db.sqlite").expect("Failed to open database")
   db.exec("create table if not exists players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
-  db.insert("players", Player{ id: 1, name: "John Doe", number: 2 })
-  db.insert("players", Player{ id: 2, name: "James Reece", number: 2 })
-  db.insert("players", Player{ id: 3, name: "Michael Jordan", number: 23 })
+  // Insert players using flexible map-based API
+  mut player1: [Str: decode::Dynamic] = [:]
+  player1.set("name", decode::from_str("John Doe"))
+  player1.set("number", decode::from_int(2))
+  
+  mut player2: [Str: decode::Dynamic] = [:]
+  player2.set("name", decode::from_str("James Reece"))
+  player2.set("number", decode::from_int(2))
+  
+  mut player3: [Str: decode::Dynamic] = [:]
+  player3.set("name", decode::from_str("Michael Jordan"))
+  player3.set("number", decode::from_int(23))
+  
+  db.insert("players", player1).expect("Failed to insert player 1")
+  db.insert("players", player2).expect("Failed to insert player 2")
+  db.insert("players", player3).expect("Failed to insert player 3")
 
-  // Update a player's number
-  db.update("players", "id = 1", Player{ id: 1, name: "John Doe", number: 10 })
+  // Update a player's number using map-based API
+  mut update_values: [Str: decode::Dynamic] = [:]
+  update_values.set("number", decode::from_int(10))
+  
+  let updated_player = db.update("players", "id = 1", update_values).expect("Failed to update player")
+  
+  // Show what was updated
+  let updated_name = decode::run(updated_player, decode::field("name", decode::string)).expect("Should have name")
+  let updated_number = decode::run(updated_player, decode::field("number", decode::int)).expect("Should have number")
+  io::print("Updated player: {updated_name} now has number {updated_number}")
 
   // Delete a player
   db.delete("players", "number = 23").expect("Failed to delete player")
