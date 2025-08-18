@@ -107,3 +107,34 @@ func TestVariables(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestFunctionTypes(t *testing.T) {
+	runTests(t, []test{
+		// Function type error cases
+		{
+			name:     "Missing opening paren in function type",
+			input:    "let f: fn Int) String = test",
+			wantErrs: []string{"Expected '(' after 'fn' in function type"},
+		},
+		{
+			name:     "Missing closing paren in function type",
+			input:    "let f: fn(Int String = test",
+			wantErrs: []string{"Expected ')' after function parameters"},
+		},
+		{
+			name:     "Valid function type",
+			input:    "let f: fn(Int) String = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid function type with no params",
+			input:    "let f: fn() String = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid function type with multiple params",
+			input:    "let f: fn(Int, String) Bool = test",
+			wantErrs: []string{},
+		},
+	})
+}

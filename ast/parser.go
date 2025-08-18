@@ -1104,11 +1104,21 @@ func (p *parser) parseType() DeclaredType {
 	// Check for function type: fn(ParamType) ReturnType
 	if p.match(fn) {
 		fnToken := p.previous()
-		p.consume(left_paren, "Expected '(' after 'fn' in function type")
+
+		// Expect opening paren
+		hasLeftParen := p.match(left_paren)
+		if !hasLeftParen {
+			p.addError(p.peek(), "Expected '(' after 'fn' in function type")
+			// Try to recover by skipping tokens until we find a reasonable boundary
+			// For function types, skip until we find =, newline, or EOF
+			for !p.isAtEnd() && !p.check(equal) && !p.check(new_line) {
+				p.advance()
+			}
+		}
 
 		// Parse parameter types
 		paramTypes := []DeclaredType{}
-		if !p.check(right_paren) {
+		if hasLeftParen && !p.check(right_paren) {
 			for {
 				paramType := p.parseType()
 				paramTypes = append(paramTypes, paramType)
@@ -1117,9 +1127,21 @@ func (p *parser) parseType() DeclaredType {
 				}
 			}
 		}
-		p.consume(right_paren, "Expected ')' after function parameters")
 
-		// Parse return type
+		// Expect closing paren (only if we had opening paren)
+		hasRightParen := false
+		if hasLeftParen {
+			hasRightParen = p.match(right_paren)
+			if !hasRightParen {
+				p.addError(p.peek(), "Expected ')' after function parameters")
+				// Skip until we find =, or newline
+				for !p.isAtEnd() && !p.check(equal) && !p.check(new_line) {
+					p.advance()
+				}
+			}
+		}
+
+		// Parse return type directly (no arrow in Ard syntax)
 		returnType := p.parseType()
 
 		// Check for nullable
