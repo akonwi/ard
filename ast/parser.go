@@ -304,10 +304,19 @@ func (p *parser) parseStatement() (Statement, error) {
 		if p.check(identifier, colon_colon) {
 			return p.traitImpl()
 		}
+		// if there's a "for" keyword directly after impl (missing trait name)
+		if p.check(for_) {
+			return p.traitImpl()
+		}
 		// if implementing a local reference, could be a regular impl or trait impl
 		if p.check(identifier) {
 			// Look ahead to see if there's a "for" keyword after the identifier
 			if p.peek2().kind == for_ {
+				return p.traitImpl()
+			}
+			// If there's an identifier after the first identifier, treat as malformed trait impl
+			// e.g., "impl Display Person" -> should be "impl Display for Person"
+			if p.peek2().kind == identifier {
 				return p.traitImpl()
 			}
 		}
@@ -885,31 +894,73 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 	if path := p.parseStaticPath(); path != nil {
 		traitImpl.Trait = *path
 	} else {
-		traitToken := p.consume(identifier, "Expected trait name after 'impl'")
-		traitImpl.Trait = Identifier{
-			Name: traitToken.text,
-			Location: Location{
-				Start: Point{traitToken.line, traitToken.column},
-				End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
-			},
+		if p.check(identifier) {
+			traitToken := p.advance()
+			traitImpl.Trait = Identifier{
+				Name: traitToken.text,
+				Location: Location{
+					Start: Point{traitToken.line, traitToken.column},
+					End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
+				},
+			}
+		} else {
+			p.addError(p.peek(), "Expected trait name after 'impl'")
+			// Create placeholder identifier to maintain AST structure
+			current := p.peek()
+			traitImpl.Trait = Identifier{
+				Name: "",
+				Location: Location{
+					Start: Point{current.line, current.column},
+					End:   Point{current.line, current.column},
+				},
+			}
+			p.synchronizeToBlockEnd()
+			return traitImpl, nil
 		}
 	}
 
 	// Parse 'for'
-	p.consume(for_, "Expected 'for' after trait name")
-
-	// Parse type name
-	typeToken := p.consume(identifier, "Expected type name after 'for'")
-	traitImpl.ForType = Identifier{
-		Name: typeToken.text,
-		Location: Location{
-			Start: Point{typeToken.line, typeToken.column},
-			End:   Point{typeToken.line, typeToken.column + len(typeToken.text)},
-		},
+	if !p.match(for_) {
+		p.addError(p.peek(), "Expected 'for' after trait name")
+		p.synchronizeToBlockEnd()
+		return traitImpl, nil
 	}
 
-	p.consume(left_brace, "Expected '{' after type name")
-	p.consume(new_line, "Expected new line")
+	// Parse type name
+	if p.check(identifier) {
+		typeToken := p.advance()
+		traitImpl.ForType = Identifier{
+			Name: typeToken.text,
+			Location: Location{
+				Start: Point{typeToken.line, typeToken.column},
+				End:   Point{typeToken.line, typeToken.column + len(typeToken.text)},
+			},
+		}
+	} else {
+		p.addError(p.peek(), "Expected type name after 'for'")
+		// Create placeholder identifier to maintain AST structure
+		current := p.peek()
+		traitImpl.ForType = Identifier{
+			Name: "",
+			Location: Location{
+				Start: Point{current.line, current.column},
+				End:   Point{current.line, current.column},
+			},
+		}
+		p.synchronizeToBlockEnd()
+		return traitImpl, nil
+	}
+
+	if !p.match(left_brace) {
+		p.addError(p.peek(), "Expected '{' after type name")
+		p.synchronizeToBlockEnd()
+		return traitImpl, nil
+	}
+
+	if !p.match(new_line) {
+		p.addError(p.peek(), "Expected new line")
+		// Continue parsing block contents even without newline
+	}
 
 	for !p.match(right_brace) {
 		if p.match(new_line) {
