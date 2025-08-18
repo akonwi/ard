@@ -1028,17 +1028,41 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 }
 
 func (p *parser) block() ([]Statement, error) {
-	p.consume(left_brace, "Expected block")
+	// Replace consume(left_brace) with error recovery
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronizeToTokens(left_brace)
+		if !p.check(left_brace) {
+			// Could not find opening brace, return empty block
+			return []Statement{}, nil
+		}
+	}
+	p.advance() // consume the '{'
+
 	p.match(new_line)
 	statements := []Statement{}
 	for !p.check(right_brace) {
+		// Prevent infinite loops when closing brace is missing
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close block")
+			break
+		}
+
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
 		statements = append(statements, stmt)
 	}
-	p.consume(right_brace, "Unclosed block")
+
+	// Replace consume(right_brace) with error recovery
+	if !p.check(right_brace) {
+		p.addError(p.peek(), "Expected '}' to close block")
+		// Return statements we've parsed so far
+		return statements, nil
+	}
+	p.advance() // consume the '}'
+
 	return statements, nil
 }
 
@@ -1635,12 +1659,60 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		if path := p.parseStaticPath(); path != nil {
 			name = path
 		} else if p.check(identifier) {
-			name = p.consume("identifier", "Expected function name after 'fn'").text
+			nameToken := p.advance()
+			name = nameToken.text
+		} else if p.check(left_paren) {
+			// This is a valid anonymous function fn(...) pattern
+			name = "" // Anonymous function
+		} else {
+			// Missing function name and no immediate parameters - add error but continue as anonymous
+			p.addError(p.peek(), "Expected function name or '(' after 'fn'")
+			name = "" // Treat as anonymous function
 		}
 
-		p.consume(left_paren, "Expected parameters list")
+		// Replace consume(left_paren) with error recovery
+		if !p.check(left_paren) {
+			p.addError(p.peek(), "Expected '(' for parameters list")
+			p.synchronizeToTokens(left_paren, left_brace)
+			if !p.check(left_paren) {
+				// Could not find opening paren, assume empty parameters and continue
+				params := []Parameter{}
+				// Try to parse function body if we found '{'
+				if p.check(left_brace) {
+					statements, err := p.block()
+					if err != nil {
+						return nil, err
+					}
+					return &AnonymousFunction{
+						Parameters: params,
+						ReturnType: &StringType{}, // Default type
+						Body:       statements,
+						Location: Location{
+							Start: Point{Row: keyword.line, Col: keyword.column},
+							End:   Point{Row: p.previous().line, Col: p.previous().column},
+						},
+					}, nil
+				}
+				// No body found either, return minimal function
+				return &AnonymousFunction{
+					Parameters: params,
+					ReturnType: &StringType{}, // Default type
+					Body:       []Statement{},
+					Location: Location{
+						Start: Point{Row: keyword.line, Col: keyword.column},
+						End:   Point{Row: keyword.line, Col: keyword.column},
+					},
+				}, nil
+			}
+		}
+		p.advance() // consume the '('
 		params := []Parameter{}
 		for !p.match(right_paren) {
+			// Prevent infinite loops when closing paren is missing
+			if p.isAtEnd() {
+				p.addError(p.peek(), "Expected ')' to close parameter list")
+				break
+			}
 			isMutable := p.match(mut)
 			nameToken := p.consumeVariableName("Expected parameter name")
 
@@ -1648,13 +1720,22 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			// In case of anonymous functions with unnamed params, we don't need types
 			var paramType DeclaredType
 			if p.check(colon) {
-				p.consume(colon, "Expected ':' after parameter name")
+				p.advance() // consume ':'
 				paramType = p.parseType()
 			} else if name == "" { // Anonymous function with untyped params
 				// For anonymous functions, allow simple parameter names without types
 				paramType = &StringType{} // Default to string type for now
 			} else {
-				return nil, p.makeError(p.peek(), "Expected ':' after parameter name")
+				// Replace makeError with addError and recovery
+				p.addError(p.peek(), "Expected ':' after parameter name")
+				p.synchronizeToTokens(colon, comma, right_paren, left_brace)
+				if p.check(colon) {
+					p.advance() // consume ':'
+					paramType = p.parseType()
+				} else {
+					// No colon found, use default type and continue
+					paramType = &StringType{}
+				}
 			}
 
 			params = append(params, Parameter{
@@ -1763,8 +1844,23 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	if p.check(identifier, left_brace) {
-		nameToken := p.consume(identifier, "Expected struct name")
-		p.consume(left_brace, "Expected '{'")
+		// Replace consume(identifier) with error recovery
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected struct name")
+			// No anonymous structs - skip this struct instantiation attempt
+			p.index = index // Reset to original position
+			return nil, nil
+		}
+		nameToken := p.advance()
+
+		// Replace consume(left_brace) with error recovery
+		if !p.check(left_brace) {
+			p.addError(p.peek(), "Expected '{'")
+			// Missing brace means this isn't a struct instantiation - skip
+			p.index = index // Reset to original position
+			return nil, nil
+		}
+		p.advance() // consume the '{'
 		instance := &StructInstance{
 			Name:       Identifier{Name: nameToken.text},
 			Properties: []StructValue{},
@@ -1777,7 +1873,15 @@ func (p *parser) structInstance() (Expression, error) {
 
 		for !p.match(right_brace) {
 			propToken := p.consumeVariableName("Expected name")
-			p.consume(colon, "Expected ':'")
+
+			// Replace consume(colon) with error recovery
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after field name - assuming it")
+				// Continue parsing without consuming colon - assume it was meant to be there
+			} else {
+				p.advance() // consume the ':'
+			}
+
 			val, err := p.or()
 			if err != nil {
 				return nil, err
@@ -2397,7 +2501,14 @@ func (p *parser) advance() token {
 /* consume a token that can be used as a variable name (identifier or keyword) */
 func (p *parser) consumeVariableName(message string) token {
 	if p.isAtEnd() {
-		panic(p.makeEOFError())
+		p.addError(nil, "Unexpected end of input")
+		// Return a dummy token to allow parsing to continue
+		return token{
+			kind:   identifier,
+			text:   "missing_name",
+			line:   0,
+			column: 0,
+		}
 	}
 
 	current := p.peek()
@@ -2411,7 +2522,15 @@ func (p *parser) consumeVariableName(message string) token {
 		return token
 	}
 
-	panic(p.makeErrorWithActual(current, message, current.kind))
+	p.addError(current, message)
+	p.advance() // CRITICAL: Must advance past the invalid token to prevent infinite loops
+	// Return a dummy token to allow parsing to continue
+	return token{
+		kind:   identifier,
+		text:   "invalid_name",
+		line:   current.line,
+		column: current.column,
+	}
 }
 
 /* check if a token kind is an allowed keyword */
