@@ -108,6 +108,47 @@ func (p *parser) synchronizeToBlockEnd() {
 	}
 }
 
+// synchronizeToTokens skips tokens until reaching one of the specified target tokens.
+// Automatically handles nesting when targeting closing brackets (}, ], ), >).
+func (p *parser) synchronizeToTokens(tokens ...kind) {
+	nestingLevel := 0
+
+	// Auto-detect if nesting is needed by checking for closing brackets
+	needsNesting := false
+	for _, token := range tokens {
+		if token == right_paren || token == right_bracket ||
+			token == right_brace || token == greater_than {
+			needsNesting = true
+			break
+		}
+	}
+
+	for !p.isAtEnd() {
+		current := p.peek().kind
+
+		if needsNesting {
+			// Track nesting for all bracket types
+			switch current {
+			case left_paren, left_bracket, left_brace, less_than:
+				nestingLevel++
+			case right_paren, right_bracket, right_brace, greater_than:
+				nestingLevel--
+			}
+		}
+
+		// Only stop at target tokens if nesting is balanced (or nesting not needed)
+		if !needsNesting || nestingLevel == 0 {
+			for _, token := range tokens {
+				if current == token {
+					return // Found target token, stop here (don't consume it)
+				}
+			}
+		}
+
+		p.advance()
+	}
+}
+
 func (p *parser) parseComment() *Comment {
 	// If not a comment, return nil
 	if !p.check(comment) {
@@ -1109,11 +1150,8 @@ func (p *parser) parseType() DeclaredType {
 		hasLeftParen := p.match(left_paren)
 		if !hasLeftParen {
 			p.addError(p.peek(), "Expected '(' after 'fn' in function type")
-			// Try to recover by skipping tokens until we find a reasonable boundary
-			// For function types, skip until we find =, newline, or EOF
-			for !p.isAtEnd() && !p.check(equal) && !p.check(new_line) {
-				p.advance()
-			}
+			// Skip until we find type boundaries
+			p.synchronizeToTokens(equal, new_line)
 		}
 
 		// Parse parameter types
@@ -1134,10 +1172,8 @@ func (p *parser) parseType() DeclaredType {
 			hasRightParen = p.match(right_paren)
 			if !hasRightParen {
 				p.addError(p.peek(), "Expected ')' after function parameters")
-				// Skip until we find =, or newline
-				for !p.isAtEnd() && !p.check(equal) && !p.check(new_line) {
-					p.advance()
-				}
+				// Skip until we find type boundaries
+				p.synchronizeToTokens(equal, new_line)
 			}
 		}
 
