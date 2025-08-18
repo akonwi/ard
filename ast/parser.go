@@ -1202,11 +1202,22 @@ func (p *parser) parseType() DeclaredType {
 		if id.text == "Result" && p.match(less_than) {
 			// Parse the value type
 			valType := p.parseType()
-			p.consume(comma, "Expected comma after value type in Result")
+			hasComma := p.match(comma)
+			if !hasComma {
+				p.addError(p.peek(), "Expected comma after value type in Result")
+				p.synchronizeToTokens(greater_than, equal, new_line)
+			}
 
-			// Parse the error type
-			errType := p.parseType()
-			p.consume(greater_than, "Expected '>' after Result type parameters")
+			// Parse the error type (only if we had comma or are positioned correctly)
+			var errType DeclaredType
+			if hasComma || p.check(identifier) {
+				errType = p.parseType()
+			}
+
+			if !p.match(greater_than) {
+				p.addError(p.peek(), "Expected '>' after Result type parameters")
+				p.synchronizeToTokens(equal, new_line, comma, right_paren)
+			}
 
 			// Check for nullable
 			nullable = p.match(question_mark)
@@ -1320,7 +1331,10 @@ func (p *parser) parseType() DeclaredType {
 		elementType := p.parseType()
 		if p.match(colon) {
 			valElementType := p.parseType()
-			p.consume(right_bracket, "Expected ']'")
+			if !p.match(right_bracket) {
+				p.addError(p.peek(), "Expected ']'")
+				p.synchronizeToTokens(equal, new_line, comma, right_paren)
+			}
 
 			// Check for Result sugar syntax: [Key:Value]!ErrorType
 			if p.match(bang) {
@@ -1348,7 +1362,10 @@ func (p *parser) parseType() DeclaredType {
 				nullable: p.match(question_mark),
 			}
 		}
-		p.consume(right_bracket, "Expected ']'")
+		if !p.match(right_bracket) {
+			p.addError(p.peek(), "Expected ']'")
+			p.synchronizeToTokens(equal, new_line, comma, right_paren)
+		}
 
 		// Check for Result sugar syntax: [Type]!ErrorType
 		if p.match(bang) {
@@ -2252,7 +2269,10 @@ func (p *parser) map_() (Expression, error) {
 		Entries:  []MapEntry{},
 	}
 	if p.match(colon) {
-		p.consume(right_bracket, "Expected ']' after ':' in empty map")
+		if !p.match(right_bracket) {
+			p.addError(p.peek(), "Expected ']' after ':' in empty map")
+			p.synchronizeToTokens(equal, new_line, comma, right_paren)
+		}
 		return node, nil
 	}
 

@@ -138,3 +138,60 @@ func TestFunctionTypes(t *testing.T) {
 		},
 	})
 }
+
+func TestResultTypes(t *testing.T) {
+	runTests(t, []test{
+		// Result type error cases
+		{
+			name:     "Missing closing > in Result type",
+			input:    "let r: Result<String, Error = test",
+			wantErrs: []string{"Expected '>' after Result type parameters"},
+		},
+		{
+			name:     "Valid Result type",
+			input:    "let r: Result<String, Error> = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid Result type with simple types",
+			input:    "let r: Result<Int, String> = test",
+			wantErrs: []string{},
+		},
+	})
+}
+
+func TestArrayMapTypes(t *testing.T) {
+	runTests(t, []test{
+		// Array/Map type error cases
+		{
+			name:     "Missing closing bracket in map type",
+			input:    "let m: [String: Int = test",
+			wantErrs: []string{"Expected ']'"},
+		},
+		{
+			name:     "Missing closing bracket in array type",
+			input:    "let arr: [String = test",
+			wantErrs: []string{"Expected ']'"},
+		},
+		{
+			name:     "Valid array type",
+			input:    "let arr: [String] = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid map type",
+			input:    "let m: [String: Int] = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid nested array type",
+			input:    "let nested: [[String]] = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid complex nested type",
+			input:    "let complex: [String: [Int]] = test",
+			wantErrs: []string{},
+		},
+	})
+}
