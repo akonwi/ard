@@ -1422,16 +1422,22 @@ func (p *parser) parseStaticPath() *StaticProperty {
 	}
 
 	for p.match(colon_colon) {
-		propName := p.consume(identifier, "Expected an identifier after '::'")
-		prop = &StaticProperty{
-			Target: prop,
-			Property: &Identifier{
-				Location: Location{
-					Start: Point{propName.line, propName.column},
-					End:   Point{propName.line, propName.column + len(propName.text)},
+		if p.check(identifier) {
+			propName := p.advance()
+			prop = &StaticProperty{
+				Target: prop,
+				Property: &Identifier{
+					Location: Location{
+						Start: Point{propName.line, propName.column},
+						End:   Point{propName.line, propName.column + len(propName.text)},
+					},
+					Name: propName.text,
 				},
-				Name: propName.text,
-			},
+			}
+		} else {
+			p.addError(p.peek(), "Expected an identifier after '::'")
+			// Just break - don't create placeholder, let higher level handle it
+			break
 		}
 	}
 
