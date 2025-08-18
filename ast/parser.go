@@ -1460,8 +1460,27 @@ func (p *parser) matchExpr() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(left_brace, "Expected '{'")
-		p.consume(new_line, "Expected new line")
+
+		// Replace consume(left_brace) with error recovery
+		if !p.check(left_brace) {
+			p.addError(p.peek(), "Expected '{'")
+			p.synchronizeToTokens(left_brace, new_line)
+			if !p.check(left_brace) {
+				// Could not find opening brace, return incomplete match expression
+				matchExpr.Subject = expr
+				return matchExpr, nil
+			}
+		}
+		p.advance() // consume the '{'
+
+		// Replace consume(new_line) with error recovery
+		if !p.check(new_line) {
+			p.addError(p.peek(), "Expected new line after '{'")
+			// Continue parsing - this is not a critical error
+		} else {
+			p.advance()
+		}
+
 		for !p.match(right_brace) {
 			if p.match(new_line) {
 				continue
@@ -1470,7 +1489,17 @@ func (p *parser) matchExpr() (Expression, error) {
 			if err != nil {
 				return nil, err
 			}
-			p.consume(fat_arrow, "Expected '=>'")
+
+			// Replace consume(fat_arrow) with error recovery
+			if !p.check(fat_arrow) {
+				p.addError(p.peek(), "Expected '=>' after pattern")
+				p.synchronizeToTokens(fat_arrow, new_line, right_brace)
+				if !p.check(fat_arrow) {
+					// Could not find fat arrow, skip to next case or end
+					continue
+				}
+			}
+			p.advance() // consume the '=>'
 			body := []Statement{}
 			if p.check(left_brace) {
 				b, err := p.block()
@@ -2216,7 +2245,17 @@ func (p *parser) primary() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(right_paren, "Expected ')' after expression")
+
+		// Replace consume(right_paren) with error recovery
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ')' after expression")
+			p.synchronizeToTokens(right_paren)
+			if !p.check(right_paren) {
+				// Could not find closing paren, return the expression anyway
+				return expr, nil
+			}
+		}
+		p.advance() // consume the ')'
 		return expr, nil
 	}
 	if p.match(left_bracket) {
@@ -2237,7 +2276,12 @@ func (p *parser) primary() (Expression, error) {
 		}, nil
 	default:
 		peek := p.peek()
-		panic(p.makeError(peek, fmt.Sprintf("unmatched primary expression: %s", peek.kind)))
+		p.addError(peek, fmt.Sprintf("unmatched primary expression: %s", peek.kind))
+		// Return a dummy identifier to allow parsing to continue
+		return &Identifier{
+			Name:     peek.text,
+			Location: peek.getLocation(),
+		}, nil
 	}
 }
 
