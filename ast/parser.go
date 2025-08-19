@@ -1028,7 +1028,6 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 }
 
 func (p *parser) block() ([]Statement, error) {
-	// Replace consume(left_brace) with error recovery
 	if !p.check(left_brace) {
 		p.addError(p.peek(), "Expected '{'")
 		p.synchronizeToTokens(left_brace)
@@ -1055,7 +1054,6 @@ func (p *parser) block() ([]Statement, error) {
 		statements = append(statements, stmt)
 	}
 
-	// Replace consume(right_brace) with error recovery
 	if !p.check(right_brace) {
 		p.addError(p.peek(), "Expected '}' to close block")
 		// Return statements we've parsed so far
@@ -1485,7 +1483,6 @@ func (p *parser) matchExpr() (Expression, error) {
 			return nil, err
 		}
 
-		// Replace consume(left_brace) with error recovery
 		if !p.check(left_brace) {
 			p.addError(p.peek(), "Expected '{'")
 			p.synchronizeToTokens(left_brace, new_line)
@@ -1497,7 +1494,6 @@ func (p *parser) matchExpr() (Expression, error) {
 		}
 		p.advance() // consume the '{'
 
-		// Replace consume(new_line) with error recovery
 		if !p.check(new_line) {
 			p.addError(p.peek(), "Expected new line after '{'")
 			// Continue parsing - this is not a critical error
@@ -1514,7 +1510,6 @@ func (p *parser) matchExpr() (Expression, error) {
 				return nil, err
 			}
 
-			// Replace consume(fat_arrow) with error recovery
 			if !p.check(fat_arrow) {
 				p.addError(p.peek(), "Expected '=>' after pattern")
 				p.synchronizeToTokens(fat_arrow, new_line, right_brace)
@@ -1670,7 +1665,6 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			name = "" // Treat as anonymous function
 		}
 
-		// Replace consume(left_paren) with error recovery
 		if !p.check(left_paren) {
 			p.addError(p.peek(), "Expected '(' for parameters list")
 			p.synchronizeToTokens(left_paren, left_brace)
@@ -1844,7 +1838,6 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	if p.check(identifier, left_brace) {
-		// Replace consume(identifier) with error recovery
 		if !p.check(identifier) {
 			p.addError(p.peek(), "Expected struct name")
 			// No anonymous structs - skip this struct instantiation attempt
@@ -1853,7 +1846,6 @@ func (p *parser) structInstance() (Expression, error) {
 		}
 		nameToken := p.advance()
 
-		// Replace consume(left_brace) with error recovery
 		if !p.check(left_brace) {
 			p.addError(p.peek(), "Expected '{'")
 			// Missing brace means this isn't a struct instantiation - skip
@@ -1874,7 +1866,6 @@ func (p *parser) structInstance() (Expression, error) {
 		for !p.match(right_brace) {
 			propToken := p.consumeVariableName("Expected name")
 
-			// Replace consume(colon) with error recovery
 			if !p.check(colon) {
 				p.addError(p.peek(), "Expected ':' after field name - assuming it")
 				// Continue parsing without consuming colon - assume it was meant to be there
@@ -2180,7 +2171,6 @@ func (p *parser) memberAccess() (Expression, error) {
 				funcName := p.previous()
 
 				// Parse type arguments
-				// Replace consume(less_than) with error recovery
 				if !p.check(less_than) {
 					p.addError(p.peek(), "Expected '<'")
 					p.synchronizeToTokens(less_than, left_paren)
@@ -2201,7 +2191,6 @@ func (p *parser) memberAccess() (Expression, error) {
 					typeArgs = append(typeArgs, typeArg)
 				}
 
-				// Replace consume(greater_than) with error recovery
 				if !p.check(greater_than) {
 					p.addError(p.peek(), "Expected '>' after type arguments")
 					p.synchronizeToTokens(greater_than, left_paren)
@@ -2218,7 +2207,6 @@ func (p *parser) memberAccess() (Expression, error) {
 				}
 
 				// Parse arguments
-				// Replace consume(left_paren) with error recovery
 				if !p.check(left_paren) {
 					p.addError(p.peek(), "Expected '(' after type arguments")
 					p.synchronizeToTokens(left_paren)
@@ -2235,7 +2223,6 @@ func (p *parser) memberAccess() (Expression, error) {
 					return nil, err
 				}
 
-				// Replace consume(right_paren) with error recovery
 				if !p.check(right_paren) {
 					p.addError(p.peek(), "Expected ')' to close function call")
 					p.synchronizeToTokens(right_paren)
@@ -2327,7 +2314,6 @@ func (p *parser) call() (Expression, error) {
 				typeArgs := []DeclaredType{typeArg}
 
 				// Parse arguments
-				// Replace consume(left_paren) with error recovery
 				if !p.check(left_paren) {
 					p.addError(p.peek(), "Expected '(' after type arguments")
 					p.synchronizeToTokens(left_paren)
@@ -2343,7 +2329,6 @@ func (p *parser) call() (Expression, error) {
 					return nil, err
 				}
 
-				// Replace consume(right_paren) with error recovery
 				if !p.check(right_paren) {
 					p.addError(p.peek(), "Expected ')' to close function call")
 					p.synchronizeToTokens(right_paren)
@@ -2386,7 +2371,6 @@ func (p *parser) call() (Expression, error) {
 			return nil, err
 		}
 
-		// Replace consume(right_paren) with error recovery
 		if !p.check(right_paren) {
 			p.addError(p.peek(), "Expected ')' to close function call")
 			p.synchronizeToTokens(right_paren)
@@ -2456,7 +2440,6 @@ func (p *parser) primary() (Expression, error) {
 			return nil, err
 		}
 
-		// Replace consume(right_paren) with error recovery
 		if !p.check(right_paren) {
 			p.addError(p.peek(), "Expected ')' after expression")
 			p.synchronizeToTokens(right_paren)
@@ -2545,7 +2528,6 @@ func (p *parser) map_() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Replace consume(colon) with error recovery
 		if !p.check(colon) {
 			p.addError(p.peek(), "Expected ':' after map key")
 			p.synchronizeToTokens(colon, comma, right_bracket)
@@ -2658,29 +2640,9 @@ func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 	return slices.Contains(keywords, k)
 }
 
-/* assert that the current token is the provided kind and return it */
-func (p *parser) consume(kind kind, message string) token {
-	if p.isAtEnd() {
-		panic(p.makeEOFError())
-	}
-	if p.peek().kind == kind {
-		return p.advance()
-	}
-
-	panic(p.makeErrorWithActual(p.peek(), message, p.peek().kind))
-}
-
 /* Error creation helpers */
 func (p *parser) makeError(at *token, msg string) error {
 	return fmt.Errorf("%s:%d:%d: %s", p.fileName, at.line, at.column, msg)
-}
-
-func (p *parser) makeErrorWithActual(at *token, msg string, actual kind) error {
-	return fmt.Errorf("%s:%d:%d: %s (Actual: %s)", p.fileName, at.line, at.column, msg, actual)
-}
-
-func (p *parser) makeEOFError() error {
-	return fmt.Errorf("%s: Unexpected end of input", p.fileName)
 }
 
 /* conditionally advance if the current token is one of those provided */
@@ -2753,7 +2715,6 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 			hasNamedArgs = true
 			name := p.advance().text
 
-			// Replace consume(colon) with error recovery
 			if !p.check(colon) {
 				p.addError(p.peek(), "Expected ':' after parameter name")
 				p.synchronizeToTokens(colon, comma, right_paren)
