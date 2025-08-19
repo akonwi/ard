@@ -21,10 +21,11 @@ type test struct {
 
 func run(t *testing.T, input string) any {
 	t.Helper()
-	tree, err := ast.Parse([]byte(input), "test.ard")
-	if err != nil {
-		t.Fatalf("Error parsing program: %v", err)
+	result := ast.Parse([]byte(input), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
+	tree := result.Program
 	module, diagnostics := checker.Check(tree, nil, "test.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
@@ -40,22 +41,23 @@ func run(t *testing.T, input string) any {
 
 func expectPanic(t *testing.T, substring, input string) {
 	t.Helper()
-	tree, err := ast.Parse([]byte(input), "test.ard")
-	if err != nil {
-		t.Fatalf("Error parsing program: %v", err)
+	result := ast.Parse([]byte(input), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
+	tree := result.Program
 	module, diagnostics := checker.Check(tree, nil, "test.ard")
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
 	program := module.Program()
 	vm := vm.New(program.Imports)
-	_, err = vm.Interpret(program)
-	if err == nil {
+	_, runErr := vm.Interpret(program)
+	if runErr == nil {
 		t.Fatalf("Did not encounter expcted panic: %s", substring)
 	}
-	if !strings.Contains(err.Error(), substring) {
-		t.Fatalf("Expected a panic containing: %s\nInstead received `%s`", substring, err)
+	if !strings.Contains(runErr.Error(), substring) {
+		t.Fatalf("Expected a panic containing: %s\nInstead received `%s`", substring, runErr)
 	}
 }
 
@@ -661,10 +663,11 @@ func TestUserModuleVMIntegration(t *testing.T) {
 math::add(10, 20)`
 
 	// Parse and check
-	astTree, err := ast.Parse([]byte(mainContent), "main.ard")
-	if err != nil {
-		t.Fatal(err)
+	parseResult := ast.Parse([]byte(mainContent), "main.ard")
+	if len(parseResult.Errors) > 0 {
+		t.Fatal(parseResult.Errors[0].Message)
 	}
+	astTree := parseResult.Program
 
 	resolver, err := checker.NewModuleResolver(tempDir)
 	if err != nil {

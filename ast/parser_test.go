@@ -57,8 +57,7 @@ type test struct {
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Use ParseWithRecovery for error testing capability
-			result := ParseWithRecovery([]byte(tt.input), "test.ard")
+			result := Parse([]byte(tt.input), "test.ard")
 
 			// Validate errors if expected
 			if len(tt.wantErrs) > 0 {

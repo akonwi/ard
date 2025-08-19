@@ -42,10 +42,11 @@ var compareOptions = cmp.Options{
 func run(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ast, err := ast.Parse([]byte(tt.input), "test.ard")
-			if err != nil {
-				t.Fatalf("Error parsing input: %v", err)
+			result := ast.Parse([]byte(tt.input), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 			}
+			ast := result.Program
 			module, diagnostics := checker.Check(ast, nil, "test.ard")
 			program := module.Program()
 			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {

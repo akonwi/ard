@@ -53,11 +53,15 @@ func main() {
 			os.Exit(1)
 		}
 
-		ast, err := ast.Parse(sourceCode, inputPath)
-		if err != nil {
-			log.Fatalf("Error parsing code: %v\n", err)
-			return
+		result := ast.Parse(sourceCode, inputPath)
+		if len(result.Errors) > 0 {
+			fmt.Fprintf(os.Stderr, "Parse errors:\n")
+			for _, err := range result.Errors {
+				fmt.Fprintf(os.Stderr, "  %s:%d:%d: %s\n", inputPath, err.Location.Start.Row, err.Location.Start.Col, err.Message)
+			}
+			os.Exit(1)
 		}
+		ast := result.Program
 
 		workingDir := filepath.Dir(inputPath)
 		moduleResolver, err := checker.NewModuleResolver(workingDir)
@@ -96,11 +100,12 @@ func check(inputPath string) bool {
 		return false
 	}
 
-	ast, err := ast.Parse(sourceCode, inputPath)
-	if err != nil {
-		log.Fatalf("Error parsing code: %v\n", err)
+	result := ast.Parse(sourceCode, inputPath)
+	if len(result.Errors) > 0 {
+		log.Fatalf("Parse errors: %s", result.Errors[0].Message)
 		return false
 	}
+	ast := result.Program
 
 	workingDir := filepath.Dir(inputPath)
 	moduleResolver, err := checker.NewModuleResolver(workingDir)

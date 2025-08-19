@@ -157,10 +157,11 @@ func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
 	}
 
 	// Parse the module
-	program, err := ast.Parse(sourceCode, filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse module %s: %w", filePath, err)
+	result := ast.Parse(sourceCode, filePath)
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("failed to parse module %s: %s", filePath, result.Errors[0].Message)
 	}
+	program := result.Program
 
 	// Cache the parsed AST
 	mr.astCache[filePath] = program
