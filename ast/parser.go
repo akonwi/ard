@@ -2171,10 +2171,26 @@ func (p *parser) memberAccess() (Expression, error) {
 			// Check for type arguments in static function calls
 			if p.check(identifier, less_than) {
 				// This is a static function call with type arguments
-				funcName := p.consume(identifier, "Expected function name")
+				if !p.match(identifier) {
+					p.addError(p.peek(), "Expected function name")
+					p.synchronizeToTokens(left_paren)
+					return nil, nil
+				}
+
+				funcName := p.previous()
 
 				// Parse type arguments
-				p.consume(less_than, "Expected '<'")
+				// Replace consume(less_than) with error recovery
+				if !p.check(less_than) {
+					p.addError(p.peek(), "Expected '<'")
+					p.synchronizeToTokens(less_than, left_paren)
+					if !p.check(less_than) {
+						// Could not find '<', skip type arguments and try regular function call
+						return nil, nil
+					}
+				}
+				p.advance() // consume the '<'
+
 				typeArgs := []DeclaredType{}
 
 				typeArg := p.parseType()
@@ -2185,17 +2201,61 @@ func (p *parser) memberAccess() (Expression, error) {
 					typeArgs = append(typeArgs, typeArg)
 				}
 
-				p.consume(greater_than, "Expected '>' after type arguments")
+				// Replace consume(greater_than) with error recovery
+				if !p.check(greater_than) {
+					p.addError(p.peek(), "Expected '>' after type arguments")
+					p.synchronizeToTokens(greater_than, left_paren)
+					if !p.check(greater_than) {
+						// Could not find '>', skip to function arguments or bail
+						if !p.check(left_paren) {
+							return nil, nil
+						}
+					} else {
+						p.advance() // consume the '>'
+					}
+				} else {
+					p.advance() // consume the '>'
+				}
 
 				// Parse arguments
-				p.consume(left_paren, "Expected '(' after type arguments")
+				// Replace consume(left_paren) with error recovery
+				if !p.check(left_paren) {
+					p.addError(p.peek(), "Expected '(' after type arguments")
+					p.synchronizeToTokens(left_paren)
+					if !p.check(left_paren) {
+						// Could not find '(', skip this function call
+						return nil, nil
+					}
+				}
+				p.advance() // consume the '('
+
 				p.match(new_line)
 				args, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
 
-				p.consume(right_paren, "Expected ')' to close function call")
+				// Replace consume(right_paren) with error recovery
+				if !p.check(right_paren) {
+					p.addError(p.peek(), "Expected ')' to close function call")
+					p.synchronizeToTokens(right_paren)
+					if !p.check(right_paren) {
+						// Could not find ')', return partial function call
+						return &StaticFunction{
+							Target: expr,
+							Function: FunctionCall{
+								Name:     funcName.text,
+								TypeArgs: typeArgs,
+								Args:     args,
+								Location: Location{
+									Start: expr.GetLocation().Start,
+									End:   Point{Row: funcName.line, Col: funcName.column},
+								},
+							},
+						}, nil
+					}
+				}
+				p.advance() // consume the ')'
 
 				// Create the StaticFunction with type arguments
 				expr = &StaticFunction{
@@ -2267,12 +2327,40 @@ func (p *parser) call() (Expression, error) {
 				typeArgs := []DeclaredType{typeArg}
 
 				// Parse arguments
-				p.consume(left_paren, "Expected '(' after type arguments")
+				// Replace consume(left_paren) with error recovery
+				if !p.check(left_paren) {
+					p.addError(p.peek(), "Expected '(' after type arguments")
+					p.synchronizeToTokens(left_paren)
+					if !p.check(left_paren) {
+						// Could not find '(', skip this function call
+						return nil, nil
+					}
+				}
+				p.advance() // consume the '('
+
 				args, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
-				p.consume(right_paren, "Unclosed function call")
+
+				// Replace consume(right_paren) with error recovery
+				if !p.check(right_paren) {
+					p.addError(p.peek(), "Expected ')' to close function call")
+					p.synchronizeToTokens(right_paren)
+					if !p.check(right_paren) {
+						// Could not find ')', return partial function call
+						return &FunctionCall{
+							Name:     expr.(*Identifier).Name,
+							TypeArgs: typeArgs,
+							Args:     args,
+							Location: Location{
+								Start: expr.GetLocation().Start,
+								End:   Point{Row: p.previous().line, Col: p.previous().column},
+							},
+						}, nil
+					}
+				}
+				p.advance() // consume the ')'
 
 				return &FunctionCall{
 					Name:     expr.(*Identifier).Name,
@@ -2297,7 +2385,25 @@ func (p *parser) call() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(right_paren, "Unclosed function call")
+
+		// Replace consume(right_paren) with error recovery
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ')' to close function call")
+			p.synchronizeToTokens(right_paren)
+			if !p.check(right_paren) {
+				// Could not find ')', return partial function call
+				return &FunctionCall{
+					Name: expr.(*Identifier).Name,
+					Args: args,
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
+				}, nil
+			}
+		}
+		p.advance() // consume the ')'
+
 		return &FunctionCall{
 			Name: expr.(*Identifier).Name,
 			Args: args,
@@ -2439,7 +2545,16 @@ func (p *parser) map_() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(colon, "Expected ':' after map key")
+		// Replace consume(colon) with error recovery
+		if !p.check(colon) {
+			p.addError(p.peek(), "Expected ':' after map key")
+			p.synchronizeToTokens(colon, comma, right_bracket)
+			if !p.check(colon) {
+				// Could not find ':', skip this map entry
+				continue
+			}
+		}
+		p.advance() // consume the ':'
 		val, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
@@ -2637,7 +2752,17 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 		if p.check(identifier) && p.peek2() != nil && p.peek2().kind == colon {
 			hasNamedArgs = true
 			name := p.advance().text
-			p.consume(colon, "Expected ':' after parameter name")
+
+			// Replace consume(colon) with error recovery
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after parameter name")
+				p.synchronizeToTokens(colon, comma, right_paren)
+				if !p.check(colon) {
+					// Could not find ':', skip this parameter
+					continue
+				}
+			}
+			p.advance() // consume the ':'
 
 			value, err := p.parseExpression()
 			if err != nil {
