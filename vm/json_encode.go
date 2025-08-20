@@ -10,32 +10,43 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+// todo: the first argument should be *object
 func json_encode(data any, t checker.Type) ([]byte, error) {
 	if t == checker.Str || t == checker.Int || t == checker.Float || t == checker.Bool {
 		str, err := json.Marshal(data)
 		return str, err
 	}
-	
+
 	// Handle Maybe types specially
 	if checker.IsMaybe(t) {
 		maybeType := t.(*checker.Maybe)
 		innerType := maybeType.Of()
-		
+
 		// If data is nil, it's a None value
 		if data == nil {
 			return json.Marshal(nil)
 		}
-		
+
 		// If it's a Maybe of a primitive type, marshal directly
 		if innerType == checker.Str || innerType == checker.Int || innerType == checker.Float || innerType == checker.Bool {
 			return json.Marshal(data)
 		}
-		
+
 		// For complex types wrapped in Maybe, recursively encode with the inner type
 		return json_encode(data, innerType)
 	}
 
 	switch t.(type) {
+	case *checker.Any:
+		if o, ok := data.(*object); ok {
+			return json_encode(o, o._type)
+		}
+		if o, ok := data.([]*object); ok {
+			if len(o) > 0 {
+				return json_encode(o, checker.MakeList(o[0]._type))
+			}
+		}
+		return json.Marshal(data)
 	case *checker.Enum:
 		return json.Marshal(data)
 	case *checker.List:
