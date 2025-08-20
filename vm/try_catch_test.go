@@ -206,11 +206,11 @@ func TestTryInMatchBlocks(t *testing.T) {
 			name: "try in enum match success case",
 			input: `
 				enum Status { active, inactive }
-				
+
 				fn get_result() Int!Str {
 					Result::ok(42)
 				}
-				
+
 				fn process_status(status: Status) Int!Str {
 					match status {
 						Status::active => {
@@ -220,7 +220,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 						Status::inactive => Result::err("inactive")
 					}
 				}
-				
+
 				process_status(Status::active).expect("")
 			`,
 			want: 43,
@@ -229,11 +229,11 @@ func TestTryInMatchBlocks(t *testing.T) {
 			name: "try in enum match error case",
 			input: `
 				enum Status { active, inactive }
-				
+
 				fn get_error() Int!Str {
 					Result::err("failed")
 				}
-				
+
 				fn process_status(status: Status) Int!Str {
 					match status {
 						Status::active => {
@@ -243,7 +243,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 						Status::inactive => Result::err("inactive")
 					}
 				}
-				
+
 				process_status(Status::active).or(-1)
 			`,
 			want: -1,
@@ -252,11 +252,11 @@ func TestTryInMatchBlocks(t *testing.T) {
 			name: "try in maybe match success",
 			input: `
 				use ard/maybe
-				
+
 				fn get_result() Int!Str {
 					Result::ok(100)
 				}
-				
+
 				fn process_maybe(maybe_val: Int?) Int!Str {
 					match maybe_val {
 						val => {
@@ -266,7 +266,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 						_ => Result::err("no value")
 					}
 				}
-				
+
 				process_maybe(maybe::some(5)).expect("")
 			`,
 			want: 105,
@@ -277,7 +277,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 				fn risky_operation() Str!Str {
 					Result::err("operation failed")
 				}
-				
+
 				fn process_with_catch(flag: Bool) Str {
 					match flag {
 						true => {
@@ -288,7 +288,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 						false => "no operation"
 					}
 				}
-				
+
 				process_with_catch(true)
 			`,
 			want: "caught: operation failed",
@@ -298,11 +298,11 @@ func TestTryInMatchBlocks(t *testing.T) {
 			input: `
 				use ard/maybe
 				enum Status { active, inactive }
-				
+
 				fn get_result() Int!Str {
 					Result::ok(50)
 				}
-				
+
 				fn process_nested(status: Status, maybe_val: Int?) Int!Str {
 					match status {
 						Status::active => {
@@ -317,10 +317,56 @@ func TestTryInMatchBlocks(t *testing.T) {
 						Status::inactive => Result::err("inactive")
 					}
 				}
-				
+
 				process_nested(Status::active, maybe::some(25)).expect("")
 			`,
 			want: 75,
 		},
 	})
+}
+
+func TestTryingWithUnionErr(t *testing.T) {
+	got := run(t, `
+		struct InvalidField { name: Str, message: Str }
+		type Error = InvalidField | Str
+
+		fn can_fail() Bool!Error {
+			Result::err("Failed")
+		}
+
+		fn do_stuff() Bool!Error {
+		  let ok = try can_fail()
+			Result::ok(ok)
+		}
+
+		do_stuff()
+	`)
+
+	if got != "Failed" {
+		t.Errorf("Expected 'Failed', got '%s'", got)
+	}
+}
+
+func TestCatchingWithUnionErr(t *testing.T) {
+	got := run(t, `
+		struct InvalidField { name: Str, message: Str }
+		type Error = InvalidField | Str
+
+		fn can_fail() Bool!Int {
+			Result::err(-1)
+		}
+
+		fn do_stuff() Bool!Error {
+		  let ok = try can_fail() -> intErr {
+				Result::err("Got a num")
+			}
+			Result::ok(ok)
+		}
+
+		do_stuff()
+	`)
+
+	if got != "Got a num" {
+		t.Errorf("Expected 'Got a num', got '%s'", got)
+	}
 }

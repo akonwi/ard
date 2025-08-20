@@ -2836,7 +2836,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
-					if !blockType.equal(returnType) {
+					if !returnType.equal(blockType) {
 						c.addError(typeMismatch(returnType, blockType), s.GetLocation())
 					}
 
