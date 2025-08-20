@@ -90,7 +90,7 @@ func TestTypeUnions(t *testing.T) {
 						fn print(p: Printable) {}
 						print(true)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int|Str, got Bool"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Printable, got Bool"},
 			},
 		},
 		{

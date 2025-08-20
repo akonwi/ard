@@ -857,11 +857,7 @@ type Union struct {
 
 func (u Union) NonProducing() {}
 func (u Union) String() string {
-	strs := make([]string, len(u.Types))
-	for i, t := range u.Types {
-		strs[i] = t.String()
-	}
-	return strings.Join(strs, "|")
+	return u.Name
 }
 func (u Union) get(name string) Type { return nil }
 
