@@ -1,8 +1,6 @@
 ## TODO
 
 - [ ] parsing shouldn't panic at errors
-- [ ] empty match case body causes nil panic
-- [ ] unknown methods causes nil panic
 - [ ] thorough checks for union compatibility
   - should be able to use unions in results
   - can catch and return with valid union types
