@@ -1,9 +1,6 @@
 ## TODO
 
 - [ ] parsing shouldn't panic at errors
-- [ ] thorough checks for union compatibility
-  - should be able to use unions in results
-  - can catch and return with valid union types
 - [ ] implement `runtime` package and export objects from them
 - [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
