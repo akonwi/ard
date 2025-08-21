@@ -197,7 +197,7 @@ func (o *object) premarshal() any {
 		}
 		return _array
 	case *checker.Result:
-		return o.raw.(*object).premarshal()
+		return o.raw.(_result).raw.premarshal()
 	}
 
 	if _, isStruct := o._type.(*checker.StructDef); isStruct {
