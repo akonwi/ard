@@ -5,12 +5,6 @@ import (
 	"testing"
 )
 
-
-
-
-
-
-
 func TestJsonEncodePrimitives(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -224,7 +218,7 @@ func TestJsonEncodeNullableNestedStructs(t *testing.T) {
 						comment: "Win or draw",
 					}),
 				}
-				
+
 				let result = json::encode(prediction).expect("")
 				result.contains("Orlando City SC") and result.contains("1598") and result.contains("Win or draw") and result.contains("Double chance")
 			`,
@@ -251,7 +245,7 @@ func TestJsonEncodeNullableNestedStructs(t *testing.T) {
 					advice: maybe::some("No prediction"),
 					winner: maybe::none(),
 				}
-				
+
 				let result = json::encode(prediction).expect("")
 				result.contains("\"winner\":null") and result.contains("No prediction")
 			`,

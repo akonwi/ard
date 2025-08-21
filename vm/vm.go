@@ -3,8 +3,8 @@
 package vm
 
 import (
-	"encoding/json/v2"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
@@ -48,8 +48,6 @@ func (vm *VM) initModuleRegistry() {
 			vm.moduleRegistry.Register(&MaybeModule{})
 		case "ard/http":
 			vm.moduleRegistry.Register(&HTTPModule{})
-		case "ard/json":
-			vm.moduleRegistry.Register(&JSONModule{})
 		case "ard/decode":
 			vm.moduleRegistry.Register(&DecodeModule{})
 		case "ard/sqlite":

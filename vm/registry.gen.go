@@ -6,6 +6,9 @@ import "fmt"
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
+	if err := r.Register("json.encode", encode); err != nil {
+		return fmt.Errorf("failed to register json.encode: %w", err)
+	}
 	if err := r.Register("runtime.print", print); err != nil {
 		return fmt.Errorf("failed to register runtime.print: %w", err)
 	}

@@ -2103,7 +2103,7 @@ func TestGenerics(t *testing.T) {
 			`,
 			output: &checker.Program{
 				Imports: map[string]checker.Module{
-					"ard/json": checker.JsonPkg{},
+					"ard/json": &checker.UserModule{},
 				},
 				Statements: []checker.Statement{
 					{
