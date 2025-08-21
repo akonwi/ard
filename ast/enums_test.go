@@ -45,6 +45,37 @@ func TestEnumDefinitions(t *testing.T) {
 				},
 			},
 		},
+		// Error cases
+		{
+			name:     "Missing enum name",
+			input:    "enum { A, B }",
+			wantErrs: []string{"Expected name after 'enum'"},
+		},
+		{
+			name:     "Missing opening brace",
+			input:    "enum Color A, B }",
+			wantErrs: []string{"Expected '{'"},
+		},
+		{
+			name:     "Empty first variant",
+			input:    "enum Color { , B }",
+			wantErrs: []string{}, // Should gracefully skip empty variants
+		},
+		{
+			name:     "Empty middle variant",
+			input:    "enum Color { A, , C }",
+			wantErrs: []string{}, // Should gracefully skip empty variants
+		},
+		{
+			name:     "Empty enum",
+			input:    "enum Color { }",
+			wantErrs: []string{}, // Should work fine
+		},
+		{
+			name:     "Trailing comma works",
+			input:    "enum Color { A, B, }",
+			wantErrs: []string{}, // Should work fine
+		},
 	})
 }
 

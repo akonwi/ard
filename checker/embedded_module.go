@@ -33,10 +33,11 @@ func findEmbeddedModule(path string) (Module, bool) {
 	}
 
 	// Parse the .ard file
-	program, err := ast.Parse(content, path)
-	if err != nil {
+	result := ast.Parse(content, path)
+	if len(result.Errors) > 0 {
 		return nil, false
 	}
+	program := result.Program
 
 	// Type check the program to create a Program with symbols
 	// Use the Check function which returns a Module and diagnostics

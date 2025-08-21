@@ -6,20 +6,40 @@ import (
 	"strings"
 )
 
-type node struct {
-	text       string
-	start, end int
+type ParseError struct {
+	Location Location
+	Message  string
+}
+
+type ParseResult struct {
+	Program *Program
+	Errors  []ParseError
 }
 
 type parser struct {
 	tokens   []token
 	index    int
 	fileName string
+	errors   []ParseError
 }
 
-func Parse(source []byte, fileName string) (*Program, error) {
+func Parse(source []byte, fileName string) ParseResult {
 	p := new(NewLexer(source).Scan(), fileName)
-	return p.parse()
+	program, err := p.parse()
+
+	result := ParseResult{
+		Program: program,
+		Errors:  p.errors,
+	}
+
+	// If there was a panic-based error, add it to errors
+	if err != nil && len(p.errors) == 0 {
+		result.Errors = append(result.Errors, ParseError{
+			Message: err.Error(),
+		})
+	}
+
+	return result
 }
 
 func new(tokens []token, fileName string) *parser {
@@ -27,6 +47,103 @@ func new(tokens []token, fileName string) *parser {
 		tokens:   tokens,
 		index:    0,
 		fileName: fileName,
+		errors:   []ParseError{},
+	}
+}
+
+func (p *parser) addError(at *token, msg string) {
+	location := Location{}
+	if at != nil {
+		location = at.getLocation()
+	}
+
+	p.errors = append(p.errors, ParseError{
+		Location: location,
+		Message:  msg,
+	})
+}
+
+func (p *parser) skipNewlines() {
+	for p.match(new_line) {
+		// continue
+	}
+}
+
+// synchronize skips tokens until reaching a statement boundary or EOF
+func (p *parser) synchronize() {
+	for !p.check(new_line) && !p.isAtEnd() {
+		p.advance()
+	}
+}
+
+// synchronizeToBlockEnd skips tokens until reaching the matching closing brace, accounting for nested blocks
+func (p *parser) synchronizeToBlockEnd() {
+	braceCount := 1 // We're already inside a block
+	for braceCount > 0 && !p.isAtEnd() {
+		if p.check(left_brace) {
+			braceCount++
+		} else if p.check(right_brace) {
+			braceCount--
+		}
+		p.advance()
+	}
+}
+
+// synchronizeToTokens skips tokens until reaching one of the specified target tokens.
+// Automatically handles nesting when targeting closing brackets (}, ], ), >).
+func (p *parser) synchronizeToTokens(tokens ...kind) {
+	nestingLevel := 0
+
+	// Auto-detect if nesting is needed by checking for closing brackets
+	needsNesting := false
+	for _, token := range tokens {
+		if token == right_paren || token == right_bracket ||
+			token == right_brace || token == greater_than {
+			needsNesting = true
+			break
+		}
+	}
+
+	for !p.isAtEnd() {
+		current := p.peek().kind
+
+		if needsNesting {
+			// Track nesting for all bracket types
+			switch current {
+			case left_paren, left_bracket, left_brace, less_than:
+				nestingLevel++
+			case right_paren, right_bracket, right_brace, greater_than:
+				nestingLevel--
+			}
+		}
+
+		// Only stop at target tokens if nesting is balanced (or nesting not needed)
+		if !needsNesting || nestingLevel == 0 {
+			for _, token := range tokens {
+				if current == token {
+					return // Found target token, stop here (don't consume it)
+				}
+			}
+		}
+
+		p.advance()
+	}
+}
+
+func (p *parser) parseComment() *Comment {
+	// If not a comment, return nil
+	if !p.check(comment) {
+		return nil
+	}
+
+	tok := p.advance()
+	line_break := p.advance()
+	return &Comment{
+		Value: tok.text,
+		Location: Location{
+			Start: tok.getLocation().Start,
+			End:   line_break.getLocation().Start,
+		},
 	}
 }
 
@@ -37,16 +154,17 @@ func (p *parser) parse() (*Program, error) {
 	}
 
 	// Parse imports first
-	for p.check(use) || p.check(new_line) {
-		if p.match(new_line) {
-			continue
+	importing := true
+	for importing {
+		if imp := p.parseImport(); imp != nil {
+			program.Imports = append(program.Imports, *imp)
+		} else {
+			if c := p.parseComment(); c != nil {
+				program.Statements = append(program.Statements, c)
+			}
+			// Continue import phase while the current token is an empty line, 'use', or comment
+			importing = p.check(new_line) || p.check(use) || p.check(comment)
 		}
-		p.consume(use, "Expected 'use' keyword")
-		imp, err := p.parseImport()
-		if err != nil {
-			return nil, err
-		}
-		program.Imports = append(program.Imports, *imp)
 	}
 
 	// Parse statements
@@ -66,15 +184,38 @@ func (p *parser) parse() (*Program, error) {
 	return program, nil
 }
 
-func (p *parser) parseImport() (*Import, error) {
-	useToken := p.previous()
-	pathToken := p.consume(path, "Expected a module path after 'use'")
+func (p *parser) parseImport() *Import {
+	// Skip any leading newlines
+	p.skipNewlines()
+
+	// If not 'use', return nil (end of import section)
+	if !p.check(use) {
+		return nil
+	}
+
+	// We have 'use' - consume it
+	useToken := p.advance()
 	start := useToken.getLocation().Start
 
+	// Check for missing path
+	if !p.check(path) {
+		p.addError(p.peek(), "Expected module path after 'use'")
+		p.synchronize()
+		return nil
+	}
+
+	pathToken := p.advance()
+
+	// Parse optional alias
 	var name string
 	if p.match(as) {
-		alias := p.consume(identifier, "Expected alias name after 'as'")
-		name = alias.text
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected alias name after 'as'")
+			return nil
+		} else {
+			alias := p.advance()
+			name = alias.text
+		}
 	} else {
 		// Default alias is last part of path
 		parts := strings.Split(pathToken.text, "/")
@@ -85,6 +226,7 @@ func (p *parser) parseImport() (*Import, error) {
 		}
 		name = strings.ReplaceAll(name, "-", "_")
 	}
+
 	endCol := p.previous().column
 	if p.match(new_line) {
 		endCol = p.previous().column - 1
@@ -98,26 +240,32 @@ func (p *parser) parseImport() (*Import, error) {
 			Start: start,
 			End:   end,
 		},
-	}, nil
+	}
 }
 
 func (p *parser) parseStatement() (Statement, error) {
-	if p.match(comment) {
-		tok := p.previous()
-		return &Comment{
-			Value: tok.text,
-			Location: Location{
-				Start: tok.getLocation().Start,
-				End:   Point{Row: p.peek().line, Col: p.peek().column - 1},
-			},
-		}, nil
+	if c := p.parseComment(); c != nil {
+		return c, nil
 	}
 	if p.match(new_line) {
 		return nil, nil
 	}
 	if p.match(break_) {
 		tok := p.previous()
-		new_line := p.consume(new_line, "Expected new line")
+
+		// Check for expected newline
+		if !p.check(new_line) {
+			p.addError(p.peek(), "Expected new line")
+			// Recovery: Create Break without consuming newline, use current position
+			return &Break{
+				Location: Location{
+					Start: tok.getLocation().Start,
+					End:   Point{Row: tok.line, Col: tok.column + len("break")},
+				},
+			}, nil
+		}
+
+		new_line := p.advance()
 		return &Break{
 			Location: Location{
 				Start: tok.getLocation().Start,
@@ -150,32 +298,36 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.check(private, enum) {
 		p.match(private)
 		p.match(enum)
-		return p.enumDef(true)
+		return p.enumDef(true), nil
 	}
 	if p.match(enum) {
-		return p.enumDef(false)
+		return p.enumDef(false), nil
 	}
 
 	if p.check(private, struct_) {
 		p.match(private)
 		p.match(struct_)
-		return p.structDef(true)
+		return p.structDef(true), nil
 	}
 	if p.match(struct_) {
-		return p.structDef(false)
+		return p.structDef(false), nil
 	}
 
 	if p.check(private, trait) {
 		p.match(private)
 		p.match(trait)
-		return p.traitDef(true)
+		return p.traitDef(true), nil
 	}
 	if p.match(trait) {
-		return p.traitDef(false)
+		return p.traitDef(false), nil
 	}
 	if p.match(impl) {
 		// if implementing a static reference, it's a trait
 		if p.check(identifier, colon_colon) {
+			return p.traitImpl()
+		}
+		// if there's a "for" keyword directly after impl (missing trait name)
+		if p.check(for_) {
 			return p.traitImpl()
 		}
 		// if implementing a local reference, could be a regular impl or trait impl
@@ -184,8 +336,13 @@ func (p *parser) parseStatement() (Statement, error) {
 			if p.peek2().kind == for_ {
 				return p.traitImpl()
 			}
+			// If there's an identifier after the first identifier, treat as malformed trait impl
+			// e.g., "impl Display Person" -> should be "impl Display for Person"
+			if p.peek2().kind == identifier {
+				return p.traitImpl()
+			}
 		}
-		return p.implBlock()
+		return p.implBlock(), nil
 	}
 	return p.assignment()
 }
@@ -198,7 +355,13 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	if p.match(colon) {
 		declaredType = p.parseType()
 	}
-	p.consume(equal, "Expected '=' after variable name")
+	if !p.check(equal) {
+		p.addError(p.peek(), "Expected '=' after variable name")
+		// Recovery: Skip to next statement boundary - missing '=' makes declaration invalid
+		return nil, nil
+	}
+
+	p.advance() // consume the '='
 	value, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -266,11 +429,16 @@ func (p *parser) whileLoop() (Statement, error) {
 			return nil, err
 		}
 		condition = or
-		p.consume(left_brace, "Expected '{' after while condition")
+		if !p.check(left_brace) {
+			p.addError(p.peek(), "Expected '{' after while condition")
+			// Recovery: Skip malformed while loop
+			return nil, nil
+		}
+		p.advance() // consume the '{'
 	}
 
 	statements := []Statement{}
-	for !p.check(right_brace) {
+	for !p.check(right_brace) && !p.isAtEnd() {
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -279,7 +447,15 @@ func (p *parser) whileLoop() (Statement, error) {
 			statements = append(statements, stmt)
 		}
 	}
-	p.consume(right_brace, "Unclosed while loop")
+	if !p.check(right_brace) {
+		p.addError(p.peek(), "Unclosed while loop")
+		// Recovery: Create while loop with statements parsed so far
+		return &WhileLoop{
+			Condition: condition,
+			Body:      statements,
+		}, nil
+	}
+	p.advance() // consume the '}'
 	p.match(new_line)
 
 	return &WhileLoop{
@@ -314,7 +490,12 @@ func (p *parser) forLoop() (Statement, error) {
 				cursor2.Name = id.text
 				cursor2.Location = id.getLocation()
 			}
-			p.consume(in, "Expected 'in' after cursor name")
+			if !p.check(in) {
+				p.addError(p.peek(), "Expected 'in' after cursor name")
+				// Recovery: Skip malformed for-in loop
+				return nil, nil
+			}
+			p.advance() // consume 'in'
 			seq, err := p.iterRange()
 			if err != nil {
 				return nil, err
@@ -348,12 +529,24 @@ func (p *parser) forLoop() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.consume(semicolon, "Expected ';' after loop cursor")
+	if !p.check(semicolon) {
+		p.addError(p.peek(), "Expected ';' after loop cursor")
+		// Recovery: Skip malformed C-style for loop
+		return nil, nil
+	}
+	p.advance() // consume first ';'
+
 	condition, err := p.or()
 	if err != nil {
 		return nil, err
 	}
-	p.consume(semicolon, "Expected ';' after loop condition")
+
+	if !p.check(semicolon) {
+		p.addError(p.peek(), "Expected ';' after loop condition")
+		// Recovery: Skip malformed C-style for loop
+		return nil, nil
+	}
+	p.advance() // consume second ';'
 	incrementer, err := p.parseStatement()
 	if err != nil {
 		return nil, err
@@ -373,9 +566,21 @@ func (p *parser) forLoop() (Statement, error) {
 
 func (p *parser) typeUnion(private bool) (Statement, error) {
 	decl := &TypeDeclaration{Private: private, Type: []DeclaredType{}}
-	nameToken := p.consume(identifier, "Expected name after 'type'")
+
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected name after 'type'")
+		p.synchronize()
+		return nil, nil
+	}
+	nameToken := p.advance()
 	decl.Name = Identifier{Name: nameToken.text}
-	p.consume(equal, "Expected '=' after type name")
+
+	if !p.check(equal) {
+		p.addError(p.peek(), "Expected '=' after type name")
+		p.synchronize()
+		return nil, nil
+	}
+	p.advance()
 
 	if p.check(new_line) {
 		return nil, p.makeError(p.peek(), "Expected type definition after '='")
@@ -391,29 +596,62 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 	return decl, nil
 }
 
-func (p *parser) enumDef(private bool) (Statement, error) {
-	nameToken := p.consume(identifier, "Expected name after 'enum'")
+func (p *parser) enumDef(private bool) Statement {
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected name after 'enum'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	enum := &EnumDefinition{Name: nameToken.text, Private: private}
-	p.consume(left_brace, "Expected '{'")
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
 	p.match(new_line)
 	for !p.match(right_brace) {
-		variantToken := p.consume(identifier, "Expected variant name")
+		if !p.check(identifier) {
+			// Skip empty variant (graceful recovery)
+			if p.match(comma) {
+				p.match(new_line)
+				continue
+			}
+			// If not a comma, we might be at end or have other issues
+			break
+		}
+		variantToken := p.advance()
 		enum.Variants = append(enum.Variants, variantToken.text)
 		p.match(comma)
 		p.match(new_line)
 	}
 
-	return enum, nil
+	return enum
 }
 
-func (p *parser) structDef(private bool) (Statement, error) {
-	nameToken := p.consume(identifier, "Expected name")
+func (p *parser) structDef(private bool) Statement {
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected name after 'struct'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	structDef := &StructDefinition{
 		Private: private,
 		Name:    Identifier{Name: nameToken.text},
 		Fields:  []StructField{},
 	}
-	p.consume(left_brace, "Expected '{'")
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
 	p.match(new_line)
 	for !p.check(right_brace) {
 		// Skip single-line comments and newlines
@@ -421,26 +659,70 @@ func (p *parser) structDef(private bool) (Statement, error) {
 			continue
 		}
 
-		fieldName := p.consumeVariableName("Expected field name")
-		p.consume(colon, "Expected ':'")
+		// Check for field name (identifier or allowed keywords)
+		current := p.peek()
+		if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
+			// If we can't parse a field, skip to end of line and continue
+			p.addError(p.peek(), "Expected field name")
+			p.synchronize()
+			break
+		}
+
+		fieldName := p.advance()
+		// For keywords, we need to set the text to be the keyword string
+		if fieldName.text == "" {
+			fieldName.text = string(fieldName.kind)
+		}
+
+		if !p.check(colon) {
+			p.addError(p.peek(), "Expected ':' after field name")
+			// Skip this malformed field and continue with next
+			p.synchronize()
+			break
+		}
+		p.advance()
 		fieldType := p.parseType()
 		structDef.Fields = append(structDef.Fields, StructField{
 			Name: Identifier{Name: fieldName.text},
 			Type: fieldType,
 		})
-		p.match(comma)
-		p.match(new_line)
-	}
-	p.consume(right_brace, "Expected '}'")
 
-	return structDef, nil
+		// After parsing field type, we expect either a comma (more fields) or closing brace (end of struct)
+		if p.check(comma) {
+			p.advance()
+			p.match(new_line)
+		} else if p.check(right_brace) {
+			// End of struct - will be handled by loop condition
+			break
+		} else if p.check(new_line) {
+			// Allow newline without comma for last field
+			p.advance()
+		} else {
+			p.addError(p.peek(), "Expected ',' or '}' after field type")
+			p.synchronize()
+			break
+		}
+	}
+
+	if !p.check(right_brace) {
+		p.addError(p.peek(), "Expected '}'")
+		return structDef
+	}
+	p.advance()
+
+	return structDef
 }
 
-func (p *parser) implBlock() (*ImplBlock, error) {
+func (p *parser) implBlock() *ImplBlock {
 	impl := &ImplBlock{}
 	implToken := p.previous()
 
-	nameToken := p.consume(identifier, "Expected type name after 'impl'")
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected type name after 'impl'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	impl.Target = Identifier{
 		Name: nameToken.text,
 		Location: Location{
@@ -449,8 +731,19 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		},
 	}
 
-	p.consume(left_brace, "Expected '{'")
-	p.consume(new_line, "Expected new line")
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
+	if !p.check(new_line) {
+		p.addError(p.peek(), "Expected new line after '{'")
+		// Continue parsing - this is not a critical error
+	} else {
+		p.advance()
+	}
 
 	for !p.match(right_brace) {
 		// not using p.parseStatement() in order to be precise
@@ -459,11 +752,16 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		}
 		stmt, err := p.functionDef(true)
 		if err != nil {
-			return nil, err
+			// For now, keep the old error handling until functionDef is converted
+			p.addError(p.peek(), err.Error())
+			p.synchronizeToBlockEnd()
+			break
 		}
 		fn, ok := stmt.(*FunctionDeclaration)
 		if !ok {
-			return nil, p.makeError(p.peek(), "Expected function declaration in impl block")
+			p.addError(p.peek(), "Expected function declaration in impl block")
+			p.synchronizeToBlockEnd()
+			break
 		}
 		impl.Methods = append(impl.Methods, *fn)
 	}
@@ -474,14 +772,19 @@ func (p *parser) implBlock() (*ImplBlock, error) {
 		End:   Point{p.previous().line, p.previous().column},
 	}
 
-	return impl, nil
+	return impl
 }
 
-func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
+func (p *parser) traitDef(private bool) *TraitDefinition {
 	traitToken := p.previous()
 	traitDef := &TraitDefinition{Private: private}
 
-	nameToken := p.consume(identifier, "Expected trait name after 'trait'")
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected trait name after 'trait'")
+		p.synchronize()
+		return nil
+	}
+	nameToken := p.advance()
 	traitDef.Name = Identifier{
 		Name: nameToken.text,
 		Location: Location{
@@ -490,33 +793,88 @@ func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
 		},
 	}
 
-	p.consume(left_brace, "Expected '{'")
-	p.consume(new_line, "Expected new line")
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronize()
+		return nil
+	}
+	p.advance()
+
+	if !p.check(new_line) {
+		p.addError(p.peek(), "Expected new line after '{'")
+		// Continue parsing - non-critical error
+	} else {
+		p.advance()
+	}
 
 	for !p.match(right_brace) {
 		if p.match(new_line) {
 			continue
 		}
+
 		// Parse function declaration without body (signature only)
-		fnToken := p.consume(fn, "Expected function declaration in trait block")
-		name := p.consume(identifier, "Expected function name")
-		p.consume(left_paren, "Expected '(' after function name")
+		if !p.check(fn) {
+			p.addError(p.peek(), "Expected function declaration in trait block")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		fnToken := p.advance()
+
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected function name")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		name := p.advance()
+
+		if !p.check(left_paren) {
+			p.addError(p.peek(), "Expected '(' after function name")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		p.advance()
 
 		// Parse parameters
 		params := []Parameter{}
 		for !p.check(right_paren) {
 			if len(params) > 0 {
-				p.consume(comma, "Expected ',' between parameters")
+				if !p.check(comma) {
+					p.addError(p.peek(), "Expected ',' between parameters")
+					break
+				}
+				p.advance()
 			}
-			paramName := p.consumeVariableName("Expected parameter name")
-			p.consume(colon, "Expected ':' after parameter name")
+
+			// Use same logic as struct fields for parameter name parsing
+			current := p.peek()
+			if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
+				p.addError(p.peek(), "Expected parameter name")
+				break
+			}
+			paramName := p.advance()
+			if paramName.text == "" {
+				paramName.text = string(paramName.kind)
+			}
+
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after parameter name")
+				break
+			}
+			p.advance()
+
 			paramType := p.parseType()
 			params = append(params, Parameter{
 				Name: paramName.text,
 				Type: paramType,
 			})
 		}
-		p.consume(right_paren, "Expected ')' after parameters")
+
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ')' after parameters")
+			p.synchronizeToBlockEnd()
+			break
+		}
+		p.advance()
 
 		// Parse return type
 		var returnType DeclaredType = nil
@@ -547,7 +905,7 @@ func (p *parser) traitDef(private bool) (*TraitDefinition, error) {
 		End:   Point{p.previous().line, p.previous().column},
 	}
 
-	return traitDef, nil
+	return traitDef
 }
 
 func (p *parser) traitImpl() (*TraitImplementation, error) {
@@ -558,31 +916,73 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 	if path := p.parseStaticPath(); path != nil {
 		traitImpl.Trait = *path
 	} else {
-		traitToken := p.consume(identifier, "Expected trait name after 'impl'")
-		traitImpl.Trait = Identifier{
-			Name: traitToken.text,
-			Location: Location{
-				Start: Point{traitToken.line, traitToken.column},
-				End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
-			},
+		if p.check(identifier) {
+			traitToken := p.advance()
+			traitImpl.Trait = Identifier{
+				Name: traitToken.text,
+				Location: Location{
+					Start: Point{traitToken.line, traitToken.column},
+					End:   Point{traitToken.line, traitToken.column + len(traitToken.text)},
+				},
+			}
+		} else {
+			p.addError(p.peek(), "Expected trait name after 'impl'")
+			// Create placeholder identifier to maintain AST structure
+			current := p.peek()
+			traitImpl.Trait = Identifier{
+				Name: "",
+				Location: Location{
+					Start: Point{current.line, current.column},
+					End:   Point{current.line, current.column},
+				},
+			}
+			p.synchronizeToBlockEnd()
+			return traitImpl, nil
 		}
 	}
 
 	// Parse 'for'
-	p.consume(for_, "Expected 'for' after trait name")
-
-	// Parse type name
-	typeToken := p.consume(identifier, "Expected type name after 'for'")
-	traitImpl.ForType = Identifier{
-		Name: typeToken.text,
-		Location: Location{
-			Start: Point{typeToken.line, typeToken.column},
-			End:   Point{typeToken.line, typeToken.column + len(typeToken.text)},
-		},
+	if !p.match(for_) {
+		p.addError(p.peek(), "Expected 'for' after trait name")
+		p.synchronizeToBlockEnd()
+		return traitImpl, nil
 	}
 
-	p.consume(left_brace, "Expected '{' after type name")
-	p.consume(new_line, "Expected new line")
+	// Parse type name
+	if p.check(identifier) {
+		typeToken := p.advance()
+		traitImpl.ForType = Identifier{
+			Name: typeToken.text,
+			Location: Location{
+				Start: Point{typeToken.line, typeToken.column},
+				End:   Point{typeToken.line, typeToken.column + len(typeToken.text)},
+			},
+		}
+	} else {
+		p.addError(p.peek(), "Expected type name after 'for'")
+		// Create placeholder identifier to maintain AST structure
+		current := p.peek()
+		traitImpl.ForType = Identifier{
+			Name: "",
+			Location: Location{
+				Start: Point{current.line, current.column},
+				End:   Point{current.line, current.column},
+			},
+		}
+		p.synchronizeToBlockEnd()
+		return traitImpl, nil
+	}
+
+	if !p.match(left_brace) {
+		p.addError(p.peek(), "Expected '{' after type name")
+		p.synchronizeToBlockEnd()
+		return traitImpl, nil
+	}
+
+	if !p.match(new_line) {
+		p.addError(p.peek(), "Expected new line")
+		// Continue parsing block contents even without newline
+	}
 
 	for !p.match(right_brace) {
 		if p.match(new_line) {
@@ -609,17 +1009,39 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 }
 
 func (p *parser) block() ([]Statement, error) {
-	p.consume(left_brace, "Expected block")
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		p.synchronizeToTokens(left_brace)
+		if !p.check(left_brace) {
+			// Could not find opening brace, return empty block
+			return []Statement{}, nil
+		}
+	}
+	p.advance() // consume the '{'
+
 	p.match(new_line)
 	statements := []Statement{}
 	for !p.check(right_brace) {
+		// Prevent infinite loops when closing brace is missing
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close block")
+			break
+		}
+
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
 		statements = append(statements, stmt)
 	}
-	p.consume(right_brace, "Unclosed block")
+
+	if !p.check(right_brace) {
+		p.addError(p.peek(), "Expected '}' to close block")
+		// Return statements we've parsed so far
+		return statements, nil
+	}
+	p.advance() // consume the '}'
+
 	return statements, nil
 }
 
@@ -726,11 +1148,18 @@ func (p *parser) parseType() DeclaredType {
 	// Check for function type: fn(ParamType) ReturnType
 	if p.match(fn) {
 		fnToken := p.previous()
-		p.consume(left_paren, "Expected '(' after 'fn' in function type")
+
+		// Expect opening paren
+		hasLeftParen := p.match(left_paren)
+		if !hasLeftParen {
+			p.addError(p.peek(), "Expected '(' after 'fn' in function type")
+			// Skip until we find type boundaries
+			p.synchronizeToTokens(equal, new_line)
+		}
 
 		// Parse parameter types
 		paramTypes := []DeclaredType{}
-		if !p.check(right_paren) {
+		if hasLeftParen && !p.check(right_paren) {
 			for {
 				paramType := p.parseType()
 				paramTypes = append(paramTypes, paramType)
@@ -739,9 +1168,19 @@ func (p *parser) parseType() DeclaredType {
 				}
 			}
 		}
-		p.consume(right_paren, "Expected ')' after function parameters")
 
-		// Parse return type
+		// Expect closing paren (only if we had opening paren)
+		hasRightParen := false
+		if hasLeftParen {
+			hasRightParen = p.match(right_paren)
+			if !hasRightParen {
+				p.addError(p.peek(), "Expected ')' after function parameters")
+				// Skip until we find type boundaries
+				p.synchronizeToTokens(equal, new_line)
+			}
+		}
+
+		// Parse return type directly (no arrow in Ard syntax)
 		returnType := p.parseType()
 
 		// Check for nullable
@@ -766,11 +1205,22 @@ func (p *parser) parseType() DeclaredType {
 		if id.text == "Result" && p.match(less_than) {
 			// Parse the value type
 			valType := p.parseType()
-			p.consume(comma, "Expected comma after value type in Result")
+			hasComma := p.match(comma)
+			if !hasComma {
+				p.addError(p.peek(), "Expected comma after value type in Result")
+				p.synchronizeToTokens(greater_than, equal, new_line)
+			}
 
-			// Parse the error type
-			errType := p.parseType()
-			p.consume(greater_than, "Expected '>' after Result type parameters")
+			// Parse the error type (only if we had comma or are positioned correctly)
+			var errType DeclaredType
+			if hasComma || p.check(identifier) {
+				errType = p.parseType()
+			}
+
+			if !p.match(greater_than) {
+				p.addError(p.peek(), "Expected '>' after Result type parameters")
+				p.synchronizeToTokens(equal, new_line, comma, right_paren)
+			}
 
 			// Check for nullable
 			nullable = p.match(question_mark)
@@ -884,7 +1334,10 @@ func (p *parser) parseType() DeclaredType {
 		elementType := p.parseType()
 		if p.match(colon) {
 			valElementType := p.parseType()
-			p.consume(right_bracket, "Expected ']'")
+			if !p.match(right_bracket) {
+				p.addError(p.peek(), "Expected ']'")
+				p.synchronizeToTokens(equal, new_line, comma, right_paren)
+			}
 
 			// Check for Result sugar syntax: [Key:Value]!ErrorType
 			if p.match(bang) {
@@ -912,7 +1365,10 @@ func (p *parser) parseType() DeclaredType {
 				nullable: p.match(question_mark),
 			}
 		}
-		p.consume(right_bracket, "Expected ']'")
+		if !p.match(right_bracket) {
+			p.addError(p.peek(), "Expected ']'")
+			p.synchronizeToTokens(equal, new_line, comma, right_paren)
+		}
 
 		// Check for Result sugar syntax: [Type]!ErrorType
 		if p.match(bang) {
@@ -969,16 +1425,22 @@ func (p *parser) parseStaticPath() *StaticProperty {
 	}
 
 	for p.match(colon_colon) {
-		propName := p.consume(identifier, "Expected an identifier after '::'")
-		prop = &StaticProperty{
-			Target: prop,
-			Property: &Identifier{
-				Location: Location{
-					Start: Point{propName.line, propName.column},
-					End:   Point{propName.line, propName.column + len(propName.text)},
+		if p.check(identifier) {
+			propName := p.advance()
+			prop = &StaticProperty{
+				Target: prop,
+				Property: &Identifier{
+					Location: Location{
+						Start: Point{propName.line, propName.column},
+						End:   Point{propName.line, propName.column + len(propName.text)},
+					},
+					Name: propName.text,
 				},
-				Name: propName.text,
-			},
+			}
+		} else {
+			p.addError(p.peek(), "Expected an identifier after '::'")
+			// Just break - don't create placeholder, let higher level handle it
+			break
 		}
 	}
 
@@ -1001,8 +1463,25 @@ func (p *parser) matchExpr() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(left_brace, "Expected '{'")
-		p.consume(new_line, "Expected new line")
+
+		if !p.check(left_brace) {
+			p.addError(p.peek(), "Expected '{'")
+			p.synchronizeToTokens(left_brace, new_line)
+			if !p.check(left_brace) {
+				// Could not find opening brace, return incomplete match expression
+				matchExpr.Subject = expr
+				return matchExpr, nil
+			}
+		}
+		p.advance() // consume the '{'
+
+		if !p.check(new_line) {
+			p.addError(p.peek(), "Expected new line after '{'")
+			// Continue parsing - this is not a critical error
+		} else {
+			p.advance()
+		}
+
 		for !p.match(right_brace) {
 			if p.match(new_line) {
 				continue
@@ -1011,7 +1490,16 @@ func (p *parser) matchExpr() (Expression, error) {
 			if err != nil {
 				return nil, err
 			}
-			p.consume(fat_arrow, "Expected '=>'")
+
+			if !p.check(fat_arrow) {
+				p.addError(p.peek(), "Expected '=>' after pattern")
+				p.synchronizeToTokens(fat_arrow, new_line, right_brace)
+				if !p.check(fat_arrow) {
+					// Could not find fat arrow, skip to next case or end
+					continue
+				}
+			}
+			p.advance() // consume the '=>'
 			body := []Statement{}
 			if p.check(left_brace) {
 				b, err := p.block()
@@ -1147,12 +1635,59 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		if path := p.parseStaticPath(); path != nil {
 			name = path
 		} else if p.check(identifier) {
-			name = p.consume("identifier", "Expected function name after 'fn'").text
+			nameToken := p.advance()
+			name = nameToken.text
+		} else if p.check(left_paren) {
+			// This is a valid anonymous function fn(...) pattern
+			name = "" // Anonymous function
+		} else {
+			// Missing function name and no immediate parameters - add error but continue as anonymous
+			p.addError(p.peek(), "Expected function name or '(' after 'fn'")
+			name = "" // Treat as anonymous function
 		}
 
-		p.consume(left_paren, "Expected parameters list")
+		if !p.check(left_paren) {
+			p.addError(p.peek(), "Expected '(' for parameters list")
+			p.synchronizeToTokens(left_paren, left_brace)
+			if !p.check(left_paren) {
+				// Could not find opening paren, assume empty parameters and continue
+				params := []Parameter{}
+				// Try to parse function body if we found '{'
+				if p.check(left_brace) {
+					statements, err := p.block()
+					if err != nil {
+						return nil, err
+					}
+					return &AnonymousFunction{
+						Parameters: params,
+						ReturnType: &StringType{}, // Default type
+						Body:       statements,
+						Location: Location{
+							Start: Point{Row: keyword.line, Col: keyword.column},
+							End:   Point{Row: p.previous().line, Col: p.previous().column},
+						},
+					}, nil
+				}
+				// No body found either, return minimal function
+				return &AnonymousFunction{
+					Parameters: params,
+					ReturnType: &StringType{}, // Default type
+					Body:       []Statement{},
+					Location: Location{
+						Start: Point{Row: keyword.line, Col: keyword.column},
+						End:   Point{Row: keyword.line, Col: keyword.column},
+					},
+				}, nil
+			}
+		}
+		p.advance() // consume the '('
 		params := []Parameter{}
 		for !p.match(right_paren) {
+			// Prevent infinite loops when closing paren is missing
+			if p.isAtEnd() {
+				p.addError(p.peek(), "Expected ')' to close parameter list")
+				break
+			}
 			isMutable := p.match(mut)
 			nameToken := p.consumeVariableName("Expected parameter name")
 
@@ -1160,13 +1695,22 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			// In case of anonymous functions with unnamed params, we don't need types
 			var paramType DeclaredType
 			if p.check(colon) {
-				p.consume(colon, "Expected ':' after parameter name")
+				p.advance() // consume ':'
 				paramType = p.parseType()
 			} else if name == "" { // Anonymous function with untyped params
 				// For anonymous functions, allow simple parameter names without types
 				paramType = &StringType{} // Default to string type for now
 			} else {
-				return nil, p.makeError(p.peek(), "Expected ':' after parameter name")
+				// Replace makeError with addError and recovery
+				p.addError(p.peek(), "Expected ':' after parameter name")
+				p.synchronizeToTokens(colon, comma, right_paren, left_brace)
+				if p.check(colon) {
+					p.advance() // consume ':'
+					paramType = p.parseType()
+				} else {
+					// No colon found, use default type and continue
+					paramType = &StringType{}
+				}
 			}
 
 			params = append(params, Parameter{
@@ -1275,8 +1819,21 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	if p.check(identifier, left_brace) {
-		nameToken := p.consume(identifier, "Expected struct name")
-		p.consume(left_brace, "Expected '{'")
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected struct name")
+			// No anonymous structs - skip this struct instantiation attempt
+			p.index = index // Reset to original position
+			return nil, nil
+		}
+		nameToken := p.advance()
+
+		if !p.check(left_brace) {
+			p.addError(p.peek(), "Expected '{'")
+			// Missing brace means this isn't a struct instantiation - skip
+			p.index = index // Reset to original position
+			return nil, nil
+		}
+		p.advance() // consume the '{'
 		instance := &StructInstance{
 			Name:       Identifier{Name: nameToken.text},
 			Properties: []StructValue{},
@@ -1289,7 +1846,14 @@ func (p *parser) structInstance() (Expression, error) {
 
 		for !p.match(right_brace) {
 			propToken := p.consumeVariableName("Expected name")
-			p.consume(colon, "Expected ':'")
+
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after field name - assuming it")
+				// Continue parsing without consuming colon - assume it was meant to be there
+			} else {
+				p.advance() // consume the ':'
+			}
+
 			val, err := p.or()
 			if err != nil {
 				return nil, err
@@ -1579,10 +2143,25 @@ func (p *parser) memberAccess() (Expression, error) {
 			// Check for type arguments in static function calls
 			if p.check(identifier, less_than) {
 				// This is a static function call with type arguments
-				funcName := p.consume(identifier, "Expected function name")
+				if !p.match(identifier) {
+					p.addError(p.peek(), "Expected function name")
+					p.synchronizeToTokens(left_paren)
+					return nil, nil
+				}
+
+				funcName := p.previous()
 
 				// Parse type arguments
-				p.consume(less_than, "Expected '<'")
+				if !p.check(less_than) {
+					p.addError(p.peek(), "Expected '<'")
+					p.synchronizeToTokens(less_than, left_paren)
+					if !p.check(less_than) {
+						// Could not find '<', skip type arguments and try regular function call
+						return nil, nil
+					}
+				}
+				p.advance() // consume the '<'
+
 				typeArgs := []DeclaredType{}
 
 				typeArg := p.parseType()
@@ -1593,17 +2172,58 @@ func (p *parser) memberAccess() (Expression, error) {
 					typeArgs = append(typeArgs, typeArg)
 				}
 
-				p.consume(greater_than, "Expected '>' after type arguments")
+				if !p.check(greater_than) {
+					p.addError(p.peek(), "Expected '>' after type arguments")
+					p.synchronizeToTokens(greater_than, left_paren)
+					if !p.check(greater_than) {
+						// Could not find '>', skip to function arguments or bail
+						if !p.check(left_paren) {
+							return nil, nil
+						}
+					} else {
+						p.advance() // consume the '>'
+					}
+				} else {
+					p.advance() // consume the '>'
+				}
 
 				// Parse arguments
-				p.consume(left_paren, "Expected '(' after type arguments")
+				if !p.check(left_paren) {
+					p.addError(p.peek(), "Expected '(' after type arguments")
+					p.synchronizeToTokens(left_paren)
+					if !p.check(left_paren) {
+						// Could not find '(', skip this function call
+						return nil, nil
+					}
+				}
+				p.advance() // consume the '('
+
 				p.match(new_line)
 				args, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
 
-				p.consume(right_paren, "Expected ')' to close function call")
+				if !p.check(right_paren) {
+					p.addError(p.peek(), "Expected ')' to close function call")
+					p.synchronizeToTokens(right_paren)
+					if !p.check(right_paren) {
+						// Could not find ')', return partial function call
+						return &StaticFunction{
+							Target: expr,
+							Function: FunctionCall{
+								Name:     funcName.text,
+								TypeArgs: typeArgs,
+								Args:     args,
+								Location: Location{
+									Start: expr.GetLocation().Start,
+									End:   Point{Row: funcName.line, Col: funcName.column},
+								},
+							},
+						}, nil
+					}
+				}
+				p.advance() // consume the ')'
 
 				// Create the StaticFunction with type arguments
 				expr = &StaticFunction{
@@ -1675,12 +2295,38 @@ func (p *parser) call() (Expression, error) {
 				typeArgs := []DeclaredType{typeArg}
 
 				// Parse arguments
-				p.consume(left_paren, "Expected '(' after type arguments")
+				if !p.check(left_paren) {
+					p.addError(p.peek(), "Expected '(' after type arguments")
+					p.synchronizeToTokens(left_paren)
+					if !p.check(left_paren) {
+						// Could not find '(', skip this function call
+						return nil, nil
+					}
+				}
+				p.advance() // consume the '('
+
 				args, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
-				p.consume(right_paren, "Unclosed function call")
+
+				if !p.check(right_paren) {
+					p.addError(p.peek(), "Expected ')' to close function call")
+					p.synchronizeToTokens(right_paren)
+					if !p.check(right_paren) {
+						// Could not find ')', return partial function call
+						return &FunctionCall{
+							Name:     expr.(*Identifier).Name,
+							TypeArgs: typeArgs,
+							Args:     args,
+							Location: Location{
+								Start: expr.GetLocation().Start,
+								End:   Point{Row: p.previous().line, Col: p.previous().column},
+							},
+						}, nil
+					}
+				}
+				p.advance() // consume the ')'
 
 				return &FunctionCall{
 					Name:     expr.(*Identifier).Name,
@@ -1705,7 +2351,24 @@ func (p *parser) call() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(right_paren, "Unclosed function call")
+
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ')' to close function call")
+			p.synchronizeToTokens(right_paren)
+			if !p.check(right_paren) {
+				// Could not find ')', return partial function call
+				return &FunctionCall{
+					Name: expr.(*Identifier).Name,
+					Args: args,
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
+				}, nil
+			}
+		}
+		p.advance() // consume the ')'
+
 		return &FunctionCall{
 			Name: expr.(*Identifier).Name,
 			Args: args,
@@ -1757,7 +2420,16 @@ func (p *parser) primary() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(right_paren, "Expected ')' after expression")
+
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ')' after expression")
+			p.synchronizeToTokens(right_paren)
+			if !p.check(right_paren) {
+				// Could not find closing paren, return the expression anyway
+				return expr, nil
+			}
+		}
+		p.advance() // consume the ')'
 		return expr, nil
 	}
 	if p.match(left_bracket) {
@@ -1778,7 +2450,12 @@ func (p *parser) primary() (Expression, error) {
 		}, nil
 	default:
 		peek := p.peek()
-		panic(p.makeError(peek, fmt.Sprintf("unmatched primary expression: %s", peek.kind)))
+		p.addError(peek, fmt.Sprintf("unmatched primary expression: %s", peek.kind))
+		// Return a dummy identifier to allow parsing to continue
+		return &Identifier{
+			Name:     peek.text,
+			Location: peek.getLocation(),
+		}, nil
 	}
 }
 
@@ -1816,7 +2493,10 @@ func (p *parser) map_() (Expression, error) {
 		Entries:  []MapEntry{},
 	}
 	if p.match(colon) {
-		p.consume(right_bracket, "Expected ']' after ':' in empty map")
+		if !p.match(right_bracket) {
+			p.addError(p.peek(), "Expected ']' after ':' in empty map")
+			p.synchronizeToTokens(equal, new_line, comma, right_paren)
+		}
 		return node, nil
 	}
 
@@ -1829,7 +2509,15 @@ func (p *parser) map_() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.consume(colon, "Expected ':' after map key")
+		if !p.check(colon) {
+			p.addError(p.peek(), "Expected ':' after map key")
+			p.synchronizeToTokens(colon, comma, right_bracket)
+			if !p.check(colon) {
+				// Could not find ':', skip this map entry
+				continue
+			}
+		}
+		p.advance() // consume the ':'
 		val, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
@@ -1891,7 +2579,14 @@ func (p *parser) advance() token {
 /* consume a token that can be used as a variable name (identifier or keyword) */
 func (p *parser) consumeVariableName(message string) token {
 	if p.isAtEnd() {
-		panic(p.makeEOFError())
+		p.addError(nil, "Unexpected end of input")
+		// Return a dummy token to allow parsing to continue
+		return token{
+			kind:   identifier,
+			text:   "missing_name",
+			line:   0,
+			column: 0,
+		}
 	}
 
 	current := p.peek()
@@ -1905,7 +2600,15 @@ func (p *parser) consumeVariableName(message string) token {
 		return token
 	}
 
-	panic(p.makeErrorWithActual(current, message, current.kind))
+	p.addError(current, message)
+	p.advance() // CRITICAL: Must advance past the invalid token to prevent infinite loops
+	// Return a dummy token to allow parsing to continue
+	return token{
+		kind:   identifier,
+		text:   "invalid_name",
+		line:   current.line,
+		column: current.column,
+	}
 }
 
 /* check if a token kind is an allowed keyword */
@@ -1918,29 +2621,9 @@ func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 	return slices.Contains(keywords, k)
 }
 
-/* assert that the current token is the provided kind and return it */
-func (p *parser) consume(kind kind, message string) token {
-	if p.isAtEnd() {
-		panic(p.makeEOFError())
-	}
-	if p.peek().kind == kind {
-		return p.advance()
-	}
-
-	panic(p.makeErrorWithActual(p.peek(), message, p.peek().kind))
-}
-
 /* Error creation helpers */
 func (p *parser) makeError(at *token, msg string) error {
 	return fmt.Errorf("%s:%d:%d: %s", p.fileName, at.line, at.column, msg)
-}
-
-func (p *parser) makeErrorWithActual(at *token, msg string, actual kind) error {
-	return fmt.Errorf("%s:%d:%d: %s (Actual: %s)", p.fileName, at.line, at.column, msg, actual)
-}
-
-func (p *parser) makeEOFError() error {
-	return fmt.Errorf("%s: Unexpected end of input", p.fileName)
 }
 
 /* conditionally advance if the current token is one of those provided */
@@ -2012,7 +2695,16 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 		if p.check(identifier) && p.peek2() != nil && p.peek2().kind == colon {
 			hasNamedArgs = true
 			name := p.advance().text
-			p.consume(colon, "Expected ':' after parameter name")
+
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after parameter name")
+				p.synchronizeToTokens(colon, comma, right_paren)
+				if !p.check(colon) {
+					// Could not find ':', skip this parameter
+					continue
+				}
+			}
+			p.advance() // consume the ':'
 
 			value, err := p.parseExpression()
 			if err != nil {

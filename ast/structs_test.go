@@ -110,6 +110,37 @@ func TestStructDefinitions(t *testing.T) {
 				},
 			},
 		},
+		// Error cases
+		{
+			name:     "Missing struct name",
+			input:    "struct { name: string }",
+			wantErrs: []string{"Expected name after 'struct'"},
+		},
+		{
+			name:     "Missing opening brace",
+			input:    "struct Person name: string }",
+			wantErrs: []string{"Expected '{'"},
+		},
+		{
+			name:     "Missing colon after field name",
+			input:    "struct Person { name string }",
+			wantErrs: []string{"Expected ':' after field name", "Expected '}'"},
+		},
+		{
+			name:     "Missing comma between fields",
+			input:    "struct Person { name: string age: int }",
+			wantErrs: []string{"Expected ',' or '}' after field type", "Expected '}'"},
+		},
+		{
+			name:     "Empty struct works",
+			input:    "struct Person { }",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Trailing comma works",
+			input:    "struct Person { name: string, }",
+			wantErrs: []string{},
+		},
 	})
 }
 

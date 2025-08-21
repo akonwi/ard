@@ -113,10 +113,11 @@ func TestUserModuleImports(t *testing.T) {
 fn main() Int {
     utils::helper()
 }`
-	astTree, err := ast.Parse([]byte(input), "main.ard")
-	if err != nil {
-		t.Fatal(err)
+	result := ast.Parse([]byte(input), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
 	}
+	astTree := result.Program
 
 	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
 	if len(diagnostics) > 0 {
@@ -185,11 +186,11 @@ fn main() Int {
     sum + product
 }`
 
-	astTree, err := ast.Parse([]byte(mainContent), "main.ard")
-	if err != nil {
-		t.Fatal(err)
+	result := ast.Parse([]byte(mainContent), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
 	}
-
+	astTree := result.Program
 	resolver, err := checker.NewModuleResolver(tempDir)
 	if err != nil {
 		t.Fatal(err)
@@ -263,11 +264,11 @@ fn main() Int {
     utils::private_helper()
 }`
 
-	astTree, err := ast.Parse([]byte(mainContent), "main.ard")
-	if err != nil {
-		t.Fatal(err)
+	result := ast.Parse([]byte(mainContent), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
 	}
-
+	astTree := result.Program
 	resolver, err := checker.NewModuleResolver(tempDir)
 	if err != nil {
 		t.Fatal(err)
@@ -325,11 +326,11 @@ fn func1() Int {
     shared::shared_function()
 }`
 
-	astTree1, err := ast.Parse([]byte(content1), "main1.ard")
-	if err != nil {
-		t.Fatal(err)
+	result1 := ast.Parse([]byte(content1), "main1.ard")
+	if len(result1.Errors) > 0 {
+		t.Fatal(result1.Errors[0].Message)
 	}
-
+	astTree1 := result1.Program
 	module1, diagnostics1 := checker.Check(astTree1, resolver, "main1.ard")
 	if len(diagnostics1) > 0 {
 		t.Fatalf("Unexpected diagnostics in first check: %v", diagnostics1)
@@ -342,11 +343,11 @@ fn func2() Int {
     shared::shared_function() + 50
 }`
 
-	astTree2, err := ast.Parse([]byte(content2), "main2.ard")
-	if err != nil {
-		t.Fatal(err)
+	result2 := ast.Parse([]byte(content2), "main2.ard")
+	if len(result2.Errors) > 0 {
+		t.Fatal(result2.Errors[0].Message)
 	}
-
+	astTree2 := result2.Program
 	module2, diagnostics2 := checker.Check(astTree2, resolver, "main2.ard")
 	if len(diagnostics2) > 0 {
 		t.Fatalf("Unexpected diagnostics in second check: %v", diagnostics2)
@@ -407,11 +408,11 @@ func TestUserModuleErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			astTree, err := ast.Parse([]byte(tt.input), "main.ard")
-			if err != nil {
-				t.Fatal(err)
+			result := ast.Parse([]byte(tt.input), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatal(result.Errors[0].Message)
 			}
-
+			astTree := result.Program
 			_, diagnostics := checker.Check(astTree, resolver, "main.ard")
 			if len(diagnostics) == 0 {
 				t.Error("Expected error but got none")
@@ -845,11 +846,11 @@ private struct PrivateStruct {
 `
 
 	// Parse and check the module
-	astTree, err := ast.Parse([]byte(moduleContent), "main.ard")
-	if err != nil {
-		t.Fatal(err)
+	result := ast.Parse([]byte(moduleContent), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
 	}
-
+	astTree := result.Program
 	resolver, err := checker.NewModuleResolver(".")
 	if err != nil {
 		t.Fatal(err)
