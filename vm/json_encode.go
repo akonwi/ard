@@ -10,7 +10,6 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-// todo: the first argument should be *object
 func json_encode(data any, t checker.Type) ([]byte, error) {
 	if t == checker.Str || t == checker.Int || t == checker.Float || t == checker.Bool {
 		str, err := json.Marshal(data)

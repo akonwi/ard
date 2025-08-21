@@ -3,6 +3,8 @@
 package vm
 
 import (
+	"encoding/json/v2"
+	"encoding/json/jsontext"
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
@@ -145,6 +147,22 @@ type object struct {
 
 func (o object) String() string {
 	return fmt.Sprintf("%v:%s", o.raw, o._type)
+}
+
+// MarshalJSONTo implements JSON v2 marshaling interface
+func (o *object) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return json.MarshalEncode(enc, o.premarshal(),
+		json.FormatNilSliceAsNull(true),
+		json.FormatNilMapAsNull(true),
+	)
+}
+
+// MarshalJSON implements the traditional JSON marshaling interface
+func (o *object) MarshalJSON() ([]byte, error) {
+	return json.Marshal(o.premarshal(),
+		json.FormatNilSliceAsNull(true),
+		json.FormatNilMapAsNull(true),
+	)
 }
 
 func (o *object) premarshal() any {
