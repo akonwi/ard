@@ -115,7 +115,12 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 				if !ok {
 					panic(fmt.Errorf("Handler for '%s' is not a function", path))
 				}
-				response := handle.eval(request)
+
+				// Create a copy of the closure with a new VM for isolation to prevent race conditions
+				// This follows the same pattern as the async module
+				isolatedHandle := *handle
+				isolatedHandle.vm = New(vm.imports)
+				response := isolatedHandle.eval(request)
 
 				// Convert Ard Response to Go HTTP response
 				respMap := response.raw.(map[string]*object)

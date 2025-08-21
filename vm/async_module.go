@@ -49,8 +49,9 @@ func (m *AsyncModule) handleStart(caller *VM, args []*object) *object {
 	// Execute the worker function in the current VM context first
 	// This will handle the parsing and setup
 	if fn, ok := workerFn.raw.(*Closure); ok {
-		// create a new VM for isolation
-		fn.vm = New(caller.imports)
+		// Create a copy of the closure with a new VM for isolation
+		isolatedFn := *fn
+		isolatedFn.vm = New(caller.imports)
 		// Start the goroutine with the evaluated function
 		go func() {
 			defer wg.Done()
@@ -62,7 +63,7 @@ func (m *AsyncModule) handleStart(caller *VM, args []*object) *object {
 			}()
 
 			// Call the function - this should work since it's already evaluated
-			fn.eval()
+			isolatedFn.eval()
 		}()
 	}
 
