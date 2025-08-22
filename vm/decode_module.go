@@ -5,7 +5,6 @@ package vm
 import (
 	"encoding/json/v2"
 	"fmt"
-	"strconv"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/vm/runtime"
@@ -112,30 +111,30 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		dynamicObj, err := parseJsonToDynamic(jsonBytes)
 		if err != nil {
 			// Return nil as Dynamic - this is valid and will be caught by decoders
-			return runtime.Make(nil, checker.Dynamic)
+			return runtime.MakeDynamic(nil)
 		}
 
 		return dynamicObj
 	case "from_str":
 		// Create Dynamic from Str primitive
 		strValue := args[0].AsString()
-		return runtime.Make(strValue, checker.Dynamic)
+		return runtime.MakeDynamic(strValue)
 	case "from_int":
 		// Create Dynamic from Int primitive
 		intValue := args[0].AsInt()
-		return runtime.Make(intValue, checker.Dynamic)
+		return runtime.MakeDynamic(intValue)
 	case "from_bool":
 		// Create Dynamic from Bool primitive
 		boolValue := args[0].AsBool()
-		return runtime.Make(boolValue, checker.Dynamic)
+		return runtime.MakeDynamic(boolValue)
 	case "from_float":
 		// Create Dynamic from Float primitive
 		floatValue := args[0].AsFloat()
-		return runtime.Make(floatValue, checker.Dynamic)
+		return runtime.MakeDynamic(floatValue)
 	case "from_list":
 		// Create Dynamic from List primitive
 		listValue := args[0].AsList()
-		return runtime.Make(listValue, checker.Dynamic)
+		return runtime.MakeDynamic(listValue)
 	case "nullable":
 		// Return a nullable decoder function that wraps the inner decoder
 		innerDecoder := args[0]
@@ -328,71 +327,6 @@ func (m *DecodeModule) HandleStatic(structName string, vm *VM, call *checker.Fun
 	panic(fmt.Errorf("Unimplemented: decode::%s::%s()", structName, call.Name))
 }
 
-// Helper function to format raw values with smart truncation and previews
-func formatRawValueForError(v interface{}) string {
-	switch val := v.(type) {
-	case string:
-		// Truncate very long strings for readability
-		if len(val) > 50 {
-			return fmt.Sprintf("\"%s...\"", val[:47])
-		}
-		return fmt.Sprintf("\"%s\"", val)
-	case int:
-		return strconv.Itoa(val)
-	case int64:
-		return strconv.FormatInt(val, 10)
-	case float64:
-		return strconv.FormatFloat(val, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(val)
-	case []interface{}:
-		// Show preview of array contents for small arrays
-		if len(val) == 0 {
-			return "[]"
-		} else if len(val) <= 3 {
-			preview := "["
-			for i, item := range val {
-				if i > 0 {
-					preview += ", "
-				}
-				preview += formatRawValueForError(item)
-			}
-			preview += "]"
-			return preview
-		}
-		return fmt.Sprintf("[array with %d elements]", len(val))
-	case map[string]interface{}:
-		// Show preview of object contents for small objects
-		if len(val) == 0 {
-			return "{}"
-		}
-		keys := make([]string, 0, len(val))
-		for k := range val {
-			keys = append(keys, k)
-		}
-		if len(keys) <= 3 {
-			preview := "{"
-			for i, key := range keys {
-				if i > 0 {
-					preview += ", "
-				}
-				preview += fmt.Sprintf("%s: %s", key, formatRawValueForError(val[key]))
-			}
-			preview += "}"
-			return preview
-		}
-		return fmt.Sprintf("{object with keys: %v}", keys[:3])
-	case nil:
-		return "null"
-	default:
-		str := fmt.Sprintf("%v", val)
-		if len(str) > 50 {
-			return str[:47] + "..."
-		}
-		return str
-	}
-}
-
 // Helper function to create DecodeError
 func makeDecodeError(expected, found string) *runtime.Object {
 	return runtime.MakeStruct(checker.DecodeErrorDef,
@@ -405,82 +339,74 @@ func makeDecodeError(expected, found string) *runtime.Object {
 }
 
 // Helper function to create [DecodeError] with one error
-func makeDecodeErrorList(expected, found string) *runtime.Object {
-	decodeErr := makeDecodeError(expected, found)
+func makeDecodeErrorList(expected string, found any) *runtime.Object {
+	decodeErr := makeDecodeError(expected, fmt.Sprintf("%v", found))
 	return runtime.MakeList(checker.DecodeErrorDef, decodeErr)
 }
 
-// Helper function to create a decode error list from data object (shows actual value)
-func makeDecodeErrorListFromData(expected string, data *runtime.Object) *runtime.Object {
-	return makeDecodeErrorList(expected, data.AsString())
-}
-
 // as_string decoder implementation
+// fn (Dynamic) Str![Error]
 func decodeAsString(data *runtime.Object, resultType *checker.Result) *runtime.Object {
-	if str, ok := data.IsStr(); ok {
+	// For Dynamic objects, check the raw value type
+	if data.Raw() == nil {
+		decodeErrList := makeDecodeErrorList("Str", "null")
+		return runtime.MakeErr(decodeErrList)
+	}
+	if str, ok := data.Raw().(string); ok {
 		return runtime.MakeOk(runtime.MakeStr(str))
 	}
 
-	// For Dynamic objects, check the raw value type
-	if data.Type() == checker.Dynamic {
-		if data.Raw() == nil {
-			decodeErrList := makeDecodeErrorListFromData("Str", data)
-			return runtime.MakeErr(decodeErrList)
-		}
-	}
-
-	decodeErrList := makeDecodeErrorListFromData("Str", data)
+	decodeErrList := makeDecodeErrorList("Str", data.GoValue())
 	return runtime.MakeErr(decodeErrList)
 }
 
 // as_int decoder implementation
+// fn (Dynamic) Int![Error]
 func decodeAsInt(data *runtime.Object, resultType *checker.Result) *runtime.Object {
-	if intVal, ok := data.IsInt(); ok {
+	// For Dynamic objects, check the raw value type
+	if data.Raw() == nil {
+		decodeErrList := makeDecodeErrorList("Int", "null")
+		return runtime.MakeErr(decodeErrList)
+	}
+	if intVal, ok := data.Raw().(int); ok {
 		return runtime.MakeOk(runtime.MakeInt(intVal))
 	}
-
-	// For Dynamic objects, check the raw value type
-	if data.Type() == checker.Dynamic {
-		if data.Raw() == nil {
-			decodeErrList := makeDecodeErrorListFromData("Int", data)
-			return runtime.MakeErr(decodeErrList)
-		}
-		// SQLite integers come as int64
-		if int64Val, ok := data.Raw().(int64); ok {
-			return runtime.MakeOk(runtime.MakeInt(int(int64Val)))
-		}
-		// JSON numbers might come as float64
-		if floatVal, ok := data.Raw().(float64); ok {
-			int := int(floatVal)
-			if floatVal == float64(int) { // Check if it's actually an integer without losing precision
-				return runtime.MakeOk(runtime.MakeInt(int))
-			}
+	// SQLite integers come as int64
+	if int64Val, ok := data.Raw().(int64); ok {
+		return runtime.MakeOk(runtime.MakeInt(int(int64Val)))
+	}
+	// JSON numbers might come as float64
+	if floatVal, ok := data.Raw().(float64); ok {
+		int := int(floatVal)
+		if floatVal == float64(int) { // Check if it's actually an integer without losing precision
+			return runtime.MakeOk(runtime.MakeInt(int))
 		}
 	}
 
-	decodeErrList := makeDecodeErrorListFromData("Int", data)
+	decodeErrList := makeDecodeErrorList("Int", data.GoValue())
 	return runtime.MakeErr(decodeErrList)
 }
 
 // as_float decoder implementation
+// fn (Dynamic) Float![Error]
 func decodeAsFloat(data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	// For Dynamic objects, check the raw value type
 	if floatVal, ok := data.Raw().(float64); ok {
 		return runtime.MakeOk(runtime.MakeFloat(floatVal))
 	}
-
-	// For Dynamic objects, check the raw value type
-	if data.Type() == checker.Dynamic {
-		if data.Raw() == nil {
-			decodeErrList := makeDecodeErrorListFromData("Float", data)
-			return runtime.MakeErr(decodeErrList)
-		}
-		// Allow int to float conversion
-		if intVal, ok := data.IsInt(); ok {
-			return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
-		}
+	if data.Raw() == nil {
+		decodeErrList := makeDecodeErrorList("Float", "null")
+		return runtime.MakeErr(decodeErrList)
+	}
+	// Allow int to float conversion
+	if intVal, ok := data.Raw().(int); ok {
+		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
+	}
+	if intVal, ok := data.Raw().(int64); ok {
+		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
 	}
 
-	decodeErrList := makeDecodeErrorListFromData("Float", data)
+	decodeErrList := makeDecodeErrorList("Float", data.GoValue())
 	return runtime.MakeErr(decodeErrList)
 }
 
@@ -492,12 +418,12 @@ func decodeAsBool(data *runtime.Object, resultType *checker.Result) *runtime.Obj
 	// For Dynamic objects, check the raw value type
 	if data.Type() == checker.Dynamic {
 		if data.Raw() == nil {
-			decodeErrList := makeDecodeErrorListFromData("Bool", data)
+			decodeErrList := makeDecodeErrorList("Bool", "null")
 			return runtime.MakeErr(decodeErrList)
 		}
 	}
 
-	decodeErrList := makeDecodeErrorListFromData("Bool", data)
+	decodeErrList := makeDecodeErrorList("Bool", data.GoValue())
 	return runtime.MakeErr(decodeErrList)
 }
 
@@ -516,8 +442,8 @@ func decodeAsNullable(innerDecoder *runtime.Object, data *runtime.Object, result
 	innerResult := closure.eval(data)
 
 	if innerResult.IsOk() {
-		// Success - wrap the decoded value in maybe::some()
-		return runtime.MakeOk(runtime.MakeMaybe(innerResult, maybeType.Of()))
+		// Success - turn the decoded value into maybe::some()
+		return runtime.MakeOk(innerResult.ToMaybe())
 	}
 	return innerResult
 }
@@ -528,23 +454,23 @@ func decodeAsList(elementDecoder *runtime.Object, data *runtime.Object, resultTy
 	if data.Type() == checker.Dynamic {
 		if data.Raw() == nil {
 			// Null data - return error (use nullable(list(...)) for nullable lists)
-			decodeErrList := makeDecodeErrorListFromData("Array", data)
+			decodeErrList := makeDecodeErrorList("Array", "null")
 			return runtime.MakeErr(decodeErrList)
 		}
 
 		// Check if raw data is a slice (JSON array becomes []interface{})
-		if rawSlice, ok := data.Raw().([]interface{}); ok {
+		if rawSlice, ok := data.Raw().([]any); ok {
 			return decodeArrayElements(elementDecoder, rawSlice, resultType)
 		}
 	}
 
 	// Not array-like data
-	decodeErrList := makeDecodeErrorListFromData("Array", data)
+	decodeErrList := makeDecodeErrorList("Array", data.Raw())
 	return runtime.MakeErr(decodeErrList)
 }
 
 // decodeArrayElements decodes each element in the array using the element decoder
-func decodeArrayElements(elementDecoder *runtime.Object, rawSlice []interface{}, resultType *checker.Result) *runtime.Object {
+func decodeArrayElements(elementDecoder *runtime.Object, rawSlice []any, resultType *checker.Result) *runtime.Object {
 	// Get element decoder closure
 	closure := elementDecoder.Raw().(*Closure)
 
@@ -591,7 +517,7 @@ func decodeAsMap(keyDecoder *runtime.Object, valueDecoder *runtime.Object, data 
 	if data.Type() == checker.Dynamic {
 		if data.Raw() == nil {
 			// Null data - return error (use nullable(map(...)) for nullable maps)
-			decodeErrList := makeDecodeErrorListFromData("Object", data)
+			decodeErrList := makeDecodeErrorList("Object", "null")
 			return runtime.MakeErr(decodeErrList)
 		}
 
@@ -602,12 +528,12 @@ func decodeAsMap(keyDecoder *runtime.Object, valueDecoder *runtime.Object, data 
 	}
 
 	// Not object-like data
-	decodeErrList := makeDecodeErrorListFromData("Object", data)
+	decodeErrList := makeDecodeErrorList("Object", data.String())
 	return runtime.MakeErr(decodeErrList)
 }
 
 // decodeMapValues decodes each key and value in the object using their respective decoders
-func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, rawMap map[string]interface{}, resultType *checker.Result) *runtime.Object {
+func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, rawMap map[string]any, resultType *checker.Result) *runtime.Object {
 	// Get decoder closures
 	keyClosure := keyDecoder.Raw().(*Closure)
 	valueClosure := valueDecoder.Raw().(*Closure)
@@ -630,7 +556,7 @@ func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, r
 			// Both key and value decoded successfully
 			// Convert decoded key to string for map storage
 			decodedKey := runtime.ToMapKey(keyResult)
-			decodedMap[decodedKey] = valueResult.Result_Unwrap()
+			decodedMap[decodedKey] = valueResult.Unwrap()
 		} else {
 			// Add errors with path information
 			if keyResult.IsErr() {
@@ -672,44 +598,22 @@ func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, r
 	return runtime.MakeOk(mapObject)
 }
 
-// convertToMapKey converts a decoded key object to a string for map storage
-func convertToMapKey(keyObj *runtime.Object) string {
-	switch keyObj.Type() {
-	case checker.Str:
-		return keyObj.Raw().(string)
-	case checker.Int:
-		return fmt.Sprintf("%d", keyObj.Raw().(int))
-	case checker.Float:
-		return fmt.Sprintf("%g", keyObj.Raw().(float64))
-	case checker.Bool:
-		if keyObj.Raw().(bool) {
-			return "true"
-		}
-		return "false"
-	default:
-		// For other types, use a string representation
-		return fmt.Sprintf("%v", keyObj.Raw())
-	}
-}
-
 // decodeAsField extracts a specific field from an object and decodes it
 func decodeAsField(fieldKey string, valueDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
 	// Check if data is Dynamic and contains object-like structure
-	if data.Type() == checker.Dynamic {
-		if data.Raw() == nil {
-			// Null data - return error
-			decodeErrList := makeDecodeErrorListFromData("Object", data)
-			return runtime.MakeErr(decodeErrList)
-		}
+	if data.Raw() == nil {
+		// Null data - return error
+		decodeErrList := makeDecodeErrorList("Object", "null")
+		return runtime.MakeErr(decodeErrList)
+	}
 
-		// Check if raw data is a map (JSON object becomes map[string]any)
-		if rawMap, ok := data.Raw().(map[string]any); ok {
-			return extractField(fieldKey, valueDecoder, rawMap, resultType)
-		}
+	// Check if raw data is a map (JSON object becomes map[string]any)
+	if rawMap, ok := data.Raw().(map[string]any); ok {
+		return extractField(fieldKey, valueDecoder, rawMap, resultType)
 	}
 
 	// Not object-like data
-	decodeErrList := makeDecodeErrorListFromData("Object", data)
+	decodeErrList := makeDecodeErrorList("Object", data.String())
 	return runtime.MakeErr(decodeErrList)
 }
 

@@ -18,10 +18,10 @@ func (vm *VM) evalResultMethod(self *runtime.Object, call *checker.FunctionCall)
 			_msg := vm.eval(call.Args[0]).AsString()
 			panic(_msg + ": " + actual)
 		}
-		return self.Result_Unwrap()
+		return self.Unwrap()
 	case "or":
 		if self.IsOk() {
-			return self.Result_Unwrap()
+			return self.Unwrap()
 		}
 		return vm.eval(call.Args[0])
 	case "is_ok":

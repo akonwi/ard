@@ -10,8 +10,12 @@ import (
 )
 
 type Object struct {
+	// the raw value will always be the Go representation of the data.
+	// Object should only be nested in raw for collections like List, Map.
 	raw   any
 	_type checker.Type
+
+	// Results will set one of these to true
 	isErr bool
 	isOk  bool
 }
@@ -156,10 +160,10 @@ func (o Object) IsInt() (int, bool) {
 }
 
 func (o Object) AsInt() int {
-	if o._type == checker.Int {
-		return o.raw.(int)
+	if int, ok := o.raw.(int); ok {
+		return int
 	}
-	panic(fmt.Sprintf("%T is not an Int", o._type))
+	panic(fmt.Sprintf("%s is not an Int", o))
 }
 
 func (o Object) IsFloat() bool {
@@ -174,10 +178,10 @@ func (o Object) AsFloat() float64 {
 }
 
 func (o Object) AsString() string {
-	if o._type == checker.Str {
-		return o.raw.(string)
+	if str, ok := o.raw.(string); ok {
+		return str
 	}
-	panic(fmt.Sprintf("%T is not a String", o._type))
+	panic(fmt.Sprintf("%s is not a string", o))
 }
 
 func (o Object) IsStr() (string, bool) {
@@ -229,11 +233,17 @@ func MakeBool(b bool) *Object {
 	}
 }
 
+// instantiate a $T?
 func MakeMaybe(raw any, of checker.Type) *Object {
 	return &Object{
 		_type: checker.MakeMaybe(of),
 		raw:   raw,
 	}
+}
+
+func (o Object) ToMaybe() *Object {
+	o._type = checker.MakeMaybe(o._type)
+	return &o
 }
 
 func MakeList(of checker.Type, items ...*Object) *Object {
@@ -324,20 +334,16 @@ func (o Object) Map_GetKey(str string) *Object {
 
 // create Result::Err
 func MakeErr(err *Object) *Object {
-	return &Object{
-		raw:   err.raw,
-		isErr: true,
-		_type: err._type,
-	}
+	unwrapped := err.Unwrap()
+	unwrapped.isErr = true
+	return unwrapped
 }
 
 // create Result::Ok
 func MakeOk(err *Object) *Object {
-	return &Object{
-		raw:   err.raw,
-		isOk:  true,
-		_type: err._type,
-	}
+	unwrapped := err.Unwrap()
+	unwrapped.isOk = true
+	return unwrapped
 }
 
 func (o Object) IsResult() bool {
@@ -352,7 +358,9 @@ func (o Object) IsErr() bool {
 	return o.isErr
 }
 
-func (o Object) Result_Unwrap() *Object {
+// return an object w/o Result indicators
+// a no-op if not already a result
+func (o *Object) Unwrap() *Object {
 	return Make(o.raw, o._type)
 }
 

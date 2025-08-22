@@ -72,14 +72,6 @@ func deepCopy(obj *runtime.Object) *runtime.Object {
 	}
 }
 
-// compareKey is a wrapper around an object to use for map keys
-// enabling proper equality comparison
-type compareKey struct {
-	obj *runtime.Object
-	// Store a string representation for hashability
-	strKey string
-}
-
 func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -626,12 +618,12 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			subj := vm.eval(e.Subject)
 			if subj.IsOk() {
 				res, _ := vm.evalBlock(e.Ok.Body, func() {
-					vm.scope.add(e.Ok.Pattern.Name, subj)
+					vm.scope.add(e.Ok.Pattern.Name, subj.Unwrap())
 				})
 				return res
 			}
 			res, _ := vm.evalBlock(e.Err.Body, func() {
-				vm.scope.add(e.Err.Pattern.Name, subj)
+				vm.scope.add(e.Err.Pattern.Name, subj.Unwrap())
 			})
 			return res
 		}
@@ -666,9 +658,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 	case *checker.TryOp:
 		{
 			subj := vm.eval(e.Expr())
-			switch _type := subj.Type().(type) {
-			case *checker.Result:
-				unwrapped := runtime.Make(subj.Raw(), subj.Type())
+			if subj.IsResult() {
+				unwrapped := subj.Unwrap()
 				if subj.IsErr() {
 					// Error case: early return from function
 					if e.CatchBlock != nil {
@@ -693,9 +684,9 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 
 				// Success case: always continue execution with unwrapped value
 				return unwrapped
-			default:
-				panic(fmt.Errorf("Cannot match on %s", _type))
 			}
+
+			panic(fmt.Errorf("Cannot use try keyword on %s", subj.Type()))
 		}
 	case *checker.ModuleSymbol:
 		// Handle module symbol references (like decode::string as a function value)
@@ -793,6 +784,9 @@ func (vm *VM) evalStrProperty(subj *runtime.Object, name string) *runtime.Object
 }
 
 func (vm *VM) evalInstanceMethod(subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
+	if subj.IsResult() {
+		return vm.evalResultMethod(subj, e.Method)
+	}
 	if subj.Type() == checker.Str {
 		return vm.evalStrMethod(subj, e.Method)
 	}
@@ -816,9 +810,6 @@ func (vm *VM) evalInstanceMethod(subj *runtime.Object, e *checker.InstanceMethod
 	}
 	if subj.IsStruct() {
 		return vm.evalStructMethod(subj, e.Method)
-	}
-	if subj.IsResult() {
-		return vm.evalResultMethod(subj, e.Method)
 	}
 	if enum, ok := subj.Type().(*checker.Enum); ok {
 		return vm.evalEnumMethod(subj, e.Method, enum)
@@ -1064,7 +1055,7 @@ func (vm *VM) evalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 				pathStr = " at " + pathBuilder.String()
 			}
 
-			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
+			errorMsg := "Decode error: expected " + expected + ", found " + "\"" + found + "\"" + pathStr
 			return runtime.MakeStr(errorMsg)
 		}
 	}

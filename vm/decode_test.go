@@ -624,6 +624,17 @@ func TestDecodeField(t *testing.T) {
 			`,
 			want: true,
 		},
+		{
+			name: "valid field decoding",
+			input: `
+				use ard/decode
+
+				let data = decode::json("\{\"name\": \"John Doe\"\}")
+				let result = decode::run(data, decode::field("name", decode::string))
+				result.expect("Failed to decode name")
+			`,
+			want: "John Doe",
+		},
 	})
 }
 
@@ -678,7 +689,7 @@ func TestDecodeErrorToString(t *testing.T) {
 					}
 				}
 			`,
-			want: "Decode error: expected Str, found [1, 2, 3]",
+			want: "Decode error: expected Str, found \"[1 2 3]\"",
 		},
 
 		{
@@ -696,7 +707,7 @@ func TestDecodeErrorToString(t *testing.T) {
 					}
 				}
 			`,
-			want: "Decode error: expected Str, found []",
+			want: "Decode error: expected Str, found \"[]\"",
 		},
 		{
 			name: "decode error handles complex values using premarshal consistently",
