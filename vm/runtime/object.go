@@ -29,9 +29,6 @@ func (o Object) Type() checker.Type {
 }
 
 func (o Object) Equals(other Object) bool {
-	if o._type != other._type {
-		return false
-	}
 	switch o._type {
 	case checker.Int:
 		return o.raw.(int) == other.raw.(int)

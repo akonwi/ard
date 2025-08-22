@@ -57,7 +57,7 @@ func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Ob
 	case "read":
 		path := args[0].Raw().(string)
 		if content, err := os.ReadFile(path); err == nil {
-			return runtime.MakeStr(string(content))
+			return runtime.MakeStr(string(content)).ToMaybe()
 		}
 		return runtime.Make(nil, call.Type())
 	case "write":
