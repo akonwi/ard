@@ -11,12 +11,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Database wrapper for sql.DB with additional metadata
-type Database struct {
-	conn     *sql.DB
-	filePath string
-}
-
 // SQLiteModule handles ard/sqlite module functions
 type SQLiteModule struct{}
 
