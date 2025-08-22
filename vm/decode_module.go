@@ -341,7 +341,7 @@ func makeDecodeError(expected, found string) *runtime.Object {
 
 // Helper function to create [DecodeError] with one error
 func makeDecodeErrorList(expected string, found any) *runtime.Object {
-	decodeErr := makeDecodeError(expected, fmt.Sprintf("%v", found))
+	decodeErr := makeDecodeError(expected, formatRawValueForError(found))
 	return runtime.MakeList(checker.DecodeErrorDef, decodeErr)
 }
 
