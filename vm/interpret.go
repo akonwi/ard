@@ -10,58 +10,66 @@ import (
 	"github.com/akonwi/ard/vm/runtime"
 )
 
+// todo: move this into Object.Copy()
 // deepCopy creates a deep copy of an object
 func deepCopy(obj *runtime.Object) *runtime.Object {
-	copy := (*obj).Copy()
-	return &copy
-	// todo: cheating to see if👆🏿 is cheeky enough
-	// switch obj._type.(type) {
-	// case *checker.StructDef:
-	// 	// Deep copy struct
-	// 	originalMap := obj.raw.(map[string]*runtime.Object)
-	// 	copiedMap := make(map[string]*runtime.Object)
-	// 	for key, value := range originalMap {
-	// 		copiedMap[key] = deepCopy(value)
-	// 	}
-	// 	return &object{copiedMap, obj._type}
-	// case *checker.List:
-	// 	// Deep copy list
-	// 	originalSlice := obj.raw.([]*runtime.Object)
-	// 	copiedSlice := make([]*runtime.Object, len(originalSlice))
-	// 	for i, value := range originalSlice {
-	// 		copiedSlice[i] = deepCopy(value)
-	// 	}
-	// 	return &object{copiedSlice, obj._type}
-	// case *checker.Map:
-	// 	// Deep copy map
-	// 	originalMap := obj.raw.(map[string]*runtime.Object)
-	// 	copiedMap := make(map[string]*runtime.Object)
-	// 	for key, value := range originalMap {
-	// 		copiedMap[key] = deepCopy(value)
-	// 	}
-	// 	return &object{copiedMap, obj._type}
-	// case *checker.Maybe:
-	// 	// Deep copy Maybe - if value is nil (None), copy as-is, otherwise deep copy the value
-	// 	if obj.raw == nil {
-	// 		return &object{nil, obj._type}
-	// 	} else {
-	// 		return &object{deepCopy(obj.raw.(*runtime.Object)).raw, obj._type}
-	// 	}
-	// case *checker.Result:
-	// 	// Deep copy Result - the value is an object containing either the success or error value
-	// 	return &object{deepCopy(obj.raw.(*runtime.Object)).raw, obj._type}
-	// case *checker.Enum:
-	// 	// Enums are typically represented as integers or simple values, safe to copy
-	// 	return &object{obj.raw, obj._type}
-	// case *checker.FunctionDef:
-	// 	// Functions cannot be copied - return the same function object
-	// 	// Functions are immutable so sharing them is safe
-	// 	return obj
-	// default:
-	// 	// For primitives (Str, Int, Float, Bool), return a new object with same value
-	// 	// These are immutable in Ard, so we can just create a new object
-	// 	return &object{obj.raw, obj._type}
-	// }
+	switch t := obj.Type().(type) {
+	case *checker.StructDef:
+		// Deep copy struct
+		originalMap := obj.AsMap()
+		copy := make(map[string]*runtime.Object)
+		for key, value := range originalMap {
+			copy[key] = deepCopy(value)
+		}
+		return runtime.MakeStruct(t, copy)
+	case *checker.List:
+		// Deep copy list
+		originalSlice := obj.AsList()
+		copiedSlice := make([]*runtime.Object, len(originalSlice))
+		for i, value := range originalSlice {
+			copiedSlice[i] = deepCopy(value)
+		}
+		return runtime.MakeList(t.Of(), copiedSlice...)
+	case *checker.Map:
+		// Deep copy map
+		originalMap := obj.AsMap()
+		copiedMap := make(map[string]*runtime.Object)
+		for key, value := range originalMap {
+			copiedMap[key] = deepCopy(value)
+		}
+		copy := runtime.MakeMap(t.Key(), t.Value())
+		copy.Set(copiedMap)
+		return copy
+	case *checker.Maybe:
+		// Deep copy Maybe - if value is nil (None), copy as-is, otherwise deep copy the value
+		if obj.Raw() == nil {
+			return runtime.Make(nil, t)
+		} else {
+			var copied any = nil
+			if inner, ok := obj.Raw().(*runtime.Object); ok {
+				copied = deepCopy(inner)
+			}
+			return runtime.Make(copied, t)
+		}
+	case *checker.Result:
+		// Deep copy Result - the value is an object containing either the success or error value
+		var copied any = nil
+		if inner, ok := obj.Raw().(*runtime.Object); ok {
+			copied = deepCopy(inner)
+		}
+		return runtime.Make(copied, t)
+	case *checker.Enum:
+		// Enums are represented as int8
+		return runtime.Make(obj.Raw(), t)
+	case *checker.FunctionDef:
+		// Functions cannot be copied - return the same function object
+		// Functions are immutable so sharing them is safe
+		return obj
+	default:
+		// For primitives (Str, Int, Float, Bool), return a new object with same value
+		// These are immutable in Ard, so we can just create a new object
+		return runtime.Make(obj.Raw(), t)
+	}
 }
 
 // compareKey is a wrapper around an object to use for map keys
@@ -349,7 +357,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return runtime.MakeFloat(left + right)
 	case *checker.Equality:
 		left, right := vm.eval(e.Left), vm.eval(e.Right)
-		return runtime.MakeBool(left == right)
+		return runtime.MakeBool(left.Equals(*right))
 	case *checker.And:
 		left, right := vm.eval(e.Left).AsBool(), vm.eval(e.Right).AsBool()
 		return runtime.MakeBool(left && right)
