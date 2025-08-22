@@ -28,6 +28,9 @@ func (o Object) Type() checker.Type {
 	return o._type
 }
 
+// simply compares the raw representations.
+//
+// the checker rules should prevent more complex comparisons.
 func (o Object) Equals(other Object) bool {
 	switch o._type {
 	case checker.Int:
@@ -50,6 +53,15 @@ func (o Object) Raw() any {
 // mutate the inner representation
 func (o *Object) Set(v any) {
 	o.raw = v
+}
+
+// slightly different from .Set()
+func (o *Object) Reassign(val *Object) {
+	o.raw = val.raw
+
+	// Update target type to match value type.
+	// o._type could be a generic and if the checker allowed it, o should become the new type
+	o._type = val._type
 }
 
 // deep copies an object
@@ -111,14 +123,6 @@ func (o *Object) Copy() *Object {
 	return copy
 }
 
-func (o *Object) Reassign(val *Object) {
-	o.raw = val.raw
-
-	// Update target type to match value type.
-	// o._type could be a generic and if the checker allowed it, o should become the new type
-	o._type = val._type
-}
-
 // MarshalJSONTo implements JSON v2 marshaling interface
 func (o *Object) MarshalJSONTo(enc *jsontext.Encoder) error {
 	return json.MarshalEncode(enc, o.GoValue(),
@@ -135,31 +139,15 @@ func (o *Object) MarshalJSON() ([]byte, error) {
 	)
 }
 
-// Convert to a Go value. used for encoding to JSON string and scripting results
+// Get the Go value. useful for encoding out and scripting results
 func (o *Object) GoValue() any {
-	if o._type == checker.Void || o._type == nil {
-		return nil
-	}
-	if o._type == checker.Str || o._type == checker.Int || o._type == checker.Float || o._type == checker.Bool {
-		return o.raw
-	}
-	if o._type == checker.Dynamic {
+	if o._type == nil {
 		return o.raw
 	}
 
 	switch o._type.(type) {
 	case *checker.FunctionDef:
 		return o._type.String()
-	case *checker.Enum:
-		return o.raw
-	case *checker.Maybe, *checker.Any:
-		if o.raw == nil {
-			return nil
-		}
-		if inner, ok := o.raw.(*Object); ok {
-			return inner.GoValue()
-		}
-		return o.raw
 	case *checker.List:
 		raw := o.raw.([]*Object)
 		_array := make([]any, len(raw))
@@ -167,11 +155,14 @@ func (o *Object) GoValue() any {
 			_array[i] = item.GoValue()
 		}
 		return _array
-	case *checker.Result:
-		return o.raw
-	}
-
-	if _, isStruct := o._type.(*checker.StructDef); isStruct {
+	case *checker.StructDef:
+		m := o.raw.(map[string]*Object)
+		rawMap := make(map[string]any)
+		for key, value := range m {
+			rawMap[key] = value.GoValue()
+		}
+		return rawMap
+	case *checker.Map:
 		m := o.raw.(map[string]*Object)
 		rawMap := make(map[string]any)
 		for key, value := range m {
@@ -180,16 +171,7 @@ func (o *Object) GoValue() any {
 		return rawMap
 	}
 
-	if _, isMap := o._type.(*checker.Map); isMap {
-		m := o.raw.(map[string]*Object)
-		rawMap := make(map[string]any)
-		for key, value := range m {
-			rawMap[key] = value.GoValue()
-		}
-		return rawMap
-	}
-
-	panic(fmt.Sprintf("Cannot marshall type: %T", o._type))
+	return o.raw
 }
 
 func (o Object) AsBool() bool {
