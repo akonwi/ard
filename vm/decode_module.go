@@ -5,6 +5,7 @@ package vm
 import (
 	"encoding/json/v2"
 	"fmt"
+	"strconv"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/vm/runtime"
@@ -342,6 +343,71 @@ func makeDecodeError(expected, found string) *runtime.Object {
 func makeDecodeErrorList(expected string, found any) *runtime.Object {
 	decodeErr := makeDecodeError(expected, fmt.Sprintf("%v", found))
 	return runtime.MakeList(checker.DecodeErrorDef, decodeErr)
+}
+
+// Helper function to format raw values with smart truncation and previews
+func formatRawValueForError(v any) string {
+	switch val := v.(type) {
+	case string:
+		// Truncate very long strings for readability
+		if len(val) > 50 {
+			return fmt.Sprintf("\"%s...\"", val[:47])
+		}
+		return fmt.Sprintf("\"%s\"", val)
+	case int:
+		return strconv.Itoa(val)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(val)
+	case []any:
+		// Show preview of array contents for small arrays
+		if len(val) == 0 {
+			return "[]"
+		} else if len(val) <= 3 {
+			preview := "["
+			for i, item := range val {
+				if i > 0 {
+					preview += ", "
+				}
+				preview += formatRawValueForError(item)
+			}
+			preview += "]"
+			return preview
+		}
+		return fmt.Sprintf("[array with %d elements]", len(val))
+	case map[string]any:
+		// Show preview of object contents for small objects
+		if len(val) == 0 {
+			return "{}"
+		}
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, k)
+		}
+		if len(keys) <= 3 {
+			preview := "{"
+			for i, key := range keys {
+				if i > 0 {
+					preview += ", "
+				}
+				preview += fmt.Sprintf("%s: %s", key, formatRawValueForError(val[key]))
+			}
+			preview += "}"
+			return preview
+		}
+		return fmt.Sprintf("{object with keys: %v}", keys[:3])
+	case nil:
+		return "null"
+	default:
+		str := fmt.Sprintf("%v", val)
+		if len(str) > 50 {
+			return str[:47] + "..."
+		}
+		return str
+	}
 }
 
 // as_string decoder implementation

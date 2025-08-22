@@ -988,7 +988,7 @@ func (vm *VM) evalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 				pathStr = " at " + pathBuilder.String()
 			}
 
-			errorMsg := "Decode error: expected " + expected + ", found " + "\"" + found + "\"" + pathStr
+			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
 			return runtime.MakeStr(errorMsg)
 		}
 	}

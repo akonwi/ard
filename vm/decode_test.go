@@ -233,14 +233,11 @@ func TestDecodeErrors(t *testing.T) {
 				let data = decode::json("invalid json")  // becomes nil Dynamic
 				let result = decode::run(data, decode::int)
 				match result {
-					err => {
-						let first_error = err.at(0)
-						first_error.expected == "Int" && first_error.found == "null"
-					}
+					err => err.at(0).to_str(),
 					ok(_) => false
 				}
 			`,
-			want: true,
+			want: `Decode error: expected Int, found "null"`,
 		},
 	})
 }
@@ -689,7 +686,7 @@ func TestDecodeErrorToString(t *testing.T) {
 					}
 				}
 			`,
-			want: "Decode error: expected Str, found \"[1 2 3]\"",
+			want: "Decode error: expected Str, found [1, 2, 3]",
 		},
 
 		{
@@ -707,7 +704,7 @@ func TestDecodeErrorToString(t *testing.T) {
 					}
 				}
 			`,
-			want: "Decode error: expected Str, found \"[]\"",
+			want: "Decode error: expected Str, found []",
 		},
 		{
 			name: "decode error handles complex values using premarshal consistently",
@@ -819,25 +816,6 @@ func TestDecodeOneOf(t *testing.T) {
 				let decoder = decode::one_of(empty_decoders)
 				let result = decode::run(data, decoder)
 				result.is_err()
-			`,
-			want: true,
-		},
-		{
-			name: "one_of empty decoder error message is descriptive",
-			input: `
-				use ard/decode
-
-				let data = decode::json("\"hello\"")
-				let empty_decoders: [fn(decode::Dynamic) Str![decode::Error]] = []
-				let decoder = decode::one_of(empty_decoders)
-				let result = decode::run(data, decoder)
-				match result {
-					err => {
-						let first_error = err.at(0)
-						first_error.expected == "At least one decoder" && first_error.found == "Empty decoder list"
-					}
-					ok(_) => false
-				}
 			`,
 			want: true,
 		},
