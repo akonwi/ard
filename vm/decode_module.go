@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // DecodeModule handles ard/decode module functions
@@ -21,7 +22,7 @@ func (m *DecodeModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "as_string":
 		return decodeAsString(args[0], call.Type().(*checker.Result))
@@ -38,14 +39,14 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
 			ReturnType: checker.MakeResult(checker.Str, checker.MakeList(checker.DecodeErrorDef)),
 		}
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsString,
 			},
-			_type: decoderType,
-		}
+			decoderType,
+		)
 	case "int":
 		// Return a decoder function as a Closure
 		decoderType := &checker.FunctionDef{
@@ -53,14 +54,14 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
 			ReturnType: checker.MakeResult(checker.Int, checker.MakeList(checker.DecodeErrorDef)),
 		}
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsInt,
 			},
-			_type: decoderType,
-		}
+			decoderType,
+		)
 	case "float":
 		// Return a decoder function as a Closure
 		decoderType := &checker.FunctionDef{
@@ -68,14 +69,14 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
 			ReturnType: checker.MakeResult(checker.Float, checker.MakeList(checker.DecodeErrorDef)),
 		}
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsFloat,
 			},
-			_type: decoderType,
-		}
+			decoderType,
+		)
 	case "bool":
 		// Return a decoder function as a Closure
 		decoderType := &checker.FunctionDef{
@@ -83,85 +84,64 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
 			ReturnType: checker.MakeResult(checker.Bool, checker.MakeList(checker.DecodeErrorDef)),
 		}
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsBool,
 			},
-			_type: decoderType,
-		}
+			decoderType,
+		)
 	case "run":
 		// Apply the decoder function to the data
 		data := args[0]    // Data comes first now
 		decoder := args[1] // Decoder comes second
 
 		// All decoders are now Closures - use unified approach
-		closure := decoder.raw.(*Closure)
+		closure := decoder.Raw().(*Closure)
 		decoderResult := closure.eval(data)
 
 		// Decoder already returns list-based errors, just return the result
-		resultWithList := call.Type().(*checker.Result)
-		decoderResultValue := decoderResult.raw.(_result)
-
-		if decoderResultValue.ok {
-			// Success - return the value
-			return makeOk(decoderResultValue.raw, resultWithList)
-		} else {
-			// Error - decoder already returns error list
-			errorList := decoderResultValue.raw
-			return makeErr(errorList, resultWithList)
-		}
+		return decoderResult
 	case "json":
 		// Parse external data (JSON string) into Dynamic object
-		jsonString := vm.eval(call.Args[0]).raw.(string)
+		jsonString := vm.eval(call.Args[0]).AsString()
 		jsonBytes := []byte(jsonString)
 
 		// Parse JSON into Dynamic object, fallback to nil if parsing fails
 		dynamicObj, err := parseJsonToDynamic(jsonBytes)
 		if err != nil {
 			// Return nil as Dynamic - this is valid and will be caught by decoders
-			return &object{
-				raw:   nil,
-				_type: checker.Dynamic,
-			}
+			return runtime.Make(nil, checker.Dynamic)
 		}
 
 		return dynamicObj
 	case "from_str":
 		// Create Dynamic from Str primitive
-		strValue := args[0].raw.(string)
-		return &object{
-			raw:   strValue,
-			_type: checker.Dynamic,
-		}
+		strValue := args[0].AsString()
+		return runtime.Make(strValue, checker.Dynamic)
 	case "from_int":
 		// Create Dynamic from Int primitive
-		intValue := args[0].raw.(int)
-		return &object{
-			raw:   intValue,
-			_type: checker.Dynamic,
-		}
+		intValue := args[0].AsInt()
+		return runtime.Make(intValue, checker.Dynamic)
 	case "from_bool":
 		// Create Dynamic from Bool primitive
-		boolValue := args[0].raw.(bool)
-		return &object{
-			raw:   boolValue,
-			_type: checker.Dynamic,
-		}
+		boolValue := args[0].AsBool()
+		return runtime.Make(boolValue, checker.Dynamic)
 	case "from_float":
 		// Create Dynamic from Float primitive
-		floatValue := args[0].raw.(float64)
-		return &object{
-			raw:   floatValue,
-			_type: checker.Dynamic,
-		}
+		floatValue := args[0].AsFloat()
+		return runtime.Make(floatValue, checker.Dynamic)
+	case "from_list":
+		// Create Dynamic from List primitive
+		listValue := args[0].AsList()
+		return runtime.Make(listValue, checker.Dynamic)
 	case "nullable":
 		// Return a nullable decoder function that wraps the inner decoder
 		innerDecoder := args[0]
 
 		// Extract the inner decoder's type to determine the Maybe type
-		innerDecoderType := innerDecoder._type.(*checker.FunctionDef)
+		innerDecoderType := innerDecoder.Type().(*checker.FunctionDef)
 		innerReturnType := innerDecoderType.ReturnType.(*checker.Result)
 		innerValueType := innerReturnType.Val()
 
@@ -175,24 +155,24 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		// Create a closure that captures the inner decoder
-		nullableDecoderFn := func(data *object, resultType *checker.Result) *object {
+		nullableDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 			return decodeAsNullable(innerDecoder, data, resultType)
 		}
 
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *nullableDecoderType,
 				builtinFn: nullableDecoderFn,
 			},
-			_type: nullableDecoderType,
-		}
+			nullableDecoderType,
+		)
 	case "list":
 		// Return a list decoder function that wraps the element decoder
 		elementDecoder := args[0]
 
 		// Extract the element decoder's type to determine the list type
-		elementDecoderType := elementDecoder._type.(*checker.FunctionDef)
+		elementDecoderType := elementDecoder.Type().(*checker.FunctionDef)
 		elementReturnType := elementDecoderType.ReturnType.(*checker.Result)
 		elementValueType := elementReturnType.Val()
 
@@ -206,30 +186,30 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		// Create a closure that captures the element decoder
-		listDecoderFn := func(data *object, resultType *checker.Result) *object {
+		listDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 			return decodeAsList(elementDecoder, data, resultType)
 		}
 
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *listDecoderType,
 				builtinFn: listDecoderFn,
 			},
-			_type: listDecoderType,
-		}
+			listDecoderType,
+		)
 	case "map":
 		// Return a map decoder function that wraps both key and value decoders
 		keyDecoder := args[0]
 		valueDecoder := args[1]
 
 		// Extract the key decoder's type to determine the key type
-		keyDecoderType := keyDecoder._type.(*checker.FunctionDef)
+		keyDecoderType := keyDecoder.Type().(*checker.FunctionDef)
 		keyReturnType := keyDecoderType.ReturnType.(*checker.Result)
 		keyValueType := keyReturnType.Val()
 
 		// Extract the value decoder's type to determine the value type
-		valueDecoderType := valueDecoder._type.(*checker.FunctionDef)
+		valueDecoderType := valueDecoder.Type().(*checker.FunctionDef)
 		valueReturnType := valueDecoderType.ReturnType.(*checker.Result)
 		valueValueType := valueReturnType.Val()
 
@@ -243,25 +223,25 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		// Create a closure that captures both decoders
-		mapDecoderFn := func(data *object, resultType *checker.Result) *object {
+		mapDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 			return decodeAsMap(keyDecoder, valueDecoder, data, resultType)
 		}
 
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *mapDecoderType,
 				builtinFn: mapDecoderFn,
 			},
-			_type: mapDecoderType,
-		}
+			mapDecoderType,
+		)
 	case "field":
 		// Return a field decoder function that extracts a specific field
-		fieldKey := vm.eval(call.Args[0]).raw.(string) // The field name to extract
-		valueDecoder := args[1]                        // Decoder for the field's value
+		fieldKey := vm.eval(call.Args[0]).AsString()
+		valueDecoder := args[1] // Decoder for the field's value
 
 		// Extract type information
-		valueDecoderType := valueDecoder._type.(*checker.FunctionDef)
+		valueDecoderType := valueDecoder.Type().(*checker.FunctionDef)
 		valueReturnType := valueDecoderType.ReturnType.(*checker.Result)
 		valueValueType := valueReturnType.Val()
 
@@ -273,49 +253,49 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		// Create closure that captures field key and value decoder
-		fieldDecoderFn := func(data *object, resultType *checker.Result) *object {
+		fieldDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 			return decodeAsField(fieldKey, valueDecoder, data, resultType)
 		}
 
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *fieldDecoderType,
 				builtinFn: fieldDecoderFn,
 			},
-			_type: fieldDecoderType,
-		}
+			fieldDecoderType,
+		)
 	case "one_of":
 		// Return a decoder that tries multiple decoders in sequence
 		decoderList := args[0] // List of decoders to try
 
 		// Extract the decoder list to get the inner type
-		decoderListObj := decoderList.raw.([]*object)
+		decoderListObj := decoderList.AsList()
 		if len(decoderListObj) == 0 {
 			// Return error instead of panicking - empty decoder lists are not allowed
 			emptyListError := makeDecodeErrorList("At least one decoder", "Empty decoder list")
-			
+
 			// Create a proper decoder type that returns an error
 			errorDecoderType := &checker.FunctionDef{
 				Name:       "OneOfDecoder",
 				Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
 				ReturnType: checker.MakeResult(checker.Void, checker.MakeList(checker.DecodeErrorDef)),
 			}
-			
-			return &object{
-				raw: &Closure{
-					vm:        vm,
-					expr:      *errorDecoderType,
-					builtinFn: func(data *object, resultType *checker.Result) *object {
-						return makeErr(emptyListError, resultType)
+
+			return runtime.Make(
+				&Closure{
+					vm:   vm,
+					expr: *errorDecoderType,
+					builtinFn: func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
+						return runtime.MakeErr(emptyListError)
 					},
 				},
-				_type: errorDecoderType,
-			}
+				errorDecoderType,
+			)
 		}
 
 		// All decoders should have the same return type - use the first one
-		firstDecoderType := decoderListObj[0]._type.(*checker.FunctionDef)
+		firstDecoderType := decoderListObj[0].Type().(*checker.FunctionDef)
 		firstReturnType := firstDecoderType.ReturnType.(*checker.Result)
 		commonValueType := firstReturnType.Val()
 
@@ -327,32 +307,25 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		// Create closure that captures the decoder list
-		oneOfDecoderFn := func(data *object, resultType *checker.Result) *object {
+		oneOfDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 			return decodeAsOneOf(decoderList, data, resultType)
 		}
 
-		return &object{
-			raw: &Closure{
+		return runtime.Make(
+			&Closure{
 				vm:        vm,
 				expr:      *oneOfDecoderType,
 				builtinFn: oneOfDecoderFn,
 			},
-			_type: oneOfDecoderType,
-		}
+			oneOfDecoderType,
+		)
 	default:
 		panic(fmt.Errorf("Unimplemented: decode::%s()", call.Name))
 	}
 }
 
-func (m *DecodeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *DecodeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: decode::%s::%s()", structName, call.Name))
-}
-
-// Helper function to format a value for error messages using premarshal
-func formatValueForError(data *object) string {
-	// Use premarshal to get the raw representation consistently
-	rawValue := data.premarshal()
-	return formatRawValueForError(rawValue)
 }
 
 // Helper function to format raw values with smart truncation and previews
@@ -421,197 +394,180 @@ func formatRawValueForError(v interface{}) string {
 }
 
 // Helper function to create DecodeError
-func makeDecodeError(expected, found string) *object {
-	errorStruct := &object{
-		raw: map[string]*object{
-			"expected": {raw: expected, _type: checker.Str},
-			"found":    {raw: found, _type: checker.Str},
-			"path":     {raw: []*object{}, _type: checker.MakeList(checker.Str)},
+func makeDecodeError(expected, found string) *runtime.Object {
+	return runtime.MakeStruct(checker.DecodeErrorDef,
+		map[string]*runtime.Object{
+			"expected": runtime.MakeStr(expected),
+			"found":    runtime.MakeStr(found),
+			"path":     runtime.MakeList(checker.Str),
 		},
-		_type: checker.DecodeErrorDef,
-	}
-	return errorStruct
+	)
 }
 
-// Helper function to create a list with single DecodeError
-func makeDecodeErrorList(expected, found string) *object {
+// Helper function to create [DecodeError] with one error
+func makeDecodeErrorList(expected, found string) *runtime.Object {
 	decodeErr := makeDecodeError(expected, found)
-	return &object{
-		raw:   []*object{decodeErr},
-		_type: checker.MakeList(checker.DecodeErrorDef),
-	}
+	return runtime.MakeList(checker.DecodeErrorDef, decodeErr)
 }
 
 // Helper function to create a decode error list from data object (shows actual value)
-func makeDecodeErrorListFromData(expected string, data *object) *object {
-	found := formatValueForError(data)
-	return makeDecodeErrorList(expected, found)
+func makeDecodeErrorListFromData(expected string, data *runtime.Object) *runtime.Object {
+	return makeDecodeErrorList(expected, data.AsString())
 }
 
 // as_string decoder implementation
-func decodeAsString(data *object, resultType *checker.Result) *object {
+func decodeAsString(data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	if str, ok := data.IsStr(); ok {
+		return runtime.MakeOk(runtime.MakeStr(str))
+	}
+
 	// For Dynamic objects, check the raw value type
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			decodeErrList := makeDecodeErrorListFromData("Str", data)
-			return makeErr(decodeErrList, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
-		if str, ok := data.raw.(string); ok {
-			return makeOk(&object{raw: str, _type: checker.Str}, resultType)
-		}
-	} else if data._type == checker.Str {
-		return makeOk(data, resultType)
 	}
 
 	decodeErrList := makeDecodeErrorListFromData("Str", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // as_int decoder implementation
-func decodeAsInt(data *object, resultType *checker.Result) *object {
+func decodeAsInt(data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	if intVal, ok := data.IsInt(); ok {
+		return runtime.MakeOk(runtime.MakeInt(intVal))
+	}
+
 	// For Dynamic objects, check the raw value type
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			decodeErrList := makeDecodeErrorListFromData("Int", data)
-			return makeErr(decodeErrList, resultType)
-		}
-		if intVal, ok := data.raw.(int); ok {
-			return makeOk(&object{raw: intVal, _type: checker.Int}, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
 		// SQLite integers come as int64
-		if int64Val, ok := data.raw.(int64); ok {
-			return makeOk(&object{raw: int(int64Val), _type: checker.Int}, resultType)
+		if int64Val, ok := data.Raw().(int64); ok {
+			return runtime.MakeOk(runtime.MakeInt(int(int64Val)))
 		}
 		// JSON numbers might come as float64
-		if floatVal, ok := data.raw.(float64); ok {
-			if floatVal == float64(int(floatVal)) { // Check if it's actually an integer
-				return makeOk(&object{raw: int(floatVal), _type: checker.Int}, resultType)
+		if floatVal, ok := data.Raw().(float64); ok {
+			int := int(floatVal)
+			if floatVal == float64(int) { // Check if it's actually an integer without losing precision
+				return runtime.MakeOk(runtime.MakeInt(int))
 			}
 		}
-	} else if data._type == checker.Int {
-		return makeOk(data, resultType)
 	}
 
 	decodeErrList := makeDecodeErrorListFromData("Int", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // as_float decoder implementation
-func decodeAsFloat(data *object, resultType *checker.Result) *object {
+func decodeAsFloat(data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	if floatVal, ok := data.Raw().(float64); ok {
+		return runtime.MakeOk(runtime.MakeFloat(floatVal))
+	}
+
 	// For Dynamic objects, check the raw value type
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			decodeErrList := makeDecodeErrorListFromData("Float", data)
-			return makeErr(decodeErrList, resultType)
-		}
-		if floatVal, ok := data.raw.(float64); ok {
-			return makeOk(&object{raw: floatVal, _type: checker.Float}, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
 		// Allow int to float conversion
-		if intVal, ok := data.raw.(int); ok {
-			return makeOk(&object{raw: float64(intVal), _type: checker.Float}, resultType)
+		if intVal, ok := data.IsInt(); ok {
+			return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
 		}
-	} else if data._type == checker.Float {
-		return makeOk(data, resultType)
 	}
 
 	decodeErrList := makeDecodeErrorListFromData("Float", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // as_bool decoder implementation
-func decodeAsBool(data *object, resultType *checker.Result) *object {
+func decodeAsBool(data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	if boolVal, ok := data.Raw().(bool); ok {
+		return runtime.MakeOk(runtime.MakeBool(boolVal))
+	}
 	// For Dynamic objects, check the raw value type
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			decodeErrList := makeDecodeErrorListFromData("Bool", data)
-			return makeErr(decodeErrList, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
-		if boolVal, ok := data.raw.(bool); ok {
-			return makeOk(&object{raw: boolVal, _type: checker.Bool}, resultType)
-		}
-	} else if data._type == checker.Bool {
-		return makeOk(data, resultType)
 	}
 
 	decodeErrList := makeDecodeErrorListFromData("Bool", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // decodeAsNullable handles nullable decoding by checking for null and delegating to inner decoder
-func decodeAsNullable(innerDecoder *object, data *object, resultType *checker.Result) *object {
+func decodeAsNullable(innerDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	maybeType := resultType.Val().(*checker.Maybe)
+
 	// If data is null (nil raw value in Dynamic), return maybe::none()
-	if data._type == checker.Dynamic && data.raw == nil {
-		maybeType := resultType.Val().(*checker.Maybe)
-		noneValue := &object{raw: nil, _type: maybeType}
-		return makeOk(noneValue, resultType)
+	if data.Type() == checker.Dynamic && data.Raw() == nil {
+		noneValue := runtime.MakeMaybe(nil, maybeType.Of())
+		return runtime.MakeOk(noneValue)
 	}
 
 	// Otherwise, call the inner decoder
-	closure := innerDecoder.raw.(*Closure)
+	closure := innerDecoder.Raw().(*Closure)
 	innerResult := closure.eval(data)
-	innerResultValue := innerResult.raw.(_result)
 
-	if innerResultValue.ok {
+	if innerResult.IsOk() {
 		// Success - wrap the decoded value in maybe::some()
-		maybeType := resultType.Val().(*checker.Maybe)
-		decodedValue := innerResultValue.raw
-		someValue := &object{raw: decodedValue.raw, _type: maybeType}
-		return makeOk(someValue, resultType)
-	} else {
-		// Error - propagate the error list as-is
-		errorList := innerResultValue.raw
-		return makeErr(errorList, resultType)
+		return runtime.MakeOk(runtime.MakeMaybe(innerResult, maybeType.Of()))
 	}
+	return innerResult
 }
 
 // decodeAsList handles list decoding by checking for array data and delegating to element decoder
-func decodeAsList(elementDecoder *object, data *object, resultType *checker.Result) *object {
+func decodeAsList(elementDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
 	// Check if data is Dynamic and contains array-like structure
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			// Null data - return error (use nullable(list(...)) for nullable lists)
 			decodeErrList := makeDecodeErrorListFromData("Array", data)
-			return makeErr(decodeErrList, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
 
 		// Check if raw data is a slice (JSON array becomes []interface{})
-		if rawSlice, ok := data.raw.([]interface{}); ok {
+		if rawSlice, ok := data.Raw().([]interface{}); ok {
 			return decodeArrayElements(elementDecoder, rawSlice, resultType)
 		}
 	}
 
 	// Not array-like data
 	decodeErrList := makeDecodeErrorListFromData("Array", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // decodeArrayElements decodes each element in the array using the element decoder
-func decodeArrayElements(elementDecoder *object, rawSlice []interface{}, resultType *checker.Result) *object {
+func decodeArrayElements(elementDecoder *runtime.Object, rawSlice []interface{}, resultType *checker.Result) *runtime.Object {
 	// Get element decoder closure
-	closure := elementDecoder.raw.(*Closure)
+	closure := elementDecoder.Raw().(*Closure)
 
-	var decodedElements []*object
-	var errors []*object
+	var decodedElements []*runtime.Object
+	var errors []*runtime.Object
 
 	// Decode each element
 	for i, rawElement := range rawSlice {
-		elementData := &object{raw: rawElement, _type: checker.Dynamic}
+		elementData := runtime.Make(rawElement, checker.Dynamic)
 		elementResult := closure.eval(elementData)
-		elementResultValue := elementResult.raw.(_result)
 
-		if elementResultValue.ok {
-			decodedElements = append(decodedElements, elementResultValue.raw)
+		if elementResult.IsOk() {
+			decodedElements = append(decodedElements, runtime.Make(elementResult.Raw(), elementResult.Type()))
 		} else {
 			// Add element errors with path information
-			elementErrors := elementResultValue.raw.raw.([]*object)
+			elementErrors := elementResult.AsList()
 			for _, err := range elementErrors {
 				// Add index to error path
-				errStruct := err.raw.(map[string]*object)
-				path := errStruct["path"].raw.([]*object)
-				indexStr := &object{raw: fmt.Sprintf("[%d]", i), _type: checker.Str}
-				newPath := append([]*object{indexStr}, path...)
-				errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
+				errStruct := err.Raw().(map[string]*runtime.Object)
+				path := errStruct["path"].Raw().([]*runtime.Object)
+				indexStr := runtime.MakeStr(fmt.Sprintf("[%d]", i))
+				newPath := append([]*runtime.Object{indexStr}, path...)
+				errStruct["path"] = runtime.Make(newPath, checker.MakeList(checker.Str))
 				errors = append(errors, err)
 			}
 		}
@@ -619,87 +575,85 @@ func decodeArrayElements(elementDecoder *object, rawSlice []interface{}, resultT
 
 	if len(errors) > 0 {
 		// Return accumulated errors
-		errorList := &object{raw: errors, _type: checker.MakeList(checker.DecodeErrorDef)}
-		return makeErr(errorList, resultType)
+		errorList := runtime.Make(errors, checker.MakeList(checker.DecodeErrorDef))
+		return runtime.MakeErr(errorList)
 	}
 
 	// Success - create list object
 	listType := resultType.Val().(*checker.List)
-	listObject := &object{raw: decodedElements, _type: listType}
-	return makeOk(listObject, resultType)
+	listObject := runtime.Make(decodedElements, listType)
+	return runtime.MakeOk(listObject)
 }
 
 // decodeAsMap handles map decoding by checking for object data and delegating to key/value decoders
-func decodeAsMap(keyDecoder *object, valueDecoder *object, data *object, resultType *checker.Result) *object {
+func decodeAsMap(keyDecoder *runtime.Object, valueDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
 	// Check if data is Dynamic and contains object-like structure
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			// Null data - return error (use nullable(map(...)) for nullable maps)
 			decodeErrList := makeDecodeErrorListFromData("Object", data)
-			return makeErr(decodeErrList, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
 
 		// Check if raw data is a map (JSON object becomes map[string]interface{})
-		if rawMap, ok := data.raw.(map[string]interface{}); ok {
+		if rawMap, ok := data.Raw().(map[string]interface{}); ok {
 			return decodeMapValues(keyDecoder, valueDecoder, rawMap, resultType)
 		}
 	}
 
 	// Not object-like data
 	decodeErrList := makeDecodeErrorListFromData("Object", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // decodeMapValues decodes each key and value in the object using their respective decoders
-func decodeMapValues(keyDecoder *object, valueDecoder *object, rawMap map[string]interface{}, resultType *checker.Result) *object {
+func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, rawMap map[string]interface{}, resultType *checker.Result) *runtime.Object {
 	// Get decoder closures
-	keyClosure := keyDecoder.raw.(*Closure)
-	valueClosure := valueDecoder.raw.(*Closure)
+	keyClosure := keyDecoder.Raw().(*Closure)
+	valueClosure := valueDecoder.Raw().(*Closure)
 
 	// Create a new map to store decoded keys and values
-	decodedMap := make(map[string]*object)
-	var errors []*object
+	decodedMap := make(map[string]*runtime.Object)
+	var errors []*runtime.Object
 
 	// Decode each key-value pair
 	for rawKey, rawValue := range rawMap {
 		// Decode key
-		keyData := &object{raw: rawKey, _type: checker.Dynamic}
+		keyData := runtime.Make(rawKey, checker.Dynamic)
 		keyResult := keyClosure.eval(keyData)
-		keyResultValue := keyResult.raw.(_result)
 
 		// Decode value
-		valueData := &object{raw: rawValue, _type: checker.Dynamic}
+		valueData := runtime.Make(rawValue, checker.Dynamic)
 		valueResult := valueClosure.eval(valueData)
-		valueResultValue := valueResult.raw.(_result)
 
-		if keyResultValue.ok && valueResultValue.ok {
+		if keyResult.IsOk() && valueResult.IsOk() {
 			// Both key and value decoded successfully
 			// Convert decoded key to string for map storage
-			decodedKey := convertToMapKey(keyResultValue.raw)
-			decodedMap[decodedKey] = valueResultValue.raw
+			decodedKey := runtime.ToMapKey(keyResult)
+			decodedMap[decodedKey] = valueResult.Result_Unwrap()
 		} else {
 			// Add errors with path information
-			if !keyResultValue.ok {
-				keyErrors := keyResultValue.raw.raw.([]*object)
+			if keyResult.IsErr() {
+				keyErrors := keyResult.AsList()
 				for _, err := range keyErrors {
 					// Add key path information
-					errStruct := err.raw.(map[string]*object)
-					path := errStruct["path"].raw.([]*object)
-					keyStr := &object{raw: fmt.Sprintf("key(%s)", rawKey), _type: checker.Str}
-					newPath := append([]*object{keyStr}, path...)
-					errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
+					errStruct := err.Raw().(map[string]*runtime.Object)
+					path := errStruct["path"].Raw().([]*runtime.Object)
+					keyStr := runtime.MakeStr(fmt.Sprintf("key(%s)", rawKey))
+					newPath := append([]*runtime.Object{keyStr}, path...)
+					errStruct["path"] = runtime.Make(newPath, checker.MakeList(checker.Str))
 					errors = append(errors, err)
 				}
 			}
-			if !valueResultValue.ok {
-				valueErrors := valueResultValue.raw.raw.([]*object)
+			if valueResult.IsErr() {
+				valueErrors := valueResult.AsList()
 				for _, err := range valueErrors {
 					// Add value path information
-					errStruct := err.raw.(map[string]*object)
-					path := errStruct["path"].raw.([]*object)
-					keyStr := &object{raw: fmt.Sprintf("value(%s)", rawKey), _type: checker.Str}
-					newPath := append([]*object{keyStr}, path...)
-					errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
+					errStruct := err.Raw().(map[string]*runtime.Object)
+					path := errStruct["path"].Raw().([]*runtime.Object)
+					keyStr := runtime.MakeStr(fmt.Sprintf("value(%s)", rawKey))
+					newPath := append([]*runtime.Object{keyStr}, path...)
+					errStruct["path"] = runtime.Make(newPath, checker.MakeList(checker.Str))
 					errors = append(errors, err)
 				}
 			}
@@ -708,122 +662,118 @@ func decodeMapValues(keyDecoder *object, valueDecoder *object, rawMap map[string
 
 	if len(errors) > 0 {
 		// Return accumulated errors
-		errorList := &object{raw: errors, _type: checker.MakeList(checker.DecodeErrorDef)}
-		return makeErr(errorList, resultType)
+		errorList := runtime.Make(errors, checker.MakeList(checker.DecodeErrorDef))
+		return runtime.MakeErr(errorList)
 	}
 
 	// Success - create map object
 	mapType := resultType.Val().(*checker.Map)
-	mapObject := &object{raw: decodedMap, _type: mapType}
-	return makeOk(mapObject, resultType)
+	mapObject := runtime.Make(decodedMap, mapType)
+	return runtime.MakeOk(mapObject)
 }
 
 // convertToMapKey converts a decoded key object to a string for map storage
-func convertToMapKey(keyObj *object) string {
-	switch keyObj._type {
+func convertToMapKey(keyObj *runtime.Object) string {
+	switch keyObj.Type() {
 	case checker.Str:
-		return keyObj.raw.(string)
+		return keyObj.Raw().(string)
 	case checker.Int:
-		return fmt.Sprintf("%d", keyObj.raw.(int))
+		return fmt.Sprintf("%d", keyObj.Raw().(int))
 	case checker.Float:
-		return fmt.Sprintf("%g", keyObj.raw.(float64))
+		return fmt.Sprintf("%g", keyObj.Raw().(float64))
 	case checker.Bool:
-		if keyObj.raw.(bool) {
+		if keyObj.Raw().(bool) {
 			return "true"
 		}
 		return "false"
 	default:
 		// For other types, use a string representation
-		return fmt.Sprintf("%v", keyObj.raw)
+		return fmt.Sprintf("%v", keyObj.Raw())
 	}
 }
 
 // decodeAsField extracts a specific field from an object and decodes it
-func decodeAsField(fieldKey string, valueDecoder *object, data *object, resultType *checker.Result) *object {
+func decodeAsField(fieldKey string, valueDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
 	// Check if data is Dynamic and contains object-like structure
-	if data._type == checker.Dynamic {
-		if data.raw == nil {
+	if data.Type() == checker.Dynamic {
+		if data.Raw() == nil {
 			// Null data - return error
 			decodeErrList := makeDecodeErrorListFromData("Object", data)
-			return makeErr(decodeErrList, resultType)
+			return runtime.MakeErr(decodeErrList)
 		}
 
-		// Check if raw data is a map (JSON object becomes map[string]interface{})
-		if rawMap, ok := data.raw.(map[string]interface{}); ok {
+		// Check if raw data is a map (JSON object becomes map[string]any)
+		if rawMap, ok := data.Raw().(map[string]any); ok {
 			return extractField(fieldKey, valueDecoder, rawMap, resultType)
 		}
 	}
 
 	// Not object-like data
 	decodeErrList := makeDecodeErrorListFromData("Object", data)
-	return makeErr(decodeErrList, resultType)
+	return runtime.MakeErr(decodeErrList)
 }
 
 // extractField handles the actual field extraction and value decoding
-func extractField(fieldKey string, valueDecoder *object, rawMap map[string]interface{}, resultType *checker.Result) *object {
+func extractField(fieldKey string, valueDecoder *runtime.Object, rawMap map[string]any, resultType *checker.Result) *runtime.Object {
 	// Get value decoder closure
-	valueClosure := valueDecoder.raw.(*Closure)
+	valueClosure := valueDecoder.Raw().(*Closure)
 
 	// Check if field exists
 	rawValue, exists := rawMap[fieldKey]
 	if !exists {
 		// Missing field error with path
-		decodeErr := &object{
-			raw: map[string]*object{
-				"expected": {raw: "field '" + fieldKey + "'", _type: checker.Str},
-				"found":    {raw: "missing", _type: checker.Str},
-				"path":     {raw: []*object{{raw: fieldKey, _type: checker.Str}}, _type: checker.MakeList(checker.Str)},
+		decodeErr := runtime.MakeStruct(
+			checker.DecodeErrorDef,
+			map[string]*runtime.Object{
+				"expected": runtime.MakeStr("field '" + fieldKey + "'"),
+				"found":    runtime.MakeStr("missing"),
+				"path":     runtime.MakeList(checker.Str, runtime.MakeStr(fieldKey)),
 			},
-			_type: checker.DecodeErrorDef,
-		}
-		errorList := &object{raw: []*object{decodeErr}, _type: checker.MakeList(checker.DecodeErrorDef)}
-		return makeErr(errorList, resultType)
+		)
+		errorList := runtime.MakeList(checker.DecodeErrorDef, decodeErr)
+		return runtime.MakeErr(errorList)
 	}
 
 	// Field exists, decode its value
-	valueData := &object{raw: rawValue, _type: checker.Dynamic}
+	valueData := runtime.MakeDynamic(rawValue)
 	valueResult := valueClosure.eval(valueData)
-	valueResultValue := valueResult.raw.(_result)
 
-	if valueResultValue.ok {
-		return makeOk(valueResultValue.raw, resultType)
-	} else {
-		// Propagate errors with field name in path
-		valueErrors := valueResultValue.raw.raw.([]*object)
-		for _, err := range valueErrors {
-			errStruct := err.raw.(map[string]*object)
-			path := errStruct["path"].raw.([]*object)
-			fieldStr := &object{raw: fieldKey, _type: checker.Str}
-			newPath := append([]*object{fieldStr}, path...)
-			errStruct["path"] = &object{raw: newPath, _type: checker.MakeList(checker.Str)}
-		}
-
-		errorList := &object{raw: valueErrors, _type: checker.MakeList(checker.DecodeErrorDef)}
-		return makeErr(errorList, resultType)
+	if valueResult.IsOk() {
+		return valueResult
 	}
+
+	// Propagate errors with field name in path
+	errors := valueResult.AsList()
+	for _, err := range errors {
+		_path := err.Struct_Get("path")
+		path := _path.AsList()
+		fieldStr := runtime.MakeStr(fieldKey)
+		// shouldn't this go on the end?
+		_path.Set(append([]*runtime.Object{fieldStr}, path...))
+	}
+
+	// todo: maybe should copy instead of mutate
+	return valueResult
 }
 
 // decodeAsOneOf tries multiple decoders in sequence until one succeeds
-func decodeAsOneOf(decoderList *object, data *object, resultType *checker.Result) *object {
-	decoders := decoderList.raw.([]*object)
-	
+func decodeAsOneOf(decoderList *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
+	decoders := decoderList.AsList()
+
 	if len(decoders) == 0 {
-		// Return error instead of panicking
 		emptyListError := makeDecodeErrorList("At least one decoder", "Empty decoder list")
-		return makeErr(emptyListError, resultType)
+		return runtime.MakeErr(emptyListError)
 	}
 
-	var firstError *object
+	var firstError *runtime.Object
 
 	// Try each decoder in sequence
 	for i, decoder := range decoders {
-		closure := decoder.raw.(*Closure)
+		closure := decoder.Raw().(*Closure)
 		result := closure.eval(data)
-		resultValue := result.raw.(_result)
 
-		if resultValue.ok {
-			// Success! Return the result
-			return makeOk(resultValue.raw, resultType)
+		if result.IsOk() {
+			return result
 		}
 
 		// Store the first error (following Gleam's pattern)
@@ -833,23 +783,19 @@ func decodeAsOneOf(decoderList *object, data *object, resultType *checker.Result
 	}
 
 	// All decoders failed - return the first error
-	firstErrorValue := firstError.raw.(_result)
-	return makeErr(firstErrorValue.raw, resultType)
+	return firstError
 }
 
 // parseJsonToDynamic parses JSON into a Dynamic object
-func parseJsonToDynamic(jsonBytes []byte) (*object, error) {
-	var rawValue interface{}
+func parseJsonToDynamic(jsonBytes []byte) (*runtime.Object, error) {
+	var rawValue any
 
-	// Parse JSON into Go interface{}
+	// Parse JSON into any
 	err := json.Unmarshal(jsonBytes, &rawValue)
 	if err != nil {
 		return nil, err
 	}
 
 	// Wrap the raw value as a Dynamic object
-	return &object{
-		raw:   rawValue,
-		_type: checker.Dynamic,
-	}, nil
+	return runtime.MakeDynamic(rawValue), nil
 }

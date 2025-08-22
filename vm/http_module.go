@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // HTTPModule handles ard/http module functions
@@ -40,78 +41,78 @@ func convertToGoPattern(path string) string {
 	return strings.Join(parts, "/")
 }
 
-func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "serve":
-		port := args[0].raw.(int)
-		handlers := args[1].raw.(map[string]*object)
+		port := args[0].Raw().(int)
+		handlers := args[1].Raw().(map[string]*runtime.Object)
 
 		_mux := http.NewServeMux()
 		for path, handler := range handlers {
 			_mux.HandleFunc(convertToGoPattern(path), func(w http.ResponseWriter, r *http.Request) {
 				// Convert Go request to  http::Request
-				headers := make(map[string]*object)
+				headers := make(map[string]*runtime.Object)
 				for k, v := range r.Header {
 					if len(v) > 0 {
-						headers[k] = &object{v[0], checker.Str}
+						headers[k] = runtime.MakeStr(v[0])
 					}
 				}
 
 				bodyType := checker.HttpRequestDef.Fields["body"]
-				var body *object
+				var body *runtime.Object
 				if r.Body != nil {
 					bodyBytes, err := io.ReadAll(r.Body)
 					if err == nil {
-						body = &object{string(bodyBytes), bodyType}
+						body = runtime.Make(string(bodyBytes), bodyType)
 					} else {
-						body = &object{nil, bodyType}
+						body = runtime.Make(nil, bodyType)
 					}
 					r.Body.Close()
 				} else {
-					body = &object{nil, bodyType}
+					body = runtime.Make(nil, bodyType)
 				}
 
 				// Convert HTTP method string to Method enum
-				var methodEnum *object
+				var methodEnum *runtime.Object
 				switch r.Method {
 				case "GET":
-					methodEnum = &object{int8(0), checker.HttpMethodDef} // Get variant
+					methodEnum = runtime.Make(int8(0), checker.HttpMethodDef) // Get variant
 				case "POST":
-					methodEnum = &object{int8(1), checker.HttpMethodDef} // Post variant
+					methodEnum = runtime.Make(int8(1), checker.HttpMethodDef) // Post variant
 				case "PUT":
-					methodEnum = &object{int8(2), checker.HttpMethodDef} // Put variant
+					methodEnum = runtime.Make(int8(2), checker.HttpMethodDef) // Put variant
 				case "DELETE":
-					methodEnum = &object{int8(3), checker.HttpMethodDef} // Del variant
+					methodEnum = runtime.Make(int8(3), checker.HttpMethodDef) // Del variant
 				case "PATCH":
-					methodEnum = &object{int8(4), checker.HttpMethodDef} // Patch variant
+					methodEnum = runtime.Make(int8(4), checker.HttpMethodDef) // Patch variant
 				case "OPTIONS":
-					methodEnum = &object{int8(5), checker.HttpMethodDef} // Patch variant
+					methodEnum = runtime.Make(int8(5), checker.HttpMethodDef) // Patch variant
 				default:
-					methodEnum = &object{int8(0), checker.HttpMethodDef} // Default to Get
+					methodEnum = runtime.Make(int8(0), checker.HttpMethodDef) // Default to Get
 				}
 
-				requestMap := map[string]*object{
+				requestMap := map[string]*runtime.Object{
 					"method":  methodEnum,
-					"url":     {r.URL.String(), checker.Str},
-					"headers": {headers, checker.MakeMap(checker.Str, checker.Str)},
+					"url":     runtime.MakeStr(r.URL.String()),
+					"headers": runtime.Make(headers, checker.MakeMap(checker.Str, checker.Str)),
 					"body":    body,
-					"path": {func() *object {
-						return &object{r.URL.Path, checker.Str}
-					}, checker.HttpRequestDef.Methods["path"]},
-					"path_param": {func(args ...*object) *object {
-						name := args[0].raw.(string)
-						return &object{r.PathValue(name), checker.Str}
-					}, checker.HttpRequestDef.Methods["path_param"]},
-					"query_param": {func(args ...*object) *object {
-						name := args[0].raw.(string)
-						return &object{r.URL.Query().Get(name), checker.Str}
-					}, checker.HttpRequestDef.Methods["query_param"]},
+					"path": runtime.Make(func() *runtime.Object {
+						return runtime.MakeStr(r.URL.Path)
+					}, checker.HttpRequestDef.Methods["path"]),
+					"path_param": runtime.Make(func(args ...*runtime.Object) *runtime.Object {
+						name := args[0].Raw().(string)
+						return runtime.MakeStr(r.PathValue(name))
+					}, checker.HttpRequestDef.Methods["path_param"]),
+					"query_param": runtime.Make(func(args ...*runtime.Object) *runtime.Object {
+						name := args[0].Raw().(string)
+						return runtime.MakeStr(r.URL.Query().Get(name))
+					}, checker.HttpRequestDef.Methods["query_param"]),
 				}
 
-				request := &object{requestMap, checker.HttpRequestDef}
+				request := runtime.MakeStruct(checker.HttpRequestDef, requestMap)
 
 				// Call the Ard handler function
-				handle, ok := handler.raw.(*Closure)
+				handle, ok := handler.Raw().(*Closure)
 				if !ok {
 					panic(fmt.Errorf("Handler for '%s' is not a function", path))
 				}
@@ -123,15 +124,15 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 				response := isolatedHandle.eval(request)
 
 				// Convert Ard Response to Go HTTP response
-				respMap := response.raw.(map[string]*object)
-				status := respMap["status"].raw.(int)
-				responseBody := respMap["body"].raw.(string)
+				respMap := response.Raw().(map[string]*runtime.Object)
+				status := respMap["status"].Raw().(int)
+				responseBody := respMap["body"].Raw().(string)
 
 				// Set response headers if present
 				if headersObj, ok := respMap["headers"]; ok {
-					if headersMap, ok := headersObj.raw.(map[string]*object); ok {
+					if headersMap, ok := headersObj.Raw().(map[string]*runtime.Object); ok {
 						for k, v := range headersMap {
-							if strVal, ok := v.raw.(string); ok {
+							if strVal, ok := v.Raw().(string); ok {
 								w.Header().Set(k, strVal)
 							}
 						}
@@ -148,28 +149,28 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			panic(fmt.Errorf("Server failed: %v", err))
 		}
 
-		return &object{nil, nil} // Server runs indefinitely
+		return runtime.Void() // Server runs indefinitely
 	case "respond":
-		status := args[0].raw.(int)
-		body := args[1].raw.(string)
+		status := args[0].Raw().(int)
+		body := args[1].Raw().(string)
 
-		responseMap := map[string]*object{
-			"status":  &object{status, checker.Int},
-			"headers": &object{make(map[string]*object), checker.MakeMap(checker.Str, checker.Str)},
-			"body":    &object{body, checker.Str},
+		responseMap := map[string]*runtime.Object{
+			"status":  runtime.MakeInt(status),
+			"headers": runtime.Make(make(map[string]*runtime.Object), checker.MakeMap(checker.Str, checker.Str)),
+			"body":    runtime.MakeStr(body),
 		}
 
-		return &object{responseMap, checker.HttpResponseDef}
+		return runtime.MakeStruct(checker.HttpResponseDef, responseMap)
 	case "send":
 		// Cast back to *VM to access the original evalHttpSend function
 		// This preserves the existing complex HTTP logic
 		request := args[0]
-		requestMap := request.raw.(map[string]*object)
+		requestMap := request.Raw().(map[string]*runtime.Object)
 
 		// Convert Method enum to string
 		methodEnum := requestMap["method"]
 		var method string
-		switch methodEnum.raw.(int8) {
+		switch methodEnum.Raw().(int8) {
 		case 0: // Get
 			method = "GET"
 		case 1: // Post
@@ -185,18 +186,18 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 		default:
 			method = "GET"
 		}
-		url := requestMap["url"].raw.(string)
+		url := requestMap["url"].Raw().(string)
 
 		var body io.Reader = nil
 
-		if bodyObj, ok := requestMap["body"]; ok && bodyObj.raw != nil {
-			body = strings.NewReader(bodyObj.raw.(string))
+		if bodyObj, ok := requestMap["body"]; ok && bodyObj.Raw() != nil {
+			body = strings.NewReader(bodyObj.Raw().(string))
 		}
 
 		headers := make(http.Header)
-		rawHeaders := requestMap["headers"].raw.(map[string]*object)
+		rawHeaders := requestMap["headers"].Raw().(map[string]*runtime.Object)
 		for k, v := range rawHeaders {
-			if strVal, ok := v.raw.(string); ok {
+			if strVal, ok := v.Raw().(string); ok {
 				headers.Set(k, strVal)
 			}
 		}
@@ -205,50 +206,48 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) 
 			Timeout: 30 * time.Second,
 		}
 
-		resultType := call.Type().(*checker.Result)
-
 		req, err := http.NewRequest(method, url, body)
 		if err != nil {
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		req.Header = headers
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 		defer resp.Body.Close()
 
 		// Read the response body
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 		bodyStr := string(bodyBytes)
 
 		// Create response headers map
-		respHeadersMap := make(map[string]*object)
+		respHeadersMap := make(map[string]*runtime.Object)
 		for k, v := range resp.Header {
 			if len(v) > 0 {
-				respHeadersMap[k] = &object{v[0], checker.Str}
+				respHeadersMap[k] = runtime.MakeStr(v[0])
 			}
 		}
 
 		// Create the response object
-		respMap := map[string]*object{
-			"status":  &object{resp.StatusCode, checker.Int},
-			"headers": &object{respHeadersMap, checker.MakeMap(checker.Str, checker.Str)},
-			"body":    &object{bodyStr, checker.Str},
+		respMap := map[string]*runtime.Object{
+			"status":  runtime.MakeInt(resp.StatusCode),
+			"headers": runtime.Make(respHeadersMap, checker.MakeMap(checker.Str, checker.Str)),
+			"body":    runtime.MakeStr(bodyStr),
 		}
 
-		return makeOk(&object{respMap, resultType.Val()}, resultType)
+		return runtime.MakeOk(runtime.MakeStruct(checker.HttpResponseDef, respMap))
 	default:
 		panic(fmt.Errorf("Unimplemented: http::%s()", call.Name))
 	}
 }
 
-func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch structName {
 	case "Response":
 		return m.handleResponseStatic(call, args)
@@ -257,7 +256,7 @@ func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.Funct
 	}
 }
 
-func (m *HTTPModule) handleResponseStatic(call *checker.FunctionCall, args []*object) *object {
+func (m *HTTPModule) handleResponseStatic(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "new":
 		// Response::new(status: Int, body: Str) -> Response
@@ -265,36 +264,36 @@ func (m *HTTPModule) handleResponseStatic(call *checker.FunctionCall, args []*ob
 			panic(fmt.Errorf("Response::new expects 2 arguments, got %d", len(args)))
 		}
 
-		status := args[0].raw.(int)
-		body := args[1].raw.(string)
+		status := args[0].Raw().(int)
+		body := args[1].Raw().(string)
 
 		// Create response object structure
-		respMap := map[string]*object{
-			"status":  &object{status, checker.Int},
-			"headers": &object{make(map[string]*object), checker.MakeMap(checker.Str, checker.Str)},
-			"body":    &object{body, checker.Str},
+		respMap := map[string]*runtime.Object{
+			"status":  runtime.MakeInt(status),
+			"headers": runtime.Make(make(map[string]*runtime.Object), checker.MakeMap(checker.Str, checker.Str)),
+			"body":    runtime.MakeStr(body),
 		}
 
-		return &object{respMap, checker.HttpResponseDef}
+		return runtime.MakeStruct(checker.HttpResponseDef, respMap)
 	default:
 		panic(fmt.Errorf("Unimplemented: Response::%s()", call.Name))
 	}
 }
 
 // do HTTP::Response methods
-func (mod *HTTPModule) evalHttpResponseMethod(response *object, method *checker.FunctionCall, args []*object) *object {
+func (mod *HTTPModule) evalHttpResponseMethod(response *runtime.Object, method *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	// Get raw response struct
-	respMap, ok := response.raw.(map[string]*object)
+	respMap, ok := response.Raw().(map[string]*runtime.Object)
 	if !ok {
 		fmt.Println("HTTP Error: Response is not correctly formatted")
-		return &object{nil, method.Type()}
+		return runtime.Make(nil, method.Type())
 	}
 
 	switch method.Name {
 	case "is_ok":
 		{
-			status := respMap["status"].raw.(int)
-			return &object{status >= 200 && status <= 300, method.Type()}
+			status := respMap["status"].Raw().(int)
+			return runtime.MakeBool(status >= 200 && status <= 300)
 		}
 	default:
 		panic(fmt.Sprintf("Unsupported method on HTTP Response: %s", method.Name))
@@ -302,26 +301,25 @@ func (mod *HTTPModule) evalHttpResponseMethod(response *object, method *checker.
 }
 
 // do HTTP::Request methods
-func (mod *HTTPModule) evalHttpRequestMethod(request *object, method *checker.FunctionCall, args []*object) *object {
-	reqMap, ok := request.raw.(map[string]*object)
+func (mod *HTTPModule) evalHttpRequestMethod(request *runtime.Object, method *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+	reqMap, ok := request.Raw().(map[string]*runtime.Object)
 	if !ok {
 		fmt.Println("HTTP Error: Response is not correctly formatted")
-		return &object{nil, method.Type()}
+		return runtime.Make(nil, method.Type())
 	}
 
 	switch method.Name {
 	case "path":
 		{
-			parsed, err := url.Parse(reqMap["url"].raw.(string))
-			resultType := method.Type().(*checker.Result)
+			parsed, err := url.Parse(reqMap["url"].Raw().(string))
 			if err != nil {
-				return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+				return runtime.MakeErr(runtime.MakeStr(err.Error()))
 			}
-			return makeOk(&object{parsed.Path, resultType.Val()}, resultType)
+			return runtime.MakeOk(runtime.MakeStr(parsed.Path))
 		}
 	default:
 		if raw, ok := reqMap[method.Name]; ok {
-			fn, ok := raw.raw.(func(...*object) *object)
+			fn, ok := raw.Raw().(func(...*runtime.Object) *runtime.Object)
 			if !ok {
 				panic(fmt.Errorf("HTTP Error: Request method is not a function: %s", method.Name))
 			}

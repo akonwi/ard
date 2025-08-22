@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -27,19 +28,18 @@ func (m *SQLiteModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "open":
-		resultType := call.Type().(*checker.Result)
-		filePath := args[0].raw.(string)
+		filePath := args[0].Raw().(string)
 		conn, err := sql.Open("sqlite3", filePath)
 		if err != nil {
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Test the connection
 		if err := conn.Ping(); err != nil {
-			return makeErr(&object{fmt.Sprintf("Failed to connect to database: %s", err), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Failed to connect to database: %s", err)))
 		}
 
 		// Create our Database wrapper
@@ -49,18 +49,15 @@ func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*object
 		}
 
 		// Create a Database object with the correct type
-		dbObject := &object{
-			raw:   database,
-			_type: resultType.Val(),
-		}
+		dbObject := runtime.Make(database, checker.DatabaseDef)
 
-		return makeOk(dbObject, resultType)
+		return runtime.MakeOk(dbObject)
 	default:
 		panic(fmt.Errorf("Unimplemented: sqlite::%s()", call.Name))
 	}
 }
 
-func (m *SQLiteModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *SQLiteModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch structName {
 	case "Database":
 		// Handle static methods on Database struct if any
@@ -71,9 +68,9 @@ func (m *SQLiteModule) HandleStatic(structName string, vm *VM, call *checker.Fun
 }
 
 // evalDatabaseMethod handles instance methods on Database objects
-func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.FunctionCall, args []*object) *object {
+func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	// Get the Database struct from the object
-	db, ok := database.raw.(*Database)
+	db, ok := database.Raw().(*Database)
 	if !ok {
 		panic(fmt.Errorf("SQLite Error: Database object is not correctly formatted"))
 	}
@@ -81,30 +78,27 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 	switch method.Name {
 	case "exec":
 		// fn exec(sql: Str) Void!Str
-		resultType := method.Type().(*checker.Result)
-		sql := args[0].raw.(string)
+		sql := args[0].AsString()
 
 		// Execute the SQL
 		_, err := db.conn.Exec(sql)
 		if err != nil {
 			// Return Err(Str)
-			errorMsg := &object{err.Error(), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return Ok(Void)
-		return makeOk(void, resultType)
+		return runtime.MakeOk(runtime.Void())
 	case "insert":
 		// fn insert(table: Str, values: [Str: Dynamic]) Result<Dynamic, Str>
-		resultType := method.Type().(*checker.Result)
-		tableName := args[0].raw.(string)
+		tableName := args[0].AsString()
 		valuesMap := args[1]
 
 		// Extract fields from the map
-		mapData, ok := valuesMap.raw.(map[string]*object)
+		mapData, ok := valuesMap.Raw().(map[string]*runtime.Object)
 		if !ok {
-			errorMsg := &object{"SQLite Error: ins expects a map object", resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr("SQLite Error: ins expects a map object")
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Build INSERT statement
@@ -122,7 +116,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		for _, columnName := range columns {
 			fieldObj := mapData[columnName]
 			placeholders = append(placeholders, "?")
-			values = append(values, fieldObj.raw)
+			values = append(values, fieldObj.GoValue())
 		}
 
 		// Construct SQL
@@ -136,8 +130,8 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		_, err := db.conn.Exec(sql, values...)
 		if err != nil {
 			// Return Err(Str)
-			errorMsg := &object{err.Error(), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(err.Error())
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Build SELECT query to get the inserted row back
@@ -145,7 +139,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		var selectValues []any
 		for _, columnName := range columns {
 			whereConditions = append(whereConditions, fmt.Sprintf("%s = ?", columnName))
-			selectValues = append(selectValues, mapData[columnName].raw)
+			selectValues = append(selectValues, mapData[columnName].GoValue())
 		}
 
 		selectSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1",
@@ -156,21 +150,21 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Execute the SELECT to get the inserted row
 		rows, err := db.conn.Query(selectSQL, selectValues...)
 		if err != nil {
-			errorMsg := &object{fmt.Sprintf("Failed to retrieve inserted row: %v", err), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to retrieve inserted row: %v", err))
+			return runtime.MakeErr(errorMsg)
 		}
 		defer rows.Close()
 
 		// Get column names from the result
 		resultColumns, err := rows.Columns()
 		if err != nil {
-			errorMsg := &object{fmt.Sprintf("Failed to get result columns: %v", err), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to get result columns: %v", err))
+			return runtime.MakeErr(errorMsg)
 		}
 
 		if !rows.Next() {
-			errorMsg := &object{"Failed to find inserted row", resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr("Failed to find inserted row")
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Scan the row data
@@ -181,8 +175,8 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		}
 
 		if err := rows.Scan(scanTargets...); err != nil {
-			errorMsg := &object{fmt.Sprintf("Failed to scan inserted row: %v", err), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to scan inserted row: %v", err))
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Build result map
@@ -192,21 +186,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		}
 
 		// Return Ok(Dynamic) with the full row data
-		dynamicResult := &object{resultMap, checker.Dynamic}
-		return makeOk(dynamicResult, resultType)
+		dynamicResult := runtime.MakeDynamic(resultMap)
+		return runtime.MakeOk(dynamicResult)
 	case "update":
 		// fn update(table: Str, where: Str, values: [Str:Dynamic]) Result<Dynamic, Str>
-		resultType := method.Type().(*checker.Result)
-		tableName := args[0].raw.(string)
-		whereClause := args[1].raw.(string)
+		tableName := args[0].AsString()
+		whereClause := args[1].AsString()
 		valuesMap := args[2]
 
 		// Extract fields from the map
-		mapData, ok := valuesMap.raw.(map[string]*object)
-		if !ok {
-			errorMsg := &object{"SQLite Error: update expects a map object", resultType.Err()}
-			return makeErr(errorMsg, resultType)
-		}
+		mapData := valuesMap.AsMap()
 
 		// Build UPDATE statement
 		var setPairs []string
@@ -223,7 +212,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		for _, columnName := range columns {
 			fieldObj := mapData[columnName]
 			setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
-			values = append(values, fieldObj.raw)
+			values = append(values, fieldObj.GoValue())
 		}
 
 		// Construct SQL
@@ -236,8 +225,8 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Execute the UPDATE
 		_, err := db.conn.Exec(sql, values...)
 		if err != nil {
-			errorMsg := &object{err.Error(), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to update row: %s", err))
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Build SELECT query to get the updated row(s) back
@@ -249,21 +238,21 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Execute the SELECT to get the updated row
 		rows, err := db.conn.Query(selectSQL)
 		if err != nil {
-			errorMsg := &object{fmt.Sprintf("Failed to retrieve updated row: %v", err), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to retrieve updated row: %s", err))
+			return runtime.MakeErr(errorMsg)
 		}
 		defer rows.Close()
 
 		// Get column names from the result
 		resultColumns, err := rows.Columns()
 		if err != nil {
-			errorMsg := &object{fmt.Sprintf("Failed to get result columns: %v", err), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to get result columns: %s", err))
+			return runtime.MakeErr(errorMsg)
 		}
 
 		if !rows.Next() {
-			errorMsg := &object{"No records found matching the where clause", resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr("No records found matching the where clause")
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Scan the row data
@@ -274,23 +263,22 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		}
 
 		if err := rows.Scan(scanTargets...); err != nil {
-			errorMsg := &object{fmt.Sprintf("Failed to scan updated row: %v", err), resultType.Err()}
-			return makeErr(errorMsg, resultType)
+			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to scan updated row: %s", err))
+			return runtime.MakeErr(errorMsg)
 		}
 
 		// Build result map
-		resultMap := make(map[string]interface{})
+		resultMap := make(map[string]any)
 		for i, columnName := range resultColumns {
 			resultMap[columnName] = scanValues[i]
 		}
 
 		// Return Ok(Dynamic) with the updated row data
-		dynamicResult := &object{resultMap, checker.Dynamic}
-		return makeOk(dynamicResult, resultType)
+		return runtime.MakeOk(runtime.MakeDynamic(resultMap))
 	case "get":
 		// fn get(table: Str, where: Str) [T]
-		tableName := args[0].raw.(string)
-		whereClause := args[1].raw.(string)
+		tableName := args[0].AsString()
+		whereClause := args[1].AsString()
 
 		resultType := method.Type().(*checker.Result)
 		// Get the target struct type from the method's return type
@@ -307,8 +295,8 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		targetStructType, ok := inner.(*checker.StructDef)
 		if !ok {
-			err := fmt.Errorf("SQLite Error: get method expects a struct type, got %T", inner)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			err := runtime.MakeStr(fmt.Errorf("SQLite Error: get method expects a struct type, got %T", inner).Error())
+			return runtime.MakeErr(err)
 		}
 
 		// Build SELECT statement
@@ -323,7 +311,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		rows, err := db.conn.Query(sql)
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 		defer rows.Close()
 
@@ -331,11 +319,11 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		columns, err := rows.Columns()
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to get column names: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Build result list
-		var results []*object
+		var results []*runtime.Object
 
 		for rows.Next() {
 			// Create scan targets for each column
@@ -348,11 +336,11 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 			// Scan the row
 			if err := rows.Scan(scanTargets...); err != nil {
 				err := fmt.Errorf("SQLite Error: failed to scan row: %v", err)
-				return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+				return runtime.MakeErr(runtime.MakeStr(err.Error()))
 			}
 
 			// Map columns to struct fields
-			structFields := make(map[string]*object)
+			structFields := make(map[string]*runtime.Object)
 			for i, columnName := range columns {
 				// Get the field type from the target struct
 				fieldType, exists := targetStructType.Fields[columnName]
@@ -433,25 +421,25 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 					}
 				}
 
-				structFields[columnName] = &object{fieldValue, fieldType}
+				structFields[columnName] = runtime.Make(fieldValue, fieldType)
 			}
 
 			// Create the struct object
-			structObj := &object{structFields, targetStructType}
+			structObj := runtime.MakeStruct(targetStructType, structFields)
 			results = append(results, structObj)
 		}
 
 		if err := rows.Err(); err != nil {
 			err := fmt.Errorf("SQLite Error: row iteration error: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return list of structs
-		return makeOk(&object{results, listType}, resultType)
+		return runtime.MakeOk(runtime.MakeList(listType.Of(), results...))
 	case "delete":
 		// fn delete(table: Str, where: Str) Result<Bool, Str>
-		tableName := args[0].raw.(string)
-		whereClause := args[1].raw.(string)
+		tableName := args[0].AsString()
+		whereClause := args[1].AsString()
 
 		// Construct SQL
 		var sql string
@@ -464,32 +452,32 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		// Execute the DELETE
 		result, err := db.conn.Exec(sql)
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Check if any rows were affected
 		rowsAffected, err := result.RowsAffected()
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return Ok(true) if rows were deleted, Ok(false) if no rows matched
 		deleted := rowsAffected > 0
-		return makeOk(&object{deleted, checker.Bool}, method.Type().(*checker.Result))
+		return runtime.MakeOk(runtime.MakeBool(deleted))
 	case "close":
 		// fn close() Result<Void, Str>
 		// Close the database connection
 		err := db.conn.Close()
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return Ok(void)
-		return makeOk(void, method.Type().(*checker.Result))
+		return runtime.MakeOk(runtime.Void())
 	case "count":
 		// fn count(table: Str, where: Str) Result<Int, Str>
-		tableName := args[0].raw.(string)
-		whereClause := args[1].raw.(string)
+		tableName := args[0].AsString()
+		whereClause := args[1].AsString()
 
 		// Construct SQL
 		var sql string
@@ -503,15 +491,15 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		var count int64
 		err := db.conn.QueryRow(sql).Scan(&count)
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return Ok(count)
-		return makeOk(&object{int(count), checker.Int}, method.Type().(*checker.Result))
+		return runtime.MakeOk(runtime.MakeInt(int(count)))
 	case "exists":
 		// fn exists(table: Str, where: Str) Result<Bool, Str>
-		tableName := args[0].raw.(string)
-		whereClause := args[1].raw.(string)
+		tableName := args[0].AsString()
+		whereClause := args[1].AsString()
 
 		// Construct SQL - using EXISTS for efficiency
 		var sql string
@@ -525,133 +513,132 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		var exists bool
 		err := db.conn.QueryRow(sql).Scan(&exists)
 		if err != nil {
-			return makeErr(&object{err.Error(), checker.Str}, method.Type().(*checker.Result))
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return Ok(exists)
-		return makeOk(&object{exists, checker.Bool}, method.Type().(*checker.Result))
-	case "upsert":
-		// fn upsert(table: Str, where: Str, record: $T) Result<Bool, Str>
-		tableName := args[0].raw.(string)
-		whereClause := args[1].raw.(string)
-		structObj := args[2]
+		return runtime.MakeOk(runtime.MakeBool(exists))
+	// case "upsert":
+	// 	// fn upsert(table: Str, where: Str, record: $T) Result<Bool, Str>
+	// 	tableName := args[0].AsString()
+	// 	whereClause := args[1].AsString()
+	// 	structObj := args[2]
 
-		resultType := method.Type().(*checker.Result)
+	// 	resultType := method.Type().(*checker.Result)
 
-		// Extract fields from the struct
-		structFields, ok := structObj.raw.(map[string]*object)
-		if !ok {
-			errorMsg := &object{"Upsert expects a struct object", resultType.Err()}
-			return makeErr(errorMsg, resultType)
-		}
+	// 	// Extract fields from the struct
+	// 	structFields, ok := structObj.raw.(map[string]*runtime.Object)
+	// 	if !ok {
+	// 		errorMsg := &object{"Upsert expects a struct object", resultType.Err()}
+	// 		return runtime.MakeErr(errorMsg, resultType)
+	// 	}
 
-		// Check if record exists
-		checkSQL := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s)", tableName, whereClause)
-		var exists bool
-		err := db.conn.QueryRow(checkSQL).Scan(&exists)
-		if err != nil {
-			errorMsg := &object{err.Error(), resultType.Err()}
-			return makeErr(errorMsg, resultType)
-		}
+	// 	// Check if record exists
+	// 	checkSQL := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s)", tableName, whereClause)
+	// 	var exists bool
+	// 	err := db.conn.QueryRow(checkSQL).Scan(&exists)
+	// 	if err != nil {
+	// 		errorMsg := &object{err.Error(), resultType.Err()}
+	// 		return runtime.MakeErr(errorMsg, resultType)
+	// 	}
 
-		if exists {
-			// Record exists - perform UPDATE
-			var setPairs []string
-			var values []interface{}
+	// 	if exists {
+	// 		// Record exists - perform UPDATE
+	// 		var setPairs []string
+	// 		var values []interface{}
 
-			// Sort column names for consistent ordering
-			var columns []string
-			for columnName := range structFields {
-				columns = append(columns, columnName)
-			}
-			sort.Strings(columns)
+	// 		// Sort column names for consistent ordering
+	// 		var columns []string
+	// 		for columnName := range structFields {
+	// 			columns = append(columns, columnName)
+	// 		}
+	// 		sort.Strings(columns)
 
-			// Build SET clauses
-			for _, columnName := range columns {
-				fieldObj := structFields[columnName]
-				setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
+	// 		// Build SET clauses
+	// 		for _, columnName := range columns {
+	// 			fieldObj := structFields[columnName]
+	// 			setPairs = append(setPairs, fmt.Sprintf("%s = ?", columnName))
 
-				// Handle Maybe types for update
-				if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
-					if fieldObj.raw == nil {
-						values = append(values, nil)
-					} else {
-						values = append(values, fieldObj.raw)
-					}
-				} else {
-					values = append(values, fieldObj.raw)
-				}
-			}
+	// 			// Handle Maybe types for update
+	// 			if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
+	// 				if fieldObj.raw == nil {
+	// 					values = append(values, nil)
+	// 				} else {
+	// 					values = append(values, fieldObj.raw)
+	// 				}
+	// 			} else {
+	// 				values = append(values, fieldObj.raw)
+	// 			}
+	// 		}
 
-			// Construct UPDATE SQL
-			sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
-				tableName,
-				strings.Join(setPairs, ", "),
-				whereClause,
-			)
+	// 		// Construct UPDATE SQL
+	// 		sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+	// 			tableName,
+	// 			strings.Join(setPairs, ", "),
+	// 			whereClause,
+	// 		)
 
-			// Execute the UPDATE
-			_, err := db.conn.Exec(sql, values...)
-			if err != nil {
-				errorMsg := &object{err.Error(), resultType.Err()}
-				return makeErr(errorMsg, resultType)
-			}
-		} else {
-			// Record doesn't exist - perform INSERT
-			var columns []string
-			var placeholders []string
-			var values []any
+	// 		// Execute the UPDATE
+	// 		_, err := db.conn.Exec(sql, values...)
+	// 		if err != nil {
+	// 			errorMsg := &object{err.Error(), resultType.Err()}
+	// 			return runtime.MakeErr(errorMsg, resultType)
+	// 		}
+	// 	} else {
+	// 		// Record doesn't exist - perform INSERT
+	// 		var columns []string
+	// 		var placeholders []string
+	// 		var values []any
 
-			// Sort column names for consistent ordering
-			for columnName := range structFields {
-				columns = append(columns, columnName)
-			}
-			sort.Strings(columns)
+	// 		// Sort column names for consistent ordering
+	// 		for columnName := range structFields {
+	// 			columns = append(columns, columnName)
+	// 		}
+	// 		sort.Strings(columns)
 
-			// Build values in same order as columns
-			for _, columnName := range columns {
-				fieldObj := structFields[columnName]
-				placeholders = append(placeholders, "?")
+	// 		// Build values in same order as columns
+	// 		for _, columnName := range columns {
+	// 			fieldObj := structFields[columnName]
+	// 			placeholders = append(placeholders, "?")
 
-				// Handle Maybe types
-				if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
-					if fieldObj.raw == nil {
-						values = append(values, nil)
-					} else {
-						values = append(values, fieldObj.raw)
-					}
-				} else {
-					values = append(values, fieldObj.raw)
-				}
-			}
+	// 			// Handle Maybe types
+	// 			if _, isMaybe := fieldObj._type.(*checker.Maybe); isMaybe {
+	// 				if fieldObj.raw == nil {
+	// 					values = append(values, nil)
+	// 				} else {
+	// 					values = append(values, fieldObj.raw)
+	// 				}
+	// 			} else {
+	// 				values = append(values, fieldObj.raw)
+	// 			}
+	// 		}
 
-			// Construct INSERT SQL
-			sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-				tableName,
-				strings.Join(columns, ", "),
-				strings.Join(placeholders, ", "),
-			)
+	// 		// Construct INSERT SQL
+	// 		sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+	// 			tableName,
+	// 			strings.Join(columns, ", "),
+	// 			strings.Join(placeholders, ", "),
+	// 		)
 
-			// Execute the INSERT
-			_, err := db.conn.Exec(sql, values...)
-			if err != nil {
-				errorMsg := &object{err.Error(), resultType.Err()}
-				return makeErr(errorMsg, resultType)
-			}
-		}
+	// 		// Execute the INSERT
+	// 		_, err := db.conn.Exec(sql, values...)
+	// 		if err != nil {
+	// 			errorMsg := &object{err.Error(), resultType.Err()}
+	// 			return runtime.MakeErr(errorMsg, resultType)
+	// 		}
+	// 	}
 
-		// Return Ok(true) - upsert succeeded
-		return makeOk(&object{true, checker.Bool}, resultType)
+	// 	// Return Ok(true) - upsert succeeded
+	// 	return runtime.MakeOk(&object{true, checker.Bool}, resultType)
 	case "query":
 		// fn query(sql: Str) Dynamic!Str
-		resultType := method.Type().(*checker.Result)
-		sql := args[0].raw.(string)
+		sql := args[0].AsString()
 
 		// Execute the query
 		rows, err := db.conn.Query(sql)
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 		defer rows.Close()
 
@@ -659,7 +646,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		columns, err := rows.Columns()
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to get column names: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Build result list - each row is a map[string]interface{}
@@ -676,7 +663,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 			// Scan the row
 			if err := rows.Scan(scanTargets...); err != nil {
 				err := fmt.Errorf("SQLite Error: failed to scan row: %v", err)
-				return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+				return runtime.MakeErr(runtime.MakeStr(err.Error()))
 			}
 
 			// Create map for this row
@@ -690,21 +677,20 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 
 		if err := rows.Err(); err != nil {
 			err := fmt.Errorf("SQLite Error: row iteration error: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Return Dynamic object containing list of row maps
-		return makeOk(&object{results, checker.Dynamic}, resultType)
+		return runtime.MakeOk(runtime.MakeDynamic(results))
 	case "first":
 		// fn first(sql: Str) Dynamic!Str
-		resultType := method.Type().(*checker.Result)
-		sql := args[0].raw.(string)
+		sql := args[0].AsString()
 
 		// Execute the query
 		rows, err := db.conn.Query(sql)
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 		defer rows.Close()
 
@@ -712,7 +698,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 		columns, err := rows.Columns()
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to get column names: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// Process only the first row
@@ -727,7 +713,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 			// Scan the row
 			if err := rows.Scan(scanTargets...); err != nil {
 				err := fmt.Errorf("SQLite Error: failed to scan row: %v", err)
-				return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+				return runtime.MakeErr(runtime.MakeStr(err.Error()))
 			}
 
 			// Create map for this row
@@ -737,16 +723,16 @@ func (m *SQLiteModule) evalDatabaseMethod(database *object, method *checker.Func
 			}
 
 			// Return Dynamic object containing the first row map
-			return makeOk(&object{rowMap, checker.Dynamic}, resultType)
+			return runtime.MakeOk(runtime.MakeDynamic(rowMap))
 		}
 
 		if err := rows.Err(); err != nil {
 			err := fmt.Errorf("SQLite Error: row iteration error: %v", err)
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 
 		// No rows found - return nil as Dynamic
-		return makeOk(&object{nil, checker.Dynamic}, resultType)
+		return runtime.MakeOk(runtime.MakeDynamic(nil))
 	default:
 		panic(fmt.Errorf("Unimplemented: Database.%s()", method.Name))
 	}

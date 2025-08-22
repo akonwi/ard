@@ -7,12 +7,13 @@ import (
 	"sync"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
-// Returns (*object, any) where any can be the appropriate Ard error type for Results
-type FFIFunc func(vm *VM, args []*object) (*object, any)
+// Returns (*runtime.Object, any) where any can be the appropriate Ard error type for Results
+type FFIFunc func(vm *VM, args []*runtime.Object) (*runtime.Object, any)
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {
@@ -46,7 +47,7 @@ func (r *RuntimeFFIRegistry) Get(binding string) (FFIFunc, bool) {
 }
 
 // Call executes an FFI function with the given arguments
-func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, returnType checker.Type) (result *object, err error) {
+func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
 	fn, exists := r.Get(binding)
 	if !exists {
 		return nil, fmt.Errorf("External function not found: %s", binding)
@@ -58,9 +59,8 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 			panicMsg := fmt.Sprintf("panic in FFI function '%s': %v", binding, r)
 
 			// If the expected return type is a Result, convert panic to Ard Error result
-			if resultType, ok := returnType.(*checker.Result); ok {
-				errorObj := &object{raw: panicMsg, _type: checker.Str}
-				result = makeErr(errorObj, resultType)
+			if _, ok := returnType.(*checker.Result); ok {
+				result = runtime.MakeErr(runtime.MakeStr(panicMsg))
 				err = nil
 				return
 			}
@@ -73,25 +73,27 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*object, return
 	// Direct call with VM access - no reflection needed!
 	result, errValue := fn(vm, args)
 
+	// todo: let external functions do this themselves
+
 	// If the expected return type is a Result, translate error value to Ard Result
 	if resultType, ok := returnType.(*checker.Result); ok {
 		if errValue != nil {
 			// Trust FFI author to return correct error type - create error object directly
-			errorObj := &object{raw: errValue, _type: resultType.Err()}
-			return makeErr(errorObj, resultType), nil
+			return runtime.MakeErr(runtime.Make(errValue, resultType.Err())), nil
 		}
 		// Convert successful result to Ard Ok result
-		return makeOk(result, resultType), nil
+		return runtime.MakeOk(result), nil
 	}
 
 	// If the expected return type is a Maybe, automatically wrap result
 	if maybeType, ok := returnType.(*checker.Maybe); ok {
-		if result == nil || result.raw == nil {
-			// Return None for Maybe<T>
-			return &object{raw: nil, _type: maybeType}, nil
+		// Init maybe::none()
+		ret := runtime.MakeMaybe(nil, maybeType.Of())
+		if result != nil && result.Raw() != nil {
+			// Return Some(value) - the result is already the inner value
+			ret.Set(result.Raw())
 		}
-		// Return Some(value) - the result is already the inner value
-		return &object{raw: result.raw, _type: maybeType}, nil
+		return ret, nil
 	}
 
 	// For non-Result return types, convert any error to Go error

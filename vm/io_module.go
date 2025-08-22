@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // IOModule handles ard/io module functions
@@ -19,7 +20,7 @@ func (m *IOModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "print":
 		toPrint := vm.evalInstanceMethod(args[0], &checker.InstanceMethod{
@@ -28,23 +29,22 @@ func (m *IOModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *o
 				Name: "to_str",
 				Args: []checker.Expression{},
 			},
-		}).raw.(string)
+		}).Raw().(string)
 
 		fmt.Println(toPrint)
-		return void
+		return runtime.Void()
 	case "read_line":
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
-		resultType := call.Type().(*checker.Result)
 		if err := scanner.Err(); err != nil {
-			return makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
-		return makeOk(&object{scanner.Text(), resultType.Val()}, resultType)
+		return runtime.MakeOk(runtime.MakeStr(scanner.Text()))
 	default:
 		panic(fmt.Errorf("Unimplemented: io::%s()", call.Name))
 	}
 }
 
-func (m *IOModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *IOModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: io::%s::%s()", structName, call.Name))
 }

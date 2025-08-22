@@ -1,10 +1,13 @@
 package vm
 
-type function func(args ...object) object
+import "github.com/akonwi/ard/vm/runtime"
+
+// todo: should this accept pointers?
+type function func(args ...runtime.Object) runtime.Object
 
 type scope struct {
 	parent    *scope
-	bindings  map[string]*object
+	bindings  map[string]*runtime.Object
 	breakable bool
 	broken    bool
 }
@@ -12,15 +15,15 @@ type scope struct {
 func newScope(parent *scope) *scope {
 	return &scope{
 		parent:   parent,
-		bindings: make(map[string]*object),
+		bindings: make(map[string]*runtime.Object),
 	}
 }
 
-func (s *scope) add(name string, value *object) {
+func (s *scope) add(name string, value *runtime.Object) {
 	s.bindings[name] = value
 }
 
-func (s scope) get(name string) (*object, bool) {
+func (s scope) get(name string) (*runtime.Object, bool) {
 	v, ok := s.bindings[name]
 	if !ok && s.parent != nil {
 		return s.parent.get(name)
@@ -28,7 +31,7 @@ func (s scope) get(name string) (*object, bool) {
 	return v, ok
 }
 
-func (s *scope) set(name string, value *object) {
+func (s *scope) set(name string, value *runtime.Object) {
 	if binding, ok := s.get(name); ok {
 		*binding = *value
 	}

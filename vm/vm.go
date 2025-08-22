@@ -3,16 +3,15 @@
 package vm
 
 import (
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 type VM struct {
 	scope          *scope
-	result         object
+	result         runtime.Object
 	imports        map[string]checker.Module
 	moduleRegistry *ModuleRegistry
 	ffiRegistry    *RuntimeFFIRegistry
@@ -74,7 +73,7 @@ func (vm *VM) popScope() {
 }
 
 // Eval implements VMEvaluator interface
-func (vm *VM) Eval(expr checker.Expression) *object {
+func (vm *VM) Eval(expr checker.Expression) *runtime.Object {
 	return vm.eval(expr)
 }
 
@@ -84,8 +83,8 @@ func (vm *VM) Eval(expr checker.Expression) *object {
 type Closure struct {
 	vm            *VM
 	expr          checker.FunctionDef
-	builtinFn     func(*object, *checker.Result) *object // for built-in decoder functions
-	capturedScope *scope                                 // scope at closure creation time
+	builtinFn     func(*runtime.Object, *checker.Result) *runtime.Object // for built-in decoder functions
+	capturedScope *scope                                                 // scope at closure creation time
 }
 
 type ExternalFunctionWrapper struct {
@@ -94,7 +93,7 @@ type ExternalFunctionWrapper struct {
 	def     checker.ExternalFunctionDef
 }
 
-func (c Closure) eval(args ...*object) *object {
+func (c Closure) eval(args ...*runtime.Object) *runtime.Object {
 	// Handle built-in functions
 	if c.builtinFn != nil {
 		data := args[0]
@@ -125,7 +124,7 @@ func (c Closure) eval(args ...*object) *object {
 	return res
 }
 
-func (e ExternalFunctionWrapper) eval(args ...*object) *object {
+func (e ExternalFunctionWrapper) eval(args ...*runtime.Object) *runtime.Object {
 	// Call the external function through the FFI registry
 	result, err := e.vm.ffiRegistry.Call(e.vm, e.binding, args, e.def.ReturnType)
 	if err != nil {
@@ -136,85 +135,4 @@ func (e ExternalFunctionWrapper) eval(args ...*object) *object {
 
 func (c Closure) Type() checker.Type {
 	return c.expr.Type()
-}
-
-type object struct {
-	raw   any
-	_type checker.Type
-}
-
-func (o object) String() string {
-	return fmt.Sprintf("%v:%s", o.raw, o._type)
-}
-
-// MarshalJSONTo implements JSON v2 marshaling interface
-func (o *object) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return json.MarshalEncode(enc, o.premarshal(),
-		json.FormatNilSliceAsNull(true),
-		json.FormatNilMapAsNull(true),
-	)
-}
-
-// MarshalJSON implements the traditional JSON marshaling interface
-func (o *object) MarshalJSON() ([]byte, error) {
-	return json.Marshal(o.premarshal(),
-		json.FormatNilSliceAsNull(true),
-		json.FormatNilMapAsNull(true),
-	)
-}
-
-func (o *object) premarshal() any {
-	if o._type == checker.Void || o._type == nil {
-		return nil
-	}
-	if o._type == checker.Str || o._type == checker.Int || o._type == checker.Float || o._type == checker.Bool {
-		return o.raw
-	}
-	if o._type == checker.Dynamic {
-		return o.raw
-	}
-
-	switch o._type.(type) {
-	case *checker.FunctionDef:
-		return o._type.String()
-	case *checker.Enum:
-		return o.raw
-	case *checker.Maybe, *checker.Any:
-		if o.raw == nil {
-			return nil
-		}
-		if inner, ok := o.raw.(*object); ok {
-			return inner.premarshal()
-		}
-		return o.raw
-	case *checker.List:
-		raw := o.raw.([]*object)
-		_array := make([]any, len(raw))
-		for i, item := range raw {
-			_array[i] = item.premarshal()
-		}
-		return _array
-	case *checker.Result:
-		return o.raw.(_result).raw.premarshal()
-	}
-
-	if _, isStruct := o._type.(*checker.StructDef); isStruct {
-		m := o.raw.(map[string]*object)
-		rawMap := make(map[string]any)
-		for key, value := range m {
-			rawMap[key] = value.premarshal()
-		}
-		return rawMap
-	}
-
-	if _, isMap := o._type.(*checker.Map); isMap {
-		m := o.raw.(map[string]*object)
-		rawMap := make(map[string]any)
-		for key, value := range m {
-			rawMap[key] = value.premarshal()
-		}
-		return rawMap
-	}
-
-	panic(fmt.Sprintf("Cannot marshall type: %T", o._type))
 }

@@ -4,62 +4,31 @@ import (
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
-/*
- * runtime wrapper for results
- * raw is the Val|Err
- * ok is boolean flag for whether it is ok or not
- * for immutability, _result will always be referenced by value
- */
-type _result struct {
-	ok  bool
-	raw *object
-}
-
-func makeOk(raw *object, resultType *checker.Result) *object {
-	return &object{
-		raw:   _result{ok: true, raw: raw},
-		_type: resultType,
-	}
-}
-
-func makeErr(raw *object, resultType *checker.Result) *object {
-	return &object{
-		raw:   _result{ok: false, raw: raw},
-		_type: resultType,
-	}
-}
-
-func (vm *VM) evalResultMethod(subj *object, call *checker.FunctionCall) *object {
-	self := subj.raw.(_result)
+func (vm *VM) evalResultMethod(self *runtime.Object, call *checker.FunctionCall) *runtime.Object {
 	switch call.Name {
 	case "expect":
-		if !self.ok {
+		if self.IsErr() {
 			actual := ""
-			if self.raw._type == checker.Str {
-				actual = self.raw.raw.(string)
+			if str, ok := self.IsStr(); ok {
+				actual = str
 			}
-			_msg := vm.eval(call.Args[0]).raw.(string)
+			_msg := vm.eval(call.Args[0]).AsString()
 			panic(_msg + ": " + actual)
 		}
-		return self.raw
+		return self.Result_Unwrap()
 	case "or":
-		if self.ok {
-			return self.raw
+		if self.IsOk() {
+			return self.Result_Unwrap()
 		}
 		return vm.eval(call.Args[0])
 	case "is_ok":
-		return &object{
-			raw:   self.ok,
-			_type: checker.Bool,
-		}
+		return runtime.MakeBool(self.IsOk())
 	case "is_err":
-		return &object{
-			raw:   !self.ok,
-			_type: checker.Bool,
-		}
+		return runtime.MakeBool(self.IsErr())
 	}
 
-	panic(fmt.Errorf("unimplemented: %s.%s", subj._type, call.Name))
+	panic(fmt.Errorf("unimplemented: Result.%s", call.Name))
 }
