@@ -570,7 +570,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			subject := vm.eval(e.Subject)
 
 			// Get the concrete type name as a string
-			typeName := subject.AsString()
+			typeName := subject.Type().String()
 
 			// If we have a case for this specific type
 			if block, ok := e.TypeCases[typeName]; ok {
