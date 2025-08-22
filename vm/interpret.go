@@ -324,7 +324,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return obj
 	case *checker.Panic:
 		msg := vm.eval(e.Message)
-		panic(fmt.Sprintf("panic at %s:\n%s", e.GetLocation().Start, msg))
+		panic(fmt.Sprintf("panic at %s:\n%s", e.GetLocation().Start, msg.AsString()))
 	case *checker.FunctionCall:
 		return vm.evalFunctionCall(e)
 	case *checker.InstanceProperty:

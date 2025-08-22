@@ -214,7 +214,7 @@ func (o Object) AsString() string {
 }
 
 func (o Object) IsStr() (string, bool) {
-	if o._type == checker.Int {
+	if o._type == checker.Str {
 		return o.raw.(string), true
 	}
 	return "", false
@@ -294,7 +294,6 @@ func MakeMap(keyType, valueType checker.Type) *Object {
 	}
 }
 
-// todo: just use o.String()
 func ToMapKey(o *Object) string {
 	// Create a string representation for the key
 	var keyStr string
@@ -434,7 +433,7 @@ func Make(val any, of checker.Type) *Object {
 	}
 }
 
-// use a single instance of void
+// use a single instance of void. lame attempt at optimization
 var void = &Object{
 	raw: nil, _type: checker.Void,
 }
