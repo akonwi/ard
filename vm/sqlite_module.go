@@ -42,16 +42,12 @@ func (m *SQLiteModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 			return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Failed to connect to database: %s", err)))
 		}
 
-		// Create our Database wrapper
-		database := &Database{
-			conn:     conn,
-			filePath: filePath,
-		}
-
 		// Create a Database object with the correct type
-		dbObject := runtime.Make(database, checker.DatabaseDef)
-
-		return runtime.MakeOk(dbObject)
+		database := runtime.MakeStruct(checker.DatabaseDef, map[string]*runtime.Object{
+			"__conn":     runtime.MakeDynamic(conn),
+			"__filePath": runtime.MakeStr(filePath),
+		})
+		return runtime.MakeOk(database)
 	default:
 		panic(fmt.Errorf("Unimplemented: sqlite::%s()", call.Name))
 	}
@@ -70,7 +66,7 @@ func (m *SQLiteModule) HandleStatic(structName string, vm *VM, call *checker.Fun
 // evalDatabaseMethod handles instance methods on Database objects
 func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	// Get the Database struct from the object
-	db, ok := database.Raw().(*Database)
+	conn, ok := database.Struct_Get("__conn").Raw().(*sql.DB)
 	if !ok {
 		panic(fmt.Errorf("SQLite Error: Database object is not correctly formatted"))
 	}
@@ -81,7 +77,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		sql := args[0].AsString()
 
 		// Execute the SQL
-		_, err := db.conn.Exec(sql)
+		_, err := conn.Exec(sql)
 		if err != nil {
 			// Return Err(Str)
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
@@ -127,7 +123,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		)
 
 		// Execute the INSERT
-		_, err := db.conn.Exec(sql, values...)
+		_, err := conn.Exec(sql, values...)
 		if err != nil {
 			// Return Err(Str)
 			errorMsg := runtime.MakeStr(err.Error())
@@ -148,7 +144,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		)
 
 		// Execute the SELECT to get the inserted row
-		rows, err := db.conn.Query(selectSQL, selectValues...)
+		rows, err := conn.Query(selectSQL, selectValues...)
 		if err != nil {
 			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to retrieve inserted row: %v", err))
 			return runtime.MakeErr(errorMsg)
@@ -180,7 +176,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		}
 
 		// Build result map
-		resultMap := make(map[string]interface{})
+		resultMap := make(map[string]any)
 		for i, columnName := range resultColumns {
 			resultMap[columnName] = scanValues[i]
 		}
@@ -223,7 +219,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		)
 
 		// Execute the UPDATE
-		_, err := db.conn.Exec(sql, values...)
+		_, err := conn.Exec(sql, values...)
 		if err != nil {
 			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to update row: %s", err))
 			return runtime.MakeErr(errorMsg)
@@ -236,7 +232,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		)
 
 		// Execute the SELECT to get the updated row
-		rows, err := db.conn.Query(selectSQL)
+		rows, err := conn.Query(selectSQL)
 		if err != nil {
 			errorMsg := runtime.MakeStr(fmt.Sprintf("Failed to retrieve updated row: %s", err))
 			return runtime.MakeErr(errorMsg)
@@ -308,7 +304,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		}
 
 		// Execute the query
-		rows, err := db.conn.Query(sql)
+		rows, err := conn.Query(sql)
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
@@ -450,7 +446,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		}
 
 		// Execute the DELETE
-		result, err := db.conn.Exec(sql)
+		result, err := conn.Exec(sql)
 		if err != nil {
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
@@ -467,7 +463,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 	case "close":
 		// fn close() Result<Void, Str>
 		// Close the database connection
-		err := db.conn.Close()
+		err := conn.Close()
 		if err != nil {
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
@@ -489,7 +485,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 
 		// Execute the COUNT query
 		var count int64
-		err := db.conn.QueryRow(sql).Scan(&count)
+		err := conn.QueryRow(sql).Scan(&count)
 		if err != nil {
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
@@ -511,7 +507,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 
 		// Execute the EXISTS query
 		var exists bool
-		err := db.conn.QueryRow(sql).Scan(&exists)
+		err := conn.QueryRow(sql).Scan(&exists)
 		if err != nil {
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
@@ -635,7 +631,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		sql := args[0].AsString()
 
 		// Execute the query
-		rows, err := db.conn.Query(sql)
+		rows, err := conn.Query(sql)
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
@@ -687,7 +683,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 		sql := args[0].AsString()
 
 		// Execute the query
-		rows, err := db.conn.Query(sql)
+		rows, err := conn.Query(sql)
 		if err != nil {
 			err := fmt.Errorf("SQLite Error: failed to execute query: %v", err)
 			return runtime.MakeErr(runtime.MakeStr(err.Error()))
@@ -717,7 +713,7 @@ func (m *SQLiteModule) evalDatabaseMethod(database *runtime.Object, method *chec
 			}
 
 			// Create map for this row
-			rowMap := make(map[string]interface{})
+			rowMap := make(map[string]any)
 			for i, columnName := range columns {
 				rowMap[columnName] = values[i]
 			}

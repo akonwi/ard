@@ -10,68 +10,6 @@ import (
 	"github.com/akonwi/ard/vm/runtime"
 )
 
-// todo: move this into Object.Copy()
-// deepCopy creates a deep copy of an object
-func deepCopy(obj *runtime.Object) *runtime.Object {
-	switch t := obj.Type().(type) {
-	case *checker.StructDef:
-		// Deep copy struct
-		originalMap := obj.AsMap()
-		copy := make(map[string]*runtime.Object)
-		for key, value := range originalMap {
-			copy[key] = deepCopy(value)
-		}
-		return runtime.MakeStruct(t, copy)
-	case *checker.List:
-		// Deep copy list
-		originalSlice := obj.AsList()
-		copiedSlice := make([]*runtime.Object, len(originalSlice))
-		for i, value := range originalSlice {
-			copiedSlice[i] = deepCopy(value)
-		}
-		return runtime.MakeList(t.Of(), copiedSlice...)
-	case *checker.Map:
-		// Deep copy map
-		originalMap := obj.AsMap()
-		copiedMap := make(map[string]*runtime.Object)
-		for key, value := range originalMap {
-			copiedMap[key] = deepCopy(value)
-		}
-		copy := runtime.MakeMap(t.Key(), t.Value())
-		copy.Set(copiedMap)
-		return copy
-	case *checker.Maybe:
-		// Deep copy Maybe - if value is nil (None), copy as-is, otherwise deep copy the value
-		if obj.Raw() == nil {
-			return runtime.Make(nil, t)
-		} else {
-			var copied any = nil
-			if inner, ok := obj.Raw().(*runtime.Object); ok {
-				copied = deepCopy(inner)
-			}
-			return runtime.Make(copied, t)
-		}
-	case *checker.Result:
-		// Deep copy Result - the value is an object containing either the success or error value
-		var copied any = nil
-		if inner, ok := obj.Raw().(*runtime.Object); ok {
-			copied = deepCopy(inner)
-		}
-		return runtime.Make(copied, t)
-	case *checker.Enum:
-		// Enums are represented as int8
-		return runtime.Make(obj.Raw(), t)
-	case *checker.FunctionDef:
-		// Functions cannot be copied - return the same function object
-		// Functions are immutable so sharing them is safe
-		return obj
-	default:
-		// For primitives (Str, Int, Float, Bool), return a new object with same value
-		// These are immutable in Ard, so we can just create a new object
-		return runtime.Make(obj.Raw(), t)
-	}
-}
-
 func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -149,11 +87,6 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		// can be broken by `try`
 		if vm.scope.broken {
 			return val
-		}
-		// for read-only bindings, copy the object to be safe
-		if !s.Mutable {
-			copy := (*val).Copy()
-			val = &copy
 		}
 		vm.scope.add(s.Name, val)
 		return runtime.Void()
@@ -705,7 +638,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 	case *checker.CopyExpression:
 		// Evaluate the expression and return a deep copy
 		original := vm.eval(e.Expr)
-		return deepCopy(original)
+		return original.Copy()
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}

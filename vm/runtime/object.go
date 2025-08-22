@@ -52,13 +52,63 @@ func (o *Object) Set(v any) {
 	o.raw = v
 }
 
-func (o Object) Copy() Object {
-	return Object{
+// deep copies an object
+func (o *Object) Copy() *Object {
+	copy := &Object{
 		raw:   o.raw,
 		_type: o._type,
 		isErr: o.isErr,
 		isOk:  o.isOk,
 	}
+
+	switch o.Type().(type) {
+	case *checker.StructDef:
+		// Deep copy struct
+		originalMap := o.raw.(map[string]*Object)
+		rawCopy := make(map[string]*Object)
+		for key, value := range originalMap {
+			rawCopy[key] = value.Copy()
+		}
+		copy.raw = rawCopy
+	case *checker.List:
+		// Deep copy list
+		originalSlice := o.AsList()
+		copiedSlice := make([]*Object, len(originalSlice))
+		for i, value := range originalSlice {
+			copiedSlice[i] = value.Copy()
+		}
+		copy.raw = copiedSlice
+	case *checker.Map:
+		// Deep copy map
+		originalMap := o.AsMap()
+		copiedMap := make(map[string]*Object)
+		for key, value := range originalMap {
+			copiedMap[key] = value.Copy()
+		}
+		copy.raw = copiedMap
+	case *checker.Maybe:
+		// Deep copy Maybe - if value is nil (None), copy as-is, otherwise deep copy the value
+		if o.Raw() == nil {
+			if inner, ok := o.Raw().(*Object); ok {
+				copy.raw = inner.Copy()
+			}
+		}
+	case *checker.Result:
+		// Deep copy Result - the value is an object containing either the success or error value
+		if inner, ok := o.Raw().(*Object); ok {
+			copy.raw = inner.Copy()
+		}
+	case *checker.Enum:
+		// Enums are represented as int8
+	case *checker.FunctionDef:
+		// Functions cannot be copied - return the same function object
+		// Functions are immutable so sharing them is safe
+	default:
+		// For primitives (Str, Int, Float, Bool), return a new object with same value
+		// These are immutable in Ard, so we can just create a new object
+	}
+
+	return copy
 }
 
 func (o *Object) Reassign(val *Object) {

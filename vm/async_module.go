@@ -9,11 +9,6 @@ import (
 	"github.com/akonwi/ard/vm/runtime"
 )
 
-// Fiber represents a running async operation
-type Fiber struct {
-	wg *sync.WaitGroup
-}
-
 // AsyncModule handles ard/async module functions
 type AsyncModule struct{}
 
@@ -43,10 +38,6 @@ func (m *AsyncModule) handleStart(caller *VM, args []*runtime.Object) *runtime.O
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
-	fiber := &Fiber{
-		wg: wg,
-	}
-
 	// Execute the worker function in the current VM context first
 	// This will handle the parsing and setup
 	if fn, ok := workerFn.Raw().(*Closure); ok {
@@ -68,8 +59,12 @@ func (m *AsyncModule) handleStart(caller *VM, args []*runtime.Object) *runtime.O
 		}()
 	}
 
-	// Return the fiber object
-	return runtime.Make(fiber, checker.Fiber)
+	// Return the fiber instance
+	fields := map[string]*runtime.Object{
+		"__wg": runtime.MakeDynamic(wg),
+	}
+	strct := runtime.MakeStruct(checker.Fiber, fields)
+	return strct
 }
 
 func (m *AsyncModule) handleSleep(args []*runtime.Object) *runtime.Object {
@@ -80,14 +75,14 @@ func (m *AsyncModule) handleSleep(args []*runtime.Object) *runtime.Object {
 
 // EvalFiberMethod handles method calls on Fiber objects
 func (m *AsyncModule) EvalFiberMethod(subj *runtime.Object, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
-	fiber, ok := subj.Raw().(*Fiber)
+	wg, ok := subj.Struct_Get("__wg").Raw().(*sync.WaitGroup)
 	if !ok {
 		panic(fmt.Errorf("Expected Fiber object, got %T", subj.Raw()))
 	}
 
 	switch call.Name {
 	case "join":
-		fiber.wg.Wait()
+		wg.Wait()
 		return runtime.Void()
 	default:
 		panic(fmt.Errorf("Unimplemented: Fiber.%s()", call.Name))
