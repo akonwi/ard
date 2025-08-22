@@ -35,7 +35,9 @@ func TestCopySemantics(t *testing.T) {
 			name: "`mut` can be used to copy and make a mutable argument",
 			input: `
 			struct Person { age: Int }
-			fn grow(mut p: Person) {}
+			fn grow(mut p: Person) {
+			  p.age =+ 1
+			}
 
 			let alice = Person{age: 30}
 			grow(mut alice)
@@ -45,41 +47,3 @@ func TestCopySemantics(t *testing.T) {
 		},
 	})
 }
-
-// func TestCopySemanticsAllTypes(t *testing.T) {
-// 	runTests(t, []test{
-// 		{
-// 			name: "copy semantics work with primitive types",
-// 			input: `
-// 				fn modify_int(mut x: Int) {
-// 					x = 999
-// 				}
-// 				let original = 42
-// 				modify_int(original)
-// 				original`,
-// 			want: 42, // original should remain unchanged
-// 		},
-// 		{
-// 			name: "copy semantics work with string types",
-// 			input: `
-// 				fn modify_str(mut s: Str) {
-// 					s = "modified"
-// 				}
-// 				let original = "original"
-// 				modify_str(original)
-// 				original`,
-// 			want: "original", // original should remain unchanged
-// 		},
-// 		{
-// 			name: "copy semantics work with lists",
-// 			input: `
-// 				fn modify_list(mut lst: [Int]) {
-// 					lst.push(999)
-// 				}
-// 				let original = [1, 2, 3]
-// 				modify_list(original)
-// 				original.size()`,
-// 			want: 3, // original list size should remain unchanged
-// 		},
-// 	})
-// }

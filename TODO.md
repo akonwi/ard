@@ -1,7 +1,5 @@
 ## TODO
 
-- [ ] parsing shouldn't panic at errors
-- [ ] implement `runtime` package and export objects from them
 - [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design

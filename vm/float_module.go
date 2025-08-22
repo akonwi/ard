@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // FloatModule handles Float and ard/float module functions
@@ -18,16 +19,16 @@ func (m *FloatModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "from_int":
-		input := args[0].raw.(int)
-		return &object{float64(input), call.Type()}
+		input := args[0].Raw().(int)
+		return runtime.MakeFloat(float64(input))
 	case "from_str":
-		input := args[0].raw.(string)
-		res := &object{nil, call.Type()}
+		input := args[0].Raw().(string)
+		res := runtime.Make(nil, call.Type())
 		if num, err := strconv.ParseFloat(input, 64); err == nil {
-			res.raw = num
+			res.Set(num)
 		}
 		return res
 	default:
@@ -35,6 +36,6 @@ func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*object)
 	}
 }
 
-func (m *FloatModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *FloatModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: float::%s::%s()", structName, call.Name))
 }

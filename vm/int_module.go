@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // IntModule handles Int and ard/ints module functions
@@ -18,13 +19,13 @@ func (m *IntModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "from_str":
-		input := args[0].raw.(string)
-		res := &object{nil, call.Type()}
+		input := args[0].Raw().(string)
+		res := runtime.Make(nil, call.Type())
 		if num, err := strconv.Atoi(input); err == nil {
-			res.raw = num
+			res.Set(num)
 		}
 		return res
 	default:
@@ -32,6 +33,6 @@ func (m *IntModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *
 	}
 }
 
-func (m *IntModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *IntModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: int::%s::%s()", structName, call.Name))
 }

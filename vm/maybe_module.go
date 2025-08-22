@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // MaybeModule handles ard/maybe module functions
@@ -17,19 +18,19 @@ func (m *MaybeModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "none":
-		return &object{nil, call.Type()}
+		return runtime.Make(nil, call.Type())
 	case "some":
 		arg := args[0]
-		arg._type = call.Type()
-		return arg
+		// Create a new object with the maybe type
+		return runtime.Make(arg.Raw(), call.Type())
 	default:
 		panic(fmt.Errorf("Unimplemented: maybe::%s()", call.Name))
 	}
 }
 
-func (m *MaybeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *MaybeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: maybe::%s::%s()", structName, call.Name))
 }

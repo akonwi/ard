@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/vm/runtime"
 )
 
 // FSModule handles ard/fs module functions
@@ -18,73 +19,64 @@ func (m *FSModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "append":
-		path := args[0].raw.(string)
-		content := args[1].raw.(string)
-		resultType := call.Type().(*checker.Result)
-		res := makeOk(void, resultType)
+		path := args[0].Raw().(string)
+		content := args[1].Raw().(string)
 		if file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644); err != nil {
-			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		} else {
 			if _, err := file.WriteString(content); err != nil {
-				res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+				file.Close()
+				return runtime.MakeErr(runtime.MakeStr(err.Error()))
 			}
 			file.Close()
 		}
-		return res
+		return runtime.MakeOk(runtime.Void())
 	case "create_file":
-		path := args[0].raw.(string)
-		resultType := call.Type().(*checker.Result)
-		res := makeOk(void, resultType)
+		path := args[0].Raw().(string)
 		if file, err := os.Create(path); err != nil {
-			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		} else {
 			file.Close()
 		}
-		return res
+		return runtime.MakeOk(runtime.Void())
 	case "delete":
-		path := args[0].raw.(string)
-		resultType := call.Type().(*checker.Result)
-		res := makeOk(void, resultType)
+		path := args[0].Raw().(string)
 		if err := os.Remove(path); err != nil {
-			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
-		return res
+		return runtime.MakeOk(runtime.Void())
 	case "exists":
-		path := args[0].raw.(string)
-		res := &object{false, call.Type()}
+		path := args[0].Raw().(string)
 		if _, err := os.Stat(path); err == nil {
-			res.raw = true
+			return runtime.MakeBool(true)
 		}
-		return res
+		return runtime.MakeBool(false)
 	case "read":
-		path := args[0].raw.(string)
-		res := &object{nil, call.Type()}
+		path := args[0].Raw().(string)
 		if content, err := os.ReadFile(path); err == nil {
-			res.raw = string(content)
+			return runtime.MakeStr(string(content)).ToMaybe()
 		}
-		return res
+		return runtime.Make(nil, call.Type())
 	case "write":
-		path := args[0].raw.(string)
-		content := vm.Eval(call.Args[1]).raw.(string)
-		resultType := call.Type().(*checker.Result)
-		res := makeOk(void, resultType)
+		path := args[0].Raw().(string)
+		content := vm.Eval(call.Args[1]).Raw().(string)
 		/* file permissions:
 		- `6` (owner): read (4) + write (2) = 6
 		- `4` (group): read only
 		- `4` (others): read only
 		*/
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			res = makeErr(&object{err.Error(), resultType.Err()}, resultType)
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
-		return res
+		return runtime.MakeOk(runtime.Void())
 	default:
 		panic(fmt.Errorf("Unimplemented: fs::%s()", call.Name))
 	}
 }
 
-func (m *FSModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*object) *object {
+func (m *FSModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: fs::%s::%s()", structName, call.Name))
 }
