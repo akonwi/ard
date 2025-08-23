@@ -742,10 +742,10 @@ func (vm *VM) evalInstanceMethod(subj *runtime.Object, e *checker.InstanceMethod
 		return vm.evalMaybeMethod(subj, e)
 	}
 	if subj.IsStruct() {
-		return vm.evalStructMethod(subj, e.Method)
+		return vm.EvalStructMethod(subj, e.Method)
 	}
 	if enum, ok := subj.Type().(*checker.Enum); ok {
-		return vm.evalEnumMethod(subj, e.Method, enum)
+		return vm.EvalEnumMethod(subj, e.Method, enum)
 	}
 
 	panic(fmt.Errorf("Unimplemented method: %s.%s()", subj.Type(), e.Method.Name))
@@ -923,7 +923,7 @@ func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *
 	}
 }
 
-func (vm *VM) evalStructMethod(subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
+func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
 	// Special handling for HTTP Response methods
 	if subj.Type() == checker.HttpResponseDef {
 		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
@@ -1033,7 +1033,7 @@ func (vm *VM) evalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	return fn(args...)
 }
 
-func (vm *VM) evalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {
+func (vm *VM) EvalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {
 	switch method.Name {
 	case "to_str":
 		// Special handling for http::Method enum

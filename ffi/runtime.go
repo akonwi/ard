@@ -1,4 +1,4 @@
-package vm
+package ffi
 
 import (
 	"bufio"
@@ -11,8 +11,8 @@ import (
 
 // Runtime module FFI functions
 
-// print prints a value to stdout
-func print(vm *VM, args []*runtime.Object) *runtime.Object {
+// Print prints a value to stdout
+func Print(vm VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
@@ -32,9 +32,9 @@ func print(vm *VM, args []*runtime.Object) *runtime.Object {
 	call := &checker.FunctionCall{Name: "to_str", Args: []checker.Expression{}}
 	// could be `arg.cast[T](as: T) (T, bool)`
 	if _, ok := arg.Type().(*checker.StructDef); ok {
-		str = vm.evalStructMethod(arg, call).Raw().(string)
+		str = vm.EvalStructMethod(arg, call).Raw().(string)
 	} else if enum, ok := arg.Type().(*checker.Enum); ok {
-		str = vm.evalEnumMethod(arg, call, enum).Raw().(string)
+		str = vm.EvalEnumMethod(arg, call, enum).Raw().(string)
 	} else {
 		panic(fmt.Errorf("Encountered an unprintable: %s", arg))
 	}
@@ -43,8 +43,8 @@ func print(vm *VM, args []*runtime.Object) *runtime.Object {
 	return runtime.Void()
 }
 
-// read_line reads a line from stdin
-func read_line(vm *VM, args []*runtime.Object) *runtime.Object {
+// ReadLine reads a line from stdin
+func ReadLine(vm VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 0 {
 		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
@@ -63,8 +63,8 @@ func read_line(vm *VM, args []*runtime.Object) *runtime.Object {
 	return runtime.MakeOk(runtime.MakeStr(scanner.Text()))
 }
 
-// panic_with_message panics with a message
-func panic_with_message(vm *VM, args []*runtime.Object) *runtime.Object {
+// PanicWithMessage panics with a message
+func PanicWithMessage(vm VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
@@ -79,8 +79,8 @@ func panic_with_message(vm *VM, args []*runtime.Object) *runtime.Object {
 
 // Environment module FFI functions
 
-// get retrieves an environment variable
-func env_get(vm *VM, args []*runtime.Object) *runtime.Object {
+// EnvGet retrieves an environment variable
+func EnvGet(vm VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}
