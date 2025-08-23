@@ -13,7 +13,7 @@ import (
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
 // Returns *runtime.Object - functions handle their own Result/Maybe creation
-type FFIFunc func(vm *VM, args []*runtime.Object) *runtime.Object
+type FFIFunc func(vm runtime.VM, args []*runtime.Object) *runtime.Object
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {

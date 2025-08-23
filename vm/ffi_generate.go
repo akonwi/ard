@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -22,9 +21,9 @@ type FFIFunction struct {
 }
 
 func main() {
-	// Find all Go files in vm directory
-	vmDir := "."
-	functions, err := discoverFFIFunctions(vmDir)
+	// Find all Go files in ffi directory
+	ffiDir := "../ffi"
+	functions, err := discoverFFIFunctions(ffiDir)
 	if err != nil {
 		log.Fatalf("Failed to discover FFI functions: %v", err)
 	}
@@ -46,12 +45,13 @@ func discoverFFIFunctions(dir string) ([]FFIFunction, error) {
 			return err
 		}
 
-		// Skip generate.go and generated files
-		if strings.HasSuffix(path, "ffi_generate.go") || strings.HasSuffix(path, ".gen.go") {
+		// Skip directories and non-Go files
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 
-		if !strings.HasSuffix(path, ".go") || info.IsDir() {
+		// Skip generate.go and generated files
+		if strings.HasSuffix(path, "ffi_generate.go") || strings.HasSuffix(path, ".gen.go") {
 			return nil
 		}
 
@@ -76,15 +76,13 @@ func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 	}
 
 	var functions []FFIFunction
-	modulePattern := regexp.MustCompile(`^ffi_([a-z]+)\.go$`)
 
-	// Extract module name from filename
+	// Extract module name from filename (e.g., runtime.go -> runtime, json.go -> json)
 	base := filepath.Base(filename)
-	matches := modulePattern.FindStringSubmatch(base)
-	if len(matches) < 2 {
-		return functions, nil // Skip files that don't match ffi_ pattern
+	if !strings.HasSuffix(base, ".go") {
+		return functions, nil // Skip non-Go files
 	}
-	module := matches[1]
+	module := strings.TrimSuffix(base, ".go")
 
 	// Walk the AST to find FFI functions
 	ast.Inspect(node, func(n ast.Node) bool {
@@ -119,12 +117,12 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Validate first parameter: vm *VM
+	// Validate first parameter: vm VM (interface)
 	firstParam := fn.Type.Params.List[0]
 	if len(firstParam.Names) != 1 || firstParam.Names[0].Name != "vm" {
 		return false
 	}
-	if !isPointerToType(firstParam.Type, "VM") {
+	if !isVMInterface(firstParam.Type) {
 		return false
 	}
 
@@ -154,6 +152,16 @@ func isPointerToType(expr ast.Expr, typeName string) bool {
 	}
 	ident, ok := star.X.(*ast.Ident)
 	return ok && ident.Name == typeName
+}
+
+func isVMInterface(expr ast.Expr) bool {
+	// Check for ffi.VM (selector expression)
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		pkg, ok := sel.X.(*ast.Ident)
+		return ok && pkg.Name == "runtime" && sel.Sel.Name == "VM"
+	}
+
+	return false
 }
 
 func isPointerToRuntimeObject(expr ast.Expr) bool {
@@ -203,15 +211,21 @@ func generateRegistry(functions []FFIFunction) error {
 
 package vm
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/akonwi/ard/ffi"
+)
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 `)
 
 	for _, fn := range functions {
-		binding := fmt.Sprintf("%s.%s", fn.Module, fn.Name)
-		sb.WriteString(fmt.Sprintf("\tif err := r.Register(%q, %s); err != nil {\n", binding, fn.Name))
+		// Use function name directly as binding name
+		binding := fn.Name
+		functionRef := fmt.Sprintf("ffi.%s", fn.Name)
+		sb.WriteString(fmt.Sprintf("\tif err := r.Register(%q, %s); err != nil {\n", binding, functionRef))
 		sb.WriteString(fmt.Sprintf("\t\treturn fmt.Errorf(\"failed to register %s: %%w\", err)\n", binding))
 		sb.WriteString("\t}\n")
 	}

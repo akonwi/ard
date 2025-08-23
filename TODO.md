@@ -1,6 +1,5 @@
 ## TODO
 
-- [ ] ffi: look for ffi defs in `./ffi` folder
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase

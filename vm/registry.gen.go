@@ -2,24 +2,28 @@
 
 package vm
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/akonwi/ard/ffi"
+)
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
-	if err := r.Register("json.encode", encode); err != nil {
-		return fmt.Errorf("failed to register json.encode: %w", err)
+	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
+		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}
-	if err := r.Register("runtime.print", print); err != nil {
-		return fmt.Errorf("failed to register runtime.print: %w", err)
+	if err := r.Register("Print", ffi.Print); err != nil {
+		return fmt.Errorf("failed to register Print: %w", err)
 	}
-	if err := r.Register("runtime.read_line", read_line); err != nil {
-		return fmt.Errorf("failed to register runtime.read_line: %w", err)
+	if err := r.Register("ReadLine", ffi.ReadLine); err != nil {
+		return fmt.Errorf("failed to register ReadLine: %w", err)
 	}
-	if err := r.Register("runtime.panic_with_message", panic_with_message); err != nil {
-		return fmt.Errorf("failed to register runtime.panic_with_message: %w", err)
+	if err := r.Register("PanicWithMessage", ffi.PanicWithMessage); err != nil {
+		return fmt.Errorf("failed to register PanicWithMessage: %w", err)
 	}
-	if err := r.Register("runtime.env_get", env_get); err != nil {
-		return fmt.Errorf("failed to register runtime.env_get: %w", err)
+	if err := r.Register("EnvGet", ffi.EnvGet); err != nil {
+		return fmt.Errorf("failed to register EnvGet: %w", err)
 	}
 
 	return nil
