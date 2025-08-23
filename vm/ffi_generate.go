@@ -45,12 +45,13 @@ func discoverFFIFunctions(dir string) ([]FFIFunction, error) {
 			return err
 		}
 
-		// Skip generate.go and generated files
-		if strings.HasSuffix(path, "ffi_generate.go") || strings.HasSuffix(path, ".gen.go") {
+		// Skip directories and non-Go files
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 
-		if !strings.HasSuffix(path, ".go") || info.IsDir() {
+		// Skip generate.go and generated files
+		if strings.HasSuffix(path, "ffi_generate.go") || strings.HasSuffix(path, ".gen.go") {
 			return nil
 		}
 
@@ -217,7 +218,7 @@ package vm
 
 import (
 	"fmt"
-	
+
 	"github.com/akonwi/ard/ffi"
 )
 
@@ -226,9 +227,8 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 `)
 
 	for _, fn := range functions {
-		// Convert PascalCase function names to snake_case for binding names
-		bindingName := toSnakeCase(fn.Name)
-		binding := fmt.Sprintf("%s.%s", fn.Module, bindingName)
+		// Use function name directly as binding name
+		binding := fn.Name
 		functionRef := fmt.Sprintf("ffi.%s", fn.Name)
 		sb.WriteString(fmt.Sprintf("\tif err := r.Register(%q, %s); err != nil {\n", binding, functionRef))
 		sb.WriteString(fmt.Sprintf("\t\treturn fmt.Errorf(\"failed to register %s: %%w\", err)\n", binding))
@@ -241,17 +241,4 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 `)
 
 	return os.WriteFile("registry.gen.go", []byte(sb.String()), 0644)
-}
-
-// toSnakeCase converts PascalCase to snake_case
-// e.g., "EnvGet" -> "env_get", "ReadLine" -> "read_line"
-func toSnakeCase(s string) string {
-	var result strings.Builder
-	for i, r := range s {
-		if i > 0 && 'A' <= r && r <= 'Z' {
-			result.WriteRune('_')
-		}
-		result.WriteRune(rune(strings.ToLower(string(r))[0]))
-	}
-	return result.String()
 }
