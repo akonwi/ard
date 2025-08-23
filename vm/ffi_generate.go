@@ -110,12 +110,12 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Check function signature: func(vm *VM, args []*object) (*object, any)
+	// Check function signature: func(vm *VM, args []*runtime.Object) *runtime.Object
 	if fn.Type.Params == nil || len(fn.Type.Params.List) != 2 {
 		return false
 	}
 
-	if fn.Type.Results == nil || len(fn.Type.Results.List) != 2 {
+	if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
 		return false
 	}
 
@@ -128,23 +128,18 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Validate second parameter: args []*object
+	// Validate second parameter: args []*runtime.Object
 	secondParam := fn.Type.Params.List[1]
 	if len(secondParam.Names) != 1 || secondParam.Names[0].Name != "args" {
 		return false
 	}
-	if !isSliceOfPointerToType(secondParam.Type, "object") {
+	if !isSliceOfPointerToRuntimeObject(secondParam.Type) {
 		return false
 	}
 
-	// Validate return types: (*object, any)
+	// Validate return type: *runtime.Object
 	firstReturn := fn.Type.Results.List[0]
-	if !isPointerToType(firstReturn.Type, "object") {
-		return false
-	}
-
-	secondReturn := fn.Type.Results.List[1]
-	if !isAnyType(secondReturn.Type) {
+	if !isPointerToRuntimeObject(firstReturn.Type) {
 		return false
 	}
 
@@ -159,6 +154,32 @@ func isPointerToType(expr ast.Expr, typeName string) bool {
 	}
 	ident, ok := star.X.(*ast.Ident)
 	return ok && ident.Name == typeName
+}
+
+func isPointerToRuntimeObject(expr ast.Expr) bool {
+	star, ok := expr.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+
+	// Check for runtime.Object (selector expression)
+	sel, ok := star.X.(*ast.SelectorExpr)
+	if ok {
+		pkg, ok := sel.X.(*ast.Ident)
+		return ok && pkg.Name == "runtime" && sel.Sel.Name == "Object"
+	}
+
+	// Also check for just Object (in case it's imported differently)
+	ident, ok := star.X.(*ast.Ident)
+	return ok && ident.Name == "Object"
+}
+
+func isSliceOfPointerToRuntimeObject(expr ast.Expr) bool {
+	array, ok := expr.(*ast.ArrayType)
+	if !ok {
+		return false
+	}
+	return isPointerToRuntimeObject(array.Elt)
 }
 
 func isSliceOfPointerToType(expr ast.Expr, typeName string) bool {

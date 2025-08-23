@@ -12,8 +12,8 @@ import (
 
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
-// Returns (*runtime.Object, any) where any can be the appropriate Ard error type for Results
-type FFIFunc func(vm *VM, args []*runtime.Object) (*runtime.Object, any)
+// Returns *runtime.Object - functions handle their own Result/Maybe creation
+type FFIFunc func(vm *VM, args []*runtime.Object) *runtime.Object
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {
@@ -71,38 +71,7 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*runtime.Object
 	}()
 
 	// Direct call with VM access - no reflection needed!
-	result, errValue := fn(vm, args)
-
-	// todo: let external functions do this themselves
-
-	// If the expected return type is a Result, translate error value to Ard Result
-	if resultType, ok := returnType.(*checker.Result); ok {
-		if errValue != nil {
-			// Trust FFI author to return correct error type - create error object directly
-			return runtime.MakeErr(runtime.Make(errValue, resultType.Err())), nil
-		}
-		// Convert successful result to Ard Ok result
-		return runtime.MakeOk(result), nil
-	}
-
-	// If the expected return type is a Maybe, automatically wrap result
-	if maybeType, ok := returnType.(*checker.Maybe); ok {
-		// Init maybe::none()
-		ret := runtime.MakeMaybe(nil, maybeType.Of())
-		if result != nil && result.Raw() != nil {
-			// Return Some(value) - the result is already the inner value
-			ret.Set(result.Raw())
-		}
-		return ret, nil
-	}
-
-	// For non-Result return types, convert any error to Go error
-	if errValue != nil {
-		if goErr, ok := errValue.(error); ok {
-			return result, goErr
-		}
-		return result, fmt.Errorf("FFI function returned error: %v", errValue)
-	}
+	result = fn(vm, args)
 	return result, nil
 }
 

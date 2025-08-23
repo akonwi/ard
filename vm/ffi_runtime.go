@@ -12,19 +12,19 @@ import (
 // Runtime module FFI functions
 
 // print prints a value to stdout
-func print(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
+func print(vm *VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
-		return nil, fmt.Errorf("print expects 1 argument, got %d", len(args))
+		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
 
 	arg := args[0]
 	switch arg := arg.Raw().(type) {
 	case string:
 		fmt.Println(arg)
-		return runtime.Void(), nil
+		return runtime.Void()
 	case bool, int, float64:
 		fmt.Printf("%v\n", arg)
-		return runtime.Void(), nil
+		return runtime.Void()
 	}
 
 	var str string
@@ -40,13 +40,13 @@ func print(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
 	}
 
 	fmt.Println(str)
-	return runtime.Void(), nil
+	return runtime.Void()
 }
 
 // read_line reads a line from stdin
-func read_line(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
+func read_line(vm *VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 0 {
-		return nil, fmt.Errorf("read_line expects 0 arguments, got %d", len(args))
+		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -54,24 +54,24 @@ func read_line(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
 	if !scanner.Scan() {
 		// No more input available or EOF
 		if err := scanner.Err(); err != nil {
-			return nil, err
+			return runtime.MakeErr(runtime.MakeStr(err.Error()))
 		}
 		// EOF - return empty string as success
-		return runtime.MakeStr(""), nil
+		return runtime.MakeOk(runtime.MakeStr(""))
 	}
 
-	return runtime.MakeStr(scanner.Text()), nil
+	return runtime.MakeOk(runtime.MakeStr(scanner.Text()))
 }
 
 // panic_with_message panics with a message
-func panic_with_message(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
+func panic_with_message(vm *VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
-		return nil, fmt.Errorf("panic expects 1 argument, got %d", len(args))
+		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
 
 	message, ok := args[0].Raw().(string)
 	if !ok {
-		return nil, fmt.Errorf("panic expects string argument, got %T", args[0].Raw())
+		panic(fmt.Errorf("panic expects string argument, got %T", args[0].Raw()))
 	}
 
 	panic(message)
@@ -80,22 +80,22 @@ func panic_with_message(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
 // Environment module FFI functions
 
 // get retrieves an environment variable
-func env_get(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
+func env_get(vm *VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
-		return nil, fmt.Errorf("get expects 1 argument, got %d", len(args))
+		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}
 
 	key, ok := args[0].Raw().(string)
 	if !ok {
-		return nil, fmt.Errorf("get expects string argument, got %T", args[0].Raw())
+		panic(fmt.Errorf("get expects string argument, got %T", args[0].Raw()))
 	}
 
 	value, exists := os.LookupEnv(key)
 	if !exists {
-		// VM will convert nil to None based on Maybe return type
-		return nil, nil
+		// Return None
+		return runtime.MakeMaybe(nil, checker.Str)
 	}
 
-	// VM will convert this to Some(value) based on Maybe return type
-	return runtime.MakeStr(value), nil
+	// Return Some(value)
+	return runtime.MakeStr(value).ToMaybe()
 }

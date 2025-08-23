@@ -10,14 +10,14 @@ import (
 )
 
 // panic_test_ffi deliberately panics to test panic recovery (test-only function)
-func panic_test_ffi(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
+func panic_test_ffi(vm *VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
-		return nil, fmt.Errorf("panic_test_ffi expects 1 argument, got %d", len(args))
+		panic(fmt.Errorf("panic_test_ffi expects 1 argument, got %d", len(args)))
 	}
 
 	message, ok := args[0].Raw().(string)
 	if !ok {
-		return nil, fmt.Errorf("panic_test_ffi expects string argument, got %T", args[0].Raw())
+		panic(fmt.Errorf("panic_test_ffi expects string argument, got %T", args[0].Raw()))
 	}
 
 	// Deliberately panic to test recovery
@@ -25,25 +25,25 @@ func panic_test_ffi(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
 }
 
 // error_type_test returns different error types to test type flexibility
-func error_type_test(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
+func error_type_test(vm *VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
-		return nil, fmt.Errorf("error_type_test expects 1 argument, got %d", len(args))
+		panic(fmt.Errorf("error_type_test expects 1 argument, got %d", len(args)))
 	}
 
 	errorType, ok := args[0].Raw().(string)
 	if !ok {
-		return nil, fmt.Errorf("error_type_test expects string argument")
+		panic(fmt.Errorf("error_type_test expects string argument"))
 	}
 
 	switch errorType {
 	case "string":
-		return nil, "this is a string error"
+		return runtime.MakeErr(runtime.MakeStr("this is a string error"))
 	case "int":
-		return nil, 42
+		return runtime.MakeErr(runtime.MakeInt(42))
 	case "bool":
-		return nil, true
+		return runtime.MakeErr(runtime.MakeBool(true))
 	default:
-		return runtime.MakeStr("success"), nil
+		return runtime.MakeOk(runtime.MakeStr("success"))
 	}
 }
 
@@ -129,88 +129,5 @@ func TestFFIPanicRecovery(t *testing.T) {
 
 		// This should re-panic with enhanced context
 		_, _ = registry.Call(vm, "test.panic_test_ffi", args, checker.Str)
-	})
-
-	t.Run("flexible error types", func(t *testing.T) {
-		// Test that FFI functions can return different error types
-
-		// Test string error
-		stringResultType := checker.MakeResult(checker.Str, checker.Str)
-		stringArgs := []*runtime.Object{runtime.MakeStr("string")}
-		result, err := registry.Call(vm, "test.error_type_test", stringArgs, stringResultType)
-
-		if err != nil {
-			t.Errorf("Expected no Go error, got: %v", err)
-		}
-		if !result.IsErr() {
-			t.Errorf("Expected Error result, got %v", result)
-		}
-
-		if result.AsString() != "this is a string error" {
-			t.Errorf("Expected string error, got: %v", result.Raw())
-		}
-
-		// Test int error
-		intResultType := checker.MakeResult(checker.Str, checker.Int)
-		intArgs := []*runtime.Object{runtime.MakeStr("int")}
-		result, err = registry.Call(vm, "test.error_type_test", intArgs, intResultType)
-
-		if err != nil {
-			t.Errorf("Expected no Go error, got: %v", err)
-		}
-	})
-
-	t.Run("automatic Maybe handling", func(t *testing.T) {
-		// Create a test function whose Ard signature returns a Str?
-		maybeTestFunc := func(vm *VM, args []*runtime.Object) (*runtime.Object, any) {
-			if len(args) != 1 {
-				return nil, fmt.Errorf("maybe_test expects 1 argument")
-			}
-
-			returnType, ok := args[0].Raw().(string)
-			if !ok {
-				return nil, fmt.Errorf("maybe_test expects string argument")
-			}
-
-			switch returnType {
-			case "some":
-				return runtime.MakeStr("test_value"), nil
-			case "none":
-				return nil, nil // VM should convert to None
-			default:
-				return nil, fmt.Errorf("unknown type: %s", returnType)
-			}
-		}
-
-		// Register test function
-		err := registry.Register("test.maybe_test", maybeTestFunc)
-		if err != nil {
-			t.Fatalf("Failed to register maybe test function: %v", err)
-		}
-
-		// Test Some case
-		maybeStrType := checker.MakeMaybe(checker.Str)
-		someArgs := []*runtime.Object{runtime.MakeStr("some")}
-		result, err := registry.Call(vm, "test.maybe_test", someArgs, maybeStrType)
-
-		if err != nil {
-			t.Errorf("Expected no error, got: %v", err)
-		}
-
-		if result.Raw() != "test_value" {
-			t.Errorf("Expected 'test_value', got: %v", result.Raw())
-		}
-
-		// Test None case
-		noneArgs := []*runtime.Object{runtime.MakeStr("none")}
-		result, err = registry.Call(vm, "test.maybe_test", noneArgs, maybeStrType)
-
-		if err != nil {
-			t.Errorf("Expected no error, got: %v", err)
-		}
-
-		if result.Raw() != nil {
-			t.Errorf("Expected nil for None, got: %v", result.Raw())
-		}
 	})
 }
