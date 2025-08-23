@@ -12,7 +12,7 @@ import (
 // Runtime module FFI functions
 
 // Print prints a value to stdout
-func Print(vm VM, args []*runtime.Object) *runtime.Object {
+func Print(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
@@ -44,7 +44,7 @@ func Print(vm VM, args []*runtime.Object) *runtime.Object {
 }
 
 // ReadLine reads a line from stdin
-func ReadLine(vm VM, args []*runtime.Object) *runtime.Object {
+func ReadLine(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 0 {
 		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
@@ -64,7 +64,7 @@ func ReadLine(vm VM, args []*runtime.Object) *runtime.Object {
 }
 
 // PanicWithMessage panics with a message
-func PanicWithMessage(vm VM, args []*runtime.Object) *runtime.Object {
+func PanicWithMessage(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
@@ -80,7 +80,7 @@ func PanicWithMessage(vm VM, args []*runtime.Object) *runtime.Object {
 // Environment module FFI functions
 
 // EnvGet retrieves an environment variable
-func EnvGet(vm VM, args []*runtime.Object) *runtime.Object {
+func EnvGet(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}

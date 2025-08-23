@@ -7,14 +7,13 @@ import (
 	"sync"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/ffi"
 	"github.com/akonwi/ard/vm/runtime"
 )
 
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
 // Returns *runtime.Object - functions handle their own Result/Maybe creation
-type FFIFunc func(vm ffi.VM, args []*runtime.Object) *runtime.Object
+type FFIFunc func(vm runtime.VM, args []*runtime.Object) *runtime.Object
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {

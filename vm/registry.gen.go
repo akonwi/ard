@@ -4,7 +4,7 @@ package vm
 
 import (
 	"fmt"
-	
+
 	"github.com/akonwi/ard/ffi"
 )
 

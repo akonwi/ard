@@ -7,7 +7,7 @@ import (
 )
 
 // Encode an Ard value into a JSON string
-func JsonEncode(vm VM, args []*runtime.Object) *runtime.Object {
+func JsonEncode(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	bytes, err := json.Marshal(args[0])
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))

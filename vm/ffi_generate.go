@@ -158,12 +158,7 @@ func isVMInterface(expr ast.Expr) bool {
 	// Check for ffi.VM (selector expression)
 	if sel, ok := expr.(*ast.SelectorExpr); ok {
 		pkg, ok := sel.X.(*ast.Ident)
-		return ok && pkg.Name == "ffi" && sel.Sel.Name == "VM"
-	}
-
-	// Check for just VM (identifier in current package)
-	if ident, ok := expr.(*ast.Ident); ok {
-		return ident.Name == "VM"
+		return ok && pkg.Name == "runtime" && sel.Sel.Name == "VM"
 	}
 
 	return false
