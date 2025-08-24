@@ -2,9 +2,6 @@ package vm
 
 import "github.com/akonwi/ard/vm/runtime"
 
-// todo: should this accept pointers?
-type function func(args ...runtime.Object) runtime.Object
-
 type scope struct {
 	parent    *scope
 	bindings  map[string]*runtime.Object
