@@ -13,6 +13,15 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}
+	if err := r.Register("FloatFromStr", ffi.FloatFromStr); err != nil {
+		return fmt.Errorf("failed to register FloatFromStr: %w", err)
+	}
+	if err := r.Register("FloatFromInt", ffi.FloatFromInt); err != nil {
+		return fmt.Errorf("failed to register FloatFromInt: %w", err)
+	}
+	if err := r.Register("FloatFloor", ffi.FloatFloor); err != nil {
+		return fmt.Errorf("failed to register FloatFloor: %w", err)
+	}
 	if err := r.Register("Print", ffi.Print); err != nil {
 		return fmt.Errorf("failed to register Print: %w", err)
 	}

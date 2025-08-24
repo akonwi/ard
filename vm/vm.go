@@ -32,7 +32,6 @@ func New(imports map[string]checker.Module) *VM {
 func (vm *VM) initModuleRegistry() {
 	// <prelude>
 	vm.moduleRegistry.Register(&IntModule{})
-	vm.moduleRegistry.Register(&FloatModule{})
 	vm.moduleRegistry.Register(&ResultModule{})
 	vm.moduleRegistry.Register(&ListModule{})
 	// </prelude>

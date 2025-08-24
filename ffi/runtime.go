@@ -97,5 +97,5 @@ func EnvGet(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	}
 
 	// Return Some(value)
-	return runtime.MakeStr(value).ToMaybe()
+	return runtime.MakeStr(value).ToSome()
 }

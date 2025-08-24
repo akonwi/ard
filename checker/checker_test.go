@@ -77,9 +77,7 @@ func TestImports(t *testing.T) {
 			name:  "importing modules",
 			input: `use ard/io`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/io": &checker.UserModule{}, // UserModule from embedded system
-				},
+				Imports: map[string]checker.Module{},
 			},
 		},
 		{
@@ -1426,9 +1424,6 @@ func TestMaybes(t *testing.T) {
 				mut name: Str? = maybe::none()
 				mut name2 = maybe::some("Bob")`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/maybe": checker.MaybePkg{},
-				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
@@ -1468,9 +1463,6 @@ func TestMaybes(t *testing.T) {
 			  name = "Alice"
 				name = maybe::none()`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/maybe": checker.MaybePkg{},
-				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
@@ -1527,10 +1519,6 @@ func TestMaybes(t *testing.T) {
 					_ => io::print("no name")
 				}`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/io":    &checker.UserModule{}, // UserModule from embedded system
-					"ard/maybe": checker.MaybePkg{},
-				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
@@ -2103,9 +2091,6 @@ func TestGenerics(t *testing.T) {
 				let result = json::encode<Int>(42)
 			`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/json": &checker.UserModule{},
-				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{

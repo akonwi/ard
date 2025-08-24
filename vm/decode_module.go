@@ -509,7 +509,7 @@ func decodeAsNullable(innerDecoder *runtime.Object, data *runtime.Object, result
 
 	if innerResult.IsOk() {
 		// Success - turn the decoded value into maybe::some()
-		return runtime.MakeOk(innerResult.ToMaybe())
+		return runtime.MakeOk(innerResult.ToSome())
 	}
 	return innerResult
 }

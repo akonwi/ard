@@ -1,7 +1,6 @@
 package checker
 
 var prelude = map[string]Module{
-	"Float":  FloatPkg{},
 	"Int":    IntPkg{},
 	"List":   ListPkg{},
 	"Result": ResultPkg{},

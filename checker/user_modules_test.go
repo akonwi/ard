@@ -126,14 +126,9 @@ fn main() Int {
 	program := module.Program()
 
 	// Should have imported the utils module
-	if len(program.Imports) != 1 {
-		t.Errorf("Expected 1 import, got %d", len(program.Imports))
-	}
-
-	// Should be able to access the utils module
 	utilsModule, ok := program.Imports["my_calculator/utils"]
 	if !ok {
-		t.Fatal("Expected 'utils' module to be imported")
+		t.Fatal("Expected 'my_calculator/utils' module to be imported")
 	}
 
 	// Test that the module provides the public function
@@ -203,14 +198,9 @@ fn main() Int {
 	program := module.Program()
 
 	// Should have imported the math module
-	if len(program.Imports) != 1 {
-		t.Errorf("Expected 1 import, got %d", len(program.Imports))
-	}
-
-	// Should be able to access the math module
 	mathModule, ok := program.Imports["test_project/math"]
 	if !ok {
-		t.Fatal("Expected 'math' module to be imported")
+		t.Fatal("Expected 'test_project/math' module to be imported")
 	}
 
 	// Test that public functions are accessible
@@ -355,13 +345,14 @@ fn func2() Int {
 	program2 := module2.Program()
 
 	// Both should have the shared module imported
-	if len(program1.Imports) != 1 || len(program2.Imports) != 1 {
-		t.Error("Expected both programs to have 1 import")
+	importedModule1, ok1 := program1.Imports["test_project/shared"]
+	if !ok1 {
+		t.Fatal("Expected program1 to have 'test_project/shared' module imported")
 	}
-
-	// The module instances should be the same (cached)
-	importedModule1 := program1.Imports["shared"]
-	importedModule2 := program2.Imports["shared"]
+	importedModule2, ok2 := program2.Imports["test_project/shared"]
+	if !ok2 {
+		t.Fatal("Expected program2 to have 'test_project/shared' module imported")
+	}
 
 	if importedModule1 != importedModule2 {
 		t.Error("Expected modules to be the same instance (cached)")

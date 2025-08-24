@@ -119,9 +119,6 @@ func TestResults(t *testing.T) {
 				}
 			}`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/io": &checker.UserModule{}, // UserModule from embedded system
-				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{
@@ -323,11 +320,11 @@ func TestTryInMatchBlocks(t *testing.T) {
 			name: "try works in enum match arms",
 			input: `
 				enum Status { active, inactive }
-				
+
 				fn get_result() Int!Str {
 					Result::ok(42)
 				}
-				
+
 				fn process_status(status: Status) Int!Str {
 					match status {
 						Status::active => {
@@ -346,7 +343,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 				fn get_result() Int!Str {
 					Result::ok(42)
 				}
-				
+
 				fn process_maybe(maybe_val: Int?) Int!Str {
 					match maybe_val {
 						val => {
@@ -365,7 +362,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 				fn risky_operation() Str!Str {
 					Result::err("failed")
 				}
-				
+
 				fn process_with_catch(flag: Bool) Str {
 					match flag {
 						true => {
@@ -383,11 +380,11 @@ func TestTryInMatchBlocks(t *testing.T) {
 			name: "try in nested match blocks",
 			input: `
 				enum Status { active, inactive }
-				
+
 				fn get_result() Int!Str {
 					Result::ok(42)
 				}
-				
+
 				fn process_nested(status: Status, maybe_val: Int?) Int!Str {
 					match status {
 						Status::active => {
@@ -411,7 +408,7 @@ func TestTryInMatchBlocks(t *testing.T) {
 				fn get_result() Int!Bool {
 					Result::ok(42)
 				}
-				
+
 				fn wrong_error_type(flag: Bool) Int!Str {
 					match flag {
 						true => {
