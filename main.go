@@ -55,10 +55,7 @@ func main() {
 
 		result := ast.Parse(sourceCode, inputPath)
 		if len(result.Errors) > 0 {
-			fmt.Fprintf(os.Stderr, "Parse errors:\n")
-			for _, err := range result.Errors {
-				fmt.Fprintf(os.Stderr, "  %s:%d:%d: %s\n", inputPath, err.Location.Start.Row, err.Location.Start.Col, err.Message)
-			}
+			result.PrintErrors()
 			os.Exit(1)
 		}
 		ast := result.Program
@@ -102,7 +99,7 @@ func check(inputPath string) bool {
 
 	result := ast.Parse(sourceCode, inputPath)
 	if len(result.Errors) > 0 {
-		log.Fatalf("Parse errors: %s", result.Errors[0].Message)
+		result.PrintErrors()
 		return false
 	}
 	ast := result.Program

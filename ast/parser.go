@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 )
@@ -12,8 +13,16 @@ type ParseError struct {
 }
 
 type ParseResult struct {
-	Program *Program
-	Errors  []ParseError
+	fileName string
+	Program  *Program
+	Errors   []ParseError
+}
+
+func (pr ParseResult) PrintErrors() {
+	fmt.Fprintf(os.Stderr, "Parse errors:\n")
+	for _, err := range pr.Errors {
+		fmt.Fprintf(os.Stderr, "  %s %s %s\n", pr.fileName, err.Location.Start, err.Message)
+	}
 }
 
 type parser struct {
@@ -28,8 +37,9 @@ func Parse(source []byte, fileName string) ParseResult {
 	program, err := p.parse()
 
 	result := ParseResult{
-		Program: program,
-		Errors:  p.errors,
+		fileName: fileName,
+		Program:  program,
+		Errors:   p.errors,
 	}
 
 	// If there was a panic-based error, add it to errors
