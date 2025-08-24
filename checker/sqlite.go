@@ -29,12 +29,6 @@ var DatabaseDef = &StructDef{
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
 			ReturnType: MakeResult(Bool, Str),
 		},
-		"get": {
-			Name:       "get",
-			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "where", Type: Str}},
-			ReturnType: MakeResult(MakeList(&Any{name: "T"}), Str),
-		},
-
 		"insert": {
 			Name:       "insert",
 			Parameters: []Parameter{{Name: "table", Type: Str}, {Name: "values", Type: MakeMap(Str, Dynamic)}},
