@@ -1,7 +1,6 @@
 package checker
 
 var prelude = map[string]Module{
-	"Int":    IntPkg{},
 	"List":   ListPkg{},
 	"Result": ResultPkg{},
 	"Str":    strMod,
@@ -142,32 +141,6 @@ func (pkg FsPkg) Get(name string) Symbol {
 				Name:       name,
 				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
 				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
-
-/* ard/ints */
-type IntPkg struct{}
-
-func (pkg IntPkg) Path() string {
-	return "ard/int"
-}
-
-func (pkg IntPkg) Program() *Program {
-	return nil
-}
-func (pkg IntPkg) Get(name string) Symbol {
-	switch name {
-	case "from_str":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "string", Type: Str}},
-				ReturnType: &Maybe{Int},
 			},
 		}
 	default:

@@ -41,3 +41,16 @@ func FloatFloor(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	floatVal := args[0].AsFloat()
 	return runtime.MakeFloat(math.Floor(floatVal))
 }
+
+func IntFromStr(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+	if len(args) != 1 {
+		panic("IntFromStr expects 1 argument")
+	}
+
+	str := args[0].AsString()
+	out := runtime.MakeMaybe(nil, checker.Int)
+	if value, err := strconv.Atoi(str); err == nil {
+		out.Set(value)
+	}
+	return out
+}
