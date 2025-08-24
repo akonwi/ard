@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// todo: this can return an error with improved messaging
+// todo: this can return an error with more detailed messaging for the scenario
 func areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)

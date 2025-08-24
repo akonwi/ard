@@ -722,7 +722,7 @@ func extractField(fieldKey string, valueDecoder *runtime.Object, rawMap map[stri
 		_path.Set(append([]*runtime.Object{fieldStr}, path...))
 	}
 
-	// todo: maybe should copy instead of mutate
+	// question: maybe should copy instead of mutate
 	return valueResult
 }
 

@@ -19,7 +19,7 @@ func TestFibers(t *testing.T) {
 			})
 			`,
 			diagnostics: []checker.Diagnostic{
-				/* todo: need more specific in error message */
+				/* todo: need to be more specific about how the mutable reference won't be shared */
 				{Kind: checker.Error, Message: "Undefined variable: duration"},
 			},
 		},
