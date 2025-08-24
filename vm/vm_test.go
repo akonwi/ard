@@ -303,7 +303,7 @@ func TestFunctions(t *testing.T) {
 			    base + x
 			  }
 			}
-			
+
 			let addFive = createAdder(5)
 			addFive(10)`,
 			want: 15,
@@ -344,6 +344,15 @@ func TestFloatApi(t *testing.T) {
 			name:  "::from_int turns an Int into a Float",
 			input: `Float::from_int(100)`,
 			want:  100.0,
+		},
+		{
+			name: "::floor() rounds down to the nearest integer",
+			input: `
+				if not Float::floor(10.5) == 10.0 { panic("10.5 failed") }
+				if not Float::floor(9.0) == 9.0 { panic("9.0 failed") }
+				if not Float::floor(7.73) == 7.0 { panic("7.73 failed") }
+			`,
+			want: nil,
 		},
 		{
 			name:  ".to_int() converts exact floats",

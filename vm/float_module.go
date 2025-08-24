@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/akonwi/ard/checker"
@@ -21,6 +22,9 @@ func (m *FloatModule) Program() *checker.Program {
 
 func (m *FloatModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
+	case "floor":
+		input := args[0].Raw().(float64)
+		return runtime.MakeFloat(math.Floor(input))
 	case "from_int":
 		input := args[0].Raw().(int)
 		return runtime.MakeFloat(float64(input))

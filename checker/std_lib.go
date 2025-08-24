@@ -47,6 +47,15 @@ func (pkg FloatPkg) Program() *Program {
 }
 func (pkg FloatPkg) Get(name string) Symbol {
 	switch name {
+	case "floor":
+		return Symbol{
+			Name: name,
+			Type: &FunctionDef{
+				Name:       name,
+				Parameters: []Parameter{{Name: "float", Type: Float}},
+				ReturnType: Float,
+			},
+		}
 	case "from_int":
 		return Symbol{
 			Name: name,
