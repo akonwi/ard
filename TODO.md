@@ -2,6 +2,17 @@
 
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
+- [ ] `match` as a replacement for if statements
+  - like cascading if conditions rather than chaining if-else-if
+  - supports catch-all case
+  ```
+  match {
+    condition_1 => {},
+    condition_2 => {},
+    condition_3 => {},
+    _ => {}
+  }
+  ```
 - [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
   - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
 - [ ] `Maybe.expect()` for panicing
