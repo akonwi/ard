@@ -1,7 +1,6 @@
 package checker
 
 var prelude = map[string]Module{
-	"List":   ListPkg{},
 	"Result": ResultPkg{},
 	"Str":    strMod,
 }
@@ -141,33 +140,6 @@ func (pkg FsPkg) Get(name string) Symbol {
 				Name:       name,
 				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
 				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
-
-/* ard/list */
-
-type ListPkg struct{}
-
-func (pkg ListPkg) Path() string {
-	return "ard/list"
-}
-
-func (pkg ListPkg) Program() *Program {
-	return nil
-}
-func (pkg ListPkg) Get(name string) Symbol {
-	switch name {
-	case "new":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{},
-				ReturnType: &List{&Any{name: "T"}},
 			},
 		}
 	default:

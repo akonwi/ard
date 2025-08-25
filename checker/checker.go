@@ -178,6 +178,9 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		if mod, ok := findInStdLib("ard/int"); ok {
 			c.program.Imports["Int"] = mod
 		}
+		if mod, ok := findInStdLib("ard/list"); ok {
+			c.program.Imports["List"] = mod
+		}
 	}
 
 	for i := range input.Statements {

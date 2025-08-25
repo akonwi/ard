@@ -37,6 +37,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("EnvGet", ffi.EnvGet); err != nil {
 		return fmt.Errorf("failed to register EnvGet: %w", err)
 	}
+	if err := r.Register("NewList", ffi.NewList); err != nil {
+		return fmt.Errorf("failed to register NewList: %w", err)
+	}
 
 	return nil
 }
