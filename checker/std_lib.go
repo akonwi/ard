@@ -32,50 +32,6 @@ func findInStdLib(path string) (Module, bool) {
 	return nil, false
 }
 
-/* ard/float */
-type FloatPkg struct{}
-
-func (pkg FloatPkg) Path() string {
-	return "ard/float"
-}
-
-func (pkg FloatPkg) Program() *Program {
-	return nil
-}
-func (pkg FloatPkg) Get(name string) Symbol {
-	switch name {
-	case "floor":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "float", Type: Float}},
-				ReturnType: Float,
-			},
-		}
-	case "from_int":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "int", Type: Int}},
-				ReturnType: Float,
-			},
-		}
-	case "from_str":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "string", Type: Str}},
-				ReturnType: &Maybe{Float},
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
-
 /* ard/fs */
 type FsPkg struct{}
 
