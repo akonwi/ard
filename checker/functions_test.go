@@ -162,9 +162,6 @@ func TestCallingPackageFunctions(t *testing.T) {
 				`io::print(200)`,
 			}, "\n"),
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/io": &checker.UserModule{}, // UserModule from embedded system
-				},
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.ModuleFunctionCall{

@@ -1,0 +1,1 @@
+extern fn new() [$T] = "NewList"

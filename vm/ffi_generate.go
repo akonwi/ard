@@ -108,8 +108,8 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Check function signature: func(vm *VM, args []*runtime.Object) *runtime.Object
-	if fn.Type.Params == nil || len(fn.Type.Params.List) != 2 {
+	// Check function signature: func(vm *VM, args []*runtime.Object, ret checker.Type) *runtime.Object
+	if fn.Type.Params == nil || len(fn.Type.Params.List) != 3 {
 		return false
 	}
 
@@ -128,11 +128,15 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 
 	// Validate second parameter: args []*runtime.Object
 	secondParam := fn.Type.Params.List[1]
-	if len(secondParam.Names) != 1 || secondParam.Names[0].Name != "args" {
-		return false
-	}
 	if !isSliceOfPointerToRuntimeObject(secondParam.Type) {
 		return false
+	}
+
+	// Validate third parameter: ret checker.Type
+	thirdParam := fn.Type.Params.List[2]
+	if sel, isSelector := thirdParam.Type.(*ast.SelectorExpr); isSelector {
+		pkg, ok := sel.X.(*ast.Ident)
+		return ok && pkg.Name == "checker" && sel.Sel.Name == "Type"
 	}
 
 	// Validate return type: *runtime.Object

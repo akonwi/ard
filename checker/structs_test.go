@@ -71,9 +71,6 @@ func TestStructs(t *testing.T) {
 				`let req = http::Request{method:http::Method::Get, url:"google.com", headers: [:]}` + "\n" +
 				`req.url`,
 			output: &checker.Program{
-				Imports: map[string]checker.Module{
-					"ard/http": checker.HttpPkg{},
-				},
 				Statements: []checker.Statement{
 					{
 						Stmt: &checker.VariableDef{

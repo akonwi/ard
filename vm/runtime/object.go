@@ -270,7 +270,7 @@ func MakeMaybe(raw any, of checker.Type) *Object {
 	}
 }
 
-func (o Object) ToMaybe() *Object {
+func (o Object) ToSome() *Object {
 	o._type = checker.MakeMaybe(o._type)
 	return &o
 }

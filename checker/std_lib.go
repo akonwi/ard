@@ -1,9 +1,6 @@
 package checker
 
 var prelude = map[string]Module{
-	"Float":  FloatPkg{},
-	"Int":    IntPkg{},
-	"List":   ListPkg{},
 	"Result": ResultPkg{},
 	"Str":    strMod,
 }
@@ -33,50 +30,6 @@ func findInStdLib(path string) (Module, bool) {
 		return SQLitePkg{}, true
 	}
 	return nil, false
-}
-
-/* ard/float */
-type FloatPkg struct{}
-
-func (pkg FloatPkg) Path() string {
-	return "ard/float"
-}
-
-func (pkg FloatPkg) Program() *Program {
-	return nil
-}
-func (pkg FloatPkg) Get(name string) Symbol {
-	switch name {
-	case "floor":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "float", Type: Float}},
-				ReturnType: Float,
-			},
-		}
-	case "from_int":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "int", Type: Int}},
-				ReturnType: Float,
-			},
-		}
-	case "from_str":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "string", Type: Str}},
-				ReturnType: &Maybe{Float},
-			},
-		}
-	default:
-		return Symbol{}
-	}
 }
 
 /* ard/fs */
@@ -143,59 +96,6 @@ func (pkg FsPkg) Get(name string) Symbol {
 				Name:       name,
 				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
 				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
-
-/* ard/ints */
-type IntPkg struct{}
-
-func (pkg IntPkg) Path() string {
-	return "ard/int"
-}
-
-func (pkg IntPkg) Program() *Program {
-	return nil
-}
-func (pkg IntPkg) Get(name string) Symbol {
-	switch name {
-	case "from_str":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "string", Type: Str}},
-				ReturnType: &Maybe{Int},
-			},
-		}
-	default:
-		return Symbol{}
-	}
-}
-
-/* ard/list */
-
-type ListPkg struct{}
-
-func (pkg ListPkg) Path() string {
-	return "ard/list"
-}
-
-func (pkg ListPkg) Program() *Program {
-	return nil
-}
-func (pkg ListPkg) Get(name string) Symbol {
-	switch name {
-	case "new":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{},
-				ReturnType: &List{&Any{name: "T"}},
 			},
 		}
 	default:

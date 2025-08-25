@@ -170,6 +170,19 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		}
 	}
 
+	// Auto-import prelude modules (only for non-embedded modules)
+	if !strings.HasPrefix(filePath, "ard/") {
+		if mod, ok := findInStdLib("ard/float"); ok {
+			c.program.Imports["Float"] = mod
+		}
+		if mod, ok := findInStdLib("ard/int"); ok {
+			c.program.Imports["Int"] = mod
+		}
+		if mod, ok := findInStdLib("ard/list"); ok {
+			c.program.Imports["List"] = mod
+		}
+	}
+
 	for i := range input.Statements {
 		if stmt := c.checkStmt(&input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)

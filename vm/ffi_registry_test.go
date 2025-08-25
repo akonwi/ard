@@ -10,7 +10,7 @@ import (
 )
 
 // panic_test_ffi deliberately panics to test panic recovery (test-only function)
-func panic_test_ffi(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func panic_test_ffi(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic_test_ffi expects 1 argument, got %d", len(args)))
 	}
@@ -25,7 +25,7 @@ func panic_test_ffi(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 }
 
 // error_type_test returns different error types to test type flexibility
-func error_type_test(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func error_type_test(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("error_type_test expects 1 argument, got %d", len(args)))
 	}
