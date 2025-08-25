@@ -12,7 +12,7 @@ import (
 // Runtime module FFI functions
 
 // Print prints a value to stdout
-func Print(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func Print(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
@@ -44,7 +44,7 @@ func Print(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 }
 
 // ReadLine reads a line from stdin
-func ReadLine(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func ReadLine(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 0 {
 		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
@@ -64,7 +64,7 @@ func ReadLine(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 }
 
 // PanicWithMessage panics with a message
-func PanicWithMessage(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func PanicWithMessage(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
@@ -80,7 +80,7 @@ func PanicWithMessage(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 // Environment module FFI functions
 
 // EnvGet retrieves an environment variable
-func EnvGet(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}
@@ -107,6 +107,10 @@ func EnvGet(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 //   - a collection of resolved generics ([]checker.Type) or map[string]checker.Type
 //     don't actually have this information at runtime
 //   - the checker.FunctionCall node which has a refined signature
-func NewList(vm runtime.VM, args []*runtime.Object) *runtime.Object {
-	return runtime.MakeList(&checker.Any{})
+func NewList(vm runtime.VM, args []*runtime.Object, ret checker.Type) *runtime.Object {
+	retList, ok := ret.(*checker.List)
+	if !ok {
+		panic(fmt.Errorf("expected *checker.List, got %T", ret))
+	}
+	return runtime.MakeList(retList.Of())
 }

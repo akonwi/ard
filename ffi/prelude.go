@@ -9,7 +9,7 @@ import (
 )
 
 // FloatFromStr parses a string to a float, returning Float? (Maybe<Float>)
-func FloatFromStr(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func FloatFromStr(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic("FloatFromStr expects 1 argument")
 	}
@@ -23,7 +23,7 @@ func FloatFromStr(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 }
 
 // FloatFromInt converts an integer to a float
-func FloatFromInt(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func FloatFromInt(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic("FloatFromInt expects 1 argument")
 	}
@@ -33,7 +33,7 @@ func FloatFromInt(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 }
 
 // FloatFloor returns the floor of a float
-func FloatFloor(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func FloatFloor(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic("FloatFloor expects 1 argument")
 	}
@@ -42,7 +42,7 @@ func FloatFloor(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 	return runtime.MakeFloat(math.Floor(floatVal))
 }
 
-func IntFromStr(vm runtime.VM, args []*runtime.Object) *runtime.Object {
+func IntFromStr(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic("IntFromStr expects 1 argument")
 	}
