@@ -128,18 +128,12 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 
 	// Validate second parameter: args []*runtime.Object
 	secondParam := fn.Type.Params.List[1]
-	if len(secondParam.Names) != 1 || secondParam.Names[0].Name != "args" {
-		return false
-	}
 	if !isSliceOfPointerToRuntimeObject(secondParam.Type) {
 		return false
 	}
 
 	// Validate third parameter: ret checker.Type
 	thirdParam := fn.Type.Params.List[2]
-	if len(thirdParam.Names) != 1 {
-		return false
-	}
 	if sel, isSelector := thirdParam.Type.(*ast.SelectorExpr); isSelector {
 		pkg, ok := sel.X.(*ast.Ident)
 		return ok && pkg.Name == "checker" && sel.Sel.Name == "Type"
