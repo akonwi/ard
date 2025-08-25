@@ -99,18 +99,3 @@ func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Obje
 	// Return Some(value)
 	return runtime.MakeStr(value).ToSome()
 }
-
-// todo: this is a generic function so the system needs to provide the resolved types
-// so there's no need for instantiating an unknown type.
-//
-// ideas for a 3rd param:
-//   - a collection of resolved generics ([]checker.Type) or map[string]checker.Type
-//     don't actually have this information at runtime
-//   - the checker.FunctionCall node which has a refined signature
-func NewList(vm runtime.VM, args []*runtime.Object, ret checker.Type) *runtime.Object {
-	retList, ok := ret.(*checker.List)
-	if !ok {
-		panic(fmt.Errorf("expected *checker.List, got %T", ret))
-	}
-	return runtime.MakeList(retList.Of())
-}
