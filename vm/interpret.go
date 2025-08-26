@@ -71,6 +71,8 @@ func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.Functi
 	mvm := New(module.Program().Imports)
 	// build up the module's environment
 	mvm.Interpret(module.Program())
+	// copy the module scope bindings (struct method closures) to caller VM
+	vm.importModuleScope(mvm)
 	// call the function
 	return mvm.evalFunctionCall(call, args...)
 }
@@ -90,16 +92,21 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	case *checker.StructDef:
 		// Process struct methods and create closures with captured scope
 		for methodName, methodDef := range s.Methods {
+			// Create a modified function definition with "@" as first parameter
+			methodDefWithSelf := *methodDef // Copy the original
+			methodDefWithSelf.Parameters = append([]checker.Parameter{
+				{Name: "@", Type: nil}, // "@" parameter for struct instance
+			}, methodDef.Parameters...)
+
 			closure := &Closure{
 				vm:            vm,
-				expr:          *methodDef,
+				expr:          methodDefWithSelf,
 				capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
 			}
 			// Store using struct.method key format
 			key := s.Name + "." + methodName
 			closureObj := runtime.Make(closure, methodDef)
 			vm.scope.add(key, closureObj)
-			fmt.Printf("added %s to scope\n", key)
 		}
 		return runtime.Void()
 	case *checker.VariableDef:
@@ -1005,31 +1012,10 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		}
 	}
 
-	var sig checker.Type
-	var ok bool
-
 	istruct := subj.Type().(*checker.StructDef)
-	// Check for methods first
-	if method, exists := istruct.Methods[call.Name]; exists {
-		sig = method
-		ok = true
-	} else {
-		// Fall back to fields (for backward compatibility)
-		sig, ok = istruct.Fields[call.Name]
-	}
-
-	if !ok {
-		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))
-	}
-
-	fnDef, ok := sig.(*checker.FunctionDef)
-	if !ok {
-		panic(fmt.Errorf("Not a function: %s.%s", istruct.Name, call.Name))
-	}
 
 	// Try to find pre-created closure with captured lexical scope
 	key := istruct.Name + "." + call.Name
-	fmt.Printf("Looking for pre-created closure: %s\n", key)
 
 	// Search through the scope chain manually since vm.scope.get might have issues
 	searchScope := vm.scope
@@ -1040,7 +1026,6 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		if obj, exists := searchScope.bindings[key]; exists {
 			closureObj = obj
 			found = true
-			fmt.Printf("Found pre-created closure: %s in scope level\n", key)
 			break
 		}
 		searchScope = searchScope.parent
@@ -1049,62 +1034,18 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	if found {
 		closure := closureObj.Raw().(*Closure)
 
-		// Add struct instance (@) to closure's captured scope
-		originalScope := closure.capturedScope
-		methodScope := newScope(originalScope)
-		methodScope.add("@", subj)
-
-		// Create new closure with method-specific scope
-		methodClosure := &Closure{
-			vm:            vm,
-			expr:          closure.expr,
-			capturedScope: methodScope,
-		}
-
-		args := make([]*runtime.Object, len(call.Args))
+		// Prepare arguments: struct instance first, then regular args
+		args := make([]*runtime.Object, len(call.Args)+1)
+		args[0] = subj // "@" - the struct instance
 		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
+			args[i+1] = vm.eval(call.Args[i])
 		}
 
-		return methodClosure.eval(args...)
+		return closure.eval(args...)
 	}
 
-	// Fallback: find the root scope containing extern functions
-	// Walk all the way up to find the scope with the most bindings (likely the module root)
-	capturedScope := vm.scope
-	currentScope := vm.scope
-	maxBindings := len(vm.scope.bindings)
-
-	for currentScope != nil {
-		if len(currentScope.bindings) > maxBindings {
-			maxBindings = len(currentScope.bindings)
-			capturedScope = currentScope
-			fmt.Printf("Found better scope with %d bindings\n", maxBindings)
-		}
-		currentScope = currentScope.parent
-	}
-
-	if capturedScope == vm.scope {
-		fmt.Printf("Using current scope (%d bindings)\n", len(vm.scope.bindings))
-	} else {
-		fmt.Printf("Using ancestor scope with %d bindings\n", len(capturedScope.bindings))
-	}
-
-	methodScope := newScope(capturedScope)
-	methodScope.add("@", subj)
-
-	closure := &Closure{
-		vm:            vm,
-		expr:          *fnDef,
-		capturedScope: methodScope,
-	}
-
-	args := make([]*runtime.Object, len(call.Args))
-	for i := range call.Args {
-		args[i] = vm.eval(call.Args[i])
-	}
-
-	return closure.eval(args...)
+	// No fallback - if pre-created closure not found, it's an error
+	panic(fmt.Errorf("Method %s not found for struct %s", call.Name, istruct.Name))
 }
 
 func (vm *VM) EvalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {

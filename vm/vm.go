@@ -30,6 +30,19 @@ func New(imports map[string]checker.Module) *VM {
 	return vm
 }
 
+// importModuleScope copies bindings from module VM to caller VM
+func (vm *VM) importModuleScope(from *VM) {
+	if from.moduleScope == nil {
+		return
+	}
+	for name, obj := range from.moduleScope.bindings {
+		// don't overwrite names that already exist in the caller
+		if _, exists := vm.scope.get(name); !exists {
+			vm.scope.add(name, obj)
+		}
+	}
+}
+
 func (vm *VM) initModuleRegistry() {
 	// <prelude>
 	vm.moduleRegistry.Register(&ResultModule{})

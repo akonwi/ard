@@ -44,6 +44,18 @@ func TestStructs(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
+						Stmt: &checker.StructDef{
+							Name: "Person",
+							Fields: map[string]checker.Type{
+								"name":     checker.Str,
+								"age":      checker.Int,
+								"employed": checker.Bool,
+							},
+							Methods: map[string]*checker.FunctionDef{},
+							Statics: map[string]*checker.FunctionDef{},
+						},
+					},
+					{
 						Stmt: &checker.VariableDef{
 							Name: "alice",
 							Value: &checker.StructInstance{
