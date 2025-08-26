@@ -60,7 +60,6 @@ func (vm *VM) initModuleRegistry() {
 			vm.moduleRegistry.Register(&HTTPModule{})
 		case "ard/decode":
 			vm.moduleRegistry.Register(&DecodeModule{})
-		// "ard/sqlite" is now handled through FFI, not as a module
 		case "ard/async":
 			vm.moduleRegistry.Register(&AsyncModule{})
 		}
