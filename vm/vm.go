@@ -15,6 +15,7 @@ type VM struct {
 	imports        map[string]checker.Module
 	moduleRegistry *ModuleRegistry
 	ffiRegistry    *RuntimeFFIRegistry
+	moduleScope    *scope // Captures the scope where extern functions are defined
 }
 
 func New(imports map[string]checker.Module) *VM {
@@ -27,6 +28,19 @@ func New(imports map[string]checker.Module) *VM {
 	vm.initModuleRegistry()
 	vm.initFFIRegistry()
 	return vm
+}
+
+// importModuleScope copies bindings from module VM to caller VM
+func (vm *VM) importModuleScope(from *VM) {
+	if from.moduleScope == nil {
+		return
+	}
+	for name, obj := range from.moduleScope.bindings {
+		// don't overwrite names that already exist in the caller
+		if _, exists := vm.scope.get(name); !exists {
+			vm.scope.add(name, obj)
+		}
+	}
 }
 
 func (vm *VM) initModuleRegistry() {
@@ -46,8 +60,6 @@ func (vm *VM) initModuleRegistry() {
 			vm.moduleRegistry.Register(&HTTPModule{})
 		case "ard/decode":
 			vm.moduleRegistry.Register(&DecodeModule{})
-		case "ard/sqlite":
-			vm.moduleRegistry.Register(&SQLiteModule{})
 		case "ard/async":
 			vm.moduleRegistry.Register(&AsyncModule{})
 		}

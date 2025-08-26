@@ -24,6 +24,11 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
 	}
+
+	// Store module scope after processing all statements
+	// This ensures we capture the scope containing all extern functions and module definitions
+	vm.moduleScope = vm.scope
+
 	return vm.result.GoValue(), nil
 }
 
@@ -66,6 +71,8 @@ func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.Functi
 	mvm := New(module.Program().Imports)
 	// build up the module's environment
 	mvm.Interpret(module.Program())
+	// copy the module scope bindings (struct method closures) to caller VM
+	vm.importModuleScope(mvm)
 	// call the function
 	return mvm.evalFunctionCall(call, args...)
 }
@@ -81,6 +88,26 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 
 	switch s := stmt.Stmt.(type) {
 	case *checker.Enum:
+		return runtime.Void()
+	case *checker.StructDef:
+		// Process struct methods and create closures with captured scope
+		for methodName, methodDef := range s.Methods {
+			// Create a modified function definition with "@" as first parameter
+			methodDefWithSelf := *methodDef // Copy the original
+			methodDefWithSelf.Parameters = append([]checker.Parameter{
+				{Name: "@", Type: nil}, // "@" parameter for struct instance
+			}, methodDef.Parameters...)
+
+			closure := &Closure{
+				vm:            vm,
+				expr:          methodDefWithSelf,
+				capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
+			}
+			// Store using struct.method key format
+			key := s.Name + "." + methodName
+			closureObj := runtime.Make(closure, methodDef)
+			vm.scope.add(key, closureObj)
+		}
 		return runtime.Void()
 	case *checker.VariableDef:
 		val := vm.eval(s.Value)
@@ -941,15 +968,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		}
 		return http.evalHttpRequestMethod(subj, call, args)
 	}
-	// Special handling for SQLite Database methods
-	if subj.Type() == checker.DatabaseDef {
-		sqlite := vm.moduleRegistry.handlers[checker.SQLitePkg{}.Path()].(*SQLiteModule)
-		args := make([]*runtime.Object, len(call.Args))
-		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
-		}
-		return sqlite.evalDatabaseMethod(subj, call, args)
-	}
+	// Database methods are now handled through standard library FFI
 	// Special handling for Fiber methods
 	if subj.Type() == checker.Fiber {
 		async := vm.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
@@ -993,44 +1012,26 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		}
 	}
 
-	var sig checker.Type
-	var ok bool
-
 	istruct := subj.Type().(*checker.StructDef)
-	// Check for methods first
-	if method, exists := istruct.Methods[call.Name]; exists {
-		sig = method
-		ok = true
-	} else {
-		// Fall back to fields (for backward compatibility)
-		sig, ok = istruct.Fields[call.Name]
+
+	// Try to find pre-created closure with captured lexical scope
+	key := istruct.Name + "." + call.Name
+	
+	if closureObj, found := vm.scope.get(key); found {
+		closure := closureObj.Raw().(*Closure)
+
+		// Prepare arguments: struct instance first, then regular args
+		args := make([]*runtime.Object, len(call.Args)+1)
+		args[0] = subj // "@" - the struct instance
+		for i := range call.Args {
+			args[i+1] = vm.eval(call.Args[i])
+		}
+
+		return closure.eval(args...)
 	}
 
-	if !ok {
-		panic(fmt.Errorf("Undefined: %s.%s", istruct.Name, call.Name))
-	}
-
-	fnDef, ok := sig.(*checker.FunctionDef)
-	if !ok {
-		panic(fmt.Errorf("Not a function: %s.%s", istruct.Name, call.Name))
-	}
-
-	fn := func(args ...*runtime.Object) *runtime.Object {
-		res, _ := vm.evalBlock(fnDef.Body, func() {
-			vm.scope.add("@", subj)
-			for i := range args {
-				vm.scope.add(fnDef.Parameters[i].Name, args[i])
-			}
-		})
-		return res
-	}
-
-	args := make([]*runtime.Object, len(call.Args))
-	for i := range call.Args {
-		args[i] = vm.eval(call.Args[i])
-	}
-
-	return fn(args...)
+	// No fallback - if pre-created closure not found, it's an error
+	panic(fmt.Errorf("Method %s not found for struct %s", call.Name, istruct.Name))
 }
 
 func (vm *VM) EvalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {

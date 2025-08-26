@@ -1,0 +1,60 @@
+use ard/decode
+
+private extern fn _create_connection(filepath: Str) decode::Dynamic!Str = "SqliteCreateConnection"
+private extern fn _close(conn: decode::Dynamic) Void!Str = "SqliteClose"
+private extern fn _exec(conn: decode::Dynamic, sql: Str) Void!Str = "SqliteExec"
+private extern fn _query(conn: decode::Dynamic, sql: Str) decode::Dynamic!Str = "SqliteQuery"
+private extern fn _first(conn: decode::Dynamic, sql: Str) decode::Dynamic!Str = "SqliteFirst"
+private extern fn _insert(conn: decode::Dynamic, table: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str = "SqliteInsert"
+private extern fn _update(conn: decode::Dynamic, table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str = "SqliteUpdate"
+private extern fn _delete(conn: decode::Dynamic, table: Str, where: Str) Bool!Str = "SqliteDelete"
+private extern fn _count(conn: decode::Dynamic, table: Str, where: Str) Int!Str = "SqliteCount"
+
+struct Database {
+  conn: decode::Dynamic
+  filepath: Str
+}
+
+fn open(filepath: Str) Database!Str {
+  let conn = try _create_connection(filepath)
+  Result::ok(Database{ conn: conn, filepath: filepath })
+}
+
+impl Database {
+  fn close() Void!Str {
+    _close(@conn)
+  }
+
+  fn exec(sql: Str) Void!Str {
+    _exec(@conn, sql)
+  }
+
+  fn query(sql: Str) decode::Dynamic!Str {
+    _query(@conn, sql)
+  }
+
+  fn first(sql: Str) decode::Dynamic!Str {
+    _first(@conn, sql)
+  }
+
+  fn insert(table: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str {
+    _insert(@conn, table, values)
+  }
+
+  fn update(table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str {
+    _update(@conn, table, where, values)
+  }
+
+  fn delete(table: Str, where: Str) Bool!Str {
+    _delete(@conn, table, where)
+  }
+
+  fn count(table: Str, where: Str) Int!Str {
+    _count(@conn, table, where)
+  }
+
+  fn exists(table: Str, where: Str) Bool!Str {
+    let count = try @count(table, where)
+    Result::ok(count > 0)
+  }
+}
