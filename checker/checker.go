@@ -50,7 +50,7 @@ func (c checker) isMutable(expr Expression) bool {
 }
 
 // isCopyable returns true if the type can be copied for mut parameters
-func (c checker) isCopyable(t Type) bool {
+func (c checker) isCopyable(_ Type) bool {
 	// In Ard, all types are copyable by default
 	// Future: might exclude external resources like file handles
 	return true
@@ -75,32 +75,15 @@ type checker struct {
 	program     *Program
 	filePath    string
 	halted      bool
-	ffiRegistry *FFIRegistry
 }
 
 func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	globalScope := makeScope(nil)
 
-	// Create FFI registry only for non-embedded modules
-	var ffiRegistry *FFIRegistry
-	if moduleResolver != nil {
-		// User module - create FFI registry with project root
-		projectRoot := "."
-		if moduleResolver.project != nil {
-			projectRoot = moduleResolver.project.RootPath
-		}
-		ffiRegistry = NewFFIRegistry(projectRoot)
-	} else if !strings.HasPrefix(filePath, "ard/") {
-		// Main program without module resolver - create FFI registry
-		ffiRegistry = NewFFIRegistry(".")
-	}
-	// For embedded modules (filePath starts with "ard/"), ffiRegistry remains nil
-
 	c := &checker{
 		diagnostics: []Diagnostic{},
 		scope:       &globalScope,
 		filePath:    filePath,
-		ffiRegistry: ffiRegistry,
 	}
 	c.program = &Program{
 		Imports:    map[string]Module{},
@@ -3153,7 +3136,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 }
 
 // New generic resolution using the enhanced symbol table
-func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []ast.DeclaredType, location ast.Location) (*FunctionDef, error) {
+func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []ast.DeclaredType, _ ast.Location) (*FunctionDef, error) {
 	if !fnDef.hasGenerics() {
 		return fnDef, nil
 	}
