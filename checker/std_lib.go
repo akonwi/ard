@@ -26,7 +26,6 @@ func findInStdLib(path string) (Module, bool) {
 		return MaybePkg{}, true
 	case "ard/result":
 		return ResultPkg{}, true
-		// ard/sqlite is now handled by embedded .ard file
 	}
 	return nil, false
 }
