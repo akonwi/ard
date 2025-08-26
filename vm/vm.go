@@ -15,6 +15,7 @@ type VM struct {
 	imports        map[string]checker.Module
 	moduleRegistry *ModuleRegistry
 	ffiRegistry    *RuntimeFFIRegistry
+	moduleScope    *scope // Captures the scope where extern functions are defined
 }
 
 func New(imports map[string]checker.Module) *VM {
@@ -46,8 +47,7 @@ func (vm *VM) initModuleRegistry() {
 			vm.moduleRegistry.Register(&HTTPModule{})
 		case "ard/decode":
 			vm.moduleRegistry.Register(&DecodeModule{})
-		case "ard/sqlite":
-			vm.moduleRegistry.Register(&SQLiteModule{})
+		// "ard/sqlite" is now handled through FFI, not as a module
 		case "ard/async":
 			vm.moduleRegistry.Register(&AsyncModule{})
 		}

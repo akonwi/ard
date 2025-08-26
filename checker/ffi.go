@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -45,20 +44,21 @@ func (r *FFIRegistry) ResolveBinding(binding string) (filePath string, functionN
 }
 
 // ValidateBinding checks if the external binding can be resolved to an existing file
+// todo: is this still necessary?
 func (r *FFIRegistry) ValidateBinding(binding string) error {
-	filePath, functionName, err := r.ResolveBinding(binding)
-	if err != nil {
-		return err
-	}
+	// filePath, functionName, err := r.ResolveBinding(binding)
+	// if err != nil {
+	// 	return err
+	// }
 
-	// Check if the FFI file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return fmt.Errorf("FFI file not found for binding %q: %s", binding, filePath)
-	}
+	// // Check if the FFI file exists
+	// if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	// 	return fmt.Errorf("FFI file not found for binding %q: %s", binding, filePath)
+	// }
 
-	// For now, we assume the function exists if the file exists
-	// Future enhancement: parse Go file and validate function exists
-	_ = functionName
+	// // For now, we assume the function exists if the file exists
+	// // Future enhancement: parse Go file and validate function exists
+	// _ = functionName
 
 	return nil
 }

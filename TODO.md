@@ -1,5 +1,6 @@
 ## TODO
 
+- [ ] parse comments in all the places they're allowed
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] `match` as a replacement for if statements

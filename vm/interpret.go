@@ -24,6 +24,11 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	for _, statement := range program.Statements {
 		vm.result = *vm.do(statement)
 	}
+
+	// Store module scope after processing all statements
+	// This ensures we capture the scope containing all extern functions and module definitions
+	vm.moduleScope = vm.scope
+
 	return vm.result.GoValue(), nil
 }
 
@@ -81,6 +86,21 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 
 	switch s := stmt.Stmt.(type) {
 	case *checker.Enum:
+		return runtime.Void()
+	case *checker.StructDef:
+		// Process struct methods and create closures with captured scope
+		for methodName, methodDef := range s.Methods {
+			closure := &Closure{
+				vm:            vm,
+				expr:          *methodDef,
+				capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
+			}
+			// Store using struct.method key format
+			key := s.Name + "." + methodName
+			closureObj := runtime.Make(closure, methodDef)
+			vm.scope.add(key, closureObj)
+			fmt.Printf("added %s to scope\n", key)
+		}
 		return runtime.Void()
 	case *checker.VariableDef:
 		val := vm.eval(s.Value)
@@ -941,15 +961,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		}
 		return http.evalHttpRequestMethod(subj, call, args)
 	}
-	// Special handling for SQLite Database methods
-	if subj.Type() == checker.DatabaseDef {
-		sqlite := vm.moduleRegistry.handlers[checker.SQLitePkg{}.Path()].(*SQLiteModule)
-		args := make([]*runtime.Object, len(call.Args))
-		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
-		}
-		return sqlite.evalDatabaseMethod(subj, call, args)
-	}
+	// Database methods are now handled through standard library FFI
 	// Special handling for Fiber methods
 	if subj.Type() == checker.Fiber {
 		async := vm.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
@@ -1015,14 +1027,76 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		panic(fmt.Errorf("Not a function: %s.%s", istruct.Name, call.Name))
 	}
 
-	fn := func(args ...*runtime.Object) *runtime.Object {
-		res, _ := vm.evalBlock(fnDef.Body, func() {
-			vm.scope.add("@", subj)
-			for i := range args {
-				vm.scope.add(fnDef.Parameters[i].Name, args[i])
-			}
-		})
-		return res
+	// Try to find pre-created closure with captured lexical scope
+	key := istruct.Name + "." + call.Name
+	fmt.Printf("Looking for pre-created closure: %s\n", key)
+
+	// Search through the scope chain manually since vm.scope.get might have issues
+	searchScope := vm.scope
+	var closureObj *runtime.Object
+	found := false
+
+	for searchScope != nil {
+		if obj, exists := searchScope.bindings[key]; exists {
+			closureObj = obj
+			found = true
+			fmt.Printf("Found pre-created closure: %s in scope level\n", key)
+			break
+		}
+		searchScope = searchScope.parent
+	}
+
+	if found {
+		closure := closureObj.Raw().(*Closure)
+
+		// Add struct instance (@) to closure's captured scope
+		originalScope := closure.capturedScope
+		methodScope := newScope(originalScope)
+		methodScope.add("@", subj)
+
+		// Create new closure with method-specific scope
+		methodClosure := &Closure{
+			vm:            vm,
+			expr:          closure.expr,
+			capturedScope: methodScope,
+		}
+
+		args := make([]*runtime.Object, len(call.Args))
+		for i := range call.Args {
+			args[i] = vm.eval(call.Args[i])
+		}
+
+		return methodClosure.eval(args...)
+	}
+
+	// Fallback: find the root scope containing extern functions
+	// Walk all the way up to find the scope with the most bindings (likely the module root)
+	capturedScope := vm.scope
+	currentScope := vm.scope
+	maxBindings := len(vm.scope.bindings)
+
+	for currentScope != nil {
+		if len(currentScope.bindings) > maxBindings {
+			maxBindings = len(currentScope.bindings)
+			capturedScope = currentScope
+			fmt.Printf("Found better scope with %d bindings\n", maxBindings)
+		}
+		currentScope = currentScope.parent
+	}
+
+	if capturedScope == vm.scope {
+		fmt.Printf("Using current scope (%d bindings)\n", len(vm.scope.bindings))
+	} else {
+		fmt.Printf("Using ancestor scope with %d bindings\n", len(capturedScope.bindings))
+	}
+
+	methodScope := newScope(capturedScope)
+	methodScope.add("@", subj)
+
+	closure := &Closure{
+		vm:            vm,
+		expr:          *fnDef,
+		capturedScope: methodScope,
 	}
 
 	args := make([]*runtime.Object, len(call.Args))
@@ -1030,7 +1104,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		args[i] = vm.eval(call.Args[i])
 	}
 
-	return fn(args...)
+	return closure.eval(args...)
 }
 
 func (vm *VM) EvalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {

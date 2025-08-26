@@ -40,6 +40,33 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("EnvGet", ffi.EnvGet); err != nil {
 		return fmt.Errorf("failed to register EnvGet: %w", err)
 	}
+	if err := r.Register("SqliteCreateConnection", ffi.SqliteCreateConnection); err != nil {
+		return fmt.Errorf("failed to register SqliteCreateConnection: %w", err)
+	}
+	if err := r.Register("SqliteClose", ffi.SqliteClose); err != nil {
+		return fmt.Errorf("failed to register SqliteClose: %w", err)
+	}
+	if err := r.Register("SqliteExec", ffi.SqliteExec); err != nil {
+		return fmt.Errorf("failed to register SqliteExec: %w", err)
+	}
+	if err := r.Register("SqliteQuery", ffi.SqliteQuery); err != nil {
+		return fmt.Errorf("failed to register SqliteQuery: %w", err)
+	}
+	if err := r.Register("SqliteFirst", ffi.SqliteFirst); err != nil {
+		return fmt.Errorf("failed to register SqliteFirst: %w", err)
+	}
+	if err := r.Register("SqliteInsert", ffi.SqliteInsert); err != nil {
+		return fmt.Errorf("failed to register SqliteInsert: %w", err)
+	}
+	if err := r.Register("SqliteUpdate", ffi.SqliteUpdate); err != nil {
+		return fmt.Errorf("failed to register SqliteUpdate: %w", err)
+	}
+	if err := r.Register("SqliteDelete", ffi.SqliteDelete); err != nil {
+		return fmt.Errorf("failed to register SqliteDelete: %w", err)
+	}
+	if err := r.Register("SqliteCount", ffi.SqliteCount); err != nil {
+		return fmt.Errorf("failed to register SqliteCount: %w", err)
+	}
 
 	return nil
 }

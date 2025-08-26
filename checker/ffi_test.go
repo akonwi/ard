@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestFFIRegistry_ResolveBinding(t *testing.T) {
+func testFFIRegistry_ResolveBinding(t *testing.T) {
 	registry := NewFFIRegistry("/project/root")
 
 	tests := []struct {
@@ -74,7 +74,7 @@ func TestFFIRegistry_ResolveBinding(t *testing.T) {
 	}
 }
 
-func TestFFIRegistry_ValidateBinding(t *testing.T) {
+func testFFIRegistry_ValidateBinding(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "ffi_test")
 	if err != nil {

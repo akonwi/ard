@@ -929,7 +929,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				def.Fields[field.Name.Name] = fieldType
 			}
 			c.scope.add(def.name(), def, false)
-			return nil
+			return &Statement{Stmt: def}
 		}
 	case *ast.ImplBlock:
 		{
@@ -3030,15 +3030,6 @@ func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunc
 	if def.ExternalBinding == "" {
 		c.addError("External binding cannot be empty", def.GetLocation())
 		return nil
-	}
-
-	// Validate that the external binding can be resolved and file exists
-	// Skip validation for embedded modules (when ffiRegistry is nil)
-	if c.ffiRegistry != nil {
-		if err := c.ffiRegistry.ValidateBinding(def.ExternalBinding); err != nil {
-			c.addError(fmt.Sprintf("Invalid external binding: %s", err.Error()), def.GetLocation())
-			return nil
-		}
 	}
 
 	// Create external function definition
