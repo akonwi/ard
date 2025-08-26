@@ -57,4 +57,12 @@ impl Database {
     let count = try @count(table, where)
     Result::ok(count > 0)
   }
+
+  fn upsert(table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str {
+    let found = try @exists(table, where)
+    match found {
+      true => @update(table, where, values),
+      false => @insert(table, values)
+    }
+  }
 }

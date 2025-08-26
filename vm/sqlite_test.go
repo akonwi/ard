@@ -296,6 +296,43 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 	}
 }
 
+func TestSQLiteUpsert(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_upsert.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sqlite
+		use ard/decode
+
+		let db = sqlite::open("test_upsert.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
+
+		db.upsert("users", "id=1", [
+			"id": decode::from_int(1),
+			"name": decode::from_str("John Doe"),
+			"email": decode::from_str("john@example.com"),
+		]).expect("Failed to create user with upsert")
+
+		let new_email = "john@doe.com"
+		let row = db.upsert("users", "id=1", [
+			"id": decode::from_int(1),
+			"name": decode::from_str("John Doe"),
+			"email": decode::from_str(new_email),
+		]).expect("Failed to update upserted user")
+
+		let email = decode::run(row, decode::field("email", decode::string)).expect("Couldn't decode db row")
+		if not email == new_email {
+			panic("Expected email to be {new_email}, got {email}")
+		}
+
+		let count = db.count("users", "").expect("Failed to get count")
+		if not count == 1 {
+			panic("Expected count to be 1, got {count}")
+		}
+	`)
+}
+
 func TestSQLiteDelete(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_delete.db"
