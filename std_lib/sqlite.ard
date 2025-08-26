@@ -1,24 +1,20 @@
-// Standard library SQLite module implemented with FFI
 use ard/decode
 
-// All extern functions must be declared first due to procedural type checking
-extern fn _create_connection(filepath: Str) decode::Dynamic!Str = "SqliteCreateConnection"
-extern fn _close(conn: decode::Dynamic) Void!Str = "SqliteClose"
-extern fn _exec(conn: decode::Dynamic, sql: Str) Void!Str = "SqliteExec"
-extern fn _query(conn: decode::Dynamic, sql: Str) decode::Dynamic!Str = "SqliteQuery"
-extern fn _first(conn: decode::Dynamic, sql: Str) decode::Dynamic!Str = "SqliteFirst"
-extern fn _insert(conn: decode::Dynamic, table: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str = "SqliteInsert"
-extern fn _update(conn: decode::Dynamic, table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str = "SqliteUpdate"
-extern fn _delete(conn: decode::Dynamic, table: Str, where: Str) Bool!Str = "SqliteDelete"
-extern fn _count(conn: decode::Dynamic, table: Str, where: Str) Int!Str = "SqliteCount"
+private extern fn _create_connection(filepath: Str) decode::Dynamic!Str = "SqliteCreateConnection"
+private extern fn _close(conn: decode::Dynamic) Void!Str = "SqliteClose"
+private extern fn _exec(conn: decode::Dynamic, sql: Str) Void!Str = "SqliteExec"
+private extern fn _query(conn: decode::Dynamic, sql: Str) decode::Dynamic!Str = "SqliteQuery"
+private extern fn _first(conn: decode::Dynamic, sql: Str) decode::Dynamic!Str = "SqliteFirst"
+private extern fn _insert(conn: decode::Dynamic, table: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str = "SqliteInsert"
+private extern fn _update(conn: decode::Dynamic, table: Str, where: Str, values: [Str:decode::Dynamic]) decode::Dynamic!Str = "SqliteUpdate"
+private extern fn _delete(conn: decode::Dynamic, table: Str, where: Str) Bool!Str = "SqliteDelete"
+private extern fn _count(conn: decode::Dynamic, table: Str, where: Str) Int!Str = "SqliteCount"
 
-// Database struct definition
 struct Database {
   conn: decode::Dynamic
   filepath: Str
 }
 
-// Public API function
 fn open(filepath: Str) Database!Str {
   let conn = try _create_connection(filepath)
   Result::ok(Database{ conn: conn, filepath: filepath })
