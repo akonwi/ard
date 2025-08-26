@@ -54,7 +54,7 @@ impl Database {
   }
 
   fn exists(table: Str, where: Str) Bool!Str {
-    let count_result = try @count(table, where)
-    Result::ok(count_result > 0)
+    let count = try @count(table, where)
+    Result::ok(count > 0)
   }
 }
