@@ -1016,22 +1016,8 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 
 	// Try to find pre-created closure with captured lexical scope
 	key := istruct.Name + "." + call.Name
-
-	// Search through the scope chain manually since vm.scope.get might have issues
-	searchScope := vm.scope
-	var closureObj *runtime.Object
-	found := false
-
-	for searchScope != nil {
-		if obj, exists := searchScope.bindings[key]; exists {
-			closureObj = obj
-			found = true
-			break
-		}
-		searchScope = searchScope.parent
-	}
-
-	if found {
+	
+	if closureObj, found := vm.scope.get(key); found {
 		closure := closureObj.Raw().(*Closure)
 
 		// Prepare arguments: struct instance first, then regular args
