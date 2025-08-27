@@ -740,6 +740,11 @@ func (p *parser) structDef(private bool) Statement {
 			Type: fieldType,
 		})
 
+		// Check for inline comment after field type
+		if c := p.parseInlineComment(); c != nil {
+			structDef.Comments = append(structDef.Comments, *c)
+		}
+
 		// After parsing field type, we expect either a comma (more fields) or closing brace (end of struct)
 		if p.check(comma) {
 			p.advance()
@@ -869,6 +874,14 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 	}
 
 	for !p.match(right_brace) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			traitDef.Comments = append(traitDef.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
@@ -956,6 +969,11 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			ReturnType: returnType,
 			Body:       nil, // No body for trait method signatures
 		})
+
+		// Check for inline comment after method signature
+		if c := p.parseInlineComment(); c != nil {
+			traitDef.Comments = append(traitDef.Comments, *c)
+		}
 
 		p.match(new_line)
 	}
@@ -2538,7 +2556,20 @@ func (p *parser) list() (Expression, error) {
 
 	start := p.index
 	items := []Expression{}
+	comments := []Comment{}
 	for !p.match(right_bracket) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+		
 		item, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
@@ -2549,10 +2580,23 @@ func (p *parser) list() (Expression, error) {
 		}
 
 		items = append(items, item)
+		
+		// Check for inline comment after list element
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+		}
+		
 		p.match(comma)
 		p.match(new_line)
 	}
-	return &ListLiteral{Items: items, Location: startToken.getLocation()}, nil
+	result := &ListLiteral{
+		Items:    items, 
+		Location: startToken.getLocation(),
+	}
+	if len(comments) > 0 {
+		result.Comments = comments
+	}
+	return result, nil
 }
 
 func (p *parser) map_() (Expression, error) {
@@ -2570,6 +2614,14 @@ func (p *parser) map_() (Expression, error) {
 	}
 
 	for !p.match(right_bracket) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			node.Comments = append(node.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
@@ -2595,10 +2647,19 @@ func (p *parser) map_() (Expression, error) {
 			Key:   key,
 			Value: val,
 		})
+		
+		// Check for inline comment after map entry
+		if c := p.parseInlineComment(); c != nil {
+			node.Comments = append(node.Comments, *c)
+		}
+		
 		p.match(comma)
 		p.match(new_line)
 	}
 
+	if len(node.Comments) == 0 {
+		node.Comments = nil  // Keep nil for backward compatibility
+	}
 	return node, nil
 }
 

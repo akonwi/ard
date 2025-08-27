@@ -354,9 +354,10 @@ type ImplBlock struct {
 
 type TraitDefinition struct {
 	Location
-	Name    Identifier
-	Methods []FunctionDeclaration
-	Private bool
+	Name     Identifier
+	Methods  []FunctionDeclaration
+	Private  bool
+	Comments []Comment  // Comments found within the trait definition
 }
 
 type TraitImplementation struct {
@@ -629,7 +630,8 @@ func (b BoolLiteral) String() string {
 
 type ListLiteral struct {
 	Location
-	Items []Expression
+	Items    []Expression
+	Comments []Comment  // Comments found within the list literal
 }
 
 func (l ListLiteral) String() string {
@@ -643,7 +645,8 @@ type MapEntry struct {
 
 type MapLiteral struct {
 	Location
-	Entries []MapEntry
+	Entries  []MapEntry
+	Comments []Comment  // Comments found within the map literal
 }
 
 func (m MapLiteral) String() string {
