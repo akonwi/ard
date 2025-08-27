@@ -4,6 +4,35 @@ import (
 	"testing"
 )
 
+func TestComments(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Single line comment",
+			input: "// this is a comment",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Comment{Value: "// this is a comment"},
+				},
+			},
+		},
+		{
+			name:  "Inline comment",
+			input: "let x = 200 // this is a comment",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:  "x",
+						Value: &NumLiteral{Value: "200"},
+					},
+					&Comment{Value: "// this is a comment"},
+				},
+			},
+		},
+	})
+}
+
 func TestCommentsInStructFields(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -76,7 +105,7 @@ func TestCommentsInEnumVariants(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&EnumDefinition{
-						Name: "Color",
+						Name:     "Color",
 						Variants: []string{"Red", "Green", "Blue"},
 						Comments: []Comment{
 							{Value: "Comment between variants"},
@@ -115,7 +144,6 @@ func TestCommentsInFunctionParameters(t *testing.T) {
 	})
 }
 
-
 func TestCommentsInStructLiterals(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -152,7 +180,7 @@ func TestInlineCommentsInStructLiterals(t *testing.T) {
 			name: "Inline comments after struct literal properties",
 			input: `Person{
 					name: "Alice",     // Person name
-					age: 30,           // Age in years 
+					age: 30,           // Age in years
 					employed: true     // Job status
 				}`,
 			output: Program{

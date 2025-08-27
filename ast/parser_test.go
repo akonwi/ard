@@ -444,35 +444,6 @@ func TestForLoops(t *testing.T) {
 	})
 }
 
-func TestComments(t *testing.T) {
-	runTests(t, []test{
-		{
-			name:  "Single line comment",
-			input: "// this is a comment",
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&Comment{Value: "// this is a comment"},
-				},
-			},
-		},
-		{
-			name:  "Inline comment",
-			input: "let x = 200 // this is a comment",
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&VariableDeclaration{
-						Name:  "x",
-						Value: &NumLiteral{Value: "200"},
-					},
-					&Comment{Value: "// this is a comment"},
-				},
-			},
-		},
-	})
-}
-
 func TestTypeUnion(t *testing.T) {
 	runTests(t, []test{
 		{
