@@ -1,6 +1,6 @@
-## TODO
+# TODO
 
-- [ ] parse comments in all the places they're allowed
+## Initial 0.1.0 build
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] `match` as a replacement for if statements
@@ -23,7 +23,6 @@
   - $Seg could be either strings or ints
     - as ints, act as an array index
 - [ ] support handling fiber panics
-- [ ] infer types in anonymous functions
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] eloquent relative conditions
@@ -31,8 +30,8 @@
 - [ ] allow non-linear declarations at the top level
   -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] matching on strings?
-- [ ] loops as expressions (comprehensions?)
-  - `let doubled: [Int] = for i in 1..10 { i * 2 }`
+  - probably should be enums
+  - could be accomplished with a plain `match` and  various conditions
 - [ ] allow omitting nullable arguments in function calls
 - [ ] inline block as expression
   ```
@@ -43,11 +42,17 @@
   }
   ```
 - [ ] private module variables
+- [ ] start versioning (begin with 0.1.0)
+
+## Future improvements
+- [ ] infer types in anonymous functions
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
 - [ ] selective variable capture for closures
   - data optimization
   -👇🏿 the returned fn should only have `as` in its scope, not the entire scope
+- [ ] loops as expressions (comprehensions?)
+  - `let doubled: [Int] = for i in 1..10 { i * 2 }`
   ```
   fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
     fn(data: decode::Dynamic) $T![decode::Error] {
