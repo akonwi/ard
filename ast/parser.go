@@ -1952,6 +1952,18 @@ func (p *parser) structInstance() (Expression, error) {
 		p.match(new_line)
 
 		for !p.match(right_brace) {
+			// Parse and collect comments between properties
+			if c := p.parseInlineComment(); c != nil {
+				instance.Comments = append(instance.Comments, *c)
+				p.match(new_line)
+				continue
+			}
+			
+			// Skip standalone newlines
+			if p.match(new_line) {
+				continue
+			}
+			
 			propToken := p.consumeVariableName("Expected name")
 
 			if !p.check(colon) {
@@ -1969,6 +1981,12 @@ func (p *parser) structInstance() (Expression, error) {
 				Name:  Identifier{Name: propToken.text},
 				Value: val,
 			})
+			
+			// Check for inline comment after property
+			if c := p.parseInlineComment(); c != nil {
+				instance.Comments = append(instance.Comments, *c)
+			}
+			
 			p.match(comma)
 			p.match(new_line)
 		}

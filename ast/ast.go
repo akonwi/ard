@@ -390,6 +390,7 @@ type StructInstance struct {
 	Location
 	Name       Identifier
 	Properties []StructValue
+	Comments   []Comment  // Comments found within the struct instance
 }
 
 func (s StructInstance) String() string {

@@ -115,3 +115,64 @@ func TestCommentsInFunctionParameters(t *testing.T) {
 	})
 }
 
+
+func TestCommentsInStructLiterals(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Comments between struct literal properties",
+			input: `Person{
+					name: "Alice",
+					// Comment between properties
+					age: 30,
+					employed: true
+				}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name: Identifier{Name: "Person"},
+						Properties: []StructValue{
+							{Name: Identifier{Name: "name"}, Value: &StrLiteral{Value: "Alice"}},
+							{Name: Identifier{Name: "age"}, Value: &NumLiteral{Value: "30"}},
+							{Name: Identifier{Name: "employed"}, Value: &BoolLiteral{Value: true}},
+						},
+						Comments: []Comment{
+							{Value: "Comment between properties"},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestInlineCommentsInStructLiterals(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Inline comments after struct literal properties",
+			input: `Person{
+					name: "Alice",     // Person name
+					age: 30,           // Age in years 
+					employed: true     // Job status
+				}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name: Identifier{Name: "Person"},
+						Properties: []StructValue{
+							{Name: Identifier{Name: "name"}, Value: &StrLiteral{Value: "Alice"}},
+							{Name: Identifier{Name: "age"}, Value: &NumLiteral{Value: "30"}},
+							{Name: Identifier{Name: "employed"}, Value: &BoolLiteral{Value: true}},
+						},
+						Comments: []Comment{
+							{Value: "Person name"},
+							{Value: "Age in years"},
+							{Value: "Job status"},
+						},
+					},
+				},
+			},
+		},
+	})
+}
