@@ -8,11 +8,13 @@ enum Color {
 
 fn get_meaning(light: Color) Str {
   match light {
+    // map a pattern to a simple expression
     Color::Red => "Stop",
+    // or a block
     Color::Yellow => {
-      // the value can also be returned from a block
       "Yield"
     },
+    // use _ for catch alls
     _ => "Go"
   }
 }
