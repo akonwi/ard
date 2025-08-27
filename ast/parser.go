@@ -157,6 +157,30 @@ func (p *parser) parseComment() *Comment {
 	}
 }
 
+// parseInlineComment parses a comment token and returns a cleaned Comment object.
+// Returns nil if the current token is not a comment.
+func (p *parser) parseInlineComment() *Comment {
+	if !p.check(comment) {
+		return nil
+	}
+	
+	commentToken := p.advance()
+	// Strip "//" and leading whitespace
+	commentText := commentToken.text[2:] // Remove "//"
+	for len(commentText) > 0 && (commentText[0] == ' ' || commentText[0] == '\t') {
+		commentText = commentText[1:]
+	}
+	// Strip trailing whitespace
+	for len(commentText) > 0 && (commentText[len(commentText)-1] == ' ' || commentText[len(commentText)-1] == '\t') {
+		commentText = commentText[:len(commentText)-1]
+	}
+	
+	return &Comment{
+		Location: commentToken.getLocation(),
+		Value:    commentText,
+	}
+}
+
 func (p *parser) parse() (*Program, error) {
 	program := &Program{
 		Imports:    []Import{},
@@ -624,6 +648,18 @@ func (p *parser) enumDef(private bool) Statement {
 
 	p.match(new_line)
 	for !p.match(right_brace) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			enum.Comments = append(enum.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+
 		if !p.check(identifier) {
 			// Skip empty variant (graceful recovery)
 			if p.match(comma) {
@@ -664,8 +700,15 @@ func (p *parser) structDef(private bool) Statement {
 
 	p.match(new_line)
 	for !p.check(right_brace) {
-		// Skip single-line comments and newlines
-		if p.match(comment, new_line) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			structDef.Comments = append(structDef.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
 			continue
 		}
 
@@ -756,10 +799,18 @@ func (p *parser) implBlock() *ImplBlock {
 	}
 
 	for !p.match(right_brace) {
-		// not using p.parseStatement() in order to be precise
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			impl.Comments = append(impl.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
+		
 		stmt, err := p.functionDef(true)
 		if err != nil {
 			// For now, keep the old error handling until functionDef is converted
@@ -1493,6 +1544,14 @@ func (p *parser) matchExpr() (Expression, error) {
 		}
 
 		for !p.match(right_brace) {
+			// Parse and collect comments
+			if c := p.parseInlineComment(); c != nil {
+				matchExpr.Comments = append(matchExpr.Comments, *c)
+				p.match(new_line) // consume newline after comment
+				continue
+			}
+			
+			// Skip standalone newlines
 			if p.match(new_line) {
 				continue
 			}

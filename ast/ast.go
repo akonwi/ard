@@ -333,6 +333,7 @@ type StructDefinition struct {
 	Name    Identifier
 	Fields  []StructField
 	Private bool
+	Comments []Comment  // Comments found within the struct definition
 }
 
 type StructField struct {
@@ -346,8 +347,9 @@ func (s StructDefinition) String() string {
 
 type ImplBlock struct {
 	Location
-	Target  Identifier
-	Methods []FunctionDeclaration
+	Target   Identifier
+	Methods  []FunctionDeclaration
+	Comments []Comment  // Comments found within the impl block
 }
 
 type TraitDefinition struct {
@@ -397,6 +399,7 @@ type EnumDefinition struct {
 	Name     string
 	Variants []string
 	Private  bool
+	Comments []Comment  // Comments found within the enum definition
 }
 
 func (e EnumDefinition) String() string {
@@ -649,8 +652,9 @@ func (m MapLiteral) String() string {
 
 type MatchExpression struct {
 	Location
-	Subject Expression
-	Cases   []MatchCase
+	Subject  Expression
+	Cases    []MatchCase
+	Comments []Comment  // Comments found within the match expression
 }
 
 func (m MatchExpression) String() string {
