@@ -157,6 +157,30 @@ func (p *parser) parseComment() *Comment {
 	}
 }
 
+// parseInlineComment parses a comment token and returns a cleaned Comment object.
+// Returns nil if the current token is not a comment.
+func (p *parser) parseInlineComment() *Comment {
+	if !p.check(comment) {
+		return nil
+	}
+	
+	commentToken := p.advance()
+	// Strip "//" and leading whitespace
+	commentText := commentToken.text[2:] // Remove "//"
+	for len(commentText) > 0 && (commentText[0] == ' ' || commentText[0] == '\t') {
+		commentText = commentText[1:]
+	}
+	// Strip trailing whitespace
+	for len(commentText) > 0 && (commentText[len(commentText)-1] == ' ' || commentText[len(commentText)-1] == '\t') {
+		commentText = commentText[:len(commentText)-1]
+	}
+	
+	return &Comment{
+		Location: commentToken.getLocation(),
+		Value:    commentText,
+	}
+}
+
 func (p *parser) parse() (*Program, error) {
 	program := &Program{
 		Imports:    []Import{},
@@ -624,6 +648,18 @@ func (p *parser) enumDef(private bool) Statement {
 
 	p.match(new_line)
 	for !p.match(right_brace) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			enum.Comments = append(enum.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+
 		if !p.check(identifier) {
 			// Skip empty variant (graceful recovery)
 			if p.match(comma) {
@@ -664,8 +700,15 @@ func (p *parser) structDef(private bool) Statement {
 
 	p.match(new_line)
 	for !p.check(right_brace) {
-		// Skip single-line comments and newlines
-		if p.match(comment, new_line) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			structDef.Comments = append(structDef.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
 			continue
 		}
 
@@ -696,6 +739,11 @@ func (p *parser) structDef(private bool) Statement {
 			Name: Identifier{Name: fieldName.text},
 			Type: fieldType,
 		})
+
+		// Check for inline comment after field type
+		if c := p.parseInlineComment(); c != nil {
+			structDef.Comments = append(structDef.Comments, *c)
+		}
 
 		// After parsing field type, we expect either a comma (more fields) or closing brace (end of struct)
 		if p.check(comma) {
@@ -756,10 +804,18 @@ func (p *parser) implBlock() *ImplBlock {
 	}
 
 	for !p.match(right_brace) {
-		// not using p.parseStatement() in order to be precise
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			impl.Comments = append(impl.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
+		
 		stmt, err := p.functionDef(true)
 		if err != nil {
 			// For now, keep the old error handling until functionDef is converted
@@ -818,6 +874,14 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 	}
 
 	for !p.match(right_brace) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			traitDef.Comments = append(traitDef.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
@@ -905,6 +969,11 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			ReturnType: returnType,
 			Body:       nil, // No body for trait method signatures
 		})
+
+		// Check for inline comment after method signature
+		if c := p.parseInlineComment(); c != nil {
+			traitDef.Comments = append(traitDef.Comments, *c)
+		}
 
 		p.match(new_line)
 	}
@@ -1493,6 +1562,14 @@ func (p *parser) matchExpr() (Expression, error) {
 		}
 
 		for !p.match(right_brace) {
+			// Parse and collect comments
+			if c := p.parseInlineComment(); c != nil {
+				matchExpr.Comments = append(matchExpr.Comments, *c)
+				p.match(new_line) // consume newline after comment
+				continue
+			}
+			
+			// Skip standalone newlines
 			if p.match(new_line) {
 				continue
 			}
@@ -1692,11 +1769,24 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		}
 		p.advance() // consume the '('
 		params := []Parameter{}
+		var functionComments []Comment
 		for !p.match(right_paren) {
 			// Prevent infinite loops when closing paren is missing
 			if p.isAtEnd() {
 				p.addError(p.peek(), "Expected ')' to close parameter list")
 				break
+			}
+			
+			// Parse and collect comments between parameters
+			if c := p.parseInlineComment(); c != nil {
+				functionComments = append(functionComments, *c)
+				p.match(new_line)
+				continue
+			}
+			
+			// Skip standalone newlines
+			if p.match(new_line) {
+				continue
 			}
 			isMutable := p.match(mut)
 			nameToken := p.consumeVariableName("Expected parameter name")
@@ -1728,6 +1818,12 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				Name:    nameToken.text,
 				Type:    paramType,
 			})
+			
+			// Check for inline comment after parameter
+			if c := p.parseInlineComment(); c != nil {
+				functionComments = append(functionComments, *c)
+			}
+			
 			p.match(comma)
 		}
 
@@ -1799,6 +1895,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       statements,
+			Comments:   functionComments,  // Add collected comments
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -1855,6 +1952,18 @@ func (p *parser) structInstance() (Expression, error) {
 		p.match(new_line)
 
 		for !p.match(right_brace) {
+			// Parse and collect comments between properties
+			if c := p.parseInlineComment(); c != nil {
+				instance.Comments = append(instance.Comments, *c)
+				p.match(new_line)
+				continue
+			}
+			
+			// Skip standalone newlines
+			if p.match(new_line) {
+				continue
+			}
+			
 			propToken := p.consumeVariableName("Expected name")
 
 			if !p.check(colon) {
@@ -1872,6 +1981,12 @@ func (p *parser) structInstance() (Expression, error) {
 				Name:  Identifier{Name: propToken.text},
 				Value: val,
 			})
+			
+			// Check for inline comment after property
+			if c := p.parseInlineComment(); c != nil {
+				instance.Comments = append(instance.Comments, *c)
+			}
+			
 			p.match(comma)
 			p.match(new_line)
 		}
@@ -2209,7 +2324,7 @@ func (p *parser) memberAccess() (Expression, error) {
 				p.advance() // consume the '('
 
 				p.match(new_line)
-				args, err := p.parseFunctionArguments()
+				args, argComments, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
@@ -2225,6 +2340,7 @@ func (p *parser) memberAccess() (Expression, error) {
 								Name:     funcName.text,
 								TypeArgs: typeArgs,
 								Args:     args,
+								Comments: argComments,
 								Location: Location{
 									Start: expr.GetLocation().Start,
 									End:   Point{Row: funcName.line, Col: funcName.column},
@@ -2242,6 +2358,7 @@ func (p *parser) memberAccess() (Expression, error) {
 						Name:     funcName.text,
 						TypeArgs: typeArgs,
 						Args:     args,
+						Comments: argComments,
 						Location: Location{
 							Start: Point{Row: funcName.line, Col: funcName.column},
 							End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2315,7 +2432,7 @@ func (p *parser) call() (Expression, error) {
 				}
 				p.advance() // consume the '('
 
-				args, err := p.parseFunctionArguments()
+				args, argComments, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
@@ -2329,6 +2446,7 @@ func (p *parser) call() (Expression, error) {
 							Name:     expr.(*Identifier).Name,
 							TypeArgs: typeArgs,
 							Args:     args,
+							Comments: argComments,
 							Location: Location{
 								Start: expr.GetLocation().Start,
 								End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2342,6 +2460,7 @@ func (p *parser) call() (Expression, error) {
 					Name:     expr.(*Identifier).Name,
 					TypeArgs: typeArgs,
 					Args:     args,
+					Comments: argComments,
 					Location: Location{
 						Start: expr.GetLocation().Start,
 						End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2357,7 +2476,7 @@ func (p *parser) call() (Expression, error) {
 	if p.match(left_paren) {
 		p.match(new_line)
 		// Regular function call without type arguments
-		args, err := p.parseFunctionArguments()
+		args, argComments, err := p.parseFunctionArguments()
 		if err != nil {
 			return nil, err
 		}
@@ -2370,6 +2489,7 @@ func (p *parser) call() (Expression, error) {
 				return &FunctionCall{
 					Name: expr.(*Identifier).Name,
 					Args: args,
+					Comments: argComments,
 					Location: Location{
 						Start: expr.GetLocation().Start,
 						End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2382,6 +2502,7 @@ func (p *parser) call() (Expression, error) {
 		return &FunctionCall{
 			Name: expr.(*Identifier).Name,
 			Args: args,
+			Comments: argComments,
 			Location: Location{
 				Start: expr.GetLocation().Start,
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2479,7 +2600,20 @@ func (p *parser) list() (Expression, error) {
 
 	start := p.index
 	items := []Expression{}
+	comments := []Comment{}
 	for !p.match(right_bracket) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+		
 		item, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
@@ -2490,10 +2624,23 @@ func (p *parser) list() (Expression, error) {
 		}
 
 		items = append(items, item)
+		
+		// Check for inline comment after list element
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+		}
+		
 		p.match(comma)
 		p.match(new_line)
 	}
-	return &ListLiteral{Items: items, Location: startToken.getLocation()}, nil
+	result := &ListLiteral{
+		Items:    items, 
+		Location: startToken.getLocation(),
+	}
+	if len(comments) > 0 {
+		result.Comments = comments
+	}
+	return result, nil
 }
 
 func (p *parser) map_() (Expression, error) {
@@ -2511,6 +2658,14 @@ func (p *parser) map_() (Expression, error) {
 	}
 
 	for !p.match(right_bracket) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			node.Comments = append(node.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+		
+		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
@@ -2536,10 +2691,19 @@ func (p *parser) map_() (Expression, error) {
 			Key:   key,
 			Value: val,
 		})
+		
+		// Check for inline comment after map entry
+		if c := p.parseInlineComment(); c != nil {
+			node.Comments = append(node.Comments, *c)
+		}
+		
 		p.match(comma)
 		p.match(new_line)
 	}
 
+	if len(node.Comments) == 0 {
+		node.Comments = nil  // Keep nil for backward compatibility
+	}
 	return node, nil
 }
 
@@ -2692,11 +2856,24 @@ func (p *parser) isAtEnd() bool {
 	return p.tokens[p.index].kind == eof
 }
 
-func (p *parser) parseFunctionArguments() ([]Argument, error) {
+func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 	args := []Argument{}
+	comments := []Comment{}
 	hasNamedArgs := false
 
 	for !p.check(right_paren) {
+		// Parse and collect comments between arguments
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+			p.match(new_line)
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+		
 		// Check for mut keyword first
 		start := p.peek().getLocation().Start
 		isMutable := p.match(mut)
@@ -2718,7 +2895,7 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 
 			value, err := p.parseExpression()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			args = append(args, Argument{
@@ -2733,12 +2910,12 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 		} else {
 			// Check if we've already seen named arguments
 			if hasNamedArgs {
-				return nil, fmt.Errorf("positional arguments cannot follow named arguments")
+				return nil, nil, fmt.Errorf("positional arguments cannot follow named arguments")
 			}
 
 			arg, err := p.parseExpression()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			// Add as Argument with empty name (positional)
@@ -2753,9 +2930,14 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 			})
 		}
 
+		// Check for inline comment after argument
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+		}
+
 		p.match(comma)
 		p.match(new_line)
 	}
 
-	return args, nil
+	return args, comments, nil
 }

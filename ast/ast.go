@@ -289,6 +289,7 @@ type FunctionDeclaration struct {
 	ReturnType DeclaredType
 	Body       []Statement
 	Private    bool
+	Comments   []Comment  // Comments found within the function declaration
 }
 
 func (f FunctionDeclaration) String() string {
@@ -333,6 +334,7 @@ type StructDefinition struct {
 	Name    Identifier
 	Fields  []StructField
 	Private bool
+	Comments []Comment  // Comments found within the struct definition
 }
 
 type StructField struct {
@@ -346,15 +348,17 @@ func (s StructDefinition) String() string {
 
 type ImplBlock struct {
 	Location
-	Target  Identifier
-	Methods []FunctionDeclaration
+	Target   Identifier
+	Methods  []FunctionDeclaration
+	Comments []Comment  // Comments found within the impl block
 }
 
 type TraitDefinition struct {
 	Location
-	Name    Identifier
-	Methods []FunctionDeclaration
-	Private bool
+	Name     Identifier
+	Methods  []FunctionDeclaration
+	Private  bool
+	Comments []Comment  // Comments found within the trait definition
 }
 
 type TraitImplementation struct {
@@ -386,6 +390,7 @@ type StructInstance struct {
 	Location
 	Name       Identifier
 	Properties []StructValue
+	Comments   []Comment  // Comments found within the struct instance
 }
 
 func (s StructInstance) String() string {
@@ -397,6 +402,7 @@ type EnumDefinition struct {
 	Name     string
 	Variants []string
 	Private  bool
+	Comments []Comment  // Comments found within the enum definition
 }
 
 func (e EnumDefinition) String() string {
@@ -473,6 +479,7 @@ type FunctionCall struct {
 	Name     string
 	TypeArgs []DeclaredType
 	Args     []Argument
+	Comments []Comment  // Comments found within the function call
 }
 
 func (f FunctionCall) String() string {
@@ -626,7 +633,8 @@ func (b BoolLiteral) String() string {
 
 type ListLiteral struct {
 	Location
-	Items []Expression
+	Items    []Expression
+	Comments []Comment  // Comments found within the list literal
 }
 
 func (l ListLiteral) String() string {
@@ -640,7 +648,8 @@ type MapEntry struct {
 
 type MapLiteral struct {
 	Location
-	Entries []MapEntry
+	Entries  []MapEntry
+	Comments []Comment  // Comments found within the map literal
 }
 
 func (m MapLiteral) String() string {
@@ -649,8 +658,9 @@ func (m MapLiteral) String() string {
 
 type MatchExpression struct {
 	Location
-	Subject Expression
-	Cases   []MatchCase
+	Subject  Expression
+	Cases    []MatchCase
+	Comments []Comment  // Comments found within the match expression
 }
 
 func (m MatchExpression) String() string {
