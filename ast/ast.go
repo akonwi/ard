@@ -289,6 +289,7 @@ type FunctionDeclaration struct {
 	ReturnType DeclaredType
 	Body       []Statement
 	Private    bool
+	Comments   []Comment  // Comments found within the function declaration
 }
 
 func (f FunctionDeclaration) String() string {
@@ -477,6 +478,7 @@ type FunctionCall struct {
 	Name     string
 	TypeArgs []DeclaredType
 	Args     []Argument
+	Comments []Comment  // Comments found within the function call
 }
 
 func (f FunctionCall) String() string {

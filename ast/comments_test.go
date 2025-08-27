@@ -87,3 +87,31 @@ func TestCommentsInEnumVariants(t *testing.T) {
 		},
 	})
 }
+
+func TestCommentsInFunctionParameters(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Comments between function parameters",
+			input: `fn add(x: Int,
+					// Comment between parameters
+					y: Int) Int { x + y }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "add",
+						Parameters: []Parameter{
+							{Name: "x", Type: &IntType{}},
+							{Name: "y", Type: &IntType{}},
+						},
+						ReturnType: &IntType{},
+						Comments: []Comment{
+							{Value: "Comment between parameters"},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+

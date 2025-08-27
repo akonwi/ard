@@ -1769,11 +1769,24 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 		}
 		p.advance() // consume the '('
 		params := []Parameter{}
+		var functionComments []Comment
 		for !p.match(right_paren) {
 			// Prevent infinite loops when closing paren is missing
 			if p.isAtEnd() {
 				p.addError(p.peek(), "Expected ')' to close parameter list")
 				break
+			}
+			
+			// Parse and collect comments between parameters
+			if c := p.parseInlineComment(); c != nil {
+				functionComments = append(functionComments, *c)
+				p.match(new_line)
+				continue
+			}
+			
+			// Skip standalone newlines
+			if p.match(new_line) {
+				continue
 			}
 			isMutable := p.match(mut)
 			nameToken := p.consumeVariableName("Expected parameter name")
@@ -1805,6 +1818,12 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				Name:    nameToken.text,
 				Type:    paramType,
 			})
+			
+			// Check for inline comment after parameter
+			if c := p.parseInlineComment(); c != nil {
+				functionComments = append(functionComments, *c)
+			}
+			
 			p.match(comma)
 		}
 
@@ -1876,6 +1895,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       statements,
+			Comments:   functionComments,  // Add collected comments
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2286,7 +2306,7 @@ func (p *parser) memberAccess() (Expression, error) {
 				p.advance() // consume the '('
 
 				p.match(new_line)
-				args, err := p.parseFunctionArguments()
+				args, argComments, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
@@ -2302,6 +2322,7 @@ func (p *parser) memberAccess() (Expression, error) {
 								Name:     funcName.text,
 								TypeArgs: typeArgs,
 								Args:     args,
+								Comments: argComments,
 								Location: Location{
 									Start: expr.GetLocation().Start,
 									End:   Point{Row: funcName.line, Col: funcName.column},
@@ -2319,6 +2340,7 @@ func (p *parser) memberAccess() (Expression, error) {
 						Name:     funcName.text,
 						TypeArgs: typeArgs,
 						Args:     args,
+						Comments: argComments,
 						Location: Location{
 							Start: Point{Row: funcName.line, Col: funcName.column},
 							End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2392,7 +2414,7 @@ func (p *parser) call() (Expression, error) {
 				}
 				p.advance() // consume the '('
 
-				args, err := p.parseFunctionArguments()
+				args, argComments, err := p.parseFunctionArguments()
 				if err != nil {
 					return nil, err
 				}
@@ -2406,6 +2428,7 @@ func (p *parser) call() (Expression, error) {
 							Name:     expr.(*Identifier).Name,
 							TypeArgs: typeArgs,
 							Args:     args,
+							Comments: argComments,
 							Location: Location{
 								Start: expr.GetLocation().Start,
 								End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2419,6 +2442,7 @@ func (p *parser) call() (Expression, error) {
 					Name:     expr.(*Identifier).Name,
 					TypeArgs: typeArgs,
 					Args:     args,
+					Comments: argComments,
 					Location: Location{
 						Start: expr.GetLocation().Start,
 						End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2434,7 +2458,7 @@ func (p *parser) call() (Expression, error) {
 	if p.match(left_paren) {
 		p.match(new_line)
 		// Regular function call without type arguments
-		args, err := p.parseFunctionArguments()
+		args, argComments, err := p.parseFunctionArguments()
 		if err != nil {
 			return nil, err
 		}
@@ -2447,6 +2471,7 @@ func (p *parser) call() (Expression, error) {
 				return &FunctionCall{
 					Name: expr.(*Identifier).Name,
 					Args: args,
+					Comments: argComments,
 					Location: Location{
 						Start: expr.GetLocation().Start,
 						End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2459,6 +2484,7 @@ func (p *parser) call() (Expression, error) {
 		return &FunctionCall{
 			Name: expr.(*Identifier).Name,
 			Args: args,
+			Comments: argComments,
 			Location: Location{
 				Start: expr.GetLocation().Start,
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2812,11 +2838,24 @@ func (p *parser) isAtEnd() bool {
 	return p.tokens[p.index].kind == eof
 }
 
-func (p *parser) parseFunctionArguments() ([]Argument, error) {
+func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 	args := []Argument{}
+	comments := []Comment{}
 	hasNamedArgs := false
 
 	for !p.check(right_paren) {
+		// Parse and collect comments between arguments
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+			p.match(new_line)
+			continue
+		}
+		
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+		
 		// Check for mut keyword first
 		start := p.peek().getLocation().Start
 		isMutable := p.match(mut)
@@ -2838,7 +2877,7 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 
 			value, err := p.parseExpression()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			args = append(args, Argument{
@@ -2853,12 +2892,12 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 		} else {
 			// Check if we've already seen named arguments
 			if hasNamedArgs {
-				return nil, fmt.Errorf("positional arguments cannot follow named arguments")
+				return nil, nil, fmt.Errorf("positional arguments cannot follow named arguments")
 			}
 
 			arg, err := p.parseExpression()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			// Add as Argument with empty name (positional)
@@ -2873,9 +2912,14 @@ func (p *parser) parseFunctionArguments() ([]Argument, error) {
 			})
 		}
 
+		// Check for inline comment after argument
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+		}
+
 		p.match(comma)
 		p.match(new_line)
 	}
 
-	return args, nil
+	return args, comments, nil
 }
