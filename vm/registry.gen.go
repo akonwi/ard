@@ -40,6 +40,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("EnvGet", ffi.EnvGet); err != nil {
 		return fmt.Errorf("failed to register EnvGet: %w", err)
 	}
+	if err := r.Register("GetTodayString", ffi.GetTodayString); err != nil {
+		return fmt.Errorf("failed to register GetTodayString: %w", err)
+	}
 	if err := r.Register("SqliteCreateConnection", ffi.SqliteCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqliteCreateConnection: %w", err)
 	}

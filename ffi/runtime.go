@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/vm/runtime"
@@ -98,4 +99,9 @@ func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Obje
 
 	// Return Some(value)
 	return runtime.MakeStr(value).ToSome()
+}
+
+func GetTodayString(vm runtime.VM, _ []*runtime.Object, _ checker.Type) *runtime.Object {
+	year, month, day := time.Now().Date()
+	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
 }
