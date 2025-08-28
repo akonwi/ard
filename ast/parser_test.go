@@ -482,6 +482,7 @@ func TestStaticPaths(t *testing.T) {
 								{Name: "", Value: &NumLiteral{Value: "200"}},
 								{Name: "", Value: &StrLiteral{Value: "ok"}},
 							},
+							Comments: []Comment{},
 						},
 					},
 				},

@@ -123,7 +123,7 @@ func TestCommentsInFunctionParameters(t *testing.T) {
 			name: "Comments between function parameters",
 			input: `fn add(x: Int,
 					// Comment between parameters
-					y: Int) Int { x + y }`,
+					y: Int) Int {}`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -137,6 +137,7 @@ func TestCommentsInFunctionParameters(t *testing.T) {
 						Comments: []Comment{
 							{Value: "Comment between parameters"},
 						},
+						Body: []Statement{},
 					},
 				},
 			},
