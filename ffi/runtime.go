@@ -13,7 +13,7 @@ import (
 // Runtime module FFI functions
 
 // Print prints a value to stdout
-func Print(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func Print(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
@@ -25,7 +25,7 @@ func Print(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Objec
 }
 
 // ReadLine reads a line from stdin
-func ReadLine(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func ReadLine(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 0 {
 		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
@@ -45,7 +45,7 @@ func ReadLine(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Ob
 }
 
 // PanicWithMessage panics with a message
-func PanicWithMessage(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func PanicWithMessage(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
@@ -61,7 +61,7 @@ func PanicWithMessage(vm runtime.VM, args []*runtime.Object, _ checker.Type) *ru
 // Environment module FFI functions
 
 // EnvGet retrieves an environment variable
-func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func EnvGet(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}
@@ -81,7 +81,7 @@ func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Obje
 	return runtime.MakeStr(value).ToSome()
 }
 
-func GetTodayString(vm runtime.VM, _ []*runtime.Object, _ checker.Type) *runtime.Object {
+func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 	year, month, day := time.Now().Date()
 	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
 }

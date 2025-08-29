@@ -108,8 +108,8 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Check function signature: func(vm *VM, args []*runtime.Object, ret checker.Type) *runtime.Object
-	if fn.Type.Params == nil || len(fn.Type.Params.List) != 3 {
+	// Check function signature: func(args []*runtime.Object, ret checker.Type) *runtime.Object
+	if fn.Type.Params == nil || len(fn.Type.Params.List) != 2 {
 		return false
 	}
 
@@ -117,24 +117,15 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Validate first parameter: vm VM (interface)
+	// Validate first parameter: args []*runtime.Object
 	firstParam := fn.Type.Params.List[0]
-	if len(firstParam.Names) != 1 || firstParam.Names[0].Name != "vm" {
-		return false
-	}
-	if !isVMInterface(firstParam.Type) {
+	if !isSliceOfPointerToRuntimeObject(firstParam.Type) {
 		return false
 	}
 
-	// Validate second parameter: args []*runtime.Object
+	// Validate second parameter: ret checker.Type
 	secondParam := fn.Type.Params.List[1]
-	if !isSliceOfPointerToRuntimeObject(secondParam.Type) {
-		return false
-	}
-
-	// Validate third parameter: ret checker.Type
-	thirdParam := fn.Type.Params.List[2]
-	if sel, isSelector := thirdParam.Type.(*ast.SelectorExpr); isSelector {
+	if sel, isSelector := secondParam.Type.(*ast.SelectorExpr); isSelector {
 		pkg, ok := sel.X.(*ast.Ident)
 		return ok && pkg.Name == "checker" && sel.Sel.Name == "Type"
 	}
@@ -156,16 +147,6 @@ func isPointerToType(expr ast.Expr, typeName string) bool {
 	}
 	ident, ok := star.X.(*ast.Ident)
 	return ok && ident.Name == typeName
-}
-
-func isVMInterface(expr ast.Expr) bool {
-	// Check for ffi.VM (selector expression)
-	if sel, ok := expr.(*ast.SelectorExpr); ok {
-		pkg, ok := sel.X.(*ast.Ident)
-		return ok && pkg.Name == "runtime" && sel.Sel.Name == "VM"
-	}
-
-	return false
 }
 
 func isPointerToRuntimeObject(expr ast.Expr) bool {

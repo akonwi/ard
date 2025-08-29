@@ -13,7 +13,7 @@ import (
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
 // Returns *runtime.Object - functions handle their own Result/Maybe creation
-type FFIFunc func(vm runtime.VM, args []*runtime.Object, returnType checker.Type) *runtime.Object
+type FFIFunc func(args []*runtime.Object, returnType checker.Type) *runtime.Object
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {
@@ -71,7 +71,7 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*runtime.Object
 	}()
 
 	// Direct call with VM access - no reflection needed!
-	result = fn(vm, args, returnType)
+	result = fn(args, returnType)
 	return result, nil
 }
 
