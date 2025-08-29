@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 	_ "github.com/mattn/go-sqlite3"
 )
 

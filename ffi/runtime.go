@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // Runtime module FFI functions

@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // FFIFunc represents the uniform signature for all FFI functions

@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // DecodeModule handles ard/decode module functions

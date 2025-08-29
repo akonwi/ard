@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // MaybeModule handles ard/maybe module functions

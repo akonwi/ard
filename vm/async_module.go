@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // AsyncModule handles ard/async module functions

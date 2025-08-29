@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
@@ -1016,7 +1016,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 
 	// Try to find pre-created closure with captured lexical scope
 	key := istruct.Name + "." + call.Name
-	
+
 	if closureObj, found := vm.scope.get(key); found {
 		closure := closureObj.Raw().(*Closure)
 

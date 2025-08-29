@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // Any built-in module should satisfy this interface

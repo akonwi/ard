@@ -1,6 +1,6 @@
 package vm
 
-import "github.com/akonwi/ard/vm/runtime"
+import "github.com/akonwi/ard/runtime"
 
 type scope struct {
 	parent    *scope

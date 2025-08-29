@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // panic_test_ffi deliberately panics to test panic recovery (test-only function)

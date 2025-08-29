@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // FloatFromStr parses a string to a float, returning Float? (Maybe<Float>)
