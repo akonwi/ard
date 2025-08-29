@@ -115,7 +115,7 @@ func (m *HTTPModule) Handle(call *checker.FunctionCall, args []*runtime.Object) 
 				request := runtime.MakeStruct(checker.HttpRequestDef, requestMap)
 
 				// Call the Ard handler function
-				handle, ok := handler.Raw().(*Closure)
+				handle, ok := handler.Raw().(*VMClosure)
 				if !ok {
 					panic(fmt.Errorf("Handler for '%s' is not a function", path))
 				}

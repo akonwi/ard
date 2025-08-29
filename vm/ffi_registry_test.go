@@ -66,16 +66,13 @@ func TestFFIPanicRecovery(t *testing.T) {
 		t.Fatalf("Failed to register error type test function: %v", err)
 	}
 
-	// Create a mock VM
-	vm := &VM{}
-
 	t.Run("panic recovery for Result type", func(t *testing.T) {
 		// Test panic recovery when return type is Result
 		resultType := checker.MakeResult(checker.Str, checker.Str)
 		args := []*runtime.Object{runtime.MakeStr("test message")}
 
 		// This should recover the panic and return an Ard Error result
-		result, err := registry.Call(vm, "test.panic_test_ffi", args, resultType)
+		result, err := registry.Call("test.panic_test_ffi", args, resultType)
 
 		// Should not return Go error
 		if err != nil {
@@ -128,6 +125,6 @@ func TestFFIPanicRecovery(t *testing.T) {
 		}()
 
 		// This should re-panic with enhanced context
-		_, _ = registry.Call(vm, "test.panic_test_ffi", args, checker.Str)
+		_, _ = registry.Call("test.panic_test_ffi", args, checker.Str)
 	})
 }

@@ -42,7 +42,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			ReturnType: checker.MakeResult(checker.Str, checker.MakeList(checker.DecodeErrorDef)),
 		}
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsString,
@@ -57,7 +57,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			ReturnType: checker.MakeResult(checker.Int, checker.MakeList(checker.DecodeErrorDef)),
 		}
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsInt,
@@ -72,7 +72,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			ReturnType: checker.MakeResult(checker.Float, checker.MakeList(checker.DecodeErrorDef)),
 		}
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsFloat,
@@ -87,7 +87,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			ReturnType: checker.MakeResult(checker.Bool, checker.MakeList(checker.DecodeErrorDef)),
 		}
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsBool,
@@ -100,7 +100,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		decoder := args[1] // Decoder comes second
 
 		// All decoders are now Closures - use unified approach
-		closure := decoder.Raw().(*Closure)
+		closure := decoder.Raw().(*VMClosure)
 		decoderResult := closure.eval(data)
 
 		// Decoder already returns list-based errors, just return the result
@@ -162,7 +162,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		}
 
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *nullableDecoderType,
 				builtinFn: nullableDecoderFn,
@@ -193,7 +193,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		}
 
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *listDecoderType,
 				builtinFn: listDecoderFn,
@@ -230,7 +230,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		}
 
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *mapDecoderType,
 				builtinFn: mapDecoderFn,
@@ -260,7 +260,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		}
 
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *fieldDecoderType,
 				builtinFn: fieldDecoderFn,
@@ -285,7 +285,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			}
 
 			return runtime.Make(
-				&Closure{
+				&VMClosure{
 					vm:   m.vm,
 					expr: *errorDecoderType,
 					builtinFn: func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
@@ -314,7 +314,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		}
 
 		return runtime.Make(
-			&Closure{
+			&VMClosure{
 				vm:        m.vm,
 				expr:      *oneOfDecoderType,
 				builtinFn: oneOfDecoderFn,
@@ -506,7 +506,7 @@ func decodeAsNullable(innerDecoder *runtime.Object, data *runtime.Object, result
 	}
 
 	// Otherwise, call the inner decoder
-	closure := innerDecoder.Raw().(*Closure)
+	closure := innerDecoder.Raw().(*VMClosure)
 	innerResult := closure.eval(data)
 
 	if innerResult.IsOk() {
@@ -540,7 +540,7 @@ func decodeAsList(elementDecoder *runtime.Object, data *runtime.Object, resultTy
 // decodeArrayElements decodes each element in the array using the element decoder
 func decodeArrayElements(elementDecoder *runtime.Object, rawSlice []any, resultType *checker.Result) *runtime.Object {
 	// Get element decoder closure
-	closure := elementDecoder.Raw().(*Closure)
+	closure := elementDecoder.Raw().(*VMClosure)
 
 	var decodedElements []*runtime.Object
 	var errors []*runtime.Object
@@ -603,8 +603,8 @@ func decodeAsMap(keyDecoder *runtime.Object, valueDecoder *runtime.Object, data 
 // decodeMapValues decodes each key and value in the object using their respective decoders
 func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, rawMap map[string]any, resultType *checker.Result) *runtime.Object {
 	// Get decoder closures
-	keyClosure := keyDecoder.Raw().(*Closure)
-	valueClosure := valueDecoder.Raw().(*Closure)
+	keyClosure := keyDecoder.Raw().(*VMClosure)
+	valueClosure := valueDecoder.Raw().(*VMClosure)
 
 	// Create a new map to store decoded keys and values
 	decodedMap := make(map[string]*runtime.Object)
@@ -688,7 +688,7 @@ func decodeAsField(fieldKey string, valueDecoder *runtime.Object, data *runtime.
 // extractField handles the actual field extraction and value decoding
 func extractField(fieldKey string, valueDecoder *runtime.Object, rawMap map[string]any, resultType *checker.Result) *runtime.Object {
 	// Get value decoder closure
-	valueClosure := valueDecoder.Raw().(*Closure)
+	valueClosure := valueDecoder.Raw().(*VMClosure)
 
 	// Check if field exists
 	rawValue, exists := rawMap[fieldKey]
@@ -741,7 +741,7 @@ func decodeAsOneOf(decoderList *runtime.Object, data *runtime.Object, resultType
 
 	// Try each decoder in sequence
 	for i, decoder := range decoders {
-		closure := decoder.Raw().(*Closure)
+		closure := decoder.Raw().(*VMClosure)
 		result := closure.eval(data)
 
 		if result.IsOk() {

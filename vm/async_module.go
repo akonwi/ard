@@ -42,7 +42,7 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 
 	// Execute the worker function in the current VM context first
 	// This will handle the parsing and setup
-	if fn, ok := workerFn.Raw().(*Closure); ok {
+	if fn, ok := workerFn.Raw().(*VMClosure); ok {
 		// Create a copy of the closure with a new VM for isolation
 		isolatedFn := *fn
 		isolatedFn.vm = New(map[string]checker.Module{})

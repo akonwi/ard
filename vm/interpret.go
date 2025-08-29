@@ -68,7 +68,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 				{Name: "@", Type: nil}, // "@" parameter for struct instance
 			}, methodDef.Parameters...)
 
-			closure := &Closure{
+			closure := &VMClosure{
 				vm:            vm,
 				expr:          methodDefWithSelf,
 				capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
@@ -301,7 +301,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 		return runtime.Void()
 	case *checker.FunctionDef:
-		closure := &Closure{vm: vm, expr: *e, capturedScope: vm.scope}
+		closure := &VMClosure{vm: vm, expr: *e, capturedScope: vm.scope}
 		obj := runtime.Make(closure, closure.Type())
 		if e.Name != "" {
 			vm.scope.add(e.Name, obj)
@@ -309,8 +309,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return obj
 	case *checker.ExternalFunctionDef:
 		// Create an external function wrapper
-		extFn := &ExternalFunctionWrapper{
-			vm:      vm,
+		extFn := &ExternClosure{
+			hq:      vm.hq,
 			binding: e.ExternalBinding,
 			def:     *e,
 		}
@@ -382,7 +382,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			}
 
 			// cast to a func
-			fn := obj.Raw().(*Closure)
+			fn := obj.Raw().(*VMClosure)
 
 			args := make([]*runtime.Object, len(e.Call.Args))
 			for i := range e.Call.Args {
@@ -618,8 +618,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 		panic(fmt.Errorf("Undefined: %s", call.Name))
 	}
 
-	// Check if it's a regular closure
-	if closure, ok := sig.Raw().(*Closure); ok {
+	if closure, ok := sig.Raw().(Closure); ok {
 		args := _args
 		// if no args are provided but the function has parameters, use the call.Args
 		if len(args) == 0 && len(sig.Type().(*checker.FunctionDef).Parameters) > 0 {
@@ -629,23 +628,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 				args[i] = vm.eval(call.Args[i])
 			}
 		}
-
 		return closure.eval(args...)
-	}
-
-	// Check if it's an external function
-	if extFn, ok := sig.Raw().(*ExternalFunctionWrapper); ok {
-		args := _args
-		// if no args are provided but the function has parameters, use the call.Args
-		if len(args) == 0 && len(extFn.def.Parameters) > 0 {
-			args = make([]*runtime.Object, len(call.Args))
-
-			for i := range call.Args {
-				args[i] = vm.eval(call.Args[i])
-			}
-		}
-
-		return extFn.eval(args...)
 	}
 
 	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.Type()))
@@ -801,7 +784,7 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 		return runtime.MakeInt(len(raw))
 	case "sort":
 		{
-			_isLess := vm.eval(m.Method.Args[0]).Raw().(*Closure)
+			_isLess := vm.eval(m.Method.Args[0]).Raw().(*VMClosure)
 
 			slices.SortFunc(raw, func(a, b *runtime.Object) int {
 				if _isLess.eval(a, b).AsBool() {
@@ -958,7 +941,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	key := istruct.Name + "." + call.Name
 
 	if closureObj, found := vm.scope.get(key); found {
-		closure := closureObj.Raw().(*Closure)
+		closure := closureObj.Raw().(*VMClosure)
 
 		// Prepare arguments: struct instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)

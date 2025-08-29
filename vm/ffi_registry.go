@@ -47,7 +47,7 @@ func (r *RuntimeFFIRegistry) Get(binding string) (FFIFunc, bool) {
 }
 
 // Call executes an FFI function with the given arguments
-func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
+func (r *RuntimeFFIRegistry) Call(binding string, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
 	fn, exists := r.Get(binding)
 	if !exists {
 		return nil, fmt.Errorf("External function not found: %s", binding)
