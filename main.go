@@ -128,7 +128,7 @@ func main() {
 				os.Exit(1)
 			}
 
-			g := vm.New2(module)
+			g := vm.NewRuntime(module)
 			if err := g.Run(); err != nil {
 				fmt.Println(err)
 				os.Exit(1)

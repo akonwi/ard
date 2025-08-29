@@ -20,7 +20,7 @@ type GlobalVM struct {
 	ffiRegistry *RuntimeFFIRegistry
 }
 
-func New2(module checker.Module) *GlobalVM {
+func NewRuntime(module checker.Module) *GlobalVM {
 	g := &GlobalVM{
 		modules:     make(map[string]*VM),
 		ffiRegistry: NewRuntimeFFIRegistry(),
