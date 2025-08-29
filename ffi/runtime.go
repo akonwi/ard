@@ -18,27 +18,7 @@ func Print(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Objec
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
 
-	arg := args[0]
-	switch arg := arg.Raw().(type) {
-	case string:
-		fmt.Println(arg)
-		return runtime.Void()
-	case bool, int, float64:
-		fmt.Printf("%v\n", arg)
-		return runtime.Void()
-	}
-
-	var str string
-
-	call := &checker.FunctionCall{Name: "to_str", Args: []checker.Expression{}}
-	// could be `arg.cast[T](as: T) (T, bool)`
-	if _, ok := arg.Type().(*checker.StructDef); ok {
-		str = vm.EvalStructMethod(arg, call).Raw().(string)
-	} else if enum, ok := arg.Type().(*checker.Enum); ok {
-		str = vm.EvalEnumMethod(arg, call, enum).Raw().(string)
-	} else {
-		panic(fmt.Errorf("Encountered an unprintable: %s", arg))
-	}
+	str := args[0].AsString()
 
 	fmt.Println(str)
 	return runtime.Void()

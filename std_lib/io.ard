@@ -1,5 +1,9 @@
 // Standard library IO module implemented with FFI
-// Provides print and input functionality through external Go functions
 
-extern fn print(value: $T) Void = "Print"
+private extern fn _print(string: Str) Void = "Print"
+
+fn print(value: Str::ToString) {
+  _print(value.to_str())
+}
+
 extern fn read_line() Str!Str = "ReadLine"
