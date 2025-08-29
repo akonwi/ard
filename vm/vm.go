@@ -38,7 +38,7 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 	for name, mod := range imports {
 		if _, exists := g.modules[name]; !exists {
 			program := mod.Program()
-			vm := New()
+			vm := NewVM()
 			vm.hq = g
 			if _, err := vm.Interpret(program); err != nil {
 				return fmt.Errorf("Failed to load module - %s: %w", name, err)
@@ -69,7 +69,7 @@ func (vm *GlobalVM) initFFIRegistry() {
 
 // call the program's main function
 func (g *GlobalVM) Run() error {
-	vm := New()
+	vm := NewVM()
 	vm.hq = g
 	program := g.subject.Program()
 
@@ -99,7 +99,7 @@ func (g *GlobalVM) Run() error {
 
 // evaluate the subject program as a script
 func (g *GlobalVM) Interpret() (any, error) {
-	vm := New()
+	vm := NewVM()
 	vm.hq = g
 	program := g.subject.Program()
 	return vm.Interpret(program)
@@ -145,7 +145,7 @@ type VM struct {
 	moduleScope *scope // Captures the scope where extern functions are defined
 }
 
-func New() *VM {
+func NewVM() *VM {
 	vm := &VM{
 		scope: newScope(nil),
 	}
