@@ -30,9 +30,8 @@ func run(t *testing.T, input string) any {
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
-	program := module.Program()
-	vm := vm.New(program.Imports)
-	res, err := vm.Interpret(program)
+	vm := vm.New2(module)
+	res, err := vm.Interpret()
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
 	}
@@ -50,9 +49,8 @@ func expectPanic(t *testing.T, substring, input string) {
 	if len(diagnostics) > 0 {
 		t.Fatalf("Diagnostics found: %v", diagnostics)
 	}
-	program := module.Program()
-	vm := vm.New(program.Imports)
-	_, runErr := vm.Interpret(program)
+	vm := vm.New2(module)
+	_, runErr := vm.Interpret()
 	if runErr == nil {
 		t.Fatalf("Did not encounter expcted panic: %s", substring)
 	}
@@ -689,9 +687,8 @@ math::add(10, 20)`
 	}
 
 	// Run with VM
-	program := module.Program()
-	vm := vm.New(program.Imports)
-	result, err := vm.Interpret(program)
+	vm := vm.New2(module)
+	result, err := vm.Interpret()
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
 	}

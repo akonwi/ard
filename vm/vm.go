@@ -19,14 +19,14 @@ type GlobalVM struct {
 }
 
 func New2(module checker.Module) *GlobalVM {
-	vm := &GlobalVM{
+	g := &GlobalVM{
 		modules: make(map[string]*VM),
 		subject: module,
 	}
-	vm.load(module.Program().Imports)
-	vm.moduleRegistry = NewModuleRegistry()
-	vm.initModuleRegistry()
-	return vm
+	g.load(module.Program().Imports)
+	g.moduleRegistry = NewModuleRegistry()
+	g.initModuleRegistry()
+	return g
 }
 
 // go through the dependency tree and make sure a single instance of each module is ready
@@ -56,6 +56,7 @@ func (vm *GlobalVM) initModuleRegistry() {
 	vm.moduleRegistry.Register(&AsyncModule{})
 }
 
+// call the program's main function
 func (g *GlobalVM) Run() error {
 	vm := New(map[string]checker.Module{})
 	vm.hq = g
@@ -85,6 +86,15 @@ func (g *GlobalVM) Run() error {
 	return vm.callMain()
 }
 
+// evaluate the subject program as a script
+func (g *GlobalVM) Interpret() (any, error) {
+	vm := New(map[string]checker.Module{})
+	vm.hq = g
+	program := g.subject.Program()
+	return vm.Interpret(program)
+}
+
+// call into another module
 func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs func() []*runtime.Object) *runtime.Object {
 	// first check in hardcoded std-lib
 	if g.moduleRegistry.HasModule(moduleName) {
@@ -204,6 +214,7 @@ func (c Closure) eval(args ...*runtime.Object) *runtime.Object {
 	return res
 }
 
+// Like a closure - perhaps Closure should be an interface
 type ExternalFunctionWrapper struct {
 	vm      *VM
 	binding string

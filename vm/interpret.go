@@ -47,36 +47,6 @@ func (vm *VM) callMain() error {
 	return err
 }
 
-// evalUserModuleFunction evaluates a function call from a user-defined module
-func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.FunctionCall) *runtime.Object {
-	// Look up the function in the module
-	symbol := module.Get(call.Name)
-	if symbol.IsZero() {
-		panic(fmt.Errorf("Function %s not found in module %s", call.Name, module.Path()))
-	}
-
-	// Verify it's a function
-	_, ok := symbol.Type.(*checker.FunctionDef)
-	if !ok {
-		panic(fmt.Errorf("%s is not a function in module %s", call.Name, module.Path()))
-	}
-
-	// Evaluate arguments
-	args := make([]*runtime.Object, len(call.Args))
-	for i := range call.Args {
-		args[i] = vm.eval(call.Args[i])
-	}
-
-	// create new vm for module
-	mvm := New(module.Program().Imports)
-	// build up the module's environment
-	mvm.Interpret(module.Program())
-	// copy the module scope bindings (struct method closures) to caller VM
-	vm.importModuleScope(mvm)
-	// call the function
-	return mvm.evalFunctionCall(call, args...)
-}
-
 func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	if stmt.Break {
 		vm.scope._break()
