@@ -26,6 +26,11 @@ func (m *HTTPModule) Program() *checker.Program {
 	return nil
 }
 
+func (m *HTTPModule) get(name string) *runtime.Object {
+	sym, _ := m.vm.scope.get(name)
+	return sym
+}
+
 /*
  * examples
  * - "/foo/bar" -> "/foo/bar"
@@ -251,7 +256,7 @@ func (m *HTTPModule) Handle(call *checker.FunctionCall, args []*runtime.Object) 
 	}
 }
 
-func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *HTTPModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch structName {
 	case "Response":
 		return m.handleResponseStatic(call, args)

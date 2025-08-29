@@ -38,26 +38,28 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 	for name, mod := range imports {
 		if _, exists := g.modules[name]; !exists {
 			program := mod.Program()
-			vm := NewVM()
-			vm.hq = g
-			if _, err := vm.Interpret(program); err != nil {
-				return fmt.Errorf("Failed to load module - %s: %w", name, err)
+			if program != nil {
+				vm := NewVM()
+				vm.hq = g
+				if _, err := vm.Interpret(program); err != nil {
+					return fmt.Errorf("Failed to load module - %s: %w", name, err)
+				}
+				g.modules[name] = vm
+				return g.load(program.Imports)
 			}
-			g.modules[name] = vm
-			g.load(mod.Program().Imports)
 		}
 	}
 	return nil
 }
 
 // initialize the part of the standard library that is hardcoded into the compiler
-func (vm *GlobalVM) initModuleRegistry() {
-	vm.moduleRegistry.Register(&ResultModule{})
-	vm.moduleRegistry.Register(&FSModule{})
-	vm.moduleRegistry.Register(&MaybeModule{})
-	vm.moduleRegistry.Register(&HTTPModule{})
-	vm.moduleRegistry.Register(&DecodeModule{})
-	vm.moduleRegistry.Register(&AsyncModule{})
+func (g *GlobalVM) initModuleRegistry() {
+	g.moduleRegistry.Register(&ResultModule{})
+	g.moduleRegistry.Register(&FSModule{})
+	g.moduleRegistry.Register(&MaybeModule{})
+	g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
+	g.moduleRegistry.Register(&DecodeModule{vm: NewVM()})
+	g.moduleRegistry.Register(&AsyncModule{hq: g})
 }
 
 func (vm *GlobalVM) initFFIRegistry() {
@@ -130,10 +132,15 @@ func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs
 func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Object {
 	module, ok := g.modules[moduleName]
 	if !ok {
-		panic(fmt.Errorf("Module not found: %s", moduleName))
+		if mod, ok := g.moduleRegistry.handlers[moduleName]; ok {
+			return mod.get(symbol.Name)
+		} else {
+			panic(fmt.Errorf("Module not found: %s", moduleName))
+		}
 	}
 
 	sym, _ := module.scope.get(symbol.Name)
+	fmt.Printf("found %s\n", sym)
 	return sym
 }
 
@@ -228,4 +235,15 @@ func (e ExternClosure) eval(args ...*runtime.Object) *runtime.Object {
 
 func (c VMClosure) Type() checker.Type {
 	return c.expr.Type()
+}
+
+type BuiltInClosure struct {
+	builtinFn func(*runtime.Object, *checker.Result) *runtime.Object
+	retType   checker.Type
+}
+
+func (c BuiltInClosure) eval(args ...*runtime.Object) *runtime.Object {
+	data := args[0]
+	resultType := c.retType.(*checker.Result)
+	return c.builtinFn(data, resultType)
 }

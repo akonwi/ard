@@ -19,6 +19,10 @@ func (m *FSModule) Program() *checker.Program {
 	return nil
 }
 
+func (m *FSModule) get(name string) *runtime.Object {
+	return nil
+}
+
 func (m *FSModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "append":
@@ -77,6 +81,6 @@ func (m *FSModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *r
 	}
 }
 
-func (m *FSModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *FSModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: fs::%s::%s()", structName, call.Name))
 }

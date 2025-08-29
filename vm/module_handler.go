@@ -10,8 +10,9 @@ import (
 // Any built-in module should satisfy this interface
 type ModuleHandler interface {
 	Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object
-	HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object
+	HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object
 	Path() string
+	get(name string) *runtime.Object
 }
 
 type ModuleRegistry struct {
@@ -40,7 +41,7 @@ func (r *ModuleRegistry) HandleStatic(moduleName string, structName string, vm *
 		args[i] = vm.Eval(arg)
 	}
 
-	return handler.HandleStatic(structName, vm, call, args)
+	return handler.HandleStatic(structName, call, args)
 }
 
 func (r *ModuleRegistry) HasModule(moduleName string) bool {

@@ -18,6 +18,10 @@ func (m *AsyncModule) Path() string {
 	return "ard/async"
 }
 
+func (m *AsyncModule) get(name string) *runtime.Object {
+	return nil
+}
+
 func (m *AsyncModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "start":
@@ -29,7 +33,7 @@ func (m *AsyncModule) Handle(call *checker.FunctionCall, args []*runtime.Object)
 	}
 }
 
-func (m *AsyncModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *AsyncModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: async::%s::%s()", structName, call.Name))
 }
 

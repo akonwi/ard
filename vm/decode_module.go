@@ -24,6 +24,28 @@ func (m *DecodeModule) Program() *checker.Program {
 	return nil
 }
 
+func (m *DecodeModule) get(name string) *runtime.Object {
+	switch name {
+	case "string":
+		// Return the decoder function as a Closure
+		decoderType := &checker.FunctionDef{
+			Name:       "Decoder",
+			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
+			ReturnType: checker.MakeResult(checker.Str, checker.MakeList(checker.DecodeErrorDef)),
+		}
+		return runtime.Make(
+			&VMClosure{
+				vm:        m.vm,
+				expr:      *decoderType,
+				builtinFn: decodeAsString,
+			},
+			decoderType,
+		)
+	}
+
+	return nil
+}
+
 func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "as_string":
@@ -326,7 +348,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 	}
 }
 
-func (m *DecodeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *DecodeModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: decode::%s::%s()", structName, call.Name))
 }
 

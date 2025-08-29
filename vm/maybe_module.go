@@ -18,6 +18,10 @@ func (m *MaybeModule) Program() *checker.Program {
 	return nil
 }
 
+func (m *MaybeModule) get(name string) *runtime.Object {
+	return nil
+}
+
 func (m *MaybeModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "none":
@@ -31,6 +35,6 @@ func (m *MaybeModule) Handle(call *checker.FunctionCall, args []*runtime.Object)
 	}
 }
 
-func (m *MaybeModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *MaybeModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	panic(fmt.Errorf("Unimplemented: maybe::%s::%s()", structName, call.Name))
 }
