@@ -132,8 +132,6 @@ type VM struct {
 	scope  *scope
 	result runtime.Object
 
-	// todo: delete this field. the VM shouldn't need these after initialization
-	imports        map[string]checker.Module
 	moduleRegistry *ModuleRegistry
 	moduleScope    *scope // Captures the scope where extern functions are defined
 }
@@ -142,7 +140,6 @@ func New(imports map[string]checker.Module) *VM {
 	vm := &VM{
 		scope:          newScope(nil),
 		moduleRegistry: NewModuleRegistry(),
-		imports:        imports,
 	}
 	return vm
 }
