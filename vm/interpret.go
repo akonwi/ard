@@ -356,11 +356,12 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleStaticFunctionCall:
 		{
+			// todo: revisit this
 			// Handle module static function calls like http::Response::new()
-			if vm.moduleRegistry.HasModule(e.Module) {
-				// Pass the struct context to the module handler
-				return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
-			}
+			// if vm.moduleRegistry.HasModule(e.Module) {
+			// 	// Pass the struct context to the module handler
+			// 	return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
+			// }
 
 			panic(fmt.Errorf("Unimplemented: %s::%s::%s()", e.Module, e.Struct, e.Call.Name))
 		}
@@ -589,19 +590,21 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleSymbol:
 		// Handle module symbol references (like decode::string as a function value)
-		if _, ok := e.Symbol.Type.(*checker.FunctionDef); ok {
-			// For function symbols, we need to get the actual function object from the module
-			// todo: it should be a simple symbol retrieval
-			if vm.moduleRegistry.HasModule(e.Module) {
-				// Create a function call to get the function object
-				call := checker.CreateCall(e.Symbol.Name, []checker.Expression{}, *e.Symbol.Type.(*checker.FunctionDef))
-				return vm.hq.callOn(e.Module, call, nil)
-			}
-			panic(fmt.Errorf("Module not found: %s", e.Module))
-		}
+		// if _, ok := e.Symbol.Type.(*checker.FunctionDef); ok {
+		// 	// For function symbols, we need to get the actual function object from the module
+		// 	// todo: it should be a simple symbol retrieval
+		// 	if vm.moduleRegistry.HasModule(e.Module) {
+		// 		// Create a function call to get the function object
+		// 		call := checker.CreateCall(e.Symbol.Name, []checker.Expression{}, *e.Symbol.Type.(*checker.FunctionDef))
+		// 		return vm.hq.callOn(e.Module, call, nil)
+		// 	}
+		// 	panic(fmt.Errorf("Module not found: %s", e.Module))
+		// }
 		// For other symbol types (like enums), we would handle them here
 		// For now, just return the symbol as-is
-		return runtime.Make(e.Symbol, e.Symbol.Type)
+		// todo: wtf?
+		// return runtime.Make(e.Symbol, e.Symbol.Type)
+		return vm.hq.lookup(e.Module, e.Symbol)
 	case *checker.CopyExpression:
 		// Evaluate the expression and return a deep copy
 		original := vm.eval(e.Expr)
@@ -876,7 +879,7 @@ func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *
 func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
 	// Special handling for HTTP Response methods
 	if subj.Type() == checker.HttpResponseDef {
-		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
+		http := vm.hq.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
 		args := make([]*runtime.Object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])
@@ -884,7 +887,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		return http.evalHttpResponseMethod(subj, call, args)
 	}
 	if subj.Type() == checker.HttpRequestDef {
-		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
+		http := vm.hq.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
 		args := make([]*runtime.Object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])
@@ -894,7 +897,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	// Database methods are now handled through standard library FFI
 	// Special handling for Fiber methods
 	if subj.Type() == checker.Fiber {
-		async := vm.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
+		async := vm.hq.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
 		args := make([]*runtime.Object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])

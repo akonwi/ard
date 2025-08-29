@@ -127,19 +127,27 @@ func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs
 	panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
 }
 
+func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Object {
+	module, ok := g.modules[moduleName]
+	if !ok {
+		panic(fmt.Errorf("Module not found: %s", moduleName))
+	}
+
+	sym, _ := module.scope.get(symbol.Name)
+	return sym
+}
+
 type VM struct {
 	hq     *GlobalVM
 	scope  *scope
 	result runtime.Object
 
-	moduleRegistry *ModuleRegistry
-	moduleScope    *scope // Captures the scope where extern functions are defined
+	moduleScope *scope // Captures the scope where extern functions are defined
 }
 
 func New() *VM {
 	vm := &VM{
-		scope:          newScope(nil),
-		moduleRegistry: NewModuleRegistry(),
+		scope: newScope(nil),
 	}
 	return vm
 }
