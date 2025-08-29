@@ -45,7 +45,7 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 	if fn, ok := workerFn.Raw().(*VMClosure); ok {
 		// Create a copy of the closure with a new VM for isolation
 		isolatedFn := *fn
-		isolatedFn.vm = New(map[string]checker.Module{})
+		isolatedFn.vm = New()
 		isolatedFn.vm.hq = m.hq
 		// Start the goroutine with the evaluated function
 		go func() {

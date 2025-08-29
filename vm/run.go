@@ -25,7 +25,7 @@ func Run(program *checker.Program) error {
 		return errors.New("No main function found")
 	}
 
-	vm := New(program.Imports)
+	vm := New()
 	// setup module scope
 	if _, err := vm.Interpret(program); err != nil {
 		return err
