@@ -19,7 +19,7 @@ func (m *FSModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *FSModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "append":
 		path := args[0].Raw().(string)
@@ -62,7 +62,7 @@ func (m *FSModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Ob
 		return runtime.Make(nil, call.Type())
 	case "write":
 		path := args[0].Raw().(string)
-		content := vm.Eval(call.Args[1]).Raw().(string)
+		content := args[0].String()
 		/* file permissions:
 		- `6` (owner): read (4) + write (2) = 6
 		- `4` (group): read only

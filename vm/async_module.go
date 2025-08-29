@@ -10,16 +10,18 @@ import (
 )
 
 // AsyncModule handles ard/async module functions
-type AsyncModule struct{}
+type AsyncModule struct {
+	hq *GlobalVM
+}
 
 func (m *AsyncModule) Path() string {
 	return "ard/async"
 }
 
-func (m *AsyncModule) Handle(caller *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *AsyncModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "start":
-		return m.handleStart(caller, args)
+		return m.handleStart(args)
 	case "sleep":
 		return m.handleSleep(args)
 	default:
@@ -31,7 +33,7 @@ func (m *AsyncModule) HandleStatic(structName string, vm *VM, call *checker.Func
 	panic(fmt.Errorf("Unimplemented: async::%s::%s()", structName, call.Name))
 }
 
-func (m *AsyncModule) handleStart(caller *VM, args []*runtime.Object) *runtime.Object {
+func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 	workerFn := args[0]
 
 	// Create a new WaitGroup for this fiber
@@ -43,7 +45,8 @@ func (m *AsyncModule) handleStart(caller *VM, args []*runtime.Object) *runtime.O
 	if fn, ok := workerFn.Raw().(*Closure); ok {
 		// Create a copy of the closure with a new VM for isolation
 		isolatedFn := *fn
-		isolatedFn.vm = New(caller.imports)
+		isolatedFn.vm = New(map[string]checker.Module{})
+		isolatedFn.vm.hq = m.hq
 		// Start the goroutine with the evaluated function
 		go func() {
 			defer wg.Done()

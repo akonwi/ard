@@ -18,7 +18,7 @@ func (m *ResultModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *ResultModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *ResultModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "ok", "err":
 		data := args[0]

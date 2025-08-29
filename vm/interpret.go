@@ -375,45 +375,14 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleFunctionCall:
 		{
-			// first check in std lib
-			if vm.moduleRegistry.HasModule(e.Module) {
-				return vm.moduleRegistry.Handle(e.Module, vm, e.Call)
-			}
-
-			// Check for embedded modules with external functions
-			if module, ok := vm.imports[e.Module]; ok {
-				if symbol := module.Get(e.Call.Name); !symbol.IsZero() {
-					// Check if this is an external function
-					if extFuncDef, ok := symbol.Type.(*checker.ExternalFunctionDef); ok {
-						// Create an ExternalFunctionWrapper and call it
-						wrapper := ExternalFunctionWrapper{
-							vm:      vm,
-							binding: extFuncDef.ExternalBinding,
-							def:     *extFuncDef,
-						}
-
-						// Convert call arguments to objects
-						args := make([]*runtime.Object, len(e.Call.Args))
-						for i, arg := range e.Call.Args {
-							args[i] = vm.eval(arg)
-						}
-
-						return wrapper.eval(args...)
-					}
+			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
+				// Convert call arguments to objects
+				args := make([]*runtime.Object, len(e.Call.Args))
+				for i, arg := range e.Call.Args {
+					args[i] = vm.eval(arg)
 				}
-			}
-
-			// Check for user modules (modules with function bodies)
-			if module, ok := vm.imports[e.Module]; ok {
-				// Check if this is a user module by seeing if the function has a body
-				if symbol := module.Get(e.Call.Name); !symbol.IsZero() {
-					if functionDef, ok := symbol.Type.(*checker.FunctionDef); ok && functionDef.Body != nil {
-						return vm.evalUserModuleFunction(module, e.Call)
-					}
-				}
-			}
-
-			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
+				return args
+			})
 		}
 	case *checker.ModuleStaticFunctionCall:
 		{
@@ -652,10 +621,11 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		// Handle module symbol references (like decode::string as a function value)
 		if _, ok := e.Symbol.Type.(*checker.FunctionDef); ok {
 			// For function symbols, we need to get the actual function object from the module
+			// todo: it should be a simple symbol retrieval
 			if vm.moduleRegistry.HasModule(e.Module) {
 				// Create a function call to get the function object
 				call := checker.CreateCall(e.Symbol.Name, []checker.Expression{}, *e.Symbol.Type.(*checker.FunctionDef))
-				return vm.moduleRegistry.Handle(e.Module, vm, call)
+				return vm.hq.callOn(e.Module, call, nil)
 			}
 			panic(fmt.Errorf("Module not found: %s", e.Module))
 		}

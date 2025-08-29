@@ -13,7 +13,10 @@ import (
 )
 
 // HTTPModule handles ard/http module functions
-type HTTPModule struct{}
+type HTTPModule struct {
+	vm *VM
+	hq *GlobalVM
+}
 
 func (m *HTTPModule) Path() string {
 	return "ard/http"
@@ -41,7 +44,7 @@ func convertToGoPattern(path string) string {
 	return strings.Join(parts, "/")
 }
 
-func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *HTTPModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "serve":
 		port := args[0].Raw().(int)
@@ -120,7 +123,8 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.
 				// Create a copy of the closure with a new VM for isolation to prevent race conditions
 				// This follows the same pattern as the async module
 				isolatedHandle := *handle
-				isolatedHandle.vm = New(vm.imports)
+				isolatedHandle.vm = New(map[string]checker.Module{})
+				isolatedHandle.vm.hq = m.hq
 				response := isolatedHandle.eval(request)
 
 				// Convert Ard Response to Go HTTP response

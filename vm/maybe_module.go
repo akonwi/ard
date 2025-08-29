@@ -18,7 +18,7 @@ func (m *MaybeModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *MaybeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *MaybeModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "none":
 		return runtime.Make(nil, call.Type())

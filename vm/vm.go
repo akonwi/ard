@@ -13,6 +13,9 @@ import (
 type GlobalVM struct {
 	modules map[string]*VM
 	subject checker.Module
+
+	// hardcoded modules
+	moduleRegistry *ModuleRegistry
 }
 
 func New2(module checker.Module) *GlobalVM {
@@ -21,6 +24,8 @@ func New2(module checker.Module) *GlobalVM {
 		subject: module,
 	}
 	vm.load(module.Program().Imports)
+	vm.moduleRegistry = NewModuleRegistry()
+	vm.initModuleRegistry()
 	return vm
 }
 
@@ -30,6 +35,7 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 		if _, exists := g.modules[name]; !exists {
 			program := mod.Program()
 			vm := New(program.Imports)
+			vm.hq = g
 			if _, err := vm.Interpret(program); err != nil {
 				return fmt.Errorf("Failed to load module - %s: %w", name, err)
 			}
@@ -40,8 +46,19 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 	return nil
 }
 
+// initialize the part of the standard library that is hardcoded into the compiler
+func (vm *GlobalVM) initModuleRegistry() {
+	vm.moduleRegistry.Register(&ResultModule{})
+	vm.moduleRegistry.Register(&FSModule{})
+	vm.moduleRegistry.Register(&MaybeModule{})
+	vm.moduleRegistry.Register(&HTTPModule{})
+	vm.moduleRegistry.Register(&DecodeModule{})
+	vm.moduleRegistry.Register(&AsyncModule{})
+}
+
 func (g *GlobalVM) Run() error {
 	vm := New(map[string]checker.Module{})
+	vm.hq = g
 	program := g.subject.Program()
 
 	hasMain := false
@@ -68,7 +85,29 @@ func (g *GlobalVM) Run() error {
 	return vm.callMain()
 }
 
+func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs func() []*runtime.Object) *runtime.Object {
+	// first check in hardcoded std-lib
+	if g.moduleRegistry.HasModule(moduleName) {
+		module, ok := g.moduleRegistry.handlers[moduleName]
+		if !ok {
+			panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
+		}
+
+		args := []*runtime.Object{}
+		if getArgs != nil {
+			args = getArgs()
+		}
+		return module.Handle(call, args)
+	}
+
+	if mvm, ok := g.modules[moduleName]; ok {
+		return mvm.evalFunctionCall(call, getArgs()...)
+	}
+	panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
+}
+
 type VM struct {
+	hq     *GlobalVM
 	scope  *scope
 	result runtime.Object
 
@@ -86,7 +125,7 @@ func New(imports map[string]checker.Module) *VM {
 		ffiRegistry:    NewRuntimeFFIRegistry(),
 		imports:        imports,
 	}
-	vm.initModuleRegistry()
+	// todo: do this in global or per-module
 	vm.initFFIRegistry()
 	return vm
 }
@@ -100,27 +139,6 @@ func (vm *VM) importModuleScope(from *VM) {
 		// don't overwrite names that already exist in the caller
 		if _, exists := vm.scope.get(name); !exists {
 			vm.scope.add(name, obj)
-		}
-	}
-}
-
-func (vm *VM) initModuleRegistry() {
-	// <prelude>
-	vm.moduleRegistry.Register(&ResultModule{})
-	// </prelude>
-
-	for path := range vm.imports {
-		switch path {
-		case "ard/fs":
-			vm.moduleRegistry.Register(&FSModule{})
-		case "ard/maybe":
-			vm.moduleRegistry.Register(&MaybeModule{})
-		case "ard/http":
-			vm.moduleRegistry.Register(&HTTPModule{})
-		case "ard/decode":
-			vm.moduleRegistry.Register(&DecodeModule{})
-		case "ard/async":
-			vm.moduleRegistry.Register(&AsyncModule{})
 		}
 	}
 }
@@ -155,12 +173,6 @@ type Closure struct {
 	capturedScope *scope                                                 // scope at closure creation time
 }
 
-type ExternalFunctionWrapper struct {
-	vm      *VM
-	binding string
-	def     checker.ExternalFunctionDef
-}
-
 func (c Closure) eval(args ...*runtime.Object) *runtime.Object {
 	// Handle built-in functions
 	if c.builtinFn != nil {
@@ -190,6 +202,12 @@ func (c Closure) eval(args ...*runtime.Object) *runtime.Object {
 		}
 	})
 	return res
+}
+
+type ExternalFunctionWrapper struct {
+	vm      *VM
+	binding string
+	def     checker.ExternalFunctionDef
 }
 
 func (e ExternalFunctionWrapper) eval(args ...*runtime.Object) *runtime.Object {

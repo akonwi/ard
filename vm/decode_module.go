@@ -12,7 +12,9 @@ import (
 )
 
 // DecodeModule handles ard/decode module functions
-type DecodeModule struct{}
+type DecodeModule struct {
+	vm *VM
+}
 
 func (m *DecodeModule) Path() string {
 	return "ard/decode"
@@ -22,7 +24,7 @@ func (m *DecodeModule) Program() *checker.Program {
 	return nil
 }
 
-func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "as_string":
 		return decodeAsString(args[0], call.Type().(*checker.Result))
@@ -41,7 +43,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		}
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsString,
 			},
@@ -56,7 +58,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		}
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsInt,
 			},
@@ -71,7 +73,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		}
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsFloat,
 			},
@@ -86,7 +88,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		}
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *decoderType,
 				builtinFn: decodeAsBool,
 			},
@@ -105,7 +107,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		return decoderResult
 	case "json":
 		// Parse external data (JSON string) into Dynamic object
-		jsonString := vm.eval(call.Args[0]).AsString()
+		jsonString := m.vm.eval(call.Args[0]).AsString()
 		jsonBytes := []byte(jsonString)
 
 		// Parse JSON into Dynamic object, fallback to nil if parsing fails
@@ -161,7 +163,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *nullableDecoderType,
 				builtinFn: nullableDecoderFn,
 			},
@@ -192,7 +194,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *listDecoderType,
 				builtinFn: listDecoderFn,
 			},
@@ -229,7 +231,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *mapDecoderType,
 				builtinFn: mapDecoderFn,
 			},
@@ -237,7 +239,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 		)
 	case "field":
 		// Return a field decoder function that extracts a specific field
-		fieldKey := vm.eval(call.Args[0]).AsString()
+		fieldKey := m.vm.eval(call.Args[0]).AsString()
 		valueDecoder := args[1] // Decoder for the field's value
 
 		// Extract type information
@@ -259,7 +261,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *fieldDecoderType,
 				builtinFn: fieldDecoderFn,
 			},
@@ -284,7 +286,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 
 			return runtime.Make(
 				&Closure{
-					vm:   vm,
+					vm:   m.vm,
 					expr: *errorDecoderType,
 					builtinFn: func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 						return runtime.MakeErr(emptyListError)
@@ -313,7 +315,7 @@ func (m *DecodeModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtim
 
 		return runtime.Make(
 			&Closure{
-				vm:        vm,
+				vm:        m.vm,
 				expr:      *oneOfDecoderType,
 				builtinFn: oneOfDecoderFn,
 			},
