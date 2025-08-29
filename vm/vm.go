@@ -3,15 +3,76 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
 
+type GlobalVM struct {
+	modules map[string]*VM
+	subject checker.Module
+}
+
+func New2(module checker.Module) *GlobalVM {
+	vm := &GlobalVM{
+		modules: make(map[string]*VM),
+		subject: module,
+	}
+	vm.load(module.Program().Imports)
+	return vm
+}
+
+// go through the dependency tree and make sure a single instance of each module is ready
+func (g *GlobalVM) load(imports map[string]checker.Module) error {
+	for name, mod := range imports {
+		if _, exists := g.modules[name]; !exists {
+			program := mod.Program()
+			vm := New(program.Imports)
+			if _, err := vm.Interpret(program); err != nil {
+				return fmt.Errorf("Failed to load module - %s: %w", name, err)
+			}
+			g.modules[name] = vm
+			g.load(mod.Program().Imports)
+		}
+	}
+	return nil
+}
+
+func (g *GlobalVM) Run() error {
+	vm := New(map[string]checker.Module{})
+	program := g.subject.Program()
+
+	hasMain := false
+	for _, stmt := range program.Statements {
+		if stmt.Expr == nil {
+			continue
+		}
+		if fn, ok := stmt.Expr.Type().(*checker.FunctionDef); ok {
+			if fn.Name == "main" && len(fn.Parameters) == 0 && fn.ReturnType == checker.Void {
+				hasMain = true
+				break
+			}
+		}
+	}
+
+	if !hasMain {
+		return errors.New("No main function found")
+	}
+
+	// build up scope
+	if _, err := vm.Interpret(program); err != nil {
+		return err
+	}
+	return vm.callMain()
+}
+
 type VM struct {
-	scope          *scope
-	result         runtime.Object
+	scope  *scope
+	result runtime.Object
+
+	// todo: delete this field. the VM shouldn't need these after initialization
 	imports        map[string]checker.Module
 	moduleRegistry *ModuleRegistry
 	ffiRegistry    *RuntimeFFIRegistry

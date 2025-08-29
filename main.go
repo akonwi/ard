@@ -85,6 +85,55 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "run2":
+		{
+			buildCmd.Parse(os.Args[2:])
+
+			if buildCmd.NArg() < 1 {
+				fmt.Println("Expected filepath argument")
+				os.Exit(1)
+			}
+
+			inputPath := buildCmd.Arg(0)
+			sourceCode, err := os.ReadFile(inputPath)
+			if err != nil {
+				fmt.Printf("Error reading file %s - %v\n", inputPath, err)
+				os.Exit(1)
+			}
+
+			result := ast.Parse(sourceCode, inputPath)
+			if len(result.Errors) > 0 {
+				result.PrintErrors()
+				os.Exit(1)
+			}
+			ast := result.Program
+
+			workingDir := filepath.Dir(inputPath)
+			moduleResolver, err := checker.NewModuleResolver(workingDir)
+			if err != nil {
+				log.Fatalf("Error initializing module resolver: %v\n", err)
+			}
+
+			// Get relative path for diagnostics
+			relPath, err := filepath.Rel(workingDir, inputPath)
+			if err != nil {
+				relPath = inputPath // fallback to absolute path
+			}
+
+			module, diagnostics := checker.Check(ast, moduleResolver, relPath)
+			if len(diagnostics) > 0 {
+				for _, diagnostic := range diagnostics {
+					fmt.Println(diagnostic)
+				}
+				os.Exit(1)
+			}
+
+			g := vm.New2(module)
+			if err := g.Run(); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
 	default:
 		log.Fatalf("Unknown command: %s\n", os.Args[1])
 	}
