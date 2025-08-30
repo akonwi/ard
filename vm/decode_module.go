@@ -3,7 +3,6 @@
 package vm
 
 import (
-	"encoding/json/v2"
 	"fmt"
 	"strconv"
 
@@ -116,46 +115,6 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			},
 			decoderType,
 		)
-	case "run":
-		// Apply the decoder function to the data
-		data := args[0]    // Data comes first now
-		decoder := args[1] // Decoder comes second
-
-		// All decoders are now Closures - use unified approach
-		closure := decoder.Raw().(*VMClosure)
-		decoderResult := closure.eval(data)
-
-		// Decoder already returns list-based errors, just return the result
-		return decoderResult
-	case "json":
-		// Parse external data (JSON string) into Dynamic object
-		jsonString := m.vm.eval(call.Args[0]).AsString()
-		jsonBytes := []byte(jsonString)
-
-		// Parse JSON into Dynamic object, fallback to nil if parsing fails
-		dynamicObj, err := parseJsonToDynamic(jsonBytes)
-		if err != nil {
-			// Return nil as Dynamic - this is valid and will be caught by decoders
-			return runtime.MakeDynamic(nil)
-		}
-
-		return dynamicObj
-	case "from_str":
-		// Create Dynamic from Str primitive
-		strValue := args[0].AsString()
-		return runtime.MakeDynamic(strValue)
-	case "from_int":
-		// Create Dynamic from Int primitive
-		intValue := args[0].AsInt()
-		return runtime.MakeDynamic(intValue)
-	case "from_bool":
-		// Create Dynamic from Bool primitive
-		boolValue := args[0].AsBool()
-		return runtime.MakeDynamic(boolValue)
-	case "from_float":
-		// Create Dynamic from Float primitive
-		floatValue := args[0].AsFloat()
-		return runtime.MakeDynamic(floatValue)
 	case "from_list":
 		// Create Dynamic from List primitive
 		listValue := args[0].AsList()
@@ -778,18 +737,4 @@ func decodeAsOneOf(decoderList *runtime.Object, data *runtime.Object, resultType
 
 	// All decoders failed - return the first error
 	return firstError
-}
-
-// parseJsonToDynamic parses JSON into a Dynamic object
-func parseJsonToDynamic(jsonBytes []byte) (*runtime.Object, error) {
-	var rawValue any
-
-	// Parse JSON into any
-	err := json.Unmarshal(jsonBytes, &rawValue)
-	if err != nil {
-		return nil, err
-	}
-
-	// Wrap the raw value as a Dynamic object
-	return runtime.MakeDynamic(rawValue), nil
 }

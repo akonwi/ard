@@ -22,6 +22,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("BoolToDynamic", ffi.BoolToDynamic); err != nil {
 		return fmt.Errorf("failed to register BoolToDynamic: %w", err)
 	}
+	if err := r.Register("JsonToDynamic", ffi.JsonToDynamic); err != nil {
+		return fmt.Errorf("failed to register JsonToDynamic: %w", err)
+	}
 	if err := r.Register("DecodeString", ffi.DecodeString); err != nil {
 		return fmt.Errorf("failed to register DecodeString: %w", err)
 	}

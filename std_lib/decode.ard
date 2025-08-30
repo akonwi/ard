@@ -34,6 +34,19 @@ extern fn from_int(val: Int) Dynamic = "IntToDynamic"
 extern fn from_float(val: Float) Dynamic = "FloatToDynamic"
 extern fn from_bool(val: Bool) Dynamic = "BoolToDynamic"
 
+// parse json text
+extern fn from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+
+// deprecated: use from_json instead
+fn json(text: Str) Dynamic {
+  match from_json(text) {
+    ok => ok,
+    err => {
+      panic("Error parsing json: {err}")
+    }
+  }
+}
+
 private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
 private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
 private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"

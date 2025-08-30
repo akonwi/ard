@@ -1,6 +1,7 @@
 package ffi
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"strconv"
 
@@ -25,6 +26,21 @@ func FloatToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 func BoolToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeDynamic(args[0].Raw())
+}
+
+// Parse external data (JSON text) into Dynamic object
+func JsonToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	jsonString := args[0].AsString()
+	jsonBytes := []byte(jsonString)
+
+	// Parse JSON into Dynamic object, fallback to nil if parsing fails
+	var raw any
+	err := json.Unmarshal(jsonBytes, &raw)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Error parsing JSON: %s", err.Error())))
+	}
+
+	return runtime.MakeOk(runtime.MakeDynamic(raw))
 }
 
 // fn (Dynamic) Str!Error
