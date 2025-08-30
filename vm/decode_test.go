@@ -25,7 +25,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 				use ard/decode
 
 				let data = decode::from_int(42)
-				decode::run(data, decode::int).expect("")
+				decode::run(data, decode::int).expect("Failed to decode")
 			`,
 			want: 42,
 		},

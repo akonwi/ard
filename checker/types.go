@@ -115,6 +115,12 @@ func (s str) get(name string) Type {
 			},
 			ReturnType: MakeList(Str),
 		}
+	case "starts_with":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "str", Type: Str}},
+			ReturnType: Bool,
+		}
 	case "to_str":
 		return &FunctionDef{
 			Name:       name,

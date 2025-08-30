@@ -10,6 +10,30 @@ import (
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
+	if err := r.Register("StrToDynamic", ffi.StrToDynamic); err != nil {
+		return fmt.Errorf("failed to register StrToDynamic: %w", err)
+	}
+	if err := r.Register("IntToDynamic", ffi.IntToDynamic); err != nil {
+		return fmt.Errorf("failed to register IntToDynamic: %w", err)
+	}
+	if err := r.Register("FloatToDynamic", ffi.FloatToDynamic); err != nil {
+		return fmt.Errorf("failed to register FloatToDynamic: %w", err)
+	}
+	if err := r.Register("BoolToDynamic", ffi.BoolToDynamic); err != nil {
+		return fmt.Errorf("failed to register BoolToDynamic: %w", err)
+	}
+	if err := r.Register("DecodeString", ffi.DecodeString); err != nil {
+		return fmt.Errorf("failed to register DecodeString: %w", err)
+	}
+	if err := r.Register("DecodeInt", ffi.DecodeInt); err != nil {
+		return fmt.Errorf("failed to register DecodeInt: %w", err)
+	}
+	if err := r.Register("DecodeFloat", ffi.DecodeFloat); err != nil {
+		return fmt.Errorf("failed to register DecodeFloat: %w", err)
+	}
+	if err := r.Register("DecodeBool", ffi.DecodeBool); err != nil {
+		return fmt.Errorf("failed to register DecodeBool: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}

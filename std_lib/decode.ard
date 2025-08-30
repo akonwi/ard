@@ -1,0 +1,72 @@
+// opaque struct for external data
+struct Dynamic {}
+
+struct Error {
+  expected: Str,
+  found: Str,
+  path: [Str],
+}
+
+impl Str::ToString for Error {
+  fn to_str() Str {
+    mut path_str = ""
+    for step, i in @path {
+      match i == 0 {
+        true => {
+          // no leading dot
+          path_str =+ step
+        },
+        false => {
+          // Subsequent elements: add dot only if not starting with bracket
+          match step.starts_with("[") {
+            true => { path_str =+ step },
+            false => { path_str =+ ".{step}" }
+          }
+        }
+      }
+    }
+    "Decode error: expected {@expected}, found {@found} at {path_str}"
+  }
+}
+
+extern fn from_str(val: Str) Dynamic = "StrToDynamic"
+extern fn from_int(val: Int) Dynamic = "IntToDynamic"
+extern fn from_float(val: Float) Dynamic = "FloatToDynamic"
+extern fn from_bool(val: Bool) Dynamic = "BoolToDynamic"
+
+private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
+private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
+private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
+private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
+
+fn string(data: Dynamic) Str![Error] {
+  let val = try _decode_string(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn int(data: Dynamic) Int![Error] {
+  let val = try _decode_int(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn float(data: Dynamic) Float![Error] {
+  let val = try _decode_float(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn bool(data: Dynamic) Bool![Error] {
+  let val = try _decode_bool(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
+  decoder(data)
+}

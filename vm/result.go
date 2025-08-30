@@ -14,6 +14,8 @@ func (vm *VM) evalResultMethod(self *runtime.Object, call *checker.FunctionCall)
 			actual := ""
 			if str, ok := self.IsStr(); ok {
 				actual = str
+			} else {
+				actual = fmt.Sprintf("%v", self.GoValue())
 			}
 			_msg := vm.eval(call.Args[0]).AsString()
 			panic(_msg + ": " + actual)

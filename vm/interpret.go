@@ -624,7 +624,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 	if closure, ok := sig.Raw().(Closure); ok {
 		args := _args
 		// if no args are provided but the function has parameters, use the call.Args
-		if len(args) == 0 && len(sig.Type().(*checker.FunctionDef).Parameters) > 0 {
+		if len(args) == 0 {
 			args = make([]*runtime.Object, len(call.Args))
 
 			for i := range call.Args {
@@ -721,6 +721,9 @@ func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runt
 			values[i] = runtime.MakeStr(str)
 		}
 		return runtime.MakeList(checker.Str, values...)
+	case "starts_with":
+		prefix := vm.eval(m.Args[0]).AsString()
+		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
 	case "to_str":
 		return subj
 	case "trim":

@@ -58,7 +58,7 @@ func (g *GlobalVM) initModuleRegistry() {
 	g.moduleRegistry.Register(&FSModule{})
 	g.moduleRegistry.Register(&MaybeModule{})
 	g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
-	g.moduleRegistry.Register(&DecodeModule{vm: NewVM()})
+	// g.moduleRegistry.Register(&DecodeModule{vm: NewVM()})
 	g.moduleRegistry.Register(&AsyncModule{hq: g})
 }
 
