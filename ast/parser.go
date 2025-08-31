@@ -163,7 +163,7 @@ func (p *parser) parseInlineComment() *Comment {
 	if !p.check(comment) {
 		return nil
 	}
-	
+
 	commentToken := p.advance()
 	// Strip "//" and leading whitespace
 	commentText := commentToken.text[2:] // Remove "//"
@@ -174,7 +174,7 @@ func (p *parser) parseInlineComment() *Comment {
 	for len(commentText) > 0 && (commentText[len(commentText)-1] == ' ' || commentText[len(commentText)-1] == '\t') {
 		commentText = commentText[:len(commentText)-1]
 	}
-	
+
 	return &Comment{
 		Location: commentToken.getLocation(),
 		Value:    commentText,
@@ -654,7 +654,7 @@ func (p *parser) enumDef(private bool) Statement {
 			p.match(new_line) // consume newline after comment
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
@@ -706,7 +706,7 @@ func (p *parser) structDef(private bool) Statement {
 			p.match(new_line) // consume newline after comment
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
@@ -810,12 +810,12 @@ func (p *parser) implBlock() *ImplBlock {
 			p.match(new_line) // consume newline after comment
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
-		
+
 		stmt, err := p.functionDef(true)
 		if err != nil {
 			// For now, keep the old error handling until functionDef is converted
@@ -880,7 +880,7 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			p.match(new_line) // consume newline after comment
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
@@ -1315,37 +1315,37 @@ func (p *parser) parseType() DeclaredType {
 				},
 			}
 		} else {
+			// Check for nullable
+			nullable := p.match(question_mark)
+
 			// Check for Result sugar syntax: Type!ErrorType
 			if p.match(bang) {
 				// Parse the error type
 				errType := p.parseType()
-
-				// Check for nullable
-				nullable := p.match(question_mark)
 
 				// Create the value type based on the identifier
 				var valType DeclaredType
 				if len(id.text) > 0 && id.text[0] == '$' {
 					valType = &GenericType{
 						Name:     id.text[1:], // Remove the leading '$'
-						nullable: false,
+						nullable: nullable,
 					}
 				} else {
 					switch id.text {
 					case "Int":
-						valType = &IntType{nullable: false}
+						valType = &IntType{nullable: nullable}
 					case "Float":
-						valType = &FloatType{nullable: false}
+						valType = &FloatType{nullable: nullable}
 					case "Str":
-						valType = &StringType{nullable: false}
+						valType = &StringType{nullable: nullable}
 					case "Bool":
-						valType = &BooleanType{nullable: false}
+						valType = &BooleanType{nullable: nullable}
 					case "Void":
-						valType = &VoidType{nullable: false}
+						valType = &VoidType{nullable: nullable}
 					default:
 						valType = &CustomType{
 							Name:     id.text,
-							nullable: false,
+							nullable: nullable,
 						}
 					}
 				}
@@ -1568,7 +1568,7 @@ func (p *parser) matchExpr() (Expression, error) {
 				p.match(new_line) // consume newline after comment
 				continue
 			}
-			
+
 			// Skip standalone newlines
 			if p.match(new_line) {
 				continue
@@ -1776,14 +1776,14 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				p.addError(p.peek(), "Expected ')' to close parameter list")
 				break
 			}
-			
+
 			// Parse and collect comments between parameters
 			if c := p.parseInlineComment(); c != nil {
 				functionComments = append(functionComments, *c)
 				p.match(new_line)
 				continue
 			}
-			
+
 			// Skip standalone newlines
 			if p.match(new_line) {
 				continue
@@ -1818,12 +1818,12 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				Name:    nameToken.text,
 				Type:    paramType,
 			})
-			
+
 			// Check for inline comment after parameter
 			if c := p.parseInlineComment(); c != nil {
 				functionComments = append(functionComments, *c)
 			}
-			
+
 			p.match(comma)
 		}
 
@@ -1895,7 +1895,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       statements,
-			Comments:   functionComments,  // Add collected comments
+			Comments:   functionComments, // Add collected comments
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -1958,12 +1958,12 @@ func (p *parser) structInstance() (Expression, error) {
 				p.match(new_line)
 				continue
 			}
-			
+
 			// Skip standalone newlines
 			if p.match(new_line) {
 				continue
 			}
-			
+
 			propToken := p.consumeVariableName("Expected name")
 
 			if !p.check(colon) {
@@ -1981,12 +1981,12 @@ func (p *parser) structInstance() (Expression, error) {
 				Name:  Identifier{Name: propToken.text},
 				Value: val,
 			})
-			
+
 			// Check for inline comment after property
 			if c := p.parseInlineComment(); c != nil {
 				instance.Comments = append(instance.Comments, *c)
 			}
-			
+
 			p.match(comma)
 			p.match(new_line)
 		}
@@ -2487,8 +2487,8 @@ func (p *parser) call() (Expression, error) {
 			if !p.check(right_paren) {
 				// Could not find ')', return partial function call
 				return &FunctionCall{
-					Name: expr.(*Identifier).Name,
-					Args: args,
+					Name:     expr.(*Identifier).Name,
+					Args:     args,
 					Comments: argComments,
 					Location: Location{
 						Start: expr.GetLocation().Start,
@@ -2500,8 +2500,8 @@ func (p *parser) call() (Expression, error) {
 		p.advance() // consume the ')'
 
 		return &FunctionCall{
-			Name: expr.(*Identifier).Name,
-			Args: args,
+			Name:     expr.(*Identifier).Name,
+			Args:     args,
 			Comments: argComments,
 			Location: Location{
 				Start: expr.GetLocation().Start,
@@ -2608,12 +2608,12 @@ func (p *parser) list() (Expression, error) {
 			p.match(new_line) // consume newline after comment
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
-		
+
 		item, err := p.functionDef(false)
 		if err != nil {
 			return nil, err
@@ -2624,17 +2624,17 @@ func (p *parser) list() (Expression, error) {
 		}
 
 		items = append(items, item)
-		
+
 		// Check for inline comment after list element
 		if c := p.parseInlineComment(); c != nil {
 			comments = append(comments, *c)
 		}
-		
+
 		p.match(comma)
 		p.match(new_line)
 	}
 	result := &ListLiteral{
-		Items:    items, 
+		Items:    items,
 		Location: startToken.getLocation(),
 	}
 	if len(comments) > 0 {
@@ -2664,7 +2664,7 @@ func (p *parser) map_() (Expression, error) {
 			p.match(new_line) // consume newline after comment
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
@@ -2691,18 +2691,18 @@ func (p *parser) map_() (Expression, error) {
 			Key:   key,
 			Value: val,
 		})
-		
+
 		// Check for inline comment after map entry
 		if c := p.parseInlineComment(); c != nil {
 			node.Comments = append(node.Comments, *c)
 		}
-		
+
 		p.match(comma)
 		p.match(new_line)
 	}
 
 	if len(node.Comments) == 0 {
-		node.Comments = nil  // Keep nil for backward compatibility
+		node.Comments = nil // Keep nil for backward compatibility
 	}
 	return node, nil
 }
@@ -2868,12 +2868,12 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 			p.match(new_line)
 			continue
 		}
-		
+
 		// Skip standalone newlines
 		if p.match(new_line) {
 			continue
 		}
-		
+
 		// Check for mut keyword first
 		start := p.peek().getLocation().Start
 		isMutable := p.match(mut)

@@ -101,6 +101,24 @@ func TestResultTypeInSignature(t *testing.T) {
 			},
 		},
 		{
+			name:  "Result sugar syntax with generic maybe type",
+			input: `fn foo() $T?!Str {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "foo",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &GenericType{Name: "T", nullable: true},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name: "Result sugar with qualified types",
 			input: `
 			fn foo() db::Conn!Str {}
