@@ -1268,7 +1268,7 @@ func (p *parser) parseType() DeclaredType {
 		return &FunctionType{
 			Params:   paramTypes,
 			Return:   returnType,
-			nullable: nullable,
+			Nullable: nullable,
 			Location: Location{
 				Start: Point{Row: fnToken.line, Col: fnToken.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -1278,7 +1278,6 @@ func (p *parser) parseType() DeclaredType {
 
 	if p.match(identifier) {
 		id := p.previous()
-		nullable := false
 
 		// Check for Result<T, E> type
 		if id.text == "Result" && p.match(less_than) {
@@ -1302,7 +1301,7 @@ func (p *parser) parseType() DeclaredType {
 			}
 
 			// Check for nullable
-			nullable = p.match(question_mark)
+			nullable := p.match(question_mark)
 
 			// Return ResultType
 			return &ResultType{
@@ -1361,8 +1360,6 @@ func (p *parser) parseType() DeclaredType {
 					},
 				}
 			}
-
-			nullable = p.match(question_mark)
 
 			// Check if this is a generic type parameter (starts with $)
 			if len(id.text) > 0 && id.text[0] == '$' {
@@ -1475,6 +1472,7 @@ func (p *parser) parseType() DeclaredType {
 			nullable: p.match(question_mark),
 		}
 	}
+
 	return nil
 }
 

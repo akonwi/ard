@@ -101,17 +101,32 @@ func TestResultTypeInSignature(t *testing.T) {
 			},
 		},
 		{
-			name:  "Result sugar syntax with generic maybe type",
-			input: `fn foo() $T?!Str {}`,
+			name: "Result sugar syntax with generic maybe type",
+			input: `
+			fn nullable(decoder: fn(Dynamic) $T![Error]) $T?![Error] {}
+			`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&FunctionDeclaration{
-						Name:       "foo",
-						Parameters: []Parameter{},
+						Name: "nullable",
+						Parameters: []Parameter{
+							{
+								Name: "decoder",
+								Type: &FunctionType{
+									Params: []DeclaredType{&CustomType{Name: "Dynamic"}},
+									Return: &ResultType{
+										Val:      &GenericType{Name: "T", nullable: false},
+										Err:      &List{Element: &CustomType{Name: "Error"}},
+										nullable: false,
+									},
+								},
+							},
+						},
 						ReturnType: &ResultType{
-							Val: &GenericType{Name: "T", nullable: true},
-							Err: &StringType{},
+							Val:      &GenericType{Name: "T", nullable: true},
+							Err:      &List{Element: &CustomType{Name: "Error"}},
+							nullable: false,
 						},
 						Body: []Statement{},
 					},
