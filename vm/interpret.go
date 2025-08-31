@@ -63,7 +63,8 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		// Process struct methods and create closures with captured scope
 		for methodName, methodDef := range s.Methods {
 			// Create a modified function definition with "@" as first parameter
-			methodDefWithSelf := *methodDef // Copy the original
+			copy := *methodDef // Copy the original
+			methodDefWithSelf := &copy
 			methodDefWithSelf.Parameters = append([]checker.Parameter{
 				{Name: "@", Type: nil}, // "@" parameter for struct instance
 			}, methodDef.Parameters...)
@@ -301,7 +302,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 		return runtime.Void()
 	case *checker.FunctionDef:
-		closure := &VMClosure{vm: vm, expr: *e, capturedScope: vm.scope}
+		closure := &VMClosure{vm: vm, expr: e, capturedScope: vm.scope}
 		obj := runtime.Make(closure, closure.Type())
 		if e.Name != "" {
 			vm.scope.add(e.Name, obj)

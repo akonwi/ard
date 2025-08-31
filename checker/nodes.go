@@ -607,14 +607,6 @@ func (e ExternalFunctionDef) String() string {
 
 func (e ExternalFunctionDef) get(name string) Type { return nil }
 
-func (e ExternalFunctionDef) name() string {
-	return e.Name
-}
-
-func (e *ExternalFunctionDef) _type() Type {
-	return e
-}
-
 func (e *ExternalFunctionDef) Type() Type {
 	return e
 }
@@ -669,29 +661,29 @@ func (e *ExternalFunctionDef) hasGenerics() bool {
 func (f FunctionDef) name() string {
 	return f.Name
 }
-func (f *FunctionDef) _type() Type {
-	return f
-}
+
 func (f *FunctionDef) Type() Type {
 	return f
 }
+
 func (f FunctionDef) equal(other Type) bool {
-	// Check if it's another FunctionDef
-	if otherF, ok := other.(*FunctionDef); ok {
-		if len(f.Parameters) != len(otherF.Parameters) {
-			return false
-		}
-
-		for i := range f.Parameters {
-			if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
-				return false
-			}
-		}
-
-		return f.Mutates == otherF.Mutates && f.ReturnType.equal(otherF.ReturnType)
+	otherF, ok := other.(*FunctionDef)
+	if !ok {
+		fmt.Printf("returning false: %T\n", other)
+		return false
 	}
 
-	return false
+	if len(f.Parameters) != len(otherF.Parameters) {
+		return false
+	}
+
+	for i := range f.Parameters {
+		if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
+			return false
+		}
+	}
+
+	return f.Mutates == otherF.Mutates && f.ReturnType.equal(otherF.ReturnType)
 }
 
 func (f FunctionDef) hasTrait(trait *Trait) bool {

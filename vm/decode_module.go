@@ -35,7 +35,7 @@ func (m *DecodeModule) get(name string) *runtime.Object {
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *decoderType,
+				expr:      decoderType,
 				builtinFn: decodeAsString,
 			},
 			decoderType,
@@ -65,7 +65,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *decoderType,
+				expr:      decoderType,
 				builtinFn: decodeAsString,
 			},
 			decoderType,
@@ -80,7 +80,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *decoderType,
+				expr:      decoderType,
 				builtinFn: decodeAsInt,
 			},
 			decoderType,
@@ -95,7 +95,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *decoderType,
+				expr:      decoderType,
 				builtinFn: decodeAsFloat,
 			},
 			decoderType,
@@ -110,7 +110,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *decoderType,
+				expr:      decoderType,
 				builtinFn: decodeAsBool,
 			},
 			decoderType,
@@ -145,7 +145,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *nullableDecoderType,
+				expr:      nullableDecoderType,
 				builtinFn: nullableDecoderFn,
 			},
 			nullableDecoderType,
@@ -176,7 +176,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *listDecoderType,
+				expr:      listDecoderType,
 				builtinFn: listDecoderFn,
 			},
 			listDecoderType,
@@ -213,7 +213,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *mapDecoderType,
+				expr:      mapDecoderType,
 				builtinFn: mapDecoderFn,
 			},
 			mapDecoderType,
@@ -243,7 +243,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *fieldDecoderType,
+				expr:      fieldDecoderType,
 				builtinFn: fieldDecoderFn,
 			},
 			fieldDecoderType,
@@ -268,7 +268,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 			return runtime.Make(
 				&VMClosure{
 					vm:   m.vm,
-					expr: *errorDecoderType,
+					expr: errorDecoderType,
 					builtinFn: func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
 						return runtime.MakeErr(emptyListError)
 					},
@@ -297,7 +297,7 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		return runtime.Make(
 			&VMClosure{
 				vm:        m.vm,
-				expr:      *oneOfDecoderType,
+				expr:      oneOfDecoderType,
 				builtinFn: oneOfDecoderFn,
 			},
 			oneOfDecoderType,

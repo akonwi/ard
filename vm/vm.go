@@ -45,7 +45,7 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 					return fmt.Errorf("Failed to load module - %s: %w", name, err)
 				}
 				g.modules[name] = vm
-				return g.load(program.Imports)
+				g.load(program.Imports)
 			}
 		}
 	}
@@ -109,7 +109,11 @@ func (g *GlobalVM) Interpret() (any, error) {
 
 // call into another module
 func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs func() []*runtime.Object) *runtime.Object {
-	// first check in hardcoded std-lib
+	// check for Ard code
+	if mvm, ok := g.modules[moduleName]; ok {
+		return mvm.evalFunctionCall(call, getArgs()...)
+	}
+	// check in hardcoded std-lib
 	if g.moduleRegistry.HasModule(moduleName) {
 		module, ok := g.moduleRegistry.handlers[moduleName]
 		if !ok {
@@ -121,10 +125,6 @@ func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs
 			args = getArgs()
 		}
 		return module.Handle(call, args)
-	}
-
-	if mvm, ok := g.modules[moduleName]; ok {
-		return mvm.evalFunctionCall(call, getArgs()...)
 	}
 	panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
 }
@@ -140,7 +140,6 @@ func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Obj
 	}
 
 	sym, _ := module.scope.get(symbol.Name)
-	fmt.Printf("found %s\n", sym)
 	return sym
 }
 
@@ -181,7 +180,7 @@ type Closure interface {
  */
 type VMClosure struct {
 	vm            *VM
-	expr          checker.FunctionDef
+	expr          *checker.FunctionDef
 	builtinFn     func(*runtime.Object, *checker.Result) *runtime.Object // for built-in decoder functions
 	capturedScope *scope                                                 // scope at closure creation time
 }
