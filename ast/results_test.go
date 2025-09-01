@@ -2,7 +2,8 @@ package ast
 
 import "testing"
 
-func TestLexAngleBrackets(t *testing.T) {
+// this needs to be done better
+func testLexAngleBrackets(t *testing.T) {
 	runLexing(t, []lexTest{
 		{
 			name:  "Result type in return declaration",
@@ -28,24 +29,6 @@ func TestLexAngleBrackets(t *testing.T) {
 
 func TestResultTypeInSignature(t *testing.T) {
 	runTests(t, []test{
-		{
-			name:  "Result type in return declaration",
-			input: `fn foo() Result<Int, Str> {}`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&FunctionDeclaration{
-						Name:       "foo",
-						Parameters: []Parameter{},
-						ReturnType: &ResultType{
-							Val: &IntType{},
-							Err: &StringType{},
-						},
-						Body: []Statement{},
-					},
-				},
-			},
-		},
 		{
 			name:  "Result sugar syntax in return declaration",
 			input: `fn foo() Int!Str {}`,

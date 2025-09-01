@@ -1276,135 +1276,29 @@ func (p *parser) parseType() DeclaredType {
 		}
 	}
 
-	if p.match(identifier) {
-		id := p.previous()
+	if _type := p.parseNamedType(); _type != nil {
+		if p.match(bang) {
+			valType := _type
+			errType := p.parseType()
 
-		// Check for Result<T, E> type
-		if id.text == "Result" && p.match(less_than) {
-			// Parse the value type
-			valType := p.parseType()
-			hasComma := p.match(comma)
-			if !hasComma {
-				p.addError(p.peek(), "Expected comma after value type in Result")
-				p.synchronizeToTokens(greater_than, equal, new_line)
+			if p.match(question_mark) {
+				p.addError(p.previous(), "Unexpected '?': Result can't be nullable")
 			}
 
-			// Parse the error type (only if we had comma or are positioned correctly)
-			var errType DeclaredType
-			if hasComma || p.check(identifier) {
-				errType = p.parseType()
-			}
-
-			if !p.match(greater_than) {
-				p.addError(p.peek(), "Expected '>' after Result type parameters")
-				p.synchronizeToTokens(equal, new_line, comma, right_paren)
-			}
-
-			// Check for nullable
-			nullable := p.match(question_mark)
-
-			// Return ResultType
 			return &ResultType{
 				Val:      valType,
 				Err:      errType,
-				nullable: nullable,
+				nullable: false,
 				Location: Location{
-					Start: Point{Row: id.line, Col: id.column},
+					Start: valType.GetLocation().Start,
 					End:   Point{Row: p.previous().line, Col: p.previous().column},
 				},
 			}
-		} else {
-			// Check for nullable
-			nullable := p.match(question_mark)
-
-			// Check for Result sugar syntax: Type!ErrorType
-			if p.match(bang) {
-				// Parse the error type
-				errType := p.parseType()
-
-				// Create the value type based on the identifier
-				var valType DeclaredType
-				if len(id.text) > 0 && id.text[0] == '$' {
-					valType = &GenericType{
-						Name:     id.text[1:], // Remove the leading '$'
-						nullable: nullable,
-					}
-				} else {
-					switch id.text {
-					case "Int":
-						valType = &IntType{nullable: nullable}
-					case "Float":
-						valType = &FloatType{nullable: nullable}
-					case "Str":
-						valType = &StringType{nullable: nullable}
-					case "Bool":
-						valType = &BooleanType{nullable: nullable}
-					case "Void":
-						valType = &VoidType{nullable: nullable}
-					default:
-						valType = &CustomType{
-							Name:     id.text,
-							nullable: nullable,
-						}
-					}
-				}
-
-				// Return ResultType using sugar syntax
-				return &ResultType{
-					Val:      valType,
-					Err:      errType,
-					nullable: nullable,
-					Location: Location{
-						Start: id.getLocation().Start,
-						End:   Point{Row: p.previous().line, Col: p.previous().column},
-					},
-				}
-			}
-
-			// Check if this is a generic type parameter (starts with $)
-			if len(id.text) > 0 && id.text[0] == '$' {
-				return &GenericType{
-					Location: id.getLocation(),
-					Name:     id.text[1:], // Remove the leading '$'
-					nullable: nullable,
-				}
-			}
-
-			switch id.text {
-			case "Int":
-				return &IntType{
-					Location: id.getLocation(),
-					nullable: nullable,
-				}
-			case "Float":
-				return &FloatType{
-					Location: id.getLocation(),
-					nullable: nullable,
-				}
-			case "Str":
-				return &StringType{
-					Location: id.getLocation(),
-					nullable: nullable,
-				}
-			case "Bool":
-				return &BooleanType{
-					Location: id.getLocation(),
-					nullable: nullable,
-				}
-			case "Void":
-				return &VoidType{
-					Location: id.getLocation(),
-					nullable: nullable,
-				}
-			default:
-				return &CustomType{
-					Location: id.getLocation(),
-					Name:     id.text,
-					nullable: nullable,
-				}
-			}
 		}
+
+		return _type
 	}
+
 	if p.match(left_bracket) {
 		bracket := p.previous()
 		elementType := p.parseType()
@@ -1474,6 +1368,58 @@ func (p *parser) parseType() DeclaredType {
 	}
 
 	return nil
+}
+
+func (p *parser) parseNamedType() DeclaredType {
+	if !p.match(identifier) {
+		return nil
+	}
+
+	id := p.previous()
+	nullable := p.match(question_mark)
+
+	// Check if this is a generic (starts with $)
+	if len(id.text) > 0 && id.text[0] == '$' {
+		return &GenericType{
+			Location: id.getLocation(),
+			Name:     id.text[1:], // Remove the leading '$'
+			nullable: nullable,
+		}
+	}
+
+	switch id.text {
+	case "Int":
+		return &IntType{
+			Location: id.getLocation(),
+			nullable: nullable,
+		}
+	case "Float":
+		return &FloatType{
+			Location: id.getLocation(),
+			nullable: nullable,
+		}
+	case "Str":
+		return &StringType{
+			Location: id.getLocation(),
+			nullable: nullable,
+		}
+	case "Bool":
+		return &BooleanType{
+			Location: id.getLocation(),
+			nullable: nullable,
+		}
+	case "Void":
+		return &VoidType{
+			Location: id.getLocation(),
+			nullable: nullable,
+		}
+	default:
+		return &CustomType{
+			Location: id.getLocation(),
+			Name:     id.text,
+			nullable: nullable,
+		}
+	}
 }
 
 func (p *parser) parseStaticPath() *StaticProperty {

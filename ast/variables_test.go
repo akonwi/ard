@@ -139,27 +139,6 @@ func TestFunctionTypes(t *testing.T) {
 	})
 }
 
-func TestResultTypes(t *testing.T) {
-	runTests(t, []test{
-		// Result type error cases
-		{
-			name:     "Missing closing > in Result type",
-			input:    "let r: Result<String, Error = test",
-			wantErrs: []string{"Expected '>' after Result type parameters"},
-		},
-		{
-			name:     "Valid Result type",
-			input:    "let r: Result<String, Error> = test",
-			wantErrs: []string{},
-		},
-		{
-			name:     "Valid Result type with simple types",
-			input:    "let r: Result<Int, String> = test",
-			wantErrs: []string{},
-		},
-	})
-}
-
 func TestArrayMapTypes(t *testing.T) {
 	runTests(t, []test{
 		// Array/Map type error cases
