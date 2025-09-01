@@ -1,3 +1,5 @@
+use ard/maybe
+
 // opaque struct for external data
 struct Dynamic {}
 
@@ -51,6 +53,7 @@ private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
 private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
 private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
 private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
+extern fn is_void(data: Dynamic) Bool = "IsNil"
 
 fn string(data: Dynamic) Str![Error] {
   let val = try _decode_string(data) -> err {
@@ -80,6 +83,19 @@ fn bool(data: Dynamic) Bool![Error] {
   Result::ok(val)
 }
 
+fn nullable(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) $T?![Error] {
+  fn(data: Dynamic) $T?![Error] {
+    match is_void(data) {
+      true => Result::ok(maybe::none()),
+      false => {
+        let val = try decoder(data)
+        Result::ok(maybe::some(val))
+      }
+    }
+  }
+}
+
+// this seems superfluous
 fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
   decoder(data)
 }

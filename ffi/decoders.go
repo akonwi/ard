@@ -67,6 +67,17 @@ func DecodeInt(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if int, ok := data.(int); ok {
 		return runtime.MakeOk(runtime.MakeInt(int))
 	}
+	// SQLite integers come as int64
+	if int64Val, ok := data.(int64); ok {
+		return runtime.MakeOk(runtime.MakeInt(int(int64Val)))
+	}
+	// JSON numbers might come as float64
+	if floatVal, ok := data.(float64); ok {
+		int := int(floatVal)
+		if floatVal == float64(int) { // Check if it's actually an integer without losing precision
+			return runtime.MakeOk(runtime.MakeInt(int))
+		}
+	}
 
 	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue())))
 }
@@ -97,6 +108,12 @@ func DecodeBool(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	return runtime.MakeErr(makeError("Bool", formatRawValueForError(arg.GoValue())))
+}
+
+// fn (Dynamic) Bool
+func IsNil(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	isNil := args[0].Raw() == nil
+	return runtime.MakeBool(isNil)
 }
 
 func makeError(expected, found string) *runtime.Object {

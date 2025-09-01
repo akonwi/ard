@@ -175,13 +175,14 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("\"hello\"")
-				let string_decoder = decode::string
-				let nullable_decoder = decode::nullable(string_decoder)
-				let result = decode::run(data, nullable_decoder)
-				result.expect("").or("default")
+				let data = decode::from_str("hello")
+				let maybe_str = decode::run(data, decode::nullable(decode::string)).expect("Decoding failed")
+				match maybe_str {
+					str => str == "hello",
+					_ => panic("Decoded string is null")
+				}
 			`,
-			want: "hello",
+			want: true,
 		},
 		{
 			name: "nullable int decoder with valid int returns some",
@@ -189,10 +190,8 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("42")
-				let int_decoder = decode::int
-				let nullable_decoder = decode::nullable(int_decoder)
-				let result = decode::run(data, nullable_decoder)
+				let data = decode::from_int(42)
+				let result = decode::run(data, decode::nullable(decode::int))
 				result.expect("").or(0)
 			`,
 			want: 42,
@@ -203,10 +202,8 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("null")
-				let string_decoder = decode::string
-				let nullable_decoder = decode::nullable(string_decoder)
-				let result = decode::run(data, nullable_decoder)
+				let data = decode::from_json("null").expect("Failed to parse json")
+				let result = decode::run(data, decode::nullable(decode::string))
 				result.expect("").or("default_value")
 			`,
 			want: "default_value",
@@ -216,10 +213,8 @@ func TestDecodeNullable(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("42")
-				let string_decoder = decode::string
-				let nullable_decoder = decode::nullable(string_decoder)
-				let result = decode::run(data, nullable_decoder)
+				let data = decode::from_json("42").expect("Failed to parse json")
+				let result = decode::run(data, decode::nullable(decode::string))
 				result.is_err()
 			`,
 			want: true,
@@ -228,15 +223,10 @@ func TestDecodeNullable(t *testing.T) {
 			name: "invalid JSON becomes null - nullable returns default",
 			input: `
 				use ard/decode
-				use ard/maybe
 
-				let data = decode::json("invalid json")  // becomes nil Dynamic
-				let int_decoder = decode::int
-				let nullable_decoder = decode::nullable(int_decoder)
-				let result = decode::run(data, nullable_decoder)
-				result.expect("").or(999)
+				decode::from_json("invalid json").expect("Failed to parse json")
 			`,
-			want: 999,
+			panic: "Failed to parse json",
 		},
 	})
 }
