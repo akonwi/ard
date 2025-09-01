@@ -92,6 +92,13 @@ func DecodeFloat(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if float, ok := data.(float64); ok {
 		return runtime.MakeOk(runtime.MakeFloat(float))
 	}
+	// Allow int to float conversion
+	if intVal, ok := data.(int); ok {
+		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
+	}
+	if intVal, ok := data.(int64); ok {
+		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
+	}
 
 	return runtime.MakeErr(makeError("Float", formatRawValueForError(arg.GoValue())))
 }
