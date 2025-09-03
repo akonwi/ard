@@ -1,6 +1,9 @@
 # TODO
 
 ## Initial 0.1.0 build
+- [ ] need to be able to alias fn signatures with `type`
+  - a single type union should act as an alias
+  - matching is only required if it supports variadic types
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] `match` as a replacement for if statements
