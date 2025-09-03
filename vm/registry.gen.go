@@ -43,6 +43,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("DynamicToList", ffi.DynamicToList); err != nil {
 		return fmt.Errorf("failed to register DynamicToList: %w", err)
 	}
+	if err := r.Register("DynamicToMap", ffi.DynamicToMap); err != nil {
+		return fmt.Errorf("failed to register DynamicToMap: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}

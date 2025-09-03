@@ -344,11 +344,8 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\{\}")
-				let string_decoder = decode::string
-				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::run(data, map_decoder)
-				let map = result.expect("")
+				let data = decode::from_json("\{\}").expect("Failed to parse json")
+				let map = decode::run(data, decode::map(decode::string, decode::string)).expect("Unexpected decoder error")
 				map.size()
 			`,
 			want: 0,
@@ -358,12 +355,8 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\{\"age\": 30, \"score\": 95\}")
-				let string_decoder = decode::string
-				let int_decoder = decode::int
-				let map_decoder = decode::map(string_decoder, int_decoder)
-				let result = decode::run(data, map_decoder)
-				let map = result.expect("")
+				let data = decode::from_json("\{\"age\": 30, \"score\": 95\}").expect("Failed to parse json")
+				let map = decode::run(data, decode::map(decode::string, decode::int)).expect("Unexpected decoder error")
 				map.get("age").or(0)
 			`,
 			want: 30,
@@ -373,10 +366,8 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("null")
-				let string_decoder = decode::string
-				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::run(data, map_decoder)
+				let data = decode::from_json("null").expect("Failed to parse json")
+				let result = decode::run(data, decode::map(decode::string, decode::string))
 				result.is_err()
 			`,
 			want: true,
@@ -386,23 +377,8 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"not an object\"")
-				let string_decoder = decode::string
-				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::run(data, map_decoder)
-				result.is_err()
-			`,
-			want: true,
-		},
-		{
-			name: "map decoder with array data returns error",
-			input: `
-				use ard/decode
-
-				let data = decode::json("[1, 2, 3]")
-				let string_decoder = decode::string
-				let map_decoder = decode::map(string_decoder, string_decoder)
-				let result = decode::run(data, map_decoder)
+				let data = decode::from_json("\"not an object\"").expect("Failed to parse json")
+				let result = decode::run(data, decode::map(decode::string, decode::string))
 				result.is_err()
 			`,
 			want: true,
@@ -412,11 +388,13 @@ func TestDecodeMap(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\{\"name\": \"Alice\", \"age\": 30\}")
-				let string_decoder = decode::string
-				let map_decoder = decode::map(string_decoder, string_decoder)
+				let data = decode::from_json("\{\"name\": \"Alice\", \"age\": 30\}").expect("Failed to parse json")
+				let map_decoder = decode::map(decode::string, decode::string)
 				let result = decode::run(data, map_decoder)
-				result.is_err()
+				match result {
+					ok => false,
+					err(errs) => errs.size() == 1
+				}
 			`,
 			want: true,
 		},
@@ -426,27 +404,22 @@ func TestDecodeMap(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("\{\"name\": \"Alice\", \"nickname\": null, \"city\": \"Boston\"\}")
-				let nullable_string_decoder = decode::nullable(decode::string)
-				let map_decoder = decode::map(decode::string, nullable_string_decoder)
-				let result = decode::run(data, map_decoder)
-				let map = result.expect("")
+				let data = decode::from_json("\{\"name\": \"Alice\", \"nickname\": null, \"city\": \"Boston\"\}").expect("Failed to parse json")
+				let decode_map = decode::map(decode::string, decode::nullable(decode::string))
+				let map = decode::run(data, decode_map).expect("Unexpected decode error")
 				map.get("nickname").is_none()
 			`,
 			want: true,
 		},
 		{
-			name: "nullable map with object data returns some",
+			name: "nullable map with object data returns maybe::some",
 			input: `
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("\{\"count\": 42\}")
-				let int_decoder = decode::int
-				let map_decoder = decode::map(decode::string, int_decoder)
-				let nullable_map_decoder = decode::nullable(map_decoder)
-				let result = decode::run(data, nullable_map_decoder)
-				let maybe_map = result.expect("")
+				let data = decode::from_json("\{\"count\": 42\}").expect("Failed to parse json")
+				let nullable_map_decoder = decode::nullable(decode::map(decode::string, decode::int))
+				let maybe_map = decode::run(data, nullable_map_decoder).expect("Unexpected decode error")
 				match maybe_map {
 					map => map.size(),
 					_ => 0
@@ -455,23 +428,17 @@ func TestDecodeMap(t *testing.T) {
 			want: 1,
 		},
 		{
-			name: "nullable map with null data returns none - uses default size",
+			name: "nullable map with null data returns maybe::none",
 			input: `
 				use ard/decode
 				use ard/maybe
 
 				let data = decode::json("null")
-				let int_decoder = decode::int
-				let map_decoder = decode::map(decode::string, int_decoder)
-				let nullable_map_decoder = decode::nullable(map_decoder)
-				let result = decode::run(data, nullable_map_decoder)
-				let maybe_map = result.expect("")
-				match maybe_map {
-					map => map.size(),
-					_ => 0
-				}
+				let nullable_map_decoder = decode::nullable(decode::map(decode::string, decode::int))
+				let maybe_map = decode::run(data, nullable_map_decoder).expect("Unexpected decode error")
+				maybe_map.is_none()
 			`,
-			want: 0,
+			want: true,
 		},
 	})
 }

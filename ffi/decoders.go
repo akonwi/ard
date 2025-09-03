@@ -143,6 +143,26 @@ func DynamicToList(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeErr(makeError("List", formatRawValueForError(arg.GoValue())))
 }
 
+// fn (Dyanmic) [Dynamic:Dynamic]!Str
+func DynamicToMap(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	arg := args[0]
+	data := arg.Raw()
+
+	if data == nil {
+		return runtime.MakeErr(makeError("Map", "null"))
+	}
+
+	if dataMap, ok := data.(map[string]any); ok {
+		_map := runtime.MakeMap(checker.Dynamic, checker.Dynamic)
+		for i, item := range dataMap {
+			_map.Map_Set(runtime.MakeDynamic(i), runtime.MakeDynamic(item))
+		}
+		return runtime.MakeOk(_map)
+	}
+
+	return runtime.MakeErr(makeError("Map", formatRawValueForError(arg.GoValue())))
+}
+
 func makeError(expected, found string) *runtime.Object {
 	return runtime.MakeStruct(checker.DecodeErrorDef,
 		map[string]*runtime.Object{

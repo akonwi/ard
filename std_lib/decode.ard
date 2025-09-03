@@ -130,6 +130,60 @@ fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
   }
 }
 
+extern fn to_map(data: Dynamic) [Dynamic:Dynamic]!Str = "DynamicToMap"
+
+fn map(
+  key: fn(Dynamic) $Key![Error],
+  value: fn(Dynamic) $Value![Error]
+) fn(Dynamic) [$Key:$Value]![Error] {
+  fn(data: Dynamic) [$Key:$Value]![Error] {
+    let raw = try to_map(data) -> found {
+      let decode_err = Error{expected: "Map", found: found, path: []}
+      Result::err([decode_err])
+    }
+
+    mut errors: [Error] = []
+    mut out: [$Key:$Value] = [:]
+
+    for k, v in raw {
+      match key(k) {
+        ok(key) => {
+          match value(v) {
+            ok(val) => { out.set(key, val) },
+            err(errs) => {
+              for e in errs {
+                mut path = e.path
+                path.push("values")
+                errors.push(Error{
+                  expected: e.expected,
+                  found: e.expected,
+                  path: path,
+                })
+              }
+            },
+          }
+        },
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.push("keys")
+            errors.push(Error{
+              expected: e.expected,
+              found: e.expected,
+              path: path,
+            })
+          }
+        }
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors)
+    }
+  }
+}
+
 // this seems superfluous
 fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
   decoder(data)

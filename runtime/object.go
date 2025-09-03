@@ -370,6 +370,8 @@ func (o Object) Map_GetKey(str string) *Object {
 		} else {
 			key.raw = _float
 		}
+	case checker.Dynamic.String():
+		key.raw = str
 	default:
 		panic(fmt.Errorf("Unsupported map key: %s", keyType))
 	}
