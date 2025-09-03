@@ -82,6 +82,12 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		return runtime.Void()
 	case *checker.VariableDef:
 		val := vm.eval(s.Value)
+		// for debugging:
+		// if s.Type().String() != val.Type().String() {
+		// fmt.Printf("type mismatch: let %s: %s = %s\n", s.Name, s.Type(), val.Type())
+		// }
+		// the checker node knows its exact type, because the value might be of a generic type
+		val.SetRefinedType(s.Type())
 		// can be broken by `try`
 		if vm.scope.broken {
 			return val

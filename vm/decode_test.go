@@ -191,8 +191,8 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/maybe
 
 				let data = decode::from_int(42)
-				let result = decode::run(data, decode::nullable(decode::int))
-				result.expect("").or(0)
+				let result = decode::run(data, decode::nullable(decode::int)).expect("Decoding failed")
+				result.or(0)
 			`,
 			want: 42,
 		},
@@ -203,8 +203,8 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/maybe
 
 				let data = decode::from_json("null").expect("Failed to parse json")
-				let result = decode::run(data, decode::nullable(decode::string))
-				result.expect("").or("default_value")
+				let result = decode::run(data, decode::nullable(decode::string)).expect("Decoding failed")
+				result.or("default_value")
 			`,
 			want: "default_value",
 		},
@@ -234,15 +234,12 @@ func TestDecodeNullable(t *testing.T) {
 func TestDecodeList(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "list of integers - returns size",
+			name: "can decode a list",
 			input: `
 				use ard/decode
 
-				let data = decode::json("[1, 2, 3, 4, 5]")
-				let int_decoder = decode::int
-				let list_decoder = decode::list(int_decoder)
-				let result = decode::run(data, list_decoder)
-				let list = result.expect("")
+				let data = decode::from_json("[1, 2, 3, 4, 5]").expect("Failed to parse json")
+				let list = decode::run(data, decode::list(decode::int)).expect("")
 				if not list.size() == 5 {
 					panic("Expected 5 elements")
 				}
@@ -255,11 +252,8 @@ func TestDecodeList(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("[]")
-				let string_decoder = decode::string
-				let list_decoder = decode::list(string_decoder)
-				let result = decode::run(data, list_decoder)
-				let list = result.expect("")
+				let data = decode::from_json("[]").expect("Failed to parse json")
+				let list = decode::run(data, decode::list(decode::string)).expect("failed to decode")
 				list.size()
 			`,
 			want: 0,
@@ -269,51 +263,47 @@ func TestDecodeList(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("null")
-				let string_decoder = decode::string
-				let list_decoder = decode::list(string_decoder)
-				let result = decode::run(data, list_decoder)
+				let data = decode::from_json("null").expect("Failed to parse json")
+				let result = decode::run(data, decode::list(decode::string))
 				result.is_err()
 			`,
 			want: true,
 		},
 		{
-			name: "list decoder with non-array data returns error",
+			name: "list decoder with non-list data returns error",
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"not an array\"")
-				let string_decoder = decode::string
-				let list_decoder = decode::list(string_decoder)
-				let result = decode::run(data, list_decoder)
+				let data = decode::from_str("not an array")
+				let result = decode::run(data, decode::list(decode::string))
 				result.is_err()
 			`,
 			want: true,
 		},
 		{
-			name: "list with invalid elements returns error",
+			name: "list with an element that can't be decoded returns error",
 			input: `
 				use ard/decode
 
-				let data = decode::json("[\"hello\", 42, \"world\"]")
-				let string_decoder = decode::string
-				let list_decoder = decode::list(string_decoder)
-				let result = decode::run(data, list_decoder)
-				result.is_err()
+				let data = decode::from_json("[\"hello\", 42, \"world\"]").expect("Failed to parse json")
+				let result = decode::run(data, decode::list(decode::string))
+				match result {
+					ok => panic("Expected an error"),
+					err(errs) => errs.size() == 1
+				}
 			`,
 			want: true,
 		},
 		{
-			name: "list of nullable strings with mixed content",
+			name: "list of nullables",
 			input: `
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("[\"hello\", null, \"world\"]")
-				let nullable_string_decoder = decode::nullable(decode::string)
-				let list_decoder = decode::list(nullable_string_decoder)
-				let result = decode::run(data, list_decoder)
-				result.expect("").at(1).is_none()
+				let data = decode::from_json("[\"hello\", null, \"world\"]").expect("Failed to parse json")
+				let list_decoder = decode::list(decode::nullable(decode::string))
+				let result = list_decoder(data).expect("Unexpected decoder error")
+				result.at(1).is_none()
 			`,
 			want: true,
 		},
@@ -323,12 +313,8 @@ func TestDecodeList(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("[1, 2, 3]")
-				let int_decoder = decode::int
-				let list_decoder = decode::list(int_decoder)
-				let nullable_list_decoder = decode::nullable(list_decoder)
-				let result = decode::run(data, nullable_list_decoder)
-				let maybe_list = result.expect("")
+				let data = decode::from_json("[1, 2, 3]").expect("Failed to parse json")
+				let maybe_list = decode::run(data, decode::nullable(decode::list(decode::int))).expect("Unexpected decoder error")
 				match maybe_list {
 				  list => list.size(),
 					_ => 0
@@ -337,24 +323,16 @@ func TestDecodeList(t *testing.T) {
 			want: 3,
 		},
 		{
-			name: "nullable list with null data returns none - uses empty default",
+			name: "nullable list with null returns none",
 			input: `
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::json("null")
-				let int_decoder = decode::int
-				let list_decoder = decode::list(int_decoder)
-				let nullable_list_decoder = decode::nullable(list_decoder)
-				let result = decode::run(data, nullable_list_decoder)
-				let maybe_list = result.expect("")
-				let maybe_list = result.expect("")
-				match maybe_list {
-				  list => list.size(),
-					_ => 0
-				}
+				let data = decode::from_json("null").expect("Failed to parse json")
+				let maybe_list = decode::run(data, decode::nullable(decode::list(decode::int))).expect("Unexpected decoder error")
+				maybe_list.is_none()
 			`,
-			want: 0,
+			want: true,
 		},
 	})
 }

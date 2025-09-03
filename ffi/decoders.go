@@ -123,6 +123,26 @@ func IsNil(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeBool(isNil)
 }
 
+// fn (Dyanmic) [Dynamic]!Str
+func DynamicToList(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	arg := args[0]
+	data := arg.Raw()
+
+	if data == nil {
+		return runtime.MakeErr(makeError("List", "null"))
+	}
+
+	if dataList, ok := data.([]any); ok {
+		items := make([]*runtime.Object, len(dataList))
+		for i, item := range dataList {
+			items[i] = runtime.Make(item, arg.Type())
+		}
+		return runtime.MakeOk(runtime.MakeList(arg.Type(), items...))
+	}
+
+	return runtime.MakeErr(makeError("List", formatRawValueForError(arg.GoValue())))
+}
+
 func makeError(expected, found string) *runtime.Object {
 	return runtime.MakeStruct(checker.DecodeErrorDef,
 		map[string]*runtime.Object{

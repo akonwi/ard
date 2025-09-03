@@ -64,6 +64,25 @@ func (o *Object) Reassign(val *Object) {
 	o._type = val._type
 }
 
+// todo: eliminating unknown generics in the checker needs more work, particularly for nested scopes - see decode::nullable
+//   - the checker successfully refines on variable definitions
+//   - it does not work on chained expressions
+//     let result = returns_generic()
+//     result.expect("foobar").do_stuff() // .expect(...) returns an open generic
+func (o *Object) SetRefinedType(declared checker.Type) {
+	if result, ok := o._type.(*checker.Result); ok {
+		if o.isErr {
+			o._type = result.Err()
+		}
+		if o.isOk {
+			o._type = result.Val()
+		}
+	}
+	if checker.IsMaybe(o._type) {
+		o._type = declared
+	}
+}
+
 // deep copies an object
 func (o *Object) Copy() *Object {
 	copy := &Object{
@@ -224,7 +243,7 @@ func (o *Object) AsList() []*Object {
 	if list, ok := o.raw.([]*Object); ok {
 		return list
 	}
-	panic(fmt.Sprintf("%T is not a List", o._type))
+	panic(fmt.Sprintf("%s could not be cast to a List", o))
 }
 
 func (o *Object) AsMap() map[string]*Object {

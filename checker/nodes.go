@@ -109,10 +109,8 @@ type VariableDef struct {
 }
 
 func (v *VariableDef) NonProducing() {}
-func (v *VariableDef) name() string {
-	return v.Name
-}
-func (v *VariableDef) _type() Type {
+
+func (v *VariableDef) Type() Type {
 	return v.__type
 }
 

@@ -95,6 +95,41 @@ fn nullable(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) $T?![Error] {
   }
 }
 
+extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
+
+fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
+  fn(data: Dynamic) [$T]![Error] {
+    let raw = try to_list(data) -> found {
+      let decode_err = Error{expected: "List", found: found, path: []}
+      Result::err([decode_err])
+    }
+
+    mut out: [$T] = []
+    mut errors: [Error] = []
+    for item, idx in raw {
+      match decoder(item) {
+        ok => { out.push(ok) },
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.push("[{idx}]")
+            errors.push(Error{
+              expected: e.expected,
+              found: e.expected,
+              path: path,
+            })
+          }
+        },
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors)
+    }
+  }
+}
+
 // this seems superfluous
 fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
   decoder(data)
