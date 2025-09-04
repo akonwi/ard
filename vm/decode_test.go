@@ -62,11 +62,15 @@ func TestDecodeErrors(t *testing.T) {
 				let data = decode::from_int(42)
 				let result = decode::run(data, decode::string)
 				match result {
-					err => err.size() == 1
-					ok(_) => false
+					err(errs) => {
+						if not errs.size() == 1 { panic("Expected 1 error. Got {errs.size()}") }
+						let first = errs.at(0)
+						first.to_str()
+					},
+					ok(_) => ""
 				}
 			`,
-			want: true,
+			want: "Decode error: expected Str, found 42",
 		},
 		{
 			name: "int decoder fails on string - returns error list",
@@ -117,23 +121,6 @@ func TestDecodeErrors(t *testing.T) {
 			panic: "Failed to parse json",
 		},
 		{
-			name: "error contains expected and found information",
-			input: `
-				use ard/decode
-
-				let data = decode::from_int(42)
-				let result = decode::run(data, decode::string)
-				match result {
-					err => {
-						let first_error = err.at(0)
-						first_error.expected == "Str" && first_error.found == "42"
-					}
-					ok(_) => false
-				}
-			`,
-			want: true,
-		},
-		{
 			name: "error path is empty for primitive decoders",
 			input: `
 				use ard/decode
@@ -151,6 +138,23 @@ func TestDecodeErrors(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "list item errors include the failed index",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("[1, false, 3]").expect("Failed to parse json")
+				let result = decode::run(data, decode::list(decode::int))
+				match result {
+					err(errs) => {
+						if not errs.size() == 1 { panic("Expected 1 error: got {errs.size()}") }
+						errs.at(0).to_str()
+					}
+					ok(_) => "",
+				}
+			`,
+			want: "Decode error: expected Int, found false at [1]",
+		},
+		{
 			name: "null data produces null error message",
 			input: `
 				use ard/decode
@@ -163,6 +167,63 @@ func TestDecodeErrors(t *testing.T) {
 				}
 			`,
 			want: `Decode error: expected Int, found "invalid json"`,
+		},
+		{
+			name: "Error string includes path information",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("[\{\"value\": \"not_a_number\"\}]").expect("Unable to parse json")
+				let result = decode::run(data, decode::list(decode::field("value", decode::int)))
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "Decode error: expected Int, found \"not_a_number\" at [0].value",
+		},
+		{
+			name: "shows enhanced array formatting for small arrays",
+			input: `
+				use ard/decode
+
+				let array_data = decode::json("[1, 2, 3]")
+				let result = decode::run(array_data, decode::string)
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "Decode error: expected Str, found [1, 2, 3]",
+		},
+		{
+			name: "shows empty array formatting",
+			input: `
+				use ard/decode
+
+				let empty_array_data = decode::json("[]")
+				let result = decode::run(empty_array_data, decode::string)
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "Decode error: expected Str, found []",
+		},
+		{
+			name: "shows proper dot notation for nested paths",
+			input: `
+				use ard/decode
+
+				// Test more complex path with nested field access
+				let data = decode::json("[\{\"user\": \{\"profile\": \{\"age\": \"not_a_number\"\}\}\}]")
+				let result = decode::run(data, decode::list(decode::field("user", decode::field("profile", decode::field("age", decode::int)))))
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "Decode error: expected Int, found \"not_a_number\" at [0].user.profile.age",
 		},
 	})
 }
@@ -481,116 +542,6 @@ func TestDecodeField(t *testing.T) {
 				result.expect("Failed to decode name")
 			`,
 			want: "John Doe",
-		},
-	})
-}
-
-func TestDecodeErrorToString(t *testing.T) {
-	runTests(t, []test{
-		{
-			name: "decode error implements to_str for readable error messages",
-			input: `
-				use ard/decode
-
-				let invalid_data = decode::json("\"hello\"")
-				let result = decode::run(invalid_data, decode::int)
-				match result {
-					ok => "unexpected success",
-					err => {
-						let first_error = err.at(0)
-						first_error.to_str()
-					}
-				}
-			`,
-			want: "Decode error: expected Int, found \"hello\"",
-		},
-		{
-			name: "decode error to_str includes path information",
-			input: `
-				use ard/decode
-
-				let data = decode::json("[\{\"value\": \"not_a_number\"\}]")
-				let result = decode::run(data, decode::list(decode::field("value", decode::int)))
-				match result {
-					ok => "unexpected success",
-					err => {
-						let first_error = err.at(0)
-						first_error.to_str()
-					}
-				}
-			`,
-			want: "Decode error: expected Int, found \"not_a_number\" at [0].value",
-		},
-		{
-			name: "decode error shows enhanced array formatting for small arrays",
-			input: `
-				use ard/decode
-
-				let array_data = decode::json("[1, 2, 3]")
-				let result = decode::run(array_data, decode::string)
-				match result {
-					ok => "unexpected success",
-					err => {
-						let first_error = err.at(0)
-						first_error.to_str()
-					}
-				}
-			`,
-			want: "Decode error: expected Str, found [1, 2, 3]",
-		},
-
-		{
-			name: "decode error shows empty array formatting",
-			input: `
-				use ard/decode
-
-				let empty_array_data = decode::json("[]")
-				let result = decode::run(empty_array_data, decode::string)
-				match result {
-					ok => "unexpected success",
-					err => {
-						let first_error = err.at(0)
-						first_error.to_str()
-					}
-				}
-			`,
-			want: "Decode error: expected Str, found []",
-		},
-		{
-			name: "decode error handles complex values using premarshal consistently",
-			input: `
-				use ard/decode
-
-				// Test that premarshal handles all types consistently
-				let func_string_data = decode::json("\"Str -> Int\"")  // String that looks like a function type
-				let result = decode::run(func_string_data, decode::int)
-				match result {
-					ok => "unexpected success",
-					err => {
-						let first_error = err.at(0)
-						first_error.to_str()
-					}
-				}
-			`,
-			want: "Decode error: expected Int, found \"Str -> Int\"",
-		},
-		{
-			name: "decode error shows proper dot notation for nested paths",
-			input: `
-				use ard/decode
-
-				// Test more complex path with nested field access
-				let data = decode::json("[\{\"user\": \{\"profile\": \{\"age\": \"not_a_number\"\}\}\}]")
-				let result = decode::run(data, decode::list(decode::field("user", decode::field("profile", decode::field("age", decode::int)))))
-				match result {
-					ok => "unexpected success",
-					err => {
-						let first_error = err.at(0)
-						first_error.to_str()
-					}
-				}
-			`,
-			want: "Decode error: expected Int, found \"not_a_number\" at [0].user.profile.age",
 		},
 	})
 }

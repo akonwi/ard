@@ -68,7 +68,7 @@ func runTests(t *testing.T, tests []test) {
 				return
 			}
 			if res := run(t, test.input); test.want != res {
-				t.Logf("Expected %v, got %v", test.want, res)
+				t.Logf("Expected \"%v\", got \"%v\"", test.want, res)
 				t.Fail()
 			}
 		})

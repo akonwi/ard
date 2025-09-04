@@ -112,7 +112,7 @@ fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
         err(errs) => {
           for e in errs {
             mut path = e.path
-            path.push("[{idx}]")
+            path.prepend("[{idx}]")
             errors.push(Error{
               expected: e.expected,
               found: e.found,
@@ -193,7 +193,7 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
         Error{
           expected: "Field",
           found: found,
-          path: [],
+          path: [name],
         }
       ])
     }
@@ -202,7 +202,7 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
       mut out: [Error] = []
       for e in errs {
         mut path = e.path
-        path.push("value")
+        path.prepend(name)
         out.push(Error{
           expected: e.expected,
           found: e.found,
