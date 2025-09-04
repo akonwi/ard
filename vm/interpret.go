@@ -798,6 +798,11 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 			panic(fmt.Errorf("Index out of range (%d) on list of length %d", index, len(raw)))
 		}
 		return raw[index]
+	case "prepend":
+		newItem := vm.eval(m.Method.Args[0])
+		raw = append([]*runtime.Object{newItem}, raw...)
+		self.Set(raw)
+		return self
 	case "push":
 		raw = append(raw, vm.eval(m.Method.Args[0]))
 		self.Set(raw)

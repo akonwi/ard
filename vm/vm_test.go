@@ -438,6 +438,14 @@ func TestListApi(t *testing.T) {
 			want:  3,
 		},
 		{
+			name: "List::prepend",
+			input: `
+				mut list = [1,2,3]
+				list.prepend(4)
+			  list.size()`,
+			want: 4,
+		},
+		{
 			name: "List::push",
 			input: `
 				mut list = [1,2,3]

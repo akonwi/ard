@@ -307,6 +307,13 @@ func (l List) get(name string) Type {
 			Parameters: []Parameter{{Name: "index", Type: Int}},
 			ReturnType: l.of,
 		}
+	case "prepend":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: l.of}},
+			Mutates:    true,
+			ReturnType: Int,
+		}
 	case "push":
 		return &FunctionDef{
 			Name:       name,

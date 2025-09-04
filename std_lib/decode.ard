@@ -115,7 +115,7 @@ fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
             path.push("[{idx}]")
             errors.push(Error{
               expected: e.expected,
-              found: e.expected,
+              found: e.found,
               path: path,
             })
           }
@@ -156,7 +156,7 @@ fn map(
                 path.push("values")
                 errors.push(Error{
                   expected: e.expected,
-                  found: e.expected,
+                  found: e.found,
                   path: path,
                 })
               }
@@ -169,7 +169,7 @@ fn map(
             path.push("keys")
             errors.push(Error{
               expected: e.expected,
-              found: e.expected,
+              found: e.found,
               path: path,
             })
           }
@@ -198,7 +198,21 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
       ])
     }
 
-    as(raw)
+    let val = try as(raw) -> errs {
+      mut out: [Error] = []
+      for e in errs {
+        mut path = e.path
+        path.push("value")
+        out.push(Error{
+          expected: e.expected,
+          found: e.found,
+          path: path,
+        })
+      }
+      Result::err(out)
+    }
+
+    Result::ok(val)
   }
 }
 
