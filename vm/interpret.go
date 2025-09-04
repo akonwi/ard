@@ -190,6 +190,24 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	}
 }
 
+func (vm *VM) createMethodClosure(strct *checker.StructDef, methodName string) *VMClosure {
+	methodDef := strct.Methods[methodName]
+	// Create a modified function definition with "@" as first parameter
+	copy := *methodDef // Copy the original
+	methodDefWithSelf := &copy
+	methodDefWithSelf.Parameters = append([]checker.Parameter{
+		{Name: "@", Type: nil}, // "@" parameter for struct instance
+	}, methodDef.Parameters...)
+
+	return &VMClosure{
+		vm:   vm,
+		expr: methodDefWithSelf,
+
+		// todo: this should be scope from the module the type is defined in. currently, it's the caller scope
+		capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
+	}
+}
+
 func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 	switch e := expr.(type) {
 	case *checker.StrLiteral:
@@ -950,12 +968,8 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 
 	istruct := subj.Type().(*checker.StructDef)
 
-	// Try to find pre-created closure with captured lexical scope
-	key := istruct.Name + "." + call.Name
-
-	if closureObj, found := vm.scope.get(key); found {
-		closure := closureObj.Raw().(*VMClosure)
-
+	closure := vm.createMethodClosure(istruct, call.Name)
+	if closure != nil {
 		// Prepare arguments: struct instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)
 		args[0] = subj // "@" - the struct instance
@@ -966,7 +980,6 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		return closure.eval(args...)
 	}
 
-	// No fallback - if pre-created closure not found, it's an error
 	panic(fmt.Errorf("Method %s not found for struct %s", call.Name, istruct.Name))
 }
 
