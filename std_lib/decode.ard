@@ -184,6 +184,24 @@ fn map(
   }
 }
 
+extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = "ExtractField"
+
+fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+  fn(data: Dynamic) $T![Error] {
+    let raw = try extract_field(data, name) -> found {
+      Result::err([
+        Error{
+          expected: "Field",
+          found: found,
+          path: [],
+        }
+      ])
+    }
+
+    as(raw)
+  }
+}
+
 // this seems superfluous
 fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
   decoder(data)

@@ -46,6 +46,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("DynamicToMap", ffi.DynamicToMap); err != nil {
 		return fmt.Errorf("failed to register DynamicToMap: %w", err)
 	}
+	if err := r.Register("ExtractField", ffi.ExtractField); err != nil {
+		return fmt.Errorf("failed to register ExtractField: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}

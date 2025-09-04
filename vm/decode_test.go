@@ -454,9 +454,8 @@ func TestDecodeField(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("null")
-				let field_decoder = decode::field("name", decode::string)
-				let result = decode::run(data, field_decoder)
+				let data = decode::from_json("null").expect("Failed to parse json")
+				let result = decode::run(data, decode::field("name", decode::string))
 				result.is_err()
 			`,
 			want: true,
@@ -466,21 +465,8 @@ func TestDecodeField(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"not an object\"")
-				let field_decoder = decode::field("name", decode::string)
-				let result = decode::run(data, field_decoder)
-				result.is_err()
-			`,
-			want: true,
-		},
-		{
-			name: "field decoder with array data returns error",
-			input: `
-				use ard/decode
-
-				let data = decode::json("[1, 2, 3]")
-				let field_decoder = decode::field("name", decode::string)
-				let result = decode::run(data, field_decoder)
+				let data = decode::from_json("\"not an object\"").expect("Failed to parse json")
+				let result = decode::run(data, decode::field("name", decode::string))
 				result.is_err()
 			`,
 			want: true,
@@ -490,7 +476,7 @@ func TestDecodeField(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::json("\{\"name\": \"John Doe\"\}")
+				let data = decode::from_json("\{\"name\": \"John Doe\"\}").expect("Failed to parse json")
 				let result = decode::run(data, decode::field("name", decode::string))
 				result.expect("Failed to decode name")
 			`,

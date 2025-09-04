@@ -149,7 +149,7 @@ func DynamicToMap(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	data := arg.Raw()
 
 	if data == nil {
-		return runtime.MakeErr(makeError("Map", "null"))
+		return runtime.MakeErr(runtime.MakeStr("null"))
 	}
 
 	if dataMap, ok := data.(map[string]any); ok {
@@ -160,7 +160,31 @@ func DynamicToMap(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		return runtime.MakeOk(_map)
 	}
 
-	return runtime.MakeErr(makeError("Map", formatRawValueForError(arg.GoValue())))
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
+}
+
+// fn (Dynamic, Str) Dynamic!Str
+func ExtractField(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	arg := args[0]
+	data := arg.Raw()
+
+	if data == nil {
+		return runtime.MakeErr(runtime.MakeStr("null"))
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
+	}
+
+	fieldName := args[1].AsString()
+
+	found := runtime.MakeDynamic(nil)
+	if val, ok := dataMap[fieldName]; ok {
+		found.Set(val)
+	}
+
+	return runtime.MakeOk(found)
 }
 
 func makeError(expected, found string) *runtime.Object {
