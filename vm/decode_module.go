@@ -33,43 +33,6 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		// Create Dynamic from List primitive
 		listValue := args[0].AsList()
 		return runtime.MakeDynamic(listValue)
-	case "map":
-		// Return a map decoder function that wraps both key and value decoders
-		keyDecoder := args[0]
-		valueDecoder := args[1]
-
-		// Extract the key decoder's type to determine the key type
-		keyDecoderType := keyDecoder.Type().(*checker.FunctionDef)
-		keyReturnType := keyDecoderType.ReturnType.(*checker.Result)
-		keyValueType := keyReturnType.Val()
-
-		// Extract the value decoder's type to determine the value type
-		valueDecoderType := valueDecoder.Type().(*checker.FunctionDef)
-		valueReturnType := valueDecoderType.ReturnType.(*checker.Result)
-		valueValueType := valueReturnType.Val()
-
-		// Create Map type with K keys and V values
-		mapType := checker.MakeMap(keyValueType, valueValueType)
-
-		mapDecoderType := &checker.FunctionDef{
-			Name:       "Decoder",
-			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
-			ReturnType: checker.MakeResult(mapType, checker.MakeList(checker.DecodeErrorDef)),
-		}
-
-		// Create a closure that captures both decoders
-		mapDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
-			return decodeAsMap(keyDecoder, valueDecoder, data, resultType)
-		}
-
-		return runtime.Make(
-			&VMClosure{
-				vm:        m.vm,
-				expr:      mapDecoderType,
-				builtinFn: mapDecoderFn,
-			},
-			mapDecoderType,
-		)
 	case "field":
 		// Return a field decoder function that extracts a specific field
 		fieldKey := m.vm.eval(call.Args[0]).AsString()
@@ -243,93 +206,6 @@ func formatRawValueForError(v any) string {
 		}
 		return str
 	}
-}
-
-// decodeAsMap handles map decoding by checking for object data and delegating to key/value decoders
-func decodeAsMap(keyDecoder *runtime.Object, valueDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
-	// Check if data is Dynamic and contains object-like structure
-	if data.Type() == checker.Dynamic {
-		if data.Raw() == nil {
-			// Null data - return error (use nullable(map(...)) for nullable maps)
-			decodeErrList := makeDecodeErrorList("Object", "null")
-			return runtime.MakeErr(decodeErrList)
-		}
-
-		// Check if raw data is a map (JSON object becomes map[string]interface{})
-		if rawMap, ok := data.Raw().(map[string]interface{}); ok {
-			return decodeMapValues(keyDecoder, valueDecoder, rawMap, resultType)
-		}
-	}
-
-	// Not object-like data
-	decodeErrList := makeDecodeErrorList("Object", data.String())
-	return runtime.MakeErr(decodeErrList)
-}
-
-// decodeMapValues decodes each key and value in the object using their respective decoders
-func decodeMapValues(keyDecoder *runtime.Object, valueDecoder *runtime.Object, rawMap map[string]any, resultType *checker.Result) *runtime.Object {
-	// Get decoder closures
-	keyClosure := keyDecoder.Raw().(*VMClosure)
-	valueClosure := valueDecoder.Raw().(*VMClosure)
-
-	// Create a new map to store decoded keys and values
-	decodedMap := make(map[string]*runtime.Object)
-	var errors []*runtime.Object
-
-	// Decode each key-value pair
-	for rawKey, rawValue := range rawMap {
-		// Decode key
-		keyData := runtime.Make(rawKey, checker.Dynamic)
-		keyResult := keyClosure.eval(keyData)
-
-		// Decode value
-		valueData := runtime.Make(rawValue, checker.Dynamic)
-		valueResult := valueClosure.eval(valueData)
-
-		if keyResult.IsOk() && valueResult.IsOk() {
-			// Both key and value decoded successfully
-			// Convert decoded key to string for map storage
-			decodedKey := runtime.ToMapKey(keyResult)
-			decodedMap[decodedKey] = valueResult.Unwrap()
-		} else {
-			// Add errors with path information
-			if keyResult.IsErr() {
-				keyErrors := keyResult.AsList()
-				for _, err := range keyErrors {
-					// Add key path information
-					errStruct := err.Raw().(map[string]*runtime.Object)
-					path := errStruct["path"].Raw().([]*runtime.Object)
-					keyStr := runtime.MakeStr(fmt.Sprintf("key(%s)", rawKey))
-					newPath := append([]*runtime.Object{keyStr}, path...)
-					errStruct["path"] = runtime.Make(newPath, checker.MakeList(checker.Str))
-					errors = append(errors, err)
-				}
-			}
-			if valueResult.IsErr() {
-				valueErrors := valueResult.AsList()
-				for _, err := range valueErrors {
-					// Add value path information
-					errStruct := err.Raw().(map[string]*runtime.Object)
-					path := errStruct["path"].Raw().([]*runtime.Object)
-					keyStr := runtime.MakeStr(fmt.Sprintf("value(%s)", rawKey))
-					newPath := append([]*runtime.Object{keyStr}, path...)
-					errStruct["path"] = runtime.Make(newPath, checker.MakeList(checker.Str))
-					errors = append(errors, err)
-				}
-			}
-		}
-	}
-
-	if len(errors) > 0 {
-		// Return accumulated errors
-		errorList := runtime.Make(errors, checker.MakeList(checker.DecodeErrorDef))
-		return runtime.MakeErr(errorList)
-	}
-
-	// Success - create map object
-	mapType := resultType.Val().(*checker.Map)
-	mapObject := runtime.Make(decodedMap, mapType)
-	return runtime.MakeOk(mapObject)
 }
 
 // decodeAsField extracts a specific field from an object and decodes it
