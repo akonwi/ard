@@ -629,23 +629,6 @@ func (r *Result) Err() Type {
 	return r.err
 }
 
-func getGenerics(types ...Type) []Type {
-	all := []Type{}
-	for _, t := range types {
-		switch t := t.(type) {
-		case *List:
-			all = append(all, getGenerics(t.of)...)
-		case *Result:
-			all = append(all, getGenerics(t.val, t.err)...)
-		case *Any:
-			if t.actual == nil {
-				all = append(all, t)
-			}
-		}
-	}
-	return all
-}
-
 // Dynamic type for external/untyped data
 type dynamicType struct{}
 
