@@ -44,25 +44,27 @@ func JsonToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (Dynamic) Str!Error
-func DecodeString(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func DecodeString(args []*runtime.Object, outType checker.Type) *runtime.Object {
+	resultType := outType.(*checker.Result)
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Str", "null"))
+		return runtime.MakeErr(makeError("Str", "null", resultType.Err()))
 	}
 	if str, ok := data.(string); ok {
 		return runtime.MakeOk(runtime.MakeStr(str))
 	}
 
-	return runtime.MakeErr(makeError("Str", formatRawValueForError(arg.GoValue())))
+	return runtime.MakeErr(makeError("Str", formatRawValueForError(arg.GoValue()), resultType.Err()))
 }
 
 // fn (Dynamic) Int!Error
-func DecodeInt(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func DecodeInt(args []*runtime.Object, outType checker.Type) *runtime.Object {
+	resultType := outType.(*checker.Result)
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Int", "null"))
+		return runtime.MakeErr(makeError("Int", "null", resultType.Err()))
 	}
 	if int, ok := data.(int); ok {
 		return runtime.MakeOk(runtime.MakeInt(int))
@@ -79,15 +81,16 @@ func DecodeInt(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		}
 	}
 
-	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue())))
+	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue()), resultType.Err()))
 }
 
 // fn (Dynamic) Float!Error
-func DecodeFloat(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func DecodeFloat(args []*runtime.Object, outType checker.Type) *runtime.Object {
+	resultType := outType.(*checker.Result)
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Float", "null"))
+		return runtime.MakeErr(makeError("Float", "null", resultType.Err()))
 	}
 	if float, ok := data.(float64); ok {
 		return runtime.MakeOk(runtime.MakeFloat(float))
@@ -100,21 +103,22 @@ func DecodeFloat(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
 	}
 
-	return runtime.MakeErr(makeError("Float", formatRawValueForError(arg.GoValue())))
+	return runtime.MakeErr(makeError("Float", formatRawValueForError(arg.GoValue()), resultType.Err()))
 }
 
 // fn (Dynamic) Bool!Error
-func DecodeBool(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func DecodeBool(args []*runtime.Object, outType checker.Type) *runtime.Object {
+	resultType := outType.(*checker.Result)
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Bool", "null"))
+		return runtime.MakeErr(makeError("Bool", "null", resultType.Err()))
 	}
 	if val, ok := data.(bool); ok {
 		return runtime.MakeOk(runtime.MakeBool(val))
 	}
 
-	return runtime.MakeErr(makeError("Bool", formatRawValueForError(arg.GoValue())))
+	return runtime.MakeErr(makeError("Bool", formatRawValueForError(arg.GoValue()), resultType.Err()))
 }
 
 // fn (Dynamic) Bool
@@ -129,7 +133,7 @@ func DynamicToList(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	data := arg.Raw()
 
 	if data == nil {
-		return runtime.MakeErr(makeError("List", "null"))
+		return runtime.MakeErr(runtime.MakeStr("null"))
 	}
 
 	if dataList, ok := data.([]any); ok {
@@ -140,7 +144,7 @@ func DynamicToList(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		return runtime.MakeOk(runtime.MakeList(arg.Type(), items...))
 	}
 
-	return runtime.MakeErr(makeError("List", formatRawValueForError(arg.GoValue())))
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
 }
 
 // fn (Dyanmic) [Dynamic:Dynamic]!Str
@@ -187,8 +191,8 @@ func ExtractField(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(found)
 }
 
-func makeError(expected, found string) *runtime.Object {
-	return runtime.MakeStruct(checker.DecodeErrorDef,
+func makeError(expected, found string, _type checker.Type) *runtime.Object {
+	return runtime.MakeStruct(_type,
 		map[string]*runtime.Object{
 			"expected": runtime.MakeStr(expected),
 			"found":    runtime.MakeStr(found),

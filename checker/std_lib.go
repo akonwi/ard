@@ -20,8 +20,6 @@ func findInStdLib(path string) (Module, bool) {
 		return HttpPkg{}, true
 	case "ard/json":
 		return JsonPkg{}, true
-	case "ard/decode":
-		return DecodePkg{}, true
 	case "ard/maybe":
 		return MaybePkg{}, true
 	case "ard/result":

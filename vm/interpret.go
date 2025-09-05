@@ -939,39 +939,6 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		}
 		return async.EvalFiberMethod(subj, call, args)
 	}
-	// Special handling for decode::Error methods
-	if subj.Type() == checker.DecodeErrorDef {
-		switch call.Name {
-		case "to_str":
-			expected := subj.Struct_Get("expected").AsString()
-			found := subj.Struct_Get("found").AsString()
-			pathList := subj.Struct_Get("path").AsList()
-
-			pathStr := ""
-			if len(pathList) > 0 {
-				var pathBuilder strings.Builder
-				for i, part := range pathList {
-					partStr := part.AsString()
-					if i == 0 {
-						// First element: no leading dot
-						pathBuilder.WriteString(partStr)
-					} else {
-						// Subsequent elements: add dot only if not starting with bracket
-						if strings.HasPrefix(partStr, "[") {
-							pathBuilder.WriteString(partStr)
-						} else {
-							pathBuilder.WriteString(".")
-							pathBuilder.WriteString(partStr)
-						}
-					}
-				}
-				pathStr = " at " + pathBuilder.String()
-			}
-
-			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
-			return runtime.MakeStr(errorMsg)
-		}
-	}
 
 	istruct := subj.Type().(*checker.StructDef)
 
