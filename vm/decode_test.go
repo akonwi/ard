@@ -553,7 +553,7 @@ func TestDecodeOneOf(t *testing.T) {
 			input: `
 				use ard/decode
 
-				fn int_to_string(data: decode::Dynamic) Str![decode::Error] {
+				fn int_to_string(data: Dynamic) Str![decode::Error] {
 					let int = try decode::int(data)
 					Result::ok(int.to_str())
 				}
@@ -569,7 +569,7 @@ func TestDecodeOneOf(t *testing.T) {
 			input: `
 				use ard/decode
 
-				fn int_to_string(data: decode::Dynamic) Str![decode::Error] {
+				fn int_to_string(data: Dynamic) Str![decode::Error] {
 					let int = try decode::int(data)
 					Result::ok(int.to_str())
 				}
@@ -594,7 +594,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 				use ard/decode
 				use ard/result
 
-				fn custom_decoder(data: decode::Dynamic) Str![decode::Error] {
+				fn custom_decoder(data: Dynamic) Str![decode::Error] {
 					Result::ok("always works")
 				}
 
@@ -613,7 +613,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					name: Str,
 				}
 
-				fn decode_person(data: decode::Dynamic) Person![decode::Error] {
+				fn decode_person(data: Dynamic) Person![decode::Error] {
 					let person_id = try decode::run(data, decode::field("id", decode::int))
 					let person_name = try decode::run(data, decode::field("name", decode::string))
 
@@ -643,7 +643,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					name: Str,
 				}
 
-				fn decode_person(data: decode::Dynamic) Person![decode::Error] {
+				fn decode_person(data: Dynamic) Person![decode::Error] {
 					let person_id = try decode::run(data, decode::field("id", decode::int))
 					let person_name = try decode::run(data, decode::field("name", decode::string))
 
@@ -678,7 +678,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					winner: Winner?,
 				}
 
-				fn decode_winner(data: decode::Dynamic) Winner![decode::Error] {
+				fn decode_winner(data: Dynamic) Winner![decode::Error] {
 					let winner_id = try decode::run(data, decode::field("id", decode::int))
 					let winner_name = try decode::run(data, decode::field("name", decode::string))
 					let winner_comment = try decode::run(data, decode::field("comment", decode::string))
@@ -690,7 +690,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					})
 				}
 
-				fn decode_prediction(data: decode::Dynamic) Prediction![decode::Error] {
+				fn decode_prediction(data: Dynamic) Prediction![decode::Error] {
 					let advice = try decode::run(data, decode::field("advice", decode::nullable(decode::string)))
 					let winner = try decode::run(data, decode::field("winner", decode::nullable(decode_winner)))
 
@@ -716,8 +716,8 @@ func TestDecodeCustomFunctions(t *testing.T) {
 			input: `
 			use ard/decode
 
-			fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
-			  fn(data: decode::Dynamic) $T![decode::Error] {
+			fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
+			  fn(data: Dynamic) $T![decode::Error] {
 			    let list = try decode::run(data, decode::list(as))
 			    Result::ok(list.at(0))
 			  }
@@ -742,8 +742,8 @@ func TestDeepCustomDecoders(t *testing.T) {
 				if text.is_empty() { panic("Empty json file") }
 
 				// create a decoder that takes the first in a list
-				fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
-					fn(data: decode::Dynamic) $T![decode::Error] {
+				fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
+					fn(data: Dynamic) $T![decode::Error] {
 						let list = try decode::run(data, decode::list(as))
 						Result::ok(list.at(0))
 					}

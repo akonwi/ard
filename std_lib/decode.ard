@@ -1,8 +1,5 @@
 use ard/maybe
 
-// opaque struct for external data
-struct Dynamic {}
-
 struct Error {
   expected: Str,
   found: Str,
@@ -27,7 +24,11 @@ impl Str::ToString for Error {
         }
       }
     }
-    "Decode error: expected {@expected}, found {@found} at {path_str}"
+
+    match path_str.is_empty() {
+      true => "Decode error: expected {@expected}, found {@found}",
+      false => "Decode error: expected {@expected}, found {@found} at {path_str}"
+    }
   }
 }
 

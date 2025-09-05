@@ -57,8 +57,8 @@
 - [ ] loops as expressions (comprehensions?)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
   ```
-  fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
-    fn(data: decode::Dynamic) $T![decode::Error] {
+  fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
+    fn(data: Dynamic) $T![decode::Error] {
       let list = try decode::run(data, decode::list(as))
       match list.size() {
         0 => Result::err([decode::Error{path: [""], expected: "non-empty list", found: "empty list"}]),
