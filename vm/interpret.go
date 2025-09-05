@@ -523,7 +523,9 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			for name, ftype := range strct.Fields {
 				val, ok := e.Fields[name]
 				if ok {
-					raw[name] = vm.eval(val)
+					val := vm.eval(val)
+					val.SetRefinedType(ftype)
+					raw[name] = val
 				} else {
 					// assume it's a $T? if the checker allowed it
 					raw[name] = runtime.MakeMaybe(nil, ftype)

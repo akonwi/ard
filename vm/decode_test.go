@@ -598,7 +598,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					Result::ok("always works")
 				}
 
-				let data = decode::json("\"hello\"")
+				let data = decode::from_json("\"hello\"").expect("Failed to parse json")
 				decode::run(data, custom_decoder).expect("")
 			`,
 			want: "always works",
@@ -623,9 +623,9 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					})
 				}
 
-				let data = decode::json("\{\"id\": 123, \"name\": \"Alice\"\}")
-				let result = decode::run(data, decode::nullable(decode_person))
-				match result.expect("") {
+				let data = decode::from_json("\{\"id\": 123, \"name\": \"Alice\"\}").expect("Failed to parse json")
+				let maybe_person = decode::run(data, decode::nullable(decode_person)).expect("Failed to decode")
+				match maybe_person {
 					person => person.name,
 					_ => "none"
 				}
@@ -653,9 +653,9 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					})
 				}
 
-				let data = decode::json("null")
-				let result = decode::run(data, decode::nullable(decode_person))
-				match result.expect("") {
+				let data = decode::from_json("null").expect("Failed to parse json")
+				let maybe_person = decode::run(data, decode::nullable(decode_person)).expect("Failed to decode")
+				match maybe_person {
 					person => person.name,
 					_ => "none"
 				}
@@ -700,9 +700,10 @@ func TestDecodeCustomFunctions(t *testing.T) {
 					})
 				}
 
-				let data = decode::json("\{\"advice\": \"Double chance\", \"winner\": \{\"id\": 1598, \"name\": \"Orlando City SC\", \"comment\": \"Win or draw\"\}\}")
-				let result = decode::run(data, decode_prediction)
-				let prediction = result.expect("")
+				let data = decode::from_json(
+					"\{\"advice\": \"Double chance\", \"winner\": \{\"id\": 1598, \"name\": \"Orlando City SC\", \"comment\": \"Win or draw\"\}\}"
+				).expect("Failed to parse JSON")
+				let prediction: Prediction = decode_prediction(data).expect("foo")
 				match prediction.winner {
 					winner => winner.name,
 					_ => "no winner"
