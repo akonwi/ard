@@ -216,6 +216,33 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
   }
 }
 
+// take the first successful decoding. if all fail, return the first set of errors
+fn one_of(first: fn(Dynamic) $T![Error], others: [fn(Dynamic) $T![Error]]) fn(Dynamic) $T![Error] {
+  fn(data: Dynamic) $T![Error] {
+    mut res = first(data)
+
+    match res.is_ok() {
+      true => res,
+      false => {
+        mut out: $T? = maybe::none()
+        for decoder in others {
+          match decoder(data) {
+            ok => {
+              out = maybe::some(ok)
+              break
+            },
+            err(errs) => {}
+          }
+        }
+        match out {
+          out => Result::ok(out),
+          _ => res
+        }
+      }
+    }
+  }
+}
+
 // this seems superfluous
 fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
   decoder(data)

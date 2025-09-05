@@ -549,76 +549,39 @@ func TestDecodeField(t *testing.T) {
 func TestDecodeOneOf(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "one_of with only string decoder - basic functionality",
+			name: "when a decoder succeeds",
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"hello\"")
-				let string_dec = decode::string
-				let decoder = decode::one_of([string_dec])
-				decode::run(data, decoder).expect("")
-			`,
-			want: "hello",
-		},
-		{
-			name: "one_of returns error from first decoder when all fail",
-			input: `
-				use ard/decode
-
-				let data = decode::json("true")
-				let str_dec1 = decode::string
-				let str_dec2 = decode::string
-				let decoder = decode::one_of([str_dec1, str_dec2])
-				let result = decode::run(data, decoder)
-				match result {
-					err => {
-						let first_error = err.at(0)
-						first_error.expected == "Str"
-					}
-					ok(_) => false
-				}
-			`,
-			want: true,
-		},
-		{
-			name: "one_of with different decoder types returning same type",
-			input: `
-				use ard/decode
-
-				// Custom decoder that converts int to string
 				fn int_to_string(data: decode::Dynamic) Str![decode::Error] {
-					let int_result = decode::as_int(data)
-					match int_result {
-						ok(val) => Result::ok(val.to_str()),
-						err(errors) => Result::err(errors)
-					}
+					let int = try decode::int(data)
+					Result::ok(int.to_str())
 				}
 
-				// Test string input - first decoder succeeds
-				let data1 = decode::json("\"hello\"")
-				let decoder = decode::one_of([decode::string, int_to_string])
-				let result1 = decode::run(data1, decoder).expect("")
-
-				// Test int input - second decoder succeeds
-				let data2 = decode::json("42")
-				let result2 = decode::run(data2, decoder).expect("")
-
-				result1 + "," + result2
+				let data = decode::from_json("20").expect("Failed to parse json")
+				let take_string = decode::one_of(decode::string, [int_to_string])
+				take_string(data).expect("Unable to decode")
 			`,
-			want: "hello,42",
+			want: "20",
 		},
 		{
-			name: "one_of with empty decoder list returns error",
+			name: "returns the first decoder errors when all fail",
 			input: `
 				use ard/decode
 
-				let data = decode::json("\"hello\"")
-				let empty_decoders: [fn(decode::Dynamic) Str![decode::Error]] = []
-				let decoder = decode::one_of(empty_decoders)
-				let result = decode::run(data, decoder)
-				result.is_err()
+				fn int_to_string(data: decode::Dynamic) Str![decode::Error] {
+					let int = try decode::int(data)
+					Result::ok(int.to_str())
+				}
+
+				let data = decode::from_json("true").expect("Failed to parse json")
+				let take_string = decode::one_of(decode::string, [int_to_string])
+				match take_string(data) {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
 			`,
-			want: true,
+			want: "Decode error: expected Str, found true",
 		},
 	})
 }

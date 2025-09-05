@@ -33,36 +33,6 @@ func (m *DecodeModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 		// Create Dynamic from List primitive
 		listValue := args[0].AsList()
 		return runtime.MakeDynamic(listValue)
-	case "field":
-		// Return a field decoder function that extracts a specific field
-		fieldKey := m.vm.eval(call.Args[0]).AsString()
-		valueDecoder := args[1] // Decoder for the field's value
-
-		// Extract type information
-		valueDecoderType := valueDecoder.Type().(*checker.FunctionDef)
-		valueReturnType := valueDecoderType.ReturnType.(*checker.Result)
-		valueValueType := valueReturnType.Val()
-
-		// Create field decoder type
-		fieldDecoderType := &checker.FunctionDef{
-			Name:       "Decoder",
-			Parameters: []checker.Parameter{{Name: "data", Type: checker.Dynamic}},
-			ReturnType: checker.MakeResult(valueValueType, checker.MakeList(checker.DecodeErrorDef)),
-		}
-
-		// Create closure that captures field key and value decoder
-		fieldDecoderFn := func(data *runtime.Object, resultType *checker.Result) *runtime.Object {
-			return decodeAsField(fieldKey, valueDecoder, data, resultType)
-		}
-
-		return runtime.Make(
-			&VMClosure{
-				vm:        m.vm,
-				expr:      fieldDecoderType,
-				builtinFn: fieldDecoderFn,
-			},
-			fieldDecoderType,
-		)
 	case "one_of":
 		// Return a decoder that tries multiple decoders in sequence
 		decoderList := args[0] // List of decoders to try
@@ -206,68 +176,6 @@ func formatRawValueForError(v any) string {
 		}
 		return str
 	}
-}
-
-// decodeAsField extracts a specific field from an object and decodes it
-func decodeAsField(fieldKey string, valueDecoder *runtime.Object, data *runtime.Object, resultType *checker.Result) *runtime.Object {
-	// Check if data is Dynamic and contains object-like structure
-	if data.Raw() == nil {
-		// Null data - return error
-		decodeErrList := makeDecodeErrorList("Object", "null")
-		return runtime.MakeErr(decodeErrList)
-	}
-
-	// Check if raw data is a map (JSON object becomes map[string]any)
-	if rawMap, ok := data.Raw().(map[string]any); ok {
-		return extractField(fieldKey, valueDecoder, rawMap, resultType)
-	}
-
-	// Not object-like data
-	decodeErrList := makeDecodeErrorList("Object", data.String())
-	return runtime.MakeErr(decodeErrList)
-}
-
-// extractField handles the actual field extraction and value decoding
-func extractField(fieldKey string, valueDecoder *runtime.Object, rawMap map[string]any, resultType *checker.Result) *runtime.Object {
-	// Get value decoder closure
-	valueClosure := valueDecoder.Raw().(*VMClosure)
-
-	// Check if field exists
-	rawValue, exists := rawMap[fieldKey]
-	if !exists {
-		// Missing field error with path
-		decodeErr := runtime.MakeStruct(
-			checker.DecodeErrorDef,
-			map[string]*runtime.Object{
-				"expected": runtime.MakeStr("field '" + fieldKey + "'"),
-				"found":    runtime.MakeStr("missing"),
-				"path":     runtime.MakeList(checker.Str, runtime.MakeStr(fieldKey)),
-			},
-		)
-		errorList := runtime.MakeList(checker.DecodeErrorDef, decodeErr)
-		return runtime.MakeErr(errorList)
-	}
-
-	// Field exists, decode its value
-	valueData := runtime.MakeDynamic(rawValue)
-	valueResult := valueClosure.eval(valueData)
-
-	if valueResult.IsOk() {
-		return valueResult
-	}
-
-	// Propagate errors with field name in path
-	errors := valueResult.AsList()
-	for _, err := range errors {
-		_path := err.Struct_Get("path")
-		path := _path.AsList()
-		fieldStr := runtime.MakeStr(fieldKey)
-		// shouldn't this go on the end?
-		_path.Set(append([]*runtime.Object{fieldStr}, path...))
-	}
-
-	// question: maybe should copy instead of mutate
-	return valueResult
 }
 
 // decodeAsOneOf tries multiple decoders in sequence until one succeeds
