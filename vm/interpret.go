@@ -61,23 +61,11 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		return runtime.Void()
 	case *checker.StructDef:
 		// Process struct methods and create closures with captured scope
-		for methodName, methodDef := range s.Methods {
+		for methodName, _ := range s.Methods {
 			// Create a modified function definition with "@" as first parameter
-			copy := *methodDef // Copy the original
-			methodDefWithSelf := &copy
-			methodDefWithSelf.Parameters = append([]checker.Parameter{
-				{Name: "@", Type: nil}, // "@" parameter for struct instance
-			}, methodDef.Parameters...)
-
-			closure := &VMClosure{
-				vm:            vm,
-				expr:          methodDefWithSelf,
-				capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
-			}
+			closure := vm.createMethodClosure(s, methodName)
 			// Store using struct.method key format
-			key := s.Name + "." + methodName
-			closureObj := runtime.Make(closure, methodDef)
-			vm.scope.add(key, closureObj)
+			vm.hq.addMethod(s, methodName, closure)
 		}
 		return runtime.Void()
 	case *checker.VariableDef:
@@ -942,8 +930,8 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 
 	istruct := subj.Type().(*checker.StructDef)
 
-	closure := vm.createMethodClosure(istruct, call.Name)
-	if closure != nil {
+	closure, ok := vm.hq.getMethod(istruct, call.Name)
+	if ok {
 		// Prepare arguments: struct instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)
 		args[0] = subj // "@" - the struct instance

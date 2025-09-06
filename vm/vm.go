@@ -14,17 +14,24 @@ type GlobalVM struct {
 	modules map[string]*VM
 	subject checker.Module
 
+	// method closures lose their scope because they aren't evaluated in their module like regular functions
+	// so keeping them track of them globally solves that
+	// [needs-improvement]
+	methodClosures map[string]Closure
+
 	// hardcoded modules
 	moduleRegistry *ModuleRegistry
 
+	// Go functions for FFI
 	ffiRegistry *RuntimeFFIRegistry
 }
 
 func NewRuntime(module checker.Module) *GlobalVM {
 	g := &GlobalVM{
-		modules:     make(map[string]*VM),
-		ffiRegistry: NewRuntimeFFIRegistry(),
-		subject:     module,
+		subject:        module,
+		methodClosures: map[string]Closure{},
+		modules:        make(map[string]*VM),
+		ffiRegistry:    NewRuntimeFFIRegistry(),
 	}
 	g.load(module.Program().Imports)
 	g.moduleRegistry = NewModuleRegistry()
@@ -57,7 +64,6 @@ func (g *GlobalVM) initModuleRegistry() {
 	g.moduleRegistry.Register(&ResultModule{})
 	g.moduleRegistry.Register(&MaybeModule{})
 	g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
-	// g.moduleRegistry.Register(&DecodeModule{vm: NewVM()})
 	g.moduleRegistry.Register(&AsyncModule{hq: g})
 }
 
@@ -140,6 +146,19 @@ func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Obj
 
 	sym, _ := module.scope.get(symbol.Name)
 	return sym
+}
+
+func (g *GlobalVM) addMethod(strct checker.Type, name string, closure Closure) {
+	key := fmt.Sprintf("%p.%s", strct, name)
+	g.methodClosures[key] = closure
+}
+
+func (g *GlobalVM) getMethod(strct checker.Type, name string) (Closure, bool) {
+	key := fmt.Sprintf("%p.%s", strct, name)
+	if closure, ok := g.methodClosures[key]; ok {
+		return closure, true
+	}
+	return nil, false
 }
 
 type VM struct {
