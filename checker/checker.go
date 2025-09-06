@@ -259,6 +259,11 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		err := c.resolveType(ty.Err)
 		baseType = MakeResult(val, err)
 	case *ast.CustomType:
+		if t.GetName() == "Dynamic" {
+			baseType = Dynamic
+			break
+		}
+
 		if sym, ok := c.scope.get(t.GetName()); ok {
 			switch s := sym.Type.(type) {
 			case *Enum:

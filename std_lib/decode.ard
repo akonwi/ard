@@ -1,0 +1,250 @@
+use ard/maybe
+
+struct Error {
+  expected: Str,
+  found: Str,
+  path: [Str],
+}
+
+impl Str::ToString for Error {
+  fn to_str() Str {
+    mut path_str = ""
+    for step, i in @path {
+      match i == 0 {
+        true => {
+          // no leading dot
+          path_str =+ step
+        },
+        false => {
+          // Subsequent elements: add dot only if not starting with bracket
+          match step.starts_with("[") {
+            true => { path_str =+ step },
+            false => { path_str =+ ".{step}" }
+          }
+        }
+      }
+    }
+
+    match path_str.is_empty() {
+      true => "Decode error: expected {@expected}, found {@found}",
+      false => "Decode error: expected {@expected}, found {@found} at {path_str}"
+    }
+  }
+}
+
+extern fn from_str(val: Str) Dynamic = "StrToDynamic"
+extern fn from_int(val: Int) Dynamic = "IntToDynamic"
+extern fn from_float(val: Float) Dynamic = "FloatToDynamic"
+extern fn from_bool(val: Bool) Dynamic = "BoolToDynamic"
+
+// parse json text
+extern fn from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+
+// deprecated: use from_json instead
+fn json(text: Str) Dynamic {
+  match from_json(text) {
+    ok => ok,
+    err => {
+      panic("Error parsing json: {err}")
+    }
+  }
+}
+
+private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
+private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
+private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
+private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
+extern fn is_void(data: Dynamic) Bool = "IsNil"
+
+fn string(data: Dynamic) Str![Error] {
+  let val = try _decode_string(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn int(data: Dynamic) Int![Error] {
+  let val = try _decode_int(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn float(data: Dynamic) Float![Error] {
+  let val = try _decode_float(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn bool(data: Dynamic) Bool![Error] {
+  let val = try _decode_bool(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn nullable(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) $T?![Error] {
+  fn(data: Dynamic) $T?![Error] {
+    match is_void(data) {
+      true => Result::ok(maybe::none()),
+      false => {
+        let val = try decoder(data)
+        Result::ok(maybe::some(val))
+      }
+    }
+  }
+}
+
+extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
+
+fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
+  fn(data: Dynamic) [$T]![Error] {
+    let raw = try to_list(data) -> found {
+      let decode_err = Error{expected: "List", found: found, path: []}
+      Result::err([decode_err])
+    }
+
+    mut out: [$T] = []
+    mut errors: [Error] = []
+    for item, idx in raw {
+      match decoder(item) {
+        ok => { out.push(ok) },
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.prepend("[{idx}]")
+            errors.push(Error{
+              expected: e.expected,
+              found: e.found,
+              path: path,
+            })
+          }
+        },
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors)
+    }
+  }
+}
+
+extern fn to_map(data: Dynamic) [Dynamic:Dynamic]!Str = "DynamicToMap"
+
+fn map(
+  key: fn(Dynamic) $Key![Error],
+  value: fn(Dynamic) $Value![Error]
+) fn(Dynamic) [$Key:$Value]![Error] {
+  fn(data: Dynamic) [$Key:$Value]![Error] {
+    let raw = try to_map(data) -> found {
+      let decode_err = Error{expected: "Map", found: found, path: []}
+      Result::err([decode_err])
+    }
+
+    mut errors: [Error] = []
+    mut out: [$Key:$Value] = [:]
+
+    for k, v in raw {
+      match key(k) {
+        ok(key) => {
+          match value(v) {
+            ok(val) => { out.set(key, val) },
+            err(errs) => {
+              for e in errs {
+                mut path = e.path
+                path.push("values")
+                errors.push(Error{
+                  expected: e.expected,
+                  found: e.found,
+                  path: path,
+                })
+              }
+            },
+          }
+        },
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.push("keys")
+            errors.push(Error{
+              expected: e.expected,
+              found: e.found,
+              path: path,
+            })
+          }
+        }
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors)
+    }
+  }
+}
+
+extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = "ExtractField"
+
+fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+  fn(data: Dynamic) $T![Error] {
+    let raw = try extract_field(data, name) -> found {
+      Result::err([
+        Error{
+          expected: "Field",
+          found: found,
+          path: [name],
+        }
+      ])
+    }
+
+    let val = try as(raw) -> errs {
+      mut out: [Error] = []
+      for e in errs {
+        mut path = e.path
+        path.prepend(name)
+        out.push(Error{
+          expected: e.expected,
+          found: e.found,
+          path: path,
+        })
+      }
+      Result::err(out)
+    }
+
+    Result::ok(val)
+  }
+}
+
+// take the first successful decoding. if all fail, return the first set of errors
+fn one_of(first: fn(Dynamic) $T![Error], others: [fn(Dynamic) $T![Error]]) fn(Dynamic) $T![Error] {
+  fn(data: Dynamic) $T![Error] {
+    mut res = first(data)
+
+    match res.is_ok() {
+      true => res,
+      false => {
+        mut out: $T? = maybe::none()
+        for decoder in others {
+          match decoder(data) {
+            ok => {
+              out = maybe::some(ok)
+              break
+            },
+            err(errs) => {}
+          }
+        }
+        match out {
+          out => Result::ok(out),
+          _ => res
+        }
+      }
+    }
+  }
+}
+
+// this seems superfluous
+fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
+  decoder(data)
+}

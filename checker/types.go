@@ -115,6 +115,12 @@ func (s str) get(name string) Type {
 			},
 			ReturnType: MakeList(Str),
 		}
+	case "starts_with":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "str", Type: Str}},
+			ReturnType: Bool,
+		}
 	case "to_str":
 		return &FunctionDef{
 			Name:       name,
@@ -300,6 +306,13 @@ func (l List) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{{Name: "index", Type: Int}},
 			ReturnType: l.of,
+		}
+	case "prepend":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: l.of}},
+			Mutates:    true,
+			ReturnType: Int,
 		}
 	case "push":
 		return &FunctionDef{
@@ -616,19 +629,15 @@ func (r *Result) Err() Type {
 	return r.err
 }
 
-func getGenerics(types ...Type) []Type {
-	all := []Type{}
-	for _, t := range types {
-		switch t := t.(type) {
-		case *List:
-			all = append(all, getGenerics(t.of)...)
-		case *Result:
-			all = append(all, getGenerics(t.val, t.err)...)
-		case *Any:
-			if t.actual == nil {
-				all = append(all, t)
-			}
-		}
-	}
-	return all
+// Dynamic type for external/untyped data
+type dynamicType struct{}
+
+func (d dynamicType) String() string       { return "Dynamic" }
+func (d dynamicType) get(name string) Type { return nil }
+func (d dynamicType) equal(other Type) bool {
+	_, ok := other.(*dynamicType)
+	return ok
 }
+func (d dynamicType) hasTrait(trait *Trait) bool { return false }
+
+var Dynamic = &dynamicType{}

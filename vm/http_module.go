@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // HTTPModule handles ard/http module functions
-type HTTPModule struct{}
+type HTTPModule struct {
+	vm *VM
+	hq *GlobalVM
+}
 
 func (m *HTTPModule) Path() string {
 	return "ard/http"
@@ -21,6 +24,11 @@ func (m *HTTPModule) Path() string {
 
 func (m *HTTPModule) Program() *checker.Program {
 	return nil
+}
+
+func (m *HTTPModule) get(name string) *runtime.Object {
+	sym, _ := m.vm.scope.get(name)
+	return sym
 }
 
 /*
@@ -41,8 +49,26 @@ func convertToGoPattern(path string) string {
 	return strings.Join(parts, "/")
 }
 
-func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *HTTPModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
+	// this is Response::new
+	case "new":
+		// Response::new(status: Int, body: Str) -> Response
+		if len(args) != 2 {
+			panic(fmt.Errorf("Response::new expects 2 arguments, got %d", len(args)))
+		}
+
+		status := args[0].Raw().(int)
+		body := args[1].Raw().(string)
+
+		// Create response object structure
+		respMap := map[string]*runtime.Object{
+			"status":  runtime.MakeInt(status),
+			"headers": runtime.Make(make(map[string]*runtime.Object), checker.MakeMap(checker.Str, checker.Str)),
+			"body":    runtime.MakeStr(body),
+		}
+
+		return runtime.MakeStruct(checker.HttpResponseDef, respMap)
 	case "serve":
 		port := args[0].Raw().(int)
 		handlers := args[1].Raw().(map[string]*runtime.Object)
@@ -112,7 +138,7 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.
 				request := runtime.MakeStruct(checker.HttpRequestDef, requestMap)
 
 				// Call the Ard handler function
-				handle, ok := handler.Raw().(*Closure)
+				handle, ok := handler.Raw().(*VMClosure)
 				if !ok {
 					panic(fmt.Errorf("Handler for '%s' is not a function", path))
 				}
@@ -120,7 +146,8 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.
 				// Create a copy of the closure with a new VM for isolation to prevent race conditions
 				// This follows the same pattern as the async module
 				isolatedHandle := *handle
-				isolatedHandle.vm = New(vm.imports)
+				isolatedHandle.vm = NewVM()
+				isolatedHandle.vm.hq = m.hq
 				response := isolatedHandle.eval(request)
 
 				// Convert Ard Response to Go HTTP response
@@ -247,7 +274,7 @@ func (m *HTTPModule) Handle(vm *VM, call *checker.FunctionCall, args []*runtime.
 	}
 }
 
-func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
+func (m *HTTPModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch structName {
 	case "Response":
 		return m.handleResponseStatic(call, args)
@@ -257,27 +284,7 @@ func (m *HTTPModule) HandleStatic(structName string, vm *VM, call *checker.Funct
 }
 
 func (m *HTTPModule) handleResponseStatic(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
-	switch call.Name {
-	case "new":
-		// Response::new(status: Int, body: Str) -> Response
-		if len(args) != 2 {
-			panic(fmt.Errorf("Response::new expects 2 arguments, got %d", len(args)))
-		}
-
-		status := args[0].Raw().(int)
-		body := args[1].Raw().(string)
-
-		// Create response object structure
-		respMap := map[string]*runtime.Object{
-			"status":  runtime.MakeInt(status),
-			"headers": runtime.Make(make(map[string]*runtime.Object), checker.MakeMap(checker.Str, checker.Str)),
-			"body":    runtime.MakeStr(body),
-		}
-
-		return runtime.MakeStruct(checker.HttpResponseDef, respMap)
-	default:
-		panic(fmt.Errorf("Unimplemented: Response::%s()", call.Name))
-	}
+	panic(fmt.Errorf("Unimplemented: Response::%s()", call.Name))
 }
 
 // do HTTP::Response methods

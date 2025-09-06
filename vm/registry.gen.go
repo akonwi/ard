@@ -10,6 +10,63 @@ import (
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
+	if err := r.Register("StrToDynamic", ffi.StrToDynamic); err != nil {
+		return fmt.Errorf("failed to register StrToDynamic: %w", err)
+	}
+	if err := r.Register("IntToDynamic", ffi.IntToDynamic); err != nil {
+		return fmt.Errorf("failed to register IntToDynamic: %w", err)
+	}
+	if err := r.Register("FloatToDynamic", ffi.FloatToDynamic); err != nil {
+		return fmt.Errorf("failed to register FloatToDynamic: %w", err)
+	}
+	if err := r.Register("BoolToDynamic", ffi.BoolToDynamic); err != nil {
+		return fmt.Errorf("failed to register BoolToDynamic: %w", err)
+	}
+	if err := r.Register("JsonToDynamic", ffi.JsonToDynamic); err != nil {
+		return fmt.Errorf("failed to register JsonToDynamic: %w", err)
+	}
+	if err := r.Register("DecodeString", ffi.DecodeString); err != nil {
+		return fmt.Errorf("failed to register DecodeString: %w", err)
+	}
+	if err := r.Register("DecodeInt", ffi.DecodeInt); err != nil {
+		return fmt.Errorf("failed to register DecodeInt: %w", err)
+	}
+	if err := r.Register("DecodeFloat", ffi.DecodeFloat); err != nil {
+		return fmt.Errorf("failed to register DecodeFloat: %w", err)
+	}
+	if err := r.Register("DecodeBool", ffi.DecodeBool); err != nil {
+		return fmt.Errorf("failed to register DecodeBool: %w", err)
+	}
+	if err := r.Register("IsNil", ffi.IsNil); err != nil {
+		return fmt.Errorf("failed to register IsNil: %w", err)
+	}
+	if err := r.Register("DynamicToList", ffi.DynamicToList); err != nil {
+		return fmt.Errorf("failed to register DynamicToList: %w", err)
+	}
+	if err := r.Register("DynamicToMap", ffi.DynamicToMap); err != nil {
+		return fmt.Errorf("failed to register DynamicToMap: %w", err)
+	}
+	if err := r.Register("ExtractField", ffi.ExtractField); err != nil {
+		return fmt.Errorf("failed to register ExtractField: %w", err)
+	}
+	if err := r.Register("FS_Exists", ffi.FS_Exists); err != nil {
+		return fmt.Errorf("failed to register FS_Exists: %w", err)
+	}
+	if err := r.Register("FS_CreateFile", ffi.FS_CreateFile); err != nil {
+		return fmt.Errorf("failed to register FS_CreateFile: %w", err)
+	}
+	if err := r.Register("FS_WriteFile", ffi.FS_WriteFile); err != nil {
+		return fmt.Errorf("failed to register FS_WriteFile: %w", err)
+	}
+	if err := r.Register("FS_AppendFile", ffi.FS_AppendFile); err != nil {
+		return fmt.Errorf("failed to register FS_AppendFile: %w", err)
+	}
+	if err := r.Register("FS_ReadFile", ffi.FS_ReadFile); err != nil {
+		return fmt.Errorf("failed to register FS_ReadFile: %w", err)
+	}
+	if err := r.Register("FS_DeleteFile", ffi.FS_DeleteFile); err != nil {
+		return fmt.Errorf("failed to register FS_DeleteFile: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}

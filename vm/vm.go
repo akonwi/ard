@@ -3,72 +3,177 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
-type VM struct {
-	scope          *scope
-	result         runtime.Object
-	imports        map[string]checker.Module
+type GlobalVM struct {
+	modules map[string]*VM
+	subject checker.Module
+
+	// method closures lose their scope because they aren't evaluated in their module like regular functions
+	// so keeping them track of them globally solves that
+	// [needs-improvement]
+	methodClosures map[string]Closure
+
+	// hardcoded modules
 	moduleRegistry *ModuleRegistry
-	ffiRegistry    *RuntimeFFIRegistry
-	moduleScope    *scope // Captures the scope where extern functions are defined
+
+	// Go functions for FFI
+	ffiRegistry *RuntimeFFIRegistry
 }
 
-func New(imports map[string]checker.Module) *VM {
-	vm := &VM{
-		scope:          newScope(nil),
-		moduleRegistry: NewModuleRegistry(),
+func NewRuntime(module checker.Module) *GlobalVM {
+	g := &GlobalVM{
+		subject:        module,
+		methodClosures: map[string]Closure{},
+		modules:        make(map[string]*VM),
 		ffiRegistry:    NewRuntimeFFIRegistry(),
-		imports:        imports,
 	}
-	vm.initModuleRegistry()
-	vm.initFFIRegistry()
-	return vm
+	g.load(module.Program().Imports)
+	g.moduleRegistry = NewModuleRegistry()
+	g.initModuleRegistry()
+	g.initFFIRegistry()
+	return g
 }
 
-// importModuleScope copies bindings from module VM to caller VM
-func (vm *VM) importModuleScope(from *VM) {
-	if from.moduleScope == nil {
-		return
-	}
-	for name, obj := range from.moduleScope.bindings {
-		// don't overwrite names that already exist in the caller
-		if _, exists := vm.scope.get(name); !exists {
-			vm.scope.add(name, obj)
+// go through the dependency tree and make sure a single instance of each module is ready
+func (g *GlobalVM) load(imports map[string]checker.Module) error {
+	for name, mod := range imports {
+		if _, exists := g.modules[name]; !exists {
+			program := mod.Program()
+			if program != nil {
+				vm := NewVM()
+				vm.hq = g
+				if _, err := vm.Interpret(program); err != nil {
+					return fmt.Errorf("Failed to load module - %s: %w", name, err)
+				}
+				g.modules[name] = vm
+				g.load(program.Imports)
+			}
 		}
 	}
+	return nil
 }
 
-func (vm *VM) initModuleRegistry() {
-	// <prelude>
-	vm.moduleRegistry.Register(&ResultModule{})
-	// </prelude>
-
-	for path := range vm.imports {
-		switch path {
-		case "ard/fs":
-			vm.moduleRegistry.Register(&FSModule{})
-		case "ard/maybe":
-			vm.moduleRegistry.Register(&MaybeModule{})
-		case "ard/http":
-			vm.moduleRegistry.Register(&HTTPModule{})
-		case "ard/decode":
-			vm.moduleRegistry.Register(&DecodeModule{})
-		case "ard/async":
-			vm.moduleRegistry.Register(&AsyncModule{})
-		}
-	}
+// initialize the part of the standard library that is hardcoded into the compiler
+func (g *GlobalVM) initModuleRegistry() {
+	g.moduleRegistry.Register(&ResultModule{})
+	g.moduleRegistry.Register(&MaybeModule{})
+	g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
+	g.moduleRegistry.Register(&AsyncModule{hq: g})
 }
 
-func (vm *VM) initFFIRegistry() {
+func (vm *GlobalVM) initFFIRegistry() {
 	// Register builtin FFI functions
 	if err := vm.ffiRegistry.RegisterBuiltinFFIFunctions(); err != nil {
 		panic(fmt.Errorf("failed to initialize FFI registry: %w", err))
 	}
+}
+
+// call the program's main function
+func (g *GlobalVM) Run() error {
+	vm := NewVM()
+	vm.hq = g
+	program := g.subject.Program()
+
+	hasMain := false
+	for _, stmt := range program.Statements {
+		if stmt.Expr == nil {
+			continue
+		}
+		if fn, ok := stmt.Expr.Type().(*checker.FunctionDef); ok {
+			if fn.Name == "main" && len(fn.Parameters) == 0 && fn.ReturnType == checker.Void {
+				hasMain = true
+				break
+			}
+		}
+	}
+
+	if !hasMain {
+		return errors.New("No main function found")
+	}
+
+	// build up scope
+	if _, err := vm.Interpret(program); err != nil {
+		return err
+	}
+	return vm.callMain()
+}
+
+// evaluate the subject program as a script
+func (g *GlobalVM) Interpret() (any, error) {
+	vm := NewVM()
+	vm.hq = g
+	program := g.subject.Program()
+	return vm.Interpret(program)
+}
+
+// call into another module
+func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs func() []*runtime.Object) *runtime.Object {
+	// check for Ard code
+	if mvm, ok := g.modules[moduleName]; ok {
+		return mvm.evalFunctionCall(call, getArgs()...)
+	}
+	// check in hardcoded std-lib
+	if g.moduleRegistry.HasModule(moduleName) {
+		module, ok := g.moduleRegistry.handlers[moduleName]
+		if !ok {
+			panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
+		}
+
+		args := []*runtime.Object{}
+		if getArgs != nil {
+			args = getArgs()
+		}
+		return module.Handle(call, args)
+	}
+	panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
+}
+
+func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Object {
+	module, ok := g.modules[moduleName]
+	if !ok {
+		if mod, ok := g.moduleRegistry.handlers[moduleName]; ok {
+			return mod.get(symbol.Name)
+		} else {
+			panic(fmt.Errorf("Module not found: %s", moduleName))
+		}
+	}
+
+	sym, _ := module.scope.get(symbol.Name)
+	return sym
+}
+
+func (g *GlobalVM) addMethod(strct checker.Type, name string, closure Closure) {
+	key := fmt.Sprintf("%p.%s", strct, name)
+	g.methodClosures[key] = closure
+}
+
+func (g *GlobalVM) getMethod(strct checker.Type, name string) (Closure, bool) {
+	key := fmt.Sprintf("%p.%s", strct, name)
+	if closure, ok := g.methodClosures[key]; ok {
+		return closure, true
+	}
+	return nil, false
+}
+
+type VM struct {
+	hq     *GlobalVM
+	scope  *scope
+	result runtime.Object
+
+	moduleScope *scope // Captures the scope where extern functions are defined
+}
+
+func NewVM() *VM {
+	vm := &VM{
+		scope: newScope(nil),
+	}
+	return vm
 }
 
 func (vm *VM) pushScope() {
@@ -84,23 +189,21 @@ func (vm *VM) Eval(expr checker.Expression) *runtime.Object {
 	return vm.eval(expr)
 }
 
+type Closure interface {
+	eval(args ...*runtime.Object) *runtime.Object
+}
+
 /*
- * fns that are bound to a particular execution scope (*VM)
+ * fns that are bound to a particular module VM
  */
-type Closure struct {
+type VMClosure struct {
 	vm            *VM
-	expr          checker.FunctionDef
+	expr          *checker.FunctionDef
 	builtinFn     func(*runtime.Object, *checker.Result) *runtime.Object // for built-in decoder functions
 	capturedScope *scope                                                 // scope at closure creation time
 }
 
-type ExternalFunctionWrapper struct {
-	vm      *VM
-	binding string
-	def     checker.ExternalFunctionDef
-}
-
-func (c Closure) eval(args ...*runtime.Object) *runtime.Object {
+func (c VMClosure) eval(args ...*runtime.Object) *runtime.Object {
 	// Handle built-in functions
 	if c.builtinFn != nil {
 		data := args[0]
@@ -131,15 +234,33 @@ func (c Closure) eval(args ...*runtime.Object) *runtime.Object {
 	return res
 }
 
-func (e ExternalFunctionWrapper) eval(args ...*runtime.Object) *runtime.Object {
+// fns for FFI, which aren't bound to a vm and have no scope
+type ExternClosure struct {
+	hq      *GlobalVM
+	binding string
+	def     checker.ExternalFunctionDef
+}
+
+func (e ExternClosure) eval(args ...*runtime.Object) *runtime.Object {
 	// Call the external function through the FFI registry
-	result, err := e.vm.ffiRegistry.Call(e.vm, e.binding, args, e.def.ReturnType)
+	result, err := e.hq.ffiRegistry.Call(e.binding, args, e.def.ReturnType)
 	if err != nil {
 		panic(fmt.Errorf("FFI call failed for %s: %w", e.binding, err))
 	}
 	return result
 }
 
-func (c Closure) Type() checker.Type {
+func (c VMClosure) Type() checker.Type {
 	return c.expr.Type()
+}
+
+type BuiltInClosure struct {
+	builtinFn func(*runtime.Object, *checker.Result) *runtime.Object
+	retType   checker.Type
+}
+
+func (c BuiltInClosure) eval(args ...*runtime.Object) *runtime.Object {
+	data := args[0]
+	resultType := c.retType.(*checker.Result)
+	return c.builtinFn(data, resultType)
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -17,7 +17,7 @@ import (
 // Only the core _create_connection function is implemented here
 
 // SqliteCreateConnection creates a new SQLite database connection
-func SqliteCreateConnection(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("create_connection expects 1 argument, got %d", len(args)))
 	}
@@ -38,7 +38,7 @@ func SqliteCreateConnection(vm runtime.VM, args []*runtime.Object, _ checker.Typ
 }
 
 // SqliteClose closes a database connection
-func SqliteClose(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("close expects 1 argument, got %d", len(args)))
 	}
@@ -57,7 +57,7 @@ func SqliteClose(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime
 }
 
 // SqliteExec executes a SQL statement
-func SqliteExec(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteExec(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 2 {
 		panic(fmt.Errorf("exec expects 2 arguments, got %d", len(args)))
 	}
@@ -77,7 +77,7 @@ func SqliteExec(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.
 }
 
 // SqliteQuery executes a query and returns all rows
-func SqliteQuery(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 2 {
 		panic(fmt.Errorf("query expects 2 arguments, got %d", len(args)))
 	}
@@ -134,7 +134,7 @@ func SqliteQuery(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime
 }
 
 // SqliteFirst executes a query and returns the first row
-func SqliteFirst(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteFirst(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 2 {
 		panic(fmt.Errorf("first expects 2 arguments, got %d", len(args)))
 	}
@@ -190,7 +190,7 @@ func SqliteFirst(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime
 }
 
 // SqliteInsert inserts a record and returns the inserted row
-func SqliteInsert(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteInsert(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("insert expects 3 arguments, got %d", len(args)))
 	}
@@ -292,7 +292,7 @@ func SqliteInsert(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtim
 }
 
 // SqliteUpdate updates records and returns the updated row
-func SqliteUpdate(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteUpdate(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 4 {
 		panic(fmt.Errorf("update expects 4 arguments, got %d", len(args)))
 	}
@@ -385,7 +385,7 @@ func SqliteUpdate(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtim
 }
 
 // SqliteDelete deletes records and returns whether any were deleted
-func SqliteDelete(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteDelete(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("delete expects 3 arguments, got %d", len(args)))
 	}
@@ -424,7 +424,7 @@ func SqliteDelete(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtim
 }
 
 // SqliteCount counts records matching the where clause
-func SqliteCount(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqliteCount(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("count expects 3 arguments, got %d", len(args)))
 	}

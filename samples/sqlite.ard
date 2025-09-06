@@ -8,7 +8,7 @@ struct Player {
   number: Int,
 }
 
-fn decode_player(data: decode::Dynamic) Player![decode::Error] {
+fn decode_player(data: Dynamic) Player![decode::Error] {
   let id = try decode::run(data, decode::field("id", decode::int))
   let name = try decode::run(data, decode::field("name", decode::string))
   let number = try decode::run(data, decode::field("number", decode::int))
@@ -25,28 +25,28 @@ fn main() {
   db.exec("create table if not exists players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
   // Insert players using flexible map-based API
-  mut player1: [Str: decode::Dynamic] = [:]
+  mut player1: [Str: Dynamic] = [:]
   player1.set("name", decode::from_str("John Doe"))
   player1.set("number", decode::from_int(2))
-  
-  mut player2: [Str: decode::Dynamic] = [:]
+
+  mut player2: [Str: Dynamic] = [:]
   player2.set("name", decode::from_str("James Reece"))
   player2.set("number", decode::from_int(2))
-  
-  mut player3: [Str: decode::Dynamic] = [:]
+
+  mut player3: [Str: Dynamic] = [:]
   player3.set("name", decode::from_str("Michael Jordan"))
   player3.set("number", decode::from_int(23))
-  
+
   db.insert("players", player1).expect("Failed to insert player 1")
   db.insert("players", player2).expect("Failed to insert player 2")
   db.insert("players", player3).expect("Failed to insert player 3")
 
   // Update a player's number using map-based API
-  mut update_values: [Str: decode::Dynamic] = [:]
+  mut update_values: [Str: Dynamic] = [:]
   update_values.set("number", decode::from_int(10))
-  
+
   let updated_player = db.update("players", "id = 1", update_values).expect("Failed to update player")
-  
+
   // Show what was updated
   let updated_name = decode::run(updated_player, decode::field("name", decode::string)).expect("Should have name")
   let updated_number = decode::run(updated_player, decode::field("number", decode::int)).expect("Should have number")

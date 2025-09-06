@@ -35,7 +35,7 @@ func TestSQLiteInsertStruct(t *testing.T) {
 		let db = sqlite::open("test_insert.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("John Doe"))
 		values.set("number", decode::from_int(2))
 
@@ -66,11 +66,11 @@ func TestSQLiteInsertMultipleValues(t *testing.T) {
 		let db = sqlite::open("test_multi.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(5))
 
@@ -91,7 +91,7 @@ func TestSQLiteInsertError(t *testing.T) {
 		let db = sqlite::open("test_error.db").expect("Failed to open database")
 		// Don't create the table - this should cause an error
 
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("John Doe"))
 		values.set("number", decode::from_int(2))
 
@@ -122,13 +122,13 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert user with email
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("email", decode::from_str("john@example.com"))
 		db.insert("users", values1).expect("Failed to insert user 1")
 
 		// Insert user without email (just don't include the email field)
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		db.insert("users", values2).expect("Failed to insert user 2")
 	`)
@@ -152,13 +152,13 @@ func TestSQLiteUpdate(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert initial record
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("John Doe"))
 		values.set("number", decode::from_int(2))
 		db.insert("players", values).expect("Failed to insert player")
 
 		// Update the record using new map-based API
-		mut update_values: [Str: decode::Dynamic] = [:]
+		mut update_values: [Str: Dynamic] = [:]
 		update_values.set("name", decode::from_str("John Smith"))
 		update_values.set("number", decode::from_int(10))
 
@@ -194,13 +194,13 @@ func TestSQLiteUpdateVerification(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert initial record
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("John Doe"))
 		values.set("number", decode::from_int(2))
 		db.insert("players", values).expect("Failed to insert player")
 
 		// Update the record with new map-based API
-		mut update_values: [Str: decode::Dynamic] = [:]
+		mut update_values: [Str: Dynamic] = [:]
 		update_values.set("name", decode::from_str("John Smith"))
 		update_values.set("number", decode::from_int(10))
 
@@ -236,7 +236,7 @@ func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Try to update non-existent record
-		mut update_values: [Str: decode::Dynamic] = [:]
+		mut update_values: [Str: Dynamic] = [:]
 		update_values.set("name", decode::from_str("Ghost Player"))
 		update_values.set("number", decode::from_int(99))
 
@@ -273,13 +273,13 @@ func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
 
 		// Insert initial record with email
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("John Doe"))
 		values.set("email", decode::from_str("john@example.com"))
 		db.insert("users", values).expect("Failed to insert user")
 
 		// Update to remove email (omit from map to set NULL) and change name
-		mut update_values: [Str: decode::Dynamic] = [:]
+		mut update_values: [Str: Dynamic] = [:]
 		update_values.set("name", decode::from_str("John Smith"))
 		// email omitted - will be set to NULL
 
@@ -351,17 +351,17 @@ func TestSQLiteDelete(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 		db.insert("players", values1).expect("Failed to insert player")
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(10))
 		db.insert("players", values2).expect("Failed to insert player")
 
-		mut values3: [Str: decode::Dynamic] = [:]
+		mut values3: [Str: Dynamic] = [:]
 		values3.set("name", decode::from_str("Bob Wilson"))
 		values3.set("number", decode::from_int(23))
 		db.insert("players", values3).expect("Failed to insert player")
@@ -426,17 +426,17 @@ func TestSQLiteDeleteMultiple(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test records
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 		db.insert("players", values1).expect("Failed to insert player")
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(2))
 		db.insert("players", values2).expect("Failed to insert player")
 
-		mut values3: [Str: decode::Dynamic] = [:]
+		mut values3: [Str: Dynamic] = [:]
 		values3.set("name", decode::from_str("Bob Wilson"))
 		values3.set("number", decode::from_int(23))
 		db.insert("players", values3).expect("Failed to insert player")
@@ -468,7 +468,7 @@ func TestSQLiteClose(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert a test record
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("John Doe"))
 		values.set("number", decode::from_int(2))
 		db.insert("players", values).expect("Failed to insert player")
@@ -538,17 +538,17 @@ func TestSQLiteCount(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test records
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 		db.insert("players", values1).expect("Failed to insert player")
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(2))
 		db.insert("players", values2).expect("Failed to insert player")
 
-		mut values3: [Str: decode::Dynamic] = [:]
+		mut values3: [Str: Dynamic] = [:]
 		values3.set("name", decode::from_str("Bob Wilson"))
 		values3.set("number", decode::from_int(23))
 		db.insert("players", values3).expect("Failed to insert player")
@@ -612,17 +612,17 @@ func TestSQLiteExists(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
 
 		// Insert test records
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 		db.insert("players", values1).expect("Failed to insert player")
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(2))
 		db.insert("players", values2).expect("Failed to insert player")
 
-		mut values3: [Str: decode::Dynamic] = [:]
+		mut values3: [Str: Dynamic] = [:]
 		values3.set("name", decode::from_str("Bob Wilson"))
 		values3.set("number", decode::from_int(23))
 		db.insert("players", values3).expect("Failed to insert player")
@@ -847,11 +847,11 @@ func TestSQLiteQueryWithDecode(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(5))
 
@@ -892,11 +892,11 @@ func TestSQLiteQueryDecodeFields(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		// Insert test data
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("John Doe"))
 		values1.set("number", decode::from_int(2))
 
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Jane Smith"))
 		values2.set("number", decode::from_int(5))
 
@@ -1052,7 +1052,7 @@ func TestSQLiteInsMethod(t *testing.T) {
 		let db = sqlite::open("test_ins.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
 
-		mut values: [Str: decode::Dynamic] = [:]
+		mut values: [Str: Dynamic] = [:]
 		values.set("name", decode::from_str("Alice"))
 		values.set("age", decode::from_int(30))
 
@@ -1083,7 +1083,7 @@ func TestSQLiteInsMethodValidation(t *testing.T) {
 		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, available BOOL)").expect("Failed to create table")
 
 		// Test 1: Insert with multiple types and verify returned data
-		mut values1: [Str: decode::Dynamic] = [:]
+		mut values1: [Str: Dynamic] = [:]
 		values1.set("name", decode::from_str("Widget"))
 		values1.set("price", decode::from_float(19.99))
 		values1.set("available", decode::from_bool(true))
@@ -1099,7 +1099,7 @@ func TestSQLiteInsMethodValidation(t *testing.T) {
 		let id1 = decode::run(row1, decode::field("id", decode::int)).expect("Should have id")
 
 		// Test 2: Insert with partial columns and verify
-		mut values2: [Str: decode::Dynamic] = [:]
+		mut values2: [Str: Dynamic] = [:]
 		values2.set("name", decode::from_str("Gadget"))
 		values2.set("price", decode::from_float(29.99))
 

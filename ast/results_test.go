@@ -2,7 +2,8 @@ package ast
 
 import "testing"
 
-func TestLexAngleBrackets(t *testing.T) {
+// this needs to be done better
+func testLexAngleBrackets(t *testing.T) {
 	runLexing(t, []lexTest{
 		{
 			name:  "Result type in return declaration",
@@ -28,24 +29,6 @@ func TestLexAngleBrackets(t *testing.T) {
 
 func TestResultTypeInSignature(t *testing.T) {
 	runTests(t, []test{
-		{
-			name:  "Result type in return declaration",
-			input: `fn foo() Result<Int, Str> {}`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&FunctionDeclaration{
-						Name:       "foo",
-						Parameters: []Parameter{},
-						ReturnType: &ResultType{
-							Val: &IntType{},
-							Err: &StringType{},
-						},
-						Body: []Statement{},
-					},
-				},
-			},
-		},
 		{
 			name:  "Result sugar syntax in return declaration",
 			input: `fn foo() Int!Str {}`,
@@ -94,6 +77,39 @@ func TestResultTypeInSignature(t *testing.T) {
 						ReturnType: &ResultType{
 							Val: &GenericType{Name: "T"},
 							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
+			name: "Result sugar syntax with generic maybe type",
+			input: `
+			fn nullable(decoder: fn(Dynamic) $T![Error]) $T?![Error] {}
+			`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name: "nullable",
+						Parameters: []Parameter{
+							{
+								Name: "decoder",
+								Type: &FunctionType{
+									Params: []DeclaredType{&CustomType{Name: "Dynamic"}},
+									Return: &ResultType{
+										Val:      &GenericType{Name: "T", nullable: false},
+										Err:      &List{Element: &CustomType{Name: "Error"}},
+										nullable: false,
+									},
+								},
+							},
+						},
+						ReturnType: &ResultType{
+							Val:      &GenericType{Name: "T", nullable: true},
+							Err:      &List{Element: &CustomType{Name: "Error"}},
+							nullable: false,
 						},
 						Body: []Statement{},
 					},

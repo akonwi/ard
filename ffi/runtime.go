@@ -7,45 +7,25 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // Runtime module FFI functions
 
 // Print prints a value to stdout
-func Print(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func Print(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
 
-	arg := args[0]
-	switch arg := arg.Raw().(type) {
-	case string:
-		fmt.Println(arg)
-		return runtime.Void()
-	case bool, int, float64:
-		fmt.Printf("%v\n", arg)
-		return runtime.Void()
-	}
-
-	var str string
-
-	call := &checker.FunctionCall{Name: "to_str", Args: []checker.Expression{}}
-	// could be `arg.cast[T](as: T) (T, bool)`
-	if _, ok := arg.Type().(*checker.StructDef); ok {
-		str = vm.EvalStructMethod(arg, call).Raw().(string)
-	} else if enum, ok := arg.Type().(*checker.Enum); ok {
-		str = vm.EvalEnumMethod(arg, call, enum).Raw().(string)
-	} else {
-		panic(fmt.Errorf("Encountered an unprintable: %s", arg))
-	}
+	str := args[0].AsString()
 
 	fmt.Println(str)
 	return runtime.Void()
 }
 
 // ReadLine reads a line from stdin
-func ReadLine(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func ReadLine(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 0 {
 		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
@@ -65,7 +45,7 @@ func ReadLine(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Ob
 }
 
 // PanicWithMessage panics with a message
-func PanicWithMessage(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func PanicWithMessage(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
@@ -81,7 +61,7 @@ func PanicWithMessage(vm runtime.VM, args []*runtime.Object, _ checker.Type) *ru
 // Environment module FFI functions
 
 // EnvGet retrieves an environment variable
-func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Object {
+func EnvGet(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}
@@ -101,7 +81,7 @@ func EnvGet(vm runtime.VM, args []*runtime.Object, _ checker.Type) *runtime.Obje
 	return runtime.MakeStr(value).ToSome()
 }
 
-func GetTodayString(vm runtime.VM, _ []*runtime.Object, _ checker.Type) *runtime.Object {
+func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 	year, month, day := time.Now().Date()
 	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
 }

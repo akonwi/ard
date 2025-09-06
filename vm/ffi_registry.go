@@ -7,13 +7,13 @@ import (
 	"sync"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 // FFIFunc represents the uniform signature for all FFI functions
 // Now includes VM access for calling instance methods and other VM operations
 // Returns *runtime.Object - functions handle their own Result/Maybe creation
-type FFIFunc func(vm runtime.VM, args []*runtime.Object, returnType checker.Type) *runtime.Object
+type FFIFunc func(args []*runtime.Object, returnType checker.Type) *runtime.Object
 
 // RuntimeFFIRegistry manages FFI functions available at runtime
 type RuntimeFFIRegistry struct {
@@ -47,7 +47,7 @@ func (r *RuntimeFFIRegistry) Get(binding string) (FFIFunc, bool) {
 }
 
 // Call executes an FFI function with the given arguments
-func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
+func (r *RuntimeFFIRegistry) Call(binding string, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
 	fn, exists := r.Get(binding)
 	if !exists {
 		return nil, fmt.Errorf("External function not found: %s", binding)
@@ -71,7 +71,7 @@ func (r *RuntimeFFIRegistry) Call(vm *VM, binding string, args []*runtime.Object
 	}()
 
 	// Direct call with VM access - no reflection needed!
-	result = fn(vm, args, returnType)
+	result = fn(args, returnType)
 	return result, nil
 }
 

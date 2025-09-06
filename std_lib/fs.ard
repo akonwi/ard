@@ -1,0 +1,11 @@
+extern fn exists(path: Str) Bool = "FS_Exists"
+
+extern fn create_file(path: Str) Bool!Str = "FS_CreateFile"
+
+extern fn write(path: Str, content: Str) Void!Str = "FS_WriteFile"
+
+extern fn append(path: Str, content: Str) Void!Str = "FS_AppendFile"
+
+extern fn read(path: Str) Str!Str = "FS_ReadFile"
+
+extern fn delete(path: Str) Void!Str = "FS_DeleteFile"

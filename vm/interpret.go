@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/vm/runtime"
+	"github.com/akonwi/ard/runtime"
 )
 
 func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
@@ -47,36 +47,6 @@ func (vm *VM) callMain() error {
 	return err
 }
 
-// evalUserModuleFunction evaluates a function call from a user-defined module
-func (vm *VM) evalUserModuleFunction(module checker.Module, call *checker.FunctionCall) *runtime.Object {
-	// Look up the function in the module
-	symbol := module.Get(call.Name)
-	if symbol.IsZero() {
-		panic(fmt.Errorf("Function %s not found in module %s", call.Name, module.Path()))
-	}
-
-	// Verify it's a function
-	_, ok := symbol.Type.(*checker.FunctionDef)
-	if !ok {
-		panic(fmt.Errorf("%s is not a function in module %s", call.Name, module.Path()))
-	}
-
-	// Evaluate arguments
-	args := make([]*runtime.Object, len(call.Args))
-	for i := range call.Args {
-		args[i] = vm.eval(call.Args[i])
-	}
-
-	// create new vm for module
-	mvm := New(module.Program().Imports)
-	// build up the module's environment
-	mvm.Interpret(module.Program())
-	// copy the module scope bindings (struct method closures) to caller VM
-	vm.importModuleScope(mvm)
-	// call the function
-	return mvm.evalFunctionCall(call, args...)
-}
-
 func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	if stmt.Break {
 		vm.scope._break()
@@ -91,26 +61,21 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		return runtime.Void()
 	case *checker.StructDef:
 		// Process struct methods and create closures with captured scope
-		for methodName, methodDef := range s.Methods {
+		for methodName, _ := range s.Methods {
 			// Create a modified function definition with "@" as first parameter
-			methodDefWithSelf := *methodDef // Copy the original
-			methodDefWithSelf.Parameters = append([]checker.Parameter{
-				{Name: "@", Type: nil}, // "@" parameter for struct instance
-			}, methodDef.Parameters...)
-
-			closure := &Closure{
-				vm:            vm,
-				expr:          methodDefWithSelf,
-				capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
-			}
+			closure := vm.createMethodClosure(s, methodName)
 			// Store using struct.method key format
-			key := s.Name + "." + methodName
-			closureObj := runtime.Make(closure, methodDef)
-			vm.scope.add(key, closureObj)
+			vm.hq.addMethod(s, methodName, closure)
 		}
 		return runtime.Void()
 	case *checker.VariableDef:
 		val := vm.eval(s.Value)
+		// for debugging:
+		// if s.Type().String() != val.Type().String() {
+		// fmt.Printf("type mismatch: let %s: %s = %s\n", s.Name, s.Type(), val.Type())
+		// }
+		// the checker node knows its exact type, because the value might be of a generic type
+		val.SetRefinedType(s.Type())
 		// can be broken by `try`
 		if vm.scope.broken {
 			return val
@@ -210,6 +175,24 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		return runtime.Void()
 	default:
 		panic(fmt.Errorf("Unimplemented statement: %T", s))
+	}
+}
+
+func (vm *VM) createMethodClosure(strct *checker.StructDef, methodName string) *VMClosure {
+	methodDef := strct.Methods[methodName]
+	// Create a modified function definition with "@" as first parameter
+	copy := *methodDef // Copy the original
+	methodDefWithSelf := &copy
+	methodDefWithSelf.Parameters = append([]checker.Parameter{
+		{Name: "@", Type: nil}, // "@" parameter for struct instance
+	}, methodDef.Parameters...)
+
+	return &VMClosure{
+		vm:   vm,
+		expr: methodDefWithSelf,
+
+		// todo: this should be scope from the module the type is defined in. currently, it's the caller scope
+		capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
 	}
 }
 
@@ -331,7 +314,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 		return runtime.Void()
 	case *checker.FunctionDef:
-		closure := &Closure{vm: vm, expr: *e, capturedScope: vm.scope}
+		closure := &VMClosure{vm: vm, expr: e, capturedScope: vm.scope}
 		obj := runtime.Make(closure, closure.Type())
 		if e.Name != "" {
 			vm.scope.add(e.Name, obj)
@@ -339,8 +322,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return obj
 	case *checker.ExternalFunctionDef:
 		// Create an external function wrapper
-		extFn := &ExternalFunctionWrapper{
-			vm:      vm,
+		extFn := &ExternClosure{
+			hq:      vm.hq,
 			binding: e.ExternalBinding,
 			def:     *e,
 		}
@@ -375,55 +358,31 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleFunctionCall:
 		{
-			// first check in std lib
-			if vm.moduleRegistry.HasModule(e.Module) {
-				return vm.moduleRegistry.Handle(e.Module, vm, e.Call)
-			}
-
-			// Check for embedded modules with external functions
-			if module, ok := vm.imports[e.Module]; ok {
-				if symbol := module.Get(e.Call.Name); !symbol.IsZero() {
-					// Check if this is an external function
-					if extFuncDef, ok := symbol.Type.(*checker.ExternalFunctionDef); ok {
-						// Create an ExternalFunctionWrapper and call it
-						wrapper := ExternalFunctionWrapper{
-							vm:      vm,
-							binding: extFuncDef.ExternalBinding,
-							def:     *extFuncDef,
-						}
-
-						// Convert call arguments to objects
-						args := make([]*runtime.Object, len(e.Call.Args))
-						for i, arg := range e.Call.Args {
-							args[i] = vm.eval(arg)
-						}
-
-						return wrapper.eval(args...)
-					}
+			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
+				// Convert call arguments to objects
+				args := make([]*runtime.Object, len(e.Call.Args))
+				for i, arg := range e.Call.Args {
+					args[i] = vm.eval(arg)
 				}
-			}
-
-			// Check for user modules (modules with function bodies)
-			if module, ok := vm.imports[e.Module]; ok {
-				// Check if this is a user module by seeing if the function has a body
-				if symbol := module.Get(e.Call.Name); !symbol.IsZero() {
-					if functionDef, ok := symbol.Type.(*checker.FunctionDef); ok && functionDef.Body != nil {
-						return vm.evalUserModuleFunction(module, e.Call)
-					}
-				}
-			}
-
-			panic(fmt.Errorf("Unimplemented: %s::%s()", e.Module, e.Call.Name))
+				return args
+			})
 		}
 	case *checker.ModuleStaticFunctionCall:
 		{
+			// todo: revisit this
 			// Handle module static function calls like http::Response::new()
-			if vm.moduleRegistry.HasModule(e.Module) {
-				// Pass the struct context to the module handler
-				return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
-			}
+			// if vm.moduleRegistry.HasModule(e.Module) {
+			// 	// Pass the struct context to the module handler
+			// 	return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
+			// }
 
-			panic(fmt.Errorf("Unimplemented: %s::%s::%s()", e.Module, e.Struct, e.Call.Name))
+			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
+				args := []*runtime.Object{}
+				for _, arg := range e.Call.Args {
+					args = append(args, vm.eval(arg))
+				}
+				return args
+			})
 		}
 	case *checker.StaticFunctionCall:
 		{
@@ -443,7 +402,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			}
 
 			// cast to a func
-			fn := obj.Raw().(*Closure)
+			fn := obj.Raw().(*VMClosure)
 
 			args := make([]*runtime.Object, len(e.Call.Args))
 			for i := range e.Call.Args {
@@ -558,7 +517,9 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			for name, ftype := range strct.Fields {
 				val, ok := e.Fields[name]
 				if ok {
-					raw[name] = vm.eval(val)
+					val := vm.eval(val)
+					val.SetRefinedType(ftype)
+					raw[name] = val
 				} else {
 					// assume it's a $T? if the checker allowed it
 					raw[name] = runtime.MakeMaybe(nil, ftype)
@@ -650,18 +611,21 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleSymbol:
 		// Handle module symbol references (like decode::string as a function value)
-		if _, ok := e.Symbol.Type.(*checker.FunctionDef); ok {
-			// For function symbols, we need to get the actual function object from the module
-			if vm.moduleRegistry.HasModule(e.Module) {
-				// Create a function call to get the function object
-				call := checker.CreateCall(e.Symbol.Name, []checker.Expression{}, *e.Symbol.Type.(*checker.FunctionDef))
-				return vm.moduleRegistry.Handle(e.Module, vm, call)
-			}
-			panic(fmt.Errorf("Module not found: %s", e.Module))
-		}
+		// if _, ok := e.Symbol.Type.(*checker.FunctionDef); ok {
+		// 	// For function symbols, we need to get the actual function object from the module
+		// 	// todo: it should be a simple symbol retrieval
+		// 	if vm.moduleRegistry.HasModule(e.Module) {
+		// 		// Create a function call to get the function object
+		// 		call := checker.CreateCall(e.Symbol.Name, []checker.Expression{}, *e.Symbol.Type.(*checker.FunctionDef))
+		// 		return vm.hq.callOn(e.Module, call, nil)
+		// 	}
+		// 	panic(fmt.Errorf("Module not found: %s", e.Module))
+		// }
 		// For other symbol types (like enums), we would handle them here
 		// For now, just return the symbol as-is
-		return runtime.Make(e.Symbol, e.Symbol.Type)
+		// todo: wtf?
+		// return runtime.Make(e.Symbol, e.Symbol.Type)
+		return vm.hq.lookup(e.Module, e.Symbol)
 	case *checker.CopyExpression:
 		// Evaluate the expression and return a deep copy
 		original := vm.eval(e.Expr)
@@ -678,34 +642,17 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 		panic(fmt.Errorf("Undefined: %s", call.Name))
 	}
 
-	// Check if it's a regular closure
-	if closure, ok := sig.Raw().(*Closure); ok {
+	if closure, ok := sig.Raw().(Closure); ok {
 		args := _args
 		// if no args are provided but the function has parameters, use the call.Args
-		if len(args) == 0 && len(sig.Type().(*checker.FunctionDef).Parameters) > 0 {
+		if len(args) == 0 {
 			args = make([]*runtime.Object, len(call.Args))
 
 			for i := range call.Args {
 				args[i] = vm.eval(call.Args[i])
 			}
 		}
-
 		return closure.eval(args...)
-	}
-
-	// Check if it's an external function
-	if extFn, ok := sig.Raw().(*ExternalFunctionWrapper); ok {
-		args := _args
-		// if no args are provided but the function has parameters, use the call.Args
-		if len(args) == 0 && len(extFn.def.Parameters) > 0 {
-			args = make([]*runtime.Object, len(call.Args))
-
-			for i := range call.Args {
-				args[i] = vm.eval(call.Args[i])
-			}
-		}
-
-		return extFn.eval(args...)
 	}
 
 	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.Type()))
@@ -795,6 +742,9 @@ func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runt
 			values[i] = runtime.MakeStr(str)
 		}
 		return runtime.MakeList(checker.Str, values...)
+	case "starts_with":
+		prefix := vm.eval(m.Args[0]).AsString()
+		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
 	case "to_str":
 		return subj
 	case "trim":
@@ -844,6 +794,11 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 			panic(fmt.Errorf("Index out of range (%d) on list of length %d", index, len(raw)))
 		}
 		return raw[index]
+	case "prepend":
+		newItem := vm.eval(m.Method.Args[0])
+		raw = append([]*runtime.Object{newItem}, raw...)
+		self.Set(raw)
+		return self
 	case "push":
 		raw = append(raw, vm.eval(m.Method.Args[0]))
 		self.Set(raw)
@@ -861,7 +816,7 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 		return runtime.MakeInt(len(raw))
 	case "sort":
 		{
-			_isLess := vm.eval(m.Method.Args[0]).Raw().(*Closure)
+			_isLess := vm.eval(m.Method.Args[0]).Raw().(*VMClosure)
 
 			slices.SortFunc(raw, func(a, b *runtime.Object) int {
 				if _isLess.eval(a, b).AsBool() {
@@ -953,7 +908,7 @@ func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *
 func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
 	// Special handling for HTTP Response methods
 	if subj.Type() == checker.HttpResponseDef {
-		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
+		http := vm.hq.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
 		args := make([]*runtime.Object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])
@@ -961,7 +916,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		return http.evalHttpResponseMethod(subj, call, args)
 	}
 	if subj.Type() == checker.HttpRequestDef {
-		http := vm.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
+		http := vm.hq.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
 		args := make([]*runtime.Object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])
@@ -971,55 +926,18 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	// Database methods are now handled through standard library FFI
 	// Special handling for Fiber methods
 	if subj.Type() == checker.Fiber {
-		async := vm.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
+		async := vm.hq.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
 		args := make([]*runtime.Object, len(call.Args))
 		for i := range call.Args {
 			args[i] = vm.eval(call.Args[i])
 		}
 		return async.EvalFiberMethod(subj, call, args)
 	}
-	// Special handling for decode::Error methods
-	if subj.Type() == checker.DecodeErrorDef {
-		switch call.Name {
-		case "to_str":
-			expected := subj.Struct_Get("expected").AsString()
-			found := subj.Struct_Get("found").AsString()
-			pathList := subj.Struct_Get("path").AsList()
-
-			pathStr := ""
-			if len(pathList) > 0 {
-				var pathBuilder strings.Builder
-				for i, part := range pathList {
-					partStr := part.AsString()
-					if i == 0 {
-						// First element: no leading dot
-						pathBuilder.WriteString(partStr)
-					} else {
-						// Subsequent elements: add dot only if not starting with bracket
-						if strings.HasPrefix(partStr, "[") {
-							pathBuilder.WriteString(partStr)
-						} else {
-							pathBuilder.WriteString(".")
-							pathBuilder.WriteString(partStr)
-						}
-					}
-				}
-				pathStr = " at " + pathBuilder.String()
-			}
-
-			errorMsg := "Decode error: expected " + expected + ", found " + found + pathStr
-			return runtime.MakeStr(errorMsg)
-		}
-	}
 
 	istruct := subj.Type().(*checker.StructDef)
 
-	// Try to find pre-created closure with captured lexical scope
-	key := istruct.Name + "." + call.Name
-	
-	if closureObj, found := vm.scope.get(key); found {
-		closure := closureObj.Raw().(*Closure)
-
+	closure, ok := vm.hq.getMethod(istruct, call.Name)
+	if ok {
 		// Prepare arguments: struct instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)
 		args[0] = subj // "@" - the struct instance
@@ -1030,7 +948,6 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		return closure.eval(args...)
 	}
 
-	// No fallback - if pre-created closure not found, it's an error
 	panic(fmt.Errorf("Method %s not found for struct %s", call.Name, istruct.Name))
 }
 

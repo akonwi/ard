@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -62,6 +63,45 @@ func (o *Object) Reassign(val *Object) {
 	// Update target type to match value type.
 	// o._type could be a generic and if the checker allowed it, o should become the new type
 	o._type = val._type
+}
+
+// todo: eliminating unknown generics in the checker needs more work, particularly for nested scopes - see decode::nullable
+//   - the checker successfully refines on variable definitions
+//   - it does not work on chained expressions
+//     let result = returns_generic()
+//     result.expect("foobar").do_stuff() // .expect(...) returns an open generic
+func (o *Object) SetRefinedType(declared checker.Type) {
+	if result, ok := o._type.(*checker.Result); ok {
+		if o.isErr {
+			o._type = result.Err()
+		}
+		if o.isOk {
+			o._type = result.Val()
+		}
+	}
+	if checker.IsMaybe(o._type) {
+		o._type = declared
+	}
+	if _, ok := o._type.(*checker.Any); ok {
+		o._type = declared
+	}
+	if strings.Contains(o.Type().String(), "$") && !strings.Contains(declared.String(), "$") {
+		o._type = declared
+
+		// for collections, refine insides
+		switch declared := declared.(type) {
+		case *checker.List:
+			raw := o.raw.([]*Object)
+			for i := range raw {
+				raw[i].SetRefinedType(declared.Of())
+			}
+		case *checker.Map:
+			raw := o.raw.(map[string]*Object)
+			for _, v := range raw {
+				v.SetRefinedType(declared.Value())
+			}
+		}
+	}
 }
 
 // deep copies an object
@@ -224,7 +264,7 @@ func (o *Object) AsList() []*Object {
 	if list, ok := o.raw.([]*Object); ok {
 		return list
 	}
-	panic(fmt.Sprintf("%T is not a List", o._type))
+	panic(fmt.Sprintf("%s could not be cast to a List", o))
 }
 
 func (o *Object) AsMap() map[string]*Object {
@@ -351,6 +391,8 @@ func (o Object) Map_GetKey(str string) *Object {
 		} else {
 			key.raw = _float
 		}
+	case checker.Dynamic.String():
+		key.raw = str
 	default:
 		panic(fmt.Errorf("Unsupported map key: %s", keyType))
 	}

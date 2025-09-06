@@ -1,6 +1,11 @@
 # TODO
 
 ## Initial 0.1.0 build
+- [ ] remove implicit "it" in union matches
+- [ ] need a void expression (Unit)
+- [ ] need to be able to alias fn signatures with `type`
+  - a single type union should act as an alias
+  - matching is only required if it supports variadic types
 - [ ] in ard/sqlite, implement prepared statements
   - needs API design
 - [ ] `match` as a replacement for if statements
@@ -54,8 +59,8 @@
 - [ ] loops as expressions (comprehensions?)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
   ```
-  fn first(as: fn(decode::Dynamic) $T![decode::Error]) fn(decode::Dynamic) $T![decode::Error] {
-    fn(data: decode::Dynamic) $T![decode::Error] {
+  fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
+    fn(data: Dynamic) $T![decode::Error] {
       let list = try decode::run(data, decode::list(as))
       match list.size() {
         0 => Result::err([decode::Error{path: [""], expected: "non-empty list", found: "empty list"}]),
@@ -64,3 +69,4 @@
     }
   }
   ```
+- [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings

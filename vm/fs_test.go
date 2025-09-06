@@ -2,7 +2,7 @@ package vm_test
 
 import "testing"
 
-func TestVM(t *testing.T) {
+func TestFS(t *testing.T) {
 	runTests(t, []test{
 		{
 			name: "fs::exists returns false when there is something at the given path",
@@ -19,12 +19,12 @@ func TestVM(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "fs::create_file returns Void!Str",
+			name: "fs::create_file returns Bool!Str",
 			input: `
 				use ard/fs
-				fs::create_file("./fixtures/fake.file")
+				fs::create_file("./fixtures/fake.file").expect("Failed to create file")
 				`,
-			want: nil,
+			want: true,
 		},
 		{
 			name: "fs::write returns Void!Str",
@@ -45,8 +45,8 @@ func TestVM(t *testing.T) {
 			input: `
 				use ard/fs
 				match fs::read("./fixtures/fake.file") {
-					s => s,
-					_ => "no file",
+					ok(s) => s,
+					err => err,
 				}`,
 			want: "content-appended",
 		},
@@ -54,11 +54,9 @@ func TestVM(t *testing.T) {
 			name: "fs::read returns an empty maybe when there is nothing at the given path",
 			input: `
 				use ard/fs
-				match fs::read("foo") {
-					s => s,
-				  _ => "no file",
-				}`,
-			want: "no file",
+				fs::read("foo").is_err()
+				`,
+			want: true,
 		},
 		{
 			name: "fs::delete returns Void!Str",
