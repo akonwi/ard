@@ -1,6 +1,8 @@
 # TODO
 
 ## Initial 0.1.0 build
+- [ ] remove implicit "it" in union matches
+- [ ] need a void expression (Unit)
 - [ ] need to be able to alias fn signatures with `type`
   - a single type union should act as an alias
   - matching is only required if it supports variadic types
@@ -67,3 +69,4 @@
     }
   }
   ```
+- [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
