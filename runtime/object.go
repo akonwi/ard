@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -83,6 +84,23 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	}
 	if _, ok := o._type.(*checker.Any); ok {
 		o._type = declared
+	}
+	if strings.Contains(o.Type().String(), "$") && !strings.Contains(declared.String(), "$") {
+		o._type = declared
+
+		// for collections, refine insides
+		switch declared := declared.(type) {
+		case *checker.List:
+			raw := o.raw.([]*Object)
+			for i := range raw {
+				raw[i].SetRefinedType(declared.Of())
+			}
+		case *checker.Map:
+			raw := o.raw.(map[string]*Object)
+			for _, v := range raw {
+				v.SetRefinedType(declared.Value())
+			}
+		}
 	}
 }
 
