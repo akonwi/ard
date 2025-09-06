@@ -14,8 +14,6 @@ func findInStdLib(path string) (Module, bool) {
 	switch path {
 	case "ard/async":
 		return AsyncPkg{}, true
-	case "ard/fs":
-		return FsPkg{}, true
 	case "ard/http":
 		return HttpPkg{}, true
 	case "ard/json":
@@ -26,77 +24,6 @@ func findInStdLib(path string) (Module, bool) {
 		return ResultPkg{}, true
 	}
 	return nil, false
-}
-
-/* ard/fs */
-type FsPkg struct{}
-
-func (pkg FsPkg) Path() string {
-	return "ard/fs"
-}
-
-func (pkg FsPkg) Program() *Program {
-	return nil
-}
-func (pkg FsPkg) Get(name string) Symbol {
-	switch name {
-	case "append":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
-				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	case "create_file":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "path", Type: Str}},
-				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	case "delete":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "path", Type: Str}},
-				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	case "exists":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "path", Type: Str}},
-				ReturnType: Bool,
-			},
-		}
-	case "read":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "path", Type: Str}},
-				ReturnType: &Maybe{Str},
-			},
-		}
-	case "write":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "path", Type: Str}, {Name: "content", Type: Str}},
-				ReturnType: MakeResult(Void, Str),
-			},
-		}
-	default:
-		return Symbol{}
-	}
 }
 
 /* ard/maybe */

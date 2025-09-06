@@ -49,6 +49,24 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("ExtractField", ffi.ExtractField); err != nil {
 		return fmt.Errorf("failed to register ExtractField: %w", err)
 	}
+	if err := r.Register("FS_Exists", ffi.FS_Exists); err != nil {
+		return fmt.Errorf("failed to register FS_Exists: %w", err)
+	}
+	if err := r.Register("FS_CreateFile", ffi.FS_CreateFile); err != nil {
+		return fmt.Errorf("failed to register FS_CreateFile: %w", err)
+	}
+	if err := r.Register("FS_WriteFile", ffi.FS_WriteFile); err != nil {
+		return fmt.Errorf("failed to register FS_WriteFile: %w", err)
+	}
+	if err := r.Register("FS_AppendFile", ffi.FS_AppendFile); err != nil {
+		return fmt.Errorf("failed to register FS_AppendFile: %w", err)
+	}
+	if err := r.Register("FS_ReadFile", ffi.FS_ReadFile); err != nil {
+		return fmt.Errorf("failed to register FS_ReadFile: %w", err)
+	}
+	if err := r.Register("FS_DeleteFile", ffi.FS_DeleteFile); err != nil {
+		return fmt.Errorf("failed to register FS_DeleteFile: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}

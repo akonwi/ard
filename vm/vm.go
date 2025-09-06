@@ -55,7 +55,6 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 // initialize the part of the standard library that is hardcoded into the compiler
 func (g *GlobalVM) initModuleRegistry() {
 	g.moduleRegistry.Register(&ResultModule{})
-	g.moduleRegistry.Register(&FSModule{})
 	g.moduleRegistry.Register(&MaybeModule{})
 	g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
 	// g.moduleRegistry.Register(&DecodeModule{vm: NewVM()})
