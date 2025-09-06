@@ -51,6 +51,24 @@ func convertToGoPattern(path string) string {
 
 func (m *HTTPModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
+	// this is Response::new
+	case "new":
+		// Response::new(status: Int, body: Str) -> Response
+		if len(args) != 2 {
+			panic(fmt.Errorf("Response::new expects 2 arguments, got %d", len(args)))
+		}
+
+		status := args[0].Raw().(int)
+		body := args[1].Raw().(string)
+
+		// Create response object structure
+		respMap := map[string]*runtime.Object{
+			"status":  runtime.MakeInt(status),
+			"headers": runtime.Make(make(map[string]*runtime.Object), checker.MakeMap(checker.Str, checker.Str)),
+			"body":    runtime.MakeStr(body),
+		}
+
+		return runtime.MakeStruct(checker.HttpResponseDef, respMap)
 	case "serve":
 		port := args[0].Raw().(int)
 		handlers := args[1].Raw().(map[string]*runtime.Object)
@@ -266,27 +284,7 @@ func (m *HTTPModule) HandleStatic(structName string, call *checker.FunctionCall,
 }
 
 func (m *HTTPModule) handleResponseStatic(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
-	switch call.Name {
-	case "new":
-		// Response::new(status: Int, body: Str) -> Response
-		if len(args) != 2 {
-			panic(fmt.Errorf("Response::new expects 2 arguments, got %d", len(args)))
-		}
-
-		status := args[0].Raw().(int)
-		body := args[1].Raw().(string)
-
-		// Create response object structure
-		respMap := map[string]*runtime.Object{
-			"status":  runtime.MakeInt(status),
-			"headers": runtime.Make(make(map[string]*runtime.Object), checker.MakeMap(checker.Str, checker.Str)),
-			"body":    runtime.MakeStr(body),
-		}
-
-		return runtime.MakeStruct(checker.HttpResponseDef, respMap)
-	default:
-		panic(fmt.Errorf("Unimplemented: Response::%s()", call.Name))
-	}
+	panic(fmt.Errorf("Unimplemented: Response::%s()", call.Name))
 }
 
 // do HTTP::Response methods

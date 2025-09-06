@@ -376,7 +376,13 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			// 	return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
 			// }
 
-			panic(fmt.Errorf("Unimplemented: %s::%s::%s()", e.Module, e.Struct, e.Call.Name))
+			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
+				args := []*runtime.Object{}
+				for _, arg := range e.Call.Args {
+					args = append(args, vm.eval(arg))
+				}
+				return args
+			})
 		}
 	case *checker.StaticFunctionCall:
 		{
