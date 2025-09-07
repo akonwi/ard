@@ -63,7 +63,7 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 func (g *GlobalVM) initModuleRegistry() {
 	g.moduleRegistry.Register(&ResultModule{})
 	g.moduleRegistry.Register(&MaybeModule{})
-	g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
+	// g.moduleRegistry.Register(&HTTPModule{hq: g, vm: NewVM()})
 }
 
 func (vm *GlobalVM) initFFIRegistry() {

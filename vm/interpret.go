@@ -906,24 +906,6 @@ func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *
 }
 
 func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
-	// Special handling for HTTP Response methods
-	if subj.Type() == checker.HttpResponseDef {
-		http := vm.hq.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
-		args := make([]*runtime.Object, len(call.Args))
-		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
-		}
-		return http.evalHttpResponseMethod(subj, call, args)
-	}
-	if subj.Type() == checker.HttpRequestDef {
-		http := vm.hq.moduleRegistry.handlers[checker.HttpPkg{}.Path()].(*HTTPModule)
-		args := make([]*runtime.Object, len(call.Args))
-		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
-		}
-		return http.evalHttpRequestMethod(subj, call, args)
-	}
-
 	istruct := subj.Type().(*checker.StructDef)
 
 	closure, ok := vm.hq.getMethod(istruct, call.Name)

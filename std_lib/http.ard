@@ -1,0 +1,80 @@
+enum Method {
+  Get,
+	Post,
+	Put,
+	Del,
+	Patch,
+	Options,
+}
+
+// refactor: enums can have methods and implement traits but don't have reference to the variant
+fn method_to_str(method: Method) Str {
+  match method {
+    Method::Get => "GET",
+    Method::Post => "POST",
+    Method::Put => "PUT",
+    Method::Del => "DELETE",
+    Method::Patch => "PATCH",
+    Method::Options => "OPTIONS",
+  }
+}
+
+struct Request {
+  method:  Method,
+	url:     Str,
+	headers: [Str:Str],
+	body:    Str?,
+
+	// inbound requests have the *http.Request
+  raw: Dynamic?,
+}
+
+private extern fn get_req_path(req: Dynamic) Str = "GetReqPath"
+private extern fn get_path_value(req: Dynamic, name: Str) Str = "GetPathValue"
+private extern fn get_query_param(req: Dynamic, name: Str) Str = "GetQueryParam"
+
+impl Request {
+  fn path() Str? {
+    match @raw {
+      raw => get_req_path(raw),
+      _ => maybe::none()
+    }
+  }
+
+  fn path_param(name: Str) Str {
+    match @raw {
+      raw => get_path_value(raw, name),
+      _ => ""
+    }
+  }
+
+  fn query_param(name: Str) Str {
+    match @raw {
+      raw => get_query_param(raw, name),
+      _ => ""
+    }
+  }
+}
+
+struct Response {
+  status:  Int,
+	headers: [Str: Str],
+	body:    Str,
+}
+
+fn Response::new(status: Int, body: Str) Response {
+  Response{status: status, body: body, headers: [:] }
+}
+
+impl Response {
+  fn is_ok() Bool {
+    @status >= 200 and @status <= 300
+  }
+}
+
+private extern fn _send(method: Str, url: Str, body: Str, headers: [Str:Str]) Response!Str = "HTTP_Send"
+
+fn send(req: Request) Response!Str {
+  let method = method_to_str(req.method)
+  _send(method, req.url, req.body, req.headers)
+}
