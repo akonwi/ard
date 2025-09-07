@@ -47,8 +47,8 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 	// Execute the worker function in the current VM context first
 	// This will handle the parsing and setup
 	if fn, ok := workerFn.Raw().(*VMClosure); ok {
-		// Create a copy of the closure with a new VM for isolation
-		isolatedFn := *fn
+		// Copy the closure and give it a new VM
+		isolatedFn := fn.copy()
 		isolatedFn.vm = NewVM()
 		isolatedFn.vm.hq = m.hq
 		// Start the goroutine with the evaluated function
@@ -61,7 +61,6 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 				}
 			}()
 
-			// Call the function - this should work since it's already evaluated
 			isolatedFn.eval()
 		}()
 	}
@@ -70,8 +69,7 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 	fields := map[string]*runtime.Object{
 		"__wg": runtime.MakeDynamic(wg),
 	}
-	strct := runtime.MakeStruct(checker.Fiber, fields)
-	return strct
+	return runtime.MakeStruct(checker.Fiber, fields)
 }
 
 func (m *AsyncModule) handleSleep(args []*runtime.Object) *runtime.Object {

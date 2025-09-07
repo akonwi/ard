@@ -6,21 +6,19 @@ import (
 )
 
 func TestAsyncSleep(t *testing.T) {
-	t.Skip("Need to sort out fiber isolation")
 	start := time.Now()
 	run(t, `
 		use ard/async
 
-		async::sleep(300)
+		async::sleep(100)
 	`)
 	elapsed := time.Since(start)
-	if elapsed < time.Duration(300*time.Millisecond) {
-		t.Errorf("Expected script to take ~300ms, but took %v", elapsed)
+	if elapsed < time.Duration(100*time.Millisecond) {
+		t.Errorf("Expected script to take ~100ms, but took %v", elapsed)
 	}
 }
 
 func TestWaitingOnFibers(t *testing.T) {
-	t.Skip("Need to sort out fiber isolation")
 	start := time.Now()
 
 	run(t, `
