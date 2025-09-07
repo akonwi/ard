@@ -408,7 +408,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			for i := range e.Call.Args {
 				args[i] = vm.eval(e.Call.Args[i])
 			}
-			return fn.eval(args...)
+			return fn.Eval(args...)
 		}
 	case *checker.ListLiteral:
 		{
@@ -642,7 +642,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 		panic(fmt.Errorf("Undefined: %s", call.Name))
 	}
 
-	if closure, ok := sig.Raw().(Closure); ok {
+	if closure, ok := sig.Raw().(runtime.Closure); ok {
 		args := _args
 		// if no args are provided but the function has parameters, use the call.Args
 		if len(args) == 0 {
@@ -652,7 +652,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 				args[i] = vm.eval(call.Args[i])
 			}
 		}
-		return closure.eval(args...)
+		return closure.Eval(args...)
 	}
 
 	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.Type()))
@@ -819,7 +819,7 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 			_isLess := vm.eval(m.Method.Args[0]).Raw().(*VMClosure)
 
 			slices.SortFunc(raw, func(a, b *runtime.Object) int {
-				if _isLess.eval(a, b).AsBool() {
+				if _isLess.Eval(a, b).AsBool() {
 					return -1
 				}
 				return 0
@@ -945,7 +945,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 			args[i+1] = vm.eval(call.Args[i])
 		}
 
-		return closure.eval(args...)
+		return closure.Eval(args...)
 	}
 
 	panic(fmt.Errorf("Method %s not found for struct %s", call.Name, istruct.Name))

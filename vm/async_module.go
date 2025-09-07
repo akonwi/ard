@@ -61,7 +61,7 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 				}
 			}()
 
-			isolatedFn.eval()
+			isolatedFn.Eval()
 		}()
 	}
 

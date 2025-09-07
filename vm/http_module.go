@@ -145,10 +145,10 @@ func (m *HTTPModule) Handle(call *checker.FunctionCall, args []*runtime.Object) 
 
 				// Create a copy of the closure with a new VM for isolation to prevent race conditions
 				// This follows the same pattern as the async module
-				isolatedHandle := *handle
+				isolatedHandle := handle.copy()
 				isolatedHandle.vm = NewVM()
 				isolatedHandle.vm.hq = m.hq
-				response := isolatedHandle.eval(request)
+				response := isolatedHandle.Eval(request)
 
 				// Convert Ard Response to Go HTTP response
 				respMap := response.Raw().(map[string]*runtime.Object)

@@ -17,7 +17,7 @@ type GlobalVM struct {
 	// method closures lose their scope because they aren't evaluated in their module like regular functions
 	// so keeping them track of them globally solves that
 	// [needs-improvement]
-	methodClosures map[string]Closure
+	methodClosures map[string]runtime.Closure
 
 	// hardcoded modules
 	moduleRegistry *ModuleRegistry
@@ -29,7 +29,7 @@ type GlobalVM struct {
 func NewRuntime(module checker.Module) *GlobalVM {
 	g := &GlobalVM{
 		subject:        module,
-		methodClosures: map[string]Closure{},
+		methodClosures: map[string]runtime.Closure{},
 		modules:        make(map[string]*VM),
 		ffiRegistry:    NewRuntimeFFIRegistry(),
 	}
@@ -148,12 +148,12 @@ func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Obj
 	return sym
 }
 
-func (g *GlobalVM) addMethod(strct checker.Type, name string, closure Closure) {
+func (g *GlobalVM) addMethod(strct checker.Type, name string, closure runtime.Closure) {
 	key := fmt.Sprintf("%p.%s", strct, name)
 	g.methodClosures[key] = closure
 }
 
-func (g *GlobalVM) getMethod(strct checker.Type, name string) (Closure, bool) {
+func (g *GlobalVM) getMethod(strct checker.Type, name string) (runtime.Closure, bool) {
 	key := fmt.Sprintf("%p.%s", strct, name)
 	if closure, ok := g.methodClosures[key]; ok {
 		return closure, true
@@ -184,13 +184,8 @@ func (vm *VM) popScope() {
 	vm.scope = vm.scope.parent
 }
 
-// Eval implements VMEvaluator interface
 func (vm *VM) Eval(expr checker.Expression) *runtime.Object {
 	return vm.eval(expr)
-}
-
-type Closure interface {
-	eval(args ...*runtime.Object) *runtime.Object
 }
 
 /*
@@ -203,7 +198,7 @@ type VMClosure struct {
 	capturedScope *scope                                                 // scope at closure creation time
 }
 
-func (c VMClosure) eval(args ...*runtime.Object) *runtime.Object {
+func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	// Handle built-in functions
 	if c.builtinFn != nil {
 		data := args[0]
@@ -234,6 +229,15 @@ func (c VMClosure) eval(args ...*runtime.Object) *runtime.Object {
 	return res
 }
 
+func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
+	// this feels like something i'll regret
+	vm := NewVM()
+	vm.hq = c.vm.hq
+	c.vm = vm
+
+	return c.Eval()
+}
+
 // returns a copy without a VM reference
 func (c VMClosure) copy() *VMClosure {
 	scope := *c.capturedScope
@@ -251,13 +255,17 @@ type ExternClosure struct {
 	def     checker.ExternalFunctionDef
 }
 
-func (e ExternClosure) eval(args ...*runtime.Object) *runtime.Object {
+func (e ExternClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	// Call the external function through the FFI registry
 	result, err := e.hq.ffiRegistry.Call(e.binding, args, e.def.ReturnType)
 	if err != nil {
 		panic(fmt.Errorf("FFI call failed for %s: %w", e.binding, err))
 	}
 	return result
+}
+
+func (e ExternClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
+	return e.Eval(args...)
 }
 
 func (c VMClosure) Type() checker.Type {
@@ -269,8 +277,12 @@ type BuiltInClosure struct {
 	retType   checker.Type
 }
 
-func (c BuiltInClosure) eval(args ...*runtime.Object) *runtime.Object {
+func (c BuiltInClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	data := args[0]
 	resultType := c.retType.(*checker.Result)
 	return c.builtinFn(data, resultType)
+}
+
+func (c BuiltInClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
+	return c.Eval(args...)
 }
