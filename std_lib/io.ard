@@ -1,4 +1,4 @@
-// Standard library IO module implemented with FFI
+use ard/string as Str
 
 private extern fn _print(string: Str) Void = "Print"
 

@@ -2,7 +2,6 @@ package checker
 
 var prelude = map[string]Module{
 	"Result": ResultPkg{},
-	"Str":    strMod,
 }
 
 func findInStdLib(path string) (Module, bool) {
@@ -100,38 +99,4 @@ func (pkg ResultPkg) Get(name string) Symbol {
 	default:
 		return Symbol{}
 	}
-}
-
-type StrMod struct {
-	symbols map[string]Symbol
-}
-
-var strMod = StrMod{
-	symbols: map[string]Symbol{
-		"ToString": Symbol{
-			Name: "ToString",
-			Type: &Trait{
-				Name: "ToString",
-				methods: []FunctionDef{
-					{
-						Name:       "to_str",
-						Parameters: []Parameter{},
-						ReturnType: Str,
-					},
-				},
-			},
-		},
-	},
-}
-
-func (pkg StrMod) Path() string {
-	return "ard/string"
-}
-
-func (pkg StrMod) Program() *Program {
-	return nil
-}
-
-func (pkg StrMod) Get(name string) Symbol {
-	return pkg.symbols[name]
 }
