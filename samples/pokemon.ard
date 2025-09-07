@@ -12,7 +12,7 @@ fn main() {
   }).expect("Unable to make request")
 
   if res.is_ok() {
-    let data = decode::any(res.body)
+    let data = decode::from_json(res.body).expect("Unable to decode response body as JSON")
 
     let count = decode::run(data, decode::field("count", decode::int))
 

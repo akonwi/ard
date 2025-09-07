@@ -13,14 +13,6 @@ var HttpResponseDef = &StructDef{
 	Statics: map[string]*FunctionDef{},
 }
 
-var HttpSendFn = &FunctionDef{
-	Name: "send",
-	Parameters: []Parameter{
-		{Name: "request", Type: HttpRequestDef},
-	},
-	ReturnType: MakeResult(HttpResponseDef, Str),
-}
-
 var HttpServeFn = &FunctionDef{
 	Name: "serve",
 	Parameters: []Parameter{
@@ -49,14 +41,5 @@ func (pkg HttpPkg) Program() *Program {
 	return nil
 }
 func (pkg HttpPkg) Get(name string) Symbol {
-	switch name {
-	case "Response":
-		return Symbol{Name: name, Type: HttpResponseDef}
-	case "send":
-		return Symbol{Name: name, Type: HttpSendFn}
-	case "serve":
-		return Symbol{Name: name, Type: HttpServeFn}
-	default:
-		return Symbol{}
-	}
+	return Symbol{}
 }

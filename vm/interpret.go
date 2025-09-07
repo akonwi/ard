@@ -529,10 +529,20 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleStructInstance:
 		{
-			if e.Module == (&HTTPModule{}).Path() {
-				return vm.eval(e.Property)
+			strct := e.Property.Type().(*checker.StructDef)
+			raw := map[string]*runtime.Object{}
+			for name, ftype := range strct.Fields {
+				val, ok := e.Property.Fields[name]
+				if ok {
+					val := vm.eval(val)
+					val.SetRefinedType(ftype)
+					raw[name] = val
+				} else {
+					// assume it's a $T? if the checker allowed it
+					raw[name] = runtime.MakeMaybe(nil, ftype)
+				}
 			}
-			panic(fmt.Errorf("Unimplemented in module: %s", e.Module))
+			return runtime.MakeStruct(e.Type(), raw)
 		}
 	case *checker.ResultMatch:
 		{
@@ -920,7 +930,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		return closure.Eval(args...)
 	}
 
-	panic(fmt.Errorf("Method %s not found for struct %s", call.Name, istruct.Name))
+	panic(fmt.Errorf("Method not found: %s.%s", istruct.Name, call.Name))
 }
 
 func (vm *VM) EvalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {

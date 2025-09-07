@@ -1829,6 +1829,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(fmt.Sprintf("Undefined static function: %s::%s", targetName, s.Function.Name), s.GetLocation())
 						return nil
 					}
+					staticFn.Name = structName + "::" + s.Function.Name
 					fnDef = staticFn
 				} else {
 					// Simple case like io::print(), look for function directly in module
@@ -1915,7 +1916,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Create function call
 				call := &FunctionCall{
-					Name: s.Function.Name,
+					Name: fnDef.Name,
 					Args: args,
 					fn:   fnDef,
 				}
@@ -2182,7 +2183,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			strct.Statics[segment.Name] = fn
 		}
 
-		return nil
+		return fn
 	case *ast.ListLiteral:
 		return c.checkList(nil, s)
 	case *ast.MapLiteral:

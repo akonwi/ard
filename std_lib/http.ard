@@ -1,3 +1,5 @@
+use ard/maybe
+
 enum Method {
   Get,
 	Post,
@@ -36,7 +38,7 @@ private extern fn get_query_param(req: Dynamic, name: Str) Str = "GetQueryParam"
 impl Request {
   fn path() Str? {
     match @raw {
-      raw => get_req_path(raw),
+      raw => maybe::some(get_req_path(raw)),
       _ => maybe::none()
     }
   }
@@ -72,9 +74,11 @@ impl Response {
   }
 }
 
-private extern fn _send(method: Str, url: Str, body: Str, headers: [Str:Str]) Response!Str = "HTTP_Send"
+private extern fn _send(method: Str, url: Str, body: Str?, headers: [Str:Str]) Response!Str = "HTTP_Send"
 
 fn send(req: Request) Response!Str {
   let method = method_to_str(req.method)
   _send(method, req.url, req.body, req.headers)
 }
+
+extern fn serve(port: Int, handlers: [Str:fn(Request) Response]) Void = "HTTP_Serve"

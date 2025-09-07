@@ -148,12 +148,12 @@ func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Obj
 }
 
 func (g *GlobalVM) addMethod(strct checker.Type, name string, closure runtime.Closure) {
-	key := fmt.Sprintf("%p.%s", strct, name)
+	key := fmt.Sprintf("%s.%s", strct.String(), name)
 	g.methodClosures[key] = closure
 }
 
 func (g *GlobalVM) getMethod(strct checker.Type, name string) (runtime.Closure, bool) {
-	key := fmt.Sprintf("%p.%s", strct, name)
+	key := fmt.Sprintf("%s.%s", strct.String(), name)
 	if closure, ok := g.methodClosures[key]; ok {
 		return closure, true
 	}
@@ -267,8 +267,16 @@ func (e ExternClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
 	return e.Eval(args...)
 }
 
+func (c ExternClosure) GetParams() []checker.Parameter {
+	return c.def.Parameters
+}
+
 func (c VMClosure) Type() checker.Type {
 	return c.expr.Type()
+}
+
+func (c VMClosure) GetParams() []checker.Parameter {
+	return c.expr.Parameters
 }
 
 type BuiltInClosure struct {
@@ -284,4 +292,8 @@ func (c BuiltInClosure) Eval(args ...*runtime.Object) *runtime.Object {
 
 func (c BuiltInClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
 	return c.Eval(args...)
+}
+
+func (c BuiltInClosure) GetParams() []checker.Parameter {
+	return []checker.Parameter{}
 }
