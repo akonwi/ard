@@ -12,8 +12,6 @@ func findInStdLib(path string) (Module, bool) {
 	}
 
 	switch path {
-	case "ard/async":
-		return AsyncPkg{}, true
 	case "ard/http":
 		return HttpPkg{}, true
 	case "ard/json":

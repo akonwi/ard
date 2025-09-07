@@ -3,7 +3,6 @@ package vm
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
@@ -26,8 +25,6 @@ func (m *AsyncModule) Handle(call *checker.FunctionCall, args []*runtime.Object)
 	switch call.Name {
 	case "start":
 		return m.handleStart(args)
-	case "sleep":
-		return m.handleSleep(args)
 	default:
 		panic(fmt.Errorf("Unimplemented: async::%s()", call.Name))
 	}
@@ -70,12 +67,6 @@ func (m *AsyncModule) handleStart(args []*runtime.Object) *runtime.Object {
 		"__wg": runtime.MakeDynamic(wg),
 	}
 	return runtime.MakeStruct(checker.Fiber, fields)
-}
-
-func (m *AsyncModule) handleSleep(args []*runtime.Object) *runtime.Object {
-	duration := args[0].AsInt()
-	time.Sleep(time.Duration(duration) * time.Millisecond)
-	return runtime.Void()
 }
 
 // EvalFiberMethod handles method calls on Fiber objects
