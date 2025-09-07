@@ -32,7 +32,7 @@ func GetQueryParam(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (method: Str, url: Str, body: Str, headers: [Str:Str]) Response!Str
-func HTTP_Send(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object {
 	method := args[0].AsString()
 	url := args[1].AsString()
 	body := func() io.Reader {
@@ -87,7 +87,9 @@ func HTTP_Send(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		"body":    runtime.MakeStr(bodyStr),
 	}
 
-	return runtime.MakeOk(runtime.MakeStruct(checker.HttpResponseDef, respMap))
+	resultType := returnType.(*checker.Result)
+
+	return runtime.MakeOk(runtime.MakeStruct(resultType.Val(), respMap))
 }
 
 /*
@@ -109,7 +111,7 @@ func convertToGoPattern(path string) string {
 }
 
 // fn serve(port: Int, handlers: [Str:fn(Request) Response])
-func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func HTTP_Serve(args []*runtime.Object, returnType checker.Type) *runtime.Object {
 	port := args[0].AsInt()
 	handlers := args[1].AsMap()
 
@@ -124,18 +126,13 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				}
 			}
 
-			bodyType := checker.HttpRequestDef.Fields["body"]
-			var body *runtime.Object
+			body := runtime.MakeMaybe(nil, checker.Str)
 			if r.Body != nil {
 				bodyBytes, err := io.ReadAll(r.Body)
 				if err == nil {
-					body = runtime.Make(string(bodyBytes), bodyType)
-				} else {
-					body = runtime.Make(nil, bodyType)
+					body.Set(string(bodyBytes))
 				}
 				r.Body.Close()
-			} else {
-				body = runtime.Make(nil, bodyType)
 			}
 
 			handle, ok := handler.Raw().(runtime.Closure)
@@ -172,7 +169,8 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				"raw":     runtime.MakeDynamic(r),
 			}
 
-			request := runtime.MakeStruct(checker.HttpRequestDef, requestMap)
+			resultType := returnType.(*checker.Result)
+			request := runtime.MakeStruct(resultType.Val(), requestMap)
 
 			// Call the Ard handler function
 			// Create a copy of the closure with a new VM for isolation to prevent race conditions
