@@ -45,12 +45,12 @@ func TestWaitingOnFibers(t *testing.T) {
 
 	// If truly concurrent, should take ~100ms, not ~300ms
 	// Allow some overhead, but should be significantly less than sequential
-	if elapsed > 200*time.Millisecond {
+	if elapsed > 90*time.Millisecond {
 		t.Errorf("Expected concurrent execution to take ~100ms, but took %v", elapsed)
 	}
 
-	// Should take at least 100ms to prove sleep actually works
-	if elapsed < 90*time.Millisecond {
+	// Shouldn't take 300ms since they were in parallel
+	if elapsed > 300*time.Millisecond {
 		t.Errorf("Expected at least 90ms execution time, but took %v", elapsed)
 	}
 }

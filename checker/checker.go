@@ -153,7 +153,7 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		}
 	}
 
-	// Auto-import prelude modules (only for non-embedded modules)
+	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(filePath, "ard/") {
 		if mod, ok := findInStdLib("ard/float"); ok {
 			c.program.Imports["Float"] = mod
@@ -163,6 +163,9 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		}
 		if mod, ok := findInStdLib("ard/list"); ok {
 			c.program.Imports["List"] = mod
+		}
+		if mod, ok := findInStdLib("ard/string"); ok {
+			c.program.Imports["Str"] = mod
 		}
 	}
 
@@ -211,6 +214,16 @@ func (c *checker) resolveModule(name string) Module {
 
 	if mod, ok := prelude[name]; ok {
 		return mod
+	}
+
+	return nil
+}
+
+func (c *checker) findModuleByPath(path string) Module {
+	for _, mod := range c.program.Imports {
+		if mod.Path() == path {
+			return mod
+		}
 	}
 
 	return nil
@@ -1236,14 +1249,16 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					chunks[i] = &StrLiteral{"<error>"}
 					continue
 				}
-				toStringTrait := strMod.Get("ToString").Type.(*Trait)
-				if !cx.Type().hasTrait(toStringTrait) {
-					c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
-					// Replace chunk that can't be converted to string with placeholder
-					chunks[i] = &StrLiteral{"<error>"}
-					continue
+				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
+					toStringTrait := strMod.Get("ToString").Type.(*Trait)
+					if !cx.Type().hasTrait(toStringTrait) {
+						c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
+						// Replace chunk that can't be converted to string with placeholder
+						chunks[i] = &StrLiteral{"<error>"}
+						continue
+					}
+					chunks[i] = cx
 				}
-				chunks[i] = cx
 			}
 			return &TemplateStr{chunks}
 		}
@@ -1829,6 +1844,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						c.addError(fmt.Sprintf("Undefined static function: %s::%s", targetName, s.Function.Name), s.GetLocation())
 						return nil
 					}
+					staticFn.Name = structName + "::" + s.Function.Name
 					fnDef = staticFn
 				} else {
 					// Simple case like io::print(), look for function directly in module
@@ -1915,7 +1931,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Create function call
 				call := &FunctionCall{
-					Name: s.Function.Name,
+					Name: fnDef.Name,
 					Args: args,
 					fn:   fnDef,
 				}
@@ -2182,7 +2198,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			strct.Statics[segment.Name] = fn
 		}
 
-		return nil
+		return fn
 	case *ast.ListLiteral:
 		return c.checkList(nil, s)
 	case *ast.MapLiteral:

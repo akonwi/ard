@@ -1308,12 +1308,17 @@ func (p *parser) parseType() DeclaredType {
 				p.addError(p.peek(), "Expected ']'")
 				p.synchronizeToTokens(equal, new_line, comma, right_paren)
 			}
+			endBracket := p.previous()
 
 			// Check for Result sugar syntax: [Key:Value]!ErrorType
 			if p.match(bang) {
 				errType := p.parseType()
 				nullable := p.match(question_mark)
 				mapType := &Map{
+					Location: Location{
+						Start: bracket.getLocation().Start,
+						End:   endBracket.getLocation().Start,
+					},
 					Key:      elementType,
 					Value:    valElementType,
 					nullable: false,
@@ -1333,6 +1338,10 @@ func (p *parser) parseType() DeclaredType {
 				Key:      elementType,
 				Value:    valElementType,
 				nullable: p.match(question_mark),
+				Location: Location{
+					Start: bracket.getLocation().Start,
+					End:   endBracket.getLocation().Start,
+				},
 			}
 		}
 		if !p.match(right_bracket) {

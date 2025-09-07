@@ -1,0 +1,22 @@
+extern fn sleep(ms: Int) Void = "Sleep"
+
+struct Fiber {
+  // raw WaitGroup
+  wg: Dynamic
+}
+
+private extern fn join(wg: Dynamic) Void = "JoinRoutine"
+
+impl Fiber {
+  fn join() {
+    join(@wg)
+  }
+}
+
+// returns WaitGroup
+private extern fn _go(do: fn() Void) Dynamic = "StartGoRoutine"
+
+fn start(do: fn() Void) Fiber {
+  let wg = _go(do)
+  Fiber{ wg: wg }
+}

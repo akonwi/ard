@@ -1,4 +1,5 @@
 use ard/maybe
+use ard/string as Str
 
 struct Error {
   expected: Str,

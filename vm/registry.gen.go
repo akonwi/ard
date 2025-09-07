@@ -67,6 +67,21 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("FS_DeleteFile", ffi.FS_DeleteFile); err != nil {
 		return fmt.Errorf("failed to register FS_DeleteFile: %w", err)
 	}
+	if err := r.Register("GetReqPath", ffi.GetReqPath); err != nil {
+		return fmt.Errorf("failed to register GetReqPath: %w", err)
+	}
+	if err := r.Register("GetPathValue", ffi.GetPathValue); err != nil {
+		return fmt.Errorf("failed to register GetPathValue: %w", err)
+	}
+	if err := r.Register("GetQueryParam", ffi.GetQueryParam); err != nil {
+		return fmt.Errorf("failed to register GetQueryParam: %w", err)
+	}
+	if err := r.Register("HTTP_Send", ffi.HTTP_Send); err != nil {
+		return fmt.Errorf("failed to register HTTP_Send: %w", err)
+	}
+	if err := r.Register("HTTP_Serve", ffi.HTTP_Serve); err != nil {
+		return fmt.Errorf("failed to register HTTP_Serve: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}
@@ -99,6 +114,15 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	}
 	if err := r.Register("GetTodayString", ffi.GetTodayString); err != nil {
 		return fmt.Errorf("failed to register GetTodayString: %w", err)
+	}
+	if err := r.Register("Sleep", ffi.Sleep); err != nil {
+		return fmt.Errorf("failed to register Sleep: %w", err)
+	}
+	if err := r.Register("StartGoRoutine", ffi.StartGoRoutine); err != nil {
+		return fmt.Errorf("failed to register StartGoRoutine: %w", err)
+	}
+	if err := r.Register("JoinRoutine", ffi.JoinRoutine); err != nil {
+		return fmt.Errorf("failed to register JoinRoutine: %w", err)
 	}
 	if err := r.Register("SqliteCreateConnection", ffi.SqliteCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqliteCreateConnection: %w", err)

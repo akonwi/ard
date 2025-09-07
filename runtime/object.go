@@ -483,3 +483,9 @@ var void = &Object{
 func Void() *Object {
 	return void
 }
+
+type Closure interface {
+	Eval(args ...*Object) *Object
+	IsolateEval(args ...*Object) *Object
+	GetParams() []checker.Parameter
+}
