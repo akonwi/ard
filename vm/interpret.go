@@ -923,16 +923,6 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		}
 		return http.evalHttpRequestMethod(subj, call, args)
 	}
-	// Database methods are now handled through standard library FFI
-	// Special handling for Fiber methods
-	if subj.Type() == checker.Fiber {
-		async := vm.hq.moduleRegistry.handlers[checker.AsyncPkg{}.Path()].(*AsyncModule)
-		args := make([]*runtime.Object, len(call.Args))
-		for i := range call.Args {
-			args[i] = vm.eval(call.Args[i])
-		}
-		return async.EvalFiberMethod(subj, call, args)
-	}
 
 	istruct := subj.Type().(*checker.StructDef)
 
