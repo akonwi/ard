@@ -1,7 +1,9 @@
 # TODO
 
 ## Initial 0.1.0 build
-- [ ] remove implicit "it" in union matches
+- [ ] structs don't need to know about statics
+  - the statics are just regular fns with qualified names
+- [ ] enum methods need some way to know "self"
 - [ ] need a void expression (Unit)
 - [ ] need to be able to alias fn signatures with `type`
   - a single type union should act as an alias
@@ -70,3 +72,4 @@
   }
   ```
 - [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
+- [ ] Support omitting `Void` in fn type declarations and externs
