@@ -365,7 +365,7 @@ func (i *IntMatch) Type() Type {
 
 type UnionMatch struct {
 	Subject   Expression
-	TypeCases map[string]*Block
+	TypeCases map[string]*Match
 	CatchAll  *Block
 }
 
@@ -373,7 +373,7 @@ func (u *UnionMatch) Type() Type {
 	// Find the first non-nil case and return its type
 	for _, block := range u.TypeCases {
 		if block != nil {
-			return block.Type()
+			return block.Body.Type()
 		}
 	}
 

@@ -115,16 +115,14 @@ let urgency = match task_priority {
 
 ## Matching on Type Unions
 
-When matching on type unions, the matched value is bound to the variable `it`:
-
 ```ard
 type Content = Str | Int | Bool
 
 fn describe(value: Content) Str {
   match value {
-    Str => "Text: '{it}'"
-    Int => "Number: {it}"
-    Bool => "Boolean: {it}"
+    Str(string) => "Text: '{string}'"
+    Int(i) => "Number: {i}"
+    Bool(val) => "Boolean: {val}"
   }
 }
 

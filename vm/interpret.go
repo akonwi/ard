@@ -492,10 +492,9 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			typeName := subject.Type().String()
 
 			// If we have a case for this specific type
-			if block, ok := e.TypeCases[typeName]; ok {
-				res, _ := vm.evalBlock(block, func() {
-					// Bind the pattern variable 'it' to the value
-					vm.scope.add("it", subject)
+			if arm, ok := e.TypeCases[typeName]; ok {
+				res, _ := vm.evalBlock(arm.Body, func() {
+					vm.scope.add(arm.Pattern.Name, subject)
 				})
 				return res
 			}

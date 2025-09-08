@@ -2445,11 +2445,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			}
 		}
 
-		// For other types, handle according to their type...
 		// For Union types, generate a UnionMatch
 		if unionType, ok := subject.Type().(*Union); ok {
 			// Track which union types we've seen and their corresponding bodies
-			typeCases := make(map[string]*Block)
+			typeCases := make(map[string]*Match)
 			var catchAllBody *Block
 
 			// Record all types in the union
@@ -2460,49 +2459,45 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Process the cases
 			for _, matchCase := range s.Cases {
-				// Check for catch-all case (_)
-				if id, ok := matchCase.Pattern.(*ast.Identifier); ok {
-					if id.Name == "_" {
+				switch p := matchCase.Pattern.(type) {
+				case *ast.Identifier:
+					if p.Name != "_" {
+						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
+					} else {
 						if catchAllBody != nil {
-							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
-							return nil
+							c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+						} else {
+							catchAllBody = c.checkBlock(matchCase.Body, nil)
 						}
-						catchAllBody = c.checkBlock(matchCase.Body, nil)
-						continue
 					}
-				}
-
-				// Handle type pattern - should be an identifier matching a type in the union
-				if typeId, ok := matchCase.Pattern.(*ast.Identifier); ok {
-					typeName := typeId.Name
+				case *ast.FunctionCall:
+					varName := p.Args[0].Value.(*ast.Identifier).Name
+					typeName := p.Name
 
 					// Check if the type exists in the union
 					_, found := unionTypeSet[typeName]
 					if !found {
 						c.addError(fmt.Sprintf("Type %s is not part of union %s", typeName, unionType),
 							matchCase.Pattern.GetLocation())
-						return nil
 					}
 
 					// Check for duplicates
 					if _, exists := typeCases[typeName]; exists {
-						c.addError(fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation())
-						return nil
+						c.addWarning(fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation())
+					} else {
+
+						// Get the actual type object
+						matchedType := unionTypeSet[typeName]
+
+						// Process the body with the matched type binding
+						body := c.checkBlock(matchCase.Body, func() {
+							c.scope.add(varName, matchedType, false)
+						})
+						typeCases[typeName] = &Match{
+							Pattern: &Identifier{Name: varName},
+							Body:    body,
+						}
 					}
-
-					// Get the actual type object
-					matchedType := unionTypeSet[typeName]
-
-					// Process the body with the matched type binding
-					body := c.checkBlock(matchCase.Body, func() {
-						// Add "it" variable to the scope with the union element's type
-						c.scope.add("it", matchedType, false)
-					})
-					typeCases[typeName] = body
-				} else {
-					c.addError("Pattern in union match must be a type name or catch-all (_)",
-						matchCase.Pattern.GetLocation())
-					return nil
 				}
 			}
 
@@ -2512,7 +2507,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					if _, covered := typeCases[typeName]; !covered {
 						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s'", typeName),
 							s.GetLocation())
-						return nil
 					}
 				}
 			}
@@ -2521,7 +2515,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			var referenceType Type
 			for _, caseBody := range typeCases {
 				if caseBody != nil {
-					referenceType = caseBody.Type()
+					referenceType = caseBody.Body.Type()
 					break
 				}
 			}
@@ -2533,8 +2527,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				for _, caseBody := range typeCases {
-					if caseBody != nil && !referenceType.equal(caseBody.Type()) {
-						c.addError(typeMismatch(referenceType, caseBody.Type()), s.GetLocation())
+					if caseBody != nil && !referenceType.equal(caseBody.Body.Type()) {
+						c.addError(typeMismatch(referenceType, caseBody.Body.Type()), s.GetLocation())
 						return nil
 					}
 				}

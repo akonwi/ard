@@ -320,8 +320,8 @@ To do conditional logic on a value of a type union, use a match expression and w
 ```ard
 for item in stuff {
   match item {
-    Str => io::print("String: {it}"),
-    Int => io::print("Number: {it.to_str()}")
+    Str(s) => io::print("String: {s}"),
+    Int(i) => io::print("Number: {it}")
   }
 }
 ```
@@ -351,7 +351,7 @@ Integer ranges are inclusive (`1..10` includes both 1 and 10). When patterns ove
 - **Booleans**: Match on `true` or `false`
 - **Enums**: Match on enum variants like `Status::active`
 - **Maybe types**: Match on value binding or `_` for none
-- **Type unions**: Match on type with `it` binding
+- **Type unions**: Match on type
 - **Results**: Match on `ok(value)` or `err` patterns
 
 ### Qualified static paths

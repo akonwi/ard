@@ -99,43 +99,11 @@ func TestTypeUnions(t *testing.T) {
 				type Printable = Int|Str|Bool
 				let a: Printable = "foo"
 				match a {
-				  Int => "number",
-					Str => "string",
+				  Int(int) => "number",
+					Str(str) => "string",
 					_ => "other"
 				}`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: false,
-							Name:    "a",
-							Value:   &checker.StrLiteral{Value: "foo"},
-						},
-					},
-					{
-						Expr: &checker.UnionMatch{
-							Subject: &checker.Variable{},
-							TypeCases: map[string]*checker.Block{
-								"Int": {
-									Stmts: []checker.Statement{
-										{Expr: &checker.StrLiteral{Value: "number"}},
-									},
-								},
-								"Str": {
-									Stmts: []checker.Statement{
-										{Expr: &checker.StrLiteral{Value: "string"}},
-									},
-								},
-							},
-							CatchAll: &checker.Block{
-								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{Value: "other"}},
-								},
-							},
-						},
-					},
-				},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 	})
 }

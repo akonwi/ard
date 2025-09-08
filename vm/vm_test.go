@@ -629,8 +629,8 @@ func TestUnions(t *testing.T) {
 				type Printable = Str | Int | Bool
 				fn print(p: Printable) Str {
 				  match p {
-					  Str => it,
-						Int => it.to_str(),
+					  Str(str) => str,
+						Int(int) => int.to_str(),
 						_ => "boolean value"
 					}
 				}
