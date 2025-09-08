@@ -132,6 +132,31 @@ fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
   }
 }
 
+// decodes for a specific element in a list
+fn at(index: Int, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+  fn(data: Dynamic) $T![Error] {
+    let _list = try to_list(data) -> found {
+      Result::err([
+        Error{
+          expected: "List",
+          found: found,
+          path: [],
+        },
+      ])
+    }
+    match _list.size() {
+      0 => Result::err([
+        Error{
+          expected: "Dynamic",
+          found: "Empty list",
+          path: [],
+        }
+      ]),
+      _ => as(_list.at(0))
+    }
+  }
+}
+
 extern fn to_map(data: Dynamic) [Dynamic:Dynamic]!Str = "DynamicToMap"
 
 fn map(
