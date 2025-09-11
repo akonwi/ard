@@ -124,7 +124,7 @@ func StartGoRoutine(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (wg: Dynamic) Void
-func JoinRoutine(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func WaitFor(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	wg := args[0].Raw().(*sync.WaitGroup)
 	wg.Wait()
 	return runtime.Void()

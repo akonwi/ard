@@ -5,11 +5,11 @@ struct Fiber {
   wg: Dynamic
 }
 
-private extern fn join(wg: Dynamic) Void = "JoinRoutine"
+private extern fn wait_for(wg: Dynamic) Void = "WaitFor"
 
 impl Fiber {
   fn join() {
-    join(@wg)
+    wait_for(@wg)
   }
 }
 

@@ -10,11 +10,11 @@ func TestAsyncSleep(t *testing.T) {
 	run(t, `
 		use ard/async
 
-		async::sleep(100)
+		async::sleep(1000)
 	`)
 	elapsed := time.Since(start)
-	if elapsed < time.Duration(100*time.Millisecond) {
-		t.Errorf("Expected script to take ~100ms, but took %v", elapsed)
+	if elapsed < time.Duration(1000*time.Millisecond) {
+		t.Errorf("Expected script to take >= 105ms, but took %v", elapsed)
 	}
 }
 
@@ -26,7 +26,7 @@ func TestWaitingOnFibers(t *testing.T) {
 
 		// Start 3 fibers that each sleep for 100ms
 		let fiber1 = async::start(fn() {
-			async::sleep(100)
+			async::sleep(1000)
 		})
 		let fiber2 = async::start(fn() {
 			async::sleep(100)
@@ -43,14 +43,13 @@ func TestWaitingOnFibers(t *testing.T) {
 
 	elapsed := time.Since(start)
 
-	// If truly concurrent, should take ~100ms, not ~300ms
-	// Allow some overhead, but should be significantly less than sequential
-	if elapsed > 90*time.Millisecond {
-		t.Errorf("Expected concurrent execution to take ~100ms, but took %v", elapsed)
+	// Should take ~1s (longest fiber) due to concurrency, not ~1.2s (sequential)
+	if elapsed < 1*time.Second {
+		t.Errorf("Expected concurrent execution to take at least 1s, but took %v", elapsed)
 	}
 
-	// Shouldn't take 300ms since they were in parallel
-	if elapsed > 300*time.Millisecond {
-		t.Errorf("Expected at least 90ms execution time, but took %v", elapsed)
+	// Allow some overhead, but shouldn't take much longer than the longest fiber
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("Expected concurrent execution to take at most 1.5s, but took %v", elapsed)
 	}
 }

@@ -121,8 +121,8 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("StartGoRoutine", ffi.StartGoRoutine); err != nil {
 		return fmt.Errorf("failed to register StartGoRoutine: %w", err)
 	}
-	if err := r.Register("JoinRoutine", ffi.JoinRoutine); err != nil {
-		return fmt.Errorf("failed to register JoinRoutine: %w", err)
+	if err := r.Register("WaitFor", ffi.WaitFor); err != nil {
+		return fmt.Errorf("failed to register WaitFor: %w", err)
 	}
 	if err := r.Register("SqliteCreateConnection", ffi.SqliteCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqliteCreateConnection: %w", err)
