@@ -11,7 +11,7 @@ export default defineConfig({
         "A modern, statically-typed programming language designed for clarity, safety, and ease.",
       favicon: "/favicon.svg",
       logo: {
-        src: "./src/assets/logo.png",
+        src: "./src/assets/logo-bordered.png",
       },
       customCss: ["./src/styles/custom.css"],
       social: [
