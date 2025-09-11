@@ -111,7 +111,7 @@ func convertToGoPattern(path string) string {
 }
 
 // fn serve(port: Int, handlers: [Str:fn(Request) Response])
-func HTTP_Serve(args []*runtime.Object, returnType checker.Type) *runtime.Object {
+func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	port := args[0].AsInt()
 	handlers := args[1].AsMap()
 
@@ -169,8 +169,9 @@ func HTTP_Serve(args []*runtime.Object, returnType checker.Type) *runtime.Object
 				"raw":     runtime.MakeDynamic(r),
 			}
 
-			resultType := returnType.(*checker.Result)
-			request := runtime.MakeStruct(resultType.Val(), requestMap)
+			handlerMapType := args[1].Type().(*checker.Map)
+			requestType := handlerMapType.Value().(*checker.FunctionDef).Parameters[0].Type
+			request := runtime.MakeStruct(requestType, requestMap)
 
 			// Call the Ard handler function
 			// Create a copy of the closure with a new VM for isolation to prevent race conditions
