@@ -1,6 +1,10 @@
 package vm
 
-import "github.com/akonwi/ard/runtime"
+import (
+	"maps"
+
+	"github.com/akonwi/ard/runtime"
+)
 
 type scope struct {
 	parent    *scope
@@ -14,6 +18,22 @@ func newScope(parent *scope) *scope {
 		parent:   parent,
 		bindings: make(map[string]*runtime.Object),
 	}
+}
+
+func (s scope) clone() scope {
+	new := &scope{
+		parent:    s.parent,
+		bindings:  make(map[string]*runtime.Object),
+		breakable: s.breakable,
+		broken:    s.broken,
+	}
+
+	maps.Copy(new.bindings, s.bindings)
+	if s.parent != nil {
+		*new.parent = s.parent.clone()
+	}
+
+	return *new
 }
 
 func (s *scope) add(name string, value *runtime.Object) {

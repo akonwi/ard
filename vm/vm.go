@@ -196,6 +196,7 @@ type VMClosure struct {
 	capturedScope *scope                                                 // scope at closure creation time
 }
 
+// [refactor] i think there's room for simplification here
 func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	// Handle built-in functions
 	if c.builtinFn != nil {
@@ -232,8 +233,11 @@ func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
 	vm := NewVM()
 	vm.hq = c.vm.hq
 	c.vm = vm
+	if c.capturedScope != nil {
+		*c.capturedScope = c.capturedScope.clone()
+	}
 
-	return c.Eval()
+	return c.Eval(args...)
 }
 
 // returns a copy without a VM reference
