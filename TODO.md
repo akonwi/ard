@@ -1,8 +1,6 @@
 # TODO
 
 ## Initial 0.1.0 build
-- [ ] structs don't need to know about statics
-  - the statics are just regular fns with qualified names
 - [ ] enum methods need some way to know "self"
 - [ ] need a void expression (Unit)
 - [ ] need to be able to alias fn signatures with `type`
