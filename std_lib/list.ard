@@ -1,1 +1,9 @@
 extern fn new() [$T] = "NewList"
+
+fn concat(a: [$T], b: [$T]) [$T] {
+  mut res = a
+  for i in b {
+    res.push(i)
+  }
+  res
+}

@@ -479,12 +479,21 @@ func TestListApi(t *testing.T) {
 			want: 11,
 		},
 		{
-			name: "List::swap swaps values at the given indexes",
+			name: "List.swap swaps values at the given indexes",
 			input: `
 				mut list = [1,2,3]
 				list.swap(0,2)
 				list.at(0)`,
 			want: 3,
+		},
+		{
+			name: "List::concat a combined list",
+			input: `
+				let a = [1,2,3]
+				let b = [4,5,6]
+				let list = List::concat(a, b)
+				list.at(3) == 4`,
+			want: true,
 		},
 	})
 }
