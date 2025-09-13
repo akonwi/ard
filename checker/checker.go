@@ -904,7 +904,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Fields:  make(map[string]Type),
 				Methods: make(map[string]*FunctionDef),
 				Private: s.Private,
-				Statics: map[string]*FunctionDef{},
 			}
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)

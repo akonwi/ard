@@ -904,7 +904,6 @@ type StructDef struct {
 	Self    string
 	Traits  []*Trait
 	Private bool
-	Statics map[string]*FunctionDef
 }
 
 func (def StructDef) NonProducing() {}
