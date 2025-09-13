@@ -367,22 +367,6 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				return args
 			})
 		}
-	case *checker.StaticFunctionCall:
-		{
-			name := e.Scope.Name + "::" + e.Call.Name
-			obj, ok := vm.scope.get(name)
-			if !ok {
-				panic(fmt.Errorf("Undefined function: %s()", name))
-			}
-
-			fn := obj.Raw().(runtime.Closure)
-
-			args := make([]*runtime.Object, len(e.Call.Args))
-			for i := range e.Call.Args {
-				args[i] = vm.eval(e.Call.Args[i])
-			}
-			return fn.Eval(args...)
-		}
 	case *checker.ListLiteral:
 		{
 			raw := make([]*runtime.Object, len(e.Elements))
