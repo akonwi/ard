@@ -386,23 +386,13 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.StaticFunctionCall:
 		{
-			// retrieve static definition
-			def, ok := e.Scope.Statics[e.Call.Name]
+			name := e.Scope.Name + "::" + e.Call.Name
+			obj, ok := vm.scope.get(name)
 			if !ok {
-				panic(fmt.Errorf("Undefined function: %s()", e.Call.Name))
+				panic(fmt.Errorf("Undefined function: %s()", name))
 			}
 
-			path := e.Scope.Name + "::" + e.Call.Name
-
-			// if it's not yet in scope, add it
-			obj, ok := vm.scope.get(path)
-			if !ok {
-				obj = vm.eval(def)
-				vm.scope.add(path, obj)
-			}
-
-			// cast to a func
-			fn := obj.Raw().(*VMClosure)
+			fn := obj.Raw().(runtime.Closure)
 
 			args := make([]*runtime.Object, len(e.Call.Args))
 			for i := range e.Call.Args {
