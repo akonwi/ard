@@ -243,6 +243,21 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
   }
 }
 
+// decode a nested field.
+// { foo: { bar: 20 } } --- path(["foo", "bar"], int)
+fn path(subpath: [Str], as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+  fn (data: Dynamic) $T![Error] {
+    mut current_data = data
+    mut out: $T? = maybe::none()
+
+    for seg, idx in subpath {
+      current_data = try extract_field(current_data, seg)
+    }
+
+    as(current_data)
+  }
+}
+
 // take the first successful decoding. if all fail, return the first set of errors
 fn one_of(first: fn(Dynamic) $T![Error], others: [fn(Dynamic) $T![Error]]) fn(Dynamic) $T![Error] {
   fn(data: Dynamic) $T![Error] {

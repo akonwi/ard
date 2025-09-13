@@ -546,6 +546,41 @@ func TestDecodeField(t *testing.T) {
 	})
 }
 
+func TestDecodePath(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "valid field decoding",
+			input: `
+				use ard/decode
+				use ard/json
+
+				struct Qux {
+					item: Int
+				}
+
+				struct Bar {
+					qux: Qux
+				}
+
+				struct Foo {
+					bar: Bar
+				}
+
+				let qux = Qux{item: 42}
+				let bar = Bar{qux: qux}
+				let foo = Foo{bar: bar}
+
+				let json_str = json::encode(foo).expect("Failed to json encode")
+
+				let data = decode::from_json(json_str).expect("Failed to parse json")
+				let result = decode::run(data, decode::path(["bar", "qux", "item"], decode::int))
+				result.expect("Failed to decode nested path")
+			`,
+			want: 42,
+		},
+	})
+}
+
 func TestDecodeOneOf(t *testing.T) {
 	runTests(t, []test{
 		{
