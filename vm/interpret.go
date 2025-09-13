@@ -367,23 +367,6 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				return args
 			})
 		}
-	case *checker.ModuleStaticFunctionCall:
-		{
-			// todo: revisit this
-			// Handle module static function calls like http::Response::new()
-			// if vm.moduleRegistry.HasModule(e.Module) {
-			// 	// Pass the struct context to the module handler
-			// 	return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
-			// }
-
-			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
-				args := []*runtime.Object{}
-				for _, arg := range e.Call.Args {
-					args = append(args, vm.eval(arg))
-				}
-				return args
-			})
-		}
 	case *checker.StaticFunctionCall:
 		{
 			name := e.Scope.Name + "::" + e.Call.Name
