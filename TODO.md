@@ -71,3 +71,14 @@
   ```
 - [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
 - [ ] Support omitting `Void` in fn type declarations and externs
+- [ ] define enum values
+  ```
+  enum HttpStatus {
+    200,
+    201,
+    404,
+    429
+  }
+
+  fn HttpStatus::from_int(int: Int) HttpStatus? {}
+  ```
