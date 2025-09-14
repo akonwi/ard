@@ -732,25 +732,6 @@ func (p *ModuleFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
-type StaticFunctionCall struct {
-	Scope *StructDef
-	Call  *FunctionCall
-}
-
-func (p *StaticFunctionCall) Type() Type {
-	return p.Call.Type()
-}
-
-type ModuleStaticFunctionCall struct {
-	Module string
-	Struct string
-	Call   *FunctionCall
-}
-
-func (p *ModuleStaticFunctionCall) Type() Type {
-	return p.Call.Type()
-}
-
 type ModuleSymbol struct {
 	Module string
 	Symbol Symbol
@@ -904,7 +885,6 @@ type StructDef struct {
 	Self    string
 	Traits  []*Trait
 	Private bool
-	Statics map[string]*FunctionDef
 }
 
 func (def StructDef) NonProducing() {}

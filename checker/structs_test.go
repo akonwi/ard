@@ -52,7 +52,6 @@ func TestStructs(t *testing.T) {
 								"employed": checker.Bool,
 							},
 							Methods: map[string]*checker.FunctionDef{},
-							Statics: map[string]*checker.FunctionDef{},
 						},
 					},
 					{

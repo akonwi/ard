@@ -367,49 +367,6 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				return args
 			})
 		}
-	case *checker.ModuleStaticFunctionCall:
-		{
-			// todo: revisit this
-			// Handle module static function calls like http::Response::new()
-			// if vm.moduleRegistry.HasModule(e.Module) {
-			// 	// Pass the struct context to the module handler
-			// 	return vm.moduleRegistry.HandleStatic(e.Module, e.Struct, vm, e.Call)
-			// }
-
-			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
-				args := []*runtime.Object{}
-				for _, arg := range e.Call.Args {
-					args = append(args, vm.eval(arg))
-				}
-				return args
-			})
-		}
-	case *checker.StaticFunctionCall:
-		{
-			// retrieve static definition
-			def, ok := e.Scope.Statics[e.Call.Name]
-			if !ok {
-				panic(fmt.Errorf("Undefined function: %s()", e.Call.Name))
-			}
-
-			path := e.Scope.Name + "::" + e.Call.Name
-
-			// if it's not yet in scope, add it
-			obj, ok := vm.scope.get(path)
-			if !ok {
-				obj = vm.eval(def)
-				vm.scope.add(path, obj)
-			}
-
-			// cast to a func
-			fn := obj.Raw().(*VMClosure)
-
-			args := make([]*runtime.Object, len(e.Call.Args))
-			for i := range e.Call.Args {
-				args[i] = vm.eval(e.Call.Args[i])
-			}
-			return fn.Eval(args...)
-		}
 	case *checker.ListLiteral:
 		{
 			raw := make([]*runtime.Object, len(e.Elements))

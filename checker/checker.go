@@ -320,29 +320,18 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 	return baseType
 }
 
-// resolveStaticPath resolves a nested static path to its final module and property name
-func (c *checker) resolveStaticPath(expr ast.Expression) (Module, string) {
-	switch e := expr.(type) {
-	case *ast.Identifier:
-		// Simple case: single identifier refers to a module
-		if mod := c.resolveModule(e.Name); mod != nil {
-			return mod, ""
-		}
-		return nil, ""
-	case *ast.StaticProperty:
-		// Nested case: recursively resolve the target
-		targetModule, _ := c.resolveStaticPath(e.Target)
-		if targetModule == nil {
-			return nil, ""
-		}
+func (c *checker) destructurePath(expr *ast.StaticFunction) (string, string) {
+	absolute := expr.Target.String() + "::" + expr.Function.Name
+	parts := strings.Split(absolute, "::")
 
-		// The property should be an identifier
-		if propId, ok := e.Property.(*ast.Identifier); ok {
-			return targetModule, propId.Name
-		}
-		return nil, ""
+	switch len(parts) {
+	case 3:
+		return parts[0], strings.Join(parts[1:], "::")
+	case 2:
+		return parts[0], parts[1]
+	default:
+		return parts[0], parts[0]
 	}
-	return nil, ""
 }
 
 func typeMismatch(expected, got Type) string {
@@ -915,7 +904,6 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				Fields:  make(map[string]Type),
 				Methods: make(map[string]*FunctionDef),
 				Private: s.Private,
-				Statics: map[string]*FunctionDef{},
 			}
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
@@ -1815,77 +1803,25 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))
 			}
 		}
+
+	// [refactor] a lot of the function call checking can be extracted
+	// - validate args and resolve generics
 	case *ast.StaticFunction:
 		{
-			// Process module function calls like io::print() or http::Response::new()
-			mod, structName := c.resolveStaticPath(s.Target)
-
-			if mod != nil {
-				var fnDef *FunctionDef
-
-				if structName != "" {
-					// We have a nested path like http::Response::new, resolve the struct first
-					structSymbol := mod.Get(structName)
-					if structSymbol.IsZero() {
-						c.addError(fmt.Sprintf("Undefined: %s", structName), s.GetLocation())
-						return nil
-					}
-
-					structDef, ok := structSymbol.Type.(*StructDef)
-					if !ok {
-						c.addError(fmt.Sprintf("%s is not a struct", structName), s.GetLocation())
-						return nil
-					}
-
-					// Look for the static function in the struct
-					staticFn, exists := structDef.Statics[s.Function.Name]
-					if !exists {
-						targetName := s.Target.String()
-						c.addError(fmt.Sprintf("Undefined static function: %s::%s", targetName, s.Function.Name), s.GetLocation())
-						return nil
-					}
-					staticFn.Name = structName + "::" + s.Function.Name
-					fnDef = staticFn
-				} else {
-					// Simple case like io::print(), look for function directly in module
-					sym := mod.Get(s.Function.Name)
-					if sym.IsZero() {
-						targetName := s.Target.String()
-						c.addError(fmt.Sprintf("Undefined: %s::%s", targetName, s.Function.Name), s.GetLocation())
-						return nil
-					}
-
-					// Handle both regular functions and external functions
-					var ok bool
-					switch fn := sym.Type.(type) {
-					case *FunctionDef:
-						fnDef = fn
-						ok = true
-					case *ExternalFunctionDef:
-						// Convert ExternalFunctionDef to FunctionDef for validation
-						fnDef = &FunctionDef{
-							Name:       fn.Name,
-							Parameters: fn.Parameters,
-							ReturnType: fn.ReturnType,
-							Private:    fn.Private,
-						}
-						ok = true
-					default:
-						ok = false
-					}
-
-					if !ok {
-						targetName := s.Target.String()
-						c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
-						return nil
-					}
+			// Handle local functions
+			absolutePath := s.Target.String() + "::" + s.Function.Name
+			if sym, ok := c.scope.get(absolutePath); ok {
+				fnDef := sym.Type.(*FunctionDef)
+				call := &FunctionCall{
+					Name: absolutePath,
+					Args: []Expression{},
+					fn:   fnDef,
 				}
-
 				// Check argument count
 				if len(s.Function.Args) != len(fnDef.Parameters) {
 					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 						len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
-					return nil
+					return call
 				}
 
 				// Check and process arguments
@@ -1893,14 +1829,14 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				for i, arg := range s.Function.Args {
 					checkedArg := c.checkExpr(arg.Value)
 					if checkedArg == nil {
-						return nil
+						return call
 					}
 
 					// Type check the argument against the parameter type
 					paramType := fnDef.Parameters[i].Type
 					if !areCompatible(paramType, checkedArg.Type()) {
 						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
-						return nil
+						return call
 					}
 
 					// Check mutability constraints if needed
@@ -1911,107 +1847,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					args[i] = checkedArg
 				}
 
-				// Use new generic resolution system
-				if fnDef.hasGenerics() {
-					specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
-					if err != nil {
-						c.addError(err.Error(), s.GetLocation())
-						return nil
-					}
-
-					return &ModuleFunctionCall{
-						Module: mod.Path(),
-						Call: &FunctionCall{
-							Name: s.Function.Name,
-							Args: args,
-							fn:   specialized,
-						},
-					}
-				}
-
-				// Create function call
-				call := &FunctionCall{
-					Name: fnDef.Name,
-					Args: args,
-					fn:   fnDef,
-				}
-
-				// Special validation for async::start calls
-				if mod.Path() == "ard/async" && s.Function.Name == "start" {
-					c.validateFiberFunction(s.Function.Args[0].Value)
-				}
-
-				// Create module static function call if struct is involved, otherwise regular module function call
-				if structName != "" {
-					return &ModuleStaticFunctionCall{
-						Module: mod.Path(),
-						Struct: structName,
-						Call:   call,
-					}
-				} else {
-					return &ModuleFunctionCall{
-						Module: mod.Path(),
-						Call:   call,
-					}
-				}
-			} else {
-				// Handle local static functions (non-module case)
-				// For now, we only support simple identifiers for local static functions
-				var fnDef *FunctionDef
-				if id, ok := s.Target.(*ast.Identifier); ok {
-					sym, ok := c.scope.get(id.Name)
-
-					if !ok {
-						c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
-						return nil
-					}
-
-					strct, ok := sym.Type.(*StructDef)
-					if !ok {
-						c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.GetLocation())
-						return nil
-					}
-
-					var exists bool
-					fnDef, exists = strct.Statics[s.Function.Name]
-					if !exists {
-						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, s.Function.Name), s.GetLocation())
-						return nil
-					}
-				} else {
-					c.addError("Unsupported static function target", s.Target.GetLocation())
-					return nil
-				}
-
-				// Check argument count
-				if len(s.Function.Args) != len(fnDef.Parameters) {
-					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-						len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
-					return nil
-				}
-
-				// Check and process arguments
-				args := make([]Expression, len(s.Function.Args))
-				for i, arg := range s.Function.Args {
-					checkedArg := c.checkExpr(arg.Value)
-					if checkedArg == nil {
-						return nil
-					}
-
-					// Type check the argument against the parameter type
-					paramType := fnDef.Parameters[i].Type
-					if !areCompatible(paramType, checkedArg.Type()) {
-						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
-						return nil
-					}
-
-					// Check mutability constraints if needed
-					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
-					}
-
-					args[i] = checkedArg
-				}
+				call.Args = args
 
 				// Use new generic resolution system
 				if fnDef.hasGenerics() {
@@ -2021,34 +1857,110 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					return &ModuleFunctionCall{
-						Module: mod.Path(),
-						Call: &FunctionCall{
-							Name: s.Function.Name,
-							Args: args,
-							fn:   specialized,
-						},
-					}
+					call.fn = specialized
+					return call
 				}
 
-				// Create function call
-				call := &FunctionCall{
-					Name: s.Function.Name,
-					Args: args,
-					fn:   fnDef,
+				return call
+			}
+
+			// find the function in a module
+			modName, name := c.destructurePath(s)
+			var fnDef *FunctionDef
+			mod := c.resolveModule(modName)
+			if mod == nil {
+				c.addError(fmt.Sprintf("Undefined module: %s", modName), s.Target.GetLocation())
+				return nil
+			}
+
+			sym := mod.Get(name)
+			if sym.IsZero() {
+				targetName := s.Target.String()
+				c.addError(fmt.Sprintf("Undefined: %s::%s", targetName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			// Handle both regular functions and external functions
+			var ok bool
+			switch fn := sym.Type.(type) {
+			case *FunctionDef:
+				fnDef = fn
+				ok = true
+			case *ExternalFunctionDef:
+				// Convert ExternalFunctionDef to FunctionDef for validation
+				fnDef = &FunctionDef{
+					Name:       fn.Name,
+					Parameters: fn.Parameters,
+					ReturnType: fn.ReturnType,
+					Private:    fn.Private,
 				}
-				// Get the struct definition for the scope
-				var scopeStruct *StructDef
-				if id, ok := s.Target.(*ast.Identifier); ok {
-					if sym, ok := c.scope.get(id.Name); ok {
-						scopeStruct, _ = sym.Type.(*StructDef)
-					}
+				ok = true
+			default:
+				ok = false
+			}
+
+			if !ok {
+				targetName := s.Target.String()
+				c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+
+			// Check argument count
+			if len(s.Function.Args) != len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+				return nil
+			}
+
+			// Check and process arguments
+			args := make([]Expression, len(s.Function.Args))
+			for i, arg := range s.Function.Args {
+				checkedArg := c.checkExpr(arg.Value)
+				if checkedArg == nil {
+					return nil
 				}
 
-				return &StaticFunctionCall{
-					Scope: scopeStruct,
-					Call:  call,
+				// Type check the argument against the parameter type
+				paramType := fnDef.Parameters[i].Type
+				if !areCompatible(paramType, checkedArg.Type()) {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
+					return nil
 				}
+
+				// Check mutability constraints if needed
+				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
+				}
+
+				args[i] = checkedArg
+			}
+
+			// Create function call
+			call := &FunctionCall{
+				Name: fnDef.Name,
+				Args: args,
+				fn:   fnDef,
+			}
+
+			// resolve generics
+			if fnDef.hasGenerics() {
+				specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+
+				call.fn = specialized
+			}
+
+			// Special validation for async::start calls
+			if mod.Path() == "ard/async" && s.Function.Name == "start" {
+				c.validateFiberFunction(s.Function.Args[0].Value)
+			}
+
+			return &ModuleFunctionCall{
+				Module: mod.Path(),
+				Call:   call,
 			}
 		}
 	case *ast.IfStatement:
@@ -2173,29 +2085,10 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			return fn
 		}
 	case *ast.StaticFunctionDeclaration:
-		qualifier := s.Path.Target.(*ast.Identifier)
-		sym, ok := c.scope.get(qualifier.Name)
-		if !ok {
-			c.addError(fmt.Sprintf("Undefined: %s", qualifier), qualifier.GetLocation())
-			return nil
-		}
-
-		strct, ok := sym.Type.(*StructDef)
-		if !ok {
-			c.addError(fmt.Sprintf("Not a struct: %s", sym.Name), s.GetLocation())
-			return nil
-		}
-
-		segment := s.Path.Property.(*ast.Identifier)
-		if _, ok := strct.Statics[segment.Name]; ok {
-			c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Path), s.Path.GetLocation())
-			return nil
-		}
-
 		fn := c.checkFunction(&s.FunctionDeclaration, nil)
 		if fn != nil {
 			fn.Name = s.Path.String()
-			strct.Statics[segment.Name] = fn
+			c.scope.add(fn.Name, fn, false)
 		}
 
 		return fn
