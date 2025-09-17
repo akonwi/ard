@@ -667,7 +667,6 @@ func (f *FunctionDef) Type() Type {
 func (f FunctionDef) equal(other Type) bool {
 	otherF, ok := other.(*FunctionDef)
 	if !ok {
-		fmt.Printf("returning false: %T\n", other)
 		return false
 	}
 
