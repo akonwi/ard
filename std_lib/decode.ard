@@ -1,3 +1,4 @@
+use ard/list as List
 use ard/maybe
 use ard/string as Str
 
@@ -247,14 +248,41 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
 // { foo: { bar: 20 } } --- path(["foo", "bar"], int)
 fn path(subpath: [Str], as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
   fn (data: Dynamic) $T![Error] {
-    mut current_data = data
-    mut out: $T? = maybe::none()
+    match subpath.size() {
+      0 => as(data),
+      _ => {
+        mut current_data = try extract_field(data, subpath.at(0)) -> found {
+          Result::err([
+            Error{expected: "Field", found: found, path: [subpath.at(0)]}
+          ])
+        }
+        mut traveled: [Str] = []
+        for seg, idx in subpath {
+          if idx > 0 {
+            current_data = try extract_field(current_data, seg) -> found {
+              Result::err([
+                Error{expected: "Field", found: found, path: [subpath.at(0)]}
+              ])
+            }
+            traveled.push(seg)
+          }
+        }
 
-    for seg, idx in subpath {
-      current_data = try extract_field(current_data, seg)
+        let out = try as(current_data) -> errs {
+          mut out: [Error] = []
+          for err in errs {
+            out.push(Error{
+              expected: err.expected,
+              found: err.found,
+              path: List::concat(err.path, subpath)
+            })
+          }
+
+          Result::err(out)
+        }
+        Result::ok(out)
+      },
     }
-
-    as(current_data)
   }
 }
 
