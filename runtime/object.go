@@ -104,6 +104,30 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	}
 }
 
+func deepCopy(data any) any {
+	if data == nil {
+		return nil
+	}
+
+	switch v := data.(type) {
+	case map[string]any:
+		newMap := make(map[string]any, len(v))
+		for key, val := range v {
+			newMap[key] = deepCopy(val)
+		}
+		return newMap
+	case []any:
+		newSlice := make([]any, len(v))
+		for i, val := range v {
+			newSlice[i] = deepCopy(val)
+		}
+		return newSlice
+	default:
+		// Primitive types (int, string, bool, float64, etc.) are copied by value.
+		return v
+	}
+}
+
 // deep copies an object
 func (o *Object) Copy() *Object {
 	copy := &Object{
@@ -139,8 +163,8 @@ func (o *Object) Copy() *Object {
 		}
 		copy.raw = copiedMap
 	case *checker.Maybe:
-		// Deep copy Maybe - if value is nil (None), copy as-is, otherwise deep copy the value
-		if o.Raw() == nil {
+		// Deep copy Maybe - if value is not nil (Some), deep copy the inner value.
+		if o.Raw() != nil {
 			if inner, ok := o.Raw().(*Object); ok {
 				copy.raw = inner.Copy()
 			}
@@ -156,6 +180,10 @@ func (o *Object) Copy() *Object {
 		// Functions cannot be copied - return the same function object
 		// Functions are immutable so sharing them is safe
 	default:
+		if o._type == checker.Dynamic {
+			// Deep copy the raw value
+			copy.raw = deepCopy(o.raw)
+		}
 		// For primitives (Str, Int, Float, Bool), return a new object with same value
 		// These are immutable in Ard, so we can just create a new object
 	}
