@@ -201,7 +201,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	err := http.ListenAndServe(fmt.Sprintf(":%d", port), _mux)
 	if err != nil {
-		panic(fmt.Errorf("Failed to start server: %v", err))
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
-	return runtime.Void()
+	return runtime.MakeOk(runtime.Void())
 }

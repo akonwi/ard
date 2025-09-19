@@ -8,5 +8,5 @@ fn main() {
     "/me": fn(req: http::Request) http::Response {
       http::Response::new(200, "this is {req.path().or("")}")
     },
-  ])
+  ]).expect("Error serving at 3000")
 }
