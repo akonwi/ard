@@ -2177,25 +2177,29 @@ func (p *parser) memberAccess() (Expression, error) {
 		return nil, err
 	}
 
+	// Handle @property and @method() syntax (no dot)
 	if id, ok := expr.(*Identifier); ok && id.Name == "@" {
-		call, err := p.call()
-		if err != nil {
-			return nil, err
-		}
-
-		switch prop := call.(type) {
-		case *Identifier:
-			expr = &InstanceProperty{
-				Target:   expr,
-				Property: *prop,
+		if p.check(identifier) {
+			call, err := p.call()
+			if err != nil {
+				return nil, err
 			}
-		case *FunctionCall:
-			expr = &InstanceMethod{
-				Target: expr,
-				Method: *prop,
+
+			switch prop := call.(type) {
+			case *Identifier:
+				expr = &InstanceProperty{
+					Target:   expr,
+					Property: *prop,
+				}
+			case *FunctionCall:
+				expr = &InstanceMethod{
+					Target: expr,
+					Method: *prop,
+				}
 			}
 		}
 	}
+
 	for p.match(dot, colon_colon) {
 		if p.previous().kind == dot {
 			call, err := p.call()

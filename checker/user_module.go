@@ -51,7 +51,7 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 				publicSymbols[s.Name] = *sym
 			}
 		case *Enum:
-			if !s.private {
+			if !s.Private {
 				publicSymbols[s.Name] = *sym
 			}
 		}

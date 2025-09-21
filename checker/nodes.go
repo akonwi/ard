@@ -742,9 +742,11 @@ func (p *ModuleSymbol) Type() Type {
 
 type Enum struct {
 	Name     string
+	Private  bool
 	Variants []string
-	private  bool
+	Methods  map[string]*FunctionDef
 	Traits   []*Trait
+	Location ast.Location
 }
 
 func (e Enum) NonProducing() {}
@@ -778,16 +780,14 @@ func (e Enum) equal(other Type) bool {
 	return true
 }
 func (e Enum) get(name string) Type {
-	switch name {
-	case "to_str":
-		// Check if the enum has the ToString trait
+	if method, ok := e.Methods[name]; ok {
+		return method
+	}
+	// Check if the enum has the ToString trait
+	if name == "to_str" {
 		for _, trait := range e.Traits {
 			if trait.Name == "ToString" {
-				return &FunctionDef{
-					Name:       name,
-					Parameters: []Parameter{},
-					ReturnType: Str,
-				}
+				return &trait.methods[0]
 			}
 		}
 	}

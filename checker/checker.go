@@ -890,10 +890,12 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			enum := &Enum{
-				private:  s.Private,
+				Private:  s.Private,
 				Name:     s.Name,
 				Variants: s.Variants,
+				Methods:  make(map[string]*FunctionDef),
 			}
+
 			c.scope.add(enum.name(), enum, false)
 			return nil
 		}
@@ -928,18 +930,33 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
-			structDef, ok := sym.Type.(*StructDef)
-			if !ok {
-				c.addError(fmt.Sprintf("Expected struct type, got %s", sym.Type), s.Target.GetLocation())
+			switch def := sym.Type.(type) {
+			case *StructDef:
+				for _, method := range s.Methods {
+					fnDef := c.checkFunction(&method, func() {
+						c.scope.add("@", def, method.Mutates)
+					})
+					fnDef.Mutates = method.Mutates
+					def.Methods[method.Name] = fnDef
+				}
+				return &Statement{Stmt: def}
+			case *Enum:
+				if def.Methods == nil {
+					def.Methods = make(map[string]*FunctionDef)
+				}
+				for _, method := range s.Methods {
+					if method.Mutates {
+						c.addError("Enum methods cannot be mutating", method.GetLocation())
+					}
+					fnDef := c.checkFunction(&method, func() {
+						c.scope.add("@", def, false)
+					})
+					def.Methods[method.Name] = fnDef
+				}
+				return &Statement{Stmt: def}
+			default:
+				c.addError(fmt.Sprintf("Can only implement methods on structs and enums, not %s", sym.Type), s.Target.GetLocation())
 				return nil
-			}
-
-			for _, method := range s.Methods {
-				fnDef := c.checkFunction(&method, func() {
-					c.scope.add("@", structDef, method.Mutates)
-				})
-				fnDef.Mutates = method.Mutates
-				structDef.Methods[method.Name] = fnDef
 			}
 			return nil
 		}

@@ -9,15 +9,16 @@ enum Method {
 	Options,
 }
 
-// refactor: enums can have methods and implement traits but don't have reference to the variant
-fn method_to_str(method: Method) Str {
-  match method {
-    Method::Get => "GET",
-    Method::Post => "POST",
-    Method::Put => "PUT",
-    Method::Del => "DELETE",
-    Method::Patch => "PATCH",
-    Method::Options => "OPTIONS",
+impl Method {
+  fn to_str() Str {
+    match @ {
+      Method::Get => "GET",
+      Method::Post => "POST",
+      Method::Put => "PUT",
+      Method::Del => "DELETE",
+      Method::Patch => "PATCH",
+      Method::Options => "OPTIONS",
+    }
   }
 }
 
@@ -77,7 +78,7 @@ impl Response {
 private extern fn _send(method: Str, url: Str, body: Str?, headers: [Str:Str]) Response!Str = "HTTP_Send"
 
 fn send(req: Request) Response!Str {
-  let method = method_to_str(req.method)
+  let method = req.method.to_str()
   _send(method, req.url, req.body, req.headers)
 }
 

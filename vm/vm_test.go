@@ -33,7 +33,7 @@ func run(t *testing.T, input string) any {
 	vm := vm.NewRuntime(module)
 	res, err := vm.Interpret()
 	if err != nil {
-		t.Fatalf("VM error: %v", err)
+		t.Fatalf("VM error: %s", err.Error())
 	}
 	return res
 }

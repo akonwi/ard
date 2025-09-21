@@ -58,6 +58,13 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 
 	switch s := stmt.Stmt.(type) {
 	case *checker.Enum:
+		// Process enum methods and create closures with captured scope
+		for methodName := range s.Methods {
+			// Create a modified function definition with "@" as first parameter
+			closure := vm.createEnumMethodClosure(s, methodName)
+			// Store using enum.method key format
+			vm.hq.addMethod(s, methodName, closure)
+		}
 		return runtime.Void()
 	case *checker.StructDef:
 		// Process struct methods and create closures with captured scope
@@ -344,12 +351,11 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				return subj.Struct_Get(e.Property)
 			}
 
-			switch subj.Type() {
-			case checker.Str:
+			if subj.Type() == checker.Str {
 				return vm.evalStrProperty(subj, e.Property)
-			default:
-				panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj.Type(), e.Property))
 			}
+
+			panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj.Type(), e.Property))
 		}
 	case *checker.InstanceMethod:
 		{
@@ -889,35 +895,36 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	panic(fmt.Errorf("Method not found: %s.%s", istruct.Name, call.Name))
 }
 
-func (vm *VM) EvalEnumMethod(self *runtime.Object, method *checker.FunctionCall, enum *checker.Enum) *runtime.Object {
-	switch method.Name {
-	case "to_str":
-		// Special handling for http::Method enum
-		if enum.Name == "Method" {
-			variantIndex := self.Raw().(int8)
-			if variantIndex >= 0 && int(variantIndex) < len(enum.Variants) {
-				// Map enum variants to HTTP method strings
-				methodStrings := map[string]string{
-					"Get":     "GET",
-					"Post":    "POST",
-					"Put":     "PUT",
-					"Del":     "DELETE",
-					"Patch":   "PATCH",
-					"Options": "OPTIONS",
-				}
-				variantName := enum.Variants[variantIndex]
-				if methodStr, ok := methodStrings[variantName]; ok {
-					return runtime.MakeStr(methodStr)
-				}
-			}
-		}
-		// Default behavior: return the variant name as string
-		variantIndex := self.Raw().(int8)
-		if variantIndex >= 0 && int(variantIndex) < len(enum.Variants) {
-			return runtime.MakeStr(enum.Variants[variantIndex])
-		}
-		return runtime.MakeStr("")
-	default:
-		panic(fmt.Errorf("Undefined method: %s.%s()", enum.Name, method.Name))
+func (vm *VM) createEnumMethodClosure(enum *checker.Enum, methodName string) *VMClosure {
+	methodDef := enum.Methods[methodName]
+	// Create a modified function definition with "@" as first parameter
+	copy := *methodDef // Copy the original
+	methodDefWithSelf := &copy
+	methodDefWithSelf.Parameters = append([]checker.Parameter{
+		{Name: "@", Type: nil}, // "@" parameter for enum instance
+	}, methodDef.Parameters...)
+
+	return &VMClosure{
+		vm:   vm,
+		expr: methodDefWithSelf,
+
+		// todo: this should be scope from the module the type is defined in. currently, it's the caller scope
+		capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
 	}
+}
+
+func (vm *VM) EvalEnumMethod(subj *runtime.Object, call *checker.FunctionCall, enum *checker.Enum) *runtime.Object {
+	closure, ok := vm.hq.getMethod(enum, call.Name)
+	if ok {
+		// Prepare arguments: enum instance first, then regular args
+		args := make([]*runtime.Object, len(call.Args)+1)
+		args[0] = subj // "@" - the enum instance
+		for i := range call.Args {
+			args[i+1] = vm.eval(call.Args[i])
+		}
+
+		return closure.Eval(args...)
+	}
+
+	panic(fmt.Errorf("Method not found: %s.%s", enum.Name, call.Name))
 }
