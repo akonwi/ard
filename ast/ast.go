@@ -631,6 +631,14 @@ func (b BoolLiteral) String() string {
 	return fmt.Sprintf("%t", b.Value)
 }
 
+type VoidLiteral struct {
+	Location
+}
+
+func (v VoidLiteral) String() string {
+	return "()"
+}
+
 type ListLiteral struct {
 	Location
 	Items    []Expression

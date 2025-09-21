@@ -716,3 +716,21 @@ math::add(10, 20)`
 		t.Errorf("Expected 30, got %v", result)
 	}
 }
+
+func TestVoidLiteral(t *testing.T) {
+	run(t, `
+		// can assign a Void
+		let unit = ()
+		unit
+
+		// can return void expresson
+		fn void() Void!Str {
+			if not 42 == 42 {
+				Result::err("42 should equal 42")
+			}
+			Result::ok(())
+		}
+		// can do empty method calls
+		void()
+	`)
+}

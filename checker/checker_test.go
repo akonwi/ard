@@ -2158,3 +2158,21 @@ func TestGenerics(t *testing.T) {
 		},
 	})
 }
+
+
+
+func TestVoidLiteral(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "void literal",
+			input: `let unit = ()`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{Name: "unit", Value: &checker.VoidLiteral{}},
+					},
+				},
+			},
+		},
+	})
+}

@@ -638,3 +638,16 @@ func TestAndOrs(t *testing.T) {
 		},
 	})
 }
+
+func TestVoidLiteral(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Void literal",
+			input: "()",
+			output: Program{
+				Imports:    []Import{},
+				Statements: []Statement{&VoidLiteral{}},
+			},
+		},
+	})
+}

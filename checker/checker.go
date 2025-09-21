@@ -1228,6 +1228,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		return &StrLiteral{s.Value}
 	case *ast.BoolLiteral:
 		return &BoolLiteral{s.Value}
+	case *ast.VoidLiteral:
+		return &VoidLiteral{}
 	case *ast.NumLiteral:
 		{
 			if strings.Contains(s.Value, ".") {

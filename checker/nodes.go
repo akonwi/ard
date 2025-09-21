@@ -58,6 +58,16 @@ func (b *BoolLiteral) Type() Type {
 	return Bool
 }
 
+type VoidLiteral struct{}
+
+func (v *VoidLiteral) String() string {
+	return "()"
+}
+
+func (v *VoidLiteral) Type() Type {
+	return Void
+}
+
 type IntLiteral struct {
 	Value int
 }

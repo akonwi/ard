@@ -209,6 +209,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return runtime.MakeStr(e.Value)
 	case *checker.BoolLiteral:
 		return runtime.MakeBool(e.Value)
+	case *checker.VoidLiteral:
+		return runtime.Void()
 	case *checker.IntLiteral:
 		return runtime.MakeInt(e.Value)
 	case *checker.FloatLiteral:

@@ -2504,6 +2504,15 @@ func (p *parser) primary() (Expression, error) {
 		}, nil
 	}
 	if p.match(left_paren) {
+		// Check for empty parentheses (void literal)
+		if p.check(right_paren) {
+			location := p.previous().getLocation()
+			p.advance() // consume the ')'
+			return &VoidLiteral{
+				Location: location,
+			}, nil
+		}
+
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
