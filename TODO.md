@@ -1,6 +1,7 @@
 # TODO
 
 ## Initial 0.1.0 build
+- [ ] std_lib imports aren't getting checked
 - [ ] enum methods need some way to know "self"
 - [ ] need a void expression (Unit)
 - [ ] need to be able to alias fn signatures with `type`
