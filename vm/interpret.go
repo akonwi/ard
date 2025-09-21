@@ -579,6 +579,28 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 
 				// Success case: always continue execution with unwrapped value
 				return unwrapped
+			} else if checker.IsMaybe(subj.Type()) {
+				if subj.Raw() == nil {
+					// None case: early return from function
+					if e.CatchBlock != nil {
+						// Execute catch block and early return its result
+						result, broken := vm.evalBlock(e.CatchBlock, nil)
+
+						// Early return: the catch block's result becomes the function's return value
+						vm.scope.broken = true
+						if broken {
+							return result
+						}
+						return result
+					} else {
+						// No catch block: propagate none by early returning
+						vm.scope.broken = true
+						return runtime.MakeMaybe(nil, e.Type())
+					}
+				}
+
+				// Some case: unwrap and continue execution
+				return runtime.Make(subj.Raw(), e.Type())
 			}
 
 			panic(fmt.Errorf("Cannot use try keyword on %s", subj.Type()))

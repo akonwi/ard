@@ -20,7 +20,6 @@
 - [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
   - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
 - [ ] `Maybe.expect()` for panicing
-- [ ] `try` on Maybe types
 - [ ] `?` sugar for safely unwrapping maybes
 - [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
   - $Seg could be either strings or ints
