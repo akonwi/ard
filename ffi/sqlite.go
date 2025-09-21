@@ -384,7 +384,7 @@ func SqliteUpdate(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(runtime.MakeDynamic(resultMap))
 }
 
-// SqliteDelete deletes records and returns whether any were deleted
+// fn (conn: Dynamic, table: Str, where: Str) Bool!Str
 func SqliteDelete(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("delete expects 3 arguments, got %d", len(args)))
