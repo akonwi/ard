@@ -25,7 +25,7 @@ func (m EmbeddedModule) Get(name string) Symbol {
 }
 
 // findEmbeddedModule loads a .ard standard library module from embedded files
-func findEmbeddedModule(path string) (Module, bool) {
+func FindEmbeddedModule(path string) (Module, bool) {
 	// Read the embedded file using std_lib.Find
 	content, err := std_lib.Find(path)
 	if err != nil {
@@ -45,6 +45,7 @@ func findEmbeddedModule(path string) (Module, bool) {
 	if len(diagnostics) > 0 {
 		// For now, we'll continue even with diagnostics
 		// In a production system, you might want to handle this differently
+
 	}
 
 	return module, true

@@ -6,7 +6,7 @@ var prelude = map[string]Module{
 
 func findInStdLib(path string) (Module, bool) {
 	// First check for embedded .ard modules
-	if mod, ok := findEmbeddedModule(path); ok {
+	if mod, ok := FindEmbeddedModule(path); ok {
 		return mod, true
 	}
 
