@@ -289,14 +289,14 @@ func TestTry(t *testing.T) {
 			},
 		},
 		{
-			name: "try can only be used on Result types",
+			name: "try can only be used on Result or Maybe types",
 			input: `
 				fn test_func() Str {
 					let val = "hello"
 					try val
 				}`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "try can only be used on Result types, got: Str"},
+				{Kind: checker.Error, Message: "try can only be used on Result or Maybe types, got: Str"},
 			},
 		},
 		{

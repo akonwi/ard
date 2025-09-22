@@ -39,11 +39,46 @@ Or use the `.or(default)` method to provide a fallback value:
 let safe_result = divide(10, 0).or(-1)  // Returns -1 on error
 ```
 
+## Maybe Types
+
+Maybe types represent values that may or may not exist. They are written as `Type?` and are equivalent to `Maybe<Type>`:
+
+```ard
+use ard/maybe
+
+fn find_user(id: Int) User? {
+    match id == 42 {
+        true => maybe::some(User { name: "Alice", id: 42 }),
+        false => maybe::none()
+    }
+}
+```
+
+### Creating Maybe Values
+
+Use the standard library functions to create Maybe values:
+- `maybe::some(value)` - creates a value that exists
+- `maybe::none()` - creates an absent value
+
+### Working with Maybe Values
+
+Maybe values can be handled using pattern matching:
+
+```ard
+let user = find_user(42)
+match user {
+    user => io::print("Found user: {user.name}"),
+    _ => io::print("User not found")
+}
+```
+
 ## The try Keyword
 
-The `try` keyword provides early return semantics for working with Result types, eliminating the need for explicit error checking in many cases.
+The `try` keyword provides early return semantics for working with Result and Maybe types, eliminating the need for explicit error checking in many cases.
 
-### Basic Usage
+
+
+### With Result Types
 
 ```ard
 fn calculate() Int!Str {
@@ -53,14 +88,32 @@ fn calculate() Int!Str {
 }
 ```
 
+### With Maybe Types
+
+```ard
+use ard/maybe
+
+fn get_user_name(id: Int) Str? {
+    let user = try find_user(id)  // If user not found, return early with none
+    maybe::some(user.name)        // If we get here, user was found
+}
+
+fn get_user_display(id: Int) Str? {
+    let name = try get_user_name(id)  // Int? -> Str?, compatible types
+    maybe::some("User: {name}")
+}
+```
+
 ### Restrictions
 
-- `try` can only be applied to Result types
-- When used without a catch clause, the function must return a compatible Result type with the same error type
+- `try` can only be applied to Result or Maybe types
+- When used without a catch clause, the function must return a compatible Result or Maybe type
+- For Result types: the function must return a Result with the same error type
+- For Maybe types: the function must return a Maybe type (inner types can be different)
 
 ## Error Transformation with Catch Blocks
 
-When your function's return type doesn't match the Result's error type, you can use catch blocks to transform errors:
+When your function's return type doesn't match the Result's error type or when you want to handle Maybe `none` cases, you can use catch blocks to transform errors:
 
 ```ard
 fn process_data() Str {
@@ -71,10 +124,28 @@ fn process_data() Str {
 }
 ```
 
+### With Maybe Types
+
+```ard
+use ard/maybe
+
+fn get_user_display(id: Int) Str {
+    let user = try find_user(id) -> _ {
+        "Unknown User"
+    }
+    "User: {user.name}"
+}
+```
+
 ### Catch Block Semantics
 
+#### For Result Types
 - **Success case**: The Result is unwrapped and execution continues normally
 - **Error case**: The catch block executes and its result is returned early from the function
+
+#### For Maybe Types
+- **Some case**: The Maybe is unwrapped and execution continues normally
+- **None case**: The catch block executes and its result is returned early from the function
 
 ### Function Reference Shorthand
 
@@ -102,14 +173,31 @@ fn process() Str {
 }
 ```
 
+### Function Reference with Maybe Types
+
+```ard
+use ard/maybe
+
+fn default_name() Str {
+    "Anonymous"
+}
+
+fn greet(id: Int) Str {
+    let name = try get_user_name(id) -> default_name
+    "Hello, {name}!"
+}
+```
+
 ## Complete Example
 
 Here's a comprehensive example showing different error handling patterns:
 
 ```ard
 use ard/io
+use ard/maybe
 
 struct Person { name: Str, age: Int }
+struct Database { users: [Int:Person] }
 
 fn parse_age(s: Str) Int!Str {
     // Simulate parsing that can fail
@@ -139,6 +227,39 @@ fn format_parse_error(msg: Str) Str {
 fn create_person_with_message(name: Str, age_str: Str) Str {
     let person = try create_person(name, age_str) -> format_parse_error
     "Created person: {person.name}, age {person.age}"
+}
+
+// Maybe type examples
+fn find_person(db: Database, id: Int) Person? {
+    match db.users.get(id) {
+        person => maybe::some(person),
+        _ => maybe::none()
+    }
+}
+
+fn get_person_info(db: Database, id: Int) Str? {
+    let person = try find_person(db, id)  // Early return none if not found
+    maybe::some("Name: {person.name}, Age: {person.age}")
+}
+
+fn get_person_display(db: Database, id: Int) Str {
+    let info = try get_person_info(db, id) -> _ {
+        "Person not found"
+    }
+    "Person Info: {info}"
+}
+
+// Mixed Result and Maybe types
+fn safe_get_person_age(db: Database, id: Int, age_str: Str) Int {
+    let person = try find_person(db, id) -> _ {
+        // If person not found, try to parse the provided age string
+        let parsed_age = try parse_age(age_str) -> err {
+            io::print("Both person lookup and age parsing failed: {err}")
+            return 0
+        }
+        return parsed_age
+    }
+    person.age
 }
 ```
 

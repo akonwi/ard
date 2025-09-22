@@ -734,3 +734,140 @@ func TestVoidLiteral(t *testing.T) {
 		void()
 	`)
 }
+
+func TestTryOnMaybe(t *testing.T) {
+	tests := []test{
+		{
+			name: "try on Maybe::some returns unwrapped value",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::some(42)
+				}
+
+				fn test() Int? {
+					let value = try get_value()
+					maybe::some(value + 1)
+				}
+
+				let result = test()
+				match result {
+					value => value,
+					_ => -1
+				}
+			`,
+			want: 43,
+		},
+		{
+			name: "try on Maybe::none propagates none",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::none()
+				}
+
+				fn test() Int? {
+					let value = try get_value()
+					maybe::some(value + 1)
+				}
+
+				let result = test()
+				match result {
+					value => value,
+					_ => -999
+				}
+			`,
+			want: -999,
+		},
+		{
+			name: "try on Maybe with catch block transforms none",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::none()
+				}
+
+				fn test() Int {
+					let value = try get_value() -> _ { 42 }
+					value + 1
+				}
+
+				test()
+			`,
+			want: 42,
+		},
+		{
+			name: "try on Maybe with catch block - some case",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::some(10)
+				}
+
+				fn test() Int {
+					let value = try get_value() -> _ { 42 }
+					value + 1
+				}
+
+				test()
+			`,
+			want: 11,
+		},
+	}
+	runTests(t, tests)
+}
+
+func TestTryOnMaybeDifferentTypes(t *testing.T) {
+	tests := []test{
+		{
+			name: "try on Maybe with different inner types - success case",
+			input: `
+				use ard/maybe
+				
+				fn get_value() Int? {
+					maybe::some(42)
+				}
+				
+				fn test() Str? {
+					let value = try get_value()  // Int? -> Int, function returns Str?
+					maybe::some("success")
+				}
+				
+				let result = test()
+				match result {
+					value => value,
+					_ => "none"
+				}
+			`,
+			want: "success",
+		},
+		{
+			name: "try on Maybe with different inner types - none case",
+			input: `
+				use ard/maybe
+				
+				fn get_value() Int? {
+					maybe::none()
+				}
+				
+				fn test() Str? {
+					let value = try get_value()  // Should early return none as Str?
+					maybe::some("should not reach")
+				}
+				
+				let result = test()
+				match result {
+					value => value,
+					_ => "got none as expected"
+				}
+			`,
+			want: "got none as expected",
+		},
+	}
+
+	runTests(t, tests)
+}
