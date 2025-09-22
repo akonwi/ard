@@ -38,24 +38,18 @@ private extern fn get_query_param(req: Dynamic, name: Str) Str = "GetQueryParam"
 
 impl Request {
   fn path() Str? {
-    match @raw {
-      raw => maybe::some(get_req_path(raw)),
-      _ => maybe::none()
-    }
+    let raw = try @raw
+    maybe::some(get_req_path(raw))
   }
 
   fn path_param(name: Str) Str {
-    match @raw {
-      raw => get_path_value(raw, name),
-      _ => ""
-    }
+    let raw = try @raw -> _ { "" }
+    get_path_value(raw, name)
   }
 
   fn query_param(name: Str) Str {
-    match @raw {
-      raw => get_query_param(raw, name),
-      _ => ""
-    }
+    let raw = try @raw -> _ { "" }
+    get_query_param(raw, name)
   }
 }
 
