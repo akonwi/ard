@@ -31,6 +31,7 @@ The project uses the `jsonv2` experiment for the [new json tools](https://antonz
 - **Testing**: Table-driven tests with descriptive names
   - use TDD
   - when adding new features or fixing bugs, recreate them with a test where possible instead of creating sample programs
+  - prefer vm tests over checker tests. use vm tests to validate that written code functions as expected. use checker tests to document expected compiler errors
 - **Formatting**: Standard Go formatting (`gofmt`)
 - **Project Structure**: Compiler follows ast → checker → vm pipeline
 - **Development Tracking**: Use TODO.md for feature development progress
