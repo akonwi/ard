@@ -887,6 +887,13 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 
 func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
 	switch m.Method.Name {
+	case "expect":
+		if subj.Raw() == nil { // This is a none
+			_msg := vm.eval(m.Method.Args[0]).AsString()
+			panic(_msg)
+		}
+		// Return the unwrapped value for some
+		return runtime.Make(subj.Raw(), m.Type())
 	case "is_none":
 		return runtime.MakeBool(subj.Raw() == nil)
 	case "is_some":

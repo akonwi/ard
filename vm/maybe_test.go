@@ -66,5 +66,21 @@ func TestMaybes(t *testing.T) {
 			`,
 			want: "hello",
 		},
+		{
+			name: ".expect() returns value for some",
+			input: `
+				use ard/maybe
+				maybe::some(42).expect("Should not panic")
+			`,
+			want: 42,
+		},
+		{
+			name: ".expect() panics with message for none",
+			input: `
+				use ard/maybe
+				maybe::none().expect("Value was expected but got none")
+			`,
+			panic: "Value was expected but got none",
+		},
 	})
 }

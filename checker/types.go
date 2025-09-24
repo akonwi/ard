@@ -491,6 +491,12 @@ func (m *Maybe) String() string {
 }
 func (m *Maybe) get(name string) Type {
 	switch name {
+	case "expect":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "message", Type: Str}},
+			ReturnType: m.of,
+		}
 	case "is_none":
 		return &FunctionDef{
 			Name:       name,
