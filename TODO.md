@@ -1,11 +1,6 @@
 # TODO
 
 ## Initial 0.1.0 build
-- [ ] need to be able to alias fn signatures with `type`
-  - a single type union should act as an alias
-  - matching is only required if it supports variadic types
-- [ ] in ard/sqlite, implement prepared statements
-  - needs API design
 - [ ] `match` as a replacement for if statements
   - like cascading if conditions rather than chaining if-else-if
   - supports catch-all case
@@ -17,11 +12,15 @@
     _ => {}
   }
   ```
+- [ ] need to be able to alias fn signatures with `type`
+  - a single type union should act as an alias
+  - matching is only required if it supports variadic types
+- [ ] in ard/sqlite, implement prepared statements
+  - needs API design
 - [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
   - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
-- [ ] `?` sugar for safely unwrapping maybes
 - [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
-  - $Seg could be either strings or ints
+  - $Seg could be union of strings or ints
     - as ints, act as an array index
 - [ ] support handling fiber panics
 - [ ] syntax for generics on structs
@@ -30,9 +29,6 @@
   - `200 <= status <= 300`
 - [ ] allow non-linear declarations at the top level
   -  i.e. a type declared at the top of the file, can reference one declared below
-- [ ] matching on strings?
-  - probably should be enums
-  - could be accomplished with a plain `match` and  various conditions
 - [ ] allow omitting nullable arguments in function calls
 - [ ] inline block as expression
   ```
@@ -46,6 +42,7 @@
 - [ ] start versioning (begin with 0.1.0)
 
 ## Future improvements
+- [ ] `?` sugar for safely unwrapping maybes
 - [ ] infer types in anonymous functions
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
