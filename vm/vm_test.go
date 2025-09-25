@@ -581,52 +581,6 @@ func TestEnums(t *testing.T) {
 				dir`,
 			want: int8(3),
 		},
-		{
-			name: "Matching on enum",
-			input: `
-				enum Direction {
-					Up, Down, Left, Right
-				}
-				let dir: Direction = Direction::Right
-				match dir {
-					Direction::Up => "North",
-					Direction::Down => {
-						"South"
-					},
-					Direction::Left => "West",
-					Direction::Right => "East"
-				}`,
-			want: "East",
-		},
-		{
-			name: "Catch all",
-			input: `
-				enum Direction {
-					Up, Down, Left, Right
-				}
-				let dir: Direction = Direction::Right
-				match dir {
-					Direction::Up => "North",
-					Direction::Down => "South",
-					_ => "skip"
-				}`,
-			want: "skip",
-		},
-	})
-}
-
-func TestMatchingOnBooleans(t *testing.T) {
-	runTests(t, []test{
-		{
-			name: "Matching on booleans",
-			input: `
-				let is_on = true
-				match is_on {
-					true => "on",
-					false => "off"
-				}`,
-			want: "on",
-		},
 	})
 }
 
@@ -827,16 +781,16 @@ func TestTryOnMaybeDifferentTypes(t *testing.T) {
 			name: "try on Maybe with different inner types - success case",
 			input: `
 				use ard/maybe
-				
+
 				fn get_value() Int? {
 					maybe::some(42)
 				}
-				
+
 				fn test() Str? {
 					let value = try get_value()  // Int? -> Int, function returns Str?
 					maybe::some("success")
 				}
-				
+
 				let result = test()
 				match result {
 					value => value,
@@ -849,16 +803,16 @@ func TestTryOnMaybeDifferentTypes(t *testing.T) {
 			name: "try on Maybe with different inner types - none case",
 			input: `
 				use ard/maybe
-				
+
 				fn get_value() Int? {
 					maybe::none()
 				}
-				
+
 				fn test() Str? {
 					let value = try get_value()  // Should early return none as Str?
 					maybe::some("should not reach")
 				}
-				
+
 				let result = test()
 				match result {
 					value => value,

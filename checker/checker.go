@@ -2629,25 +2629,33 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 					caseBlock := c.checkBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
+				} else if unaryExpr, ok := matchCase.Pattern.(*ast.UnaryExpression); ok && unaryExpr.Operator == ast.Minus {
+					// Handle negative numbers like -1, -5, etc.
+					if literal, ok := unaryExpr.Operand.(*ast.NumLiteral); ok {
+						// Convert string to int and negate
+						value, err := strconv.Atoi(literal.Value)
+						if err != nil {
+							c.addError(fmt.Sprintf("Invalid integer literal: %s", literal.Value), literal.GetLocation())
+							return nil
+						}
+						negativeValue := -value
+						caseBlock := c.checkBlock(matchCase.Body, nil)
+						intCases[negativeValue] = caseBlock
+					} else {
+						c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
+						return nil
+					}
 				} else if rangeExpr, ok := matchCase.Pattern.(*ast.RangeExpression); ok {
-					// Handle range pattern like 1..10
-					startLiteral, startOk := rangeExpr.Start.(*ast.NumLiteral)
-					endLiteral, endOk := rangeExpr.End.(*ast.NumLiteral)
-
-					if !startOk || !endOk {
-						c.addError("Range patterns must use integer literals", matchCase.Pattern.GetLocation())
+					// Handle range pattern like 1..10 or -10..5
+					startValue, startErr := c.extractIntFromPattern(rangeExpr.Start)
+					if startErr != nil {
+						c.addError(fmt.Sprintf("Invalid start value in range: %s", startErr.Error()), rangeExpr.Start.GetLocation())
 						return nil
 					}
 
-					startValue, err := strconv.Atoi(startLiteral.Value)
-					if err != nil {
-						c.addError(fmt.Sprintf("Invalid start value in range: %s", startLiteral.Value), rangeExpr.Start.GetLocation())
-						return nil
-					}
-
-					endValue, err := strconv.Atoi(endLiteral.Value)
-					if err != nil {
-						c.addError(fmt.Sprintf("Invalid end value in range: %s", endLiteral.Value), rangeExpr.End.GetLocation())
+					endValue, endErr := c.extractIntFromPattern(rangeExpr.End)
+					if endErr != nil {
+						c.addError(fmt.Sprintf("Invalid end value in range: %s", endErr.Error()), rangeExpr.End.GetLocation())
 						return nil
 					}
 
@@ -2953,6 +2961,28 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		}
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
+	}
+}
+
+// extractIntFromPattern extracts an integer value from a pattern that can be either
+// a NumLiteral or a UnaryExpression with minus operator applied to a NumLiteral
+func (c *checker) extractIntFromPattern(expr ast.Expression) (int, error) {
+	switch e := expr.(type) {
+	case *ast.NumLiteral:
+		return strconv.Atoi(e.Value)
+	case *ast.UnaryExpression:
+		if e.Operator == ast.Minus {
+			if literal, ok := e.Operand.(*ast.NumLiteral); ok {
+				value, err := strconv.Atoi(literal.Value)
+				if err != nil {
+					return 0, err
+				}
+				return -value, nil
+			}
+		}
+		return 0, fmt.Errorf("unsupported unary expression in pattern")
+	default:
+		return 0, fmt.Errorf("pattern must be an integer literal or negative integer")
 	}
 }
 

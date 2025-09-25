@@ -1,7 +1,6 @@
 # TODO
 
 ## Initial 0.1.0 build
-- [ ] Int matches should allow negative numbers
 - [ ] module variables should be exported
 - [ ] `match` as a replacement for if statements
   - like cascading if conditions rather than chaining if-else-if
