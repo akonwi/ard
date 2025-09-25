@@ -1,4 +1,5 @@
 use ard/maybe
+use ard/string as Str
 
 enum Method {
   Get,
@@ -9,7 +10,7 @@ enum Method {
 	Options,
 }
 
-impl Method {
+impl Str::ToString for Method {
   fn to_str() Str {
     match @ {
       Method::Get => "GET",

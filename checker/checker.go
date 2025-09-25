@@ -431,81 +431,164 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
-			structType, ok := typeSym.Type.(*StructDef)
-			if !ok {
-				c.addError(fmt.Sprintf("%s is not a struct type", s.ForType.Name), s.ForType.GetLocation())
+			switch targetType := typeSym.Type.(type) {
+			case *StructDef:
+				// Verify that all required methods are implemented
+				traitMethods := trait.GetMethods()
+				implementedMethods := make(map[string]bool)
+
+				// Check each method in the implementation
+				for _, method := range s.Methods {
+					implementedMethods[method.Name] = true
+
+					// Find the corresponding trait method
+					var traitMethod *FunctionDef
+					for _, m := range traitMethods {
+						if m.Name == method.Name {
+							traitMethod = &m
+							break
+						}
+					}
+
+					if traitMethod == nil {
+						c.addWarning(fmt.Sprintf("Method %s is not part of trait %s", method.Name, trait.name()), method.GetLocation())
+						continue
+					}
+
+					// Check parameter count
+					if len(method.Parameters) != len(traitMethod.Parameters) {
+						c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+						continue
+					}
+
+					params := make([]Parameter, len(method.Parameters))
+					for i, param := range method.Parameters {
+						paramType := c.resolveType(param.Type)
+						expectedType := traitMethod.Parameters[i].Type
+						if !paramType.equal(expectedType) {
+							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+						}
+
+						params[i] = Parameter{Name: param.Name, Type: paramType}
+					}
+
+					// Check return type
+					var returnType Type = Void
+					if method.ReturnType != nil {
+						returnType = c.resolveType(method.ReturnType)
+					}
+					if !traitMethod.ReturnType.equal(returnType) {
+						c.addError(fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType), method.GetLocation())
+						continue
+					}
+
+					// if we made it this far, it's a valid implementation
+					fnDef := c.checkFunction(&method, func() {
+						c.scope.add("@", targetType, method.Mutates)
+					})
+					fnDef.Mutates = method.Mutates
+					// add the method to the struct
+					targetType.Methods[method.Name] = fnDef
+				}
+
+				// Check if all required methods are implemented
+				for _, method := range traitMethods {
+					if !implementedMethods[method.Name] {
+						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
+					}
+				}
+
+				// Add the trait to the struct type's traits list
+				targetType.Traits = append(targetType.Traits, trait)
+
+				// Return the struct so VM can register the new trait methods
+				return &Statement{Stmt: targetType}
+
+			case *Enum:
+				// Verify that all required methods are implemented (same logic as structs)
+				traitMethods := trait.GetMethods()
+				implementedMethods := make(map[string]bool)
+
+				// Check each method in the implementation
+				for _, method := range s.Methods {
+					implementedMethods[method.Name] = true
+
+					// Find the corresponding trait method
+					var traitMethod *FunctionDef
+					for _, m := range traitMethods {
+						if m.Name == method.Name {
+							traitMethod = &m
+							break
+						}
+					}
+
+					if traitMethod == nil {
+						c.addWarning(fmt.Sprintf("Method %s is not part of trait %s", method.Name, trait.name()), method.GetLocation())
+						continue
+					}
+
+					// Check parameter count
+					if len(method.Parameters) != len(traitMethod.Parameters) {
+						c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+						continue
+					}
+
+					params := make([]Parameter, len(method.Parameters))
+					for i, param := range method.Parameters {
+						paramType := c.resolveType(param.Type)
+						expectedType := traitMethod.Parameters[i].Type
+						if !paramType.equal(expectedType) {
+							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+						}
+
+						params[i] = Parameter{Name: param.Name, Type: paramType}
+					}
+
+					// Check return type
+					var returnType Type = Void
+					if method.ReturnType != nil {
+						returnType = c.resolveType(method.ReturnType)
+					}
+					if !traitMethod.ReturnType.equal(returnType) {
+						c.addError(fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType), method.GetLocation())
+						continue
+					}
+
+					// if we made it this far, it's a valid implementation
+					fnDef := c.checkFunction(&method, func() {
+						c.scope.add("@", targetType, false) // Enums are immutable, so always false
+					})
+					// Enums cannot have mutating methods
+					if method.Mutates {
+						c.addError("Enum methods cannot be mutating", method.GetLocation())
+					}
+					fnDef.Mutates = false // Enums are always immutable
+
+					// Ensure enum has Methods map initialized
+					if targetType.Methods == nil {
+						targetType.Methods = make(map[string]*FunctionDef)
+					}
+					// add the method to the enum
+					targetType.Methods[method.Name] = fnDef
+				}
+
+				// Check if all required methods are implemented
+				for _, method := range traitMethods {
+					if !implementedMethods[method.Name] {
+						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
+					}
+				}
+
+				// Add the trait to the enum type's traits list
+				targetType.Traits = append(targetType.Traits, trait)
+
+				// Return the enum so VM can register the new trait methods
+				return &Statement{Stmt: targetType}
+
+			default:
+				c.addError(fmt.Sprintf("%s cannot implement a Trait", s.ForType.Name), s.ForType.GetLocation())
 				return nil
 			}
-
-			// Verify that all required methods are implemented
-			traitMethods := trait.GetMethods()
-			implementedMethods := make(map[string]bool)
-
-			// Check each method in the implementation
-			for _, method := range s.Methods {
-				implementedMethods[method.Name] = true
-
-				// Find the corresponding trait method
-				var traitMethod *FunctionDef
-				for _, m := range traitMethods {
-					if m.Name == method.Name {
-						traitMethod = &m
-						break
-					}
-				}
-
-				if traitMethod == nil {
-					c.addError(fmt.Sprintf("Method %s is not required by trait %s", method.Name, trait.name()), method.GetLocation())
-					continue
-				}
-
-				// Check parameter count
-				if len(method.Parameters) != len(traitMethod.Parameters) {
-					c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
-					continue
-				}
-
-				params := make([]Parameter, len(method.Parameters))
-				for i, param := range method.Parameters {
-					paramType := c.resolveType(param.Type)
-					expectedType := traitMethod.Parameters[i].Type
-					if !paramType.equal(expectedType) {
-						c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
-					}
-
-					params[i] = Parameter{Name: param.Name, Type: paramType}
-				}
-
-				// Check return type
-				var returnType Type = Void
-				if method.ReturnType != nil {
-					returnType = c.resolveType(method.ReturnType)
-				}
-				if !traitMethod.ReturnType.equal(returnType) {
-					c.addError(fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType), method.GetLocation())
-					continue
-				}
-
-				// if we made it this far, it's a valid implementation
-				fnDef := c.checkFunction(&method, func() {
-					c.scope.add("@", structType, method.Mutates)
-				})
-				fnDef.Mutates = method.Mutates
-				// add the method to the struct
-				structType.Methods[method.Name] = fnDef
-			}
-
-			// Check if all required methods are implemented
-			for _, method := range traitMethods {
-				if !implementedMethods[method.Name] {
-					c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
-				}
-			}
-
-			// Add the trait to the struct type's traits list
-			structType.Traits = append(structType.Traits, trait)
-
-			return nil
 		}
 	case *ast.TypeDeclaration:
 		{
