@@ -1,6 +1,8 @@
 # TODO
 
 ## Initial 0.1.0 build
+- [ ] Int matches should allow negative numbers
+- [ ] module variables should be exported
 - [ ] `match` as a replacement for if statements
   - like cascading if conditions rather than chaining if-else-if
   - supports catch-all case
@@ -67,10 +69,10 @@
 - [ ] define enum values
   ```
   enum HttpStatus {
-    200,
-    201,
-    404,
-    429
+    Ok: 200,
+    Created: 201,
+    Not_Found: 404,
+    // ...
   }
 
   fn HttpStatus::from_int(int: Int) HttpStatus? {}
