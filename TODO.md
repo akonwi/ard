@@ -75,3 +75,7 @@
 
   fn HttpStatus::from_int(int: Int) HttpStatus? {}
   ```
+- [ ] compile time constant variables
+  - should readonly variables with a literal value be considered constants?
+    pro: simpler than adding a new `const` keyword and just works
+  - would allow limiting variables in `match Int` patterns to constants for better analysis that there are no conflicts or overlaps in patterns
