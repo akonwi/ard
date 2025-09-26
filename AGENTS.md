@@ -23,6 +23,9 @@ The project uses the `jsonv2` experiment for the [new json tools](https://antonz
 - Verbose testing: `go test -v ./...`
 - Generate FFI registry: `go generate ./vm` (run when adding new FFI functions)
 
+## Instructions
+- When searching the codebase, use the codanna tool first and only grep or use search CLI commands if codanna doesn't yield results
+
 ## Code Style Guidelines
 - **Naming**: PascalCase for exported, camelCase for unexported items
 - **Imports**: Group standard library, third-party, then local imports
