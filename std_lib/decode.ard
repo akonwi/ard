@@ -34,6 +34,8 @@ impl Str::ToString for Error {
   }
 }
 
+// functions to create Dynamic values
+// todo: move into ard/dynamic. probably can be one method with a generic parameter
 extern fn from_str(val: Str) Dynamic = "StrToDynamic"
 extern fn from_int(val: Int) Dynamic = "IntToDynamic"
 extern fn from_float(val: Float) Dynamic = "FloatToDynamic"

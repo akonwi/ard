@@ -113,9 +113,9 @@ fn divide(a: Int, b: Int) Int!Str {
 
 ## Public and Private Declarations
 
-### Public by Default
+### Functions, Structs, Enums, and Traits
 
-All declarations in a module are public and accessible from other modules by default:
+By default, functions, structs, enums, and traits are public and accessible from other modules:
 
 ```ard
 // In utils.ard
@@ -123,12 +123,12 @@ fn helper_function() Str {  // Public
   "This can be called from other modules"
 }
 
-let global_config = "config_value"  // Public
+struct Config {  // Public
+  name: Str
+}
 ```
 
-### Private Declarations
-
-Use the `private` keyword to make declarations module-local:
+Use the `private` keyword to make these declarations module-local:
 
 ```ard
 // In utils.ard
@@ -140,7 +140,41 @@ private fn private_helper() Str {  // Private
   "This cannot be called from other modules"
 }
 
-private let secret_key = "abc123"  // Private
+private struct InternalConfig {  // Private
+  secret: Str
+}
+```
+
+### Variables
+
+Variables have different privacy rules based on mutability:
+
+- **Immutable variables** (`let`) are **public by default**
+- **Mutable variables** (`mut`) are **private by default**
+
+```ard
+// In constants.ard
+let API_URL = "https://api.example.com"  // Public (immutable)
+let MAX_RETRIES = 3                      // Public (immutable)
+
+mut internal_counter = 0                 // Private (mutable)
+mut debug_mode = false                   // Private (mutable)
+```
+
+Usage from another module:
+
+```ard
+// In main.ard
+use my_project/constants
+
+fn main() {
+  // Access public immutable variables
+  let url = constants::API_URL           // ✅ Works
+  let max = constants::MAX_RETRIES       // ✅ Works
+  
+  // Cannot access private mutable variables
+  // let counter = constants::internal_counter  // ❌ Error
+}
 ```
 
 ## Struct Field Visibility
