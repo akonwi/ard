@@ -2713,23 +2713,12 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							Property: instance,
 						}
 					case *ast.Identifier:
-						// Look up other symbols (like enums, functions, etc.)
 						sym := mod.Get(prop.Name)
 						if sym.IsZero() {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						// Check if it's an enum - return it directly for further processing
-						if enum, ok := sym.Type.(*Enum); ok {
-							return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: enum}}
-						}
-						// Check if it's a function - return it as a function reference
-						if fnDef, ok := sym.Type.(*FunctionDef); ok {
-							return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: fnDef}}
-						}
-						// For now, we don't handle other module symbols besides structs, enums, and functions
-						c.addError(fmt.Sprintf("Cannot access %s::%s in this context", id.Name, prop.Name), prop.GetLocation())
-						return nil
+						return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
 					default:
 						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, prop), s.Property.GetLocation())
 						return nil

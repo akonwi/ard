@@ -816,6 +816,87 @@ fn func_b() Int { 2 }`,
 	}
 }
 
+func TestVariableModuleExports(t *testing.T) {
+	// Create temporary directory structure
+	tempDir, err := os.MkdirTemp("", "ard_variable_exports_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project structure
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a constants module with public and private variables
+	constContent := `let API_URL: Str = "https://api.example.com"
+let MAX_RETRIES: Int = 3
+mut internal_counter: Int = 0
+mut debug_mode: Bool = false`
+	err = os.WriteFile(filepath.Join(tempDir, "constants.ard"), []byte(constContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a main file that uses the constants
+	mainContent := `use test_project/constants
+
+fn main() Str {
+    let url: Str = constants::API_URL
+    url + "/users"
+}`
+
+	result := ast.Parse([]byte(mainContent), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	astTree := result.Program
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+	program := module.Program()
+
+	// Should have imported the constants module
+	constModule, ok := program.Imports["test_project/constants"]
+	if !ok {
+		t.Fatal("Expected 'test_project/constants' module to be imported")
+	}
+
+	// Test that immutable variables are accessible (public)
+	if userMod, ok := constModule.(*checker.UserModule); ok {
+		apiUrl := userMod.Get("API_URL")
+		if apiUrl.IsZero() {
+			t.Error("Expected to find 'API_URL' (immutable variables should be public)")
+		}
+
+		maxRetries := userMod.Get("MAX_RETRIES")
+		if maxRetries.IsZero() {
+			t.Error("Expected to find 'MAX_RETRIES' (immutable variables should be public)")
+		}
+
+		// Test that mutable variables are not accessible (private)
+		internalCounter := userMod.Get("internal_counter")
+		if !internalCounter.IsZero() {
+			t.Error("Expected 'internal_counter' to not be accessible (mutable variables should be private)")
+		}
+
+		debugMode := userMod.Get("debug_mode")
+		if !debugMode.IsZero() {
+			t.Error("Expected 'debug_mode' to not be accessible (mutable variables should be private)")
+		}
+	} else {
+		t.Error("Expected constants module to be a UserModule")
+	}
+}
+
 func TestSymbolExtraction(t *testing.T) {
 	// Create test module with public and private symbols
 	moduleContent := `
@@ -834,6 +915,10 @@ struct PublicStruct {
 private struct PrivateStruct {
     field: Str
 }
+
+let public_variable: Int = 100
+
+mut private_variable: Str = "secret"
 `
 
 	// Parse and check the module
@@ -892,6 +977,21 @@ private struct PrivateStruct {
 	privateStruct := userModule.Get("PrivateStruct")
 	if !privateStruct.IsZero() {
 		t.Error("Expected PrivateStruct to be nil (not accessible)")
+	}
+
+	// Test public immutable variable access
+	publicVar := userModule.Get("public_variable")
+	if publicVar.IsZero() {
+		t.Error("Expected to find public_variable (immutable variables are public)")
+	}
+	if publicVar.Type != checker.Int {
+		t.Errorf("Expected public_variable to be Int, got %v", publicVar.Type)
+	}
+
+	// Test private mutable variable access (should return nil)
+	privateVar := userModule.Get("private_variable")
+	if !privateVar.IsZero() {
+		t.Error("Expected private_variable to be nil (mutable variables are private)")
 	}
 
 	// Test non-existent symbol

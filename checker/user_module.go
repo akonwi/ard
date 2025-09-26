@@ -57,6 +57,21 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 		}
 	}
 
+	// Extract public variables from program statements
+	// Immutable variables are public, mutable variables are private
+	for _, stmt := range program.Statements {
+		if s, ok := stmt.Stmt.(*VariableDef); ok {
+			if !s.Mutable { // Only immutable variables are public
+				// Create a symbol for the public variable
+				publicSymbols[s.Name] = Symbol{
+					Name:    s.Name,
+					Type:    s.__type,
+					mutable: s.Mutable,
+				}
+			}
+		}
+	}
+
 	return &UserModule{
 		filePath:      filePath,
 		publicSymbols: publicSymbols,
