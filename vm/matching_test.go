@@ -82,3 +82,84 @@ func TestMatchingOnInt(t *testing.T) {
 		},
 	})
 }
+
+func TestConditionalMatch(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "basic conditional matching with catch-all",
+			input: `
+				let score = 85
+				match {
+					score >= 90 => "A",
+					score >= 80 => "B", 
+					score >= 70 => "C",
+					score >= 60 => "D",
+					_ => "F"
+				}
+			`,
+			want: "B",
+		},
+		{
+			name: "conditional matching with complex conditions",
+			input: `
+				let age = 25
+				let hasLicense = true
+				match {
+					age < 16 => "Too young",
+					not hasLicense => "Need license",
+					age >= 65 => "Senior driver",
+					_ => "Regular driver"
+				}
+			`,
+			want: "Regular driver",
+		},
+		{
+			name: "conditional matching with first condition true",
+			input: `
+				let x = 15
+				match {
+					x > 10 => "big",
+					x > 5 => "medium",
+					_ => "small"
+				}
+			`,
+			want: "big",
+		},
+		{
+			name: "conditional matching falls through to catch-all",
+			input: `
+				let x = 3
+				match {
+					x > 10 => "big",
+					x > 5 => "medium",
+					_ => "small"
+				}
+			`,
+			want: "small",
+		},
+		{
+			name: "conditional matching with integer return types",
+			input: `
+				let condition = true
+				match {
+					condition => 42,
+					_ => 0
+				}
+			`,
+			want: 42,
+		},
+		{
+			name: "conditional matching with boolean conditions",
+			input: `
+				let a = true
+				let b = false
+				match {
+					a and b => "both true",
+					a or b => "at least one true",
+					_ => "both false"
+				}
+			`,
+			want: "at least one true",
+		},
+	})
+}
