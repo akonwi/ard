@@ -3,7 +3,7 @@
 ## Initial 0.1.0 build
 - [ ] `match` as a replacement for if statements
   - like cascading if conditions rather than chaining if-else-if
-  - supports catch-all case
+  - supports an optional catch-all case. the catch-all is equivalent to an `else` block
   ```
   match {
     condition_1 => {},
@@ -38,7 +38,6 @@
     stuff + 5
   }
   ```
-- [ ] private module variables
 - [ ] start versioning (begin with 0.1.0)
 
 ## Future improvements
