@@ -1,17 +1,6 @@
 # TODO
 
 ## Initial 0.1.0 build
-- [ ] `match` as a replacement for if statements
-  - like cascading if conditions rather than chaining if-else-if
-  - supports an optional catch-all case. the catch-all is equivalent to an `else` block
-  ```
-  match {
-    condition_1 => {},
-    condition_2 => {},
-    condition_3 => {},
-    _ => {}
-  }
-  ```
 - [ ] need to be able to alias fn signatures with `type`
   - a single type union should act as an alias
   - matching is only required if it supports variadic types
