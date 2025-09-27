@@ -84,7 +84,60 @@ while count < 10 {
 
 ## Match Expressions
 
-Match expressions are similar to `switch` expressions in most languages.
+Match expressions are similar to `switch` expressions in most languages. They come in two forms: **value matching** (with a subject) and **conditional matching** (without a subject).
+
+### Conditional Matching
+
+Match expressions can be used without a subject to create clean conditional logic as an alternative to if-else chains:
+
+```ard
+let grade = match {
+  score >= 90 => "A",
+  score >= 80 => "B", 
+  score >= 70 => "C",
+  score >= 60 => "D",
+  _ => "F"
+}
+```
+
+This is equivalent to, but more concise than:
+
+```ard
+let grade = if score >= 90 {
+  "A"
+} else if score >= 80 {
+  "B"
+} else if score >= 70 {
+  "C"
+} else if score >= 60 {
+  "D"
+} else {
+  "F"
+}
+```
+
+Conditional match expressions evaluate conditions in order and execute the first matching case. **A catch-all case (`_`) is required** to ensure the expression always returns a value.
+
+#### Complex Conditions
+
+You can use any boolean expressions as conditions:
+
+```ard
+let status = match {
+  age < 16 => "Too young to drive",
+  not hasLicense => "Need to get a license",
+  not hasInsurance => "Need insurance", 
+  age >= 65 => "Senior driver",
+  _ => "Ready to drive"
+}
+
+let activity = match {
+  temperature > 80 and sunny => "Go to the beach",
+  temperature > 70 and weekend => "Have a picnic", 
+  temperature < 50 => "Stay inside and read",
+  _ => "Go for a walk"
+}
+```
 
 ### Integer Matching
 
@@ -146,7 +199,36 @@ for item in items {
 
 ## Pattern Matching Order
 
-Patterns are evaluated in the order they appear. More specific patterns should come before general ones:
+Patterns are evaluated in the order they appear. More specific patterns should come before general ones.
+
+## When to Use Match vs If-Else
+
+**Use conditional match expressions when:**
+- You need to return a value based on conditions
+- You want cleaner, more functional code
+- The logic is pure (no side effects)
+
+**Use if statements when:**
+- You need to perform side effects (like `break`, `panic`, or mutations)
+- You're doing control flow within loops
+- You're executing statements rather than returning values
+
+```ard
+// Good: conditional match for values
+let message = match {
+  user.is_admin() => "Admin access granted",
+  user.is_member() => "Member access granted", 
+  _ => "Access denied"
+}
+
+// Good: if statement for control flow
+for item in items {
+  if should_skip(item) {
+    break  // Side effect - can't use match here
+  }
+  process(item)
+}
+```
 
 ## Loop Control
 
