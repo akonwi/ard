@@ -2,6 +2,7 @@ package vm
 
 import (
 	"maps"
+	"sync"
 
 	"github.com/akonwi/ard/runtime"
 )
@@ -11,6 +12,7 @@ type scope struct {
 	bindings  map[string]*runtime.Object
 	breakable bool
 	broken    bool
+	mu        sync.RWMutex
 }
 
 func newScope(parent *scope) *scope {
@@ -21,6 +23,8 @@ func newScope(parent *scope) *scope {
 }
 
 func (s scope) clone() scope {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	new := &scope{
 		parent:    s.parent,
 		bindings:  make(map[string]*runtime.Object),
@@ -37,10 +41,14 @@ func (s scope) clone() scope {
 }
 
 func (s *scope) add(name string, value *runtime.Object) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.bindings[name] = value
 }
 
 func (s scope) get(name string) (*runtime.Object, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	v, ok := s.bindings[name]
 	if !ok && s.parent != nil {
 		return s.parent.get(name)
