@@ -685,6 +685,29 @@ func (m MatchCase) String() string {
 	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
 }
 
+type ConditionalMatchExpression struct {
+	Location
+	Cases    []ConditionalMatchCase
+	Comments []Comment // Comments found within the match expression
+}
+
+func (c ConditionalMatchExpression) String() string {
+	return "ConditionalMatchExpression"
+}
+
+type ConditionalMatchCase struct {
+	Location
+	Condition Expression // The boolean condition to evaluate (nil for catch-all case)
+	Body      []Statement
+}
+
+func (c ConditionalMatchCase) String() string {
+	if c.Condition == nil {
+		return "ConditionalMatchCase(_)"
+	}
+	return fmt.Sprintf("ConditionalMatchCase(%s)", c.Condition)
+}
+
 type Try struct {
 	Location
 	keyword    Identifier

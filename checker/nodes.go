@@ -395,6 +395,26 @@ func (u *UnionMatch) Type() Type {
 	return Void
 }
 
+type ConditionalMatch struct {
+	Cases    []ConditionalCase
+	CatchAll *Block
+}
+
+func (c *ConditionalMatch) Type() Type {
+	if len(c.Cases) > 0 {
+		return c.Cases[0].Body.Type()
+	}
+	if c.CatchAll != nil {
+		return c.CatchAll.Type()
+	}
+	return Void
+}
+
+type ConditionalCase struct {
+	Condition Expression // Must be type Bool
+	Body      *Block
+}
+
 type FloatSubtraction struct {
 	Left  Expression
 	Right Expression

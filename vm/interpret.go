@@ -550,6 +550,21 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			// This should never happen if the type checker is working correctly
 			panic(fmt.Errorf("No matching case for int value %d", intValue))
 		}
+	case *checker.ConditionalMatch:
+		{
+			// Check conditions in order, execute first matching case
+			for _, conditionalCase := range e.Cases {
+				condition := vm.eval(conditionalCase.Condition)
+				if condition.AsBool() {
+					res, _ := vm.evalBlock(conditionalCase.Body, nil)
+					return res
+				}
+			}
+
+			// If no conditions matched, use catch-all (guaranteed to exist by type checker)
+			res, _ := vm.evalBlock(e.CatchAll, nil)
+			return res
+		}
 	case *checker.TryOp:
 		{
 			subj := vm.eval(e.Expr())

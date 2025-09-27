@@ -2682,6 +2682,56 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 		c.addError(fmt.Sprintf("Cannot match on %s", subject.Type()), s.GetLocation())
 		return nil
+	case *ast.ConditionalMatchExpression:
+		var cases []ConditionalCase
+		var catchAll *Block
+		var referenceType Type
+
+		for _, matchCase := range s.Cases {
+			if matchCase.Condition == nil {
+				// This is a catch-all case (_)
+				if catchAll != nil {
+					c.addError("Duplicate catch-all case", matchCase.GetLocation())
+				} else {
+					catchAll = c.checkBlock(matchCase.Body, nil)
+					if referenceType == nil {
+						referenceType = catchAll.Type()
+					} else if !referenceType.equal(catchAll.Type()) {
+						c.addError(fmt.Sprintf("All cases must return the same type. Expected %s, got %s", referenceType.String(), catchAll.Type().String()), matchCase.GetLocation())
+					}
+				}
+			} else {
+				// Regular condition case
+				if condition := c.checkExpr(matchCase.Condition); condition != nil {
+					// Ensure condition is boolean
+					if condition.Type() != Bool {
+						c.addError(fmt.Sprintf("Condition must be of type Bool, got %s", condition.Type().String()), matchCase.Condition.GetLocation())
+					}
+
+					body := c.checkBlock(matchCase.Body, nil)
+					if referenceType == nil {
+						referenceType = body.Type()
+					} else if !referenceType.equal(body.Type()) {
+						c.addError(fmt.Sprintf("All cases must return the same type. Expected %s, got %s", referenceType.String(), body.Type().String()), matchCase.GetLocation())
+					}
+
+					cases = append(cases, ConditionalCase{
+						Condition: condition,
+						Body:      body,
+					})
+				}
+			}
+		}
+
+		// Require catch-all case for conditional match to guarantee a return value
+		if catchAll == nil {
+			c.addError("Conditional match must include a catch-all (_) case", s.GetLocation())
+		}
+
+		return &ConditionalMatch{
+			Cases:    cases,
+			CatchAll: catchAll,
+		}
 	case *ast.StaticProperty:
 		{
 			if id, ok := s.Target.(*ast.Identifier); ok {

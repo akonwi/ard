@@ -1486,6 +1486,13 @@ func (p *parser) parseExpression() (Expression, error) {
 func (p *parser) matchExpr() (Expression, error) {
 	if p.match(match) {
 		keyword := p.previous()
+
+		// Check if this is a conditional match (no subject expression)
+		if p.check(left_brace) {
+			return p.parseConditionalMatch(*keyword)
+		}
+
+		// Regular match with subject expression
 		matchExpr := &MatchExpression{
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
@@ -1568,6 +1575,91 @@ func (p *parser) matchExpr() (Expression, error) {
 	}
 
 	return p.try()
+}
+
+func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
+	conditionalMatch := &ConditionalMatchExpression{
+		Location: Location{
+			Start: Point{Row: keyword.line, Col: keyword.column},
+		},
+	}
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{'")
+		return conditionalMatch, nil
+	}
+	p.advance() // consume the '{'
+
+	if !p.check(new_line) {
+		p.addError(p.peek(), "Expected new line after '{'")
+		// Continue parsing - this is not a critical error
+	} else {
+		p.advance()
+	}
+
+	for !p.match(right_brace) {
+		// Parse and collect comments
+		if c := p.parseInlineComment(); c != nil {
+			conditionalMatch.Comments = append(conditionalMatch.Comments, *c)
+			p.match(new_line) // consume newline after comment
+			continue
+		}
+
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+
+		var condition Expression
+		var err error
+
+		// Check for catch-all case (_)
+		if p.check(identifier) && p.peek().text == "_" {
+			p.advance()     // consume '_'
+			condition = nil // nil condition indicates catch-all
+		} else {
+			// Parse the condition expression
+			condition, err = p.or()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if !p.check(fat_arrow) {
+			p.addError(p.peek(), "Expected '=>' after condition")
+			p.synchronizeToTokens(fat_arrow, new_line, right_brace)
+			if !p.check(fat_arrow) {
+				// Could not find fat arrow, skip to next case or end
+				continue
+			}
+		}
+		p.advance() // consume the '=>'
+
+		// Parse the body
+		body := []Statement{}
+		if p.check(left_brace) {
+			b, err := p.block()
+			if err != nil {
+				return nil, err
+			}
+			body = b
+		} else {
+			stmt, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			body = append(body, stmt)
+		}
+
+		conditionalMatch.Cases = append(conditionalMatch.Cases, ConditionalMatchCase{
+			Condition: condition,
+			Body:      body,
+		})
+		p.match(comma)
+	}
+
+	conditionalMatch.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+	return conditionalMatch, nil
 }
 
 func (p *parser) try() (Expression, error) {
