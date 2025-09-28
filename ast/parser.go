@@ -1385,6 +1385,22 @@ func (p *parser) parseNamedType() DeclaredType {
 	}
 
 	id := p.previous()
+
+	// Check for generic arguments
+	var typeArgs []DeclaredType
+	if p.match(less_than) {
+		// Loop to parse comma-separated types until '>'
+		for !p.check(greater_than) && !p.isAtEnd() {
+			typeArgs = append(typeArgs, p.parseType())
+			if !p.match(comma) {
+				break // No comma, so expect '>' next
+			}
+		}
+		if !p.match(greater_than) {
+			p.addError(p.peek(), "Expected '>' to close generic type arguments")
+		}
+	}
+
 	nullable := p.match(question_mark)
 
 	// Check if this is a generic (starts with $)
@@ -1427,6 +1443,7 @@ func (p *parser) parseNamedType() DeclaredType {
 			Location: id.getLocation(),
 			Name:     id.text,
 			nullable: nullable,
+			TypeArgs: typeArgs,
 		}
 	}
 }

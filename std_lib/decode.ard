@@ -60,6 +60,8 @@ private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
 private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
 extern fn is_void(data: Dynamic) Bool = "IsNil"
 
+type Decoder = fn(Dynamic) $Out![Error]
+
 fn string(data: Dynamic) Str![Error] {
   let val = try _decode_string(data) -> err {
     Result::err([err])
@@ -88,7 +90,7 @@ fn bool(data: Dynamic) Bool![Error] {
   Result::ok(val)
 }
 
-fn nullable(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) $T?![Error] {
+fn nullable(decoder: Decoder<$T>) fn(Dynamic) $T?![Error] {
   fn(data: Dynamic) $T?![Error] {
     match is_void(data) {
       true => Result::ok(maybe::none()),
@@ -102,7 +104,7 @@ fn nullable(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) $T?![Error] {
 
 extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
 
-fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
+fn list(decoder: Decoder<$T>) fn(Dynamic) [$T]![Error] {
   fn(data: Dynamic) [$T]![Error] {
     let raw = try to_list(data) -> found {
       let decode_err = Error{expected: "List", found: found, path: []}
@@ -136,7 +138,7 @@ fn list(decoder: fn(Dynamic) $T![Error]) fn(Dynamic) [$T]![Error] {
 }
 
 // decodes for a specific element in a list
-fn at(index: Int, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+fn at(index: Int, with: Decoder<$T>) fn(Dynamic) $T![Error] {
   fn(data: Dynamic) $T![Error] {
     let _list = try to_list(data) -> found {
       Result::err([
@@ -155,7 +157,7 @@ fn at(index: Int, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
           path: [],
         }
       ]),
-      _ => as(_list.at(0))
+      _ => with(_list.at(0))
     }
   }
 }
@@ -163,9 +165,9 @@ fn at(index: Int, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
 extern fn to_map(data: Dynamic) [Dynamic:Dynamic]!Str = "DynamicToMap"
 
 fn map(
-  key: fn(Dynamic) $Key![Error],
-  value: fn(Dynamic) $Value![Error]
-) fn(Dynamic) [$Key:$Value]![Error] {
+  key: Decoder<$Key>,
+  value: Decoder<$Value>
+) Decoder<[$Key:$Value]> {
   fn(data: Dynamic) [$Key:$Value]![Error] {
     let raw = try to_map(data) -> found {
       let decode_err = Error{expected: "Map", found: found, path: []}
@@ -216,7 +218,7 @@ fn map(
 
 extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = "ExtractField"
 
-fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
   fn(data: Dynamic) $T![Error] {
     let raw = try extract_field(data, name) -> found {
       Result::err([
@@ -228,7 +230,7 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
       ])
     }
 
-    let val = try as(raw) -> errs {
+    let val = try with(raw) -> errs {
       mut out: [Error] = []
       for e in errs {
         mut path = e.path
@@ -248,10 +250,10 @@ fn field(name: Str, as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
 
 // decode a nested field.
 // { foo: { bar: 20 } } --- path(["foo", "bar"], int)
-fn path(subpath: [Str], as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
+fn path(subpath: [Str], with: Decoder<$T>) Decoder<$T> {
   fn (data: Dynamic) $T![Error] {
     match subpath.size() {
-      0 => as(data),
+      0 => with(data),
       _ => {
         mut current_data = try extract_field(data, subpath.at(0)) -> found {
           Result::err([
@@ -270,7 +272,7 @@ fn path(subpath: [Str], as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
           }
         }
 
-        let out = try as(current_data) -> errs {
+        let out = try with(current_data) -> errs {
           mut out: [Error] = []
           for err in errs {
             out.push(Error{
@@ -289,7 +291,7 @@ fn path(subpath: [Str], as: fn(Dynamic) $T![Error]) fn(Dynamic) $T![Error] {
 }
 
 // take the first successful decoding. if all fail, return the first set of errors
-fn one_of(first: fn(Dynamic) $T![Error], others: [fn(Dynamic) $T![Error]]) fn(Dynamic) $T![Error] {
+fn one_of(first: Decoder<$T>, others: [Decoder<$T>]) Decoder<$T> {
   fn(data: Dynamic) $T![Error] {
     mut res = first(data)
 
@@ -315,7 +317,7 @@ fn one_of(first: fn(Dynamic) $T![Error], others: [fn(Dynamic) $T![Error]]) fn(Dy
   }
 }
 
-// this seems superfluous
-fn run(data: Dynamic, decoder: fn(Dynamic) $T![Error]) $T![Error] {
+// although this looks superfluous, it's a shorthand to declare + apply a decoder
+fn run(data: Dynamic, decoder: Decoder<$T>) $T![Error] {
   decoder(data)
 }
