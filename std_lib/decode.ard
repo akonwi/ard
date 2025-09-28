@@ -12,12 +12,12 @@ impl Str::ToString for Error {
   fn to_str() Str {
     mut path_str = ""
     for step, i in @path {
-      match i == 0 {
-        true => {
+      match i {
+        0 => {
           // no leading dot
           path_str =+ step
         },
-        false => {
+        _ => {
           // Subsequent elements: add dot only if not starting with bracket
           match step.starts_with("[") {
             true => { path_str =+ step },
