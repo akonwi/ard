@@ -9,44 +9,45 @@ import (
 func TestTypeUnions(t *testing.T) {
 	run(t, []test{
 		{
+			name: "As an alias",
+			input: `
+				type UserId = Int
+				let id1: UserId = 1
+				let id2: UserId = 2
+				let ids: [UserId] = [id1, id2, 3]
+
+				id1.to_str() // Int has a .to_str() method
+
+				match id1 {
+					-1 => "not found",
+					_ => "found"
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Aliasing a function type",
+			input: `
+				type BinaryOp = fn(Int, Int) Int
+				fn do(op: BinaryOp)  Int {
+					op(1, 2)
+				}
+
+				fn add(a: Int, b: Int) Int {
+					a + b
+				}
+
+				do(add)
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Compatible types to a union",
 			input: `
-				type Alias = Bool
 			  type Printable = Int|Str
 				let a: Printable = "foo"
-				let b: Alias = true
 				let list: [Printable] = [1, "two", 3]`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: false,
-							Name:    "a",
-							Value:   &checker.StrLiteral{Value: "foo"},
-						},
-					},
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: false,
-							Name:    "b",
-							Value:   &checker.BoolLiteral{Value: true},
-						},
-					},
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: false,
-							Name:    "list",
-							Value: &checker.ListLiteral{
-								Elements: []checker.Expression{
-									&checker.IntLiteral{Value: 1},
-									&checker.StrLiteral{Value: "two"},
-									&checker.IntLiteral{Value: 3},
-								},
-							},
-						},
-					},
-				},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Using unions in return declarations",

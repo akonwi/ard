@@ -278,16 +278,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
-			switch s := sym.Type.(type) {
-			case *Enum:
-				baseType = s
-			case *Union:
-				baseType = s
-			case *StructDef:
-				baseType = s
-			default:
-				panic(fmt.Sprintf("Unhandled match for ast.CustomType: %T", t))
-			}
+			baseType = sym.Type
 			break
 		}
 		if ty.Type.Target != nil {
@@ -601,6 +592,12 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					return nil
 				}
 				types[i] = resolvedType
+			}
+
+			if len(types) == 1 {
+				// It's a type alias
+				c.scope.add(s.Name.Name, types[0], false)
+				return nil
 			}
 
 			// Create a union type (even if it only contains one type)
