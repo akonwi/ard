@@ -22,7 +22,7 @@ func newScope(parent *scope) *scope {
 	}
 }
 
-func (s scope) clone() scope {
+func (s *scope) clone() *scope {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	new := &scope{
@@ -34,10 +34,10 @@ func (s scope) clone() scope {
 
 	maps.Copy(new.bindings, s.bindings)
 	if s.parent != nil {
-		*new.parent = s.parent.clone()
+		new.parent = s.parent.clone()
 	}
 
-	return *new
+	return new
 }
 
 func (s *scope) add(name string, value *runtime.Object) {
@@ -46,7 +46,7 @@ func (s *scope) add(name string, value *runtime.Object) {
 	s.bindings[name] = value
 }
 
-func (s scope) get(name string) (*runtime.Object, bool) {
+func (s *scope) get(name string) (*runtime.Object, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v, ok := s.bindings[name]

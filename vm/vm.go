@@ -234,7 +234,7 @@ func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
 	vm.hq = c.vm.hq
 	c.vm = vm
 	if c.capturedScope != nil {
-		*c.capturedScope = c.capturedScope.clone()
+		vm.scope = c.capturedScope.clone()
 	}
 
 	return c.Eval(args...)
