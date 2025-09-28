@@ -675,15 +675,8 @@ func (vm *VM) evalBlock(block *checker.Block, init func()) (*runtime.Object, boo
 	return res, false
 }
 
-func (vm *VM) evalStrProperty(subj *runtime.Object, name string) *runtime.Object {
-	self := subj.AsString()
-	switch name {
-	// todo: delete this because .size() is a method
-	case "size":
-		return runtime.MakeInt(len(self))
-	default:
-		return runtime.Void()
-	}
+func (vm *VM) evalStrProperty(_ *runtime.Object, _ string) *runtime.Object {
+	return runtime.Void()
 }
 
 func (vm *VM) evalInstanceMethod(subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
