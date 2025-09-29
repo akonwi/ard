@@ -229,6 +229,62 @@ func (c *checker) findModuleByPath(path string) Module {
 	return nil
 }
 
+func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
+	switch t := t.(type) {
+	case *Any:
+		if !seen[t.name] {
+			*params = append(*params, t.name)
+			seen[t.name] = true
+		}
+	case *List:
+		collectGenericsFromType(t.of, params, seen)
+	case *Map:
+		collectGenericsFromType(t.key, params, seen)
+		collectGenericsFromType(t.value, params, seen)
+	case *FunctionDef:
+		for _, p := range t.Parameters {
+			collectGenericsFromType(p.Type, params, seen)
+		}
+		if t.ReturnType != nil {
+			collectGenericsFromType(t.ReturnType, params, seen)
+		}
+	case *Maybe:
+		collectGenericsFromType(t.of, params, seen)
+	case *Result:
+		collectGenericsFromType(t.val, params, seen)
+		collectGenericsFromType(t.err, params, seen)
+	case *StructDef:
+		// This needs to handle a defined order, which map doesn't provide.
+		// For now, this is not supported.
+	}
+}
+
+func (c *checker) specializeAliasedType(originalType Type, typeArgs []ast.DeclaredType, loc ast.Location) Type {
+	// 1. Collect generics from the original type
+	genericParams := []string{}
+	seenGenerics := make(map[string]bool)
+	collectGenericsFromType(originalType, &genericParams, seenGenerics)
+
+	if len(genericParams) == 0 {
+		c.addError("Type is not generic and cannot be specialized.", loc)
+		return originalType
+	}
+
+	if len(typeArgs) != len(genericParams) {
+		c.addError(fmt.Sprintf("Incorrect number of type arguments: expected %d, got %d", len(genericParams), len(typeArgs)), loc)
+		return originalType
+	}
+
+	// 3. Replace generics
+	specializedType := originalType
+	for i, typeArg := range typeArgs {
+		genericName := genericParams[i]
+		resolvedArgType := c.resolveType(typeArg)
+		specializedType = replaceGeneric(specializedType, genericName, resolvedArgType)
+	}
+	return specializedType
+}
+
 func (c *checker) resolveType(t ast.DeclaredType) Type {
 	var baseType Type
 	switch ty := t.(type) {
@@ -278,15 +334,10 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
-			switch s := sym.Type.(type) {
-			case *Enum:
-				baseType = s
-			case *Union:
-				baseType = s
-			case *StructDef:
-				baseType = s
-			default:
-				panic(fmt.Sprintf("Unhandled match for ast.CustomType: %T", t))
+			if len(ty.TypeArgs) > 0 {
+				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
+			} else {
+				baseType = sym.Type
 			}
 			break
 		}
@@ -601,6 +652,12 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					return nil
 				}
 				types[i] = resolvedType
+			}
+
+			if len(types) == 1 {
+				// It's a type alias
+				c.scope.add(s.Name.Name, types[0], false)
+				return nil
 			}
 
 			// Create a union type (even if it only contains one type)

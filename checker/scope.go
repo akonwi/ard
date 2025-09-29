@@ -184,6 +184,25 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			val: replaceGeneric(t.val, genericName, concreteType),
 			err: replaceGeneric(t.err, genericName, concreteType),
 		}
+	case *FunctionDef:
+		newParams := make([]Parameter, len(t.Parameters))
+		for i, p := range t.Parameters {
+			newParams[i] = Parameter{
+				Name:    p.Name,
+				Type:    replaceGeneric(p.Type, genericName, concreteType),
+				Mutable: p.Mutable,
+			}
+		}
+		newReturnType := replaceGeneric(t.ReturnType, genericName, concreteType)
+		// Create a new FunctionDef, don't modify the original
+		return &FunctionDef{
+			Name:       t.Name,
+			Parameters: newParams,
+			ReturnType: newReturnType,
+			Mutates:    t.Mutates,
+			Body:       t.Body,
+			Private:    t.Private,
+		}
 	default:
 		return t
 	}

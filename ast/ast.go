@@ -206,6 +206,7 @@ type CustomType struct {
 	Type     StaticProperty
 	nullable bool
 	Private  bool
+	TypeArgs []DeclaredType
 }
 
 func (u CustomType) GetName() string {
