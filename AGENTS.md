@@ -25,6 +25,7 @@ The project uses the `jsonv2` experiment for the [new json tools](https://antonz
 
 ## Instructions
 - When searching the codebase, use the codanna tool first and only grep or use search CLI commands if codanna doesn't yield results
+- use the gopls tool (Go language server) to get diagnostics and compilation info
 
 ## Code Style Guidelines
 - **Naming**: PascalCase for exported, camelCase for unexported items
