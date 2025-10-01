@@ -84,7 +84,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		// the checker node knows its exact type, because the value might be of a generic type
 		val.SetRefinedType(s.Type())
 		// can be broken by `try`
-		if vm.scope.broken {
+		if vm.scope.isBroken() {
 			return val
 		}
 		vm.scope.add(s.Name, val)
@@ -98,7 +98,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }
 		update := func() { vm.do(checker.Statement{Stmt: s.Update}) }
 		for init(); vm.eval(s.Condition).AsBool(); update() {
-			_, broke := vm.evalBlock(s.Body, func() { vm.scope.breakable = true })
+			_, broke := vm.evalBlock(s.Body, func() { vm.scope.setBreakable(true) })
 			if broke {
 				break
 			}
@@ -110,7 +110,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		iteration := 0
 		for i <= end {
 			_, broke := vm.evalBlock(s.Body, func() {
-				vm.scope.breakable = true
+				vm.scope.setBreakable(true)
 				vm.scope.add(s.Cursor, runtime.MakeInt(i))
 				if s.Index != "" {
 					vm.scope.add(s.Index, runtime.MakeInt(iteration))
@@ -127,7 +127,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		val := vm.eval(s.Value).AsString()
 		for i, c := range val {
 			_, broke := vm.evalBlock(s.Body, func() {
-				vm.scope.breakable = true
+				vm.scope.setBreakable(true)
 				vm.scope.add(s.Cursor, runtime.MakeStr(string(c)))
 				if s.Index != "" {
 					vm.scope.add(s.Index, runtime.MakeInt(i))
@@ -142,7 +142,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		list := vm.eval(s.List).AsList()
 		for i := range list {
 			_, broke := vm.evalBlock(s.Body, func() {
-				vm.scope.breakable = true
+				vm.scope.setBreakable(true)
 				vm.scope.add(s.Cursor, list[i])
 				if s.Index != "" {
 					vm.scope.add(s.Index, runtime.MakeInt(i))
@@ -159,7 +159,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 			_map := mapObj.AsMap()
 			for k, v := range _map {
 				_, broke := vm.evalBlock(s.Body, func() {
-					vm.scope.breakable = true
+					vm.scope.setBreakable(true)
 					key := mapObj.Map_GetKey(k)
 					vm.scope.add(s.Key, key)
 					vm.scope.add(s.Val, v)
@@ -172,7 +172,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		}
 	case *checker.WhileLoop:
 		for vm.eval(s.Condition).AsBool() {
-			_, broke := vm.evalBlock(s.Body, func() { vm.scope.breakable = true })
+			_, broke := vm.evalBlock(s.Body, func() { vm.scope.setBreakable(true) })
 			if broke {
 				break
 			}
@@ -579,7 +579,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 						})
 
 						// Early return: the catch block's result becomes the function's return value
-						vm.scope.broken = true
+						vm.scope.setBroken(true)
 						if broken {
 							return result
 						}
@@ -587,7 +587,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 					} else {
 						// No catch block: propagate error by early returning
 						// Create a new Result with the same error for the function's return type
-						vm.scope.broken = true
+						vm.scope.setBroken(true)
 						return subj
 					}
 				}
@@ -602,14 +602,14 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 						result, broken := vm.evalBlock(e.CatchBlock, nil)
 
 						// Early return: the catch block's result becomes the function's return value
-						vm.scope.broken = true
+						vm.scope.setBroken(true)
 						if broken {
 							return result
 						}
 						return result
 					} else {
 						// No catch block: propagate none by early returning
-						vm.scope.broken = true
+						vm.scope.setBroken(true)
 						return runtime.MakeMaybe(nil, e.Type())
 					}
 				}
@@ -666,7 +666,7 @@ func (vm *VM) evalBlock(block *checker.Block, init func()) (*runtime.Object, boo
 	for i := range block.Stmts {
 		stmt := block.Stmts[i]
 		r := vm.do(stmt)
-		if vm.scope.broken {
+		if vm.scope.isBroken() {
 			return r, true
 		}
 		res = r

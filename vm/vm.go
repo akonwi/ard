@@ -229,12 +229,13 @@ func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 }
 
 func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
-	// this feels like something i'll regret
+	// Create isolated VM for fiber execution
 	vm := NewVM()
 	vm.hq = c.vm.hq
 	c.vm = vm
 	if c.capturedScope != nil {
-		vm.scope = c.capturedScope.clone()
+		// Use fiber-optimized cloning for read-only access
+		vm.scope = c.capturedScope.fork()
 	}
 
 	return c.Eval(args...)

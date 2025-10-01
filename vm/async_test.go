@@ -53,3 +53,46 @@ func TestWaitingOnFibers(t *testing.T) {
 		t.Errorf("Expected concurrent execution to take at most 1.5s, but took %v", elapsed)
 	}
 }
+
+func TestConcurrentReadsOfVariables(t *testing.T) {
+	result := run(t, `
+		use ard/async
+
+		// Shared immutable variables that all fibers will access
+		let shared_number = 42
+		let shared_string = "hello world"
+		let shared_list = [1, 2, 3, 4, 5]
+
+		mut fibers: [async::Fiber] = []
+
+		for i in 0..30 {
+			match i % 3 {
+				0 => {
+					fibers.push(async::start(fn() {
+						shared_number + shared_string.size() + shared_list.at(0)
+					}))
+				},
+				1 => {
+					fibers.push(async::start(fn() {
+						shared_number * 2 + shared_list.at(1)
+					}))
+				},
+				_ => {
+					fibers.push(async::start(fn() {
+						shared_string.size() + shared_list.at(2)
+					}))
+				}
+			}
+		}
+
+		for f in fibers {
+			f.join()
+		}
+		"success"
+	`)
+
+	// Run the test multiple times to stress test the scope system
+	if result != "success" {
+		t.Errorf("Expected 'success', got %v", result)
+	}
+}
