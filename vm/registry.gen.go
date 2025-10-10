@@ -22,6 +22,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("BoolToDynamic", ffi.BoolToDynamic); err != nil {
 		return fmt.Errorf("failed to register BoolToDynamic: %w", err)
 	}
+	if err := r.Register("VoidToDynamic", ffi.VoidToDynamic); err != nil {
+		return fmt.Errorf("failed to register VoidToDynamic: %w", err)
+	}
 	if err := r.Register("JsonToDynamic", ffi.JsonToDynamic); err != nil {
 		return fmt.Errorf("failed to register JsonToDynamic: %w", err)
 	}
@@ -138,6 +141,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	}
 	if err := r.Register("SqliteQuery", ffi.SqliteQuery); err != nil {
 		return fmt.Errorf("failed to register SqliteQuery: %w", err)
+	}
+	if err := r.Register("SqliteQueryRun", ffi.SqliteQueryRun); err != nil {
+		return fmt.Errorf("failed to register SqliteQueryRun: %w", err)
 	}
 	if err := r.Register("SqliteFirst", ffi.SqliteFirst); err != nil {
 		return fmt.Errorf("failed to register SqliteFirst: %w", err)

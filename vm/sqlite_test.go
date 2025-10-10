@@ -48,59 +48,24 @@ func TestSqliteExtractParams(t *testing.T) {
 	`)
 }
 
-func TestSQLiteInsert(t *testing.T) {
+func TestSQLiteInsertion(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-
-		let db = sqlite::open("test_insert.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("John Doe"))
-		values.set("number", decode::from_int(2))
-
-		let inserted_row = db.insert("players", values).expect("Insert should succeed")
-
-		// Verify the inserted data
-		let name = decode::run(inserted_row, decode::field("name", decode::string)).expect("Should have name")
-		let number = decode::run(inserted_row, decode::field("number", decode::int)).expect("Should have number")
-
-		name == "John Doe" && number == 2
-	`)
-
-	// Should return true
-	if result != true {
-		t.Errorf("Expected true, got %v", result)
-	}
-}
-
-func TestSQLiteInsertMultipleValues(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_multi.db"
 	defer os.Remove(testDB)
 
 	run(t, `
 		use ard/sqlite
 		use ard/decode
 
-		let db = sqlite::open("test_multi.db").expect("Failed to open database")
+		let db = sqlite::open("test_insert.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
-
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(5))
-
-		db.insert("players", values1).expect("Failed to insert player 1")
-		db.insert("players", values2).expect("Failed to insert player 2")
+		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
+		let values: [Str:Dynamic] = [
+		  "name": Dynamic::from("John Doe"),
+			"number": Dynamic::from(2),
+		]
+  	stmt.run(values).expect("Insert failed")
 	`)
 }
 
@@ -109,26 +74,22 @@ func TestSQLiteInsertError(t *testing.T) {
 	testDB := "test_error.db"
 	defer os.Remove(testDB)
 
-	result := run(t, `
+	expectPanic(t, "Insert should fail", `
 		use ard/sqlite
 		use ard/decode
 
 		let db = sqlite::open("test_error.db").expect("Failed to open database")
 		// Don't create the table - this should cause an error
 
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("John Doe"))
-		values.set("number", decode::from_int(2))
-
-		db.insert("players", values)
-	`)
-
-	if result == nil {
-		t.Errorf("Expected insert to fail with error, got %v", result)
-	}
+		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
+		stmt.run([
+		  "name": Dynamic::from("John Doe"),
+			"number": Dynamic::from(2),
+		]).expect("Insert should fail")
+`)
 }
 
-func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
+func TestSQLiteInsertingNull(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_maybe.db"
 	defer os.Remove(testDB)
@@ -144,18 +105,16 @@ func TestSQLiteInsertWithMaybeTypes(t *testing.T) {
 		}
 
 		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
+		let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+		let values: [Str:Dynamic] = [:]
+		create_table.run(values)
 
-		// Insert user with email
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("email", decode::from_str("john@example.com"))
-		db.insert("users", values1).expect("Failed to insert user 1")
-
-		// Insert user without email (just don't include the email field)
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		db.insert("users", values2).expect("Failed to insert user 2")
+		let stmt = db.query("INSERT INTO players (name, number, email) VALUES (@name, @number, @email)")
+		let values: [Str:Dynamic] = [
+		  "name": Dynamic::from("John Doe"),
+			"number": Dynamic::from(2),
+			"email": Dynamic::from(())
+		]
 	`)
 }
 

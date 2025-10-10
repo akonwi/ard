@@ -155,6 +155,9 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(filePath, "ard/") {
+		if mod, ok := findInStdLib("ard/dynamic"); ok {
+			c.program.Imports["Dynamic"] = mod
+		}
 		if mod, ok := findInStdLib("ard/float"); ok {
 			c.program.Imports["Float"] = mod
 		}

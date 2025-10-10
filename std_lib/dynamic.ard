@@ -1,0 +1,18 @@
+// functions to create Dynamic values
+extern fn from_str(val: Str) Dynamic = "StrToDynamic"
+extern fn from_int(val: Int) Dynamic = "IntToDynamic"
+extern fn from_float(val: Float) Dynamic = "FloatToDynamic"
+extern fn from_bool(val: Bool) Dynamic = "BoolToDynamic"
+extern fn from_void() Dynamic = "VoidToDynamic"
+
+type Primitive = Str | Bool | Int | Float | Void
+
+fn from(primitive: Primitive) Dynamic {
+  match primitive {
+    Str(s) => from_str(s),
+    Bool(b) => from_bool(b),
+    Int(i) => from_int(i),
+    Float(f) => from_float(f),
+    _ => from_void()
+  }
+}
