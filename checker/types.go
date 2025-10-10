@@ -101,6 +101,15 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Bool,
 		}
+	case "replace", "replace_all":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "old", Type: Str},
+				{Name: "new", Type: Str},
+			},
+			ReturnType: Str,
+		}
 	case "size":
 		return &FunctionDef{
 			Name:       name,
