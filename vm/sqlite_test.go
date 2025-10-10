@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSQLiteBasicOperations(t *testing.T) {
+func TestSQLiteOpen(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test.db"
 	defer os.Remove(testDB)
