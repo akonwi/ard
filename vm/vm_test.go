@@ -418,6 +418,16 @@ func TestStrApi(t *testing.T) {
 			input: `"hello world".split(" ").at(1)`,
 			want:  "world",
 		},
+		{
+			name:  "Str.replace()",
+			input: `"hello world".replace("world", "universe")`,
+			want:  "hello universe",
+		},
+		{
+			name:  "Str.replace_all()",
+			input: `"hello world hello world".replace_all("world", "universe")`,
+			want:  "hello universe hello universe",
+		},
 	}
 	runTests(t, tests)
 }

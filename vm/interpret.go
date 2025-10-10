@@ -723,6 +723,14 @@ func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runt
 		return runtime.MakeBool(len(raw) == 0)
 	case "contains":
 		return runtime.MakeBool(strings.Contains(raw, vm.eval(m.Args[0]).AsString()))
+	case "replace":
+		old := vm.eval(m.Args[0]).AsString()
+		new := vm.eval(m.Args[1]).AsString()
+		return runtime.MakeStr(strings.Replace(raw, old, new, 1))
+	case "replace_all":
+		old := vm.eval(m.Args[0]).AsString()
+		new := vm.eval(m.Args[1]).AsString()
+		return runtime.MakeStr(strings.ReplaceAll(raw, old, new))
 	case "split":
 		sep := vm.eval(m.Args[0]).AsString()
 		split := strings.Split(raw, sep)
