@@ -23,7 +23,32 @@ func TestSQLiteOpen(t *testing.T) {
 	}
 }
 
-func TestSQLiteInsertStruct(t *testing.T) {
+func TestSqliteExtractParams(t *testing.T) {
+	run(t, `
+		use ard/sqlite
+
+		let params = sqlite::extract_params("INSERT INTO players (name, number) VALUES (@name, @number)")
+		if not params.size() == 2 {
+			panic("Expected a list of 2 elements")
+		}
+		for p, idx in params {
+			match idx {
+				0 => {
+					if not p == "name" {
+						panic("Expected 'name' at {idx} got {p}")
+					}
+				},
+				1 => {
+					if not p == "number" {
+						panic("Expected 'number' at {idx} got {p}")
+					}
+				},
+			}
+		}
+	`)
+}
+
+func TestSQLiteInsert(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"
 	defer os.Remove(testDB)

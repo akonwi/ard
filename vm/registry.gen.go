@@ -133,6 +133,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("SqliteExec", ffi.SqliteExec); err != nil {
 		return fmt.Errorf("failed to register SqliteExec: %w", err)
 	}
+	if err := r.Register("SqliteExtractParams", ffi.SqliteExtractParams); err != nil {
+		return fmt.Errorf("failed to register SqliteExtractParams: %w", err)
+	}
 	if err := r.Register("SqliteQuery", ffi.SqliteQuery); err != nil {
 		return fmt.Errorf("failed to register SqliteQuery: %w", err)
 	}

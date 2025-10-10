@@ -1,5 +1,6 @@
 use ard/decode
 
+extern fn extract_params(sql: Str) [Str] = "SqliteExtractParams"
 private extern fn _create_connection(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
 private extern fn _close(conn: Dynamic) Void!Str = "SqliteClose"
 private extern fn _exec(conn: Dynamic, sql: Str) Void!Str = "SqliteExec"

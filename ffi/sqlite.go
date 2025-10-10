@@ -76,6 +76,64 @@ func SqliteExec(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(runtime.Void())
 }
 
+// Extract parameter names from a sql expression in the order they appear
+func SqliteExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	if len(args) != 1 {
+		panic(fmt.Errorf("extract_params expects 1 argument, got %d", len(args)))
+	}
+
+	sqlStr := args[0].AsString()
+
+	// Split SQL into tokens by multiple delimiters
+	delimiters := []string{" ", "(", ")", ",", ";", "=", "<", ">", "!", "\t", "\n", "\r"}
+	tokens := splitByMultipleDelimiters(sqlStr, delimiters)
+
+	var paramNames []string
+	seen := make(map[string]bool)
+
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "@") && len(token) > 1 {
+			// Extract parameter name, removing @ prefix and any trailing punctuation
+			paramName := strings.TrimLeft(token[1:], "@")
+			paramName = strings.TrimRight(paramName, ".,;:!?")
+
+			if paramName != "" && !seen[paramName] {
+				paramNames = append(paramNames, paramName)
+				seen[paramName] = true
+			}
+		}
+	}
+
+	// Convert to runtime objects
+	var result []*runtime.Object
+	for _, paramName := range paramNames {
+		result = append(result, runtime.MakeStr(paramName))
+	}
+
+	return runtime.MakeList(checker.Str, result...)
+}
+
+// Helper function to split string by multiple delimiters
+func splitByMultipleDelimiters(s string, delimiters []string) []string {
+	// Replace all delimiters with a single delimiter, then split
+	result := s
+	for _, delimiter := range delimiters {
+		result = strings.ReplaceAll(result, delimiter, " ")
+	}
+
+	// Split by space and filter out empty strings
+	tokens := strings.Split(result, " ")
+	var nonEmpty []string
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token != "" {
+			nonEmpty = append(nonEmpty, token)
+		}
+	}
+
+	return nonEmpty
+}
+
 // SqliteQuery executes a query and returns all rows
 func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 2 {
