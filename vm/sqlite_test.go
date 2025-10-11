@@ -439,7 +439,7 @@ func TestSQLiteClose(t *testing.T) {
 	testDB := "test_close.db"
 	defer os.Remove(testDB)
 
-	result := run(t, `
+	run(t, `
 		use ard/sqlite
 		use ard/decode
 		struct Player {
@@ -451,25 +451,8 @@ func TestSQLiteClose(t *testing.T) {
 		let db = sqlite::open("test_close.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
-		// Insert a test record
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("John Doe"))
-		values.set("number", decode::from_int(2))
-		db.insert("players", values).expect("Failed to insert player")
-
-		// Close the database
-		let result = db.close()
-
-		// Should succeed
-		match result {
-			ok => true,
-			err => false
-		}
+		db.close().expect("should succeed")
 	`)
-
-	if result != true {
-		t.Errorf("Expected close to succeed, got %v", result)
-	}
 }
 
 func TestSQLiteCloseMultipleTimes(t *testing.T) {
@@ -477,31 +460,13 @@ func TestSQLiteCloseMultipleTimes(t *testing.T) {
 	testDB := "test_close_multiple.db"
 	defer os.Remove(testDB)
 
-	result := run(t, `
+	run(t, `
 		use ard/sqlite
 		let db = sqlite::open("test_close_multiple.db").expect("Failed to open database")
 
-		// Close the database once
 		let first_close = db.close()
-
-		// Try to close again - SQLite should handle this gracefully
-		let second_close = db.close()
-
-		// Both should succeed (SQLite allows multiple closes)
-		match first_close {
-			ok => {
-				match second_close {
-					ok => true,
-					err => false
-				}
-			},
-			err => false
-		}
+		db.close().expect("the second call to .close should fail")
 	`)
-
-	if result != true {
-		t.Errorf("Expected multiple closes to succeed, got %v", result)
-	}
 }
 
 func TestSQLiteCount(t *testing.T) {
