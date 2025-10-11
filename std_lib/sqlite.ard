@@ -3,8 +3,8 @@ use ard/decode
 private extern fn _create_connection(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
 private extern fn _close(conn: Dynamic) Void!Str = "SqliteClose"
 private extern fn _exec(conn: Dynamic, sql: Str) Void!Str = "SqliteExec"
-private extern fn _query(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteQuery"
 private extern fn _query_run(conn: Dynamic, sql: Str, values: [Dynamic]) Dynamic!Str = "SqliteQueryRun"
+private extern fn _query_all(conn: Dynamic, sql: Str, values: [Dynamic]) Dynamic!Str = "SqliteQuery"
 private extern fn _first(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteFirst"
 private extern fn _insert(conn: Dynamic, table: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteInsert"
 private extern fn _update(conn: Dynamic, table: Str, where: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteUpdate"
@@ -19,17 +19,6 @@ struct Query {
   params: [Str]
 }
 
-fn join(strings: [Str], with: Str) Str {
-  mut out = ""
-  for s, idx in strings {
-    if not idx == 0 {
-      out =+ with
-    }
-    out =+ s
-  }
-  out
-}
-
 impl Query {
   fn run(values: [Str:Dynamic]) Dynamic!Str {
     mut sanitized = @string
@@ -41,6 +30,18 @@ impl Query {
     }
 
     _query_run(@conn, sanitized, ordered_values)
+  }
+
+  fn all(values: [Str:Dynamic]) Dynamic!Str {
+    mut sanitized = @string
+    mut ordered_values: [Dynamic] = []
+    for param in @params {
+      sanitized = sanitized.replace_all("@"+param, "?")
+      let value = try values.get(param) -> _ { Result::err("Missing parameter: " + param) }
+      ordered_values.push(value)
+    }
+
+    _query_all(@conn, sanitized, ordered_values)
   }
 }
 

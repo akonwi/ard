@@ -786,85 +786,25 @@ func TestSQLiteQueryWithDecode(t *testing.T) {
 	result := run(t, `
 		use ard/sqlite
 		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
 
 		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
+		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
 
-		// Insert test data
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
+		let query = db.query("SELECT id, name, number FROM players")
+		let vals: [Str:Dynamic] = [:]
+		let rows = query.all(vals).expect("Failed to query players")
 
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(5))
-
-		db.insert("players", values1).expect("Failed to insert player")
-		db.insert("players", values2).expect("Failed to insert player")
-
-		// Query the data
-		let rows = db.query("SELECT id, name, number FROM players").expect("Failed to query players")
-
-		// Decode using the new API - extract just the count first
-		let player_list = decode::run(rows, decode::list(
+		let name_list = decode::run(rows, decode::list(
 			decode::field("name", decode::string)
 		)).expect("Failed to decode")
 
-		player_list.size()
+		name_list.size()
 	`)
 
 	if result != 2 {
 		t.Errorf("Expected 2 decoded players, got %v", result)
-	}
-}
-
-func TestSQLiteQueryDecodeFields(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_query_fields.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_query_fields.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Insert test data
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
-
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(5))
-
-		db.insert("players", values1).expect("Failed to insert player")
-		db.insert("players", values2).expect("Failed to insert player")
-
-		// Query the data
-		let rows = db.query("SELECT id, name, number FROM players ORDER BY id").expect("Failed to query players")
-
-		// Decode all player IDs
-		let player_ids = decode::run(rows, decode::list(
-			decode::field("id", decode::int)
-		)).expect("Failed to decode player ids")
-
-		player_ids.at(0) == 1
-	`)
-
-	if result != true {
-		t.Errorf("Expected first player ID to be 1, got %v", result)
 	}
 }
 

@@ -136,8 +136,8 @@ func splitByMultipleDelimiters(s string, delimiters []string) []string {
 
 // SqliteQuery executes a query and returns all rows
 func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	if len(args) != 2 {
-		panic(fmt.Errorf("query expects 2 arguments, got %d", len(args)))
+	if len(args) != 3 {
+		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
 	}
 
 	conn, ok := args[0].Raw().(*sql.DB)
@@ -146,7 +146,17 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	sqlStr := args[1].AsString()
-	rows, err := conn.Query(sqlStr)
+	valuesListObj := args[2]
+
+	// Extract values from the list
+	valuesList := valuesListObj.AsList()
+	var values []any
+	for _, valueObj := range valuesList {
+		// Convert Ard Value union type to Go value
+		values = append(values, valueObj.GoValue())
+	}
+
+	rows, err := conn.Query(sqlStr, values...)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to execute query: %v", err)))
 	}
@@ -159,7 +169,7 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	// Build result list - each row is a map[string]interface{}
-	var results []interface{}
+	var results []any
 
 	for rows.Next() {
 		// Create scan targets for each column
@@ -175,7 +185,7 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		}
 
 		// Create map for this row
-		rowMap := make(map[string]interface{})
+		rowMap := make(map[string]any)
 		for i, columnName := range columns {
 			rowMap[columnName] = values[i]
 		}
