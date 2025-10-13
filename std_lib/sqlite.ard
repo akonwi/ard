@@ -1,10 +1,12 @@
 use ard/decode
 
+type Value = Str | Bool | Int | Float
+
 private extern fn _create_connection(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
 private extern fn _close(conn: Dynamic) Void!Str = "SqliteClose"
 private extern fn _exec(conn: Dynamic, sql: Str) Void!Str = "SqliteExec"
 private extern fn _query_run(conn: Dynamic, sql: Str, values: [Dynamic]) Dynamic!Str = "SqliteQueryRun"
-private extern fn _query_all(conn: Dynamic, sql: Str, values: [Dynamic]) Dynamic!Str = "SqliteQuery"
+private extern fn _query_all(conn: Dynamic, sql: Str, values: [Value?]) Dynamic!Str = "SqliteQuery"
 private extern fn _first(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteFirst"
 private extern fn _insert(conn: Dynamic, table: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteInsert"
 private extern fn _update(conn: Dynamic, table: Str, where: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteUpdate"
@@ -32,9 +34,9 @@ impl Query {
     _query_run(@conn, sanitized, ordered_values)
   }
 
-  fn all(values: [Str:Dynamic]) Dynamic!Str {
+  fn all(values: [Str:Value?]) Dynamic!Str {
     mut sanitized = @string
-    mut ordered_values: [Dynamic] = []
+    mut ordered_values: [Value?] = []
     for param in @params {
       sanitized = sanitized.replace_all("@"+param, "?")
       let value = try values.get(param) -> _ { Result::err("Missing parameter: " + param) }

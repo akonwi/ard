@@ -778,34 +778,36 @@ func testSQLiteUpsertError(t *testing.T) {
 	}
 }
 
-func TestSQLiteQueryWithDecode(t *testing.T) {
+func TestSQLiteQuery(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_query_decode.db"
 	defer os.Remove(testDB)
 
-	result := run(t, `
+	run(t, `
 		use ard/sqlite
 		use ard/decode
+		use ard/maybe
 
 		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
 		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
 
-		let query = db.query("SELECT id, name, number FROM players")
-		let vals: [Str:Dynamic] = [:]
+		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
+		let vals: [Str:sqlite::Value?] = ["number": maybe::some(5)]
 		let rows = query.all(vals).expect("Failed to query players")
 
 		let name_list = decode::run(rows, decode::list(
 			decode::field("name", decode::string)
 		)).expect("Failed to decode")
 
-		name_list.size()
+		if not name_list.size() == 1 {
+			panic("Expected 1 result, got {name_list.size()}")
+		}
+		if not name_list.at(0) == "Jane Smith" {
+			panic("Expected Jane Smith, got {name_list.at(0)}")
+		}
 	`)
-
-	if result != 2 {
-		t.Errorf("Expected 2 decoded players, got %v", result)
-	}
 }
 
 func TestSQLiteQueryWithNullValues(t *testing.T) {
