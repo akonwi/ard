@@ -219,6 +219,7 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 					&VariableDeclaration{
 						Name: "req",
 						Type: &CustomType{
+							Name: "http::Request",
 							Type: StaticProperty{
 								Target:   &Identifier{Name: "http"},
 								Property: &Identifier{Name: "Request"},

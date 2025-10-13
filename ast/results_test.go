@@ -128,10 +128,12 @@ func TestResultTypeInSignature(t *testing.T) {
 						Name:       "foo",
 						Parameters: []Parameter{},
 						ReturnType: &ResultType{
-							Val: &CustomType{Type: StaticProperty{
-								Target:   &Identifier{Name: "db"},
-								Property: &Identifier{Name: "Conn"},
-							}},
+							Val: &CustomType{
+								Name: "db::Conn",
+								Type: StaticProperty{
+									Target:   &Identifier{Name: "db"},
+									Property: &Identifier{Name: "Conn"},
+								}},
 							Err: &StringType{},
 						},
 						Body: []Statement{},
@@ -141,10 +143,12 @@ func TestResultTypeInSignature(t *testing.T) {
 						Parameters: []Parameter{},
 						ReturnType: &ResultType{
 							Val: &BooleanType{},
-							Err: &CustomType{Type: StaticProperty{
-								Target:   &Identifier{Name: "bar"},
-								Property: &Identifier{Name: "Qux"},
-							}},
+							Err: &CustomType{
+								Name: "bar::Qux",
+								Type: StaticProperty{
+									Target:   &Identifier{Name: "bar"},
+									Property: &Identifier{Name: "Qux"},
+								}},
 						},
 						Body: []Statement{},
 					},
