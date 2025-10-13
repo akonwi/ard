@@ -1218,6 +1218,7 @@ func (p *parser) parseType() DeclaredType {
 			}
 		}
 		return &CustomType{
+			Name:     static.String(),
 			Location: static.Location,
 			Type:     *static,
 			nullable: p.match(question_mark),

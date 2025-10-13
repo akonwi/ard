@@ -350,7 +350,8 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
 				sym := mod.Get(ty.Type.Property.(*ast.Identifier).Name)
 				if !sym.IsZero() {
-					return sym.Type
+					baseType = sym.Type
+					break
 				}
 			}
 		}

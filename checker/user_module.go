@@ -54,6 +54,11 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 			if !s.Private {
 				publicSymbols[s.Name] = *sym
 			}
+		case *Union:
+			// todo: support 'private' keyword
+			// if !s.Private {
+			publicSymbols[s.Name] = *sym
+			// }
 		}
 	}
 
