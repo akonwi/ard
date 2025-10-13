@@ -11,16 +11,11 @@ func TestSQLiteOpen(t *testing.T) {
 	defer os.Remove(testDB)
 
 	// Test opening database and creating table
-	result := run(t, `
+	run(t, `
 		use ard/sqlite
 		let db = sqlite::open("test.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
 	`)
-
-	// Should return None (no error)
-	if result != nil {
-		t.Errorf("Expected nil (no error), got %v", result)
-	}
 }
 
 func TestSqliteExtractParams(t *testing.T) {
@@ -48,7 +43,7 @@ func TestSqliteExtractParams(t *testing.T) {
 	`)
 }
 
-func TestSQLiteInsertion(t *testing.T) {
+func TestSQLiteRun(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"
 	defer os.Remove(testDB)
@@ -61,9 +56,9 @@ func TestSQLiteInsertion(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-		let values: [Str:Dynamic] = [
-		  "name": Dynamic::from("John Doe"),
-			"number": Dynamic::from(2),
+		let values: [Str:sqlite::Value] = [
+		  "name": "John Doe",
+			"number": 2,
 		]
   	stmt.run(values).expect("Insert failed")
 	`)
@@ -97,24 +92,63 @@ func TestSQLiteInsertingNull(t *testing.T) {
 	run(t, `
 		use ard/sqlite
 		use ard/decode
-		use ard/maybe
-		struct User {
-			id: Int,
-			name: Str,
-			email: Str?
-		}
 
 		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
 		let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
 		let values: [Str:Dynamic] = [:]
 		create_table.run(values)
 
-		let stmt = db.query("INSERT INTO players (name, number, email) VALUES (@name, @number, @email)")
-		let values: [Str:Dynamic] = [
-		  "name": Dynamic::from("John Doe"),
-			"number": Dynamic::from(2),
-			"email": Dynamic::from(())
+		let stmt = db.query("INSERT INTO users (name, email) VALUES (@name, @email)")
+		let values: [Str:sqlite::Value] = [
+		  "name": "John Doe",
+			"email": ()
 		]
+		stmt.run(values).expect("Failed to insert row")
+
+		let query = db.query("SELECT email FROM users WHERE id = 1")
+		let rows = query.all(values).expect("Failed to find users with id 1")
+
+		let emails = decode::run(rows, decode::list(decode::field("email", decode::nullable(decode::string)))).expect("Failed to decode emails")
+
+		if not emails.size() == 1 {
+			panic("Expected 1 result, got {emails.size()}")
+		}
+
+		if emails.at(0).is_some() {
+			panic("Expected the email to be maybe::none")
+		}
+	`)
+}
+
+func TestSQLiteQuery(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_decode.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sqlite
+		use ard/decode
+		use ard/maybe
+
+		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
+		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
+
+		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
+		let vals: [Str:sqlite::Value?] = ["number": maybe::some(5)]
+		let rows = query.all(vals).expect("Failed to query players")
+
+		let name_list = decode::run(rows, decode::list(
+			decode::field("name", decode::string)
+		)).expect("Failed to decode")
+
+		if not name_list.size() == 1 {
+			panic("Expected 1 result, got {name_list.size()}")
+		}
+		if not name_list.at(0) == "Jane Smith" {
+			panic("Expected Jane Smith, got {name_list.at(0)}")
+		}
 	`)
 }
 
@@ -775,75 +809,6 @@ func testSQLiteUpsertError(t *testing.T) {
 
 	if result != true {
 		t.Errorf("Expected upsert to fail with missing table, got %v", result)
-	}
-}
-
-func TestSQLiteQuery(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_query_decode.db"
-	defer os.Remove(testDB)
-
-	run(t, `
-		use ard/sqlite
-		use ard/decode
-		use ard/maybe
-
-		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
-		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
-
-		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
-		let vals: [Str:sqlite::Value?] = ["number": maybe::some(5)]
-		let rows = query.all(vals).expect("Failed to query players")
-
-		let name_list = decode::run(rows, decode::list(
-			decode::field("name", decode::string)
-		)).expect("Failed to decode")
-
-		if not name_list.size() == 1 {
-			panic("Expected 1 result, got {name_list.size()}")
-		}
-		if not name_list.at(0) == "Jane Smith" {
-			panic("Expected Jane Smith, got {name_list.at(0)}")
-		}
-	`)
-}
-
-func TestSQLiteQueryWithNullValues(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_query_null.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		use ard/maybe
-
-		let db = sqlite::open("test_query_null.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
-
-		// Insert data with and without email
-		db.exec("INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')").expect("Failed to insert")
-		db.exec("INSERT INTO users (id, name, email) VALUES (2, 'Jane', NULL)").expect("Failed to insert")
-
-		// Query the data
-		let rows = db.query("SELECT id, name, email FROM users ORDER BY id").expect("Failed to query users")
-
-		// Decode email with nullable handling
-		let emails = decode::run(rows, decode::list(
-			decode::field("email", decode::nullable(decode::string))
-		)).expect("Failed to decode emails")
-
-		// First email should be "john@example.com", second should be none
-		let first_email = emails.at(0).or("default")
-		let second_email = emails.at(1).or("default")
-
-		first_email == "john@example.com" and second_email == "default"
-	`)
-
-	if result != true {
-		t.Errorf("Expected proper NULL handling, got %v", result)
 	}
 }
 
