@@ -398,7 +398,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 	case *checker.OptionMatch:
 		{
 			subject := vm.eval(e.Subject)
-			if subject.Raw() == nil {
+			if subject.IsNone() {
 				// None case - evaluate the None block
 				res, _ := vm.evalBlock(e.None, nil)
 				return res
@@ -595,7 +595,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				// Success case: always continue execution with unwrapped value
 				return unwrapped
 			} else if checker.IsMaybe(subj.Type()) {
-				if subj.Raw() == nil {
+				if subj.IsNone() {
 					// None case: early return from function
 					if e.CatchBlock != nil {
 						// Execute catch block and early return its result
@@ -860,7 +860,7 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 			// Return nil for the maybe type
 			return runtime.MakeMaybe(nil, mapType.Value())
 		}
-		return runtime.MakeMaybe(value.Raw(), mapType.Value())
+		return value.ToSome()
 	case "set":
 		keyArg := vm.eval(m.Method.Args[0])
 		valueArg := vm.eval(m.Method.Args[1])

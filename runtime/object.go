@@ -19,6 +19,8 @@ type Object struct {
 	// Results will set one of these to true
 	isErr bool
 	isOk  bool
+
+	isNone bool
 }
 
 func (o Object) String() string {
@@ -333,14 +335,20 @@ func MakeBool(b bool) *Object {
 // instantiate a $T?
 func MakeMaybe(raw any, of checker.Type) *Object {
 	return &Object{
-		_type: checker.MakeMaybe(of),
-		raw:   raw,
+		_type:  checker.MakeMaybe(of),
+		raw:    raw,
+		isNone: true,
 	}
 }
 
 func (o Object) ToSome() *Object {
 	o._type = checker.MakeMaybe(o._type)
+	o.isNone = false
 	return &o
+}
+
+func (o Object) IsNone() bool {
+	return o.isNone
 }
 
 func MakeList(of checker.Type, items ...*Object) *Object {
