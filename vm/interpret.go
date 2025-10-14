@@ -92,7 +92,12 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	case *checker.Reassignment:
 		target := vm.eval(s.Target)
 		val := vm.eval(s.Value)
-		target.Reassign(val)
+
+		// replace the target with the new value
+		// note: it's possible that either side still has an open generic,
+		// but the checker theoretically should have refined whatever is on the new value.
+		// so it __should__ be safe to just accept it whole
+		*target = *val
 		return runtime.Void()
 	case *checker.ForLoop:
 		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }

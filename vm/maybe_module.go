@@ -29,7 +29,7 @@ func (m *MaybeModule) Handle(call *checker.FunctionCall, args []*runtime.Object)
 	case "some":
 		arg := args[0]
 		// Create a new object with the maybe type
-		return runtime.Make(arg.Raw(), call.Type())
+		return runtime.Make(arg.Raw(), call.Type()).ToSome()
 	default:
 		panic(fmt.Errorf("Unimplemented: maybe::%s()", call.Name))
 	}

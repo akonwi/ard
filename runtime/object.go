@@ -58,15 +58,6 @@ func (o *Object) Set(v any) {
 	o.raw = v
 }
 
-// slightly different from .Set()
-func (o *Object) Reassign(val *Object) {
-	o.raw = val.raw
-
-	// Update target type to match value type.
-	// o._type could be a generic and if the checker allowed it, o should become the new type
-	o._type = val._type
-}
-
 // todo: eliminating unknown generics in the checker needs more work, particularly for nested scopes - see decode::nullable
 //   - the checker successfully refines on variable definitions
 //   - it does not work on chained expressions
@@ -133,10 +124,11 @@ func deepCopy(data any) any {
 // deep copies an object
 func (o *Object) Copy() *Object {
 	copy := &Object{
-		raw:   o.raw,
-		_type: o._type,
-		isErr: o.isErr,
-		isOk:  o.isOk,
+		raw:    o.raw,
+		_type:  o._type,
+		isErr:  o.isErr,
+		isOk:   o.isOk,
+		isNone: o.isNone,
 	}
 
 	switch o.Type().(type) {
