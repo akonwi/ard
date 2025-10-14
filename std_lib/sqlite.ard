@@ -22,29 +22,28 @@ struct Query {
 }
 
 impl Query {
-  fn run(values: [Str:Value]) Dynamic!Str {
-    mut sanitized = @string
-    mut ordered_values: [Value] = []
+  fn prepare(mut query_str: Str, mut values: [Value], args: [Str:Value]) Void!Str {
     for param in @params {
-      sanitized = sanitized.replace_all("@"+param, "?")
-      let value = try values.get(param) -> _ { Result::err("Missing parameter: " + param) }
-      ordered_values.push(value)
+      query_str = query_str.replace_all("@"+param, "?")
+      let value = try args.get(param) -> _ { Result::err("Missing parameter: " + param) }
+      values.push(value)
     }
 
-    _query_run(@conn, sanitized, ordered_values)
+    Result::ok(())
   }
 
-  fn all(values: [Str:Value]) Dynamic!Str {
+  fn run(args: [Str:Value]) Dynamic!Str {
     mut sanitized = @string
-    mut ordered_values: [Value] = []
+    mut values: [Value] = []
+    try @prepare(sanitized, values, args)
+    _query_run(@conn, sanitized, values)
+  }
 
-    for param in @params {
-      sanitized = sanitized.replace_all("@"+param, "?")
-      let arg = try values.get(param) -> _ { Result::err("Missing parameter: " + param) }
-      ordered_values.push(arg)
-    }
-
-    _query_all(@conn, sanitized, ordered_values)
+  fn all(args: [Str:Value]) Dynamic!Str {
+    mut sanitized = @string
+    mut values: [Value] = []
+    try @prepare(sanitized, values, args)
+    _query_all(@conn, sanitized, values)
   }
 }
 
