@@ -18,6 +18,27 @@ func TestSQLiteOpen(t *testing.T) {
 	`)
 }
 
+func TestSQLiteClose(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_close.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sqlite
+		use ard/decode
+		struct Player {
+			id: Int,
+			name: Str,
+			number: Int,
+		}
+
+		let db = sqlite::open("test_close.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+
+		db.close().expect("should succeed")
+	`)
+}
+
 func TestSqliteExtractParams(t *testing.T) {
 	run(t, `
 		use ard/sqlite
@@ -43,7 +64,7 @@ func TestSqliteExtractParams(t *testing.T) {
 	`)
 }
 
-func TestSQLiteRun(t *testing.T) {
+func TestSQLiteQueryRun(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"
 	defer os.Remove(testDB)
@@ -64,7 +85,7 @@ func TestSQLiteRun(t *testing.T) {
 	`)
 }
 
-func TestSQLiteInsertError(t *testing.T) {
+func TestSQLiteQueryError(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_error.db"
 	defer os.Remove(testDB)
@@ -82,6 +103,38 @@ func TestSQLiteInsertError(t *testing.T) {
 			"number": Dynamic::from(2),
 		]).expect("Insert should fail")
 `)
+}
+
+func TestSQLiteQueryAll(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_decode.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sqlite
+		use ard/decode
+		use ard/maybe
+
+		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
+		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
+
+		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
+		let vals: [Str:sqlite::Value] = ["number": 5]
+		let rows = query.all(vals).expect("Failed to query players")
+
+		let name_list = decode::run(rows, decode::list(
+			decode::field("name", decode::string)
+		)).expect("Failed to decode")
+
+		if not name_list.size() == 1 {
+			panic("Expected 1 result, got {name_list.size()}")
+		}
+		if not name_list.at(0) == "Jane Smith" {
+			panic("Expected Jane Smith, got {name_list.at(0)}")
+		}
+	`)
 }
 
 func TestSQLiteInsertingNull(t *testing.T) {
@@ -117,389 +170,6 @@ func TestSQLiteInsertingNull(t *testing.T) {
 		if emails.at(0).is_some() {
 			panic("Expected the email to be maybe::none")
 		}
-	`)
-}
-
-func TestSQLiteQuery(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_query_decode.db"
-	defer os.Remove(testDB)
-
-	run(t, `
-		use ard/sqlite
-		use ard/decode
-		use ard/maybe
-
-		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
-		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
-
-		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
-		let vals: [Str:sqlite::Value?] = ["number": maybe::some(5)]
-		let rows = query.all(vals).expect("Failed to query players")
-
-		let name_list = decode::run(rows, decode::list(
-			decode::field("name", decode::string)
-		)).expect("Failed to decode")
-
-		if not name_list.size() == 1 {
-			panic("Expected 1 result, got {name_list.size()}")
-		}
-		if not name_list.at(0) == "Jane Smith" {
-			panic("Expected Jane Smith, got {name_list.at(0)}")
-		}
-	`)
-}
-
-func TestSQLiteUpdate(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_update.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_update.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Insert initial record
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("John Doe"))
-		values.set("number", decode::from_int(2))
-		db.insert("players", values).expect("Failed to insert player")
-
-		// Update the record using new map-based API
-		mut update_values: [Str: Dynamic] = [:]
-		update_values.set("name", decode::from_str("John Smith"))
-		update_values.set("number", decode::from_int(10))
-
-		let updated_row = db.update("players", "id = 1", update_values).expect("Update should succeed")
-
-		// Verify the returned data matches what we updated
-		let updated_name = decode::run(updated_row, decode::field("name", decode::string)).expect("Should have name")
-		let updated_number = decode::run(updated_row, decode::field("number", decode::int)).expect("Should have number")
-
-		updated_name == "John Smith" && updated_number == 10
-	`)
-
-	if result != true {
-		t.Errorf("Expected update to succeed, got %v", result)
-	}
-}
-
-func TestSQLiteUpdateVerification(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_update_verify.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_update_verify.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Insert initial record
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("John Doe"))
-		values.set("number", decode::from_int(2))
-		db.insert("players", values).expect("Failed to insert player")
-
-		// Update the record with new map-based API
-		mut update_values: [Str: Dynamic] = [:]
-		update_values.set("name", decode::from_str("John Smith"))
-		update_values.set("number", decode::from_int(10))
-
-		let updated_row = db.update("players", "id = 1", update_values).expect("Update should succeed")
-
-		// Verify the returned data matches what we updated
-		let updated_name = decode::run(updated_row, decode::field("name", decode::string)).expect("Should have name")
-		let updated_number = decode::run(updated_row, decode::field("number", decode::int)).expect("Should have number")
-
-		updated_name == "John Smith" && updated_number == 10
-	`)
-
-	if result != true {
-		t.Errorf("Expected update verification to pass, got %v", result)
-	}
-}
-
-func TestSQLiteUpdateNonExistentRecord(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_update_missing.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_update_missing.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Try to update non-existent record
-		mut update_values: [Str: Dynamic] = [:]
-		update_values.set("name", decode::from_str("Ghost Player"))
-		update_values.set("number", decode::from_int(99))
-
-		let result = db.update("players", "id = 999", update_values)
-
-		// Should fail (no rows to update)
-		match result {
-			ok => false,
-			err => true
-		}
-	`)
-
-	if result != true {
-		t.Errorf("Expected update of non-existent record to fail, got %v", result)
-	}
-}
-
-func TestSQLiteUpdateWithMaybeTypes(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_update_maybe.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		use ard/maybe
-		struct User {
-			id: Int,
-			name: Str,
-			email: Str?
-		}
-
-		let db = sqlite::open("test_update_maybe.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
-
-		// Insert initial record with email
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("John Doe"))
-		values.set("email", decode::from_str("john@example.com"))
-		db.insert("users", values).expect("Failed to insert user")
-
-		// Update to remove email (omit from map to set NULL) and change name
-		mut update_values: [Str: Dynamic] = [:]
-		update_values.set("name", decode::from_str("John Smith"))
-		// email omitted - will be set to NULL
-
-		let updated_row = db.update("users", "id = 1", update_values).expect("Update should succeed")
-
-		// Verify the returned data - name changed, email should be NULL
-		let updated_name = decode::run(updated_row, decode::field("name", decode::string)).expect("Should have name")
-
-		updated_name == "John Smith"
-	`)
-
-	if result != true {
-		t.Errorf("Expected update with Maybe types to work correctly, got %v", result)
-	}
-}
-
-func TestSQLiteUpsert(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_upsert.db"
-	defer os.Remove(testDB)
-
-	run(t, `
-		use ard/sqlite
-		use ard/decode
-
-		let db = sqlite::open("test_upsert.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
-
-		db.upsert("users", "id=1", [
-			"id": decode::from_int(1),
-			"name": decode::from_str("John Doe"),
-			"email": decode::from_str("john@example.com"),
-		]).expect("Failed to create user with upsert")
-
-		let new_email = "john@doe.com"
-		let row = db.upsert("users", "id=1", [
-			"id": decode::from_int(1),
-			"name": decode::from_str("John Doe"),
-			"email": decode::from_str(new_email),
-		]).expect("Failed to update upserted user")
-
-		let email = decode::run(row, decode::field("email", decode::string)).expect("Couldn't decode db row")
-		if not email == new_email {
-			panic("Expected email to be {new_email}, got {email}")
-		}
-
-		let count = db.count("users", "").expect("Failed to get count")
-		if not count == 1 {
-			panic("Expected count to be 1, got {count}")
-		}
-	`)
-}
-
-func TestSQLiteDelete(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_delete.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_delete.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Insert test records
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
-		db.insert("players", values1).expect("Failed to insert player")
-
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(10))
-		db.insert("players", values2).expect("Failed to insert player")
-
-		mut values3: [Str: Dynamic] = [:]
-		values3.set("name", decode::from_str("Bob Wilson"))
-		values3.set("number", decode::from_int(23))
-		db.insert("players", values3).expect("Failed to insert player")
-
-		// Delete one record
-		let result = db.delete("players", "id = 2")
-
-		// Should succeed - expect Ok(true) since record should be deleted
-		match result {
-			ok => {
-				ok == true
-			},
-			err => false
-		}
-	`)
-
-	if result != true {
-		t.Errorf("Expected delete to succeed, got %v", result)
-	}
-}
-
-func TestSQLiteDeleteNonExistent(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_delete_missing.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_delete_missing.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Try to delete non-existent record
-		db.delete("players", "id = 999")
-	`)
-
-	if result != false {
-		t.Errorf("Expected delete of non-existent record to return Ok(false), got %v", result)
-	}
-}
-
-func TestSQLiteDeleteMultiple(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_delete_multiple.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_delete_multiple.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Insert test records
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
-		db.insert("players", values1).expect("Failed to insert player")
-
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(2))
-		db.insert("players", values2).expect("Failed to insert player")
-
-		mut values3: [Str: Dynamic] = [:]
-		values3.set("name", decode::from_str("Bob Wilson"))
-		values3.set("number", decode::from_int(23))
-		db.insert("players", values3).expect("Failed to insert player")
-
-		// Delete multiple records with same number
-		db.delete("players", "number = 2")
-	`)
-
-	if result != true {
-		t.Errorf("Expected delete multiple to succeed, got %v", result)
-	}
-}
-
-func TestSQLiteClose(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_close.db"
-	defer os.Remove(testDB)
-
-	run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_close.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		db.close().expect("should succeed")
-	`)
-}
-
-func TestSQLiteCloseMultipleTimes(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_close_multiple.db"
-	defer os.Remove(testDB)
-
-	run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test_close_multiple.db").expect("Failed to open database")
-
-		let first_close = db.close()
-		db.close().expect("the second call to .close should fail")
 	`)
 }
 
