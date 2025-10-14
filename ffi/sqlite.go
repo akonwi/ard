@@ -209,16 +209,14 @@ func SqliteQueryRun(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	conn, ok := args[0].Raw().(*sql.DB)
 	if !ok {
-		panic(fmt.Errorf("SQLite Error: invalid connection object"))
+		return runtime.MakeErr(runtime.MakeStr("SQLite Error: invalid connection object"))
 	}
 
 	sqlStr := args[1].AsString()
-	valuesListObj := args[2]
 
 	// Extract values from the list
-	valuesList := valuesListObj.AsList()
 	var values []any
-	for _, valueObj := range valuesList {
+	for _, valueObj := range args[2].AsList() {
 		// Convert Ard Value union type to Go value
 		values = append(values, valueObj.GoValue())
 	}
