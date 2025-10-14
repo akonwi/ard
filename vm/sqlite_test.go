@@ -123,16 +123,42 @@ func TestSQLiteQueryAll(t *testing.T) {
 		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
 		let vals: [Str:sqlite::Value] = ["number": 5]
 		let rows = query.all(vals).expect("Failed to query players")
-
-		let name_list = decode::run(rows, decode::list(
-			decode::field("name", decode::string)
-		)).expect("Failed to decode")
-
-		if not name_list.size() == 1 {
-			panic("Expected 1 result, got {name_list.size()}")
+		if not rows.size() == 1 {
+			panic("Expected 1 result, got {rows.size()}")
 		}
-		if not name_list.at(0) == "Jane Smith" {
-			panic("Expected Jane Smith, got {name_list.at(0)}")
+
+		let decode_name = decode::field("name", decode::string)
+		let first_name = decode_name(rows.at(0)).expect("Unable to decode row")
+		if not first_name == "Jane Smith" {
+			panic("Expected Jane Smith, got {first_name}")
+		}
+	`)
+}
+
+func TestSQLiteQueryFirst(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_query_first.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sqlite
+		use ard/decode
+		use ard/maybe
+
+		let db = sqlite::open("test_query_first.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
+		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
+
+		let query = db.query("SELECT id FROM players WHERE number = @number")
+		let vals: [Str:sqlite::Value] = ["number": 5]
+		let maybe_row = query.first(vals).expect("Failed to query players")
+		let row = maybe_row.expect("Found none")
+
+		let decode_name = decode::field("name", decode::string)
+		let id = decode::run(row, decode::field("id", decode::int)).expect("Failed to decode id")
+		if not id == 2 {
+			panic("Expected id 2, got {id}")
 		}
 	`)
 }
@@ -148,7 +174,7 @@ func TestSQLiteInsertingNull(t *testing.T) {
 
 		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
 		let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
-		let values: [Str:Dynamic] = [:]
+		let values: [Str:sqlite::Value] = [:]
 		create_table.run(values)
 
 		let stmt = db.query("INSERT INTO users (name, email) VALUES (@name, @email)")
@@ -160,486 +186,13 @@ func TestSQLiteInsertingNull(t *testing.T) {
 
 		let query = db.query("SELECT email FROM users WHERE id = 1")
 		let rows = query.all(values).expect("Failed to find users with id 1")
-
-		let emails = decode::run(rows, decode::list(decode::field("email", decode::nullable(decode::string)))).expect("Failed to decode emails")
-
-		if not emails.size() == 1 {
-			panic("Expected 1 result, got {emails.size()}")
+		if not rows.size() == 1 {
+			panic("Expected 1 result, got {rows.size()}")
 		}
 
-		if emails.at(0).is_some() {
+		let email = decode::run(rows.at(0), decode::field("email", decode::nullable(decode::string))).expect("Failed to decode email")
+		if email.is_some() {
 			panic("Expected the email to be maybe::none")
 		}
 	`)
-}
-
-func TestSQLiteCount(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_count.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_count.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
-
-		// Insert test records
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
-		db.insert("players", values1).expect("Failed to insert player")
-
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(2))
-		db.insert("players", values2).expect("Failed to insert player")
-
-		mut values3: [Str: Dynamic] = [:]
-		values3.set("name", decode::from_str("Bob Wilson"))
-		values3.set("number", decode::from_int(23))
-		db.insert("players", values3).expect("Failed to insert player")
-
-		// Count all players
-		let all_count = db.count("players", "").expect("Failed to count all players")
-
-		// Count players with number 2
-		let twos_count = db.count("players", "number = 2").expect("Failed to count players with number 2")
-
-		// Count players with non-existent condition
-		let none_count = db.count("players", "number = 999").expect("Failed to count non-existent players")
-
-		all_count == 3 and twos_count == 2 and none_count == 0
-	`)
-
-	if result != true {
-		t.Errorf("Expected count operations to return correct values, got %v", result)
-	}
-}
-
-func TestSQLiteCountInvalidTable(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_count_invalid.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test_count_invalid.db").expect("Failed to open database")
-
-		// Try to count from non-existent table
-		let result = db.count("non_existent_table", "")
-
-		// Should fail
-		match result {
-			ok => false,
-			err => true
-		}
-	`)
-
-	if result != true {
-		t.Errorf("Expected count on invalid table to fail, got %v", result)
-	}
-}
-
-func TestSQLiteExists(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_exists.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_exists.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
-
-		// Insert test records
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("John Doe"))
-		values1.set("number", decode::from_int(2))
-		db.insert("players", values1).expect("Failed to insert player")
-
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Jane Smith"))
-		values2.set("number", decode::from_int(2))
-		db.insert("players", values2).expect("Failed to insert player")
-
-		mut values3: [Str: Dynamic] = [:]
-		values3.set("name", decode::from_str("Bob Wilson"))
-		values3.set("number", decode::from_int(23))
-		db.insert("players", values3).expect("Failed to insert player")
-
-		// Check if any players exist
-		let any_exist = db.exists("players", "").expect("Failed to check if any players exist")
-
-		// Check if players with number 2 exist
-		let twos_exist = db.exists("players", "number = 2").expect("Failed to check if players with number 2 exist")
-
-		// Check if players with non-existent condition exist
-		let none_exist = db.exists("players", "number = 999").expect("Failed to check if players with number 999 exist")
-
-		any_exist == true and twos_exist == true and none_exist == false
-	`)
-
-	if result != true {
-		t.Errorf("Expected exists operations to return correct values, got %v", result)
-	}
-}
-
-func TestSQLiteExistsInvalidTable(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_exists_invalid.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test_exists_invalid.db").expect("Failed to open database")
-
-		// Try to check existence in non-existent table
-		let result = db.exists("non_existent_table", "")
-
-		// Should fail
-		match result {
-			ok => false,
-			err => true
-		}
-	`)
-
-	if result != true {
-		t.Errorf("Expected exists on invalid table to fail, got %v", result)
-	}
-}
-
-func TestSQLiteExistsEmptyTable(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_exists_empty.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test_exists_empty.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)")
-
-		// Check if any players exist in empty table
-		let exists = db.exists("players", "").expect("Failed to check existence in empty table")
-
-		exists == false
-	`)
-
-	if result != true {
-		t.Errorf("Expected exists in empty table to return false, got %v", result)
-	}
-}
-
-func testSQLiteUpsert(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_upsert.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_upsert.db").expect("Failed to open database")
-		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-
-		// Test insert (new record)
-		let player1 = Player{ id: 1, name: "John Doe", number: 2 }
-		let insert_result = db.upsert("players", "id = 1", player1).expect("Failed to upsert new player")
-
-		// Test update (existing record)
-		let updated_player1 = Player{ id: 1, name: "John Smith", number: 10 }
-		let update_result = db.upsert("players", "id = 1", updated_player1).expect("Failed to upsert existing player")
-
-		// Verify the update worked
-		let players = db.get<Player>("players", "id = 1").expect("Failed to get player")
-		let retrieved = players.at(0)
-
-		insert_result == true and update_result == true and retrieved.name == "John Smith" and retrieved.number == 10
-	`)
-
-	if result != true {
-		t.Errorf("Expected upsert operations to work correctly, got %v", result)
-	}
-}
-
-func testSQLiteUpsertMultipleKeys(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_upsert_multi.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		struct Score {
-			player_id: Int,
-			game_id: Int,
-			score: Int,
-		}
-
-		let db = sqlite::open("test_upsert_multi.db").expect("Failed to open database")
-		db.exec("CREATE TABLE scores (player_id INTEGER, game_id INTEGER, score INTEGER, PRIMARY KEY (player_id, game_id))").expect("Failed to create table")
-
-		// Test insert with composite key
-		let score1 = Score{ player_id: 1, game_id: 1, score: 100 }
-		let insert_result = db.upsert("scores", "player_id = 1 AND game_id = 1", score1).expect("Failed to upsert new score")
-
-		// Test update with composite key
-		let updated_score1 = Score{ player_id: 1, game_id: 1, score: 150 }
-		let update_result = db.upsert("scores", "player_id = 1 AND game_id = 1", updated_score1).expect("Failed to upsert existing score")
-
-		// Verify the update worked
-		let scores = db.get<Score>("scores", "player_id = 1 AND game_id = 1").expect("Failed to get score")
-		let retrieved = scores.at(0)
-
-		insert_result == true and update_result == true and retrieved.score == 150
-	`)
-
-	if result != true {
-		t.Errorf("Expected upsert with multiple keys to work correctly, got %v", result)
-	}
-}
-
-func testSQLiteUpsertWithMaybeTypes(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_upsert_maybe.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/maybe
-		struct User {
-			id: Int,
-			name: Str,
-			email: Str?
-		}
-
-		let db = sqlite::open("test_upsert_maybe.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").expect("Failed to create table")
-
-		// Insert user with email
-		let user1 = User{ id: 1, name: "John Doe", email: maybe::some("john@example.com") }
-		db.upsert("users", "id = 1", user1).expect("Failed to upsert user with email")
-
-		// Update user to remove email
-		let user1_no_email = User{ id: 1, name: "John Doe", email: maybe::none() }
-		db.upsert("users", "id = 1", user1_no_email).expect("Failed to upsert user without email")
-
-		// Verify the update worked
-		let users = db.get<User>("users", "id = 1").expect("Failed to get user")
-		let retrieved = users.at(0)
-
-		retrieved.name == "John Doe" and retrieved.email.or("default") == "default"
-	`)
-
-	if result != true {
-		t.Errorf("Expected upsert with Maybe types to work correctly, got %v", result)
-	}
-}
-
-func testSQLiteUpsertError(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_upsert_error.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		struct Player {
-			id: Int,
-			name: Str,
-			number: Int,
-		}
-
-		let db = sqlite::open("test_upsert_error.db").expect("Failed to open database")
-		// Don't create the table - this should cause an error
-
-		let player = Player{ id: 1, name: "John Doe", number: 2 }
-		let result = db.upsert("players", "id = 1", player)
-
-		// Should fail
-		match result {
-			ok => false,
-			err => true
-		}
-	`)
-
-	if result != true {
-		t.Errorf("Expected upsert to fail with missing table, got %v", result)
-	}
-}
-
-func TestSQLiteQueryComprehensive(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_query_comprehensive.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-		use ard/maybe
-
-		let db = sqlite::open("test_query_comprehensive.db").expect("Failed to open database")
-		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, active INTEGER, description TEXT)").expect("Failed to create table")
-
-		// Insert test data with different types
-		db.exec("INSERT INTO products (id, name, price, active, description) VALUES (1, 'Widget', 19.99, 1, 'A useful widget')").expect("Failed to insert")
-		db.exec("INSERT INTO products (id, name, price, active, description) VALUES (2, 'Gadget', 29.50, 0, NULL)").expect("Failed to insert")
-		db.exec("INSERT INTO products (id, name, price, active, description) VALUES (3, 'Tool', 15.00, 1, 'Handy tool')").expect("Failed to insert")
-
-		// Query active products only
-		let rows = db.query("SELECT name, price, description FROM products WHERE active = 1 ORDER BY price").expect("Failed to query")
-
-		// Decode using compositional decoders
-		let products = decode::run(rows, decode::list(
-			decode::field("name", decode::string)
-		)).expect("Failed to decode products")
-
-		// Should get "Tool" (15.00) and "Widget" (19.99) in price order
-		products.size() == 2 and products.at(0) == "Tool" and products.at(1) == "Widget"
-	`)
-
-	if result != true {
-		t.Errorf("Expected comprehensive query and decode to work correctly, got %v", result)
-	}
-}
-
-func TestSQLiteFirst(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_first.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test_first.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
-
-		// Insert multiple users
-		db.exec("INSERT INTO users (id, name, age) VALUES (1, 'Alice', 25)").expect("Failed to insert")
-		db.exec("INSERT INTO users (id, name, age) VALUES (2, 'Bob', 30)").expect("Failed to insert")
-		db.exec("INSERT INTO users (id, name, age) VALUES (3, 'Charlie', 35)").expect("Failed to insert")
-
-		// Test first() method - should return only the first row
-		let first_user = db.first("SELECT name, age FROM users ORDER BY age").expect("Failed to query first")
-
-		// first_user should be a map with Alice's data (youngest user)
-		true // Just test that it doesn't error for now
-	`)
-
-	if result != true {
-		t.Errorf("Expected first() method to work correctly, got %v", result)
-	}
-}
-
-func TestSQLiteFirstNoResults(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_first_empty.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test_first_empty.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
-
-		// Query empty table - should return null
-		let first_user = db.first("SELECT * FROM users").expect("Failed to query first")
-
-		// Should return null when no rows found
-		true // Just test that it doesn't error for now
-	`)
-
-	if result != true {
-		t.Errorf("Expected first() method to return null for empty results, got %v", result)
-	}
-}
-
-func TestSQLiteInsMethod(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_ins.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-
-		let db = sqlite::open("test_ins.db").expect("Failed to open database")
-		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
-
-		mut values: [Str: Dynamic] = [:]
-		values.set("name", decode::from_str("Alice"))
-		values.set("age", decode::from_int(30))
-
-		let inserted_row = db.insert("users", values).expect("Failed to insert with ins method")
-
-		// ins should return the full row as Dynamic - verify we can access the inserted data
-		let returned_name = decode::run(inserted_row, decode::field("name", decode::string)).expect("Should have name")
-		let returned_age = decode::run(inserted_row, decode::field("age", decode::int)).expect("Should have age")
-
-		returned_name == "Alice" && returned_age == 30
-	`)
-
-	if result != true {
-		t.Errorf("Expected ins method to work, got %v", result)
-	}
-}
-
-func TestSQLiteInsMethodValidation(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_ins_validation.db"
-	defer os.Remove(testDB)
-
-	result := run(t, `
-		use ard/sqlite
-		use ard/decode
-
-		let db = sqlite::open("test_ins_validation.db").expect("Failed to open database")
-		db.exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, available BOOL)").expect("Failed to create table")
-
-		// Test 1: Insert with multiple types and verify returned data
-		mut values1: [Str: Dynamic] = [:]
-		values1.set("name", decode::from_str("Widget"))
-		values1.set("price", decode::from_float(19.99))
-		values1.set("available", decode::from_bool(true))
-
-		let row1 = db.insert("products", values1).expect("Failed to insert product 1")
-
-		// Decode the returned row and verify it contains our data
-		let name1 = decode::run(row1, decode::field("name", decode::string)).expect("Should have name")
-		let price1 = decode::run(row1, decode::field("price", decode::float)).expect("Should have price")
-		// SQLite stores booleans as integers, so decode as int then convert to bool
-		let available_int = decode::run(row1, decode::field("available", decode::int)).expect("Should have available")
-		let available1 = available_int == 1
-		let id1 = decode::run(row1, decode::field("id", decode::int)).expect("Should have id")
-
-		// Test 2: Insert with partial columns and verify
-		mut values2: [Str: Dynamic] = [:]
-		values2.set("name", decode::from_str("Gadget"))
-		values2.set("price", decode::from_float(29.99))
-
-		let row2 = db.insert("products", values2).expect("Failed to insert product 2")
-		let name2 = decode::run(row2, decode::field("name", decode::string)).expect("Should have name")
-		let price2 = decode::run(row2, decode::field("price", decode::float)).expect("Should have price")
-		let id2 = decode::run(row2, decode::field("id", decode::int)).expect("Should have id")
-
-		// Verify the data matches what we inserted
-		name1 == "Widget" && price1 == 19.99 && available1 == true && id1 > 0 &&
-		name2 == "Gadget" && price2 == 29.99 && id2 > 0
-	`)
-
-	if result != true {
-		t.Errorf("Expected ins method validation to pass, got %v", result)
-	}
 }

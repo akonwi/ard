@@ -1,4 +1,6 @@
 use ard/decode
+use ard/maybe
+use ard/result as Result
 
 type Value = Str | Bool | Int | Float | Void
 
@@ -6,7 +8,7 @@ private extern fn _create_connection(filepath: Str) Dynamic!Str = "SqliteCreateC
 private extern fn _close(conn: Dynamic) Void!Str = "SqliteClose"
 private extern fn _exec(conn: Dynamic, sql: Str) Void!Str = "SqliteExec"
 private extern fn _query_run(conn: Dynamic, sql: Str, values: [Value]) Void!Str = "SqliteQueryRun"
-private extern fn _query_all(conn: Dynamic, sql: Str, values: [Value]) Dynamic!Str = "SqliteQuery"
+private extern fn _query_all(conn: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqliteQuery"
 private extern fn _first(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteFirst"
 private extern fn _insert(conn: Dynamic, table: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteInsert"
 private extern fn _update(conn: Dynamic, table: Str, where: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteUpdate"
@@ -39,11 +41,19 @@ impl Query {
     _query_run(@conn, sanitized, values)
   }
 
-  fn all(args: [Str:Value]) Dynamic!Str {
+  fn all(args: [Str:Value]) [Dynamic]!Str {
     mut sanitized = @string
     mut values: [Value] = []
     try @prepare(sanitized, values, args)
     _query_all(@conn, sanitized, values)
+  }
+
+  fn first(args: [Str:Value]) Dynamic?!Str {
+    let rows = try @all(args)
+    match rows.size() {
+      0 => Result::ok(maybe::none()),
+      _ => Result::ok(maybe::some(rows.at(0)))
+    }
   }
 }
 

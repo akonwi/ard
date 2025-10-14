@@ -169,7 +169,7 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	// Build result list - each row is a map[string]interface{}
-	var results []any
+	var results []*runtime.Object
 
 	for rows.Next() {
 		// Create scan targets for each column
@@ -190,7 +190,7 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 			rowMap[columnName] = values[i]
 		}
 
-		results = append(results, rowMap)
+		results = append(results, runtime.MakeDynamic(rowMap))
 	}
 
 	if err := rows.Err(); err != nil {
@@ -198,7 +198,7 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	// Return Dynamic object containing list of row maps
-	return runtime.MakeOk(runtime.MakeDynamic(results))
+	return runtime.MakeOk(runtime.MakeList(checker.Dynamic, results...))
 }
 
 // SqliteQueryRun executes a prepared statement with parameters
