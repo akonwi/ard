@@ -223,64 +223,12 @@ func SqliteQueryRun(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		values = append(values, valueObj.GoValue())
 	}
 
-	// Determine if this is a SELECT query or not
-	sqlUpper := strings.ToUpper(strings.TrimSpace(sqlStr))
-	isSelect := strings.HasPrefix(sqlUpper, "SELECT")
-
-	if isSelect {
-		// For SELECT queries, return all rows as Dynamic
-		rows, err := conn.Query(sqlStr, values...)
-		if err != nil {
-			return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to execute query: %v", err)))
-		}
-		defer rows.Close()
-
-		// Get column names
-		columns, err := rows.Columns()
-		if err != nil {
-			return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to get column names: %v", err)))
-		}
-
-		// Build result list - each row is a map[string]interface{}
-		var results []any
-
-		for rows.Next() {
-			// Create scan targets for each column
-			scanValues := make([]any, len(columns))
-			scanTargets := make([]any, len(columns))
-			for i := range scanValues {
-				scanTargets[i] = &scanValues[i]
-			}
-
-			// Scan the row
-			if err := rows.Scan(scanTargets...); err != nil {
-				return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to scan row: %v", err)))
-			}
-
-			// Create map for this row
-			rowMap := make(map[string]any)
-			for i, columnName := range columns {
-				rowMap[columnName] = scanValues[i]
-			}
-
-			results = append(results, rowMap)
-		}
-
-		if err := rows.Err(); err != nil {
-			return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("row iteration error: %v", err)))
-		}
-
-		// Return Dynamic object containing list of row maps
-		return runtime.MakeOk(runtime.MakeDynamic(results))
-	} else {
-		// For INSERT/UPDATE/DELETE/DDL statements, execute and return void
-		_, err := conn.Exec(sqlStr, values...)
-		if err != nil {
-			return runtime.MakeErr(runtime.MakeStr(err.Error()))
-		}
-
-		return runtime.MakeOk(runtime.Void())
+	_, err := conn.Exec(sqlStr, values...)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
+
+	return runtime.MakeOk(runtime.Void())
 }
 
 // SqliteFirst executes a query and returns the first row

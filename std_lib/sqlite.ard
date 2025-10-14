@@ -5,7 +5,7 @@ type Value = Str | Bool | Int | Float | Void
 private extern fn _create_connection(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
 private extern fn _close(conn: Dynamic) Void!Str = "SqliteClose"
 private extern fn _exec(conn: Dynamic, sql: Str) Void!Str = "SqliteExec"
-private extern fn _query_run(conn: Dynamic, sql: Str, values: [Value]) Dynamic!Str = "SqliteQueryRun"
+private extern fn _query_run(conn: Dynamic, sql: Str, values: [Value]) Void!Str = "SqliteQueryRun"
 private extern fn _query_all(conn: Dynamic, sql: Str, values: [Value]) Dynamic!Str = "SqliteQuery"
 private extern fn _first(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteFirst"
 private extern fn _insert(conn: Dynamic, table: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteInsert"
@@ -32,7 +32,7 @@ impl Query {
     Result::ok(())
   }
 
-  fn run(args: [Str:Value]) Dynamic!Str {
+  fn run(args: [Str:Value]) Void!Str {
     mut sanitized = @string
     mut values: [Value] = []
     try @prepare(sanitized, values, args)
