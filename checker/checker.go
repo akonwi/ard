@@ -1080,8 +1080,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add("@", def, method.Mutates)
 					})
-					fnDef.Mutates = method.Mutates
-					def.Methods[method.Name] = fnDef
+					if fnDef != nil {
+						fnDef.Mutates = method.Mutates
+						def.Methods[method.Name] = fnDef
+					}
 				}
 				return &Statement{Stmt: def}
 			case *Enum:
