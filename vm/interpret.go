@@ -22,7 +22,9 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	}()
 
 	for _, statement := range program.Statements {
-		vm.result = *vm.do(statement)
+		if res := vm.do(statement); res != nil {
+			vm.result = *res
+		}
 	}
 
 	// Store module scope after processing all statements
