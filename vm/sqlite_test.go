@@ -98,10 +98,11 @@ func TestSQLiteQueryError(t *testing.T) {
 		// Don't create the table - this should cause an error
 
 		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-		stmt.run([
-		  "name": Dynamic::from("John Doe"),
-			"number": Dynamic::from(2),
-		]).expect("Insert should fail")
+		let values: [Str:sqlite::Value] = [
+		  "name": "John Doe",
+			"number": 2,
+		]
+		stmt.run(values).expect("Insert should fail")
 `)
 }
 
