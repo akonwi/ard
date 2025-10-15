@@ -157,8 +157,8 @@ func (o *Object) Copy() *Object {
 		}
 		copy.raw = copiedMap
 	case *checker.Maybe:
-		// Deep copy Maybe - if value is not nil (Some), deep copy the inner value.
-		if o.Raw() != nil {
+		// Deep copy Maybe - if value is not None, deep copy the inner value.
+		if !o.IsNone() {
 			if inner, ok := o.Raw().(*Object); ok {
 				copy.raw = inner.Copy()
 			}
