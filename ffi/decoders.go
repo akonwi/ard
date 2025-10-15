@@ -28,6 +28,10 @@ func BoolToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeDynamic(args[0].Raw())
 }
 
+func VoidToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	return runtime.MakeDynamic(nil)
+}
+
 // Parse external data (JSON text) into Dynamic object
 func JsonToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	jsonString := args[0].AsString()

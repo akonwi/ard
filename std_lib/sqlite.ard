@@ -1,14 +1,57 @@
 use ard/decode
+use ard/list as List
+use ard/maybe
+use ard/result as Result
 
-private extern fn _create_connection(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
-private extern fn _close(conn: Dynamic) Void!Str = "SqliteClose"
-private extern fn _exec(conn: Dynamic, sql: Str) Void!Str = "SqliteExec"
-private extern fn _query(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteQuery"
-private extern fn _first(conn: Dynamic, sql: Str) Dynamic!Str = "SqliteFirst"
-private extern fn _insert(conn: Dynamic, table: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteInsert"
-private extern fn _update(conn: Dynamic, table: Str, where: Str, values: [Str:Dynamic]) Dynamic!Str = "SqliteUpdate"
-private extern fn _delete(conn: Dynamic, table: Str, where: Str) Bool!Str = "SqliteDelete"
-private extern fn _count(conn: Dynamic, table: Str, where: Str) Int!Str = "SqliteCount"
+// Only support primitives as values for query variables
+type Value = Str | Bool | Int | Float | Void
+
+private extern fn connect(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
+private extern fn close_connection(conn: Dynamic) Void!Str = "SqliteClose"
+private extern fn execute(conn: Dynamic, sql: Str, values: [Value]) Void!Str = "SqliteExecute"
+private extern fn run_query(conn: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqliteQuery"
+
+extern fn extract_params(sql: Str) [Str] = "SqliteExtractParams"
+
+struct Query {
+  conn: Dynamic,
+  string: Str,
+  params: [Str]
+}
+
+impl Query {
+  fn prepare(mut query_str: Str, mut values: [Value], args: [Str:Value]) Void!Str {
+    for param in @params {
+      query_str = query_str.replace_all("@"+param, "?")
+      let value = try args.get(param) -> _ { Result::err("Missing parameter: " + param) }
+      values.push(value)
+    }
+
+    Result::ok(())
+  }
+
+  fn run(args: [Str:Value]) Void!Str {
+    mut sanitized = @string
+    mut values: [Value] = []
+    try @prepare(sanitized, values, args)
+    execute(@conn, sanitized, values)
+  }
+
+  fn all(args: [Str:Value]) [Dynamic]!Str {
+    mut sanitized = @string
+    mut values: [Value] = []
+    try @prepare(sanitized, values, args)
+    run_query(@conn, sanitized, values)
+  }
+
+  fn first(args: [Str:Value]) Dynamic?!Str {
+    let rows = try @all(args)
+    match rows.size() {
+      0 => Result::ok(maybe::none()),
+      _ => Result::ok(maybe::some(rows.at(0)))
+    }
+  }
+}
 
 struct Database {
   conn: Dynamic
@@ -16,53 +59,26 @@ struct Database {
 }
 
 fn open(filepath: Str) Database!Str {
-  let conn = try _create_connection(filepath)
+  let conn = try connect(filepath)
   Result::ok(Database{ conn: conn, filepath: filepath })
 }
 
 impl Database {
   fn close() Void!Str {
-    _close(@conn)
+    close_connection(@conn)
   }
 
+  // simple one-off executions where the results aren't needed
+  // [note]: could be removed entirely for query.run() once optional params are sorted
   fn exec(sql: Str) Void!Str {
-    _exec(@conn, sql)
+    execute(@conn, sql, List::new<Value>())
   }
 
-  fn query(sql: Str) Dynamic!Str {
-    _query(@conn, sql)
-  }
-
-  fn first(sql: Str) Dynamic!Str {
-    _first(@conn, sql)
-  }
-
-  fn insert(table: Str, values: [Str:Dynamic]) Dynamic!Str {
-    _insert(@conn, table, values)
-  }
-
-  fn update(table: Str, where: Str, values: [Str:Dynamic]) Dynamic!Str {
-    _update(@conn, table, where, values)
-  }
-
-  fn delete(table: Str, where: Str) Bool!Str {
-    _delete(@conn, table, where)
-  }
-
-  fn count(table: Str, where: Str) Int!Str {
-    _count(@conn, table, where)
-  }
-
-  fn exists(table: Str, where: Str) Bool!Str {
-    let count = try @count(table, where)
-    Result::ok(count > 0)
-  }
-
-  fn upsert(table: Str, where: Str, values: [Str:Dynamic]) Dynamic!Str {
-    let found = try @exists(table, where)
-    match found {
-      true => @update(table, where, values),
-      false => @insert(table, values)
+  fn query(sql: Str) Query {
+    Query{
+      conn: @conn,
+      string: sql,
+      params: extract_params(sql),
     }
   }
 }

@@ -650,8 +650,13 @@ type dynamicType struct{}
 func (d dynamicType) String() string       { return "Dynamic" }
 func (d dynamicType) get(name string) Type { return nil }
 func (d dynamicType) equal(other Type) bool {
-	_, ok := other.(*dynamicType)
-	return ok
+	if _, ok := other.(*dynamicType); ok {
+		return true
+	}
+	if any, ok := other.(*Any); ok && any.actual == nil {
+		return true
+	}
+	return false
 }
 func (d dynamicType) hasTrait(trait *Trait) bool { return false }
 

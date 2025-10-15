@@ -19,6 +19,8 @@ type Object struct {
 	// Results will set one of these to true
 	isErr bool
 	isOk  bool
+
+	isNone bool
 }
 
 func (o Object) String() string {
@@ -54,15 +56,6 @@ func (o Object) Raw() any {
 // mutate the inner representation
 func (o *Object) Set(v any) {
 	o.raw = v
-}
-
-// slightly different from .Set()
-func (o *Object) Reassign(val *Object) {
-	o.raw = val.raw
-
-	// Update target type to match value type.
-	// o._type could be a generic and if the checker allowed it, o should become the new type
-	o._type = val._type
 }
 
 // todo: eliminating unknown generics in the checker needs more work, particularly for nested scopes - see decode::nullable
@@ -131,10 +124,11 @@ func deepCopy(data any) any {
 // deep copies an object
 func (o *Object) Copy() *Object {
 	copy := &Object{
-		raw:   o.raw,
-		_type: o._type,
-		isErr: o.isErr,
-		isOk:  o.isOk,
+		raw:    o.raw,
+		_type:  o._type,
+		isErr:  o.isErr,
+		isOk:   o.isOk,
+		isNone: o.isNone,
 	}
 
 	switch o.Type().(type) {
@@ -163,8 +157,8 @@ func (o *Object) Copy() *Object {
 		}
 		copy.raw = copiedMap
 	case *checker.Maybe:
-		// Deep copy Maybe - if value is not nil (Some), deep copy the inner value.
-		if o.Raw() != nil {
+		// Deep copy Maybe - if value is not None, deep copy the inner value.
+		if !o.IsNone() {
 			if inner, ok := o.Raw().(*Object); ok {
 				copy.raw = inner.Copy()
 			}
@@ -333,14 +327,26 @@ func MakeBool(b bool) *Object {
 // instantiate a $T?
 func MakeMaybe(raw any, of checker.Type) *Object {
 	return &Object{
-		_type: checker.MakeMaybe(of),
-		raw:   raw,
+		_type:  checker.MakeMaybe(of),
+		raw:    raw,
+		isNone: true,
 	}
+}
+
+func (o Object) ToNone() *Object {
+	o._type = checker.MakeMaybe(o._type)
+	o.isNone = true
+	return &o
 }
 
 func (o Object) ToSome() *Object {
 	o._type = checker.MakeMaybe(o._type)
+	o.isNone = false
 	return &o
+}
+
+func (o Object) IsNone() bool {
+	return o.isNone
 }
 
 func MakeList(of checker.Type, items ...*Object) *Object {
@@ -432,14 +438,14 @@ func (o Object) Map_GetKey(str string) *Object {
 
 // create Result::Err
 func MakeErr(err *Object) *Object {
-	unwrapped := err.Unwrap()
+	unwrapped := err.UnwrapResult()
 	unwrapped.isErr = true
 	return unwrapped
 }
 
 // create Result::Ok
 func MakeOk(err *Object) *Object {
-	unwrapped := err.Unwrap()
+	unwrapped := err.UnwrapResult()
 	unwrapped.isOk = true
 	return unwrapped
 }
@@ -456,10 +462,10 @@ func (o Object) IsErr() bool {
 	return o.isErr
 }
 
-// return an object w/o Result indicators
-// a no-op if not already a result
-func (o *Object) Unwrap() *Object {
-	return Make(o.raw, o._type)
+func (o *Object) UnwrapResult() *Object {
+	new := Make(o.raw, o._type)
+	new.isNone = o.isNone
+	return new
 }
 
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {

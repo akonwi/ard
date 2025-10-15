@@ -1,8 +1,6 @@
 # TODO
 
 ## Initial 0.1.0 build
-- [ ] in ard/sqlite, implement prepared statements
-  - needs API design
 - [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
   - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
 - [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
@@ -27,6 +25,10 @@
 - [ ] start versioning (begin with 0.1.0)
 
 ## Future improvements
+- [ ] type casting a map literal
+  `Map::new<Str, sqlite::Value>(["age": 1, "foo": "bar"])`
+- [ ] map and list literals should be compared against the parameter type
+  - `query.run(["foo":2, "bar": false])` is map with two valid values but the compiler complains that keys aren't consistent
 - [ ] `?` sugar for safely unwrapping maybes
 - [ ] infer types in anonymous functions
 - [ ] equivalent of Gleam's `use`

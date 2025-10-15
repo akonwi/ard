@@ -22,7 +22,9 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	}()
 
 	for _, statement := range program.Statements {
-		vm.result = *vm.do(statement)
+		if res := vm.do(statement); res != nil {
+			vm.result = *res
+		}
 	}
 
 	// Store module scope after processing all statements
@@ -92,7 +94,12 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	case *checker.Reassignment:
 		target := vm.eval(s.Target)
 		val := vm.eval(s.Value)
-		target.Reassign(val)
+
+		// replace the target with the new value
+		// note: it's possible that either side still has an open generic,
+		// but the checker theoretically should have refined whatever is on the new value.
+		// so it __should__ be safe to just accept it whole
+		*target = *val
 		return runtime.Void()
 	case *checker.ForLoop:
 		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }
@@ -398,7 +405,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 	case *checker.OptionMatch:
 		{
 			subject := vm.eval(e.Subject)
-			if subject.Raw() == nil {
+			if subject.IsNone() {
 				// None case - evaluate the None block
 				res, _ := vm.evalBlock(e.None, nil)
 				return res
@@ -513,12 +520,12 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			subj := vm.eval(e.Subject)
 			if subj.IsOk() {
 				res, _ := vm.evalBlock(e.Ok.Body, func() {
-					vm.scope.add(e.Ok.Pattern.Name, subj.Unwrap())
+					vm.scope.add(e.Ok.Pattern.Name, subj.UnwrapResult())
 				})
 				return res
 			}
 			res, _ := vm.evalBlock(e.Err.Body, func() {
-				vm.scope.add(e.Err.Pattern.Name, subj.Unwrap())
+				vm.scope.add(e.Err.Pattern.Name, subj.UnwrapResult())
 			})
 			return res
 		}
@@ -569,7 +576,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		{
 			subj := vm.eval(e.Expr())
 			if subj.IsResult() {
-				unwrapped := subj.Unwrap()
+				unwrapped := subj.UnwrapResult()
 				if subj.IsErr() {
 					// Error case: early return from function
 					if e.CatchBlock != nil {
@@ -595,7 +602,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				// Success case: always continue execution with unwrapped value
 				return unwrapped
 			} else if checker.IsMaybe(subj.Type()) {
-				if subj.Raw() == nil {
+				if subj.IsNone() {
 					// None case: early return from function
 					if e.CatchBlock != nil {
 						// Execute catch block and early return its result
@@ -723,6 +730,14 @@ func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runt
 		return runtime.MakeBool(len(raw) == 0)
 	case "contains":
 		return runtime.MakeBool(strings.Contains(raw, vm.eval(m.Args[0]).AsString()))
+	case "replace":
+		old := vm.eval(m.Args[0]).AsString()
+		new := vm.eval(m.Args[1]).AsString()
+		return runtime.MakeStr(strings.Replace(raw, old, new, 1))
+	case "replace_all":
+		old := vm.eval(m.Args[0]).AsString()
+		new := vm.eval(m.Args[1]).AsString()
+		return runtime.MakeStr(strings.ReplaceAll(raw, old, new))
 	case "split":
 		sep := vm.eval(m.Args[0]).AsString()
 		split := strings.Split(raw, sep)
@@ -852,7 +867,7 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 			// Return nil for the maybe type
 			return runtime.MakeMaybe(nil, mapType.Value())
 		}
-		return runtime.MakeMaybe(value.Raw(), mapType.Value())
+		return value.ToSome()
 	case "set":
 		keyArg := vm.eval(m.Method.Args[0])
 		valueArg := vm.eval(m.Method.Args[1])

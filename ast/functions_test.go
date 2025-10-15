@@ -174,6 +174,7 @@ func TestFunctionDeclaration(t *testing.T) {
 							{
 								Name: "thing",
 								Type: &CustomType{
+									Name: "Str::ToString",
 									Type: StaticProperty{
 										Target:   &Identifier{Name: "Str"},
 										Property: &Identifier{Name: "ToString"},

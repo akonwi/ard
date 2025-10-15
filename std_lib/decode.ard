@@ -290,30 +290,26 @@ fn path(subpath: [Str], with: Decoder<$T>) Decoder<$T> {
   }
 }
 
-// take the first successful decoding. if all fail, return the first set of errors
+// take the first successful decoding. if all fail, return the original errors
 fn one_of(first: Decoder<$T>, others: [Decoder<$T>]) Decoder<$T> {
   fn(data: Dynamic) $T![Error] {
     mut res = first(data)
 
-    match res.is_ok() {
-      true => res,
-      false => {
-        mut out: $T? = maybe::none()
+    match res.is_err() {
+      true => {
         for decoder in others {
           match decoder(data) {
             ok => {
-              out = maybe::some(ok)
+              res = Result::ok(ok)
               break
             },
-            err(errs) => {}
+            err(_) => ()
           }
         }
-        match out {
-          out => Result::ok(out),
-          _ => res
-        }
-      }
+      },
+      false => ()
     }
+    res
   }
 }
 

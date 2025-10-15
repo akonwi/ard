@@ -155,6 +155,9 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(filePath, "ard/") {
+		if mod, ok := findInStdLib("ard/dynamic"); ok {
+			c.program.Imports["Dynamic"] = mod
+		}
 		if mod, ok := findInStdLib("ard/float"); ok {
 			c.program.Imports["Float"] = mod
 		}
@@ -347,7 +350,8 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
 				sym := mod.Get(ty.Type.Property.(*ast.Identifier).Name)
 				if !sym.IsZero() {
-					return sym.Type
+					baseType = sym.Type
+					break
 				}
 			}
 		}
@@ -1076,8 +1080,10 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add("@", def, method.Mutates)
 					})
-					fnDef.Mutates = method.Mutates
-					def.Methods[method.Name] = fnDef
+					if fnDef != nil {
+						fnDef.Mutates = method.Mutates
+						def.Methods[method.Name] = fnDef
+					}
 				}
 				return &Statement{Stmt: def}
 			case *Enum:

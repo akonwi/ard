@@ -1202,6 +1202,7 @@ func (p *parser) parseType() DeclaredType {
 			nullable := p.match(question_mark)
 			// Create the value type as a CustomType with StaticProperty
 			valType := &CustomType{
+				Name:     static.String(),
 				Location: static.Location,
 				Type:     *static,
 				nullable: false,
@@ -1218,6 +1219,7 @@ func (p *parser) parseType() DeclaredType {
 			}
 		}
 		return &CustomType{
+			Name:     static.String(),
 			Location: static.Location,
 			Type:     *static,
 			nullable: p.match(question_mark),

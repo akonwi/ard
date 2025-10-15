@@ -22,6 +22,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("BoolToDynamic", ffi.BoolToDynamic); err != nil {
 		return fmt.Errorf("failed to register BoolToDynamic: %w", err)
 	}
+	if err := r.Register("VoidToDynamic", ffi.VoidToDynamic); err != nil {
+		return fmt.Errorf("failed to register VoidToDynamic: %w", err)
+	}
 	if err := r.Register("JsonToDynamic", ffi.JsonToDynamic); err != nil {
 		return fmt.Errorf("failed to register JsonToDynamic: %w", err)
 	}
@@ -130,26 +133,14 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("SqliteClose", ffi.SqliteClose); err != nil {
 		return fmt.Errorf("failed to register SqliteClose: %w", err)
 	}
-	if err := r.Register("SqliteExec", ffi.SqliteExec); err != nil {
-		return fmt.Errorf("failed to register SqliteExec: %w", err)
+	if err := r.Register("SqliteExtractParams", ffi.SqliteExtractParams); err != nil {
+		return fmt.Errorf("failed to register SqliteExtractParams: %w", err)
 	}
 	if err := r.Register("SqliteQuery", ffi.SqliteQuery); err != nil {
 		return fmt.Errorf("failed to register SqliteQuery: %w", err)
 	}
-	if err := r.Register("SqliteFirst", ffi.SqliteFirst); err != nil {
-		return fmt.Errorf("failed to register SqliteFirst: %w", err)
-	}
-	if err := r.Register("SqliteInsert", ffi.SqliteInsert); err != nil {
-		return fmt.Errorf("failed to register SqliteInsert: %w", err)
-	}
-	if err := r.Register("SqliteUpdate", ffi.SqliteUpdate); err != nil {
-		return fmt.Errorf("failed to register SqliteUpdate: %w", err)
-	}
-	if err := r.Register("SqliteDelete", ffi.SqliteDelete); err != nil {
-		return fmt.Errorf("failed to register SqliteDelete: %w", err)
-	}
-	if err := r.Register("SqliteCount", ffi.SqliteCount); err != nil {
-		return fmt.Errorf("failed to register SqliteCount: %w", err)
+	if err := r.Register("SqliteExecute", ffi.SqliteExecute); err != nil {
+		return fmt.Errorf("failed to register SqliteExecute: %w", err)
 	}
 
 	return nil

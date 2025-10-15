@@ -51,7 +51,7 @@ func TestStdLibModules(t *testing.T) {
 			if len(diagnostics) > 0 {
 				var errorMessages []string
 				for _, d := range diagnostics {
-					errorMessages = append(errorMessages, fmt.Sprintf("[%s] %s", d.Kind, d.Message))
+					errorMessages = append(errorMessages, d.String())
 				}
 				t.Fatalf("Checker diagnostics: %s", strings.Join(errorMessages, "\n"))
 			}
