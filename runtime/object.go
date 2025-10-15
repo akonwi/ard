@@ -333,6 +333,12 @@ func MakeMaybe(raw any, of checker.Type) *Object {
 	}
 }
 
+func (o Object) ToNone() *Object {
+	o._type = checker.MakeMaybe(o._type)
+	o.isNone = true
+	return &o
+}
+
 func (o Object) ToSome() *Object {
 	o._type = checker.MakeMaybe(o._type)
 	o.isNone = false
@@ -432,14 +438,14 @@ func (o Object) Map_GetKey(str string) *Object {
 
 // create Result::Err
 func MakeErr(err *Object) *Object {
-	unwrapped := err.Unwrap()
+	unwrapped := err.UnwrapResult()
 	unwrapped.isErr = true
 	return unwrapped
 }
 
 // create Result::Ok
 func MakeOk(err *Object) *Object {
-	unwrapped := err.Unwrap()
+	unwrapped := err.UnwrapResult()
 	unwrapped.isOk = true
 	return unwrapped
 }
@@ -456,10 +462,10 @@ func (o Object) IsErr() bool {
 	return o.isErr
 }
 
-// return an object w/o Result indicators
-// a no-op if not already a result
-func (o *Object) Unwrap() *Object {
-	return Make(o.raw, o._type)
+func (o *Object) UnwrapResult() *Object {
+	new := Make(o.raw, o._type)
+	new.isNone = o.isNone
+	return new
 }
 
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {

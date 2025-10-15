@@ -520,12 +520,12 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			subj := vm.eval(e.Subject)
 			if subj.IsOk() {
 				res, _ := vm.evalBlock(e.Ok.Body, func() {
-					vm.scope.add(e.Ok.Pattern.Name, subj.Unwrap())
+					vm.scope.add(e.Ok.Pattern.Name, subj.UnwrapResult())
 				})
 				return res
 			}
 			res, _ := vm.evalBlock(e.Err.Body, func() {
-				vm.scope.add(e.Err.Pattern.Name, subj.Unwrap())
+				vm.scope.add(e.Err.Pattern.Name, subj.UnwrapResult())
 			})
 			return res
 		}
@@ -576,7 +576,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		{
 			subj := vm.eval(e.Expr())
 			if subj.IsResult() {
-				unwrapped := subj.Unwrap()
+				unwrapped := subj.UnwrapResult()
 				if subj.IsErr() {
 					// Error case: early return from function
 					if e.CatchBlock != nil {
