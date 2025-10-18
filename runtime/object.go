@@ -324,11 +324,10 @@ func MakeBool(b bool) *Object {
 	}
 }
 
-// instantiate a $T?
-func MakeMaybe(raw any, of checker.Type) *Object {
+func MakeNone(of checker.Type) *Object {
 	return &Object{
 		_type:  checker.MakeMaybe(of),
-		raw:    raw,
+		raw:    nil,
 		isNone: true,
 	}
 }

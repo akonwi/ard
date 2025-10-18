@@ -75,7 +75,7 @@ func EnvGet(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	value, exists := os.LookupEnv(key)
 	if !exists {
 		// Return None
-		return runtime.MakeMaybe(nil, checker.Str)
+		return runtime.MakeNone(checker.Str)
 	}
 
 	// Return Some(value)

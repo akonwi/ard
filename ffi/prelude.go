@@ -20,7 +20,7 @@ func FloatFromStr(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		floatObj := runtime.MakeFloat(value)
 		return floatObj.ToSome()
 	}
-	return runtime.MakeMaybe(nil, checker.Float)
+	return runtime.MakeNone(checker.Float)
 }
 
 // FloatFromInt converts an integer to a float
@@ -49,7 +49,7 @@ func IntFromStr(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	str := args[0].AsString()
-	out := runtime.MakeMaybe(nil, checker.Int)
+	out := runtime.MakeNone(checker.Int)
 	if value, err := strconv.Atoi(str); err == nil {
 		return out.ToSome(value)
 	}

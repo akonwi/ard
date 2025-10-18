@@ -126,7 +126,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				}
 			}
 
-			body := runtime.MakeMaybe(nil, checker.Str)
+			body := runtime.MakeNone(checker.Str)
 			if r.Body != nil {
 				bodyBytes, err := io.ReadAll(r.Body)
 				if err == nil {

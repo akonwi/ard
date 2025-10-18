@@ -493,7 +493,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 					raw[name] = val
 				} else {
 					// assume it's a $T? if the checker allowed it
-					raw[name] = runtime.MakeMaybe(nil, ftype)
+					raw[name] = runtime.MakeNone(ftype)
 				}
 			}
 			return runtime.Make(raw, e.Type())
@@ -510,7 +510,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 					raw[name] = val
 				} else {
 					// assume it's a $T? if the checker allowed it
-					raw[name] = runtime.MakeMaybe(nil, ftype)
+					raw[name] = runtime.MakeNone(ftype)
 				}
 			}
 			return runtime.MakeStruct(e.Type(), raw)
@@ -617,7 +617,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 					} else {
 						// No catch block: propagate none by early returning
 						vm.scope.setBroken(true)
-						return runtime.MakeMaybe(nil, e.Type())
+						return runtime.MakeNone(e.Type())
 					}
 				}
 
@@ -865,7 +865,7 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 		value, found := raw[_key]
 		if !found {
 			// Return nil for the maybe type
-			return runtime.MakeMaybe(nil, mapType.Value())
+			return runtime.MakeNone(mapType.Value())
 		}
 		return value.ToSome()
 	case "set":
