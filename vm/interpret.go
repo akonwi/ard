@@ -861,13 +861,11 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 		_key := runtime.ToMapKey(keyArg)
 
 		mapType := subj.Type().(*checker.Map)
-		// Try to find the key
-		value, found := raw[_key]
-		if !found {
-			// Return nil for the maybe type
-			return runtime.MakeNone(mapType.Value())
+		out := runtime.MakeNone(mapType.Value())
+		if value, found := raw[_key]; found {
+			out = out.ToSome(value.Raw())
 		}
-		return value.ToSome()
+		return out
 	case "set":
 		keyArg := vm.eval(m.Method.Args[0])
 		valueArg := vm.eval(m.Method.Args[1])

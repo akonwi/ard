@@ -338,11 +338,12 @@ func (o Object) ToNone() *Object {
 	return &o
 }
 
-func (o Object) ToSome(val ...any) *Object {
-	if val != nil {
-		o.raw = val[0]
+// create a Maybe::Some from an existing Maybe
+func (o Object) ToSome(val any) *Object {
+	if !checker.IsMaybe(o._type) {
+		panic(fmt.Errorf("Cannot make Maybe::some from %s", o))
 	}
-	o._type = checker.MakeMaybe(o._type)
+	o.raw = val
 	o.isNone = false
 	return &o
 }

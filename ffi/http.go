@@ -166,7 +166,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				"url":     runtime.MakeStr(r.URL.String()),
 				"headers": runtime.Make(headers, checker.MakeMap(checker.Str, checker.Str)),
 				"body":    body,
-				"raw":     runtime.MakeDynamic(r).ToSome(),
+				"raw":     runtime.MakeNone(checker.Dynamic).ToSome(r),
 			}
 
 			handlerMapType := args[1].Type().(*checker.Map)

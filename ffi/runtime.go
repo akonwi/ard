@@ -79,7 +79,7 @@ func EnvGet(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	// Return Some(value)
-	return runtime.MakeStr(value).ToSome()
+	return runtime.MakeNone(checker.Str).ToSome(value)
 }
 
 func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {

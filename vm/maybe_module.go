@@ -25,12 +25,12 @@ func (m *MaybeModule) get(name string) *runtime.Object {
 func (m *MaybeModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "none":
-		o := runtime.Make(nil, call.Type()).ToNone()
+		o := runtime.MakeNone(nil)
 		o.SetRefinedType(call.Type())
 		return o
 	case "some":
 		arg := args[0]
-		o := runtime.Make(arg.Raw(), call.Type()).ToSome()
+		o := runtime.MakeNone(arg.Type()).ToSome(arg.Raw())
 		o.SetRefinedType(call.Type())
 		return o
 	default:

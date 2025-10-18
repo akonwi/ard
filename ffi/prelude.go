@@ -16,11 +16,11 @@ func FloatFromStr(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	}
 
 	str := args[0].AsString()
+	out := runtime.MakeNone(checker.Float)
 	if value, err := strconv.ParseFloat(str, 64); err == nil {
-		floatObj := runtime.MakeFloat(value)
-		return floatObj.ToSome()
+		out = out.ToSome(value)
 	}
-	return runtime.MakeNone(checker.Float)
+	return out
 }
 
 // FloatFromInt converts an integer to a float
