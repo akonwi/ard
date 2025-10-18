@@ -2352,21 +2352,21 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Resolve the pattern using existing expression resolution logic
 					patternExpr := c.checkExpr(staticProp)
 					if patternExpr == nil {
-						return nil // Error already reported by checkExpr
+						continue // Error already reported by checkExpr
 					}
 
 					// Check if the pattern resolves to an enum variant
 					enumVariant, ok := patternExpr.(*EnumVariant)
 					if !ok {
 						c.addError("Pattern in enum match must be an enum variant", staticProp.GetLocation())
-						return nil
+						continue
 					}
 
 					// Verify that the variant's enum matches the subject's enum
 					if !enumVariant.enum.equal(enumType) {
 						c.addError(fmt.Sprintf("Cannot match %s variant against %s enum",
 							enumVariant.enum.Name, enumType.Name), staticProp.GetLocation())
-						return nil
+						continue
 					}
 
 					// Get the variant name and index
@@ -2376,7 +2376,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					// Check for duplicate cases
 					if seenVariants[variantName] {
 						c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
-						return nil
+						continue
 					}
 					seenVariants[variantName] = true
 

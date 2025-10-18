@@ -140,7 +140,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				panic(fmt.Errorf("Handler for '%s' is not a function", path))
 			}
 
-			methodEnumType := handle.GetParams()[0].Type
+			methodEnumType := handle.GetParams()[0].Type.(*checker.StructDef).Fields["method"]
 
 			// Convert HTTP method string to Method enum
 			var method *runtime.Object

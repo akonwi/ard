@@ -339,7 +339,10 @@ func (o Object) ToNone() *Object {
 	return &o
 }
 
-func (o Object) ToSome() *Object {
+func (o Object) ToSome(val ...any) *Object {
+	if val != nil {
+		o.raw = val[0]
+	}
 	o._type = checker.MakeMaybe(o._type)
 	o.isNone = false
 	return &o

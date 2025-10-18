@@ -51,7 +51,7 @@ func IntFromStr(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	str := args[0].AsString()
 	out := runtime.MakeMaybe(nil, checker.Int)
 	if value, err := strconv.Atoi(str); err == nil {
-		out.Set(value)
+		return out.ToSome(value)
 	}
 	return out
 }
