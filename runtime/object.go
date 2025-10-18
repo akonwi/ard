@@ -333,7 +333,9 @@ func MakeNone(of checker.Type) *Object {
 }
 
 func (o Object) ToNone() *Object {
-	o._type = checker.MakeMaybe(o._type)
+	if !checker.IsMaybe(o._type) {
+		panic(fmt.Errorf("Cannot make Maybe::none from %s", o))
+	}
 	o.isNone = true
 	return &o
 }
