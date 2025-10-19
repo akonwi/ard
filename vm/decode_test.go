@@ -187,7 +187,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let array_data = decode::json("[1, 2, 3]")
+				let array_data = decode::from_json("[1, 2, 3]").expect("Unable to parse json")
 				let result = decode::run(array_data, decode::string)
 				match result {
 					ok => "unexpected success",
@@ -201,7 +201,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let empty_array_data = decode::json("[]")
+				let empty_array_data = decode::from_json("[]").expect("Unable to parse json")
 				let result = decode::run(empty_array_data, decode::string)
 				match result {
 					ok => "unexpected success",
@@ -216,7 +216,7 @@ func TestDecodeErrors(t *testing.T) {
 				use ard/decode
 
 				// Test more complex path with nested field access
-				let data = decode::json("[\{\"user\": \{\"profile\": \{\"age\": \"not_a_number\"\}\}\}]")
+				let data = decode::from_json("[\{\"user\": \{\"profile\": \{\"age\": \"not_a_number\"\}\}\}]").expect("Unable to parse json")
 				let result = decode::run(data, decode::list(decode::field("user", decode::field("profile", decode::field("age", decode::int)))))
 				match result {
 					ok => "unexpected success",
@@ -757,7 +757,7 @@ func TestDecodeCustomFunctions(t *testing.T) {
 			    Result::ok(list.at(0))
 			  }
 			}
-			let data = decode::json("[3,2,1]")
+			let data = decode::from_json("[3,2,1]").expect("Unable to parse json")
 			match decode::run(data, first(decode::int)) {
 				ok => ok,
 				err(errs) => -1
@@ -784,7 +784,7 @@ func TestDeepCustomDecoders(t *testing.T) {
 					}
 				}
 
-				let data = decode::json(text)
+				let data = decode::from_json(text).expect("Unable to parse json")
 
 				// Extract response[0].bookmakers[0].bets[0].name
 				let res = decode::run(data,
