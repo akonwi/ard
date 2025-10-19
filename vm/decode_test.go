@@ -14,7 +14,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("hello")
+				let data = Dynamic::from("hello")
 				decode::run(data, decode::string).expect("")
 			`,
 			want: "hello",
@@ -24,7 +24,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_int(42)
+				let data = Dynamic::from(42)
 				decode::run(data, decode::int).expect("Failed to decode")
 			`,
 			want: 42,
@@ -34,7 +34,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_float(3.14)
+				let data = Dynamic::from(3.14)
 				decode::run(data, decode::float).expect("")
 			`,
 			want: 3.14,
@@ -44,7 +44,7 @@ func TestDecodeBasicPrimitives(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_bool(true)
+				let data = Dynamic::from(true)
 				decode::run(data, decode::bool).expect("")
 			`,
 			want: true,
@@ -59,7 +59,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_int(42)
+				let data = Dynamic::from(42)
 				let result = decode::run(data, decode::string)
 				match result {
 					err(errs) => {
@@ -77,7 +77,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("hello")
+				let data = Dynamic::from("hello")
 				let result = decode::run(data, decode::int)
 				result.is_err()
 			`,
@@ -88,7 +88,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("true")
+				let data = Dynamic::from("true")
 				let result = decode::run(data, decode::bool)
 				match result {
 					err => err.size() == 1
@@ -102,7 +102,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("3.14")
+				let data = Dynamic::from("3.14")
 				let result = decode::run(data, decode::float)
 				match result {
 					err => err.size() == 1
@@ -125,7 +125,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("not_a_number")
+				let data = Dynamic::from("not_a_number")
 				let result = decode::run(data, decode::int)
 				match result {
 					err => {
@@ -159,7 +159,7 @@ func TestDecodeErrors(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("invalid json")
+				let data = Dynamic::from("invalid json")
 				let result = decode::run(data, decode::int)
 				match result {
 					err => err.at(0).to_str(),
@@ -236,7 +236,7 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::from_str("hello")
+				let data = Dynamic::from("hello")
 				let maybe_str = decode::run(data, decode::nullable(decode::string)).expect("Decoding failed")
 				match maybe_str {
 					str => str == "hello",
@@ -251,7 +251,7 @@ func TestDecodeNullable(t *testing.T) {
 				use ard/decode
 				use ard/maybe
 
-				let data = decode::from_int(42)
+				let data = Dynamic::from(42)
 				let result = decode::run(data, decode::nullable(decode::int)).expect("Decoding failed")
 				result.or(0)
 			`,
@@ -335,7 +335,7 @@ func TestDecodeList(t *testing.T) {
 			input: `
 				use ard/decode
 
-				let data = decode::from_str("not an array")
+				let data = Dynamic::from("not an array")
 				let result = decode::run(data, decode::list(decode::string))
 				result.is_err()
 			`,
