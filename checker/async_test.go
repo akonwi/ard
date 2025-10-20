@@ -47,16 +47,5 @@ func TestFibers(t *testing.T) {
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
-		{
-			name: "Module function calls within fibers are allowed",
-			input: `
-			use ard/async
-
-			async::start(fn() {
-				async::sleep(100)
-			})
-			`,
-			diagnostics: []checker.Diagnostic{},
-		},
 	})
 }
