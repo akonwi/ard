@@ -49,15 +49,15 @@ func (c *checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *
 			fnName: "main",
 		}
 	case *ast.StaticProperty:
-		mod := c.resolveModule(node.Target.String())
+		module := c.resolveModule(node.Target.String())
 
-		if mod == nil {
+		if module == nil {
 			c.addError(fmt.Sprintf("Module not found: %s", node.Target.String()), node.Location)
 			return &FiberExecution{_type: fiberType}
 		}
 
 		return &FiberExecution{
-			module: mod,
+			module: module,
 			_type:  fiberType,
 			fnName: node.Property.String(),
 		}
