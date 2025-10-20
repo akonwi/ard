@@ -241,16 +241,6 @@ func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
 	return c.Eval(args...)
 }
 
-// returns a copy without a VM reference
-func (c VMClosure) copy() *VMClosure {
-	scope := *c.capturedScope
-	return &VMClosure{
-		vm:            nil,
-		expr:          c.expr,
-		capturedScope: &scope,
-	}
-}
-
 // fns for FFI, which aren't bound to a vm and have no scope
 type ExternClosure struct {
 	hq      *GlobalVM
