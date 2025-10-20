@@ -73,7 +73,7 @@ func (vm *GlobalVM) initFFIRegistry() {
 }
 
 // call the program's main function
-func (g *GlobalVM) Run() error {
+func (g *GlobalVM) Run(fnName string) error {
 	vm := NewVM()
 	vm.hq = g
 	program := g.subject.Program()
@@ -84,7 +84,7 @@ func (g *GlobalVM) Run() error {
 			continue
 		}
 		if fn, ok := stmt.Expr.Type().(*checker.FunctionDef); ok {
-			if fn.Name == "main" && len(fn.Parameters) == 0 && fn.ReturnType == checker.Void {
+			if fn.Name == fnName {
 				hasMain = true
 				break
 			}
@@ -99,7 +99,7 @@ func (g *GlobalVM) Run() error {
 	if _, err := vm.Interpret(program); err != nil {
 		return err
 	}
-	return vm.callMain()
+	return vm.callMain(fnName)
 }
 
 // evaluate the subject program as a script

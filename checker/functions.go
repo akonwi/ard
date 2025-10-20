@@ -9,6 +9,7 @@ import (
 type FiberExecution struct {
 	module Module
 	_type  Type
+	fnName string
 }
 
 func (f FiberExecution) Type() Type {
@@ -17,6 +18,10 @@ func (f FiberExecution) Type() Type {
 
 func (f FiberExecution) GetModule() Module {
 	return f.module
+}
+
+func (f FiberExecution) GetMainName() string {
+	return f.fnName
 }
 
 func (c *checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *FiberExecution {
@@ -41,6 +46,20 @@ func (c *checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *
 		return &FiberExecution{
 			module: module,
 			_type:  fiberType,
+			fnName: "main",
+		}
+	case *ast.StaticProperty:
+		mod := c.resolveModule(node.Target.String())
+
+		if mod == nil {
+			c.addError(fmt.Sprintf("Module not found: %s", node.Target.String()), node.Location)
+			return &FiberExecution{_type: fiberType}
+		}
+
+		return &FiberExecution{
+			module: mod,
+			_type:  fiberType,
+			fnName: node.Property.String(),
 		}
 	default:
 		// probably need to handle when the function is a variable reference

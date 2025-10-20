@@ -31,5 +31,5 @@ func Run(program *checker.Program) error {
 		return err
 	}
 
-	return vm.callMain()
+	return vm.callMain("main")
 }

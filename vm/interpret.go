@@ -35,12 +35,12 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	return vm.result.GoValue(), nil
 }
 
-func (vm *VM) callMain() error {
+func (vm *VM) callMain(name string) error {
 	_, err := vm.Interpret(&checker.Program{
 		Statements: []checker.Statement{
 			{
 				Expr: &checker.FunctionCall{
-					Name: "main",
+					Name: name,
 					Args: []checker.Expression{},
 				},
 			},
@@ -638,7 +638,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		f := NewRuntime(e.GetModule())
 		wg := &sync.WaitGroup{}
 		wg.Go(func() {
-			if err := f.Run(); err != nil {
+			if err := f.Run(e.GetMainName()); err != nil {
 				fmt.Printf("Panic in fiber: %v\n", err)
 			}
 		})
