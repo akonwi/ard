@@ -94,35 +94,6 @@ func Sleep(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.Void()
 }
 
-// returns waitgroup
-// fn (do: fn() Void) Dynamic
-func StartGoRoutine(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	workerFn := args[0]
-
-	// Create a new WaitGroup for this fiber
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
-	// Execute the worker function in the current VM context first
-	// This will handle the parsing and setup
-	if fn, ok := workerFn.Raw().(runtime.Closure); ok {
-		// Evaluate the closure in a goroutine
-		go func() {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					// Handle panics in the goroutine
-					fmt.Printf("Panic in fiber: %v\n", r)
-				}
-			}()
-
-			fn.IsolateEval()
-		}()
-	}
-
-	return runtime.MakeDynamic(wg)
-}
-
 // fn (wg: Dynamic) Void
 func WaitFor(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	wg := args[0].Raw().(*sync.WaitGroup)
