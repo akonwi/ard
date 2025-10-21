@@ -129,6 +129,7 @@ func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs
 		}
 		return module.Handle(call, args)
 	}
+	// [todo] maestro-api randomly reaches this point on startup
 	panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
 }
 
