@@ -176,7 +176,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 			// Call the Ard handler function
 			// Create a copy of the closure with a new VM for isolation to prevent race conditions
 			// This follows the same pattern as the async module
-			response := handle.IsolateEval(request)
+			response := handle.Eval(request)
 
 			// Convert Ard Response to Go HTTP response
 			respMap := response.AsMap()

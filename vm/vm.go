@@ -229,19 +229,6 @@ func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	return res
 }
 
-func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
-	// Create isolated VM for fiber execution
-	vm := NewVM()
-	vm.hq = c.vm.hq
-	c.vm = vm
-	if c.capturedScope != nil {
-		// Use fiber-optimized cloning for read-only access
-		vm.scope = c.capturedScope.fork()
-	}
-
-	return c.Eval(args...)
-}
-
 // fns for FFI, which aren't bound to a vm and have no scope
 type ExternClosure struct {
 	hq      *GlobalVM
@@ -256,10 +243,6 @@ func (e ExternClosure) Eval(args ...*runtime.Object) *runtime.Object {
 		panic(fmt.Errorf("FFI call failed for %s: %w", e.binding, err))
 	}
 	return result
-}
-
-func (e ExternClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
-	return e.Eval(args...)
 }
 
 func (c ExternClosure) GetParams() []checker.Parameter {

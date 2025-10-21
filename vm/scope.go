@@ -31,19 +31,6 @@ func newScope(parent *scope) *scope {
 	}
 }
 
-func (s *scope) clone() *scope {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// Increment reference count atomically
-	atomic.AddInt32(&s.data.refCount, 1)
-
-	return &scope{
-		parent: s.parent, // Share parent reference (no recursive copy!)
-		data:   s.data,   // Share data (COW semantics)
-	}
-}
-
 // fork creates a fiber-optimized clone for read-only access
 func (s *scope) fork() *scope {
 	s.mu.RLock()
