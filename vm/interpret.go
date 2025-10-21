@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
@@ -34,12 +35,12 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	return vm.result.GoValue(), nil
 }
 
-func (vm *VM) callMain() error {
+func (vm *VM) callMain(name string) error {
 	_, err := vm.Interpret(&checker.Program{
 		Statements: []checker.Statement{
 			{
 				Expr: &checker.FunctionCall{
-					Name: "main",
+					Name: name,
 					Args: []checker.Expression{},
 				},
 			},
@@ -633,6 +634,17 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		// Evaluate the expression and return a deep copy
 		original := vm.eval(e.Expr)
 		return original.Copy()
+	case *checker.FiberExecution:
+		f := NewRuntime(e.GetModule())
+		wg := &sync.WaitGroup{}
+		wg.Go(func() {
+			if err := f.Run(e.GetMainName()); err != nil {
+				fmt.Printf("Panic in fiber: %v\n", err)
+			}
+		})
+		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
+			"wg": runtime.MakeDynamic(wg),
+		})
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}

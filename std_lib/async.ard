@@ -1,7 +1,7 @@
 extern fn sleep(ms: Int) Void = "Sleep"
 
 struct Fiber {
-  // raw WaitGroup
+  // pointer to *WaitGroup
   wg: Dynamic
 }
 
@@ -13,10 +13,6 @@ impl Fiber {
   }
 }
 
-// returns WaitGroup
-private extern fn _go(do: fn() Void) Dynamic = "StartGoRoutine"
-
 fn start(do: fn() Void) Fiber {
-  let wg = _go(do)
-  Fiber{ wg: wg }
+  panic("Unreachable: async::start() is part of the compiler.")
 }

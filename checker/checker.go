@@ -2120,7 +2120,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 			// Special validation for async::start calls
 			if mod.Path() == "ard/async" && s.Function.Name == "start" {
-				c.validateFiberFunction(s.Function.Args[0].Value)
+				return c.validateFiberFunction(s.Function.Args[0].Value, mod.Get("Fiber").Type)
 			}
 
 			return &ModuleFunctionCall{

@@ -55,13 +55,8 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 		return sym, true
 	}
 
-	if st.parent != nil {
+	if st.parent != nil && !st.isolated {
 		got, ok := st.parent.get(name)
-
-		// for isolated scopes, only read-only references are allowed
-		if ok && st.isolated && got.mutable {
-			return nil, false
-		}
 		return got, ok
 	}
 	return nil, false

@@ -45,6 +45,10 @@ func (r *ModuleRegistry) HandleStatic(moduleName string, structName string, vm *
 }
 
 func (r *ModuleRegistry) HasModule(moduleName string) bool {
+	// wtf? why is this necessary? in a real program with fibers, somehow r or r.handlers is randomly nil
+	if r == nil || r.handlers == nil {
+		return false
+	}
 	if _, ok := r.handlers[moduleName]; ok {
 		return true
 	}

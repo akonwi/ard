@@ -73,7 +73,7 @@ func (vm *GlobalVM) initFFIRegistry() {
 }
 
 // call the program's main function
-func (g *GlobalVM) Run() error {
+func (g *GlobalVM) Run(fnName string) error {
 	vm := NewVM()
 	vm.hq = g
 	program := g.subject.Program()
@@ -84,7 +84,7 @@ func (g *GlobalVM) Run() error {
 			continue
 		}
 		if fn, ok := stmt.Expr.Type().(*checker.FunctionDef); ok {
-			if fn.Name == "main" && len(fn.Parameters) == 0 && fn.ReturnType == checker.Void {
+			if fn.Name == fnName {
 				hasMain = true
 				break
 			}
@@ -99,7 +99,7 @@ func (g *GlobalVM) Run() error {
 	if _, err := vm.Interpret(program); err != nil {
 		return err
 	}
-	return vm.callMain()
+	return vm.callMain(fnName)
 }
 
 // evaluate the subject program as a script
@@ -129,6 +129,7 @@ func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs
 		}
 		return module.Handle(call, args)
 	}
+	// [todo] maestro-api randomly reaches this point on startup
 	panic(fmt.Errorf("Unimplemented: %s::%s()", moduleName, call.Name))
 }
 
@@ -228,19 +229,6 @@ func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	return res
 }
 
-func (c VMClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
-	// Create isolated VM for fiber execution
-	vm := NewVM()
-	vm.hq = c.vm.hq
-	c.vm = vm
-	if c.capturedScope != nil {
-		// Use fiber-optimized cloning for read-only access
-		vm.scope = c.capturedScope.fork()
-	}
-
-	return c.Eval(args...)
-}
-
 // fns for FFI, which aren't bound to a vm and have no scope
 type ExternClosure struct {
 	hq      *GlobalVM
@@ -255,10 +243,6 @@ func (e ExternClosure) Eval(args ...*runtime.Object) *runtime.Object {
 		panic(fmt.Errorf("FFI call failed for %s: %w", e.binding, err))
 	}
 	return result
-}
-
-func (e ExternClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
-	return e.Eval(args...)
 }
 
 func (c ExternClosure) GetParams() []checker.Parameter {

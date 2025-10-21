@@ -121,9 +121,6 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("Sleep", ffi.Sleep); err != nil {
 		return fmt.Errorf("failed to register Sleep: %w", err)
 	}
-	if err := r.Register("StartGoRoutine", ffi.StartGoRoutine); err != nil {
-		return fmt.Errorf("failed to register StartGoRoutine: %w", err)
-	}
 	if err := r.Register("WaitFor", ffi.WaitFor); err != nil {
 		return fmt.Errorf("failed to register WaitFor: %w", err)
 	}

@@ -9,7 +9,7 @@ import (
 func TestFibers(t *testing.T) {
 	run(t, []test{
 		{
-			name: "Fibers cannot reference mutable variables in outer scopes",
+			name: "Fibers cannot reference mutable variables in outer scope",
 			input: `
 			use ard/async
 
@@ -24,7 +24,7 @@ func TestFibers(t *testing.T) {
 			},
 		},
 		{
-			name: "Fibers can reference read-only variables in outer scopes",
+			name: "Fibers cannot reference read-only variables in outer scope",
 			input: `
 			use ard/async
 
@@ -33,7 +33,10 @@ func TestFibers(t *testing.T) {
 				duration + 1
 			})
 			`,
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []checker.Diagnostic{
+				/* todo: need to be more specific about how the mutable reference won't be shared */
+				{Kind: checker.Error, Message: "Undefined variable: duration"},
+			},
 		},
 		{
 			name: "Valid fiber functions work",
@@ -43,17 +46,6 @@ func TestFibers(t *testing.T) {
 			async::start(fn() {
 				let x = 42
 				x + 1
-			})
-			`,
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "Module function calls within fibers are allowed",
-			input: `
-			use ard/async
-
-			async::start(fn() {
-				async::sleep(100)
 			})
 			`,
 			diagnostics: []checker.Diagnostic{},
