@@ -136,6 +136,127 @@ func TestFunctions(t *testing.T) {
 			f.name`,
 			want: "Test",
 		},
+		{
+			name: "omitting nullable parameters",
+			input: `
+				use ard/maybe
+
+				fn add(a: Int, b: Int?) Int {
+					a + b.or(0)
+				}
+				add(1)`,
+			want: 1,
+		},
+		{
+			name: "omitting nullable parameters with explicit value",
+			input: `
+				use ard/maybe
+
+				fn add(a: Int, b: Int?) Int {
+					a + b.or(0)
+				}
+				add(1, maybe::some(5))`,
+			want: 6,
+		},
+		{
+			name: "automatic wrapping of non-nullable values for nullable parameters",
+			input: `
+				fn add(a: Int, b: Int?) Int {
+					a + b.or(0)
+				}
+				add(1, 5)`,
+			want: 6,
+		},
+		{
+			name: "automatic wrapping works with omitted args",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				test(42)`,
+			want: "42,0,default",
+		},
+		{
+			name: "automatic wrapping with one wrapped argument",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				test(42, 7)`,
+			want: "42,7,default",
+		},
+		{
+			name: "automatic wrapping with all arguments provided",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				test(42, 7, "hello")`,
+			want: "42,7,hello",
+		},
+		{
+			name: "automatic wrapping of list literals for nullable parameters",
+			input: `
+				fn process(items: [Int]?) Bool {
+					match items {
+						lst => true
+						_ => false
+					}
+				}
+				process([10, 20, 30])`,
+			want: true,
+		},
+		{
+			name: "automatic wrapping of map literals for nullable parameters",
+			input: `
+				fn process(data: [Str:Int]?) Bool {
+					match data {
+						m => true
+						_ => false
+					}
+				}
+				process(["count": 42])`,
+			want: true,
+		},
+		{
+			name: "automatic wrapping with labeled arguments",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				test(a: 42, b: 7, c: "hello")`,
+			want: "42,7,hello",
+		},
+		{
+			name: "automatic wrapping with labeled arguments and omitted values",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				test(a: 42, c: "world")`,
+			want: "42,0,world",
+		},
+		{
+			name: "automatic wrapping with labeled arguments in different order",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				test(c: "reorder", b: 99, a: 5)`,
+			want: "5,99,reorder",
+		},
 	}
 
 	runTests(t, tests)

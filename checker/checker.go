@@ -2065,7 +2065,18 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Check argument count after resolving
-			if len(resolvedExprs) != len(fnDef.Parameters) {
+			numOmittedArgs := 0
+			if len(resolvedExprs) < len(fnDef.Parameters) {
+				// Find first non-nullable parameter that's missing
+				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
+					paramType := fnDef.Parameters[i].Type
+					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+						return nil
+					}
+				}
+				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
+			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
 				return nil
@@ -2078,7 +2089,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -2156,6 +2167,24 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
+			// Check argument count and validate omitted arguments
+			numOmittedArgs := 0
+			if len(resolvedExprs) < len(fnDef.Parameters) {
+				// Find first non-nullable parameter that's missing
+				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
+					paramType := fnDef.Parameters[i].Type
+					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+						return nil
+					}
+				}
+				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
+			} else if len(resolvedExprs) > len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+				return nil
+			}
+
 			// Align mutability information with parameters
 			resolvedArgs := c.alignArgumentsWithParameters(s.Method.Args, fnDef.Parameters)
 
@@ -2226,7 +2255,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -2688,6 +2717,24 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
+			// Check argument count and validate omitted arguments
+			numOmittedArgs := 0
+			if len(resolvedExprs) < len(fnDef.Parameters) {
+				// Find first non-nullable parameter that's missing
+				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
+					paramType := fnDef.Parameters[i].Type
+					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+						return nil
+					}
+				}
+				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
+			} else if len(resolvedExprs) > len(fnDef.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+				return nil
+			}
+
 			// Align mutability information with parameters
 			resolvedArgs := c.alignArgumentsWithParameters(s.Function.Args, fnDef.Parameters)
 
@@ -2695,7 +2742,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -4151,14 +4198,78 @@ func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *Symb
 	return fnDefCopy, genericScope
 }
 
+// synthesizeMaybeNone creates a synthetic maybe::none() call for an omitted nullable argument.
+// This transforms the omitted argument into an explicit function call, allowing backends
+// to treat all arguments uniformly without special OmittedArg handling.
+func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
+	// paramType should be a Maybe type for omitted arguments
+	_, ok := paramType.(*Maybe)
+	if !ok {
+		// Defensive: if somehow we got here with non-Maybe, return a VoidLiteral
+		// (this shouldn't happen due to validation earlier)
+		return &VoidLiteral{}
+	}
+
+	// Create a module function call: maybe::none()
+	// The return type of maybe::none() depends on its context, which will be the Maybe type
+	return &ModuleFunctionCall{
+		Module: "ard/maybe",
+		Call: &FunctionCall{
+			Name: "none",
+			Args: []Expression{},
+			fn: &FunctionDef{
+				Name:       "none",
+				Parameters: []Parameter{},
+				ReturnType: paramType, // The return type is the Maybe type we're filling in
+				Body:       nil,       // No body for synthesized calls
+			},
+		},
+	}
+}
+
+// synthesizeMaybeSome wraps a value in maybe::some() for automatic coercion of T to Maybe<T>.
+// This allows calling functions with nullable parameters using unwrapped values:
+// instead of add(1, maybe::some(5)), you can write add(1, 5).
+func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expression {
+	return &ModuleFunctionCall{
+		Module: "ard/maybe",
+		Call: &FunctionCall{
+			Name: "some",
+			Args: []Expression{value},
+			fn: &FunctionDef{
+				Name: "some",
+				Parameters: []Parameter{
+					{
+						Name:    "value",
+						Type:    value.Type(),
+						Mutable: false,
+					},
+				},
+				ReturnType: maybeType,
+				Body:       nil, // No body for synthesized calls
+			},
+		},
+	}
+}
+
 // checkAndProcessArguments validates and type-checks function arguments with generic support.
 // Returns the processed arguments and the specialized function (with generics resolved if applicable).
 // Handles the `mut` keyword for explicit copy semantics on mutable parameters.
+// Synthesizes maybe::none() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
-func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []parse.Argument, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable) ([]Expression, *FunctionDef) {
-	args := make([]Expression, len(resolvedArgs))
+func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []parse.Argument, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
+	// Create the full argument list including synthesized maybe::none() calls for omitted arguments
+	// Need to maintain parameter order, so use indexed assignment instead of appending
+	totalArgs := len(fnDefCopy.Parameters)
+	allExprs := make([]Expression, totalArgs)
 
-	for i := range resolvedArgs {
+	// Process provided arguments
+	for i := range resolvedExprs {
+		// Skip omitted arguments (nil entries) - handle them separately below
+		if resolvedExprs[i] == nil {
+			continue
+		}
+
 		// Get the expected parameter type from the copy (which has fresh TypeVar instances for generics).
 		// For generic functions, dereference to see bound generics from previous arguments.
 		// derefType walks the type tree so List($T) becomes List(Int) if $T was bound to Int.
@@ -4170,18 +4281,46 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		// For list and map literals, use checkExprAs to infer type from context.
 		// Anonymous functions also use checkExprAs so parameter types are inferred from
 		// the (possibly bound) paramType.
+		// For nullable parameters, use the inner type since literals can't be Maybe
+		expectedType := paramType
+		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
+			_, isLiteralOrFunc := resolvedExprs[i].(*parse.ListLiteral)
+			if !isLiteralOrFunc {
+				_, isLiteralOrFunc = resolvedExprs[i].(*parse.MapLiteral)
+			}
+			if !isLiteralOrFunc {
+				_, isLiteralOrFunc = resolvedExprs[i].(*parse.AnonymousFunction)
+			}
+			// For literals and anonymous functions in Maybe parameters, use inner type
+			if isLiteralOrFunc {
+				expectedType = maybeParam.Of()
+			}
+		}
+
 		var checkedArg Expression
 		switch resolvedExprs[i].(type) {
 		case *parse.ListLiteral, *parse.MapLiteral:
-			checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+			checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
 		case *parse.AnonymousFunction:
-			checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+			checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
 		default:
 			checkedArg = c.checkExpr(resolvedExprs[i])
 		}
 
 		if checkedArg == nil {
 			return nil, nil
+		}
+
+		// Check if we need to wrap the argument in maybe::some() for nullable parameters
+		// If parameter is Maybe<T> and argument is T, wrap it
+		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
+			if argType := checkedArg.Type(); !argType.equal(paramType) {
+				// Check if argument type matches the inner Maybe type
+				if maybeParam.Of().equal(argType) {
+					// Wrap non-Maybe value in maybe::some()
+					checkedArg = c.synthesizeMaybeSome(checkedArg, paramType)
+				}
+			}
 		}
 
 		// For generic functions, unify the argument type with the parameter type.
@@ -4205,10 +4344,11 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		if fnDefCopy.Parameters[i].Mutable {
 			if c.isMutable(checkedArg) {
 				// Argument is already mutable - use it directly
-				args[i] = checkedArg
-			} else if resolvedArgs[i].Mutable {
+				allExprs[i] = checkedArg
+			} else if i < len(resolvedArgs) && resolvedArgs[i].Mutable {
 				// User provided `mut` keyword - create a copy
-				args[i] = &CopyExpression{
+				// (omitted arguments won't have a resolvedArgs entry)
+				allExprs[i] = &CopyExpression{
 					Expr:  checkedArg,
 					Type_: checkedArg.Type(),
 				}
@@ -4218,7 +4358,18 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 				return nil, nil
 			}
 		} else {
-			args[i] = checkedArg
+			allExprs[i] = checkedArg
+		}
+	}
+
+	// Fill in synthesized maybe::none() calls for omitted arguments
+	for i := range allExprs {
+		if allExprs[i] == nil {
+			paramType := fnDefCopy.Parameters[i].Type
+			if fnDef.hasGenerics() && genericScope != nil {
+				paramType = derefType(paramType)
+			}
+			allExprs[i] = c.synthesizeMaybeNone(paramType)
 		}
 	}
 
@@ -4254,7 +4405,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		fnToUse = fnDef
 	}
 
-	return args, fnToUse
+	return allExprs, fnToUse
 }
 
 // New generic resolution using the enhanced symbol table
@@ -4426,8 +4577,27 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 		}
 	}
 
-	// If no named arguments, just return positional arguments
+	// If no named arguments, check if we can omit nullable parameters
 	if len(namedArgs) == 0 {
+		// Check if all provided positional arguments are present
+		if len(positionalArgs) <= len(params) {
+			// Check if remaining parameters are all nullable
+			allNullableOrProvidedMatches := true
+			for i := len(positionalArgs); i < len(params); i++ {
+				paramType := params[i].Type
+				// Check if parameter type is nullable (Maybe)
+				if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					allNullableOrProvidedMatches = false
+					break
+				}
+			}
+			
+			// If all remaining parameters are nullable, allow omitting them
+			if allNullableOrProvidedMatches {
+				return positionalArgs, nil
+			}
+		}
+		// Otherwise, return the positional arguments and let the count check handle the error
 		return positionalArgs, nil
 	}
 
@@ -4465,10 +4635,14 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 		used[paramIndex] = true
 	}
 
-	// Check that all parameters are provided
+	// Check that all parameters are provided (allow missing nullable parameters)
 	for i, param := range params {
 		if !used[i] {
-			return nil, fmt.Errorf("missing argument for parameter: %s", param.Name)
+			// Allow omitting nullable parameters
+			paramType := params[i].Type
+			if _, isMaybe := paramType.(*Maybe); !isMaybe {
+				return nil, fmt.Errorf("missing argument for parameter: %s", param.Name)
+			}
 		}
 	}
 
