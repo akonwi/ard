@@ -229,6 +229,25 @@ func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	return res
 }
 
+func (c VMClosure) EvalIsolated(args ...*runtime.Object) *runtime.Object {
+	// Create a shallow copy of the VM with a new scope
+	isolatedVM := &VM{
+		hq:          c.vm.hq,                   // Share GlobalVM (read-only)
+		moduleScope: c.vm.moduleScope,          // Share module scope (read-only)
+		scope:       newScope(c.capturedScope), // NEW isolated scope
+	}
+
+	// Create a new closure pointing to isolated VM
+	isolatedClosure := VMClosure{
+		vm:            isolatedVM,
+		expr:          c.expr,
+		capturedScope: c.capturedScope,
+	}
+
+	// Execute normally - no race condition because scope is isolated
+	return isolatedClosure.Eval(args...)
+}
+
 // fns for FFI, which aren't bound to a vm and have no scope
 type ExternClosure struct {
 	hq      *GlobalVM
@@ -243,6 +262,10 @@ func (e ExternClosure) Eval(args ...*runtime.Object) *runtime.Object {
 		panic(fmt.Errorf("FFI call failed for %s: %w", e.binding, err))
 	}
 	return result
+}
+
+func (e ExternClosure) EvalIsolated(args ...*runtime.Object) *runtime.Object {
+	return e.Eval(args...)
 }
 
 func (c ExternClosure) GetParams() []checker.Parameter {
@@ -268,7 +291,7 @@ func (c BuiltInClosure) Eval(args ...*runtime.Object) *runtime.Object {
 	return c.builtinFn(data, resultType)
 }
 
-func (c BuiltInClosure) IsolateEval(args ...*runtime.Object) *runtime.Object {
+func (c BuiltInClosure) EvalIsolated(args ...*runtime.Object) *runtime.Object {
 	return c.Eval(args...)
 }
 

@@ -525,5 +525,6 @@ func Void() *Object {
 
 type Closure interface {
 	Eval(args ...*Object) *Object
+	EvalIsolated(args ...*Object) *Object
 	GetParams() []checker.Parameter
 }
