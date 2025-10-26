@@ -30,7 +30,7 @@ func NewRuntime(module checker.Module) *GlobalVM {
 	g := &GlobalVM{
 		subject:        module,
 		methodClosures: map[string]runtime.Closure{},
-		modules:        make(map[string]*VM),
+		modules:        map[string]*VM{},
 		ffiRegistry:    NewRuntimeFFIRegistry(),
 	}
 	g.load(module.Program().Imports)
@@ -46,13 +46,10 @@ func (g *GlobalVM) load(imports map[string]checker.Module) error {
 		if _, exists := g.modules[name]; !exists {
 			program := mod.Program()
 			if program != nil {
-				vm := NewVM()
-				vm.hq = g
-				if _, err := vm.Interpret(program); err != nil {
-					return fmt.Errorf("Failed to load module - %s: %w", name, err)
-				}
-				g.modules[name] = vm
 				g.load(program.Imports)
+				vm := NewVM(g)
+				vm.init(program)
+				g.modules[name] = vm
 			}
 		}
 	}
@@ -74,8 +71,7 @@ func (vm *GlobalVM) initFFIRegistry() {
 
 // call the program's main function
 func (g *GlobalVM) Run(fnName string) error {
-	vm := NewVM()
-	vm.hq = g
+	vm := NewVM(g)
 	program := g.subject.Program()
 
 	hasMain := false
@@ -104,8 +100,7 @@ func (g *GlobalVM) Run(fnName string) error {
 
 // evaluate the subject program as a script
 func (g *GlobalVM) Interpret() (any, error) {
-	vm := NewVM()
-	vm.hq = g
+	vm := NewVM(g)
 	program := g.subject.Program()
 	return vm.Interpret(program)
 }
@@ -161,18 +156,32 @@ func (g *GlobalVM) getMethod(strct checker.Type, name string) (runtime.Closure, 
 }
 
 type VM struct {
-	hq     *GlobalVM
+	hq *GlobalVM
+	// the module scope
 	scope  *scope
 	result runtime.Object
 
+	// [deprecated] redundant to scope above?
 	moduleScope *scope // Captures the scope where extern functions are defined
 }
 
-func NewVM() *VM {
+func NewVM(hq *GlobalVM) *VM {
 	vm := &VM{
 		scope: newScope(nil),
+		hq:    hq,
 	}
 	return vm
+}
+
+// evaluate all top-level statements to build up the module scope
+func (vm *VM) init(program *checker.Program) {
+	for _, statement := range program.Statements {
+		vm.do(statement)
+	}
+
+	// Store module scope after processing all statements
+	// This ensures we capture the scope containing all extern functions and module definitions
+	vm.moduleScope = vm.scope
 }
 
 func (vm *VM) pushScope() {
