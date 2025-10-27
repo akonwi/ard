@@ -10,9 +10,12 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
+const SUBJECT = "__subject__"
+
 type GlobalVM struct {
-	modules map[string]*VM
-	subject checker.Module
+	modules      map[string]*VM
+	moduleScopes map[string]*scope
+	subject      checker.Module
 
 	// method closures lose their scope because they aren't evaluated in their module like regular functions
 	// so keeping them track of them globally solves that
@@ -26,37 +29,55 @@ type GlobalVM struct {
 	ffiRegistry *RuntimeFFIRegistry
 }
 
-func NewRuntime(module checker.Module) *GlobalVM {
+func NewRuntime(module checker.Module, scripting ...bool) *GlobalVM {
 	g := &GlobalVM{
 		subject:        module,
 		methodClosures: map[string]runtime.Closure{},
-		modules:        make(map[string]*VM),
+		modules:        map[string]*VM{},
+		moduleScopes:   map[string]*scope{},
 		ffiRegistry:    NewRuntimeFFIRegistry(),
+		moduleRegistry: NewModuleRegistry(),
 	}
-	g.load(module.Program().Imports)
-	g.moduleRegistry = NewModuleRegistry()
-	g.initModuleRegistry()
 	g.initFFIRegistry()
+	g.initModuleRegistry()
+
+	g.loadImports(module.Program().Imports)
+	g.loadModule(SUBJECT, module.Program(), len(scripting) > 0 && scripting[0] == true)
 	return g
 }
 
+func NewScriptRuntime(module checker.Module) *GlobalVM {
+	return NewRuntime(module, true)
+}
+
 // go through the dependency tree and make sure a single instance of each module is ready
-func (g *GlobalVM) load(imports map[string]checker.Module) error {
+func (g *GlobalVM) loadImports(imports map[string]checker.Module) {
 	for name, mod := range imports {
 		if _, exists := g.modules[name]; !exists {
 			program := mod.Program()
 			if program != nil {
-				vm := NewVM()
-				vm.hq = g
-				if _, err := vm.Interpret(program); err != nil {
-					return fmt.Errorf("Failed to load module - %s: %w", name, err)
-				}
-				g.modules[name] = vm
-				g.load(program.Imports)
+				g.loadImports(program.Imports)
+				g.loadModule(name, program, false)
 			}
 		}
 	}
-	return nil
+}
+
+func (g *GlobalVM) loadModule(name string, program *checker.Program, scripting bool) (*VM, *scope) {
+	s := newScope(nil)
+	vm := NewVM(g)
+	if !scripting {
+		vm.init(program, s)
+	}
+	g.modules[name] = vm
+	g.moduleScopes[name] = s
+
+	return vm, s
+}
+
+func (g *GlobalVM) unloadModule(name string) {
+	delete(g.modules, name)
+	delete(g.moduleScopes, name)
 }
 
 // initialize the part of the standard library that is hardcoded into the compiler
@@ -72,49 +93,38 @@ func (vm *GlobalVM) initFFIRegistry() {
 	}
 }
 
+func (g *GlobalVM) getModule(name string) (*VM, *scope, bool) {
+	vm, hasMod := g.modules[name]
+	scope, hasScope := g.moduleScopes[name]
+	return vm, scope, hasMod && hasScope
+}
+
 // call the program's main function
 func (g *GlobalVM) Run(fnName string) error {
-	vm := NewVM()
-	vm.hq = g
-	program := g.subject.Program()
-
-	hasMain := false
-	for _, stmt := range program.Statements {
-		if stmt.Expr == nil {
-			continue
-		}
-		if fn, ok := stmt.Expr.Type().(*checker.FunctionDef); ok {
-			if fn.Name == fnName {
-				hasMain = true
-				break
-			}
-		}
+	vm, scope, ok := g.getModule(SUBJECT)
+	if !ok {
+		return errors.New("Module not initialized")
 	}
 
-	if !hasMain {
-		return errors.New("No main function found")
-	}
-
-	// build up scope
-	if _, err := vm.Interpret(program); err != nil {
-		return err
-	}
-	return vm.callMain(fnName)
+	vm.callMain(fnName, scope)
+	return nil
 }
 
 // evaluate the subject program as a script
 func (g *GlobalVM) Interpret() (any, error) {
-	vm := NewVM()
-	vm.hq = g
 	program := g.subject.Program()
-	return vm.Interpret(program)
+	mvm, scope, ok := g.getModule(SUBJECT)
+	if !ok {
+		return nil, errors.New("Module not initialized")
+	}
+	return mvm.Interpret(program, scope)
 }
 
 // call into another module
 func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs func() []*runtime.Object) *runtime.Object {
 	// check for Ard code
-	if mvm, ok := g.modules[moduleName]; ok {
-		return mvm.evalFunctionCall(call, getArgs()...)
+	if mvm, scope, ok := g.getModule(moduleName); ok {
+		return mvm.evalFunctionCall(scope, call, getArgs()...)
 	}
 	// check in hardcoded std-lib
 	if g.moduleRegistry.HasModule(moduleName) {
@@ -134,7 +144,7 @@ func (g *GlobalVM) callOn(moduleName string, call *checker.FunctionCall, getArgs
 }
 
 func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Object {
-	module, ok := g.modules[moduleName]
+	_, scope, ok := g.getModule(moduleName)
 	if !ok {
 		if mod, ok := g.moduleRegistry.handlers[moduleName]; ok {
 			return mod.get(symbol.Name)
@@ -143,7 +153,7 @@ func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Obj
 		}
 	}
 
-	sym, _ := module.scope.get(symbol.Name)
+	sym, _ := scope.get(symbol.Name)
 	return sym
 }
 
@@ -162,29 +172,22 @@ func (g *GlobalVM) getMethod(strct checker.Type, name string) (runtime.Closure, 
 
 type VM struct {
 	hq     *GlobalVM
-	scope  *scope
 	result runtime.Object
-
-	moduleScope *scope // Captures the scope where extern functions are defined
 }
 
-func NewVM() *VM {
+func NewVM(hq *GlobalVM) *VM {
 	vm := &VM{
-		scope: newScope(nil),
+		hq: hq,
 	}
 	return vm
 }
 
-func (vm *VM) pushScope() {
-	vm.scope = newScope(vm.scope)
-}
+// evaluate all top-level statements to build up the module scope
+func (vm *VM) init(program *checker.Program, scope *scope) {
+	for _, statement := range program.Statements {
+		vm.do(statement, scope)
+	}
 
-func (vm *VM) popScope() {
-	vm.scope = vm.scope.parent
-}
-
-func (vm *VM) Eval(expr checker.Expression) *runtime.Object {
-	return vm.eval(expr)
 }
 
 /*
@@ -206,24 +209,10 @@ func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 		return c.builtinFn(data, resultType)
 	}
 
-	// Handle regular Ard functions
-	// Save current VM scope
-	originalScope := c.vm.scope
-
-	// Ensure scope is restored even if function panics
-	defer func() {
-		c.vm.scope = originalScope
-	}()
-
-	// Set VM scope to captured scope for lexical scoping
-	if c.capturedScope != nil {
-		c.vm.scope = c.capturedScope
-	}
-
 	// Execute function with captured scope as base
-	res, _ := c.vm.evalBlock(c.expr.Body, func() {
+	res, _ := c.vm.evalBlock(c.capturedScope, c.expr.Body, func(sc *scope) {
 		for i := range args {
-			c.vm.scope.add(c.expr.Parameters[i].Name, args[i])
+			sc.add(c.expr.Parameters[i].Name, args[i])
 		}
 	})
 	return res
@@ -232,9 +221,7 @@ func (c VMClosure) Eval(args ...*runtime.Object) *runtime.Object {
 func (c VMClosure) EvalIsolated(args ...*runtime.Object) *runtime.Object {
 	// Create a shallow copy of the VM with a new scope
 	isolatedVM := &VM{
-		hq:          c.vm.hq,                   // Share GlobalVM (read-only)
-		moduleScope: c.vm.moduleScope,          // Share module scope (read-only)
-		scope:       newScope(c.capturedScope), // NEW isolated scope
+		hq: c.vm.hq, // Share GlobalVM (read-only)
 	}
 
 	// Create a new closure pointing to isolated VM

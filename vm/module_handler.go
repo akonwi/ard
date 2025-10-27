@@ -38,7 +38,7 @@ func (r *ModuleRegistry) HandleStatic(moduleName string, structName string, vm *
 	// evaluate arguments in current vm context because the function called will be evaluated in another context
 	args := make([]*runtime.Object, len(call.Args))
 	for i, arg := range call.Args {
-		args[i] = vm.Eval(arg)
+		args[i] = vm.eval(newScope(nil), arg)
 	}
 
 	return handler.HandleStatic(structName, call, args)

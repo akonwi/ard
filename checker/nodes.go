@@ -611,7 +611,7 @@ func (f FunctionDef) String() string {
 		paramStrs[i] = f.Parameters[i].Type.String()
 	}
 
-	return fmt.Sprintf("fn (%s) %s", strings.Join(paramStrs, ","), f.ReturnType.String())
+	return fmt.Sprintf("fn %s(%s) %s", f.Name, strings.Join(paramStrs, ","), f.ReturnType.String())
 }
 
 func (f FunctionDef) get(name string) Type { return nil }

@@ -1,6 +1,9 @@
 package vm_test
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDurationFunctions(t *testing.T) {
 	runTests(t, []test{
@@ -10,7 +13,7 @@ func TestDurationFunctions(t *testing.T) {
 				use ard/duration
 				duration::from_seconds(20)
 			`,
-			want: 20 * 1000,
+			want: int(20 * time.Second),
 		},
 		{
 			name: "from_minutes",
@@ -18,7 +21,7 @@ func TestDurationFunctions(t *testing.T) {
 				use ard/duration
 				duration::from_minutes(5)
 			`,
-			want: 5 * 60 * 1000,
+			want: int(5 * time.Minute),
 		},
 		{
 			name: "from_hours",
@@ -26,7 +29,7 @@ func TestDurationFunctions(t *testing.T) {
 				use ard/duration
 				duration::from_hours(2)
 			`,
-			want: 2 * 3600 * 1000,
+			want: int(2 * time.Hour),
 		},
 	})
 }

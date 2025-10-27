@@ -11,7 +11,7 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
-func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
+func (vm *VM) Interpret(program *checker.Program, scope *scope) (val any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if msg, ok := r.(string); ok {
@@ -23,40 +23,32 @@ func (vm *VM) Interpret(program *checker.Program) (val any, err error) {
 	}()
 
 	for _, statement := range program.Statements {
-		if res := vm.do(statement); res != nil {
+		if res := vm.do(statement, scope); res != nil {
 			vm.result = *res
 		}
 	}
 
-	// Store module scope after processing all statements
-	// This ensures we capture the scope containing all extern functions and module definitions
-	vm.moduleScope = vm.scope
-
 	return vm.result.GoValue(), nil
 }
 
-func (vm *VM) callMain(name string) error {
-	_, err := vm.Interpret(&checker.Program{
-		Statements: []checker.Statement{
-			{
-				Expr: &checker.FunctionCall{
-					Name: name,
-					Args: []checker.Expression{},
-				},
-			},
-		},
+func (vm *VM) callMain(name string, scope *scope) {
+	if _, ok := scope.get(name); !ok {
+		fmt.Printf("%v\n", scope.data.bindings)
+		panic(fmt.Sprintf("main function '%s' not found", name))
+	}
+	vm.evalFunctionCall(scope, &checker.FunctionCall{
+		Name: name,
+		Args: []checker.Expression{},
 	})
-
-	return err
 }
 
-func (vm *VM) do(stmt checker.Statement) *runtime.Object {
+func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 	if stmt.Break {
-		vm.scope._break()
+		scp._break()
 		return runtime.Void()
 	}
 	if stmt.Expr != nil {
-		return vm.eval(stmt.Expr)
+		return vm.eval(scp, stmt.Expr)
 	}
 
 	switch s := stmt.Stmt.(type) {
@@ -64,7 +56,7 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		// Process enum methods and create closures with captured scope
 		for methodName := range s.Methods {
 			// Create a modified function definition with "@" as first parameter
-			closure := vm.createEnumMethodClosure(s, methodName)
+			closure := vm.createEnumMethodClosure(s, methodName, scp)
 			// Store using enum.method key format
 			vm.hq.addMethod(s, methodName, closure)
 		}
@@ -73,13 +65,13 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		// Process struct methods and create closures with captured scope
 		for methodName, _ := range s.Methods {
 			// Create a modified function definition with "@" as first parameter
-			closure := vm.createMethodClosure(s, methodName)
+			closure := vm.createMethodClosure(s, methodName, scp)
 			// Store using struct.method key format
 			vm.hq.addMethod(s, methodName, closure)
 		}
 		return runtime.Void()
 	case *checker.VariableDef:
-		val := vm.eval(s.Value)
+		val := vm.eval(scp, s.Value)
 		// for debugging:
 		// if s.Type().String() != val.Type().String() {
 		// fmt.Printf("type mismatch: let %s: %s = %s\n", s.Name, s.Type(), val.Type())
@@ -87,14 +79,14 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		// the checker node knows its exact type, because the value might be of a generic type
 		val.SetRefinedType(s.Type())
 		// can be broken by `try`
-		if vm.scope.isBroken() {
+		if scp.isBroken() {
 			return val
 		}
-		vm.scope.add(s.Name, val)
+		scp.add(s.Name, val)
 		return runtime.Void()
 	case *checker.Reassignment:
-		target := vm.eval(s.Target)
-		val := vm.eval(s.Value)
+		target := vm.eval(scp, s.Target)
+		val := vm.eval(scp, s.Value)
 
 		// replace the target with the new value
 		// note: it's possible that either side still has an open generic,
@@ -103,25 +95,25 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		*target = *val
 		return runtime.Void()
 	case *checker.ForLoop:
-		init := func() { vm.do(checker.Statement{Stmt: s.Init}) }
-		update := func() { vm.do(checker.Statement{Stmt: s.Update}) }
-		for init(); vm.eval(s.Condition).AsBool(); update() {
-			_, broke := vm.evalBlock(s.Body, func() { vm.scope.setBreakable(true) })
+		init := func() { vm.do(checker.Statement{Stmt: s.Init}, scp) }
+		update := func() { vm.do(checker.Statement{Stmt: s.Update}, scp) }
+		for init(); vm.eval(scp, s.Condition).AsBool(); update() {
+			_, broke := vm.evalBlock(scp, s.Body, func(s *scope) { s.setBreakable(true) })
 			if broke {
 				break
 			}
 		}
 		return runtime.Void()
 	case *checker.ForIntRange:
-		i := vm.eval(s.Start).AsInt()
-		end := vm.eval(s.End).AsInt()
+		i := vm.eval(scp, s.Start).AsInt()
+		end := vm.eval(scp, s.End).AsInt()
 		iteration := 0
 		for i <= end {
-			_, broke := vm.evalBlock(s.Body, func() {
-				vm.scope.setBreakable(true)
-				vm.scope.add(s.Cursor, runtime.MakeInt(i))
+			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+				sc.setBreakable(true)
+				sc.add(s.Cursor, runtime.MakeInt(i))
 				if s.Index != "" {
-					vm.scope.add(s.Index, runtime.MakeInt(iteration))
+					sc.add(s.Index, runtime.MakeInt(iteration))
 				}
 			})
 			if broke {
@@ -132,13 +124,13 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		}
 		return runtime.Void()
 	case *checker.ForInStr:
-		val := vm.eval(s.Value).AsString()
+		val := vm.eval(scp, s.Value).AsString()
 		for i, c := range val {
-			_, broke := vm.evalBlock(s.Body, func() {
-				vm.scope.setBreakable(true)
-				vm.scope.add(s.Cursor, runtime.MakeStr(string(c)))
+			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+				sc.setBreakable(true)
+				sc.add(s.Cursor, runtime.MakeStr(string(c)))
 				if s.Index != "" {
-					vm.scope.add(s.Index, runtime.MakeInt(i))
+					sc.add(s.Index, runtime.MakeInt(i))
 				}
 			})
 			if broke {
@@ -147,13 +139,13 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		}
 		return runtime.Void()
 	case *checker.ForInList:
-		list := vm.eval(s.List).AsList()
+		list := vm.eval(scp, s.List).AsList()
 		for i := range list {
-			_, broke := vm.evalBlock(s.Body, func() {
-				vm.scope.setBreakable(true)
-				vm.scope.add(s.Cursor, list[i])
+			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+				sc.setBreakable(true)
+				sc.add(s.Cursor, list[i])
 				if s.Index != "" {
-					vm.scope.add(s.Index, runtime.MakeInt(i))
+					sc.add(s.Index, runtime.MakeInt(i))
 				}
 			})
 			if broke {
@@ -163,14 +155,14 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 		return runtime.Void()
 	case *checker.ForInMap:
 		{
-			mapObj := vm.eval(s.Map)
+			mapObj := vm.eval(scp, s.Map)
 			_map := mapObj.AsMap()
 			for k, v := range _map {
-				_, broke := vm.evalBlock(s.Body, func() {
-					vm.scope.setBreakable(true)
+				_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+					sc.setBreakable(true)
 					key := mapObj.Map_GetKey(k)
-					vm.scope.add(s.Key, key)
-					vm.scope.add(s.Val, v)
+					sc.add(s.Key, key)
+					sc.add(s.Val, v)
 				})
 				if broke {
 					break
@@ -179,8 +171,8 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 			return runtime.Void()
 		}
 	case *checker.WhileLoop:
-		for vm.eval(s.Condition).AsBool() {
-			_, broke := vm.evalBlock(s.Body, func() { vm.scope.setBreakable(true) })
+		for vm.eval(scp, s.Condition).AsBool() {
+			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) { sc.setBreakable(true) })
 			if broke {
 				break
 			}
@@ -193,25 +185,23 @@ func (vm *VM) do(stmt checker.Statement) *runtime.Object {
 	}
 }
 
-func (vm *VM) createMethodClosure(strct *checker.StructDef, methodName string) *VMClosure {
+func (vm *VM) createMethodClosure(strct *checker.StructDef, methodName string, scope *scope) *VMClosure {
 	methodDef := strct.Methods[methodName]
 	// Create a modified function definition with "@" as first parameter
-	copy := *methodDef // Copy the original
+	copy := *methodDef
 	methodDefWithSelf := &copy
 	methodDefWithSelf.Parameters = append([]checker.Parameter{
-		{Name: "@", Type: nil}, // "@" parameter for struct instance
+		{Name: "@", Type: strct},
 	}, methodDef.Parameters...)
 
 	return &VMClosure{
-		vm:   vm,
-		expr: methodDefWithSelf,
-
-		// todo: this should be scope from the module the type is defined in. currently, it's the caller scope
-		capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
+		vm:            vm,
+		expr:          methodDefWithSelf,
+		capturedScope: scope,
 	}
 }
 
-func (vm *VM) eval(expr checker.Expression) *runtime.Object {
+func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	switch e := expr.(type) {
 	case *checker.StrLiteral:
 		return runtime.MakeStr(e.Value)
@@ -227,7 +217,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		sb := strings.Builder{}
 		for i := range e.Chunks {
 			// chunks implement Str::ToString
-			chunk := vm.eval(&checker.InstanceMethod{
+			chunk := vm.eval(scp, &checker.InstanceMethod{
 				Subject: e.Chunks[i],
 				Method: &checker.FunctionCall{
 					Name: "to_str",
@@ -238,103 +228,103 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 		return runtime.MakeStr(sb.String())
 	case *checker.Variable:
-		val, ok := vm.scope.get(e.Name())
+		val, ok := scp.get(e.Name())
 		if !ok {
 			panic(fmt.Errorf("variable not found: %s", e.Name()))
 		}
 		return val
 	case *checker.Not:
-		val := vm.eval(e.Value)
+		val := vm.eval(scp, e.Value)
 		return runtime.MakeBool(!val.AsBool())
 
 	case *checker.Negation:
-		val := vm.eval(e.Value)
+		val := vm.eval(scp, e.Value)
 		if num, isInt := val.IsInt(); isInt {
 			return runtime.MakeInt(-num)
 		}
 		return runtime.MakeFloat(-val.AsFloat())
 	case *checker.StrAddition:
-		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		left, right := vm.eval(scp, e.Left), vm.eval(scp, e.Right)
 		return runtime.MakeStr(left.AsString() + right.AsString())
 	case *checker.IntAddition:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeInt(left + right)
 	case *checker.IntSubtraction:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeInt(left - right)
 	case *checker.IntMultiplication:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeInt(left * right)
 	case *checker.IntDivision:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeInt(left / right)
 	case *checker.IntModulo:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeInt(left % right)
 	case *checker.IntGreater:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeBool(left > right)
 	case *checker.IntGreaterEqual:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeBool(left >= right)
 	case *checker.IntLess:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeBool(left < right)
 	case *checker.IntLessEqual:
-		left, right := vm.eval(e.Left).AsInt(), vm.eval(e.Right).AsInt()
+		left, right := vm.eval(scp, e.Left).AsInt(), vm.eval(scp, e.Right).AsInt()
 		return runtime.MakeBool(left <= right)
 	case *checker.FloatGreater:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeBool(left > right)
 	case *checker.FloatGreaterEqual:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeBool(left >= right)
 	case *checker.FloatLess:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeBool(left < right)
 	case *checker.FloatLessEqual:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeBool(left <= right)
 	case *checker.FloatDivision:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeFloat(left / right)
 	case *checker.FloatMultiplication:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeFloat(left * right)
 	case *checker.FloatSubtraction:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeFloat(left - right)
 	case *checker.FloatAddition:
-		left, right := vm.eval(e.Left).AsFloat(), vm.eval(e.Right).AsFloat()
+		left, right := vm.eval(scp, e.Left).AsFloat(), vm.eval(scp, e.Right).AsFloat()
 		return runtime.MakeFloat(left + right)
 	case *checker.Equality:
-		left, right := vm.eval(e.Left), vm.eval(e.Right)
+		left, right := vm.eval(scp, e.Left), vm.eval(scp, e.Right)
 		return runtime.MakeBool(left.Equals(*right))
 	case *checker.And:
-		left, right := vm.eval(e.Left).AsBool(), vm.eval(e.Right).AsBool()
+		left, right := vm.eval(scp, e.Left).AsBool(), vm.eval(scp, e.Right).AsBool()
 		return runtime.MakeBool(left && right)
 	case *checker.Or:
-		left, right := vm.eval(e.Left).AsBool(), vm.eval(e.Right).AsBool()
+		left, right := vm.eval(scp, e.Left).AsBool(), vm.eval(scp, e.Right).AsBool()
 		return runtime.MakeBool(left || right)
 	case *checker.If:
-		if cond := vm.eval(e.Condition); cond.AsBool() {
-			res, _ := vm.evalBlock(e.Body, nil)
+		if cond := vm.eval(scp, e.Condition); cond.AsBool() {
+			res, _ := vm.evalBlock(scp, e.Body, nil)
 			return res
 		}
-		if e.ElseIf != nil && vm.eval(e.ElseIf.Condition).AsBool() {
-			res, _ := vm.evalBlock(e.ElseIf.Body, nil)
+		if e.ElseIf != nil && vm.eval(scp, e.ElseIf.Condition).AsBool() {
+			res, _ := vm.evalBlock(scp, e.ElseIf.Body, nil)
 			return res
 		}
 		if e.Else != nil {
-			res, _ := vm.evalBlock(e.Else, nil)
+			res, _ := vm.evalBlock(scp, e.Else, nil)
 			return res
 		}
 		return runtime.Void()
 	case *checker.FunctionDef:
-		closure := &VMClosure{vm: vm, expr: e, capturedScope: vm.scope}
+		closure := &VMClosure{vm: vm, expr: e, capturedScope: scp}
 		obj := runtime.Make(closure, closure.Type())
 		if e.Name != "" {
-			vm.scope.add(e.Name, obj)
+			scp.add(e.Name, obj)
 		}
 		return obj
 	case *checker.ExternalFunctionDef:
@@ -346,17 +336,17 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 		obj := runtime.Make(extFn, e)
 		if e.Name != "" {
-			vm.scope.add(e.Name, obj)
+			scp.add(e.Name, obj)
 		}
 		return obj
 	case *checker.Panic:
-		msg := vm.eval(e.Message)
+		msg := vm.eval(scp, e.Message)
 		panic(fmt.Sprintf("panic at %s:\n%s", e.GetLocation().Start, msg.AsString()))
 	case *checker.FunctionCall:
-		return vm.evalFunctionCall(e)
+		return vm.evalFunctionCall(scp, e)
 	case *checker.InstanceProperty:
 		{
-			subj := vm.eval(e.Subject)
+			subj := vm.eval(scp, e.Subject)
 			if subj.IsStruct() {
 				return subj.Struct_Get(e.Property)
 			}
@@ -369,8 +359,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.InstanceMethod:
 		{
-			subj := vm.eval(e.Subject)
-			return vm.evalInstanceMethod(subj, e)
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalInstanceMethod(scp, subj, e)
 		}
 	case *checker.ModuleFunctionCall:
 		{
@@ -378,7 +368,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 				// Convert call arguments to objects
 				args := make([]*runtime.Object, len(e.Call.Args))
 				for i, arg := range e.Call.Args {
-					args[i] = vm.eval(arg)
+					args[i] = vm.eval(scp, arg)
 				}
 				return args
 			})
@@ -387,7 +377,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		{
 			raw := make([]*runtime.Object, len(e.Elements))
 			for i, el := range e.Elements {
-				raw[i] = vm.eval(el)
+				raw[i] = vm.eval(scp, el)
 			}
 			return runtime.Make(raw, e.Type())
 		}
@@ -396,8 +386,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			mapType := e.Type().(*checker.Map)
 			_map := runtime.MakeMap(mapType.Key(), mapType.Value())
 			for i := range e.Keys {
-				key := vm.eval(e.Keys[i])
-				value := vm.eval(e.Values[i])
+				key := vm.eval(scp, e.Keys[i])
+				value := vm.eval(scp, e.Values[i])
 
 				_map.Map_Set(key, value)
 			}
@@ -405,35 +395,35 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.OptionMatch:
 		{
-			subject := vm.eval(e.Subject)
+			subject := vm.eval(scp, e.Subject)
 			if subject.IsNone() {
 				// None case - evaluate the None block
-				res, _ := vm.evalBlock(e.None, nil)
+				res, _ := vm.evalBlock(scp, e.None, nil)
 				return res
 			} else {
 				// Some case - bind the value and evaluate the Some block
-				res, _ := vm.evalBlock(e.Some.Body, func() {
+				res, _ := vm.evalBlock(scp, e.Some.Body, func(sc *scope) {
 					// Bind the pattern name to the value
 					subject := runtime.Make(subject.Raw(), subject.Type().(*checker.Maybe).Of())
-					vm.scope.add(e.Some.Pattern.Name, subject)
+					sc.add(e.Some.Pattern.Name, subject)
 				})
 				return res
 			}
 		}
 	case *checker.EnumMatch:
 		{
-			subject := vm.eval(e.Subject)
+			subject := vm.eval(scp, e.Subject)
 			variantIndex := subject.Raw().(int8)
 
 			// If there is a catch-all case and we do not have a specific handler for this variant
 			if e.CatchAll != nil && (variantIndex >= int8(len(e.Cases)) || e.Cases[variantIndex] == nil) {
-				res, _ := vm.evalBlock(e.CatchAll, nil)
+				res, _ := vm.evalBlock(scp, e.CatchAll, nil)
 				return res
 			}
 
 			// Execute the matching case block for this variant
 			if variantIndex < int8(len(e.Cases)) && e.Cases[variantIndex] != nil {
-				res, _ := vm.evalBlock(e.Cases[variantIndex], nil)
+				res, _ := vm.evalBlock(scp, e.Cases[variantIndex], nil)
 				return res
 			}
 
@@ -445,36 +435,36 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return runtime.Make(e.Variant, e.Type())
 	case *checker.BoolMatch:
 		{
-			subject := vm.eval(e.Subject)
+			subject := vm.eval(scp, e.Subject)
 			value := subject.AsBool()
 
 			// Execute the appropriate case based on the boolean value
 			if value {
-				res, _ := vm.evalBlock(e.True, nil)
+				res, _ := vm.evalBlock(scp, e.True, nil)
 				return res
 			} else {
-				res, _ := vm.evalBlock(e.False, nil)
+				res, _ := vm.evalBlock(scp, e.False, nil)
 				return res
 			}
 		}
 	case *checker.UnionMatch:
 		{
-			subject := vm.eval(e.Subject)
+			subject := vm.eval(scp, e.Subject)
 
 			// Get the concrete type name as a string
 			typeName := subject.Type().String()
 
 			// If we have a case for this specific type
 			if arm, ok := e.TypeCases[typeName]; ok {
-				res, _ := vm.evalBlock(arm.Body, func() {
-					vm.scope.add(arm.Pattern.Name, subject)
+				res, _ := vm.evalBlock(scp, arm.Body, func(sc *scope) {
+					sc.add(arm.Pattern.Name, subject)
 				})
 				return res
 			}
 
 			// If we have a catch-all case
 			if e.CatchAll != nil {
-				res, _ := vm.evalBlock(e.CatchAll, nil)
+				res, _ := vm.evalBlock(scp, e.CatchAll, nil)
 				return res
 			}
 
@@ -489,7 +479,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			for name, ftype := range strct.Fields {
 				val, ok := e.Fields[name]
 				if ok {
-					val := vm.eval(val)
+					val := vm.eval(scp, val)
 					val.SetRefinedType(ftype)
 					raw[name] = val
 				} else {
@@ -506,7 +496,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 			for name, ftype := range strct.Fields {
 				val, ok := e.Property.Fields[name]
 				if ok {
-					val := vm.eval(val)
+					val := vm.eval(scp, val)
 					val.SetRefinedType(ftype)
 					raw[name] = val
 				} else {
@@ -518,40 +508,40 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ResultMatch:
 		{
-			subj := vm.eval(e.Subject)
+			subj := vm.eval(scp, e.Subject)
 			if subj.IsOk() {
-				res, _ := vm.evalBlock(e.Ok.Body, func() {
-					vm.scope.add(e.Ok.Pattern.Name, subj.UnwrapResult())
+				res, _ := vm.evalBlock(scp, e.Ok.Body, func(sc *scope) {
+					sc.add(e.Ok.Pattern.Name, subj.UnwrapResult())
 				})
 				return res
 			}
-			res, _ := vm.evalBlock(e.Err.Body, func() {
-				vm.scope.add(e.Err.Pattern.Name, subj.UnwrapResult())
+			res, _ := vm.evalBlock(scp, e.Err.Body, func(sc *scope) {
+				sc.add(e.Err.Pattern.Name, subj.UnwrapResult())
 			})
 			return res
 		}
 	case *checker.IntMatch:
 		{
-			subject := vm.eval(e.Subject)
+			subject := vm.eval(scp, e.Subject)
 			intValue := subject.AsInt()
 
 			// Check if we have a specific case for this integer
 			if caseBlock, exists := e.IntCases[intValue]; exists {
-				res, _ := vm.evalBlock(caseBlock, nil)
+				res, _ := vm.evalBlock(scp, caseBlock, nil)
 				return res
 			}
 
 			// Check if the value falls within any range
 			for rangePattern, caseBlock := range e.RangeCases {
 				if intValue >= rangePattern.Start && intValue <= rangePattern.End {
-					res, _ := vm.evalBlock(caseBlock, nil)
+					res, _ := vm.evalBlock(scp, caseBlock, nil)
 					return res
 				}
 			}
 
 			// If no specific case or range found, use catch-all if available
 			if e.CatchAll != nil {
-				res, _ := vm.evalBlock(e.CatchAll, nil)
+				res, _ := vm.evalBlock(scp, e.CatchAll, nil)
 				return res
 			}
 
@@ -562,32 +552,32 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		{
 			// Check conditions in order, execute first matching case
 			for _, conditionalCase := range e.Cases {
-				condition := vm.eval(conditionalCase.Condition)
+				condition := vm.eval(scp, conditionalCase.Condition)
 				if condition.AsBool() {
-					res, _ := vm.evalBlock(conditionalCase.Body, nil)
+					res, _ := vm.evalBlock(scp, conditionalCase.Body, nil)
 					return res
 				}
 			}
 
 			// If no conditions matched, use catch-all (guaranteed to exist by type checker)
-			res, _ := vm.evalBlock(e.CatchAll, nil)
+			res, _ := vm.evalBlock(scp, e.CatchAll, nil)
 			return res
 		}
 	case *checker.TryOp:
 		{
-			subj := vm.eval(e.Expr())
+			subj := vm.eval(scp, e.Expr())
 			if subj.IsResult() {
 				unwrapped := subj.UnwrapResult()
 				if subj.IsErr() {
 					// Error case: early return from function
 					if e.CatchBlock != nil {
 						// Execute catch block and early return its result
-						result, broken := vm.evalBlock(e.CatchBlock, func() {
-							vm.scope.add(e.CatchVar, unwrapped)
+						result, broken := vm.evalBlock(scp, e.CatchBlock, func(sc *scope) {
+							sc.add(e.CatchVar, unwrapped)
 						})
 
 						// Early return: the catch block's result becomes the function's return value
-						vm.scope.setBroken(true)
+						scp.setBroken(true)
 						if broken {
 							return result
 						}
@@ -595,7 +585,7 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 					} else {
 						// No catch block: propagate error by early returning
 						// Create a new Result with the same error for the function's return type
-						vm.scope.setBroken(true)
+						scp.setBroken(true)
 						return subj
 					}
 				}
@@ -607,17 +597,17 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 					// None case: early return from function
 					if e.CatchBlock != nil {
 						// Execute catch block and early return its result
-						result, broken := vm.evalBlock(e.CatchBlock, nil)
+						result, broken := vm.evalBlock(scp, e.CatchBlock, nil)
 
 						// Early return: the catch block's result becomes the function's return value
-						vm.scope.setBroken(true)
+						scp.setBroken(true)
 						if broken {
 							return result
 						}
 						return result
 					} else {
 						// No catch block: propagate none by early returning
-						vm.scope.setBroken(true)
+						scp.setBroken(true)
 						return runtime.MakeNone(e.Type())
 					}
 				}
@@ -632,15 +622,25 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 		return vm.hq.lookup(e.Module, e.Symbol)
 	case *checker.CopyExpression:
 		// Evaluate the expression and return a deep copy
-		original := vm.eval(e.Expr)
+		original := vm.eval(scp, e.Expr)
 		return original.Copy()
 	case *checker.FiberExecution:
-		f := NewRuntime(e.GetModule())
+		// at some point, it may be a good idea to have globally unique names for fiber modules in case the same code is launched in multiple fibers
+		name := e.GetModule().Path()
+		f, fscope := vm.hq.loadModule(name, e.GetModule().Program(), false)
 		wg := &sync.WaitGroup{}
 		wg.Go(func() {
-			if err := f.Run(e.GetMainName()); err != nil {
-				fmt.Printf("Panic in fiber: %v\n", err)
-			}
+			defer vm.hq.unloadModule(name)
+			defer func() {
+				if r := recover(); r != nil {
+					if msg, ok := r.(string); ok {
+						fmt.Println(fmt.Errorf("Panic in fiber: %s", msg))
+					} else {
+						fmt.Printf("Panic in fiber: %v\n", r)
+					}
+				}
+			}()
+			f.callMain(e.GetMainName(), fscope)
 		})
 		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
 			"wg": runtime.MakeDynamic(wg),
@@ -651,8 +651,8 @@ func (vm *VM) eval(expr checker.Expression) *runtime.Object {
 }
 
 // _args can be provided by caller from different module scopes
-func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Object) *runtime.Object {
-	sig, ok := vm.scope.get(call.Name)
+func (vm *VM) evalFunctionCall(scope *scope, call *checker.FunctionCall, _args ...*runtime.Object) *runtime.Object {
+	sig, ok := scope.get(call.Name)
 	if !ok {
 		panic(fmt.Errorf("Undefined: %s", call.Name))
 	}
@@ -664,7 +664,7 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 			args = make([]*runtime.Object, len(call.Args))
 
 			for i := range call.Args {
-				args[i] = vm.eval(call.Args[i])
+				args[i] = vm.eval(scope, call.Args[i])
 			}
 		}
 		return closure.Eval(args...)
@@ -673,19 +673,18 @@ func (vm *VM) evalFunctionCall(call *checker.FunctionCall, _args ...*runtime.Obj
 	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.Type()))
 }
 
-func (vm *VM) evalBlock(block *checker.Block, init func()) (*runtime.Object, bool) {
-	vm.pushScope()
-	defer vm.popScope()
+func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope)) (*runtime.Object, bool) {
+	blockScope := newScope(scope)
 
 	if init != nil {
-		init()
+		init(blockScope)
 	}
 
 	res := runtime.Void()
 	for i := range block.Stmts {
 		stmt := block.Stmts[i]
-		r := vm.do(stmt)
-		if vm.scope.isBroken() {
+		r := vm.do(stmt, blockScope)
+		if blockScope.isBroken() {
 			return r, true
 		}
 		res = r
@@ -698,12 +697,12 @@ func (vm *VM) evalStrProperty(_ *runtime.Object, _ string) *runtime.Object {
 	return runtime.Void()
 }
 
-func (vm *VM) evalInstanceMethod(subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
+func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
 	if subj.IsResult() {
-		return vm.evalResultMethod(subj, e.Method)
+		return vm.evalResultMethod(scope, subj, e.Method)
 	}
 	if subj.Type() == checker.Str {
-		return vm.evalStrMethod(subj, e.Method)
+		return vm.evalStrMethod(scope, subj, e.Method)
 	}
 	if _, isInt := subj.IsInt(); isInt {
 		return vm.evalIntMethod(subj, e)
@@ -715,25 +714,25 @@ func (vm *VM) evalInstanceMethod(subj *runtime.Object, e *checker.InstanceMethod
 		return vm.evalBoolMethod(subj, e)
 	}
 	if _, ok := subj.Type().(*checker.List); ok {
-		return vm.evalListMethod(subj, e)
+		return vm.evalListMethod(scope, subj, e)
 	}
 	if _, ok := subj.Type().(*checker.Map); ok {
-		return vm.evalMapMethod(subj, e)
+		return vm.evalMapMethod(scope, subj, e)
 	}
 	if _, ok := subj.Type().(*checker.Maybe); ok {
-		return vm.evalMaybeMethod(subj, e)
+		return vm.evalMaybeMethod(scope, subj, e)
 	}
 	if subj.IsStruct() {
-		return vm.EvalStructMethod(subj, e.Method)
+		return vm.EvalStructMethod(scope, subj, e.Method)
 	}
 	if enum, ok := subj.Type().(*checker.Enum); ok {
-		return vm.EvalEnumMethod(subj, e.Method, enum)
+		return vm.EvalEnumMethod(scope, subj, e.Method, enum)
 	}
 
 	panic(fmt.Errorf("Unimplemented method: %s.%s()", subj.Type(), e.Method.Name))
 }
 
-func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runtime.Object {
+func (vm *VM) evalStrMethod(scope *scope, subj *runtime.Object, m *checker.FunctionCall) *runtime.Object {
 	raw := subj.AsString()
 	switch m.Name {
 	case "size":
@@ -741,17 +740,17 @@ func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runt
 	case "is_empty":
 		return runtime.MakeBool(len(raw) == 0)
 	case "contains":
-		return runtime.MakeBool(strings.Contains(raw, vm.eval(m.Args[0]).AsString()))
+		return runtime.MakeBool(strings.Contains(raw, vm.eval(scope, m.Args[0]).AsString()))
 	case "replace":
-		old := vm.eval(m.Args[0]).AsString()
-		new := vm.eval(m.Args[1]).AsString()
+		old := vm.eval(scope, m.Args[0]).AsString()
+		new := vm.eval(scope, m.Args[1]).AsString()
 		return runtime.MakeStr(strings.Replace(raw, old, new, 1))
 	case "replace_all":
-		old := vm.eval(m.Args[0]).AsString()
-		new := vm.eval(m.Args[1]).AsString()
+		old := vm.eval(scope, m.Args[0]).AsString()
+		new := vm.eval(scope, m.Args[1]).AsString()
 		return runtime.MakeStr(strings.ReplaceAll(raw, old, new))
 	case "split":
-		sep := vm.eval(m.Args[0]).AsString()
+		sep := vm.eval(scope, m.Args[0]).AsString()
 		split := strings.Split(raw, sep)
 		values := make([]*runtime.Object, len(split))
 		for i, str := range split {
@@ -759,7 +758,7 @@ func (vm *VM) evalStrMethod(subj *runtime.Object, m *checker.FunctionCall) *runt
 		}
 		return runtime.MakeList(checker.Str, values...)
 	case "starts_with":
-		prefix := vm.eval(m.Args[0]).AsString()
+		prefix := vm.eval(scope, m.Args[0]).AsString()
 		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
 	case "to_str":
 		return subj
@@ -801,27 +800,27 @@ func (vm *VM) evalBoolMethod(subj *runtime.Object, m *checker.InstanceMethod) *r
 	}
 }
 
-func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
+func (vm *VM) evalListMethod(scope *scope, self *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
 	raw := self.AsList()
 	switch m.Method.Name {
 	case "at":
-		index := vm.eval(m.Method.Args[0]).AsInt()
+		index := vm.eval(scope, m.Method.Args[0]).AsInt()
 		if index >= len(raw) {
 			panic(fmt.Errorf("Index out of range (%d) on list of length %d", index, len(raw)))
 		}
 		return raw[index]
 	case "prepend":
-		newItem := vm.eval(m.Method.Args[0])
+		newItem := vm.eval(scope, m.Method.Args[0])
 		raw = append([]*runtime.Object{newItem}, raw...)
 		self.Set(raw)
 		return self
 	case "push":
-		raw = append(raw, vm.eval(m.Method.Args[0]))
+		raw = append(raw, vm.eval(scope, m.Method.Args[0]))
 		self.Set(raw)
 		return self
 	case "set":
-		index := vm.eval(m.Method.Args[0]).AsInt()
-		value := vm.eval(m.Method.Args[1])
+		index := vm.eval(scope, m.Method.Args[0]).AsInt()
+		value := vm.eval(scope, m.Method.Args[1])
 		result := runtime.MakeBool(false)
 		if index <= len(raw) {
 			raw[index] = value
@@ -832,7 +831,7 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 		return runtime.MakeInt(len(raw))
 	case "sort":
 		{
-			_isLess := vm.eval(m.Method.Args[0]).Raw().(*VMClosure)
+			_isLess := vm.eval(scope, m.Method.Args[0]).Raw().(*VMClosure)
 
 			slices.SortFunc(raw, func(a, b *runtime.Object) int {
 				if _isLess.Eval(a, b).AsBool() {
@@ -844,8 +843,8 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 			return runtime.Void()
 		}
 	case "swap":
-		l := vm.eval(m.Method.Args[0]).AsInt()
-		r := vm.eval(m.Method.Args[1]).AsInt()
+		l := vm.eval(scope, m.Method.Args[0]).AsInt()
+		r := vm.eval(scope, m.Method.Args[1]).AsInt()
 		_l, _r := raw[l], raw[r]
 		raw[l] = _r
 		raw[r] = _l
@@ -855,7 +854,7 @@ func (vm *VM) evalListMethod(self *runtime.Object, m *checker.InstanceMethod) *r
 	}
 }
 
-func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
+func (vm *VM) evalMapMethod(scope *scope, subj *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
 	raw := subj.AsMap()
 	switch m.Method.Name {
 	case "keys":
@@ -869,7 +868,7 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 	case "size":
 		return runtime.MakeInt(len(raw))
 	case "get":
-		keyArg := vm.eval(m.Method.Args[0])
+		keyArg := vm.eval(scope, m.Method.Args[0])
 		_key := runtime.ToMapKey(keyArg)
 
 		mapType := subj.Type().(*checker.Map)
@@ -879,20 +878,20 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 		}
 		return out
 	case "set":
-		keyArg := vm.eval(m.Method.Args[0])
-		valueArg := vm.eval(m.Method.Args[1])
+		keyArg := vm.eval(scope, m.Method.Args[0])
+		valueArg := vm.eval(scope, m.Method.Args[1])
 
 		keyStr := runtime.ToMapKey(keyArg)
 		raw[keyStr] = valueArg
 		return runtime.MakeBool(true)
 	case "drop":
-		keyArg := vm.eval(m.Method.Args[0])
+		keyArg := vm.eval(scope, m.Method.Args[0])
 		keyStr := runtime.ToMapKey(keyArg)
 
 		delete(raw, keyStr)
 		return runtime.Void()
 	case "has":
-		keyArg := vm.eval(m.Method.Args[0])
+		keyArg := vm.eval(scope, m.Method.Args[0])
 
 		// Convert key to string
 		keyStr := runtime.ToMapKey(keyArg)
@@ -903,11 +902,11 @@ func (vm *VM) evalMapMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 	}
 }
 
-func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
+func (vm *VM) evalMaybeMethod(scope *scope, subj *runtime.Object, m *checker.InstanceMethod) *runtime.Object {
 	switch m.Method.Name {
 	case "expect":
 		if subj.Raw() == nil { // This is a none
-			_msg := vm.eval(m.Method.Args[0]).AsString()
+			_msg := vm.eval(scope, m.Method.Args[0]).AsString()
 			panic(_msg)
 		}
 		// Return the unwrapped value for some
@@ -918,7 +917,7 @@ func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *
 		return runtime.MakeBool(subj.Raw() != nil)
 	case "or":
 		if subj.Raw() == nil {
-			return vm.eval(m.Method.Args[0])
+			return vm.eval(scope, m.Method.Args[0])
 		}
 		return runtime.Make(subj.Raw(), m.Type())
 	default:
@@ -926,7 +925,7 @@ func (vm *VM) evalMaybeMethod(subj *runtime.Object, m *checker.InstanceMethod) *
 	}
 }
 
-func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
+func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
 	istruct := subj.Type().(*checker.StructDef)
 
 	closure, ok := vm.hq.getMethod(istruct, call.Name)
@@ -935,7 +934,7 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 		args := make([]*runtime.Object, len(call.Args)+1)
 		args[0] = subj // "@" - the struct instance
 		for i := range call.Args {
-			args[i+1] = vm.eval(call.Args[i])
+			args[i+1] = vm.eval(scope, call.Args[i])
 		}
 
 		return closure.Eval(args...)
@@ -944,32 +943,30 @@ func (vm *VM) EvalStructMethod(subj *runtime.Object, call *checker.FunctionCall)
 	panic(fmt.Errorf("Method not found: %s.%s", istruct.Name, call.Name))
 }
 
-func (vm *VM) createEnumMethodClosure(enum *checker.Enum, methodName string) *VMClosure {
+func (vm *VM) createEnumMethodClosure(enum *checker.Enum, methodName string, scope *scope) *VMClosure {
 	methodDef := enum.Methods[methodName]
 	// Create a modified function definition with "@" as first parameter
 	copy := *methodDef // Copy the original
 	methodDefWithSelf := &copy
 	methodDefWithSelf.Parameters = append([]checker.Parameter{
-		{Name: "@", Type: nil}, // "@" parameter for enum instance
+		{Name: "@", Type: enum},
 	}, methodDef.Parameters...)
 
 	return &VMClosure{
-		vm:   vm,
-		expr: methodDefWithSelf,
-
-		// todo: this should be scope from the module the type is defined in. currently, it's the caller scope
-		capturedScope: vm.scope, // CRITICAL: captures current scope with extern functions
+		vm:            vm,
+		expr:          methodDefWithSelf,
+		capturedScope: scope,
 	}
 }
 
-func (vm *VM) EvalEnumMethod(subj *runtime.Object, call *checker.FunctionCall, enum *checker.Enum) *runtime.Object {
+func (vm *VM) EvalEnumMethod(scope *scope, subj *runtime.Object, call *checker.FunctionCall, enum *checker.Enum) *runtime.Object {
 	closure, ok := vm.hq.getMethod(enum, call.Name)
 	if ok {
 		// Prepare arguments: enum instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)
 		args[0] = subj // "@" - the enum instance
 		for i := range call.Args {
-			args[i+1] = vm.eval(call.Args[i])
+			args[i+1] = vm.eval(scope, call.Args[i])
 		}
 
 		return closure.Eval(args...)

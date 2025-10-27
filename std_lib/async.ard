@@ -1,11 +1,10 @@
 extern fn sleep(ms: Int) Void = "Sleep"
+private extern fn wait_for(wg: Dynamic) Void = "WaitFor"
 
 struct Fiber {
   // pointer to *WaitGroup
   wg: Dynamic
 }
-
-private extern fn wait_for(wg: Dynamic) Void = "WaitFor"
 
 impl Fiber {
   fn join() {

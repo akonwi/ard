@@ -87,10 +87,9 @@ func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
 }
 
-// fn (ms: Int) Void
+// fn (ns: Int) Void
 func Sleep(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	duration := args[0].AsInt()
-	time.Sleep(time.Duration(duration) * time.Millisecond)
+	time.Sleep(time.Duration(args[0].AsInt()))
 	return runtime.Void()
 }
 
