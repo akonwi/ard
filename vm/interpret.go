@@ -58,7 +58,6 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 			// Create a modified function definition with "@" as first parameter
 			closure := vm.createEnumMethodClosure(s, methodName, scp)
 			// Store using enum.method key format
-			// [deprecate] shouldn't be necessary after vm + scopes are decoupled
 			vm.hq.addMethod(s, methodName, closure)
 		}
 		return runtime.Void()
@@ -68,7 +67,6 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 			// Create a modified function definition with "@" as first parameter
 			closure := vm.createMethodClosure(s, methodName, scp)
 			// Store using struct.method key format
-			// [deprecate] shouldn't be necessary after vm + scopes are decoupled
 			vm.hq.addMethod(s, methodName, closure)
 		}
 		return runtime.Void()
@@ -190,17 +188,16 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 func (vm *VM) createMethodClosure(strct *checker.StructDef, methodName string, scope *scope) *VMClosure {
 	methodDef := strct.Methods[methodName]
 	// Create a modified function definition with "@" as first parameter
-	copy := *methodDef // Copy the original
+	copy := *methodDef
 	methodDefWithSelf := &copy
 	methodDefWithSelf.Parameters = append([]checker.Parameter{
-		{Name: "@", Type: nil}, // "@" parameter for struct instance
+		{Name: "@", Type: strct},
 	}, methodDef.Parameters...)
 
 	return &VMClosure{
-		vm:   vm,
-		expr: methodDefWithSelf,
-
-		capturedScope: scope, // CRITICAL: captures current scope with extern functions
+		vm:            vm,
+		expr:          methodDefWithSelf,
+		capturedScope: scope,
 	}
 }
 
@@ -945,14 +942,12 @@ func (vm *VM) createEnumMethodClosure(enum *checker.Enum, methodName string, sco
 	copy := *methodDef // Copy the original
 	methodDefWithSelf := &copy
 	methodDefWithSelf.Parameters = append([]checker.Parameter{
-		{Name: "@", Type: nil}, // "@" parameter for enum instance
+		{Name: "@", Type: enum},
 	}, methodDef.Parameters...)
 
 	return &VMClosure{
-		vm:   vm,
-		expr: methodDefWithSelf,
-
-		// todo: this should be scope from the module the type is defined in. currently, it's the caller scope
+		vm:            vm,
+		expr:          methodDefWithSelf,
 		capturedScope: scope,
 	}
 }
