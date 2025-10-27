@@ -7,7 +7,7 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
-func (vm *VM) evalResultMethod(self *runtime.Object, call *checker.FunctionCall) *runtime.Object {
+func (vm *VM) evalResultMethod(scope *scope, self *runtime.Object, call *checker.FunctionCall) *runtime.Object {
 	switch call.Name {
 	case "expect":
 		if self.IsErr() {
@@ -17,7 +17,7 @@ func (vm *VM) evalResultMethod(self *runtime.Object, call *checker.FunctionCall)
 			} else {
 				actual = fmt.Sprintf("%v", self.GoValue())
 			}
-			_msg := vm.eval(call.Args[0]).AsString()
+			_msg := vm.eval(scope, call.Args[0]).AsString()
 			panic(_msg + ": " + actual)
 		}
 		return self.UnwrapResult()
@@ -25,7 +25,7 @@ func (vm *VM) evalResultMethod(self *runtime.Object, call *checker.FunctionCall)
 		if self.IsOk() {
 			return self.UnwrapResult()
 		}
-		return vm.eval(call.Args[0])
+		return vm.eval(scope, call.Args[0])
 	case "is_ok":
 		return runtime.MakeBool(self.IsOk())
 	case "is_err":

@@ -89,8 +89,9 @@ func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 
 // fn (ms: Int) Void
 func Sleep(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	duration := args[0].AsInt()
-	time.Sleep(time.Duration(duration) * time.Millisecond)
+	_duration := args[0].AsInt()
+	duration := time.Duration(_duration * 1000000)
+	time.Sleep(duration)
 	return runtime.Void()
 }
 
