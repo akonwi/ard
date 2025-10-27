@@ -75,6 +75,11 @@ func (g *GlobalVM) loadModule(name string, program *checker.Program, scripting b
 	return vm, s
 }
 
+func (g *GlobalVM) unloadModule(name string) {
+	delete(g.modules, name)
+	delete(g.moduleScopes, name)
+}
+
 // initialize the part of the standard library that is hardcoded into the compiler
 func (g *GlobalVM) initModuleRegistry() {
 	g.moduleRegistry.Register(&ResultModule{})

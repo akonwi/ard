@@ -625,15 +625,22 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		original := vm.eval(scp, e.Expr)
 		return original.Copy()
 	case *checker.FiberExecution:
-		f, fscope := vm.hq.loadModule(e.GetModule().Path(), e.GetModule().Program(), false)
+		// at some point, it may be a good idea to have globally unique names for fiber modules in case the same code is launched in multiple fibers
+		name := e.GetModule().Path()
+		f, fscope := vm.hq.loadModule(name, e.GetModule().Program(), false)
 		wg := &sync.WaitGroup{}
 		wg.Go(func() {
+			defer vm.hq.unloadModule(name)
 			defer func() {
-				delete(vm.hq.modules, e.GetModule().Path())
-				delete(vm.hq.moduleScopes, e.GetModule().Path())
+				if r := recover(); r != nil {
+					if msg, ok := r.(string); ok {
+						fmt.Println(fmt.Errorf("Panic in fiber: %s", msg))
+					} else {
+						fmt.Printf("Panic in fiber: %v\n", r)
+					}
+				}
 			}()
 			f.callMain(e.GetMainName(), fscope)
-			// fmt.Printf("Panic in fiber: %v\n", err)
 		})
 		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
 			"wg": runtime.MakeDynamic(wg),
