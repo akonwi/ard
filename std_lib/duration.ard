@@ -1,11 +1,13 @@
+// converters to nanoseconds
+
 fn from_hours(h: Int) Int {
-  h * 3600 * 1000
+  h * 3600 * 1000000000
 }
 
 fn from_seconds(s: Int) Int {
-  s * 1000
+  s * 1000000000
 }
 
 fn from_minutes(m: Int) Int {
-  m * 60 * 1000
+  m * 60 * 1000000000
 }
