@@ -24,7 +24,7 @@ func TestFibers(t *testing.T) {
 			},
 		},
 		{
-			name: "Fibers cannot reference read-only variables in outer scope",
+			name: "Fibers can reference read-only variables in outer scope",
 			input: `
 			use ard/async
 
@@ -33,10 +33,7 @@ func TestFibers(t *testing.T) {
 				duration + 1
 			})
 			`,
-			diagnostics: []checker.Diagnostic{
-				/* todo: need to be more specific about how the mutable reference won't be shared */
-				{Kind: checker.Error, Message: "Undefined variable: duration"},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Valid fiber functions work",

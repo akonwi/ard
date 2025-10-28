@@ -628,9 +628,13 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		// at some point, it may be a good idea to have globally unique names for fiber modules in case the same code is launched in multiple fibers
 		name := e.GetModule().Path()
 		f, fscope := vm.hq.loadModule(name, e.GetModule().Program(), false)
+		fscope.parent = scp
 		wg := &sync.WaitGroup{}
 		wg.Go(func() {
-			defer vm.hq.unloadModule(name)
+			defer func() {
+				fscope.parent = nil
+				vm.hq.unloadModule(name)
+			}()
 			defer func() {
 				if r := recover(); r != nil {
 					if msg, ok := r.(string); ok {

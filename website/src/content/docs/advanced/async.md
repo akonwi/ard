@@ -1,6 +1,6 @@
 ---
 title: "Async Programming"
-description: Learn about asynchronous programming in Ard using fibers and the async module.
+description: Learn about asynchronous programming in Ard using the async module.
 ---
 
 ## Overview
@@ -15,7 +15,7 @@ Ard uses **fibers** for concurrent execution contexts. Currently, all fibers are
 
 > 💡 This design choice keeps the possibility of OS-level threads open without naming conflicts.
 
-Each fiber runs as an **independent program** with its own runtime and module loading. This design ensures complete isolation between concurrent executions, eliminating entire classes of concurrency bugs.
+Fiber scopes can safely access readonly data from parent scopes and mutable access is prohibited to guard against race conditions.
 
 ## The `ard/async` Module
 
@@ -31,7 +31,7 @@ use ard/io
 
 fn main() {
   io::print("hello...")
-  async::sleep(1000)  // Sleep for 1 second
+  async::sleep(100)  // Sleep for 100ns
   io::print("world!")
 }
 ```
@@ -73,7 +73,7 @@ fn main() {
   io::print("1")
 
   let fiber = async::start(fn() {
-    async::sleep(5000)  // Sleep for 5 seconds
+    async::sleep(5)  // Sleep for 5ns
     io::print("2")
   })
 
@@ -91,27 +91,28 @@ Now the output will always be:
 
 With a 5-second delay between "1" and "2".
 
-## Scope Isolation
+## Scope Access
 
-Fibers run as completely isolated programs. Functions passed to `async::start()` **cannot access variables from the outer scope**:
+Fibers can access **read-only variables** from parent scopes, but cannot access mutable variables:
 
 ```ard
 use ard/async
+use ard/io
 
 fn main() {
-  let value = 42
+  let value = 42      // Immutable - accessible in fiber
+  mut count = 0       // Mutable - NOT accessible in fiber
 
   async::start(fn() {
-    // Error: cannot access `value` - it's not in scope
-    io::print(value)
+    io::print(value)  // ✅ Works! Read-only access is safe
+    count += 1        // ❌ Error: mutable variables are isolated
   })
 }
 ```
 
-This restriction prevents data races and ensures safe concurrent execution. Each fiber must use:
-- Its own local variables
-- Module imports (which are loaded fresh for each fiber)
-- Module-level functions and constants
+This design provides safe concurrent execution by:
+- **Allowing** access to readonly variables
+- **Preventing** access to mutable references, which could cause race conditions
 
 ### Practical Example
 
@@ -119,18 +120,20 @@ For background tasks that need external data, use module-level functions or relo
 
 ```ard
 use ard/async
+use ard/duration
 use maestro/config
 use maestro/db
 
 fn main() {
   // Start background worker
   async::start(fn() {
-    // Each fiber creates its own database connection
     let conn = db::connect()
 
     while true {
       // Do work...
-      async::sleep(60000)
+      conn.query("SELECT * FROM foo WHERE id = @id").run(["id": 1])
+      // ...
+      async::sleep(duration::from_minutes(5))
     }
   })
 
@@ -140,8 +143,6 @@ fn main() {
 
 ## Design Philosophy
 
-Think of `async::start()` as spawning an **independent program** that runs concurrently. Each fiber:
-- Loads its own copy of all modules
-- Has its own isolated scope and state
-- Cannot share memory with other fibers
-- Must manage its own resources (connections, file handles, etc.)
+Each fiber runs in its own concurrent context with:
+- **Read-only access** to immutable variables from parent scopes
+- **Complete isolation** from mutable state
