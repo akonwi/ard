@@ -60,6 +60,17 @@ let data = decode::any("true")
 let active = decode::run(data, decode::bool).expect("")  // true
 ```
 
+### Parsing JSON
+
+The `decode::from_json()` function parses JSON strings into `Dynamic` data:
+
+```ard
+use ard/decode
+
+// Parse a JSON string
+let data = decode::from_json("{\"name\": \"Alice\", \"age\": 30}").expect("Invalid JSON")
+```
+
 ### Entry Point Function
 
 The `decode::run()` function applies a decoder to dynamic data:
@@ -88,12 +99,24 @@ let text = maybe_text.or("default")  // "hello"
 
 ### Lists
 
-Decode arrays using `list()`:
+Decode entire arrays using `list()`:
 
 ```ard
-let data = decode::any("[1, 2, 3, 4, 5]")
+let data = decode::from_json("[1, 2, 3, 4, 5]").expect("Invalid JSON")
 let numbers = decode::run(data, decode::list(decode::int)).expect("")
 numbers.size()  // 5
+```
+
+### Array Element Access
+
+Extract a specific element from an array using `at()`:
+
+```ard
+let data = decode::from_json("[\"first\", \"second\", \"third\"]").expect("Invalid JSON")
+
+// Decode the element at index 0
+let first = decode::run(data, decode::at(0, decode::string)).expect("")
+first  // "first"
 ```
 
 ### Maps
@@ -114,7 +137,7 @@ Extract specific fields from objects using `field()`:
 
 ```ard
 let json = "\{\"user\": \{\"name\": \"Alice\", \"age\": 30\}\}"
-let data = decode::any(json)
+let data = decode::from_json(json).expect("Invalid JSON")
 
 // Extract nested field
 let name = decode::run(data,
@@ -122,6 +145,42 @@ let name = decode::run(data,
     decode::field("name", decode::string)
   )
 ).expect("")  // "Alice"
+```
+
+### Path-Based Field Access
+
+For deeply nested fields, use `path()` to specify a list of keys:
+
+```ard
+let json = "\{\"user\": \{\"profile\": \{\"name\": \"Alice\"\}\}\}"
+let data = decode::from_json(json).expect("Invalid JSON")
+
+// Navigate deeply nested paths with a single list of keys
+let name = decode::run(data, decode::path(["user", "profile", "name"], decode::string)).expect("")
+```
+
+## Additional Decoder Functions
+
+### Handling Multiple Input Types
+
+The `one_of()` function allows trying multiple decoders in sequence until one succeeds. This is useful when external data may be in different formats but you need a single output type:
+
+```ard
+use ard/decode
+
+fn int_to_str(d: Dynamic) Str![decode::Error] {
+  let num = try decode::int(d)
+  Result::ok(num.to_str())
+}
+
+// Try string first, then try an int as a backup
+let decode_as_string = decode::one_of(decode::string, [int_to_str])
+
+let data1 = decode::from_json("\"hello\"").expect("Invalid JSON")
+let result1 = decode_as_string(data1).expect("")  // "hello"
+
+let data2 = decode::from_json("42").expect("Invalid JSON")
+let result2 = decode_as_string(data2).expect("")  // "42"
 ```
 
 ## Advanced Patterns
@@ -177,10 +236,8 @@ fn fetch_pokemon() {
   let response = http::get("https://pokeapi.co/api/v2/pokemon").expect("Request failed")
 
   if response.is_ok() {
-    let data = decode::any(response.body)
-
     // Extract count
-    let count = decode::run(data, decode::field("count", decode::int))
+    let count = decode::run(response.body, decode::field("count", decode::int))
     match count {
       ok(n) => io::print("Total Pokemon: {n}"),
       err(_) => io::print("Could not extract count")
@@ -188,7 +245,7 @@ fn fetch_pokemon() {
 
     // Extract results array
     let results_decoder = decode::list(decode::map(decode::string, decode::string))
-    let results = decode::run(data, decode::field("results", results_decoder))
+    let results = decode::run(response.body, decode::field("results", results_decoder))
     match results {
       ok(pokemon_list) => io::print("Found {pokemon_list.size()} Pokemon"),
       err(_) => io::print("Could not extract results")
