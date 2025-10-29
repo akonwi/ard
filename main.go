@@ -23,7 +23,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "version":
-		fmt.Printf(version.Get())
+		fmt.Println(version.Get())
 		os.Exit(0)
 	case "check":
 		{
