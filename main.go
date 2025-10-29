@@ -9,6 +9,7 @@ import (
 
 	"github.com/akonwi/ard/ast"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/version"
 	"github.com/akonwi/ard/vm"
 )
 
@@ -21,6 +22,9 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "version":
+		fmt.Printf(version.Get())
+		os.Exit(0)
 	case "check":
 		{
 			buildCmd.Parse(os.Args[2:])
