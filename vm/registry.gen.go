@@ -28,6 +28,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("ListToDynamic", ffi.ListToDynamic); err != nil {
 		return fmt.Errorf("failed to register ListToDynamic: %w", err)
 	}
+	if err := r.Register("MapToDynamic", ffi.MapToDynamic); err != nil {
+		return fmt.Errorf("failed to register MapToDynamic: %w", err)
+	}
 	if err := r.Register("JsonToDynamic", ffi.JsonToDynamic); err != nil {
 		return fmt.Errorf("failed to register JsonToDynamic: %w", err)
 	}

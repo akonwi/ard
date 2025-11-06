@@ -19,3 +19,20 @@ func TestDynamicList(t *testing.T) {
 		}
 		`)
 }
+
+func TestDynamicObject(t *testing.T) {
+	run(t, `
+		use ard/decode
+
+		let data = Dynamic::object([
+			"foo": Dynamic::from_int(0),
+			"baz": Dynamic::from_int(1),
+		])
+
+		let map = decode::run(data, decode::map(decode::string, decode::int)).expect("Couldn't decode data")
+		let foo = map.get("foo")
+		if not foo.or(-1) == 0 {
+			panic("foo key should be 0")
+		}
+		`)
+}
