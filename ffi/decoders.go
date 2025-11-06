@@ -32,6 +32,15 @@ func VoidToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeDynamic(nil)
 }
 
+func ListToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	arg := args[0].AsList()
+	raw := make([]any, len(arg))
+	for i, item := range arg {
+		raw[i] = item.Raw()
+	}
+	return runtime.MakeDynamic(raw)
+}
+
 // Parse external data (JSON text) into Dynamic object
 func JsonToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	jsonString := args[0].AsString()

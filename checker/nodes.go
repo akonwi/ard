@@ -695,6 +695,19 @@ func (f *FunctionDef) Type() Type {
 }
 
 func (f FunctionDef) equal(other Type) bool {
+	if otherF, ok := other.(*ExternalFunctionDef); ok {
+		if len(f.Parameters) != len(otherF.Parameters) {
+			return false
+		}
+
+		for i := range f.Parameters {
+			if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
+				return false
+			}
+		}
+		return true
+	}
+
 	otherF, ok := other.(*FunctionDef)
 	if !ok {
 		return false
