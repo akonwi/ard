@@ -1,11 +1,5 @@
 # TODO
-
-## Initial 0.1.0 build
-- [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
-  - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
-- [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
-  - $Seg could be union of strings or ints
-    - as ints, act as an array index
+- [ ] for loops as expressions
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] allow non-linear declarations at the top level
@@ -65,3 +59,5 @@
 - [ ] eloquent relative conditions
   - `200 <= status <= 300`
 - [ ] allow omitting nullable arguments in function calls
+- [ ] decode::path() could support both field name and array index
+    - `fn decode::path(segments: [Str|Int], as: decode::Decoder<$Out>) $Out![decode::Error] `
