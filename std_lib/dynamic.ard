@@ -4,6 +4,8 @@ extern fn from_int(val: Int) Dynamic = "IntToDynamic"
 extern fn from_float(val: Float) Dynamic = "FloatToDynamic"
 extern fn from_bool(val: Bool) Dynamic = "BoolToDynamic"
 extern fn from_void() Dynamic = "VoidToDynamic"
+extern fn from_list(list: [Dynamic]) Dynamic = "ListToDynamic"
+extern fn object(from: [Str:Dynamic]) Dynamic = "MapToDynamic"
 
 type Primitive = Str | Bool | Int | Float | Void
 
@@ -15,4 +17,12 @@ fn from(primitive: Primitive) Dynamic {
     Float(f) => from_float(f),
     _ => from_void()
   }
+}
+
+fn list(from: [$T], of: fn($T) Dynamic) Dynamic {
+  mut array: [Dynamic] = []
+  for f in from {
+    array.push(of(f))
+  }
+  from_list(array)
 }

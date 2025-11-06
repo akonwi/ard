@@ -286,3 +286,21 @@ func TestJsonEncodeNullableNestedStructs(t *testing.T) {
 		},
 	})
 }
+
+func TestJsonEncodeDynamic(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "encoding an object",
+			input: `
+			use ard/json
+
+			let data = Dynamic::object([
+				"foo": Dynamic::from_int(0),
+				"baz": Dynamic::from_int(1),
+			])
+			json::encode(data)
+			`,
+			want: `{"foo":0,"baz":1}`,
+		},
+	})
+}

@@ -1,19 +1,11 @@
 # TODO
-
-## Initial 0.1.0 build
-- [ ] support json encode options like casing for object keys; snake_case|kebab-case|pascalCase
-  - idea: `fn encode_with(data: $T, casing: CaseEnum) Str!Str`
-- [ ] `fn decode::at(segments: [$Seg], as: decode::Decoder<$Out>) $Out![decode::Error] `
-  - $Seg could be union of strings or ints
-    - as ints, act as an array index
-- [ ] support handling fiber panics
+- [ ] for loops as expressions
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
-- [ ] eloquent relative conditions
-  - `200 <= status <= 300`
 - [ ] allow non-linear declarations at the top level
   -  i.e. a type declared at the top of the file, can reference one declared below
-- [ ] allow omitting nullable arguments in function calls
+- [ ] add helpful functions to ard/list module
+  - map, find, select, take?, partition?
 - [ ] inline block as expression
   ```
   let foo: Int = {
@@ -22,9 +14,6 @@
     stuff + 5
   }
   ```
-- [ ] start versioning (begin with 0.1.0)
-
-## Future improvements
 - [ ] type casting a map literal
   `Map::new<Str, sqlite::Value>(["age": 1, "foo": "bar"])`
 - [ ] map and list literals should be compared against the parameter type
@@ -66,3 +55,9 @@
   - should readonly variables with a literal value be considered constants?
     pro: simpler than adding a new `const` keyword and just works
   - would allow limiting variables in `match Int` patterns to constants for better analysis that there are no conflicts or overlaps in patterns
+- [ ] support handling fiber panics
+- [ ] eloquent relative conditions
+  - `200 <= status <= 300`
+- [ ] allow omitting nullable arguments in function calls
+- [ ] decode::path() could support both field name and array index
+    - `fn decode::path(segments: [Str|Int], as: decode::Decoder<$Out>) $Out![decode::Error] `
