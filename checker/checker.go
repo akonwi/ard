@@ -1378,7 +1378,8 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 		return &VoidLiteral{}
 	case *ast.NumLiteral:
 		{
-			if strings.Contains(s.Value, ".") {
+			stripped := strings.ReplaceAll(s.Value, "_", "")
+			if strings.Contains(stripped, ".") {
 				value, err := strconv.ParseFloat(s.Value, 64)
 				if err != nil {
 					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
@@ -1386,7 +1387,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 				return &FloatLiteral{Value: value}
 			}
-			value, err := strconv.Atoi(s.Value)
+			value, err := strconv.Atoi(stripped)
 			if err != nil {
 				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
 			}

@@ -29,7 +29,7 @@ func runLexing(t *testing.T, tests []lexTest) {
 func TestLexing(t *testing.T) {
 	runLexing(t, []lexTest{
 		{
-			name: "comments",
+			name:  "comments",
 			input: "// this is a comment",
 			want: []token{
 				{kind: comment, line: 1, column: 1, text: "// this is a comment"},
@@ -41,7 +41,7 @@ func TestLexing(t *testing.T) {
 			name: "variables",
 			input: strings.Join([]string{
 				"mut x = 5",
-				"let y = 10",
+				"let y = 1_000",
 				`let string: Str = "hello"`,
 				"x = 20",
 				"mut temp: Float = 98.6",
@@ -56,8 +56,8 @@ func TestLexing(t *testing.T) {
 				{kind: let, line: 2, column: 1},
 				{kind: identifier, line: 2, column: 5, text: "y"},
 				{kind: equal, line: 2, column: 7},
-				{kind: number, line: 2, column: 9, text: "10"},
-				{kind: new_line, line: 2, column: 11},
+				{kind: number, line: 2, column: 9, text: "1_000"},
+				{kind: new_line, line: 2, column: 14},
 
 				{kind: let, line: 3, column: 1},
 				{kind: identifier, line: 3, column: 5, text: "string"},

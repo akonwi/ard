@@ -82,11 +82,11 @@ const (
 	str   = "str"
 
 	// Literals
-	path          = "path"
-	identifier    = "identifier"
-	number        = "number"
-	string_       = "string"
-	comment = "comment"
+	path       = "path"
+	identifier = "identifier"
+	number     = "number"
+	string_    = "string"
+	comment    = "comment"
 
 	eof = "eof"
 )
@@ -385,8 +385,6 @@ func (l *lexer) comment(start *char) token {
 	return token{kind: comment, line: start.line, column: start.col, text: text}
 }
 
-
-
 func (l *lexer) takeString(start char) (token, bool) {
 	sb := strings.Builder{}
 
@@ -601,7 +599,7 @@ func (l *lexer) at(i int) *char {
 func (l *lexer) takeNumber() token {
 	// record the start column
 	column := l.column - 1
-	for l.hasMore() && (l.peek().isDigit() || (l.check(".") && !l.check(".."))) {
+	for l.hasMore() && (l.peek().isDigit() || l.check("_") || (l.check(".") && !l.check(".."))) {
 		if l.check(".") && !l.at(l.cursor+1).isDigit() {
 			break
 		}

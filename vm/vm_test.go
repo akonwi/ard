@@ -132,7 +132,7 @@ func TestNumberOperations(t *testing.T) {
 		input string
 		want  any
 	}{
-		{input: `30 + 12`, want: 42},
+		{input: `3_000 + 12`, want: 3012},
 		{input: `30 - 2`, want: 28},
 		{input: `30 * 2`, want: 60},
 		{input: `30 / 2`, want: 15},
