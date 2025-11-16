@@ -130,6 +130,21 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("WaitFor", ffi.WaitFor); err != nil {
 		return fmt.Errorf("failed to register WaitFor: %w", err)
 	}
+	if err := r.Register("SqlCreateConnection", ffi.SqlCreateConnection); err != nil {
+		return fmt.Errorf("failed to register SqlCreateConnection: %w", err)
+	}
+	if err := r.Register("SqlClose", ffi.SqlClose); err != nil {
+		return fmt.Errorf("failed to register SqlClose: %w", err)
+	}
+	if err := r.Register("SqlExtractParams", ffi.SqlExtractParams); err != nil {
+		return fmt.Errorf("failed to register SqlExtractParams: %w", err)
+	}
+	if err := r.Register("SqlQuery", ffi.SqlQuery); err != nil {
+		return fmt.Errorf("failed to register SqlQuery: %w", err)
+	}
+	if err := r.Register("SqlExecute", ffi.SqlExecute); err != nil {
+		return fmt.Errorf("failed to register SqlExecute: %w", err)
+	}
 	if err := r.Register("SqliteCreateConnection", ffi.SqliteCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqliteCreateConnection: %w", err)
 	}

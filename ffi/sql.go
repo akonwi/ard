@@ -7,22 +7,27 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
-	_ "github.com/mattn/go-sqlite3"
 )
 
-// SQLite FFI functions
+// Generic SQL FFI functions supporting multiple database drivers
+// (postgres, mysql, sqlite, etc.)
 
-// Note: SqliteOpen is not needed - the open function is implemented in sqlite.ard
-// Only the core _create_connection function is implemented here
-
-// SqliteCreateConnection creates a new SQLite database connection
-func SqliteCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Object {
+// SqlCreateConnection creates a new database connection from a connection string
+// Supports connection strings for various drivers:
+// - SQLite: "file:test.db" or "test.db"
+// - PostgreSQL: "postgres://user:password@localhost:5432/dbname"
+// - MySQL: "user:password@tcp(localhost:3306)/dbname"
+func SqlCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
-		panic(fmt.Errorf("create_connection expects 1 argument, got %d", len(args)))
+		panic(fmt.Errorf("open expects 1 argument, got %d", len(args)))
 	}
 
-	filePath := args[0].Raw().(string)
-	conn, err := sql.Open("sqlite3", filePath)
+	connectionString := args[0].Raw().(string)
+
+	// Determine driver from connection string
+	driver := detectDriver(connectionString)
+
+	conn, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
@@ -36,15 +41,33 @@ func SqliteCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Obj
 	return runtime.MakeOk(runtime.MakeDynamic(conn))
 }
 
-// SqliteClose closes a database connection
-func SqliteClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
+// detectDriver identifies the SQL driver based on the connection string
+func detectDriver(connStr string) string {
+	connStr = strings.TrimSpace(connStr)
+
+	// Check for postgres
+	if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
+		return "postgres"
+	}
+
+	// Check for mysql
+	if strings.Contains(connStr, "@tcp(") || strings.Contains(connStr, "@unix(") {
+		return "mysql"
+	}
+
+	// Default to sqlite for any other format (file paths, file: URIs, etc.)
+	return "sqlite3"
+}
+
+// SqlClose closes a database connection
+func SqlClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("close expects 1 argument, got %d", len(args)))
 	}
 
 	conn, ok := args[0].Raw().(*sql.DB)
 	if !ok {
-		panic(fmt.Errorf("SQLite Error: invalid connection object"))
+		panic(fmt.Errorf("SQL Error: invalid connection object"))
 	}
 
 	err := conn.Close()
@@ -56,7 +79,7 @@ func SqliteClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // Extract parameter names from a sql expression in the order they appear
-func SqliteExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("extract_params expects 1 argument, got %d", len(args)))
 	}
@@ -92,15 +115,37 @@ func SqliteExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object
 	return runtime.MakeList(checker.Str, result...)
 }
 
+// splitSQLByMultipleDelimiters is a helper function to split string by multiple delimiters
+// Used by both SQL and SQLite extract_params implementations
+func splitSQLByMultipleDelimiters(s string, delimiters []string) []string {
+	// Replace all delimiters with a single delimiter, then split
+	result := s
+	for _, delimiter := range delimiters {
+		result = strings.ReplaceAll(result, delimiter, " ")
+	}
+
+	// Split by space and filter out empty strings
+	tokens := strings.Split(result, " ")
+	var nonEmpty []string
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token != "" {
+			nonEmpty = append(nonEmpty, token)
+		}
+	}
+
+	return nonEmpty
+}
+
 // executes a query and returns the rows
-func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
 	}
 
 	conn, ok := args[0].Raw().(*sql.DB)
 	if !ok {
-		panic(fmt.Errorf("SQLite Error: invalid connection object"))
+		panic(fmt.Errorf("SQL Error: invalid connection object"))
 	}
 
 	sqlStr := args[1].AsString()
@@ -160,14 +205,14 @@ func SqliteQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // executes a query and doesn't return rows
-func SqliteExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
 	}
 
 	conn, ok := args[0].Raw().(*sql.DB)
 	if !ok {
-		return runtime.MakeErr(runtime.MakeStr("SQLite Error: invalid connection object"))
+		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
 	}
 
 	sqlStr := args[1].AsString()
