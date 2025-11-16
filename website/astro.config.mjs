@@ -54,6 +54,12 @@ export default defineConfig({
           ],
         },
         {
+          label: "Standard Library",
+          items: [
+            { label: "ard/sql", slug: "stdlib/sql" },
+          ],
+        },
+        {
           label: "Examples",
           items: [{ label: "Code Samples", slug: "examples/samples" }],
         },
