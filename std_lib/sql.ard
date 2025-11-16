@@ -6,12 +6,12 @@ use ard/result as Result
 // Only support primitives as values for query variables
 type Value = Str | Bool | Int | Float | Void
 
-private extern fn connect(filepath: Str) Dynamic!Str = "SqliteCreateConnection"
-private extern fn close_connection(conn: Dynamic) Void!Str = "SqliteClose"
-private extern fn execute(conn: Dynamic, sql: Str, values: [Value]) Void!Str = "SqliteExecute"
-private extern fn run_query(conn: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqliteQuery"
+private extern fn connect(connection_string: Str) Dynamic!Str = "SqlCreateConnection"
+private extern fn close_connection(conn: Dynamic) Void!Str = "SqlClose"
+private extern fn execute(conn: Dynamic, sql: Str, values: [Value]) Void!Str = "SqlExecute"
+private extern fn run_query(conn: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
 
-extern fn extract_params(sql: Str) [Str] = "SqliteExtractParams"
+extern fn extract_params(sql: Str) [Str] = "SqlExtractParams"
 
 struct Query {
   conn: Dynamic,
@@ -53,30 +53,30 @@ impl Query {
   }
 }
 
-struct Database {
-  conn: Dynamic
-  filepath: Str
+struct Connection {
+  _ptr: Dynamic
+  path: Str
 }
 
-fn open(filepath: Str) Database!Str {
-  let conn = try connect(filepath)
-  Result::ok(Database{ conn: conn, filepath: filepath })
+fn open(path: Str) Connection!Str {
+  let conn = try connect(path)
+  Result::ok(Connection{ _ptr: conn, path: path })
 }
 
-impl Database {
+impl Connection {
   fn close() Void!Str {
-    close_connection(@conn)
+    close_connection(@_ptr)
   }
 
   // simple one-off executions where the results aren't needed
   // [note]: could be removed entirely for query.run() once optional params are sorted
   fn exec(sql: Str) Void!Str {
-    execute(@conn, sql, List::new<Value>())
+    execute(@_ptr, sql, List::new<Value>())
   }
 
   fn query(sql: Str) Query {
     Query{
-      conn: @conn,
+      conn: @_ptr,
       string: sql,
       params: extract_params(sql),
     }

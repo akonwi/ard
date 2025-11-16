@@ -5,26 +5,26 @@ import (
 	"testing"
 )
 
-func TestSQLiteOpen(t *testing.T) {
+func TestSQLOpen(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test.db"
 	defer os.Remove(testDB)
 
-	// Test opening database and creating table
+	// Test opening database and creating table using generic sql module
 	run(t, `
-		use ard/sqlite
-		let db = sqlite::open("test.db").expect("Failed to open database")
+		use ard/sql
+		let db = sql::open("test.db").expect("Failed to open database")
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
 	`)
 }
 
-func TestSQLiteClose(t *testing.T) {
+func TestSQLClose(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_close.db"
 	defer os.Remove(testDB)
 
 	run(t, `
-		use ard/sqlite
+		use ard/sql
 		use ard/decode
 		struct Player {
 			id: Int,
@@ -32,18 +32,18 @@ func TestSQLiteClose(t *testing.T) {
 			number: Int,
 		}
 
-		let db = sqlite::open("test_close.db").expect("Failed to open database")
+		let db = sql::open("test_close.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		db.close().expect("should succeed")
 	`)
 }
 
-func TestSqliteExtractParams(t *testing.T) {
+func TestSqlExtractParams(t *testing.T) {
 	run(t, `
-		use ard/sqlite
+		use ard/sql
 
-		let params = sqlite::extract_params("INSERT INTO players (name, number) VALUES (@name, @number)")
+		let params = sql::extract_params("INSERT INTO players (name, number) VALUES (@name, @number)")
 		if not params.size() == 2 {
 			panic("Expected a list of 2 elements")
 		}
@@ -64,20 +64,20 @@ func TestSqliteExtractParams(t *testing.T) {
 	`)
 }
 
-func TestSQLiteQueryRun(t *testing.T) {
+func TestSQLQueryRun(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"
 	defer os.Remove(testDB)
 
 	run(t, `
-		use ard/sqlite
+		use ard/sql
 		use ard/decode
 
-		let db = sqlite::open("test_insert.db").expect("Failed to open database")
+		let db = sql::open("test_insert.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-		let values: [Str:sqlite::Value] = [
+		let values: [Str:sql::Value] = [
 		  "name": "John Doe",
 			"number": 2,
 		]
@@ -85,20 +85,20 @@ func TestSQLiteQueryRun(t *testing.T) {
 	`)
 }
 
-func TestSQLiteQueryError(t *testing.T) {
+func TestSQLQueryError(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_error.db"
 	defer os.Remove(testDB)
 
 	expectPanic(t, "Insert should fail", `
-		use ard/sqlite
+		use ard/sql
 		use ard/decode
 
-		let db = sqlite::open("test_error.db").expect("Failed to open database")
+		let db = sql::open("test_error.db").expect("Failed to open database")
 		// Don't create the table - this should cause an error
 
 		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-		let values: [Str:sqlite::Value] = [
+		let values: [Str:sql::Value] = [
 		  "name": "John Doe",
 			"number": 2,
 		]
@@ -106,23 +106,23 @@ func TestSQLiteQueryError(t *testing.T) {
 `)
 }
 
-func TestSQLiteQueryAll(t *testing.T) {
+func TestSQLQueryAll(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_query_decode.db"
 	defer os.Remove(testDB)
 
 	run(t, `
-		use ard/sqlite
+		use ard/sql
 		use ard/decode
 		use ard/maybe
 
-		let db = sqlite::open("test_query_decode.db").expect("Failed to open database")
+		let db = sql::open("test_query_decode.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
 		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
 
 		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
-		let vals: [Str:sqlite::Value] = ["number": 5]
+		let vals: [Str:sql::Value] = ["number": 5]
 		let rows = query.all(vals).expect("Failed to query players")
 		if not rows.size() == 1 {
 			panic("Expected 1 result, got {rows.size()}")
@@ -136,23 +136,23 @@ func TestSQLiteQueryAll(t *testing.T) {
 	`)
 }
 
-func TestSQLiteQueryFirst(t *testing.T) {
+func TestSQLQueryFirst(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_query_first.db"
 	defer os.Remove(testDB)
 
 	run(t, `
-		use ard/sqlite
+		use ard/sql
 		use ard/decode
 		use ard/maybe
 
-		let db = sqlite::open("test_query_first.db").expect("Failed to open database")
+		let db = sql::open("test_query_first.db").expect("Failed to open database")
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 		db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
 		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
 
 		let query = db.query("SELECT id FROM players WHERE number = @number")
-		let vals: [Str:sqlite::Value] = ["number": 5]
+		let vals: [Str:sql::Value] = ["number": 5]
 		let maybe_row = query.first(vals).expect("Failed to query players")
 		let row = maybe_row.expect("Found none")
 
@@ -164,22 +164,22 @@ func TestSQLiteQueryFirst(t *testing.T) {
 	`)
 }
 
-func TestSQLiteInsertingNull(t *testing.T) {
+func TestSQLInsertingNull(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_maybe.db"
 	defer os.Remove(testDB)
 
 	run(t, `
-		use ard/sqlite
+		use ard/sql
 		use ard/decode
 
-		let db = sqlite::open("test_maybe.db").expect("Failed to open database")
+		let db = sql::open("test_maybe.db").expect("Failed to open database")
 		let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
-		let values: [Str:sqlite::Value] = [:]
+		let values: [Str:sql::Value] = [:]
 		create_table.run(values)
 
 		let stmt = db.query("INSERT INTO users (name, email) VALUES (@name, @email)")
-		let values: [Str:sqlite::Value] = [
+		let values: [Str:sql::Value] = [
 		  "name": "John Doe",
 			"email": ()
 		]
