@@ -7,6 +7,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Generic SQL FFI functions supporting multiple database drivers
