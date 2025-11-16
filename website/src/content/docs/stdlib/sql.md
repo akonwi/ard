@@ -49,7 +49,7 @@ sql::open("postgres://user:password@localhost:5432/dbname")
 sql::open("user:password@tcp(localhost:3306)/dbname")
 ```
 
-### `fn Database.exec(stmt: Str) Void!Str`
+### `fn Connection.exec(stmt: Str) Void!Str`
 
 Use `exec()` for operations which may not return rows or to ignore the results.
 
@@ -67,7 +67,7 @@ The `exec()` function does not support parameter sanitization. Be wary of using 
 For safe usage of external values, use the below methods.
 :::
 
-### `fn Database.query(stmt: Str) sql::Query`
+### `fn Connection.query(stmt: Str) sql::Query`
 
 Use `query()` to create reusable query objects that can be executed with arguments to prevent SQL injection.
 
@@ -90,7 +90,7 @@ stmt.run(insert_values).expect("Insert failed")
 The `Query` struct has the following methods to choose how many rows are returned:
 
 
-__`run(args: [Str: sql::Value]) Void!Str`__: Similar to `Database.exec()` doesn't return results
+__`run(args: [Str: sql::Value]) Void!Str`__: Similar to `Connection.exec()` doesn't return results
 
 __`all(args: [Str: sql::Value]) [Dynamic]!Str`__: Returns all the found rows as a list of `Dynamic`, which can be decoded with the `ard/decode` module
 
