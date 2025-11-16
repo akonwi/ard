@@ -32,7 +32,7 @@ fn main() {
 
 ## API
 
-### `fn open(path: Str) Database!Str`
+### `fn open(path: Str) Connection!Str`
 
 This function accepts a path to a database and returns a result of connection object or error message, in case of failure
 
