@@ -53,17 +53,17 @@ impl Query {
   }
 }
 
-struct Database {
+struct Connection {
   conn: Dynamic
   connection_string: Str
 }
 
-fn open(connection_string: Str) Database!Str {
+fn open(connection_string: Str) Connection!Str {
   let conn = try connect(connection_string)
-  Result::ok(Database{ conn: conn, connection_string: connection_string })
+  Result::ok(Connection{ conn: conn, connection_string: connection_string })
 }
 
-impl Database {
+impl Connection {
   fn close() Void!Str {
     close_connection(@conn)
   }
