@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -14,8 +13,6 @@ import (
 )
 
 func main() {
-	buildCmd := flag.NewFlagSet("build", flag.ExitOnError)
-
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide a command")
 		os.Exit(1)
@@ -27,14 +24,12 @@ func main() {
 		os.Exit(0)
 	case "check":
 		{
-			buildCmd.Parse(os.Args[2:])
-
-			if buildCmd.NArg() < 1 {
+			if len(os.Args) < 3 {
 				fmt.Println("Expected filepath argument")
 				os.Exit(1)
 			}
 
-			inputPath := buildCmd.Arg(0)
+			inputPath := os.Args[2]
 			if !check(inputPath) {
 				os.Exit(1)
 			}
@@ -44,14 +39,12 @@ func main() {
 		}
 	case "run":
 		{
-			buildCmd.Parse(os.Args[2:])
-
-			if buildCmd.NArg() < 1 {
+			if len(os.Args) < 3 {
 				fmt.Println("Expected filepath argument")
 				os.Exit(1)
 			}
 
-			inputPath := buildCmd.Arg(0)
+			inputPath := os.Args[2]
 			sourceCode, err := os.ReadFile(inputPath)
 			if err != nil {
 				fmt.Printf("Error reading file %s - %v\n", inputPath, err)
@@ -92,7 +85,8 @@ func main() {
 			}
 		}
 	default:
-		log.Fatalf("Unknown command: %s\n", os.Args[1])
+		fmt.Printf("Unknown command: %s\n", os.Args[1])
+		os.Exit(1)
 	}
 }
 
