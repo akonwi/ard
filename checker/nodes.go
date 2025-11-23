@@ -182,6 +182,10 @@ func (i *InstanceMethod) Type() Type {
 	return i.Method.Type()
 }
 
+func (i *InstanceMethod) String() string {
+	return fmt.Sprintf("%s.%s", i.Subject, i.Method.Name)
+}
+
 type Negation struct {
 	Value Expression
 }
