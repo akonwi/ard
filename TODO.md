@@ -1,5 +1,9 @@
 # TODO
+- [ ] infer types in anonymous functions
 - [ ] for loops as expressions
+  - evaluates to a list that can be assigned to a variable
+    - can't be used in place of other expressions - m
+  - broken loops: still a list up to the break point
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] allow non-linear declarations at the top level
@@ -19,7 +23,6 @@
 - [ ] map and list literals should be compared against the parameter type
   - `query.run(["foo":2, "bar": false])` is map with two valid values but the compiler complains that keys aren't consistent
 - [ ] `?` sugar for safely unwrapping maybes
-- [ ] infer types in anonymous functions
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
 - [ ] selective variable capture for closures
