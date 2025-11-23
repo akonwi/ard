@@ -7,3 +7,15 @@ fn concat(a: [$T], b: [$T]) [$T] {
   }
   res
 }
+
+// returns a new list of the items, dropping the elements before the given index
+fn drop(from: [$T], till: Int) [$T] {
+  mut out: [$T] = []
+  for t, idx in from {
+    if idx >= till {
+      out.push(t)
+    }
+  }
+
+  out
+}

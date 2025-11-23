@@ -13,6 +13,14 @@ import (
 
 // Runtime module FFI functions
 
+func OsArgs(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+	var out []*runtime.Object = make([]*runtime.Object, len(os.Args))
+	for i, a := range os.Args {
+		out[i] = runtime.MakeStr(a)
+	}
+	return runtime.MakeList(checker.Str, out...)
+}
+
 // Print prints a value to stdout
 func Print(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {

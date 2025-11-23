@@ -109,6 +109,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("NewList", ffi.NewList); err != nil {
 		return fmt.Errorf("failed to register NewList: %w", err)
 	}
+	if err := r.Register("OsArgs", ffi.OsArgs); err != nil {
+		return fmt.Errorf("failed to register OsArgs: %w", err)
+	}
 	if err := r.Register("Print", ffi.Print); err != nil {
 		return fmt.Errorf("failed to register Print: %w", err)
 	}
