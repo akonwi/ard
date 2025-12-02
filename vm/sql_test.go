@@ -193,20 +193,6 @@ func TestSQLInsertingNull(t *testing.T) {
 	`)
 }
 
-func TestTransactionBegin(t *testing.T) {
-	// Clean up any existing test database
-	testDB := "test_tx_begin.db"
-	defer os.Remove(testDB)
-
-	run(t, `
-		use ard/sql
-
-		let db = sql::open("test_tx_begin.db").expect("Failed to open database")
-		let tx = db.begin().expect("Failed to begin transaction")
-		tx.commit().expect("Failed to commit transaction")
-	`)
-}
-
 func TestTransactionRollback(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_tx_rollback.db"
@@ -216,8 +202,16 @@ func TestTransactionRollback(t *testing.T) {
 		use ard/sql
 
 		let db = sql::open("test_tx_rollback.db").expect("Failed to open database")
+		db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)").run([:])
+
 		let tx = db.begin().expect("Failed to begin transaction")
+		tx.exec("INSERT INTO users (id, name) VALUES (1, 'joe');").expect("Failed to insert")
 		tx.rollback().expect("Failed to rollback transaction")
+
+		let rows = db.query("SELECT * FROM users;").all([:]).expect("Failed to get all")
+		if not rows.size() == 0 {
+			panic("Expected no rows after rollback")
+		}
 	`)
 }
 
@@ -233,13 +227,17 @@ func TestTransactionCommitInsert(t *testing.T) {
 		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
 
 		let tx = db.begin().expect("Failed to begin transaction")
-		tx.exec("INSERT INTO users (name) VALUES ('Alice')").expect("Failed to insert in transaction")
+		let insert = tx.query("INSERT INTO users (name) VALUES (@name)")
+
+		let names = ["Alice", "Bob"]
+		for name in names {
+			insert.run(["name":name]).expect("Failed to insert {name}")
+		}
 		tx.commit().expect("Failed to commit transaction")
 
-		// Verify insert persisted
 		let rows = db.query("SELECT * FROM users").all([:]).expect("Failed to query")
-		if not rows.size() == 1 {
-			panic("Expected 1 row after commit, got {rows.size()}")
+		if not rows.size() == names.size() {
+			panic("Expected {names.size()} rows after commit, got {rows.size()}")
 		}
 	`)
 }

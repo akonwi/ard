@@ -206,7 +206,7 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	} else if tx, ok := connRaw.(*sql.Tx); ok {
 		runner = tx
 	} else {
-		panic(fmt.Errorf("SQL Error: invalid connection object"))
+		return runtime.MakeStr(fmt.Sprintf("SQL Error: invalid connection object: %T", connRaw))
 	}
 
 	sqlStr := args[1].AsString()
@@ -290,7 +290,7 @@ func SqlCommit(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	err := tx.Commit()
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to commit transaction: %v", err)))
+		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to commit transaction: %s", err)))
 	}
 
 	return runtime.MakeOk(runtime.Void())
@@ -309,7 +309,7 @@ func SqlRollback(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	err := tx.Rollback()
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to rollback transaction: %v", err)))
+		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to rollback transaction: %s", err.Error())))
 	}
 
 	return runtime.MakeOk(runtime.Void())
