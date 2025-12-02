@@ -432,3 +432,39 @@ func TestNamedArguments(t *testing.T) {
 		},
 	})
 }
+
+func TestInferringEmptyCollectionArguments(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Empty array argument has no error",
+			input: `
+				fn greet(names: [Str]) {}
+				greet(names: [])
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Empty map argument has no error",
+			input: `
+				fn foo(map: [Str:Int]) {}
+				foo(map: [:])
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
+func TestUsingValidTypesForUnionArguments(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Map literal with union values",
+			input: `
+				use ard/sql
+
+				fn foo(values: [Str : sql::Value]) {}
+				foo(values: ["int":1, "str":"hey"])
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}

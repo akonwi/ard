@@ -77,11 +77,10 @@ func TestSQLQueryRun(t *testing.T) {
 		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
 
 		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-		let values: [Str:sql::Value] = [
-		  "name": "John Doe",
+  	stmt.run([
+   		"name": "John Doe",
 			"number": 2,
-		]
-  	stmt.run(values).expect("Insert failed")
+   	]).expect("Insert failed")
 	`)
 }
 
@@ -98,11 +97,10 @@ func TestSQLQueryError(t *testing.T) {
 		// Don't create the table - this should cause an error
 
 		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-		let values: [Str:sql::Value] = [
+		stmt.run([
 		  "name": "John Doe",
 			"number": 2,
-		]
-		stmt.run(values).expect("Insert should fail")
+		]).expect("Insert should fail")
 `)
 }
 
@@ -122,8 +120,7 @@ func TestSQLQueryAll(t *testing.T) {
 		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
 
 		let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
-		let vals: [Str:sql::Value] = ["number": 5]
-		let rows = query.all(vals).expect("Failed to query players")
+		let rows = query.all(["number": 5]).expect("Failed to query players")
 		if not rows.size() == 1 {
 			panic("Expected 1 result, got {rows.size()}")
 		}
@@ -152,8 +149,7 @@ func TestSQLQueryFirst(t *testing.T) {
 		db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
 
 		let query = db.query("SELECT id FROM players WHERE number = @number")
-		let vals: [Str:sql::Value] = ["number": 5]
-		let maybe_row = query.first(vals).expect("Failed to query players")
+		let maybe_row = query.first(["number": 5]).expect("Failed to query players")
 		let row = maybe_row.expect("Found none")
 
 		let decode_name = decode::field("name", decode::string)
@@ -175,8 +171,7 @@ func TestSQLInsertingNull(t *testing.T) {
 
 		let db = sql::open("test_maybe.db").expect("Failed to open database")
 		let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
-		let values: [Str:sql::Value] = [:]
-		create_table.run(values)
+		create_table.run([:])
 
 		let stmt = db.query("INSERT INTO users (name, email) VALUES (@name, @email)")
 		let values: [Str:sql::Value] = [
@@ -242,8 +237,7 @@ func TestTransactionCommitInsert(t *testing.T) {
 		tx.commit().expect("Failed to commit transaction")
 
 		// Verify insert persisted
-		let values: [Str:sql::Value] = [:]
-		let rows = db.query("SELECT * FROM users").all(values).expect("Failed to query")
+		let rows = db.query("SELECT * FROM users").all([:]).expect("Failed to query")
 		if not rows.size() == 1 {
 			panic("Expected 1 row after commit, got {rows.size()}")
 		}
@@ -266,8 +260,7 @@ func TestTransactionRollbackInsert(t *testing.T) {
 		tx.rollback().expect("Failed to rollback transaction")
 
 		// Verify insert was rolled back
-		let values: [Str:sql::Value] = [:]
-		let rows = db.query("SELECT * FROM users").all(values).expect("Failed to query")
+		let rows = db.query("SELECT * FROM users").all([:]).expect("Failed to query")
 		if not rows.size() == 0 {
 			panic("Expected 0 rows after rollback, got {rows.size()}")
 		}
@@ -288,8 +281,7 @@ func TestTransactionQueryRead(t *testing.T) {
 		db.exec("INSERT INTO users (name) VALUES ('Charlie')").expect("Failed to insert")
 
 		let tx = db.begin().expect("Failed to begin transaction")
-		let values: [Str:sql::Value] = [:]
-		let rows = tx.query("SELECT * FROM users").all(values).expect("Failed to query in transaction")
+		let rows = tx.query("SELECT * FROM users").all([:]).expect("Failed to query in transaction")
 		tx.commit().expect("Failed to commit transaction")
 
 		if not rows.size() == 1 {
@@ -317,8 +309,7 @@ func TestTransactionMultipleOperations(t *testing.T) {
 		let tx = db.begin().expect("Failed to begin transaction")
 		tx.exec("INSERT INTO items (name) VALUES ('Item1')").expect("Failed to insert Item1")
 		tx.exec("INSERT INTO items (name) VALUES ('Item2')").expect("Failed to insert Item2")
-		let values: [Str:sql::Value] = [:]
-		let rows = tx.query("SELECT * FROM items").all(values).expect("Failed to query in transaction")
+		let rows = tx.query("SELECT * FROM items").all([:]).expect("Failed to query in transaction")
 		tx.commit().expect("Failed to commit transaction")
 
 		if not rows.size() == 2 {
@@ -326,8 +317,7 @@ func TestTransactionMultipleOperations(t *testing.T) {
 		}
 
 		// Verify all inserts persisted
-		let values2: [Str:sql::Value] = [:]
-		let final_rows = db.query("SELECT * FROM items").all(values2).expect("Failed to query after commit")
+		let final_rows = db.query("SELECT * FROM items").all([:]).expect("Failed to query after commit")
 		if not final_rows.size() == 2 {
 			panic("Expected 2 rows after commit, got {final_rows.size()}")
 		}
@@ -351,8 +341,7 @@ func TestTransactionRollbackMultipleOperations(t *testing.T) {
 		tx.rollback().expect("Failed to rollback transaction")
 
 		// Verify all inserts were rolled back
-		let values: [Str:sql::Value] = [:]
-		let rows = db.query("SELECT * FROM items").all(values).expect("Failed to query")
+		let rows = db.query("SELECT * FROM items").all([:]).expect("Failed to query")
 		if not rows.size() == 0 {
 			panic("Expected 0 rows after rollback, got {rows.size()}")
 		}

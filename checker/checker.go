@@ -1248,7 +1248,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 				hasError = true
 				continue
 			}
-			if !expectedKeyType.equal(key.Type()) {
+			if !areCompatible(expectedKeyType, key.Type()) {
 				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
 				hasError = true
 				continue
@@ -1261,7 +1261,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 				hasError = true
 				continue
 			}
-			if !expectedValueType.equal(value.Type()) {
+			if !areCompatible(expectedValueType, value.Type()) {
 				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
 				hasError = true
 				continue
@@ -1527,13 +1527,23 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Check and process arguments
 			args := make([]Expression, len(resolvedArgs))
 			for i, arg := range resolvedArgs {
-				checkedArg := c.checkExpr(resolvedExprs[i])
+				// Get the expected parameter type
+				paramType := fnDef.Parameters[i].Type
+
+				// For list and map literals, use checkExprAs to infer type from context
+				var checkedArg Expression
+				switch resolvedExprs[i].(type) {
+				case *ast.ListLiteral, *ast.MapLiteral:
+					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+				default:
+					checkedArg = c.checkExpr(resolvedExprs[i])
+				}
+
 				if checkedArg == nil {
 					return nil
 				}
 
 				// Type check the argument against the parameter type
-				paramType := fnDef.Parameters[i].Type
 				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
 					return nil
@@ -1638,13 +1648,23 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			// Check and process arguments
 			args := make([]Expression, len(s.Method.Args))
 			for i, arg := range s.Method.Args {
-				checkedArg := c.checkExpr(arg.Value)
+				// Get the expected parameter type
+				paramType := fnDef.Parameters[i].Type
+				
+				// For list and map literals, use checkExprAs to infer type from context
+				var checkedArg Expression
+				switch arg.Value.(type) {
+				case *ast.ListLiteral, *ast.MapLiteral:
+					checkedArg = c.checkExprAs(arg.Value, paramType)
+				default:
+					checkedArg = c.checkExpr(arg.Value)
+				}
+				
 				if checkedArg == nil {
 					return nil
 				}
 
 				// Type check the argument against the parameter type
-				paramType := fnDef.Parameters[i].Type
 				if !areCompatible(paramType, checkedArg.Type()) {
 					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
 					return nil
