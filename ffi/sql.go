@@ -138,29 +138,15 @@ func splitSQLByMultipleDelimiters(s string, delimiters []string) []string {
 	return nonEmpty
 }
 
-// executes a query and returns the rows
-func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	if len(args) != 3 {
-		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
-	}
+// sqlRunner interface abstracts both *sql.DB and *sql.Tx for query execution
+type sqlRunner interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	Exec(query string, args ...any) (sql.Result, error)
+}
 
-	conn, ok := args[0].Raw().(*sql.DB)
-	if !ok {
-		panic(fmt.Errorf("SQL Error: invalid connection object"))
-	}
-
-	sqlStr := args[1].AsString()
-	valuesListObj := args[2]
-
-	// Extract values from the list
-	valuesList := valuesListObj.AsList()
-	var values []any
-	for _, valueObj := range valuesList {
-		// Convert Ard Value union type to Go value
-		values = append(values, valueObj.GoValue())
-	}
-
-	rows, err := conn.Query(sqlStr, values...)
+// executeQuery is a helper that works with both *sql.DB and *sql.Tx
+func executeQuery(runner sqlRunner, sqlStr string, values []any) *runtime.Object {
+	rows, err := runner.Query(sqlStr, values...)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to execute query: %v", err)))
 	}
@@ -177,10 +163,10 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	for rows.Next() {
 		// Create scan targets for each column
-		values := make([]any, len(columns))
+		scanValues := make([]any, len(columns))
 		scanTargets := make([]any, len(columns))
-		for i := range values {
-			scanTargets[i] = &values[i]
+		for i := range scanValues {
+			scanTargets[i] = &scanValues[i]
 		}
 
 		// Scan the row
@@ -191,7 +177,7 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		// Create map for this row
 		rowMap := make(map[string]any)
 		for i, columnName := range columns {
-			rowMap[columnName] = values[i]
+			rowMap[columnName] = scanValues[i]
 		}
 
 		results = append(results, runtime.MakeDynamic(rowMap))
@@ -205,14 +191,53 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(runtime.MakeList(checker.Dynamic, results...))
 }
 
+// executes a query and returns the rows
+func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	if len(args) != 3 {
+		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
+	}
+
+	connRaw := args[0].Raw()
+
+	// Try to cast to *sql.DB first, then *sql.Tx
+	var runner sqlRunner
+	if db, ok := connRaw.(*sql.DB); ok {
+		runner = db
+	} else if tx, ok := connRaw.(*sql.Tx); ok {
+		runner = tx
+	} else {
+		panic(fmt.Errorf("SQL Error: invalid connection object"))
+	}
+
+	sqlStr := args[1].AsString()
+	valuesListObj := args[2]
+
+	// Extract values from the list
+	valuesList := valuesListObj.AsList()
+	var values []any
+	for _, valueObj := range valuesList {
+		// Convert Ard Value union type to Go value
+		values = append(values, valueObj.GoValue())
+	}
+
+	return executeQuery(runner, sqlStr, values)
+}
+
 // executes a query and doesn't return rows
 func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
 	}
 
-	conn, ok := args[0].Raw().(*sql.DB)
-	if !ok {
+	connRaw := args[0].Raw()
+
+	// Try to cast to *sql.DB first, then *sql.Tx
+	var runner sqlRunner
+	if db, ok := connRaw.(*sql.DB); ok {
+		runner = db
+	} else if tx, ok := connRaw.(*sql.Tx); ok {
+		runner = tx
+	} else {
 		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
 	}
 
@@ -225,9 +250,66 @@ func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		values = append(values, valueObj.GoValue())
 	}
 
-	_, err := conn.Exec(sqlStr, values...)
+	_, err := runner.Exec(sqlStr, values...)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+
+	return runtime.MakeOk(runtime.Void())
+}
+
+// SqlBeginTx begins a new transaction
+func SqlBeginTx(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	if len(args) != 1 {
+		panic(fmt.Errorf("begin expects 1 argument, got %d", len(args)))
+	}
+
+	db, ok := args[0].Raw().(*sql.DB)
+	if !ok {
+		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to begin transaction: %v", err)))
+	}
+
+	return runtime.MakeOk(runtime.MakeDynamic(tx))
+}
+
+// SqlCommit commits a transaction
+func SqlCommit(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	if len(args) != 1 {
+		panic(fmt.Errorf("commit expects 1 argument, got %d", len(args)))
+	}
+
+	tx, ok := args[0].Raw().(*sql.Tx)
+	if !ok {
+		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid transaction object"))
+	}
+
+	err := tx.Commit()
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to commit transaction: %v", err)))
+	}
+
+	return runtime.MakeOk(runtime.Void())
+}
+
+// SqlRollback rolls back a transaction
+func SqlRollback(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	if len(args) != 1 {
+		panic(fmt.Errorf("rollback expects 1 argument, got %d", len(args)))
+	}
+
+	tx, ok := args[0].Raw().(*sql.Tx)
+	if !ok {
+		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid transaction object"))
+	}
+
+	err := tx.Rollback()
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to rollback transaction: %v", err)))
 	}
 
 	return runtime.MakeOk(runtime.Void())

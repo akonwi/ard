@@ -148,6 +148,15 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("SqlExecute", ffi.SqlExecute); err != nil {
 		return fmt.Errorf("failed to register SqlExecute: %w", err)
 	}
+	if err := r.Register("SqlBeginTx", ffi.SqlBeginTx); err != nil {
+		return fmt.Errorf("failed to register SqlBeginTx: %w", err)
+	}
+	if err := r.Register("SqlCommit", ffi.SqlCommit); err != nil {
+		return fmt.Errorf("failed to register SqlCommit: %w", err)
+	}
+	if err := r.Register("SqlRollback", ffi.SqlRollback); err != nil {
+		return fmt.Errorf("failed to register SqlRollback: %w", err)
+	}
 
 	return nil
 }

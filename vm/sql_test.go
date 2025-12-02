@@ -197,3 +197,193 @@ func TestSQLInsertingNull(t *testing.T) {
 		}
 	`)
 }
+
+func TestTransactionBegin(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_begin.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_tx_begin.db").expect("Failed to open database")
+		let tx = db.begin().expect("Failed to begin transaction")
+		tx.commit().expect("Failed to commit transaction")
+	`)
+}
+
+func TestTransactionRollback(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_rollback.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_tx_rollback.db").expect("Failed to open database")
+		let tx = db.begin().expect("Failed to begin transaction")
+		tx.rollback().expect("Failed to rollback transaction")
+	`)
+}
+
+func TestTransactionCommitInsert(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_insert.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_tx_insert.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
+
+		let tx = db.begin().expect("Failed to begin transaction")
+		tx.exec("INSERT INTO users (name) VALUES ('Alice')").expect("Failed to insert in transaction")
+		tx.commit().expect("Failed to commit transaction")
+
+		// Verify insert persisted
+		let values: [Str:sql::Value] = [:]
+		let rows = db.query("SELECT * FROM users").all(values).expect("Failed to query")
+		if not rows.size() == 1 {
+			panic("Expected 1 row after commit, got {rows.size()}")
+		}
+	`)
+}
+
+func TestTransactionRollbackInsert(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_rollback_insert.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_tx_rollback_insert.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
+
+		let tx = db.begin().expect("Failed to begin transaction")
+		tx.exec("INSERT INTO users (name) VALUES ('Bob')").expect("Failed to insert in transaction")
+		tx.rollback().expect("Failed to rollback transaction")
+
+		// Verify insert was rolled back
+		let values: [Str:sql::Value] = [:]
+		let rows = db.query("SELECT * FROM users").all(values).expect("Failed to query")
+		if not rows.size() == 0 {
+			panic("Expected 0 rows after rollback, got {rows.size()}")
+		}
+	`)
+}
+
+func TestTransactionQueryRead(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_read.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+		use ard/decode
+
+		let db = sql::open("test_tx_read.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
+		db.exec("INSERT INTO users (name) VALUES ('Charlie')").expect("Failed to insert")
+
+		let tx = db.begin().expect("Failed to begin transaction")
+		let values: [Str:sql::Value] = [:]
+		let rows = tx.query("SELECT * FROM users").all(values).expect("Failed to query in transaction")
+		tx.commit().expect("Failed to commit transaction")
+
+		if not rows.size() == 1 {
+			panic("Expected 1 row in transaction, got {rows.size()}")
+		}
+
+		let name = decode::run(rows.at(0), decode::field("name", decode::string)).expect("Failed to decode name")
+		if not name == "Charlie" {
+			panic("Expected name 'Charlie', got {name}")
+		}
+	`)
+}
+
+func TestTransactionMultipleOperations(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_multiple.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_tx_multiple.db").expect("Failed to open database")
+		db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
+
+		let tx = db.begin().expect("Failed to begin transaction")
+		tx.exec("INSERT INTO items (name) VALUES ('Item1')").expect("Failed to insert Item1")
+		tx.exec("INSERT INTO items (name) VALUES ('Item2')").expect("Failed to insert Item2")
+		let values: [Str:sql::Value] = [:]
+		let rows = tx.query("SELECT * FROM items").all(values).expect("Failed to query in transaction")
+		tx.commit().expect("Failed to commit transaction")
+
+		if not rows.size() == 2 {
+			panic("Expected 2 rows in transaction, got {rows.size()}")
+		}
+
+		// Verify all inserts persisted
+		let values2: [Str:sql::Value] = [:]
+		let final_rows = db.query("SELECT * FROM items").all(values2).expect("Failed to query after commit")
+		if not final_rows.size() == 2 {
+			panic("Expected 2 rows after commit, got {final_rows.size()}")
+		}
+	`)
+}
+
+func TestTransactionRollbackMultipleOperations(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_rollback_multiple.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_tx_rollback_multiple.db").expect("Failed to open database")
+		db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)").expect("Failed to create table")
+
+		let tx = db.begin().expect("Failed to begin transaction")
+		tx.exec("INSERT INTO items (name) VALUES ('Item1')").expect("Failed to insert Item1")
+		tx.exec("INSERT INTO items (name) VALUES ('Item2')").expect("Failed to insert Item2")
+		tx.rollback().expect("Failed to rollback transaction")
+
+		// Verify all inserts were rolled back
+		let values: [Str:sql::Value] = [:]
+		let rows = db.query("SELECT * FROM items").all(values).expect("Failed to query")
+		if not rows.size() == 0 {
+			panic("Expected 0 rows after rollback, got {rows.size()}")
+		}
+	`)
+}
+
+func TestTransactionQueryWithParams(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_tx_params.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+		use ard/decode
+
+		let db = sql::open("test_tx_params.db").expect("Failed to open database")
+		db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
+		db.exec("INSERT INTO users (name, age) VALUES ('User1', 25)").expect("Failed to insert User1")
+		db.exec("INSERT INTO users (name, age) VALUES ('User2', 30)").expect("Failed to insert User2")
+
+		let tx = db.begin().expect("Failed to begin transaction")
+		let rows = tx.query("SELECT * FROM users WHERE age = @age").all(["age": 30]).expect("Failed to query in transaction")
+		tx.commit().expect("Failed to commit transaction")
+
+		if not rows.size() == 1 {
+			panic("Expected 1 row matching age 30, got {rows.size()}")
+		}
+
+		let name = decode::run(rows.at(0), decode::field("name", decode::string)).expect("Failed to decode name")
+		if not name == "User2" {
+			panic("Expected name 'User2', got {name}")
+		}
+	`)
+}
