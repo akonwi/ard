@@ -64,6 +64,23 @@ func TestSqlExtractParams(t *testing.T) {
 	`)
 }
 
+func TestMissingParameters(t *testing.T) {
+	// Clean up any existing test database
+	testDB := "test_insert.db"
+	defer os.Remove(testDB)
+
+	expectPanic(t, "Missing parameter: number", `
+		use ard/sql
+		use ard/decode
+
+		let db = sql::open("test_insert.db").expect("Failed to open database")
+		db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+
+		let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
+ 		stmt.run([ "name": "John Doe", "int": 2]).expect("Failed to insert")
+	`)
+}
+
 func TestSQLQueryRun(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"

@@ -78,8 +78,8 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 		// }
 		// the checker node knows its exact type, because the value might be of a generic type
 		val.SetRefinedType(s.Type())
-		// can be broken by `try`
-		if scp.isBroken() {
+		// can be stopped early by `try` expression
+		if scp.isStopped() {
 			return val
 		}
 		scp.add(s.Name, val)
@@ -98,8 +98,14 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 		init := func() { vm.do(checker.Statement{Stmt: s.Init}, scp) }
 		update := func() { vm.do(checker.Statement{Stmt: s.Update}, scp) }
 		for init(); vm.eval(scp, s.Condition).AsBool(); update() {
-			_, broke := vm.evalBlock(scp, s.Body, func(s *scope) { s.setBreakable(true) })
+			r, broke := vm.evalBlock(scp, s.Body, func(s *scope) { s.setBreakable(true) })
 			if broke {
+				if scp.isStopped() {
+					// Early return from function (try expression, result type error, etc.)
+					scp.stop() // Propagate stopped status to parent scope
+					return r
+				}
+				// Regular break statement, exit loop normally
 				break
 			}
 		}
@@ -109,7 +115,7 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 		end := vm.eval(scp, s.End).AsInt()
 		iteration := 0
 		for i <= end {
-			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+			r, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
 				sc.setBreakable(true)
 				sc.add(s.Cursor, runtime.MakeInt(i))
 				if s.Index != "" {
@@ -117,6 +123,12 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 				}
 			})
 			if broke {
+				if scp.isStopped() {
+					// Early return from function
+					scp.stop()
+					return r
+				}
+				// Regular break statement
 				break
 			}
 			i++
@@ -126,7 +138,7 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 	case *checker.ForInStr:
 		val := vm.eval(scp, s.Value).AsString()
 		for i, c := range val {
-			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+			r, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
 				sc.setBreakable(true)
 				sc.add(s.Cursor, runtime.MakeStr(string(c)))
 				if s.Index != "" {
@@ -134,6 +146,12 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 				}
 			})
 			if broke {
+				if scp.isStopped() {
+					// Early return from function
+					scp.stop()
+					return r
+				}
+				// Regular break statement
 				break
 			}
 		}
@@ -141,7 +159,7 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 	case *checker.ForInList:
 		list := vm.eval(scp, s.List).AsList()
 		for i := range list {
-			_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+			r, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
 				sc.setBreakable(true)
 				sc.add(s.Cursor, list[i])
 				if s.Index != "" {
@@ -149,6 +167,12 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 				}
 			})
 			if broke {
+				if scp.isStopped() {
+					// Early return from function
+					scp.stop()
+					return r
+				}
+				// Regular break statement
 				break
 			}
 		}
@@ -158,13 +182,19 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 			mapObj := vm.eval(scp, s.Map)
 			_map := mapObj.AsMap()
 			for k, v := range _map {
-				_, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
+				r, broke := vm.evalBlock(scp, s.Body, func(sc *scope) {
 					sc.setBreakable(true)
 					key := mapObj.Map_GetKey(k)
 					sc.add(s.Key, key)
 					sc.add(s.Val, v)
 				})
 				if broke {
+					if scp.isStopped() {
+						// Early return from function
+						scp.stop()
+						return r
+					}
+					// Regular break statement
 					break
 				}
 			}
@@ -577,7 +607,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						})
 
 						// Early return: the catch block's result becomes the function's return value
-						scp.setBroken(true)
+						scp.stop()
 						if broken {
 							return result
 						}
@@ -585,7 +615,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					} else {
 						// No catch block: propagate error by early returning
 						// Create a new Result with the same error for the function's return type
-						scp.setBroken(true)
+						scp.stop()
 						return subj
 					}
 				}
@@ -600,14 +630,14 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						result, broken := vm.evalBlock(scp, e.CatchBlock, nil)
 
 						// Early return: the catch block's result becomes the function's return value
-						scp.setBroken(true)
+						scp.stop()
 						if broken {
 							return result
 						}
 						return result
 					} else {
 						// No catch block: propagate none by early returning
-						scp.setBroken(true)
+						scp.stop()
 						return runtime.MakeNone(e.Type())
 					}
 				}
@@ -688,7 +718,11 @@ func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope))
 	for i := range block.Stmts {
 		stmt := block.Stmts[i]
 		r := vm.do(stmt, blockScope)
-		if blockScope.isBroken() {
+		if blockScope.isBroke() || blockScope.isStopped() {
+			// Propagate stopped flag to parent scope if this block is breakable (loop context)
+			if blockScope.isStopped() && blockScope.data.breakable {
+				scope.stop()
+			}
 			return r, true
 		}
 		res = r

@@ -7,7 +7,8 @@ import (
 type scopeData struct {
 	bindings  map[string]*runtime.Object
 	breakable bool
-	broken    bool
+	broke     bool // true if broken via break statement in a loop
+	stopped   bool // true if execution stopped via try expression or result type early return
 }
 
 type scope struct {
@@ -44,22 +45,24 @@ func (s *scope) set(name string, value *runtime.Object) {
 
 func (s *scope) _break() {
 	if s.data.breakable {
-		s.data.broken = true
+		s.data.broke = true
 	} else if s.parent != nil {
 		s.parent._break()
 	}
 }
 
-func (s *scope) setBroken(broken bool) {
-	s.data.broken = broken
+func (s *scope) stop() {
+	s.data.stopped = true
 }
 
 func (s *scope) setBreakable(breakable bool) {
 	s.data.breakable = breakable
 }
 
+func (s *scope) isBroke() bool {
+	return s.data.broke
+}
 
-
-func (s *scope) isBroken() bool {
-	return s.data.broken
+func (s *scope) isStopped() bool {
+	return s.data.stopped
 }
