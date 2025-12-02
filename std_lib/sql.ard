@@ -7,9 +7,9 @@ use ard/result as Result
 type Value = Str | Bool | Int | Float | Void
 
 private extern fn connect(connection_string: Str) Dynamic!Str = "SqlCreateConnection"
-private extern fn close_connection(conn: Dynamic) Void!Str = "SqlClose"
-private extern fn execute(conn: Dynamic, sql: Str, values: [Value]) Void!Str = "SqlExecute"
-private extern fn run_query(conn: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
+private extern fn close_db(db: Dynamic) Void!Str = "SqlClose"
+private extern fn execute(db: Dynamic, sql: Str, values: [Value]) Void!Str = "SqlExecute"
+private extern fn run_query(db: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
 
 extern fn extract_params(sql: Str) [Str] = "SqlExtractParams"
 
@@ -53,19 +53,19 @@ impl Query {
   }
 }
 
-struct Connection {
+struct Database {
   _ptr: Dynamic
   path: Str
 }
 
-fn open(path: Str) Connection!Str {
+fn open(path: Str) Database!Str {
   let conn = try connect(path)
-  Result::ok(Connection{ _ptr: conn, path: path })
+  Result::ok(Database{ _ptr: conn, path: path })
 }
 
-impl Connection {
+impl Database {
   fn close() Void!Str {
-    close_connection(@_ptr)
+    close_db(@_ptr)
   }
 
   // simple one-off executions where the results aren't needed

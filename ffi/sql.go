@@ -28,18 +28,18 @@ func SqlCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Object
 	// Determine driver from connection string
 	driver := detectDriver(connectionString)
 
-	conn, err := sql.Open(driver, connectionString)
+	db, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
 
 	// Test the connection
-	if err := conn.Ping(); err != nil {
+	if err := db.Ping(); err != nil {
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Failed to connect to database: %s", err)))
 	}
 
-	// Return the raw connection as Dynamic
-	return runtime.MakeOk(runtime.MakeDynamic(conn))
+	// Return the raw db as Dynamic
+	return runtime.MakeOk(runtime.MakeDynamic(db))
 }
 
 // detectDriver identifies the SQL driver based on the connection string
