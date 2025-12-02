@@ -3113,9 +3113,15 @@ func (c *checker) extractIntFromPattern(expr ast.Expression) (int, error) {
 func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
 	case *ast.ListLiteral:
-		return c.checkList(expectedType, s)
+		if result := c.checkList(expectedType, s); result != nil {
+			return result
+		}
+		return nil
 	case *ast.MapLiteral:
-		return c.checkMap(expectedType, s)
+		if result := c.checkMap(expectedType, s); result != nil {
+			return result
+		}
+		return nil
 	case *ast.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)
