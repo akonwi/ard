@@ -1,4 +1,6 @@
 # TODO
+- [ ] referencing module-level fns within a method gets confused with method of same name
+- [ ] last expression in function doesn't always cause error when it should
 - [ ] infer types in anonymous functions
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
