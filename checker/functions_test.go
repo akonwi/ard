@@ -113,6 +113,20 @@ func TestFunctions(t *testing.T) {
 			},
 		},
 		{
+			name: "A functiton with a declared return type should have a final expression that satisfies it",
+			input: strings.Join(
+				[]string{
+					`fn add(a: Int, b: Int) Void!Bool {
+						let foo = false
+					}`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Void!Bool, got Void"},
+			},
+		},
+		{
 			name: "Functions can declare Void in return type",
 			input: strings.Join(
 				[]string{

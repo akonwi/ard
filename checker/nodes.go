@@ -1027,7 +1027,10 @@ func (p Panic) GetLocation() ast.Location {
 }
 
 func (p Panic) Type() Type {
-	return Void
+	// realistically, this is Void but that would break expectations when using `panic()` to signal unreachable code
+	// in a function or block that is declared to return or be a non-Void value.
+	// using Any technically allows empty panicking functions to work; e.g. the `async:start()` function in async.ard
+	return &Any{name: "Unreachable"}
 }
 
 type TryOp struct {

@@ -1650,7 +1650,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			for i, arg := range s.Method.Args {
 				// Get the expected parameter type
 				paramType := fnDef.Parameters[i].Type
-				
+
 				// For list and map literals, use checkExprAs to infer type from context
 				var checkedArg Expression
 				switch arg.Value.(type) {
@@ -1659,7 +1659,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				default:
 					checkedArg = c.checkExpr(arg.Value)
 				}
-				
+
 				if checkedArg == nil {
 					return nil
 				}
@@ -3311,14 +3311,7 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 
 	// Check that the function's return type matches its body's type
 	if returnType != Void && !areCompatible(returnType, body.Type()) {
-		// Special case: if body type is Void but the function declares a return type,
-		// this might be due to early returns from try statements. For now, let's
-		// be more permissive to allow this pattern.
-		if body.Type() != Void {
-			c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
-			return nil
-		}
-		// If body.Type() is Void, we allow it for now to handle early returns
+		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 	}
 
 	// Set the body now that it's been checked
