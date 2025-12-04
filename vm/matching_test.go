@@ -91,7 +91,7 @@ func TestConditionalMatch(t *testing.T) {
 				let score = 85
 				match {
 					score >= 90 => "A",
-					score >= 80 => "B", 
+					score >= 80 => "B",
 					score >= 70 => "C",
 					score >= 60 => "D",
 					_ => "F"

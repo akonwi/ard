@@ -59,6 +59,7 @@ func TestSqlExtractParams(t *testing.T) {
 						panic("Expected 'number' at {idx} got {p}")
 					}
 				},
+				_ => panic("Unexpected: {p}")
 			}
 		}
 	`)

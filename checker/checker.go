@@ -2756,6 +2756,11 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				}
 			}
 
+			// Validate that there is a catch-all case for Int match
+			if catchAll == nil {
+				c.addError("Incomplete match: missing catch-all case for Int match", s.GetLocation())
+			}
+
 			return &IntMatch{
 				Subject:    subject,
 				IntCases:   intCases,

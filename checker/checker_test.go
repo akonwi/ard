@@ -2062,6 +2062,28 @@ func TestMatchingOnBooleans(t *testing.T) {
 	})
 }
 
+func TestMatchingOnInts(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Matching on booleans should be exhaustive",
+			input: `
+			  let int = 100
+				match int {
+				  -1 => "less",
+				  0 => "equal",
+					1 => "greater",
+				}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Incomplete match: missing catch-all case for Int match",
+				},
+			},
+		},
+	})
+}
+
 func TestGenerics(t *testing.T) {
 	run(t, []test{
 		{
@@ -2158,8 +2180,6 @@ func TestGenerics(t *testing.T) {
 		},
 	})
 }
-
-
 
 func TestVoidLiteral(t *testing.T) {
 	run(t, []test{
