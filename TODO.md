@@ -1,6 +1,9 @@
 # TODO
-- [ ] referencing module-level fns within a method gets confused with method of same name
 - [ ] last expression in function doesn't always cause error when it should
+- [ ] Panic: No matching case for int value 541
+  this should be prevented at compile time by requiring a fallback case
+- [ ] sql param replacement is not exclusive (replaceAll should only happen on exact matches)
+- [ ] referencing module-level fns within a method gets confused with method of same name
 - [ ] infer types in anonymous functions
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
