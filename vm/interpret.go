@@ -646,6 +646,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 				return runtime.Make(subj.Raw(), e.Type())
 			}
 
+			// There's a real problem if this occurs. it means an object is incorrect and there's a bug somewhere in the interpreter
 			panic(fmt.Errorf("Cannot use try keyword on %s", subj.Type()))
 		}
 	case *checker.ModuleSymbol:
