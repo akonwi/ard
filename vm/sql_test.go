@@ -43,24 +43,14 @@ func TestSqlExtractParams(t *testing.T) {
 	run(t, `
 		use ard/sql
 
-		let params = sql::extract_params("INSERT INTO players (name, number) VALUES (@name, @number)")
-		if not params.size() == 2 {
-			panic("Expected a list of 2 elements")
-		}
-		for p, idx in params {
-			match idx {
-				0 => {
-					if not p == "name" {
-						panic("Expected 'name' at {idx} got {p}")
-					}
-				},
-				1 => {
-					if not p == "number" {
-						panic("Expected 'number' at {idx} got {p}")
-					}
-				},
-				_ => panic("Unexpected: {p}")
-			}
+	  let names = sql::extract_params("SELECT f.*, fs.* FROM fixtures f
+	    JOIN fixture_stats fs ON f.id = fs.fixture_id
+	    WHERE f.league_id = @league_id AND f.season = @season
+	    AND (f.home_id = @team_id OR f.away_id = @team_id)
+	    AND f.finished = true"
+	  )
+		if not names.size() == 4 {
+			panic("Expected a list of 4 names - got {names.size()}")
 		}
 	`)
 }

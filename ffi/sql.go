@@ -92,7 +92,6 @@ func SqlExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	tokens := splitSQLByMultipleDelimiters(sqlStr, delimiters)
 
 	var paramNames []string
-	seen := make(map[string]bool)
 
 	for _, token := range tokens {
 		if strings.HasPrefix(token, "@") && len(token) > 1 {
@@ -100,9 +99,8 @@ func SqlExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object {
 			paramName := strings.TrimLeft(token[1:], "@")
 			paramName = strings.TrimRight(paramName, ".,;:!?")
 
-			if paramName != "" && !seen[paramName] {
+			if paramName != "" {
 				paramNames = append(paramNames, paramName)
-				seen[paramName] = true
 			}
 		}
 	}
