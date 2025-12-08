@@ -55,6 +55,36 @@ func TestSqlExtractParams(t *testing.T) {
 	`)
 }
 
+func TestSQLParameterSubstringOverlap(t *testing.T) {
+	// Test that parameter replacement doesn't corrupt similar parameter names
+	// e.g., @team and @team_id should not interfere with each other
+	testDB := "test_substring_overlap.db"
+	defer os.Remove(testDB)
+
+	run(t, `
+		use ard/sql
+
+		let db = sql::open("test_substring_overlap.db").expect("Failed to open database")
+		db.exec("CREATE TABLE teams (id INTEGER PRIMARY KEY, team_id TEXT, team TEXT)").expect("Failed to create table")
+
+		let stmt = db.query("INSERT INTO teams (team, team_id) VALUES (@team, @team_id)")
+		stmt.run([
+			"team_id": "T123",
+			"team": "Rockets",
+		]).expect("Insert failed")
+
+		let query = db.query("SELECT team_id, team FROM teams WHERE team_id = @team_id AND team = @team")
+		let rows = query.all([
+			"team_id": "T123",
+			"team": "Rockets",
+		]).expect("Query failed")
+
+		if not rows.size() == 1 {
+			panic("Expected 1 result, got {rows.size()}")
+		}
+	`)
+}
+
 func TestMissingParameters(t *testing.T) {
 	// Clean up any existing test database
 	testDB := "test_insert.db"

@@ -29,7 +29,8 @@ struct Query {
 impl Query {
   fn prepare(mut query_str: Str, mut values: [Value], args: [Str:Value]) Void!Str {
     for param in @params {
-      query_str = query_str.replace_all("@"+param, "?")
+      // Replace only the first occurrence to handle duplicate parameters correctly
+      query_str = query_str.replace("@"+param, "?")
       let value = try args.get(param) -> _ { Result::err("Missing parameter: " + param) }
       values.push(value)
     }
