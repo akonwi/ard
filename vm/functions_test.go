@@ -80,6 +80,46 @@ func TestFunctions(t *testing.T) {
 			p.full(last: "Doe", first: "Jane")`,
 			want: "Jane Doe",
 		},
+		{
+			name: "referencing module-level fn within method of same name",
+			input: `
+			fn process(x: Int) Int {
+			  x * 2
+			}
+
+			struct Handler { }
+
+			impl Handler {
+			  fn process(x: Int) Str {
+			    let result = process(5)
+			    "Result: {result}"
+			  }
+			}
+
+			let h = Handler{}
+			h.process(10)`,
+			want: "Result: 10",
+		},
+		{
+			name: "module-level fn and method with same name but different param types",
+			input: `
+			fn process(x: Str) Str {
+			  "string: {x}"
+			}
+
+			struct Handler { }
+
+			impl Handler {
+			  fn process(x: Int) Str {
+			    let result = process("hello")
+			    "handler: {result}"
+			  }
+			}
+
+			let h = Handler{}
+			h.process(42)`,
+			want: "handler: string: hello",
+		},
 	}
 
 	runTests(t, tests)

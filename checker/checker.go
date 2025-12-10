@@ -3425,7 +3425,10 @@ func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *Func
 	}
 
 	// Add function to scope BEFORE checking body to support recursion
-	c.scope.add(def.Name, fn, false)
+	// But don't add methods (when init != nil) to outer scope - they should only be accessible via receiver
+	if init == nil {
+		c.scope.add(def.Name, fn, false)
+	}
 
 	// Check function body
 	body := c.checkBlock(def.Body, func() {
