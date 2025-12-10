@@ -1,5 +1,4 @@
 # TODO
-- [x] module level `let` variables should be exported 
 - [ ] missing `try` keyword should be a checker error. currently, it causes an infinite loop
 - [ ] `fixtures.ard [75:17] Type mismatch: Expected Fixture?!Str, got $Val!Str` is a false error
 - [ ] struct instances as struct field values
