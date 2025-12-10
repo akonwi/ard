@@ -1,5 +1,4 @@
 # TODO
-- [ ] `fixtures.ard [75:17] Type mismatch: Expected Fixture?!Str, got $Val!Str` is a false error
 - [ ] struct instances as struct field values
 - [ ] referencing module-level fns within a method gets confused with method of same name
 - [ ] infer types in anonymous functions

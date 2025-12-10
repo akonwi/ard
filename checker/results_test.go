@@ -311,6 +311,80 @@ func TestTry(t *testing.T) {
 				{Kind: checker.Error, Message: "Error type mismatch: Expected Int, got Str"},
 			},
 		},
+		{
+			name: "try-catch in for loop",
+			input: `
+				fn process(val: Int) Int!Str {
+					Result::ok(val)
+				}
+
+				fn do_stuff(stuff: [Int]) Int!Str {
+					for i in 0..stuff.size() {
+						let processed = try process(stuff.at(i)) -> err {
+							Result::err("Failed: {err}")
+						}
+					}
+					Result::ok(0)
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try-catch in for-in loop with Result::err",
+			input: `
+				fn process(val: Int) Int!Str {
+					Result::ok(val)
+				}
+
+				fn do_stuff(stuff: [Int]) Int!Str {
+					for f in stuff {
+						let processed = try process(f) -> err {
+							Result::err("Failed: {err}")
+						}
+					}
+					Result::ok(0)
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try-catch with Maybe in for-in loop",
+			input: `
+				use ard/maybe
+
+				fn process(val: Int) Int? {
+					maybe::some(val)
+				}
+
+				fn do_stuff(stuff: [Int]) Int? {
+					for f in stuff {
+						let processed = try process(f) -> _ {
+							maybe::none()
+						}
+					}
+					maybe::some(0)
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result::err with inferred value type matches expected Result",
+			input: `
+				fn process(x: Int) Str!Str {
+					Result::ok(x.to_str())
+				}
+
+				fn wrapper(items: [Int]) Str!Str {
+					for item in items {
+						let result = try process(item) -> err {
+							Result::err("Processing failed: {err}")
+						}
+					}
+					Result::ok("")
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }
 

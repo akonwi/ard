@@ -3057,8 +3057,27 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
-					if !returnType.equal(blockType) {
-						c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+					
+					// Validate catch block type compatibility
+					// If both are Results, only error types need to match (value types can differ, including generic $Val)
+					var typeOk bool
+					if fnReturnResult, ok := returnType.(*Result); ok {
+						if blockResultType, ok := blockType.(*Result); ok {
+							typeOk = fnReturnResult.err.equal(blockResultType.err)
+							if !typeOk {
+								c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), blockResultType.err.String()), s.GetLocation())
+							}
+						} else {
+							// Catch block returns non-Result but function expects Result
+							typeOk = false
+							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+						}
+					} else {
+						// Function return type is not a Result
+						typeOk = returnType.equal(blockType)
+						if !typeOk {
+							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+						}
 					}
 
 					// With catch clause, try returns the unwrapped value type on success
@@ -3121,8 +3140,27 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
-					if !returnType.equal(blockType) {
-						c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+					
+					// Validate catch block type compatibility
+					// For Maybe catch blocks, inner types must match (or both have unresolved generics)
+					var typeOk bool
+					if fnReturnMaybe, ok := returnType.(*Maybe); ok {
+						if blockMaybeType, ok := blockType.(*Maybe); ok {
+							// Both are Maybe types - inner types should match
+							typeOk = fnReturnMaybe.of.equal(blockMaybeType.of)
+							if !typeOk {
+								c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+							}
+						} else {
+							typeOk = false
+							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+						}
+					} else {
+						// Function return type is not a Maybe
+						typeOk = returnType.equal(blockType)
+						if !typeOk {
+							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+						}
 					}
 
 					// With catch clause, try returns the unwrapped value type on success
