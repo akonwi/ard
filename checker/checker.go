@@ -1639,25 +1639,47 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			if len(s.Method.Args) != len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(s.Method.Args)), s.GetLocation())
+			// Resolve named and positional arguments to match parameters
+			resolvedExprs, err := c.resolveArguments(s.Method.Args, fnDef.Parameters)
+			if err != nil {
+				c.addError(err.Error(), s.GetLocation())
 				return nil
 			}
 
+			// Align mutability information with parameters
+			resolvedArgs := make([]ast.Argument, len(fnDef.Parameters))
+			if len(s.Method.Args) > 0 && s.Method.Args[0].Name != "" {
+				paramMap := make(map[string]int)
+				for i, param := range fnDef.Parameters {
+					paramMap[param.Name] = i
+				}
+				for _, arg := range s.Method.Args {
+					if index, exists := paramMap[arg.Name]; exists {
+						resolvedArgs[index] = ast.Argument{
+							Location: arg.Location,
+							Name:     "",
+							Value:    arg.Value,
+							Mutable:  arg.Mutable,
+						}
+					}
+				}
+			} else {
+				copy(resolvedArgs, s.Method.Args)
+			}
+
 			// Check and process arguments
-			args := make([]Expression, len(s.Method.Args))
-			for i, arg := range s.Method.Args {
+			args := make([]Expression, len(resolvedArgs))
+			for i := range resolvedArgs {
 				// Get the expected parameter type
 				paramType := fnDef.Parameters[i].Type
 
 				// For list and map literals, use checkExprAs to infer type from context
 				var checkedArg Expression
-				switch arg.Value.(type) {
+				switch resolvedExprs[i].(type) {
 				case *ast.ListLiteral, *ast.MapLiteral:
-					checkedArg = c.checkExprAs(arg.Value, paramType)
+					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
 				default:
-					checkedArg = c.checkExpr(arg.Value)
+					checkedArg = c.checkExpr(resolvedExprs[i])
 				}
 
 				if checkedArg == nil {
@@ -1666,7 +1688,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 				// Type check the argument against the parameter type
 				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
+					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
 					return nil
 				}
 
@@ -1680,7 +1702,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 							Type_: checkedArg.Type(),
 						}
 					} else {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 					}
 				} else {
 					args[i] = checkedArg
@@ -1998,42 +2020,71 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 			absolutePath := s.Target.String() + "::" + s.Function.Name
 			if sym, ok := c.scope.get(absolutePath); ok {
 				fnDef := sym.Type.(*FunctionDef)
-				call := &FunctionCall{
-					Name: absolutePath,
-					Args: []Expression{},
-					fn:   fnDef,
+
+				// Resolve named and positional arguments to match parameters
+				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
 				}
-				// Check argument count
-				if len(s.Function.Args) != len(fnDef.Parameters) {
-					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-						len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
-					return call
+
+				// We also need argument mutability aligned with parameters
+				resolvedArgs := make([]ast.Argument, len(fnDef.Parameters))
+				if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
+					paramMap := make(map[string]int)
+					for i, param := range fnDef.Parameters {
+						paramMap[param.Name] = i
+					}
+					for _, arg := range s.Function.Args {
+						if index, exists := paramMap[arg.Name]; exists {
+							resolvedArgs[index] = ast.Argument{
+								Location: arg.Location,
+								Name:     "",
+								Value:    arg.Value,
+								Mutable:  arg.Mutable,
+							}
+						}
+					}
+				} else {
+					copy(resolvedArgs, s.Function.Args)
 				}
 
 				// Check and process arguments
-				args := make([]Expression, len(s.Function.Args))
-				for i, arg := range s.Function.Args {
-					checkedArg := c.checkExpr(arg.Value)
+				args := make([]Expression, len(resolvedArgs))
+				for i := range resolvedArgs {
+					paramType := fnDef.Parameters[i].Type
+
+					var checkedArg Expression
+					switch resolvedExprs[i].(type) {
+					case *ast.ListLiteral, *ast.MapLiteral:
+						checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+					default:
+						checkedArg = c.checkExpr(resolvedExprs[i])
+					}
+
 					if checkedArg == nil {
-						return call
+						return nil
 					}
 
 					// Type check the argument against the parameter type
-					paramType := fnDef.Parameters[i].Type
 					if !areCompatible(paramType, checkedArg.Type()) {
-						c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
-						return call
+						c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+						return nil
 					}
 
 					// Check mutability constraints if needed
 					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 					}
 
 					args[i] = checkedArg
 				}
 
-				call.Args = args
+				call := &FunctionCall{
+					Name: absolutePath,
+					Args: args,
+					fn:   fnDef,
+				}
 
 				// Use new generic resolution system
 				if fnDef.hasGenerics() {
@@ -2044,7 +2095,6 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					}
 
 					call.fn = specialized
-					return call
 				}
 
 				return call
@@ -2091,31 +2141,60 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			// Check argument count
-			if len(s.Function.Args) != len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+			// Resolve named and positional arguments to match parameters
+			resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
+			if err != nil {
+				c.addError(err.Error(), s.GetLocation())
 				return nil
 			}
 
+			// Align mutability information with parameters
+			resolvedArgs := make([]ast.Argument, len(fnDef.Parameters))
+			if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
+				paramMap := make(map[string]int)
+				for i, param := range fnDef.Parameters {
+					paramMap[param.Name] = i
+				}
+				for _, arg := range s.Function.Args {
+					if index, exists := paramMap[arg.Name]; exists {
+						resolvedArgs[index] = ast.Argument{
+							Location: arg.Location,
+							Name:     "",
+							Value:    arg.Value,
+							Mutable:  arg.Mutable,
+						}
+					}
+				}
+			} else {
+				copy(resolvedArgs, s.Function.Args)
+			}
+
 			// Check and process arguments
-			args := make([]Expression, len(s.Function.Args))
-			for i, arg := range s.Function.Args {
-				checkedArg := c.checkExpr(arg.Value)
+			args := make([]Expression, len(resolvedArgs))
+			for i := range resolvedArgs {
+				paramType := fnDef.Parameters[i].Type
+
+				var checkedArg Expression
+				switch resolvedExprs[i].(type) {
+				case *ast.ListLiteral, *ast.MapLiteral:
+					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+				default:
+					checkedArg = c.checkExpr(resolvedExprs[i])
+				}
+
 				if checkedArg == nil {
 					return nil
 				}
 
 				// Type check the argument against the parameter type
-				paramType := fnDef.Parameters[i].Type
 				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), arg.Value.GetLocation())
+					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
 					return nil
 				}
 
 				// Check mutability constraints if needed
 				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), arg.Value.GetLocation())
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				}
 
 				args[i] = checkedArg
@@ -3118,15 +3197,21 @@ func (c *checker) extractIntFromPattern(expr ast.Expression) (int, error) {
 func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
 	case *ast.ListLiteral:
-		if result := c.checkList(expectedType, s); result != nil {
-			return result
+		// Only use collection-specific inference when the expected type is a list.
+		if _, ok := expectedType.(*List); ok {
+			if result := c.checkList(expectedType, s); result != nil {
+				return result
+			}
+			return nil
 		}
-		return nil
 	case *ast.MapLiteral:
-		if result := c.checkMap(expectedType, s); result != nil {
-			return result
+		// Only use collection-specific inference when the expected type is a map.
+		if _, ok := expectedType.(*Map); ok {
+			if result := c.checkMap(expectedType, s); result != nil {
+				return result
+			}
+			return nil
 		}
-		return nil
 	case *ast.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)

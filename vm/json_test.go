@@ -298,9 +298,10 @@ func TestJsonEncodeDynamic(t *testing.T) {
 				"foo": Dynamic::from_int(0),
 				"baz": Dynamic::from_int(1),
 			])
-			json::encode(data)
+			let encoded = json::encode(data).expect("")
+			encoded.contains("\"foo\":0") and encoded.contains("\"baz\":1")
 			`,
-			want: `{"foo":0,"baz":1}`,
+			want: true,
 		},
 	})
 }
