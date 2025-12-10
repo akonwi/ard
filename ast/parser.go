@@ -1682,6 +1682,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 }
 
 func (p *parser) try() (Expression, error) {
+	// Handle the explicit `try` keyword first
 	if p.check(identifier) && p.peek().text == "try" {
 		idToken := p.advance()
 		keyword := Identifier{
@@ -1769,7 +1770,34 @@ func (p *parser) try() (Expression, error) {
 			CatchBlock: catchBlock,
 		}, nil
 	}
-	return p.functionDef(false)
+
+	// Not a `try` expression: parse the underlying expression as usual.
+	expr, err := p.functionDef(false)
+	if err != nil {
+		return nil, err
+	}
+
+	// If we now see a `->` after a non-`try` expression, this is
+	// syntactically invalid: the catch block will never be evaluated.
+	if p.check(thin_arrow) {
+		p.addError(p.peek(), "Missing 'try' keyword: the catch block after '->' will never be evaluated")
+
+		// Best-effort recovery: consume the arrow, optional identifier,
+		// and an optional `{ ... }` block so parsing can continue.
+		p.advance() // consume '->'
+
+		if p.check(identifier) {
+			p.advance()
+		}
+
+		if p.check(left_brace) {
+			if _, err := p.block(); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return expr, nil
 }
 
 func (p *parser) functionDef(asMethod bool) (Statement, error) {

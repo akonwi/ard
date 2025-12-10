@@ -490,3 +490,23 @@ func TestStaticPaths(t *testing.T) {
 		},
 	})
 }
+
+func TestMissingTryKeywordWithCatchBlock(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "arrow catch without try produces parse error",
+			input: strings.Join([]string{
+				`fn divide(a: Int, b: Int) Int!Str {`,
+				`  Result::ok(a / b)`,
+				`}`,
+				`fn foo(a: Int, b: Int) Int {`,
+				`  let x = divide(a, b) -> err { 0 }`,
+				`  x + 1`,
+				`}`,
+			}, "\n"),
+			wantErrs: []string{
+				"Missing 'try' keyword",
+			},
+		},
+	})
+}
