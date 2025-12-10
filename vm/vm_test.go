@@ -626,6 +626,131 @@ math::add(10, 20)`
 	}
 }
 
+func TestFunctionVariableFromModule(t *testing.T) {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "ard_vm_test_func_var_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project files
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a module that exports a function as a variable
+	moduleContent := `let add_one = fn(x: Int) Int {
+	x + 1
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(moduleContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test content that imports and calls the function variable
+	mainContent := `use test_project/utils
+utils::add_one(5)`
+
+	// Parse and check
+	parseResult := ast.Parse([]byte(mainContent), "main.ard")
+	if len(parseResult.Errors) > 0 {
+		t.Fatal(parseResult.Errors[0].Message)
+	}
+	astTree := parseResult.Program
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+
+	// Run with VM
+	runtime := vm.NewScriptRuntime(module)
+	result, err := runtime.Interpret()
+	if err != nil {
+		t.Fatalf("VM error: %v", err)
+	}
+
+	// Should return 6
+	if result != 6 {
+		t.Errorf("Expected 6, got %v", result)
+	}
+}
+
+func TestFunctionVariableCallDirectly(t *testing.T) {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "ard_vm_test_func_call_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create project files
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a module that exports a function as a variable
+	moduleContent := `let double = fn(x: Int) Int {
+	x * 2
+}`
+	err = os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(moduleContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test content that stores the function in a variable and then calls it
+	mainContent := `use test_project/utils
+let f = utils::double
+f(10)`
+
+	// Parse and check
+	parseResult := ast.Parse([]byte(mainContent), "main.ard")
+	if len(parseResult.Errors) > 0 {
+		t.Fatal(parseResult.Errors[0].Message)
+	}
+	astTree := parseResult.Program
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	if len(diagnostics) > 0 {
+		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	}
+
+	// Run with VM
+	runtime := vm.NewScriptRuntime(module)
+	result, err := runtime.Interpret()
+	if err != nil {
+		t.Fatalf("VM error: %v", err)
+	}
+
+	// Should return 20
+	if result != 20 {
+		t.Errorf("Expected 20, got %v", result)
+	}
+}
+
+func TestFunctionVariableInLocalScope(t *testing.T) {
+	// Test assigning a function to a variable and then calling it
+	run(t, `
+	let multiply = fn(a: Int, b: Int) Int {
+		a * b
+	}
+	multiply(3, 4)
+	`)
+}
+
 func TestVoidLiteral(t *testing.T) {
 	run(t, `
 		// can assign a Void
