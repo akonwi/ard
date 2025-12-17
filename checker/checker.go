@@ -910,11 +910,12 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Apply copy semantics for mutable variable assignments
-			if s.Mutable && c.shouldCopyForMutableAssignment(val.Type()) {
+			valType := c.LookupType(val)
+			if s.Mutable && c.shouldCopyForMutableAssignment(valType) {
 				// Always wrap in copy expression for mutable assignment of copyable types
 				val = &CopyExpression{
 					Expr:  val,
-					Type_: val.Type(),
+					Type_: valType,
 				}
 			}
 
@@ -948,8 +949,9 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 					return nil
 				}
 
-				if !target.Type.equal(value.Type()) {
-					c.addError(typeMismatch(target.Type, value.Type()), s.Value.GetLocation())
+				valueType := c.LookupType(value)
+				if !target.Type.equal(valueType) {
+					c.addError(typeMismatch(target.Type, valueType), s.Value.GetLocation())
 					return nil
 				}
 
@@ -991,7 +993,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Condition must be a boolean expression
-			if condition.Type() != Bool {
+			if c.LookupType(condition) != Bool {
 				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
 				return nil
 			}
@@ -1037,7 +1039,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Condition must be a boolean expression
-			if condition.Type() != Bool {
+			if c.LookupType(condition) != Bool {
 				c.addError("For loop condition must be a boolean expression", s.Condition.GetLocation())
 				return nil
 			}
@@ -1074,12 +1076,14 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			if start == nil || end == nil {
 				return nil
 			}
-			if start.Type() != end.Type() {
-				c.addError(fmt.Sprintf("Invalid range: %s..%s", start.Type(), end.Type()), s.Start.GetLocation())
+			startType := c.LookupType(start)
+			endType := c.LookupType(end)
+			if startType != endType {
+				c.addError(fmt.Sprintf("Invalid range: %s..%s", startType, endType), s.Start.GetLocation())
 				return nil
 			}
 
-			if start.Type() == Int {
+			if startType == Int {
 				loop := &ForIntRange{
 					Cursor: s.Cursor.Name,
 					Index:  s.Cursor2.Name,
@@ -1087,7 +1091,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 					End:    end,
 				}
 				body := c.checkBlock(s.Body, func() {
-					c.scope.add(s.Cursor.Name, start.Type(), false)
+					c.scope.add(s.Cursor.Name, startType, false)
 					if loop.Index != "" {
 						c.scope.add(loop.Index, Int, false)
 					}
@@ -1096,7 +1100,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
-			panic(fmt.Errorf("Cannot create range of %s", start.Type()))
+			panic(fmt.Errorf("Cannot create range of %s", startType))
 		}
 	case *ast.ForInLoop:
 		{
@@ -1105,8 +1109,9 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 				return nil
 			}
 
+			iterType := c.LookupType(iterValue)
 			// Handle strings specifically
-			if iterValue.Type() == Str {
+			if iterType == Str {
 				loop := &ForInStr{
 					Cursor: s.Cursor.Name,
 					Index:  s.Cursor2.Name,
@@ -1128,7 +1133,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Handle integer iteration (for i in n - sugar for 0..n)
-			if iterValue.Type() == Int {
+			if iterType == Int {
 				// This is syntax sugar for a range from 0 to n
 				loop := &ForIntRange{
 					Cursor: s.Cursor.Name,
@@ -1150,7 +1155,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
-			if listType, ok := iterValue.Type().(*List); ok {
+			if listType, ok := iterType.(*List); ok {
 				// This is syntax sugar for a range from 0 to n
 				loop := &ForInList{
 					Cursor: s.Cursor.Name,
@@ -1170,7 +1175,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
-			if mapType, ok := iterValue.Type().(*Map); ok {
+			if mapType, ok := iterType.(*Map); ok {
 				iterable := c.checkExpr(s.Iterable)
 				if iterable == nil {
 					return nil
@@ -1193,7 +1198,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Currently we only support string, integer, and List iteration
-			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
+			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterType), s.Iterable.GetLocation())
 			return nil
 		}
 	case *ast.EnumDefinition:
@@ -1304,8 +1309,9 @@ func (c *Checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 		for i := range expr.Items {
 			item := expr.Items[i]
 			element := c.checkExpr(item)
-			if !expectedElementType.equal(element.Type()) {
-				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
+			elementType := c.LookupType(element)
+			if !expectedElementType.equal(elementType) {
+				c.addError(typeMismatch(expectedElementType, elementType), item.GetLocation())
 				return nil
 			}
 			elements[i] = element
@@ -1333,9 +1339,10 @@ func (c *Checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 			continue
 		}
 
+		elemType := c.LookupType(element)
 		if i == 0 {
-			elementType = element.Type()
-		} else if !elementType.equal(element.Type()) {
+			elementType = elemType
+		} else if !elementType.equal(elemType) {
 			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
 			hasError = true
 			continue
@@ -1428,8 +1435,9 @@ func (c *Checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedKeyType, key.Type()) {
-				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
+			keyType := c.LookupType(key)
+			if !areCompatible(expectedKeyType, keyType) {
+				c.addError(typeMismatch(expectedKeyType, keyType), entry.Key.GetLocation())
 				hasError = true
 				continue
 			}
@@ -1441,8 +1449,9 @@ func (c *Checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedValueType, value.Type()) {
-				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
+			valueType := c.LookupType(value)
+			if !areCompatible(expectedValueType, valueType) {
+				c.addError(typeMismatch(expectedValueType, valueType), entry.Value.GetLocation())
 				hasError = true
 				continue
 			}
@@ -1472,8 +1481,8 @@ func (c *Checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 		return nil
 	}
 
-	keyType := firstKey.Type()
-	valueType := firstValue.Type()
+	keyType := c.LookupType(firstKey)
+	valueType := c.LookupType(firstValue)
 	keys[0] = firstKey
 	values[0] = firstValue
 
@@ -1484,8 +1493,9 @@ func (c *Checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 			keyType = Void
 			continue
 		}
-		if !keyType.equal(key.Type()) {
-			c.addError(fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type()), expr.Entries[i].Key.GetLocation())
+		currentKeyType := c.LookupType(key)
+		if !keyType.equal(currentKeyType) {
+			c.addError(fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, currentKeyType), expr.Entries[i].Key.GetLocation())
 			continue
 		}
 		keys[i] = key
@@ -1495,8 +1505,9 @@ func (c *Checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 			valueType = Void
 			continue
 		}
-		if !valueType.equal(value.Type()) {
-			c.addError(fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type()), expr.Entries[i].Value.GetLocation())
+		currentValueType := c.LookupType(value)
+		if !valueType.equal(currentValueType) {
+			c.addError(fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, currentValueType), expr.Entries[i].Value.GetLocation())
 			continue
 		}
 		values[i] = value
@@ -1585,8 +1596,9 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				}
 				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
 					toStringTrait := strMod.Get("ToString").Type.(*Trait)
-					if !cx.Type().hasTrait(toStringTrait) {
-						c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
+					cxType := c.LookupType(cx)
+					if !cxType.hasTrait(toStringTrait) {
+						c.addError(typeMismatch(toStringTrait, cxType), s.Chunks[i].GetLocation())
 						// Replace chunk that can't be converted to string with placeholder
 						chunks[i] = c.registerExpr(&StrLiteral{Value: "<error>"})
 						continue
@@ -1724,8 +1736,9 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Type check the argument against the parameter type
-				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+				checkedArgType := c.LookupType(checkedArg)
+				if !areCompatible(paramType, checkedArgType) {
+					c.addError(typeMismatch(paramType, checkedArgType), resolvedExprs[i].GetLocation())
 					return nil
 				}
 
@@ -1735,7 +1748,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						// User provided `mut` - create a copy
 						args[i] = c.registerExpr(&CopyExpression{
 							Expr:  checkedArg,
-							Type_: checkedArg.Type(),
+							Type_: checkedArgType,
 						})
 					} else if c.isMutable(checkedArg) {
 						// Argument is already mutable
@@ -1780,7 +1793,8 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-	propType := subj.Type().get(s.Property.Name)
+			subjType := c.LookupType(subj)
+			propType := subjType.get(s.Property.Name)
 			if propType == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
 				return nil
@@ -1799,10 +1813,11 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			if subj.Type() == nil {
+			subjType := c.LookupType(subj)
+			if subjType == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
 			}
-			sig := subj.Type().get(s.Method.Name)
+			sig := subjType.get(s.Method.Name)
 			if sig == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
 				return nil
@@ -1867,19 +1882,20 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				}
 
 				// Type check the argument against the parameter type
-				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+				checkedArgType := c.LookupType(checkedArg)
+				if !areCompatible(paramType, checkedArgType) {
+					c.addError(typeMismatch(paramType, checkedArgType), resolvedExprs[i].GetLocation())
 					return nil
 				}
 
 				// Check mutability constraints if needed
 				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
 					// Check if the type is copyable (structs for now)
-					if c.isCopyable(checkedArg.Type()) {
+					if c.isCopyable(checkedArgType) {
 						// Wrap in copy expression instead of erroring
 						args[i] = c.registerExpr(&CopyExpression{
 							Expr:  checkedArg,
-							Type_: checkedArg.Type(),
+							Type_: checkedArgType,
 						})
 					} else {
 						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
@@ -1926,15 +1942,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 			if value == nil {
 				return nil
 			}
+			valueType := c.LookupType(value)
 			if s.Operator == ast.Minus {
-				if value.Type() != Int && value.Type() != Float {
+				if valueType != Int && valueType != Float {
 					c.addError("Only numbers can be negated with '-'", s.GetLocation())
 					return nil
 				}
 				return c.registerExpr(&Negation{Value: value})
 			}
 
-			if value.Type() != Bool {
+			if valueType != Bool {
 				c.addError("Only booleans can be negated with 'not'", s.GetLocation())
 				return nil
 			}
@@ -1951,17 +1968,19 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if !left.Type().equal(right.Type()) {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if !leftType.equal(rightType) {
 						c.addError("Cannot add different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntAddition{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatAddition{Left: left, Right: right})
 					}
-					if left.Type() == Str {
+					if leftType == Str {
 						return c.registerExpr(&StrAddition{Left: left, Right: right})
 					}
 					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
@@ -1975,14 +1994,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot subtract different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntSubtraction{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatSubtraction{Left: left, Right: right})
 					}
 					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
@@ -1996,14 +2017,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot multiply different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntMultiplication{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatMultiplication{Left: left, Right: right})
 					}
 					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
@@ -2017,14 +2040,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot divide different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntDivision{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatDivision{Left: left, Right: right})
 					}
 					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
@@ -2038,11 +2063,13 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot modulo different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntModulo{Left: left, Right: right})
 					}
 					c.addError("The '%' operator can only be used for Int", s.GetLocation())
@@ -2056,14 +2083,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot compare different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntGreater{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatGreater{Left: left, Right: right})
 					}
 					c.addError("The '>' operator can only be used for Int", s.GetLocation())
@@ -2077,14 +2106,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot compare different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntGreaterEqual{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatGreaterEqual{Left: left, Right: right})
 					}
 					c.addError("The '>=' operator can only be used for Int", s.GetLocation())
@@ -2098,14 +2129,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot compare different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntLess{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatLess{Left: left, Right: right})
 					}
 					c.addError("The '<' operator can only be used for Int or Float", s.GetLocation())
@@ -2119,14 +2152,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != rightType {
 						c.addError("Cannot compare different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if leftType == Int {
 						return c.registerExpr(&IntLessEqual{Left: left, Right: right})
 					}
-					if left.Type() == Float {
+					if leftType == Float {
 						return c.registerExpr(&FloatLessEqual{Left: left, Right: right})
 					}
 					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
@@ -2139,8 +2174,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if !left.Type().equal(right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if !leftType.equal(rightType) {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", leftType, rightType), s.GetLocation())
 						return nil
 					}
 
@@ -2148,12 +2185,12 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						_, ok := val.(*Maybe)
 						return ok
 					}
-					if isMaybe(left.Type()) {
+					if isMaybe(leftType) {
 						return c.registerExpr(&Equality{Left: left, Right: right})
 					}
 					allowedTypes := []Type{Int, Float, Str, Bool}
-					if !slices.Contains(allowedTypes, left.Type()) || !slices.Contains(allowedTypes, right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+					if !slices.Contains(allowedTypes, leftType) || !slices.Contains(allowedTypes, rightType) {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", leftType, rightType), s.GetLocation())
 						return nil
 					}
 					return c.registerExpr(&Equality{Left: left, Right: right})
@@ -2166,7 +2203,9 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != Bool || right.Type() != Bool {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != Bool || rightType != Bool {
 						c.addError("The 'and' operator can only be used between Bools", s.GetLocation())
 						return nil
 					}
@@ -2181,7 +2220,9 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != Bool || right.Type() != Bool {
+					leftType := c.LookupType(left)
+					rightType := c.LookupType(right)
+					if leftType != Bool || rightType != Bool {
 						c.addError("The 'or' operator can only be used with Boolean values", s.GetLocation())
 						return nil
 					}
