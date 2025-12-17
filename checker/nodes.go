@@ -22,6 +22,7 @@ type NonProducing interface {
 
 type Expression interface {
 	Type() Type
+	GetTypeID() TypeID
 }
 
 type StrLiteral struct {
@@ -572,6 +573,7 @@ func (b *Block) Type() Type {
 }
 
 type If struct {
+	typeID    TypeID
 	Condition Expression
 	Body      *Block
 	ElseIf    *If
@@ -580,6 +582,10 @@ type If struct {
 
 func (i *If) Type() Type {
 	return i.Body.Type()
+}
+
+func (i *If) GetTypeID() TypeID {
+	return i.typeID
 }
 
 type ForIntRange struct {
@@ -642,6 +648,7 @@ type Parameter struct {
 }
 
 type FunctionDef struct {
+	typeID     TypeID
 	Name       string
 	Parameters []Parameter
 	ReturnType Type
@@ -661,7 +668,12 @@ func (f FunctionDef) String() string {
 
 func (f FunctionDef) get(name string) Type { return nil }
 
+func (f *FunctionDef) GetTypeID() TypeID {
+	return f.typeID
+}
+
 type ExternalFunctionDef struct {
+	typeID          TypeID
 	Name            string
 	Parameters      []Parameter
 	ReturnType      Type
@@ -682,6 +694,10 @@ func (e ExternalFunctionDef) get(name string) Type { return nil }
 
 func (e *ExternalFunctionDef) Type() Type {
 	return e
+}
+
+func (e *ExternalFunctionDef) GetTypeID() TypeID {
+	return e.typeID
 }
 
 func (e ExternalFunctionDef) equal(other Type) bool {
@@ -803,12 +819,17 @@ func (f *FunctionCall) Type() Type {
 }
 
 type ModuleStructInstance struct {
+	typeID   TypeID
 	Module   string
 	Property *StructInstance
 }
 
 func (p *ModuleStructInstance) Type() Type {
 	return p.Property._type
+}
+
+func (p *ModuleStructInstance) GetTypeID() TypeID {
+	return p.typeID
 }
 
 type ModuleFunctionCall struct {
@@ -822,12 +843,17 @@ func (p *ModuleFunctionCall) Type() Type {
 }
 
 type ModuleSymbol struct {
+	typeID TypeID
 	Module string
 	Symbol Symbol
 }
 
 func (p *ModuleSymbol) Type() Type {
 	return p.Symbol.Type
+}
+
+func (p *ModuleSymbol) GetTypeID() TypeID {
+	return p.typeID
 }
 
 type Enum struct {
@@ -894,19 +920,24 @@ func (e Enum) hasTrait(trait *Trait) bool {
 }
 
 type EnumVariant struct {
+	typeID  TypeID
 	enum    *Enum
 	Variant int8
 }
 
-func (ev EnumVariant) Type() Type {
+func (ev *EnumVariant) Type() Type {
 	return ev.enum
 }
 
-func (ev EnumVariant) hasTrait(trait *Trait) bool {
+func (ev *EnumVariant) GetTypeID() TypeID {
+	return ev.typeID
+}
+
+func (ev *EnumVariant) hasTrait(trait *Trait) bool {
 	return ev.enum.hasTrait(trait)
 }
 
-func (ev EnumVariant) String() string {
+func (ev *EnumVariant) String() string {
 	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Variants[ev.Variant])
 }
 
@@ -1103,4 +1134,195 @@ type CopyExpression struct {
 
 func (c *CopyExpression) Type() Type {
 	return c.Type_
+}
+
+// GetTypeID implementations for all Expression types
+// Phase 4: Providing access to typeID for registry lookups
+
+func (s *StrLiteral) GetTypeID() TypeID {
+	return s.typeID
+}
+
+func (t *TemplateStr) GetTypeID() TypeID {
+	return t.typeID
+}
+
+func (b *BoolLiteral) GetTypeID() TypeID {
+	return b.typeID
+}
+
+func (v *VoidLiteral) GetTypeID() TypeID {
+	return v.typeID
+}
+
+func (i *IntLiteral) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (f *FloatLiteral) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (l *ListLiteral) GetTypeID() TypeID {
+	return l.typeID
+}
+
+func (m *MapLiteral) GetTypeID() TypeID {
+	return m.typeID
+}
+
+func (v *Variable) GetTypeID() TypeID {
+	return v.typeID
+}
+
+func (i *InstanceProperty) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *InstanceMethod) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (n *Negation) GetTypeID() TypeID {
+	return n.typeID
+}
+
+func (n *Not) GetTypeID() TypeID {
+	return n.typeID
+}
+
+func (i *IntAddition) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntSubtraction) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntMultiplication) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntDivision) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntModulo) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntGreater) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntGreaterEqual) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntLess) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (i *IntLessEqual) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (f *FloatAddition) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatSubtraction) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatMultiplication) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatDivision) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatGreater) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatGreaterEqual) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatLess) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FloatLessEqual) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (s *StrAddition) GetTypeID() TypeID {
+	return s.typeID
+}
+
+func (e *Equality) GetTypeID() TypeID {
+	return e.typeID
+}
+
+func (a *And) GetTypeID() TypeID {
+	return a.typeID
+}
+
+func (o *Or) GetTypeID() TypeID {
+	return o.typeID
+}
+
+func (o *OptionMatch) GetTypeID() TypeID {
+	return o.typeID
+}
+
+func (e *EnumMatch) GetTypeID() TypeID {
+	return e.typeID
+}
+
+func (b *BoolMatch) GetTypeID() TypeID {
+	return b.typeID
+}
+
+func (i *IntMatch) GetTypeID() TypeID {
+	return i.typeID
+}
+
+func (u *UnionMatch) GetTypeID() TypeID {
+	return u.typeID
+}
+
+func (c *ConditionalMatch) GetTypeID() TypeID {
+	return c.typeID
+}
+
+func (f *FunctionCall) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (m *ModuleFunctionCall) GetTypeID() TypeID {
+	return m.typeID
+}
+
+func (s *StructInstance) GetTypeID() TypeID {
+	return s.typeID
+}
+
+func (r *ResultMatch) GetTypeID() TypeID {
+	return r.typeID
+}
+
+func (p *Panic) GetTypeID() TypeID {
+	return p.typeID
+}
+
+func (t *TryOp) GetTypeID() TypeID {
+	return t.typeID
+}
+
+func (c *CopyExpression) GetTypeID() TypeID {
+	return c.typeID
 }

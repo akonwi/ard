@@ -40,6 +40,28 @@ func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
+// LookupType retrieves the type of an expression from the registry.
+// Phase 4: Registry-based type lookup with fallback to computed types.
+// This is the strangler fig transition: we look up from the registry first,
+// and fall back to the traditional Type() method if the registry doesn't have it.
+func (c *Checker) LookupType(expr Expression) Type {
+	if expr == nil {
+		return nil
+	}
+	
+	typeID := expr.GetTypeID()
+	if typeID != InvalidTypeID {
+		if t := c.types.Lookup(typeID); t != nil {
+			return t
+		}
+	}
+	
+	// Fallback to computed type during transition
+	// This happens during initial expression checking when Type() is called
+	// before registerExpr() is called
+	return expr.Type()
+}
+
 func (c Checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:

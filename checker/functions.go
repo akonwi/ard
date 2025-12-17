@@ -7,20 +7,25 @@ import (
 )
 
 type FiberExecution struct {
+	typeID TypeID
 	module Module
 	_type  Type
 	fnName string
 }
 
-func (f FiberExecution) Type() Type {
+func (f *FiberExecution) Type() Type {
 	return f._type
 }
 
-func (f FiberExecution) GetModule() Module {
+func (f *FiberExecution) GetTypeID() TypeID {
+	return f.typeID
+}
+
+func (f *FiberExecution) GetModule() Module {
 	return f.module
 }
 
-func (f FiberExecution) GetMainName() string {
+func (f *FiberExecution) GetMainName() string {
 	return f.fnName
 }
 
