@@ -24,7 +24,7 @@ func (f FiberExecution) GetMainName() string {
 	return f.fnName
 }
 
-func (c *checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *FiberExecution {
+func (c *Checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *FiberExecution {
 	switch node := fnNode.(type) {
 	case *ast.AnonymousFunction:
 		block := c.checkBlock(node.Body, func() {

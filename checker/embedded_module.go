@@ -40,8 +40,8 @@ func FindEmbeddedModule(path string) (Module, bool) {
 	program := result.Program
 
 	// Type check the program to create a Program with symbols
-	// Use the Check function which returns a Module and diagnostics
-	module, diagnostics := Check(program, nil, path)
+	// Use the check function which returns a Module and diagnostics
+	module, diagnostics := check(program, nil, path)
 	if len(diagnostics) > 0 {
 		// For now, we'll continue even with diagnostics
 		// In a production system, you might want to handle this differently

@@ -39,7 +39,7 @@ func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
-func (c checker) isMutable(expr Expression) bool {
+func (c Checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
 		return e.sym.mutable
@@ -50,7 +50,7 @@ func (c checker) isMutable(expr Expression) bool {
 }
 
 // isCopyable returns true if the type can be copied for mut parameters
-func (c checker) isCopyable(_ Type) bool {
+func (c Checker) isCopyable(_ Type) bool {
 	// In Ard, all types are copyable by default
 	// Future: might exclude external resources like file handles
 	return true
@@ -58,7 +58,7 @@ func (c checker) isCopyable(_ Type) bool {
 
 // shouldCopyForMutableAssignment determines if we should copy for mut variable assignments
 // This is more conservative than isCopyable to avoid unnecessary copying of primitives
-func (c checker) shouldCopyForMutableAssignment(t Type) bool {
+func (c Checker) shouldCopyForMutableAssignment(t Type) bool {
 	switch t.(type) {
 	case *StructDef, *List, *Map:
 		// Complex types that benefit from copy semantics
@@ -69,28 +69,43 @@ func (c checker) shouldCopyForMutableAssignment(t Type) bool {
 	}
 }
 
-type checker struct {
-	diagnostics []Diagnostic
-	scope       *SymbolTable
-	program     *Program
-	filePath    string
-	halted      bool
+type Checker struct {
+	diagnostics    []Diagnostic
+	input          *ast.Program
+	scope          *SymbolTable
+	filePath       string
+	program        *Program
+	halted         bool
+	moduleResolver *ModuleResolver
 }
 
-func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
-	globalScope := makeScope(nil)
-
-	c := &checker{
-		diagnostics: []Diagnostic{},
-		scope:       &globalScope,
-		filePath:    filePath,
+func New(filePath string, input *ast.Program, moduleResolver *ModuleResolver) *Checker {
+	rootScope := makeScope(nil)
+	c := &Checker{
+		diagnostics:    []Diagnostic{},
+		input:          input,
+		filePath:       filePath,
+		moduleResolver: moduleResolver,
+		program: &Program{
+			Imports:    map[string]Module{},
+			Statements: []Statement{},
+		},
+		scope: &rootScope,
 	}
-	c.program = &Program{
-		Imports:    map[string]Module{},
-		Statements: []Statement{},
-	}
 
-	for _, imp := range input.Imports {
+	return c
+}
+
+func (c *Checker) HasErrors() bool {
+	return len(c.diagnostics) > 0
+}
+
+func (c *Checker) Diagnostics() []Diagnostic {
+	return c.diagnostics
+}
+
+func (c *Checker) Check() {
+	for _, imp := range c.input.Imports {
 		if _, dup := c.program.Imports[imp.Name]; dup {
 			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
 			continue
@@ -109,31 +124,31 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 			}
 		} else {
 			// Handle user module imports
-			if moduleResolver == nil {
+			if c.moduleResolver == nil {
 				panic(fmt.Sprintf("No module resolver provided for user import: %s", imp.Path))
 			}
 
-			filePath, err := moduleResolver.ResolveImportPath(imp.Path)
+			filePath, err := c.moduleResolver.ResolveImportPath(imp.Path)
 			if err != nil {
 				c.addError(fmt.Sprintf("Failed to resolve import '%s': %v", imp.Path, err), imp.GetLocation())
 				continue
 			}
 
 			// Check if module is already cached
-			if cachedModule, ok := moduleResolver.moduleCache[filePath]; ok {
+			if cachedModule, ok := c.moduleResolver.moduleCache[filePath]; ok {
 				c.program.Imports[imp.Name] = cachedModule
 				continue
 			}
 
 			// Load and parse the module file using import path
-			ast, err := moduleResolver.LoadModule(imp.Path)
+			ast, err := c.moduleResolver.LoadModule(imp.Path)
 			if err != nil {
 				c.addError(fmt.Sprintf("Failed to load module %s: %v", filePath, err), imp.GetLocation())
 				continue
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := Check(ast, moduleResolver, imp.Path+".ard")
+			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard")
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
@@ -148,13 +163,13 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 			}
 
 			// Cache and add to imports
-			moduleResolver.moduleCache[filePath] = userModule
+			c.moduleResolver.moduleCache[filePath] = userModule
 			c.program.Imports[imp.Name] = userModule
 		}
 	}
 
 	// Auto-import prelude modules (only for non-std lib)
-	if !strings.HasPrefix(filePath, "ard/") {
+	if !strings.HasPrefix(c.filePath, "ard/") {
 		if mod, ok := findInStdLib("ard/dynamic"); ok {
 			c.program.Imports["Dynamic"] = mod
 		}
@@ -172,8 +187,8 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		}
 	}
 
-	for i := range input.Statements {
-		if stmt := c.checkStmt(&input.Statements[i]); stmt != nil {
+	for i := range c.input.Statements {
+		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
 		}
 		if c.halted {
@@ -181,18 +196,30 @@ func Check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) 
 		}
 	}
 
-	// Create UserModule from the checked program
-	userModule := NewUserModule(filePath, c.program, c.scope)
-
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
 		delete(c.program.Imports, alias)
 		c.program.Imports[mod.Path()] = mod
 	}
-	return userModule, c.diagnostics
 }
 
-func (c *checker) addError(msg string, location ast.Location) {
+// This should only be called after .Check()
+// The returned module could be problematic if there are diagnostic errors.
+func (c *Checker) Module() Module {
+	return NewUserModule(c.filePath, c.program, c.scope)
+}
+
+// check is an internal helper for recursive module checking.
+// Use New() + Check() + Module() for the public API.
+func check(input *ast.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
+	c := New(filePath, input, moduleResolver)
+
+	c.Check()
+
+	return c.Module(), c.diagnostics
+}
+
+func (c *Checker) addError(msg string, location ast.Location) {
 	c.diagnostics = append(c.diagnostics, Diagnostic{
 		Kind:     Error,
 		Message:  msg,
@@ -201,7 +228,7 @@ func (c *checker) addError(msg string, location ast.Location) {
 	})
 }
 
-func (c *checker) addWarning(msg string, location ast.Location) {
+func (c *Checker) addWarning(msg string, location ast.Location) {
 	c.diagnostics = append(c.diagnostics, Diagnostic{
 		Kind:     Warn,
 		Message:  msg,
@@ -210,7 +237,7 @@ func (c *checker) addWarning(msg string, location ast.Location) {
 	})
 }
 
-func (c *checker) resolveModule(name string) Module {
+func (c *Checker) resolveModule(name string) Module {
 	if mod, ok := c.program.Imports[name]; ok {
 		return mod
 	}
@@ -222,7 +249,7 @@ func (c *checker) resolveModule(name string) Module {
 	return nil
 }
 
-func (c *checker) findModuleByPath(path string) Module {
+func (c *Checker) findModuleByPath(path string) Module {
 	for _, mod := range c.program.Imports {
 		if mod.Path() == path {
 			return mod
@@ -262,7 +289,7 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	}
 }
 
-func (c *checker) specializeAliasedType(originalType Type, typeArgs []ast.DeclaredType, loc ast.Location) Type {
+func (c *Checker) specializeAliasedType(originalType Type, typeArgs []ast.DeclaredType, loc ast.Location) Type {
 	// 1. Collect generics from the original type
 	genericParams := []string{}
 	seenGenerics := make(map[string]bool)
@@ -288,7 +315,7 @@ func (c *checker) specializeAliasedType(originalType Type, typeArgs []ast.Declar
 	return specializedType
 }
 
-func (c *checker) resolveType(t ast.DeclaredType) Type {
+func (c *Checker) resolveType(t ast.DeclaredType) Type {
 	var baseType Type
 	switch ty := t.(type) {
 	case *ast.StringType:
@@ -375,7 +402,7 @@ func (c *checker) resolveType(t ast.DeclaredType) Type {
 	return baseType
 }
 
-func (c *checker) destructurePath(expr *ast.StaticFunction) (string, string) {
+func (c *Checker) destructurePath(expr *ast.StaticFunction) (string, string) {
 	absolute := expr.Target.String() + "::" + expr.Function.Name
 	parts := strings.Split(absolute, "::")
 
@@ -397,7 +424,7 @@ func typeMismatch(expected, got Type) string {
 	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, got)
 }
 
-func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
+func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 	if c.halted {
 		return nil
 	}
@@ -1117,7 +1144,7 @@ func (c *checker) checkStmt(stmt *ast.Statement) *Statement {
 	}
 }
 
-func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiteral {
+func (c *Checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiteral {
 	if declaredType != nil {
 		expectedElementType := declaredType.(*List).of
 		elements := make([]Expression, len(expr.Items))
@@ -1174,7 +1201,7 @@ func (c *checker) checkList(declaredType Type, expr *ast.ListLiteral) *ListLiter
 	}
 }
 
-func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
+func (c *Checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 	if len(stmts) == 0 {
 		return &Block{Stmts: []Statement{}}
 	}
@@ -1202,7 +1229,7 @@ func (c *checker) checkBlock(stmts []ast.Statement, setup func()) *Block {
 	return block
 }
 
-func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral {
+func (c *Checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral {
 	// Handle empty map with declared type
 	if len(expr.Entries) == 0 {
 		if declaredType != nil {
@@ -1331,7 +1358,7 @@ func (c *checker) checkMap(declaredType Type, expr *ast.MapLiteral) *MapLiteral 
 }
 
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
-func (c *checker) validateStructInstance(structType *StructDef, properties []ast.StructValue, structName string, loc ast.Location) *StructInstance {
+func (c *Checker) validateStructInstance(structType *StructDef, properties []ast.StructValue, structName string, loc ast.Location) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
 
@@ -1365,7 +1392,7 @@ func (c *checker) validateStructInstance(structType *StructDef, properties []ast
 	return instance
 }
 
-func (c *checker) checkExpr(expr ast.Expression) Expression {
+func (c *Checker) checkExpr(expr ast.Expression) Expression {
 	if c.halted {
 		return nil
 	}
@@ -3057,7 +3084,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
-					
+
 					// Validate catch block type compatibility
 					// If both are Results, only error types need to match (value types can differ, including generic $Val)
 					var typeOk bool
@@ -3140,7 +3167,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
-					
+
 					// Validate catch block type compatibility
 					// For Maybe catch blocks, inner types must match (or both have unresolved generics)
 					var typeOk bool
@@ -3211,7 +3238,7 @@ func (c *checker) checkExpr(expr ast.Expression) Expression {
 
 // extractIntFromPattern extracts an integer value from a pattern that can be either
 // a NumLiteral or a UnaryExpression with minus operator applied to a NumLiteral
-func (c *checker) extractIntFromPattern(expr ast.Expression) (int, error) {
+func (c *Checker) extractIntFromPattern(expr ast.Expression) (int, error) {
 	switch e := expr.(type) {
 	case *ast.NumLiteral:
 		return strconv.Atoi(e.Value)
@@ -3232,7 +3259,7 @@ func (c *checker) extractIntFromPattern(expr ast.Expression) (int, error) {
 }
 
 // use this when we know what the expr's Type should be
-func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression {
+func (c *Checker) checkExprAs(expr ast.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
 	case *ast.ListLiteral:
 		// Only use collection-specific inference when the expected type is a list.
@@ -3344,7 +3371,7 @@ func (c *checker) checkExprAs(expr ast.Expression, expectedType Type) Expression
 	return checked
 }
 
-func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunctionDef {
+func (c *Checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunctionDef {
 	// Check for duplicate function names
 	if _, dup := c.scope.get(def.Name); dup {
 		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
@@ -3386,7 +3413,7 @@ func (c *checker) checkExternalFunction(def *ast.ExternalFunction) *ExternalFunc
 	return extFn
 }
 
-func (c *checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {
+func (c *Checker) checkFunction(def *ast.FunctionDeclaration, init func()) *FunctionDef {
 	if init != nil {
 		init()
 	}
@@ -3494,7 +3521,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 }
 
 // New generic resolution using the enhanced symbol table
-func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []ast.DeclaredType, _ ast.Location) (*FunctionDef, error) {
+func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []ast.DeclaredType, _ ast.Location) (*FunctionDef, error) {
 	if !fnDef.hasGenerics() {
 		return fnDef, nil
 	}
@@ -3573,7 +3600,7 @@ func (c *checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 }
 
 // unifyTypes attempts to unify two types by binding generics in the scope
-func (c *checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
+func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
 	switch expectedType := expected.(type) {
 	case *Any:
 		// Generic type - bind it to the actual type
@@ -3649,7 +3676,7 @@ func extractGenericNames(t Type, names map[string]bool) {
 }
 
 // resolveArguments converts unified argument list to positional arguments
-func (c *checker) resolveArguments(args []ast.Argument, params []Parameter) ([]ast.Expression, error) {
+func (c *Checker) resolveArguments(args []ast.Argument, params []Parameter) ([]ast.Expression, error) {
 	// Separate positional and named arguments
 	var positionalArgs []ast.Expression
 	var namedArgs []ast.Argument

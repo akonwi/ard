@@ -119,10 +119,12 @@ fn main() Int {
 	}
 	astTree := result.Program
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
+	module := c.Module()
 	program := module.Program()
 
 	// Should have imported the utils module
@@ -191,10 +193,12 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
+	module := c.Module()
 	program := module.Program()
 
 	// Should have imported the math module
@@ -264,7 +268,9 @@ fn main() Int {
 		t.Fatal(err)
 	}
 
-	_, diagnostics := checker.Check(astTree, resolver, "main.ard")
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	diagnostics := c.Diagnostics()
 	if len(diagnostics) == 0 {
 		t.Error("Expected error when accessing private function")
 	}
@@ -321,10 +327,12 @@ fn func1() Int {
 		t.Fatal(result1.Errors[0].Message)
 	}
 	astTree1 := result1.Program
-	module1, diagnostics1 := checker.Check(astTree1, resolver, "main1.ard")
-	if len(diagnostics1) > 0 {
-		t.Fatalf("Unexpected diagnostics in first check: %v", diagnostics1)
+	c1 := checker.New("main1.ard", astTree1, resolver)
+	c1.Check()
+	if c1.HasErrors() {
+		t.Fatalf("Unexpected diagnostics in first check: %v", c1.Diagnostics())
 	}
+	module1 := c1.Module()
 	program1 := module1.Program()
 
 	// Second import of the same module - should use cache
@@ -338,10 +346,12 @@ fn func2() Int {
 		t.Fatal(result2.Errors[0].Message)
 	}
 	astTree2 := result2.Program
-	module2, diagnostics2 := checker.Check(astTree2, resolver, "main2.ard")
-	if len(diagnostics2) > 0 {
-		t.Fatalf("Unexpected diagnostics in second check: %v", diagnostics2)
+	c2 := checker.New("main2.ard", astTree2, resolver)
+	c2.Check()
+	if c2.HasErrors() {
+		t.Fatalf("Unexpected diagnostics in second check: %v", c2.Diagnostics())
 	}
+	module2 := c2.Module()
 	program2 := module2.Program()
 
 	// Both should have the shared module imported
@@ -404,7 +414,9 @@ func TestUserModuleErrors(t *testing.T) {
 				t.Fatal(result.Errors[0].Message)
 			}
 			astTree := result.Program
-			_, diagnostics := checker.Check(astTree, resolver, "main.ard")
+			c := checker.New("main.ard", astTree, resolver)
+			c.Check()
+			diagnostics := c.Diagnostics()
 			if len(diagnostics) == 0 {
 				t.Error("Expected error but got none")
 				return
@@ -858,10 +870,12 @@ fn main() Str {
 		t.Fatal(err)
 	}
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
+	module := c.Module()
 	program := module.Program()
 
 	// Should have imported the constants module
@@ -932,12 +946,14 @@ mut private_variable: Str = "secret"
 		t.Fatal(err)
 	}
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
 
 	// Cast to UserModule for testing
+	module := c.Module()
 	userModule, ok := module.(*checker.UserModule)
 	if !ok {
 		t.Fatal("Expected UserModule")

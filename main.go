@@ -70,15 +70,16 @@ func main() {
 				relPath = inputPath // fallback to absolute path
 			}
 
-			module, diagnostics := checker.Check(ast, moduleResolver, relPath)
-			if len(diagnostics) > 0 {
-				for _, diagnostic := range diagnostics {
+			c := checker.New(relPath, ast, moduleResolver)
+			c.Check()
+			if c.HasErrors() {
+				for _, diagnostic := range c.Diagnostics() {
 					fmt.Println(diagnostic)
 				}
 				os.Exit(1)
 			}
 
-			g := vm.NewRuntime(module)
+			g := vm.NewRuntime(c.Module())
 			if err := g.Run("main"); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -116,9 +117,10 @@ func check(inputPath string) bool {
 		relPath = inputPath // fallback to absolute path
 	}
 
-	_, diagnostics := checker.Check(ast, moduleResolver, relPath)
-	if len(diagnostics) > 0 {
-		for _, diagnostic := range diagnostics {
+	c := checker.New(relPath, ast, moduleResolver)
+	c.Check()
+	if c.HasErrors() {
+		for _, diagnostic := range c.Diagnostics() {
 			fmt.Println(diagnostic)
 		}
 		return false
