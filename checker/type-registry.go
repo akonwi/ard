@@ -9,8 +9,19 @@ const InvalidTypeID TypeID = 0
 
 // TypeRegistry stores all types for a module and assigns them unique IDs
 type TypeRegistry struct {
-	types  map[TypeID]Type
-	nextID TypeID
+	types        map[TypeID]Type
+	nextID       TypeID
+	canonicalIDs CanonicalTypeIDs
+}
+
+// CanonicalTypeIDs caches TypeIDs for built-in types for O(1) comparisons
+// Phase 6: Optimization - avoid Type() calls in hot paths
+type CanonicalTypeIDs struct {
+	Int   TypeID
+	Float TypeID
+	Str   TypeID
+	Bool  TypeID
+	Void  TypeID
 }
 
 // NewTypeRegistry creates an empty registry with ID allocation starting at 1
@@ -18,6 +29,13 @@ func NewTypeRegistry() *TypeRegistry {
 	return &TypeRegistry{
 		types:  make(map[TypeID]Type),
 		nextID: 1, // 0 is reserved for InvalidTypeID
+		canonicalIDs: CanonicalTypeIDs{
+			Int:   InvalidTypeID,
+			Float: InvalidTypeID,
+			Str:   InvalidTypeID,
+			Bool:  InvalidTypeID,
+			Void:  InvalidTypeID,
+		},
 	}
 }
 
@@ -30,6 +48,7 @@ func (tr *TypeRegistry) Next() TypeID {
 
 // Register stores a type with the given ID
 // Returns an error if the ID is already registered
+// Phase 6: Cache canonical type IDs for O(1) comparisons
 func (tr *TypeRegistry) Register(id TypeID, t Type) error {
 	if id == InvalidTypeID {
 		return fmt.Errorf("cannot register with InvalidTypeID")
@@ -41,6 +60,25 @@ func (tr *TypeRegistry) Register(id TypeID, t Type) error {
 		return fmt.Errorf("cannot register nil type")
 	}
 	tr.types[id] = t
+	
+	// Cache canonical type IDs for built-in types
+	// This enables O(1) type comparisons without Type() calls
+	if tr.canonicalIDs.Int == InvalidTypeID && t == Int {
+		tr.canonicalIDs.Int = id
+	}
+	if tr.canonicalIDs.Float == InvalidTypeID && t == Float {
+		tr.canonicalIDs.Float = id
+	}
+	if tr.canonicalIDs.Str == InvalidTypeID && t == Str {
+		tr.canonicalIDs.Str = id
+	}
+	if tr.canonicalIDs.Bool == InvalidTypeID && t == Bool {
+		tr.canonicalIDs.Bool = id
+	}
+	if tr.canonicalIDs.Void == InvalidTypeID && t == Void {
+		tr.canonicalIDs.Void = id
+	}
+	
 	return nil
 }
 
@@ -56,4 +94,10 @@ func (tr *TypeRegistry) Lookup(id TypeID) Type {
 // All returns all registered types (for testing/debugging)
 func (tr *TypeRegistry) All() map[TypeID]Type {
 	return tr.types
+}
+
+// CanonicalIds returns the cached TypeIDs for built-in types
+// Phase 6: Used for fast type comparisons in hot paths
+func (tr *TypeRegistry) CanonicalIds() CanonicalTypeIDs {
+	return tr.canonicalIDs
 }

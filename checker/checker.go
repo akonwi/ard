@@ -62,6 +62,70 @@ func (c *Checker) LookupType(expr Expression) Type {
 	return expr.Type()
 }
 
+// Phase 6: Fast type comparison methods using cached canonical TypeIDs
+// These enable O(1) comparisons in hot paths without calling Type()
+
+// IsInt checks if an expression's type is Int using TypeID comparison
+func (c *Checker) IsInt(expr Expression) bool {
+	if expr == nil {
+		return false
+	}
+	canonicalIDs := c.types.CanonicalIds()
+	if canonicalIDs.Int == InvalidTypeID {
+		// Fallback during bootstrapping before Int is registered
+		return c.LookupType(expr) == Int
+	}
+	return expr.GetTypeID() == canonicalIDs.Int
+}
+
+// IsStr checks if an expression's type is Str using TypeID comparison
+func (c *Checker) IsStr(expr Expression) bool {
+	if expr == nil {
+		return false
+	}
+	canonicalIDs := c.types.CanonicalIds()
+	if canonicalIDs.Str == InvalidTypeID {
+		return c.LookupType(expr) == Str
+	}
+	return expr.GetTypeID() == canonicalIDs.Str
+}
+
+// IsBool checks if an expression's type is Bool using TypeID comparison
+func (c *Checker) IsBool(expr Expression) bool {
+	if expr == nil {
+		return false
+	}
+	canonicalIDs := c.types.CanonicalIds()
+	if canonicalIDs.Bool == InvalidTypeID {
+		return c.LookupType(expr) == Bool
+	}
+	return expr.GetTypeID() == canonicalIDs.Bool
+}
+
+// IsFloat checks if an expression's type is Float using TypeID comparison
+func (c *Checker) IsFloat(expr Expression) bool {
+	if expr == nil {
+		return false
+	}
+	canonicalIDs := c.types.CanonicalIds()
+	if canonicalIDs.Float == InvalidTypeID {
+		return c.LookupType(expr) == Float
+	}
+	return expr.GetTypeID() == canonicalIDs.Float
+}
+
+// IsVoid checks if an expression's type is Void using TypeID comparison
+func (c *Checker) IsVoid(expr Expression) bool {
+	if expr == nil {
+		return false
+	}
+	canonicalIDs := c.types.CanonicalIds()
+	if canonicalIDs.Void == InvalidTypeID {
+		return c.LookupType(expr) == Void
+	}
+	return expr.GetTypeID() == canonicalIDs.Void
+}
+
 func (c Checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
