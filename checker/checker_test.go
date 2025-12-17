@@ -47,22 +47,22 @@ func run(t *testing.T, tests []test) {
 				t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 			}
 			ast := result.Program
-			module, diagnostics := checker.Check(ast, nil, "test.ard")
-			program := module.Program()
-			if len(tt.diagnostics) > 0 || len(diagnostics) > 0 {
-				if diff := cmp.Diff(tt.diagnostics, diagnostics, compareOptions); diff != "" {
+			c := checker.New("test.ard", ast, nil)
+			c.Check()
+			if len(tt.diagnostics) > 0 || c.HasErrors() {
+				if diff := cmp.Diff(tt.diagnostics, c.Diagnostics(), compareOptions); diff != "" {
 					t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
 				}
 			}
 
 			if tt.output != nil {
 				if len(tt.output.Imports) > 0 {
-					if diff := cmp.Diff(tt.output.Imports, program.Imports, compareOptions); diff != "" {
+					if diff := cmp.Diff(tt.output.Imports, c.Module().Program().Imports, compareOptions); diff != "" {
 						t.Fatalf("Program imports mismatch (-want +got):\n%s", diff)
 					}
 				}
 				if len(tt.output.Statements) > 0 {
-					if diff := cmp.Diff(tt.output.Statements, program.Statements, compareOptions); diff != "" {
+					if diff := cmp.Diff(tt.output.Statements, c.Module().Program().Statements, compareOptions); diff != "" {
 						t.Fatalf("Program statements mismatch (-want +got):\n%s", diff)
 					}
 				}

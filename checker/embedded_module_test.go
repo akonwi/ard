@@ -47,10 +47,11 @@ func TestStdLibModules(t *testing.T) {
 			}
 
 			// Type check the program to create a Program with symbols
-			_, diagnostics := checker.Check(result.Program, nil, modulePath)
-			if len(diagnostics) > 0 {
+			c := checker.New(modulePath, result.Program, nil)
+			c.Check()
+			if c.HasErrors() {
 				var errorMessages []string
-				for _, d := range diagnostics {
+				for _, d := range c.Diagnostics() {
 					errorMessages = append(errorMessages, d.String())
 				}
 				t.Fatalf("Checker diagnostics: %s", strings.Join(errorMessages, "\n"))

@@ -26,11 +26,12 @@ func run(t *testing.T, input string) any {
 		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
 	tree := result.Program
-	module, diagnostics := checker.Check(tree, nil, "test.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Diagnostics found: %v", diagnostics)
+	c := checker.New("test.ard", tree, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Diagnostics found: %v", c.Diagnostics())
 	}
-	vm := vm.NewScriptRuntime(module)
+	vm := vm.NewScriptRuntime(c.Module())
 	res, err := vm.Interpret()
 	if err != nil {
 		t.Fatalf("VM error: %s", err.Error())
@@ -45,11 +46,12 @@ func expectPanic(t *testing.T, substring, input string) {
 		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
 	tree := result.Program
-	module, diagnostics := checker.Check(tree, nil, "test.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Diagnostics found: %v", diagnostics)
+	c := checker.New("test.ard", tree, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Diagnostics found: %v", c.Diagnostics())
 	}
-	vm := vm.NewScriptRuntime(module)
+	vm := vm.NewScriptRuntime(c.Module())
 	_, runErr := vm.Interpret()
 	if runErr == nil {
 		t.Fatalf("Did not encounter expcted panic: %s", substring)
@@ -607,13 +609,14 @@ math::add(10, 20)`
 		t.Fatal(err)
 	}
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
 
 	// Run with VM
-	vm := vm.NewScriptRuntime(module)
+	vm := vm.NewScriptRuntime(c.Module())
 	result, err := vm.Interpret()
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
@@ -665,13 +668,14 @@ utils::add_one(5)`
 		t.Fatal(err)
 	}
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
 
 	// Run with VM
-	runtime := vm.NewScriptRuntime(module)
+	runtime := vm.NewScriptRuntime(c.Module())
 	result, err := runtime.Interpret()
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
@@ -723,13 +727,14 @@ f(10)`
 		t.Fatal(err)
 	}
 
-	module, diagnostics := checker.Check(astTree, resolver, "main.ard")
-	if len(diagnostics) > 0 {
-		t.Fatalf("Unexpected diagnostics: %v", diagnostics)
+	c := checker.New("main.ard", astTree, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("Unexpected diagnostics: %v", c.Diagnostics())
 	}
 
 	// Run with VM
-	runtime := vm.NewScriptRuntime(module)
+	runtime := vm.NewScriptRuntime(c.Module())
 	result, err := runtime.Interpret()
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
