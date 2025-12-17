@@ -42,7 +42,7 @@ func (c *Checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *
 			Statements: []Statement{
 				{Expr: main},
 			},
-		}, &SymbolTable{})
+		}, &SymbolTable{}, c.types)
 		return &FiberExecution{
 			module: module,
 			_type:  fiberType,

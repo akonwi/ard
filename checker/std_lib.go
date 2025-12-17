@@ -29,6 +29,11 @@ func (pkg MaybePkg) Path() string {
 func (pkg MaybePkg) Program() *Program {
 	return nil
 }
+
+func (pkg MaybePkg) TypeRegistry() *TypeRegistry {
+	return nil
+}
+
 func (pkg MaybePkg) Get(name string) Symbol {
 	switch name {
 	case "none":
@@ -68,6 +73,11 @@ func (pkg ResultPkg) Path() string {
 func (pkg ResultPkg) Program() *Program {
 	return nil
 }
+
+func (pkg ResultPkg) TypeRegistry() *TypeRegistry {
+	return nil
+}
+
 func (pkg ResultPkg) Get(name string) Symbol {
 	switch name {
 	case "ok":

@@ -19,6 +19,7 @@ type Module interface {
 	Path() string
 	Get(name string) Symbol
 	Program() *Program
+	TypeRegistry() *TypeRegistry
 }
 
 type DiagnosticKind string
@@ -93,7 +94,7 @@ func New(filePath string, input *ast.Program, moduleResolver *ModuleResolver) *C
 			Statements: []Statement{},
 		},
 		scope: &rootScope,
-		types: &TypeRegistry{},
+		types: NewTypeRegistry(),
 	}
 
 	return c
@@ -105,6 +106,20 @@ func (c *Checker) HasErrors() bool {
 
 func (c *Checker) Diagnostics() []Diagnostic {
 	return c.diagnostics
+}
+
+// registerType registers a type in the type registry and returns the assigned ID
+func (c *Checker) registerType(t Type) TypeID {
+	if t == nil {
+		return InvalidTypeID
+	}
+	id := c.types.Next()
+	if err := c.types.Register(id, t); err != nil {
+		// This should never happen in normal operation, but log it if it does
+		c.addError(fmt.Sprintf("Internal error registering type: %v", err), ast.Location{})
+		return InvalidTypeID
+	}
+	return id
 }
 
 func (c *Checker) Check() {
@@ -209,7 +224,7 @@ func (c *Checker) Check() {
 // This should only be called after .Check()
 // The returned module could be problematic if there are diagnostic errors.
 func (c *Checker) Module() Module {
-	return NewUserModule(c.filePath, c.program, c.scope)
+	return NewUserModule(c.filePath, c.program, c.scope, c.types)
 }
 
 // check is an internal helper for recursive module checking.

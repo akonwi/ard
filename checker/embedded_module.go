@@ -10,6 +10,7 @@ type EmbeddedModule struct {
 	path          string
 	program       *Program
 	publicSymbols map[string]Symbol
+	typeRegistry  *TypeRegistry
 }
 
 func (m EmbeddedModule) Path() string {
@@ -22,6 +23,10 @@ func (m EmbeddedModule) Program() *Program {
 
 func (m EmbeddedModule) Get(name string) Symbol {
 	return m.publicSymbols[name]
+}
+
+func (m EmbeddedModule) TypeRegistry() *TypeRegistry {
+	return m.typeRegistry
 }
 
 // findEmbeddedModule loads a .ard standard library module from embedded files

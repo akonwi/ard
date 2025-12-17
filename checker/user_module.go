@@ -5,6 +5,7 @@ type UserModule struct {
 	filePath      string
 	publicSymbols map[string]Symbol // only public symbols from the checked program
 	program       *Program
+	typeRegistry  *TypeRegistry
 }
 
 // Path returns the file path for this module
@@ -22,13 +23,18 @@ func (m *UserModule) Program() *Program {
 	return m.program
 }
 
+// TypeRegistry returns the type registry for this module
+func (m *UserModule) TypeRegistry() *TypeRegistry {
+	return m.typeRegistry
+}
+
 // setFilePath sets the file path for this module
 func (m *UserModule) setFilePath(path string) {
 	m.filePath = path
 }
 
 // NewUserModule creates a UserModule from a checked program, extracting only public symbols
-func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) *UserModule {
+func NewUserModule(filePath string, program *Program, globalScope *SymbolTable, typeRegistry *TypeRegistry) *UserModule {
 	publicSymbols := make(map[string]Symbol)
 
 	// Extract public symbols from the global scope
@@ -81,5 +87,6 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 		filePath:      filePath,
 		publicSymbols: publicSymbols,
 		program:       program,
+		typeRegistry:  typeRegistry,
 	}
 }
