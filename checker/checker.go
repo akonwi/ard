@@ -122,6 +122,119 @@ func (c *Checker) registerType(t Type) TypeID {
 	return id
 }
 
+// registerExpr registers an expression's type in the registry and sets its typeID
+// This is a helper to keep registration logic centralized
+func (c *Checker) registerExpr(expr Expression) Expression {
+	if expr == nil {
+		return nil
+	}
+	typeID := c.registerType(expr.Type())
+	// Set typeID on the expression struct if it has that field
+	// This is done via reflection since not all expressions may have it initialized yet
+	setTypeID(expr, typeID)
+	return expr
+}
+
+// setTypeID sets the typeID field on an expression via reflection
+func setTypeID(expr interface{}, id TypeID) {
+	switch e := expr.(type) {
+	case *StrLiteral:
+		e.typeID = id
+	case *TemplateStr:
+		e.typeID = id
+	case *BoolLiteral:
+		e.typeID = id
+	case *VoidLiteral:
+		e.typeID = id
+	case *IntLiteral:
+		e.typeID = id
+	case *FloatLiteral:
+		e.typeID = id
+	case *ListLiteral:
+		e.typeID = id
+	case *MapLiteral:
+		e.typeID = id
+	case *Variable:
+		e.typeID = id
+	case *InstanceProperty:
+		e.typeID = id
+	case *InstanceMethod:
+		e.typeID = id
+	case *Negation:
+		e.typeID = id
+	case *Not:
+		e.typeID = id
+	case *IntAddition:
+		e.typeID = id
+	case *IntSubtraction:
+		e.typeID = id
+	case *IntMultiplication:
+		e.typeID = id
+	case *IntDivision:
+		e.typeID = id
+	case *IntModulo:
+		e.typeID = id
+	case *IntGreater:
+		e.typeID = id
+	case *IntGreaterEqual:
+		e.typeID = id
+	case *IntLess:
+		e.typeID = id
+	case *IntLessEqual:
+		e.typeID = id
+	case *FloatAddition:
+		e.typeID = id
+	case *FloatSubtraction:
+		e.typeID = id
+	case *FloatMultiplication:
+		e.typeID = id
+	case *FloatDivision:
+		e.typeID = id
+	case *FloatGreater:
+		e.typeID = id
+	case *FloatGreaterEqual:
+		e.typeID = id
+	case *FloatLess:
+		e.typeID = id
+	case *FloatLessEqual:
+		e.typeID = id
+	case *StrAddition:
+		e.typeID = id
+	case *Equality:
+		e.typeID = id
+	case *And:
+		e.typeID = id
+	case *Or:
+		e.typeID = id
+	case *OptionMatch:
+		e.typeID = id
+	case *EnumMatch:
+		e.typeID = id
+	case *BoolMatch:
+		e.typeID = id
+	case *IntMatch:
+		e.typeID = id
+	case *UnionMatch:
+		e.typeID = id
+	case *ConditionalMatch:
+		e.typeID = id
+	case *FunctionCall:
+		e.typeID = id
+	case *ModuleFunctionCall:
+		e.typeID = id
+	case *StructInstance:
+		e.typeID = id
+	case *ResultMatch:
+		e.typeID = id
+	case *Panic:
+		e.typeID = id
+	case *TryOp:
+		e.typeID = id
+	case *CopyExpression:
+		e.typeID = id
+	}
+}
+
 func (c *Checker) Check() {
 	for _, imp := range c.input.Imports {
 		if _, dup := c.program.Imports[imp.Name]; dup {
@@ -819,7 +932,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 				}
 
 				return &Statement{
-					Stmt: &Reassignment{Target: &Variable{*target}, Value: value},
+					Stmt: &Reassignment{Target: &Variable{sym: *target}, Value: value},
 				}
 			}
 
@@ -850,7 +963,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			// Check the condition expression
 			var condition Expression
 			if s.Condition == nil {
-				condition = &BoolLiteral{true}
+				condition = c.registerExpr(&BoolLiteral{Value: true})
 			} else {
 				condition = c.checkExpr(s.Condition)
 			}
@@ -998,7 +1111,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 				loop := &ForIntRange{
 					Cursor: s.Cursor.Name,
 					Index:  s.Cursor2.Name,
-					Start:  &IntLiteral{0}, // Start from 0
+					Start:  c.registerExpr(&IntLiteral{Value: 0}).(*IntLiteral), // Start from 0
 					End:    iterValue,      // End at the specified number
 				}
 
@@ -1416,11 +1529,11 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 	}
 	switch s := (expr).(type) {
 	case *ast.StrLiteral:
-		return &StrLiteral{s.Value}
+		return c.registerExpr(&StrLiteral{Value: s.Value})
 	case *ast.BoolLiteral:
-		return &BoolLiteral{s.Value}
+		return c.registerExpr(&BoolLiteral{Value: s.Value})
 	case *ast.VoidLiteral:
-		return &VoidLiteral{}
+		return c.registerExpr(&VoidLiteral{})
 	case *ast.NumLiteral:
 		{
 			stripped := strings.ReplaceAll(s.Value, "_", "")
@@ -1428,15 +1541,15 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				value, err := strconv.ParseFloat(s.Value, 64)
 				if err != nil {
 					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
-					return &FloatLiteral{Value: 0.0}
+					return c.registerExpr(&FloatLiteral{Value: 0.0})
 				}
-				return &FloatLiteral{Value: value}
+				return c.registerExpr(&FloatLiteral{Value: value})
 			}
 			value, err := strconv.Atoi(stripped)
 			if err != nil {
 				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
 			}
-			return &IntLiteral{value}
+			return c.registerExpr(&IntLiteral{Value: value})
 		}
 	case *ast.InterpolatedStr:
 		{
@@ -1445,7 +1558,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				cx := c.checkExpr(s.Chunks[i])
 				if cx == nil {
 					// Replace failed chunk with placeholder
-					chunks[i] = &StrLiteral{"<error>"}
+					chunks[i] = c.registerExpr(&StrLiteral{Value: "<error>"})
 					continue
 				}
 				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
@@ -1453,17 +1566,17 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					if !cx.Type().hasTrait(toStringTrait) {
 						c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
 						// Replace chunk that can't be converted to string with placeholder
-						chunks[i] = &StrLiteral{"<error>"}
+						chunks[i] = c.registerExpr(&StrLiteral{Value: "<error>"})
 						continue
 					}
 					chunks[i] = cx
 				}
 			}
-			return &TemplateStr{chunks}
+			return c.registerExpr(&TemplateStr{Chunks: chunks})
 		}
 	case *ast.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
-			return &Variable{*sym}
+			return c.registerExpr(&Variable{sym: *sym})
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
 		c.halted = true
@@ -1480,10 +1593,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					return nil
 				}
 
-				return &Panic{
+				return c.registerExpr(&Panic{
 					Message: message,
 					node:    s,
-				}
+				})
 			}
 
 			// Find the function in the scope
@@ -1598,10 +1711,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				if fnDef.Parameters[i].Mutable {
 					if arg.Mutable {
 						// User provided `mut` - create a copy
-						args[i] = &CopyExpression{
+						args[i] = c.registerExpr(&CopyExpression{
 							Expr:  checkedArg,
 							Type_: checkedArg.Type(),
-						}
+						})
 					} else if c.isMutable(checkedArg) {
 						// Argument is already mutable
 						args[i] = checkedArg
@@ -1623,19 +1736,19 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					return nil
 				}
 
-				return &FunctionCall{
+				return c.registerExpr(&FunctionCall{
 					Name: s.Name,
 					Args: args,
 					fn:   specialized,
-				}
+				})
 			}
 
 			// Create and return the function call node
-			return &FunctionCall{
+			return c.registerExpr(&FunctionCall{
 				Name: s.Name,
 				Args: args,
 				fn:   fnDef,
-			}
+			})
 		}
 	case *ast.InstanceProperty:
 		{
@@ -1645,16 +1758,16 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				return nil
 			}
 
-			propType := subj.Type().get(s.Property.Name)
+	propType := subj.Type().get(s.Property.Name)
 			if propType == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
 				return nil
 			}
-			return &InstanceProperty{
+			return c.registerExpr(&InstanceProperty{
 				Subject:  subj,
 				Property: s.Property.Name,
 				_type:    propType,
-			}
+			})
 		}
 	case *ast.InstanceMethod:
 		{
@@ -1742,10 +1855,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					// Check if the type is copyable (structs for now)
 					if c.isCopyable(checkedArg.Type()) {
 						// Wrap in copy expression instead of erroring
-						args[i] = &CopyExpression{
+						args[i] = c.registerExpr(&CopyExpression{
 							Expr:  checkedArg,
 							Type_: checkedArg.Type(),
-						}
+						})
 					} else {
 						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 					}
@@ -1762,14 +1875,15 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					return nil
 				}
 
-				return &InstanceMethod{
-					Subject: subj,
-					Method: &FunctionCall{
-						Name: s.Method.Name,
-						Args: args,
-						fn:   specialized,
-					},
+				methodCall := &FunctionCall{
+					Name: s.Method.Name,
+					Args: args,
+					fn:   specialized,
 				}
+				return c.registerExpr(&InstanceMethod{
+					Subject: subj,
+					Method:  c.registerExpr(methodCall).(*FunctionCall),
+				})
 			}
 
 			// Create function call
@@ -1779,10 +1893,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				fn:   fnDef,
 			}
 
-			return &InstanceMethod{
+			return c.registerExpr(&InstanceMethod{
 				Subject: subj,
-				Method:  call,
-			}
+				Method:  c.registerExpr(call).(*FunctionCall),
+			})
 		}
 	case *ast.UnaryExpression:
 		{
@@ -1795,14 +1909,14 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					c.addError("Only numbers can be negated with '-'", s.GetLocation())
 					return nil
 				}
-				return &Negation{value}
+				return c.registerExpr(&Negation{Value: value})
 			}
 
 			if value.Type() != Bool {
 				c.addError("Only booleans can be negated with 'not'", s.GetLocation())
 				return nil
 			}
-			return &Not{value}
+			return c.registerExpr(&Not{Value: value})
 		}
 	case *ast.BinaryExpression:
 		{
@@ -1820,13 +1934,13 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntAddition{left, right}
+						return c.registerExpr(&IntAddition{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatAddition{left, right}
+						return c.registerExpr(&FloatAddition{Left: left, Right: right})
 					}
 					if left.Type() == Str {
-						return &StrAddition{left, right}
+						return c.registerExpr(&StrAddition{Left: left, Right: right})
 					}
 					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
 					return nil
@@ -1844,10 +1958,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntSubtraction{left, right}
+						return c.registerExpr(&IntSubtraction{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatSubtraction{left, right}
+						return c.registerExpr(&FloatSubtraction{Left: left, Right: right})
 					}
 					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
 					return nil
@@ -1865,10 +1979,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntMultiplication{left, right}
+						return c.registerExpr(&IntMultiplication{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatMultiplication{left, right}
+						return c.registerExpr(&FloatMultiplication{Left: left, Right: right})
 					}
 					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
 					return nil
@@ -1886,10 +2000,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntDivision{left, right}
+						return c.registerExpr(&IntDivision{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatDivision{left, right}
+						return c.registerExpr(&FloatDivision{Left: left, Right: right})
 					}
 					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
 					return nil
@@ -1907,7 +2021,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntModulo{left, right}
+						return c.registerExpr(&IntModulo{Left: left, Right: right})
 					}
 					c.addError("The '%' operator can only be used for Int", s.GetLocation())
 					return nil
@@ -1925,10 +2039,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntGreater{left, right}
+						return c.registerExpr(&IntGreater{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatGreater{left, right}
+						return c.registerExpr(&FloatGreater{Left: left, Right: right})
 					}
 					c.addError("The '>' operator can only be used for Int", s.GetLocation())
 					return nil
@@ -1946,10 +2060,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntGreaterEqual{left, right}
+						return c.registerExpr(&IntGreaterEqual{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatGreaterEqual{left, right}
+						return c.registerExpr(&FloatGreaterEqual{Left: left, Right: right})
 					}
 					c.addError("The '>=' operator can only be used for Int", s.GetLocation())
 					return nil
@@ -1967,10 +2081,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntLess{left, right}
+						return c.registerExpr(&IntLess{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatLess{left, right}
+						return c.registerExpr(&FloatLess{Left: left, Right: right})
 					}
 					c.addError("The '<' operator can only be used for Int or Float", s.GetLocation())
 					return nil
@@ -1988,10 +2102,10 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 					if left.Type() == Int {
-						return &IntLessEqual{left, right}
+						return c.registerExpr(&IntLessEqual{Left: left, Right: right})
 					}
 					if left.Type() == Float {
-						return &FloatLessEqual{left, right}
+						return c.registerExpr(&FloatLessEqual{Left: left, Right: right})
 					}
 					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
 					return nil
@@ -2013,14 +2127,14 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return ok
 					}
 					if isMaybe(left.Type()) {
-						return &Equality{left, right}
+						return c.registerExpr(&Equality{Left: left, Right: right})
 					}
 					allowedTypes := []Type{Int, Float, Str, Bool}
 					if !slices.Contains(allowedTypes, left.Type()) || !slices.Contains(allowedTypes, right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
 						return nil
 					}
-					return &Equality{left, right}
+					return c.registerExpr(&Equality{Left: left, Right: right})
 				}
 			case ast.And:
 				{
@@ -2035,7 +2149,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					return &And{left, right}
+					return c.registerExpr(&And{Left: left, Right: right})
 				}
 			case ast.Or:
 				{
@@ -2050,7 +2164,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					return &Or{left, right}
+					return c.registerExpr(&Or{Left: left, Right: right})
 				}
 			default:
 				panic(fmt.Errorf("Unexpected operator: %v", s.Operator))

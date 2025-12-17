@@ -25,6 +25,7 @@ var compareOptions = cmp.Options{
 		checker.EnumVariant{},
 		checker.Identifier{},
 		checker.InstanceProperty{},
+		checker.InstanceMethod{},
 		checker.Statement{},
 		checker.Variable{},
 		checker.VariableDef{},
@@ -36,6 +37,45 @@ var compareOptions = cmp.Options{
 		checker.Result{},
 		checker.TryOp{},
 		checker.UserModule{},
+		checker.And{},
+		checker.BoolLiteral{},
+		checker.BoolMatch{},
+		checker.ConditionalMatch{},
+		checker.CopyExpression{},
+		checker.EnumMatch{},
+		checker.Equality{},
+		checker.FloatAddition{},
+		checker.FloatDivision{},
+		checker.FloatGreater{},
+		checker.FloatGreaterEqual{},
+		checker.FloatLess{},
+		checker.FloatLessEqual{},
+		checker.FloatLiteral{},
+		checker.FloatMultiplication{},
+		checker.FloatSubtraction{},
+		checker.IntAddition{},
+		checker.IntDivision{},
+		checker.IntGreater{},
+		checker.IntGreaterEqual{},
+		checker.IntLess{},
+		checker.IntLessEqual{},
+		checker.IntLiteral{},
+		checker.IntMatch{},
+		checker.IntModulo{},
+		checker.IntMultiplication{},
+		checker.IntSubtraction{},
+		checker.ModuleFunctionCall{},
+		checker.Negation{},
+		checker.Not{},
+		checker.OptionMatch{},
+		checker.Or{},
+		checker.Panic{},
+		checker.ResultMatch{},
+		checker.StrAddition{},
+		checker.StrLiteral{},
+		checker.TemplateStr{},
+		checker.UnionMatch{},
+		checker.VoidLiteral{},
 	),
 }
 
@@ -119,7 +159,7 @@ func TestPrimitiveLiterals(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-						Expr: &checker.StrLiteral{"hello"},
+						Expr: &checker.StrLiteral{Value: "hello"},
 					},
 					{Expr: &checker.IntLiteral{
 						Value: 42,
@@ -141,12 +181,12 @@ func TestPrimitiveLiterals(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-						Stmt: &checker.VariableDef{Name: "name", Value: &checker.StrLiteral{"world"}},
+						Stmt: &checker.VariableDef{Name: "name", Value: &checker.StrLiteral{Value: "world"}},
 					},
 					{
 						Expr: &checker.TemplateStr{
 							Chunks: []checker.Expression{
-								&checker.StrLiteral{"Hello, "},
+								&checker.StrLiteral{Value: "Hello, "},
 								&checker.Variable{},
 							},
 						},
@@ -154,8 +194,8 @@ func TestPrimitiveLiterals(t *testing.T) {
 					{
 						Expr: &checker.TemplateStr{
 							Chunks: []checker.Expression{
-								&checker.StrLiteral{"Hello, "},
-								&checker.IntLiteral{3},
+								&checker.StrLiteral{Value: "Hello, "},
+								&checker.IntLiteral{Value: 3},
 							},
 						},
 					},
@@ -281,20 +321,20 @@ func TestVariables(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "name",
-							Value:   &checker.StrLiteral{"Alice"},
+							Value:   &checker.StrLiteral{Value: "Alice"},
 						},
 					},
 					{
 						Stmt: &checker.VariableDef{
 							Mutable: true,
 							Name:    "other_name",
-							Value:   &checker.StrLiteral{"Bob"},
+							Value:   &checker.StrLiteral{Value: "Bob"},
 						},
 					},
 					{
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
-							Value:  &checker.StrLiteral{"joe"},
+							Value:  &checker.StrLiteral{Value: "joe"},
 						},
 					},
 				},
@@ -326,7 +366,7 @@ func TestVariables(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "string_1",
-							Value:   &checker.StrLiteral{"Hello"},
+							Value:   &checker.StrLiteral{Value: "Hello"},
 						},
 					},
 					{
@@ -355,7 +395,7 @@ func TestInstanceProperties(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.InstanceProperty{
-							Subject:  &checker.StrLiteral{"foobar"},
+							Subject:  &checker.StrLiteral{Value: "foobar"},
 							Property: "size",
 						},
 					},
@@ -363,7 +403,7 @@ func TestInstanceProperties(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "name",
-							Value:   &checker.StrLiteral{"Alice"},
+							Value:   &checker.StrLiteral{Value: "Alice"},
 						},
 					},
 					{
@@ -446,14 +486,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntAddition{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntAddition{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -469,14 +509,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatAddition{
-							Left:  &checker.FloatLiteral{1},
-							Right: &checker.FloatLiteral{2},
+							Left:  &checker.FloatLiteral{Value: 1},
+							Right: &checker.FloatLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.FloatAddition{
-							Left:  &checker.FloatLiteral{3},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -491,8 +531,8 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.StrAddition{
-							Left:  &checker.StrLiteral{"hello"},
-							Right: &checker.StrLiteral{"world"},
+							Left:  &checker.StrLiteral{Value: "hello"},
+							Right: &checker.StrLiteral{Value: "world"},
 						},
 					},
 				},
@@ -508,14 +548,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntSubtraction{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntSubtraction{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -531,14 +571,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatSubtraction{
-							Left:  &checker.FloatLiteral{1},
-							Right: &checker.FloatLiteral{2},
+							Left:  &checker.FloatLiteral{Value: 1},
+							Right: &checker.FloatLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.FloatSubtraction{
-							Left:  &checker.FloatLiteral{3},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -554,14 +594,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntMultiplication{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntMultiplication{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -577,14 +617,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatMultiplication{
-							Left:  &checker.FloatLiteral{1},
-							Right: &checker.FloatLiteral{2},
+							Left:  &checker.FloatLiteral{Value: 1},
+							Right: &checker.FloatLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.FloatMultiplication{
-							Left:  &checker.FloatLiteral{3},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -600,14 +640,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntDivision{
-							Left:  &checker.IntLiteral{10},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 10},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntDivision{
-							Left:  &checker.IntLiteral{15},
-							Right: &checker.Negation{&checker.IntLiteral{3}},
+							Left:  &checker.IntLiteral{Value: 15},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 3}},
 						},
 					},
 				},
@@ -623,14 +663,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatDivision{
-							Left:  &checker.FloatLiteral{10},
-							Right: &checker.FloatLiteral{2},
+							Left:  &checker.FloatLiteral{Value: 10},
+							Right: &checker.FloatLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.FloatDivision{
-							Left:  &checker.FloatLiteral{15},
-							Right: &checker.Negation{&checker.FloatLiteral{3}},
+							Left:  &checker.FloatLiteral{Value: 15},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 3}},
 						},
 					},
 				},
@@ -646,14 +686,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntModulo{
-							Left:  &checker.IntLiteral{10},
-							Right: &checker.IntLiteral{3},
+							Left:  &checker.IntLiteral{Value: 10},
+							Right: &checker.IntLiteral{Value: 3},
 						},
 					},
 					{
 						Expr: &checker.IntModulo{
-							Left:  &checker.IntLiteral{15},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 15},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -676,14 +716,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntGreater{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntGreater{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -699,14 +739,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntGreaterEqual{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntGreaterEqual{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -722,14 +762,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatGreater{
-							Left:  &checker.FloatLiteral{1.0},
-							Right: &checker.FloatLiteral{2.0},
+							Left:  &checker.FloatLiteral{Value: 1.0},
+							Right: &checker.FloatLiteral{Value: 2.0},
 						},
 					},
 					{
 						Expr: &checker.FloatGreater{
-							Left:  &checker.FloatLiteral{3.0},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3.0},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -745,14 +785,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatGreaterEqual{
-							Left:  &checker.FloatLiteral{1.0},
-							Right: &checker.FloatLiteral{2.0},
+							Left:  &checker.FloatLiteral{Value: 1.0},
+							Right: &checker.FloatLiteral{Value: 2.0},
 						},
 					},
 					{
 						Expr: &checker.FloatGreaterEqual{
-							Left:  &checker.FloatLiteral{3.0},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3.0},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -768,14 +808,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntLess{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntLess{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -791,14 +831,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntLessEqual{
-							Left:  &checker.IntLiteral{1},
-							Right: &checker.IntLiteral{2},
+							Left:  &checker.IntLiteral{Value: 1},
+							Right: &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.IntLessEqual{
-							Left:  &checker.IntLiteral{3},
-							Right: &checker.Negation{&checker.IntLiteral{4}},
+							Left:  &checker.IntLiteral{Value: 3},
+							Right: &checker.Negation{Value: &checker.IntLiteral{Value: 4}},
 						},
 					},
 				},
@@ -814,14 +854,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatLess{
-							Left:  &checker.FloatLiteral{1.0},
-							Right: &checker.FloatLiteral{2.0},
+							Left:  &checker.FloatLiteral{Value: 1.0},
+							Right: &checker.FloatLiteral{Value: 2.0},
 						},
 					},
 					{
 						Expr: &checker.FloatLess{
-							Left:  &checker.FloatLiteral{3.0},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3.0},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -837,14 +877,14 @@ func TestIntMath(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.FloatLessEqual{
-							Left:  &checker.FloatLiteral{1.0},
-							Right: &checker.FloatLiteral{2.0},
+							Left:  &checker.FloatLiteral{Value: 1.0},
+							Right: &checker.FloatLiteral{Value: 2.0},
 						},
 					},
 					{
 						Expr: &checker.FloatLessEqual{
-							Left:  &checker.FloatLiteral{3.0},
-							Right: &checker.Negation{&checker.FloatLiteral{4.5}},
+							Left:  &checker.FloatLiteral{Value: 3.0},
+							Right: &checker.Negation{Value: &checker.FloatLiteral{Value: 4.5}},
 						},
 					},
 				},
@@ -870,26 +910,26 @@ func TestEqualityComparisons(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.Equality{
-							&checker.IntLiteral{1},
-							&checker.IntLiteral{2},
+							Left:   &checker.IntLiteral{Value: 1},
+							Right:  &checker.IntLiteral{Value: 2},
 						},
 					},
 					{
 						Expr: &checker.Equality{
-							&checker.FloatLiteral{10.2},
-							&checker.FloatLiteral{21.4},
+							Left:   &checker.FloatLiteral{Value: 10.2},
+							Right:  &checker.FloatLiteral{Value: 21.4},
 						},
 					},
 					{
 						Expr: &checker.Equality{
-							&checker.BoolLiteral{true},
-							&checker.BoolLiteral{false},
+							Left:   &checker.BoolLiteral{Value: true},
+							Right:  &checker.BoolLiteral{Value: false},
 						},
 					},
 					{
 						Expr: &checker.Equality{
-							&checker.StrLiteral{"hello"},
-							&checker.StrLiteral{"world"},
+							Left:   &checker.StrLiteral{Value: "hello"},
+							Right:  &checker.StrLiteral{Value: "world"},
 						},
 					},
 				},
@@ -944,8 +984,8 @@ func TestParenthesizedExpressions(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.IntMultiplication{
-							Left:  &checker.IntAddition{&checker.IntLiteral{30}, &checker.IntLiteral{20}},
-							Right: &checker.IntLiteral{4},
+							Left:  &checker.IntAddition{Left: &checker.IntLiteral{Value: 30}, Right: &checker.IntLiteral{Value: 20}},
+							Right: &checker.IntLiteral{Value: 4},
 						},
 					},
 				},
@@ -958,8 +998,8 @@ func TestParenthesizedExpressions(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.Or{
-							&checker.And{&checker.BoolLiteral{true}, &checker.BoolLiteral{true}},
-							&checker.And{&checker.BoolLiteral{true}, &checker.BoolLiteral{false}},
+							Left:  &checker.And{Left: &checker.BoolLiteral{Value: true}, Right: &checker.BoolLiteral{Value: true}},
+							Right: &checker.And{Left: &checker.BoolLiteral{Value: true}, Right: &checker.BoolLiteral{Value: false}},
 						},
 					},
 				},
@@ -984,7 +1024,7 @@ func TestIfStatements(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: false,
 							Name:    "is_on",
-							Value:   &checker.BoolLiteral{true},
+							Value:   &checker.BoolLiteral{Value: true},
 						},
 					},
 					{
@@ -992,7 +1032,7 @@ func TestIfStatements(t *testing.T) {
 							Condition: &checker.Variable{},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"on"}},
+									{Expr: &checker.StrLiteral{Value: "on"}},
 								},
 							},
 						},
@@ -1024,15 +1064,15 @@ func TestIfStatements(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.If{
-							Condition: &checker.BoolLiteral{true},
+							Condition: &checker.BoolLiteral{Value: true},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"bar"}},
+									{Expr: &checker.StrLiteral{Value: "bar"}},
 								},
 							},
 							Else: &checker.Block{
 								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"baz"}},
+									{Expr: &checker.StrLiteral{Value: "baz"}},
 								},
 							},
 						},
@@ -1055,23 +1095,23 @@ func TestIfStatements(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.If{
-							Condition: &checker.BoolLiteral{true},
+							Condition: &checker.BoolLiteral{Value: true},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"bar"}},
+									{Expr: &checker.StrLiteral{Value: "bar"}},
 								},
 							},
 							ElseIf: &checker.If{
-								Condition: &checker.BoolLiteral{false},
+								Condition: &checker.BoolLiteral{Value: false},
 								Body: &checker.Block{
 									Stmts: []checker.Statement{
-										{Expr: &checker.StrLiteral{"baz"}},
+										{Expr: &checker.StrLiteral{Value: "baz"}},
 									},
 								},
 							},
 							Else: &checker.Block{
 								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"qux"}},
+									{Expr: &checker.StrLiteral{Value: "qux"}},
 								},
 							},
 						},
@@ -1111,14 +1151,14 @@ func TestForLoops(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: true,
 							Name:    "count",
-							Value:   &checker.IntLiteral{0},
+							Value:   &checker.IntLiteral{Value: 0},
 						},
 					},
 					{
 						Stmt: &checker.ForIntRange{
 							Cursor: "i",
-							Start:  &checker.IntLiteral{1},
-							End:    &checker.IntLiteral{10},
+							Start:  &checker.IntLiteral{Value: 1},
+							End:    &checker.IntLiteral{Value: 10},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{
@@ -1188,8 +1228,8 @@ func TestForLoops(t *testing.T) {
 					{
 						Stmt: &checker.ForIntRange{
 							Cursor: "i",
-							Start:  &checker.IntLiteral{0},
-							End:    &checker.IntLiteral{20},
+							Start:  &checker.IntLiteral{Value: 0},
+							End:    &checker.IntLiteral{Value: 20},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{Expr: &checker.Variable{}},
@@ -1225,8 +1265,8 @@ func TestLoopingOverMaps(t *testing.T) {
 							Key: "key",
 							Val: "val",
 							Map: &checker.MapLiteral{
-								Keys:   []checker.Expression{&checker.StrLiteral{"hello"}, &checker.StrLiteral{"world"}},
-								Values: []checker.Expression{&checker.IntLiteral{5}, &checker.IntLiteral{5}},
+								Keys:   []checker.Expression{&checker.StrLiteral{Value: "hello"}, &checker.StrLiteral{Value: "world"}},
+								Values: []checker.Expression{&checker.IntLiteral{Value: 5}, &checker.IntLiteral{Value: 5}},
 							},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
@@ -1236,7 +1276,7 @@ func TestLoopingOverMaps(t *testing.T) {
 												&checker.StrLiteral{},
 												&checker.Variable{},
 												&checker.TemplateStr{Chunks: []checker.Expression{
-													&checker.StrLiteral{" = "},
+													&checker.StrLiteral{Value: " = "},
 													&checker.Variable{},
 												}},
 											},
@@ -1268,17 +1308,17 @@ func TestTraditionalForLoop(t *testing.T) {
 							Init: &checker.VariableDef{
 								Mutable: true,
 								Name:    "i",
-								Value:   &checker.IntLiteral{0},
+								Value:   &checker.IntLiteral{Value: 0},
 							},
 							Condition: &checker.IntLess{
 								Left:  &checker.Variable{},
-								Right: &checker.IntLiteral{10},
+								Right: &checker.IntLiteral{Value: 10},
 							},
 							Update: &checker.Reassignment{
 								Target: &checker.Variable{},
 								Value: &checker.IntAddition{
 									Left:  &checker.Variable{},
-									Right: &checker.IntLiteral{1},
+									Right: &checker.IntLiteral{Value: 1},
 								},
 							},
 							Body: &checker.Block{
@@ -1319,14 +1359,14 @@ func TestWhileLoops(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: true,
 							Name:    "count",
-							Value:   &checker.IntLiteral{10},
+							Value:   &checker.IntLiteral{Value: 10},
 						},
 					},
 					{
 						Stmt: &checker.WhileLoop{
 							Condition: &checker.IntGreater{
 								Left:  &checker.Variable{},
-								Right: &checker.IntLiteral{0},
+								Right: &checker.IntLiteral{Value: 0},
 							},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
@@ -1335,7 +1375,7 @@ func TestWhileLoops(t *testing.T) {
 											Target: &checker.Variable{},
 											Value: &checker.IntSubtraction{
 												Left:  &checker.Variable{},
-												Right: &checker.IntLiteral{1},
+												Right: &checker.IntLiteral{Value: 1},
 											},
 										},
 									},
@@ -1372,14 +1412,14 @@ func TestWhileLoops(t *testing.T) {
 						Stmt: &checker.VariableDef{
 							Mutable: true,
 							Name:    "i",
-							Value:   &checker.IntLiteral{0},
+							Value:   &checker.IntLiteral{Value: 0},
 						},
 					},
 					{
 						Stmt: &checker.VariableDef{
 							Mutable: true,
 							Name:    "j",
-							Value:   &checker.IntLiteral{10},
+							Value:   &checker.IntLiteral{Value: 10},
 						},
 					},
 					{
@@ -1387,11 +1427,11 @@ func TestWhileLoops(t *testing.T) {
 							Condition: &checker.And{
 								Left: &checker.IntLess{
 									Left:  &checker.Variable{},
-									Right: &checker.IntLiteral{5},
+									Right: &checker.IntLiteral{Value: 5},
 								},
 								Right: &checker.IntGreater{
 									Left:  &checker.Variable{},
-									Right: &checker.IntLiteral{0},
+									Right: &checker.IntLiteral{Value: 0},
 								},
 							},
 							Body: &checker.Block{
@@ -1401,7 +1441,7 @@ func TestWhileLoops(t *testing.T) {
 											Target: &checker.Variable{},
 											Value: &checker.IntAddition{
 												Left:  &checker.Variable{},
-												Right: &checker.IntLiteral{1},
+												Right: &checker.IntLiteral{Value: 1},
 											},
 										},
 									},
@@ -1446,7 +1486,7 @@ func TestMaybes(t *testing.T) {
 								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
-									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
+									Args: []checker.Expression{&checker.StrLiteral{Value: "Bob"}},
 								},
 							},
 						},
@@ -1472,7 +1512,7 @@ func TestMaybes(t *testing.T) {
 								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
-									Args: []checker.Expression{&checker.StrLiteral{"Joe"}},
+									Args: []checker.Expression{&checker.StrLiteral{Value: "Joe"}},
 								},
 							},
 						},
@@ -1484,7 +1524,7 @@ func TestMaybes(t *testing.T) {
 								Module: "ard/maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
-									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
+									Args: []checker.Expression{&checker.StrLiteral{Value: "Bob"}},
 								},
 							},
 						},
@@ -1671,7 +1711,7 @@ func TestLists(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.InstanceMethod{
-							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
+							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{Value: 1}}},
 							Method:  &checker.FunctionCall{Name: "size", Args: []checker.Expression{}},
 						},
 					},
@@ -1702,12 +1742,12 @@ func TestMaps(t *testing.T) {
 							Name: "ages",
 							Value: &checker.MapLiteral{
 								Keys: []checker.Expression{
-									&checker.StrLiteral{"ard"},
-									&checker.StrLiteral{"go"},
+									&checker.StrLiteral{Value: "ard"},
+									&checker.StrLiteral{Value: "go"},
 								},
 								Values: []checker.Expression{
-									&checker.IntLiteral{0},
-									&checker.IntLiteral{15},
+									&checker.IntLiteral{Value: 0},
+									&checker.IntLiteral{Value: 15},
 								},
 							},
 						},
@@ -1725,12 +1765,12 @@ func TestMaps(t *testing.T) {
 							Name: "ages",
 							Value: &checker.MapLiteral{
 								Keys: []checker.Expression{
-									&checker.StrLiteral{"ard"},
-									&checker.StrLiteral{"go"},
+									&checker.StrLiteral{Value: "ard"},
+									&checker.StrLiteral{Value: "go"},
 								},
 								Values: []checker.Expression{
-									&checker.IntLiteral{0},
-									&checker.IntLiteral{15},
+									&checker.IntLiteral{Value: 0},
+									&checker.IntLiteral{Value: 15},
 								},
 							},
 						},
@@ -2121,7 +2161,7 @@ func TestGenerics(t *testing.T) {
 								Module: "ard/json",
 								Call: &checker.FunctionCall{
 									Name: "encode",
-									Args: []checker.Expression{&checker.IntLiteral{42}},
+									Args: []checker.Expression{&checker.IntLiteral{Value: 42}},
 								},
 							},
 						},
@@ -2151,10 +2191,10 @@ func TestGenerics(t *testing.T) {
 					},
 					{
 						Expr: &checker.IntAddition{
-							&checker.IntLiteral{2},
-							&checker.FunctionCall{
+							Left: &checker.IntLiteral{Value: 2},
+							Right: &checker.FunctionCall{
 								Name: "identity",
-								Args: []checker.Expression{&checker.IntLiteral{1}},
+								Args: []checker.Expression{&checker.IntLiteral{Value: 1}},
 							},
 						},
 					},

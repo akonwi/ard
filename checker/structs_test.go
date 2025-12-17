@@ -60,9 +60,9 @@ func TestStructs(t *testing.T) {
 							Value: &checker.StructInstance{
 								Name: "Person",
 								Fields: map[string]checker.Expression{
-									"name":     &checker.StrLiteral{"Alice"},
-									"age":      &checker.IntLiteral{30},
-									"employed": &checker.BoolLiteral{true},
+									"name":     &checker.StrLiteral{Value: "Alice"},
+									"age":      &checker.IntLiteral{Value: 30},
+									"employed": &checker.BoolLiteral{Value: true},
 								},
 							},
 						},
@@ -92,7 +92,7 @@ func TestStructs(t *testing.T) {
 									Name: "Request",
 									Fields: map[string]checker.Expression{
 										"method":  &checker.EnumVariant{},
-										"url":     &checker.StrLiteral{"google.com"},
+										"url":     &checker.StrLiteral{Value: "google.com"},
 										"headers": &checker.MapLiteral{Keys: []checker.Expression{}, Values: []checker.Expression{}},
 									},
 								},

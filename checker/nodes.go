@@ -25,6 +25,7 @@ type Expression interface {
 }
 
 type StrLiteral struct {
+	typeID TypeID
 	Value string
 }
 
@@ -36,6 +37,7 @@ func (s *StrLiteral) Type() Type {
 }
 
 type TemplateStr struct {
+	typeID TypeID
 	Chunks []Expression
 }
 
@@ -47,6 +49,7 @@ func (t *TemplateStr) Type() Type {
 }
 
 type BoolLiteral struct {
+	typeID TypeID
 	Value bool
 }
 
@@ -58,7 +61,9 @@ func (b *BoolLiteral) Type() Type {
 	return Bool
 }
 
-type VoidLiteral struct{}
+type VoidLiteral struct {
+	typeID TypeID
+}
 
 func (v *VoidLiteral) String() string {
 	return "()"
@@ -69,6 +74,7 @@ func (v *VoidLiteral) Type() Type {
 }
 
 type IntLiteral struct {
+	typeID TypeID
 	Value int
 }
 
@@ -81,6 +87,7 @@ func (i *IntLiteral) Type() Type {
 }
 
 type FloatLiteral struct {
+	typeID TypeID
 	Value float64
 }
 
@@ -93,6 +100,7 @@ func (f *FloatLiteral) Type() Type {
 }
 
 type ListLiteral struct {
+	typeID TypeID
 	Elements []Expression
 	_type    Type
 }
@@ -102,6 +110,7 @@ func (l *ListLiteral) Type() Type {
 }
 
 type MapLiteral struct {
+	typeID TypeID
 	Keys   []Expression
 	Values []Expression
 	_type  Type
@@ -141,6 +150,7 @@ func (i *Identifier) Type() Type {
 }
 
 type Variable struct {
+	typeID TypeID
 	sym Symbol
 }
 
@@ -155,6 +165,7 @@ func (v Variable) Type() Type {
 }
 
 type InstanceProperty struct {
+	typeID TypeID
 	Subject  Expression
 	Property string
 	_type    Type
@@ -174,6 +185,7 @@ func (i *InstanceProperty) String() string {
 }
 
 type InstanceMethod struct {
+	typeID TypeID
 	Subject Expression
 	Method  *FunctionCall
 }
@@ -187,6 +199,7 @@ func (i *InstanceMethod) String() string {
 }
 
 type Negation struct {
+	typeID TypeID
 	Value Expression
 }
 
@@ -198,6 +211,7 @@ func (n *Negation) Type() Type {
 }
 
 type Not struct {
+	typeID TypeID
 	Value Expression
 }
 
@@ -209,6 +223,7 @@ func (n *Not) Type() Type {
 }
 
 type IntAddition struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -218,6 +233,7 @@ func (n *IntAddition) Type() Type {
 }
 
 type IntSubtraction struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -227,6 +243,7 @@ func (n *IntSubtraction) Type() Type {
 }
 
 type IntMultiplication struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -236,6 +253,7 @@ func (n *IntMultiplication) Type() Type {
 }
 
 type IntDivision struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -245,6 +263,7 @@ func (n *IntDivision) Type() Type {
 }
 
 type IntModulo struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -254,6 +273,7 @@ func (n *IntModulo) Type() Type {
 }
 
 type IntGreater struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -263,6 +283,7 @@ func (n *IntGreater) Type() Type {
 }
 
 type IntGreaterEqual struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -272,6 +293,7 @@ func (n *IntGreaterEqual) Type() Type {
 }
 
 type IntLess struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -281,6 +303,7 @@ func (n *IntLess) Type() Type {
 }
 
 type IntLessEqual struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -290,6 +313,7 @@ func (n *IntLessEqual) Type() Type {
 }
 
 type FloatAddition struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -304,6 +328,7 @@ type Match struct {
 }
 
 type OptionMatch struct {
+	typeID TypeID
 	Subject Expression
 	Some    *Match
 	None    *Block
@@ -314,6 +339,7 @@ func (o *OptionMatch) Type() Type {
 }
 
 type EnumMatch struct {
+	typeID TypeID
 	Subject  Expression
 	Cases    []*Block
 	CatchAll *Block
@@ -334,6 +360,7 @@ func (e *EnumMatch) Type() Type {
 }
 
 type BoolMatch struct {
+	typeID TypeID
 	Subject Expression
 	True    *Block
 	False   *Block
@@ -349,6 +376,7 @@ type IntRange struct {
 }
 
 type IntMatch struct {
+	typeID TypeID
 	Subject    Expression
 	IntCases   map[int]*Block      // keys are integer values
 	RangeCases map[IntRange]*Block // keys are integer ranges
@@ -378,6 +406,7 @@ func (i *IntMatch) Type() Type {
 }
 
 type UnionMatch struct {
+	typeID TypeID
 	Subject   Expression
 	TypeCases map[string]*Match
 	CatchAll  *Block
@@ -400,6 +429,7 @@ func (u *UnionMatch) Type() Type {
 }
 
 type ConditionalMatch struct {
+	typeID TypeID
 	Cases    []ConditionalCase
 	CatchAll *Block
 }
@@ -420,6 +450,7 @@ type ConditionalCase struct {
 }
 
 type FloatSubtraction struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -429,6 +460,7 @@ func (n *FloatSubtraction) Type() Type {
 }
 
 type FloatMultiplication struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -438,6 +470,7 @@ func (n *FloatMultiplication) Type() Type {
 }
 
 type FloatDivision struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -447,6 +480,7 @@ func (n *FloatDivision) Type() Type {
 }
 
 type FloatGreater struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -456,6 +490,7 @@ func (n *FloatGreater) Type() Type {
 }
 
 type FloatGreaterEqual struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -465,6 +500,7 @@ func (n *FloatGreaterEqual) Type() Type {
 }
 
 type FloatLess struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -474,6 +510,7 @@ func (n *FloatLess) Type() Type {
 }
 
 type FloatLessEqual struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -483,6 +520,7 @@ func (n *FloatLessEqual) Type() Type {
 }
 
 type StrAddition struct {
+	typeID TypeID
 	Left  Expression
 	Right Expression
 }
@@ -492,6 +530,7 @@ func (n *StrAddition) Type() Type {
 }
 
 type Equality struct {
+	typeID TypeID
 	Left, Right Expression
 }
 
@@ -500,6 +539,7 @@ func (n *Equality) Type() Type {
 }
 
 type And struct {
+	typeID TypeID
 	Left, Right Expression
 }
 
@@ -508,6 +548,7 @@ func (a *And) Type() Type {
 }
 
 type Or struct {
+	typeID TypeID
 	Left, Right Expression
 }
 
@@ -743,6 +784,7 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
+	typeID TypeID
 	Name string
 	Args []Expression
 	fn   *FunctionDef
@@ -770,6 +812,7 @@ func (p *ModuleStructInstance) Type() Type {
 }
 
 type ModuleFunctionCall struct {
+	typeID TypeID
 	Module string
 	Call   *FunctionCall
 }
@@ -998,6 +1041,7 @@ func (def StructDef) hasTrait(trait *Trait) bool {
 }
 
 type StructInstance struct {
+	typeID TypeID
 	Name   string
 	Fields map[string]Expression
 	_type  *StructDef
@@ -1008,6 +1052,7 @@ func (s StructInstance) Type() Type {
 }
 
 type ResultMatch struct {
+	typeID TypeID
 	Subject Expression
 	Ok      *Match
 	Err     *Match
@@ -1018,6 +1063,7 @@ func (r ResultMatch) Type() Type {
 }
 
 type Panic struct {
+	typeID TypeID
 	Message Expression
 	node    *ast.FunctionCall
 }
@@ -1034,6 +1080,7 @@ func (p Panic) Type() Type {
 }
 
 type TryOp struct {
+	typeID TypeID
 	expr       Expression
 	ok         Type
 	CatchBlock *Block
@@ -1049,6 +1096,7 @@ func (t TryOp) Type() Type {
 }
 
 type CopyExpression struct {
+	typeID TypeID
 	Expr  Expression
 	Type_ Type
 }

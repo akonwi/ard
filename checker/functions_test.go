@@ -194,7 +194,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 							Call: &checker.FunctionCall{
 								Name: "print",
 								Args: []checker.Expression{
-									&checker.IntLiteral{200},
+									&checker.IntLiteral{Value: 200},
 								},
 							},
 						},
@@ -214,7 +214,7 @@ func TestCallingInstanceMethods(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.InstanceMethod{
-							Subject: &checker.IntLiteral{200},
+							Subject: &checker.IntLiteral{Value: 200},
 							Method: &checker.FunctionCall{
 								Name: "to_str",
 								Args: []checker.Expression{},

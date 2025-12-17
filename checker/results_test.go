@@ -32,8 +32,8 @@ func TestResults(t *testing.T) {
 									{
 										Expr: &checker.BoolMatch{
 											Subject: &checker.Equality{
-												&checker.Variable{},
-												&checker.IntLiteral{Value: 0},
+												Left:  &checker.Variable{},
+												Right: &checker.IntLiteral{Value: 0},
 											},
 											True: &checker.Block{
 												Stmts: []checker.Statement{
@@ -127,7 +127,7 @@ func TestResults(t *testing.T) {
 								Module: "ard/result",
 								Call: &checker.FunctionCall{
 									Name: "err",
-									Args: []checker.Expression{&checker.StrLiteral{"foo"}},
+									Args: []checker.Expression{&checker.StrLiteral{Value: "foo"}},
 								},
 							},
 						},
@@ -149,11 +149,11 @@ func TestResults(t *testing.T) {
 										Call: &checker.FunctionCall{
 											Name: "print",
 											Args: []checker.Expression{
-												&checker.StrAddition{&checker.StrLiteral{"failed: "}, &checker.Variable{}},
+												&checker.StrAddition{Left: &checker.StrLiteral{Value: "failed: "}, Right: &checker.Variable{}},
 											},
 										},
 									}},
-									{Expr: &checker.Negation{&checker.IntLiteral{1}}},
+									{Expr: &checker.Negation{Value: &checker.IntLiteral{Value: 1}}},
 								}},
 							},
 						},
@@ -192,7 +192,7 @@ func TestTry(t *testing.T) {
 												Module: "ard/result",
 												Call: &checker.FunctionCall{
 													Name: "ok",
-													Args: []checker.Expression{&checker.IntLiteral{2}},
+													Args: []checker.Expression{&checker.IntLiteral{Value: 2}},
 												},
 											},
 										},
