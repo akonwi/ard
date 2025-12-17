@@ -195,10 +195,31 @@ func (c *Checker) Diagnostics() []Diagnostic {
 }
 
 // registerType registers a type in the type registry and returns the assigned ID
+// Phase 6: Check if this is a canonical type and return its ID directly
 func (c *Checker) registerType(t Type) TypeID {
 	if t == nil {
 		return InvalidTypeID
 	}
+	
+	// Check if this is a canonical type that's already cached
+	canonicalIDs := c.types.CanonicalIds()
+	if t == Int && canonicalIDs.Int != InvalidTypeID {
+		return canonicalIDs.Int
+	}
+	if t == Float && canonicalIDs.Float != InvalidTypeID {
+		return canonicalIDs.Float
+	}
+	if t == Str && canonicalIDs.Str != InvalidTypeID {
+		return canonicalIDs.Str
+	}
+	if t == Bool && canonicalIDs.Bool != InvalidTypeID {
+		return canonicalIDs.Bool
+	}
+	if t == Void && canonicalIDs.Void != InvalidTypeID {
+		return canonicalIDs.Void
+	}
+	
+	// Register the type with a new ID
 	id := c.types.Next()
 	if err := c.types.Register(id, t); err != nil {
 		// This should never happen in normal operation, but log it if it does
@@ -1057,7 +1078,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Condition must be a boolean expression
-			if c.LookupType(condition) != Bool {
+			if !c.IsBool(condition) {
 				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
 				return nil
 			}
@@ -1103,7 +1124,7 @@ func (c *Checker) checkStmt(stmt *ast.Statement) *Statement {
 			}
 
 			// Condition must be a boolean expression
-			if c.LookupType(condition) != Bool {
+			if !c.IsBool(condition) {
 				c.addError("For loop condition must be a boolean expression", s.Condition.GetLocation())
 				return nil
 			}
@@ -2006,16 +2027,15 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 			if value == nil {
 				return nil
 			}
-			valueType := c.LookupType(value)
 			if s.Operator == ast.Minus {
-				if valueType != Int && valueType != Float {
+				if !c.IsInt(value) && !c.IsFloat(value) {
 					c.addError("Only numbers can be negated with '-'", s.GetLocation())
 					return nil
 				}
 				return c.registerExpr(&Negation{Value: value})
 			}
 
-			if valueType != Bool {
+			if !c.IsBool(value) {
 				c.addError("Only booleans can be negated with 'not'", s.GetLocation())
 				return nil
 			}
@@ -2047,7 +2067,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					if leftType == Str {
 						return c.registerExpr(&StrAddition{Left: left, Right: right})
 					}
-					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '+' operator can only be used for Int, Float, or Str", s.GetLocation())
 					return nil
 				}
 			case ast.Minus:
@@ -2070,7 +2090,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					if leftType == Float {
 						return c.registerExpr(&FloatSubtraction{Left: left, Right: right})
 					}
-					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
 			case ast.Multiply:
@@ -2267,9 +2287,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					leftType := c.LookupType(left)
-					rightType := c.LookupType(right)
-					if leftType != Bool || rightType != Bool {
+					if !c.IsBool(left) || !c.IsBool(right) {
 						c.addError("The 'and' operator can only be used between Bools", s.GetLocation())
 						return nil
 					}
@@ -2284,9 +2302,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 						return nil
 					}
 
-					leftType := c.LookupType(left)
-					rightType := c.LookupType(right)
-					if leftType != Bool || rightType != Bool {
+					if !c.IsBool(left) || !c.IsBool(right) {
 						c.addError("The 'or' operator can only be used with Boolean values", s.GetLocation())
 						return nil
 					}
@@ -2520,7 +2536,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 			if cond == nil {
 				return nil
 			}
-			if cond.Type() != Bool {
+			if !c.IsBool(cond) {
 				c.addError("If conditions must be boolean expressions", s.GetLocation())
 				return nil
 			}
@@ -2538,7 +2554,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 					if cond == nil {
 						return nil
 					}
-					if cond.Type() != Bool {
+					if !c.IsBool(cond) {
 						c.addError("If conditions must be boolean expressions", next.GetLocation())
 						return nil
 					}
@@ -3158,7 +3174,7 @@ func (c *Checker) checkExpr(expr ast.Expression) Expression {
 				// Regular condition case
 				if condition := c.checkExpr(matchCase.Condition); condition != nil {
 					// Ensure condition is boolean
-					if condition.Type() != Bool {
+					if !c.IsBool(condition) {
 						c.addError(fmt.Sprintf("Condition must be of type Bool, got %s", condition.Type().String()), matchCase.Condition.GetLocation())
 					}
 
