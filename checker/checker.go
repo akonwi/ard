@@ -3841,11 +3841,8 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		}
 	}
 
-	// Allow unresolved generics - they will be resolved through context
-	// (e.g., variable assignment, return type inference)
-	// Don't require all generics to be resolved at function call time
-
-	// Create specialized function with resolved generics
+	// Gleam-style: Require all generics to be fully resolved at call time
+	// This prevents unresolved Any types from reaching the runtime
 	bindings := genericScope.getGenericBindings()
 
 	// Only specialize if we have resolved some generics
@@ -3947,6 +3944,32 @@ func extractGenericNames(t Type, names map[string]bool) {
 			extractGenericNames(param.Type, names)
 		}
 		extractGenericNames(t.ReturnType, names)
+	}
+}
+
+// hasUnresolvedGenerics checks if a type contains any unresolved generic placeholders
+func hasUnresolvedGenerics(t Type) bool {
+	switch typ := t.(type) {
+	case *Any:
+		// An Any type with a name starting with "$" or in a generic context is unresolved
+		return typ.name != "" && typ.actual == nil
+	case *List:
+		return hasUnresolvedGenerics(typ.of)
+	case *Map:
+		return hasUnresolvedGenerics(typ.key) || hasUnresolvedGenerics(typ.value)
+	case *Maybe:
+		return hasUnresolvedGenerics(typ.of)
+	case *Result:
+		return hasUnresolvedGenerics(typ.val) || hasUnresolvedGenerics(typ.err)
+	case *FunctionDef:
+		for _, param := range typ.Parameters {
+			if hasUnresolvedGenerics(param.Type) {
+				return true
+			}
+		}
+		return hasUnresolvedGenerics(typ.ReturnType)
+	default:
+		return false
 	}
 }
 

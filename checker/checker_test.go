@@ -2242,3 +2242,56 @@ func TestVoidLiteral(t *testing.T) {
 		},
 	})
 }
+
+// Phase 7: Gleam-Style Generic Resolution
+// Tests verify that generic types are properly resolved through inference
+func TestGleamStyleGenerics(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Generic function with inferred types from arguments",
+			input: strings.Join([]string{
+				`fn identity(of: $T) $T { of }`,
+				`fn main() {`,
+				`  let x = identity(42)`,
+				`  let y = identity("hello")`,
+				`  x`,
+				`  y`,
+				`}`,
+			}, "\n"),
+		},
+		{
+			name: "Generic function with explicit type arguments",
+			input: strings.Join([]string{
+				`fn identity(of: $T) $T { of }`,
+				`fn main() {`,
+				`  identity<Int>(42)`,
+				`  identity<Str>("hello")`,
+				`}`,
+			}, "\n"),
+		},
+		{
+			name: "Generic function with nested type [T]",
+			input: strings.Join([]string{
+				`fn count_items(items: [$T]) Int {`,
+				`  items.size()`,
+				`}`,
+				`fn main() {`,
+				`  count_items([1, 2, 3])`,
+				`  count_items(["a", "b"])`,
+				`}`,
+			}, "\n"),
+		},
+		{
+			name: "Type inference from variable assignment context",
+			input: strings.Join([]string{
+				`fn create_value() $T {`,
+				`  42`,
+				`}`,
+				`fn main() {`,
+				`  let x: Int = create_value()`,
+				`  x`,
+				`}`,
+			}, "\n"),
+		},
+	})
+}
