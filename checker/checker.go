@@ -203,6 +203,24 @@ func (c *Checker) Check() {
 	}
 }
 
+func (c *Checker) scanForUnresolvedGenerics() {
+	for _, stmt := range c.program.Statements {
+		if stmt.Expr == nil {
+			continue
+		}
+
+		if anyType, ok := stmt.Expr.Type().(*Any); ok && anyType.actual == nil {
+			loc := ast.Location{}
+			if locatable, ok := stmt.Expr.(interface{ GetLocation() ast.Location }); ok {
+				loc = locatable.GetLocation()
+			}
+
+			c.addError(fmt.Sprintf("Unresolved generic: %s", anyType.String()), loc)
+			break
+		}
+	}
+}
+
 // This should only be called after .Check()
 // The returned module could be problematic if there are diagnostic errors.
 func (c *Checker) Module() Module {
