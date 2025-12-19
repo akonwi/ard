@@ -28,7 +28,11 @@ var compareOptions = cmp.Options{
 		checker.Identifier{},
 		checker.InstanceProperty{},
 		checker.IntMethod{},
+		checker.ListMethod{},
+		checker.MapMethod{},
+		checker.MaybeMethod{},
 		checker.OptionMatch{},
+		checker.ResultMethod{},
 		checker.Statement{},
 		checker.StrMethod{},
 		checker.Variable{},
@@ -1678,9 +1682,11 @@ func TestLists(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-						Expr: &checker.InstanceMethod{
-							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
-							Method:  &checker.FunctionCall{Name: "size", Args: []checker.Expression{}},
+						Expr: &checker.ListMethod{
+							Subject:     &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
+							Kind:        checker.ListSize,
+							Args:        []checker.Expression{},
+							ElementType: checker.Int,
 						},
 					},
 				},

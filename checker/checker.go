@@ -1429,10 +1429,10 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	return instance
 }
 
-// createPrimitiveMethodNode creates type-specific method nodes for primitives
-// Falls back to generic InstanceMethod for user-defined types
+// createPrimitiveMethodNode creates type-specific method nodes for primitives and collections
+// Falls back to generic InstanceMethod for user-defined types (structs, enums)
 func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	// Determine subject type - for primitives we emit specialized nodes
+	// Determine subject type - emit specialized nodes for all built-in types
 	switch subject.Type() {
 	case Str:
 		return c.createStrMethod(subject, methodName, args)
@@ -1442,16 +1442,30 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		return c.createFloatMethod(subject, methodName)
 	case Bool:
 		return c.createBoolMethod(subject, methodName)
-	default:
-		// For non-primitives (structs, enums, etc.), use generic InstanceMethod
-		return &InstanceMethod{
-			Subject: subject,
-			Method: &FunctionCall{
-				Name: methodName,
-				Args: args,
-				fn:   fnDef,
-			},
-		}
+	}
+
+	// Check for collection types
+	if _, isList := subject.Type().(*List); isList {
+		return c.createListMethod(subject, methodName, args, fnDef)
+	}
+	if _, isMap := subject.Type().(*Map); isMap {
+		return c.createMapMethod(subject, methodName, args, fnDef)
+	}
+	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
+		return c.createMaybeMethod(subject, methodName, args, fnDef)
+	}
+	if _, isResult := subject.Type().(*Result); isResult {
+		return c.createResultMethod(subject, methodName, args, fnDef)
+	}
+
+	// For user-defined types (structs, enums), use generic InstanceMethod
+	return &InstanceMethod{
+		Subject: subject,
+		Method: &FunctionCall{
+			Name: methodName,
+			Args: args,
+			fn:   fnDef,
+		},
 	}
 }
 
@@ -1528,6 +1542,114 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 	return &BoolMethod{
 		Subject: subject,
 		Kind:    kind,
+	}
+}
+
+func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+	listType := subject.Type().(*List)
+	var kind ListMethodKind
+	switch methodName {
+	case "at":
+		kind = ListAt
+	case "prepend":
+		kind = ListPrepend
+	case "push":
+		kind = ListPush
+	case "set":
+		kind = ListSet
+	case "size":
+		kind = ListSize
+	case "sort":
+		kind = ListSort
+	case "swap":
+		kind = ListSwap
+	default:
+		panic(fmt.Sprintf("Unknown List method: %s", methodName))
+	}
+	return &ListMethod{
+		Subject:     subject,
+		Kind:        kind,
+		Args:        args,
+		ElementType: listType.of,
+		fn:          fnDef,
+	}
+}
+
+func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+	mapType := subject.Type().(*Map)
+	var kind MapMethodKind
+	switch methodName {
+	case "keys":
+		kind = MapKeys
+	case "size":
+		kind = MapSize
+	case "get":
+		kind = MapGet
+	case "set":
+		kind = MapSet
+	case "drop":
+		kind = MapDrop
+	case "has":
+		kind = MapHas
+	default:
+		panic(fmt.Sprintf("Unknown Map method: %s", methodName))
+	}
+	return &MapMethod{
+		Subject:   subject,
+		Kind:      kind,
+		Args:      args,
+		KeyType:   mapType.Key(),
+		ValueType: mapType.Value(),
+		fn:        fnDef,
+	}
+}
+
+func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+	maybeType := subject.Type().(*Maybe)
+	var kind MaybeMethodKind
+	switch methodName {
+	case "expect":
+		kind = MaybeExpect
+	case "is_none":
+		kind = MaybeIsNone
+	case "is_some":
+		kind = MaybeIsSome
+	case "or":
+		kind = MaybeOr
+	default:
+		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
+	}
+	return &MaybeMethod{
+		Subject:   subject,
+		Kind:      kind,
+		Args:      args,
+		InnerType: maybeType.Of(),
+		fn:        fnDef,
+	}
+}
+
+func (c *Checker) createResultMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+	resultType := subject.Type().(*Result)
+	var kind ResultMethodKind
+	switch methodName {
+	case "expect":
+		kind = ResultExpect
+	case "or":
+		kind = ResultOr
+	case "is_ok":
+		kind = ResultIsOk
+	case "is_err":
+		kind = ResultIsErr
+	default:
+		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
+	}
+	return &ResultMethod{
+		Subject: subject,
+		Kind:    kind,
+		Args:    args,
+		OkType:  resultType.Val(),
+		ErrType: resultType.Err(),
+		fn:      fnDef,
 	}
 }
 

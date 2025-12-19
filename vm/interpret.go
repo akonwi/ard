@@ -412,6 +412,26 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			subj := vm.eval(scp, e.Subject)
 			return vm.evalBoolMethodNode(subj, e)
 		}
+	case *checker.ListMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalListMethodNode(scp, subj, e)
+		}
+	case *checker.MapMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalMapMethodNode(scp, subj, e)
+		}
+	case *checker.MaybeMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalMaybeMethodNode(scp, subj, e)
+		}
+	case *checker.ResultMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalResultMethodNode(scp, subj, e)
+		}
 	case *checker.ModuleFunctionCall:
 		{
 			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
@@ -858,6 +878,150 @@ func (vm *VM) evalBoolMethodNode(subj *runtime.Object, e *checker.BoolMethod) *r
 	}
 }
 
+// Handlers for collection method nodes
+
+func (vm *VM) evalListMethodNode(scope *scope, self *runtime.Object, e *checker.ListMethod) *runtime.Object {
+	raw := self.AsList()
+	switch e.Kind {
+	case checker.ListAt:
+		index := vm.eval(scope, e.Args[0]).AsInt()
+		if index >= len(raw) {
+			panic(fmt.Errorf("Index out of range (%d) on list of length %d", index, len(raw)))
+		}
+		return raw[index]
+	case checker.ListPrepend:
+		newItem := vm.eval(scope, e.Args[0])
+		raw = append([]*runtime.Object{newItem}, raw...)
+		self.Set(raw)
+		return self
+	case checker.ListPush:
+		raw = append(raw, vm.eval(scope, e.Args[0]))
+		self.Set(raw)
+		return self
+	case checker.ListSet:
+		index := vm.eval(scope, e.Args[0]).AsInt()
+		value := vm.eval(scope, e.Args[1])
+		result := runtime.MakeBool(false)
+		if index < len(raw) {
+			raw[index] = value
+			result.Set(true)
+		}
+		return result
+	case checker.ListSize:
+		return runtime.MakeInt(len(raw))
+	case checker.ListSort:
+		_isLess := vm.eval(scope, e.Args[0]).Raw().(*VMClosure)
+		slices.SortFunc(raw, func(a, b *runtime.Object) int {
+			if _isLess.Eval(a, b).AsBool() {
+				return -1
+			}
+			return 0
+		})
+		return runtime.Void()
+	case checker.ListSwap:
+		l := vm.eval(scope, e.Args[0]).AsInt()
+		r := vm.eval(scope, e.Args[1]).AsInt()
+		_l, _r := raw[l], raw[r]
+		raw[l] = _r
+		raw[r] = _l
+		return runtime.Void()
+	default:
+		panic(fmt.Errorf("Unknown ListMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalMapMethodNode(scope *scope, subj *runtime.Object, e *checker.MapMethod) *runtime.Object {
+	raw := subj.AsMap()
+	switch e.Kind {
+	case checker.MapKeys:
+		keys := make([]*runtime.Object, len(raw))
+		i := 0
+		for k := range raw {
+			keys[i] = subj.Map_GetKey(k)
+			i++
+		}
+		return runtime.MakeList(e.KeyType, keys...)
+	case checker.MapSize:
+		return runtime.MakeInt(len(raw))
+	case checker.MapGet:
+		keyArg := vm.eval(scope, e.Args[0])
+		_key := runtime.ToMapKey(keyArg)
+		out := runtime.MakeNone(e.ValueType)
+		if value, found := raw[_key]; found {
+			out = out.ToSome(value.Raw())
+		}
+		return out
+	case checker.MapSet:
+		keyArg := vm.eval(scope, e.Args[0])
+		valueArg := vm.eval(scope, e.Args[1])
+		keyStr := runtime.ToMapKey(keyArg)
+		raw[keyStr] = valueArg
+		return runtime.MakeBool(true)
+	case checker.MapDrop:
+		keyArg := vm.eval(scope, e.Args[0])
+		keyStr := runtime.ToMapKey(keyArg)
+		delete(raw, keyStr)
+		return runtime.Void()
+	case checker.MapHas:
+		keyArg := vm.eval(scope, e.Args[0])
+		keyStr := runtime.ToMapKey(keyArg)
+		_, found := raw[keyStr]
+		return runtime.MakeBool(found)
+	default:
+		panic(fmt.Errorf("Unknown MapMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalMaybeMethodNode(scope *scope, subj *runtime.Object, e *checker.MaybeMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.MaybeExpect:
+		if subj.Raw() == nil {
+			_msg := vm.eval(scope, e.Args[0]).AsString()
+			panic(_msg)
+		}
+		return runtime.Make(subj.Raw(), e.InnerType)
+	case checker.MaybeIsNone:
+		return runtime.MakeBool(subj.Raw() == nil)
+	case checker.MaybeIsSome:
+		return runtime.MakeBool(subj.Raw() != nil)
+	case checker.MaybeOr:
+		if subj.Raw() == nil {
+			return vm.eval(scope, e.Args[0])
+		}
+		return runtime.Make(subj.Raw(), e.InnerType)
+	default:
+		panic(fmt.Errorf("Unknown MaybeMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalResultMethodNode(scope *scope, subj *runtime.Object, e *checker.ResultMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.ResultExpect:
+		if subj.IsErr() {
+			actual := ""
+			if str, ok := subj.IsStr(); ok {
+				actual = str
+			} else {
+				actual = fmt.Sprintf("%v", subj.GoValue())
+			}
+			_msg := vm.eval(scope, e.Args[0]).AsString()
+			panic(_msg + ": " + actual)
+		}
+		return subj.UnwrapResult()
+	case checker.ResultOr:
+		if subj.IsErr() {
+			return vm.eval(scope, e.Args[0])
+		}
+		return subj.UnwrapResult()
+	case checker.ResultIsOk:
+		return runtime.MakeBool(!subj.IsErr())
+	case checker.ResultIsErr:
+		return runtime.MakeBool(subj.IsErr())
+	default:
+		panic(fmt.Errorf("Unknown ResultMethodKind: %d", e.Kind))
+	}
+}
+
 func (vm *VM) evalStrMethod(scope *scope, subj *runtime.Object, m *checker.FunctionCall) *runtime.Object {
 	raw := subj.AsString()
 	switch m.Name {
@@ -948,7 +1112,7 @@ func (vm *VM) evalListMethod(scope *scope, self *runtime.Object, m *checker.Inst
 		index := vm.eval(scope, m.Method.Args[0]).AsInt()
 		value := vm.eval(scope, m.Method.Args[1])
 		result := runtime.MakeBool(false)
-		if index <= len(raw) {
+		if index < len(raw) {
 			raw[index] = value
 			result.Set(true)
 		}
