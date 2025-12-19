@@ -306,9 +306,10 @@ type Match struct {
 }
 
 type OptionMatch struct {
-	Subject Expression
-	Some    *Match
-	None    *Block
+	Subject   Expression
+	Some      *Match
+	None      *Block
+	InnerType Type // Pre-computed inner type of Maybe
 }
 
 func (o *OptionMatch) Type() Type {

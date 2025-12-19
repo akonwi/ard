@@ -25,6 +25,7 @@ var compareOptions = cmp.Options{
 		checker.EnumVariant{},
 		checker.Identifier{},
 		checker.InstanceProperty{},
+		checker.OptionMatch{},
 		checker.Statement{},
 		checker.Variable{},
 		checker.VariableDef{},
@@ -1537,7 +1538,8 @@ func TestMaybes(t *testing.T) {
 					},
 					{
 						Expr: &checker.OptionMatch{
-							Subject: &checker.Variable{},
+							Subject:   &checker.Variable{},
+							InnerType: checker.Str,
 							Some: &checker.Match{
 								Pattern: &checker.Identifier{Name: "value"},
 								Body: &checker.Block{

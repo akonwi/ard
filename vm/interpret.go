@@ -432,8 +432,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			} else {
 				// Some case - bind the value and evaluate the Some block
 				res, _ := vm.evalBlock(scp, e.Some.Body, func(sc *scope) {
-					// Bind the pattern name to the value
-					subject := runtime.Make(subject.Raw(), subject.Type().(*checker.Maybe).Of())
+					// Bind the pattern name to the value using pre-computed inner type
+					subject := runtime.Make(subject.Raw(), e.InnerType)
 					sc.add(e.Some.Pattern.Name, subject)
 				})
 				return res

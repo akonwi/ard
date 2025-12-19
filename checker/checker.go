@@ -1789,19 +1789,19 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						fn:   specialized,
 					},
 				}
-			}
+				}
 
-			// Create function call
-			call := &FunctionCall{
+				// Create function call
+				call := &FunctionCall{
 				Name: s.Method.Name,
 				Args: args,
 				fn:   fnDef,
-			}
+				}
 
-			return &InstanceMethod{
-				Subject: subj,
-				Method:  call,
-			}
+				return &InstanceMethod{
+					Subject: subj,
+					Method:  call,
+				}
 		}
 	case *parser.UnaryExpression:
 		{
@@ -2476,7 +2476,8 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			// Create the OptionMatch
 			return &OptionMatch{
-				Subject: subject,
+				Subject:   subject,
+				InnerType: maybeType.of,
 				Some: &Match{
 					Pattern: patternIdent,
 					Body:    someBody,
