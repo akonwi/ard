@@ -242,12 +242,17 @@ Implemented for three highest-impact node types:
 
 **Impact**: Eliminated 3 major type assertions from VM code. VM now reads pre-computed fields instead of introspecting checker's type system.
 
-## Next Steps
+### Phase 2: Additional Enrichment (in progress) ✅
 
-### Phase 2: Additional Enrichment (if needed)
-Consider other cases from the original analysis:
-- InstanceMethod dispatch (currently has 8+ type checks)
-- Other assertion-heavy operations
+Implemented for high-impact node type:
+
+4. **OptionMatch** - Added InnerType field
+   - Pre-computed during checking when creating OptionMatch for Maybe types (line 2480 in checker.go)
+   - VM simplified: use `e.InnerType` instead of calling `subject.Type().(*checker.Maybe).Of()`
+   - Eliminates type assertion in OptionMatch evaluation path
+   - Test updated and passing (TestMaybes/Matching_on_maybes)
+
+**Impact**: Simplified OptionMatch handling in VM. Pattern matching on Maybe types no longer requires type introspection.
 
 ### Phase 3: Simplify Backends
 1. Go transpiler can now read the same lowered AST
