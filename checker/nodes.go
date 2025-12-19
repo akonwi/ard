@@ -188,6 +188,114 @@ func (i *InstanceMethod) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Method.Name)
 }
 
+// Primitive method types with enum-based dispatch
+
+type StrMethodKind uint8
+
+const (
+	StrSize StrMethodKind = iota
+	StrIsEmpty
+	StrContains
+	StrReplace
+	StrReplaceAll
+	StrSplit
+	StrStartsWith
+	StrToStr
+	StrTrim
+)
+
+type StrMethod struct {
+	Subject Expression
+	Kind    StrMethodKind
+	Args    []Expression
+}
+
+func (s *StrMethod) Type() Type {
+	switch s.Kind {
+	case StrSize:
+		return Int
+	case StrIsEmpty:
+		return Bool
+	case StrContains:
+		return Bool
+	case StrReplace, StrReplaceAll:
+		return Str
+	case StrSplit:
+		return MakeList(Str)
+	case StrStartsWith:
+		return Bool
+	case StrToStr:
+		return Str
+	case StrTrim:
+		return Str
+	default:
+		return Void
+	}
+}
+
+type IntMethodKind uint8
+
+const (
+	IntToStr IntMethodKind = iota
+)
+
+type IntMethod struct {
+	Subject Expression
+	Kind    IntMethodKind
+}
+
+func (m *IntMethod) Type() Type {
+	switch m.Kind {
+	case IntToStr:
+		return Str
+	default:
+		return Void
+	}
+}
+
+type FloatMethodKind uint8
+
+const (
+	FloatToStr FloatMethodKind = iota
+	FloatToInt
+)
+
+type FloatMethod struct {
+	Subject Expression
+	Kind    FloatMethodKind
+}
+
+func (m *FloatMethod) Type() Type {
+	switch m.Kind {
+	case FloatToStr:
+		return Str
+	case FloatToInt:
+		return Int
+	default:
+		return Void
+	}
+}
+
+type BoolMethodKind uint8
+
+const (
+	BoolToStr BoolMethodKind = iota
+)
+
+type BoolMethod struct {
+	Subject Expression
+	Kind    BoolMethodKind
+}
+
+func (m *BoolMethod) Type() Type {
+	switch m.Kind {
+	case BoolToStr:
+		return Str
+	default:
+		return Void
+	}
+}
+
 type Negation struct {
 	Value Expression
 }

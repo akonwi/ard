@@ -392,6 +392,26 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			subj := vm.eval(scp, e.Subject)
 			return vm.evalInstanceMethod(scp, subj, e)
 		}
+	case *checker.StrMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalStrMethodNode(scp, subj, e)
+		}
+	case *checker.IntMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalIntMethodNode(subj, e)
+		}
+	case *checker.FloatMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalFloatMethodNode(subj, e)
+		}
+	case *checker.BoolMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalBoolMethodNode(subj, e)
+		}
 	case *checker.ModuleFunctionCall:
 		{
 			return vm.hq.callOn(e.Module, e.Call, func() []*runtime.Object {
@@ -766,6 +786,76 @@ func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.
 	}
 
 	panic(fmt.Errorf("Unimplemented method: %s.%s()", subj.Type(), e.Method.Name))
+}
+
+// Handlers for specialized method nodes
+
+func (vm *VM) evalStrMethodNode(scope *scope, subj *runtime.Object, e *checker.StrMethod) *runtime.Object {
+	raw := subj.AsString()
+	switch e.Kind {
+	case checker.StrSize:
+		return runtime.MakeInt(len(raw))
+	case checker.StrIsEmpty:
+		return runtime.MakeBool(len(raw) == 0)
+	case checker.StrContains:
+		return runtime.MakeBool(strings.Contains(raw, vm.eval(scope, e.Args[0]).AsString()))
+	case checker.StrReplace:
+		old := vm.eval(scope, e.Args[0]).AsString()
+		new := vm.eval(scope, e.Args[1]).AsString()
+		return runtime.MakeStr(strings.Replace(raw, old, new, 1))
+	case checker.StrReplaceAll:
+		old := vm.eval(scope, e.Args[0]).AsString()
+		new := vm.eval(scope, e.Args[1]).AsString()
+		return runtime.MakeStr(strings.ReplaceAll(raw, old, new))
+	case checker.StrSplit:
+		sep := vm.eval(scope, e.Args[0]).AsString()
+		split := strings.Split(raw, sep)
+		values := make([]*runtime.Object, len(split))
+		for i, str := range split {
+			values[i] = runtime.MakeStr(str)
+		}
+		return runtime.MakeList(checker.Str, values...)
+	case checker.StrStartsWith:
+		prefix := vm.eval(scope, e.Args[0]).AsString()
+		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
+	case checker.StrToStr:
+		return subj
+	case checker.StrTrim:
+		return runtime.MakeStr(strings.Trim(raw, " "))
+	default:
+		panic(fmt.Errorf("Unknown StrMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalIntMethodNode(subj *runtime.Object, e *checker.IntMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.IntToStr:
+		return runtime.MakeStr(strconv.Itoa(subj.AsInt()))
+	default:
+		panic(fmt.Errorf("Unknown IntMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalFloatMethodNode(subj *runtime.Object, e *checker.FloatMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.FloatToStr:
+		return runtime.MakeStr(strconv.FormatFloat(subj.AsFloat(), 'f', 2, 64))
+	case checker.FloatToInt:
+		floatVal := subj.AsFloat()
+		intVal := int(floatVal)
+		return runtime.MakeInt(intVal)
+	default:
+		panic(fmt.Errorf("Unknown FloatMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalBoolMethodNode(subj *runtime.Object, e *checker.BoolMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.BoolToStr:
+		return runtime.MakeStr(strconv.FormatBool(subj.AsBool()))
+	default:
+		panic(fmt.Errorf("Unknown BoolMethodKind: %d", e.Kind))
+	}
 }
 
 func (vm *VM) evalStrMethod(scope *scope, subj *runtime.Object, m *checker.FunctionCall) *runtime.Object {

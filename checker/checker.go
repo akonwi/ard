@@ -1429,6 +1429,108 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	return instance
 }
 
+// createPrimitiveMethodNode creates type-specific method nodes for primitives
+// Falls back to generic InstanceMethod for user-defined types
+func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+	// Determine subject type - for primitives we emit specialized nodes
+	switch subject.Type() {
+	case Str:
+		return c.createStrMethod(subject, methodName, args)
+	case Int:
+		return c.createIntMethod(subject, methodName)
+	case Float:
+		return c.createFloatMethod(subject, methodName)
+	case Bool:
+		return c.createBoolMethod(subject, methodName)
+	default:
+		// For non-primitives (structs, enums, etc.), use generic InstanceMethod
+		return &InstanceMethod{
+			Subject: subject,
+			Method: &FunctionCall{
+				Name: methodName,
+				Args: args,
+				fn:   fnDef,
+			},
+		}
+	}
+}
+
+func (c *Checker) createStrMethod(subject Expression, methodName string, args []Expression) Expression {
+	var kind StrMethodKind
+	switch methodName {
+	case "size":
+		kind = StrSize
+	case "is_empty":
+		kind = StrIsEmpty
+	case "contains":
+		kind = StrContains
+	case "replace":
+		kind = StrReplace
+	case "replace_all":
+		kind = StrReplaceAll
+	case "split":
+		kind = StrSplit
+	case "starts_with":
+		kind = StrStartsWith
+	case "to_str":
+		kind = StrToStr
+	case "trim":
+		kind = StrTrim
+	default:
+		// Fallback for unknown methods
+		panic(fmt.Sprintf("Unknown Str method: %s", methodName))
+	}
+	return &StrMethod{
+		Subject: subject,
+		Kind:    kind,
+		Args:    args,
+	}
+}
+
+func (c *Checker) createIntMethod(subject Expression, methodName string) Expression {
+	var kind IntMethodKind
+	switch methodName {
+	case "to_str":
+		kind = IntToStr
+	default:
+		panic(fmt.Sprintf("Unknown Int method: %s", methodName))
+	}
+	return &IntMethod{
+		Subject: subject,
+		Kind:    kind,
+	}
+}
+
+func (c *Checker) createFloatMethod(subject Expression, methodName string) Expression {
+	var kind FloatMethodKind
+	switch methodName {
+	case "to_str":
+		kind = FloatToStr
+	case "to_int":
+		kind = FloatToInt
+	default:
+		panic(fmt.Sprintf("Unknown Float method: %s", methodName))
+	}
+	return &FloatMethod{
+		Subject: subject,
+		Kind:    kind,
+	}
+}
+
+func (c *Checker) createBoolMethod(subject Expression, methodName string) Expression {
+	var kind BoolMethodKind
+	switch methodName {
+	case "to_str":
+		kind = BoolToStr
+	default:
+		panic(fmt.Sprintf("Unknown Bool method: %s", methodName))
+	}
+	return &BoolMethod{
+		Subject: subject,
+		Kind:    kind,
+	}
+}
+
 func (c *Checker) checkExpr(expr parser.Expression) Expression {
 	if c.halted {
 		return nil
@@ -1781,27 +1883,11 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					return nil
 				}
 
-				return &InstanceMethod{
-					Subject: subj,
-					Method: &FunctionCall{
-						Name: s.Method.Name,
-						Args: args,
-						fn:   specialized,
-					},
-				}
-				}
+				return c.createPrimitiveMethodNode(subj, s.Method.Name, args, specialized)
+			}
 
-				// Create function call
-				call := &FunctionCall{
-				Name: s.Method.Name,
-				Args: args,
-				fn:   fnDef,
-				}
-
-				return &InstanceMethod{
-					Subject: subj,
-					Method:  call,
-				}
+			// Create function call
+			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnDef)
 		}
 	case *parser.UnaryExpression:
 		{
