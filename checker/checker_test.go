@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parser"
 	checker "github.com/akonwi/ard/checker"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -42,7 +42,7 @@ var compareOptions = cmp.Options{
 func run(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ast.Parse([]byte(tt.input), "test.ard")
+			result := parser.Parse([]byte(tt.input), "test.ard")
 			if len(result.Errors) > 0 {
 				t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 			}

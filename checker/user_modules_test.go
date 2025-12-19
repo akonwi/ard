@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parser"
 	"github.com/akonwi/ard/checker"
 )
 
@@ -113,7 +113,7 @@ func TestUserModuleImports(t *testing.T) {
 fn main() Int {
     utils::helper()
 }`
-	result := ast.Parse([]byte(input), "main.ard")
+	result := parser.Parse([]byte(input), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatal(result.Errors[0].Message)
 	}
@@ -183,7 +183,7 @@ fn main() Int {
     sum + product
 }`
 
-	result := ast.Parse([]byte(mainContent), "main.ard")
+	result := parser.Parse([]byte(mainContent), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatal(result.Errors[0].Message)
 	}
@@ -258,7 +258,7 @@ fn main() Int {
     utils::private_helper()
 }`
 
-	result := ast.Parse([]byte(mainContent), "main.ard")
+	result := parser.Parse([]byte(mainContent), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatal(result.Errors[0].Message)
 	}
@@ -322,7 +322,7 @@ fn func1() Int {
     shared::shared_function()
 }`
 
-	result1 := ast.Parse([]byte(content1), "main1.ard")
+	result1 := parser.Parse([]byte(content1), "main1.ard")
 	if len(result1.Errors) > 0 {
 		t.Fatal(result1.Errors[0].Message)
 	}
@@ -341,7 +341,7 @@ fn func2() Int {
     shared::shared_function() + 50
 }`
 
-	result2 := ast.Parse([]byte(content2), "main2.ard")
+	result2 := parser.Parse([]byte(content2), "main2.ard")
 	if len(result2.Errors) > 0 {
 		t.Fatal(result2.Errors[0].Message)
 	}
@@ -409,7 +409,7 @@ func TestUserModuleErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ast.Parse([]byte(tt.input), "main.ard")
+			result := parser.Parse([]byte(tt.input), "main.ard")
 			if len(result.Errors) > 0 {
 				t.Fatal(result.Errors[0].Message)
 			}
@@ -860,7 +860,7 @@ fn main() Str {
     url + "/users"
 }`
 
-	result := ast.Parse([]byte(mainContent), "main.ard")
+	result := parser.Parse([]byte(mainContent), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatal(result.Errors[0].Message)
 	}
@@ -936,7 +936,7 @@ mut private_variable: Str = "secret"
 `
 
 	// Parse and check the module
-	result := ast.Parse([]byte(moduleContent), "main.ard")
+	result := parser.Parse([]byte(moduleContent), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatal(result.Errors[0].Message)
 	}

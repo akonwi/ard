@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parser"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/std_lib"
 )
@@ -37,7 +37,7 @@ func TestStdLibModules(t *testing.T) {
 			}
 
 			// Parse the .ard file
-			result := ast.Parse(content, modulePath)
+			result := parser.Parse(content, modulePath)
 			if len(result.Errors) > 0 {
 				var errorMessages []string
 				for _, err := range result.Errors {

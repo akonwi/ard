@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parser"
 )
 
 /* can either produce a value or not */
@@ -793,7 +793,7 @@ type Enum struct {
 	Variants []string
 	Methods  map[string]*FunctionDef
 	Traits   []*Trait
-	Location ast.Location
+	Location parser.Location
 }
 
 func (e Enum) NonProducing() {}
@@ -1019,10 +1019,10 @@ func (r ResultMatch) Type() Type {
 
 type Panic struct {
 	Message Expression
-	node    *ast.FunctionCall
+	node    *parser.FunctionCall
 }
 
-func (p Panic) GetLocation() ast.Location {
+func (p Panic) GetLocation() parser.Location {
 	return p.node.GetLocation()
 }
 

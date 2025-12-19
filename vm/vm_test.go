@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parser"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/vm"
 )
@@ -21,7 +21,7 @@ type test struct {
 
 func run(t *testing.T, input string) any {
 	t.Helper()
-	result := ast.Parse([]byte(input), "test.ard")
+	result := parser.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
@@ -41,7 +41,7 @@ func run(t *testing.T, input string) any {
 
 func expectPanic(t *testing.T, substring, input string) {
 	t.Helper()
-	result := ast.Parse([]byte(input), "test.ard")
+	result := parser.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
@@ -598,7 +598,7 @@ func TestUserModuleVMIntegration(t *testing.T) {
 math::add(10, 20)`
 
 	// Parse and check
-	parseResult := ast.Parse([]byte(mainContent), "main.ard")
+	parseResult := parser.Parse([]byte(mainContent), "main.ard")
 	if len(parseResult.Errors) > 0 {
 		t.Fatal(parseResult.Errors[0].Message)
 	}
@@ -657,7 +657,7 @@ func TestFunctionVariableFromModule(t *testing.T) {
 utils::add_one(5)`
 
 	// Parse and check
-	parseResult := ast.Parse([]byte(mainContent), "main.ard")
+	parseResult := parser.Parse([]byte(mainContent), "main.ard")
 	if len(parseResult.Errors) > 0 {
 		t.Fatal(parseResult.Errors[0].Message)
 	}
@@ -716,7 +716,7 @@ let f = utils::double
 f(10)`
 
 	// Parse and check
-	parseResult := ast.Parse([]byte(mainContent), "main.ard")
+	parseResult := parser.Parse([]byte(mainContent), "main.ard")
 	if len(parseResult.Errors) > 0 {
 		t.Fatal(parseResult.Errors[0].Message)
 	}
