@@ -1259,15 +1259,24 @@ func (c *Checker) checkMap(declaredType Type, expr *parser.MapLiteral) *MapLiter
 
 			// Return empty map with the declared type
 			return &MapLiteral{
-				Keys:   []Expression{},
-				Values: []Expression{},
-				_type:  mapType,
+				Keys:      []Expression{},
+				Values:    []Expression{},
+				_type:     mapType,
+				KeyType:   mapType.Key(),
+				ValueType: mapType.Value(),
 			}
 		} else {
 			// Empty map without a declared type is an error
 			c.addError("Empty maps need an explicit type", expr.GetLocation())
 			c.halted = true
-			return &MapLiteral{_type: MakeMap(Void, Void), Keys: []Expression{}, Values: []Expression{}}
+			mapType := MakeMap(Void, Void)
+			return &MapLiteral{
+				_type:     mapType,
+				Keys:      []Expression{},
+				Values:    []Expression{},
+				KeyType:   Void,
+				ValueType: Void,
+			}
 		}
 	}
 
@@ -1319,9 +1328,11 @@ func (c *Checker) checkMap(declaredType Type, expr *parser.MapLiteral) *MapLiter
 		}
 
 		return &MapLiteral{
-			Keys:   keys,
-			Values: values,
-			_type:  mapType,
+			Keys:      keys,
+			Values:    values,
+			_type:     mapType,
+			KeyType:   mapType.Key(),
+			ValueType: mapType.Value(),
 		}
 	}
 
@@ -1368,10 +1379,13 @@ func (c *Checker) checkMap(declaredType Type, expr *parser.MapLiteral) *MapLiter
 	}
 
 	// Create and return the map
+	mapType := MakeMap(keyType, valueType)
 	return &MapLiteral{
-		Keys:   keys,
-		Values: values,
-		_type:  MakeMap(keyType, valueType),
+		Keys:      keys,
+		Values:    values,
+		_type:     mapType,
+		KeyType:   keyType,
+		ValueType: valueType,
 	}
 }
 
@@ -1379,6 +1393,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parser.MapLiteral) *MapLiter
 func (c *Checker) validateStructInstance(structType *StructDef, properties []parser.StructValue, structName string, loc parser.Location) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
+	fieldTypes := make(map[string]Type)
 
 	// Check all provided properties
 	for _, property := range properties {
@@ -1388,6 +1403,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 			if val := c.checkExprAs(property.Value, field); val != nil {
 				fields[property.Name.Name] = val
 			}
+			fieldTypes[property.Name.Name] = field
 		}
 	}
 
@@ -1401,12 +1417,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				missing = append(missing, name)
 			}
 		}
+		// Pre-compute all field types, not just provided ones
+		fieldTypes[name] = t
 	}
 	if len(missing) > 0 {
 		c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), loc)
 	}
 
 	instance.Fields = fields
+	instance.FieldTypes = fieldTypes
 	return instance
 }
 
@@ -2971,9 +2990,16 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 							return nil
 						}
 
+						// Pre-compute field types for the module instance
+						fieldTypes := make(map[string]Type)
+						for name, t := range structType.Fields {
+							fieldTypes[name] = t
+						}
+
 						return &ModuleStructInstance{
-							Module:   mod.Path(),
-							Property: instance,
+							Module:     mod.Path(),
+							Property:   instance,
+							FieldTypes: fieldTypes,
 						}
 					case *parser.Identifier:
 						sym := mod.Get(prop.Name)

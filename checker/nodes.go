@@ -102,9 +102,11 @@ func (l *ListLiteral) Type() Type {
 }
 
 type MapLiteral struct {
-	Keys   []Expression
-	Values []Expression
-	_type  Type
+	Keys      []Expression
+	Values    []Expression
+	_type     Type
+	KeyType   Type // Pre-computed by checker
+	ValueType Type // Pre-computed by checker
 }
 
 func (m *MapLiteral) Type() Type {
@@ -761,8 +763,9 @@ func (f *FunctionCall) Type() Type {
 }
 
 type ModuleStructInstance struct {
-	Module   string
-	Property *StructInstance
+	Module     string
+	Property   *StructInstance
+	FieldTypes map[string]Type // Pre-computed by checker
 }
 
 func (p *ModuleStructInstance) Type() Type {
@@ -998,9 +1001,10 @@ func (def StructDef) hasTrait(trait *Trait) bool {
 }
 
 type StructInstance struct {
-	Name   string
-	Fields map[string]Expression
-	_type  *StructDef
+	Name       string
+	Fields     map[string]Expression
+	_type      *StructDef
+	FieldTypes map[string]Type // Pre-computed by checker
 }
 
 func (s StructInstance) Type() Type {

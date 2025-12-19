@@ -1225,8 +1225,10 @@ func TestLoopingOverMaps(t *testing.T) {
 							Key: "key",
 							Val: "val",
 							Map: &checker.MapLiteral{
-								Keys:   []checker.Expression{&checker.StrLiteral{"hello"}, &checker.StrLiteral{"world"}},
-								Values: []checker.Expression{&checker.IntLiteral{5}, &checker.IntLiteral{5}},
+								Keys:      []checker.Expression{&checker.StrLiteral{"hello"}, &checker.StrLiteral{"world"}},
+								Values:    []checker.Expression{&checker.IntLiteral{5}, &checker.IntLiteral{5}},
+								KeyType:   checker.Str,
+								ValueType: checker.Int,
 							},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
@@ -1709,6 +1711,8 @@ func TestMaps(t *testing.T) {
 									&checker.IntLiteral{0},
 									&checker.IntLiteral{15},
 								},
+								KeyType:   checker.Str,
+								ValueType: checker.Int,
 							},
 						},
 					},
@@ -1732,6 +1736,8 @@ func TestMaps(t *testing.T) {
 									&checker.IntLiteral{0},
 									&checker.IntLiteral{15},
 								},
+								KeyType:   checker.Str,
+								ValueType: checker.Int,
 							},
 						},
 					},

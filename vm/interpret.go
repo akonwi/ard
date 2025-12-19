@@ -413,8 +413,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.MapLiteral:
 		{
-			mapType := e.Type().(*checker.Map)
-			_map := runtime.MakeMap(mapType.Key(), mapType.Value())
+			_map := runtime.MakeMap(e.KeyType, e.ValueType)
 			for i := range e.Keys {
 				key := vm.eval(scp, e.Keys[i])
 				value := vm.eval(scp, e.Values[i])
@@ -504,9 +503,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.StructInstance:
 		{
-			strct := e.Type().(*checker.StructDef)
 			raw := map[string]*runtime.Object{}
-			for name, ftype := range strct.Fields {
+			for name, ftype := range e.FieldTypes {
 				val, ok := e.Fields[name]
 				if ok {
 					val := vm.eval(scp, val)
@@ -521,9 +519,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleStructInstance:
 		{
-			strct := e.Property.Type().(*checker.StructDef)
 			raw := map[string]*runtime.Object{}
-			for name, ftype := range strct.Fields {
+			for name, ftype := range e.FieldTypes {
 				val, ok := e.Property.Fields[name]
 				if ok {
 					val := vm.eval(scp, val)

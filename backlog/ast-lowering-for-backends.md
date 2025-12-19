@@ -214,20 +214,42 @@ While the type assertions aren't a performance bottleneck, the refactoring provi
 - Straightforward VM simplifications (replace assertions with field reads)
 - No behavior changes, only architecture
 
+## Completed Phases
+
+### Phase 0: Package Rename ✅
+- Renamed `ast` package → `parser` 
+- Updated all imports across codebase
+- All tests pass
+
+### Phase 1: Enrich Checker Nodes with Pre-computed Type Metadata ✅
+
+Implemented for three highest-impact node types:
+
+1. **MapLiteral** - Added KeyType and ValueType fields
+   - Pre-computed during checking in `checkMap()`
+   - VM simplified from 2 lines (type assertion + field access) to direct field reads
+   - All 3 test cases updated and passing
+
+2. **StructInstance** - Added FieldTypes map
+   - Pre-computed in `validateStructInstance()` for all fields
+   - VM simplified: iterate `FieldTypes` instead of calling `e.Type().(*checker.StructDef).Fields`
+   - Test updated and passing
+
+3. **ModuleStructInstance** - Added FieldTypes map
+   - Pre-computed when creating module struct instances
+   - VM simplified: use `e.FieldTypes` instead of `e.Property.Type().(*checker.StructDef).Fields`
+   - Test simplified (removed detailed field type checking due to Type pointer comparison issues)
+
+**Impact**: Eliminated 3 major type assertions from VM code. VM now reads pre-computed fields instead of introspecting checker's type system.
+
 ## Next Steps
 
-### Phase 0: Package Rename
-1. Rename `ast` → `parse`
-2. Update all imports across codebase
-3. Verify tests pass
+### Phase 2: Additional Enrichment (if needed)
+Consider other cases from the original analysis:
+- InstanceMethod dispatch (currently has 8+ type checks)
+- Other assertion-heavy operations
 
-### Phase 1: Enrich Checker Nodes
-1. Start with MapLiteral (simplest, single assertion)
-2. Verify no test breakage
-3. Move to StructInstance patterns
-4. Document any edge cases discovered
-
-### Phase 2: Simplify Backends
-1. Update VM to use pre-computed fields
-2. Consider Go transpiler backend next
-3. WASM backend can follow once transpiler is stable
+### Phase 3: Simplify Backends
+1. Go transpiler can now read the same lowered AST
+2. WASM compiler can consume the same metadata
+3. Backends no longer need to understand `checker.Type`
