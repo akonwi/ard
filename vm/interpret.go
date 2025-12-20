@@ -769,12 +769,13 @@ func (vm *VM) evalStrProperty(_ *runtime.Object, _ string) *runtime.Object {
 	return runtime.Void()
 }
 
+// this method is for evaluating a checker.InstanceMethod. Even though there are type specific Method instruction nodes,
+// looking at subj.Type() is still necessary here because of dynamic dispatch on traits. (e.g. calling .to_str() on Str::ToString - see io.ard)
 func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
 	if subj.IsResult() {
 		return vm.evalResultMethod(scope, subj, e.Method)
 	}
 	if subj.Type() == checker.Str {
-		// Str methods still use InstanceMethod dispatch (e.g., from template strings at runtime)
 		return vm.evalStrMethod(scope, subj, e.Method)
 	}
 	if _, isInt := subj.IsInt(); isInt {
