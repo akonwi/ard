@@ -164,7 +164,10 @@ func TestPrimitiveLiterals(t *testing.T) {
 						Expr: &checker.TemplateStr{
 							Chunks: []checker.Expression{
 								&checker.StrLiteral{"Hello, "},
-								&checker.IntLiteral{3},
+								&checker.IntMethod{
+									Subject: &checker.IntLiteral{3},
+									Kind:    checker.IntToStr,
+								},
 							},
 						},
 					},
@@ -1248,7 +1251,10 @@ func TestLoopingOverMaps(t *testing.T) {
 												&checker.Variable{},
 												&checker.TemplateStr{Chunks: []checker.Expression{
 													&checker.StrLiteral{" = "},
-													&checker.Variable{},
+													&checker.IntMethod{
+														Subject: &checker.Variable{},
+														Kind:    checker.IntToStr,
+													},
 												}},
 											},
 										},

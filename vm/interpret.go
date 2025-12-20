@@ -246,14 +246,10 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.TemplateStr:
 		sb := strings.Builder{}
 		for i := range e.Chunks {
-			// chunks implement Str::ToString
-			chunk := vm.eval(scp, &checker.InstanceMethod{
-				Subject: e.Chunks[i],
-				Method: &checker.FunctionCall{
-					Name: "to_str",
-					Args: []checker.Expression{},
-				},
-			}).AsString()
+			// Chunks are already prepared by the checker:
+			// - String literals are kept as-is
+			// - Non-string expressions have to_str() method calls wrapping them
+			chunk := vm.eval(scp, e.Chunks[i]).AsString()
 			sb.WriteString(chunk)
 		}
 		return runtime.MakeStr(sb.String())
@@ -778,6 +774,7 @@ func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.
 		return vm.evalResultMethod(scope, subj, e.Method)
 	}
 	if subj.Type() == checker.Str {
+		// Str methods still use InstanceMethod dispatch (e.g., from template strings at runtime)
 		return vm.evalStrMethod(scope, subj, e.Method)
 	}
 	if _, isInt := subj.IsInt(); isInt {

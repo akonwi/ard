@@ -1687,19 +1687,30 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			for i := range s.Chunks {
 				cx := c.checkExpr(s.Chunks[i])
 				if cx == nil {
-					// Replace failed chunk with placeholder
-					chunks[i] = &StrLiteral{"<error>"}
+					// skip bad expressions
+					chunks[i] = &StrLiteral{}
 					continue
 				}
+
+				// If chunk is a string, use it directly
+				if cx.Type() == Str {
+					chunks[i] = cx
+					continue
+				}
+
 				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
 					toStringTrait := strMod.Get("ToString").Type.(*Trait)
 					if !cx.Type().hasTrait(toStringTrait) {
 						c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
-						// Replace chunk that can't be converted to string with placeholder
-						chunks[i] = &StrLiteral{"<error>"}
+						// a non-stringable chunk stays empty
+						chunks[i] = &StrLiteral{}
 						continue
 					}
-					chunks[i] = cx
+
+					// For non-string types that satisfy ToString trait, wrap with to_str() call
+					toStrMethod := toStringTrait.methods[0]
+					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod)
+					chunks[i] = methodNode
 				}
 			}
 			return &TemplateStr{chunks}
