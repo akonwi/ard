@@ -246,14 +246,10 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.TemplateStr:
 		sb := strings.Builder{}
 		for i := range e.Chunks {
-			// chunks implement Str::ToString
-			chunk := vm.eval(scp, &checker.InstanceMethod{
-				Subject: e.Chunks[i],
-				Method: &checker.FunctionCall{
-					Name: "to_str",
-					Args: []checker.Expression{},
-				},
-			}).AsString()
+			// Chunks are already prepared by the checker:
+			// - String literals are kept as-is
+			// - Non-string expressions have to_str() method calls wrapping them
+			chunk := vm.eval(scp, e.Chunks[i]).AsString()
 			sb.WriteString(chunk)
 		}
 		return runtime.MakeStr(sb.String())
@@ -377,20 +373,54 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.InstanceProperty:
 		{
 			subj := vm.eval(scp, e.Subject)
-			if subj.IsStruct() {
-				return subj.Struct_Get(e.Property)
-			}
 
-			if subj.Type() == checker.Str {
-				return vm.evalStrProperty(subj, e.Property)
-			}
-
-			panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj.Type(), e.Property))
+			// InstanceProperty only supports struct field access (pre-computed by checker)
+			return subj.Struct_Get(e.Property)
 		}
 	case *checker.InstanceMethod:
 		{
 			subj := vm.eval(scp, e.Subject)
 			return vm.evalInstanceMethod(scp, subj, e)
+		}
+	case *checker.StrMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalStrMethodNode(scp, subj, e)
+		}
+	case *checker.IntMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalIntMethodNode(subj, e)
+		}
+	case *checker.FloatMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalFloatMethodNode(subj, e)
+		}
+	case *checker.BoolMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalBoolMethodNode(subj, e)
+		}
+	case *checker.ListMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalListMethodNode(scp, subj, e)
+		}
+	case *checker.MapMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalMapMethodNode(scp, subj, e)
+		}
+	case *checker.MaybeMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalMaybeMethodNode(scp, subj, e)
+		}
+	case *checker.ResultMethod:
+		{
+			subj := vm.eval(scp, e.Subject)
+			return vm.evalResultMethodNode(scp, subj, e)
 		}
 	case *checker.ModuleFunctionCall:
 		{
@@ -413,8 +443,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.MapLiteral:
 		{
-			mapType := e.Type().(*checker.Map)
-			_map := runtime.MakeMap(mapType.Key(), mapType.Value())
+			_map := runtime.MakeMap(e.KeyType, e.ValueType)
 			for i := range e.Keys {
 				key := vm.eval(scp, e.Keys[i])
 				value := vm.eval(scp, e.Values[i])
@@ -433,8 +462,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			} else {
 				// Some case - bind the value and evaluate the Some block
 				res, _ := vm.evalBlock(scp, e.Some.Body, func(sc *scope) {
-					// Bind the pattern name to the value
-					subject := runtime.Make(subject.Raw(), subject.Type().(*checker.Maybe).Of())
+					// Bind the pattern name to the value using pre-computed inner type
+					subject := runtime.Make(subject.Raw(), e.InnerType)
 					sc.add(e.Some.Pattern.Name, subject)
 				})
 				return res
@@ -504,9 +533,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.StructInstance:
 		{
-			strct := e.Type().(*checker.StructDef)
 			raw := map[string]*runtime.Object{}
-			for name, ftype := range strct.Fields {
+			for name, ftype := range e.FieldTypes {
 				val, ok := e.Fields[name]
 				if ok {
 					val := vm.eval(scp, val)
@@ -521,9 +549,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.ModuleStructInstance:
 		{
-			strct := e.Property.Type().(*checker.StructDef)
 			raw := map[string]*runtime.Object{}
-			for name, ftype := range strct.Fields {
+			for name, ftype := range e.FieldTypes {
 				val, ok := e.Property.Fields[name]
 				if ok {
 					val := vm.eval(scp, val)
@@ -596,7 +623,10 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.TryOp:
 		{
 			subj := vm.eval(scp, e.Expr())
-			if subj.IsResult() {
+
+			// Dispatch based on pre-computed kind (determined by checker)
+			switch e.Kind {
+			case checker.TryResult:
 				unwrapped := subj.UnwrapResult()
 				if subj.IsErr() {
 					// Error case: early return from function
@@ -605,8 +635,6 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						result, broken := vm.evalBlock(scp, e.CatchBlock, func(sc *scope) {
 							sc.add(e.CatchVar, unwrapped)
 						})
-
-						// Early return: the catch block's result becomes the function's return value
 						scp.stop()
 						if broken {
 							return result
@@ -614,22 +642,19 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						return result
 					} else {
 						// No catch block: propagate error by early returning
-						// Create a new Result with the same error for the function's return type
 						scp.stop()
 						return subj
 					}
 				}
-
-				// Success case: always continue execution with unwrapped value
+				// Success case: continue execution with unwrapped value
 				return unwrapped
-			} else if checker.IsMaybe(subj.Type()) {
+
+			case checker.TryMaybe:
 				if subj.IsNone() {
 					// None case: early return from function
 					if e.CatchBlock != nil {
 						// Execute catch block and early return its result
 						result, broken := vm.evalBlock(scp, e.CatchBlock, nil)
-
-						// Early return: the catch block's result becomes the function's return value
 						scp.stop()
 						if broken {
 							return result
@@ -641,13 +666,12 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						return runtime.MakeNone(e.Type())
 					}
 				}
-
 				// Some case: unwrap and continue execution
 				return runtime.Make(subj.Raw(), e.Type())
-			}
 
-			// There's a real problem if this occurs. it means an object is incorrect and there's a bug somewhere in the interpreter
-			panic(fmt.Errorf("Cannot use try keyword on %s", subj.Type()))
+			default:
+				panic(fmt.Errorf("Unknown try kind: %d", e.Kind))
+			}
 		}
 	case *checker.ModuleSymbol:
 		return vm.hq.lookup(e.Module, e.Symbol)
@@ -732,10 +756,8 @@ func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope))
 	return res, false
 }
 
-func (vm *VM) evalStrProperty(_ *runtime.Object, _ string) *runtime.Object {
-	return runtime.Void()
-}
-
+// this method is for evaluating a checker.InstanceMethod. Even though there are type specific Method instruction nodes,
+// looking at subj.Type() is still necessary here because of dynamic dispatch on traits. (e.g. calling .to_str() on Str::ToString - see io.ard)
 func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
 	if subj.IsResult() {
 		return vm.evalResultMethod(scope, subj, e.Method)
@@ -769,6 +791,220 @@ func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.
 	}
 
 	panic(fmt.Errorf("Unimplemented method: %s.%s()", subj.Type(), e.Method.Name))
+}
+
+// Handlers for specialized method nodes
+
+func (vm *VM) evalStrMethodNode(scope *scope, subj *runtime.Object, e *checker.StrMethod) *runtime.Object {
+	raw := subj.AsString()
+	switch e.Kind {
+	case checker.StrSize:
+		return runtime.MakeInt(len(raw))
+	case checker.StrIsEmpty:
+		return runtime.MakeBool(len(raw) == 0)
+	case checker.StrContains:
+		return runtime.MakeBool(strings.Contains(raw, vm.eval(scope, e.Args[0]).AsString()))
+	case checker.StrReplace:
+		old := vm.eval(scope, e.Args[0]).AsString()
+		new := vm.eval(scope, e.Args[1]).AsString()
+		return runtime.MakeStr(strings.Replace(raw, old, new, 1))
+	case checker.StrReplaceAll:
+		old := vm.eval(scope, e.Args[0]).AsString()
+		new := vm.eval(scope, e.Args[1]).AsString()
+		return runtime.MakeStr(strings.ReplaceAll(raw, old, new))
+	case checker.StrSplit:
+		sep := vm.eval(scope, e.Args[0]).AsString()
+		split := strings.Split(raw, sep)
+		values := make([]*runtime.Object, len(split))
+		for i, str := range split {
+			values[i] = runtime.MakeStr(str)
+		}
+		return runtime.MakeList(checker.Str, values...)
+	case checker.StrStartsWith:
+		prefix := vm.eval(scope, e.Args[0]).AsString()
+		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
+	case checker.StrToStr:
+		return subj
+	case checker.StrTrim:
+		return runtime.MakeStr(strings.Trim(raw, " "))
+	default:
+		panic(fmt.Errorf("Unknown StrMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalIntMethodNode(subj *runtime.Object, e *checker.IntMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.IntToStr:
+		return runtime.MakeStr(strconv.Itoa(subj.AsInt()))
+	default:
+		panic(fmt.Errorf("Unknown IntMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalFloatMethodNode(subj *runtime.Object, e *checker.FloatMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.FloatToStr:
+		return runtime.MakeStr(strconv.FormatFloat(subj.AsFloat(), 'f', 2, 64))
+	case checker.FloatToInt:
+		floatVal := subj.AsFloat()
+		intVal := int(floatVal)
+		return runtime.MakeInt(intVal)
+	default:
+		panic(fmt.Errorf("Unknown FloatMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalBoolMethodNode(subj *runtime.Object, e *checker.BoolMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.BoolToStr:
+		return runtime.MakeStr(strconv.FormatBool(subj.AsBool()))
+	default:
+		panic(fmt.Errorf("Unknown BoolMethodKind: %d", e.Kind))
+	}
+}
+
+// Handlers for collection method nodes
+
+func (vm *VM) evalListMethodNode(scope *scope, self *runtime.Object, e *checker.ListMethod) *runtime.Object {
+	raw := self.AsList()
+	switch e.Kind {
+	case checker.ListAt:
+		index := vm.eval(scope, e.Args[0]).AsInt()
+		if index >= len(raw) {
+			panic(fmt.Errorf("Index out of range (%d) on list of length %d", index, len(raw)))
+		}
+		return raw[index]
+	case checker.ListPrepend:
+		newItem := vm.eval(scope, e.Args[0])
+		raw = append([]*runtime.Object{newItem}, raw...)
+		self.Set(raw)
+		return self
+	case checker.ListPush:
+		raw = append(raw, vm.eval(scope, e.Args[0]))
+		self.Set(raw)
+		return self
+	case checker.ListSet:
+		index := vm.eval(scope, e.Args[0]).AsInt()
+		value := vm.eval(scope, e.Args[1])
+		result := runtime.MakeBool(false)
+		if index < len(raw) {
+			raw[index] = value
+			result.Set(true)
+		}
+		return result
+	case checker.ListSize:
+		return runtime.MakeInt(len(raw))
+	case checker.ListSort:
+		_isLess := vm.eval(scope, e.Args[0]).Raw().(*VMClosure)
+		slices.SortFunc(raw, func(a, b *runtime.Object) int {
+			if _isLess.Eval(a, b).AsBool() {
+				return -1
+			}
+			return 0
+		})
+		return runtime.Void()
+	case checker.ListSwap:
+		l := vm.eval(scope, e.Args[0]).AsInt()
+		r := vm.eval(scope, e.Args[1]).AsInt()
+		_l, _r := raw[l], raw[r]
+		raw[l] = _r
+		raw[r] = _l
+		return runtime.Void()
+	default:
+		panic(fmt.Errorf("Unknown ListMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalMapMethodNode(scope *scope, subj *runtime.Object, e *checker.MapMethod) *runtime.Object {
+	raw := subj.AsMap()
+	switch e.Kind {
+	case checker.MapKeys:
+		keys := make([]*runtime.Object, len(raw))
+		i := 0
+		for k := range raw {
+			keys[i] = subj.Map_GetKey(k)
+			i++
+		}
+		return runtime.MakeList(e.KeyType, keys...)
+	case checker.MapSize:
+		return runtime.MakeInt(len(raw))
+	case checker.MapGet:
+		keyArg := vm.eval(scope, e.Args[0])
+		_key := runtime.ToMapKey(keyArg)
+		out := runtime.MakeNone(e.ValueType)
+		if value, found := raw[_key]; found {
+			out = out.ToSome(value.Raw())
+		}
+		return out
+	case checker.MapSet:
+		keyArg := vm.eval(scope, e.Args[0])
+		valueArg := vm.eval(scope, e.Args[1])
+		keyStr := runtime.ToMapKey(keyArg)
+		raw[keyStr] = valueArg
+		return runtime.MakeBool(true)
+	case checker.MapDrop:
+		keyArg := vm.eval(scope, e.Args[0])
+		keyStr := runtime.ToMapKey(keyArg)
+		delete(raw, keyStr)
+		return runtime.Void()
+	case checker.MapHas:
+		keyArg := vm.eval(scope, e.Args[0])
+		keyStr := runtime.ToMapKey(keyArg)
+		_, found := raw[keyStr]
+		return runtime.MakeBool(found)
+	default:
+		panic(fmt.Errorf("Unknown MapMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalMaybeMethodNode(scope *scope, subj *runtime.Object, e *checker.MaybeMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.MaybeExpect:
+		if subj.Raw() == nil {
+			_msg := vm.eval(scope, e.Args[0]).AsString()
+			panic(_msg)
+		}
+		return runtime.Make(subj.Raw(), e.InnerType)
+	case checker.MaybeIsNone:
+		return runtime.MakeBool(subj.Raw() == nil)
+	case checker.MaybeIsSome:
+		return runtime.MakeBool(subj.Raw() != nil)
+	case checker.MaybeOr:
+		if subj.Raw() == nil {
+			return vm.eval(scope, e.Args[0])
+		}
+		return runtime.Make(subj.Raw(), e.InnerType)
+	default:
+		panic(fmt.Errorf("Unknown MaybeMethodKind: %d", e.Kind))
+	}
+}
+
+func (vm *VM) evalResultMethodNode(scope *scope, subj *runtime.Object, e *checker.ResultMethod) *runtime.Object {
+	switch e.Kind {
+	case checker.ResultExpect:
+		if subj.IsErr() {
+			actual := ""
+			if str, ok := subj.IsStr(); ok {
+				actual = str
+			} else {
+				actual = fmt.Sprintf("%v", subj.GoValue())
+			}
+			_msg := vm.eval(scope, e.Args[0]).AsString()
+			panic(_msg + ": " + actual)
+		}
+		return subj.UnwrapResult()
+	case checker.ResultOr:
+		if subj.IsErr() {
+			return vm.eval(scope, e.Args[0])
+		}
+		return subj.UnwrapResult()
+	case checker.ResultIsOk:
+		return runtime.MakeBool(!subj.IsErr())
+	case checker.ResultIsErr:
+		return runtime.MakeBool(subj.IsErr())
+	default:
+		panic(fmt.Errorf("Unknown ResultMethodKind: %d", e.Kind))
+	}
 }
 
 func (vm *VM) evalStrMethod(scope *scope, subj *runtime.Object, m *checker.FunctionCall) *runtime.Object {
@@ -861,7 +1097,7 @@ func (vm *VM) evalListMethod(scope *scope, self *runtime.Object, m *checker.Inst
 		index := vm.eval(scope, m.Method.Args[0]).AsInt()
 		value := vm.eval(scope, m.Method.Args[1])
 		result := runtime.MakeBool(false)
-		if index <= len(raw) {
+		if index < len(raw) {
 			raw[index] = value
 			result.Set(true)
 		}

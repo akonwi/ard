@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/ast"
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -21,11 +21,20 @@ var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
 		checker.Any{},
+		checker.BoolMethod{},
 		checker.Diagnostic{},
 		checker.EnumVariant{},
+		checker.FloatMethod{},
 		checker.Identifier{},
 		checker.InstanceProperty{},
+		checker.IntMethod{},
+		checker.ListMethod{},
+		checker.MapMethod{},
+		checker.MaybeMethod{},
+		checker.OptionMatch{},
+		checker.ResultMethod{},
 		checker.Statement{},
+		checker.StrMethod{},
 		checker.Variable{},
 		checker.VariableDef{},
 		checker.FunctionCall{},
@@ -42,7 +51,7 @@ var compareOptions = cmp.Options{
 func run(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ast.Parse([]byte(tt.input), "test.ard")
+			result := parse.Parse([]byte(tt.input), "test.ard")
 			if len(result.Errors) > 0 {
 				t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 			}
@@ -155,7 +164,10 @@ func TestPrimitiveLiterals(t *testing.T) {
 						Expr: &checker.TemplateStr{
 							Chunks: []checker.Expression{
 								&checker.StrLiteral{"Hello, "},
-								&checker.IntLiteral{3},
+								&checker.IntMethod{
+									Subject: &checker.IntLiteral{3},
+									Kind:    checker.IntToStr,
+								},
 							},
 						},
 					},
@@ -344,37 +356,6 @@ func TestVariables(t *testing.T) {
 
 func TestInstanceProperties(t *testing.T) {
 	run(t, []test{
-		{
-			name: "valid instance members",
-			input: strings.Join([]string{
-				`"foobar".size`,
-				`let name = "Alice"`,
-				`name.size`,
-			}, "\n"),
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Expr: &checker.InstanceProperty{
-							Subject:  &checker.StrLiteral{"foobar"},
-							Property: "size",
-						},
-					},
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: false,
-							Name:    "name",
-							Value:   &checker.StrLiteral{"Alice"},
-						},
-					},
-					{
-						Expr: &checker.InstanceProperty{
-							Subject:  &checker.Variable{},
-							Property: "size",
-						},
-					},
-				},
-			},
-		},
 		{
 			name: "Undefined instance members are errors",
 			input: strings.Join([]string{
@@ -1225,8 +1206,10 @@ func TestLoopingOverMaps(t *testing.T) {
 							Key: "key",
 							Val: "val",
 							Map: &checker.MapLiteral{
-								Keys:   []checker.Expression{&checker.StrLiteral{"hello"}, &checker.StrLiteral{"world"}},
-								Values: []checker.Expression{&checker.IntLiteral{5}, &checker.IntLiteral{5}},
+								Keys:      []checker.Expression{&checker.StrLiteral{"hello"}, &checker.StrLiteral{"world"}},
+								Values:    []checker.Expression{&checker.IntLiteral{5}, &checker.IntLiteral{5}},
+								KeyType:   checker.Str,
+								ValueType: checker.Int,
 							},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
@@ -1237,7 +1220,10 @@ func TestLoopingOverMaps(t *testing.T) {
 												&checker.Variable{},
 												&checker.TemplateStr{Chunks: []checker.Expression{
 													&checker.StrLiteral{" = "},
-													&checker.Variable{},
+													&checker.IntMethod{
+														Subject: &checker.Variable{},
+														Kind:    checker.IntToStr,
+													},
 												}},
 											},
 										},
@@ -1535,7 +1521,8 @@ func TestMaybes(t *testing.T) {
 					},
 					{
 						Expr: &checker.OptionMatch{
-							Subject: &checker.Variable{},
+							Subject:   &checker.Variable{},
+							InnerType: checker.Str,
 							Some: &checker.Match{
 								Pattern: &checker.Identifier{Name: "value"},
 								Body: &checker.Block{
@@ -1670,9 +1657,11 @@ func TestLists(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-						Expr: &checker.InstanceMethod{
-							Subject: &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
-							Method:  &checker.FunctionCall{Name: "size", Args: []checker.Expression{}},
+						Expr: &checker.ListMethod{
+							Subject:     &checker.ListLiteral{Elements: []checker.Expression{&checker.IntLiteral{1}}},
+							Kind:        checker.ListSize,
+							Args:        []checker.Expression{},
+							ElementType: checker.Int,
 						},
 					},
 				},
@@ -1709,6 +1698,8 @@ func TestMaps(t *testing.T) {
 									&checker.IntLiteral{0},
 									&checker.IntLiteral{15},
 								},
+								KeyType:   checker.Str,
+								ValueType: checker.Int,
 							},
 						},
 					},
@@ -1732,6 +1723,8 @@ func TestMaps(t *testing.T) {
 									&checker.IntLiteral{0},
 									&checker.IntLiteral{15},
 								},
+								KeyType:   checker.Str,
+								ValueType: checker.Int,
 							},
 						},
 					},

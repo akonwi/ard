@@ -1,4 +1,4 @@
-package ast
+package parse
 
 import (
 	"fmt"

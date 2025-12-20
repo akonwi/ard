@@ -3,7 +3,7 @@ package checker
 import (
 	"fmt"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parse"
 )
 
 type FiberExecution struct {
@@ -24,9 +24,9 @@ func (f FiberExecution) GetMainName() string {
 	return f.fnName
 }
 
-func (c *Checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *FiberExecution {
+func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type) *FiberExecution {
 	switch node := fnNode.(type) {
-	case *ast.AnonymousFunction:
+	case *parse.AnonymousFunction:
 		block := c.checkBlock(node.Body, func() {
 			// do not inherit parent scope
 			c.scope.isolate()
@@ -48,7 +48,7 @@ func (c *Checker) validateFiberFunction(fnNode ast.Expression, fiberType Type) *
 			_type:  fiberType,
 			fnName: "main",
 		}
-	case *ast.StaticProperty:
+	case *parse.StaticProperty:
 		module := c.resolveModule(node.Target.String())
 
 		if module == nil {

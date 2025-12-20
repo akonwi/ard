@@ -213,12 +213,9 @@ func TestCallingInstanceMethods(t *testing.T) {
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
-						Expr: &checker.InstanceMethod{
+						Expr: &checker.IntMethod{
 							Subject: &checker.IntLiteral{200},
-							Method: &checker.FunctionCall{
-								Name: "to_str",
-								Args: []checker.Expression{},
-							},
+							Kind:    checker.IntToStr,
 						},
 					},
 				},

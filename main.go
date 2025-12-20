@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/version"
 	"github.com/akonwi/ard/vm"
@@ -51,12 +51,12 @@ func main() {
 				os.Exit(1)
 			}
 
-			result := ast.Parse(sourceCode, inputPath)
+			result := parse.Parse(sourceCode, inputPath)
 			if len(result.Errors) > 0 {
 				result.PrintErrors()
 				os.Exit(1)
 			}
-			ast := result.Program
+			program := result.Program
 
 			workingDir := filepath.Dir(inputPath)
 			moduleResolver, err := checker.NewModuleResolver(workingDir)
@@ -70,7 +70,7 @@ func main() {
 				relPath = inputPath // fallback to absolute path
 			}
 
-			c := checker.New(relPath, ast, moduleResolver)
+			c := checker.New(relPath, program, moduleResolver)
 			c.Check()
 			if c.HasErrors() {
 				for _, diagnostic := range c.Diagnostics() {
@@ -98,12 +98,12 @@ func check(inputPath string) bool {
 		return false
 	}
 
-	result := ast.Parse(sourceCode, inputPath)
+	result := parse.Parse(sourceCode, inputPath)
 	if len(result.Errors) > 0 {
 		result.PrintErrors()
 		return false
 	}
-	ast := result.Program
+	program := result.Program
 
 	workingDir := filepath.Dir(inputPath)
 	moduleResolver, err := checker.NewModuleResolver(workingDir)
@@ -117,7 +117,7 @@ func check(inputPath string) bool {
 		relPath = inputPath // fallback to absolute path
 	}
 
-	c := checker.New(relPath, ast, moduleResolver)
+	c := checker.New(relPath, program, moduleResolver)
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parse"
 )
 
 /* can either produce a value or not */
@@ -102,9 +102,11 @@ func (l *ListLiteral) Type() Type {
 }
 
 type MapLiteral struct {
-	Keys   []Expression
-	Values []Expression
-	_type  Type
+	Keys      []Expression
+	Values    []Expression
+	_type     Type
+	KeyType   Type // Pre-computed by checker
+	ValueType Type // Pre-computed by checker
 }
 
 func (m *MapLiteral) Type() Type {
@@ -154,10 +156,17 @@ func (v Variable) Type() Type {
 	return v.sym.Type
 }
 
+type SubjectKind uint8
+
+const (
+	StructSubject SubjectKind = iota
+)
+
 type InstanceProperty struct {
 	Subject  Expression
 	Property string
 	_type    Type
+	Kind     SubjectKind // Pre-computed by checker based on subject type
 }
 
 func (i *InstanceProperty) Type() Type {
@@ -184,6 +193,269 @@ func (i *InstanceMethod) Type() Type {
 
 func (i *InstanceMethod) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Method.Name)
+}
+
+// Primitive method types with enum-based dispatch
+
+type StrMethodKind uint8
+
+const (
+	StrSize StrMethodKind = iota
+	StrIsEmpty
+	StrContains
+	StrReplace
+	StrReplaceAll
+	StrSplit
+	StrStartsWith
+	StrToStr
+	StrTrim
+)
+
+type StrMethod struct {
+	Subject Expression
+	Kind    StrMethodKind
+	Args    []Expression
+}
+
+func (s *StrMethod) Type() Type {
+	switch s.Kind {
+	case StrSize:
+		return Int
+	case StrIsEmpty:
+		return Bool
+	case StrContains:
+		return Bool
+	case StrReplace, StrReplaceAll:
+		return Str
+	case StrSplit:
+		return MakeList(Str)
+	case StrStartsWith:
+		return Bool
+	case StrToStr:
+		return Str
+	case StrTrim:
+		return Str
+	default:
+		return Void
+	}
+}
+
+type IntMethodKind uint8
+
+const (
+	IntToStr IntMethodKind = iota
+)
+
+type IntMethod struct {
+	Subject Expression
+	Kind    IntMethodKind
+}
+
+func (m *IntMethod) Type() Type {
+	switch m.Kind {
+	case IntToStr:
+		return Str
+	default:
+		return Void
+	}
+}
+
+type FloatMethodKind uint8
+
+const (
+	FloatToStr FloatMethodKind = iota
+	FloatToInt
+)
+
+type FloatMethod struct {
+	Subject Expression
+	Kind    FloatMethodKind
+}
+
+func (m *FloatMethod) Type() Type {
+	switch m.Kind {
+	case FloatToStr:
+		return Str
+	case FloatToInt:
+		return Int
+	default:
+		return Void
+	}
+}
+
+type BoolMethodKind uint8
+
+const (
+	BoolToStr BoolMethodKind = iota
+)
+
+type BoolMethod struct {
+	Subject Expression
+	Kind    BoolMethodKind
+}
+
+func (m *BoolMethod) Type() Type {
+	switch m.Kind {
+	case BoolToStr:
+		return Str
+	default:
+		return Void
+	}
+}
+
+// Collection method types with enum-based dispatch
+
+type ListMethodKind uint8
+
+const (
+	ListAt ListMethodKind = iota
+	ListPrepend
+	ListPush
+	ListSet
+	ListSize
+	ListSort
+	ListSwap
+)
+
+type ListMethod struct {
+	Subject     Expression
+	Kind        ListMethodKind
+	Args        []Expression
+	ElementType Type        // Pre-computed element type
+	fn          *FunctionDef // Function definition for return type resolution
+}
+
+func (m *ListMethod) Type() Type {
+	// Use function return type if available (handles generics properly)
+	if m.fn != nil {
+		return m.fn.ReturnType
+	}
+	// Fallback to computed type (for backwards compatibility)
+	switch m.Kind {
+	case ListAt:
+		return m.ElementType
+	case ListPrepend, ListPush:
+		return MakeList(m.ElementType)
+	case ListSet:
+		return Bool
+	case ListSize:
+		return Int
+	case ListSort, ListSwap:
+		return Void
+	default:
+		return Void
+	}
+}
+
+type MapMethodKind uint8
+
+const (
+	MapKeys MapMethodKind = iota
+	MapSize
+	MapGet
+	MapSet
+	MapDrop
+	MapHas
+)
+
+type MapMethod struct {
+	Subject   Expression
+	Kind      MapMethodKind
+	Args      []Expression
+	KeyType   Type        // Pre-computed key type
+	ValueType Type        // Pre-computed value type
+	fn        *FunctionDef // Function definition for return type resolution
+}
+
+func (m *MapMethod) Type() Type {
+	// Use function return type if available (handles generics properly)
+	if m.fn != nil {
+		return m.fn.ReturnType
+	}
+	// Fallback to computed type (for backwards compatibility)
+	switch m.Kind {
+	case MapKeys:
+		return MakeList(m.KeyType)
+	case MapSize:
+		return Int
+	case MapGet:
+		return MakeMaybe(m.ValueType)
+	case MapSet:
+		return Bool
+	case MapDrop:
+		return Void
+	case MapHas:
+		return Bool
+	default:
+		return Void
+	}
+}
+
+type MaybeMethodKind uint8
+
+const (
+	MaybeExpect MaybeMethodKind = iota
+	MaybeIsNone
+	MaybeIsSome
+	MaybeOr
+)
+
+type MaybeMethod struct {
+	Subject   Expression
+	Kind      MaybeMethodKind
+	Args      []Expression
+	InnerType Type        // Pre-computed inner type
+	fn        *FunctionDef // Function definition for return type resolution
+}
+
+func (m *MaybeMethod) Type() Type {
+	// Use function return type if available (handles generics properly)
+	if m.fn != nil {
+		return m.fn.ReturnType
+	}
+	// Fallback to computed type (for backwards compatibility)
+	switch m.Kind {
+	case MaybeExpect, MaybeOr:
+		return m.InnerType
+	case MaybeIsNone, MaybeIsSome:
+		return Bool
+	default:
+		return Void
+	}
+}
+
+type ResultMethodKind uint8
+
+const (
+	ResultExpect ResultMethodKind = iota
+	ResultOr
+	ResultIsOk
+	ResultIsErr
+)
+
+type ResultMethod struct {
+	Subject Expression
+	Kind    ResultMethodKind
+	Args    []Expression
+	OkType  Type        // Pre-computed OK type
+	ErrType Type        // Pre-computed Error type
+	fn      *FunctionDef // Function definition for return type resolution
+}
+
+func (m *ResultMethod) Type() Type {
+	// Use function return type if available (handles generics properly)
+	if m.fn != nil {
+		return m.fn.ReturnType
+	}
+	// Fallback to computed type (for backwards compatibility)
+	switch m.Kind {
+	case ResultExpect, ResultOr:
+		return m.OkType
+	case ResultIsOk, ResultIsErr:
+		return Bool
+	default:
+		return Void
+	}
 }
 
 type Negation struct {
@@ -304,9 +576,10 @@ type Match struct {
 }
 
 type OptionMatch struct {
-	Subject Expression
-	Some    *Match
-	None    *Block
+	Subject   Expression
+	Some      *Match
+	None      *Block
+	InnerType Type // Pre-computed inner type of Maybe
 }
 
 func (o *OptionMatch) Type() Type {
@@ -761,8 +1034,9 @@ func (f *FunctionCall) Type() Type {
 }
 
 type ModuleStructInstance struct {
-	Module   string
-	Property *StructInstance
+	Module     string
+	Property   *StructInstance
+	FieldTypes map[string]Type // Pre-computed by checker
 }
 
 func (p *ModuleStructInstance) Type() Type {
@@ -793,7 +1067,7 @@ type Enum struct {
 	Variants []string
 	Methods  map[string]*FunctionDef
 	Traits   []*Trait
-	Location ast.Location
+	Location parse.Location
 }
 
 func (e Enum) NonProducing() {}
@@ -998,9 +1272,10 @@ func (def StructDef) hasTrait(trait *Trait) bool {
 }
 
 type StructInstance struct {
-	Name   string
-	Fields map[string]Expression
-	_type  *StructDef
+	Name       string
+	Fields     map[string]Expression
+	_type      *StructDef
+	FieldTypes map[string]Type // Pre-computed by checker
 }
 
 func (s StructInstance) Type() Type {
@@ -1019,10 +1294,10 @@ func (r ResultMatch) Type() Type {
 
 type Panic struct {
 	Message Expression
-	node    *ast.FunctionCall
+	node    *parse.FunctionCall
 }
 
-func (p Panic) GetLocation() ast.Location {
+func (p Panic) GetLocation() parse.Location {
 	return p.node.GetLocation()
 }
 
@@ -1033,11 +1308,19 @@ func (p Panic) Type() Type {
 	return &Any{name: "Unreachable"}
 }
 
+type TryKind uint8
+
+const (
+	TryResult TryKind = iota
+	TryMaybe
+)
+
 type TryOp struct {
 	expr       Expression
 	ok         Type
 	CatchBlock *Block
 	CatchVar   string
+	Kind       TryKind // Pre-computed by checker: TryResult or TryMaybe
 }
 
 func (t TryOp) Expr() Expression {

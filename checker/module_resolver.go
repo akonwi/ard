@@ -9,7 +9,7 @@ import (
 
 	"slices"
 
-	"github.com/akonwi/ard/ast"
+	"github.com/akonwi/ard/parse"
 )
 
 // ProjectInfo holds information about the current project
@@ -22,7 +22,7 @@ type ProjectInfo struct {
 type ModuleResolver struct {
 	project      *ProjectInfo
 	moduleCache  map[string]Module       // cache loaded modules by file path
-	astCache     map[string]*ast.Program // cache parsed ASTs by file path
+	astCache     map[string]*parse.Program // cache parsed ASTs by file path
 	loadingChain []string                // track import paths currently being loaded for circular dependency detection
 }
 
@@ -91,7 +91,7 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 	return &ModuleResolver{
 		project:      project,
 		moduleCache:  make(map[string]Module),
-		astCache:     make(map[string]*ast.Program),
+		astCache:     make(map[string]*parse.Program),
 		loadingChain: make([]string, 0),
 	}, nil
 }
@@ -138,7 +138,7 @@ func (mr *ModuleResolver) GetProjectInfo() *ProjectInfo {
 }
 
 // LoadModule loads and parses a module file from the given import path
-func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
+func (mr *ModuleResolver) LoadModule(importPath string) (*parse.Program, error) {
 	// Resolve import path to filesystem path
 	filePath, err := mr.ResolveImportPath(importPath)
 	if err != nil {
@@ -157,7 +157,7 @@ func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
 	}
 
 	// Parse the module
-	result := ast.Parse(sourceCode, filePath)
+	result := parse.Parse(sourceCode, filePath)
 	if len(result.Errors) > 0 {
 		return nil, fmt.Errorf("failed to parse module %s: %s", filePath, result.Errors[0].Message)
 	}
@@ -170,12 +170,12 @@ func (mr *ModuleResolver) LoadModule(importPath string) (*ast.Program, error) {
 }
 
 // LoadModuleWithDependencies loads a module and all its dependencies, detecting circular dependencies
-func (mr *ModuleResolver) LoadModuleWithDependencies(importPath string) (*ast.Program, error) {
+func (mr *ModuleResolver) LoadModuleWithDependencies(importPath string) (*parse.Program, error) {
 	return mr.loadModuleRecursive(importPath)
 }
 
 // loadModuleRecursive is the internal method that handles recursive loading with cycle detection
-func (mr *ModuleResolver) loadModuleRecursive(importPath string) (*ast.Program, error) {
+func (mr *ModuleResolver) loadModuleRecursive(importPath string) (*parse.Program, error) {
 	// Check for circular dependency using import path (not file path)
 	if slices.Contains(mr.loadingChain, importPath) {
 		chain := append(mr.loadingChain, importPath)
