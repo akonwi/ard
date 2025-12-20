@@ -70,7 +70,7 @@ func discoverFFIFunctions(dir string) ([]FFIFunction, error) {
 // parseFFIFunctions parses a Go file and extracts FFI functions
 func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 	fset := token.NewFileSet()
-	node, err := goparser.ParseFile(fset, filename, nil, goparser.ParseComments)
+	node, err := goparse.ParseFile(fset, filename, nil, goparse.ParseComments)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 
 	// Walk the AST to find FFI functions
 	ast.Inspect(node, func(n ast.Node) bool {
-		if fn, ok := n.(*parser.FuncDecl); ok {
+		if fn, ok := n.(*parse.FuncDecl); ok {
 			if isFFIFunction(fn) {
 				functions = append(functions, FFIFunction{
 					Name:   fn.Name.Name,
@@ -102,7 +102,7 @@ func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 }
 
 // isFFIFunction checks if a function matches the FFI signature
-func isFFIFunction(fn *parser.FuncDecl) bool {
+func isFFIFunction(fn *parse.FuncDecl) bool {
 	// Skip functions that start with underscore (internal/private functions)
 	if strings.HasPrefix(fn.Name.Name, "_") {
 		return false
@@ -125,8 +125,8 @@ func isFFIFunction(fn *parser.FuncDecl) bool {
 
 	// Validate second parameter: ret checker.Type
 	secondParam := fn.Type.Params.List[1]
-	if sel, isSelector := secondParam.Type.(*parser.SelectorExpr); isSelector {
-		pkg, ok := sel.X.(*parser.Ident)
+	if sel, isSelector := secondParam.Type.(*parse.SelectorExpr); isSelector {
+		pkg, ok := sel.X.(*parse.Ident)
 		return ok && pkg.Name == "checker" && sel.Sel.Name == "Type"
 	}
 
@@ -141,34 +141,34 @@ func isFFIFunction(fn *parser.FuncDecl) bool {
 
 // Helper functions for AST type checking
 func isPointerToType(expr ast.Expr, typeName string) bool {
-	star, ok := expr.(*parser.StarExpr)
+	star, ok := expr.(*parse.StarExpr)
 	if !ok {
 		return false
 	}
-	ident, ok := star.X.(*parser.Ident)
+	ident, ok := star.X.(*parse.Ident)
 	return ok && ident.Name == typeName
 }
 
 func isPointerToRuntimeObject(expr ast.Expr) bool {
-	star, ok := expr.(*parser.StarExpr)
+	star, ok := expr.(*parse.StarExpr)
 	if !ok {
 		return false
 	}
 
 	// Check for runtime.Object (selector expression)
-	sel, ok := star.X.(*parser.SelectorExpr)
+	sel, ok := star.X.(*parse.SelectorExpr)
 	if ok {
-		pkg, ok := sel.X.(*parser.Ident)
+		pkg, ok := sel.X.(*parse.Ident)
 		return ok && pkg.Name == "runtime" && sel.Sel.Name == "Object"
 	}
 
 	// Also check for just Object (in case it's imported differently)
-	ident, ok := star.X.(*parser.Ident)
+	ident, ok := star.X.(*parse.Ident)
 	return ok && ident.Name == "Object"
 }
 
 func isSliceOfPointerToRuntimeObject(expr ast.Expr) bool {
-	array, ok := expr.(*parser.ArrayType)
+	array, ok := expr.(*parse.ArrayType)
 	if !ok {
 		return false
 	}
@@ -176,7 +176,7 @@ func isSliceOfPointerToRuntimeObject(expr ast.Expr) bool {
 }
 
 func isSliceOfPointerToType(expr ast.Expr, typeName string) bool {
-	array, ok := expr.(*parser.ArrayType)
+	array, ok := expr.(*parse.ArrayType)
 	if !ok {
 		return false
 	}
@@ -184,7 +184,7 @@ func isSliceOfPointerToType(expr ast.Expr, typeName string) bool {
 }
 
 func isAnyType(expr ast.Expr) bool {
-	ident, ok := expr.(*parser.Ident)
+	ident, ok := expr.(*parse.Ident)
 	return ok && ident.Name == "any"
 }
 

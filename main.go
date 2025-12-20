@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/akonwi/ard/parser"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/version"
 	"github.com/akonwi/ard/vm"
@@ -51,7 +51,7 @@ func main() {
 				os.Exit(1)
 			}
 
-			result := parser.Parse(sourceCode, inputPath)
+			result := parse.Parse(sourceCode, inputPath)
 			if len(result.Errors) > 0 {
 				result.PrintErrors()
 				os.Exit(1)
@@ -98,7 +98,7 @@ func check(inputPath string) bool {
 		return false
 	}
 
-	result := parser.Parse(sourceCode, inputPath)
+	result := parse.Parse(sourceCode, inputPath)
 	if len(result.Errors) > 0 {
 		result.PrintErrors()
 		return false

@@ -1,7 +1,7 @@
 package checker
 
 import (
-	"github.com/akonwi/ard/parser"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/std_lib"
 )
 
@@ -33,7 +33,7 @@ func FindEmbeddedModule(path string) (Module, bool) {
 	}
 
 	// Parse the .ard file
-	result := parser.Parse(content, path)
+	result := parse.Parse(content, path)
 	if len(result.Errors) > 0 {
 		return nil, false
 	}

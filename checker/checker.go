@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/parser"
+	"github.com/akonwi/ard/parse"
 )
 
 type Program struct {
@@ -32,7 +32,7 @@ type Diagnostic struct {
 	Kind     DiagnosticKind
 	Message  string
 	filePath string
-	location parser.Location
+	location parse.Location
 }
 
 func (d Diagnostic) String() string {
@@ -71,7 +71,7 @@ func (c Checker) shouldCopyForMutableAssignment(t Type) bool {
 
 type Checker struct {
 	diagnostics    []Diagnostic
-	input          *parser.Program
+	input          *parse.Program
 	scope          *SymbolTable
 	filePath       string
 	program        *Program
@@ -79,7 +79,7 @@ type Checker struct {
 	moduleResolver *ModuleResolver
 }
 
-func New(filePath string, input *parser.Program, moduleResolver *ModuleResolver) *Checker {
+func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver) *Checker {
 	rootScope := makeScope(nil)
 	c := &Checker{
 		diagnostics:    []Diagnostic{},
@@ -210,8 +210,8 @@ func (c *Checker) scanForUnresolvedGenerics() {
 		}
 
 		if anyType, ok := stmt.Expr.Type().(*Any); ok && anyType.actual == nil {
-			loc := parser.Location{}
-			if locatable, ok := stmt.Expr.(interface{ GetLocation() parser.Location }); ok {
+			loc := parse.Location{}
+			if locatable, ok := stmt.Expr.(interface{ GetLocation() parse.Location }); ok {
 				loc = locatable.GetLocation()
 			}
 
@@ -229,7 +229,7 @@ func (c *Checker) Module() Module {
 
 // check is an internal helper for recursive module checking.
 // Use New() + Check() + Module() for the public API.
-func check(input *parser.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
+func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
 	c := New(filePath, input, moduleResolver)
 
 	c.Check()
@@ -237,7 +237,7 @@ func check(input *parser.Program, moduleResolver *ModuleResolver, filePath strin
 	return c.Module(), c.diagnostics
 }
 
-func (c *Checker) addError(msg string, location parser.Location) {
+func (c *Checker) addError(msg string, location parse.Location) {
 	c.diagnostics = append(c.diagnostics, Diagnostic{
 		Kind:     Error,
 		Message:  msg,
@@ -246,7 +246,7 @@ func (c *Checker) addError(msg string, location parser.Location) {
 	})
 }
 
-func (c *Checker) addWarning(msg string, location parser.Location) {
+func (c *Checker) addWarning(msg string, location parse.Location) {
 	c.diagnostics = append(c.diagnostics, Diagnostic{
 		Kind:     Warn,
 		Message:  msg,
@@ -307,7 +307,7 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	}
 }
 
-func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parser.DeclaredType, loc parser.Location) Type {
+func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.DeclaredType, loc parse.Location) Type {
 	// 1. Collect generics from the original type
 	genericParams := []string{}
 	seenGenerics := make(map[string]bool)
@@ -333,21 +333,21 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parser.Dec
 	return specializedType
 }
 
-func (c *Checker) resolveType(t parser.DeclaredType) Type {
+func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	var baseType Type
 	switch ty := t.(type) {
-	case *parser.StringType:
+	case *parse.StringType:
 		baseType = Str
-	case *parser.IntType:
+	case *parse.IntType:
 		baseType = Int
-	case *parser.FloatType:
+	case *parse.FloatType:
 		baseType = Float
-	case *parser.BooleanType:
+	case *parse.BooleanType:
 		baseType = Bool
-	case *parser.VoidType:
+	case *parse.VoidType:
 		baseType = Void
 
-	case *parser.FunctionType:
+	case *parse.FunctionType:
 		// Convert each parameter type and return type
 		params := make([]Parameter, len(ty.Params))
 		for i, param := range ty.Params {
@@ -364,18 +364,18 @@ func (c *Checker) resolveType(t parser.DeclaredType) Type {
 			Parameters: params,
 			ReturnType: returnType,
 		}
-	case *parser.List:
+	case *parse.List:
 		of := c.resolveType(ty.Element)
 		baseType = MakeList(of)
-	case *parser.Map:
+	case *parse.Map:
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
 		baseType = MakeMap(key, value)
-	case *parser.ResultType:
+	case *parse.ResultType:
 		val := c.resolveType(ty.Val)
 		err := c.resolveType(ty.Err)
 		baseType = MakeResult(val, err)
-	case *parser.CustomType:
+	case *parse.CustomType:
 		if t.GetName() == "Dynamic" {
 			baseType = Dynamic
 			break
@@ -390,10 +390,10 @@ func (c *Checker) resolveType(t parser.DeclaredType) Type {
 			break
 		}
 		if ty.Type.Target != nil {
-			mod := c.resolveModule(ty.Type.Target.(*parser.Identifier).Name)
+			mod := c.resolveModule(ty.Type.Target.(*parse.Identifier).Name)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
-				sym := mod.Get(ty.Type.Property.(*parser.Identifier).Name)
+				sym := mod.Get(ty.Type.Property.(*parse.Identifier).Name)
 				if !sym.IsZero() {
 					baseType = sym.Type
 					break
@@ -402,7 +402,7 @@ func (c *Checker) resolveType(t parser.DeclaredType) Type {
 		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return &Any{name: "unknown"}
-	case *parser.GenericType:
+	case *parse.GenericType:
 		if existing := c.scope.findGeneric(ty.Name); existing != nil {
 			baseType = existing
 		} else {
@@ -420,7 +420,7 @@ func (c *Checker) resolveType(t parser.DeclaredType) Type {
 	return baseType
 }
 
-func (c *Checker) destructurePath(expr *parser.StaticFunction) (string, string) {
+func (c *Checker) destructurePath(expr *parse.StaticFunction) (string, string) {
 	absolute := expr.Target.String() + "::" + expr.Function.Name
 	parts := strings.Split(absolute, "::")
 
@@ -442,16 +442,16 @@ func typeMismatch(expected, got Type) string {
 	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, got)
 }
 
-func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
+func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	if c.halted {
 		return nil
 	}
 	switch s := (*stmt).(type) {
-	case *parser.Comment:
+	case *parse.Comment:
 		return nil
-	case *parser.Break:
+	case *parse.Break:
 		return &Statement{Break: true}
-	case *parser.TraitDefinition:
+	case *parse.TraitDefinition:
 		{
 			methods := make([]FunctionDef, len(s.Methods))
 			for i, method := range s.Methods {
@@ -491,18 +491,18 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			c.scope.add(trait.name(), &trait, false)
 			return nil
 		}
-	case *parser.TraitImplementation:
+	case *parse.TraitImplementation:
 		{
 			var sym Symbol
 			switch name := s.Trait.(type) {
-			case parser.Identifier:
+			case parse.Identifier:
 				if s, ok := c.scope.get(name.Name); ok {
 					sym = *s
 				}
-			case parser.StaticProperty:
-				mod := c.resolveModule(name.Target.(*parser.Identifier).Name)
+			case parse.StaticProperty:
+				mod := c.resolveModule(name.Target.(*parse.Identifier).Name)
 				if mod != nil {
-					if propId, ok := name.Property.(*parser.Identifier); ok {
+					if propId, ok := name.Property.(*parse.Identifier); ok {
 						sym = mod.Get(propId.Name)
 					} else {
 						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
@@ -690,7 +690,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 				return nil
 			}
 		}
-	case *parser.TypeDeclaration:
+	case *parse.TypeDeclaration:
 		{
 			// Handle type declaration (type unions/aliases)
 			types := make([]Type, len(s.Type))
@@ -719,16 +719,16 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			c.scope.add(unionType.name(), unionType, false)
 			return nil
 		}
-	case *parser.VariableDeclaration:
+	case *parse.VariableDeclaration:
 		{
 			var val Expression
 			if s.Type == nil {
 				switch literal := s.Value.(type) {
-				case *parser.ListLiteral:
+				case *parse.ListLiteral:
 					if expr := c.checkList(nil, literal); expr != nil {
 						val = expr
 					}
-				case *parser.MapLiteral:
+				case *parse.MapLiteral:
 					if expr := c.checkMap(nil, literal); expr != nil {
 						val = expr
 					}
@@ -743,11 +743,11 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 				}
 
 				switch literal := s.Value.(type) {
-				case *parser.ListLiteral:
+				case *parse.ListLiteral:
 					if expr := c.checkList(expected, literal); expr != nil {
 						val = expr
 					}
-				case *parser.MapLiteral:
+				case *parse.MapLiteral:
 					if expr := c.checkMap(expected, literal); expr != nil {
 						val = expr
 					}
@@ -794,9 +794,9 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 				Stmt: v,
 			}
 		}
-	case *parser.VariableAssignment:
+	case *parse.VariableAssignment:
 		{
-			if id, ok := s.Target.(*parser.Identifier); ok {
+			if id, ok := s.Target.(*parse.Identifier); ok {
 				target, ok := c.scope.get(id.Name)
 				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
@@ -823,7 +823,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 				}
 			}
 
-			if ip, ok := s.Target.(*parser.InstanceProperty); ok {
+			if ip, ok := s.Target.(*parse.InstanceProperty); ok {
 				subject := c.checkExpr(ip)
 				if subject == nil {
 					return nil
@@ -845,7 +845,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 
 			panic(fmt.Sprintf("Unsupported reassignment target: %T", s.Target))
 		}
-	case *parser.WhileLoop:
+	case *parse.WhileLoop:
 		{
 			// Check the condition expression
 			var condition Expression
@@ -872,7 +872,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 
 			return &Statement{Stmt: loop}
 		}
-	case *parser.ForLoop:
+	case *parse.ForLoop:
 		{
 			// Create a new scope for the loop body and initialization
 			parent := c.scope
@@ -883,7 +883,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			}()
 
 			// Check the initialization statement - handle it as a variable declaration
-			initDeclStmt := parser.Statement(s.Init)
+			initDeclStmt := parse.Statement(s.Init)
 			initStmt := c.checkStmt(&initDeclStmt)
 			if initStmt == nil || initStmt.Stmt == nil {
 				c.addError("Invalid for loop initialization", s.Init.GetLocation())
@@ -908,7 +908,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			}
 
 			// Check the update statement - handle it as a variable assignment
-			incrStmt := parser.Statement(s.Incrementer)
+			incrStmt := parse.Statement(s.Incrementer)
 			updateStmt := c.checkStmt(&incrStmt)
 			if updateStmt == nil || updateStmt.Stmt == nil {
 				c.addError("Invalid for loop update expression", s.Incrementer.GetLocation())
@@ -933,7 +933,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 
 			return &Statement{Stmt: loop}
 		}
-	case *parser.RangeLoop:
+	case *parse.RangeLoop:
 		{
 			start, end := c.checkExpr(s.Start), c.checkExpr(s.End)
 			if start == nil || end == nil {
@@ -963,7 +963,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 
 			panic(fmt.Errorf("Cannot create range of %s", start.Type()))
 		}
-	case *parser.ForInLoop:
+	case *parse.ForInLoop:
 		{
 			iterValue := c.checkExpr(s.Iterable)
 			if iterValue == nil {
@@ -1061,7 +1061,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
 			return nil
 		}
-	case *parser.EnumDefinition:
+	case *parse.EnumDefinition:
 		{
 			if len(s.Variants) == 0 {
 				c.addError("Enums must have at least one variant", s.GetLocation())
@@ -1088,7 +1088,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			c.scope.add(enum.name(), enum, false)
 			return nil
 		}
-	case *parser.StructDefinition:
+	case *parse.StructDefinition:
 		{
 			def := &StructDef{
 				Name:    s.Name.Name,
@@ -1111,7 +1111,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 			c.scope.add(def.name(), def, false)
 			return &Statement{Stmt: def}
 		}
-	case *parser.ImplBlock:
+	case *parse.ImplBlock:
 		{
 			sym, ok := c.scope.get(s.Target.Name)
 			if !ok {
@@ -1154,7 +1154,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 	case nil:
 		return nil
 	default:
-		expr := c.checkExpr((parser.Expression)(*stmt))
+		expr := c.checkExpr((parse.Expression)(*stmt))
 		if expr == nil {
 			return nil
 		}
@@ -1162,7 +1162,7 @@ func (c *Checker) checkStmt(stmt *parser.Statement) *Statement {
 	}
 }
 
-func (c *Checker) checkList(declaredType Type, expr *parser.ListLiteral) *ListLiteral {
+func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLiteral {
 	if declaredType != nil {
 		expectedElementType := declaredType.(*List).of
 		elements := make([]Expression, len(expr.Items))
@@ -1219,7 +1219,7 @@ func (c *Checker) checkList(declaredType Type, expr *parser.ListLiteral) *ListLi
 	}
 }
 
-func (c *Checker) checkBlock(stmts []parser.Statement, setup func()) *Block {
+func (c *Checker) checkBlock(stmts []parse.Statement, setup func()) *Block {
 	if len(stmts) == 0 {
 		return &Block{Stmts: []Statement{}}
 	}
@@ -1247,7 +1247,7 @@ func (c *Checker) checkBlock(stmts []parser.Statement, setup func()) *Block {
 	return block
 }
 
-func (c *Checker) checkMap(declaredType Type, expr *parser.MapLiteral) *MapLiteral {
+func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLiteral {
 	// Handle empty map with declared type
 	if len(expr.Entries) == 0 {
 		if declaredType != nil {
@@ -1390,7 +1390,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parser.MapLiteral) *MapLiter
 }
 
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
-func (c *Checker) validateStructInstance(structType *StructDef, properties []parser.StructValue, structName string, loc parser.Location) *StructInstance {
+func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
@@ -1653,18 +1653,18 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 	}
 }
 
-func (c *Checker) checkExpr(expr parser.Expression) Expression {
+func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	if c.halted {
 		return nil
 	}
 	switch s := (expr).(type) {
-	case *parser.StrLiteral:
+	case *parse.StrLiteral:
 		return &StrLiteral{s.Value}
-	case *parser.BoolLiteral:
+	case *parse.BoolLiteral:
 		return &BoolLiteral{s.Value}
-	case *parser.VoidLiteral:
+	case *parse.VoidLiteral:
 		return &VoidLiteral{}
-	case *parser.NumLiteral:
+	case *parse.NumLiteral:
 		{
 			stripped := strings.ReplaceAll(s.Value, "_", "")
 			if strings.Contains(stripped, ".") {
@@ -1681,7 +1681,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 			return &IntLiteral{value}
 		}
-	case *parser.InterpolatedStr:
+	case *parse.InterpolatedStr:
 		{
 			chunks := make([]Expression, len(s.Chunks))
 			for i := range s.Chunks {
@@ -1715,14 +1715,14 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 			return &TemplateStr{chunks}
 		}
-	case *parser.Identifier:
+	case *parse.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
 			return &Variable{*sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
 		c.halted = true
 		return nil
-	case *parser.FunctionCall:
+	case *parse.FunctionCall:
 		{
 			if s.Name == "panic" {
 				if len(s.Args) != 1 {
@@ -1801,7 +1801,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 
 			// We need to also resolve the arguments with mutability info
-			resolvedArgs := make([]parser.Argument, len(fnDef.Parameters))
+			resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
 			if len(s.Args) > 0 && s.Args[0].Name != "" {
 				// Handle named arguments - need to reorder them
 				paramMap := make(map[string]int)
@@ -1810,7 +1810,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				}
 				for _, arg := range s.Args {
 					if index, exists := paramMap[arg.Name]; exists {
-						resolvedArgs[index] = parser.Argument{
+						resolvedArgs[index] = parse.Argument{
 							Location: arg.Location,
 							Name:     "",
 							Value:    arg.Value,
@@ -1832,7 +1832,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				// For list and map literals, use checkExprAs to infer type from context
 				var checkedArg Expression
 				switch resolvedExprs[i].(type) {
-				case *parser.ListLiteral, *parser.MapLiteral:
+				case *parse.ListLiteral, *parse.MapLiteral:
 					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
 				default:
 					checkedArg = c.checkExpr(resolvedExprs[i])
@@ -1891,7 +1891,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				fn:   fnDef,
 			}
 		}
-	case *parser.InstanceProperty:
+	case *parse.InstanceProperty:
 		{
 			subj := c.checkExpr(s.Target)
 			if subj == nil {
@@ -1922,7 +1922,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			return prop
 		}
-	case *parser.InstanceMethod:
+	case *parse.InstanceMethod:
 		{
 			subj := c.checkExpr(s.Target)
 			if subj == nil {
@@ -1958,7 +1958,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 
 			// Align mutability information with parameters
-			resolvedArgs := make([]parser.Argument, len(fnDef.Parameters))
+			resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
 			if len(s.Method.Args) > 0 && s.Method.Args[0].Name != "" {
 				paramMap := make(map[string]int)
 				for i, param := range fnDef.Parameters {
@@ -1966,7 +1966,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				}
 				for _, arg := range s.Method.Args {
 					if index, exists := paramMap[arg.Name]; exists {
-						resolvedArgs[index] = parser.Argument{
+						resolvedArgs[index] = parse.Argument{
 							Location: arg.Location,
 							Name:     "",
 							Value:    arg.Value,
@@ -1987,7 +1987,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				// For list and map literals, use checkExprAs to infer type from context
 				var checkedArg Expression
 				switch resolvedExprs[i].(type) {
-				case *parser.ListLiteral, *parser.MapLiteral:
+				case *parse.ListLiteral, *parse.MapLiteral:
 					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
 				default:
 					checkedArg = c.checkExpr(resolvedExprs[i])
@@ -2034,13 +2034,13 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			// Create function call
 			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnDef)
 		}
-	case *parser.UnaryExpression:
+	case *parse.UnaryExpression:
 		{
 			value := c.checkExpr(s.Operand)
 			if value == nil {
 				return nil
 			}
-			if s.Operator == parser.Minus {
+			if s.Operator == parse.Minus {
 				if value.Type() != Int && value.Type() != Float {
 					c.addError("Only numbers can be negated with '-'", s.GetLocation())
 					return nil
@@ -2054,10 +2054,10 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 			return &Not{value}
 		}
-	case *parser.BinaryExpression:
+	case *parse.BinaryExpression:
 		{
 			switch s.Operator {
-			case parser.Plus:
+			case parse.Plus:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2081,7 +2081,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
-			case parser.Minus:
+			case parse.Minus:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2102,7 +2102,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
-			case parser.Multiply:
+			case parse.Multiply:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2123,7 +2123,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
-			case parser.Divide:
+			case parse.Divide:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2144,7 +2144,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
-			case parser.Modulo:
+			case parse.Modulo:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2162,7 +2162,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '%' operator can only be used for Int", s.GetLocation())
 					return nil
 				}
-			case parser.GreaterThan:
+			case parse.GreaterThan:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2183,7 +2183,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '>' operator can only be used for Int", s.GetLocation())
 					return nil
 				}
-			case parser.GreaterThanOrEqual:
+			case parse.GreaterThanOrEqual:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2204,7 +2204,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '>=' operator can only be used for Int", s.GetLocation())
 					return nil
 				}
-			case parser.LessThan:
+			case parse.LessThan:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2225,7 +2225,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '<' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
-			case parser.LessThanOrEqual:
+			case parse.LessThanOrEqual:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2246,7 +2246,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
 					return nil
 				}
-			case parser.Equal:
+			case parse.Equal:
 				{
 					left, right := c.checkExpr(s.Left), c.checkExpr(s.Right)
 					if left == nil || right == nil {
@@ -2272,7 +2272,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					}
 					return &Equality{left, right}
 				}
-			case parser.And:
+			case parse.And:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2287,7 +2287,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 					return &And{left, right}
 				}
-			case parser.Or:
+			case parse.Or:
 				{
 					left := c.checkExpr(s.Left)
 					right := c.checkExpr(s.Right)
@@ -2309,7 +2309,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 	// [refactor] a lot of the function call checking can be extracted
 	// - validate args and resolve generics
-	case *parser.StaticFunction:
+	case *parse.StaticFunction:
 		{
 			// Handle local functions
 			absolutePath := s.Target.String() + "::" + s.Function.Name
@@ -2324,7 +2324,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				}
 
 				// We also need argument mutability aligned with parameters
-				resolvedArgs := make([]parser.Argument, len(fnDef.Parameters))
+				resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
 				if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
 					paramMap := make(map[string]int)
 					for i, param := range fnDef.Parameters {
@@ -2332,7 +2332,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					}
 					for _, arg := range s.Function.Args {
 						if index, exists := paramMap[arg.Name]; exists {
-							resolvedArgs[index] = parser.Argument{
+							resolvedArgs[index] = parse.Argument{
 								Location: arg.Location,
 								Name:     "",
 								Value:    arg.Value,
@@ -2351,7 +2351,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 					var checkedArg Expression
 					switch resolvedExprs[i].(type) {
-					case *parser.ListLiteral, *parser.MapLiteral:
+					case *parse.ListLiteral, *parse.MapLiteral:
 						checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
 					default:
 						checkedArg = c.checkExpr(resolvedExprs[i])
@@ -2444,7 +2444,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 
 			// Align mutability information with parameters
-			resolvedArgs := make([]parser.Argument, len(fnDef.Parameters))
+			resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
 			if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
 				paramMap := make(map[string]int)
 				for i, param := range fnDef.Parameters {
@@ -2452,7 +2452,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				}
 				for _, arg := range s.Function.Args {
 					if index, exists := paramMap[arg.Name]; exists {
-						resolvedArgs[index] = parser.Argument{
+						resolvedArgs[index] = parse.Argument{
 							Location: arg.Location,
 							Name:     "",
 							Value:    arg.Value,
@@ -2471,7 +2471,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 				var checkedArg Expression
 				switch resolvedExprs[i].(type) {
-				case *parser.ListLiteral, *parser.MapLiteral:
+				case *parse.ListLiteral, *parse.MapLiteral:
 					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
 				default:
 					checkedArg = c.checkExpr(resolvedExprs[i])
@@ -2523,7 +2523,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				Call:   call,
 			}
 		}
-	case *parser.IfStatement:
+	case *parse.IfStatement:
 		{
 			cond := c.checkExpr(s.Condition)
 			if cond == nil {
@@ -2541,7 +2541,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			// does not recurse. reach into AST for each level since it's fixed
 			if s.Else != nil {
-				next := s.Else.(*parser.IfStatement)
+				next := s.Else.(*parse.IfStatement)
 				if next.Condition != nil {
 					cond := c.checkExpr(next.Condition)
 					if cond == nil {
@@ -2563,7 +2563,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						Body:      elseIfBody,
 					}
 
-					if next, ok := next.Else.(*parser.IfStatement); ok {
+					if next, ok := next.Else.(*parse.IfStatement); ok {
 						elseBody = c.checkBlock(next.Body, nil)
 					}
 				} else {
@@ -2583,11 +2583,11 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				Else:      elseBody,
 			}
 		}
-	case *parser.FunctionDeclaration:
+	case *parse.FunctionDeclaration:
 		return c.checkFunction(s, nil)
-	case *parser.ExternalFunction:
+	case *parse.ExternalFunction:
 		return c.checkExternalFunction(s)
-	case *parser.AnonymousFunction:
+	case *parse.AnonymousFunction:
 		{
 			// Process parameters
 			params := make([]Parameter, len(s.Parameters))
@@ -2644,7 +2644,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			return fn
 		}
-	case *parser.StaticFunctionDeclaration:
+	case *parse.StaticFunctionDeclaration:
 		fn := c.checkFunction(&s.FunctionDeclaration, nil)
 		if fn != nil {
 			fn.Name = s.Path.String()
@@ -2652,11 +2652,11 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 		}
 
 		return fn
-	case *parser.ListLiteral:
+	case *parse.ListLiteral:
 		return c.checkList(nil, s)
-	case *parser.MapLiteral:
+	case *parse.MapLiteral:
 		return c.checkMap(nil, s)
-	case *parser.MatchExpression:
+	case *parse.MatchExpression:
 		// Check the subject
 		subject := c.checkExpr(s.Subject)
 		if subject == nil {
@@ -2672,7 +2672,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			// Process the cases
 			for _, matchCase := range s.Cases {
 				// Check if it's the default case (_)
-				if id, ok := matchCase.Pattern.(*parser.Identifier); ok {
+				if id, ok := matchCase.Pattern.(*parse.Identifier); ok {
 					if id.Name == "_" {
 						// This is the None case
 						noneBody = c.checkBlock(matchCase.Body, nil)
@@ -2729,7 +2729,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			// Process the cases
 			for _, matchCase := range s.Cases {
-				if id, ok := matchCase.Pattern.(*parser.Identifier); ok {
+				if id, ok := matchCase.Pattern.(*parse.Identifier); ok {
 					if id.Name == "_" {
 						// This is a catch-all case
 						if hasCatchAll {
@@ -2744,7 +2744,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				}
 
 				// Handle enum variant case - the pattern should be a static property reference like Enum::Variant
-				if staticProp, ok := matchCase.Pattern.(*parser.StaticProperty); ok {
+				if staticProp, ok := matchCase.Pattern.(*parse.StaticProperty); ok {
 					// Resolve the pattern using existing expression resolution logic
 					patternExpr := c.checkExpr(staticProp)
 					if patternExpr == nil {
@@ -2838,7 +2838,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			// Process the cases
 			for _, matchCase := range s.Cases {
-				if id, ok := matchCase.Pattern.(*parser.Identifier); ok {
+				if id, ok := matchCase.Pattern.(*parse.Identifier); ok {
 					if id.Name == "_" {
 						// Catch-all cases aren't allowed for boolean matches
 						c.addError("Catch-all case is not allowed for boolean matches", matchCase.Pattern.GetLocation())
@@ -2847,7 +2847,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				}
 
 				// Handle boolean literal case
-				if boolLit, ok := matchCase.Pattern.(*parser.BoolLiteral); ok {
+				if boolLit, ok := matchCase.Pattern.(*parse.BoolLiteral); ok {
 					// Check for duplicates
 					if boolLit.Value && seenTrue {
 						c.addError("Duplicate case: 'true'", matchCase.Pattern.GetLocation())
@@ -2914,7 +2914,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			// Process the cases
 			for _, matchCase := range s.Cases {
 				switch p := matchCase.Pattern.(type) {
-				case *parser.Identifier:
+				case *parse.Identifier:
 					if p.Name != "_" {
 						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
 					} else {
@@ -2924,8 +2924,8 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 							catchAllBody = c.checkBlock(matchCase.Body, nil)
 						}
 					}
-				case *parser.FunctionCall:
-					varName := p.Args[0].Value.(*parser.Identifier).Name
+				case *parse.FunctionCall:
+					varName := p.Args[0].Value.(*parse.Identifier).Name
 					typeName := p.Name
 
 					// Check if the type exists in the union
@@ -3006,7 +3006,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			var errCase *Match
 			for _, node := range s.Cases {
 				switch p := node.Pattern.(type) {
-				case *parser.Identifier:
+				case *parse.Identifier:
 					{
 						switch p.Name {
 						case "ok":
@@ -3027,12 +3027,12 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 							c.addWarning("Ignored pattern", p.GetLocation())
 						}
 					}
-				case *parser.FunctionCall: // use FunctionCall node as aliasing variable
+				case *parse.FunctionCall: // use FunctionCall node as aliasing variable
 					{
-						varName := p.Args[0].Value.(*parser.Identifier).Name
+						varName := p.Args[0].Value.(*parse.Identifier).Name
 						switch p.Name {
 						case "ok":
-							varName := p.Args[0].Value.(*parser.Identifier).Name
+							varName := p.Args[0].Value.(*parse.Identifier).Name
 							okCase = &Match{
 								Pattern: &Identifier{Name: varName},
 								Body: c.checkBlock(node.Body, func() {
@@ -3077,9 +3077,9 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 			for _, matchCase := range s.Cases {
 				// Check if it's the default case (_)
-				if id, ok := matchCase.Pattern.(*parser.Identifier); ok && id.Name == "_" {
+				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
 					catchAll = c.checkBlock(matchCase.Body, nil)
-				} else if literal, ok := matchCase.Pattern.(*parser.NumLiteral); ok {
+				} else if literal, ok := matchCase.Pattern.(*parse.NumLiteral); ok {
 					// Convert string to int
 					value, err := strconv.Atoi(literal.Value)
 					if err != nil {
@@ -3088,9 +3088,9 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					}
 					caseBlock := c.checkBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
-				} else if unaryExpr, ok := matchCase.Pattern.(*parser.UnaryExpression); ok && unaryExpr.Operator == parser.Minus {
+				} else if unaryExpr, ok := matchCase.Pattern.(*parse.UnaryExpression); ok && unaryExpr.Operator == parse.Minus {
 					// Handle negative numbers like -1, -5, etc.
-					if literal, ok := unaryExpr.Operand.(*parser.NumLiteral); ok {
+					if literal, ok := unaryExpr.Operand.(*parse.NumLiteral); ok {
 						// Convert string to int and negate
 						value, err := strconv.Atoi(literal.Value)
 						if err != nil {
@@ -3104,7 +3104,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
 						return nil
 					}
-				} else if rangeExpr, ok := matchCase.Pattern.(*parser.RangeExpression); ok {
+				} else if rangeExpr, ok := matchCase.Pattern.(*parse.RangeExpression); ok {
 					// Handle range pattern like 1..10 or -10..5
 					startValue, startErr := c.extractIntFromPattern(rangeExpr.Start)
 					if startErr != nil {
@@ -3146,7 +3146,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 		c.addError(fmt.Sprintf("Cannot match on %s", subject.Type()), s.GetLocation())
 		return nil
-	case *parser.ConditionalMatchExpression:
+	case *parse.ConditionalMatchExpression:
 		var cases []ConditionalCase
 		var catchAll *Block
 		var referenceType Type
@@ -3196,13 +3196,13 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			Cases:    cases,
 			CatchAll: catchAll,
 		}
-	case *parser.StaticProperty:
+	case *parse.StaticProperty:
 		{
-			if id, ok := s.Target.(*parser.Identifier); ok {
+			if id, ok := s.Target.(*parse.Identifier); ok {
 				// Check if this is accessing a module
 				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
-					case *parser.StructInstance:
+					case *parse.StructInstance:
 						// Look up the struct symbol directly from the module
 						sym := mod.Get(prop.Name.Name)
 						if sym.IsZero() {
@@ -3233,7 +3233,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 							Property:   instance,
 							FieldTypes: fieldTypes,
 						}
-					case *parser.Identifier:
+					case *parse.Identifier:
 						sym := mod.Get(prop.Name)
 						if sym.IsZero() {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
@@ -3260,20 +3260,20 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 				var variant int8 = -1
 				for i := range enum.Variants {
-					if enum.Variants[i] == s.Property.(*parser.Identifier).Name {
+					if enum.Variants[i] == s.Property.(*parse.Identifier).Name {
 						variant = int8(i)
 						break
 					}
 				}
 				if variant == -1 {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property.(*parser.Identifier).Name), id.GetLocation())
+					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property.(*parse.Identifier).Name), id.GetLocation())
 					return nil
 				}
 
 				return &EnumVariant{enum: enum, Variant: variant}
 			}
 			// Handle nested static properties like http::Method::Get
-			if _, ok := s.Target.(*parser.StaticProperty); ok {
+			if _, ok := s.Target.(*parse.StaticProperty); ok {
 				// First resolve the nested static property (e.g., http::Method)
 				nestedSym := c.checkExpr(s.Target)
 				if nestedSym == nil {
@@ -3285,13 +3285,13 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					// Find the variant
 					var variant int8 = -1
 					for i := range enum.Variants {
-						if enum.Variants[i] == s.Property.(*parser.Identifier).Name {
+						if enum.Variants[i] == s.Property.(*parse.Identifier).Name {
 							variant = int8(i)
 							break
 						}
 					}
 					if variant == -1 {
-						c.addError(fmt.Sprintf("Undefined: %s::%s", enum.Name, s.Property.(*parser.Identifier).Name), s.Property.GetLocation())
+						c.addError(fmt.Sprintf("Undefined: %s::%s", enum.Name, s.Property.(*parse.Identifier).Name), s.Property.GetLocation())
 						return nil
 					}
 
@@ -3303,7 +3303,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 			}
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}
-	case *parser.StructInstance:
+	case *parse.StructInstance:
 		name := s.Name.Name
 		sym, ok := c.scope.get(name)
 		if !ok {
@@ -3319,7 +3319,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 		// Use helper function for validation
 		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation())
-	case *parser.Try:
+	case *parse.Try:
 		{
 			expr := c.checkExpr(s.Expression)
 			if expr == nil {
@@ -3522,13 +3522,13 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 
 // extractIntFromPattern extracts an integer value from a pattern that can be either
 // a NumLiteral or a UnaryExpression with minus operator applied to a NumLiteral
-func (c *Checker) extractIntFromPattern(expr parser.Expression) (int, error) {
+func (c *Checker) extractIntFromPattern(expr parse.Expression) (int, error) {
 	switch e := expr.(type) {
-	case *parser.NumLiteral:
+	case *parse.NumLiteral:
 		return strconv.Atoi(e.Value)
-	case *parser.UnaryExpression:
-		if e.Operator == parser.Minus {
-			if literal, ok := e.Operand.(*parser.NumLiteral); ok {
+	case *parse.UnaryExpression:
+		if e.Operator == parse.Minus {
+			if literal, ok := e.Operand.(*parse.NumLiteral); ok {
 				value, err := strconv.Atoi(literal.Value)
 				if err != nil {
 					return 0, err
@@ -3543,9 +3543,9 @@ func (c *Checker) extractIntFromPattern(expr parser.Expression) (int, error) {
 }
 
 // use this when we know what the expr's Type should be
-func (c *Checker) checkExprAs(expr parser.Expression, expectedType Type) Expression {
+func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
-	case *parser.ListLiteral:
+	case *parse.ListLiteral:
 		// Only use collection-specific inference when the expected type is a list.
 		if _, ok := expectedType.(*List); ok {
 			if result := c.checkList(expectedType, s); result != nil {
@@ -3553,7 +3553,7 @@ func (c *Checker) checkExprAs(expr parser.Expression, expectedType Type) Express
 			}
 			return nil
 		}
-	case *parser.MapLiteral:
+	case *parse.MapLiteral:
 		// Only use collection-specific inference when the expected type is a map.
 		if _, ok := expectedType.(*Map); ok {
 			if result := c.checkMap(expectedType, s); result != nil {
@@ -3561,16 +3561,16 @@ func (c *Checker) checkExprAs(expr parser.Expression, expectedType Type) Express
 			}
 			return nil
 		}
-	case *parser.StaticFunction:
+	case *parse.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)
 			if !expectResult &&
-				s.Target.(*parser.Identifier).Name != "Result" &&
+				s.Target.(*parse.Identifier).Name != "Result" &&
 				(s.Function.Name != "ok" && s.Function.Name != "err") {
 				return c.checkExpr(s)
 			}
 
-			moduleName := s.Target.(*parser.Identifier).Name
+			moduleName := s.Target.(*parse.Identifier).Name
 			mod := c.resolveModule(moduleName)
 			if mod == nil {
 				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
@@ -3655,7 +3655,7 @@ func (c *Checker) checkExprAs(expr parser.Expression, expectedType Type) Express
 	return checked
 }
 
-func (c *Checker) checkExternalFunction(def *parser.ExternalFunction) *ExternalFunctionDef {
+func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFunctionDef {
 	// Check for duplicate function names
 	if _, dup := c.scope.get(def.Name); dup {
 		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
@@ -3697,7 +3697,7 @@ func (c *Checker) checkExternalFunction(def *parser.ExternalFunction) *ExternalF
 	return extFn
 }
 
-func (c *Checker) checkFunction(def *parser.FunctionDeclaration, init func()) *FunctionDef {
+func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *FunctionDef {
 	if init != nil {
 		init()
 	}
@@ -3805,7 +3805,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 }
 
 // New generic resolution using the enhanced symbol table
-func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []parser.DeclaredType, _ parser.Location) (*FunctionDef, error) {
+func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []parse.DeclaredType, _ parse.Location) (*FunctionDef, error) {
 	if !fnDef.hasGenerics() {
 		return fnDef, nil
 	}
@@ -3960,10 +3960,10 @@ func extractGenericNames(t Type, names map[string]bool) {
 }
 
 // resolveArguments converts unified argument list to positional arguments
-func (c *Checker) resolveArguments(args []parser.Argument, params []Parameter) ([]parser.Expression, error) {
+func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, error) {
 	// Separate positional and named arguments
-	var positionalArgs []parser.Expression
-	var namedArgs []parser.Argument
+	var positionalArgs []parse.Expression
+	var namedArgs []parse.Argument
 
 	for _, arg := range args {
 		if arg.Name == "" {
@@ -3987,7 +3987,7 @@ func (c *Checker) resolveArguments(args []parser.Argument, params []Parameter) (
 	}
 
 	// Create result array
-	result := make([]parser.Expression, len(params))
+	result := make([]parse.Expression, len(params))
 	used := make([]bool, len(params))
 
 	// Fill in positional arguments first
