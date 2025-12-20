@@ -1308,11 +1308,19 @@ func (p Panic) Type() Type {
 	return &Any{name: "Unreachable"}
 }
 
+type TryKind uint8
+
+const (
+	TryResult TryKind = iota
+	TryMaybe
+)
+
 type TryOp struct {
 	expr       Expression
 	ok         Type
 	CatchBlock *Block
 	CatchVar   string
+	Kind       TryKind // Pre-computed by checker: TryResult or TryMaybe
 }
 
 func (t TryOp) Expr() Expression {

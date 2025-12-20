@@ -3390,8 +3390,9 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						ok:         _type.val, // Returns unwrapped value for continued execution
 						CatchBlock: block,
 						CatchVar:   s.CatchVar.Name,
+						Kind:       TryResult,
 					}
-				} else {
+					} else {
 					// No catch clause: function must return a compatible Result type
 					fnReturnResult, ok := c.scope.getReturnType().(*Result)
 					if !ok {
@@ -3400,6 +3401,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						return &TryOp{
 							expr: expr,
 							ok:   _type.val,
+							Kind: TryResult,
 						}
 					}
 
@@ -3410,6 +3412,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						return &TryOp{
 							expr: expr,
 							ok:   _type.val,
+							Kind: TryResult,
 						}
 					}
 
@@ -3418,8 +3421,9 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					return &TryOp{
 						expr: expr,
 						ok:   _type.val,
+						Kind: TryResult,
 					}
-				}
+					}
 			case *Maybe:
 				// Handle catch clause if present
 				if s.CatchVar != nil && s.CatchBlock != nil {
@@ -3473,8 +3477,9 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						ok:         _type.of, // Returns unwrapped value for continued execution
 						CatchBlock: block,
 						CatchVar:   "", // No variable binding for Maybe catch
+						Kind:       TryMaybe,
 					}
-				} else {
+					} else {
 					// No catch clause: function must return a compatible Maybe type
 					fnReturnMaybe, ok := c.scope.getReturnType().(*Maybe)
 					if !ok {
@@ -3483,6 +3488,7 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 						return &TryOp{
 							expr: expr,
 							ok:   _type.of,
+							Kind: TryMaybe,
 						}
 					}
 
@@ -3496,15 +3502,17 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 					return &TryOp{
 						expr: expr,
 						ok:   _type.of,
+						Kind: TryMaybe,
 					}
-				}
-			default:
-				c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
-				// Return a try op with the expr type to avoid cascading errors
-				return &TryOp{
+					}
+					default:
+					c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
+					// Return a try op with the expr type to avoid cascading errors
+					return &TryOp{
 					expr: expr,
 					ok:   expr.Type(),
-				}
+					Kind: TryResult, // Default to Result, though this is an error path
+					}
 			}
 		}
 	default:

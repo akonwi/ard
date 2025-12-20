@@ -623,7 +623,10 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.TryOp:
 		{
 			subj := vm.eval(scp, e.Expr())
-			if subj.IsResult() {
+
+			// Dispatch based on pre-computed kind (determined by checker)
+			switch e.Kind {
+			case checker.TryResult:
 				unwrapped := subj.UnwrapResult()
 				if subj.IsErr() {
 					// Error case: early return from function
@@ -632,8 +635,6 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						result, broken := vm.evalBlock(scp, e.CatchBlock, func(sc *scope) {
 							sc.add(e.CatchVar, unwrapped)
 						})
-
-						// Early return: the catch block's result becomes the function's return value
 						scp.stop()
 						if broken {
 							return result
@@ -641,22 +642,19 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						return result
 					} else {
 						// No catch block: propagate error by early returning
-						// Create a new Result with the same error for the function's return type
 						scp.stop()
 						return subj
 					}
 				}
-
-				// Success case: always continue execution with unwrapped value
+				// Success case: continue execution with unwrapped value
 				return unwrapped
-			} else if checker.IsMaybe(subj.Type()) {
+
+			case checker.TryMaybe:
 				if subj.IsNone() {
 					// None case: early return from function
 					if e.CatchBlock != nil {
 						// Execute catch block and early return its result
 						result, broken := vm.evalBlock(scp, e.CatchBlock, nil)
-
-						// Early return: the catch block's result becomes the function's return value
 						scp.stop()
 						if broken {
 							return result
@@ -668,13 +666,12 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 						return runtime.MakeNone(e.Type())
 					}
 				}
-
 				// Some case: unwrap and continue execution
 				return runtime.Make(subj.Raw(), e.Type())
-			}
 
-			// There's a real problem if this occurs. it means an object is incorrect and there's a bug somewhere in the interpreter
-			panic(fmt.Errorf("Cannot use try keyword on %s", subj.Type()))
+			default:
+				panic(fmt.Errorf("Unknown try kind: %d", e.Kind))
+			}
 		}
 	case *checker.ModuleSymbol:
 		return vm.hq.lookup(e.Module, e.Symbol)
