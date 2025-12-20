@@ -76,6 +76,7 @@ func TestStructs(t *testing.T) {
 						Expr: &checker.InstanceProperty{
 							Subject:  &checker.Variable{},
 							Property: "name",
+							Kind:     checker.StructSubject,
 						},
 					},
 				},

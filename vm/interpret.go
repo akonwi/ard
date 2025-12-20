@@ -373,15 +373,9 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.InstanceProperty:
 		{
 			subj := vm.eval(scp, e.Subject)
-			if subj.IsStruct() {
-				return subj.Struct_Get(e.Property)
-			}
 
-			if subj.Type() == checker.Str {
-				return vm.evalStrProperty(subj, e.Property)
-			}
-
-			panic(fmt.Errorf("Unimplemented instance property: %s.%s", subj.Type(), e.Property))
+			// InstanceProperty only supports struct field access (pre-computed by checker)
+			return subj.Struct_Get(e.Property)
 		}
 	case *checker.InstanceMethod:
 		{
@@ -763,10 +757,6 @@ func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope))
 	}
 
 	return res, false
-}
-
-func (vm *VM) evalStrProperty(_ *runtime.Object, _ string) *runtime.Object {
-	return runtime.Void()
 }
 
 // this method is for evaluating a checker.InstanceMethod. Even though there are type specific Method instruction nodes,

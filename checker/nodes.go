@@ -156,10 +156,17 @@ func (v Variable) Type() Type {
 	return v.sym.Type
 }
 
+type SubjectKind uint8
+
+const (
+	StructSubject SubjectKind = iota
+)
+
 type InstanceProperty struct {
 	Subject  Expression
 	Property string
 	_type    Type
+	Kind     SubjectKind // Pre-computed by checker based on subject type
 }
 
 func (i *InstanceProperty) Type() Type {

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/parser"
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parser"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -356,37 +356,6 @@ func TestVariables(t *testing.T) {
 
 func TestInstanceProperties(t *testing.T) {
 	run(t, []test{
-		{
-			name: "valid instance members",
-			input: strings.Join([]string{
-				`"foobar".size`,
-				`let name = "Alice"`,
-				`name.size`,
-			}, "\n"),
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Expr: &checker.InstanceProperty{
-							Subject:  &checker.StrLiteral{"foobar"},
-							Property: "size",
-						},
-					},
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: false,
-							Name:    "name",
-							Value:   &checker.StrLiteral{"Alice"},
-						},
-					},
-					{
-						Expr: &checker.InstanceProperty{
-							Subject:  &checker.Variable{},
-							Property: "size",
-						},
-					},
-				},
-			},
-		},
 		{
 			name: "Undefined instance members are errors",
 			input: strings.Join([]string{

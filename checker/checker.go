@@ -1904,11 +1904,23 @@ func (c *Checker) checkExpr(expr parser.Expression) Expression {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
 				return nil
 			}
-			return &InstanceProperty{
+
+			prop := &InstanceProperty{
 				Subject:  subj,
 				Property: s.Property.Name,
 				_type:    propType,
 			}
+
+			// Pre-compute which kind of property this is based on subject type
+			switch subj.Type().(type) {
+			case *StructDef:
+				prop.Kind = StructSubject
+			default:
+				// unreachable
+				c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
+			}
+
+			return prop
 		}
 	case *parser.InstanceMethod:
 		{
