@@ -1,5 +1,4 @@
 # TODO
-- [ ] struct instances as struct field values
 - [ ] infer types in anonymous functions
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
