@@ -258,3 +258,23 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 		},
 	})
 }
+
+func TestNestedStructInstantiation(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:     "Minimal nested struct instantiation",
+			input:    `Line{ start: Point { x: 10 } }`,
+			wantErrs: []string{},
+		},
+		{
+			name:     "Multiple nested struct instantiations",
+			input:    `Line{ start: Point { x: 10, y: 20 }, end: Point { x: 30, y: 40 } }`,
+			wantErrs: []string{},
+		},
+		{
+			name:     "Deeply nested structs",
+			input:    `Box{ item: Container { value: Point { x: 1 } } }`,
+			wantErrs: []string{},
+		},
+	})
+}

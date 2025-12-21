@@ -2032,57 +2032,18 @@ func (p *parser) structInstance() (Expression, error) {
 			p.index = index // Reset to original position
 			return nil, nil
 		}
-		p.advance() // consume the '{'
-		instance := &StructInstance{
-			Name:       Identifier{Name: nameToken.text},
-			Properties: []StructValue{},
+
+		name := &Identifier{
+			Name: nameToken.text,
 			Location: Location{
 				Start: Point{Row: nameToken.line, Col: nameToken.column},
+				End:   Point{Row: nameToken.line, Col: nameToken.column + len(nameToken.text)},
 			},
 		}
-
-		p.match(new_line)
-
-		for !p.match(right_brace) {
-			// Parse and collect comments between properties
-			if c := p.parseInlineComment(); c != nil {
-				instance.Comments = append(instance.Comments, *c)
-				p.match(new_line)
-				continue
-			}
-
-			// Skip standalone newlines
-			if p.match(new_line) {
-				continue
-			}
-
-			propToken := p.consumeVariableName("Expected name")
-
-			if !p.check(colon) {
-				p.addError(p.peek(), "Expected ':' after field name - assuming it")
-				// Continue parsing without consuming colon - assume it was meant to be there
-			} else {
-				p.advance() // consume the ':'
-			}
-
-			val, err := p.or()
-			if err != nil {
-				return nil, err
-			}
-			instance.Properties = append(instance.Properties, StructValue{
-				Name:  Identifier{Name: propToken.text},
-				Value: val,
-			})
-
-			// Check for inline comment after property
-			if c := p.parseInlineComment(); c != nil {
-				instance.Comments = append(instance.Comments, *c)
-			}
-
-			p.match(comma)
-			p.match(new_line)
+		instance, err := p.parseStructFields(name)
+		if err != nil {
+			return nil, err
 		}
-		instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 
 		if static != nil {
 			static.Property = instance
@@ -2096,6 +2057,73 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	return p.iterRange()
+}
+
+// parseStructInstantiationFromIdentifier parses a struct instantiation given an identifier.
+// This is called from call() when we encounter Name { ... } in expressions.
+func (p *parser) parseStructInstantiationFromIdentifier(name *Identifier) (Expression, error) {
+	if !p.check(left_brace) {
+		return name, nil
+	}
+	return p.parseStructFields(name)
+}
+
+// parseStructFields parses the field definitions within a struct instantiation.
+// Assumes the opening { is about to be consumed. The struct name must be provided.
+func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
+	p.advance() // consume the '{'
+	instance := &StructInstance{
+		Name:       *name,
+		Properties: []StructValue{},
+		Location: Location{
+			Start: name.GetLocation().Start,
+		},
+	}
+
+	p.match(new_line)
+
+	for !p.match(right_brace) {
+		// Parse and collect comments between properties
+		if c := p.parseInlineComment(); c != nil {
+			instance.Comments = append(instance.Comments, *c)
+			p.match(new_line)
+			continue
+		}
+
+		// Skip standalone newlines
+		if p.match(new_line) {
+			continue
+		}
+
+		propToken := p.consumeVariableName("Expected name")
+
+		if !p.check(colon) {
+			p.addError(p.peek(), "Expected ':' after field name - assuming it")
+			// Continue parsing without consuming colon - assume it was meant to be there
+		} else {
+			p.advance() // consume the ':'
+		}
+
+		val, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		instance.Properties = append(instance.Properties, StructValue{
+			Name:  Identifier{Name: propToken.text},
+			Value: val,
+		})
+
+		// Check for inline comment after property
+		if c := p.parseInlineComment(); c != nil {
+			instance.Comments = append(instance.Comments, *c)
+		}
+
+		p.match(comma)
+		p.match(new_line)
+	}
+	instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+
+	return instance, nil
 }
 
 func (p *parser) iterRange() (Expression, error) {
@@ -2567,6 +2595,29 @@ func (p *parser) call() (Expression, error) {
 
 		// Rewind if this wasn't a type argument
 		p.index = savedIndex - 1 // go back to before the '<'
+	}
+
+	// Check for struct instantiation syntax: Name { field: value, ... }
+	// Only parse as struct if we see { followed by optional newline, then identifier, then colon
+	if idExpr, isIdentifier := expr.(*Identifier); isIdentifier && p.check(left_brace) {
+		// Look ahead to distinguish from match/if blocks: struct has { identifier : pattern
+		savedIndex := p.index
+		p.advance() // consume {
+		p.match(new_line)
+		isStructInstance := p.check(identifier) && p.peek().text != "_"
+		// Additional check: if it's an identifier followed by colon, it's definitely a struct field
+		if isStructInstance && p.index+1 < len(p.tokens) {
+			nextAfterID := p.tokens[p.index+1]
+			if nextAfterID.kind != colon {
+				// Not a struct field assignment, so not a struct instantiation
+				isStructInstance = false
+			}
+		}
+		p.index = savedIndex // rewind
+		
+		if isStructInstance {
+			return p.parseStructInstantiationFromIdentifier(idExpr)
+		}
 	}
 
 	if p.match(left_paren) {

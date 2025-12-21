@@ -34,6 +34,24 @@ func TestStructs(t *testing.T) {
 				p.x`,
 			want: 30,
 		},
+		{
+			name: "Nesting structs",
+			input: `
+				struct Point {
+					x: Int,
+					y: Int,
+				}
+				struct Line {
+					start: Point,
+					end: Point,
+				}
+				let line = Line{
+					start: Point { x: 10, y: 20 },
+					end: Point { x: 10, y: 0 },
+				}
+				line.start.x + line.end.y`,
+			want: 10,
+		},
 	})
 }
 
