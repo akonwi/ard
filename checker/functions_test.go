@@ -528,3 +528,45 @@ func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 		},
 	})
 }
+
+func TestInferringAnonymousFunctionTypes(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Anonymous function argument count mismatch",
+			input: strings.Join(
+				[]string{
+					`fn process(callback: fn(Int, Str) Bool) {}`,
+					`process(fn(x) { true })`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
+			},
+		},
+		{
+			name: "Anonymous function return type mismatch",
+			input: strings.Join(
+				[]string{
+					`fn process(callback: fn(Int) Str) {}`,
+					`process(fn(x) { 42 })`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+			},
+		},
+		{
+			name: "Anonymous function inferred parameter types work correctly",
+			input: strings.Join(
+				[]string{
+					`fn process(callback: fn(Str) Bool) {}`,
+					`process(fn(x) { x.size() > 0 })`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}

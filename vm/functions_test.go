@@ -140,3 +140,30 @@ func TestFunctions(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestInferringAnonymousFunctionTypes(t *testing.T) {
+	tests := []test{
+		{
+			name: "callback with inferred Str parameter",
+			input: `
+			fn process(f: fn(Str) Bool) Bool {
+			  f("hello")
+			}
+
+			process(fn(x) { x.size() > 0 })`,
+			want: true,
+		},
+		{
+			name: "callback with inferred Bool return type",
+			input: `
+			fn check(f: fn(Str) Bool) Bool {
+			  f("test")
+			}
+
+			check(fn(s) { true })`,
+			want: true,
+		},
+	}
+
+	runTests(t, tests)
+}

@@ -1,5 +1,4 @@
 # TODO
-- [ ] infer types in anonymous functions
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
     - can't be used in place of other expressions - m

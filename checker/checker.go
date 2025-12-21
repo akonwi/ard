@@ -1834,6 +1834,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				switch resolvedExprs[i].(type) {
 				case *parse.ListLiteral, *parse.MapLiteral:
 					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+				case *parse.AnonymousFunction:
+					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
 				default:
 					checkedArg = c.checkExpr(resolvedExprs[i])
 				}
@@ -2589,59 +2591,37 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		return c.checkExternalFunction(s)
 	case *parse.AnonymousFunction:
 		{
-			// Process parameters
-			params := make([]Parameter, len(s.Parameters))
-			for i, param := range s.Parameters {
-				var paramType Type = Void
-				if param.Type != nil {
-					paramType = c.resolveType(param.Type)
-				}
+			// Resolve parameters and return type (no type context for inference)
+			params := c.resolveParametersWithContext(s.Parameters, nil)
+			returnType := c.resolveReturnTypeWithContext(s.ReturnType, nil)
 
-				params[i] = Parameter{
-					Name:    param.Name,
-					Type:    paramType,
-					Mutable: param.Mutable,
-				}
-			}
-
-			// Determine return type
-			var returnType Type = Void
-			if s.ReturnType != nil {
-				returnType = c.resolveType(s.ReturnType)
-			}
-
-			// Create function definition early (before checking body)
-			// Generate a unique name for the anonymous function
+			// Create function definition
 			uniqueName := fmt.Sprintf("anon_func_%p", s)
-
 			fn := &FunctionDef{
 				Name:       uniqueName,
 				Parameters: params,
 				ReturnType: returnType,
-				Body:       nil, // Will be set after checking
+				Body:       nil,
 			}
 
-			// Add function to scope BEFORE checking body to support generic resolution
-			c.scope.add(uniqueName, fn, false)
-
-			// Check function body with a setup function that adds parameters to scope
+			// Check body (anonymous functions use equal, not areCompatible)
 			body := c.checkBlock(s.Body, func() {
-				// set the expected return type to the scope
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
 			})
 
-			// Check that the function's return type matches its body's type
+			// Add function to scope after body is checked (for generic resolution support)
+			c.scope.add(uniqueName, fn, false)
+
+			// Validate return type using equal (stricter than areCompatible)
 			if returnType != Void && !returnType.equal(body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
 
-			// Set the body now that it's been checked
 			fn.Body = body
-
 			return fn
 		}
 	case *parse.StaticFunctionDeclaration:
@@ -3574,6 +3554,55 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			}
 			return nil
 		}
+	case *parse.AnonymousFunction:
+		{
+			// Try to infer types from the expected type
+			expectedFnType, ok := expectedType.(*FunctionDef)
+			if !ok || expectedFnType.Name != "<function>" {
+				// Not a function type (or not a type signature), check normally
+				return c.checkExpr(s)
+			}
+
+			// Check parameter count
+			if len(s.Parameters) != len(expectedFnType.Parameters) {
+				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
+					len(expectedFnType.Parameters), len(s.Parameters)), s.GetLocation())
+				return nil
+			}
+
+			// Resolve parameters with type inference from expected function
+			params := c.resolveParametersWithContext(s.Parameters, expectedFnType)
+			returnType := c.resolveReturnTypeWithContext(s.ReturnType, expectedFnType)
+
+			// Create function definition
+			uniqueName := fmt.Sprintf("anon_func_%p", s)
+			fn := &FunctionDef{
+				Name:       uniqueName,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       nil,
+			}
+
+			// Check body
+			body := c.checkBlock(s.Body, func() {
+				c.scope.expectReturn(returnType)
+				for _, param := range params {
+					c.scope.add(param.Name, param.Type, param.Mutable)
+				}
+			})
+
+			// Add function to scope after checking body
+			c.scope.add(uniqueName, fn, false)
+
+			// Validate return type
+			if returnType != Void && !returnType.equal(body.Type()) {
+				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				return nil
+			}
+
+			fn.Body = body
+			return fn
+		}
 	case *parse.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)
@@ -3710,68 +3739,110 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	return extFn
 }
 
-func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *FunctionDef {
-	if init != nil {
-		init()
-	}
-
-	// Process parameters
-	params := make([]Parameter, len(def.Parameters))
-	for i, param := range def.Parameters {
+// resolveParametersWithContext resolves parameter types, optionally inferring from an expected function type
+func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {
+	result := make([]Parameter, len(params))
+	for i, param := range params {
 		var paramType Type = Void
-		if param.Type != nil {
-			paramType = c.resolveType(param.Type)
-			if paramType == nil {
-				panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
-			}
-		}
 
-		params[i] = Parameter{
+		if param.Type != nil {
+			// Explicit type provided
+			paramType = c.resolveType(param.Type)
+		} else if expectedFnType != nil && i < len(expectedFnType.Parameters) {
+			// Infer from expected function type
+			paramType = expectedFnType.Parameters[i].Type
+		}
+		// Otherwise defaults to Void
+
+		result[i] = Parameter{
 			Name:    param.Name,
 			Type:    paramType,
 			Mutable: param.Mutable,
 		}
 	}
+	return result
+}
 
-	// Determine return type
-	var returnType Type = Void
-	if def.ReturnType != nil {
-		returnType = c.resolveType(def.ReturnType)
+// resolveReturnTypeWithContext resolves return type, optionally inferring from an expected function type
+func (c *Checker) resolveReturnTypeWithContext(returnTypeNode parse.DeclaredType, expectedFnType *FunctionDef) Type {
+	if returnTypeNode != nil {
+		// Explicit type provided
+		return c.resolveType(returnTypeNode)
+	} else if expectedFnType != nil {
+		// Infer from expected function type
+		return expectedFnType.ReturnType
 	}
+	// Default to Void
+	return Void
+}
 
-	// Create function definition early (before checking body)
-	fn := &FunctionDef{
-		Name:       def.Name,
-		Parameters: params,
-		ReturnType: returnType,
-		Body:       nil, // Will be set after checking
-		Private:    def.Private,
-	}
-
-	// Add function to scope BEFORE checking body to support recursion
-	// But don't add methods (when init != nil) to outer scope - they should only be accessible via receiver
-	if init == nil {
-		c.scope.add(def.Name, fn, false)
-	}
+// checkFunctionBody validates the function body and returns the checked block
+func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement, params []Parameter, returnType Type, location parse.Location) *Block {
+	// Add function to scope BEFORE checking body
+	c.scope.add(fn.Name, fn, false)
 
 	// Check function body
-	body := c.checkBlock(def.Body, func() {
-		// set the expected return type to the scope
+	body := c.checkBlock(bodyStmts, func() {
+		// Set the expected return type to the scope
 		c.scope.expectReturn(returnType)
-		// add parameters to scope
+		// Add parameters to scope
 		for _, param := range params {
 			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
 	})
 
 	// Check that the function's return type matches its body's type
+	if returnType != Void && !returnType.equal(body.Type()) {
+		c.addError(typeMismatch(returnType, body.Type()), location)
+	}
+
+	return body
+}
+
+func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *FunctionDef {
+	if init != nil {
+		init()
+	}
+
+	// Resolve parameters and return type
+	params := c.resolveParametersWithContext(def.Parameters, nil)
+	returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+
+	// Validate parameters resolved correctly (for named functions, types must be explicit)
+	for i, param := range def.Parameters {
+		if param.Type != nil && params[i].Type == nil {
+			panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+		}
+	}
+
+	// Create function definition
+	fn := &FunctionDef{
+		Name:       def.Name,
+		Parameters: params,
+		ReturnType: returnType,
+		Body:       nil,
+		Private:    def.Private,
+	}
+
+	// Add function to scope before checking body (for recursion support)
+	// For methods (when init != nil), only add within the body scope
+	if init == nil {
+		c.scope.add(def.Name, fn, false)
+	}
+
+	body := c.checkBlock(def.Body, func() {
+		c.scope.expectReturn(returnType)
+		for _, param := range params {
+			c.scope.add(param.Name, param.Type, param.Mutable)
+		}
+	})
+
+	// Validate return type - named functions use areCompatible, anonymous use equal
 	if returnType != Void && !areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 	}
 
-	// Set the body now that it's been checked
 	fn.Body = body
-
 	return fn
 }
 
