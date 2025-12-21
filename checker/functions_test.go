@@ -479,3 +479,52 @@ func TestUsingValidTypesForUnionArguments(t *testing.T) {
 		},
 	})
 }
+
+func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Defining and calling Type::function should recognize the function",
+			input: `
+				struct Fixture {
+					id: Int,
+					name: Str,
+				}
+
+				fn Fixture::from_entry(data: Str) Fixture {
+					Fixture{id: 1, name: data}
+				}
+
+				let f = Fixture::from_entry("Test")
+				f.name
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Type::function called in decode path similar to maestro fixtures.ard",
+			input: `
+				use ard/decode
+
+				struct Fixture {
+					id: Int,
+					name: Str,
+				}
+
+				fn Fixture::from_api_entry(data: Dynamic) Fixture![decode::Error] {
+					let id = try decode::run(data, decode::field("id", decode::int))
+					let name = try decode::run(data, decode::field("name", decode::string))
+					Result::ok(Fixture{id: id, name: name})
+				}
+
+				fn find_fixtures(body: Dynamic) [Fixture]!Str {
+					let fixtures = try decode::run(body, decode::field("response", decode::list(Fixture::from_api_entry))) -> errs {
+						Result::err("Error decoding fixtures")
+					}
+					Result::ok(fixtures)
+				}
+
+				Fixture{id: 1, name: "Test"}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}

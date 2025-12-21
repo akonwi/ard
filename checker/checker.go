@@ -3246,12 +3246,25 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 				}
 
-				// Handle local enum variants (not from modules)
+				// Handle local enum variants or static functions (not from modules)
 				sym, ok := c.scope.get(id.Name)
 				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
 					return nil
 				}
+
+				// Check if it's accessing a static function (e.g., Fixture::from_api_entry)
+				if propIdent, ok := s.Property.(*parse.Identifier); ok {
+					staticFnName := id.Name + "::" + propIdent.Name
+					if fnSym, ok := c.scope.get(staticFnName); ok {
+						// Found a static function, return it as a function variable
+						if fnDef, ok := fnSym.Type.(*FunctionDef); ok {
+							return &Variable{Symbol{Name: staticFnName, Type: fnDef}}
+						}
+					}
+				}
+
+				// Check if it's an enum variant
 				enum, ok := sym.Type.(*Enum)
 				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property), id.GetLocation())

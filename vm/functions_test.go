@@ -120,6 +120,22 @@ func TestFunctions(t *testing.T) {
 			h.process(42)`,
 			want: "handler: string: hello",
 		},
+		{
+			name: "calling Type::function static method defined with double colon syntax",
+			input: `
+			struct Fixture {
+			  id: Int,
+			  name: Str,
+			}
+
+			fn Fixture::from_entry(data: Str) Fixture {
+			  Fixture{id: 1, name: data}
+			}
+
+			let f = Fixture::from_entry("Test")
+			f.name`,
+			want: "Test",
+		},
 	}
 
 	runTests(t, tests)
