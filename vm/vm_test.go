@@ -910,3 +910,196 @@ func TestTryOnMaybeDifferentTypes(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestNonLinearDeclarations(t *testing.T) {
+	// Test that types declared later in the file can be referenced by earlier declarations
+	tests := []test{
+		{
+			name: "struct field references later-declared struct",
+			input: `
+				struct Person {
+					name: Str,
+					company: Company
+				}
+
+				struct Company {
+					name: Str
+				}
+
+				let company = Company { name: "Acme" }
+				let person = Person { name: "Alice", company: company }
+				person.name
+			`,
+			want: "Alice",
+		},
+		{
+			name: "function return type references later-declared struct",
+			input: `
+				fn get_company() Company {
+					Company { name: "TechCorp" }
+				}
+
+				struct Company {
+					name: Str
+				}
+
+				let c = get_company()
+				c.name
+			`,
+			want: "TechCorp",
+		},
+		{
+			name: "function parameter type references later-declared struct",
+			input: `
+				fn extract_name(c: Company) Str {
+					c.name
+				}
+
+				struct Company {
+					name: Str
+				}
+
+				let company = Company { name: "DevShop" }
+				extract_name(company)
+			`,
+			want: "DevShop",
+		},
+		{
+			name: "struct field references list of later-declared struct",
+			input: `
+				struct Config {
+					items: [Item]
+				}
+
+				struct Item {
+					id: Int
+				}
+
+				let item1 = Item { id: 10 }
+				let item2 = Item { id: 20 }
+				let config = Config { items: [item1, item2] }
+				config.items.at(0).id
+			`,
+			want: 10,
+		},
+		{
+			name: "multiple forward references",
+			input: `
+				struct A {
+					b: B,
+					c: C
+				}
+
+				struct B {
+					name: Str
+				}
+
+				struct C {
+					id: Int
+				}
+
+				let b = B { name: "B" }
+				let c = C { id: 42 }
+				let a = A { b: b, c: c }
+				a.c.id
+			`,
+			want: 42,
+		},
+	}
+	runTests(t, tests)
+}
+
+func TestNonLinearFunctionCalls(t *testing.T) {
+	// Test that functions declared later in the file can be called by earlier declarations
+	tests := []test{
+		{
+			name: "early function calls later-declared function",
+			input: `
+				fn caller() Int {
+					helper()
+				}
+
+				fn helper() Int {
+					42
+				}
+
+				caller()
+			`,
+			want: 42,
+		},
+		{
+			name: "early function calls later-declared function with parameter",
+			input: `
+				fn add_one(x: Int) Int {
+					add_two(x)
+				}
+
+				fn add_two(x: Int) Int {
+					x + 2
+				}
+
+				add_one(5)
+			`,
+			want: 7,
+		},
+		{
+			name: "multiple early calls to later functions",
+			input: `
+				fn main() Int {
+					first() + second()
+				}
+
+				fn first() Int {
+					10
+				}
+
+				fn second() Int {
+					20
+				}
+
+				main()
+			`,
+			want: 30,
+		},
+		{
+			name: "chain of early calls to later functions",
+			input: `
+				fn a() Int {
+					b()
+				}
+
+				fn b() Int {
+					c()
+				}
+
+				fn c() Int {
+					100
+				}
+
+				a()
+			`,
+			want: 100,
+		},
+		{
+			name: "early function with struct parameter calls later function",
+			input: `
+				fn process(p: Person) Str {
+					format_name(p)
+				}
+
+				fn format_name(p: Person) Str {
+					p.name
+				}
+
+				struct Person {
+					name: Str
+				}
+
+				let person = Person { name: "Alice" }
+				process(person)
+			`,
+			want: "Alice",
+		},
+	}
+	runTests(t, tests)
+}

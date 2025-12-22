@@ -187,19 +187,179 @@ func (c *Checker) Check() {
 		}
 	}
 
-	for i := range c.input.Statements {
-		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
-			c.program.Statements = append(c.program.Statements, *stmt)
-		}
-		if c.halted {
-			break
-		}
-	}
+	// Pass 1: Register all type names and function signatures (stubs) to enable forward references
+	c.registerTypeNames()
+
+	// Pass 2: Process all type definitions (structs, enums, traits) with forward refs now available
+	c.processTypeDefinitions()
+
+	// Pass 3: Resolve all function signatures (parameters and return types)
+	// This must happen before checking function bodies so that all functions
+	// are fully registered with their proper signatures
+	c.resolveFunctionSignatures()
+
+	// Pass 4: Process all remaining statements (functions, expressions, impl blocks, etc.)
+	c.processStatements()
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
 		delete(c.program.Imports, alias)
 		c.program.Imports[mod.Path()] = mod
+	}
+}
+
+// registerTypeNames creates stub symbols for all type definitions and functions.
+// This allows forward references in type and function resolution.
+func (c *Checker) registerTypeNames() {
+	for _, stmt := range c.input.Statements {
+		switch s := stmt.(type) {
+		case *parse.StructDefinition:
+			def := &StructDef{
+				Name:    s.Name.Name,
+				Fields:  make(map[string]Type),
+				Methods: make(map[string]*FunctionDef),
+				Private: s.Private,
+			}
+			c.scope.add(def.name(), def, false)
+
+		case *parse.EnumDefinition:
+			enum := &Enum{
+				Name:     s.Name,
+				Variants: s.Variants,
+				Methods:  make(map[string]*FunctionDef),
+				Private:  s.Private,
+			}
+			c.scope.add(enum.name(), enum, false)
+
+		case *parse.TraitDefinition:
+			trait := &Trait{
+				Name:    s.Name.Name,
+				methods: []FunctionDef{},
+				private: s.Private,
+			}
+			c.scope.add(trait.name(), trait, false)
+
+		case *parse.FunctionDeclaration:
+			// Register function stub to allow forward references
+			stub := &FunctionDef{
+				Name:       s.Name,
+				Parameters: []Parameter{},
+				ReturnType: Void,
+				Private:    s.Private,
+			}
+			c.scope.add(s.Name, stub, false)
+
+		case *parse.ExternalFunction:
+			// Register external function stub
+			stub := &FunctionDef{
+				Name:       s.Name,
+				Parameters: []Parameter{},
+				ReturnType: Void,
+				Private:    s.Private,
+			}
+			c.scope.add(s.Name, stub, false)
+		}
+	}
+}
+
+// processTypeDefinitions processes all struct, enum, trait definitions, and type declarations.
+// This ensures all type names and aliases are available for forward references.
+func (c *Checker) processTypeDefinitions() {
+	for i := range c.input.Statements {
+		stmt := &c.input.Statements[i]
+		switch (*stmt).(type) {
+		case *parse.StructDefinition, *parse.EnumDefinition, *parse.TraitDefinition, *parse.TypeDeclaration:
+			if s := c.checkStmt(stmt); s != nil {
+				c.program.Statements = append(c.program.Statements, *s)
+			}
+			if c.halted {
+				return
+			}
+		default:
+			// Skip non-type definitions
+		}
+	}
+}
+
+// resolveFunctionSignatures resolves the signatures (parameters and return types)
+// of all functions. This must happen before checking function bodies so that
+// forward references to functions with proper signatures are available.
+func (c *Checker) resolveFunctionSignatures() {
+	for i := range c.input.Statements {
+		stmt := &c.input.Statements[i]
+		switch s := (*stmt).(type) {
+		case *parse.FunctionDeclaration:
+			// Resolve parameters and return type
+			params := c.resolveParametersWithContext(s.Parameters, nil)
+			returnType := c.resolveReturnTypeWithContext(s.ReturnType, nil)
+
+			// Update the stub in scope with the resolved signature
+			if sym, ok := c.scope.get(s.Name); ok && sym.Type != nil {
+				if stubFn, ok := sym.Type.(*FunctionDef); ok {
+					stubFn.Parameters = params
+					stubFn.ReturnType = returnType
+				}
+			} else {
+				// Fallback: stub should exist from Pass 1, but create one if needed
+				stub := &FunctionDef{
+					Name:       s.Name,
+					Parameters: params,
+					ReturnType: returnType,
+					Private:    s.Private,
+				}
+				c.scope.add(s.Name, stub, false)
+			}
+
+		case *parse.ExternalFunction:
+			// Resolve parameters and return type for external functions
+			params := make([]Parameter, len(s.Parameters))
+			for i, param := range s.Parameters {
+				paramType := c.resolveType(param.Type)
+				params[i] = Parameter{
+					Name:    param.Name,
+					Type:    paramType,
+					Mutable: param.Mutable,
+				}
+			}
+			returnType := c.resolveType(s.ReturnType)
+
+			// Update the stub in scope with the resolved signature
+			if sym, ok := c.scope.get(s.Name); ok && sym.Type != nil {
+				if stubFn, ok := sym.Type.(*FunctionDef); ok {
+					stubFn.Parameters = params
+					stubFn.ReturnType = returnType
+				}
+			} else {
+				// Fallback: stub should exist from Pass 1, but create one if needed
+				stub := &FunctionDef{
+					Name:       s.Name,
+					Parameters: params,
+					ReturnType: returnType,
+					Private:    s.Private,
+				}
+				c.scope.add(s.Name, stub, false)
+			}
+		}
+	}
+}
+
+// processStatements processes all remaining statements (functions, expressions, etc.).
+func (c *Checker) processStatements() {
+	for i := range c.input.Statements {
+		stmt := &c.input.Statements[i]
+		switch (*stmt).(type) {
+		case *parse.StructDefinition, *parse.EnumDefinition, *parse.TraitDefinition, *parse.TypeDeclaration:
+			// Already processed in Pass 2
+			continue
+		default:
+			// Process all other statements
+			if s := c.checkStmt(stmt); s != nil {
+				c.program.Statements = append(c.program.Statements, *s)
+			}
+			if c.halted {
+				return
+			}
+		}
 	}
 }
 
@@ -488,6 +648,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				methods: methods,
 			}
 
+			// Update the existing stub in scope (from registerTypeNames) or add if not present
+			if sym, ok := c.scope.get(trait.name()); ok && sym.Type != nil {
+				// Replace the stub's methods with the resolved methods
+				if stubTrait, ok := sym.Type.(*Trait); ok {
+					stubTrait.methods = trait.methods
+					stubTrait.private = trait.private
+					return nil
+				}
+			}
 			c.scope.add(trait.name(), &trait, false)
 			return nil
 		}
@@ -1085,6 +1254,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Methods:  make(map[string]*FunctionDef),
 			}
 
+			// Update the existing stub in scope (from registerTypeNames) or add if not present
+			if sym, ok := c.scope.get(enum.name()); ok && sym.Type != nil {
+				// Replace the stub's variants with the resolved variants
+				if stubEnum, ok := sym.Type.(*Enum); ok {
+					stubEnum.Variants = enum.Variants
+					stubEnum.Private = enum.Private
+					return nil
+				}
+			}
 			c.scope.add(enum.name(), enum, false)
 			return nil
 		}
@@ -1107,6 +1285,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 				def.Fields[field.Name.Name] = fieldType
+			}
+			
+			// Update the existing stub in scope (from registerTypeNames) or add if not present
+			if sym, ok := c.scope.get(def.name()); ok && sym.Type != nil {
+				// Replace the stub's fields with the resolved fields
+				if stubDef, ok := sym.Type.(*StructDef); ok {
+					stubDef.Fields = def.Fields
+					stubDef.Private = def.Private
+					return &Statement{Stmt: stubDef}
+				}
 			}
 			c.scope.add(def.name(), def, false)
 			return &Statement{Stmt: def}
@@ -3698,12 +3886,6 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 }
 
 func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFunctionDef {
-	// Check for duplicate function names
-	if _, dup := c.scope.get(def.Name); dup {
-		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
-		return nil
-	}
-
 	// Process parameters
 	params := make([]Parameter, len(def.Parameters))
 	for i, param := range def.Parameters {
@@ -3731,6 +3913,19 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 		ReturnType:      returnType,
 		ExternalBinding: def.ExternalBinding,
 		Private:         def.Private,
+	}
+
+	// Check if a stub already exists (from Pass 1) and update it in-place
+	if sym, ok := c.scope.get(def.Name); ok && sym.Type != nil {
+		if stubFn, ok := sym.Type.(*FunctionDef); ok {
+			// Update the stub with external function details
+			stubFn.Parameters = params
+			stubFn.ReturnType = returnType
+			stubFn.Private = def.Private
+			// Note: We keep the stub as FunctionDef, not converting to ExternalFunctionDef
+			// The VM will handle the external binding through other means
+			return extFn
+		}
 	}
 
 	// Add to scope
@@ -3804,42 +3999,57 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 		init()
 	}
 
-	// Resolve parameters and return type
-	params := c.resolveParametersWithContext(def.Parameters, nil)
-	returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+	// Create or get function definition
+	var fn *FunctionDef
 
-	// Validate parameters resolved correctly (for named functions, types must be explicit)
-	for i, param := range def.Parameters {
-		if param.Type != nil && params[i].Type == nil {
-			panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+	// For methods (when init != nil), always create a new function
+	if init != nil {
+		// Resolve parameters and return type for methods
+		params := c.resolveParametersWithContext(def.Parameters, nil)
+		returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+
+		fn = &FunctionDef{
+			Name:       def.Name,
+			Parameters: params,
+			ReturnType: returnType,
+			Body:       nil,
+			Private:    def.Private,
+		}
+	} else {
+		// For named functions, the signature was already resolved in Pass 3
+		// Just get the stub from scope
+		if sym, ok := c.scope.get(def.Name); ok && sym.Type != nil {
+			if stubFn, ok := sym.Type.(*FunctionDef); ok {
+				fn = stubFn
+			}
+		}
+
+		// Fallback: should not happen if Pass 3 ran correctly
+		if fn == nil {
+			params := c.resolveParametersWithContext(def.Parameters, nil)
+			returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+			fn = &FunctionDef{
+				Name:       def.Name,
+				Parameters: params,
+				ReturnType: returnType,
+				Body:       nil,
+				Private:    def.Private,
+			}
+			c.scope.add(def.Name, fn, false)
 		}
 	}
 
-	// Create function definition
-	fn := &FunctionDef{
-		Name:       def.Name,
-		Parameters: params,
-		ReturnType: returnType,
-		Body:       nil,
-		Private:    def.Private,
-	}
-
-	// Add function to scope before checking body (for recursion support)
-	// For methods (when init != nil), only add within the body scope
-	if init == nil {
-		c.scope.add(def.Name, fn, false)
-	}
-
+	// Check the function body
 	body := c.checkBlock(def.Body, func() {
-		c.scope.expectReturn(returnType)
-		for _, param := range params {
+		c.scope.expectReturn(fn.ReturnType)
+		for _, param := range fn.Parameters {
 			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
 	})
 
 	// Validate return type - named functions use areCompatible, anonymous use equal
-	if returnType != Void && !areCompatible(returnType, body.Type()) {
-		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
+	if fn.ReturnType != Void && !areCompatible(fn.ReturnType, body.Type()) {
+		c.addError(typeMismatch(fn.ReturnType, body.Type()), def.GetLocation())
 	}
 
 	fn.Body = body
