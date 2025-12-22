@@ -1,12 +1,10 @@
 # TODO
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
-    - can't be used in place of other expressions - m
+    - can't be used in place of other expressions
   - broken loops: still a list up to the break point
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
-- [ ] allow non-linear declarations at the top level
-  -  i.e. a type declared at the top of the file, can reference one declared below
 - [ ] add helpful functions to ard/list module
   - map, find, select, take?, partition?
 - [ ] inline block as expression
