@@ -882,6 +882,21 @@ func TestEqualityComparisons(t *testing.T) {
 	})
 }
 
+func TestChainedComparisons(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "Chained comparison with equality operators should error",
+			input: "1 < 2 == 1",
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "equality operators cannot be chained"},
+			},
+		},
+	})
+}
+
 func TestBooleanOperations(t *testing.T) {
 	run(t, []test{
 		{

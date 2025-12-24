@@ -2309,6 +2309,41 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 		}
 
+	case *parse.ChainedComparison:
+		{
+			// Validate that only relative operators are used (not == or !=)
+			for _, op := range s.Operators {
+				if op == parse.Equal || op == parse.NotEqual {
+					c.addError("equality operators cannot be chained", s.GetLocation())
+					return nil
+				}
+			}
+
+			// Transform chained comparison into nested And expressions
+			// a op1 b op2 c => (a op1 b) && (b op2 c)
+			var result Expression
+
+			// Build the first comparison: operands[0] op operators[0] operands[1]
+			firstComparison := c.buildComparison(s.Operands[0], s.Operators[0], s.Operands[1])
+			if firstComparison == nil {
+				return nil
+			}
+			result = firstComparison
+
+			// Build remaining comparisons and AND them together
+			for i := 1; i < len(s.Operators); i++ {
+				nextComparison := c.buildComparison(s.Operands[i], s.Operators[i], s.Operands[i+1])
+				if nextComparison == nil {
+					return nil
+				}
+
+				// AND the previous result with the next comparison
+				result = &And{result, nextComparison}
+			}
+
+			return result
+		}
+
 	// [refactor] a lot of the function call checking can be extracted
 	// - validate args and resolve generics
 	case *parse.StaticFunction:
@@ -4106,4 +4141,67 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 	}
 
 	return result, nil
+}
+
+// buildComparison builds a comparison expression node from two operands and an operator
+// It returns the appropriate typed comparison node (IntGreater, FloatLess, etc.)
+func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, rightExpr parse.Expression) Expression {
+	left := c.checkExpr(leftExpr)
+	right := c.checkExpr(rightExpr)
+	if left == nil || right == nil {
+		return nil
+	}
+
+	// Validate types match
+	if left.Type() != right.Type() {
+		c.addError("Cannot compare different types", leftExpr.GetLocation())
+		return nil
+	}
+
+	// Build the appropriate comparison node based on operator and type
+	switch op {
+	case parse.GreaterThan:
+		if left.Type() == Int {
+			return &IntGreater{left, right}
+		}
+		if left.Type() == Float {
+			return &FloatGreater{left, right}
+		}
+		c.addError("The '>' operator can only be used for Int or Float", leftExpr.GetLocation())
+		return nil
+
+	case parse.GreaterThanOrEqual:
+		if left.Type() == Int {
+			return &IntGreaterEqual{left, right}
+		}
+		if left.Type() == Float {
+			return &FloatGreaterEqual{left, right}
+		}
+		c.addError("The '>=' operator can only be used for Int or Float", leftExpr.GetLocation())
+		return nil
+
+	case parse.LessThan:
+		if left.Type() == Int {
+			return &IntLess{left, right}
+		}
+		if left.Type() == Float {
+			return &FloatLess{left, right}
+		}
+		c.addError("The '<' operator can only be used for Int or Float", leftExpr.GetLocation())
+		return nil
+
+	case parse.LessThanOrEqual:
+		if left.Type() == Int {
+			return &IntLessEqual{left, right}
+		}
+		if left.Type() == Float {
+			return &FloatLessEqual{left, right}
+		}
+		c.addError("The '<=' operator can only be used for Int or Float", leftExpr.GetLocation())
+		return nil
+
+	default:
+		c.addError(fmt.Sprintf("Unsupported operator in comparison: %v", op), leftExpr.GetLocation())
+		return nil
+	}
 }

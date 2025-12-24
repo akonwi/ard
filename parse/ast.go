@@ -577,6 +577,16 @@ func (b BinaryExpression) String() string {
 	return fmt.Sprintf("(%v %v %v)", b.Left, b.Operator, b.Right)
 }
 
+type ChainedComparison struct {
+	Location
+	Operands []Expression // [a, b, c] for `a op1 b op2 c`
+	Operators []Operator   // [op1, op2] for `a op1 b op2 c`
+}
+
+func (c ChainedComparison) String() string {
+	return fmt.Sprintf("ChainedComparison(%v %v)", c.Operands, c.Operators)
+}
+
 type RangeExpression struct {
 	Location
 	Start, End Expression
