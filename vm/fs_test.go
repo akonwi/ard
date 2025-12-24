@@ -65,5 +65,54 @@ func TestFS(t *testing.T) {
 				fs::delete("./fixtures/fake.file")`,
 			want: nil,
 		},
+		{
+			name: "fs::is_file returns true for a file",
+			input: `
+				use ard/fs
+				fs::is_file("../main.go")`,
+			want: true,
+		},
+		{
+			name: "fs::is_file returns false for a directory",
+			input: `
+				use ard/fs
+				fs::is_file("../vm")`,
+			want: false,
+		},
+		{
+			name: "fs::is_file returns false for non-existent path",
+			input: `
+				use ard/fs
+				fs::is_file("path/to/nonexistent")`,
+			want: false,
+		},
+		{
+			name: "fs::is_dir returns true for a directory",
+			input: `
+				use ard/fs
+				fs::is_dir("../vm")`,
+			want: true,
+		},
+		{
+			name: "fs::is_dir returns false for a file",
+			input: `
+				use ard/fs
+				fs::is_dir("../main.go")`,
+			want: false,
+		},
+		{
+			name: "fs::is_dir returns false for non-existent path",
+			input: `
+				use ard/fs
+				fs::is_dir("path/to/nonexistent")`,
+			want: false,
+		},
+		{
+			name: "fs::list_dir returns error for non-existent directory",
+			input: `
+				use ard/fs
+				fs::list_dir("path/to/nonexistent").is_err()`,
+			want: true,
+		},
 	})
 }

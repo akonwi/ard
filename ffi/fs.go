@@ -1,6 +1,7 @@
 package ffi
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/akonwi/ard/checker"
@@ -69,4 +70,48 @@ func FS_DeleteFile(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
 	return runtime.MakeOk(runtime.Void())
+}
+
+func FS_IsFile(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	info, err := os.Stat(path)
+	if err != nil {
+		return runtime.MakeBool(false)
+	}
+	return runtime.MakeBool(!info.IsDir())
+}
+
+func FS_IsDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	info, err := os.Stat(path)
+	if err != nil {
+		return runtime.MakeBool(false)
+	}
+	return runtime.MakeBool(info.IsDir())
+}
+
+func FS_ListDir(args []*runtime.Object, resultType checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+
+	// Extract the DirEntry struct type from the result type
+	listType, ok := resultType.(*checker.List)
+	if !ok {
+		panic(fmt.Sprintf("Unexpected return type of list_dir(): %T", resultType))
+	}
+	dirEntryType := listType.Of()
+
+	var dirEntries []*runtime.Object
+	for _, entry := range entries {
+		dirEntryObj := runtime.MakeStruct(dirEntryType, map[string]*runtime.Object{
+			"name":    runtime.MakeStr(entry.Name()),
+			"is_file": runtime.MakeBool(!entry.IsDir()),
+		})
+		dirEntries = append(dirEntries, dirEntryObj)
+	}
+
+	return runtime.MakeOk(runtime.MakeList(dirEntryType, dirEntries...))
 }

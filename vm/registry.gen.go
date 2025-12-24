@@ -76,6 +76,15 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("FS_DeleteFile", ffi.FS_DeleteFile); err != nil {
 		return fmt.Errorf("failed to register FS_DeleteFile: %w", err)
 	}
+	if err := r.Register("FS_IsFile", ffi.FS_IsFile); err != nil {
+		return fmt.Errorf("failed to register FS_IsFile: %w", err)
+	}
+	if err := r.Register("FS_IsDir", ffi.FS_IsDir); err != nil {
+		return fmt.Errorf("failed to register FS_IsDir: %w", err)
+	}
+	if err := r.Register("FS_ListDir", ffi.FS_ListDir); err != nil {
+		return fmt.Errorf("failed to register FS_ListDir: %w", err)
+	}
 	if err := r.Register("GetReqPath", ffi.GetReqPath); err != nil {
 		return fmt.Errorf("failed to register GetReqPath: %w", err)
 	}
