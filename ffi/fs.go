@@ -90,7 +90,7 @@ func FS_IsDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeBool(info.IsDir())
 }
 
-func FS_ListDir(args []*runtime.Object, resultType checker.Type) *runtime.Object {
+func FS_ListDir(args []*runtime.Object, outType checker.Type) *runtime.Object {
 	path := args[0].Raw().(string)
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -98,9 +98,13 @@ func FS_ListDir(args []*runtime.Object, resultType checker.Type) *runtime.Object
 	}
 
 	// Extract the DirEntry struct type from the result type
-	listType, ok := resultType.(*checker.List)
+	resultType, ok := outType.(*checker.Result)
 	if !ok {
-		panic(fmt.Sprintf("Unexpected return type of list_dir(): %T", resultType))
+		panic(fmt.Sprintf("Unexpected return type of list_dir(): %s", outType))
+	}
+	listType, ok := resultType.Val().(*checker.List)
+	if !ok {
+		panic(fmt.Sprintf("Unexpected return Result::ok type of list_dir(): %s", resultType.Val()))
 	}
 	dirEntryType := listType.Of()
 
