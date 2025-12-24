@@ -219,6 +219,83 @@ func TestArithmatic(t *testing.T) {
 	}
 }
 
+func TestChainedComparisons(t *testing.T) {
+	tests := []struct {
+		input string
+		want  any
+	}{
+		// Basic chained comparisons with <=
+		{input: `200 <= 200 <= 300`, want: true},
+		{input: `200 <= 250 <= 300`, want: true},
+		{input: `200 <= 300 <= 300`, want: true},
+		{input: `200 <= 100 <= 300`, want: false},
+		{input: `200 <= 300 <= 200`, want: false},
+		
+		// Mixed operators
+		{input: `100 < 150 <= 200`, want: true},
+		{input: `100 < 100 <= 200`, want: false},
+		{input: `100 <= 150 < 200`, want: true},
+		{input: `100 <= 150 < 100`, want: false},
+		
+		// Greater than variants
+		{input: `300 >= 250 >= 200`, want: true},
+		{input: `300 >= 200 >= 200`, want: true},
+		{input: `300 >= 300 >= 200`, want: true},
+		{input: `300 >= 200 >= 300`, want: false},
+		{input: `200 > 150 > 100`, want: true},
+		{input: `200 > 150 > 200`, want: false},
+		
+		// Three-operand chains
+		{input: `50 < 100 < 150 < 200`, want: true},
+		{input: `50 < 100 < 150 < 100`, want: false},
+		{input: `100 <= 100 <= 100 <= 100`, want: true},
+		
+		// Float comparisons
+		{input: `1.5 < 2.0 < 2.5`, want: true},
+		{input: `1.5 < 1.5 < 2.5`, want: false},
+		{input: `2.5 >= 2.0 >= 1.5`, want: true},
+		{input: `3.14 <= 3.14 <= 3.14`, want: true},
+		
+		// With variables
+		{input: `let x = 150
+let result = 100 < x <= 200
+result`, want: true},
+		{input: `let x = 250
+let result = 100 < x <= 200
+result`, want: false},
+		
+		// In if conditions
+		{input: `let status = 201
+if 200 <= status <= 300 {
+	42
+} else {
+	0
+}`, want: 42},
+		{input: `let status = 150
+if 200 <= status <= 300 {
+	42
+} else {
+	0
+}`, want: 0},
+		
+		// With function calls (middle operand evaluated once)
+		{input: `fn get_mid() Int {
+	10
+}
+5 < get_mid() < 15`, want: true},
+		{input: `fn get_mid() Int {
+	10
+}
+15 < get_mid() < 5`, want: false},
+	}
+
+	for _, test := range tests {
+		if res := run(t, test.input); res != test.want {
+			t.Errorf("%s = %v but got %v", test.input, test.want, res)
+		}
+	}
+}
+
 func TestIfStatements(t *testing.T) {
 	tests := []test{
 		{

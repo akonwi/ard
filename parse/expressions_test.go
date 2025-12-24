@@ -639,6 +639,99 @@ func TestAndOrs(t *testing.T) {
 	})
 }
 
+func TestChainedComparisons(t *testing.T) {
+	tests := []test{
+		{
+			name:  "Basic chained comparison with <=",
+			input: `200 <= status <= 300`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ChainedComparison{
+						Operands: []Expression{
+							&NumLiteral{Value: "200"},
+							&Identifier{Name: "status"},
+							&NumLiteral{Value: "300"},
+						},
+						Operators: []Operator{LessThanOrEqual, LessThanOrEqual},
+					},
+				},
+			},
+		},
+		{
+			name:  "Mixed operators in chain",
+			input: `100 < x <= 200`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ChainedComparison{
+						Operands: []Expression{
+							&NumLiteral{Value: "100"},
+							&Identifier{Name: "x"},
+							&NumLiteral{Value: "200"},
+						},
+						Operators: []Operator{LessThan, LessThanOrEqual},
+					},
+				},
+			},
+		},
+		{
+			name:  "Three-operand chain with mixed operators",
+			input: `50 < y <= 100 <= 150`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ChainedComparison{
+						Operands: []Expression{
+							&NumLiteral{Value: "50"},
+							&Identifier{Name: "y"},
+							&NumLiteral{Value: "100"},
+							&NumLiteral{Value: "150"},
+						},
+						Operators: []Operator{LessThan, LessThanOrEqual, LessThanOrEqual},
+					},
+				},
+			},
+		},
+		{
+			name:  "Chained comparison with greater than",
+			input: `300 >= x >= 200`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ChainedComparison{
+						Operands: []Expression{
+							&NumLiteral{Value: "300"},
+							&Identifier{Name: "x"},
+							&NumLiteral{Value: "200"},
+						},
+						Operators: []Operator{GreaterThanOrEqual, GreaterThanOrEqual},
+					},
+				},
+			},
+		},
+		{
+			name:  "Chained comparison with equality operators",
+			input: `1 == x == 1`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ChainedComparison{
+						Operands: []Expression{
+							&NumLiteral{Value: "1"},
+							&Identifier{Name: "x"},
+							&NumLiteral{Value: "1"},
+						},
+						Operators: []Operator{Equal, Equal},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
+
 func TestVoidLiteral(t *testing.T) {
 	runTests(t, []test{
 		{

@@ -2199,36 +2199,91 @@ func (p *parser) comparison() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
-		opToken := p.previous()
-		var operator Operator
-		switch opToken.kind {
-		case greater_than:
-			operator = GreaterThan
-		case greater_than_equal:
-			operator = GreaterThanOrEqual
-		case less_than:
-			operator = LessThan
-		case less_than_equal:
-			operator = LessThanOrEqual
-		case equal_equal:
-			operator = Equal
-		}
-		right, err := p.modulo()
-		if err != nil {
-			return nil, err
-		}
-		left = &BinaryExpression{
-			Location: Location{
-				Start: left.GetLocation().Start,
-				End:   right.GetLocation().End,
-			},
-			Operator: operator,
-			Left:     left,
-			Right:    right,
-		}
+	
+	// Check if first token is a comparison operator
+	if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
+		return left, nil
 	}
-	return left, nil
+	
+	// Parse first comparison
+	opToken := p.previous()
+	var operator Operator
+	switch opToken.kind {
+	case greater_than:
+		operator = GreaterThan
+	case greater_than_equal:
+		operator = GreaterThanOrEqual
+	case less_than:
+		operator = LessThan
+	case less_than_equal:
+		operator = LessThanOrEqual
+	case equal_equal:
+		operator = Equal
+	}
+	
+	right, err := p.modulo()
+	if err != nil {
+		return nil, err
+	}
+	
+	// Check for chained comparisons (is the next token also a comparison operator?)
+	comparisonOps := []kind{greater_than, greater_than_equal, less_than, less_than_equal, equal_equal}
+	if slices.Contains(comparisonOps, p.peek().kind) {
+		// This is a chained comparison
+		operands := []Expression{left, right}
+		operators := []Operator{operator}
+		startLoc := left.GetLocation().Start
+		
+		// Keep consuming comparison operators and operands
+		for slices.Contains(comparisonOps, p.peek().kind) {
+			if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
+				break
+			}
+			
+			opToken := p.previous()
+			var op Operator
+			switch opToken.kind {
+			case greater_than:
+				op = GreaterThan
+			case greater_than_equal:
+				op = GreaterThanOrEqual
+			case less_than:
+				op = LessThan
+			case less_than_equal:
+				op = LessThanOrEqual
+			case equal_equal:
+				op = Equal
+			}
+			
+			nextRight, err := p.modulo()
+			if err != nil {
+				return nil, err
+			}
+			
+			operands = append(operands, nextRight)
+			operators = append(operators, op)
+		}
+		
+		return &ChainedComparison{
+			Location: Location{
+				Start: startLoc,
+				End:   operands[len(operands)-1].GetLocation().End,
+			},
+			Operands: operands,
+			Operators: operators,
+		}, nil
+	}
+	
+	// Single comparison
+	return &BinaryExpression{
+		Location: Location{
+			Start: left.GetLocation().Start,
+			End:   right.GetLocation().End,
+		},
+		Operator: operator,
+		Left:     left,
+		Right:    right,
+	}, nil
 }
 
 func (p *parser) modulo() (Expression, error) {
