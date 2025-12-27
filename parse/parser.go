@@ -1891,7 +1891,8 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 				paramType = p.parseType()
 			} else if name == "" { // Anonymous function with untyped params
 				// For anonymous functions, allow simple parameter names without types
-				paramType = &StringType{} // Default to string type for now
+				// Leave paramType as nil so the checker can infer the type from context
+				paramType = nil
 			} else {
 				// Replace makeError with addError and recovery
 				p.addError(p.peek(), "Expected ':' after parameter name")
@@ -1900,8 +1901,8 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 					p.advance() // consume ':'
 					paramType = p.parseType()
 				} else {
-					// No colon found, use default type and continue
-					paramType = &StringType{}
+					// No colon found, use nil type so checker can infer it
+					paramType = nil
 				}
 			}
 
