@@ -85,6 +85,10 @@ fn nullable(decoder: Decoder<$T>) fn(Dynamic) $T?![Error] {
   }
 }
 
+fn dynamic(data: Dynamic) Dynamic![Error] {
+  Result::ok(data)
+}
+
 extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
 
 fn list(decoder: Decoder<$T>) fn(Dynamic) [$T]![Error] {
