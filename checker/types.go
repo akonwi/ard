@@ -147,7 +147,7 @@ func (s str) get(name string) Type {
 	}
 }
 func (s *str) equal(other Type) bool {
-	if o, ok := other.(*Any); ok {
+	if o, ok := other.(*TypeVar); ok {
 		if o.actual == nil {
 			return true
 		}
@@ -181,11 +181,11 @@ func (i *_int) equal(other Type) bool {
 	if i == other {
 		return true
 	}
-	if any, ok := other.(*Any); ok {
-		if any.actual == nil {
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
 			return true
 		}
-		return i.equal(any.actual)
+		return i.equal(typeVar.actual)
 	}
 
 	if union, ok := other.(*Union); ok {
@@ -228,7 +228,7 @@ func (f *float) equal(other Type) bool {
 	if f == other {
 		return true
 	}
-	if o, ok := other.(*Any); ok {
+	if o, ok := other.(*TypeVar); ok {
 		if o.actual == nil {
 			return true
 		}
@@ -265,7 +265,7 @@ func (b *_bool) equal(other Type) bool {
 	if b == other {
 		return true
 	}
-	if o, ok := other.(*Any); ok {
+	if o, ok := other.(*TypeVar); ok {
 		if o.actual == nil {
 			return true
 		}
@@ -289,7 +289,7 @@ func (v void) String() string       { return "Void" }
 func (v void) get(name string) Type { return nil }
 func (v *void) equal(other Type) bool {
 	// pass when comparing with an open generic
-	if any, isAny := other.(*Any); isAny && any.actual == nil {
+	if typeVar, isTypeVar := other.(*TypeVar); isTypeVar && typeVar.actual == nil {
 		return true
 	}
 	return v == other
@@ -377,11 +377,11 @@ func (l *List) equal(other Type) bool {
 	if o, ok := other.(*List); ok {
 		return l.of.equal(o.of)
 	}
-	if any, ok := other.(*Any); ok {
-		if any.actual == nil {
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
 			return true
 		}
-		return l.equal(any.actual)
+		return l.equal(typeVar.actual)
 	}
 	if union, ok := other.(*Union); ok {
 		return union.equal(l)
@@ -413,11 +413,11 @@ func (m Map) equal(other Type) bool {
 	if o, ok := other.(*Map); ok {
 		return m.key.equal(o.key) && m.value.equal(o.value)
 	}
-	if any, ok := other.(*Any); ok {
-		if any.actual == nil {
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
 			return true
 		}
-		return m.equal(any.actual)
+		return m.equal(typeVar.actual)
 	}
 
 	if union, ok := other.(*Union); ok {
@@ -543,29 +543,29 @@ func (m *Maybe) Of() Type {
 	return m.of
 }
 
-type Any struct {
+type TypeVar struct {
 	name   string
 	actual Type
 	bound  bool 
 }
 
-func (a Any) String() string {
+func (a TypeVar) String() string {
 	if a.bound && a.actual != nil {
 		return a.actual.String()
 	}
 	return "$" + a.name
 }
-func (a Any) Actual() Type {
+func (a TypeVar) Actual() Type {
 	return a.actual
 }
 
-func (a Any) get(name string) Type {
+func (a TypeVar) get(name string) Type {
 	if a.actual != nil {
 		return a.actual.get(name)
 	}
 	panic(fmt.Errorf("Cannot look up symbols in unrefined %s", a.String()))
 }
-func (a *Any) equal(other Type) bool {
+func (a *TypeVar) equal(other Type) bool {
 	if a == other {
 		return true
 	}
@@ -575,7 +575,7 @@ func (a *Any) equal(other Type) bool {
 	return a.actual.equal(other)
 }
 
-func (a *Any) hasTrait(trait *Trait) bool {
+func (a *TypeVar) hasTrait(trait *Trait) bool {
 	if a.actual == nil {
 		return false
 	}
@@ -654,7 +654,7 @@ func (d dynamicType) equal(other Type) bool {
 	if _, ok := other.(*dynamicType); ok {
 		return true
 	}
-	if any, ok := other.(*Any); ok && any.actual == nil {
+	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
 		return true
 	}
 	return false

@@ -9,23 +9,23 @@ func TestTypeEquality(t *testing.T) {
 		expect bool
 	}{
 		{
-			left:   &Any{name: "T"},
+			left:   &TypeVar{name: "T"},
 			right:  Str,
 			expect: true,
 		},
 		{
 			left:   Str,
-			right:  &Any{name: "T"},
+			right:  &TypeVar{name: "T"},
 			expect: true,
 		},
 		{
-			left:   MakeResult(&Any{name: "T"}, Void),
+			left:   MakeResult(&TypeVar{name: "T"}, Void),
 			right:  MakeResult(Str, Void),
 			expect: true,
 		},
 		{
 			left:   MakeResult(Str, Void),
-			right:  MakeResult(&Any{name: "T"}, Void),
+			right:  MakeResult(&TypeVar{name: "T"}, Void),
 			expect: true,
 		},
 		{
@@ -35,7 +35,7 @@ func TestTypeEquality(t *testing.T) {
 			},
 			right: &FunctionDef{
 				Parameters: []Parameter{},
-				ReturnType: MakeResult(&Any{name: "T"}, Void),
+				ReturnType: MakeResult(&TypeVar{name: "T"}, Void),
 			},
 			expect: true,
 		},
@@ -46,7 +46,7 @@ func TestTypeEquality(t *testing.T) {
 			},
 			right: &FunctionDef{
 				Parameters: []Parameter{},
-				ReturnType: MakeResult(&Any{name: "T"}, Void),
+				ReturnType: MakeResult(&TypeVar{name: "T"}, Void),
 			},
 			expect: true,
 		},
@@ -55,7 +55,7 @@ func TestTypeEquality(t *testing.T) {
 				Parameters: []Parameter{
 					{
 						Name: "foo",
-						Type: &Any{name: "T"},
+						Type: &TypeVar{name: "T"},
 					},
 				},
 				ReturnType: MakeResult(Str, Void),
@@ -67,7 +67,7 @@ func TestTypeEquality(t *testing.T) {
 						Type: Int,
 					},
 				},
-				ReturnType: MakeResult(&Any{name: "T"}, Void),
+				ReturnType: MakeResult(&TypeVar{name: "T"}, Void),
 			},
 			expect: true,
 		},
@@ -85,7 +85,7 @@ func TestTypeEquality(t *testing.T) {
 				Parameters: []Parameter{
 					{
 						Name: "foo",
-						Type: &Any{name: "T"},
+						Type: &TypeVar{name: "T"},
 					},
 				},
 				ReturnType: Void,

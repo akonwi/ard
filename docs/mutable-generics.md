@@ -186,21 +186,21 @@ All tests pass with full coverage:
 // fn map(f: T -> U, items: List(T)) -> List(U) { ... }
 mapFn := /* ... loaded from stdlib or user code ... */
 
-// For THIS call site, create a copy with fresh Any instances
+// For THIS call site, create a copy with fresh TypeVar instances
 // map(\x -> str(x), [1, 2, 3])
 genericScope := c.scope.createGenericScope([]string{"T", "U"})
-fnDefCopy := copyFunctionWithFreshGenerics(mapFn, genericScope)
+fnDefCopy := copyFunctionWithTypeVarMap(mapFn, *genericScope.genericContext)
 // fnDefCopy.Parameters[0].Type now refers to genericScope's T and U, not stdlib's
 
 // Check arg 1: (\x -> str(x)) against fnDefCopy.Parameters[0]: T -> U
-anyT := genericScope.typeVars["T"]
-anyU := genericScope.typeVars["U"]
+typeVarT := (*genericScope.genericContext)["T"]
+typeVarU := (*genericScope.genericContext)["U"]
 c.unifyTypes(fnDefCopy.Parameters[0].Type, actualArg1Type, genericScope)
-// After: anyT.actual = Int, anyT.bound = true
-//        anyU.actual = Str, anyU.bound = true
+// After: typeVarT.actual = Int, typeVarT.bound = true
+//        typeVarU.actual = Str, typeVarU.bound = true
 
 // Check arg 2: [1, 2, 3] against fnDefCopy.Parameters[1]: List(T)
-// List(T) in the copy now refers to anyT, which is bound to Int
+// List(T) in the copy now refers to typeVarT, which is bound to Int
 // Unification of List(Int) with List(Int) succeeds
 // And if arg was an anonymous function, its parameter T would already be inferred as Int
 ```
@@ -257,23 +257,9 @@ Where:
 
 This test should be added to `TestListApi()` in `vm/vm_test.go`.
 
-## Future Enhancements
+## Implementation Complete
 
-### Potential: Rename `Any` to `TypeVar`
-
-The design doc originally recommended not renaming because `Any` was already used throughout the codebase. However, now that the implementation is complete and stable, renaming `Any` → `TypeVar` could improve code clarity:
-
-**Pros:**
-- More explicit name: `TypeVar` clearly indicates "type variable" (generic parameter)
-- Better semantics: distinguishes from "any unknown type"
-- Matches academic conventions and other languages
-
-**Cons:**
-- Large refactoring across checker package (40+ files)
-- Requires updating all type definitions and type matching
-- Low priority (implementation already works correctly)
-
-**Recommendation:** Consider for a future maintenance pass after other features stabilize.
+The rename from `Any` to `TypeVar` has been completed. All references throughout the checker package have been updated to use the more semantically clear name.
 
 ## Summary
 

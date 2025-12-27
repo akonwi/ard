@@ -38,21 +38,21 @@ func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
-// deref follows Any bindings to find the concrete type.
+// deref follows TypeVar bindings to find the concrete type.
 // Used during type unification to ensure we see resolved types.
 // Only dereferences a single type node; for compound types use derefType.
 //
 // Example: If $T is bound to Int, deref($T) returns Int.
 // If $T is bound to [$U], deref($T) returns [$U] (not the resolved contents).
 func deref(t Type) Type {
-	if any, ok := t.(*Any); ok && any.bound {
-		return deref(any.actual)  // Recursively follow chains
+	if typeVar, ok := t.(*TypeVar); ok && typeVar.bound {
+		return deref(typeVar.actual)  // Recursively follow chains
 	}
 	return t
 }
 
 // derefType recursively dereferences a type, including through compound types.
-// Walks the entire type tree, dereferencing Any at each level.
+// Walks the entire type tree, dereferencing TypeVar at each level.
 // Used when parameter types must reflect bound generics before checking arguments.
 // Only creates new instances when inner types actually change.
 //
@@ -311,13 +311,13 @@ func (c *Checker) scanForUnresolvedGenerics() {
 			continue
 		}
 
-		if anyType, ok := stmt.Expr.Type().(*Any); ok && anyType.actual == nil {
+		if typeVar, ok := stmt.Expr.Type().(*TypeVar); ok && typeVar.actual == nil {
 			loc := parse.Location{}
 			if locatable, ok := stmt.Expr.(interface{ GetLocation() parse.Location }); ok {
 				loc = locatable.GetLocation()
 			}
 
-			c.addError(fmt.Sprintf("Unresolved generic: %s", anyType.String()), loc)
+			c.addError(fmt.Sprintf("Unresolved generic: %s", typeVar.String()), loc)
 			break
 		}
 	}
@@ -381,7 +381,7 @@ func (c *Checker) findModuleByPath(path string) Module {
 
 func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	switch t := t.(type) {
-	case *Any:
+	case *TypeVar:
 		if !seen[t.name] {
 			*params = append(*params, t.name)
 			seen[t.name] = true
@@ -503,12 +503,12 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			}
 		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
-		return &Any{name: "unknown"}
+		return &TypeVar{name: "unknown"}
 	case *parse.GenericType:
 		if existing := c.scope.findGeneric(ty.Name); existing != nil {
 			baseType = existing
 		} else {
-			baseType = &Any{name: ty.Name}
+			baseType = &TypeVar{name: ty.Name}
 		}
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
@@ -3803,7 +3803,7 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 // Substitute generic parameters in a type
 func substituteType(t Type, typeMap map[string]Type) Type {
 	switch typ := t.(type) {
-	case *Any:
+	case *TypeVar:
 		if concrete, exists := typeMap[typ.name]; exists {
 			return concrete
 			// typ.actual = concrete
@@ -3876,7 +3876,7 @@ func (c *Checker) alignArgumentsWithParameters(args []parse.Argument, params []P
 }
 
 // setupFunctionGenerics sets up generic scope and function copy for generic functions.
-// Returns the function copy (with fresh Any instances for generics) and the generic scope.
+// Returns the function copy (with fresh TypeVar instances for generics) and the generic scope.
 // For non-generic functions, returns the original function and a nil scope.
 func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *SymbolTable) {
 	if !fnDef.hasGenerics() {
@@ -3897,7 +3897,7 @@ func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *Symb
 
 	// Create generic scope and fresh function copy
 	genericScope := c.scope.createGenericScope(genericParams)
-	fnDefCopy := copyFunctionWithAnyMap(fnDef, *genericScope.genericContext)
+	fnDefCopy := copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
 
 	return fnDefCopy, genericScope
 }
@@ -3910,7 +3910,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 	args := make([]Expression, len(resolvedArgs))
 	
 	for i := range resolvedArgs {
-		// Get the expected parameter type from the copy (which has fresh Any instances for generics).
+		// Get the expected parameter type from the copy (which has fresh TypeVar instances for generics).
 		// For generic functions, dereference to see bound generics from previous arguments.
 		// derefType walks the type tree so List($T) becomes List(Int) if $T was bound to Int.
 		paramType := fnDefCopy.Parameters[i].Type
@@ -3937,7 +3937,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 
 		// For generic functions, unify the argument type with the parameter type.
 		// unifyTypes uses deref() to see bound generics and calls bindGeneric()
-		// to mutate Any instances in-place. This binds generics so that
+		// to mutate TypeVar instances in-place. This binds generics so that
 		// subsequent arguments see bound types.
 		if fnDef.hasGenerics() && genericScope != nil {
 			if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
@@ -4029,9 +4029,9 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	// Create a call-site-specific generic context scope
 	genericScope := c.scope.createGenericScope(genericParams)
 
-	// Create a call-site-specific copy of the function with fresh Any instances
-	// This copy is isolated to this call and its Any instances will be mutated during unification
-	fnDefCopy := copyFunctionWithAnyMap(fnDef, *genericScope.genericContext)
+	// Create a call-site-specific copy of the function with fresh TypeVar instances
+	// This copy is isolated to this call and its TypeVar instances will be mutated during unification
+	fnDefCopy := copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
 
 	// Handle explicit type arguments
 	if len(typeArgs) > 0 {
@@ -4052,7 +4052,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	}
 
 	// Infer types from arguments using the copied function definition
-	// The fresh Any instances in fnDefCopy will be mutated as generics are bound
+	// The fresh TypeVar instances in fnDefCopy will be mutated as generics are bound
 	for i, param := range fnDefCopy.Parameters {
 		if err := c.unifyTypes(param.Type, args[i].Type(), genericScope); err != nil {
 			return nil, err
@@ -4071,7 +4071,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		return fnDef, nil
 	}
 
-	// The function copy already has fresh Any instances that have been bound.
+	// The function copy already has fresh TypeVar instances that have been bound.
 	// We now need to substitute the bindings to create the final specialized function.
 	specialized := &FunctionDef{
 		Name:       fnDefCopy.Name,
@@ -4096,12 +4096,12 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 
 // unifyTypes performs type unification for generic function arguments.
 // It recursively walks the type tree, binding generics to concrete types.
-// When expected is an Any (generic parameter), bindGeneric mutates the Any in-place
+// When expected is a TypeVar (generic parameter), bindGeneric mutates the TypeVar in-place
 // with the concrete type, making the binding immediately visible to all callers.
 // This enables single-pass argument checking where later arguments see bindings from earlier ones.
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
 	switch expectedType := expected.(type) {
-	case *Any:
+	case *TypeVar:
 		// Generic type - bind it to the actual type using in-place mutation.
 		// This mutates expectedType.bound and expectedType.actual directly.
 		return genericScope.bindGeneric(expectedType.name, actual)

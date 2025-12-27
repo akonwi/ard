@@ -75,7 +75,7 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	if checker.IsMaybe(o._type) {
 		o._type = declared
 	}
-	if _, ok := o._type.(*checker.Any); ok {
+	if _, ok := o._type.(*checker.TypeVar); ok {
 		o._type = declared
 	}
 	if strings.Contains(o.Type().String(), "$") && !strings.Contains(declared.String(), "$") {
