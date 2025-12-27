@@ -3,7 +3,6 @@ package checker
 import (
 	"fmt"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -37,6 +36,109 @@ type Diagnostic struct {
 
 func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
+}
+
+// deref follows TypeVar bindings to find the concrete type.
+// Used during type unification to ensure we see resolved types.
+// Only dereferences a single type node; for compound types use derefType.
+//
+// Example: If $T is bound to Int, deref($T) returns Int.
+// If $T is bound to [$U], deref($T) returns [$U] (not the resolved contents).
+func deref(t Type) Type {
+	if typeVar, ok := t.(*TypeVar); ok && typeVar.bound {
+		return deref(typeVar.actual)  // Recursively follow chains
+	}
+	return t
+}
+
+// derefType recursively dereferences a type, including through compound types.
+// Walks the entire type tree, dereferencing TypeVar at each level.
+// Used when parameter types must reflect bound generics before checking arguments.
+// Only creates new instances when inner types actually change.
+//
+// Example: If $T is bound to Int, derefType([$T]) returns [Int].
+// Ensures anonymous function parameters see fully resolved types.
+func derefType(t Type) Type {
+	t = deref(t)  // First dereference at the top level
+	switch typ := t.(type) {
+	case *List:
+		derefInner := derefType(typ.of)
+		if derefInner == typ.of {
+			return typ  // No change, return original
+		}
+		return &List{of: derefInner}
+	case *Map:
+		derefKey := derefType(typ.key)
+		derefVal := derefType(typ.value)
+		if derefKey == typ.key && derefVal == typ.value {
+			return typ  // No change, return original
+		}
+		return &Map{
+			key:   derefKey,
+			value: derefVal,
+		}
+	case *Maybe:
+		derefInner := derefType(typ.of)
+		if derefInner == typ.of {
+			return typ  // No change, return original
+		}
+		return &Maybe{of: derefInner}
+	case *Result:
+		derefVal := derefType(typ.val)
+		derefErr := derefType(typ.err)
+		if derefVal == typ.val && derefErr == typ.err {
+			return typ  // No change, return original
+		}
+		return &Result{
+			val: derefVal,
+			err: derefErr,
+		}
+	case *Union:
+		newTypes := make([]Type, len(typ.Types))
+		changed := false
+		for i, t := range typ.Types {
+			newTypes[i] = derefType(t)
+			if newTypes[i] != typ.Types[i] {
+				changed = true
+			}
+		}
+		if !changed {
+			return typ  // No change, return original
+		}
+		return &Union{
+			Name:  typ.Name,
+			Types: newTypes,
+		}
+	case *FunctionDef:
+		newParams := make([]Parameter, len(typ.Parameters))
+		paramsChanged := false
+		for i, param := range typ.Parameters {
+			derefParamType := derefType(param.Type)
+			newParams[i] = Parameter{
+				Name:    param.Name,
+				Type:    derefParamType,
+				Mutable: param.Mutable,
+			}
+			if derefParamType != param.Type {
+				paramsChanged = true
+			}
+		}
+		derefReturnType := derefType(typ.ReturnType)
+		returnChanged := derefReturnType != typ.ReturnType
+		if !paramsChanged && !returnChanged {
+			return typ  // No change, return original
+		}
+		return &FunctionDef{
+			Name:       typ.Name,
+			Parameters: newParams,
+			ReturnType: derefReturnType,
+			Body:       typ.Body,
+			Mutates:    typ.Mutates,
+			Private:    typ.Private,
+		}
+	default:
+		return t
+	}
 }
 
 func (c Checker) isMutable(expr Expression) bool {
@@ -209,13 +311,13 @@ func (c *Checker) scanForUnresolvedGenerics() {
 			continue
 		}
 
-		if anyType, ok := stmt.Expr.Type().(*Any); ok && anyType.actual == nil {
+		if typeVar, ok := stmt.Expr.Type().(*TypeVar); ok && typeVar.actual == nil {
 			loc := parse.Location{}
 			if locatable, ok := stmt.Expr.(interface{ GetLocation() parse.Location }); ok {
 				loc = locatable.GetLocation()
 			}
 
-			c.addError(fmt.Sprintf("Unresolved generic: %s", anyType.String()), loc)
+			c.addError(fmt.Sprintf("Unresolved generic: %s", typeVar.String()), loc)
 			break
 		}
 	}
@@ -279,7 +381,7 @@ func (c *Checker) findModuleByPath(path string) Module {
 
 func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	switch t := t.(type) {
-	case *Any:
+	case *TypeVar:
 		if !seen[t.name] {
 			*params = append(*params, t.name)
 			seen[t.name] = true
@@ -401,12 +503,12 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			}
 		}
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
-		return &Any{name: "unknown"}
+		return &TypeVar{name: "unknown"}
 	case *parse.GenericType:
 		if existing := c.scope.findGeneric(ty.Name); existing != nil {
 			baseType = existing
 		} else {
-			baseType = &Any{name: ty.Name}
+			baseType = &TypeVar{name: ty.Name}
 		}
 	default:
 		panic(fmt.Errorf("unrecognized type: %s", t.GetName()))
@@ -1800,97 +1902,23 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			// We need to also resolve the arguments with mutability info
-			resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
-			if len(s.Args) > 0 && s.Args[0].Name != "" {
-				// Handle named arguments - need to reorder them
-				paramMap := make(map[string]int)
-				for i, param := range fnDef.Parameters {
-					paramMap[param.Name] = i
-				}
-				for _, arg := range s.Args {
-					if index, exists := paramMap[arg.Name]; exists {
-						resolvedArgs[index] = parse.Argument{
-							Location: arg.Location,
-							Name:     "",
-							Value:    arg.Value,
-							Mutable:  arg.Mutable,
-						}
-					}
-				}
-			} else {
-				// Positional arguments - direct copy
-				copy(resolvedArgs, s.Args)
-			}
+			// Align mutability information with parameters
+			resolvedArgs := c.alignArgumentsWithParameters(s.Args, fnDef.Parameters)
 
-			// Check and process arguments
-			args := make([]Expression, len(resolvedArgs))
-			for i, arg := range resolvedArgs {
-				// Get the expected parameter type
-				paramType := fnDef.Parameters[i].Type
+			// Setup generics if function has them
+			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
-				// For list and map literals, use checkExprAs to infer type from context
-				var checkedArg Expression
-				switch resolvedExprs[i].(type) {
-				case *parse.ListLiteral, *parse.MapLiteral:
-					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
-				case *parse.AnonymousFunction:
-					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
-				default:
-					checkedArg = c.checkExpr(resolvedExprs[i])
-				}
-
-				if checkedArg == nil {
-					return nil
-				}
-
-				// Type check the argument against the parameter type
-				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-					return nil
-				}
-
-				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable {
-					if arg.Mutable {
-						// User provided `mut` - create a copy
-						args[i] = &CopyExpression{
-							Expr:  checkedArg,
-							Type_: checkedArg.Type(),
-						}
-					} else if c.isMutable(checkedArg) {
-						// Argument is already mutable
-						args[i] = checkedArg
-					} else {
-						// Not mutable and no `mut` keyword - error
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
-						return nil
-					}
-				} else {
-					args[i] = checkedArg
-				}
-			}
-
-			// Use new generic resolution system
-			if fnDef.hasGenerics() {
-				specialized, err := c.resolveGenericFunction(fnDef, args, s.TypeArgs, s.GetLocation())
-				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-
-				return &FunctionCall{
-					Name: s.Name,
-					Args: args,
-					fn:   specialized,
-				}
+			// Check and process arguments (handles both generics and mutability)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)
+			if args == nil {
+				return nil
 			}
 
 			// Create and return the function call node
 			return &FunctionCall{
 				Name: s.Name,
 				Args: args,
-				fn:   fnDef,
+				fn:   fnToUse,
 			}
 		}
 	case *parse.InstanceProperty:
@@ -1960,81 +1988,19 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Align mutability information with parameters
-			resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
-			if len(s.Method.Args) > 0 && s.Method.Args[0].Name != "" {
-				paramMap := make(map[string]int)
-				for i, param := range fnDef.Parameters {
-					paramMap[param.Name] = i
-				}
-				for _, arg := range s.Method.Args {
-					if index, exists := paramMap[arg.Name]; exists {
-						resolvedArgs[index] = parse.Argument{
-							Location: arg.Location,
-							Name:     "",
-							Value:    arg.Value,
-							Mutable:  arg.Mutable,
-						}
-					}
-				}
-			} else {
-				copy(resolvedArgs, s.Method.Args)
-			}
+			resolvedArgs := c.alignArgumentsWithParameters(s.Method.Args, fnDef.Parameters)
 
-			// Check and process arguments
-			args := make([]Expression, len(resolvedArgs))
-			for i := range resolvedArgs {
-				// Get the expected parameter type
-				paramType := fnDef.Parameters[i].Type
+			// Setup generics if function has them
+			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
-				// For list and map literals, use checkExprAs to infer type from context
-				var checkedArg Expression
-				switch resolvedExprs[i].(type) {
-				case *parse.ListLiteral, *parse.MapLiteral:
-					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
-				default:
-					checkedArg = c.checkExpr(resolvedExprs[i])
-				}
-
-				if checkedArg == nil {
-					return nil
-				}
-
-				// Type check the argument against the parameter type
-				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-					return nil
-				}
-
-				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					// Check if the type is copyable (structs for now)
-					if c.isCopyable(checkedArg.Type()) {
-						// Wrap in copy expression instead of erroring
-						args[i] = &CopyExpression{
-							Expr:  checkedArg,
-							Type_: checkedArg.Type(),
-						}
-					} else {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
-					}
-				} else {
-					args[i] = checkedArg
-				}
-			}
-
-			// Use new generic resolution system
-			if fnDef.hasGenerics() {
-				specialized, err := c.resolveGenericFunction(fnDef, args, s.Method.TypeArgs, s.GetLocation())
-				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-
-				return c.createPrimitiveMethodNode(subj, s.Method.Name, args, specialized)
+			// Check and process arguments (handles both generics and mutability)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)
+			if args == nil {
+				return nil
 			}
 
 			// Create function call
-			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnDef)
+			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse)
 		}
 	case *parse.UnaryExpression:
 		{
@@ -2267,8 +2233,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if isMaybe(left.Type()) {
 						return &Equality{left, right}
 					}
-					allowedTypes := []Type{Int, Float, Str, Bool}
-					if !slices.Contains(allowedTypes, left.Type()) || !slices.Contains(allowedTypes, right.Type()) {
+					
+					// Check if types are allowed for equality (use equal() not pointer equality)
+					isAllowedType := func(t Type) bool {
+						return t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool)
+					}
+					if !isAllowedType(left.Type()) || !isAllowedType(right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
 						return nil
 					}
@@ -2481,73 +2451,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Align mutability information with parameters
-			resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
-			if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
-				paramMap := make(map[string]int)
-				for i, param := range fnDef.Parameters {
-					paramMap[param.Name] = i
-				}
-				for _, arg := range s.Function.Args {
-					if index, exists := paramMap[arg.Name]; exists {
-						resolvedArgs[index] = parse.Argument{
-							Location: arg.Location,
-							Name:     "",
-							Value:    arg.Value,
-							Mutable:  arg.Mutable,
-						}
-					}
-				}
-			} else {
-				copy(resolvedArgs, s.Function.Args)
-			}
+			resolvedArgs := c.alignArgumentsWithParameters(s.Function.Args, fnDef.Parameters)
 
-			// Check and process arguments
-			args := make([]Expression, len(resolvedArgs))
-			for i := range resolvedArgs {
-				paramType := fnDef.Parameters[i].Type
+			// Setup generics if function has them
+			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
-				var checkedArg Expression
-				switch resolvedExprs[i].(type) {
-				case *parse.ListLiteral, *parse.MapLiteral:
-					checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
-				default:
-					checkedArg = c.checkExpr(resolvedExprs[i])
-				}
-
-				if checkedArg == nil {
-					return nil
-				}
-
-				// Type check the argument against the parameter type
-				if !areCompatible(paramType, checkedArg.Type()) {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-					return nil
-				}
-
-				// Check mutability constraints if needed
-				if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
-				}
-
-				args[i] = checkedArg
+			// Check and process arguments (handles both generics and mutability)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)
+			if args == nil {
+				return nil
 			}
 
 			// Create function call
 			call := &FunctionCall{
 				Name: fnDef.Name,
 				Args: args,
-				fn:   fnDef,
-			}
-
-			// resolve generics
-			if fnDef.hasGenerics() {
-				specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
-				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-
-				call.fn = specialized
+				fn:   fnToUse,
 			}
 
 			// Special validation for async::start calls
@@ -3884,7 +3803,7 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 // Substitute generic parameters in a type
 func substituteType(t Type, typeMap map[string]Type) Type {
 	switch typ := t.(type) {
-	case *Any:
+	case *TypeVar:
 		if concrete, exists := typeMap[typ.name]; exists {
 			return concrete
 			// typ.actual = concrete
@@ -3923,6 +3842,172 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	}
 }
 
+// alignArgumentsWithParameters converts a list of (possibly named) arguments to positional form,
+// aligned with function parameters and preserving mutability information.
+func (c *Checker) alignArgumentsWithParameters(args []parse.Argument, params []Parameter) []parse.Argument {
+	resolvedArgs := make([]parse.Argument, len(params))
+	
+	if len(args) == 0 {
+		return resolvedArgs
+	}
+	
+	// If arguments have names, reorder them to match parameter positions
+	if args[0].Name != "" {
+		paramMap := make(map[string]int)
+		for i, param := range params {
+			paramMap[param.Name] = i
+		}
+		for _, arg := range args {
+			if index, exists := paramMap[arg.Name]; exists {
+				resolvedArgs[index] = parse.Argument{
+					Location: arg.Location,
+					Name:     "",
+					Value:    arg.Value,
+					Mutable:  arg.Mutable,
+				}
+			}
+		}
+	} else {
+		// Positional arguments - direct copy
+		copy(resolvedArgs, args)
+	}
+	
+	return resolvedArgs
+}
+
+// setupFunctionGenerics sets up generic scope and function copy for generic functions.
+// Returns the function copy (with fresh TypeVar instances for generics) and the generic scope.
+// For non-generic functions, returns the original function and a nil scope.
+func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *SymbolTable) {
+	if !fnDef.hasGenerics() {
+		return fnDef, nil
+	}
+
+	// Extract generic parameter names
+	genericNames := make(map[string]bool)
+	for _, param := range fnDef.Parameters {
+		extractGenericNames(param.Type, genericNames)
+	}
+	extractGenericNames(fnDef.ReturnType, genericNames)
+
+	genericParams := make([]string, 0, len(genericNames))
+	for name := range genericNames {
+		genericParams = append(genericParams, name)
+	}
+
+	// Create generic scope and fresh function copy
+	genericScope := c.scope.createGenericScope(genericParams)
+	fnDefCopy := copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
+
+	return fnDefCopy, genericScope
+}
+
+// checkAndProcessArguments validates and type-checks function arguments with generic support.
+// Returns the processed arguments and the specialized function (with generics resolved if applicable).
+// Handles the `mut` keyword for explicit copy semantics on mutable parameters.
+// If any error occurs, it's added to the checker's diagnostics.
+func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []parse.Argument, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable) ([]Expression, *FunctionDef) {
+	args := make([]Expression, len(resolvedArgs))
+	
+	for i := range resolvedArgs {
+		// Get the expected parameter type from the copy (which has fresh TypeVar instances for generics).
+		// For generic functions, dereference to see bound generics from previous arguments.
+		// derefType walks the type tree so List($T) becomes List(Int) if $T was bound to Int.
+		paramType := fnDefCopy.Parameters[i].Type
+		if fnDef.hasGenerics() && genericScope != nil {
+			paramType = derefType(paramType)
+		}
+
+		// For list and map literals, use checkExprAs to infer type from context.
+		// Anonymous functions also use checkExprAs so parameter types are inferred from
+		// the (possibly bound) paramType.
+		var checkedArg Expression
+		switch resolvedExprs[i].(type) {
+		case *parse.ListLiteral, *parse.MapLiteral:
+			checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+		case *parse.AnonymousFunction:
+			checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
+		default:
+			checkedArg = c.checkExpr(resolvedExprs[i])
+		}
+
+		if checkedArg == nil {
+			return nil, nil
+		}
+
+		// For generic functions, unify the argument type with the parameter type.
+		// unifyTypes uses deref() to see bound generics and calls bindGeneric()
+		// to mutate TypeVar instances in-place. This binds generics so that
+		// subsequent arguments see bound types.
+		if fnDef.hasGenerics() && genericScope != nil {
+			if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
+				c.addError(err.Error(), resolvedExprs[i].GetLocation())
+				return nil, nil
+			}
+		} else {
+			// For non-generic functions, do regular type compatibility check
+			if !areCompatible(paramType, checkedArg.Type()) {
+				c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+				return nil, nil
+			}
+		}
+
+		// Check mutability constraints if needed
+		if fnDefCopy.Parameters[i].Mutable {
+			if c.isMutable(checkedArg) {
+				// Argument is already mutable - use it directly
+				args[i] = checkedArg
+			} else if resolvedArgs[i].Mutable {
+				// User provided `mut` keyword - create a copy
+				args[i] = &CopyExpression{
+					Expr:  checkedArg,
+					Type_: checkedArg.Type(),
+				}
+			} else {
+				// Argument is not mutable and no `mut` keyword - error
+				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
+				return nil, nil
+			}
+		} else {
+			args[i] = checkedArg
+		}
+	}
+
+	// Finalize generic resolution by creating the specialized function
+	var fnToUse *FunctionDef
+	if fnDef.hasGenerics() && genericScope != nil {
+		bindings := genericScope.getGenericBindings()
+		
+		if len(bindings) == 0 {
+			// No generics were bound, use original function
+			fnToUse = fnDef
+		} else {
+			// Create specialized function with resolved generics
+			fnToUse = &FunctionDef{
+				Name:       fnDefCopy.Name,
+				Parameters: make([]Parameter, len(fnDefCopy.Parameters)),
+				ReturnType: substituteType(fnDefCopy.ReturnType, bindings),
+				Body:       fnDefCopy.Body,
+				Mutates:    fnDefCopy.Mutates,
+				Private:    fnDefCopy.Private,
+			}
+
+			// Replace generics in parameters
+			for i, param := range fnDefCopy.Parameters {
+				fnToUse.Parameters[i] = Parameter{
+					Name:    param.Name,
+					Type:    substituteType(param.Type, bindings),
+					Mutable: param.Mutable,
+				}
+			}
+		}
+	} else {
+		fnToUse = fnDef
+	}
+
+	return args, fnToUse
+}
+
 // New generic resolution using the enhanced symbol table
 func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []parse.DeclaredType, _ parse.Location) (*FunctionDef, error) {
 	if !fnDef.hasGenerics() {
@@ -3941,8 +4026,12 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		genericParams = append(genericParams, name)
 	}
 
-	// Create generic context scope
+	// Create a call-site-specific generic context scope
 	genericScope := c.scope.createGenericScope(genericParams)
+
+	// Create a call-site-specific copy of the function with fresh TypeVar instances
+	// This copy is isolated to this call and its TypeVar instances will be mutated during unification
+	fnDefCopy := copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
 
 	// Handle explicit type arguments
 	if len(typeArgs) > 0 {
@@ -3962,8 +4051,9 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		}
 	}
 
-	// Infer types from arguments
-	for i, param := range fnDef.Parameters {
+	// Infer types from arguments using the copied function definition
+	// The fresh TypeVar instances in fnDefCopy will be mutated as generics are bound
+	for i, param := range fnDefCopy.Parameters {
 		if err := c.unifyTypes(param.Type, args[i].Type(), genericScope); err != nil {
 			return nil, err
 		}
@@ -3973,25 +4063,27 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	// (e.g., variable assignment, return type inference)
 	// Don't require all generics to be resolved at function call time
 
-	// Create specialized function with resolved generics
+	// Get bindings to determine if we need to create a specialized version
 	bindings := genericScope.getGenericBindings()
 
-	// Only specialize if we have resolved some generics
+	// If no generics were bound, return the original function
 	if len(bindings) == 0 {
 		return fnDef, nil
 	}
 
+	// The function copy already has fresh TypeVar instances that have been bound.
+	// We now need to substitute the bindings to create the final specialized function.
 	specialized := &FunctionDef{
-		Name:       fnDef.Name,
-		Parameters: make([]Parameter, len(fnDef.Parameters)),
-		ReturnType: substituteType(fnDef.ReturnType, bindings),
-		Body:       fnDef.Body,
-		Mutates:    fnDef.Mutates,
-		Private:    fnDef.Private,
+		Name:       fnDefCopy.Name,
+		Parameters: make([]Parameter, len(fnDefCopy.Parameters)),
+		ReturnType: substituteType(fnDefCopy.ReturnType, bindings),
+		Body:       fnDefCopy.Body,
+		Mutates:    fnDefCopy.Mutates,
+		Private:    fnDefCopy.Private,
 	}
 
 	// Replace generics in parameters
-	for i, param := range fnDef.Parameters {
+	for i, param := range fnDefCopy.Parameters {
 		specialized.Parameters[i] = Parameter{
 			Name:    param.Name,
 			Type:    substituteType(param.Type, bindings),
@@ -4002,31 +4094,46 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	return specialized, nil
 }
 
-// unifyTypes attempts to unify two types by binding generics in the scope
+// unifyTypes performs type unification for generic function arguments.
+// It recursively walks the type tree, binding generics to concrete types.
+// When expected is a TypeVar (generic parameter), bindGeneric mutates the TypeVar in-place
+// with the concrete type, making the binding immediately visible to all callers.
+// This enables single-pass argument checking where later arguments see bindings from earlier ones.
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
 	switch expectedType := expected.(type) {
-	case *Any:
-		// Generic type - bind it to the actual type
+	case *TypeVar:
+		// Generic type - bind it to the actual type using in-place mutation.
+		// This mutates expectedType.bound and expectedType.actual directly.
 		return genericScope.bindGeneric(expectedType.name, actual)
 	case *FunctionDef:
-		// Function type unification
+		// Function type unification - handle both FunctionDef and ExternalFunctionDef
+		var actualParams []Parameter
+		var actualReturnType Type
+		
 		if actualFn, ok := actual.(*FunctionDef); ok {
-			// Check parameter count
-			if len(expectedType.Parameters) != len(actualFn.Parameters) {
-				return fmt.Errorf("parameter count mismatch")
-			}
-
-			// Unify parameters
-			for i, expectedParam := range expectedType.Parameters {
-				if err := c.unifyTypes(expectedParam.Type, actualFn.Parameters[i].Type, genericScope); err != nil {
-					return err
-				}
-			}
-
-			// Unify return types
-			return c.unifyTypes(expectedType.ReturnType, actualFn.ReturnType, genericScope)
+			actualParams = actualFn.Parameters
+			actualReturnType = actualFn.ReturnType
+		} else if actualFn, ok := actual.(*ExternalFunctionDef); ok {
+			actualParams = actualFn.Parameters
+			actualReturnType = actualFn.ReturnType
+		} else {
+			return fmt.Errorf("expected function, got %s", actual.String())
 		}
-		return fmt.Errorf("expected function, got %T", actual)
+		
+		// Check parameter count
+		if len(expectedType.Parameters) != len(actualParams) {
+			return fmt.Errorf("parameter count mismatch")
+		}
+
+		// Unify parameters
+		for i, expectedParam := range expectedType.Parameters {
+			if err := c.unifyTypes(expectedParam.Type, actualParams[i].Type, genericScope); err != nil {
+				return err
+			}
+		}
+
+		// Unify return types
+		return c.unifyTypes(expectedType.ReturnType, actualReturnType, genericScope)
 	case *Result:
 		if actualResult, ok := actual.(*Result); ok {
 			if err := c.unifyTypes(expectedType.val, actualResult.val, genericScope); err != nil {
@@ -4054,29 +4161,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 	}
 }
 
-// Helper function to extract generic names from a type
-func extractGenericNames(t Type, names map[string]bool) {
-	switch t := t.(type) {
-	case *Any:
-		names[t.name] = true
-	case *List:
-		extractGenericNames(t.of, names)
-	case *Map:
-		extractGenericNames(t.key, names)
-		extractGenericNames(t.value, names)
-	case *Maybe:
-		extractGenericNames(t.of, names)
-	case *Result:
-		extractGenericNames(t.val, names)
-		extractGenericNames(t.err, names)
-	case *FunctionDef:
-		// Extract generics from function parameters and return type
-		for _, param := range t.Parameters {
-			extractGenericNames(param.Type, names)
-		}
-		extractGenericNames(t.ReturnType, names)
-	}
-}
+
 
 // resolveArguments converts unified argument list to positional arguments
 func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, error) {

@@ -1007,12 +1007,12 @@ func (f FunctionDef) hasTrait(trait *Trait) bool {
 	return false
 }
 func (f *FunctionDef) hasGenerics() bool {
-	for i := range f.Parameters {
-		if strings.HasPrefix(f.Parameters[i].Type.String(), "$") {
+	for _, param := range f.Parameters {
+		if hasGenericsInType(param.Type) {
 			return true
 		}
 	}
-	return strings.Contains(f.ReturnType.String(), "$")
+	return hasGenericsInType(f.ReturnType)
 }
 
 type FunctionCall struct {
@@ -1252,7 +1252,7 @@ func (def StructDef) equal(other Type) bool {
 		}
 		return true
 	}
-	if o, ok := other.(*Any); ok {
+	if o, ok := other.(*TypeVar); ok {
 		if o.actual == nil {
 			return true
 		}
@@ -1304,8 +1304,8 @@ func (p Panic) GetLocation() parse.Location {
 func (p Panic) Type() Type {
 	// realistically, this is Void but that would break expectations when using `panic()` to signal unreachable code
 	// in a function or block that is declared to return or be a non-Void value.
-	// using Any technically allows empty panicking functions to work; e.g. the `async:start()` function in async.ard
-	return &Any{name: "Unreachable"}
+	// using TypeVar technically allows empty panicking functions to work; e.g. the `async:start()` function in async.ard
+	return &TypeVar{name: "Unreachable"}
 }
 
 type TryKind uint8

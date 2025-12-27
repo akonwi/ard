@@ -20,7 +20,7 @@ type test struct {
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
-		checker.Any{},
+		checker.TypeVar{},
 		checker.BoolMethod{},
 		checker.Diagnostic{},
 		checker.EnumVariant{},
@@ -2102,8 +2102,8 @@ func TestGenerics(t *testing.T) {
 					{
 						Expr: &checker.FunctionDef{
 							Name:       "identity",
-							Parameters: []checker.Parameter{{Name: "of", Type: &checker.Any{}}},
-							ReturnType: &checker.Any{},
+							Parameters: []checker.Parameter{{Name: "of", Type: &checker.TypeVar{}}},
+							ReturnType: &checker.TypeVar{},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{Expr: &checker.Variable{}},
@@ -2148,8 +2148,8 @@ func TestGenerics(t *testing.T) {
 					{
 						Expr: &checker.FunctionDef{
 							Name:       "identity",
-							Parameters: []checker.Parameter{{Name: "of", Type: &checker.Any{}}},
-							ReturnType: &checker.Any{},
+							Parameters: []checker.Parameter{{Name: "of", Type: &checker.TypeVar{}}},
+							ReturnType: &checker.TypeVar{},
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{Expr: &checker.Variable{}},

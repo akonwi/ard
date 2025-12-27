@@ -16,13 +16,9 @@ type SymbolTable struct {
 	genericContext *GenericContext
 }
 
-type GenericContext struct {
-	// Map from generic parameter name to concrete type
-	bindings map[string]Type
-
-	// Track which generics are still unresolved
-	unresolved map[string]bool
-}
+// GenericContext maps generic parameter names to their TypeVar instances
+// The TypeVar instances are mutable - binding happens by setting TypeVar.actual and TypeVar.bound
+type GenericContext = map[string]*TypeVar
 
 type Symbol struct {
 	Name    string
@@ -67,11 +63,11 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 }
 
 // findGeneric looks for an existing generic type with the given name in the scope chain
-func (st *SymbolTable) findGeneric(genericName string) *Any {
+func (st *SymbolTable) findGeneric(genericName string) *TypeVar {
 	// Check current scope
 	for _, symbol := range st.symbols {
-		if anyType, ok := symbol.Type.(*Any); ok && anyType.name == genericName {
-			return anyType
+		if typeVar, ok := symbol.Type.(*TypeVar); ok && typeVar.name == genericName {
+			return typeVar
 		}
 	}
 
@@ -104,21 +100,22 @@ func (st *SymbolTable) isolate() {
 
 // Generic context methods
 func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
-	genericContext := &GenericContext{
-		bindings:   make(map[string]Type),
-		unresolved: make(map[string]bool),
-	}
+	gc := make(GenericContext)
 
-	// Mark all generics as unresolved initially
+	// Create unbound TypeVar instances for each generic parameter
 	for _, param := range genericParams {
-		genericContext.unresolved[param] = true
+		gc[param] = &TypeVar{
+			name:   param,
+			actual: nil,
+			bound:  false,
+		}
 	}
 
 	return &SymbolTable{
 		parent:         st,
 		symbols:        make(map[string]*Symbol),
 		isolated:       false,
-		genericContext: genericContext,
+		genericContext: &gc,
 	}
 }
 
@@ -127,21 +124,28 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 		return nil // No generic context, ignore
 	}
 
-	// Check if already bound to a different type
-	if existing, exists := st.genericContext.bindings[genericName]; exists {
-		if !existing.equal(concreteType) {
+	// Get the TypeVar instance for this generic parameter
+	typeVar, exists := (*st.genericContext)[genericName]
+	if !exists {
+		// Generic not found in this scope - not an error, might be from parent
+		return nil
+	}
+
+	if typeVar.bound {
+		// Already bound - verify consistency
+		// Dereference both sides to handle chains
+		actual := deref(typeVar.actual)
+		concrete := deref(concreteType)
+		if !actual.equal(concrete) {
 			return fmt.Errorf("generic %s already bound to %s, cannot bind to %s",
-				genericName, existing.String(), concreteType.String())
+				genericName, actual.String(), concrete.String())
 		}
 		return nil
 	}
 
-	// Bind the generic
-	st.genericContext.bindings[genericName] = concreteType
-	st.genericContext.unresolved[genericName] = false
-
-	// Update all symbols that use this generic
-	st.updateSymbolsWithGeneric(genericName, concreteType)
+	// Bind it now - mutate the TypeVar in-place
+	typeVar.actual = deref(concreteType)
+	typeVar.bound = true
 
 	return nil
 }
@@ -158,13 +162,83 @@ func (st *SymbolTable) getGenericBindings() map[string]Type {
 	if st.genericContext == nil {
 		return nil
 	}
-	return st.genericContext.bindings
+
+	// Collect bindings from the bound TypeVar instances
+	bindings := make(map[string]Type)
+	for name, typeVar := range *st.genericContext {
+		if typeVar.bound && typeVar.actual != nil {
+			bindings[name] = typeVar.actual
+		}
+	}
+	return bindings
+}
+
+// extractGenericNames recursively collects all generic parameter names from a type.
+// Walks the type tree and adds any $T, $U, etc. to the names map.
+func extractGenericNames(t Type, names map[string]bool) {
+	switch t := t.(type) {
+	case *TypeVar:
+		names[t.name] = true
+	case *List:
+		extractGenericNames(t.of, names)
+	case *Map:
+		extractGenericNames(t.key, names)
+		extractGenericNames(t.value, names)
+	case *Maybe:
+		extractGenericNames(t.of, names)
+	case *Result:
+		extractGenericNames(t.val, names)
+		extractGenericNames(t.err, names)
+	case *Union:
+		for _, t := range t.Types {
+			extractGenericNames(t, names)
+		}
+	case *FunctionDef:
+		// Extract generics from function parameters and return type
+		for _, param := range t.Parameters {
+			extractGenericNames(param.Type, names)
+		}
+		extractGenericNames(t.ReturnType, names)
+	}
+}
+
+// hasGenericsInType checks if a type contains any generic parameters.
+// Used for quick detection before generic handling.
+func hasGenericsInType(t Type) bool {
+	switch t := t.(type) {
+	case *TypeVar:
+		return true
+	case *List:
+		return hasGenericsInType(t.of)
+	case *Map:
+		return hasGenericsInType(t.key) || hasGenericsInType(t.value)
+	case *Maybe:
+		return hasGenericsInType(t.of)
+	case *Result:
+		return hasGenericsInType(t.val) || hasGenericsInType(t.err)
+	case *Union:
+		for _, t := range t.Types {
+			if hasGenericsInType(t) {
+				return true
+			}
+		}
+		return false
+	case *FunctionDef:
+		for _, param := range t.Parameters {
+			if hasGenericsInType(param.Type) {
+				return true
+			}
+		}
+		return hasGenericsInType(t.ReturnType)
+	default:
+		return false
+	}
 }
 
 // Type replacement functions
 func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 	switch t := t.(type) {
-	case *Any:
+	case *TypeVar:
 		if t.name == genericName {
 			return concreteType
 		}
@@ -209,7 +283,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 
 func hasGeneric(t Type, genericName string) bool {
 	switch t := t.(type) {
-	case *Any:
+	case *TypeVar:
 		return t.name == genericName
 	case *List:
 		return hasGeneric(t.of, genericName)
@@ -221,5 +295,65 @@ func hasGeneric(t Type, genericName string) bool {
 		return hasGeneric(t.val, genericName) || hasGeneric(t.err, genericName)
 	default:
 		return false
+	}
+}
+
+// copyFunctionWithTypeVarMap recursively copies a function definition, replacing
+// TypeVar instances with those from the provided map
+func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeVar) *FunctionDef {
+	newParams := make([]Parameter, len(fnDef.Parameters))
+	for i, param := range fnDef.Parameters {
+		newParams[i] = Parameter{
+			Name:    param.Name,
+			Type:    copyTypeWithTypeVarMap(param.Type, typeVarMap),
+			Mutable: param.Mutable,
+		}
+	}
+
+	return &FunctionDef{
+		Name:       fnDef.Name,
+		Parameters: newParams,
+		ReturnType: copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
+		Body:       fnDef.Body,
+		Mutates:    fnDef.Mutates,
+		Private:    fnDef.Private,
+	}
+}
+
+// copyTypeWithTypeVarMap deep copies a type, replacing TypeVar instances with fresh ones
+func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
+	switch typ := t.(type) {
+	case *TypeVar:
+		if fresh, exists := typeVarMap[typ.name]; exists {
+			return fresh // Use the fresh TypeVar instance from genericScope
+		}
+		return typ // Keep as-is if not a generic parameter
+	case *List:
+		return &List{of: copyTypeWithTypeVarMap(typ.of, typeVarMap)}
+	case *Map:
+		return &Map{
+			key:   copyTypeWithTypeVarMap(typ.key, typeVarMap),
+			value: copyTypeWithTypeVarMap(typ.value, typeVarMap),
+		}
+	case *Maybe:
+		return &Maybe{of: copyTypeWithTypeVarMap(typ.of, typeVarMap)}
+	case *Result:
+		return &Result{
+			val: copyTypeWithTypeVarMap(typ.val, typeVarMap),
+			err: copyTypeWithTypeVarMap(typ.err, typeVarMap),
+		}
+	case *Union:
+		newTypes := make([]Type, len(typ.Types))
+		for i, t := range typ.Types {
+			newTypes[i] = copyTypeWithTypeVarMap(t, typeVarMap)
+		}
+		return &Union{
+			Name:  typ.Name,
+			Types: newTypes,
+		}
+	case *FunctionDef:
+		return copyFunctionWithTypeVarMap(typ, typeVarMap)
+	default:
+		return t
 	}
 }

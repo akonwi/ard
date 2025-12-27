@@ -19,3 +19,15 @@ fn drop(from: [$T], till: Int) [$T] {
 
   out
 }
+
+// given a list of items and a predicate, returns a new list of items matching the predicate
+fn keep(list: [$T], where: fn($T) Bool) [$T] {
+  mut out: [$T] = []
+  for t in list {
+    if where(t) {
+      out.push(t)
+    }
+  }
+
+  out
+}
