@@ -529,6 +529,39 @@ func TestListApi(t *testing.T) {
 				list.at(3) == 4`,
 			want: true,
 		},
+		{
+			name: "List::keep with inferred function parameter type",
+			input: `
+				struct User { name: Str }
+				
+				let users = [
+					User{name: "Alice"},
+					User{name: "Bob"},
+					User{name: "Andrew"},
+					User{name: "Charlie"},
+				]
+				
+				let a_people = List::keep(users, fn(u) { u.name.starts_with("A") })
+				a_people.size()
+			`,
+			want: 2,
+		},
+		{
+			name: "List::keep with inferred parameter accessing struct fields",
+			input: `
+				struct User { name: Str, age: Int }
+				
+				let users = [
+					User{name: "Alice", age: 25},
+					User{name: "Bob", age: 30},
+					User{name: "Andrew", age: 35},
+				]
+				
+				let adults = List::keep(users, fn(u) { u.age >= 30 })
+				adults.size()
+			`,
+			want: 2,
+		},
 	})
 }
 

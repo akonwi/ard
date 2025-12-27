@@ -546,10 +546,11 @@ func (m *Maybe) Of() Type {
 type Any struct {
 	name   string
 	actual Type
+	bound  bool 
 }
 
 func (a Any) String() string {
-	if a.actual != nil {
+	if a.bound && a.actual != nil {
 		return a.actual.String()
 	}
 	return "$" + a.name

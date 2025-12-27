@@ -16,13 +16,9 @@ type SymbolTable struct {
 	genericContext *GenericContext
 }
 
-type GenericContext struct {
-	// Map from generic parameter name to concrete type
-	bindings map[string]Type
-
-	// Track which generics are still unresolved
-	unresolved map[string]bool
-}
+// GenericContext maps generic parameter names to their Any instances
+// The Any instances are mutable - binding happens by setting Any.actual and Any.bound
+type GenericContext = map[string]*Any
 
 type Symbol struct {
 	Name    string
@@ -104,21 +100,22 @@ func (st *SymbolTable) isolate() {
 
 // Generic context methods
 func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
-	genericContext := &GenericContext{
-		bindings:   make(map[string]Type),
-		unresolved: make(map[string]bool),
-	}
+	gc := make(GenericContext)
 
-	// Mark all generics as unresolved initially
+	// Create unbound Any instances for each generic parameter
 	for _, param := range genericParams {
-		genericContext.unresolved[param] = true
+		gc[param] = &Any{
+			name:   param,
+			actual: nil,
+			bound:  false,
+		}
 	}
 
 	return &SymbolTable{
 		parent:         st,
 		symbols:        make(map[string]*Symbol),
 		isolated:       false,
-		genericContext: genericContext,
+		genericContext: &gc,
 	}
 }
 
@@ -127,21 +124,28 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 		return nil // No generic context, ignore
 	}
 
-	// Check if already bound to a different type
-	if existing, exists := st.genericContext.bindings[genericName]; exists {
-		if !existing.equal(concreteType) {
+	// Get the Any instance for this generic parameter
+	any, exists := (*st.genericContext)[genericName]
+	if !exists {
+		// Generic not found in this scope - not an error, might be from parent
+		return nil
+	}
+
+	if any.bound {
+		// Already bound - verify consistency
+		// Dereference both sides to handle chains
+		actual := deref(any.actual)
+		concrete := deref(concreteType)
+		if !actual.equal(concrete) {
 			return fmt.Errorf("generic %s already bound to %s, cannot bind to %s",
-				genericName, existing.String(), concreteType.String())
+				genericName, actual.String(), concrete.String())
 		}
 		return nil
 	}
 
-	// Bind the generic
-	st.genericContext.bindings[genericName] = concreteType
-	st.genericContext.unresolved[genericName] = false
-
-	// Update all symbols that use this generic
-	st.updateSymbolsWithGeneric(genericName, concreteType)
+	// Bind it now - mutate the Any in-place
+	any.actual = deref(concreteType)
+	any.bound = true
 
 	return nil
 }
@@ -158,7 +162,15 @@ func (st *SymbolTable) getGenericBindings() map[string]Type {
 	if st.genericContext == nil {
 		return nil
 	}
-	return st.genericContext.bindings
+
+	// Collect bindings from the bound Any instances
+	bindings := make(map[string]Type)
+	for name, any := range *st.genericContext {
+		if any.bound && any.actual != nil {
+			bindings[name] = any.actual
+		}
+	}
+	return bindings
 }
 
 // Type replacement functions
@@ -221,5 +233,65 @@ func hasGeneric(t Type, genericName string) bool {
 		return hasGeneric(t.val, genericName) || hasGeneric(t.err, genericName)
 	default:
 		return false
+	}
+}
+
+// copyFunctionWithAnyMap recursively copies a function definition, replacing
+// Any instances with those from the provided map
+func copyFunctionWithAnyMap(fnDef *FunctionDef, anyMap map[string]*Any) *FunctionDef {
+	newParams := make([]Parameter, len(fnDef.Parameters))
+	for i, param := range fnDef.Parameters {
+		newParams[i] = Parameter{
+			Name:    param.Name,
+			Type:    copyTypeWithAnyMap(param.Type, anyMap),
+			Mutable: param.Mutable,
+		}
+	}
+
+	return &FunctionDef{
+		Name:       fnDef.Name,
+		Parameters: newParams,
+		ReturnType: copyTypeWithAnyMap(fnDef.ReturnType, anyMap),
+		Body:       fnDef.Body,
+		Mutates:    fnDef.Mutates,
+		Private:    fnDef.Private,
+	}
+}
+
+// copyTypeWithAnyMap deep copies a type, replacing Any instances with fresh ones
+func copyTypeWithAnyMap(t Type, anyMap map[string]*Any) Type {
+	switch typ := t.(type) {
+	case *Any:
+		if fresh, exists := anyMap[typ.name]; exists {
+			return fresh // Use the fresh Any instance from genericScope
+		}
+		return typ // Keep as-is if not a generic parameter
+	case *List:
+		return &List{of: copyTypeWithAnyMap(typ.of, anyMap)}
+	case *Map:
+		return &Map{
+			key:   copyTypeWithAnyMap(typ.key, anyMap),
+			value: copyTypeWithAnyMap(typ.value, anyMap),
+		}
+	case *Maybe:
+		return &Maybe{of: copyTypeWithAnyMap(typ.of, anyMap)}
+	case *Result:
+		return &Result{
+			val: copyTypeWithAnyMap(typ.val, anyMap),
+			err: copyTypeWithAnyMap(typ.err, anyMap),
+		}
+	case *Union:
+		newTypes := make([]Type, len(typ.Types))
+		for i, t := range typ.Types {
+			newTypes[i] = copyTypeWithAnyMap(t, anyMap)
+		}
+		return &Union{
+			Name:  typ.Name,
+			Types: newTypes,
+		}
+	case *FunctionDef:
+		return copyFunctionWithAnyMap(typ, anyMap)
+	default:
+		return t
 	}
 }
