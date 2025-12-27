@@ -173,6 +173,68 @@ func (st *SymbolTable) getGenericBindings() map[string]Type {
 	return bindings
 }
 
+// extractGenericNames recursively collects all generic parameter names from a type.
+// Walks the type tree and adds any $T, $U, etc. to the names map.
+func extractGenericNames(t Type, names map[string]bool) {
+	switch t := t.(type) {
+	case *Any:
+		names[t.name] = true
+	case *List:
+		extractGenericNames(t.of, names)
+	case *Map:
+		extractGenericNames(t.key, names)
+		extractGenericNames(t.value, names)
+	case *Maybe:
+		extractGenericNames(t.of, names)
+	case *Result:
+		extractGenericNames(t.val, names)
+		extractGenericNames(t.err, names)
+	case *Union:
+		for _, t := range t.Types {
+			extractGenericNames(t, names)
+		}
+	case *FunctionDef:
+		// Extract generics from function parameters and return type
+		for _, param := range t.Parameters {
+			extractGenericNames(param.Type, names)
+		}
+		extractGenericNames(t.ReturnType, names)
+	}
+}
+
+// hasGenericsInType checks if a type contains any generic parameters.
+// Used for quick detection before generic handling.
+func hasGenericsInType(t Type) bool {
+	switch t := t.(type) {
+	case *Any:
+		return true
+	case *List:
+		return hasGenericsInType(t.of)
+	case *Map:
+		return hasGenericsInType(t.key) || hasGenericsInType(t.value)
+	case *Maybe:
+		return hasGenericsInType(t.of)
+	case *Result:
+		return hasGenericsInType(t.val) || hasGenericsInType(t.err)
+	case *Union:
+		for _, t := range t.Types {
+			if hasGenericsInType(t) {
+				return true
+			}
+		}
+		return false
+	case *FunctionDef:
+		for _, param := range t.Parameters {
+			if hasGenericsInType(param.Type) {
+				return true
+			}
+		}
+		return hasGenericsInType(t.ReturnType)
+	default:
+		return false
+	}
+}
+
 // Type replacement functions
 func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 	switch t := t.(type) {

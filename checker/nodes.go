@@ -1007,12 +1007,12 @@ func (f FunctionDef) hasTrait(trait *Trait) bool {
 	return false
 }
 func (f *FunctionDef) hasGenerics() bool {
-	for i := range f.Parameters {
-		if strings.HasPrefix(f.Parameters[i].Type.String(), "$") {
+	for _, param := range f.Parameters {
+		if hasGenericsInType(param.Type) {
 			return true
 		}
 	}
-	return strings.Contains(f.ReturnType.String(), "$")
+	return hasGenericsInType(f.ReturnType)
 }
 
 type FunctionCall struct {

@@ -38,8 +38,12 @@ func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
 }
 
-// deref follows Any bindings to find the concrete type
-// Used during type unification to ensure we see resolved types
+// deref follows Any bindings to find the concrete type.
+// Used during type unification to ensure we see resolved types.
+// Only dereferences a single type node; for compound types use derefType.
+//
+// Example: If $T is bound to Int, deref($T) returns Int.
+// If $T is bound to [$U], deref($T) returns [$U] (not the resolved contents).
 func deref(t Type) Type {
 	if any, ok := t.(*Any); ok && any.bound {
 		return deref(any.actual)  // Recursively follow chains
@@ -47,9 +51,13 @@ func deref(t Type) Type {
 	return t
 }
 
-// derefType recursively dereferences a type, including through compound types
-// This is needed to see bound generics in function parameters, list elements, etc.
+// derefType recursively dereferences a type, including through compound types.
+// Walks the entire type tree, dereferencing Any at each level.
+// Used when parameter types must reflect bound generics before checking arguments.
 // Only creates new instances when inner types actually change.
+//
+// Example: If $T is bound to Int, derefType([$T]) returns [Int].
+// Ensures anonymous function parameters see fully resolved types.
 func derefType(t Type) Type {
 	t = deref(t)  // First dereference at the top level
 	switch typ := t.(type) {
@@ -3902,14 +3910,17 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 	args := make([]Expression, len(resolvedArgs))
 	
 	for i := range resolvedArgs {
-		// Get the expected parameter type from the copy (which has fresh Any instances for generics)
-		// For generic functions, dereference to see bound generics from previous arguments
+		// Get the expected parameter type from the copy (which has fresh Any instances for generics).
+		// For generic functions, dereference to see bound generics from previous arguments.
+		// derefType walks the type tree so List($T) becomes List(Int) if $T was bound to Int.
 		paramType := fnDefCopy.Parameters[i].Type
 		if fnDef.hasGenerics() && genericScope != nil {
 			paramType = derefType(paramType)
 		}
 
-		// For list and map literals, use checkExprAs to infer type from context
+		// For list and map literals, use checkExprAs to infer type from context.
+		// Anonymous functions also use checkExprAs so parameter types are inferred from
+		// the (possibly bound) paramType.
 		var checkedArg Expression
 		switch resolvedExprs[i].(type) {
 		case *parse.ListLiteral, *parse.MapLiteral:
@@ -3924,8 +3935,10 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 			return nil, nil
 		}
 
-		// For generic functions, unify the argument type with the parameter type
-		// This binds generics so that subsequent arguments see bound types
+		// For generic functions, unify the argument type with the parameter type.
+		// unifyTypes uses deref() to see bound generics and calls bindGeneric()
+		// to mutate Any instances in-place. This binds generics so that
+		// subsequent arguments see bound types.
 		if fnDef.hasGenerics() && genericScope != nil {
 			if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
 				c.addError(err.Error(), resolvedExprs[i].GetLocation())
@@ -4081,31 +4094,46 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	return specialized, nil
 }
 
-// unifyTypes attempts to unify two types by binding generics in the scope
+// unifyTypes performs type unification for generic function arguments.
+// It recursively walks the type tree, binding generics to concrete types.
+// When expected is an Any (generic parameter), bindGeneric mutates the Any in-place
+// with the concrete type, making the binding immediately visible to all callers.
+// This enables single-pass argument checking where later arguments see bindings from earlier ones.
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
 	switch expectedType := expected.(type) {
 	case *Any:
-		// Generic type - bind it to the actual type
+		// Generic type - bind it to the actual type using in-place mutation.
+		// This mutates expectedType.bound and expectedType.actual directly.
 		return genericScope.bindGeneric(expectedType.name, actual)
 	case *FunctionDef:
-		// Function type unification
+		// Function type unification - handle both FunctionDef and ExternalFunctionDef
+		var actualParams []Parameter
+		var actualReturnType Type
+		
 		if actualFn, ok := actual.(*FunctionDef); ok {
-			// Check parameter count
-			if len(expectedType.Parameters) != len(actualFn.Parameters) {
-				return fmt.Errorf("parameter count mismatch")
-			}
-
-			// Unify parameters
-			for i, expectedParam := range expectedType.Parameters {
-				if err := c.unifyTypes(expectedParam.Type, actualFn.Parameters[i].Type, genericScope); err != nil {
-					return err
-				}
-			}
-
-			// Unify return types
-			return c.unifyTypes(expectedType.ReturnType, actualFn.ReturnType, genericScope)
+			actualParams = actualFn.Parameters
+			actualReturnType = actualFn.ReturnType
+		} else if actualFn, ok := actual.(*ExternalFunctionDef); ok {
+			actualParams = actualFn.Parameters
+			actualReturnType = actualFn.ReturnType
+		} else {
+			return fmt.Errorf("expected function, got %s", actual.String())
 		}
-		return fmt.Errorf("expected function, got %T", actual)
+		
+		// Check parameter count
+		if len(expectedType.Parameters) != len(actualParams) {
+			return fmt.Errorf("parameter count mismatch")
+		}
+
+		// Unify parameters
+		for i, expectedParam := range expectedType.Parameters {
+			if err := c.unifyTypes(expectedParam.Type, actualParams[i].Type, genericScope); err != nil {
+				return err
+			}
+		}
+
+		// Unify return types
+		return c.unifyTypes(expectedType.ReturnType, actualReturnType, genericScope)
 	case *Result:
 		if actualResult, ok := actual.(*Result); ok {
 			if err := c.unifyTypes(expectedType.val, actualResult.val, genericScope); err != nil {
@@ -4133,33 +4161,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 	}
 }
 
-// Helper function to extract generic names from a type
-func extractGenericNames(t Type, names map[string]bool) {
-	switch t := t.(type) {
-	case *Any:
-		names[t.name] = true
-	case *List:
-		extractGenericNames(t.of, names)
-	case *Map:
-		extractGenericNames(t.key, names)
-		extractGenericNames(t.value, names)
-	case *Maybe:
-		extractGenericNames(t.of, names)
-	case *Result:
-		extractGenericNames(t.val, names)
-		extractGenericNames(t.err, names)
-	case *Union:
-		for _, t := range t.Types {
-			extractGenericNames(t, names)
-		}
-	case *FunctionDef:
-		// Extract generics from function parameters and return type
-		for _, param := range t.Parameters {
-			extractGenericNames(param.Type, names)
-		}
-		extractGenericNames(t.ReturnType, names)
-	}
-}
+
 
 // resolveArguments converts unified argument list to positional arguments
 func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, error) {
