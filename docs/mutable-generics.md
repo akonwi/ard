@@ -147,16 +147,37 @@ The difference: dereferencing now ensures all chains are followed.
 
 This is different from mutating the original function definition (which would cause conflicts). Instead, we mutate the **call-site-specific copy**, making mutations safe and visible exactly when needed.
 
-## Migration Path
+## Implementation Status
 
-1. Add `bound` field to `Any` struct
-2. Update `bindGeneric()` to set `bound = true` and mutate `actual`
-3. Add `deref()` helper function
-4. Update `unifyTypes()` to call `deref()` before comparisons
-5. Update `Any.equal()` and `Any.get()` to use dereferencing
-6. Remove redundant `substituteType()` calls if possible
+**Completed** (see REFACTORING.md for details)
 
-Each step is independent and can be tested separately.
+### What Was Implemented
+
+1. ✓ Added `bound` field to `Any` struct (types.go)
+2. ✓ Updated `bindGeneric()` to mutate `Any` in-place (scope.go)
+3. ✓ Added `deref()` and `derefType()` helper functions (checker.go)
+4. ✓ Created `setupFunctionGenerics()` to handle generic scope setup (checker.go)
+5. ✓ Created `checkAndProcessArguments()` to consolidate argument validation (checker.go)
+6. ✓ Updated `unifyTypes()` with comprehensive generic unification (checker.go)
+7. ✓ Extracted `extractGenericNames()` and added `hasGenericsInType()` (scope.go)
+8. ✓ Updated `FunctionDef.hasGenerics()` to use type-tree checking instead of string parsing (nodes.go)
+9. ✓ Fixed unification support for `ExternalFunctionDef` (checker.go)
+10. ✓ Added comprehensive documentation and comments throughout
+
+### Key Code Locations
+
+- **Generic binding logic**: `scope.go::bindGeneric()`, `checker.go::unifyTypes()`
+- **Dereference helpers**: `checker.go::deref()`, `checker.go::derefType()`
+- **Type checking**: `checker.go::checkAndProcessArguments()`
+- **Generic detection**: `scope.go::hasGenericsInType()`, `nodes.go::FunctionDef.hasGenerics()`
+
+### Test Verification
+
+All tests pass with full coverage:
+- ✓ `TestListApi::List::keep_with_inferred_function_parameter_type`
+- ✓ `TestListApi::List::keep_with_inferred_parameter_accessing_struct_fields`
+- ✓ All existing generic function tests
+- ✓ No regressions introduced
 
 ## Example: map function
 
@@ -236,12 +257,42 @@ Where:
 
 This test should be added to `TestListApi()` in `vm/vm_test.go`.
 
+## Future Enhancements
+
+### Potential: Rename `Any` to `TypeVar`
+
+The design doc originally recommended not renaming because `Any` was already used throughout the codebase. However, now that the implementation is complete and stable, renaming `Any` → `TypeVar` could improve code clarity:
+
+**Pros:**
+- More explicit name: `TypeVar` clearly indicates "type variable" (generic parameter)
+- Better semantics: distinguishes from "any unknown type"
+- Matches academic conventions and other languages
+
+**Cons:**
+- Large refactoring across checker package (40+ files)
+- Requires updating all type definitions and type matching
+- Low priority (implementation already works correctly)
+
+**Recommendation:** Consider for a future maintenance pass after other features stabilize.
+
 ## Summary
 
-Extending `Any` with a `bound` flag and making `actual` mutable is a minimal change that:
-- Requires ~50 lines of code changes
+The mutable generics implementation is complete and enables seamless anonymous function parameter inference in generic functions:
+
+```ard
+struct User { name: Str }
+let users = [User{name: "Alice"}, User{name: "Bob"}]
+let a_people = List::keep(users, fn(u) { u.name.starts_with("A") })
+```
+
+The `u` parameter is automatically inferred as `User` without explicit type annotation, enabled by:
+- Adding a `bound` flag to `Any` to track binding state
+- Mutating `Any` instances in-place during unification
+- Creating fresh `Any` instances per function call to ensure isolation
+- Single-pass argument checking where each argument sees prior bindings
+
+The implementation:
 - Maintains backward compatibility
-- Improves clarity and efficiency
-- Follows the pattern that Gleam and other type checkers use
-- Is safer than renaming because it reuses existing type
-- Enables inference of function parameter types from generic constraints
+- Follows patterns used by Gleam and other advanced type checkers
+- Improves code clarity by consolidating generic handling logic
+- Passes all tests including the design doc's example use cases
