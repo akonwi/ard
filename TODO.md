@@ -1,4 +1,6 @@
 # TODO
+- [ ] in checker: variable assignment should be an expression that results in Void
+  - would allow use `var = foo` in match cases without wrapping in a block
 - [ ] syntax for generics on structs
   - `struct Box { item: $T }`
 - [ ] add helpful functions to ard/list module
