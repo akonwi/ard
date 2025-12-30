@@ -1216,9 +1216,7 @@ func (def StructDef) NonProducing() {}
 func (def *StructDef) name() string {
 	return def.Name
 }
-func (def StructDef) _type() Type {
-	return def
-}
+
 func (def StructDef) String() string {
 	return def.name()
 }
@@ -1261,6 +1259,15 @@ func (def StructDef) equal(other Type) bool {
 			return true
 		}
 		return def.equal(o.actual)
+	}
+	return false
+}
+
+func (def StructDef) hasGenerics() bool {
+	for _, fieldType := range def.Fields {
+		if hasGenericsInType(fieldType) {
+			return true
+		}
 	}
 	return false
 }
