@@ -1497,30 +1497,92 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
 
+	// For generic structs, infer generics from provided field values
+	var structDefCopy *StructDef
+	var genericScope *SymbolTable
+	if structType.hasGenerics() {
+		// Extract generic parameter names from struct fields
+		genericNames := make(map[string]bool)
+		for _, fieldType := range structType.Fields {
+			extractGenericNames(fieldType, genericNames)
+		}
+		
+		genericParams := make([]string, 0, len(genericNames))
+		for name := range genericNames {
+			genericParams = append(genericParams, name)
+		}
+		
+		// Create generic scope and fresh struct copy
+		genericScope = c.scope.createGenericScope(genericParams)
+		structDefCopy = copyStructWithTypeVarMap(structType, *genericScope.genericContext)
+	} else {
+		structDefCopy = structType
+	}
+
 	// Check all provided properties
 	for _, property := range properties {
-		if field, ok := structType.Fields[property.Name.Name]; !ok {
-			c.addError(fmt.Sprintf("Unknown field: %s", property.Name.Name), property.GetLocation())
+		fieldName := property.Name.Name
+		var field Type
+		var ok bool
+		
+		// Get field from the copy (which has fresh TypeVar instances for generics)
+		if genericScope != nil {
+			field, ok = structDefCopy.Fields[fieldName]
 		} else {
-			if val := c.checkExprAs(property.Value, field); val != nil {
-				fields[property.Name.Name] = val
+			field, ok = structType.Fields[fieldName]
+		}
+		
+		if !ok {
+			c.addError(fmt.Sprintf("Unknown field: %s", fieldName), property.GetLocation())
+		} else {
+			// For generic structs, unify types to resolve generics
+			if genericScope != nil {
+				// Check expression without type context first (let it infer if possible)
+				checkVal := c.checkExpr(property.Value)
+				if checkVal == nil {
+					continue
+				}
+				
+				if err := c.unifyTypes(field, checkVal.Type(), genericScope); err != nil {
+					c.addError(err.Error(), property.GetLocation())
+					continue
+				}
+				// After unification, dereference to get the actual type
+				field = derefType(field)
+				
+				fields[fieldName] = checkVal
+				fieldTypes[fieldName] = field
+			} else {
+				// For non-generic structs, use the original checkExprAs which provides type context
+				if val := c.checkExprAs(property.Value, field); val != nil {
+					fields[fieldName] = val
+					fieldTypes[fieldName] = field
+				}
 			}
-			fieldTypes[property.Name.Name] = field
 		}
 	}
 
 	// Check for missing required fields
 	missing := []string{}
-	for name, t := range structType.Fields {
+	checkFieldsMap := structDefCopy.Fields
+	if structDefCopy == structType {
+		checkFieldsMap = structType.Fields
+	}
+	
+	for name, t := range checkFieldsMap {
 		if _, exists := fields[name]; !exists {
 			if _, isMaybe := t.(*Maybe); !isMaybe {
 				// todo: distinguish between provided w/ error + missing to avoid creating 2 errors:
 				// missing field + invalid expression for field
 				missing = append(missing, name)
+			} else {
+				// For optional fields, include their type
+				fieldTypes[name] = t
 			}
+		} else if _, exists := fieldTypes[name]; !exists {
+			// Pre-compute all field types, not just provided ones
+			fieldTypes[name] = t
 		}
-		// Pre-compute all field types, not just provided ones
-		fieldTypes[name] = t
 	}
 	if len(missing) > 0 {
 		c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), loc)
@@ -1528,6 +1590,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 	instance.Fields = fields
 	instance.FieldTypes = fieldTypes
+	// Store the refined struct definition (with resolved generics) as the instance's type
+	instance._type = &StructDef{
+		Name:    structDefCopy.Name,
+		Fields:  fieldTypes,
+		Methods: structDefCopy.Methods,
+		Self:    structDefCopy.Self,
+		Traits:  structDefCopy.Traits,
+		Private: structDefCopy.Private,
+	}
 	return instance
 }
 
@@ -1753,6 +1824,41 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		ErrType: resultType.Err(),
 		fn:      fnDef,
 	}
+}
+
+// extractGenericBindingsFromSpecializedStruct builds a mapping from generic parameter names to their resolved types
+// by comparing the original struct definition with a specialized version of it.
+// For example, if the original struct is `Box { item: $T }` and the specialized has `item: Int`,
+// this returns `{$T: Int}`.
+func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, specializedDef *StructDef) map[string]Type {
+	bindings := make(map[string]Type)
+	
+	if originalDef == nil || specializedDef == nil {
+		return bindings
+	}
+	
+	// Now compare original field types with specialized field types
+	// For each field that contains a generic in the original, extract its resolved type
+	for fieldName, originalFieldType := range originalDef.Fields {
+		specializedFieldType, ok := specializedDef.Fields[fieldName]
+		if !ok {
+			continue
+		}
+		
+		// Extract generic names from the original field type
+		genericNames := make(map[string]bool)
+		extractGenericNames(originalFieldType, genericNames)
+		
+		// For each generic found, bind it to the corresponding specialized type
+		for genericName := range genericNames {
+			if _, alreadyBound := bindings[genericName]; !alreadyBound {
+				// Bind this generic to the specialized field type
+				bindings[genericName] = specializedFieldType
+			}
+		}
+	}
+	
+	return bindings
 }
 
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
@@ -1990,8 +2096,71 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Align mutability information with parameters
 			resolvedArgs := c.alignArgumentsWithParameters(s.Method.Args, fnDef.Parameters)
 
-			// Setup generics if function has them
-			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
+			// For methods on generic struct instances, bind struct generics to method parameters.
+			// When calling a method on a generic struct instance, the method's generic parameters
+			// should use the types that were resolved during struct instantiation.
+			// Example: For Box{ item: 42 }, calling put(x: $T) should require Int for $T.
+			var genericScope *SymbolTable
+			var fnDefCopy *FunctionDef
+			
+			// Check if the subject is a struct and if the original struct definition has generics
+			structType, isStruct := subj.Type().(*StructDef)
+			if isStruct {
+				// Look up the original struct definition by name to check if it's generic
+				scopeSymbol, _ := c.scope.get(structType.Name)
+				var originalDef *StructDef
+				if scopeSymbol != nil {
+					if origType, ok := scopeSymbol.Type.(*StructDef); ok {
+						originalDef = origType
+					}
+				}
+				
+				// If the original definition has generics, the current structType might be
+				// a specialized version with concrete field types (e.g., item: Int instead of item: $T)
+				if originalDef != nil && originalDef.hasGenerics() {
+					// Extract generic parameter names used in the function
+					genericNames := make(map[string]bool)
+					for _, param := range fnDef.Parameters {
+						extractGenericNames(param.Type, genericNames)
+					}
+					extractGenericNames(fnDef.ReturnType, genericNames)
+					
+					if len(genericNames) > 0 {
+						genericParams := make([]string, 0, len(genericNames))
+						for name := range genericNames {
+							genericParams = append(genericParams, name)
+						}
+						
+						// Create generic scope with fresh TypeVar instances
+						genericScope = c.scope.createGenericScope(genericParams)
+						
+						// Build mapping from generic names to their resolved types.
+						// Compare original struct fields (which contain generics like $T)
+						// with current struct fields (which have concrete types like Int).
+						// This tells us what each generic parameter should be bound to.
+						genericBindings := c.extractGenericBindingsFromSpecializedStruct(originalDef, structType)
+						
+						// Bind the method's generic parameters based on the struct instance's specialization
+						for paramName, resolvedType := range genericBindings {
+							if gv, exists := (*genericScope.genericContext)[paramName]; exists {
+								gv.actual = resolvedType
+								gv.bound = true
+							}
+						}
+						
+						// Copy the function with the struct's generic bindings applied
+						fnDefCopy = copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
+					} else {
+						fnDefCopy = fnDef
+					}
+				} else {
+					// Not a generic struct, use normal generic setup (for methods with their own generics)
+					fnDefCopy, genericScope = c.setupFunctionGenerics(fnDef)
+				}
+			} else {
+				// Not a struct - setup generics if the method itself has them
+				fnDefCopy, genericScope = c.setupFunctionGenerics(fnDef)
+			}
 
 			// Check and process arguments (handles both generics and mutability)
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope)

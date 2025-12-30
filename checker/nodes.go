@@ -133,6 +133,10 @@ type Reassignment struct {
 
 func (r *Reassignment) NonProducing() {}
 
+func (r *Reassignment) Type() Type {
+	return Void
+}
+
 type Identifier struct {
 	Name string
 	sym  Symbol
@@ -321,7 +325,7 @@ type ListMethod struct {
 	Subject     Expression
 	Kind        ListMethodKind
 	Args        []Expression
-	ElementType Type        // Pre-computed element type
+	ElementType Type         // Pre-computed element type
 	fn          *FunctionDef // Function definition for return type resolution
 }
 
@@ -362,8 +366,8 @@ type MapMethod struct {
 	Subject   Expression
 	Kind      MapMethodKind
 	Args      []Expression
-	KeyType   Type        // Pre-computed key type
-	ValueType Type        // Pre-computed value type
+	KeyType   Type         // Pre-computed key type
+	ValueType Type         // Pre-computed value type
 	fn        *FunctionDef // Function definition for return type resolution
 }
 
@@ -404,7 +408,7 @@ type MaybeMethod struct {
 	Subject   Expression
 	Kind      MaybeMethodKind
 	Args      []Expression
-	InnerType Type        // Pre-computed inner type
+	InnerType Type         // Pre-computed inner type
 	fn        *FunctionDef // Function definition for return type resolution
 }
 
@@ -437,8 +441,8 @@ type ResultMethod struct {
 	Subject Expression
 	Kind    ResultMethodKind
 	Args    []Expression
-	OkType  Type        // Pre-computed OK type
-	ErrType Type        // Pre-computed Error type
+	OkType  Type         // Pre-computed OK type
+	ErrType Type         // Pre-computed Error type
 	fn      *FunctionDef // Function definition for return type resolution
 }
 
@@ -1212,9 +1216,7 @@ func (def StructDef) NonProducing() {}
 func (def *StructDef) name() string {
 	return def.Name
 }
-func (def StructDef) _type() Type {
-	return def
-}
+
 func (def StructDef) String() string {
 	return def.name()
 }
@@ -1257,6 +1259,15 @@ func (def StructDef) equal(other Type) bool {
 			return true
 		}
 		return def.equal(o.actual)
+	}
+	return false
+}
+
+func (def StructDef) hasGenerics() bool {
+	for _, fieldType := range def.Fields {
+		if hasGenericsInType(fieldType) {
+			return true
+		}
 	}
 	return false
 }

@@ -3,15 +3,15 @@
 This file provides guidance to a coding agent.
 
 ## Project Summary
-This is the source code for the parser, compiler, and interpreter of a programming language called Ard
-The language spec is in the README.md
-  - Use this and the documentation files in ./docs to understand the language syntax, features, and their design
-  - There are runnable samples in ./samples/*.ard
-    - Also use as a reference
-  - The ./website directory is the documentation website
-    - using Astro and Starlight
-The backlog of work is a simple todo list in TODO.md
+This is the source code for the parser, compiler, interpreter, and documentation website of a programming language called Ard.
 
+### Repo structure
+- /docs: documentation about language syntax, feature design, and implementation decisions
+- /samples: runnable samples
+- /website: the documentation website built with Astro and Starlight as a static site
+- TODO.md: The running backlog of bugs, refactorings, and new feature ideas
+
+## Commands
 The project uses the `jsonv2` experiment for the [new json tools](https://antonz.org/go-json-v2/) and has build tag directives for it.
 
 - Build: `go build`

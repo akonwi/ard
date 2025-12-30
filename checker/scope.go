@@ -320,6 +320,24 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 	}
 }
 
+// copyStructWithTypeVarMap creates a shallow copy of a StructDef with fresh TypeVar instances
+// for generic type parameters. This is used to create call-site-specific copies of generic structs.
+func copyStructWithTypeVarMap(structDef *StructDef, typeVarMap map[string]*TypeVar) *StructDef {
+	newFields := make(map[string]Type)
+	for name, fieldType := range structDef.Fields {
+		newFields[name] = copyTypeWithTypeVarMap(fieldType, typeVarMap)
+	}
+
+	return &StructDef{
+		Name:    structDef.Name,
+		Fields:  newFields,
+		Methods: structDef.Methods, // Methods are not copied; they're shared
+		Self:    structDef.Self,
+		Traits:  structDef.Traits,
+		Private: structDef.Private,
+	}
+}
+
 // copyTypeWithTypeVarMap deep copies a type, replacing TypeVar instances with fresh ones
 func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
 	switch typ := t.(type) {

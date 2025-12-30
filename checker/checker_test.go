@@ -2186,6 +2186,27 @@ func TestGenerics(t *testing.T) {
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
+		{
+			name: "Generic structs",
+			input: `
+				struct Box { item: $T }
+				impl Box {
+					fn mut put(new: $T) {
+						@item = new
+					}
+				}
+				mut int_box = Box{ item: 42 }
+				let forty_four = int_box.item + 2
+
+				int_box.put(false) // not allowed
+			`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "type mismatch: expected Int, got Bool",
+				},
+			},
+		},
 	})
 }
 
