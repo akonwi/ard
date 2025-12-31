@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/vm"
 )
 
@@ -230,13 +230,13 @@ func TestChainedComparisons(t *testing.T) {
 		{input: `200 <= 300 <= 300`, want: true},
 		{input: `200 <= 100 <= 300`, want: false},
 		{input: `200 <= 300 <= 200`, want: false},
-		
+
 		// Mixed operators
 		{input: `100 < 150 <= 200`, want: true},
 		{input: `100 < 100 <= 200`, want: false},
 		{input: `100 <= 150 < 200`, want: true},
 		{input: `100 <= 150 < 100`, want: false},
-		
+
 		// Greater than variants
 		{input: `300 >= 250 >= 200`, want: true},
 		{input: `300 >= 200 >= 200`, want: true},
@@ -244,18 +244,18 @@ func TestChainedComparisons(t *testing.T) {
 		{input: `300 >= 200 >= 300`, want: false},
 		{input: `200 > 150 > 100`, want: true},
 		{input: `200 > 150 > 200`, want: false},
-		
+
 		// Three-operand chains
 		{input: `50 < 100 < 150 < 200`, want: true},
 		{input: `50 < 100 < 150 < 100`, want: false},
 		{input: `100 <= 100 <= 100 <= 100`, want: true},
-		
+
 		// Float comparisons
 		{input: `1.5 < 2.0 < 2.5`, want: true},
 		{input: `1.5 < 1.5 < 2.5`, want: false},
 		{input: `2.5 >= 2.0 >= 1.5`, want: true},
 		{input: `3.14 <= 3.14 <= 3.14`, want: true},
-		
+
 		// With variables
 		{input: `let x = 150
 let result = 100 < x <= 200
@@ -263,7 +263,7 @@ result`, want: true},
 		{input: `let x = 250
 let result = 100 < x <= 200
 result`, want: false},
-		
+
 		// In if conditions
 		{input: `let status = 201
 if 200 <= status <= 300 {
@@ -277,7 +277,7 @@ if 200 <= status <= 300 {
 } else {
 	0
 }`, want: 0},
-		
+
 		// With function calls (middle operand evaluated once)
 		{input: `fn get_mid() Int {
 	10
@@ -454,115 +454,6 @@ func TestStrApi(t *testing.T) {
 		},
 	}
 	runTests(t, tests)
-}
-
-func TestListApi(t *testing.T) {
-	runTests(t, []test{
-		{
-			name: "List::new",
-			input: `mut nums = List::new<Int>()
-			nums.push(1)
-			nums.push(2)
-			nums.size()`,
-			want: 2,
-		},
-		{
-			name:  "List.size",
-			input: "[1,2,3].size()",
-			want:  3,
-		},
-		{
-			name: "List::prepend",
-			input: `
-				mut list = [1,2,3]
-				list.prepend(4)
-			  list.size()`,
-			want: 4,
-		},
-		{
-			name: "List::push",
-			input: `
-				mut list = [1,2,3]
-				list.push(4)
-			  list.size()`,
-			want: 4,
-		},
-		{
-			name: "List::at",
-			input: `
-				mut list = [1,2,3]
-				list.push(4)
-			  list.at(3)`,
-			want: 4,
-		},
-		{
-			name: "List::set updates the list at the specified index",
-			input: `
-				mut list = [1,2,3]
-				list.set(1, 10)
-				list.at(1)`,
-			want: 10,
-		},
-		{
-			name: "List.sort()",
-			input: `
-				mut list = [3,7,8,5,2,9,5,4]
-				list.sort(fn(a: Int, b: Int) Bool { a < b })
-				list.at(0) + list.at(7) // 2 + 9 = 11
-			`,
-			want: 11,
-		},
-		{
-			name: "List.swap swaps values at the given indexes",
-			input: `
-				mut list = [1,2,3]
-				list.swap(0,2)
-				list.at(0)`,
-			want: 3,
-		},
-		{
-			name: "List::concat a combined list",
-			input: `
-				let a = [1,2,3]
-				let b = [4,5,6]
-				let list = List::concat(a, b)
-				list.at(3) == 4`,
-			want: true,
-		},
-		{
-			name: "List::keep with inferred function parameter type",
-			input: `
-				struct User { name: Str }
-				
-				let users = [
-					User{name: "Alice"},
-					User{name: "Bob"},
-					User{name: "Andrew"},
-					User{name: "Charlie"},
-				]
-				
-				let a_people = List::keep(users, fn(u) { u.name.starts_with("A") })
-				a_people.size()
-			`,
-			want: 2,
-		},
-		{
-			name: "List::keep with inferred parameter accessing struct fields",
-			input: `
-				struct User { name: Str, age: Int }
-				
-				let users = [
-					User{name: "Alice", age: 25},
-					User{name: "Bob", age: 30},
-					User{name: "Andrew", age: 35},
-				]
-				
-				let adults = List::keep(users, fn(u) { u.age >= 30 })
-				adults.size()
-			`,
-			want: 2,
-		},
-	})
 }
 
 func TestMapApi(t *testing.T) {

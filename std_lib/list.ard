@@ -1,3 +1,5 @@
+use ard/maybe
+
 extern fn new() [$T] = "NewList"
 
 fn concat(a: [$T], b: [$T]) [$T] {
@@ -30,4 +32,47 @@ fn keep(list: [$T], where: fn($T) Bool) [$T] {
   }
 
   out
+}
+
+// transforms a list of items using a given function
+fn map(list: [$A], transform: fn($A) $B) [$B] {
+  mut out: [$B] = []
+  for t in list {
+    out.push(transform(t))
+  }
+
+  out
+}
+
+// look for the first item in a list matching the predicate
+fn find(list: [$T], where: fn($T) Bool) $T? {
+  mut found = maybe::none<$T>()
+  for t in list {
+    if where(t) {
+      found = maybe::some(t)
+      break
+    }
+  }
+
+  found
+}
+
+// split a list into two based on which match the given predicate
+struct Partition {
+  selected: [$T],
+  others: [$T],
+}
+
+fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
+  mut selected: [$T] = []
+  mut others: [$T] = []
+
+  for t in list {
+    match where(t) {
+      true => selected.push(t),
+      false => others.push(t)
+    }
+  }
+
+  Partition{ selected: selected, others: others }
 }

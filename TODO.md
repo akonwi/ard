@@ -1,6 +1,4 @@
 # TODO
-- [ ] add helpful functions to ard/list module
-  - map, find, select, take?, partition?
 - [ ] inline block as expression
   ```
   let foo: Int = {
