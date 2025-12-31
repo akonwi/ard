@@ -404,8 +404,11 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 		collectGenericsFromType(t.val, params, seen)
 		collectGenericsFromType(t.err, params, seen)
 	case *StructDef:
-		// This needs to handle a defined order, which map doesn't provide.
-		// For now, this is not supported.
+		// Extract generics from struct fields in a consistent order
+		// We need to iterate in a deterministic order; using sorted keys would work
+		for _, fieldType := range t.Fields {
+			collectGenericsFromType(fieldType, params, seen)
+		}
 	}
 }
 

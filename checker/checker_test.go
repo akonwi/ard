@@ -2207,6 +2207,72 @@ func TestGenerics(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Multiple generic parameters",
+			input: `
+				struct Pair { first: $T, second: $U }
+				impl Pair {
+					fn get_first() $T {
+						@first
+					}
+					fn get_second() $U {
+						@second
+					}
+				}
+				let pair = Pair{ first: 42, second: "hello" }
+				let num = pair.get_first()
+				let greeting = pair.get_second()
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Multiple generics with method parameter validation",
+			input: `
+				struct Pair { first: $T, second: $U }
+				impl Pair {
+					fn mut swap_first(new: $T) {
+						@first = new
+					}
+					fn mut swap_second(new: $U) {
+						@second = new
+					}
+				}
+				mut pair = Pair{ first: 42, second: "hello" }
+				pair.swap_first(100)
+				pair.swap_second("world")
+				pair.swap_first("wrong") // type error
+			`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "type mismatch: expected Int, got Str",
+				},
+			},
+		},
+		{
+			name: "Different types for each generic parameter",
+			input: `
+				struct Pair { first: $T, second: $U }
+				impl Pair {
+					fn validate_first(val: $T) Bool {
+						true
+					}
+					fn validate_second(val: $U) Bool {
+						true
+					}
+				}
+				let pair = Pair{ first: 42, second: "hello" }
+				pair.validate_first(100)
+				pair.validate_second("world")
+				pair.validate_first("wrong") // type error
+			`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "type mismatch: expected Int, got Str",
+				},
+			},
+		},
 	})
 }
 
@@ -2222,6 +2288,32 @@ func TestVoidLiteral(t *testing.T) {
 					},
 				},
 			},
+		},
+	})
+}
+
+func TestGenericTypeParams(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Explicit type parameters for generic structs",
+			input: strings.Join([]string{
+				`struct Box { item: $T }`,
+				`let box: Box<Int> = Box{ item: 42 }`,
+			}, "\n"),
+		},
+		{
+			name: "Multiple type parameters",
+			input: strings.Join([]string{
+				`struct Pair { first: $T, second: $U }`,
+				`let pair: Pair<Int, Str> = Pair{ first: 42, second: "hello" }`,
+			}, "\n"),
+		},
+		{
+			name: "Type parameter with nested generic type",
+			input: strings.Join([]string{
+				`struct Box { item: $T }`,
+				`let box: Box<[Int]> = Box{ item: [1, 2, 3] }`,
+			}, "\n"),
 		},
 	})
 }
