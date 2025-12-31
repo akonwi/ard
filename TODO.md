@@ -1,6 +1,4 @@
 # TODO
-- [ ] syntax for generics on structs
-  - `struct Box { item: $T }`
 - [ ] add helpful functions to ard/list module
   - map, find, select, take?, partition?
 - [ ] inline block as expression
