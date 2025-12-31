@@ -3634,6 +3634,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 			}
 		}
+	case *parse.BlockExpression:
+		{
+			// Check block statements in the current scope
+			block := c.checkBlock(s.Statements, nil)
+			return block
+		}
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}

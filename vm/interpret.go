@@ -704,6 +704,10 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
 			"wg": runtime.MakeDynamic(wg),
 		})
+	case *checker.Block:
+		// Evaluate block and return the result of the last statement
+		result, _ := vm.evalBlock(scp, e, nil)
+		return result
 	default:
 		panic(fmt.Errorf("Unimplemented expression: %T", e))
 	}

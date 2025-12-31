@@ -733,3 +733,12 @@ func (t Try) String() string {
 	}
 	return fmt.Sprintf("try %s", t.Expression)
 }
+
+type BlockExpression struct {
+	Location
+	Statements []Statement
+}
+
+func (b BlockExpression) String() string {
+	return "BlockExpression"
+}

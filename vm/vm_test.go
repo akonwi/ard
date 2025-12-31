@@ -911,3 +911,78 @@ func TestTryOnMaybeDifferentTypes(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestInlineBlockExpressions(t *testing.T) {
+	tests := []test{
+		{
+			name: "simple inline block returns last expression",
+			input: `
+				let x = {
+					5 + 3
+				}
+				x
+			`,
+			want: 8,
+		},
+		{
+			name: "inline block with statements and final expression",
+			input: `
+				let result = {
+					let y = 10
+					let z = 2
+					y * z
+				}
+				result
+			`,
+			want: 20,
+		},
+		{
+			name: "nested inline blocks",
+			input: `
+				let x = {
+					let inner = {
+						1 + 2
+					}
+					inner * 3
+				}
+				x
+			`,
+			want: 9,
+		},
+		{
+			name: "inline block with multiple statements",
+			input: `
+				let value = {
+					let x = 10
+					let y = 32
+					x + y
+				}
+				value
+			`,
+			want: 42,
+		},
+		{
+			name: "inline block with boolean type",
+			input: `
+				let flag = {
+					true and false
+				}
+				flag
+			`,
+			want: false,
+		},
+		{
+			name: "inline block with string",
+			input: `
+				let msg = {
+					let prefix = "hello"
+					let suffix = "world"
+					prefix + " " + suffix
+				}
+				msg
+			`,
+			want: "hello world",
+		},
+	}
+	runTests(t, tests)
+}

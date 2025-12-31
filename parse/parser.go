@@ -1097,7 +1097,10 @@ func (p *parser) block() ([]Statement, error) {
 		}
 	}
 	p.advance() // consume the '{'
+	return p.blockStatements()
+}
 
+func (p *parser) blockStatements() ([]Statement, error) {
 	p.match(new_line)
 	statements := []Statement{}
 	for !p.check(right_brace) {
@@ -2777,6 +2780,21 @@ func (p *parser) primary() (Expression, error) {
 	}
 	if p.match(left_bracket) {
 		return p.list()
+	}
+	if p.match(left_brace) {
+		// Block expression: rewind and parse as block
+		startToken := p.previous()
+		statements, err := p.blockStatements()
+		if err != nil {
+			return nil, err
+		}
+		return &BlockExpression{
+			Location: Location{
+				Start: Point{Row: startToken.line, Col: startToken.column},
+				End:   Point{Row: p.previous().line, Col: p.previous().column},
+			},
+			Statements: statements,
+		}, nil
 	}
 	switch tok := p.peek(); tok.kind {
 	// Handle keywords as identifiers when used as variables
