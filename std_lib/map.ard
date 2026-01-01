@@ -1,0 +1,5 @@
+// instantiates an empty Map. Useful for inlining an empty map
+fn new() [Str:$V] {
+  let map: [Str:$V] = [:]
+  map
+}

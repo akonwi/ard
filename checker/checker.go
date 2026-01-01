@@ -46,7 +46,7 @@ func (d Diagnostic) String() string {
 // If $T is bound to [$U], deref($T) returns [$U] (not the resolved contents).
 func deref(t Type) Type {
 	if typeVar, ok := t.(*TypeVar); ok && typeVar.bound {
-		return deref(typeVar.actual)  // Recursively follow chains
+		return deref(typeVar.actual) // Recursively follow chains
 	}
 	return t
 }
@@ -59,19 +59,19 @@ func deref(t Type) Type {
 // Example: If $T is bound to Int, derefType([$T]) returns [Int].
 // Ensures anonymous function parameters see fully resolved types.
 func derefType(t Type) Type {
-	t = deref(t)  // First dereference at the top level
+	t = deref(t) // First dereference at the top level
 	switch typ := t.(type) {
 	case *List:
 		derefInner := derefType(typ.of)
 		if derefInner == typ.of {
-			return typ  // No change, return original
+			return typ // No change, return original
 		}
 		return &List{of: derefInner}
 	case *Map:
 		derefKey := derefType(typ.key)
 		derefVal := derefType(typ.value)
 		if derefKey == typ.key && derefVal == typ.value {
-			return typ  // No change, return original
+			return typ // No change, return original
 		}
 		return &Map{
 			key:   derefKey,
@@ -80,14 +80,14 @@ func derefType(t Type) Type {
 	case *Maybe:
 		derefInner := derefType(typ.of)
 		if derefInner == typ.of {
-			return typ  // No change, return original
+			return typ // No change, return original
 		}
 		return &Maybe{of: derefInner}
 	case *Result:
 		derefVal := derefType(typ.val)
 		derefErr := derefType(typ.err)
 		if derefVal == typ.val && derefErr == typ.err {
-			return typ  // No change, return original
+			return typ // No change, return original
 		}
 		return &Result{
 			val: derefVal,
@@ -103,7 +103,7 @@ func derefType(t Type) Type {
 			}
 		}
 		if !changed {
-			return typ  // No change, return original
+			return typ // No change, return original
 		}
 		return &Union{
 			Name:  typ.Name,
@@ -126,7 +126,7 @@ func derefType(t Type) Type {
 		derefReturnType := derefType(typ.ReturnType)
 		returnChanged := derefReturnType != typ.ReturnType
 		if !paramsChanged && !returnChanged {
-			return typ  // No change, return original
+			return typ // No change, return original
 		}
 		return &FunctionDef{
 			Name:       typ.Name,
@@ -283,6 +283,9 @@ func (c *Checker) Check() {
 		}
 		if mod, ok := findInStdLib("ard/list"); ok {
 			c.program.Imports["List"] = mod
+		}
+		if mod, ok := findInStdLib("ard/map"); ok {
+			c.program.Imports["Map"] = mod
 		}
 		if mod, ok := findInStdLib("ard/string"); ok {
 			c.program.Imports["Str"] = mod
@@ -1509,12 +1512,12 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		for _, fieldType := range structType.Fields {
 			extractGenericNames(fieldType, genericNames)
 		}
-		
+
 		genericParams := make([]string, 0, len(genericNames))
 		for name := range genericNames {
 			genericParams = append(genericParams, name)
 		}
-		
+
 		// Create generic scope and fresh struct copy
 		genericScope = c.scope.createGenericScope(genericParams)
 		structDefCopy = copyStructWithTypeVarMap(structType, *genericScope.genericContext)
@@ -1527,14 +1530,14 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		fieldName := property.Name.Name
 		var field Type
 		var ok bool
-		
+
 		// Get field from the copy (which has fresh TypeVar instances for generics)
 		if genericScope != nil {
 			field, ok = structDefCopy.Fields[fieldName]
 		} else {
 			field, ok = structType.Fields[fieldName]
 		}
-		
+
 		if !ok {
 			c.addError(fmt.Sprintf("Unknown field: %s", fieldName), property.GetLocation())
 		} else {
@@ -1545,14 +1548,14 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				if checkVal == nil {
 					continue
 				}
-				
+
 				if err := c.unifyTypes(field, checkVal.Type(), genericScope); err != nil {
 					c.addError(err.Error(), property.GetLocation())
 					continue
 				}
 				// After unification, dereference to get the actual type
 				field = derefType(field)
-				
+
 				fields[fieldName] = checkVal
 				fieldTypes[fieldName] = field
 			} else {
@@ -1571,7 +1574,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	if structDefCopy == structType {
 		checkFieldsMap = structType.Fields
 	}
-	
+
 	for name, t := range checkFieldsMap {
 		if _, exists := fields[name]; !exists {
 			if _, isMaybe := t.(*Maybe); !isMaybe {
@@ -1835,11 +1838,11 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 // this returns `{$T: Int}`.
 func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, specializedDef *StructDef) map[string]Type {
 	bindings := make(map[string]Type)
-	
+
 	if originalDef == nil || specializedDef == nil {
 		return bindings
 	}
-	
+
 	// Now compare original field types with specialized field types
 	// For each field that contains a generic in the original, extract its resolved type
 	for fieldName, originalFieldType := range originalDef.Fields {
@@ -1847,11 +1850,11 @@ func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, speci
 		if !ok {
 			continue
 		}
-		
+
 		// Extract generic names from the original field type
 		genericNames := make(map[string]bool)
 		extractGenericNames(originalFieldType, genericNames)
-		
+
 		// For each generic found, bind it to the corresponding specialized type
 		for genericName := range genericNames {
 			if _, alreadyBound := bindings[genericName]; !alreadyBound {
@@ -1860,7 +1863,7 @@ func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, speci
 			}
 		}
 	}
-	
+
 	return bindings
 }
 
@@ -2105,7 +2108,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Example: For Box{ item: 42 }, calling put(x: $T) should require Int for $T.
 			var genericScope *SymbolTable
 			var fnDefCopy *FunctionDef
-			
+
 			// Check if the subject is a struct and if the original struct definition has generics
 			structType, isStruct := subj.Type().(*StructDef)
 			if isStruct {
@@ -2117,7 +2120,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						originalDef = origType
 					}
 				}
-				
+
 				// If the original definition has generics, the current structType might be
 				// a specialized version with concrete field types (e.g., item: Int instead of item: $T)
 				if originalDef != nil && originalDef.hasGenerics() {
@@ -2127,22 +2130,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						extractGenericNames(param.Type, genericNames)
 					}
 					extractGenericNames(fnDef.ReturnType, genericNames)
-					
+
 					if len(genericNames) > 0 {
 						genericParams := make([]string, 0, len(genericNames))
 						for name := range genericNames {
 							genericParams = append(genericParams, name)
 						}
-						
+
 						// Create generic scope with fresh TypeVar instances
 						genericScope = c.scope.createGenericScope(genericParams)
-						
+
 						// Build mapping from generic names to their resolved types.
 						// Compare original struct fields (which contain generics like $T)
 						// with current struct fields (which have concrete types like Int).
 						// This tells us what each generic parameter should be bound to.
 						genericBindings := c.extractGenericBindingsFromSpecializedStruct(originalDef, structType)
-						
+
 						// Bind the method's generic parameters based on the struct instance's specialization
 						for paramName, resolvedType := range genericBindings {
 							if gv, exists := (*genericScope.genericContext)[paramName]; exists {
@@ -2150,7 +2153,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 								gv.bound = true
 							}
 						}
-						
+
 						// Copy the function with the struct's generic bindings applied
 						fnDefCopy = copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
 					} else {
@@ -2405,7 +2408,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if isMaybe(left.Type()) {
 						return &Equality{left, right}
 					}
-					
+
 					// Check if types are allowed for equality (use equal() not pointer equality)
 					isAllowedType := func(t Type) bool {
 						return t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool)
@@ -3511,7 +3514,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						CatchVar:   s.CatchVar.Name,
 						Kind:       TryResult,
 					}
-					} else {
+				} else {
 					// No catch clause: function must return a compatible Result type
 					fnReturnResult, ok := c.scope.getReturnType().(*Result)
 					if !ok {
@@ -3542,7 +3545,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						ok:   _type.val,
 						Kind: TryResult,
 					}
-					}
+				}
 			case *Maybe:
 				// Handle catch clause if present
 				if s.CatchVar != nil && s.CatchBlock != nil {
@@ -3598,7 +3601,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						CatchVar:   "", // No variable binding for Maybe catch
 						Kind:       TryMaybe,
 					}
-					} else {
+				} else {
 					// No catch clause: function must return a compatible Maybe type
 					fnReturnMaybe, ok := c.scope.getReturnType().(*Maybe)
 					if !ok {
@@ -3623,15 +3626,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						ok:   _type.of,
 						Kind: TryMaybe,
 					}
-					}
-					default:
-					c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
-					// Return a try op with the expr type to avoid cascading errors
-					return &TryOp{
+				}
+			default:
+				c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
+				// Return a try op with the expr type to avoid cascading errors
+				return &TryOp{
 					expr: expr,
 					ok:   expr.Type(),
 					Kind: TryResult, // Default to Result, though this is an error path
-					}
+				}
 			}
 		}
 	case *parse.BlockExpression:
@@ -4024,11 +4027,11 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 // aligned with function parameters and preserving mutability information.
 func (c *Checker) alignArgumentsWithParameters(args []parse.Argument, params []Parameter) []parse.Argument {
 	resolvedArgs := make([]parse.Argument, len(params))
-	
+
 	if len(args) == 0 {
 		return resolvedArgs
 	}
-	
+
 	// If arguments have names, reorder them to match parameter positions
 	if args[0].Name != "" {
 		paramMap := make(map[string]int)
@@ -4049,7 +4052,7 @@ func (c *Checker) alignArgumentsWithParameters(args []parse.Argument, params []P
 		// Positional arguments - direct copy
 		copy(resolvedArgs, args)
 	}
-	
+
 	return resolvedArgs
 }
 
@@ -4086,7 +4089,7 @@ func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *Symb
 // If any error occurs, it's added to the checker's diagnostics.
 func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []parse.Argument, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable) ([]Expression, *FunctionDef) {
 	args := make([]Expression, len(resolvedArgs))
-	
+
 	for i := range resolvedArgs {
 		// Get the expected parameter type from the copy (which has fresh TypeVar instances for generics).
 		// For generic functions, dereference to see bound generics from previous arguments.
@@ -4155,7 +4158,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 	var fnToUse *FunctionDef
 	if fnDef.hasGenerics() && genericScope != nil {
 		bindings := genericScope.getGenericBindings()
-		
+
 		if len(bindings) == 0 {
 			// No generics were bound, use original function
 			fnToUse = fnDef
@@ -4287,7 +4290,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		// Function type unification - handle both FunctionDef and ExternalFunctionDef
 		var actualParams []Parameter
 		var actualReturnType Type
-		
+
 		if actualFn, ok := actual.(*FunctionDef); ok {
 			actualParams = actualFn.Parameters
 			actualReturnType = actualFn.ReturnType
@@ -4297,7 +4300,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		} else {
 			return fmt.Errorf("expected function, got %s", actual.String())
 		}
-		
+
 		// Check parameter count
 		if len(expectedType.Parameters) != len(actualParams) {
 			return fmt.Errorf("parameter count mismatch")
@@ -4338,8 +4341,6 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		return nil
 	}
 }
-
-
 
 // resolveArguments converts unified argument list to positional arguments
 func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, error) {

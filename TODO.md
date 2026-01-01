@@ -1,14 +1,4 @@
 # TODO
-- [ ] inline block as expression
-  ```
-  let foo: Int = {
-    // do stuff here
-    let stuff = get_stuff()
-    stuff + 5
-  }
-  ```
-- [ ] type casting a map literal
-  `Map::new<Str, sqlite::Value>(["age": 1, "foo": "bar"])`
 - [ ] map and list literals should be compared against the parameter type
   - `query.run(["foo":2, "bar": false])` is map with two valid values but the compiler complains that keys aren't consistent
 - [ ] `?` sugar for safely unwrapping maybes

@@ -459,7 +459,7 @@ func TestStrApi(t *testing.T) {
 func TestMapApi(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "Map::size",
+			name: "Map.size",
 			input: `
 				let ages = ["Alice":40, "Bob":30]
 				let jobs: [Str:Int] = [:]
@@ -467,14 +467,14 @@ func TestMapApi(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "Map::keys",
+			name: "Map.keys",
 			input: `
 						let ages = ["Alice":40, "Bob":30]
 						ages.keys().size()`,
 			want: 2,
 		},
 		{
-			name: "Map::get reads entries",
+			name: "Map.get reads entries",
 			input: `
 				let ages = ["Alice":40, "Bob":30]
 				match ages.get("Alice") {
@@ -484,7 +484,7 @@ func TestMapApi(t *testing.T) {
 			want: "Alice is 40",
 		},
 		{
-			name: "Map::set adds entries",
+			name: "Map.set adds entries",
 			input: `
 				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Charlie", 25)
@@ -493,7 +493,7 @@ func TestMapApi(t *testing.T) {
 			want: 4,
 		},
 		{
-			name: "Map::set updates entries",
+			name: "Map.set updates entries",
 			input: `
 				mut ages = ["Alice":40, "Bob":30]
 				ages.set("Bob", 31)
@@ -504,7 +504,7 @@ func TestMapApi(t *testing.T) {
 			want: "Bob is 31",
 		},
 		{
-			name: "Map::drop removes entries",
+			name: "Map.drop removes entries",
 			input: `
 				mut ages = ["Alice":40, "Bob":30]
 				ages.drop("Alice")
@@ -515,7 +515,7 @@ func TestMapApi(t *testing.T) {
 			want: 0,
 		},
 		{
-			name: "Map::has returns whether an entry exists",
+			name: "Map.has returns whether an entry exists",
 			input: `
 				let ages = ["Alice":40, "Bob":30]
 				let has_alice = ages.has("Alice").to_str()
@@ -523,6 +523,15 @@ func TestMapApi(t *testing.T) {
 				"{has_alice},{has_charlie}"
 				`,
 			want: "true,false",
+		},
+		{
+			name: "Map::new instantiates a new map",
+			input: `
+				mut ages = Map::new<Int>()
+				ages.set("Alice", 25)
+				ages.get("Alice").or(0)
+				`,
+			want: 25,
 		},
 	})
 }
