@@ -1,6 +1,4 @@
 # TODO
-- [ ] map and list literals should be compared against the parameter type
-  - `query.run(["foo":2, "bar": false])` is map with two valid values but the compiler complains that keys aren't consistent
 - [ ] `?` sugar for safely unwrapping maybes
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
