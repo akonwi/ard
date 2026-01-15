@@ -142,6 +142,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("WaitFor", ffi.WaitFor); err != nil {
 		return fmt.Errorf("failed to register WaitFor: %w", err)
 	}
+	if err := r.Register("Join", ffi.Join); err != nil {
+		return fmt.Errorf("failed to register Join: %w", err)
+	}
 	if err := r.Register("SqlCreateConnection", ffi.SqlCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqlCreateConnection: %w", err)
 	}

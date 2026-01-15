@@ -1239,13 +1239,13 @@ func (def StructDef) equal(other Type) bool {
 		if len(def.Fields) != len(otherDef.Fields) {
 			return false
 		}
-		if len(def.Methods) != len(otherDef.Methods) {
-			return false
-		}
 		for name, fieldType := range def.Fields {
 			if otherFieldType, ok := otherDef.Fields[name]; !ok || !fieldType.equal(otherFieldType) {
 				return false
 			}
+		}
+		if len(def.Methods) != len(otherDef.Methods) {
+			return false
 		}
 		for name, methodType := range def.Methods {
 			if otherMethodType, ok := otherDef.Methods[name]; !ok || !methodType.equal(otherMethodType) {

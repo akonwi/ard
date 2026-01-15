@@ -107,3 +107,18 @@ func WaitFor(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	wg.Wait()
 	return runtime.Void()
 }
+
+// fn (fibers: [Fiber]) Void
+func Join(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	if len(args) != 1 {
+		panic(fmt.Errorf("join expects 1 argument, got %d", len(args)))
+	}
+	
+	fibers := args[0].AsList()
+	for _, fiberObj := range fibers {
+		fiberFields := fiberObj.Raw().(map[string]*runtime.Object)
+		wg := fiberFields["wg"].Raw().(*sync.WaitGroup)
+		wg.Wait()
+	}
+	return runtime.Void()
+}

@@ -1197,6 +1197,12 @@ func (p *parser) assignment() (Statement, error) {
 func (p *parser) parseType() DeclaredType {
 	static := p.parseStaticPath()
 	if static != nil {
+		// Parse generic type arguments if present
+		var typeArgs []DeclaredType
+		if p.check(less_than) {
+			typeArgs = p.parseTypeArguments()
+		}
+		
 		// Check for Result sugar syntax
 		if p.match(bang) {
 			// Parse the error type
@@ -1209,6 +1215,7 @@ func (p *parser) parseType() DeclaredType {
 				Location: static.Location,
 				Type:     *static,
 				nullable: false,
+				TypeArgs: typeArgs,
 			}
 			// Return ResultType using sugar syntax
 			return &ResultType{
@@ -1226,6 +1233,7 @@ func (p *parser) parseType() DeclaredType {
 			Location: static.Location,
 			Type:     *static,
 			nullable: p.match(question_mark),
+			TypeArgs: typeArgs,
 		}
 	}
 
@@ -1499,6 +1507,29 @@ func (p *parser) parseStaticPath() *StaticProperty {
 	}
 
 	return prop
+}
+
+func (p *parser) parseTypeArguments() []DeclaredType {
+	if !p.match(less_than) {
+		return nil
+	}
+
+	var typeArgs []DeclaredType
+	if !p.check(greater_than) {
+		for {
+			typeArg := p.parseType()
+			typeArgs = append(typeArgs, typeArg)
+			if !p.match(comma) {
+				break
+			}
+		}
+	}
+
+	if !p.match(greater_than) {
+		p.addError(p.peek(), "Expected '>' to close generic type arguments")
+	}
+
+	return typeArgs
 }
 
 func (p *parser) parseExpression() (Expression, error) {

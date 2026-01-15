@@ -47,5 +47,58 @@ func TestFibers(t *testing.T) {
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
+		{
+			name: "The fiber created by async::start() is strictly Fiber<Void>",
+			input: `
+				use ard/async
+
+				let fiber: async::Fiber<Int> = async::start(fn() { 2 })
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Fiber<Int>, got Fiber<Void>"},
+			},
+		},
+	})
+}
+
+func TestAsyncEvalIsolation(t *testing.T) {
+	run(t, []test{
+		{
+			name: "async::eval cannot reference mutable variables in outer scope",
+			input: `
+			use ard/async
+
+			mut value = 10
+			async::eval(fn() {
+				value + 1
+			})
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined variable: value"},
+			},
+		},
+		{
+			name: "async::eval can reference read-only variables in outer scope",
+			input: `
+			use ard/async
+
+			let value = 10
+			async::eval(fn() {
+				value + 1
+			})
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "async::eval returns Fiber with result and join methods",
+			input: `
+			use ard/async
+
+			let fiber = async::eval(fn() { 42 })
+			fiber.join()
+			let result = fiber.get()
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }

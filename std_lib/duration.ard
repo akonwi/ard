@@ -11,3 +11,7 @@ fn from_seconds(s: Int) Int {
 fn from_minutes(m: Int) Int {
   m * 60 * 1000000000
 }
+
+fn from_millis(ms: Int) Int {
+  ms * 1000000
+}

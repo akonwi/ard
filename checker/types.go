@@ -630,6 +630,12 @@ func (r *Result) equal(other Type) bool {
 	if o, ok := other.(*Result); ok {
 		return r.val.equal(o.val) && r.err.equal(o.err)
 	}
+	if tv, ok := other.(*TypeVar); ok {
+		if tv.actual == nil {
+			return true
+		}
+		return r.equal(tv.actual)
+	}
 	return false
 }
 

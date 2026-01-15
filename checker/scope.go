@@ -244,18 +244,37 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		}
 		return t
 	case *List:
-		return &List{of: replaceGeneric(t.of, genericName, concreteType)}
+		newOf := replaceGeneric(t.of, genericName, concreteType)
+		if newOf == t.of {
+			return t
+		}
+		return &List{of: newOf}
 	case *Map:
+		newKey := replaceGeneric(t.key, genericName, concreteType)
+		newValue := replaceGeneric(t.value, genericName, concreteType)
+		if newKey == t.key && newValue == t.value {
+			return t
+		}
 		return &Map{
-			key:   replaceGeneric(t.key, genericName, concreteType),
-			value: replaceGeneric(t.value, genericName, concreteType),
+			key:   newKey,
+			value: newValue,
 		}
 	case *Maybe:
-		return &Maybe{of: replaceGeneric(t.of, genericName, concreteType)}
+		newOf := replaceGeneric(t.of, genericName, concreteType)
+		if newOf == t.of {
+			return t
+		}
+		return &Maybe{of: newOf}
 	case *Result:
+		newVal := replaceGeneric(t.val, genericName, concreteType)
+		newErr := replaceGeneric(t.err, genericName, concreteType)
+		// Only create a new Result if something actually changed
+		if newVal == t.val && newErr == t.err {
+			return t
+		}
 		return &Result{
-			val: replaceGeneric(t.val, genericName, concreteType),
-			err: replaceGeneric(t.err, genericName, concreteType),
+			val: newVal,
+			err: newErr,
 		}
 	case *FunctionDef:
 		newParams := make([]Parameter, len(t.Parameters))
@@ -275,6 +294,37 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Mutates:    t.Mutates,
 			Body:       t.Body,
 			Private:    t.Private,
+		}
+	case *StructDef:
+		// Check if any fields or methods actually need specialization
+		anyChanged := false
+		newFields := make(map[string]Type)
+		for fieldName, fieldType := range t.Fields {
+			newFieldType := replaceGeneric(fieldType, genericName, concreteType)
+			newFields[fieldName] = newFieldType
+			if newFieldType != fieldType {
+				anyChanged = true
+			}
+		}
+		newMethods := make(map[string]*FunctionDef)
+		for methodName, methodDef := range t.Methods {
+			newMethodDef := replaceGeneric(methodDef, genericName, concreteType).(*FunctionDef)
+			newMethods[methodName] = newMethodDef
+			if newMethodDef != methodDef {
+				anyChanged = true
+			}
+		}
+		// If nothing changed, return the original struct
+		if !anyChanged {
+			return t
+		}
+		return &StructDef{
+			Name:    t.Name,
+			Fields:  newFields,
+			Methods: newMethods,
+			Self:    t.Self,
+			Traits:  t.Traits,
+			Private: t.Private,
 		}
 	default:
 		return t

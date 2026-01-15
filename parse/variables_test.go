@@ -175,5 +175,40 @@ func TestArrayMapTypes(t *testing.T) {
 	})
 }
 
+func TestGenericTypeParameters(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:     "Variable with single generic type parameter",
+			input:    "let fiber: async::Fiber<Void> = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Variable with single type parameter",
+			input:    "let box: Box<Int> = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Variable with multiple type parameters",
+			input:    "let map: Map<String, Int> = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Missing closing bracket in generic type",
+			input:    "let fiber: Fiber<Int = test",
+			wantErrs: []string{"Expected '>' to close generic type arguments"},
+		},
+		{
+			name:     "Nested generic types",
+			input:    "let nested: Box<Maybe<Int>> = test",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Generic type with function type argument",
+			input:    "let handler: Handler<fn(Int) Bool> = test",
+			wantErrs: []string{},
+		},
+	})
+}
+
 // TestStaticPropertyAccess - basic error recovery implemented
 // Comprehensive testing skipped due to complex interaction with assignment parsing

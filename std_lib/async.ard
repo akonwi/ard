@@ -4,14 +4,27 @@ private extern fn wait_for(wg: Dynamic) Void = "WaitFor"
 struct Fiber {
   // pointer to *WaitGroup
   wg: Dynamic
+  // stores the return value of the function run concurrently
+  result: $T
 }
 
 impl Fiber {
   fn join() {
     wait_for(@wg)
   }
+
+  fn get() $T {
+    @join()
+    @result
+  }
 }
 
 fn start(do: fn() Void) Fiber {
   panic("Unreachable: async::start() is part of the compiler.")
 }
+
+fn eval(do: fn() $T) Fiber {
+  panic("Unreachable: async::eval() is part of the compiler.")
+}
+
+extern fn join(fibers: [Fiber]) Void = "Join"

@@ -688,7 +688,8 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		wg.Go(func() {
 			defer func() {
 				fscope.parent = nil
-				vm.hq.unloadModule(name)
+				// Don't unload the module here - it may be accessed by other fibers or join()
+				// The module cache manages its own lifecycle
 			}()
 			defer func() {
 				if r := recover(); r != nil {
@@ -703,6 +704,49 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		})
 		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
 			"wg": runtime.MakeDynamic(wg),
+		})
+	case *checker.FiberEval:
+		// Execute the closure concurrently and return a Fiber handle with the result
+		fn := vm.eval(scp, e.GetFn())
+		closure, ok := fn.Raw().(runtime.Closure)
+		if !ok {
+			panic(fmt.Errorf("async::eval expects a function, got %T", fn.Raw()))
+		}
+
+		// Get the async module's program and load it
+		// Create a minimal program with the Fiber struct and async functions
+		asyncProg := &checker.Program{
+			Imports:    make(map[string]checker.Module),
+			Statements: []checker.Statement{},
+		}
+		// Try to get the program from the embedded module
+		if embeddedMod, ok := checker.FindEmbeddedModule("ard/async"); ok {
+			if prog := embeddedMod.Program(); prog != nil {
+				asyncProg = prog
+			}
+		}
+		vm.hq.loadModule("ard/async", asyncProg, false)
+
+		wg := &sync.WaitGroup{}
+		// resultValue is wrapped in a container so it can be updated concurrently
+		resultContainer := &runtime.Object{}
+		wg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if msg, ok := r.(string); ok {
+						fmt.Println(fmt.Errorf("Panic in eval fiber: %s", msg))
+					} else {
+						fmt.Printf("Panic in eval fiber: %v\n", r)
+					}
+				}
+			}()
+			result := closure.Eval()
+			*resultContainer = *result
+		})
+
+		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
+			"wg":     runtime.MakeDynamic(wg),
+			"result": resultContainer,
 		})
 	case *checker.Block:
 		// Evaluate block and return the result of the last statement

@@ -503,7 +503,11 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
 				sym := mod.Get(ty.Type.Property.(*parse.Identifier).Name)
 				if !sym.IsZero() {
-					baseType = sym.Type
+					if len(ty.TypeArgs) > 0 {
+						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
+					} else {
+						baseType = sym.Type
+					}
 					break
 				}
 			}
@@ -542,12 +546,23 @@ func (c *Checker) destructurePath(expr *parse.StaticFunction) (string, string) {
 	}
 }
 
+func formatTypeForDisplay(t Type) string {
+	// For StructDef with generic fields, show type parameters
+	if structDef, ok := t.(*StructDef); ok {
+		if resultType, hasResult := structDef.Fields["result"]; hasResult {
+			// The result field's type indicates the generic parameter
+			return fmt.Sprintf("%s<%s>", structDef.String(), resultType.String())
+		}
+	}
+	return t.String()
+}
+
 func typeMismatch(expected, got Type) string {
-	exMsg := expected.String()
+	exMsg := formatTypeForDisplay(expected)
 	if _, isTrait := expected.(*Trait); isTrait {
 		exMsg = "implementation of " + exMsg
 	}
-	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, got)
+	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, formatTypeForDisplay(got))
 }
 
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
@@ -2647,6 +2662,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Special validation for async::start calls
 			if mod.Path() == "ard/async" && s.Function.Name == "start" {
 				return c.validateFiberFunction(s.Function.Args[0].Value, mod.Get("Fiber").Type)
+			}
+			// Special validation for async::eval calls
+			if mod.Path() == "ard/async" && s.Function.Name == "eval" {
+				return c.validateAsyncEval(s.Function.Args[0].Value)
 			}
 
 			return &ModuleFunctionCall{
