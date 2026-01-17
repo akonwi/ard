@@ -15,12 +15,13 @@ The async module provides:
 
 ```ard
 use ard/async
+use ard/duration
 use ard/io
 
 fn main() {
   // Start a background task
   let fiber = async::start(fn() {
-    async::sleep(100000000)  // Sleep 100ms
+    async::sleep(duration::from_millis(100))
     io::print("Background task complete")
   })
   
@@ -33,12 +34,13 @@ fn main() {
 
 ### `fn sleep(ns: Int) Void`
 
-Sleep for a specified duration in nanoseconds.
+Sleep for a specified duration in nanoseconds. Use the `ard/duration` module to convert from human-readable units.
 
 ```ard
 use ard/async
+use ard/duration
 
-async::sleep(1000000000)  // Sleep for 1 second (1 billion nanoseconds)
+async::sleep(duration::from_seconds(1))  // Sleep for 1 second
 ```
 
 ### `fn start(do: fn() Void) Fiber`
@@ -194,6 +196,7 @@ fn main() {
 
 ```ard
 use ard/async
+use ard/duration
 use ard/io
 
 fn main() {
@@ -201,7 +204,7 @@ fn main() {
     mut count = 0
     while count < 5 {
       io::print("Worker tick {count.to_str()}")
-      async::sleep(100000000)  // 100ms
+      async::sleep(duration::from_millis(100))
       count = count + 1
     }
   })
