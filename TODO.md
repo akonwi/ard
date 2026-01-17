@@ -49,3 +49,8 @@
   - evaluates to a list that can be assigned to a variable
     - can't be used in place of other expressions
   - broken loops: still a list up to the break point
+- [ ] (idea): change `json::encode()` to only accept Dynamic  
+  - it would make it easier on interpreter, to not have to use reflection to do the encoding
+- [ ] replace angle brackets for generics. with parens or brackets?
+- [ ] change for loop syntax to something like odin
+  - `for [1,2,3] i { ... }`
