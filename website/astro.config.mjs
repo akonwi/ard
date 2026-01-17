@@ -58,6 +58,7 @@ export default defineConfig({
           items: [
             { label: "ard/argv", slug: "stdlib/argv" },
             { label: "ard/async", slug: "stdlib/async" },
+            { label: "ard/chrono", slug: "stdlib/chrono" },
             { label: "ard/dates", slug: "stdlib/dates" },
             { label: "ard/decode", slug: "stdlib/decode" },
             { label: "ard/duration", slug: "stdlib/duration" },

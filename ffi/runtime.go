@@ -95,6 +95,14 @@ func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
 }
 
+// Chrono module FFI functions
+
+// fn now() Int
+func Now(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+	seconds := time.Now().Unix()
+	return runtime.MakeInt(int(seconds))
+}
+
 // fn (ns: Int) Void
 func Sleep(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	time.Sleep(time.Duration(args[0].AsInt()))
@@ -113,7 +121,7 @@ func Join(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("join expects 1 argument, got %d", len(args)))
 	}
-	
+
 	fibers := args[0].AsList()
 	for _, fiberObj := range fibers {
 		fiberFields := fiberObj.Raw().(map[string]*runtime.Object)

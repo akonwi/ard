@@ -136,6 +136,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("GetTodayString", ffi.GetTodayString); err != nil {
 		return fmt.Errorf("failed to register GetTodayString: %w", err)
 	}
+	if err := r.Register("Now", ffi.Now); err != nil {
+		return fmt.Errorf("failed to register Now: %w", err)
+	}
 	if err := r.Register("Sleep", ffi.Sleep); err != nil {
 		return fmt.Errorf("failed to register Sleep: %w", err)
 	}
