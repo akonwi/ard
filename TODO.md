@@ -1,4 +1,5 @@
 # TODO
+- [ ] `Maybe.or_lazy()` to run a function to generate the fallback
 - [ ] `?` sugar for safely unwrapping maybes
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
