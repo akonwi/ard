@@ -1,6 +1,4 @@
 # TODO
-- [ ] `Maybe.or_lazy()` to run a function to generate the fallback
-- [ ] `?` sugar for safely unwrapping maybes
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
 - [ ] selective variable capture for closures
@@ -55,3 +53,4 @@
 - [ ] replace angle brackets for generics. with parens or brackets?
 - [ ] change for loop syntax to something like odin
   - `for [1,2,3] i { ... }`
+- [ ] `Maybe.or_lazy()` to run a function to generate the fallback
