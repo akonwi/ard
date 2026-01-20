@@ -253,6 +253,12 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			sb.WriteString(chunk)
 		}
 		return runtime.MakeStr(sb.String())
+	case *checker.Identifier:
+		val, ok := scp.get(e.Name)
+		if !ok {
+			panic(fmt.Errorf("identifier not found: %s", e.Name))
+		}
+		return val
 	case *checker.Variable:
 		val, ok := scp.get(e.Name())
 		if !ok {

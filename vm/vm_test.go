@@ -870,6 +870,36 @@ func TestTryOnMaybe(t *testing.T) {
 	runTests(t, tests)
 }
 
+func TestTryOnChainedMaybes(t *testing.T) {
+	out := run(t, `
+		use ard/maybe
+
+		struct Profile {
+	  	name: Str?
+		}
+
+		struct User {
+	  	profile: Profile?
+		}
+
+		fn get_user() User? {
+			let profile = maybe::some(Profile{name: maybe::none() })
+			maybe::some(User{ profile: profile })
+ 			}
+
+		fn get_name() Str {
+			let name = try get_user().profile.name -> _ { "Sample" }
+			name
+		}
+
+		get_name()
+	`)
+
+	if out != "Sample" {
+		t.Errorf("Expected 'Sample', got '%s'", out)
+	}
+}
+
 func TestTryOnMaybeDifferentTypes(t *testing.T) {
 	tests := []test{
 		{

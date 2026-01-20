@@ -3462,7 +3462,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation())
 	case *parse.Try:
 		{
-			expr := c.checkExpr(s.Expression)
+			// Check if this is a property/method accessor chain that might need cascading Maybe handling
+			expr := c.tryCheckAccessorChain(s.Expression)
 			if expr == nil {
 				return nil
 			}
@@ -4486,5 +4487,162 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 	default:
 		c.addError(fmt.Sprintf("Unsupported operator in comparison: %v", op), leftExpr.GetLocation())
 		return nil
+	}
+}
+
+// tryCheckAccessorChain checks if the expression is a property/method accessor chain with Maybes
+// and handles cascading None propagation via OptionMatch expressions
+func (c *Checker) tryCheckAccessorChain(parseExpr parse.Expression) Expression {
+	// Detect if this is a property/method accessor chain
+	if !c.isAccessorChain(parseExpr) {
+		// Not an accessor chain, check normally
+		return c.checkExpr(parseExpr)
+	}
+
+	// Try to build the accessor chain with Maybe handling
+	return c.checkAccessorChainWithMaybes(parseExpr)
+}
+
+// isAccessorChain checks if an expression is a property or method accessor (possibly chained)
+func (c *Checker) isAccessorChain(parseExpr parse.Expression) bool {
+	switch parseExpr.(type) {
+	case *parse.InstanceProperty, *parse.InstanceMethod:
+		return true
+	default:
+		return false
+	}
+}
+
+// checkAccessorChainWithMaybes checks an accessor chain and wraps Maybe property accesses in OptionMatch
+func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expression {
+	switch p := parseExpr.(type) {
+	case *parse.InstanceProperty:
+		// First check the target
+		target := c.checkAccessorChainWithMaybes(p.Target)
+		if target == nil {
+			return nil
+		}
+
+		// Try to get the property type
+		innerType := target.Type()
+		var isMaybe bool
+		if maybeType, ok := innerType.(*Maybe); ok {
+			innerType = maybeType.of
+			isMaybe = true
+		}
+
+		propType := innerType.get(p.Property.Name)
+		if propType == nil {
+			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Property.Name), p.Property.GetLocation())
+			return nil
+		}
+
+		prop := &InstanceProperty{
+			Subject:  target,
+			Property: p.Property.Name,
+			_type:    propType,
+			Kind:     StructSubject,
+		}
+
+		// If the target is Maybe, wrap in OptionMatch
+		if isMaybe {
+			return c.wrapAccessorInMatch(target, prop, innerType, propType)
+		}
+
+		return prop
+
+	case *parse.InstanceMethod:
+		// Similar logic for methods
+		target := c.checkAccessorChainWithMaybes(p.Target)
+		if target == nil {
+			return nil
+		}
+
+		// Try to get the method signature
+		innerType := target.Type()
+		var isMaybe bool
+		if maybeType, ok := innerType.(*Maybe); ok {
+			innerType = maybeType.of
+			isMaybe = true
+		}
+
+		sig := innerType.get(p.Method.Name)
+		if sig == nil {
+			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Method.Name), p.Method.GetLocation())
+			return nil
+		}
+
+		_, ok := sig.(*FunctionDef)
+		if !ok {
+			c.addError(fmt.Sprintf("%s.%s is not a function", innerType, p.Method.Name), p.Method.GetLocation())
+			return nil
+		}
+
+		// For now, just check the method normally and return if not Maybe
+		// (full method call handling is complex, only handle property accessor chains for now)
+		if !isMaybe {
+			// Fall back to normal checking for non-Maybe methods
+			return c.checkExpr(parseExpr)
+		}
+
+		// If the target is Maybe, we'd need to wrap the entire method call
+		// For simplicity, just check normally - the user should use property access if they want cascading
+		return c.checkExpr(parseExpr)
+
+	default:
+		// Not an accessor, check normally
+		return c.checkExpr(parseExpr)
+	}
+}
+
+// wrapAccessorInMatch wraps a property access on a Maybe type in an OptionMatch expression
+func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty, innerType Type, propType Type) Expression {
+	// Generate a pattern variable name
+	patternVar := "_maybe_prop"
+
+	// Create a symbol for the pattern variable
+	patternSym := Symbol{
+		Name:    patternVar,
+		Type:    innerType,
+		mutable: false,
+	}
+
+	// Create an identifier for the pattern variable with the symbol
+	patternIdent := &Identifier{Name: patternVar}
+	patternIdent.sym = patternSym
+
+	// The Some block accesses the property on the unwrapped value
+	// We create a new InstanceProperty with the pattern variable as subject
+	propOnUnwrapped := &InstanceProperty{
+		Subject:  patternIdent,
+		Property: prop.Property,
+		_type:    propType,
+		Kind:     StructSubject,
+	}
+
+	// Create the Some block containing the property access
+	someBlock := &Block{
+		Stmts: []Statement{
+			{Expr: propOnUnwrapped},
+		},
+	}
+
+	// The None block just returns the subject (which is None)
+	// The subject's type is Maybe<innerType>, so it will propagate as None of type propType
+	noneBlock := &Block{
+		Stmts: []Statement{
+			{Expr: subject},
+		},
+	}
+
+	// Create and return the OptionMatch
+	return &OptionMatch{
+		Subject: subject,
+		Some: &Match{
+			Pattern: patternIdent,
+			Body:    someBlock,
+		},
+		None:      noneBlock,
+		InnerType: innerType,
 	}
 }
