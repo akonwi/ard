@@ -191,6 +191,43 @@ fn greet(id: Int) Str {
 }
 ```
 
+## Chained Property Access in Try Statements
+
+When working with nested structures, you often need to access properties through multiple levels where intermediate values might be Maybe types. The `try` statement handles this elegantly:
+
+```ard
+use ard/maybe
+
+struct Profile { name: Str, bio: Str? }
+struct User { id: Int, profile: Profile? }
+
+fn get_user_bio(user: User?) Str {
+    let bio = try user.profile.name -> _ {
+        "No bio available"
+    }
+    bio
+}
+```
+
+When a property in the chain is a Maybe type, `try` automatically unwraps it. If any property in the chain is `none`, the catch block executes and returns early.
+
+This desugars to nested pattern matching internally, but you get the convenience of writing simple dot-notation chains without manually handling each level:
+
+```ard
+// Equivalent to the above, but without the convenience syntax
+fn get_user_bio_manual(user: User?) Str {
+    match user {
+        u => match u.profile {
+            profile => profile.name,
+            _ => maybe::none()
+        },
+        _ => maybe::none()
+    } -> _ {
+        "No bio available"
+    }
+}
+```
+
 ## Complete Example
 
 Here's a comprehensive example showing different error handling patterns:
