@@ -70,7 +70,7 @@ func TestDecodeErrors(t *testing.T) {
 					ok(_) => ""
 				}
 			`,
-			want: "Decode error: expected Str, found 42",
+			want: "got 42, expected Str",
 		},
 		{
 			name: "int decoder fails on string - returns error list",
@@ -152,7 +152,7 @@ func TestDecodeErrors(t *testing.T) {
 					ok(_) => "",
 				}
 			`,
-			want: "Decode error: expected Int, found false at [1]",
+			want: "[1]: got false, expected Int",
 		},
 		{
 			name: "null data produces null error message",
@@ -166,7 +166,7 @@ func TestDecodeErrors(t *testing.T) {
 					ok(_) => false
 				}
 			`,
-			want: `Decode error: expected Int, found "invalid json"`,
+			want: `got "invalid json", expected Int`,
 		},
 		{
 			name: "Error string includes path information",
@@ -180,7 +180,7 @@ func TestDecodeErrors(t *testing.T) {
 					err(errs) => errs.at(0).to_str()
 				}
 			`,
-			want: "Decode error: expected Int, found \"not_a_number\" at [0].value",
+			want: "[0].value: got \"not_a_number\", expected Int",
 		},
 		{
 			name: "shows enhanced array formatting for small arrays",
@@ -194,7 +194,7 @@ func TestDecodeErrors(t *testing.T) {
 					err(errs) => errs.at(0).to_str()
 				}
 			`,
-			want: "Decode error: expected Str, found [1, 2, 3]",
+			want: "got [1, 2, 3], expected Str",
 		},
 		{
 			name: "shows empty array formatting",
@@ -208,7 +208,7 @@ func TestDecodeErrors(t *testing.T) {
 					err(errs) => errs.at(0).to_str()
 				}
 			`,
-			want: "Decode error: expected Str, found []",
+			want: "got [], expected Str",
 		},
 		{
 			name: "shows proper dot notation for nested paths",
@@ -223,7 +223,7 @@ func TestDecodeErrors(t *testing.T) {
 					err(errs) => errs.at(0).to_str()
 				}
 			`,
-			want: "Decode error: expected Int, found \"not_a_number\" at [0].user.profile.age",
+			want: "[0].user.profile.age: got \"not_a_number\", expected Int",
 		},
 	})
 }

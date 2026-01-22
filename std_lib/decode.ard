@@ -28,8 +28,8 @@ impl Str::ToString for Error {
     }
 
     match path_str.is_empty() {
-      true => "Decode error: expected {@expected}, found {@found}",
-      false => "Decode error: expected {@expected}, found {@found} at {path_str}"
+      true => "got {@found}, expected {@expected}",
+      false => "{path_str}: got {@found}, expected {@expected}"
     }
   }
 }
