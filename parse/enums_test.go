@@ -10,10 +10,10 @@ var colorCode = `enum Color {
 	Yellow
 }`
 
-var colorVariants = []string{
-	"Red",
-	"Green",
-	"Yellow",
+var colorVariants = []EnumVariant{
+	{Name: "Red"},
+	{Name: "Green"},
+	{Name: "Yellow"},
 }
 
 func TestEnumDefinitions(t *testing.T) {
@@ -25,8 +25,12 @@ func TestEnumDefinitions(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&EnumDefinition{
-						Name:     "Color",
-						Variants: []string{"Red", "Green", "Yellow"},
+						Name: "Color",
+						Variants: []EnumVariant{
+							{Name: "Red"},
+							{Name: "Green"},
+							{Name: "Yellow"},
+						},
 					},
 				},
 			},
@@ -38,9 +42,13 @@ func TestEnumDefinitions(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&EnumDefinition{
-						Name:     "Color",
-						Variants: []string{"Red", "Green", "Yellow"},
-						Private:  true,
+						Name: "Color",
+						Variants: []EnumVariant{
+							{Name: "Red"},
+							{Name: "Green"},
+							{Name: "Yellow"},
+						},
+						Private: true,
 					},
 				},
 			},

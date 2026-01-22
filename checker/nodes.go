@@ -1065,10 +1065,15 @@ func (p *ModuleSymbol) Type() Type {
 	return p.Symbol.Type
 }
 
+type EnumValue struct {
+	Name  string
+	Value int // The computed integer discriminant
+}
+
 type Enum struct {
 	Name     string
 	Private  bool
-	Variants []string
+	Values   []EnumValue // The discriminant values for each variant
 	Methods  map[string]*FunctionDef
 	Traits   []*Trait
 	Location parse.Location
@@ -1094,11 +1099,11 @@ func (e Enum) equal(other Type) bool {
 	if e.Name != o.Name {
 		return false
 	}
-	if len(e.Variants) != len(o.Variants) {
+	if len(e.Values) != len(o.Values) {
 		return false
 	}
-	for i := range e.Variants {
-		if e.Variants[i] != o.Variants[i] {
+	for i := range e.Values {
+		if e.Values[i].Name != o.Values[i].Name || e.Values[i].Value != o.Values[i].Value {
 			return false
 		}
 	}
@@ -1142,7 +1147,7 @@ func (ev EnumVariant) hasTrait(trait *Trait) bool {
 }
 
 func (ev EnumVariant) String() string {
-	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Variants[ev.Variant])
+	return fmt.Sprintf("%s::%s", ev.enum.Name, ev.enum.Values[ev.Variant].Name)
 }
 
 type Union struct {

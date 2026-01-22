@@ -670,7 +670,19 @@ func (p *parser) enumDef(private bool) Statement {
 			break
 		}
 		variantToken := p.advance()
-		enum.Variants = append(enum.Variants, variantToken.text)
+		variant := EnumVariant{Name: variantToken.text}
+
+		// Check for explicit value assignment
+		if p.match(equal) {
+			variant.Value, _ = p.parseExpression()
+			if variant.Value == nil {
+				p.addError(p.peek(), "Expected expression after '='")
+				p.synchronize()
+				return nil
+			}
+		}
+
+		enum.Variants = append(enum.Variants, variant)
 		p.match(comma)
 		p.match(new_line)
 	}

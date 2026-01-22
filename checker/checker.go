@@ -1192,19 +1192,61 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			// Check for duplicate variant names
-			seenVariants := make(map[string]bool)
+			seenNames := make(map[string]bool)
 			for _, variant := range s.Variants {
-				if seenVariants[variant] {
-					c.addError(fmt.Sprintf("Duplicate variant: %s", variant), s.GetLocation())
+				if seenNames[variant.Name] {
+					c.addError(fmt.Sprintf("Duplicate variant: %s", variant.Name), s.GetLocation())
 					return nil
 				}
-				seenVariants[variant] = true
+				seenNames[variant.Name] = true
+			}
+
+			// Compute discriminant values
+			var computedValues []EnumValue
+			var nextValue int = 0
+			seenValues := make(map[int]string) // Detect duplicate discriminants
+
+			for _, variant := range s.Variants {
+				var value int
+
+				if variant.Value != nil {
+					// Parse explicit value
+					expr := c.checkExpr(variant.Value)
+					if expr == nil {
+						continue
+					}
+
+					// Value must be an integer literal
+					intLit, ok := expr.(*IntLiteral)
+					if !ok {
+						c.addError("Enum variant value must be an integer literal", variant.Value.GetLocation())
+						continue
+					}
+					value = intLit.Value
+					nextValue = value + 1
+				} else {
+					// Auto-assign
+					value = nextValue
+					nextValue++
+				}
+
+				// Check for duplicate discriminant values
+				if existing, found := seenValues[value]; found {
+					c.addError(fmt.Sprintf("Duplicate enum value %d (also used by variant %s)", value, existing), s.GetLocation())
+					return nil
+				}
+				seenValues[value] = variant.Name
+
+				computedValues = append(computedValues, EnumValue{
+					Name:  variant.Name,
+					Value: value,
+				})
 			}
 
 			enum := &Enum{
 				Private:  s.Private,
 				Name:     s.Name,
-				Variants: s.Variants,
+				Values:   computedValues,
 				Methods:  make(map[string]*FunctionDef),
 			}
 
@@ -2852,7 +2894,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Track whether we've seen a catch-all case
 			hasCatchAll := false
 			// Cases in the match statement mapped to enum variants
-			cases := make([]*Block, len(enumType.Variants))
+			cases := make([]*Block, len(enumType.Values))
 			var catchAllBody *Block
 
 			// Process the cases
@@ -2894,7 +2936,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 
 					// Get the variant name and index
-					variantName := enumType.Variants[enumVariant.Variant]
+					variantName := enumType.Values[enumVariant.Variant].Name
 					variantIndex := int(enumVariant.Variant)
 
 					// Check for duplicate cases
@@ -2915,9 +2957,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Check if the match is exhaustive
 			if !hasCatchAll {
-				for i, variant := range enumType.Variants {
+				for i, value := range enumType.Values {
 					if cases[i] == nil {
-						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, variant), s.GetLocation())
+						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name), s.GetLocation())
 					}
 				}
 			}
@@ -3400,8 +3442,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 
 				var variant int8 = -1
-				for i := range enum.Variants {
-					if enum.Variants[i] == s.Property.(*parse.Identifier).Name {
+				for i := range enum.Values {
+					if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
 						variant = int8(i)
 						break
 					}
@@ -3425,8 +3467,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if enum, ok := nestedSym.Type().(*Enum); ok {
 					// Find the variant
 					var variant int8 = -1
-					for i := range enum.Variants {
-						if enum.Variants[i] == s.Property.(*parse.Identifier).Name {
+					for i := range enum.Values {
+						if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
 							variant = int8(i)
 							break
 						}

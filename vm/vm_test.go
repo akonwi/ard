@@ -546,7 +546,57 @@ func TestEnums(t *testing.T) {
 				}
 				let dir: Direction = Direction::Right
 				dir`,
-			want: int8(3),
+			want: 3,
+		},
+	})
+}
+
+func TestEnumValues(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Enum with explicit values",
+			input: `
+				enum HttpStatus {
+					Ok = 200,
+					Created = 201,
+					Not_Found = 404
+				}
+				HttpStatus::Ok
+			`,
+			want: 200,
+		},
+		{
+			name: "Auto-incrementing enum values",
+			input: `
+				enum Status {
+					Pending,
+					Active = 100,
+					Inactive
+				}
+				Status::Inactive
+			`,
+			want: 101,
+		},
+		{
+			name: "Mixing explicit and auto-assigned values",
+			input: `
+				enum Priority {
+					Low,
+					Medium = 50,
+					High,
+					Critical = 100
+				}
+				fn get_priority(p: Priority) Int {
+					match p {
+						Priority::Low => 0,
+						Priority::Medium => 50,
+						Priority::High => 51,
+						Priority::Critical => 100
+					}
+				}
+				get_priority(Priority::Low) + get_priority(Priority::High)
+			`,
+			want: 51,
 		},
 	})
 }
