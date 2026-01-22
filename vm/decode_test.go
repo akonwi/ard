@@ -616,7 +616,7 @@ func TestDecodeOneOf(t *testing.T) {
 					err(errs) => errs.at(0).to_str()
 				}
 			`,
-			want: "Decode error: expected Str, found true",
+			want: "got true, expected Str",
 		},
 	})
 }
@@ -764,6 +764,57 @@ func TestDecodeCustomFunctions(t *testing.T) {
 			}
 			`,
 			want: 3,
+		},
+	})
+}
+
+func TestDecodeFlatten(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "flatten single error",
+			input: `
+				use ard/decode
+
+				let errors = [decode::Error{expected: "Int", found: "false", path: []}]
+				decode::flatten(errors)
+			`,
+			want: "got false, expected Int",
+		},
+		{
+			name: "flatten multiple errors with newlines",
+			input: `
+				use ard/decode
+
+				let errors = [
+					decode::Error{expected: "Int", found: "false", path: ["[1]"]},
+					decode::Error{expected: "Str", found: "42", path: ["[2]"]},
+				]
+				decode::flatten(errors)
+			`,
+			want: "[1]: got false, expected Int\n[2]: got 42, expected Str",
+		},
+		{
+			name: "flatten empty error list",
+			input: `
+				use ard/decode
+
+				let errors: [decode::Error] = []
+				decode::flatten(errors)
+			`,
+			want: "",
+		},
+		{
+			name: "flatten errors with complex paths",
+			input: `
+				use ard/decode
+
+				let errors = [
+					decode::Error{expected: "Int", found: "\"invalid\"", path: ["user", "profile", "age"]},
+					decode::Error{expected: "Str", found: "null", path: ["user", "name"]},
+				]
+				decode::flatten(errors)
+			`,
+			want: "user.profile.age: got \"invalid\", expected Int\nuser.name: got null, expected Str",
 		},
 	})
 }

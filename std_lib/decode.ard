@@ -304,3 +304,21 @@ fn one_of(first: Decoder<$T>, others: [Decoder<$T>]) Decoder<$T> {
 fn run(data: Dynamic, decoder: Decoder<$T>) $T![Error] {
   decoder(data)
 }
+
+// flatten a list of errors into a single string
+fn flatten(errors: [Error]) Str {
+  match errors.size() {
+    0 => "",
+    1 => errors.at(0).to_str(),
+    _ => {
+      mut result = ""
+      for err, idx in errors {
+        if idx > 0 {
+          result =+ "\n"
+        }
+        result =+ err.to_str()
+      }
+      result
+    }
+  }
+}

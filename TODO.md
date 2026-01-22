@@ -1,5 +1,4 @@
 # TODO
-- [ ] ard/decode: `fn collapse([Error]) Str` to flatten errors 
 - [ ] equivalent of Gleam's `use`
   - sugar to denest callbacks
 - [ ] selective variable capture for closures
