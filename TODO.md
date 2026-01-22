@@ -1,15 +1,4 @@
 # TODO
-- [ ] define enum values
-  ```
-  enum HttpStatus {
-    Ok = 200,
-    Created = 201,
-    Not_Found = 404,
-    // ...
-  }
-
-  fn HttpStatus::from_int(int: Int) HttpStatus? {}
-  ```
 - [ ] compile time constant variables
   - should readonly variables with a literal value be considered constants?
     pro: simpler than adding a new `const` keyword and just works

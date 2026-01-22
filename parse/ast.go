@@ -398,10 +398,15 @@ func (s StructInstance) String() string {
 	return fmt.Sprintf("StructInstance(%s)", s.Name)
 }
 
+type EnumVariant struct {
+	Name  string
+	Value Expression // nil means auto-assign (0 or previous+1)
+}
+
 type EnumDefinition struct {
 	Location
 	Name     string
-	Variants []string
+	Variants []EnumVariant
 	Private  bool
 	Comments []Comment // Comments found within the enum definition
 }

@@ -1842,6 +1842,78 @@ func TestEnums(t *testing.T) {
 	})
 }
 
+func TestEnumValues(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Enum with explicit values",
+			input: strings.Join([]string{
+				`enum HttpStatus {`,
+				`  Ok = 200,`,
+				`  Created = 201,`,
+				`  Not_Found = 404`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+		},
+		{
+			name: "Enum with auto-incrementing values",
+			input: strings.Join([]string{
+				`enum Status {`,
+				`  Pending,`,
+				`  Active = 100,`,
+				`  Inactive`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+		},
+		{
+			name: "Duplicate enum values are not allowed",
+			input: strings.Join([]string{
+				`enum Status {`,
+				`  Pending = 1,`,
+				`  Active = 1`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Duplicate enum value 1 (also used by variant Pending)",
+				},
+			},
+		},
+		{
+			name: "Auto-incremented values must not duplicate",
+			input: strings.Join([]string{
+				`enum Status {`,
+				`  First = 1,`,
+				`  Second,`,
+				`  Third = 2`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Duplicate enum value 2 (also used by variant Second)",
+				},
+			},
+		},
+		{
+			name: "Enum variant values must be integer literals",
+			input: `enum Test { X = "not an int" }`,
+			diagnostics: []checker.Diagnostic{
+				{
+					Kind:    checker.Error,
+					Message: "Enum variant value must be an integer literal",
+				},
+			},
+		},
+	})
+}
+
 func TestMatchingOnEnums(t *testing.T) {
 	run(t, []test{
 		{

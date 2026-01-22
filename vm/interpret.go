@@ -478,26 +478,39 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.EnumMatch:
 		{
 			subject := vm.eval(scp, e.Subject)
-			variantIndex := subject.Raw().(int8)
+			discriminant := subject.Raw().(int)
+			
+			// Map discriminant value to variant index
+			enumType := e.Subject.Type().(*checker.Enum)
+			var variantIndex int8 = -1
+			for i, value := range enumType.Values {
+				if value.Value == discriminant {
+					variantIndex = int8(i)
+					break
+				}
+			}
 
 			// If there is a catch-all case and we do not have a specific handler for this variant
-			if e.CatchAll != nil && (variantIndex >= int8(len(e.Cases)) || e.Cases[variantIndex] == nil) {
+			if e.CatchAll != nil && (variantIndex < 0 || variantIndex >= int8(len(e.Cases)) || e.Cases[variantIndex] == nil) {
 				res, _ := vm.evalBlock(scp, e.CatchAll, nil)
 				return res
 			}
 
 			// Execute the matching case block for this variant
-			if variantIndex < int8(len(e.Cases)) && e.Cases[variantIndex] != nil {
+			if variantIndex >= 0 && variantIndex < int8(len(e.Cases)) && e.Cases[variantIndex] != nil {
 				res, _ := vm.evalBlock(scp, e.Cases[variantIndex], nil)
 				return res
 			}
 
 			// This should never happen if the type checker is working correctly
 			// because it ensures the match is exhaustive
-			panic(fmt.Errorf("No matching case for enum variant %d", variantIndex))
+			panic(fmt.Errorf("No matching case for enum variant with discriminant %d", discriminant))
 		}
 	case *checker.EnumVariant:
-		return runtime.Make(e.Variant, e.Type())
+		// Get the enum type and find the discriminant value for this variant
+		enumType := e.Type().(*checker.Enum)
+		discriminant := enumType.Values[e.Variant].Value
+		return runtime.Make(discriminant, e.Type())
 	case *checker.BoolMatch:
 		{
 			subject := vm.eval(scp, e.Subject)

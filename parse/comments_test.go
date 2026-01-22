@@ -105,8 +105,12 @@ func TestCommentsInEnumVariants(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&EnumDefinition{
-						Name:     "Color",
-						Variants: []string{"Red", "Green", "Blue"},
+						Name: "Color",
+						Variants: []EnumVariant{
+							{Name: "Red"},
+							{Name: "Green"},
+							{Name: "Blue"},
+						},
 						Comments: []Comment{
 							{Value: "Comment between variants"},
 						},
