@@ -169,7 +169,7 @@ func (o *Object) Copy() *Object {
 			copy.raw = inner.Copy()
 		}
 	case *checker.Enum:
-		// Enums are represented as int8
+		// Enums are represented as int (their discriminant value)
 	case *checker.FunctionDef:
 		// Functions cannot be copied - return the same function object
 		// Functions are immutable so sharing them is safe

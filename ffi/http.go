@@ -140,26 +140,27 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				panic(fmt.Errorf("Handler for '%s' is not a function", path))
 			}
 
-			methodEnumType := handle.GetParams()[0].Type.(*checker.StructDef).Fields["method"]
+			methodEnumType := handle.GetParams()[0].Type.(*checker.StructDef).Fields["method"].(*checker.Enum)
 
-			// Convert HTTP method string to Method enum
-			var method *runtime.Object
+			// Convert HTTP method string to Method enum discriminant value
+			var methodValue int
 			switch r.Method {
 			case "GET":
-				method = runtime.Make(int8(0), methodEnumType) // Get variant
+				methodValue = methodEnumType.Values[0].Value // Get variant
 			case "POST":
-				method = runtime.Make(int8(1), methodEnumType) // Post variant
+				methodValue = methodEnumType.Values[1].Value // Post variant
 			case "PUT":
-				method = runtime.Make(int8(2), methodEnumType) // Put variant
+				methodValue = methodEnumType.Values[2].Value // Put variant
 			case "DELETE":
-				method = runtime.Make(int8(3), methodEnumType) // Del variant
+				methodValue = methodEnumType.Values[3].Value // Del variant
 			case "PATCH":
-				method = runtime.Make(int8(4), methodEnumType) // Patch variant
+				methodValue = methodEnumType.Values[4].Value // Patch variant
 			case "OPTIONS":
-				method = runtime.Make(int8(5), methodEnumType) // Patch variant
+				methodValue = methodEnumType.Values[5].Value // Options variant
 			default:
-				method = runtime.Make(int8(0), methodEnumType) // Default to Get
+				methodValue = methodEnumType.Values[0].Value // Default to Get
 			}
+			method := runtime.Make(methodValue, methodEnumType)
 
 			requestMap := map[string]*runtime.Object{
 				"method":  method,
