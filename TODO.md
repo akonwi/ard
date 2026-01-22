@@ -1,30 +1,10 @@
 # TODO
-- [ ] equivalent of Gleam's `use`
-  - sugar to denest callbacks
-- [ ] selective variable capture for closures
-  - data optimization
-  -👇🏿 the returned fn should only have `as` in its scope, not the entire scope
-- [ ] loops as expressions (comprehensions?)
-  - `let doubled: [Int] = for i in 1..10 { i * 2 }`
-  ```
-  fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
-    fn(data: Dynamic) $T![decode::Error] {
-      let list = try decode::run(data, decode::list(as))
-      match list.size() {
-        0 => Result::err([decode::Error{path: [""], expected: "non-empty list", found: "empty list"}]),
-        _ => Result::ok(list.at(0))
-      }
-    }
-  }
-  ```
-- [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
-- [ ] Support omitting `Void` in fn type declarations and externs
 - [ ] define enum values
   ```
   enum HttpStatus {
-    Ok: 200,
-    Created: 201,
-    Not_Found: 404,
+    Ok = 200,
+    Created = 201,
+    Not_Found = 404,
     // ...
   }
 
@@ -54,3 +34,25 @@
 - [ ] change for loop syntax to something like odin
   - `for [1,2,3] i { ... }`
 - [ ] `Maybe.or_lazy()` to run a function to generate the fallback
+- [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
+- [ ] equivalent of Gleam's `use`
+  - sugar to denest callbacks
+- [ ] loops as expressions (comprehensions?)
+  - inspiration from zig
+  - the result of the iteration is a new list
+  - kind of needs support for `break` with a value, so that value is the lone result (i.e. find)
+  - `let doubled: [Int] = for i in 1..10 { i * 2 }`
+- [ ] **i'm not sure what this means anymore** selective variable capture for closures
+  - data optimization
+  -👇🏿 the returned fn should only have `as` in its scope, not the entire scope
+  ```
+  fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
+    fn(data: Dynamic) $T![decode::Error] {
+      let list = try decode::run(data, decode::list(as))
+      match list.size() {
+        0 => Result::err([decode::Error{path: [""], expected: "non-empty list", found: "empty list"}]),
+        _ => Result::ok(list.at(0))
+      }
+    }
+  }
+  ```
