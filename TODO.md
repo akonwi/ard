@@ -1,9 +1,4 @@
 # TODO
-- [ ] compile time constant variables
-  - should readonly variables with a literal value be considered constants?
-    pro: simpler than adding a new `const` keyword and just works
-  - would allow limiting variables in `match Int` patterns to constants for better analysis that there are no conflicts or overlaps in patterns
-- [ ] support handling fiber panics
 - [ ] allow omitting nullable arguments in function calls
 - [ ] decode::path() could support both field name and array index
     - `fn decode::path(segments: [Str|Int], as: decode::Decoder<$Out>) $Out![decode::Error] `
@@ -31,6 +26,11 @@
   - the result of the iteration is a new list
   - kind of needs support for `break` with a value, so that value is the lone result (i.e. find)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
+- [ ] support handling fiber panics
+- [ ] compile time constant variables
+  - should readonly variables with a literal value be considered constants?
+    pro: simpler than adding a new `const` keyword and just works
+  - would allow limiting variables in `match Int` patterns to constants for better analysis that there are no conflicts or overlaps in patterns
 - [ ] **i'm not sure what this means anymore** selective variable capture for closures
   - data optimization
   -👇🏿 the returned fn should only have `as` in its scope, not the entire scope
