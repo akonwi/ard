@@ -240,5 +240,116 @@ func TestTryKeyword(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "try with catch shorthand - simple function",
+			input: `try get_result() -> format_error`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Try{
+						Expression: &FunctionCall{
+							Name:     "get_result",
+							Args:     []Argument{},
+							Comments: []Comment{},
+						},
+						CatchVar: &Identifier{
+							Name: "err",
+						},
+						CatchBlock: []Statement{
+							&FunctionCall{
+								Name: "format_error",
+								Args: []Argument{
+									{
+										Name: "",
+										Value: &Identifier{
+											Name: "err",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "try with catch shorthand - qualified function",
+			input: `try get_result() -> result::format_error`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Try{
+						Expression: &FunctionCall{
+							Name:     "get_result",
+							Args:     []Argument{},
+							Comments: []Comment{},
+						},
+						CatchVar: &Identifier{
+							Name: "err",
+						},
+						CatchBlock: []Statement{
+							&StaticFunction{
+								Target: &Identifier{
+									Name: "result",
+								},
+								Function: FunctionCall{
+									Name: "format_error",
+									Args: []Argument{
+										{
+											Name: "",
+											Value: &Identifier{
+												Name: "err",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "try with catch shorthand - multi-level qualified function",
+			input: `try get_result() -> module::sub::format_error`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Try{
+						Expression: &FunctionCall{
+							Name:     "get_result",
+							Args:     []Argument{},
+							Comments: []Comment{},
+						},
+						CatchVar: &Identifier{
+							Name: "err",
+						},
+						CatchBlock: []Statement{
+							&StaticFunction{
+								Target: &StaticProperty{
+									Target: &Identifier{
+										Name: "module",
+									},
+									Property: &Identifier{
+										Name: "sub",
+									},
+								},
+								Function: FunctionCall{
+									Name: "format_error",
+									Args: []Argument{
+										{
+											Name: "",
+											Value: &Identifier{
+												Name: "err",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	})
 }

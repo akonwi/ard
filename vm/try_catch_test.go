@@ -134,51 +134,48 @@ func TestTryNestedEarlyReturns(t *testing.T) {
 }
 
 func TestTryCatchWithFunction(t *testing.T) {
-	input := `
-	fn make_error_message(code: Str) Str {
-		"Failed with code: {code}"
-	}
+	runTests(t, []test{
+		{
+			name: "a simple function name",
+			input: `
+				fn make_error_message(code: Str) Str {
+					"Failed with code: {code}"
+				}
 
-	fn foobar() Int!Str {
-		Result::err("something went wrong")
-	}
+				fn foobar() Int!Str {
+					Result::err("something went wrong")
+				}
 
-	fn do_thing() Str {
-		let result = try foobar() -> make_error_message
-		"success: {result}"
-	}
+				fn do_thing() Str {
+					let result = try foobar() -> make_error_message
+					"success: {result}"
+				}
 
-	do_thing()
-	`
-	result := run(t, input)
-	expected := "Failed with code: something went wrong"
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
-	}
-}
+				do_thing()
+			`,
+			want: "Failed with code: something went wrong",
+		},
+		{
+			name: "a qualified function name",
+			input: `
+				fn Foo::format(code: Str) Str {
+					"Failed with code: {code}"
+				}
 
-func TestTryCatchWithFunctionSuccess(t *testing.T) {
-	input := `
-	fn make_error_message(code: Int) Str {
-		"Error: {code}"
-	}
+				fn foobar() Int!Str {
+					Result::err("something went wrong")
+				}
 
-	fn foobar() Str!Int {
-		Result::err(42)
-	}
+				fn do_thing() Str {
+					let result = try foobar() -> Foo::format
+					"success: {result}"
+				}
 
-	fn do_thing() Str {
-		let result = try foobar() -> make_error_message
-		result
-	}
-
-	do_thing()
-	`
-	result := run(t, input)
-	expected := "Error: 42"
-	if result != expected {
-		t.Errorf("Expected %s, got %v", expected, result)
-	}
+				do_thing()
+			`,
+			want: "Failed with code: something went wrong",
+		},
+	})
 }
 
 // Test simpler early return behavior

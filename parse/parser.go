@@ -1743,7 +1743,7 @@ func (p *parser) try() (Expression, error) {
 		var catchVar *Identifier
 		var catchBlock []Statement
 
-		// Check for catch clause: -> varname { ... } or -> function_name
+		// Check for catch clause: -> varname { ... } or -> function_name or -> qualified::function
 		if p.match(thin_arrow) {
 			if !p.check(identifier) {
 				return nil, p.makeError(p.peek(), "Expected identifier after '->' in try-catch")
@@ -1764,32 +1764,107 @@ func (p *parser) try() (Expression, error) {
 				}
 				catchBlock = block
 			} else {
-				// Function syntax: -> function_name
-				// Desugar to: -> err { function_name(err) }
+				// Function syntax: -> function_name or -> qualified::function
+				// Desugar to: -> err { function_name(err) } or -> err { qualified::function(err) }
 				catchVar = &Identifier{
 					Name:     "err",
 					Location: idToken.getLocation(),
 				}
 
-				// Create function call: function_name(err)
-				funcCall := &FunctionCall{
-					Location: idToken.getLocation(),
+				// Build the function expression - could be qualified with ::
+				var functionExpr Expression
+				
+				// Start with the first identifier
+				functionExpr = &Identifier{
 					Name:     idToken.text,
-					Args: []Argument{
-						{
-							Location: idToken.getLocation(),
-							Name:     "",
-							Value: &Identifier{
-								Name:     "err",
-								Location: idToken.getLocation(),
+					Location: idToken.getLocation(),
+				}
+				
+				// Parse qualified path (e.g., module::function or Type::method)
+				startLoc := idToken.getLocation()
+				endLoc := startLoc
+				
+				for p.match(colon_colon) {
+					if !p.check(identifier) {
+						p.addError(p.peek(), "Expected an identifier after '::'")
+						break
+					}
+					propToken := p.advance()
+					
+					functionExpr = &StaticProperty{
+						Location: Location{
+							Start: startLoc.Start,
+							End:   propToken.getLocation().End,
+						},
+						Target: functionExpr,
+						Property: &Identifier{
+							Location: propToken.getLocation(),
+							Name:     propToken.text,
+						},
+					}
+					endLoc = propToken.getLocation()
+				}
+				
+				// Create the appropriate call node
+				var callStmt Statement
+				
+				// If we have a qualified path, create a StaticFunction
+				if _, isQualified := functionExpr.(*StaticProperty); isQualified {
+					// Extract the final function name and target from the chain
+					var finalName string
+					var target Expression
+					
+					// Walk to the last StaticProperty to get the final name
+					current := functionExpr
+					if sp, ok := current.(*StaticProperty); ok {
+						if id, ok := sp.Property.(*Identifier); ok {
+							finalName = id.Name
+						}
+						target = sp.Target
+					}
+					
+					callStmt = &StaticFunction{
+						Location: Location{
+							Start: startLoc.Start,
+							End:   endLoc.End,
+						},
+						Target: target,
+						Function: FunctionCall{
+							Location: endLoc,
+							Name:     finalName,
+							Args: []Argument{
+								{
+									Location: endLoc,
+									Name:     "",
+									Value: &Identifier{
+										Name:     "err",
+										Location: endLoc,
+									},
+								},
 							},
 						},
-					},
+					}
+				} else {
+					// Simple function name - create FunctionCall
+					callStmt = &FunctionCall{
+						Location: endLoc,
+						Name:     idToken.text,
+						Args: []Argument{
+							{
+								Location: endLoc,
+								Name:     "",
+								Value: &Identifier{
+									Name:     "err",
+									Location: endLoc,
+								},
+							},
+						},
+					}
 				}
 
 				// Wrap in a statement
 				catchBlock = []Statement{
-					funcCall,
+					callStmt,
 				}
 			}
 		}
