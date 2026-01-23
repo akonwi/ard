@@ -1544,6 +1544,41 @@ func (p *parser) parseTypeArguments() []DeclaredType {
 	return typeArgs
 }
 
+func (p *parser) parseGenericTypeParameters() []string {
+	if !p.match(less_than) {
+		return nil
+	}
+
+	var typeParams []string
+	if !p.check(greater_than) {
+		for {
+			if !p.check(identifier) {
+				p.addError(p.peek(), "Expected generic type parameter starting with '$'")
+				break
+			}
+			paramToken := p.peek()
+			// Check if this is a generic parameter (starts with $)
+			if len(paramToken.text) == 0 || paramToken.text[0] != '$' {
+				p.addError(paramToken, "Expected generic type parameter starting with '$'")
+				break
+			}
+			p.advance() // consume the token
+			// paramToken.text will be like "$T", we need just "T"
+			paramName := paramToken.text[1:] // Remove the leading '$'
+			typeParams = append(typeParams, paramName)
+			if !p.match(comma) {
+				break
+			}
+		}
+	}
+
+	if !p.match(greater_than) {
+		p.addError(p.peek(), "Expected '>' to close generic type parameters")
+	}
+
+	return typeParams
+}
+
 func (p *parser) parseExpression() (Expression, error) {
 	return p.matchExpr()
 }
@@ -1946,6 +1981,9 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			name = "" // Treat as anonymous function
 		}
 
+		// Parse generic type parameters if present (e.g., <$T, $U>)
+		typeParams := p.parseGenericTypeParameters()
+
 		if !p.check(left_paren) {
 			p.addError(p.peek(), "Expected '(' for parameters list")
 			p.synchronizeToTokens(left_paren, left_brace)
@@ -2074,6 +2112,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			extFn := &ExternalFunction{
 				Private:         private,
 				Name:            name.(string), // External functions must have string names
+				TypeParams:      typeParams,
 				Parameters:      params,
 				ReturnType:      returnType,
 				ExternalBinding: externalBinding,
@@ -2105,6 +2144,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 
 		fnDef := &FunctionDeclaration{
 			Private:    private,
+			TypeParams: typeParams,
 			Mutates:    asMethod && mutates,
 			Parameters: params,
 			ReturnType: returnType,

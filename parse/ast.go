@@ -285,6 +285,7 @@ func (p Parameter) String() string {
 type FunctionDeclaration struct {
 	Location
 	Name       string
+	TypeParams []string        // Generic type parameters (e.g., ["T", "U"] for fn<$T, $U>(...))
 	Mutates    bool
 	Parameters []Parameter
 	ReturnType DeclaredType
@@ -300,6 +301,7 @@ func (f FunctionDeclaration) String() string {
 type ExternalFunction struct {
 	Location
 	Name            string
+	TypeParams      []string // Generic type parameters
 	Parameters      []Parameter
 	ReturnType      DeclaredType
 	ExternalBinding string

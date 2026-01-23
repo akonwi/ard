@@ -529,3 +529,60 @@ func TestAnonymousFunctions(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestGenericFunctionDeclaration(t *testing.T) {
+	tests := []test{
+		{
+			name:  "Generic function with single type parameter",
+			input: `fn identity<$T>(value: $T) $T { value }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "identity",
+						TypeParams: []string{"T"},
+						Parameters: []Parameter{
+							{
+								Name: "value",
+								Type: &GenericType{Name: "T"},
+							},
+						},
+						ReturnType: &GenericType{Name: "T"},
+						Body: []Statement{
+							&Identifier{Name: "value"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Generic function with multiple type parameters",
+			input: `fn pair<$A, $B>(a: $A, b: $B) $A { a }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "pair",
+						TypeParams: []string{"A", "B"},
+						Parameters: []Parameter{
+							{
+								Name: "a",
+								Type: &GenericType{Name: "A"},
+							},
+							{
+								Name: "b",
+								Type: &GenericType{Name: "B"},
+							},
+						},
+						ReturnType: &GenericType{Name: "A"},
+						Body: []Statement{
+							&Identifier{Name: "a"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runTests(t, tests)
+}
