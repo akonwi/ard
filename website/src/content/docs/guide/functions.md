@@ -62,6 +62,54 @@ fn get_status(code: Int) Str {
 }
 ```
 
+## Nullable Parameters
+
+Function parameters can be marked as nullable using the `?` modifier, allowing callers to omit them:
+
+```ard
+fn greet(name: Str, greeting: Str?) Str {
+  let msg = greeting.or("Hello")
+  "{msg}, {name}!"
+}
+
+// Providing a value for the nullable parameter
+greet("Alice", "Hi")
+
+// Omitting the nullable parameter (greeting becomes None)
+greet("Bob")
+```
+
+When a non-nullable value is provided to a nullable parameter, it's automatically wrapped in `maybe::some()`:
+
+```ard
+fn process(data: Str, options: Options?) Result {
+  let opts = options.or(Options::default())
+  // Process with options
+}
+
+// Automatically wraps provided value as Some(Options)
+process("data", Options { verbose: true })
+
+// Omits the parameter (becomes None)
+process("data")
+```
+
+### Omitting Nullable Parameters
+
+You can omit any trailing nullable parameters in a function call. They will be treated as `None`:
+
+```ard
+fn configure(name: Str, timeout: Int?, retries: Int?, debug: Bool?) {
+  // All nullable parameters are optional
+}
+
+// You can provide all, some, or none of the nullable parameters
+configure("service", 30, 3, true)    // All provided
+configure("service", 30, 3)          // debug omitted
+configure("service", 30)             // retries and debug omitted
+configure("service")                 // All nullable params omitted
+```
+
 ## Labelled Arguments
 
 Functions can be called with labelled arguments, allowing parameters to be specified in any order:

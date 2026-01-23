@@ -160,7 +160,7 @@ func TestFunctions(t *testing.T) {
 				"\n",
 			),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 2, got 1"},
+				{Kind: checker.Error, Message: "missing argument for parameter: b"},
 			},
 		},
 	})

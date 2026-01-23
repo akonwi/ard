@@ -1,5 +1,6 @@
 # TODO
 - [ ] allow omitting nullable arguments in function calls
+- [ ] is it time for a channel implementation?
 - [ ] decode::path() could support both field name and array index
     - `fn decode::path(segments: [Str|Int], as: decode::Decoder<$Out>) $Out![decode::Error] `
 - [ ] refactor ard/http request handlers so they don't need to construct the responses
