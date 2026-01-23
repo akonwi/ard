@@ -58,9 +58,6 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("ExtractField", ffi.ExtractField); err != nil {
 		return fmt.Errorf("failed to register ExtractField: %w", err)
 	}
-	if err := r.Register("ExtractAt", ffi.ExtractAt); err != nil {
-		return fmt.Errorf("failed to register ExtractAt: %w", err)
-	}
 	if err := r.Register("FS_Exists", ffi.FS_Exists); err != nil {
 		return fmt.Errorf("failed to register FS_Exists: %w", err)
 	}

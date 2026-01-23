@@ -213,31 +213,6 @@ func ExtractField(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(found)
 }
 
-// fn (Dynamic, Int) Dynamic!Str
-func ExtractAt(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	arg := args[0]
-	data := arg.Raw()
-
-	if data == nil {
-		return runtime.MakeErr(runtime.MakeStr("null"))
-	}
-
-	dataList, ok := data.([]any)
-	if !ok {
-		return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
-	}
-
-	index := args[1].AsInt()
-
-	// Check bounds
-	if index < 0 || index >= len(dataList) {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("index %d out of bounds for array of length %d", index, len(dataList))))
-	}
-
-	found := runtime.MakeDynamic(dataList[index])
-	return runtime.MakeOk(found)
-}
-
 func makeError(expected, found string, _type checker.Type) *runtime.Object {
 	return runtime.MakeStruct(_type,
 		map[string]*runtime.Object{

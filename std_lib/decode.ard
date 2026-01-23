@@ -2,8 +2,6 @@ use ard/list as List
 use ard/maybe
 use ard/string as Str
 
-type PathSegment = Str | Int
-
 struct Error {
   expected: Str,
   found: Str,
@@ -237,37 +235,27 @@ fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
   }
 }
 
-extern fn extract_at(data: Dynamic, index: Int) Dynamic!Str = "ExtractAt"
-
-// decode a nested field or array element.
+// decode a nested field.
 // { foo: { bar: 20 } } --- path(["foo", "bar"], int)
-// [{ id: 1 }, { id: 2 }] --- path([0, "id"], int)
-fn path(segments: [PathSegment], with: Decoder<$T>) Decoder<$T> {
+fn path(subpath: [Str], with: Decoder<$T>) Decoder<$T> {
   fn (data: Dynamic) $T![Error] {
-    match segments.size() {
+    match subpath.size() {
       0 => with(data),
       _ => {
-        mut current_data = data
+        mut current_data = try extract_field(data, subpath.at(0)) -> found {
+          Result::err([
+            Error{expected: "Field", found: found, path: [subpath.at(0)]}
+          ])
+        }
         mut traveled: [Str] = []
-
-        for segment, idx in segments {
-          match segment {
-            Str(str) => {
-              current_data = try extract_field(current_data, str) -> found {
-                Result::err([
-                  Error{expected: "Field", found: found, path: traveled}
-                ])
-              }
-              traveled.push(str)
-            },
-            Int(int) => {
-              current_data = try extract_at(current_data, int) -> found {
-                Result::err([
-                  Error{expected: "Array index", found: found, path: traveled}
-                ])
-              }
-              traveled.push("[{int}]")
+        for seg, idx in subpath {
+          if idx > 0 {
+            current_data = try extract_field(current_data, seg) -> found {
+              Result::err([
+                Error{expected: "Field", found: found, path: [subpath.at(0)]}
+              ])
             }
+            traveled.push(seg)
           }
         }
 
@@ -277,7 +265,7 @@ fn path(segments: [PathSegment], with: Decoder<$T>) Decoder<$T> {
             out.push(Error{
               expected: err.expected,
               found: err.found,
-              path: List::concat(traveled, err.path)
+              path: List::concat(err.path, subpath)
             })
           }
 

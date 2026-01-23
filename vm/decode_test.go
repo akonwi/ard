@@ -578,62 +578,6 @@ func TestDecodePath(t *testing.T) {
 			`,
 			want: 42,
 		},
-		{
-			name: "decode with path containing array index",
-			input: `
-				use ard/decode
-
-				let data = decode::from_json("[1, 2, 3]").expect("Unable to parse json")
-				let result = decode::run(data, decode::path([0], decode::int))
-				match result {
-					ok(val) => val,
-					err(errs) => -1
-				}
-			`,
-			want: 1,
-		},
-		{
-			name: "decode with mixed path of fields and indices",
-			input: `
-				use ard/decode
-
-				let data = decode::from_json("[\{\"id\": 1\}, \{\"id\": 2\}, \{\"id\": 3\}]").expect("Unable to parse json")
-				let result = decode::run(data, decode::path([1, "id"], decode::int))
-				match result {
-					ok(id) => id,
-					err(errs) => -1
-				}
-			`,
-			want: 2,
-		},
-		{
-			name: "decode with complex nested path",
-			input: `
-				use ard/decode
-
-				let data = decode::from_json("[\{\"users\": [\{\"name\": \"Alice\"\}, \{\"name\": \"Bob\"\}]\}]").expect("Unable to parse json")
-				let result = decode::run(data, decode::path([0, "users", 1, "name"], decode::string))
-				match result {
-					ok(name) => name,
-					err(errs) => ""
-				}
-			`,
-			want: "Bob",
-		},
-		{
-			name: "decode with path error includes proper error location",
-			input: `
-				use ard/decode
-
-				let data = decode::from_json("[\{\"user\": \{\"age\": \"not_a_number\"\}\}]").expect("Unable to parse json")
-				let result = decode::run(data, decode::path([0, "user", "age"], decode::int))
-				match result {
-					ok(_) => "unexpected success",
-					err(errs) => errs.at(0).to_str()
-				}
-			`,
-			want: "[0].user.age: got \"not_a_number\", expected Int",
-		},
 	})
 }
 
