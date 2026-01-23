@@ -601,6 +601,46 @@ func TestEnumValues(t *testing.T) {
 	})
 }
 
+func TestEnumEquality(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Enum equality comparison",
+			input: `
+				enum Direction {
+					Up, Down, Left, Right
+				}
+				let dir1 = Direction::Up
+				let dir2 = Direction::Up
+				dir1 == dir2
+			`,
+			want: true,
+		},
+		{
+			name: "Enum inequality comparison",
+			input: `
+				enum Direction {
+					Up, Down, Left, Right
+				}
+				let dir1 = Direction::Up
+				let dir2 = Direction::Down
+				dir1 == dir2
+			`,
+			want: false,
+		},
+		{
+			name: "Enum direct comparison with constant",
+			input: `
+				enum Status {
+					Active, Inactive
+				}
+				let status = Status::Active
+				status == Status::Active
+			`,
+			want: true,
+		},
+	})
+}
+
 func TestUnions(t *testing.T) {
 	runTests(t, []test{
 		{

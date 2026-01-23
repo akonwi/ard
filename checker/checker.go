@@ -2468,7 +2468,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Check if types are allowed for equality (use equal() not pointer equality)
 					isAllowedType := func(t Type) bool {
-						return t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool)
+						// Primitives and enums are allowed for equality
+						if t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool) {
+							return true
+						}
+						// Enums are allowed (they are just integers with semantic meaning)
+						_, isEnum := t.(*Enum)
+						return isEnum
 					}
 					if !isAllowedType(left.Type()) || !isAllowedType(right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
