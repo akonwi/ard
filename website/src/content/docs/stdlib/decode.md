@@ -110,15 +110,20 @@ let data = decode::from_json("{\"name\": \"Alice\"}").expect("Invalid JSON")
 let name = decode::run(data, decode::field("name", decode::string)).expect("Failed to decode")
 ```
 
-#### `fn path(subpath: [Str], with: Decoder<$T>) Decoder<$T>`
+#### `fn path(segments: [PathSegment], with: Decoder<$T>) Decoder<$T>`
 
-Create a decoder for a nested field path. Useful for deeply nested structures.
+Create a decoder for a nested path that supports both field names and array indices. The path can mix strings (field names) and integers (array indices) to traverse complex nested structures.
 
 ```ard
 use ard/decode
 
+// Nested fields only
 let data = decode::from_json("{\"user\": {\"profile\": {\"age\": 30}}}").expect("Invalid JSON")
-let age = decode::run(data, decode::path(["user", "profile"], decode::field("age", decode::int))).expect("Failed to decode")
+let age = decode::run(data, decode::path(["user", "profile", "age"], decode::int)).expect("Failed to decode")
+
+// Mix fields and array indices
+let data2 = decode::from_json("[{\"users\": [{\"name\": \"Alice\"}, {\"name\": \"Bob\"}]}]").expect("Invalid JSON")
+let name = decode::run(data2, decode::path([0, "users", 1, "name"], decode::string)).expect("Failed to decode")
 ```
 
 #### `fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key:$Value]>`
