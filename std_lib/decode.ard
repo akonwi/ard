@@ -2,6 +2,8 @@ use ard/list as List
 use ard/maybe
 use ard/string as Str
 
+type PathSegment = Str | Int
+
 struct Error {
   expected: Str,
   found: Str,
@@ -269,6 +271,59 @@ fn path(subpath: [Str], with: Decoder<$T>) Decoder<$T> {
             })
           }
 
+          Result::err(out)
+        }
+        Result::ok(out)
+      },
+    }
+  }
+}
+
+// decode a nested path that supports both field names and array indices.
+// { foo: [{ bar: 20 }] } --- path2(["foo", 0, "bar"], int)
+fn path2(subpath: [PathSegment], with: Decoder<$T>) Decoder<$T> {
+  fn (data: Dynamic) $T![Error] {
+    match subpath.size() {
+      0 => with(data),
+      _ => {
+        mut current_data = data
+        mut traveled: [Str] = []
+
+        for seg in subpath {
+          match seg {
+            Str(s) => {
+              current_data = try extract_field(current_data, s) -> found {
+                mut err_path = traveled
+                err_path.push(s)
+                Result::err([
+                  Error{expected: "Field", found: found, path: err_path}
+                ])
+              }
+              traveled.push(s)
+            },
+            Int(i) => {
+              let list = try to_list(current_data) -> found {
+                mut err_path = traveled
+                err_path.push("[{i}]")
+                Result::err([
+                  Error{expected: "List", found: found, path: err_path}
+                ])
+              }
+              current_data = list.at(i)
+              traveled.push("[{i}]")
+            }
+          }
+        }
+
+        let out = try with(current_data) -> errs {
+          mut out: [Error] = []
+          for err in errs {
+            out.push(Error{
+              expected: err.expected,
+              found: err.found,
+              path: List::concat(traveled, err.path)
+            })
+          }
           Result::err(out)
         }
         Result::ok(out)

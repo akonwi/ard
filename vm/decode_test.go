@@ -581,6 +581,130 @@ func TestDecodePath(t *testing.T) {
 	})
 }
 
+func TestDecodePath2(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "path2 with only string segments works like path",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("\{\"foo\": \{\"bar\": 42\}\}").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["foo", "bar"], decode::int))
+				result.expect("Failed to decode")
+			`,
+			want: 42,
+		},
+		{
+			name: "path2 with array index",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("\{\"items\": [10, 20, 30]\}").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["items", 1], decode::int))
+				result.expect("Failed to decode")
+			`,
+			want: 20,
+		},
+		{
+			name: "path2 with mixed field and array access",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("\{\"response\": [\{\"name\": \"Alice\"\}, \{\"name\": \"Bob\"\}]\}").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["response", 0, "name"], decode::string))
+				result.expect("Failed to decode")
+			`,
+			want: "Alice",
+		},
+		{
+			name: "path2 with deeply nested mixed access",
+			input: `
+				use ard/decode
+
+				let json = "\{\"data\": \{\"users\": [\{\"profile\": \{\"age\": 25\}\}]\}\}"
+				let data = decode::from_json(json).expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["data", "users", 0, "profile", "age"], decode::int))
+				result.expect("Failed to decode")
+			`,
+			want: 25,
+		},
+		{
+			name: "path2 with empty path returns data as-is",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("42").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2([], decode::int))
+				result.expect("Failed to decode")
+			`,
+			want: 42,
+		},
+		{
+			name: "path2 error includes correct path for decoder failure",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("\{\"foo\": \{\"bar\": \"not_an_int\"\}\}").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["foo", "bar"], decode::int))
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "foo.bar: got \"not_an_int\", expected Int",
+		},
+		{
+			name: "path2 error includes array index in path",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("\{\"items\": [\"a\", \"b\"]\}").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["items", 1], decode::int))
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "items[1]: got \"b\", expected Int",
+		},
+		{
+			name: "path2 error with mixed path segments",
+			input: `
+				use ard/decode
+
+				let data = decode::from_json("\{\"users\": [\{\"name\": 123\}]\}").expect("Failed to parse json")
+				let result = decode::run(data, decode::path2(["users", 0, "name"], decode::string))
+				match result {
+					ok => "unexpected success",
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "users[0].name: got 123, expected Str",
+		},
+		{
+			name: "path2 simplifies the deep custom decoder pattern",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/json_data.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+
+				let data = decode::from_json(text).expect("Unable to parse json")
+
+				// Extract response[0].bookmakers[0].bets[0].name using path2
+				let res = decode::run(data, decode::path2(["response", 0, "bookmakers", 0, "bets", 0, "name"], decode::string))
+
+				match res {
+					ok(name) => name,
+					err(errs) => errs.at(0).to_str()
+				}
+			`,
+			want: "Match Winner",
+		},
+	})
+}
+
 func TestDecodeOneOf(t *testing.T) {
 	runTests(t, []test{
 		{

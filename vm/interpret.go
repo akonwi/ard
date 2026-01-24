@@ -88,6 +88,11 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 		target := vm.eval(scp, s.Target)
 		val := vm.eval(scp, s.Value)
 
+		// can be stopped early by `try` expression
+		if scp.isStopped() {
+			return val
+		}
+
 		// replace the target with the new value
 		// note: it's possible that either side still has an open generic,
 		// but the checker theoretically should have refined whatever is on the new value.
@@ -479,7 +484,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		{
 			subject := vm.eval(scp, e.Subject)
 			discriminant := subject.Raw().(int)
-			
+
 			// Map discriminant value to variant index
 			enumType := e.Subject.Type().(*checker.Enum)
 			var variantIndex int8 = -1
