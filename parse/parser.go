@@ -2969,8 +2969,9 @@ func (p *parser) primary() (Expression, error) {
 		}, nil
 	default:
 		peek := p.peek()
-		p.addError(peek, fmt.Sprintf("unmatched primary expression: %s", peek.kind))
-		// Return a dummy identifier to allow parsing to continue
+		p.addError(peek, fmt.Sprintf("Unexpected token: %s", peek.kind))
+		// Advance past the unexpected token to prevent infinite loops
+		p.advance()
 		return &Identifier{
 			Name:     peek.text,
 			Location: peek.getLocation(),
