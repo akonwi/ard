@@ -705,6 +705,455 @@ func TestDecodePath2(t *testing.T) {
 	})
 }
 
+func TestDecodePath2WithTry(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "path2 with try in a function",
+			input: `
+				use ard/decode
+
+				fn extract_id(data: Dynamic) Int![decode::Error] {
+					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					Result::ok(id)
+				}
+
+				let json = "\{\"fixture\": \{\"id\": 42\}\}"
+				let data = decode::from_json(json).expect("Failed to parse json")
+				extract_id(data).expect("Failed to extract id")
+			`,
+			want: 42,
+		},
+		{
+			name: "path2 with try in a function - multiple calls",
+			input: `
+				use ard/decode
+
+				fn extract_fixture(data: Dynamic) [Int]![decode::Error] {
+					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					let timestamp = try decode::run(data, decode::path2(["fixture", "timestamp"], decode::int))
+					Result::ok([id, timestamp])
+				}
+
+				let json = "\{\"fixture\": \{\"id\": 1446667, \"timestamp\": 12345\}\}"
+				let data = decode::from_json(json).expect("Failed to parse json")
+				let result = extract_fixture(data).expect("Failed to extract")
+				result.at(0)
+			`,
+			want: 1446667,
+		},
+		{
+			name: "path2 chained - extract from response array then decode nested fields",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				fn extract_fixture(data: Dynamic) Int![decode::Error] {
+					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					Result::ok(id)
+				}
+
+				let text = fs::read("./fixtures/team.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+				let data = decode::from_json(text).expect("Unable to parse json")
+
+				// First extract response[0] using path2
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed to get response entry")
+
+				// Then pass that to a function that uses path2 again
+				extract_fixture(entry).expect("Failed to extract fixture")
+			`,
+			want: 1390960,
+		},
+		{
+			name: "path2 with list iteration - mimics fapi pattern",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				fn extract_fixture_id(data: Dynamic) Int![decode::Error] {
+					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					Result::ok(id)
+				}
+
+				let text = fs::read("./fixtures/team.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+				let data = decode::from_json(text).expect("Unable to parse json")
+
+				// Extract response array
+				let entries = decode::run(data, decode::path(["response"], decode::list(decode::dynamic))).expect("Failed to get response")
+
+				// Iterate and extract from each entry
+				mut ids: [Int] = []
+				for entry in entries {
+					let id = extract_fixture_id(entry).expect("Failed to extract fixture id")
+					ids.push(id)
+				}
+				ids.at(0)
+			`,
+			want: 1390960,
+		},
+		{
+			name: "path2 string-only vs path - direct comparison",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+				let data = decode::from_json(text).expect("Unable to parse json")
+
+				// Extract entry using path2 with mixed segments (like fapi::get_fixture does)
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed to get entry")
+
+				// Now try path2 with string-only segments (like the user's change)
+				let id = decode::run(entry, decode::path2(["fixture", "id"], decode::int)).expect("Failed to get id with path2")
+				id
+			`,
+			want: 1390960,
+		},
+		{
+			name: "path2 after path2 - the exact fapi pattern",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				fn from_api_entry(data: Dynamic) Int![decode::Error] {
+					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					let timestamp = try decode::run(data, decode::path2(["fixture", "timestamp"], decode::int))
+					Result::ok(id + timestamp)
+				}
+
+				let text = fs::read("./fixtures/team.json").or("")
+				if text.is_empty() { panic("Empty json file") }
+				let data = decode::from_json(text).expect("Unable to parse json")
+
+				// First path2 call extracts response[0]
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed to get entry")
+
+				// Second path2 call (inside function) extracts fixture.id
+				from_api_entry(entry).expect("Failed in from_api_entry")
+			`,
+			want: 1390960 + 1765051200,
+		},
+		{
+			name: "path2 multiple calls - check each value separately",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				let id = decode::run(entry, decode::path2(["fixture", "id"], decode::int)).expect("Failed id")
+				let timestamp = decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+
+				// Return timestamp to verify it's not returning id
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "path2 single call - timestamp only",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				// Only call path2 once - for timestamp
+				let timestamp = decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "path (not path2) multiple calls work correctly",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				let id = decode::run(entry, decode::path(["fixture", "id"], decode::int)).expect("Failed id")
+				let timestamp = decode::run(entry, decode::path(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "path2 with pre-defined lists works",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				// Pre-define the path lists
+				let id_path: [decode::PathSegment] = ["fixture", "id"]
+				let ts_path: [decode::PathSegment] = ["fixture", "timestamp"]
+
+				let id = decode::run(entry, decode::path2(id_path, decode::int)).expect("Failed id")
+				let timestamp = decode::run(entry, decode::path2(ts_path, decode::int)).expect("Failed timestamp")
+
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "minimal union type iteration bug",
+			input: `
+				type Seg = Str | Int
+
+				fn extract(path: [Seg]) Str {
+					mut result = ""
+					for seg in path {
+						match seg {
+							Str(s) => { result =+ s + "," },
+							Int(i) => { result =+ i.to_str() + "," }
+						}
+					}
+					result
+				}
+
+				let a = extract(["foo", "bar"])
+				let b = extract(["baz", "qux"])
+				b
+			`,
+			want: "baz,qux,",
+		},
+		{
+			name: "closure capturing union list - multiple calls",
+			input: `
+				type Seg = Str | Int
+
+				fn make_extractor(path: [Seg]) fn() Str {
+					fn() Str {
+						mut result = ""
+						for seg in path {
+							match seg {
+								Str(s) => { result =+ s + "," },
+								Int(i) => { result =+ i.to_str() + "," }
+							}
+						}
+						result
+					}
+				}
+
+				let extractor_a = make_extractor(["foo", "bar"])
+				let extractor_b = make_extractor(["baz", "qux"])
+
+				let a = extractor_a()
+				let b = extractor_b()
+				b
+			`,
+			want: "baz,qux,",
+		},
+		{
+			name: "closure with try and mutation - mimics path2",
+			input: `
+				type Seg = Str | Int
+
+				fn get_field(data: [Str:Int], name: Str) Int!Str {
+					match data.get(name) {
+						v => Result::ok(v),
+						_ => Result::err("not found")
+					}
+				}
+
+				fn make_getter(path: [Seg]) fn([Str:Int]) Int!Str {
+					fn(data: [Str:Int]) Int!Str {
+						mut current = 0
+						for seg in path {
+							match seg {
+								Str(s) => {
+									current = try get_field(data, s)
+								},
+								Int(i) => {
+									current = i
+								}
+							}
+						}
+						Result::ok(current)
+					}
+				}
+
+				let data = ["a": 1, "b": 2]
+				let get_a = make_getter(["a"])
+				let get_b = make_getter(["b"])
+
+				let a = get_a(data).expect("a")
+				let b = get_b(data).expect("b")
+				b
+			`,
+			want: 2,
+		},
+		{
+			name: "path2 without decode::run - direct call",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				// Call path2 decoders directly without decode::run
+				let id_decoder = decode::path2(["fixture", "id"], decode::int)
+				let ts_decoder = decode::path2(["fixture", "timestamp"], decode::int)
+
+				let id = id_decoder(entry).expect("Failed id")
+				let timestamp = ts_decoder(entry).expect("Failed timestamp")
+
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "path2 create and call immediately - no overlap",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				// Create decoder and call immediately for id
+				let id_decoder = decode::path2(["fixture", "id"], decode::int)
+				let id = id_decoder(entry).expect("Failed id")
+
+				// Create decoder and call immediately for timestamp
+				let ts_decoder = decode::path2(["fixture", "timestamp"], decode::int)
+				let timestamp = ts_decoder(entry).expect("Failed timestamp")
+
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "path2 with different decoder types",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				// Use string decoder for timezone
+				let tz = decode::run(entry, decode::path2(["fixture", "timezone"], decode::string)).expect("Failed tz")
+
+				// Use int decoder for timestamp
+				let timestamp = decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+
+				timestamp
+			`,
+			want: 1765051200,
+		},
+		{
+			name: "local path2-like function - test scope isolation",
+			input: `
+				type Seg = Str | Int
+
+				fn my_path2(subpath: [Seg]) fn([Str:Int]) Int {
+					fn(data: [Str:Int]) Int {
+						mut current = 0
+						for seg in subpath {
+							match seg {
+								Str(s) => {
+									current = data.get(s).or(0)
+								},
+								Int(i) => {
+									current = i
+								}
+							}
+						}
+						current
+					}
+				}
+
+				let data = ["a": 1, "b": 2, "c": 3]
+
+				let get_a = my_path2(["a"])
+				let get_b = my_path2(["b"])
+
+				let a = get_a(data)
+				let b = get_b(data)
+				b
+			`,
+			want: 2,
+		},
+		{
+			name: "decode path2 debug - check what path is used",
+			input: `
+				use ard/decode
+				use ard/fs
+				use ard/io
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				// Create a debug decoder that shows what path it sees
+				fn debug_path(name: Str, path: [decode::PathSegment]) fn(Dynamic) Str![decode::Error] {
+					fn(data: Dynamic) Str![decode::Error] {
+						mut path_str = name + ": ["
+						for seg in path {
+							match seg {
+								Str(s) => { path_str =+ s + ", " },
+								Int(i) => { path_str =+ i.to_str() + ", " }
+							}
+						}
+						path_str =+ "]"
+						Result::ok(path_str)
+					}
+				}
+
+				let decoder_a = debug_path("a", ["fixture", "id"])
+				let decoder_b = debug_path("b", ["fixture", "timestamp"])
+
+				let a = decoder_a(entry).expect("a")
+				let b = decoder_b(entry).expect("b")
+				b
+			`,
+			want: "b: [fixture, timestamp, ]",
+		},
+		{
+			name: "extract values through separate helper functions",
+			input: `
+				use ard/decode
+				use ard/fs
+
+				fn get_id(entry: Dynamic) Int![decode::Error] {
+					decode::run(entry, decode::path2(["fixture", "id"], decode::int))
+				}
+
+				fn get_timestamp(entry: Dynamic) Int![decode::Error] {
+					decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int))
+				}
+
+				let text = fs::read("./fixtures/team.json").or("")
+				let data = decode::from_json(text).expect("Unable to parse json")
+				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+
+				let id = get_id(entry).expect("Failed id")
+				let timestamp = get_timestamp(entry).expect("Failed timestamp")
+
+				timestamp
+			`,
+			want: 1765051200,
+		},
+	})
+}
+
 func TestDecodeOneOf(t *testing.T) {
 	runTests(t, []test{
 		{
