@@ -43,6 +43,16 @@ func (s *scope) set(name string, value *runtime.Object) {
 	}
 }
 
+// update replaces the binding to point to a new Object, rather than mutating in place.
+// This is used for simple variable reassignment to prevent aliasing issues.
+func (s *scope) update(name string, value *runtime.Object) {
+	if _, ok := s.data.bindings[name]; ok {
+		s.data.bindings[name] = value
+	} else if s.parent != nil {
+		s.parent.update(name, value)
+	}
+}
+
 func (s *scope) _break() {
 	if s.data.breakable {
 		s.data.broke = true

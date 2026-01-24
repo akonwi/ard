@@ -85,7 +85,6 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 		scp.add(s.Name, val)
 		return runtime.Void()
 	case *checker.Reassignment:
-		target := vm.eval(scp, s.Target)
 		val := vm.eval(scp, s.Value)
 
 		// can be stopped early by `try` expression
@@ -93,10 +92,16 @@ func (vm *VM) do(stmt checker.Statement, scp *scope) *runtime.Object {
 			return val
 		}
 
-		// replace the target with the new value
-		// note: it's possible that either side still has an open generic,
-		// but the checker theoretically should have refined whatever is on the new value.
-		// so it __should__ be safe to just accept it whole
+		// For simple variable reassignment, update the scope binding
+		// instead of mutating the Object in place. This prevents aliasing issues
+		// where two variables pointing to the same Object would both be affected.
+		if v, ok := s.Target.(*checker.Variable); ok {
+			scp.update(v.Name(), val)
+			return runtime.Void()
+		}
+
+		// For field/index access, we need to mutate the target in place
+		target := vm.eval(scp, s.Target)
 		*target = *val
 		return runtime.Void()
 	case *checker.ForLoop:
