@@ -3348,6 +3348,24 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					caseBlock := c.checkBlock(matchCase.Body, nil)
 					rangeCases[IntRange{Start: startValue, End: endValue}] = caseBlock
+				} else if staticProp, ok := matchCase.Pattern.(*parse.StaticProperty); ok {
+					// Handle enum variant pattern like Status::active
+					patternExpr := c.checkExpr(staticProp)
+					if patternExpr == nil {
+						continue // Error already reported by checkExpr
+					}
+
+					// Check if the pattern resolves to an enum variant
+					enumVariant, ok := patternExpr.(*EnumVariant)
+					if !ok {
+						c.addError("Pattern in Int match must be an integer literal, range, or enum variant", staticProp.GetLocation())
+						continue
+					}
+
+					// Extract the integer value from the enum variant's actual value (supports custom enum values)
+					value := enumVariant.enum.Values[enumVariant.Variant].Value
+					caseBlock := c.checkBlock(matchCase.Body, nil)
+					intCases[value] = caseBlock
 				} else {
 					c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
 					return nil

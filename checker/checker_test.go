@@ -2161,8 +2161,47 @@ func TestMatchingOnInts(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Matching on Int with enum variant patterns",
+			input: strings.Join([]string{
+				`enum Status { active, inactive, pending }`,
+				`let code: Int = 0`,
+				`match code {`,
+				`  Status::active => "Active",`,
+				`  Status::inactive => "Inactive",`,
+				`  Status::pending => "Pending",`,
+				`  _ => "Unknown"`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name:  "code",
+							Value: &checker.IntLiteral{Value: 0},
+						},
+					},
+					{
+						Expr: &checker.IntMatch{
+							Subject: &checker.Variable{},
+							IntCases: map[int]*checker.Block{
+								0: {Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Active"}}}},
+								1: {Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Inactive"}}}},
+								2: {Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Pending"}}}},
+							},
+							RangeCases: map[checker.IntRange]*checker.Block{},
+							CatchAll: &checker.Block{
+								Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Unknown"}}},
+							},
+						},
+					},
+				},
+			},
+		},
 	})
 }
+
+
 
 func TestGenerics(t *testing.T) {
 	run(t, []test{

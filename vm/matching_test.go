@@ -80,6 +80,85 @@ func TestMatchingOnInt(t *testing.T) {
 				`,
 			want: "pass",
 		},
+		{
+			name: "matching on int with enum variant patterns",
+			input: `
+				enum Status {
+					active,
+					inactive,
+					pending
+				}
+				let code: Int = 0
+				match code {
+					Status::active => "Active",
+					Status::inactive => "Inactive",
+					Status::pending => "Pending",
+					_ => "Unknown"
+				}
+			`,
+			want: "Active",
+		},
+		{
+			name: "matching on int with mixed enum and literal patterns",
+			input: `
+				enum HttpStatus {
+					ok,
+					created,
+					notFound,
+					serverError
+				}
+				let code: Int = 2
+				match code {
+					HttpStatus::ok => "200 OK",
+					HttpStatus::created => "201 Created",
+					HttpStatus::notFound => "404 Not Found",
+					500..599 => "Server Error",
+					_ => "Unknown"
+				}
+			`,
+			want: "404 Not Found",
+		},
+		{
+			name: "matching on int with custom enum values",
+			input: `
+				enum HttpStatus {
+					Ok = 200,
+					Created = 201,
+					NotFound = 404,
+					ServerError = 500
+				}
+				let code: Int = 404
+				match code {
+					HttpStatus::Ok => "Success",
+					HttpStatus::Created => "Created",
+					HttpStatus::NotFound => "Not Found",
+					HttpStatus::ServerError => "Server Error",
+					_ => "Unknown"
+				}
+			`,
+			want: "Not Found",
+		},
+		{
+			name: "matching on int with mixed custom enum values and ranges",
+			input: `
+				enum Status {
+					Pending = 0,
+					Active = 100,
+					Inactive = 101,
+					Deleted = 999
+				}
+				let code: Int = 150
+				match code {
+					Status::Pending => "Pending",
+					Status::Active => "Active",
+					Status::Inactive => "Inactive",
+					100..199 => "In range 100-199",
+					Status::Deleted => "Deleted",
+					_ => "Unknown"
+				}
+			`,
+			want: "In range 100-199",
+		},
 	})
 }
 
