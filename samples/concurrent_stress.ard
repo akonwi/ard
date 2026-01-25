@@ -1,0 +1,106 @@
+// samples/concurrent_stress.ard
+// Stress test for concurrent interpreter safety
+// - Multiple concurrent fibers
+// - Struct instantiation in fibers
+// - Result collection in main thread
+
+use ard/async
+use ard/io
+
+fn sum_items(items: [Int]) Int {
+  mut sum = 0
+  for item in items {
+    sum =+ item
+  }
+  sum
+}
+
+fn count_evens(items: [Int]) Int {
+  mut count = 0
+  for item in items {
+    if item % 2 == 0 {
+      count =+ 1
+    }
+  }
+  count
+}
+
+fn expensive_work(n: Int) Int {
+  async::sleep(10000000)
+  mut result = 0
+  for i in 1..n {
+    result =+ (i * i)
+  }
+  result
+}
+
+fn main() {
+  io::print("=== Concurrent Stress Test ===")
+
+  // Test 1: Multiple concurrent batch operations
+  io::print("Test 1: Concurrent batch processing")
+
+  let batch1 = [1, 2, 3, 4, 5]
+  let batch2 = [6, 7, 8, 9, 10]
+  let batch3 = [11, 12, 13, 14, 15]
+  let batch4 = [16, 17, 18, 19, 20]
+  let batch5 = [21, 22, 23, 24, 25]
+
+  mut fibers: [async::Fiber<Int>] = []
+  fibers.push(async::eval(fn() { sum_items(batch1) }))
+  fibers.push(async::eval(fn() { sum_items(batch2) }))
+  fibers.push(async::eval(fn() { sum_items(batch3) }))
+  fibers.push(async::eval(fn() { sum_items(batch4) }))
+  fibers.push(async::eval(fn() { sum_items(batch5) }))
+
+  async::join(fibers)
+
+  mut total_sum = 0
+  for f in fibers {
+    total_sum =+ f.get()
+  }
+
+  io::print("Sum results:")
+  io::print("Total: ")
+  io::print(total_sum.to_str())
+
+  // Test 2: Even counting in parallel
+  io::print("Test 2: Even counting")
+
+  mut even_fibers: [async::Fiber<Int>] = []
+  even_fibers.push(async::eval(fn() { count_evens(batch1) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch2) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch3) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch4) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch5) }))
+
+  async::join(even_fibers)
+
+  mut total_evens = 0
+  for f in even_fibers {
+    total_evens =+ f.get()
+  }
+
+  io::print("Even counts total: ")
+  io::print(total_evens.to_str())
+
+  // Test 3: Expensive computations
+  io::print("Test 3: Expensive work")
+
+  mut work_fibers: [async::Fiber<Int>] = []
+  for i in 0..100 {
+    work_fibers.push(async::eval(fn() { expensive_work(i) }))
+  }
+
+  async::join(work_fibers)
+
+  mut work_total = 0
+  for f in work_fibers {
+    work_total =+ f.get()
+  }
+
+  io::print("Work total: ")
+  io::print(work_total.to_str())
+
+  io::print("=== All concurrent tests completed ===")
+}

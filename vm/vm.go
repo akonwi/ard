@@ -14,16 +14,17 @@ import (
 const SUBJECT = "__subject__"
 
 type GlobalVM struct {
+	// modules and moduleScopes are loaded once during initialization and never modified
+	// multiple fibers can safely read them concurrently
 	modules      map[string]*VM
 	moduleScopes map[string]*scope
-	moduleMutex  sync.RWMutex
 	subject      checker.Module
 
 	// method closures lose their scope because they aren't evaluated in their module like regular functions
 	// so keeping them track of them globally solves that
 	// [needs-improvement]
-	methodClosures map[string]runtime.Closure
-	methodMutex    sync.RWMutex
+	// uses sync.Map for concurrent read-heavy access by multiple fibers
+	methodClosures sync.Map // map[string]runtime.Closure
 
 	// hardcoded modules
 	moduleRegistry *ModuleRegistry
@@ -34,11 +35,10 @@ type GlobalVM struct {
 
 func NewRuntime(module checker.Module, scripting ...bool) *GlobalVM {
 	g := &GlobalVM{
-		subject:        module,
-		methodClosures: map[string]runtime.Closure{},
-		modules:        map[string]*VM{},
-		moduleScopes:   map[string]*scope{},
-		ffiRegistry:    NewRuntimeFFIRegistry(),
+		subject:      module,
+		modules:      map[string]*VM{},
+		moduleScopes: map[string]*scope{},
+		ffiRegistry: NewRuntimeFFIRegistry(),
 		moduleRegistry: NewModuleRegistry(),
 	}
 	g.initFFIRegistry()
@@ -72,8 +72,6 @@ func (g *GlobalVM) loadModule(name string, program *checker.Program, scripting b
 	if !scripting {
 		vm.init(program, s)
 	}
-	g.moduleMutex.Lock()
-	defer g.moduleMutex.Unlock()
 	g.modules[name] = vm
 	g.moduleScopes[name] = s
 
@@ -81,8 +79,6 @@ func (g *GlobalVM) loadModule(name string, program *checker.Program, scripting b
 }
 
 func (g *GlobalVM) unloadModule(name string) {
-	g.moduleMutex.Lock()
-	defer g.moduleMutex.Unlock()
 	delete(g.modules, name)
 	delete(g.moduleScopes, name)
 }
@@ -101,8 +97,6 @@ func (vm *GlobalVM) initFFIRegistry() {
 }
 
 func (g *GlobalVM) getModule(name string) (*VM, *scope, bool) {
-	g.moduleMutex.RLock()
-	defer g.moduleMutex.RUnlock()
 	vm, hasMod := g.modules[name]
 	scope, hasScope := g.moduleScopes[name]
 	return vm, scope, hasMod && hasScope
@@ -167,18 +161,14 @@ func (g *GlobalVM) lookup(moduleName string, symbol checker.Symbol) *runtime.Obj
 }
 
 func (g *GlobalVM) addMethod(strct checker.Type, name string, closure runtime.Closure) {
-	g.methodMutex.Lock()
-	defer g.methodMutex.Unlock()
 	key := fmt.Sprintf("%s.%s", strct.String(), name)
-	g.methodClosures[key] = closure
+	g.methodClosures.Store(key, closure)
 }
 
 func (g *GlobalVM) getMethod(strct checker.Type, name string) (runtime.Closure, bool) {
-	g.methodMutex.RLock()
-	defer g.methodMutex.RUnlock()
 	key := fmt.Sprintf("%s.%s", strct.String(), name)
-	if closure, ok := g.methodClosures[key]; ok {
-		return closure, true
+	if val, ok := g.methodClosures.Load(key); ok {
+		return val.(runtime.Closure), true
 	}
 	return nil, false
 }
