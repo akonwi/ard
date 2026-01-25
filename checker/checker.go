@@ -2399,17 +2399,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
-						c.addError("Cannot compare different types", s.GetLocation())
-						return nil
+					// Allow Enum vs Int comparisons
+					if c.areTypesComparable(left.Type(), right.Type()) {
+						if left.Type() == Int || c.isEnum(left.Type()) {
+							return &IntGreater{left, right}
+						}
+						if left.Type() == Float {
+							return &FloatGreater{left, right}
+						}
 					}
-					if left.Type() == Int {
-						return &IntGreater{left, right}
-					}
-					if left.Type() == Float {
-						return &FloatGreater{left, right}
-					}
-					c.addError("The '>' operator can only be used for Int", s.GetLocation())
+					c.addError("Cannot compare different types", s.GetLocation())
 					return nil
 				}
 			case parse.GreaterThanOrEqual:
@@ -2420,17 +2419,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
-						c.addError("Cannot compare different types", s.GetLocation())
-						return nil
+					// Allow Enum vs Int comparisons
+					if c.areTypesComparable(left.Type(), right.Type()) {
+						if left.Type() == Int || c.isEnum(left.Type()) {
+							return &IntGreaterEqual{left, right}
+						}
+						if left.Type() == Float {
+							return &FloatGreaterEqual{left, right}
+						}
 					}
-					if left.Type() == Int {
-						return &IntGreaterEqual{left, right}
-					}
-					if left.Type() == Float {
-						return &FloatGreaterEqual{left, right}
-					}
-					c.addError("The '>=' operator can only be used for Int", s.GetLocation())
+					c.addError("Cannot compare different types", s.GetLocation())
 					return nil
 				}
 			case parse.LessThan:
@@ -2441,17 +2439,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
-						c.addError("Cannot compare different types", s.GetLocation())
-						return nil
+					// Allow Enum vs Int comparisons
+					if c.areTypesComparable(left.Type(), right.Type()) {
+						if left.Type() == Int || c.isEnum(left.Type()) {
+							return &IntLess{left, right}
+						}
+						if left.Type() == Float {
+							return &FloatLess{left, right}
+						}
 					}
-					if left.Type() == Int {
-						return &IntLess{left, right}
-					}
-					if left.Type() == Float {
-						return &FloatLess{left, right}
-					}
-					c.addError("The '<' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("Cannot compare different types", s.GetLocation())
 					return nil
 				}
 			case parse.LessThanOrEqual:
@@ -2462,17 +2459,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
-						c.addError("Cannot compare different types", s.GetLocation())
-						return nil
+					// Allow Enum vs Int comparisons
+					if c.areTypesComparable(left.Type(), right.Type()) {
+						if left.Type() == Int || c.isEnum(left.Type()) {
+							return &IntLessEqual{left, right}
+						}
+						if left.Type() == Float {
+							return &FloatLessEqual{left, right}
+						}
 					}
-					if left.Type() == Int {
-						return &IntLessEqual{left, right}
-					}
-					if left.Type() == Float {
-						return &FloatLessEqual{left, right}
-					}
-					c.addError("The '<=' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("Cannot compare different types", s.GetLocation())
 					return nil
 				}
 			case parse.Equal:
@@ -2482,22 +2478,23 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if !left.Type().equal(right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
-						return nil
-					}
-
 					isMaybe := func(val Type) bool {
 						_, ok := val.(*Maybe)
 						return ok
 					}
-					if isMaybe(left.Type()) {
+					if isMaybe(left.Type()) && isMaybe(right.Type()) {
 						return &Equality{left, right}
+					}
+
+					// Allow Enum vs Int and Int vs Enum comparisons
+					if !c.areTypesComparable(left.Type(), right.Type()) {
+						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						return nil
 					}
 
 					// Check if types are allowed for equality (use equal() not pointer equality)
 					isAllowedType := func(t Type) bool {
-						// Primitives and enums are allowed for equality
+						// Primitives are allowed for equality
 						if t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool) {
 							return true
 						}
@@ -3803,6 +3800,30 @@ func (c *Checker) extractIntFromPattern(expr parse.Expression) (int, error) {
 	}
 }
 
+// isEnum checks if a type is an Enum
+func (c *Checker) isEnum(t Type) bool {
+	_, ok := t.(*Enum)
+	return ok
+}
+
+// areTypesComparable checks if two types can be compared together
+// This allows Enum vs Int and Int vs Enum comparisons
+func (c *Checker) areTypesComparable(left, right Type) bool {
+	// Same type is always comparable
+	if left.equal(right) {
+		return true
+	}
+	// Allow Enum vs Int comparisons
+	leftIsEnum := c.isEnum(left)
+	rightIsEnum := c.isEnum(right)
+	
+	if (leftIsEnum && right == Int) || (left == Int && rightIsEnum) {
+		return true
+	}
+	
+	return false
+}
+
 // use this when we know what the expr's Type should be
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
@@ -4676,8 +4697,8 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		return nil
 	}
 
-	// Validate types match
-	if left.Type() != right.Type() {
+	// Allow Enum vs Int comparisons
+	if !c.areTypesComparable(left.Type(), right.Type()) {
 		c.addError("Cannot compare different types", leftExpr.GetLocation())
 		return nil
 	}
@@ -4685,7 +4706,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 	// Build the appropriate comparison node based on operator and type
 	switch op {
 	case parse.GreaterThan:
-		if left.Type() == Int {
+		if left.Type() == Int || c.isEnum(left.Type()) {
 			return &IntGreater{left, right}
 		}
 		if left.Type() == Float {
@@ -4695,7 +4716,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		return nil
 
 	case parse.GreaterThanOrEqual:
-		if left.Type() == Int {
+		if left.Type() == Int || c.isEnum(left.Type()) {
 			return &IntGreaterEqual{left, right}
 		}
 		if left.Type() == Float {
@@ -4705,7 +4726,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		return nil
 
 	case parse.LessThan:
-		if left.Type() == Int {
+		if left.Type() == Int || c.isEnum(left.Type()) {
 			return &IntLess{left, right}
 		}
 		if left.Type() == Float {
@@ -4715,7 +4736,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		return nil
 
 	case parse.LessThanOrEqual:
-		if left.Type() == Int {
+		if left.Type() == Int || c.isEnum(left.Type()) {
 			return &IntLessEqual{left, right}
 		}
 		if left.Type() == Float {

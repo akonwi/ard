@@ -882,6 +882,43 @@ func TestEqualityComparisons(t *testing.T) {
 	})
 }
 
+func TestEnumToIntComparisons(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Enum can be compared to Int with equality",
+			input: strings.Join([]string{
+				`enum Status { active, inactive, pending }`,
+				`let status = Status::active`,
+				`status == 0`,
+			}, "\n"),
+		},
+		{
+			name: "Int can be compared to Enum with equality",
+			input: strings.Join([]string{
+				`enum HttpStatus { Ok = 200, NotFound = 404 }`,
+				`let code: Int = 404`,
+				`code == HttpStatus::NotFound`,
+			}, "\n"),
+		},
+		{
+			name: "Enum can be compared to Int with relational operators",
+			input: strings.Join([]string{
+				`enum Priority { low = 0, medium = 50, high = 100 }`,
+				`let priority = Priority::medium`,
+				`priority < 75`,
+			}, "\n"),
+		},
+		{
+			name: "Int can be compared to Enum with relational operators",
+			input: strings.Join([]string{
+				`enum Priority { low = 0, medium = 50, high = 100 }`,
+				`let threshold: Int = 75`,
+				`threshold >= Priority::high`,
+			}, "\n"),
+		},
+	})
+}
+
 func TestChainedComparisons(t *testing.T) {
 	run(t, []test{
 		{

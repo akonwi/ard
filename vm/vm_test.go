@@ -187,6 +187,56 @@ func TestEquality(t *testing.T) {
 	}
 }
 
+func TestEnumToIntComparisons(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Enum equality with Int",
+			input: `
+				enum Status { active, inactive, pending }
+				let status = Status::active
+				status == 0
+			`,
+			want: true,
+		},
+		{
+			name: "Int equality with Enum",
+			input: `
+				enum HttpStatus { Ok = 200, NotFound = 404 }
+				let code: Int = 404
+				code == HttpStatus::NotFound
+			`,
+			want: true,
+		},
+		{
+			name: "Enum less than Int",
+			input: `
+				enum Priority { low = 0, medium = 50, high = 100 }
+				let priority = Priority::medium
+				priority < 75
+			`,
+			want: true,
+		},
+		{
+			name: "Int greater than or equal to Enum",
+			input: `
+				enum Priority { low = 0, medium = 50, high = 100 }
+				let threshold: Int = 100
+				threshold >= Priority::high
+			`,
+			want: true,
+		},
+		{
+			name: "Enum inequality with different Int",
+			input: `
+				enum Status { active = 1, inactive = 2 }
+				let status = Status::active
+				not (status == 2)
+			`,
+			want: true,
+		},
+	})
+}
+
 func TestBooleanOperations(t *testing.T) {
 	tests := []struct {
 		input string
