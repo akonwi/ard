@@ -1,0 +1,98 @@
+==================
+Member Access
+==================
+
+let initialized: [Str:Bool] = [:]
+initialized.count
+initialized.put("key", true)
+location.point.x = 1
+let falsy = not something.done
+---
+
+(program
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      type: (type
+        (map_type
+          key: (type
+            (primitive_type
+              (str)))
+          value: (type
+            (primitive_type
+              (bool)))))
+      (assign)
+      value: (expression
+        (map_value))))
+  (statement
+    (expression
+      (member_access
+        target: (expression
+          (identifier))
+        operator: (period)
+        member: (identifier))))
+  (statement
+    (expression
+      (member_access
+        target: (expression
+          (identifier))
+        operator: (period)
+        member: (function_call
+          target: (identifier)
+          arguments: (paren_arguments
+            argument: (expression
+              (primitive_value
+                primitive: (string
+                  chunk: (string_content))))
+            argument: (expression
+              (primitive_value
+                primitive: (boolean))))))))
+  (statement
+    (reassignment
+      target: (member_access
+        target: (expression
+          (member_access
+            target: (expression
+              (identifier))
+            operator: (period)
+            member: (identifier)))
+        operator: (period)
+        member: (identifier))
+      operator: (assign)
+      value: (expression
+        (primitive_value
+          primitive: (number)))))
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      (assign)
+      value: (expression
+        (member_access
+          target: (expression
+            (unary_expression
+              operator: (not)
+              operand: (expression
+                (identifier))))
+          operator: (period)
+          member: (identifier))))))
+
+==================
+Members on string literals
+==================
+
+"fizzbuzz".size
+
+---
+
+(program
+  (statement
+    (expression
+      (member_access
+        (expression
+          (primitive_value
+            (string
+              (string_content))))
+        (period)
+        (identifier)))))

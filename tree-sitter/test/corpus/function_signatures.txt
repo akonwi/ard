@@ -1,0 +1,174 @@
+==================
+function signature as types
+==================
+fn apply(f: fn(Int) Int, x: Int) Int {
+  f(x)
+}
+
+fn increment(x: Int) Int {
+  x + 1
+}
+
+apply(increment, 5)
+
+-------------
+
+(program
+  (statement
+    (function_definition
+      name: (identifier)
+      parameters: (parameters
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (function_type
+              (type
+                (primitive_type
+                  (int)))
+              (type
+                (primitive_type
+                  (int))))))
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (primitive_type
+              (int)))))
+      return: (type
+        (primitive_type
+          (int)))
+      body: (block
+        (statement
+          (expression
+            (function_call
+              target: (identifier)
+              arguments: (paren_arguments
+                argument: (expression
+                  (identifier)))))))))
+  (statement
+    (function_definition
+      name: (identifier)
+      parameters: (parameters
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (primitive_type
+              (int)))))
+      return: (type
+        (primitive_type
+          (int)))
+      body: (block
+        (statement
+          (expression
+            (binary_expression
+              left: (expression
+                (identifier))
+              operator: (plus)
+              right: (expression
+                (primitive_value
+                  primitive: (number)))))))))
+  (statement
+    (expression
+      (function_call
+        target: (identifier)
+        arguments: (paren_arguments
+          argument: (expression
+            (identifier))
+          argument: (expression
+            (primitive_value
+              primitive: (number))))))))
+
+==================
+function signature with multiple parameters
+==================
+fn apply_binary(f: fn(Int, Int) Int, x: Int, y: Int) Int {
+  f(x, y)
+}
+
+fn add(x: Int, y: Int) Int {
+  x + y
+}
+
+apply_binary(add, 5, 3)
+
+-------------
+
+(program
+  (statement
+    (function_definition
+      name: (identifier)
+      parameters: (parameters
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (function_type
+              (type
+                (primitive_type
+                  (int)))
+              (type
+                (primitive_type
+                  (int)))
+              (type
+                (primitive_type
+                  (int))))))
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (primitive_type
+              (int))))
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (primitive_type
+              (int)))))
+      return: (type
+        (primitive_type
+          (int)))
+      body: (block
+        (statement
+          (expression
+            (function_call
+              target: (identifier)
+              arguments: (paren_arguments
+                argument: (expression
+                  (identifier))
+                argument: (expression
+                  (identifier)))))))))
+  (statement
+    (function_definition
+      name: (identifier)
+      parameters: (parameters
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (primitive_type
+              (int))))
+        parameter: (param_def
+          name: (identifier)
+          type: (type
+            (primitive_type
+              (int)))))
+      return: (type
+        (primitive_type
+          (int)))
+      body: (block
+        (statement
+          (expression
+            (binary_expression
+              left: (expression
+                (identifier))
+              operator: (plus)
+              right: (expression
+                (identifier))))))))
+  (statement
+    (expression
+      (function_call
+        target: (identifier)
+        arguments: (paren_arguments
+          argument: (expression
+            (identifier))
+          argument: (expression
+            (primitive_value
+              primitive: (number)))
+          argument: (expression
+            (primitive_value
+              primitive: (number))))))))

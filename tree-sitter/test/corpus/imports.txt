@@ -1,0 +1,29 @@
+==================
+imports
+==================
+
+use std/io
+use fmt
+use testing
+use github.com/google/go-cmp/cmp
+use github.com/tree-sitter/go-tree-sitter as ts
+
+---
+
+(program
+  (import
+    (module_path))
+  (import
+    (module_path))
+  (import
+    (module_path))
+  (import
+    (module_path))
+  (import
+    (module_path))
+  (statement
+    (expression
+      (identifier)))
+  (statement
+    (expression
+      (identifier))))

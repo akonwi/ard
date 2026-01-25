@@ -1,0 +1,82 @@
+==================
+lists
+==================
+
+let empty: [Int] = []
+let numbers = [1, 2, 3]
+let strings: [Str] = ["a", "b","c"]
+let booleans: [Bool] = [true, false]
+
+---
+
+(program
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      type: (type
+        (list_type
+          element_type: (type
+            (primitive_type
+              (int)))))
+      (assign)
+      value: (expression
+        (list_value))))
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      (assign)
+      value: (expression
+        (list_value
+          (expression
+            (primitive_value
+              primitive: (number)))
+          (expression
+            (primitive_value
+              primitive: (number)))
+          (expression
+            (primitive_value
+              primitive: (number)))))))
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      type: (type
+        (list_type
+          element_type: (type
+            (primitive_type
+              (str)))))
+      (assign)
+      value: (expression
+        (list_value
+          (expression
+            (primitive_value
+              primitive: (string
+                chunk: (string_content))))
+          (expression
+            (primitive_value
+              primitive: (string
+                chunk: (string_content))))
+          (expression
+            (primitive_value
+              primitive: (string
+                chunk: (string_content))))))))
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      type: (type
+        (list_type
+          element_type: (type
+            (primitive_type
+              (bool)))))
+      (assign)
+      value: (expression
+        (list_value
+          (expression
+            (primitive_value
+              primitive: (boolean)))
+          (expression
+            (primitive_value
+              primitive: (boolean))))))))

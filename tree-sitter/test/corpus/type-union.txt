@@ -1,0 +1,89 @@
+==================
+type union
+==================
+
+type Shape = Square|Circle
+
+match some_shape {
+  Square => {
+    io::print("Square size: {some_shape.size.to_str()}")
+  },
+  Circle => {
+    io::print("Circle radius: {some_shape.radius.to_str()}")
+  },
+}
+---
+
+(program
+  (statement
+    (type_declaration
+      (identifier)
+      (assign)
+      (type_union
+        (type
+          (identifier))
+        (type
+          (identifier)))))
+  (statement
+    (expression
+      (match_expression
+        (expression
+          (identifier))
+        (match_case
+          (identifier)
+          (block
+            (statement
+              (expression
+                (member_access
+                  (expression
+                    (identifier))
+                  (double_colon)
+                  (function_call
+                    (identifier)
+                    (paren_arguments
+                      (expression
+                        (primitive_value
+                          (string
+                            (string_content)
+                            (string_interpolation
+                              (expression
+                                (member_access
+                                  (expression
+                                    (member_access
+                                      (expression
+                                        (identifier))
+                                      (period)
+                                      (identifier)))
+                                  (period)
+                                  (function_call
+                                    (identifier)
+                                    (paren_arguments)))))))))))))))
+        (match_case
+          (identifier)
+          (block
+            (statement
+              (expression
+                (member_access
+                  (expression
+                    (identifier))
+                  (double_colon)
+                  (function_call
+                    (identifier)
+                    (paren_arguments
+                      (expression
+                        (primitive_value
+                          (string
+                            (string_content)
+                            (string_interpolation
+                              (expression
+                                (member_access
+                                  (expression
+                                    (member_access
+                                      (expression
+                                        (identifier))
+                                      (period)
+                                      (identifier)))
+                                  (period)
+                                  (function_call
+                                    (identifier)
+                                    (paren_arguments)))))))))))))))))))

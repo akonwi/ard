@@ -1,0 +1,22 @@
+==================
+comments
+==================
+
+// this is a comment
+true
+/*
+this is
+a comment
+too
+*/
+---
+
+(program
+  (statement
+    (comment))
+  (statement
+    (expression
+      (primitive_value
+        (boolean))))
+  (statement
+    (comment)))

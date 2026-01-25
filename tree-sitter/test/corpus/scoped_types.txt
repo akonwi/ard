@@ -1,0 +1,33 @@
+==================
+scoped types
+==================
+fn show(item: Str::ToString) {
+  io::print(item)
+}
+
+-------------
+
+(program
+  (statement
+    (function_definition
+      name: (identifier)
+      parameters: (parameters
+        parameter: (param_def
+          name: (identifier)
+          type: (member_access_type
+            target: (primitive_type
+              (str))
+            operator: (double_colon)
+            member: (identifier))))
+      body: (block
+        (statement
+          (expression
+            (member_access
+              target: (expression
+                (identifier))
+              operator: (double_colon)
+              member: (function_call
+                target: (identifier)
+                arguments: (paren_arguments
+                  argument: (expression
+                    (identifier)))))))))))

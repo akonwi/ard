@@ -1,0 +1,22 @@
+==================
+result types
+==================
+
+fn hello() Result<Int, Str> {}
+
+---
+
+(program
+  (statement
+    (function_definition
+      (identifier)
+      (parameters)
+      (type
+        (result_type
+          (type
+            (primitive_type
+              (int)))
+          (type
+            (primitive_type
+              (str)))))
+      (block))))

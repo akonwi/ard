@@ -1,0 +1,51 @@
+==================
+control flow
+==================
+
+if not is_true {}
+
+if age > 18 or something_else {
+} else if age == 18 {
+} else {
+}
+
+---
+
+(program
+  (statement
+    (if_statement
+      condition: (expression
+        (unary_expression
+          operator: (not)
+          operand: (expression
+            (identifier))))
+      body: (block)))
+  (statement
+    (if_statement
+      condition: (expression
+        (binary_expression
+          left: (expression
+            (binary_expression
+              left: (expression
+                (identifier))
+              operator: (greater_than)
+              right: (expression
+                (primitive_value
+                  primitive: (number)))))
+          operator: (or)
+          right: (expression
+            (identifier))))
+      body: (block)
+      else: (else_clause
+        if: (if_statement
+          condition: (expression
+            (binary_expression
+              left: (expression
+                (identifier))
+              operator: (equal)
+              right: (expression
+                (primitive_value
+                  primitive: (number)))))
+          body: (block)
+          else: (else_clause
+            body: (block)))))))

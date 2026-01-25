@@ -1,0 +1,13 @@
+struct Todo {
+  title: Str,
+  completed: Bool
+}
+
+let list: [Todo] = [
+  Todo { title: "Buy milk", completed: false },
+]
+
+list.add(Todo { title: "Buy eggs", completed: false })
+list.add(Todo { title: "Buy fruits", completed: false })
+
+print(list.length)

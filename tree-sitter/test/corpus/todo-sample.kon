@@ -1,0 +1,36 @@
+struct Account {
+  id: Str
+  balance: Int
+}
+
+// todo: implementations
+impl Account {
+	// self as a first argument makes this an instance method
+	// Account::new("123")
+	fn new(id: Str) Account {
+		Account {
+			id: id,
+			balance: 0
+		}
+	}
+
+	// self as a first argument makes this an instance method
+  fn deposit(self, amount: Int) {
+		self.balance =+ amount
+	}
+
+	fn withdraw(self, amount: Int) {
+		self.balance =- amount
+	}
+}
+
+let account = Account {
+	id: "123",
+	balance: 100
+}
+
+account.balance = 200 // error
+account.deposit(50)
+account.deposit(250)
+account.withdraw(100)
+print(account.balance) // 200

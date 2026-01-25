@@ -1,0 +1,75 @@
+==================
+trait definitions
+==================
+
+trait Person {
+	fn name() Str
+	fn age() Int
+}
+
+---
+
+(program
+  (statement
+    (trait_definition
+      name: (identifier)
+      function: (trait_function
+        name: (identifier)
+        parameters: (parameters)
+        type: (type
+          (primitive_type
+            (str))))
+      function: (trait_function
+        name: (identifier)
+        parameters: (parameters)
+        type: (type
+          (primitive_type
+            (int)))))))
+
+==================
+trait implementations
+==================
+
+impl Str::ToString for Person {
+	fn name() Str {
+	  @my_name
+	}
+
+	fn age() Int {
+	  @my_age
+	}
+}
+
+---
+
+(program
+  (statement
+    (trait_implementation
+      trait: (member_access
+        target: (expression
+          (identifier))
+        operator: (double_colon)
+        member: (identifier))
+      for: (identifier)
+      function: (trait_implementation_function
+        name: (identifier)
+        parameters: (parameters)
+        type: (type
+          (primitive_type
+            (str)))
+        body: (block
+          (statement
+            (expression
+              (instance_property
+                name: (identifier))))))
+      function: (trait_implementation_function
+        name: (identifier)
+        parameters: (parameters)
+        type: (type
+          (primitive_type
+            (int)))
+        body: (block
+          (statement
+            (expression
+              (instance_property
+                name: (identifier)))))))))

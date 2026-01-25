@@ -1,0 +1,110 @@
+// Ard language example file for syntax highlighting
+
+// Import statement
+use std/io
+
+// Type definition
+type Optional<$T> = $T | Void
+
+// Enum definition
+enum Status {
+  Success,
+  Failure,
+  Pending
+}
+
+// Struct definition
+struct Person {
+  name: Str,
+  age: Int,
+  email: Str?
+}
+
+// Function with Result return type
+fn divide(a: Int, b: Int) Result<Int, Str> {
+  match b == 0 {
+    true => Result::err("Cannot divide by zero"),
+    false => Result::ok(a/b),
+  }
+}
+
+// Function with pattern matching on Result
+fn safe_divide(a: Int, b: Int) Int {
+  match divide(a, b) {
+    ok(result) => result,
+    err(_) => 0
+  }
+}
+
+// Main function
+fn main() {
+  // Variable definition
+  let person = Person{
+    name: "John Doe",
+    age: 30,
+    email: "john@example.com"
+  }
+
+  // Mutable variable
+  mut counter = 0
+
+  // For loop with range
+  for i in 0..10 {
+    counter =+ 1
+    io::print("Counter: {counter}")
+  }
+
+  // If statement
+  if person.age > 18 {
+    io::print("{person.name} is an adult")
+  } else {
+    io::print("{person.name} is a minor")
+  }
+
+  // List
+  let list = [1, 2, 3, 4, 5]
+
+  // Map
+  let map = [
+    "one": 1,
+    "two": 2,
+    "three": 3
+  ]
+
+  // While loop
+  while counter < 20 {
+    counter =+ 1
+    if counter == 15 {
+      break
+    }
+  }
+
+  // variable of anonymous function
+  let multiply = (x: Int, y: Int) Int {
+    return x * y
+  }
+
+  multiply(x: 2, y: 3)
+
+  // Using the Result type
+  let division_result = divide(10, 2)
+  match division_result {
+    ok(result) => io::print("Result: {result}"),
+    err(message) => io::print("Error: {message}")
+  }
+
+  // Using nullable types
+  let maybe_value: Int? = 42
+  match maybe_value {
+    // Pattern matching with wildcard
+    _ => io::print("Has a value")
+  }
+
+  // Status check using enum
+  let current_status = Status::Pending
+  match current_status {
+    Status::Success => io::print("Operation was successful"),
+    Status::Failure => io::print("Operation failed"),
+    Status::Pending => io::print("Operation is pending")
+  }
+}

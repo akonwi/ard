@@ -1,0 +1,44 @@
+==================
+enums
+==================
+
+enum Payload {
+  Plain,
+  Rich
+}
+
+let data = Payload::Plain
+
+enum Option {
+  None,
+  Some
+}
+
+---
+
+(program
+  (statement
+    (enum_definition
+      name: (identifier)
+      variant: (enum_variant
+        variant: (identifier))
+      variant: (enum_variant
+        variant: (identifier))))
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      (assign)
+      value: (expression
+        (member_access
+          target: (expression
+            (identifier))
+          operator: (double_colon)
+          member: (identifier)))))
+  (statement
+    (enum_definition
+      name: (identifier)
+      variant: (enum_variant
+        variant: (identifier))
+      variant: (enum_variant
+        variant: (identifier)))))

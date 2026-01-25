@@ -1,0 +1,55 @@
+==================
+maps
+==================
+
+let empty: [Str:Int] = [:]
+let initialized: [Str:Bool] = [ "John": true, "Jane": false, ]
+---
+
+(program
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      type: (type
+        (map_type
+          key: (type
+            (primitive_type
+              (str)))
+          value: (type
+            (primitive_type
+              (int)))))
+      (assign)
+      value: (expression
+        (map_value))))
+  (statement
+    (variable_definition
+      binding: (variable_binding)
+      name: (identifier)
+      type: (type
+        (map_type
+          key: (type
+            (primitive_type
+              (str)))
+          value: (type
+            (primitive_type
+              (bool)))))
+      (assign)
+      value: (expression
+        (map_value
+          entry: (map_pair
+            key: (expression
+              (primitive_value
+                primitive: (string
+                  chunk: (string_content))))
+            value: (expression
+              (primitive_value
+                primitive: (boolean))))
+          entry: (map_pair
+            key: (expression
+              (primitive_value
+                primitive: (string
+                  chunk: (string_content))))
+            value: (expression
+              (primitive_value
+                primitive: (boolean)))))))))

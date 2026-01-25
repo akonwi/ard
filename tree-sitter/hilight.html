@@ -1,0 +1,274 @@
+
+<!doctype HTML>
+<head>
+  <title>Tree-sitter Highlighting</title>
+  <style>
+    body {
+      font-family: monospace
+    }
+    .line-number {
+      user-select: none;
+      text-align: right;
+      color: rgba(27,31,35,.3);
+      padding: 0 10px;
+    }
+    .line {
+      white-space: pre;
+    }
+  </style>
+  <style>
+    .attribute { font-style: italic;color: #af0000; }
+    .comment { font-style: italic;color: #8a8a8a; }
+    .constant { color: #875f00; }
+    .constant.builtin { font-weight: bold;color: #875f00; }
+    .constructor { color: #af8700; }
+    .function { color: #005fd7; }
+    .function.builtin { font-weight: bold;color: #005fd7; }
+    .keyword { color: #5f00d7; }
+    .module { color: #af8700; }
+    .number { font-weight: bold;color: #875f00; }
+    .operator { font-weight: bold;color: #4e4e4e; }
+    .property { color: #af0000; }
+    .property.builtin { font-weight: bold;color: #af0000; }
+    .punctuation { color: #4e4e4e; }
+    .punctuation.bracket { color: #4e4e4e; }
+    .punctuation.delimiter { color: #4e4e4e; }
+    .punctuation.special { color: #4e4e4e; }
+    .string { color: #008700; }
+    .string.special { color: #008787; }
+    .tag { color: #000087; }
+    .type { color: #005f5f; }
+    .type.builtin { font-weight: bold;color: #005f5f; }
+    .variable { color: #d0d0d0; }
+    .variable.builtin { font-weight: bold;color: #d0d0d0; }
+    .variable.parameter { text-decoration: underline;color: #d0d0d0; }
+  </style>
+
+</head>
+<body>
+
+<table>
+<tr><td class=line-number>1</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Ard language example file for syntax highlighting</span>
+</td></tr>
+<tr><td class=line-number>2</td><td class=line>
+</td></tr>
+<tr><td class=line-number>3</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Import statement</span>
+</td></tr>
+<tr><td class=line-number>4</td><td class=line><span style='color: #d0d0d0'>use</span> <span style='color: #d0d0d0'>std</span><span style='font-weight: bold;color: #4e4e4e'>/</span><span style='color: #d0d0d0'>io</span>
+</td></tr>
+<tr><td class=line-number>5</td><td class=line>
+</td></tr>
+<tr><td class=line-number>6</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Type definition</span>
+</td></tr>
+<tr><td class=line-number>7</td><td class=line><span style='color: #5f00d7'>type</span> <span style='color: #005f5f'>Optional</span><span style='color: #4e4e4e'>&lt;</span><span style='color: #4e4e4e'>$</span>T<span style='color: #4e4e4e'>&gt;</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #4e4e4e'>$</span><span style='color: #005f5f'>T</span> | <span style='font-weight: bold;color: #005f5f'>Void</span>
+</td></tr>
+<tr><td class=line-number>8</td><td class=line>
+</td></tr>
+<tr><td class=line-number>9</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Enum definition</span>
+</td></tr>
+<tr><td class=line-number>10</td><td class=line><span style='color: #5f00d7'>enum</span> <span style='color: #005f5f'>Status</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>11</td><td class=line>  <span style='color: #005f5f'>Success</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>12</td><td class=line>  <span style='color: #005f5f'>Failure</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>13</td><td class=line>  <span style='color: #005f5f'>Pending</span>
+</td></tr>
+<tr><td class=line-number>14</td><td class=line><span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>15</td><td class=line>
+</td></tr>
+<tr><td class=line-number>16</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Struct definition</span>
+</td></tr>
+<tr><td class=line-number>17</td><td class=line><span style='color: #5f00d7'>struct</span> <span style='color: #005f5f'>Person</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>18</td><td class=line>  <span style='color: #af0000'>name</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Str</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>19</td><td class=line>  <span style='color: #af0000'>age</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>20</td><td class=line>  <span style='color: #af0000'>email</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Str</span><span style='color: #4e4e4e'>?</span>
+</td></tr>
+<tr><td class=line-number>21</td><td class=line><span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>22</td><td class=line>
+</td></tr>
+<tr><td class=line-number>23</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Function with Result return type</span>
+</td></tr>
+<tr><td class=line-number>24</td><td class=line><span style='color: #5f00d7'>fn</span> <span style='color: #005fd7'>divide</span><span style='color: #4e4e4e'>(</span><span style='text-decoration: underline;color: #d0d0d0'>a</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>,</span> <span style='text-decoration: underline;color: #d0d0d0'>b</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>)</span> Result<span style='color: #4e4e4e'>&lt;</span><span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>,</span> <span style='font-weight: bold;color: #005f5f'>Str</span><span style='color: #4e4e4e'>&gt;</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>25</td><td class=line>  <span style='color: #5f00d7'>match</span> <span style='color: #d0d0d0'>b</span> <span style='font-weight: bold;color: #4e4e4e'>==</span> <span style='font-weight: bold;color: #875f00'>0</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>26</td><td class=line>    true <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #005f5f'>Result</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>err</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Cannot divide by zero</span>&quot;</span><span style='color: #4e4e4e'>)</span></span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>27</td><td class=line>    false <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #005f5f'>Result</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>ok</span><span style='color: #4e4e4e'>(</span><span style='color: #d0d0d0'>a</span><span style='font-weight: bold;color: #4e4e4e'>/</span><span style='color: #d0d0d0'>b</span><span style='color: #4e4e4e'>)</span></span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>28</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>29</td><td class=line><span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>30</td><td class=line>
+</td></tr>
+<tr><td class=line-number>31</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Function with pattern matching on Result</span>
+</td></tr>
+<tr><td class=line-number>32</td><td class=line><span style='color: #5f00d7'>fn</span> <span style='color: #005fd7'>safe_divide</span><span style='color: #4e4e4e'>(</span><span style='text-decoration: underline;color: #d0d0d0'>a</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>,</span> <span style='text-decoration: underline;color: #d0d0d0'>b</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>)</span> <span style='font-weight: bold;color: #005f5f'>Int</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>33</td><td class=line>  <span style='color: #5f00d7'>match</span> <span style='color: #005fd7'>divide</span><span style='color: #4e4e4e'>(</span><span style='color: #d0d0d0'>a</span><span style='color: #4e4e4e'>,</span> <span style='color: #d0d0d0'>b</span><span style='color: #4e4e4e'>)</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>34</td><td class=line>    <span style='color: #005fd7'>ok</span><span style='color: #4e4e4e'>(</span><span style='color: #d0d0d0'>result</span><span style='color: #4e4e4e'>)</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>result</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>35</td><td class=line>    <span style='color: #005fd7'>err</span><span style='color: #4e4e4e'>(</span><span style='color: #d0d0d0'>_</span><span style='color: #4e4e4e'>)</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='font-weight: bold;color: #875f00'>0</span>
+</td></tr>
+<tr><td class=line-number>36</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>37</td><td class=line><span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>38</td><td class=line>
+</td></tr>
+<tr><td class=line-number>39</td><td class=line><span style='font-style: italic;color: #8a8a8a'>// Main function</span>
+</td></tr>
+<tr><td class=line-number>40</td><td class=line><span style='color: #5f00d7'>fn</span> <span style='color: #005fd7'>main</span><span style='color: #4e4e4e'>(</span><span style='color: #4e4e4e'>)</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>41</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// Variable definition</span>
+</td></tr>
+<tr><td class=line-number>42</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>person</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #005f5f'>Person</span><span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>43</td><td class=line>    <span style='color: #af0000'>name</span><span style='color: #4e4e4e'>:</span> <span style='color: #008700'>&quot;<span style='color: #008700'>John Doe</span>&quot;</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>44</td><td class=line>    <span style='color: #af0000'>age</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #875f00'>30</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>45</td><td class=line>    <span style='color: #af0000'>email</span><span style='color: #4e4e4e'>:</span> <span style='color: #008700'>&quot;<span style='color: #008700'>john@example.com</span>&quot;</span>
+</td></tr>
+<tr><td class=line-number>46</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>47</td><td class=line>
+</td></tr>
+<tr><td class=line-number>48</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// Mutable variable</span>
+</td></tr>
+<tr><td class=line-number>49</td><td class=line>  <span style='color: #5f00d7'>mut</span> <span style='color: #d0d0d0'>counter</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='font-weight: bold;color: #875f00'>0</span>
+</td></tr>
+<tr><td class=line-number>50</td><td class=line>
+</td></tr>
+<tr><td class=line-number>51</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// For loop with range</span>
+</td></tr>
+<tr><td class=line-number>52</td><td class=line>  <span style='color: #5f00d7'>for</span> <span style='color: #d0d0d0'>i</span> <span style='color: #5f00d7'>in</span> <span style='font-weight: bold;color: #875f00'>0</span><span style='font-weight: bold;color: #4e4e4e'>..</span><span style='font-weight: bold;color: #875f00'>10</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>53</td><td class=line>    <span style='color: #d0d0d0'>counter</span> <span style='font-weight: bold;color: #4e4e4e'>=+</span> <span style='font-weight: bold;color: #875f00'>1</span>
+</td></tr>
+<tr><td class=line-number>54</td><td class=line>    <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Counter: </span><span style='color: #4e4e4e'>{</span><span style='color: #d0d0d0'>counter</span><span style='color: #4e4e4e'>}</span>&quot;</span><span style='color: #4e4e4e'>)</span></span>
+</td></tr>
+<tr><td class=line-number>55</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>56</td><td class=line>
+</td></tr>
+<tr><td class=line-number>57</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// If statement</span>
+</td></tr>
+<tr><td class=line-number>58</td><td class=line>  <span style='color: #5f00d7'>if</span> <span style='color: #d0d0d0'>person</span><span style='color: #4e4e4e'>.</span><span style='color: #af0000'>age</span> <span style='font-weight: bold;color: #4e4e4e'><span style='color: #4e4e4e'>&gt;</span></span> <span style='font-weight: bold;color: #875f00'>18</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>59</td><td class=line>    <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #4e4e4e'>{</span><span style='color: #d0d0d0'>person</span><span style='color: #4e4e4e'>.</span><span style='color: #af0000'>name</span><span style='color: #4e4e4e'>}</span><span style='color: #008700'> is an adult</span>&quot;</span><span style='color: #4e4e4e'>)</span></span>
+</td></tr>
+<tr><td class=line-number>60</td><td class=line>  <span style='color: #4e4e4e'>}</span> <span style='color: #5f00d7'>else</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>61</td><td class=line>    <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #4e4e4e'>{</span><span style='color: #d0d0d0'>person</span><span style='color: #4e4e4e'>.</span><span style='color: #af0000'>name</span><span style='color: #4e4e4e'>}</span><span style='color: #008700'> is a minor</span>&quot;</span><span style='color: #4e4e4e'>)</span></span>
+</td></tr>
+<tr><td class=line-number>62</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>63</td><td class=line>
+</td></tr>
+<tr><td class=line-number>64</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// List</span>
+</td></tr>
+<tr><td class=line-number>65</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>list</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #4e4e4e'>[</span><span style='font-weight: bold;color: #875f00'>1</span><span style='color: #4e4e4e'>,</span> <span style='font-weight: bold;color: #875f00'>2</span><span style='color: #4e4e4e'>,</span> <span style='font-weight: bold;color: #875f00'>3</span><span style='color: #4e4e4e'>,</span> <span style='font-weight: bold;color: #875f00'>4</span><span style='color: #4e4e4e'>,</span> <span style='font-weight: bold;color: #875f00'>5</span><span style='color: #4e4e4e'>]</span>
+</td></tr>
+<tr><td class=line-number>66</td><td class=line>
+</td></tr>
+<tr><td class=line-number>67</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// Map</span>
+</td></tr>
+<tr><td class=line-number>68</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>map</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #4e4e4e'>[</span>
+</td></tr>
+<tr><td class=line-number>69</td><td class=line>    <span style='color: #008700'>&quot;<span style='color: #008700'>one</span>&quot;</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #875f00'>1</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>70</td><td class=line>    <span style='color: #008700'>&quot;<span style='color: #008700'>two</span>&quot;</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #875f00'>2</span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>71</td><td class=line>    <span style='color: #008700'>&quot;<span style='color: #008700'>three</span>&quot;</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #875f00'>3</span>
+</td></tr>
+<tr><td class=line-number>72</td><td class=line>  <span style='color: #4e4e4e'>]</span>
+</td></tr>
+<tr><td class=line-number>73</td><td class=line>
+</td></tr>
+<tr><td class=line-number>74</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// While loop</span>
+</td></tr>
+<tr><td class=line-number>75</td><td class=line>  <span style='color: #5f00d7'>while</span> <span style='color: #d0d0d0'>counter</span> <span style='font-weight: bold;color: #4e4e4e'><span style='color: #4e4e4e'>&lt;</span></span> <span style='font-weight: bold;color: #875f00'>20</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>76</td><td class=line>    <span style='color: #d0d0d0'>counter</span> <span style='font-weight: bold;color: #4e4e4e'>=+</span> <span style='font-weight: bold;color: #875f00'>1</span>
+</td></tr>
+<tr><td class=line-number>77</td><td class=line>    <span style='color: #5f00d7'>if</span> <span style='color: #d0d0d0'>counter</span> <span style='font-weight: bold;color: #4e4e4e'>==</span> <span style='font-weight: bold;color: #875f00'>15</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>78</td><td class=line>      <span style='color: #5f00d7'>break</span>
+</td></tr>
+<tr><td class=line-number>79</td><td class=line>    <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>80</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>81</td><td class=line>
+</td></tr>
+<tr><td class=line-number>82</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// variable of anonymous function</span>
+</td></tr>
+<tr><td class=line-number>83</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>multiply</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #4e4e4e'>(</span><span style='text-decoration: underline;color: #d0d0d0'>x</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>,</span> <span style='text-decoration: underline;color: #d0d0d0'>y</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>)</span> <span style='font-weight: bold;color: #005f5f'>Int</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>84</td><td class=line>    <span style='color: #d0d0d0'>return</span> <span style='color: #d0d0d0'>x</span> <span style='font-weight: bold;color: #4e4e4e'>*</span> <span style='color: #d0d0d0'>y</span>
+</td></tr>
+<tr><td class=line-number>85</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>86</td><td class=line>
+</td></tr>
+<tr><td class=line-number>87</td><td class=line>  <span style='color: #005fd7'>multiply</span><span style='color: #4e4e4e'>(</span><span style='text-decoration: underline;color: #d0d0d0'>x</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #875f00'>2</span><span style='color: #4e4e4e'>,</span> <span style='text-decoration: underline;color: #d0d0d0'>y</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #875f00'>3</span><span style='color: #4e4e4e'>)</span>
+</td></tr>
+<tr><td class=line-number>88</td><td class=line>
+</td></tr>
+<tr><td class=line-number>89</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// Using the Result type</span>
+</td></tr>
+<tr><td class=line-number>90</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>division_result</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #005fd7'>divide</span><span style='color: #4e4e4e'>(</span><span style='font-weight: bold;color: #875f00'>10</span><span style='color: #4e4e4e'>,</span> <span style='font-weight: bold;color: #875f00'>2</span><span style='color: #4e4e4e'>)</span>
+</td></tr>
+<tr><td class=line-number>91</td><td class=line>  <span style='color: #5f00d7'>match</span> <span style='color: #d0d0d0'>division_result</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>92</td><td class=line>    <span style='color: #005fd7'>ok</span><span style='color: #4e4e4e'>(</span><span style='color: #d0d0d0'>result</span><span style='color: #4e4e4e'>)</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Result: </span><span style='color: #4e4e4e'>{</span><span style='color: #d0d0d0'>result</span><span style='color: #4e4e4e'>}</span>&quot;</span><span style='color: #4e4e4e'>)</span></span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>93</td><td class=line>    <span style='color: #005fd7'>err</span><span style='color: #4e4e4e'>(</span><span style='color: #d0d0d0'>message</span><span style='color: #4e4e4e'>)</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Error: </span><span style='color: #4e4e4e'>{</span><span style='color: #d0d0d0'>message</span><span style='color: #4e4e4e'>}</span>&quot;</span><span style='color: #4e4e4e'>)</span></span>
+</td></tr>
+<tr><td class=line-number>94</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>95</td><td class=line>
+</td></tr>
+<tr><td class=line-number>96</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// Using nullable types</span>
+</td></tr>
+<tr><td class=line-number>97</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>maybe_value</span><span style='color: #4e4e4e'>:</span> <span style='font-weight: bold;color: #005f5f'>Int</span><span style='color: #4e4e4e'>?</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='font-weight: bold;color: #875f00'>42</span>
+</td></tr>
+<tr><td class=line-number>98</td><td class=line>  <span style='color: #5f00d7'>match</span> <span style='color: #d0d0d0'>maybe_value</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>99</td><td class=line>    <span style='font-style: italic;color: #8a8a8a'>// Pattern matching with wildcard</span>
+</td></tr>
+<tr><td class=line-number>100</td><td class=line>    <span style='color: #d0d0d0'>_</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Has a value</span>&quot;</span><span style='color: #4e4e4e'>)</span></span>
+</td></tr>
+<tr><td class=line-number>101</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>102</td><td class=line>
+</td></tr>
+<tr><td class=line-number>103</td><td class=line>  <span style='font-style: italic;color: #8a8a8a'>// Status check using enum</span>
+</td></tr>
+<tr><td class=line-number>104</td><td class=line>  <span style='color: #5f00d7'>let</span> <span style='color: #d0d0d0'>current_status</span> <span style='font-weight: bold;color: #4e4e4e'>=</span> <span style='color: #005f5f'>Status</span><span style='color: #4e4e4e'>::</span><span style='color: #af0000'>Pending</span>
+</td></tr>
+<tr><td class=line-number>105</td><td class=line>  <span style='color: #5f00d7'>match</span> <span style='color: #d0d0d0'>current_status</span> <span style='color: #4e4e4e'>{</span>
+</td></tr>
+<tr><td class=line-number>106</td><td class=line>    <span style='color: #005f5f'>Status</span><span style='color: #4e4e4e'>::</span><span style='color: #af0000'>Success</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Operation was successful</span>&quot;</span><span style='color: #4e4e4e'>)</span></span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>107</td><td class=line>    <span style='color: #005f5f'>Status</span><span style='color: #4e4e4e'>::</span><span style='color: #af0000'>Failure</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Operation failed</span>&quot;</span><span style='color: #4e4e4e'>)</span></span><span style='color: #4e4e4e'>,</span>
+</td></tr>
+<tr><td class=line-number>108</td><td class=line>    <span style='color: #005f5f'>Status</span><span style='color: #4e4e4e'>::</span><span style='color: #af0000'>Pending</span> <span style='font-weight: bold;color: #4e4e4e'>=&gt;</span> <span style='color: #d0d0d0'>io</span><span style='color: #4e4e4e'>::</span><span style='color: #005fd7'><span style='color: #005fd7'>print</span><span style='color: #4e4e4e'>(</span><span style='color: #008700'>&quot;<span style='color: #008700'>Operation is pending</span>&quot;</span><span style='color: #4e4e4e'>)</span></span>
+</td></tr>
+<tr><td class=line-number>109</td><td class=line>  <span style='color: #4e4e4e'>}</span>
+</td></tr>
+<tr><td class=line-number>110</td><td class=line><span style='color: #4e4e4e'>}</span>
+</td></tr>
+</table>
+
+</body>
+

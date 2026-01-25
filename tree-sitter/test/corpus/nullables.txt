@@ -1,0 +1,87 @@
+==================
+maybe types
+==================
+
+use ard/maybe
+
+mut name: Str? = maybe::none()
+name = maybe::some("Akonwi")
+
+match name {
+  n => io::print("name is: {n}"),
+  _ => io::print("no name")
+}
+
+---
+
+(program
+  (import
+    (module_path))
+  (statement
+    (variable_definition
+      (variable_binding)
+      (identifier)
+      (type
+        (primitive_type
+          (str)))
+      (assign)
+      (expression
+        (member_access
+          (expression
+            (identifier))
+          (double_colon)
+          (function_call
+            (identifier)
+            (paren_arguments))))))
+  (statement
+    (reassignment
+      (identifier)
+      (assign)
+      (expression
+        (member_access
+          (expression
+            (identifier))
+          (double_colon)
+          (function_call
+            (identifier)
+            (paren_arguments
+              (expression
+                (primitive_value
+                  (string
+                    (string_content))))))))))
+  (statement
+    (expression
+      (match_expression
+        (expression
+          (identifier))
+        (match_case
+          (identifier)
+          (expression
+            (member_access
+              (expression
+                (identifier))
+              (double_colon)
+              (function_call
+                (identifier)
+                (paren_arguments
+                  (expression
+                    (primitive_value
+                      (string
+                        (string_content)
+                        (string_interpolation
+                          (expression
+                            (identifier)))))))))))
+        (match_case
+          (wildcard)
+          (expression
+            (member_access
+              (expression
+                (identifier))
+              (double_colon)
+              (function_call
+                (identifier)
+                (paren_arguments
+                  (expression
+                    (primitive_value
+                      (string
+                        (string_content)))))))))))))
