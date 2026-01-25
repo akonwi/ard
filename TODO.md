@@ -1,5 +1,7 @@
 # TODO
-- [ ] is it time for a channel implementation?
+- [ ] Invalid pattern for Int match: *parse.StaticProperty
+  * should be able to use enums in patterns 
+- [ ] enums should be comparable to Int
 - [ ] decode::path() could support both field name and array index
     - `fn decode::path(segments: [Str|Int], as: decode::Decoder<$Out>) $Out![decode::Error] `
 - [ ] refactor ard/http request handlers so they don't need to construct the responses
