@@ -1,0 +1,11 @@
+id = "ard"
+name = "Ard"
+version = "0.0.1"
+schema_version = 1
+authors = ["Akonwi Ngoh <akonwi@gmail.com>"]
+description = "Language support for Ard"
+repository = "https://github.com/akonwi/zed-ard"
+
+[grammars.ard]
+repository = "file:///Users/akonwi/Developer/tree-sitter-ard"
+commit = "c36fe142f048a86cf34797048ceffbdd4b16dd5e"
