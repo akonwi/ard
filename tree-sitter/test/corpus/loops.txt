@@ -115,26 +115,28 @@ for cell in (b.cells) {}
 (program
   (statement
     (for_in_loop
-      (identifier)
-      (expression
+      items: (for_in_items
         (identifier))
-      (block
+      range: (expression
+        (identifier))
+      body: (block
         (statement
           (expression
             (function_call
-              (identifier)
-              (paren_arguments
-                (expression
+              target: (identifier)
+              arguments: (paren_arguments
+                argument: (expression
                   (identifier)))))))))
   (statement
     (for_in_loop
-      (identifier)
-      (expression
+      items: (for_in_items
+        (identifier))
+      range: (expression
         (paren_expression
-          (expression
+          expr: (expression
             (member_access
-              (expression
+              target: (expression
                 (identifier))
-              (period)
-              (identifier)))))
-      (block))))
+              operator: (period)
+              member: (identifier)))))
+      body: (block))))

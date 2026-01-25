@@ -3,7 +3,7 @@
 (param_def name: (identifier) @local.definition.parameter)
 (anonymous_parameter name: (identifier) @local.definition.parameter)
 (variable_definition name: (identifier) @local.definition.var)
-(for_in_loop cursor: (identifier) @local.definition.var)
+(for_in_loop items: (for_in_items (identifier) @local.definition.var))
 
 ;; References
 (identifier) @local.reference

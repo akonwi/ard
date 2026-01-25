@@ -70,6 +70,7 @@ module.exports = grammar({
         $.for_in_loop,
         $.variable_definition,
         $.function_definition,
+        $.external_function,
         $.reassignment,
         $._expression_statement,
         $.struct_definition,
@@ -178,6 +179,18 @@ module.exports = grammar({
         field("body", $.block),
       ),
 
+    external_function: ($) =>
+      seq(
+        optional($.private),
+        "extern",
+        $._fn,
+        field("name", $.identifier),
+        field("parameters", $.parameters),
+        field("return", $.type),
+        $.assign,
+        field("binding", $.string),
+      ),
+
     block: ($) =>
       seq($._left_brace, optional(repeat($.statement)), $._right_brace),
 
@@ -198,10 +211,16 @@ module.exports = grammar({
     for_in_loop: ($) =>
       seq(
         "for",
-        field("cursor", $.identifier),
+        field("items", $.for_in_items),
         "in",
         field("range", $.expression),
         field("body", $.block),
+      ),
+
+    for_in_items: ($) =>
+      choice(
+        $.identifier,
+        seq($.identifier, repeat(seq(",", $.identifier))),
       ),
 
     if_statement: ($) =>
@@ -241,6 +260,7 @@ module.exports = grammar({
         $.struct_instance,
         $.paren_expression,
         $.match_expression,
+        $.try_expression,
         $.anonymous_function,
         $.range_expression,
         $.wildcard,
@@ -362,6 +382,21 @@ module.exports = grammar({
         field("body", choice($.block, $.expression)),
       ),
 
+    try_expression: ($) =>
+      prec.right(
+        "assignment",
+        choice(
+          seq("try", field("expr", $.expression)),
+          seq(
+            "try",
+            field("expr", $.expression),
+            "->",
+            field("catch_var", $.identifier),
+            field("catch_block", $.block),
+          ),
+        ),
+      ),
+
     wildcard: ($) => "_",
 
     struct_instance: ($) =>
@@ -458,7 +493,12 @@ module.exports = grammar({
             $.result_type,
             $.function_type,
           ),
-          field("optional", optional($._question)),
+          optional(
+            choice(
+              seq("!", field("error_type", choice($.identifier, $.member_access_type))),
+              $._question,
+            ),
+          ),
         ),
       ),
 

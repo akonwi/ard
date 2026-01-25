@@ -1,0 +1,54 @@
+==================
+for-in loop with tuple unpacking
+==================
+
+for key, value in map {
+  io::print(key)
+}
+
+for a, b, c in items {
+  io::print(a)
+}
+
+---
+
+(program
+  (statement
+    (for_in_loop
+      items: (for_in_items
+        (identifier)
+        (identifier))
+      range: (expression
+        (identifier))
+      body: (block
+        (statement
+          (expression
+            (member_access
+              target: (expression
+                (identifier))
+              operator: (double_colon)
+              member: (function_call
+                target: (identifier)
+                arguments: (paren_arguments
+                  argument: (expression
+                    (identifier))))))))))
+  (statement
+    (for_in_loop
+      items: (for_in_items
+        (identifier)
+        (identifier)
+        (identifier))
+      range: (expression
+        (identifier))
+      body: (block
+        (statement
+          (expression
+            (member_access
+              target: (expression
+                (identifier))
+              operator: (double_colon)
+              member: (function_call
+                target: (identifier)
+                arguments: (paren_arguments
+                  argument: (expression
+                    (identifier)))))))))))

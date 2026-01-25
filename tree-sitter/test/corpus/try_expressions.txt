@@ -1,0 +1,35 @@
+==================
+try expression simple
+==================
+
+try read_line()
+
+---
+
+(program
+  (statement
+    (expression
+      (try_expression
+        expr: (expression
+          (function_call
+            target: (identifier)
+            arguments: (paren_arguments)))))))
+
+==================
+try expression with catch
+==================
+
+try read_line() -> err { }
+
+---
+
+(program
+  (statement
+    (expression
+      (try_expression
+        expr: (expression
+          (function_call
+            target: (identifier)
+            arguments: (paren_arguments)))
+        catch_var: (identifier)
+        catch_block: (block)))))
