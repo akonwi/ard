@@ -237,51 +237,9 @@ fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
   }
 }
 
-// decode a nested field.
-// { foo: { bar: 20 } } --- path(["foo", "bar"], int)
-fn path(subpath: [Str], with: Decoder<$T>) Decoder<$T> {
-  fn (data: Dynamic) $T![Error] {
-    match subpath.size() {
-      0 => with(data),
-      _ => {
-        mut current_data = try extract_field(data, subpath.at(0)) -> found {
-          Result::err([
-            Error{expected: "Field", found: found, path: [subpath.at(0)]}
-          ])
-        }
-        mut traveled: [Str] = []
-        for seg, idx in subpath {
-          if idx > 0 {
-            current_data = try extract_field(current_data, seg) -> found {
-              Result::err([
-                Error{expected: "Field", found: found, path: [subpath.at(0)]}
-              ])
-            }
-            traveled.push(seg)
-          }
-        }
-
-        let out = try with(current_data) -> errs {
-          mut out: [Error] = []
-          for err in errs {
-            out.push(Error{
-              expected: err.expected,
-              found: err.found,
-              path: List::concat(err.path, subpath)
-            })
-          }
-
-          Result::err(out)
-        }
-        Result::ok(out)
-      },
-    }
-  }
-}
-
 // decode a nested path that supports both field names and array indices.
-// { foo: [{ bar: 20 }] } --- path2(["foo", 0, "bar"], int)
-fn path2(subpath: [PathSegment], with: Decoder<$T>) Decoder<$T> {
+// { foo: [{ bar: 20 }] } --- path(["foo", 0, "bar"], int)
+fn path(subpath: [PathSegment], with: Decoder<$T>) Decoder<$T> {
   fn (data: Dynamic) $T![Error] {
     match subpath.size() {
       0 => with(data),

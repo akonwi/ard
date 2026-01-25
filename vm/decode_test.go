@@ -549,103 +549,68 @@ func TestDecodeField(t *testing.T) {
 func TestDecodePath(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "valid field decoding",
-			input: `
-				use ard/decode
-				use ard/json
-
-				struct Qux {
-					item: Int
-				}
-
-				struct Bar {
-					qux: Qux
-				}
-
-				struct Foo {
-					bar: Bar
-				}
-
-				let qux = Qux{item: 42}
-				let bar = Bar{qux: qux}
-				let foo = Foo{bar: bar}
-
-				let json_str = json::encode(foo).expect("Failed to json encode")
-
-				let data = decode::from_json(json_str).expect("Failed to parse json")
-				let result = decode::run(data, decode::path(["bar", "qux", "item"], decode::int))
-				result.expect("Failed to decode nested path")
-			`,
-			want: 42,
-		},
-	})
-}
-
-func TestDecodePath2(t *testing.T) {
-	runTests(t, []test{
-		{
-			name: "path2 with only string segments works like path",
+			name: "path with only string segments works like path",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("\{\"foo\": \{\"bar\": 42\}\}").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["foo", "bar"], decode::int))
+				let result = decode::run(data, decode::path(["foo", "bar"], decode::int))
 				result.expect("Failed to decode")
 			`,
 			want: 42,
 		},
 		{
-			name: "path2 with array index",
+			name: "path with array index",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("\{\"items\": [10, 20, 30]\}").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["items", 1], decode::int))
+				let result = decode::run(data, decode::path(["items", 1], decode::int))
 				result.expect("Failed to decode")
 			`,
 			want: 20,
 		},
 		{
-			name: "path2 with mixed field and array access",
+			name: "path with mixed field and array access",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("\{\"response\": [\{\"name\": \"Alice\"\}, \{\"name\": \"Bob\"\}]\}").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["response", 0, "name"], decode::string))
+				let result = decode::run(data, decode::path(["response", 0, "name"], decode::string))
 				result.expect("Failed to decode")
 			`,
 			want: "Alice",
 		},
 		{
-			name: "path2 with deeply nested mixed access",
+			name: "path with deeply nested mixed access",
 			input: `
 				use ard/decode
 
 				let json = "\{\"data\": \{\"users\": [\{\"profile\": \{\"age\": 25\}\}]\}\}"
 				let data = decode::from_json(json).expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["data", "users", 0, "profile", "age"], decode::int))
+				let result = decode::run(data, decode::path(["data", "users", 0, "profile", "age"], decode::int))
 				result.expect("Failed to decode")
 			`,
 			want: 25,
 		},
 		{
-			name: "path2 with empty path returns data as-is",
+			name: "path with empty path returns data as-is",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("42").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2([], decode::int))
+				let result = decode::run(data, decode::path([], decode::int))
 				result.expect("Failed to decode")
 			`,
 			want: 42,
 		},
 		{
-			name: "path2 error includes correct path for decoder failure",
+			name: "path error includes correct path for decoder failure",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("\{\"foo\": \{\"bar\": \"not_an_int\"\}\}").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["foo", "bar"], decode::int))
+				let result = decode::run(data, decode::path(["foo", "bar"], decode::int))
 				match result {
 					ok => "unexpected success",
 					err(errs) => errs.at(0).to_str()
@@ -654,12 +619,12 @@ func TestDecodePath2(t *testing.T) {
 			want: "foo.bar: got \"not_an_int\", expected Int",
 		},
 		{
-			name: "path2 error includes array index in path",
+			name: "path error includes array index in path",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("\{\"items\": [\"a\", \"b\"]\}").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["items", 1], decode::int))
+				let result = decode::run(data, decode::path(["items", 1], decode::int))
 				match result {
 					ok => "unexpected success",
 					err(errs) => errs.at(0).to_str()
@@ -668,12 +633,12 @@ func TestDecodePath2(t *testing.T) {
 			want: "items[1]: got \"b\", expected Int",
 		},
 		{
-			name: "path2 error with mixed path segments",
+			name: "path error with mixed path segments",
 			input: `
 				use ard/decode
 
 				let data = decode::from_json("\{\"users\": [\{\"name\": 123\}]\}").expect("Failed to parse json")
-				let result = decode::run(data, decode::path2(["users", 0, "name"], decode::string))
+				let result = decode::run(data, decode::path(["users", 0, "name"], decode::string))
 				match result {
 					ok => "unexpected success",
 					err(errs) => errs.at(0).to_str()
@@ -682,7 +647,7 @@ func TestDecodePath2(t *testing.T) {
 			want: "users[0].name: got 123, expected Str",
 		},
 		{
-			name: "path2 simplifies the deep custom decoder pattern",
+			name: "path simplifies the deep custom decoder pattern",
 			input: `
 				use ard/decode
 				use ard/fs
@@ -692,8 +657,8 @@ func TestDecodePath2(t *testing.T) {
 
 				let data = decode::from_json(text).expect("Unable to parse json")
 
-				// Extract response[0].bookmakers[0].bets[0].name using path2
-				let res = decode::run(data, decode::path2(["response", 0, "bookmakers", 0, "bets", 0, "name"], decode::string))
+				// Extract response[0].bookmakers[0].bets[0].name using path
+				let res = decode::run(data, decode::path(["response", 0, "bookmakers", 0, "bets", 0, "name"], decode::string))
 
 				match res {
 					ok(name) => name,
@@ -705,15 +670,15 @@ func TestDecodePath2(t *testing.T) {
 	})
 }
 
-func TestDecodePath2WithTry(t *testing.T) {
+func TestDecodePathWithTry(t *testing.T) {
 	runTests(t, []test{
 		{
-			name: "path2 with try in a function",
+			name: "path with try in a function",
 			input: `
 				use ard/decode
 
 				fn extract_id(data: Dynamic) Int![decode::Error] {
-					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					let id = try decode::run(data, decode::path(["fixture", "id"], decode::int))
 					Result::ok(id)
 				}
 
@@ -724,13 +689,13 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 42,
 		},
 		{
-			name: "path2 with try in a function - multiple calls",
+			name: "path with try in a function - multiple calls",
 			input: `
 				use ard/decode
 
 				fn extract_fixture(data: Dynamic) [Int]![decode::Error] {
-					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
-					let timestamp = try decode::run(data, decode::path2(["fixture", "timestamp"], decode::int))
+					let id = try decode::run(data, decode::path(["fixture", "id"], decode::int))
+					let timestamp = try decode::run(data, decode::path(["fixture", "timestamp"], decode::int))
 					Result::ok([id, timestamp])
 				}
 
@@ -742,13 +707,13 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 1446667,
 		},
 		{
-			name: "path2 chained - extract from response array then decode nested fields",
+			name: "path chained - extract from response array then decode nested fields",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				fn extract_fixture(data: Dynamic) Int![decode::Error] {
-					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					let id = try decode::run(data, decode::path(["fixture", "id"], decode::int))
 					Result::ok(id)
 				}
 
@@ -756,22 +721,22 @@ func TestDecodePath2WithTry(t *testing.T) {
 				if text.is_empty() { panic("Empty json file") }
 				let data = decode::from_json(text).expect("Unable to parse json")
 
-				// First extract response[0] using path2
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed to get response entry")
+				// First extract response[0] using path
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed to get response entry")
 
-				// Then pass that to a function that uses path2 again
+				// Then pass that to a function that uses path again
 				extract_fixture(entry).expect("Failed to extract fixture")
 			`,
 			want: 1390960,
 		},
 		{
-			name: "path2 with list iteration - mimics fapi pattern",
+			name: "path with list iteration - mimics fapi pattern",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				fn extract_fixture_id(data: Dynamic) Int![decode::Error] {
-					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
+					let id = try decode::run(data, decode::path(["fixture", "id"], decode::int))
 					Result::ok(id)
 				}
 
@@ -793,7 +758,7 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 1390960,
 		},
 		{
-			name: "path2 string-only vs path - direct comparison",
+			name: "path string-only vs path - direct comparison",
 			input: `
 				use ard/decode
 				use ard/fs
@@ -802,24 +767,24 @@ func TestDecodePath2WithTry(t *testing.T) {
 				if text.is_empty() { panic("Empty json file") }
 				let data = decode::from_json(text).expect("Unable to parse json")
 
-				// Extract entry using path2 with mixed segments (like fapi::get_fixture does)
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed to get entry")
+				// Extract entry using path with mixed segments (like fapi::get_fixture does)
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed to get entry")
 
-				// Now try path2 with string-only segments (like the user's change)
-				let id = decode::run(entry, decode::path2(["fixture", "id"], decode::int)).expect("Failed to get id with path2")
+				// Now try path with string-only segments (like the user's change)
+				let id = decode::run(entry, decode::path(["fixture", "id"], decode::int)).expect("Failed to get id with path")
 				id
 			`,
 			want: 1390960,
 		},
 		{
-			name: "path2 after path2 - the exact fapi pattern",
+			name: "path after path - the exact fapi pattern",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				fn from_api_entry(data: Dynamic) Int![decode::Error] {
-					let id = try decode::run(data, decode::path2(["fixture", "id"], decode::int))
-					let timestamp = try decode::run(data, decode::path2(["fixture", "timestamp"], decode::int))
+					let id = try decode::run(data, decode::path(["fixture", "id"], decode::int))
+					let timestamp = try decode::run(data, decode::path(["fixture", "timestamp"], decode::int))
 					Result::ok(id + timestamp)
 				}
 
@@ -827,26 +792,26 @@ func TestDecodePath2WithTry(t *testing.T) {
 				if text.is_empty() { panic("Empty json file") }
 				let data = decode::from_json(text).expect("Unable to parse json")
 
-				// First path2 call extracts response[0]
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed to get entry")
+				// First path call extracts response[0]
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed to get entry")
 
-				// Second path2 call (inside function) extracts fixture.id
+				// Second path call (inside function) extracts fixture.id
 				from_api_entry(entry).expect("Failed in from_api_entry")
 			`,
 			want: 1390960 + 1765051200,
 		},
 		{
-			name: "path2 multiple calls - check each value separately",
+			name: "path multiple calls - check each value separately",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
-				let id = decode::run(entry, decode::path2(["fixture", "id"], decode::int)).expect("Failed id")
-				let timestamp = decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+				let id = decode::run(entry, decode::path(["fixture", "id"], decode::int)).expect("Failed id")
+				let timestamp = decode::run(entry, decode::path(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
 
 				// Return timestamp to verify it's not returning id
 				timestamp
@@ -854,30 +819,30 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 1765051200,
 		},
 		{
-			name: "path2 single call - timestamp only",
+			name: "path single call - timestamp only",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
-				// Only call path2 once - for timestamp
-				let timestamp = decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+				// Only call path once - for timestamp
+				let timestamp = decode::run(entry, decode::path(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
 				timestamp
 			`,
 			want: 1765051200,
 		},
 		{
-			name: "path (not path2) multiple calls work correctly",
+			name: "path (not path) multiple calls work correctly",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
 				let id = decode::run(entry, decode::path(["fixture", "id"], decode::int)).expect("Failed id")
 				let timestamp = decode::run(entry, decode::path(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
@@ -887,21 +852,21 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 1765051200,
 		},
 		{
-			name: "path2 with pre-defined lists works",
+			name: "path with pre-defined lists works",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
 				// Pre-define the path lists
 				let id_path: [decode::PathSegment] = ["fixture", "id"]
 				let ts_path: [decode::PathSegment] = ["fixture", "timestamp"]
 
-				let id = decode::run(entry, decode::path2(id_path, decode::int)).expect("Failed id")
-				let timestamp = decode::run(entry, decode::path2(ts_path, decode::int)).expect("Failed timestamp")
+				let id = decode::run(entry, decode::path(id_path, decode::int)).expect("Failed id")
+				let timestamp = decode::run(entry, decode::path(ts_path, decode::int)).expect("Failed timestamp")
 
 				timestamp
 			`,
@@ -957,7 +922,7 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: "baz,qux,",
 		},
 		{
-			name: "closure with try and mutation - mimics path2",
+			name: "closure with try and mutation - mimics path",
 			input: `
 				type Seg = Str | Int
 
@@ -996,18 +961,18 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "path2 without decode::run - direct call",
+			name: "path without decode::run - direct call",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
-				// Call path2 decoders directly without decode::run
-				let id_decoder = decode::path2(["fixture", "id"], decode::int)
-				let ts_decoder = decode::path2(["fixture", "timestamp"], decode::int)
+				// Call path decoders directly without decode::run
+				let id_decoder = decode::path(["fixture", "id"], decode::int)
+				let ts_decoder = decode::path(["fixture", "timestamp"], decode::int)
 
 				let id = id_decoder(entry).expect("Failed id")
 				let timestamp = ts_decoder(entry).expect("Failed timestamp")
@@ -1017,21 +982,21 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 1765051200,
 		},
 		{
-			name: "path2 create and call immediately - no overlap",
+			name: "path create and call immediately - no overlap",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
 				// Create decoder and call immediately for id
-				let id_decoder = decode::path2(["fixture", "id"], decode::int)
+				let id_decoder = decode::path(["fixture", "id"], decode::int)
 				let id = id_decoder(entry).expect("Failed id")
 
 				// Create decoder and call immediately for timestamp
-				let ts_decoder = decode::path2(["fixture", "timestamp"], decode::int)
+				let ts_decoder = decode::path(["fixture", "timestamp"], decode::int)
 				let timestamp = ts_decoder(entry).expect("Failed timestamp")
 
 				timestamp
@@ -1039,31 +1004,31 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 1765051200,
 		},
 		{
-			name: "path2 with different decoder types",
+			name: "path with different decoder types",
 			input: `
 				use ard/decode
 				use ard/fs
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
 				// Use string decoder for timezone
-				let tz = decode::run(entry, decode::path2(["fixture", "timezone"], decode::string)).expect("Failed tz")
+				let tz = decode::run(entry, decode::path(["fixture", "timezone"], decode::string)).expect("Failed tz")
 
 				// Use int decoder for timestamp
-				let timestamp = decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
+				let timestamp = decode::run(entry, decode::path(["fixture", "timestamp"], decode::int)).expect("Failed timestamp")
 
 				timestamp
 			`,
 			want: 1765051200,
 		},
 		{
-			name: "local path2-like function - test scope isolation",
+			name: "local path-like function - test scope isolation",
 			input: `
 				type Seg = Str | Int
 
-				fn my_path2(subpath: [Seg]) fn([Str:Int]) Int {
+				fn my_path(subpath: [Seg]) fn([Str:Int]) Int {
 					fn(data: [Str:Int]) Int {
 						mut current = 0
 						for seg in subpath {
@@ -1082,8 +1047,8 @@ func TestDecodePath2WithTry(t *testing.T) {
 
 				let data = ["a": 1, "b": 2, "c": 3]
 
-				let get_a = my_path2(["a"])
-				let get_b = my_path2(["b"])
+				let get_a = my_path(["a"])
+				let get_b = my_path(["b"])
 
 				let a = get_a(data)
 				let b = get_b(data)
@@ -1092,7 +1057,7 @@ func TestDecodePath2WithTry(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "decode path2 debug - check what path is used",
+			name: "decode path debug - check what path is used",
 			input: `
 				use ard/decode
 				use ard/fs
@@ -1100,7 +1065,7 @@ func TestDecodePath2WithTry(t *testing.T) {
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
 				// Create a debug decoder that shows what path it sees
 				fn debug_path(name: Str, path: [decode::PathSegment]) fn(Dynamic) Str![decode::Error] {
@@ -1133,16 +1098,16 @@ func TestDecodePath2WithTry(t *testing.T) {
 				use ard/fs
 
 				fn get_id(entry: Dynamic) Int![decode::Error] {
-					decode::run(entry, decode::path2(["fixture", "id"], decode::int))
+					decode::run(entry, decode::path(["fixture", "id"], decode::int))
 				}
 
 				fn get_timestamp(entry: Dynamic) Int![decode::Error] {
-					decode::run(entry, decode::path2(["fixture", "timestamp"], decode::int))
+					decode::run(entry, decode::path(["fixture", "timestamp"], decode::int))
 				}
 
 				let text = fs::read("./fixtures/team.json").or("")
 				let data = decode::from_json(text).expect("Unable to parse json")
-				let entry = decode::run(data, decode::path2(["response", 0], decode::dynamic)).expect("Failed")
+				let entry = decode::run(data, decode::path(["response", 0], decode::dynamic)).expect("Failed")
 
 				let id = get_id(entry).expect("Failed id")
 				let timestamp = get_timestamp(entry).expect("Failed timestamp")
