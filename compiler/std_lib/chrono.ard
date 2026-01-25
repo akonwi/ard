@@ -1,0 +1,2 @@
+// Get current Unix timestamp in seconds since 1970-01-01 UTC
+extern fn now() Int = "Now"

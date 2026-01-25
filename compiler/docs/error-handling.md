@@ -1,0 +1,313 @@
+# Error Handling with Result Types and try
+
+Ard provides a robust error handling system based on Result types and the `try` keyword. This system encourages explicit error handling while providing convenient syntax for error propagation and transformation.
+
+## Result Types
+
+Result types represent operations that can either succeed with a value or fail with an error. They are written as `ValueType!ErrorType`:
+
+```ard
+fn divide(a: Int, b: Int) Int!Str {
+    match b == 0 {
+        true => Result::err("division by zero"),
+        false => Result::ok(a / b)
+    }
+}
+```
+
+### Creating Results
+
+Use the standard library functions to create Result values:
+- `Result::ok(value)` - creates a successful result
+- `Result::err(error)` - creates an error result
+
+### Working with Results
+
+Results can be handled using pattern matching:
+
+```ard
+let result = divide(10, 2)
+match result {
+    ok(value) => io::print("Result: {value}"),
+    err(message) => io::print("Error: {message}")
+}
+```
+
+Or use the `.or(default)` method to provide a fallback value:
+
+```ard
+let safe_result = divide(10, 0).or(-1)  // Returns -1 on error
+```
+
+## Maybe Types
+
+Maybe types represent values that may or may not exist. They are written as `Type?` and are equivalent to `Maybe<Type>`:
+
+```ard
+use ard/maybe
+
+fn find_user(id: Int) User? {
+    match id == 42 {
+        true => maybe::some(User { name: "Alice", id: 42 }),
+        false => maybe::none()
+    }
+}
+```
+
+### Creating Maybe Values
+
+Use the standard library functions to create Maybe values:
+- `maybe::some(value)` - creates a value that exists
+- `maybe::none()` - creates an absent value
+
+### Working with Maybe Values
+
+Maybe values can be handled using pattern matching:
+
+```ard
+let user = find_user(42)
+match user {
+    user => io::print("Found user: {user.name}"),
+    _ => io::print("User not found")
+}
+```
+
+## The try Keyword
+
+The `try` keyword provides early return semantics for working with Result and Maybe types, eliminating the need for explicit error checking in many cases.
+
+
+
+### With Result Types
+
+```ard
+fn calculate() Int!Str {
+    let x = try divide(10, 2)  // If divide fails, return early with error
+    let y = try divide(x, 3)   // If this fails, return early with error
+    Result::ok(y + 1)          // If we get here, both operations succeeded
+}
+```
+
+### With Maybe Types
+
+```ard
+use ard/maybe
+
+fn get_user_name(id: Int) Str? {
+    let user = try find_user(id)  // If user not found, return early with none
+    maybe::some(user.name)        // If we get here, user was found
+}
+
+fn get_user_display(id: Int) Str? {
+    let name = try get_user_name(id)  // Int? -> Str?, compatible types
+    maybe::some("User: {name}")
+}
+```
+
+### Restrictions
+
+- `try` can only be applied to Result or Maybe types
+- When used without a catch clause, the function must return a compatible Result or Maybe type
+- For Result types: the function must return a Result with the same error type
+- For Maybe types: the function must return a Maybe type (inner types can be different)
+
+## Error Transformation with Catch Blocks
+
+When your function's return type doesn't match the Result's error type or when you want to handle Maybe `none` cases, you can use catch blocks to transform errors:
+
+```ard
+fn process_data() Str {
+    let num = try parse_number("abc") -> err {
+        "Failed to parse: {err}"
+    }
+    "Number is: {num}"
+}
+```
+
+### With Maybe Types
+
+```ard
+use ard/maybe
+
+fn get_user_display(id: Int) Str {
+    let user = try find_user(id) -> _ {
+        "Unknown User"
+    }
+    "User: {user.name}"
+}
+```
+
+### Catch Block Semantics
+
+#### For Result Types
+- **Success case**: The Result is unwrapped and execution continues normally
+- **Error case**: The catch block executes and its result is returned early from the function
+
+#### For Maybe Types
+- **Some case**: The Maybe is unwrapped and execution continues normally
+- **None case**: The catch block executes and its result is returned early from the function
+
+### Function Reference Shorthand
+
+For simple error transformations, you can reference a function directly:
+
+```ard
+fn format_error(msg: Str) Str {
+    "Error: {msg}"
+}
+
+fn process() Str {
+    let result = try risky_operation() -> format_error
+    "Success: {result}"
+}
+```
+
+This is equivalent to:
+
+```ard
+fn process() Str {
+    let result = try risky_operation() -> err {
+        format_error(err)
+    }
+    "Success: {result}"
+}
+```
+
+### Function Reference with Maybe Types
+
+```ard
+use ard/maybe
+
+fn default_name() Str {
+    "Anonymous"
+}
+
+fn greet(id: Int) Str {
+    let name = try get_user_name(id) -> default_name
+    "Hello, {name}!"
+}
+```
+
+## Complete Example
+
+Here's a comprehensive example showing different error handling patterns:
+
+```ard
+use ard/io
+use ard/maybe
+
+struct Person { name: Str, age: Int }
+struct Database { users: [Int:Person] }
+
+fn parse_age(s: Str) Int!Str {
+    // Simulate parsing that can fail
+    match s {
+        "invalid" => Result::err("not a number"),
+        _ => Result::ok(25)
+    }
+}
+
+fn create_person(name: Str, age_str: Str) Person!Str {
+    let age = try parse_age(age_str)  // Early return on parse error
+    Result::ok(Person { name: name, age: age })
+}
+
+fn safe_create_person(name: Str, age_str: Str) Person {
+    let age = try parse_age(age_str) -> err {
+        io::print("Age parsing failed: {err}")
+        return Person { name: name, age: 0 }  // Default age on error
+    }
+    Person { name: name, age: age }
+}
+
+fn format_parse_error(msg: Str) Str {
+    "Invalid age provided: {msg}"
+}
+
+fn create_person_with_message(name: Str, age_str: Str) Str {
+    let person = try create_person(name, age_str) -> format_parse_error
+    "Created person: {person.name}, age {person.age}"
+}
+
+// Maybe type examples
+fn find_person(db: Database, id: Int) Person? {
+    match db.users.get(id) {
+        person => maybe::some(person),
+        _ => maybe::none()
+    }
+}
+
+fn get_person_info(db: Database, id: Int) Str? {
+    let person = try find_person(db, id)  // Early return none if not found
+    maybe::some("Name: {person.name}, Age: {person.age}")
+}
+
+fn get_person_display(db: Database, id: Int) Str {
+    let info = try get_person_info(db, id) -> _ {
+        "Person not found"
+    }
+    "Person Info: {info}"
+}
+
+// Mixed Result and Maybe types
+fn safe_get_person_age(db: Database, id: Int, age_str: Str) Int {
+    let person = try find_person(db, id) -> _ {
+        // If person not found, try to parse the provided age string
+        let parsed_age = try parse_age(age_str) -> err {
+            io::print("Both person lookup and age parsing failed: {err}")
+            return 0
+        }
+        return parsed_age
+    }
+    person.age
+}
+```
+
+## Best Practices
+
+### 1. Use try for Happy Path Code
+
+The `try` keyword is designed to let you write code that focuses on the success case:
+
+```ard
+fn process_file() Str!Str {
+    let content = try read_file("data.txt")
+    let parsed = try parse_json(content)
+    let result = try transform_data(parsed)
+    Result::ok(result)
+}
+```
+
+### 2. Transform Errors Appropriately
+
+Use catch blocks to convert errors into appropriate types for your context:
+
+```ard
+fn user_friendly_operation() Str {
+    try internal_operation() -> err {
+        "Sorry, something went wrong. Please try again."
+    }
+}
+```
+
+### 3. Propagate Errors When Possible
+
+When functions can naturally propagate errors, prefer `try` without catch:
+
+```ard
+fn chain_operations() DataType!ErrorType {
+    let step1 = try first_operation()
+    let step2 = try second_operation(step1)
+    let step3 = try third_operation(step2)
+    Result::ok(step3)
+}
+```
+
+## Error Handling vs Exceptions
+
+Ard's error handling system differs from exception-based systems:
+
+- **Explicit**: Errors are part of the type system and must be handled explicitly
+- **Predictable**: No hidden control flow - errors only propagate through `try`
+
+This approach encourages writing robust code while maintaining expressiveness.

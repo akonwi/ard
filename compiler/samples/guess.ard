@@ -1,0 +1,32 @@
+use ard/io
+
+fn main() {
+  let target = 47
+  io::print("Guess the number!")
+
+  while {
+    io::print("Please input your guess:")
+    match io::read_line() {
+      ok(guess) => {
+        io::print("You guessed: {guess.trim()}")
+        match Int::from_str(guess) {
+          num => {
+            if num < target {
+              io::print("Too low")
+            } else if num > target {
+              io::print("Too high")
+            } else {
+              io::print("Correct!")
+              break
+            }
+          },
+          _ => io::print("not a number")
+        }
+      },
+      err => {
+        io::print("Failed to read input: {err}")
+        break
+      }
+    }
+  }
+}

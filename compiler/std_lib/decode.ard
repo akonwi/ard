@@ -1,0 +1,337 @@
+use ard/list as List
+use ard/maybe
+use ard/string as Str
+
+type PathSegment = Str | Int
+
+struct Error {
+  expected: Str,
+  found: Str,
+  path: [Str],
+}
+
+impl Str::ToString for Error {
+  fn to_str() Str {
+    mut path_str = ""
+    for step, i in @path {
+      match i {
+        0 => {
+          // no leading dot
+          path_str =+ step
+        },
+        _ => {
+          // Subsequent elements: add dot only if not starting with bracket
+          match step.starts_with("[") {
+            true => { path_str =+ step },
+            false => { path_str =+ ".{step}" }
+          }
+        }
+      }
+    }
+
+    match path_str.is_empty() {
+      true => "got {@found}, expected {@expected}",
+      false => "{path_str}: got {@found}, expected {@expected}"
+    }
+  }
+}
+
+// parse json text
+extern fn from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+
+private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
+private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
+private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
+private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
+extern fn is_void(data: Dynamic) Bool = "IsNil"
+
+type Decoder = fn(Dynamic) $Out![Error]
+
+fn string(data: Dynamic) Str![Error] {
+  let val = try _decode_string(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn int(data: Dynamic) Int![Error] {
+  let val = try _decode_int(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn float(data: Dynamic) Float![Error] {
+  let val = try _decode_float(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn bool(data: Dynamic) Bool![Error] {
+  let val = try _decode_bool(data) -> err {
+    Result::err([err])
+  }
+  Result::ok(val)
+}
+
+fn nullable(decoder: Decoder<$T>) fn(Dynamic) $T?![Error] {
+  fn(data: Dynamic) $T?![Error] {
+    match is_void(data) {
+      true => Result::ok(maybe::none()),
+      false => {
+        let val = try decoder(data)
+        Result::ok(maybe::some(val))
+      }
+    }
+  }
+}
+
+fn dynamic(data: Dynamic) Dynamic![Error] {
+  Result::ok(data)
+}
+
+extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
+
+fn list(decoder: Decoder<$T>) fn(Dynamic) [$T]![Error] {
+  fn(data: Dynamic) [$T]![Error] {
+    let raw = try to_list(data) -> found {
+      let decode_err = Error{expected: "List", found: found, path: []}
+      Result::err([decode_err])
+    }
+
+    mut out: [$T] = []
+    mut errors: [Error] = []
+    for item, idx in raw {
+      match decoder(item) {
+        ok => { out.push(ok) },
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.prepend("[{idx}]")
+            errors.push(Error{
+              expected: e.expected,
+              found: e.found,
+              path: path,
+            })
+          }
+        },
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors)
+    }
+  }
+}
+
+// decodes for a specific element in a list
+fn at(index: Int, with: Decoder<$T>) fn(Dynamic) $T![Error] {
+  fn(data: Dynamic) $T![Error] {
+    let _list = try to_list(data) -> found {
+      Result::err([
+        Error{
+          expected: "List",
+          found: found,
+          path: [],
+        },
+      ])
+    }
+    match _list.size() {
+      0 => Result::err([
+        Error{
+          expected: "Dynamic",
+          found: "Empty list",
+          path: [],
+        }
+      ]),
+      _ => with(_list.at(0))
+    }
+  }
+}
+
+extern fn to_map(data: Dynamic) [Dynamic:Dynamic]!Str = "DynamicToMap"
+
+fn map(
+  key: Decoder<$Key>,
+  value: Decoder<$Value>
+) Decoder<[$Key:$Value]> {
+  fn(data: Dynamic) [$Key:$Value]![Error] {
+    let raw = try to_map(data) -> found {
+      let decode_err = Error{expected: "Map", found: found, path: []}
+      Result::err([decode_err])
+    }
+
+    mut errors: [Error] = []
+    mut out: [$Key:$Value] = [:]
+
+    for k, v in raw {
+      match key(k) {
+        ok(key) => {
+          match value(v) {
+            ok(val) => { out.set(key, val) },
+            err(errs) => {
+              for e in errs {
+                mut path = e.path
+                path.push("values")
+                errors.push(Error{
+                  expected: e.expected,
+                  found: e.found,
+                  path: path,
+                })
+              }
+            },
+          }
+        },
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.push("keys")
+            errors.push(Error{
+              expected: e.expected,
+              found: e.found,
+              path: path,
+            })
+          }
+        }
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors)
+    }
+  }
+}
+
+extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = "ExtractField"
+
+fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
+  fn(data: Dynamic) $T![Error] {
+    let raw = try extract_field(data, name) -> found {
+      Result::err([
+        Error{
+          expected: "Field",
+          found: found,
+          path: [name],
+        }
+      ])
+    }
+
+    let val = try with(raw) -> errs {
+      mut out: [Error] = []
+      for e in errs {
+        mut path = e.path
+        path.prepend(name)
+        out.push(Error{
+          expected: e.expected,
+          found: e.found,
+          path: path,
+        })
+      }
+      Result::err(out)
+    }
+
+    Result::ok(val)
+  }
+}
+
+// decode a nested path that supports both field names and array indices.
+// { foo: [{ bar: 20 }] } --- path(["foo", 0, "bar"], int)
+fn path(subpath: [PathSegment], with: Decoder<$T>) Decoder<$T> {
+  fn (data: Dynamic) $T![Error] {
+    match subpath.size() {
+      0 => with(data),
+      _ => {
+        mut current_data = data
+        mut traveled: [Str] = []
+
+        for seg in subpath {
+          match seg {
+            Str(s) => {
+              current_data = try extract_field(current_data, s) -> found {
+                mut err_path = traveled
+                err_path.push(s)
+                Result::err([
+                  Error{expected: "Field", found: found, path: err_path}
+                ])
+              }
+              traveled.push(s)
+            },
+            Int(i) => {
+              let list = try to_list(current_data) -> found {
+                mut err_path = traveled
+                err_path.push("[{i}]")
+                Result::err([
+                  Error{expected: "List", found: found, path: err_path}
+                ])
+              }
+              current_data = list.at(i)
+              traveled.push("[{i}]")
+            }
+          }
+        }
+
+        let out = try with(current_data) -> errs {
+          mut out: [Error] = []
+          for err in errs {
+            out.push(Error{
+              expected: err.expected,
+              found: err.found,
+              path: List::concat(traveled, err.path)
+            })
+          }
+          Result::err(out)
+        }
+        Result::ok(out)
+      },
+    }
+  }
+}
+
+// take the first successful decoding. if all fail, return the original errors
+fn one_of(first: Decoder<$T>, others: [Decoder<$T>]) Decoder<$T> {
+  fn(data: Dynamic) $T![Error] {
+    mut res = first(data)
+
+    match res.is_err() {
+      true => {
+        for decoder in others {
+          match decoder(data) {
+            ok => {
+              res = Result::ok(ok)
+              break
+            },
+            err(_) => ()
+          }
+        }
+      },
+      false => ()
+    }
+    res
+  }
+}
+
+// although this looks superfluous, it's a shorthand to declare + apply a decoder
+fn run(data: Dynamic, decoder: Decoder<$T>) $T![Error] {
+  decoder(data)
+}
+
+// flatten a list of errors into a single string
+fn flatten(errors: [Error]) Str {
+  match errors.size() {
+    0 => "",
+    1 => errors.at(0).to_str(),
+    _ => {
+      mut result = ""
+      for err, idx in errors {
+        if idx > 0 {
+          result =+ "\n"
+        }
+        result =+ err.to_str()
+      }
+      result
+    }
+  }
+}

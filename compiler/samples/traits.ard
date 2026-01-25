@@ -1,0 +1,22 @@
+use ard/io
+
+struct Book {
+  title: Str,
+  author: Str
+}
+
+impl Str::ToString for Book {
+  fn to_str() Str {
+    "Book: " + @title + " by " + @author
+  }
+}
+
+// This is a contrived example with the same signature as `io::print()`
+fn show(item: Str::ToString) {
+  io::print(item)
+}
+
+fn main() {
+  let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
+  show(book)
+}

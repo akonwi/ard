@@ -1,0 +1,114 @@
+package interpreter
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/akonwi/ard/ast"
+	ts_ard "github.com/akonwi/tree-sitter-ard/bindings/go"
+	"github.com/google/go-cmp/cmp"
+	ts "github.com/tree-sitter/go-tree-sitter"
+)
+
+var treeSitterParser *ts.Parser
+
+func init() {
+	ts, err := ts_ard.MakeParser()
+	if err != nil {
+		panic(err)
+	}
+	treeSitterParser = ts
+}
+
+func assertEquality(t *testing.T, got, want string) {
+	t.Helper()
+	diff := cmp.Diff(want, got)
+	if diff != "" {
+		t.Errorf("Generated code does not match (-want +got):\n%s", diff)
+	}
+}
+
+type test struct {
+	name, input, output string
+}
+
+func runTests(t *testing.T, tests []test) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := treeSitterParser.Parse([]byte(tt.input), nil)
+			parser := ast.NewParser([]byte(tt.input), tree)
+			ast, err := parser.Parse()
+			if err != nil {
+				t.Fatal(fmt.Errorf("Error parsing tree: %v", err))
+			}
+
+			goCode := GenerateGo(&ast)
+
+			if diff := cmp.Diff(tt.output, goCode, cmp.Transformer("SpaceRemover", strings.TrimSpace)); diff != "" {
+				t.Errorf("Generated Go code does not match (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func testComments(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:   "single line comment",
+			input:  "// this is a comment",
+			output: "// this is a comment",
+		},
+	})
+}
+
+func testLiteralExpressions(t *testing.T) {
+	tests := []test{
+		{
+			name: "identifier",
+			input: `
+let x = 42
+let y = x`,
+			output: `
+x := 42
+y := x`,
+		},
+		{
+			name:   "raw string",
+			input:  `let str = "foobar"`,
+			output: `str := "foobar"`,
+		},
+		{
+			name: "interpolated strings",
+			input: `
+"foobar {{ 42 }}"
+let num = 42
+"num is {{ num }}"`,
+			output: "fmt.Sprintf(\"foobar %d\", 42)\n" +
+				"num := 42\n" +
+				"fmt.Sprintf(\"num is %d\", num)",
+		},
+		{
+			name:   "number",
+			input:  `42`,
+			output: `42`,
+		},
+		{
+			name:   "booleans",
+			input:  `false`,
+			output: `false`,
+		},
+		{
+			name:   "list literal",
+			input:  `[1, 2, 3]`,
+			output: `[1, 2, 3]`,
+		},
+		{
+			name:   "map literal",
+			input:  `["jane": 1, "joe": 2]`,
+			output: `new Map([["jane", 1], ["joe", 2]])`,
+		},
+	}
+
+	runTests(t, tests)
+}

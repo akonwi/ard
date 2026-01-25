@@ -1,0 +1,13 @@
+use ard/io
+
+fn main() {
+  io::print("Hello, World!")
+
+  let name: Str = "Alice"
+  let age: Int = 30
+  let is_student: Bool = true
+
+  io::print("name = {name}")
+  io::print("age = {age}")
+  io::print("is_student = {is_student}")
+}

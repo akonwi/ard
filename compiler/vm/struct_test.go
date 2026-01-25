@@ -1,0 +1,83 @@
+package vm_test
+
+import "testing"
+
+func TestStructs(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Struct usage",
+			input: `
+				struct Point {
+					x: Int,
+					y: Int,
+				}
+
+				impl Point {
+					fn print() Str {
+						"{@x.to_str()},{@y.to_str()}"
+					}
+				}
+
+				let p = Point { x: 10, y: 20 }
+				p.print()`,
+			want: "10,20",
+		},
+		{
+			name: "Reassigning struct properties",
+			input: `
+				struct Point {
+					x: Int,
+					y: Int,
+				}
+				mut p = Point { x: 10, y: 20 }
+				p.x = 30
+				p.x`,
+			want: 30,
+		},
+		{
+			name: "Nesting structs",
+			input: `
+				struct Point {
+					x: Int,
+					y: Int,
+				}
+				struct Line {
+					start: Point,
+					end: Point,
+				}
+				let line = Line{
+					start: Point { x: 10, y: 20 },
+					end: Point { x: 10, y: 0 },
+				}
+				line.start.x + line.end.y`,
+			want: 10,
+		},
+	})
+}
+
+func TestStaticFunctions(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "Struct usage",
+			input: `
+				struct Point {
+					x: Int,
+					y: Int,
+				}
+				fn Point::make(x: Int, y: Int) Point {
+					Point { x: x, y: y }
+				}
+				let p = Point::make(10, 20)
+				p.x`,
+			want: 10,
+		},
+		{
+			name: "deeply nested",
+			input: `
+				use ard/http
+				let res = http::Response::new(200, "ok")
+				res.status`,
+			want: 200,
+		},
+	})
+}

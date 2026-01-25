@@ -1,1 +1,0 @@
-extern fn from_str(str: Str) Int? = "IntFromStr"

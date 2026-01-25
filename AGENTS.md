@@ -6,22 +6,32 @@ This file provides guidance to a coding agent.
 This is the source code for the parser, compiler, interpreter, and documentation website of a programming language called Ard.
 
 ### Repo structure
-- /docs: documentation about language syntax, feature design, and implementation decisions
-- /samples: runnable samples
+This is a monorepo with the following top-level directories:
+- /compiler: The Ard language compiler, parser, type checker, and runtime VM
+  - /compiler/docs: documentation about language syntax, feature design, and implementation decisions
+  - /compiler/samples: runnable Ard program samples
+  - /compiler/parse: parser implementation
+  - /compiler/checker: type checker and semantic analysis
+  - /compiler/vm: virtual machine runtime and FFI system
+  - /compiler/std_lib: standard library definitions
+  - /compiler/main.go: compiler CLI entry point
+  - /compiler/go.mod & go.sum: Go module dependencies for the compiler
 - /website: the documentation website built with Astro and Starlight as a static site
 - TODO.md: The running backlog of bugs, refactorings, and new feature ideas
 
 ## Commands
 The project uses the `jsonv2` experiment for the [new json tools](https://antonz.org/go-json-v2/) and has build tag directives for it.
 
-- Build: `go build`
+All commands should be run from the `/compiler` directory:
+
+- Build: `cd compiler && go build`
   > Important: do not stage and commit the built binary
-- Run Ard program: `go run main.go run samples/[file].ard`
-- Run all tests: `go test ./...`
-- Run package tests: `go test ./ast` or `go test ./checker` or `go test ./vm`
-- Run single test: `go test -run TestName ./[package]`
-- Verbose testing: `go test -v ./...`
-- Generate FFI registry: `go generate ./vm` (run when adding new FFI functions)
+- Run Ard program: `cd compiler && go run main.go run samples/[file].ard`
+- Run all tests: `cd compiler && go test ./...`
+- Run package tests: `cd compiler && go test ./ast` or `go test ./checker` or `go test ./vm`
+- Run single test: `cd compiler && go test -run TestName ./[package]`
+- Verbose testing: `cd compiler && go test -v ./...`
+- Generate FFI registry: `cd compiler && go generate ./vm` (run when adding new FFI functions)
 
 ## Instructions
 - When searching the codebase, use the codanna tool first and only grep or use search CLI commands if codanna doesn't yield results
