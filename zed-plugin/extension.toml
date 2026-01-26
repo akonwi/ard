@@ -4,8 +4,8 @@ version = "0.0.1"
 schema_version = 1
 authors = ["Akonwi Ngoh <akonwi@gmail.com>"]
 description = "Language support for Ard"
-repository = "https://github.com/akonwi/zed-ard"
+repository = "https://github.com/akonwi/ard"
 
 [grammars.ard]
-repository = "file:///Users/akonwi/Developer/tree-sitter-ard"
-commit = "c36fe142f048a86cf34797048ceffbdd4b16dd5e"
+repository = "file:///Users/akonwi/Developer/agent/ard/tree-sitter"
+commit = "a10c034cdb1d8fac994dc52f12656707aca8d0df"
