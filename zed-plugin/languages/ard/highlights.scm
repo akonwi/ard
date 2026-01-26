@@ -32,15 +32,18 @@
 (function_declaration name: (identifier) @function.definition)
 (function_declaration name: (qualified_identifier) @function.definition)
 (extern_function name: (identifier) @function.definition)
+(enum_variant name: (identifier) @constant)
 
 ; Parameters
 (parameter name: (identifier) @variable.parameter)
+(named_argument name: (identifier) @variable.parameter)
 
 ; Variables and properties
 (variable_declaration name: (identifier) @variable)
 (struct_field name: (identifier) @property)
 (struct_literal_field name: (identifier) @property)
 (member_expression (identifier) @property)
+(self_expression "@" @variable.builtin (identifier) @variable)
 
 ; Calls
 (call_expression
@@ -55,6 +58,7 @@
 (string) @string
 (boolean) @boolean
 (void) @constant.builtin
+(wildcard) @variable.special
 
 ; Comments
 (comment) @comment
