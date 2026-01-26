@@ -43,7 +43,7 @@
 (struct_field name: (identifier) @property)
 (struct_literal_field name: (identifier) @property)
 (member_expression (identifier) @property)
-(self_expression "@" @variable.builtin (identifier) @variable)
+(self_expression "@" @keyword (identifier) @property)
 
 ; Calls
 (call_expression
