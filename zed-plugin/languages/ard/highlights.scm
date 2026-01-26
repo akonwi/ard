@@ -42,16 +42,22 @@
 (variable_declaration name: (identifier) @variable)
 (struct_field name: (identifier) @property)
 (struct_literal_field name: (identifier) @property)
-(member_expression (identifier) @property)
+(member_expression "." (identifier) @property)
+(member_expression "::" (identifier) @type
+  (#match? @type "^[A-Z]"))
+(member_expression "::" (identifier) @function
+  (#match? @function "^[a-z_]"))
+(call_expression
+  (member_expression "." (identifier) @function))
+(call_expression
+  (member_expression "::" (identifier) @function))
 (self_expression "@" @keyword (identifier) @property)
 
 ; Calls
 (call_expression
   (member_expression
-    (primary_expression (identifier) @function)))
-(call_expression
-  (member_expression
-    (identifier) @function))
+    (primary_expression (identifier) @function))
+  (argument_list))
 
 ; Literals
 (number) @number
