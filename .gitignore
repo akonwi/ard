@@ -7,3 +7,5 @@ build
 
 .codanna*
 .fastembed_*
+
+*.wasm
