@@ -1,6 +1,6 @@
-; Minimal Ard highlights for bootstrap grammar (tree-sitter CLI)
+; Ard highlights (tree-sitter CLI)
 
-; Keywords (node-based, minimal)
+; Keywords (node-based)
 (break_statement) @keyword
 (if_statement) @keyword
 (while_loop) @keyword
@@ -42,26 +42,16 @@
 (variable_declaration name: (identifier) @variable)
 (struct_field name: (identifier) @property)
 (struct_literal_field name: (identifier) @property)
-(member_expression "." (identifier) @property)
-(member_expression "::" (identifier) @type
-  (#match? @type "^[A-Z]"))
-(member_expression "::" (identifier) @function
-  (#match? @function "^[a-z_]"))
-(call_expression
-  (member_expression "." (identifier) @function))
-(call_expression
-  (member_expression "::" (identifier) @function))
 (self_expression "@" @keyword (identifier) @property)
 
-; Calls
-(call_expression
-  (member_expression
-    (primary_expression (identifier) @function))
-  (argument_list))
+; Member/property vs call (disabled for now; was causing CLI query errors)
 
 ; Literals
 (number) @number
 (string) @string
+(string_interpolation "{" @punctuation.bracket "}" @punctuation.bracket)
+(string_content) @string
+(escape_sequence) @string.escape
 (boolean) @boolean
 (void) @constant.builtin
 (wildcard) @variable.special
