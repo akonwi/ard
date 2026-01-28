@@ -24,6 +24,7 @@ jobs:
           cache: true
 
       - name: Download dependencies
+        working-directory: compiler
         run: go mod download
 
       - name: Determine version
@@ -34,6 +35,7 @@ jobs:
           echo "Building version: ${VERSION}"
 
       - name: Build binary
+        working-directory: compiler
         run: |
           go build \
             -tags=goexperiment.jsonv2 \
@@ -42,16 +44,18 @@ jobs:
             .
 
       - name: Run tests
+        working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./...
 
       - name: Verify binary
+        working-directory: compiler
         run: ./ard version
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
-          files: ard
+          files: compiler/ard
           body: |
             Binary for version ${{ github.ref_name }}
 
