@@ -10,4 +10,4 @@ build
 
 *.wasm
 
-./grammars
+zed-plugin/grammars/*
