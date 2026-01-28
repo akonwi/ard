@@ -1,1 +1,13 @@
-; minimal brackets query (intentionally empty)
+; Ard bracket pairs
+
+[
+  "("
+  "["
+  "{"
+] @open
+
+[
+  ")"
+  "]"
+  "}"
+] @close

@@ -7,5 +7,5 @@ description = "Language support for Ard"
 repository = "https://github.com/akonwi/ard"
 
 [grammars.ard]
-repository = "file:///Users/akonwi/Developer/agent/ard/tree-sitter"
-commit = "a9fc3d0eeffa05bd403f31daa921b0882f9fe41b"
+repository = "file:///Users/akonwi/Developer/agent/ard/tree-sitter-ard"
+commit = "ddcecdb6a59dcc9096fce825d6d2a8057dbdf0ea"

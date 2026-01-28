@@ -2,20 +2,24 @@
 
 ; Keywords (node-based)
 (break_statement) @keyword
-(if_statement) @keyword
-(while_loop) @keyword
-(for_loop) @keyword
-(for_in_loop) @keyword
-(match_expression) @keyword
-(try_expression) @keyword
-(import_statement) @keyword
-(variable_declaration) @keyword
-(function_declaration) @keyword
-(extern_function) @keyword
-(struct_declaration) @keyword
-(enum_declaration) @keyword
-(trait_declaration) @keyword
-(impl_block) @keyword
+(if_statement "if" @keyword)
+(while_loop "while" @keyword)
+(for_loop "for" @keyword)
+(for_in_loop "for" @keyword)
+(for_in_loop "in" @keyword)
+(for_in_loop (for_binding) @variable.parameter)
+(match_expression "match" @keyword)
+(try_expression "try" @keyword)
+(import_statement "use" @keyword)
+(variable_declaration "let" @keyword)
+(variable_declaration "mut" @keyword)
+(function_declaration "fn" @keyword)
+(extern_function "extern" @keyword)
+(extern_function "fn" @keyword)
+(struct_declaration "struct" @keyword)
+(enum_declaration "enum" @keyword)
+(trait_declaration "trait" @keyword)
+(impl_block "impl" @keyword)
 
 ; Types
 (primitive_type) @type.builtin
