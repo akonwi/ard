@@ -1,4 +1,0 @@
-// defines converting to a string
-trait ToString {
-  fn to_str() Str
-}

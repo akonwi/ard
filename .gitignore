@@ -7,3 +7,7 @@ build
 
 .codanna*
 .fastembed_*
+
+*.wasm
+
+zed-plugin/grammars/*

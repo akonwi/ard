@@ -1,3 +1,0 @@
-// Standard library JSON module implemented with FFI
-
-extern fn encode(value: $T) Str!Str = "JsonEncode"

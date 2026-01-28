@@ -1,0 +1,46 @@
+use ard/io
+
+struct Todo {
+  title: Str,
+  completed: Bool
+}
+
+impl Todo {
+  fn get_str() Str {
+    let box = match (@completed) {
+      true => "[x]",
+      false => "[ ]"
+    }
+    "{box} {@title}"
+  }
+}
+
+fn Todo::new(title: Str) Todo {
+  Todo { title: title, completed: false }
+}
+
+fn render(list: [Todo]) {
+  io::print("Todo List:")
+  for todo in list {
+    io::print(todo.get_str())
+  }
+}
+
+fn main() {
+  mut list: [Todo] = [
+    Todo{ title: "Buy milk", completed: true }
+  ]
+
+  mut running = true
+  while running {
+    render(list)
+    io::print("What's your next todo?")
+    let title = io::read_line().expect("Failed to read line")
+    if title.is_empty() {
+      running = false
+    } else {
+      list.push(Todo::new(title))
+      io::print("------")
+    }
+  }
+}

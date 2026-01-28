@@ -1,0 +1,4 @@
+name = "Ard"
+grammar = "ard"
+path_suffixes = ["ard"]
+line_comments = ["// "]

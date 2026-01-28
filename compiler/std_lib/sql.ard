@@ -1,0 +1,119 @@
+use ard/decode
+use ard/list as List
+use ard/maybe
+use ard/result as Result
+
+// Only support primitives as values for query variables
+type Value = Str | Bool | Int | Float | Void
+
+private extern fn connect(connection_string: Str) Dynamic!Str = "SqlCreateConnection"
+private extern fn close_db(db: Dynamic) Void!Str = "SqlClose"
+private extern fn execute(db: Dynamic, sql: Str, values: [Value]) Void!Str = "SqlExecute"
+private extern fn run_query(db: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
+private extern fn begin_tx(db: Dynamic) Dynamic!Str = "SqlBeginTx"
+private extern fn commit_tx(tx: Dynamic) Void!Str = "SqlCommit"
+private extern fn rollback_tx(tx: Dynamic) Void!Str = "SqlRollback"
+
+extern fn extract_params(sql: Str) [Str] = "SqlExtractParams"
+
+struct Transaction {
+  _ptr: Dynamic
+}
+
+struct Query {
+  conn: Dynamic,
+  string: Str,
+  params: [Str]
+}
+
+impl Query {
+  fn prepare(mut query_str: Str, mut values: [Value], args: [Str:Value]) Void!Str {
+    for param in @params {
+      // Replace only the first occurrence to handle duplicate parameters correctly
+      query_str = query_str.replace("@"+param, "?")
+      let value = try args.get(param) -> _ { Result::err("Missing parameter: " + param) }
+      values.push(value)
+    }
+
+    Result::ok(())
+  }
+
+  fn run(args: [Str:Value]) Void!Str {
+    mut sanitized = @string
+    mut values: [Value] = []
+    try @prepare(sanitized, values, args)
+    execute(@conn, sanitized, values)
+  }
+
+  fn all(args: [Str:Value]) [Dynamic]!Str {
+    mut sanitized = @string
+    mut values: [Value] = []
+    try @prepare(sanitized, values, args)
+    run_query(@conn, sanitized, values)
+  }
+
+  fn first(args: [Str:Value]) Dynamic?!Str {
+    let rows = try @all(args)
+    match rows.size() {
+      0 => Result::ok(maybe::none()),
+      _ => Result::ok(maybe::some(rows.at(0)))
+    }
+  }
+}
+
+struct Database {
+  _ptr: Dynamic
+  path: Str
+}
+
+fn open(path: Str) Database!Str {
+  let conn = try connect(path)
+  Result::ok(Database{ _ptr: conn, path: path })
+}
+
+impl Database {
+  fn close() Void!Str {
+    close_db(@_ptr)
+  }
+
+  // simple one-off executions where the results aren't needed
+  // [note]: could be removed entirely for query.run() once optional params are sorted
+  fn exec(sql: Str) Void!Str {
+    execute(@_ptr, sql, List::new<Value>())
+  }
+
+  fn query(sql: Str) Query {
+    Query{
+      conn: @_ptr,
+      string: sql,
+      params: extract_params(sql),
+    }
+  }
+
+  fn begin() Transaction!Str {
+    let tx = try begin_tx(@_ptr)
+    Result::ok(Transaction{ _ptr: tx })
+  }
+}
+
+impl Transaction {
+  fn query(sql: Str) Query {
+    Query{
+      conn: @_ptr,
+      string: sql,
+      params: extract_params(sql),
+    }
+  }
+
+  fn exec(sql: Str) Void!Str {
+    execute(@_ptr, sql, List::new<Value>())
+  }
+
+  fn commit() Void!Str {
+    commit_tx(@_ptr)
+  }
+
+  fn rollback() Void!Str {
+    rollback_tx(@_ptr)
+  }
+}

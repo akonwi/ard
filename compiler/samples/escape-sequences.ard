@@ -1,0 +1,15 @@
+use ard/io
+
+// Print examples of different escape sequences
+fn main() {
+  io::print("Testing escape sequences:")
+  io::print("line 1\nline 2")
+  io::print("Tabbed\ttext\tshows\talignment")
+  io::print("Quotes: \"This is in quotes\"")
+  io::print("Backslash: This is a backslash -> \\ <- see?")
+  io::print("Bell\b, form-feed\f, and vertical-tab\v characters")
+
+  // Test escape sequences with string interpolation
+  let name = "World"
+  io::print("Hello, {name}!\nWelcome to \tArd!")
+}

@@ -1,0 +1,1 @@
+extern fn get_today() Str = "GetTodayString"

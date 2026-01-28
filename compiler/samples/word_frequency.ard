@@ -1,0 +1,47 @@
+use ard/io
+
+struct WordCount {
+  word: Str,
+  count: Int
+}
+
+fn count_words(words: [Str]) [WordCount] {
+  mut counts: [Str:Int] = [:]
+
+  for word in words {
+    counts.set(word, counts.get(word).or(0) + 1)
+  }
+
+  mut res: [WordCount] = []
+  for word, count in counts {
+    res.push(WordCount{ word: word, count: count })
+  }
+  res
+}
+
+fn main() {
+  io::print("Enter some text to analyze:")
+  match io::read_line() {
+    ok(text) => {
+      let words = text.split(" ")
+      mut word_counts = count_words(words)
+
+      io::print("\nWord Frequency Analysis:")
+      io::print("------------------------")
+      io::print("Total words: {words.size()}")
+      io::print("Unique words: {word_counts.size()}")
+
+      io::print("\nMost frequent words:")
+      word_counts.sort(fn(a: WordCount, b: WordCount) Bool {
+        a.count > b.count
+      })
+
+      for entry, rank in word_counts {
+        io::print("{rank+1}. {entry.word}: {entry.count}")
+      }
+    },
+    err => io::print("Unable to read input: {err}")
+  }
+}
+
+main()

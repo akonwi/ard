@@ -1,6 +1,0 @@
-// Standard library Float module implemented with FFI
-// Provides float conversion and utility functions
-
-extern fn from_str(string: Str) Float? = "FloatFromStr"
-extern fn from_int(int: Int) Float = "FloatFromInt"  
-extern fn floor(float: Float) Float = "FloatFloor"

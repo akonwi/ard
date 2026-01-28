@@ -1,0 +1,27 @@
+use ard/io
+
+fn main() {
+  mut count = 0
+  while count <= 9 {
+    count = count + 1
+  }
+
+  let is_true = false
+  while is_true or count > 0 {
+    count =  count - 1
+  }
+
+  count = 3
+  while count > 0 {
+    count = count - 1
+  }
+
+  for i in 1..10 {
+    io::print(i)
+  }
+
+  io::print("counting from 1 to {(count + 3)}")
+  for i in 1..count + 3 {
+    io::print(i)
+  }
+}

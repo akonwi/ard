@@ -1,0 +1,16 @@
+use ard/list as List
+
+extern fn os_args() [Str] = "OsArgs"
+
+struct Argv {
+  program: Str,
+  arguments: [Str],
+}
+
+fn load() Argv {
+  let args = os_args()
+  Argv {
+    program: args.at(2),
+    arguments: List::drop(from: args, till: 3),
+  }
+}

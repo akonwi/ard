@@ -1,0 +1,7 @@
+use ard/io
+use samples/maths
+
+fn main() {
+  // Call maths::multiply and see what happens
+  io::print(maths::add(1, 20))
+}
