@@ -9,3 +9,5 @@ build
 .fastembed_*
 
 *.wasm
+
+./grammars
