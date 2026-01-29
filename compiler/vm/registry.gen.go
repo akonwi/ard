@@ -100,6 +100,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("HTTP_Serve", ffi.HTTP_Serve); err != nil {
 		return fmt.Errorf("failed to register HTTP_Serve: %w", err)
 	}
+	if err := r.Register("HTTP_Serve2", ffi.HTTP_Serve2); err != nil {
+		return fmt.Errorf("failed to register HTTP_Serve2: %w", err)
+	}
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}

@@ -1214,7 +1214,7 @@ func (p *parser) parseType() DeclaredType {
 		if p.check(less_than) {
 			typeArgs = p.parseTypeArguments()
 		}
-		
+
 		// Check for Result sugar syntax
 		if p.match(bang) {
 			// Parse the error type
@@ -1265,6 +1265,8 @@ func (p *parser) parseType() DeclaredType {
 		paramTypes := []DeclaredType{}
 		if hasLeftParen && !p.check(right_paren) {
 			for {
+				// Skip 'mut' keyword if present (marks mutable parameters in type signatures)
+				_ = p.match(mut)
 				paramType := p.parseType()
 				paramTypes = append(paramTypes, paramType)
 				if !p.match(comma) {
@@ -1285,7 +1287,11 @@ func (p *parser) parseType() DeclaredType {
 		}
 
 		// Parse return type directly (no arrow in Ard syntax)
-		returnType := p.parseType()
+		// Return type is optional - if omitted, implicitly returns Void
+		var returnType DeclaredType
+		if !p.check(right_bracket) && !p.check(right_paren) && !p.check(comma) && !p.check(equal) && !p.check(new_line) {
+			returnType = p.parseType()
+		}
 
 		// Check for nullable
 		nullable := p.match(question_mark)
@@ -1808,24 +1814,24 @@ func (p *parser) try() (Expression, error) {
 
 				// Build the function expression - could be qualified with ::
 				var functionExpr Expression
-				
+
 				// Start with the first identifier
 				functionExpr = &Identifier{
 					Name:     idToken.text,
 					Location: idToken.getLocation(),
 				}
-				
+
 				// Parse qualified path (e.g., module::function or Type::method)
 				startLoc := idToken.getLocation()
 				endLoc := startLoc
-				
+
 				for p.match(colon_colon) {
 					if !p.check(identifier) {
 						p.addError(p.peek(), "Expected an identifier after '::'")
 						break
 					}
 					propToken := p.advance()
-					
+
 					functionExpr = &StaticProperty{
 						Location: Location{
 							Start: startLoc.Start,
@@ -1839,16 +1845,16 @@ func (p *parser) try() (Expression, error) {
 					}
 					endLoc = propToken.getLocation()
 				}
-				
+
 				// Create the appropriate call node
 				var callStmt Statement
-				
+
 				// If we have a qualified path, create a StaticFunction
 				if _, isQualified := functionExpr.(*StaticProperty); isQualified {
 					// Extract the final function name and target from the chain
 					var finalName string
 					var target Expression
-					
+
 					// Walk to the last StaticProperty to get the final name
 					current := functionExpr
 					if sp, ok := current.(*StaticProperty); ok {
@@ -1857,7 +1863,7 @@ func (p *parser) try() (Expression, error) {
 						}
 						target = sp.Target
 					}
-					
+
 					callStmt = &StaticFunction{
 						Location: Location{
 							Start: startLoc.Start,
@@ -2361,12 +2367,12 @@ func (p *parser) comparison() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check if first token is a comparison operator
 	if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
 		return left, nil
 	}
-	
+
 	// Parse first comparison
 	opToken := p.previous()
 	var operator Operator
@@ -2382,12 +2388,12 @@ func (p *parser) comparison() (Expression, error) {
 	case equal_equal:
 		operator = Equal
 	}
-	
+
 	right, err := p.modulo()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check for chained comparisons (is the next token also a comparison operator?)
 	comparisonOps := []kind{greater_than, greater_than_equal, less_than, less_than_equal, equal_equal}
 	if slices.Contains(comparisonOps, p.peek().kind) {
@@ -2395,13 +2401,13 @@ func (p *parser) comparison() (Expression, error) {
 		operands := []Expression{left, right}
 		operators := []Operator{operator}
 		startLoc := left.GetLocation().Start
-		
+
 		// Keep consuming comparison operators and operands
 		for slices.Contains(comparisonOps, p.peek().kind) {
 			if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
 				break
 			}
-			
+
 			opToken := p.previous()
 			var op Operator
 			switch opToken.kind {
@@ -2416,26 +2422,26 @@ func (p *parser) comparison() (Expression, error) {
 			case equal_equal:
 				op = Equal
 			}
-			
+
 			nextRight, err := p.modulo()
 			if err != nil {
 				return nil, err
 			}
-			
+
 			operands = append(operands, nextRight)
 			operators = append(operators, op)
 		}
-		
+
 		return &ChainedComparison{
 			Location: Location{
 				Start: startLoc,
 				End:   operands[len(operands)-1].GetLocation().End,
 			},
-			Operands: operands,
+			Operands:  operands,
 			Operators: operators,
 		}, nil
 	}
-	
+
 	// Single comparison
 	return &BinaryExpression{
 		Location: Location{
@@ -2831,7 +2837,7 @@ func (p *parser) call() (Expression, error) {
 			}
 		}
 		p.index = savedIndex // rewind
-		
+
 		if isStructInstance {
 			return p.parseStructInstantiationFromIdentifier(idExpr)
 		}

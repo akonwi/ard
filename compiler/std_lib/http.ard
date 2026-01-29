@@ -78,3 +78,5 @@ fn send(req: Request) Response!Str {
 }
 
 extern fn serve(port: Int, handlers: [Str:fn(Request) Response]) Void!Str = "HTTP_Serve"
+
+extern fn serve2(port: Int, handlers: [Str:fn(Request, mut Response)]) Void!Str = "HTTP_Serve2"

@@ -464,7 +464,11 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				Type: c.resolveType(param),
 			}
 		}
-		returnType := c.resolveType(ty.Return)
+		// If no return type specified, default to Void
+		var returnType Type = Void
+		if ty.Return != nil {
+			returnType = c.resolveType(ty.Return)
+		}
 
 		// Create a FunctionDef from the function type syntax
 		baseType = &FunctionDef{
@@ -1244,10 +1248,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			enum := &Enum{
-				Private:  s.Private,
-				Name:     s.Name,
-				Values:   computedValues,
-				Methods:  make(map[string]*FunctionDef),
+				Private: s.Private,
+				Name:    s.Name,
+				Values:  computedValues,
+				Methods: make(map[string]*FunctionDef),
 			}
 
 			c.scope.add(enum.name(), enum, false)
@@ -3816,11 +3820,11 @@ func (c *Checker) areTypesComparable(left, right Type) bool {
 	// Allow Enum vs Int comparisons
 	leftIsEnum := c.isEnum(left)
 	rightIsEnum := c.isEnum(right)
-	
+
 	if (leftIsEnum && right == Int) || (left == Int && rightIsEnum) {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -4630,7 +4634,7 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 					break
 				}
 			}
-			
+
 			// If all remaining parameters are nullable, allow omitting them
 			if allNullableOrProvidedMatches {
 				return positionalArgs, nil
