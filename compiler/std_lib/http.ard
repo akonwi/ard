@@ -77,6 +77,6 @@ fn send(req: Request) Response!Str {
   _send(method, req.url, req.body, req.headers)
 }
 
-extern fn serve(port: Int, handlers: [Str:fn(Request) Response]) Void!Str = "HTTP_Serve"
+type HandlerFn = fn(Request, mut Response)
 
-extern fn serve2(port: Int, handlers: [Str:fn(Request, mut Response)]) Void!Str = "HTTP_Serve2"
+extern fn serve(port: Int, handlers: [Str:HandlerFn]) Void!Str = "HTTP_Serve"

@@ -160,20 +160,21 @@ match http::send(req) {
 }
 ```
 
-### `fn serve(port: Int, handlers: [Str:fn(Request) Response]) Void!Str`
+### `fn serve(port: Int, handlers: [Str:fn(Request, mut Response)]) Void!Str`
 
 Start an HTTP server on the given port with route handlers.
 
-The handlers map keys are route paths and values are handler functions that take a request and return a response.
+The handlers map keys are route paths and values are handler functions that take a request and a mutable response object. Handlers modify the response object directly rather than constructing and returning it.
 
 ```ard
 use ard/http
 use ard/io
 
 fn main() {
-  let handlers: [Str:fn(http::Request) http::Response] = [
-    "/": fn(req: http::Request) http::Response {
-      http::Response::new(200, "Hello, World!")
+  let handlers: [Str:fn(http::Request, mut http::Response)] = [
+    "/": fn(req: http::Request, mut res: http::Response) {
+      res.body = "Hello, World!"
+      res.status = 200
     }
   ]
   
@@ -242,16 +243,16 @@ use ard/http
 use ard/io
 
 fn main() {
-  let handlers: [Str:fn(http::Request) http::Response] = [
-    "/": fn(req: http::Request) http::Response {
-      http::Response::new(200, "Welcome!")
+  let handlers: [Str:fn(http::Request, mut http::Response)] = [
+    "/": fn(req: http::Request, mut res: http::Response) {
+      res.body = "Welcome!"
     },
-    "/about": fn(req: http::Request) http::Response {
-      http::Response::new(200, "About page")
+    "/about": fn(req: http::Request, mut res: http::Response) {
+      res.body = "About page"
     },
-    "/users/:id": fn(req: http::Request) http::Response {
+    "/users/:id": fn(req: http::Request, mut res: http::Response) {
       let id = req.path_param("id")
-      http::Response::new(200, "User ID: {id}")
+      res.body = "User ID: {id}"
     }
   ]
   
@@ -265,11 +266,10 @@ fn main() {
 use ard/http
 
 fn main() {
-  let handlers: [Str:fn(http::Request) http::Response] = [
-    "/search": fn(req: http::Request) http::Response {
+  let handlers: [Str:fn(http::Request, mut http::Response)] = [
+    "/search": fn(req: http::Request, mut res: http::Response) {
       let query = req.query_param("q")
-      let results = "Results for: {query}"
-      http::Response::new(200, results)
+      res.body = "Results for: {query}"
     }
   ]
   

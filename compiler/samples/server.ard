@@ -1,7 +1,7 @@
 use ard/http
 
 fn main() {
-  http::serve2(3000, [
+  http::serve(3000, [
     "/": fn(req: http::Request, mut res: http::Response) {
       res.body = "Hello, World!"
     },
