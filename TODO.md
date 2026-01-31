@@ -1,16 +1,10 @@
 # TODO
-- [ ] refactor ard/http request handlers so they don't need to construct the responses
-  - introduce this as ard/http2 so it doesn't break existing code
-  - handler signature should become `fn (req: Request, mut res: Response) Void!Str`
-  - the handler can mutate the response accordingly
-  - the library code will take care of flushing the response
-  - if the handler returns an error, the library will use that as the response body
+- [ ] (idea): change `json::encode()` to only accept Dynamic  
+  - it would make it easier on interpreter, to not have to use reflection to do the encoding
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
     - can't be used in place of other expressions
   - broken loops: still a list up to the break point
-- [ ] (idea): change `json::encode()` to only accept Dynamic  
-  - it would make it easier on interpreter, to not have to use reflection to do the encoding
 - [ ] replace angle brackets for generics. with parens or brackets?
 - [ ] change for loop syntax to something like odin
   - `for [1,2,3] i { ... }`
