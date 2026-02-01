@@ -10,14 +10,11 @@
   - `for [1,2,3] i { ... }`
 - [ ] `Maybe.or_lazy()` to run a function to generate the fallback
 - [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
-- [ ] equivalent of Gleam's `use`
-  - sugar to denest callbacks
 - [ ] loops as expressions (comprehensions?)
   - inspiration from zig
   - the result of the iteration is a new list
   - kind of needs support for `break` with a value, so that value is the lone result (i.e. find)
   - `let doubled: [Int] = for i in 1..10 { i * 2 }`
-- [ ] support handling fiber panics
 - [ ] compile time constant variables
   - should readonly variables with a literal value be considered constants?
     pro: simpler than adding a new `const` keyword and just works
