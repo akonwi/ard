@@ -5,9 +5,6 @@
   - evaluates to a list that can be assigned to a variable
     - can't be used in place of other expressions
   - broken loops: still a list up to the break point
-- [ ] replace angle brackets for generics. with parens or brackets?
-- [ ] change for loop syntax to something like odin
-  - `for [1,2,3] i { ... }`
 - [ ] `Maybe.or_lazy()` to run a function to generate the fallback
 - [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
 - [ ] loops as expressions (comprehensions?)
