@@ -136,6 +136,12 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
+	case "to_dyn":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Dynamic,
+		}
 	case "trim":
 		return &FunctionDef{
 			Name:       name,
@@ -157,7 +163,7 @@ func (s *str) equal(other Type) bool {
 }
 
 func (s *str) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString"
+	return trait.name() == "ToString" || trait.name() == "Encodable"
 }
 
 var Str = &str{}
@@ -172,6 +178,12 @@ func (i _int) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
+		}
+	case "to_dyn":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -198,7 +210,7 @@ func (i *_int) equal(other Type) bool {
 }
 
 func (i *_int) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString"
+	return trait.name() == "ToString" || trait.name() == "Encodable"
 }
 
 var Int = &_int{}
@@ -213,6 +225,12 @@ func (f float) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
+		}
+	case "to_dyn":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Dynamic,
 		}
 	case "to_int":
 		return &FunctionDef{
@@ -241,7 +259,7 @@ func (f *float) equal(other Type) bool {
 }
 
 func (f *float) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString"
+	return trait.name() == "ToString" || trait.name() == "Encodable"
 }
 
 var Float = &float{}
@@ -256,6 +274,12 @@ func (b _bool) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
+		}
+	case "to_dyn":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -278,7 +302,7 @@ func (b *_bool) equal(other Type) bool {
 }
 
 func (b *_bool) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString"
+	return trait.name() == "ToString" || trait.name() == "Encodable"
 }
 
 var Bool = &_bool{}
@@ -546,7 +570,7 @@ func (m *Maybe) Of() Type {
 type TypeVar struct {
 	name   string
 	actual Type
-	bound  bool 
+	bound  bool
 }
 
 func (a TypeVar) String() string {

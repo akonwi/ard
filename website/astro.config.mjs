@@ -63,6 +63,7 @@ export default defineConfig({
             { label: "ard/decode", slug: "stdlib/decode" },
             { label: "ard/duration", slug: "stdlib/duration" },
             { label: "ard/dynamic", slug: "stdlib/dynamic" },
+            { label: "ard/encode", slug: "stdlib/encode" },
             { label: "ard/env", slug: "stdlib/env" },
             { label: "ard/float", slug: "stdlib/float" },
             { label: "ard/fs", slug: "stdlib/fs" },

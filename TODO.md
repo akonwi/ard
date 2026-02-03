@@ -1,6 +1,4 @@
 # TODO
-- [ ] (idea): change `json::encode()` to only accept Dynamic  
-  - it would make it easier on interpreter, to not have to use reflection to do the encoding
 - [ ] for loops as expressions
   - evaluates to a list that can be assigned to a variable
     - can't be used in place of other expressions

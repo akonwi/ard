@@ -79,6 +79,43 @@ func TestJsonEncodePrimitives(t *testing.T) {
 	})
 }
 
+func TestEncodeJsonPrimitives(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "encoding Str",
+			input: `
+				use ard/encode
+				encode::json("hello")
+			`,
+			want: `"hello"`,
+		},
+		{
+			name: "encoding Int",
+			input: `
+				use ard/encode
+				encode::json(200)
+			`,
+			want: `200`,
+		},
+		{
+			name: "encoding Float",
+			input: `
+				use ard/encode
+				encode::json(98.6)
+			`,
+			want: `98.6`,
+		},
+		{
+			name: "encoding Bool",
+			input: `
+				use ard/encode
+				encode::json(true)
+			`,
+			want: `true`,
+		},
+	})
+}
+
 func TestJsonEncodeList(t *testing.T) {
 	result := run(t, `
 		use ard/json
