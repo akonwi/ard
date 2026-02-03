@@ -55,6 +55,10 @@ The bytecode backend reads pre-computed fields directly from checker nodes inste
 
 See `backlog/bytecode-roadmap/README.md` for the concrete backend roadmap and bytecode VM plan.
 
+## Roadmap
+
+See `backlog/bytecode-roadmap/README.md` for the concrete backend roadmap and bytecode VM plan.
+
 ## Concrete Changes Required
 
 ### Case 1: MapLiteral

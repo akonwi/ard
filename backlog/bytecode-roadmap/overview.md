@@ -19,8 +19,11 @@ Deliverables:
 Exit criteria:
 - VM can execute entirely from lowered nodes without reading checker.Type.
 
+<<<<<<< HEAD
 Status: complete for bytecode path with conformance tests across samples. Interpreter VM is legacy and not fully decoupled.
 
+=======
+>>>>>>> e226d11 (:memo: backlog for bytecode)
 ## Phase 2: Bytecode Emitter
 
 Deliverables:
@@ -35,12 +38,15 @@ Deliverables:
 Exit criteria:
 - A representative subset of stdlib samples compiles to bytecode and runs in a new bytecode VM.
 
+<<<<<<< HEAD
 Status: emitter and VM cover literals, ops, control flow, lists/maps, structs/enums, matches, try, FFI, methods, closures, copy semantics, async fibers, and module calls. Bytecode verifier is implemented; representative samples (including io and concurrent stress) are exercised in bytecode tests.
 
 ## Parallel Track: Go Backend (Runtime-Light)
 
 See `backlog/bytecode-roadmap/go-backend.md` for the Go backend plan that preserves Ard semantics with a minimal runtime support layer.
 
+=======
+>>>>>>> e226d11 (:memo: backlog for bytecode)
 ## Phase 3: Bytecode VM
 
 Deliverables:
@@ -51,10 +57,13 @@ Deliverables:
 Exit criteria:
 - End-to-end compile + run from bytecode for multiple samples and tests.
 
+<<<<<<< HEAD
 Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode. `ard run` now defaults to bytecode with `--legacy` for interpreter.
 
 Performance notes: bytecode VM is ~33% faster with ~24% lower memory and ~28% fewer allocations on the fib(20) benchmark (M3 Pro, Feb 2026).
 
+=======
+>>>>>>> e226d11 (:memo: backlog for bytecode)
 ## Phase 4: Binary Packaging
 
 Deliverables:
@@ -63,5 +72,8 @@ Deliverables:
 
 Exit criteria:
 - A binary can run without source files or the interpreter frontend.
+<<<<<<< HEAD
 
 Status: complete. `ard build FILE` emits a self-contained executable (bytecode embedded in the compiler binary) and supports `--out` for custom output paths.
+=======
+>>>>>>> e226d11 (:memo: backlog for bytecode)
