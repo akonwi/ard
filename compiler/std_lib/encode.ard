@@ -1,0 +1,8 @@
+// encoding utilities
+
+// Trait for types that can be encoded
+trait Encodable {
+  fn to_dyn() Dynamic
+}
+
+extern fn json(value: Encodable) Str!Str = "JsonEncode"

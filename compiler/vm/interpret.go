@@ -902,6 +902,8 @@ func (vm *VM) evalStrMethodNode(scope *scope, subj *runtime.Object, e *checker.S
 		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
 	case checker.StrToStr:
 		return subj
+	case checker.StrToDyn:
+		return runtime.MakeDynamic(raw)
 	case checker.StrTrim:
 		return runtime.MakeStr(strings.Trim(raw, " "))
 	default:
@@ -913,6 +915,8 @@ func (vm *VM) evalIntMethodNode(subj *runtime.Object, e *checker.IntMethod) *run
 	switch e.Kind {
 	case checker.IntToStr:
 		return runtime.MakeStr(strconv.Itoa(subj.AsInt()))
+	case checker.IntToDyn:
+		return runtime.MakeDynamic(subj.AsInt())
 	default:
 		panic(fmt.Errorf("Unknown IntMethodKind: %d", e.Kind))
 	}
@@ -926,6 +930,8 @@ func (vm *VM) evalFloatMethodNode(subj *runtime.Object, e *checker.FloatMethod) 
 		floatVal := subj.AsFloat()
 		intVal := int(floatVal)
 		return runtime.MakeInt(intVal)
+	case checker.FloatToDyn:
+		return runtime.MakeDynamic(subj.AsFloat())
 	default:
 		panic(fmt.Errorf("Unknown FloatMethodKind: %d", e.Kind))
 	}
@@ -935,6 +941,8 @@ func (vm *VM) evalBoolMethodNode(subj *runtime.Object, e *checker.BoolMethod) *r
 	switch e.Kind {
 	case checker.BoolToStr:
 		return runtime.MakeStr(strconv.FormatBool(subj.AsBool()))
+	case checker.BoolToDyn:
+		return runtime.MakeDynamic(subj.AsBool())
 	default:
 		panic(fmt.Errorf("Unknown BoolMethodKind: %d", e.Kind))
 	}
@@ -1114,6 +1122,8 @@ func (vm *VM) evalStrMethod(scope *scope, subj *runtime.Object, m *checker.Funct
 		return runtime.MakeBool(strings.HasPrefix(raw, prefix))
 	case "to_str":
 		return subj
+	case "to_dyn":
+		return runtime.MakeDynamic(raw)
 	case "trim":
 		return runtime.MakeStr(strings.Trim(raw, " "))
 	default:
@@ -1125,6 +1135,8 @@ func (vm *VM) evalIntMethod(subj *runtime.Object, m *checker.InstanceMethod) *ru
 	switch m.Method.Name {
 	case "to_str":
 		return runtime.MakeStr(strconv.Itoa(subj.AsInt()))
+	case "to_dyn":
+		return runtime.MakeDynamic(subj.AsInt())
 	default:
 		return runtime.Void()
 	}
@@ -1138,6 +1150,8 @@ func (vm *VM) evalFloatMethod(subj *runtime.Object, m *checker.FunctionCall) *ru
 		floatVal := subj.AsFloat()
 		intVal := int(floatVal) // Truncates toward zero
 		return runtime.MakeInt(intVal)
+	case "to_dyn":
+		return runtime.MakeDynamic(subj.AsFloat())
 	default:
 		return runtime.Void()
 	}
@@ -1147,6 +1161,8 @@ func (vm *VM) evalBoolMethod(subj *runtime.Object, m *checker.InstanceMethod) *r
 	switch m.Method.Name {
 	case "to_str":
 		return runtime.MakeStr(strconv.FormatBool(subj.AsBool()))
+	case "to_dyn":
+		return runtime.MakeDynamic(subj.AsBool())
 	default:
 		return runtime.Void()
 	}

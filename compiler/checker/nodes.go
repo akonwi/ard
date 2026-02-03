@@ -212,6 +212,7 @@ const (
 	StrSplit
 	StrStartsWith
 	StrToStr
+	StrToDyn
 	StrTrim
 )
 
@@ -237,6 +238,8 @@ func (s *StrMethod) Type() Type {
 		return Bool
 	case StrToStr:
 		return Str
+	case StrToDyn:
+		return Dynamic
 	case StrTrim:
 		return Str
 	default:
@@ -248,6 +251,7 @@ type IntMethodKind uint8
 
 const (
 	IntToStr IntMethodKind = iota
+	IntToDyn
 )
 
 type IntMethod struct {
@@ -259,6 +263,8 @@ func (m *IntMethod) Type() Type {
 	switch m.Kind {
 	case IntToStr:
 		return Str
+	case IntToDyn:
+		return Dynamic
 	default:
 		return Void
 	}
@@ -269,6 +275,7 @@ type FloatMethodKind uint8
 const (
 	FloatToStr FloatMethodKind = iota
 	FloatToInt
+	FloatToDyn
 )
 
 type FloatMethod struct {
@@ -282,6 +289,8 @@ func (m *FloatMethod) Type() Type {
 		return Str
 	case FloatToInt:
 		return Int
+	case FloatToDyn:
+		return Dynamic
 	default:
 		return Void
 	}
@@ -291,6 +300,7 @@ type BoolMethodKind uint8
 
 const (
 	BoolToStr BoolMethodKind = iota
+	BoolToDyn
 )
 
 type BoolMethod struct {
@@ -302,6 +312,8 @@ func (m *BoolMethod) Type() Type {
 	switch m.Kind {
 	case BoolToStr:
 		return Str
+	case BoolToDyn:
+		return Dynamic
 	default:
 		return Void
 	}

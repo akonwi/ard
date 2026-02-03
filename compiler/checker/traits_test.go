@@ -123,6 +123,20 @@ func TestTraitsAsTypes(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of ToString, got Foo"},
 			},
 		},
+		{
+			name: "encode::Encodable only accepts primitives",
+			input: `
+			use ard/encode
+
+			encode::json(1)
+			encode::json("ok")
+			encode::json(false)
+			encode::json([1, 2, 3])
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Encodable, got [Int]"},
+			},
+		},
 		// {
 		// 	name: "functions with Trait return",
 		// 	input: `
