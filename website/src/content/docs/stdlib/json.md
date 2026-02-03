@@ -5,6 +5,10 @@ description: Convert Ard values to JSON strings using the ard/json module.
 
 The `ard/json` module provides functions for encoding Ard values into JSON format.
 
+:::note
+For new code that only needs primitives, prefer `ard/encode`. Use `ard/json` when you need to encode structs, lists, maps, or `Dynamic` values.
+:::
+
 The json module provides:
 - **Generic encoding** to convert any type to JSON
 - **Automatic handling** of structs, lists, maps, and nullable types

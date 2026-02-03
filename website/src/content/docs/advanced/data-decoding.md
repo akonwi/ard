@@ -11,6 +11,8 @@ The `ard/decode` module provides a flexible, type-safe way to decode external da
 
 Unlike `ard/json` which requires defining structs upfront, the decode library lets you work with arbitrary JSON structures and extract only the data you need.
 
+When you need to serialize primitive values back to JSON, use `ard/encode`. For complex values, `ard/json` remains the encoding path.
+
 ```ard
 use ard/decode
 
