@@ -1,15 +1,6 @@
 # TODO
-- [ ] for loops as expressions
-  - evaluates to a list that can be assigned to a variable
-    - can't be used in place of other expressions
-  - broken loops: still a list up to the break point
 - [ ] `Maybe.or_lazy()` to run a function to generate the fallback
 - [ ] FFI functions should be able to use idiomatic Go and compiler handles mappings
-- [ ] loops as expressions (comprehensions?)
-  - inspiration from zig
-  - the result of the iteration is a new list
-  - kind of needs support for `break` with a value, so that value is the lone result (i.e. find)
-  - `let doubled: [Int] = for i in 1..10 { i * 2 }`
 - [ ] compile time constant variables
   - should readonly variables with a literal value be considered constants?
     pro: simpler than adding a new `const` keyword and just works
