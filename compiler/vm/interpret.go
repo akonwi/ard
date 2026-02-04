@@ -686,11 +686,11 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					} else {
 						// No catch block: propagate none by early returning
 						scp.stop()
-						return runtime.MakeNone(e.Type())
+						return runtime.MakeNone(e.OkType)
 					}
 				}
 				// Some case: unwrap and continue execution
-				return runtime.Make(subj.Raw(), e.Type())
+				return runtime.Make(subj.Raw(), e.OkType)
 
 			default:
 				panic(fmt.Errorf("Unknown try kind: %d", e.Kind))
@@ -725,7 +725,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			}()
 			f.callMain(e.GetMainName(), fscope)
 		})
-		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
+		return runtime.MakeStruct(e.FiberType, map[string]*runtime.Object{
 			"wg": runtime.MakeDynamic(wg),
 		})
 	case *checker.FiberEval:
@@ -767,7 +767,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			*resultContainer = *result
 		})
 
-		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
+		return runtime.MakeStruct(e.FiberType, map[string]*runtime.Object{
 			"wg":     runtime.MakeDynamic(wg),
 			"result": resultContainer,
 		})

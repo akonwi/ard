@@ -3674,6 +3674,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return &TryOp{
 						expr:       expr,
 						ok:         _type.val, // Returns unwrapped value for continued execution
+						OkType:     _type.val,
 						CatchBlock: block,
 						CatchVar:   s.CatchVar.Name,
 						Kind:       TryResult,
@@ -3685,9 +3686,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("try without catch clause requires function to return a Result type", s.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr: expr,
-							ok:   _type.val,
-							Kind: TryResult,
+							expr:   expr,
+							ok:     _type.val,
+							OkType: _type.val,
+							Kind:   TryResult,
 						}
 					}
 
@@ -3696,18 +3698,20 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String()), s.Expression.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr: expr,
-							ok:   _type.val,
-							Kind: TryResult,
+							expr:   expr,
+							ok:     _type.val,
+							OkType: _type.val,
+							Kind:   TryResult,
 						}
 					}
 
 					// Success: returns the unwrapped value
 					// Error: early returns the error wrapped in the function's Result type
 					return &TryOp{
-						expr: expr,
-						ok:   _type.val,
-						Kind: TryResult,
+						expr:   expr,
+						ok:     _type.val,
+						OkType: _type.val,
+						Kind:   TryResult,
 					}
 				}
 			case *Maybe:
@@ -3761,6 +3765,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return &TryOp{
 						expr:       expr,
 						ok:         _type.of, // Returns unwrapped value for continued execution
+						OkType:     _type.of,
 						CatchBlock: block,
 						CatchVar:   "", // No variable binding for Maybe catch
 						Kind:       TryMaybe,
@@ -3772,9 +3777,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("try without catch clause on Maybe requires function to return a Maybe type", s.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr: expr,
-							ok:   _type.of,
-							Kind: TryMaybe,
+							expr:   expr,
+							ok:     _type.of,
+							OkType: _type.of,
+							Kind:   TryMaybe,
 						}
 					}
 
@@ -3786,18 +3792,20 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					// Success: returns the unwrapped value
 					// None: early returns none wrapped in the function's Maybe type
 					return &TryOp{
-						expr: expr,
-						ok:   _type.of,
-						Kind: TryMaybe,
+						expr:   expr,
+						ok:     _type.of,
+						OkType: _type.of,
+						Kind:   TryMaybe,
 					}
 				}
 			default:
 				c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
 				// Return a try op with the expr type to avoid cascading errors
 				return &TryOp{
-					expr: expr,
-					ok:   expr.Type(),
-					Kind: TryResult, // Default to Result, though this is an error path
+					expr:   expr,
+					ok:     expr.Type(),
+					OkType: expr.Type(),
+					Kind:   TryResult, // Default to Result, though this is an error path
 				}
 			}
 		}

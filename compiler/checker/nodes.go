@@ -1352,6 +1352,7 @@ const (
 type TryOp struct {
 	expr       Expression
 	ok         Type
+	OkType     Type
 	CatchBlock *Block
 	CatchVar   string
 	Kind       TryKind // Pre-computed by checker: TryResult or TryMaybe
