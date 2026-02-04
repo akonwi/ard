@@ -532,12 +532,14 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.UnionMatch:
 		{
 			subject := vm.eval(scp, e.Subject)
-
-			// Get the concrete type name as a string
-			typeName := subject.Type().String()
-
-			// If we have a case for this specific type
-			if arm, ok := e.TypeCases[typeName]; ok {
+			if len(e.TypeCasesByType) > 0 {
+				if arm, ok := e.TypeCasesByType[subject.Type()]; ok {
+					res, _ := vm.evalBlock(scp, arm.Body, func(sc *scope) {
+						sc.add(arm.Pattern.Name, subject)
+					})
+					return res
+				}
+			} else if arm, ok := e.TypeCases[subject.Type().String()]; ok {
 				res, _ := vm.evalBlock(scp, arm.Body, func(sc *scope) {
 					sc.add(arm.Pattern.Name, subject)
 				})
@@ -552,7 +554,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 
 			// This should never happen if the type checker is working correctly
 			// because it ensures the match is exhaustive
-			panic(fmt.Errorf("No matching case for union type %s", typeName))
+			panic(fmt.Errorf("No matching case for union type %s", subject.Type().String()))
 		}
 	case *checker.StructInstance:
 		{

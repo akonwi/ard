@@ -28,6 +28,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
+	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType"),
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},
 		checker.BoolMethod{},

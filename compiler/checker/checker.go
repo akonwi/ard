@@ -3165,6 +3165,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		if unionType, ok := subject.Type().(*Union); ok {
 			// Track which union types we've seen and their corresponding bodies
 			typeCases := make(map[string]*Match)
+			typeCasesByType := make(map[Type]*Match)
 			var catchAllBody *Block
 
 			// Record all types in the union
@@ -3209,10 +3210,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						body := c.checkBlock(matchCase.Body, func() {
 							c.scope.add(varName, matchedType, false)
 						})
-						typeCases[typeName] = &Match{
+						matchNode := &Match{
 							Pattern: &Identifier{Name: varName},
 							Body:    body,
 						}
+						typeCases[typeName] = matchNode
+						typeCasesByType[matchedType] = matchNode
 					}
 				}
 			}
@@ -3252,9 +3255,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Create and return the UnionMatch
 			return &UnionMatch{
-				Subject:   subject,
-				TypeCases: typeCases,
-				CatchAll:  catchAllBody,
+				Subject:         subject,
+				TypeCases:       typeCases,
+				TypeCasesByType: typeCasesByType,
+				CatchAll:        catchAllBody,
 			}
 		}
 

@@ -682,9 +682,10 @@ func (i *IntMatch) Type() Type {
 }
 
 type UnionMatch struct {
-	Subject   Expression
-	TypeCases map[string]*Match
-	CatchAll  *Block
+	Subject         Expression
+	TypeCases       map[string]*Match
+	TypeCasesByType map[Type]*Match // Pre-computed type lookup
+	CatchAll        *Block
 }
 
 func (u *UnionMatch) Type() Type {
