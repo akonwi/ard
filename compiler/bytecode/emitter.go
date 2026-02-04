@@ -8,11 +8,15 @@ import (
 )
 
 type Emitter struct {
-	program   Program
-	typeIndex map[string]TypeID
-	funcIndex map[string]int
-	funcTypes map[string]checker.Type
-	anonCount int
+	program      Program
+	typeIndex    map[string]TypeID
+	funcIndex    map[string]int
+	funcTypes    map[string]checker.Type
+	anonCount    int
+	modulePrefix string
+	moduleFuncs  map[string]struct{}
+	visitedMods  map[string]struct{}
+	modules      map[string]checker.Module
 }
 
 type funcEmitter struct {
@@ -37,9 +41,10 @@ func NewEmitter() *Emitter {
 			Types:     []TypeEntry{},
 			Functions: []Function{},
 		},
-		typeIndex: map[string]TypeID{},
-		funcIndex: map[string]int{},
-		funcTypes: map[string]checker.Type{},
+		typeIndex:   map[string]TypeID{},
+		funcIndex:   map[string]int{},
+		funcTypes:   map[string]checker.Type{},
+		visitedMods: map[string]struct{}{},
 	}
 }
 
@@ -48,6 +53,7 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 	if prog == nil {
 		return e.program, nil
 	}
+	e.modules = prog.Imports
 
 	fn := &funcEmitter{
 		emitter: e,
@@ -63,6 +69,11 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 					return Program{}, err
 				}
 			}
+			if def, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok {
+				if _, err := e.emitExternWrapper(def.Name, def); err != nil {
+					return Program{}, err
+				}
+			}
 		}
 		switch def := stmt.Stmt.(type) {
 		case *checker.StructDef:
@@ -75,6 +86,13 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 			}
 		default:
 			_ = def
+		}
+	}
+	if prog.Imports != nil {
+		for _, mod := range prog.Imports {
+			if err := e.emitModule(mod); err != nil {
+				return Program{}, err
+			}
 		}
 	}
 	if err := fn.emitStatements(prog.Statements); err != nil {
@@ -129,10 +147,23 @@ func (e *Emitter) emitFunctionWithParent(def *checker.FunctionDef, parent *funcE
 		fnName = fmt.Sprintf("@anon%d", e.anonCount)
 		e.anonCount++
 	}
+	if e.modulePrefix != "" {
+		if _, ok := e.moduleFuncs[def.Name]; ok {
+			fnName = fmt.Sprintf("%s::%s", e.modulePrefix, def.Name)
+		}
+	}
+	index := -1
 	if def.Name != "" {
-		if idx, ok := e.funcIndex[def.Name]; ok {
+		if idx, ok := e.funcIndex[fnName]; ok {
 			return idx, nil, nil
 		}
+		index = len(e.program.Functions)
+		e.funcIndex[fnName] = index
+		e.funcTypes[fnName] = def
+		e.program.Functions = append(e.program.Functions, Function{
+			Name:  fnName,
+			Arity: len(def.Parameters),
+		})
 	}
 
 	fnEmitter := &funcEmitter{
@@ -152,10 +183,8 @@ func (e *Emitter) emitFunctionWithParent(def *checker.FunctionDef, parent *funcE
 	}
 	fnEmitter.ensureReturn()
 
-	index := len(e.program.Functions)
-	if def.Name != "" {
-		e.funcIndex[def.Name] = index
-		e.funcTypes[def.Name] = def
+	if index == -1 {
+		index = len(e.program.Functions)
 	}
 	fn := Function{
 		Name:     fnName,
@@ -165,7 +194,11 @@ func (e *Emitter) emitFunctionWithParent(def *checker.FunctionDef, parent *funcE
 		MaxStack: fnEmitter.maxStack,
 		Code:     fnEmitter.code,
 	}
-	e.program.Functions = append(e.program.Functions, fn)
+	if index < len(e.program.Functions) {
+		e.program.Functions[index] = fn
+	} else {
+		e.program.Functions = append(e.program.Functions, fn)
+	}
 	return index, append([]string{}, fnEmitter.captures...), nil
 }
 
@@ -205,6 +238,146 @@ func (e *Emitter) emitEnumMethods(def *checker.Enum) error {
 		}
 	}
 	return nil
+}
+
+func (e *Emitter) emitModule(mod checker.Module) error {
+	if mod == nil {
+		return nil
+	}
+	path := mod.Path()
+	if path == "" {
+		return nil
+	}
+	if _, ok := e.visitedMods[path]; ok {
+		return nil
+	}
+	e.visitedMods[path] = struct{}{}
+	prog := mod.Program()
+	if prog == nil {
+		return nil
+	}
+	if prog.Imports != nil {
+		for _, dep := range prog.Imports {
+			if err := e.emitModule(dep); err != nil {
+				return err
+			}
+		}
+	}
+	moduleFuncs := e.collectModuleFuncs(prog)
+	prevPrefix := e.modulePrefix
+	prevFuncs := e.moduleFuncs
+	e.modulePrefix = path
+	e.moduleFuncs = moduleFuncs
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		if stmt.Expr != nil {
+			if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+				if err := e.emitFunction(def); err != nil {
+					e.modulePrefix = prevPrefix
+					e.moduleFuncs = prevFuncs
+					return err
+				}
+			}
+			if def, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok {
+				name := e.qualifyName(def.Name)
+				if _, err := e.emitExternWrapper(name, def); err != nil {
+					e.modulePrefix = prevPrefix
+					e.moduleFuncs = prevFuncs
+					return err
+				}
+			}
+		}
+		switch def := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if err := e.emitStructMethods(def); err != nil {
+				e.modulePrefix = prevPrefix
+				e.moduleFuncs = prevFuncs
+				return err
+			}
+		case *checker.Enum:
+			if err := e.emitEnumMethods(def); err != nil {
+				e.modulePrefix = prevPrefix
+				e.moduleFuncs = prevFuncs
+				return err
+			}
+		default:
+			_ = def
+		}
+	}
+	e.modulePrefix = prevPrefix
+	e.moduleFuncs = prevFuncs
+	return nil
+}
+
+func (e *Emitter) collectModuleFuncs(prog *checker.Program) map[string]struct{} {
+	funcs := map[string]struct{}{}
+	if prog == nil {
+		return funcs
+	}
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		if stmt.Expr != nil {
+			if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+				if def.Name != "" {
+					funcs[def.Name] = struct{}{}
+				}
+			}
+			if def, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok {
+				if def.Name != "" {
+					funcs[def.Name] = struct{}{}
+				}
+			}
+		}
+	}
+	return funcs
+}
+
+func (e *Emitter) qualifyName(name string) string {
+	if e.modulePrefix != "" {
+		if _, ok := e.moduleFuncs[name]; ok {
+			return fmt.Sprintf("%s::%s", e.modulePrefix, name)
+		}
+	}
+	return name
+}
+
+func (e *Emitter) nextAnonName(prefix string) string {
+	name := fmt.Sprintf("@%s%d", prefix, e.anonCount)
+	e.anonCount++
+	return name
+}
+
+func (e *Emitter) emitExternWrapper(name string, def *checker.ExternalFunctionDef) (int, error) {
+	if idx, ok := e.funcIndex[name]; ok {
+		return idx, nil
+	}
+	fnEmitter := &funcEmitter{
+		emitter: e,
+		code:    []Instruction{},
+		locals:  map[string]int{},
+	}
+	for _, param := range def.Parameters {
+		fnEmitter.defineLocal(param.Name)
+	}
+	for i := range def.Parameters {
+		fnEmitter.emit(Instruction{Op: OpLoadLocal, A: i})
+	}
+	bindingIdx := e.addConst(Constant{Kind: ConstStr, Str: def.ExternalBinding})
+	retID := e.addType(def.ReturnType)
+	fnEmitter.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: len(def.Parameters), C: int(retID)})
+	fnEmitter.adjustStack(len(def.Parameters), 1)
+	fnEmitter.ensureReturn()
+	index := len(e.program.Functions)
+	e.funcIndex[name] = index
+	e.funcTypes[name] = def
+	e.program.Functions = append(e.program.Functions, Function{
+		Name:     name,
+		Arity:    len(def.Parameters),
+		Locals:   fnEmitter.localTop,
+		MaxStack: fnEmitter.maxStack,
+		Code:     fnEmitter.code,
+	})
+	return index, nil
 }
 
 func (f *funcEmitter) emitStatements(stmts []checker.Statement) error {
@@ -282,18 +455,21 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		f.emit(Instruction{Op: OpStoreLocal, A: index})
 		return nil
 	case *checker.Reassignment:
-		if err := f.emitExpr(s.Value); err != nil {
-			return err
-		}
 		switch target := s.Target.(type) {
 		case *checker.InstanceProperty:
 			if err := f.emitExpr(target.Subject); err != nil {
+				return err
+			}
+			if err := f.emitExpr(s.Value); err != nil {
 				return err
 			}
 			nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: target.Property})
 			f.emit(Instruction{Op: OpSetField, A: nameIdx})
 			f.adjustStack(2, 0)
 		default:
+			if err := f.emitExpr(s.Value); err != nil {
+				return err
+			}
 			index, err := f.resolveTargetLocal(s.Target)
 			if err != nil {
 				return err
@@ -346,6 +522,12 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 			}
 			f.emit(Instruction{Op: OpAdd})
 		}
+		return nil
+	case *checker.CopyExpression:
+		if err := f.emitExpr(e.Expr); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpCopy})
 		return nil
 	case *checker.BoolLiteral:
 		imm := 0
@@ -507,6 +689,18 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitUnionMatch(e)
 	case *checker.TryOp:
 		return f.emitTryOp(e)
+	case *checker.Panic:
+		if err := f.emitExpr(e.Message); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpPanic})
+		return nil
+	case *checker.ModuleSymbol:
+		return f.emitModuleSymbol(e)
+	case *checker.FiberExecution:
+		return f.emitFiberExecution(e)
+	case *checker.FiberEval:
+		return f.emitFiberEval(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -950,7 +1144,8 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 		f.adjustStack(argc+1, 1)
 		return nil
 	}
-	idx, ok := f.emitter.funcIndex[call.Name]
+	qualified := f.emitter.qualifyName(call.Name)
+	idx, ok := f.emitter.funcIndex[qualified]
 	if !ok {
 		return fmt.Errorf("unknown function: %s", call.Name)
 	}
@@ -964,6 +1159,45 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 }
 
 func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) error {
+	argc := len(call.Call.Args)
+	if call.Call.ExternalBinding != "" {
+		for i := range call.Call.Args {
+			if err := f.emitExpr(call.Call.Args[i]); err != nil {
+				return err
+			}
+		}
+		bindingIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.Call.ExternalBinding})
+		retID := f.emitter.addType(call.Call.ReturnType)
+		f.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: argc, C: int(retID)})
+		f.adjustStack(argc, 1)
+		return nil
+	}
+	qualified := fmt.Sprintf("%s::%s", call.Module, call.Call.Name)
+	if idx, ok := f.emitter.funcIndex[qualified]; ok {
+		for i := range call.Call.Args {
+			if err := f.emitExpr(call.Call.Args[i]); err != nil {
+				return err
+			}
+		}
+		f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+		return nil
+	}
+	if f.emitter.modules != nil {
+		if mod, ok := f.emitter.modules[call.Module]; ok {
+			if err := f.emitter.emitModule(mod); err != nil {
+				return err
+			}
+			if idx, ok := f.emitter.funcIndex[qualified]; ok {
+				for i := range call.Call.Args {
+					if err := f.emitExpr(call.Call.Args[i]); err != nil {
+						return err
+					}
+				}
+				f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+				return nil
+			}
+		}
+	}
 	for i := range call.Call.Args {
 		if err := f.emitExpr(call.Call.Args[i]); err != nil {
 			return err
@@ -972,7 +1206,6 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 	modIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.Module})
 	fnIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.Call.Name})
 	retID := f.emitter.addType(call.Call.ReturnType)
-	argc := len(call.Call.Args)
 	f.emit(Instruction{Op: OpCallModule, A: modIdx, B: fnIdx, Imm: argc, C: int(retID)})
 	f.adjustStack(argc, 1)
 	return nil
@@ -1519,6 +1752,76 @@ func (f *funcEmitter) emitTryOp(op *checker.TryOp) error {
 	} else {
 		f.code[catchJump].A = -1
 	}
+	return nil
+}
+
+func (f *funcEmitter) emitModuleSymbol(sym *checker.ModuleSymbol) error {
+	name := fmt.Sprintf("%s::%s", sym.Module, sym.Symbol.Name)
+	switch def := sym.Symbol.Type.(type) {
+	case *checker.FunctionDef:
+		idx, ok := f.emitter.funcIndex[name]
+		if !ok {
+			return fmt.Errorf("unknown module function: %s", name)
+		}
+		typeID := f.emitter.addType(def)
+		f.emit(Instruction{Op: OpMakeClosure, A: idx, B: 0, C: int(typeID)})
+		f.adjustStack(0, 1)
+		return nil
+	case *checker.ExternalFunctionDef:
+		idx, err := f.emitter.emitExternWrapper(name, def)
+		if err != nil {
+			return err
+		}
+		typeID := f.emitter.addType(def)
+		f.emit(Instruction{Op: OpMakeClosure, A: idx, B: 0, C: int(typeID)})
+		f.adjustStack(0, 1)
+		return nil
+	default:
+		return fmt.Errorf("unsupported module symbol type: %T", sym.Symbol.Type)
+	}
+}
+
+func (f *funcEmitter) emitFiberExecution(exec *checker.FiberExecution) error {
+	mod := exec.GetModule()
+	if mod == nil {
+		return fmt.Errorf("missing fiber module")
+	}
+	prog := mod.Program()
+	if prog == nil {
+		return fmt.Errorf("missing fiber program")
+	}
+	var target *checker.FunctionDef
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+			if def.Name == exec.GetMainName() {
+				target = def
+				break
+			}
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("fiber function not found: %s", exec.GetMainName())
+	}
+	copy := *target
+	copy.Name = f.emitter.nextAnonName("fiber")
+	fnIndex, _, err := f.emitter.emitFunctionWithParent(&copy, nil)
+	if err != nil {
+		return err
+	}
+	fnTypeID := f.emitter.addType(copy.Type())
+	f.emit(Instruction{Op: OpMakeClosure, A: fnIndex, B: 0, C: int(fnTypeID)})
+	fiberTypeID := f.emitter.addType(exec.FiberType)
+	f.emit(Instruction{Op: OpAsyncStart, C: int(fiberTypeID)})
+	return nil
+}
+
+func (f *funcEmitter) emitFiberEval(eval *checker.FiberEval) error {
+	if err := f.emitExpr(eval.GetFn()); err != nil {
+		return err
+	}
+	fiberTypeID := f.emitter.addType(eval.FiberType)
+	f.emit(Instruction{Op: OpAsyncEval, C: int(fiberTypeID)})
 	return nil
 }
 

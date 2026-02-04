@@ -81,9 +81,6 @@ func (vm *VM) enumTypeFor(id bytecode.TypeID) (*checker.Enum, error) {
 
 func parseTypeName(name string) (checker.Type, error) {
 	trimmed := strings.TrimSpace(name)
-	if strings.Contains(trimmed, "$") {
-		return checker.Dynamic, nil
-	}
 	switch trimmed {
 	case checker.Int.String():
 		return checker.Int, nil
@@ -138,6 +135,9 @@ func parseTypeName(name string) (checker.Type, error) {
 			return nil, err
 		}
 		return checker.MakeMap(keyType, valType), nil
+	}
+	if strings.HasPrefix(trimmed, "$") {
+		return checker.Dynamic, nil
 	}
 
 	return &checker.StructDef{Name: trimmed, Fields: map[string]checker.Type{}, Methods: map[string]*checker.FunctionDef{}}, nil

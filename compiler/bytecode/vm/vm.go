@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
@@ -29,6 +30,9 @@ type VM struct {
 	modules   *ModuleRegistry
 	funcIndex map[string]int
 	ffi       *corevm.RuntimeFFIRegistry
+	lastOp    bytecode.Opcode
+	lastIP    int
+	lastFn    string
 }
 
 func New(program bytecode.Program) *VM {
@@ -56,6 +60,10 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 		MaxStack: fn.MaxStack,
 	}
 	vm.Frames = append(vm.Frames, frame)
+	return vm.run()
+}
+
+func (vm *VM) run() (*runtime.Object, error) {
 
 	for len(vm.Frames) > 0 {
 		curr := vm.Frames[len(vm.Frames)-1]
@@ -64,6 +72,9 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 		}
 		inst := curr.Fn.Code[curr.IP]
 		curr.IP++
+		vm.lastOp = inst.Op
+		vm.lastIP = curr.IP - 1
+		vm.lastFn = curr.Fn.Name
 
 		switch inst.Op {
 		case bytecode.OpNoop:
@@ -138,6 +149,18 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 			}
 			vm.push(curr, b)
 			vm.push(curr, a)
+		case bytecode.OpCopy:
+			val, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, val.Copy())
+		case bytecode.OpPanic:
+			msgObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("panic: %s", msgObj.AsString())
 		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv, bytecode.OpMod:
 			b, err := vm.pop(curr)
 			if err != nil {
@@ -215,6 +238,15 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				curr.IP = inst.A
 			}
 		case bytecode.OpReturn:
+			if len(curr.Stack) == 0 {
+				val := runtime.Void()
+				vm.Frames = vm.Frames[:len(vm.Frames)-1]
+				if len(vm.Frames) == 0 {
+					return val, nil
+				}
+				vm.push(vm.Frames[len(vm.Frames)-1], val)
+				continue
+			}
 			val, err := vm.pop(curr)
 			if err != nil {
 				return nil, err
@@ -231,9 +263,6 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 			}
 			fnDef := vm.Program.Functions[fnIndex]
 			argc := inst.B
-			if argc != fnDef.Arity {
-				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
-			}
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
 				arg, err := vm.pop(curr)
@@ -242,15 +271,9 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				}
 				args[i] = arg
 			}
-			frame := &Frame{
-				Fn:       fnDef,
-				IP:       0,
-				Locals:   make([]*runtime.Object, fnDef.Locals),
-				Stack:    []*runtime.Object{},
-				MaxStack: fnDef.MaxStack,
-			}
-			for i := range args {
-				frame.Locals[i] = args[i]
+			frame, err := vm.newFrame(fnDef, args, nil)
+			if err != nil {
+				return nil, err
 			}
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpMakeClosure:
@@ -298,29 +321,73 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, fmt.Errorf("function index out of range")
 			}
 			fnDef := vm.Program.Functions[closure.FnIndex]
-			if argc != fnDef.Arity {
-				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
-			}
-			if len(closure.Captures) != len(fnDef.Captures) {
-				return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(closure.Captures))
-			}
-			frame := &Frame{
-				Fn:       fnDef,
-				IP:       0,
-				Locals:   make([]*runtime.Object, fnDef.Locals),
-				Stack:    []*runtime.Object{},
-				MaxStack: fnDef.MaxStack,
-			}
-			for i, localIdx := range fnDef.Captures {
-				if localIdx < 0 || localIdx >= len(frame.Locals) {
-					return nil, fmt.Errorf("capture local index out of range")
-				}
-				frame.Locals[localIdx] = closure.Captures[i]
-			}
-			for i := range args {
-				frame.Locals[i] = args[i]
+			frame, err := vm.newFrame(fnDef, args, closure.Captures)
+			if err != nil {
+				return nil, err
 			}
 			vm.Frames = append(vm.Frames, frame)
+		case bytecode.OpAsyncStart:
+			closureObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			closure, ok := closureObj.Raw().(*Closure)
+			if !ok {
+				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
+			}
+			fiberType, err := vm.structTypeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println(fmt.Errorf("panic in fiber: %v", r))
+					}
+				}()
+				child := vm.spawn()
+				_, _ = child.runClosure(closure, nil)
+			}()
+			fields := map[string]*runtime.Object{
+				"wg": runtime.MakeDynamic(wg),
+			}
+			vm.push(curr, runtime.MakeStruct(fiberType, fields))
+		case bytecode.OpAsyncEval:
+			closureObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			closure, ok := closureObj.Raw().(*Closure)
+			if !ok {
+				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
+			}
+			fiberType, err := vm.structTypeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
+			resultContainer := &runtime.Object{}
+			go func() {
+				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println(fmt.Errorf("panic in eval fiber: %v", r))
+					}
+				}()
+				child := vm.spawn()
+				if res, err := child.runClosure(closure, nil); err == nil && res != nil {
+					*resultContainer = *res
+				}
+			}()
+			fields := map[string]*runtime.Object{
+				"wg":     runtime.MakeDynamic(wg),
+				"result": resultContainer,
+			}
+			vm.push(curr, runtime.MakeStruct(fiberType, fields))
 		case bytecode.OpMakeList:
 			typeID := bytecode.TypeID(inst.A)
 			listType, err := vm.typeFor(typeID)
@@ -787,7 +854,12 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 			fnName := fmt.Sprintf("%s.%s", subj.TypeName(), methodConst.Str)
 			fnIndex, ok := vm.funcIndex[fnName]
 			if !ok {
-				return nil, fmt.Errorf("unknown method: %s", fnName)
+				res, err := vm.evalTraitMethodByName(subj, methodConst.Str, args)
+				if err != nil {
+					return nil, fmt.Errorf("unknown method: %s", fnName)
+				}
+				vm.push(curr, res)
+				continue
 			}
 			fnDef := vm.Program.Functions[fnIndex]
 			if fnDef.Arity != argc+1 {
@@ -863,8 +935,7 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
-			bytecode.OpMatchMaybe, bytecode.OpMatchResult,
-			bytecode.OpAsyncStart, bytecode.OpAsyncEval:
+			bytecode.OpMatchMaybe, bytecode.OpMatchResult:
 			return nil, fmt.Errorf("opcode not implemented: %s", inst.Op)
 		default:
 			return nil, fmt.Errorf("unknown opcode: %d", inst.Op)
@@ -883,13 +954,62 @@ func (vm *VM) lookupFunction(name string) (bytecode.Function, bool) {
 	return bytecode.Function{}, false
 }
 
+func (vm *VM) spawn() *VM {
+	child := New(vm.Program)
+	child.modules = vm.modules
+	child.funcIndex = vm.funcIndex
+	return child
+}
+
+func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures []*runtime.Object) (*Frame, error) {
+	if len(args) != fnDef.Arity {
+		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
+	}
+	if captures == nil {
+		captures = []*runtime.Object{}
+	}
+	if len(captures) != len(fnDef.Captures) {
+		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(captures))
+	}
+	frame := &Frame{
+		Fn:       fnDef,
+		IP:       0,
+		Locals:   make([]*runtime.Object, fnDef.Locals),
+		Stack:    []*runtime.Object{},
+		MaxStack: fnDef.MaxStack,
+	}
+	for i, localIdx := range fnDef.Captures {
+		if localIdx < 0 || localIdx >= len(frame.Locals) {
+			return nil, fmt.Errorf("capture local index out of range")
+		}
+		frame.Locals[localIdx] = captures[i]
+	}
+	for i := range args {
+		frame.Locals[i] = args[i]
+	}
+	return frame, nil
+}
+
+func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Object, error) {
+	if closure.FnIndex < 0 || closure.FnIndex >= len(vm.Program.Functions) {
+		return nil, fmt.Errorf("function index out of range")
+	}
+	fnDef := vm.Program.Functions[closure.FnIndex]
+	frame, err := vm.newFrame(fnDef, args, closure.Captures)
+	if err != nil {
+		return nil, err
+	}
+	vm.Frames = append(vm.Frames, frame)
+	return vm.run()
+}
+
 func (vm *VM) push(frame *Frame, obj *runtime.Object) {
 	frame.Stack = append(frame.Stack, obj)
 }
 
 func (vm *VM) pop(frame *Frame) (*runtime.Object, error) {
 	if len(frame.Stack) == 0 {
-		return nil, fmt.Errorf("stack underflow")
+		return nil, fmt.Errorf("stack underflow at %s ip=%d fn=%s", vm.lastOp, vm.lastIP, vm.lastFn)
 	}
 	idx := len(frame.Stack) - 1
 	val := frame.Stack[idx]

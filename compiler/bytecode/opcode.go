@@ -15,6 +15,7 @@ const (
 	OpPop
 	OpDup
 	OpSwap
+	OpCopy
 	OpAdd
 	OpSub
 	OpMul
@@ -77,5 +78,6 @@ const (
 	OpTryMaybe
 	OpAsyncStart
 	OpAsyncEval
+	OpPanic
 	OpReturn
 )

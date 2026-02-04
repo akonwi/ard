@@ -2797,6 +2797,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
+			if extFn, ok := sym.Type.(*ExternalFunctionDef); ok {
+				call.ExternalBinding = extFn.ExternalBinding
+			}
 
 			// Special validation for async::start calls
 			if mod.Path() == "ard/async" && s.Function.Name == "start" {

@@ -31,6 +31,8 @@ func (o Opcode) String() string {
 		return "DUP"
 	case OpSwap:
 		return "SWAP"
+	case OpCopy:
+		return "COPY"
 	case OpAdd:
 		return "ADD"
 	case OpSub:
@@ -155,6 +157,8 @@ func (o Opcode) String() string {
 		return "ASYNC_START"
 	case OpAsyncEval:
 		return "ASYNC_EVAL"
+	case OpPanic:
+		return "PANIC"
 	case OpReturn:
 		return "RETURN"
 	default:
@@ -178,6 +182,8 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 2}
 	case OpSwap:
 		return StackEffect{Pop: 2, Push: 2}
+	case OpCopy:
+		return StackEffect{Pop: 1, Push: 1}
 	case OpAdd, OpSub, OpMul, OpDiv, OpMod, OpAnd, OpOr, OpEq, OpNeq, OpLt, OpLte, OpGt, OpGte:
 		return StackEffect{Pop: 2, Push: 1}
 	case OpNeg, OpNot:
@@ -222,6 +228,10 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 0, Push: 1}
 	case OpTryResult, OpTryMaybe:
 		return StackEffect{Pop: 1, Push: 1}
+	case OpAsyncStart, OpAsyncEval:
+		return StackEffect{Pop: 1, Push: 1}
+	case OpPanic:
+		return StackEffect{Pop: 1, Push: 0}
 	default:
 		return StackEffect{}
 	}

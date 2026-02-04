@@ -7,6 +7,8 @@ Goal: generate portable binaries by compiling Ard programs to bytecode and embed
 - Complete AST lowering so backends do not inspect checker.Type.
 - Stabilize runtime.Object, Result, Maybe, Dynamic APIs used by all backends.
 
+Status: mostly complete for current bytecode path (runtime Kind tags + lowered metadata). Remaining gaps include trait dispatch and async lowering for bytecode.
+
 ## Phase 1: Lowered IR Stabilization
 
 Deliverables:
@@ -16,6 +18,8 @@ Deliverables:
 
 Exit criteria:
 - VM can execute entirely from lowered nodes without reading checker.Type.
+
+Status: complete for supported features. Remaining items are tied to missing bytecode features (async, trait dispatch, extern module calls).
 
 ## Phase 2: Bytecode Emitter
 
@@ -31,6 +35,8 @@ Deliverables:
 Exit criteria:
 - A representative subset of stdlib samples compiles to bytecode and runs in a new bytecode VM.
 
+Status: emitter and VM cover literals, ops, control flow, lists/maps, structs/enums, matches, try, FFI, methods, closures, copy semantics, async fibers, and module calls. Bytecode verifier is implemented; representative samples are exercised in bytecode tests (excluding io-only samples).
+
 ## Parallel Track: Go Backend (Runtime-Light)
 
 See `backlog/bytecode-roadmap/go-backend.md` for the Go backend plan that preserves Ard semantics with a minimal runtime support layer.
@@ -44,6 +50,8 @@ Deliverables:
 
 Exit criteria:
 - End-to-end compile + run from bytecode for multiple samples and tests.
+
+Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode.
 
 ## Phase 4: Binary Packaging
 

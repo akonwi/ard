@@ -160,6 +160,43 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 	}
 }
 
+func (vm *VM) evalTraitMethodByName(subj *runtime.Object, name string, args []*runtime.Object) (*runtime.Object, error) {
+	if len(args) != 0 {
+		return nil, fmt.Errorf("trait method %s expects no args", name)
+	}
+	switch subj.Kind() {
+	case runtime.KindStr:
+		switch name {
+		case "to_str":
+			return vm.evalStrMethod(checker.StrToStr, subj, nil)
+		case "to_dyn":
+			return vm.evalStrMethod(checker.StrToDyn, subj, nil)
+		}
+	case runtime.KindInt:
+		switch name {
+		case "to_str":
+			return vm.evalIntMethod(checker.IntToStr, subj)
+		case "to_dyn":
+			return vm.evalIntMethod(checker.IntToDyn, subj)
+		}
+	case runtime.KindFloat:
+		switch name {
+		case "to_str":
+			return vm.evalFloatMethod(checker.FloatToStr, subj)
+		case "to_dyn":
+			return vm.evalFloatMethod(checker.FloatToDyn, subj)
+		}
+	case runtime.KindBool:
+		switch name {
+		case "to_str":
+			return vm.evalBoolMethod(checker.BoolToStr, subj)
+		case "to_dyn":
+			return vm.evalBoolMethod(checker.BoolToDyn, subj)
+		}
+	}
+	return nil, fmt.Errorf("unsupported trait method: %s", name)
+}
+
 func (vm *VM) makeValueWithType(raw any, typeID bytecode.TypeID) (*runtime.Object, error) {
 	if typeID == 0 {
 		return runtime.MakeDynamic(raw), nil

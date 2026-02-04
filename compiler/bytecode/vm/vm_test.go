@@ -3,15 +3,26 @@ package vm
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/runtime"
 )
 
 func runBytecode(t *testing.T, input string) any {
+	t.Helper()
+	res := runBytecodeRaw(t, input)
+	if res == nil {
+		return nil
+	}
+	return res.GoValue()
+}
+
+func runBytecodeRaw(t *testing.T, input string) *runtime.Object {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
@@ -37,16 +48,16 @@ func runBytecode(t *testing.T, input string) any {
 	if err != nil {
 		t.Fatalf("Emit error: %v", err)
 	}
+	if err := bytecode.VerifyProgram(program); err != nil {
+		t.Fatalf("Verify error: %v", err)
+	}
 
 	vm := New(program)
 	res, err := vm.Run("main")
 	if err != nil {
 		t.Fatalf("VM error: %v", err)
 	}
-	if res == nil {
-		return nil
-	}
-	return res.GoValue()
+	return res
 }
 
 func TestBytecodeEmptyProgram(t *testing.T) {
@@ -687,5 +698,105 @@ func TestBytecodeEnumMatch(t *testing.T) {
 	}, "\n"))
 	if res != 1 {
 		t.Fatalf("Expected 1, got %v", res)
+	}
+}
+
+func TestBytecodeCopySemantics(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`struct Person { name: Str, age: Int }`,
+		`let alice = Person { name: "Alice", age: 30 }`,
+		`mut bob = alice`,
+		`bob.age = 31`,
+		`"{alice.age} -- {bob.age}"`,
+	}, "\n"))
+	if res != "30 -- 31" {
+		t.Fatalf("Expected 30 -- 31, got %v", res)
+	}
+
+	res = runBytecode(t, strings.Join([]string{
+		`struct Person { name: Str, age: Int }`,
+		`mut alice = Person { name: "Alice", age: 30 }`,
+		`alice.age = 28`,
+		`mut bob = alice`,
+		`bob.age =+ 1`,
+		`"{alice.age} - {bob.age}"`,
+	}, "\n"))
+	if res != "28 - 29" {
+		t.Fatalf("Expected 28 - 29, got %v", res)
+	}
+}
+
+func TestBytecodeModuleFunctions(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/duration`,
+		`duration::from_millis(2)`,
+	}, "\n"))
+	if res != 2000000 {
+		t.Fatalf("Expected 2000000, got %v", res)
+	}
+
+	res = runBytecode(t, strings.Join([]string{
+		`use ard/http`,
+		`let res = http::Response::new(200, "ok")`,
+		`res.status`,
+	}, "\n"))
+	if res != 200 {
+		t.Fatalf("Expected 200, got %v", res)
+	}
+}
+
+func TestBytecodeIoPrint(t *testing.T) {
+	runBytecodeRaw(t, strings.Join([]string{
+		`use ard/io`,
+		`io::print("hello")`,
+	}, "\n"))
+}
+
+func TestBytecodeAsyncEval(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/async`,
+		`fn add_2(x: Int) Int { x + 2 }`,
+		`let fiber = async::eval(fn() { add_2(5) })`,
+		`fiber.get()`,
+	}, "\n"))
+	if res != 7 {
+		t.Fatalf("Expected 7, got %v", res)
+	}
+}
+
+func TestBytecodeDynamicDecode(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/decode`,
+		`let foo = [1,2,3]`,
+		`let data = Dynamic::list(from: foo, of: Dynamic::from_int)`,
+		`let list = decode::run(data, decode::list(decode::int)).expect("Couldn't decode data")`,
+		`list.size()`,
+	}, "\n"))
+	if res != 3 {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+}
+
+func TestBytecodeSamples(t *testing.T) {
+	samples := []string{
+		"variables.ard",
+		"loops.ard",
+		"maths.ard",
+		"maps.ard",
+		"nullables.ard",
+		"fizzbuzz.ard",
+		"fibonacci.ard",
+		"collections.ard",
+	}
+	for _, name := range samples {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "samples", name)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Failed to read %s: %v", path, err)
+			}
+			runBytecodeRaw(t, string(data))
+		})
 	}
 }
