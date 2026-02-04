@@ -782,8 +782,16 @@ func (f *funcEmitter) emitIfExpr(expr *checker.If) error {
 	elseLabel := len(f.code)
 	f.patchJump(elseJump, elseLabel)
 	if expr.ElseIf != nil {
-		if err := f.emitIfExpr(expr.ElseIf); err != nil {
-			return err
+		if expr.ElseIf.Else == nil && expr.Else != nil {
+			elseIf := *expr.ElseIf
+			elseIf.Else = expr.Else
+			if err := f.emitIfExpr(&elseIf); err != nil {
+				return err
+			}
+		} else {
+			if err := f.emitIfExpr(expr.ElseIf); err != nil {
+				return err
+			}
 		}
 	} else if expr.Else != nil {
 		if err := f.emitBlockExpr(expr.Else); err != nil {

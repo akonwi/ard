@@ -1,18 +1,28 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/bytecode"
+	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 	"github.com/akonwi/ard/vm"
 )
 
+const bytecodeFooterMarker = "ARDBYTECODEv1"
+
 func main() {
+	if maybeRunEmbedded() {
+		return
+	}
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide a command")
 		os.Exit(1)
@@ -39,51 +49,52 @@ func main() {
 		}
 	case "run":
 		{
+			vmMode, inputPath, err := parseRunArgs(os.Args[2:])
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			module, err := loadModule(inputPath)
+			if err != nil {
+				os.Exit(1)
+			}
+			switch vmMode {
+			case "interp":
+				g := vm.NewRuntime(module)
+				if err := g.Run("main"); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+			default:
+				program, err := bytecode.NewEmitter().EmitProgram(module)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if err := bytecode.VerifyProgram(program); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if _, err := bytecodevm.New(program).Run("main"); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+			}
+		}
+	case "build":
+		{
 			if len(os.Args) < 3 {
 				fmt.Println("Expected filepath argument")
 				os.Exit(1)
 			}
 
 			inputPath := os.Args[2]
-			sourceCode, err := os.ReadFile(inputPath)
+			outputPath, err := buildBytecodeBinary(inputPath)
 			if err != nil {
-				fmt.Printf("Error reading file %s - %v\n", inputPath, err)
-				os.Exit(1)
-			}
-
-			result := parse.Parse(sourceCode, inputPath)
-			if len(result.Errors) > 0 {
-				result.PrintErrors()
-				os.Exit(1)
-			}
-			program := result.Program
-
-			workingDir := filepath.Dir(inputPath)
-			moduleResolver, err := checker.NewModuleResolver(workingDir)
-			if err != nil {
-				log.Fatalf("Error initializing module resolver: %v\n", err)
-			}
-
-			// Get relative path for diagnostics
-			relPath, err := filepath.Rel(workingDir, inputPath)
-			if err != nil {
-				relPath = inputPath // fallback to absolute path
-			}
-
-			c := checker.New(relPath, program, moduleResolver)
-			c.Check()
-			if c.HasErrors() {
-				for _, diagnostic := range c.Diagnostics() {
-					fmt.Println(diagnostic)
-				}
-				os.Exit(1)
-			}
-
-			g := vm.NewRuntime(c.Module())
-			if err := g.Run("main"); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
+			fmt.Printf("Built %s\n", outputPath)
 		}
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
@@ -92,16 +103,21 @@ func main() {
 }
 
 func check(inputPath string) bool {
+	_, err := loadModule(inputPath)
+	return err == nil
+}
+
+func loadModule(inputPath string) (checker.Module, error) {
 	sourceCode, err := os.ReadFile(inputPath)
 	if err != nil {
 		fmt.Printf("Error reading file %s - %v\n", inputPath, err)
-		return false
+		return nil, err
 	}
 
 	result := parse.Parse(sourceCode, inputPath)
 	if len(result.Errors) > 0 {
 		result.PrintErrors()
-		return false
+		return nil, fmt.Errorf("parse errors")
 	}
 	program := result.Program
 
@@ -123,8 +139,174 @@ func check(inputPath string) bool {
 		for _, diagnostic := range c.Diagnostics() {
 			fmt.Println(diagnostic)
 		}
-		return false
+		return nil, fmt.Errorf("type errors")
 	}
 
+	return c.Module(), nil
+}
+
+func parseRunArgs(args []string) (string, string, error) {
+	vmMode := "bytecode"
+	inputPath := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--vm=") {
+			vmMode = strings.TrimPrefix(arg, "--vm=")
+			continue
+		}
+		if arg == "--vm" {
+			if i+1 >= len(args) {
+				return "", "", fmt.Errorf("--vm requires a value")
+			}
+			vmMode = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			return "", "", fmt.Errorf("unknown flag: %s", arg)
+		}
+		if inputPath == "" {
+			inputPath = arg
+			continue
+		}
+	}
+	if inputPath == "" {
+		return "", "", fmt.Errorf("expected filepath argument")
+	}
+	if vmMode != "bytecode" && vmMode != "interp" {
+		return "", "", fmt.Errorf("unknown vm mode: %s", vmMode)
+	}
+	return vmMode, inputPath, nil
+}
+
+func buildBytecodeBinary(inputPath string) (string, error) {
+	module, err := loadModule(inputPath)
+	if err != nil {
+		return "", err
+	}
+	program, err := bytecode.NewEmitter().EmitProgram(module)
+	if err != nil {
+		return "", err
+	}
+	if err := bytecode.VerifyProgram(program); err != nil {
+		return "", err
+	}
+	data, err := bytecode.SerializeProgram(program)
+	if err != nil {
+		return "", err
+	}
+	selfPath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	outputPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+	if err := writeEmbeddedBinary(selfPath, outputPath, data); err != nil {
+		return "", err
+	}
+	return outputPath, nil
+}
+
+func maybeRunEmbedded() bool {
+	if len(os.Args) > 1 && os.Args[1] != "run-embedded" {
+		return false
+	}
+	data, err := readEmbeddedBytecode()
+	if err != nil || data == nil {
+		return false
+	}
+	program, err := bytecode.DeserializeProgram(data)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to deserialize bytecode:", err)
+		os.Exit(1)
+	}
+	if err := bytecode.VerifyProgram(program); err != nil {
+		fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
+		os.Exit(1)
+	}
+	if _, err := bytecodevm.New(program).Run("main"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	return true
+}
+
+func writeEmbeddedBinary(srcPath string, dstPath string, data []byte) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+	if _, err := dst.Write(data); err != nil {
+		return err
+	}
+	if err := writeFooter(dst, uint64(len(data))); err != nil {
+		return err
+	}
+	return dst.Chmod(0o755)
+}
+
+func writeFooter(w io.Writer, length uint64) error {
+	if _, err := w.Write([]byte(bytecodeFooterMarker)); err != nil {
+		return err
+	}
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, length)
+	_, err := w.Write(buf)
+	return err
+}
+
+func readEmbeddedBytecode() ([]byte, error) {
+	path, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	footerSize := int64(len(bytecodeFooterMarker) + 8)
+	if info.Size() < footerSize {
+		return nil, nil
+	}
+	_, err = file.Seek(info.Size()-footerSize, io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+	footer := make([]byte, footerSize)
+	if _, err := io.ReadFull(file, footer); err != nil {
+		return nil, err
+	}
+	marker := string(footer[:len(bytecodeFooterMarker)])
+	if marker != bytecodeFooterMarker {
+		return nil, nil
+	}
+	length := binary.LittleEndian.Uint64(footer[len(bytecodeFooterMarker):])
+	dataOffset := info.Size() - footerSize - int64(length)
+	if dataOffset < 0 {
+		return nil, fmt.Errorf("invalid embedded bytecode length")
+	}
+	if _, err := file.Seek(dataOffset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data := make([]byte, length)
+	if _, err := io.ReadFull(file, data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }

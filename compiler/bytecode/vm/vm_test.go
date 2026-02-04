@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -750,6 +751,63 @@ func TestBytecodeIoPrint(t *testing.T) {
 		`use ard/io`,
 		`io::print("hello")`,
 	}, "\n"))
+}
+
+func TestBytecodeIoPrintInt(t *testing.T) {
+	output, err := captureStdout(func() error {
+		runBytecodeRaw(t, strings.Join([]string{
+			`use ard/io`,
+			`io::print(1)`,
+		}, "\n"))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("capture error: %v", err)
+	}
+	if output != "1\n" {
+		t.Fatalf("Expected 1, got %q", output)
+	}
+}
+
+func TestBytecodeTraitToStringOnInt(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`fn print_any(v: Str::ToString) Str {`,
+		`  v.to_str()`,
+		`}`,
+		`print_any(3)`,
+	}, "\n"))
+	if res != "3" {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+}
+
+func captureStdout(fn func() error) (string, error) {
+	old := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stdout = writer
+	readCh := make(chan string, 1)
+	readErrCh := make(chan error, 1)
+	go func() {
+		data, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		if readErr != nil {
+			readErrCh <- readErr
+			return
+		}
+		readCh <- string(data)
+	}()
+	runErr := fn()
+	_ = writer.Close()
+	os.Stdout = old
+	select {
+	case readErr := <-readErrCh:
+		return "", readErr
+	case output := <-readCh:
+		return output, runErr
+	}
 }
 
 func TestBytecodeAsyncEval(t *testing.T) {

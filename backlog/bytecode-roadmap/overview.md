@@ -35,7 +35,7 @@ Deliverables:
 Exit criteria:
 - A representative subset of stdlib samples compiles to bytecode and runs in a new bytecode VM.
 
-Status: emitter and VM cover literals, ops, control flow, lists/maps, structs/enums, matches, try, FFI, methods, closures, copy semantics, async fibers, and module calls. Bytecode verifier is implemented; representative samples are exercised in bytecode tests (excluding io-only samples).
+Status: emitter and VM cover literals, ops, control flow, lists/maps, structs/enums, matches, try, FFI, methods, closures, copy semantics, async fibers, and module calls. Bytecode verifier is implemented; representative samples (including io and concurrent stress) are exercised in bytecode tests.
 
 ## Parallel Track: Go Backend (Runtime-Light)
 
@@ -52,6 +52,8 @@ Exit criteria:
 - End-to-end compile + run from bytecode for multiple samples and tests.
 
 Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode.
+
+Performance notes: bytecode VM is ~33% faster with ~24% lower memory and ~28% fewer allocations on the fib(20) benchmark (M3 Pro, Feb 2026).
 
 ## Phase 4: Binary Packaging
 
