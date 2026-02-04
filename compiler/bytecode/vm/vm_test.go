@@ -90,6 +90,10 @@ func TestBytecodeEquality(t *testing.T) {
 	if res != true {
 		t.Fatalf("Expected true, got %v", res)
 	}
+	res = runBytecode(t, `"a" == "a"`)
+	if res != true {
+		t.Fatalf("Expected true, got %v", res)
+	}
 }
 
 func TestBytecodeIfExpression(t *testing.T) {
@@ -130,5 +134,16 @@ func TestBytecodeIfInFunction(t *testing.T) {
 	}, "\n"))
 	if res != 10 {
 		t.Fatalf("Expected 10, got %v", res)
+	}
+}
+
+func TestBytecodeFloatComparisons(t *testing.T) {
+	res := runBytecode(t, `3.5 > 2.1`)
+	if res != true {
+		t.Fatalf("Expected true, got %v", res)
+	}
+	res = runBytecode(t, `3.5 <= 2.1`)
+	if res != false {
+		t.Fatalf("Expected false, got %v", res)
 	}
 }
