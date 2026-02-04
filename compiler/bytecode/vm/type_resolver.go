@@ -103,7 +103,7 @@ func parseTypeName(name string) (checker.Type, error) {
 		}
 		return checker.MakeMaybe(of), nil
 	}
-	if strings.HasPrefix(trimmed, "fn ") {
+	if strings.HasPrefix(trimmed, "fn ") || strings.HasPrefix(trimmed, "fn(") {
 		open := strings.Index(trimmed, "(")
 		close := strings.LastIndex(trimmed, ")")
 		if open == -1 || close == -1 || close < open {
@@ -169,15 +169,20 @@ func parseTypeName(name string) (checker.Type, error) {
 }
 
 func splitTopLevel(s string, sep rune) (string, string) {
-	depth := 0
+	brackets := 0
+	parens := 0
 	for i, r := range s {
 		switch r {
 		case '[':
-			depth++
+			brackets++
 		case ']':
-			depth--
+			brackets--
+		case '(':
+			parens++
+		case ')':
+			parens--
 		default:
-			if r == sep && depth == 0 {
+			if r == sep && brackets == 0 && parens == 0 {
 				return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:])
 			}
 		}
@@ -187,16 +192,21 @@ func splitTopLevel(s string, sep rune) (string, string) {
 
 func splitTopLevelList(s string) []string {
 	parts := []string{}
-	depth := 0
+	brackets := 0
+	parens := 0
 	start := 0
 	for i, r := range s {
 		switch r {
 		case '[':
-			depth++
+			brackets++
 		case ']':
-			depth--
+			brackets--
+		case '(':
+			parens++
+		case ')':
+			parens--
 		case ',':
-			if depth == 0 {
+			if brackets == 0 && parens == 0 {
 				parts = append(parts, strings.TrimSpace(s[start:i]))
 				start = i + 1
 			}
