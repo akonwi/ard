@@ -284,6 +284,11 @@ func (vm *VM) evalBinary(op bytecode.Opcode, left, right *runtime.Object) (*runt
 			return runtime.MakeFloat(a / b), nil
 		}
 	}
+	if left.Kind() == runtime.KindStr && right.Kind() == runtime.KindStr {
+		if op == bytecode.OpAdd {
+			return runtime.MakeStr(left.AsString() + right.AsString()), nil
+		}
+	}
 
 	return nil, fmt.Errorf("unsupported binary op %s for %s and %s", op, left.Kind(), right.Kind())
 }
@@ -305,6 +310,16 @@ func (vm *VM) evalUnary(op bytecode.Opcode, val *runtime.Object) (*runtime.Objec
 }
 
 func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*runtime.Object, error) {
+	if op == bytecode.OpEq || op == bytecode.OpNeq {
+		if left.Kind() == right.Kind() {
+			eq := left.Equals(*right)
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		return runtime.MakeBool(false), nil
+	}
 	if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindInt {
 		a := left.AsInt()
 		b := right.AsInt()
@@ -341,26 +356,5 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 			return runtime.MakeBool(a >= b), nil
 		}
 	}
-	if left.Kind() == runtime.KindBool && right.Kind() == runtime.KindBool {
-		a := left.AsBool()
-		b := right.AsBool()
-		switch op {
-		case bytecode.OpEq:
-			return runtime.MakeBool(a == b), nil
-		case bytecode.OpNeq:
-			return runtime.MakeBool(a != b), nil
-		}
-	}
-	if left.Kind() == runtime.KindStr && right.Kind() == runtime.KindStr {
-		a := left.AsString()
-		b := right.AsString()
-		switch op {
-		case bytecode.OpEq:
-			return runtime.MakeBool(a == b), nil
-		case bytecode.OpNeq:
-			return runtime.MakeBool(a != b), nil
-		}
-	}
-
 	return nil, fmt.Errorf("unsupported comparison %s for %s and %s", op, left.Kind(), right.Kind())
 }

@@ -130,8 +130,10 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 2, Push: 1}
 	case OpNeg, OpNot:
 		return StackEffect{Pop: 1, Push: 1}
-	case OpJump, OpJumpIfFalse, OpJumpIfTrue:
+	case OpJump:
 		return StackEffect{Pop: 0, Push: 0}
+	case OpJumpIfFalse, OpJumpIfTrue:
+		return StackEffect{Pop: 1, Push: 0}
 	case OpReturn:
 		return StackEffect{Pop: 1, Push: 0}
 	default:
