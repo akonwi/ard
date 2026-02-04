@@ -1291,7 +1291,7 @@ func (vm *VM) evalMaybeMethod(scope *scope, subj *runtime.Object, m *checker.Ins
 			panic(_msg)
 		}
 		// Return the unwrapped value for some
-		return runtime.Make(subj.Raw(), m.Type())
+		return runtime.Make(subj.Raw(), m.Method.ReturnType)
 	case "is_none":
 		return runtime.MakeBool(subj.Raw() == nil)
 	case "is_some":
@@ -1300,7 +1300,7 @@ func (vm *VM) evalMaybeMethod(scope *scope, subj *runtime.Object, m *checker.Ins
 		if subj.Raw() == nil {
 			return vm.eval(scope, m.Method.Args[0])
 		}
-		return runtime.Make(subj.Raw(), m.Type())
+		return runtime.Make(subj.Raw(), m.Method.ReturnType)
 	default:
 		panic(fmt.Errorf("Unimplemented: %s.%s()", subj.Kind(), m.Method.Name))
 	}

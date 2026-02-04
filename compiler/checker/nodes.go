@@ -431,19 +431,21 @@ const (
 )
 
 type MaybeMethod struct {
-	Subject   Expression
-	Kind      MaybeMethodKind
-	Args      []Expression
-	InnerType Type         // Pre-computed inner type
-	fn        *FunctionDef // Function definition for return type resolution
+	Subject    Expression
+	Kind       MaybeMethodKind
+	Args       []Expression
+	InnerType  Type         // Pre-computed inner type
+	fn         *FunctionDef // Function definition for return type resolution
+	ReturnType Type         // Pre-computed by checker
 }
 
 func (m *MaybeMethod) Type() Type {
-	// Use function return type if available (handles generics properly)
+	if m.ReturnType != nil {
+		return m.ReturnType
+	}
 	if m.fn != nil {
 		return m.fn.ReturnType
 	}
-	// Fallback to computed type (for backwards compatibility)
 	switch m.Kind {
 	case MaybeExpect, MaybeOr:
 		return m.InnerType
@@ -1048,21 +1050,23 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name string
-	Args []Expression
-	fn   *FunctionDef
+	Name       string
+	Args       []Expression
+	fn         *FunctionDef
+	ReturnType Type // Pre-computed by checker
 }
 
 func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
 	return &FunctionCall{
-		Name: name,
-		Args: args,
-		fn:   &fn,
+		Name:       name,
+		Args:       args,
+		fn:         &fn,
+		ReturnType: fn.ReturnType,
 	}
 }
 
 func (f *FunctionCall) Type() Type {
-	return f.fn.ReturnType
+	return f.ReturnType
 }
 
 type ModuleStructInstance struct {

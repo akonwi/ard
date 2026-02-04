@@ -25,13 +25,21 @@ func (m *MaybeModule) get(name string) *runtime.Object {
 func (m *MaybeModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
 	switch call.Name {
 	case "none":
-		o := runtime.MakeNone(nil)
-		o.SetRefinedType(call.Type())
+		maybeType, ok := call.ReturnType.(*checker.Maybe)
+		if !ok {
+			panic(fmt.Errorf("maybe::none expected Maybe return type, got %s", call.ReturnType))
+		}
+		o := runtime.MakeNone(maybeType.Of())
+		o.SetRefinedType(call.ReturnType)
 		return o
 	case "some":
 		arg := args[0]
-		o := runtime.MakeNone(arg.Type()).ToSome(arg.Raw())
-		o.SetRefinedType(call.Type())
+		maybeType, ok := call.ReturnType.(*checker.Maybe)
+		if !ok {
+			panic(fmt.Errorf("maybe::some expected Maybe return type, got %s", call.ReturnType))
+		}
+		o := runtime.MakeNone(maybeType.Of()).ToSome(arg.Raw())
+		o.SetRefinedType(call.ReturnType)
 		return o
 	default:
 		panic(fmt.Errorf("Unimplemented: maybe::%s()", call.Name))

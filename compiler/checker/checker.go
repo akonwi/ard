@@ -1723,9 +1723,10 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	return &InstanceMethod{
 		Subject: subject,
 		Method: &FunctionCall{
-			Name: methodName,
-			Args: args,
-			fn:   fnDef,
+			Name:       methodName,
+			Args:       args,
+			fn:         fnDef,
+			ReturnType: fnDef.ReturnType,
 		},
 		ReceiverKind: receiverKind,
 		StructType:   structType,
@@ -1893,11 +1894,12 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
 	return &MaybeMethod{
-		Subject:   subject,
-		Kind:      kind,
-		Args:      args,
-		InnerType: maybeType.Of(),
-		fn:        fnDef,
+		Subject:    subject,
+		Kind:       kind,
+		Args:       args,
+		InnerType:  maybeType.Of(),
+		fn:         fnDef,
+		ReturnType: fnDef.ReturnType,
 	}
 }
 
@@ -2133,9 +2135,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Create and return the function call node
 			return &FunctionCall{
-				Name: s.Name,
-				Args: args,
-				fn:   fnToUse,
+				Name:       s.Name,
+				Args:       args,
+				fn:         fnToUse,
+				ReturnType: fnToUse.ReturnType,
 			}
 		}
 	case *parse.InstanceProperty:
@@ -2684,9 +2687,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 
 				call := &FunctionCall{
-					Name: absolutePath,
-					Args: args,
-					fn:   fnDef,
+					Name:       absolutePath,
+					Args:       args,
+					fn:         fnDef,
+					ReturnType: fnDef.ReturnType,
 				}
 
 				// Use new generic resolution system
@@ -2698,6 +2702,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 
 					call.fn = specialized
+					call.ReturnType = specialized.ReturnType
 				}
 
 				return call
@@ -2783,9 +2788,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Create function call
 			call := &FunctionCall{
-				Name: fnDef.Name,
-				Args: args,
-				fn:   fnToUse,
+				Name:       fnDef.Name,
+				Args:       args,
+				fn:         fnToUse,
+				ReturnType: fnToUse.ReturnType,
 			}
 
 			// Special validation for async::start calls
@@ -4030,9 +4036,10 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
 				Call: &FunctionCall{
-					Name: fnDef.name(),
-					Args: []Expression{arg},
-					fn:   fnDef,
+					Name:       fnDef.name(),
+					Args:       []Expression{arg},
+					fn:         fnDef,
+					ReturnType: fnDef.ReturnType,
 				},
 			}
 		}
@@ -4327,6 +4334,7 @@ func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
 				ReturnType: paramType, // The return type is the Maybe type we're filling in
 				Body:       nil,       // No body for synthesized calls
 			},
+			ReturnType: paramType,
 		},
 	}
 }
@@ -4352,6 +4360,7 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 				ReturnType: maybeType,
 				Body:       nil, // No body for synthesized calls
 			},
+			ReturnType: maybeType,
 		},
 	}
 }

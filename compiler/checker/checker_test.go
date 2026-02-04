@@ -26,6 +26,8 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.FiberEval{}, "FiberType"),
 	cmpopts.IgnoreFields(checker.FiberExecution{}, "FiberType"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
+	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
+	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
 	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType"),
