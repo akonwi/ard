@@ -21,10 +21,15 @@ type VM struct {
 	Frames    []*Frame
 	typeCache map[bytecode.TypeID]checker.Type
 	modules   *ModuleRegistry
+	funcIndex map[string]int
 }
 
 func New(program bytecode.Program) *VM {
-	return &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry()}
+	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}}
+	for i := range program.Functions {
+		vm.funcIndex[program.Functions[i].Name] = i
+	}
+	return vm
 }
 
 func (vm *VM) Run(functionName string) (*runtime.Object, error) {
@@ -451,6 +456,12 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, runtime.MakeInt(len(mapObj.AsMap())))
+		case bytecode.OpMakeNone:
+			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, runtime.MakeNone(resolved))
 		case bytecode.OpStrMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
@@ -615,6 +626,107 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, obj)
+		case bytecode.OpMakeStruct:
+			structType, err := vm.structTypeFor(bytecode.TypeID(inst.A))
+			if err != nil {
+				return nil, err
+			}
+			count := inst.B
+			fields := map[string]*runtime.Object{}
+			for i := 0; i < count; i++ {
+				val, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				keyObj, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				key := keyObj.AsString()
+				fields[key] = val
+			}
+			vm.push(curr, runtime.MakeStruct(structType, fields))
+		case bytecode.OpMakeEnum:
+			discObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			enumType, err := vm.enumTypeFor(bytecode.TypeID(inst.A))
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, runtime.Make(discObj.AsInt(), enumType))
+		case bytecode.OpGetField:
+			obj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			nameConst, err := vm.constAt(inst.A)
+			if err != nil {
+				return nil, err
+			}
+			val := obj.Struct_Get(nameConst.Str)
+			if val == nil {
+				return nil, fmt.Errorf("missing struct field: %s", nameConst.Str)
+			}
+			vm.push(curr, val)
+		case bytecode.OpSetField:
+			val, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			obj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			nameConst, err := vm.constAt(inst.A)
+			if err != nil {
+				return nil, err
+			}
+			fields, ok := obj.Raw().(map[string]*runtime.Object)
+			if !ok {
+				return nil, fmt.Errorf("set field on non-struct")
+			}
+			fields[nameConst.Str] = val
+		case bytecode.OpCallMethod:
+			methodConst, err := vm.constAt(inst.A)
+			if err != nil {
+				return nil, err
+			}
+			argc := inst.B
+			args := make([]*runtime.Object, argc)
+			for i := argc - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			fnName := fmt.Sprintf("%s.%s", subj.TypeName(), methodConst.Str)
+			fnIndex, ok := vm.funcIndex[fnName]
+			if !ok {
+				return nil, fmt.Errorf("unknown method: %s", fnName)
+			}
+			fnDef := vm.Program.Functions[fnIndex]
+			if fnDef.Arity != argc+1 {
+				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc+1)
+			}
+			frame := &Frame{
+				Fn:       fnDef,
+				IP:       0,
+				Locals:   make([]*runtime.Object, fnDef.Locals),
+				Stack:    []*runtime.Object{},
+				MaxStack: fnDef.MaxStack,
+			}
+			frame.Locals[0] = subj
+			for i := range args {
+				frame.Locals[i+1] = args[i]
+			}
+			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpCallModule:
 			modConst, err := vm.constAt(inst.A)
 			if err != nil {
@@ -647,8 +759,6 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpCallExtern,
-			bytecode.OpMakeStruct, bytecode.OpMakeEnum,
-			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,
 			bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
 			bytecode.OpMatchMaybe, bytecode.OpMatchResult,
 			bytecode.OpAsyncStart, bytecode.OpAsyncEval:
@@ -776,6 +886,20 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 	if op == bytecode.OpEq || op == bytecode.OpNeq {
 		if left.Kind() == right.Kind() {
 			eq := left.Equals(*right)
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		if left.Kind() == runtime.KindEnum && right.Kind() == runtime.KindInt {
+			eq := left.Raw().(int) == right.AsInt()
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindEnum {
+			eq := left.AsInt() == right.Raw().(int)
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
 			}

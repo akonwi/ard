@@ -356,3 +356,47 @@ func TestBytecodeTryMaybe(t *testing.T) {
 		t.Fatalf("Expected 6, got %v", res)
 	}
 }
+
+func TestBytecodeStructAccess(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`struct Point { x: Int, y: Int }`,
+		`fn main() Int {`,
+		`  let p = Point{x: 1, y: 2}`,
+		`  p.x + p.y`,
+		`}`,
+		`main()`,
+	}, "\n"))
+	if res != 3 {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+}
+
+func TestBytecodeStructMethod(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`struct Point { x: Int, y: Int }`,
+		`impl Point {`,
+		`  fn sum() Int { @x + @y }`,
+		`}`,
+		`fn main() Int {`,
+		`  let p = Point{x: 2, y: 3}`,
+		`  p.sum()`,
+		`}`,
+		`main()`,
+	}, "\n"))
+	if res != 5 {
+		t.Fatalf("Expected 5, got %v", res)
+	}
+}
+
+func TestBytecodeEnumMatch(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`enum Color { Red, Green }`,
+		`match Color::Red {`,
+		`  Color::Red => 1,`,
+		`  _ => 0`,
+		`}`,
+	}, "\n"))
+	if res != 1 {
+		t.Fatalf("Expected 1, got %v", res)
+	}
+}

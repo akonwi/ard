@@ -57,7 +57,18 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 				}
 			}
 		}
-		_ = stmt.Stmt
+		switch def := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if err := e.emitStructMethods(def); err != nil {
+				return Program{}, err
+			}
+		case *checker.Enum:
+			if err := e.emitEnumMethods(def); err != nil {
+				return Program{}, err
+			}
+		default:
+			_ = def
+		}
 	}
 	if err := fn.emitStatements(prog.Statements); err != nil {
 		return Program{}, err
@@ -132,6 +143,44 @@ func (e *Emitter) emitFunction(def *checker.FunctionDef) error {
 		MaxStack: fnEmitter.maxStack,
 		Code:     fnEmitter.code,
 	})
+	return nil
+}
+
+func (e *Emitter) emitStructMethods(def *checker.StructDef) error {
+	for name, method := range def.Methods {
+		methodName := fmt.Sprintf("%s.%s", def.Name, name)
+		if _, ok := e.funcIndex[methodName]; ok {
+			continue
+		}
+		copy := *method
+		methodDef := &copy
+		methodDef.Name = methodName
+		methodDef.Parameters = append([]checker.Parameter{
+			{Name: "@", Type: def},
+		}, method.Parameters...)
+		if err := e.emitFunction(methodDef); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Emitter) emitEnumMethods(def *checker.Enum) error {
+	for name, method := range def.Methods {
+		methodName := fmt.Sprintf("%s.%s", def.Name, name)
+		if _, ok := e.funcIndex[methodName]; ok {
+			continue
+		}
+		copy := *method
+		methodDef := &copy
+		methodDef.Name = methodName
+		methodDef.Parameters = append([]checker.Parameter{
+			{Name: "@", Type: def},
+		}, method.Parameters...)
+		if err := e.emitFunction(methodDef); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -213,11 +262,21 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		if err := f.emitExpr(s.Value); err != nil {
 			return err
 		}
-		index, err := f.resolveTargetLocal(s.Target)
-		if err != nil {
-			return err
+		switch target := s.Target.(type) {
+		case *checker.InstanceProperty:
+			if err := f.emitExpr(target.Subject); err != nil {
+				return err
+			}
+			nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: target.Property})
+			f.emit(Instruction{Op: OpSetField, A: nameIdx})
+			f.adjustStack(2, 0)
+		default:
+			index, err := f.resolveTargetLocal(s.Target)
+			if err != nil {
+				return err
+			}
+			f.emit(Instruction{Op: OpStoreLocal, A: index})
 		}
-		f.emit(Instruction{Op: OpStoreLocal, A: index})
 		return nil
 	case *checker.WhileLoop:
 		return f.emitWhileLoop(s)
@@ -227,6 +286,10 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		return f.emitForInList(s)
 	case *checker.ForInMap:
 		return f.emitForInMap(s)
+	case *checker.StructDef:
+		return nil
+	case *checker.Enum:
+		return nil
 	default:
 		return fmt.Errorf("unsupported statement: %T", s)
 	}
@@ -333,6 +396,16 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitResultMethod(e)
 	case *checker.ModuleFunctionCall:
 		return f.emitModuleFunctionCall(e)
+	case *checker.StructInstance:
+		return f.emitStructInstance(e)
+	case *checker.ModuleStructInstance:
+		return f.emitModuleStructInstance(e)
+	case *checker.EnumVariant:
+		return f.emitEnumVariant(e)
+	case *checker.InstanceProperty:
+		return f.emitInstanceProperty(e)
+	case *checker.InstanceMethod:
+		return f.emitInstanceMethod(e)
 	case *checker.BoolMatch:
 		return f.emitBoolMatch(e)
 	case *checker.IntMatch:
@@ -982,7 +1055,6 @@ func (f *funcEmitter) emitIntMatch(match *checker.IntMatch) error {
 	subjectIndex := f.localIndex(subjectTemp)
 	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
 
-	endJump := f.emitJump(OpJump)
 	caseJumps := []int{}
 
 	intKeys := make([]int, 0, len(match.IntCases))
@@ -1049,7 +1121,6 @@ func (f *funcEmitter) emitIntMatch(match *checker.IntMatch) error {
 	}
 
 	endLabel := len(f.code)
-	f.patchJump(endJump, endLabel)
 	for _, j := range caseJumps {
 		f.patchJump(j, endLabel)
 	}
@@ -1136,7 +1207,6 @@ func (f *funcEmitter) emitResultMatch(match *checker.ResultMatch) error {
 }
 
 func (f *funcEmitter) emitConditionalMatch(match *checker.ConditionalMatch) error {
-	endJump := f.emitJump(OpJump)
 	caseJumps := []int{}
 	for _, c := range match.Cases {
 		if err := f.emitExpr(c.Condition); err != nil {
@@ -1157,7 +1227,6 @@ func (f *funcEmitter) emitConditionalMatch(match *checker.ConditionalMatch) erro
 		f.emit(Instruction{Op: OpConstVoid})
 	}
 	endLabel := len(f.code)
-	f.patchJump(endJump, endLabel)
 	for _, j := range caseJumps {
 		f.patchJump(j, endLabel)
 	}
@@ -1172,7 +1241,6 @@ func (f *funcEmitter) emitEnumMatch(match *checker.EnumMatch) error {
 	subjectIndex := f.localIndex(subjectTemp)
 	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
 
-	endJump := f.emitJump(OpJump)
 	caseJumps := []int{}
 	discriminants := make([]int, 0, len(match.DiscriminantToIndex))
 	for disc := range match.DiscriminantToIndex {
@@ -1208,7 +1276,6 @@ func (f *funcEmitter) emitEnumMatch(match *checker.EnumMatch) error {
 		f.emit(Instruction{Op: OpConstVoid})
 	}
 	endLabel := len(f.code)
-	f.patchJump(endJump, endLabel)
 	for _, j := range caseJumps {
 		f.patchJump(j, endLabel)
 	}
@@ -1229,7 +1296,6 @@ func (f *funcEmitter) emitUnionMatch(match *checker.UnionMatch) error {
 	typeIndex := f.localIndex(typeTemp)
 	f.emit(Instruction{Op: OpStoreLocal, A: typeIndex})
 
-	endJump := f.emitJump(OpJump)
 	caseJumps := []int{}
 
 	keys := make([]string, 0, len(match.TypeCases))
@@ -1266,7 +1332,6 @@ func (f *funcEmitter) emitUnionMatch(match *checker.UnionMatch) error {
 		f.emit(Instruction{Op: OpConstVoid})
 	}
 	endLabel := len(f.code)
-	f.patchJump(endJump, endLabel)
 	for _, j := range caseJumps {
 		f.patchJump(j, endLabel)
 	}
@@ -1307,5 +1372,81 @@ func (f *funcEmitter) emitTryOp(op *checker.TryOp) error {
 	} else {
 		f.code[catchJump].A = -1
 	}
+	return nil
+}
+
+func (f *funcEmitter) emitStructInstance(inst *checker.StructInstance) error {
+	fieldNames := make([]string, 0, len(inst.FieldTypes))
+	for name := range inst.FieldTypes {
+		fieldNames = append(fieldNames, name)
+	}
+	if len(fieldNames) > 1 {
+		slices.Sort(fieldNames)
+	}
+	for _, name := range fieldNames {
+		nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: name})
+		f.emit(Instruction{Op: OpConst, A: nameIdx})
+		if expr, ok := inst.Fields[name]; ok {
+			if err := f.emitExpr(expr); err != nil {
+				return err
+			}
+		} else {
+			fieldType := inst.FieldTypes[name]
+			typeID := f.emitter.addType(fieldType)
+			f.emit(Instruction{Op: OpMakeNone, A: int(typeID)})
+		}
+	}
+	structType := inst.StructType
+	if structType == nil {
+		structType = inst.Type()
+	}
+	structTypeID := f.emitter.addType(structType)
+	f.emit(Instruction{Op: OpMakeStruct, A: int(structTypeID), B: len(fieldNames)})
+	f.adjustStack(len(fieldNames)*2, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitModuleStructInstance(inst *checker.ModuleStructInstance) error {
+	inner := inst.Property
+	if inner == nil {
+		return fmt.Errorf("missing struct instance for module struct")
+	}
+	return f.emitStructInstance(inner)
+}
+
+func (f *funcEmitter) emitEnumVariant(variant *checker.EnumVariant) error {
+	if variant.EnumType == nil {
+		return fmt.Errorf("missing enum type")
+	}
+	f.emit(Instruction{Op: OpConstInt, Imm: variant.Discriminant})
+	var enumType checker.Type = variant.EnumType
+	structTypeID := f.emitter.addType(enumType)
+	f.emit(Instruction{Op: OpMakeEnum, A: int(structTypeID)})
+	f.adjustStack(1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitInstanceProperty(prop *checker.InstanceProperty) error {
+	if err := f.emitExpr(prop.Subject); err != nil {
+		return err
+	}
+	nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: prop.Property})
+	f.emit(Instruction{Op: OpGetField, A: nameIdx})
+	f.adjustStack(1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitInstanceMethod(method *checker.InstanceMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	for i := range method.Method.Args {
+		if err := f.emitExpr(method.Method.Args[i]); err != nil {
+			return err
+		}
+	}
+	nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: method.Method.Name})
+	f.emit(Instruction{Op: OpCallMethod, A: nameIdx, B: len(method.Method.Args)})
+	f.adjustStack(len(method.Method.Args)+1, 1)
 	return nil
 }

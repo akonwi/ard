@@ -37,6 +37,48 @@ func (vm *VM) typeFor(id bytecode.TypeID) (checker.Type, error) {
 	return parsed, nil
 }
 
+func (vm *VM) typeNameFor(id bytecode.TypeID) (string, error) {
+	if id == 0 {
+		return "", nil
+	}
+	for i := range vm.Program.Types {
+		if vm.Program.Types[i].ID == id {
+			return vm.Program.Types[i].Name, nil
+		}
+	}
+	return "", fmt.Errorf("unknown type id: %d", id)
+}
+
+func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
+	if t, ok := vm.typeCache[id]; ok {
+		if s, ok := t.(*checker.StructDef); ok {
+			return s, nil
+		}
+	}
+	name, err := vm.typeNameFor(id)
+	if err != nil {
+		return nil, err
+	}
+	strct := &checker.StructDef{Name: name, Fields: map[string]checker.Type{}, Methods: map[string]*checker.FunctionDef{}}
+	vm.typeCache[id] = strct
+	return strct, nil
+}
+
+func (vm *VM) enumTypeFor(id bytecode.TypeID) (*checker.Enum, error) {
+	if t, ok := vm.typeCache[id]; ok {
+		if e, ok := t.(*checker.Enum); ok {
+			return e, nil
+		}
+	}
+	name, err := vm.typeNameFor(id)
+	if err != nil {
+		return nil, err
+	}
+	enum := &checker.Enum{Name: name, Values: []checker.EnumValue{}, Methods: map[string]*checker.FunctionDef{}}
+	vm.typeCache[id] = enum
+	return enum, nil
+}
+
 func parseTypeName(name string) (checker.Type, error) {
 	trimmed := strings.TrimSpace(name)
 	if strings.Contains(trimmed, "$") {
@@ -98,7 +140,7 @@ func parseTypeName(name string) (checker.Type, error) {
 		return checker.MakeMap(keyType, valType), nil
 	}
 
-	return nil, fmt.Errorf("unsupported type name: %s", name)
+	return &checker.StructDef{Name: trimmed, Fields: map[string]checker.Type{}, Methods: map[string]*checker.FunctionDef{}}, nil
 }
 
 func splitTopLevel(s string, sep rune) (string, string) {
