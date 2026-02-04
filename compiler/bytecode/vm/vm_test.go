@@ -91,3 +91,24 @@ func TestBytecodeEquality(t *testing.T) {
 		t.Fatalf("Expected true, got %v", res)
 	}
 }
+
+func TestBytecodeIfExpression(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`let val = 3`,
+		`if val > 2 { 10 } else { 20 }`,
+	}, "\n"))
+	if res != 10 {
+		t.Fatalf("Expected 10, got %v", res)
+	}
+}
+
+func TestBytecodeLogicalOps(t *testing.T) {
+	res := runBytecode(t, `true and false`)
+	if res != false {
+		t.Fatalf("Expected false, got %v", res)
+	}
+	res = runBytecode(t, `true or false`)
+	if res != true {
+		t.Fatalf("Expected true, got %v", res)
+	}
+}

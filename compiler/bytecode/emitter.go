@@ -201,6 +201,14 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitBinary(expr, OpLte)
 	case *checker.Equality:
 		return f.emitBinary(expr, OpEq)
+	case *checker.And:
+		return f.emitLogicalAnd(e)
+	case *checker.Or:
+		return f.emitLogicalOr(e)
+	case *checker.Block:
+		return f.emitBlockExpr(e)
+	case *checker.If:
+		return f.emitIfExpr(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -258,11 +266,72 @@ func (f *funcEmitter) emitBinary(expr checker.Expression, op Opcode) error {
 	if err := f.emitExpr(right); err != nil {
 		return err
 	}
-	if op == OpEq {
-		f.emit(Instruction{Op: OpEq})
-		return nil
-	}
 	f.emit(Instruction{Op: op})
+	return nil
+}
+
+func (f *funcEmitter) emitLogicalAnd(expr *checker.And) error {
+	if err := f.emitExpr(expr.Left); err != nil {
+		return err
+	}
+	falseJump := f.emitJump(OpJumpIfFalse)
+	if err := f.emitExpr(expr.Right); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJump)
+	falseLabel := len(f.code)
+	f.patchJump(falseJump, falseLabel)
+	f.emit(Instruction{Op: OpConstBool, Imm: 0})
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	return nil
+}
+
+func (f *funcEmitter) emitLogicalOr(expr *checker.Or) error {
+	if err := f.emitExpr(expr.Left); err != nil {
+		return err
+	}
+	trueJump := f.emitJump(OpJumpIfTrue)
+	if err := f.emitExpr(expr.Right); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJump)
+	trueLabel := len(f.code)
+	f.patchJump(trueJump, trueLabel)
+	f.emit(Instruction{Op: OpConstBool, Imm: 1})
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	return nil
+}
+
+func (f *funcEmitter) emitBlockExpr(block *checker.Block) error {
+	return f.emitStatements(block.Stmts)
+}
+
+func (f *funcEmitter) emitIfExpr(expr *checker.If) error {
+	if err := f.emitExpr(expr.Condition); err != nil {
+		return err
+	}
+	elseJump := f.emitJump(OpJumpIfFalse)
+	if err := f.emitBlockExpr(expr.Body); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJump)
+	elseLabel := len(f.code)
+	f.patchJump(elseJump, elseLabel)
+	if expr.ElseIf != nil {
+		if err := f.emitIfExpr(expr.ElseIf); err != nil {
+			return err
+		}
+	} else if expr.Else != nil {
+		if err := f.emitBlockExpr(expr.Else); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
 	return nil
 }
 
@@ -274,6 +343,19 @@ func (f *funcEmitter) emit(inst Instruction) {
 			f.maxStack = f.stack
 		}
 	}
+}
+
+func (f *funcEmitter) emitJump(op Opcode) int {
+	idx := len(f.code)
+	f.emit(Instruction{Op: op, A: -1})
+	return idx
+}
+
+func (f *funcEmitter) patchJump(index int, target int) {
+	if index < 0 || index >= len(f.code) {
+		return
+	}
+	f.code[index].A = target
 }
 
 func (f *funcEmitter) localIndex(name string) int {
