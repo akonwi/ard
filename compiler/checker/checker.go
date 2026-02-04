@@ -1705,6 +1705,21 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	}
 
 	// For user-defined types (structs, enums), use generic InstanceMethod
+	receiverKind := ReceiverUnknown
+	var structType *StructDef
+	var enumType *Enum
+	var traitType *Trait
+	switch receiver := subject.Type().(type) {
+	case *StructDef:
+		receiverKind = ReceiverStruct
+		structType = receiver
+	case *Enum:
+		receiverKind = ReceiverEnum
+		enumType = receiver
+	case *Trait:
+		receiverKind = ReceiverTrait
+		traitType = receiver
+	}
 	return &InstanceMethod{
 		Subject: subject,
 		Method: &FunctionCall{
@@ -1712,6 +1727,10 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 			Args: args,
 			fn:   fnDef,
 		},
+		ReceiverKind: receiverKind,
+		StructType:   structType,
+		EnumType:     enumType,
+		TraitType:    traitType,
 	}
 }
 

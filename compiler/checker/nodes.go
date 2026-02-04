@@ -188,8 +188,12 @@ func (i *InstanceProperty) String() string {
 }
 
 type InstanceMethod struct {
-	Subject Expression
-	Method  *FunctionCall
+	Subject      Expression
+	Method       *FunctionCall
+	ReceiverKind InstanceReceiverKind
+	StructType   *StructDef
+	EnumType     *Enum
+	TraitType    *Trait
 }
 
 func (i *InstanceMethod) Type() Type {
@@ -199,6 +203,15 @@ func (i *InstanceMethod) Type() Type {
 func (i *InstanceMethod) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Method.Name)
 }
+
+type InstanceReceiverKind uint8
+
+const (
+	ReceiverUnknown InstanceReceiverKind = iota
+	ReceiverStruct
+	ReceiverEnum
+	ReceiverTrait
+)
 
 // Primitive method types with enum-based dispatch
 

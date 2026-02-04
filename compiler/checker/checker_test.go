@@ -22,6 +22,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
 	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
+	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
 	cmpopts.IgnoreFields(checker.FiberEval{}, "FiberType"),
 	cmpopts.IgnoreFields(checker.FiberExecution{}, "FiberType"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),

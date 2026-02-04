@@ -830,6 +830,23 @@ func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope))
 // this method is for evaluating a checker.InstanceMethod. Even though there are type specific Method instruction nodes,
 // looking at subj.Type() is still necessary here because of dynamic dispatch on traits. (e.g. calling .to_str() on Str::ToString - see io.ard)
 func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
+	switch e.ReceiverKind {
+	case checker.ReceiverStruct:
+		if e.StructType == nil {
+			break
+		}
+		return vm.EvalStructMethod(scope, subj, e.Method, e.StructType)
+	case checker.ReceiverEnum:
+		if e.EnumType == nil {
+			break
+		}
+		return vm.EvalEnumMethod(scope, subj, e.Method, e.EnumType)
+	case checker.ReceiverTrait:
+		// Fall through to dynamic dispatch based on runtime type.
+	default:
+		// Continue with dynamic dispatch.
+	}
+
 	if subj.IsResult() {
 		return vm.evalResultMethod(scope, subj, e.Method)
 	}
@@ -855,7 +872,9 @@ func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.
 		return vm.evalMaybeMethod(scope, subj, e)
 	}
 	if subj.IsStruct() {
-		return vm.EvalStructMethod(scope, subj, e.Method)
+		if structType, ok := subj.Type().(*checker.StructDef); ok {
+			return vm.EvalStructMethod(scope, subj, e.Method, structType)
+		}
 	}
 	if enum, ok := subj.Type().(*checker.Enum); ok {
 		return vm.EvalEnumMethod(scope, subj, e.Method, enum)
@@ -1287,10 +1306,8 @@ func (vm *VM) evalMaybeMethod(scope *scope, subj *runtime.Object, m *checker.Ins
 	}
 }
 
-func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
-	istruct := subj.Type().(*checker.StructDef)
-
-	closure, ok := vm.hq.getMethod(istruct, call.Name)
+func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker.FunctionCall, structType *checker.StructDef) *runtime.Object {
+	closure, ok := vm.hq.getMethod(structType, call.Name)
 	if ok {
 		// Prepare arguments: struct instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)
@@ -1302,7 +1319,7 @@ func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker
 		return closure.Eval(args...)
 	}
 
-	panic(fmt.Errorf("Method not found: %s.%s", istruct.Name, call.Name))
+	panic(fmt.Errorf("Method not found: %s.%s", structType.Name, call.Name))
 }
 
 func (vm *VM) createEnumMethodClosure(enum *checker.Enum, methodName string, scope *scope) *VMClosure {
