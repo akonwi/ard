@@ -1919,12 +1919,13 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
 	}
 	return &ResultMethod{
-		Subject: subject,
-		Kind:    kind,
-		Args:    args,
-		OkType:  resultType.Val(),
-		ErrType: resultType.Err(),
-		fn:      fnDef,
+		Subject:    subject,
+		Kind:       kind,
+		Args:       args,
+		OkType:     resultType.Val(),
+		ErrType:    resultType.Err(),
+		fn:         fnDef,
+		ReturnType: fnDef.ReturnType,
 	}
 }
 

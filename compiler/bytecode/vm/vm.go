@@ -450,6 +450,90 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, runtime.MakeInt(len(mapObj.AsMap())))
+		case bytecode.OpStrMethod:
+			args := make([]*runtime.Object, inst.B)
+			for i := inst.B - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			obj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalStrMethod(bytecodeToStrKind(inst.A), obj, args)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpIntMethod:
+			obj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalIntMethod(bytecodeToIntKind(inst.A), obj)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpFloatMethod:
+			obj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalFloatMethod(bytecodeToFloatKind(inst.A), obj)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpBoolMethod:
+			obj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalBoolMethod(bytecodeToBoolKind(inst.A), obj)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpMaybeMethod:
+			args := make([]*runtime.Object, inst.B)
+			for i := inst.B - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalMaybeMethod(bytecodeToMaybeKind(inst.A), subj, args, bytecode.TypeID(inst.Imm))
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpResultMethod:
+			args := make([]*runtime.Object, inst.B)
+			for i := inst.B - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalResultMethod(bytecodeToResultKind(inst.A), subj, args)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
 		case bytecode.OpCallExtern, bytecode.OpCallModule,
 			bytecode.OpMakeStruct, bytecode.OpMakeEnum,
 			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,

@@ -466,16 +466,20 @@ const (
 )
 
 type ResultMethod struct {
-	Subject Expression
-	Kind    ResultMethodKind
-	Args    []Expression
-	OkType  Type         // Pre-computed OK type
-	ErrType Type         // Pre-computed Error type
-	fn      *FunctionDef // Function definition for return type resolution
+	Subject    Expression
+	Kind       ResultMethodKind
+	Args       []Expression
+	OkType     Type         // Pre-computed OK type
+	ErrType    Type         // Pre-computed Error type
+	fn         *FunctionDef // Function definition for return type resolution
+	ReturnType Type         // Pre-computed by checker
 }
 
 func (m *ResultMethod) Type() Type {
 	// Use function return type if available (handles generics properly)
+	if m.ReturnType != nil {
+		return m.ReturnType
+	}
 	if m.fn != nil {
 		return m.fn.ReturnType
 	}

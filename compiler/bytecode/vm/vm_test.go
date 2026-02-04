@@ -256,4 +256,22 @@ func TestBytecodeMapMethods(t *testing.T) {
 	if res != true {
 		t.Fatalf("Expected true, got %v", res)
 	}
+	res = runBytecode(t, strings.Join([]string{
+		`let items = ["a": 1, "b": 2]`,
+		`items.get("a").or(0)`,
+	}, "\n"))
+	if res != 1 {
+		t.Fatalf("Expected 1, got %v", res)
+	}
+}
+
+func TestBytecodeStringMethods(t *testing.T) {
+	res := runBytecode(t, `"hello".size()`)
+	if res != 5 {
+		t.Fatalf("Expected 5, got %v", res)
+	}
+	res = runBytecode(t, `"hello".contains("ell")`)
+	if res != true {
+		t.Fatalf("Expected true, got %v", res)
+	}
 }

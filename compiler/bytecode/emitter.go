@@ -318,6 +318,18 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitListMethod(e)
 	case *checker.MapMethod:
 		return f.emitMapMethod(e)
+	case *checker.StrMethod:
+		return f.emitStrMethod(e)
+	case *checker.IntMethod:
+		return f.emitIntMethod(e)
+	case *checker.FloatMethod:
+		return f.emitFloatMethod(e)
+	case *checker.BoolMethod:
+		return f.emitBoolMethod(e)
+	case *checker.MaybeMethod:
+		return f.emitMaybeMethod(e)
+	case *checker.ResultMethod:
+		return f.emitResultMethod(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -603,6 +615,13 @@ func (f *funcEmitter) emit(inst Instruction) {
 	}
 }
 
+func (f *funcEmitter) adjustStack(pop, push int) {
+	f.stack = f.stack - pop + push
+	if f.stack > f.maxStack {
+		f.maxStack = f.stack
+	}
+}
+
 func (f *funcEmitter) emitJump(op Opcode) int {
 	idx := len(f.code)
 	f.emit(Instruction{Op: op, A: -1})
@@ -825,4 +844,75 @@ func (f *funcEmitter) emitMapMethod(method *checker.MapMethod) error {
 	default:
 		return fmt.Errorf("unsupported map method: %v", method.Kind)
 	}
+}
+
+func (f *funcEmitter) emitStrMethod(method *checker.StrMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	for i := range method.Args {
+		if err := f.emitExpr(method.Args[i]); err != nil {
+			return err
+		}
+	}
+	f.emit(Instruction{Op: OpStrMethod, A: int(method.Kind), B: len(method.Args)})
+	f.adjustStack(len(method.Args)+1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitIntMethod(method *checker.IntMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	f.emit(Instruction{Op: OpIntMethod, A: int(method.Kind)})
+	f.adjustStack(1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitFloatMethod(method *checker.FloatMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	f.emit(Instruction{Op: OpFloatMethod, A: int(method.Kind)})
+	f.adjustStack(1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitBoolMethod(method *checker.BoolMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	f.emit(Instruction{Op: OpBoolMethod, A: int(method.Kind)})
+	f.adjustStack(1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitMaybeMethod(method *checker.MaybeMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	for i := range method.Args {
+		if err := f.emitExpr(method.Args[i]); err != nil {
+			return err
+		}
+	}
+	retID := f.emitter.addType(method.ReturnType)
+	f.emit(Instruction{Op: OpMaybeMethod, A: int(method.Kind), B: len(method.Args), Imm: int(retID)})
+	f.adjustStack(len(method.Args)+1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitResultMethod(method *checker.ResultMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	for i := range method.Args {
+		if err := f.emitExpr(method.Args[i]); err != nil {
+			return err
+		}
+	}
+	retID := f.emitter.addType(method.ReturnType)
+	f.emit(Instruction{Op: OpResultMethod, A: int(method.Kind), B: len(method.Args), Imm: int(retID)})
+	f.adjustStack(len(method.Args)+1, 1)
+	return nil
 }

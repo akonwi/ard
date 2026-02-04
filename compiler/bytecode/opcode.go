@@ -55,6 +55,12 @@ const (
 	OpGetField
 	OpSetField
 	OpCallMethod
+	OpStrMethod
+	OpIntMethod
+	OpFloatMethod
+	OpBoolMethod
+	OpMaybeMethod
+	OpResultMethod
 	OpMatchBool
 	OpMatchInt
 	OpMatchEnum

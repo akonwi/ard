@@ -111,6 +111,18 @@ func (o Opcode) String() string {
 		return "SET_FIELD"
 	case OpCallMethod:
 		return "CALL_METHOD"
+	case OpStrMethod:
+		return "STR_METHOD"
+	case OpIntMethod:
+		return "INT_METHOD"
+	case OpFloatMethod:
+		return "FLOAT_METHOD"
+	case OpBoolMethod:
+		return "BOOL_METHOD"
+	case OpMaybeMethod:
+		return "MAYBE_METHOD"
+	case OpResultMethod:
+		return "RESULT_METHOD"
 	case OpMatchBool:
 		return "MATCH_BOOL"
 	case OpMatchInt:
@@ -188,6 +200,8 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 2, Push: 1}
 	case OpMapSize:
 		return StackEffect{Pop: 1, Push: 1}
+	case OpStrMethod, OpIntMethod, OpFloatMethod, OpBoolMethod, OpMaybeMethod, OpResultMethod:
+		return StackEffect{}
 	default:
 		return StackEffect{}
 	}
