@@ -31,6 +31,10 @@ Deliverables:
 Exit criteria:
 - A representative subset of stdlib samples compiles to bytecode and runs in a new bytecode VM.
 
+## Parallel Track: Go Backend (Runtime-Light)
+
+See `backlog/bytecode-roadmap/go-backend.md` for the Go backend plan that preserves Ard semantics with a minimal runtime support layer.
+
 ## Phase 3: Bytecode VM
 
 Deliverables:
