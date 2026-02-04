@@ -49,7 +49,7 @@ func main() {
 		}
 	case "run":
 		{
-			vmMode, inputPath, err := parseRunArgs(os.Args[2:])
+			useLegacy, inputPath, err := parseRunArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -58,43 +58,41 @@ func main() {
 			if err != nil {
 				os.Exit(1)
 			}
-			switch vmMode {
-			case "interp":
+			if useLegacy {
 				g := vm.NewRuntime(module)
 				if err := g.Run("main"); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
-			default:
-				program, err := bytecode.NewEmitter().EmitProgram(module)
-				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := bytecode.VerifyProgram(program); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if _, err := bytecodevm.New(program).Run("main"); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
+				break
 			}
-		}
-	case "build":
-		{
-			if len(os.Args) < 3 {
-				fmt.Println("Expected filepath argument")
-				os.Exit(1)
-			}
-
-			inputPath := os.Args[2]
-			outputPath, err := buildBytecodeBinary(inputPath)
+			program, err := bytecode.NewEmitter().EmitProgram(module)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			fmt.Printf("Built %s\n", outputPath)
+			if err := bytecode.VerifyProgram(program); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			if _, err := bytecodevm.New(program).Run("main"); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
+	case "build":
+		{
+			inputPath, outputPath, err := parseBuildArgs(os.Args[2:])
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			builtPath, err := buildBytecodeBinary(inputPath, outputPath)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			fmt.Printf("Built %s\n", builtPath)
 		}
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
@@ -145,20 +143,39 @@ func loadModule(inputPath string) (checker.Module, error) {
 	return c.Module(), nil
 }
 
-func parseRunArgs(args []string) (string, string, error) {
-	vmMode := "bytecode"
+func parseRunArgs(args []string) (bool, string, error) {
+	useLegacy := false
 	inputPath := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if strings.HasPrefix(arg, "--vm=") {
-			vmMode = strings.TrimPrefix(arg, "--vm=")
+		if arg == "--legacy" {
+			useLegacy = true
 			continue
 		}
-		if arg == "--vm" {
+		if strings.HasPrefix(arg, "-") {
+			return false, "", fmt.Errorf("unknown flag: %s", arg)
+		}
+		if inputPath == "" {
+			inputPath = arg
+			continue
+		}
+	}
+	if inputPath == "" {
+		return false, "", fmt.Errorf("expected filepath argument")
+	}
+	return useLegacy, inputPath, nil
+}
+
+func parseBuildArgs(args []string) (string, string, error) {
+	inputPath := ""
+	outputPath := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--out" {
 			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("--vm requires a value")
+				return "", "", fmt.Errorf("--out requires a path")
 			}
-			vmMode = args[i+1]
+			outputPath = args[i+1]
 			i++
 			continue
 		}
@@ -173,13 +190,13 @@ func parseRunArgs(args []string) (string, string, error) {
 	if inputPath == "" {
 		return "", "", fmt.Errorf("expected filepath argument")
 	}
-	if vmMode != "bytecode" && vmMode != "interp" {
-		return "", "", fmt.Errorf("unknown vm mode: %s", vmMode)
+	if outputPath == "" {
+		outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
 	}
-	return vmMode, inputPath, nil
+	return inputPath, outputPath, nil
 }
 
-func buildBytecodeBinary(inputPath string) (string, error) {
+func buildBytecodeBinary(inputPath string, outputPath string) (string, error) {
 	module, err := loadModule(inputPath)
 	if err != nil {
 		return "", err
@@ -199,7 +216,6 @@ func buildBytecodeBinary(inputPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	outputPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
 	if err := writeEmbeddedBinary(selfPath, outputPath, data); err != nil {
 		return "", err
 	}
