@@ -3191,15 +3191,33 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			for _, matchCase := range s.Cases {
 				switch p := matchCase.Pattern.(type) {
 				case *parse.Identifier:
-					if p.Name != "_" {
-						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
-					} else {
+					if p.Name == "_" {
 						if catchAllBody != nil {
 							c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
 						} else {
 							catchAllBody = c.checkBlock(matchCase.Body, nil)
 						}
+						break
 					}
+					// Allow union type name as implicit binding to "it"
+					matchedType, found := unionTypeSet[p.Name]
+					if !found {
+						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
+						break
+					}
+					if _, exists := typeCases[p.Name]; exists {
+						c.addWarning(fmt.Sprintf("Duplicate case: %s", p.Name), matchCase.Pattern.GetLocation())
+						break
+					}
+					body := c.checkBlock(matchCase.Body, func() {
+						c.scope.add("it", matchedType, false)
+					})
+					matchNode := &Match{
+						Pattern: &Identifier{Name: "it"},
+						Body:    body,
+					}
+					typeCases[p.Name] = matchNode
+					typeCasesByType[matchedType] = matchNode
 				case *parse.FunctionCall:
 					varName := p.Args[0].Value.(*parse.Identifier).Name
 					typeName := p.Name

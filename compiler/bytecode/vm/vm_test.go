@@ -787,6 +787,7 @@ func TestBytecodeSamples(t *testing.T) {
 		"fizzbuzz.ard",
 		"fibonacci.ard",
 		"collections.ard",
+		"type-unions.ard",
 	}
 	for _, name := range samples {
 		name := name
