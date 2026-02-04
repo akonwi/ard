@@ -21,6 +21,32 @@ type Frame struct {
 type Closure struct {
 	FnIndex  int
 	Captures []*runtime.Object
+	Program  *bytecode.Program
+	Params   []checker.Parameter
+}
+
+func (c *Closure) Eval(args ...*runtime.Object) *runtime.Object {
+	res, err := c.eval(args...)
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
+func (c *Closure) EvalIsolated(args ...*runtime.Object) *runtime.Object {
+	return c.Eval(args...)
+}
+
+func (c *Closure) GetParams() []checker.Parameter {
+	return c.Params
+}
+
+func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
+	if c.Program == nil {
+		return nil, fmt.Errorf("closure missing program")
+	}
+	vm := New(*c.Program)
+	return vm.runClosure(c, args)
 }
 
 type VM struct {
@@ -297,7 +323,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			closure := &Closure{FnIndex: fnIndex, Captures: captures}
+			params := []checker.Parameter{}
+			if def, ok := fnType.(*checker.FunctionDef); ok {
+				params = def.Parameters
+			}
+			closure := &Closure{FnIndex: fnIndex, Captures: captures, Program: &vm.Program, Params: params}
 			vm.push(curr, runtime.Make(closure, fnType))
 		case bytecode.OpCallClosure:
 			argc := inst.B

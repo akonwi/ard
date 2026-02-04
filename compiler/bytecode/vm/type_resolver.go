@@ -103,6 +103,31 @@ func parseTypeName(name string) (checker.Type, error) {
 		}
 		return checker.MakeMaybe(of), nil
 	}
+	if strings.HasPrefix(trimmed, "fn ") {
+		open := strings.Index(trimmed, "(")
+		close := strings.LastIndex(trimmed, ")")
+		if open == -1 || close == -1 || close < open {
+			return nil, fmt.Errorf("invalid function type: %s", trimmed)
+		}
+		paramsRaw := strings.TrimSpace(trimmed[open+1 : close])
+		retRaw := strings.TrimSpace(trimmed[close+1:])
+		params := []checker.Parameter{}
+		if paramsRaw != "" {
+			parts := splitTopLevelList(paramsRaw)
+			for _, part := range parts {
+				paramType, err := parseTypeName(part)
+				if err != nil {
+					return nil, err
+				}
+				params = append(params, checker.Parameter{Type: paramType})
+			}
+		}
+		retType, err := parseTypeName(retRaw)
+		if err != nil {
+			return nil, err
+		}
+		return &checker.FunctionDef{Parameters: params, ReturnType: retType}, nil
+	}
 	leftBang, rightBang := splitTopLevel(trimmed, '!')
 	if rightBang != "" {
 		leftType, err := parseTypeName(leftBang)
@@ -158,4 +183,27 @@ func splitTopLevel(s string, sep rune) (string, string) {
 		}
 	}
 	return strings.TrimSpace(s), ""
+}
+
+func splitTopLevelList(s string) []string {
+	parts := []string{}
+	depth := 0
+	start := 0
+	for i, r := range s {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	if start <= len(s) {
+		parts = append(parts, strings.TrimSpace(s[start:]))
+	}
+	return parts
 }

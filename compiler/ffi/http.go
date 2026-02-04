@@ -140,7 +140,30 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				panic(fmt.Errorf("Handler for '%s' is not a function", path))
 			}
 
-			methodEnumType := handle.GetParams()[0].Type.(*checker.StructDef).Fields["method"].(*checker.Enum)
+			var methodEnumType *checker.Enum
+			params := handle.GetParams()
+			if len(params) > 0 {
+				if structType, ok := params[0].Type.(*checker.StructDef); ok {
+					if field, ok := structType.Fields["method"]; ok {
+						if enumType, ok := field.(*checker.Enum); ok {
+							methodEnumType = enumType
+						}
+					}
+				}
+			}
+			if methodEnumType == nil {
+				if mod, ok := checker.FindEmbeddedModule("ard/http"); ok {
+					sym := mod.Get("Method")
+					if sym.Type != nil {
+						if enumType, ok := sym.Type.(*checker.Enum); ok {
+							methodEnumType = enumType
+						}
+					}
+				}
+			}
+			if methodEnumType == nil {
+				panic(fmt.Errorf("Handler for '%s' missing http::Request method type", path))
+			}
 
 			// Convert HTTP method string to Method enum discriminant value
 			var methodValue int
