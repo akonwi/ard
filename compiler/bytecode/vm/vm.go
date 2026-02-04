@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/akonwi/ard/bytecode"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
 
@@ -16,12 +17,13 @@ type Frame struct {
 }
 
 type VM struct {
-	Program bytecode.Program
-	Frames  []*Frame
+	Program   bytecode.Program
+	Frames    []*Frame
+	typeCache map[bytecode.TypeID]checker.Type
 }
 
 func New(program bytecode.Program) *VM {
-	return &VM{Program: program, Frames: []*Frame{}}
+	return &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}}
 }
 
 func (vm *VM) Run(functionName string) (*runtime.Object, error) {
@@ -235,8 +237,48 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				frame.Locals[i] = args[i]
 			}
 			vm.Frames = append(vm.Frames, frame)
+		case bytecode.OpMakeList:
+			typeID := bytecode.TypeID(inst.A)
+			listType, err := vm.typeFor(typeID)
+			if err != nil {
+				return nil, err
+			}
+			count := inst.B
+			items := make([]*runtime.Object, count)
+			for i := count - 1; i >= 0; i-- {
+				item, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				items[i] = item
+			}
+			vm.push(curr, runtime.Make(items, listType))
+		case bytecode.OpMakeMap:
+			typeID := bytecode.TypeID(inst.A)
+			mapType, err := vm.typeFor(typeID)
+			if err != nil {
+				return nil, err
+			}
+			mapDef, ok := mapType.(*checker.Map)
+			if !ok {
+				return nil, fmt.Errorf("expected map type for id %d", typeID)
+			}
+			count := inst.B
+			m := runtime.MakeMap(mapDef.Key(), mapDef.Value())
+			for i := 0; i < count; i++ {
+				val, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				key, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				m.Map_Set(key, val)
+			}
+			vm.push(curr, m)
 		case bytecode.OpCallExtern, bytecode.OpCallModule,
-			bytecode.OpMakeList, bytecode.OpMakeMap, bytecode.OpMakeStruct, bytecode.OpMakeEnum,
+			bytecode.OpMakeStruct, bytecode.OpMakeEnum,
 			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,
 			bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
 			bytecode.OpMatchMaybe, bytecode.OpMatchResult,

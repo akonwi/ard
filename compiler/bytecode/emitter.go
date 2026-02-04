@@ -266,6 +266,10 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return nil
 	case *checker.FunctionCall:
 		return f.emitFunctionCall(e)
+	case *checker.ListLiteral:
+		return f.emitListLiteral(e)
+	case *checker.MapLiteral:
+		return f.emitMapLiteral(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -436,5 +440,43 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 		return fmt.Errorf("unknown function: %s", call.Name)
 	}
 	f.emit(Instruction{Op: OpCall, A: idx, B: len(call.Args)})
+	return nil
+}
+
+func (f *funcEmitter) emitListLiteral(lit *checker.ListLiteral) error {
+	for i := range lit.Elements {
+		if err := f.emitExpr(lit.Elements[i]); err != nil {
+			return err
+		}
+	}
+	typeID := f.emitter.addType(lit.ListType)
+	count := len(lit.Elements)
+	f.emit(Instruction{Op: OpMakeList, A: int(typeID), B: count})
+	f.stack = f.stack - count + 1
+	if f.stack > f.maxStack {
+		f.maxStack = f.stack
+	}
+	return nil
+}
+
+func (f *funcEmitter) emitMapLiteral(lit *checker.MapLiteral) error {
+	if len(lit.Keys) != len(lit.Values) {
+		return fmt.Errorf("map literal keys/values mismatch")
+	}
+	for i := range lit.Keys {
+		if err := f.emitExpr(lit.Keys[i]); err != nil {
+			return err
+		}
+		if err := f.emitExpr(lit.Values[i]); err != nil {
+			return err
+		}
+	}
+	typeID := f.emitter.addType(lit.Type())
+	count := len(lit.Keys)
+	f.emit(Instruction{Op: OpMakeMap, A: int(typeID), B: count})
+	f.stack = f.stack - (count * 2) + 1
+	if f.stack > f.maxStack {
+		f.maxStack = f.stack
+	}
 	return nil
 }

@@ -147,3 +147,25 @@ func TestBytecodeFloatComparisons(t *testing.T) {
 		t.Fatalf("Expected false, got %v", res)
 	}
 }
+
+func TestBytecodeListLiteral(t *testing.T) {
+	res := runBytecode(t, `[1, 2, 3]`)
+	items, ok := res.([]any)
+	if !ok {
+		t.Fatalf("Expected list result, got %T", res)
+	}
+	if len(items) != 3 || items[0] != 1 || items[1] != 2 || items[2] != 3 {
+		t.Fatalf("Unexpected list result: %v", res)
+	}
+}
+
+func TestBytecodeMapLiteral(t *testing.T) {
+	res := runBytecode(t, `["a": 1, "b": 2]`)
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("Expected map result, got %T", res)
+	}
+	if m["a"] != 1 || m["b"] != 2 {
+		t.Fatalf("Unexpected map result: %v", res)
+	}
+}
