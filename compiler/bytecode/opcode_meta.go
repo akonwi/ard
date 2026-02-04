@@ -73,6 +73,10 @@ func (o Opcode) String() string {
 		return "CALL_EXTERN"
 	case OpCallModule:
 		return "CALL_MODULE"
+	case OpMakeClosure:
+		return "MAKE_CLOSURE"
+	case OpCallClosure:
+		return "CALL_CLOSURE"
 	case OpMakeList:
 		return "MAKE_LIST"
 	case OpMakeMap:
@@ -184,6 +188,8 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 0}
 	case OpReturn:
 		return StackEffect{Pop: 1, Push: 0}
+	case OpMakeClosure:
+		return StackEffect{}
 	case OpListLen:
 		return StackEffect{Pop: 1, Push: 1}
 	case OpListGet:

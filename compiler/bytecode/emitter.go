@@ -11,6 +11,8 @@ type Emitter struct {
 	program   Program
 	typeIndex map[string]TypeID
 	funcIndex map[string]int
+	funcTypes map[string]checker.Type
+	anonCount int
 }
 
 type funcEmitter struct {
@@ -22,6 +24,10 @@ type funcEmitter struct {
 	maxStack   int
 	breakStack [][]int
 	tempIndex  int
+	parent     *funcEmitter
+	captureIdx map[string]int
+	captures   []string
+	capLocals  []int
 }
 
 func NewEmitter() *Emitter {
@@ -33,6 +39,7 @@ func NewEmitter() *Emitter {
 		},
 		typeIndex: map[string]TypeID{},
 		funcIndex: map[string]int{},
+		funcTypes: map[string]checker.Type{},
 	}
 }
 
@@ -112,38 +119,54 @@ func (e *Emitter) addConst(c Constant) int {
 }
 
 func (e *Emitter) emitFunction(def *checker.FunctionDef) error {
-	if def.Name == "" {
-		return fmt.Errorf("anonymous functions not yet supported")
+	_, _, err := e.emitFunctionWithParent(def, nil)
+	return err
+}
+
+func (e *Emitter) emitFunctionWithParent(def *checker.FunctionDef, parent *funcEmitter) (int, []string, error) {
+	fnName := def.Name
+	if fnName == "" {
+		fnName = fmt.Sprintf("@anon%d", e.anonCount)
+		e.anonCount++
 	}
-	if _, ok := e.funcIndex[def.Name]; ok {
-		return nil
+	if def.Name != "" {
+		if idx, ok := e.funcIndex[def.Name]; ok {
+			return idx, nil, nil
+		}
 	}
 
 	fnEmitter := &funcEmitter{
-		emitter: e,
-		code:    []Instruction{},
-		locals:  map[string]int{},
+		emitter:    e,
+		code:       []Instruction{},
+		locals:     map[string]int{},
+		parent:     parent,
+		captureIdx: map[string]int{},
 	}
 	for _, param := range def.Parameters {
-		fnEmitter.localIndex(param.Name)
+		fnEmitter.defineLocal(param.Name)
 	}
 	if def.Body != nil {
 		if err := fnEmitter.emitStatements(def.Body.Stmts); err != nil {
-			return err
+			return -1, nil, err
 		}
 	}
 	fnEmitter.ensureReturn()
 
 	index := len(e.program.Functions)
-	e.funcIndex[def.Name] = index
-	e.program.Functions = append(e.program.Functions, Function{
-		Name:     def.Name,
+	if def.Name != "" {
+		e.funcIndex[def.Name] = index
+		e.funcTypes[def.Name] = def
+	}
+	fn := Function{
+		Name:     fnName,
 		Arity:    len(def.Parameters),
+		Captures: append([]int{}, fnEmitter.capLocals...),
 		Locals:   fnEmitter.localTop,
 		MaxStack: fnEmitter.maxStack,
 		Code:     fnEmitter.code,
-	})
-	return nil
+	}
+	e.program.Functions = append(e.program.Functions, fn)
+	return index, append([]string{}, fnEmitter.captures...), nil
 }
 
 func (e *Emitter) emitStructMethods(def *checker.StructDef) error {
@@ -158,7 +181,7 @@ func (e *Emitter) emitStructMethods(def *checker.StructDef) error {
 		methodDef.Parameters = append([]checker.Parameter{
 			{Name: "@", Type: def},
 		}, method.Parameters...)
-		if err := e.emitFunction(methodDef); err != nil {
+		if _, _, err := e.emitFunctionWithParent(methodDef, nil); err != nil {
 			return err
 		}
 	}
@@ -177,7 +200,7 @@ func (e *Emitter) emitEnumMethods(def *checker.Enum) error {
 		methodDef.Parameters = append([]checker.Parameter{
 			{Name: "@", Type: def},
 		}, method.Parameters...)
-		if err := e.emitFunction(methodDef); err != nil {
+		if _, _, err := e.emitFunctionWithParent(methodDef, nil); err != nil {
 			return err
 		}
 	}
@@ -308,6 +331,22 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		idx := f.emitter.addConst(Constant{Kind: ConstStr, Str: e.Value})
 		f.emit(Instruction{Op: OpConst, A: idx})
 		return nil
+	case *checker.TemplateStr:
+		if len(e.Chunks) == 0 {
+			idx := f.emitter.addConst(Constant{Kind: ConstStr, Str: ""})
+			f.emit(Instruction{Op: OpConst, A: idx})
+			return nil
+		}
+		if err := f.emitExpr(e.Chunks[0]); err != nil {
+			return err
+		}
+		for i := 1; i < len(e.Chunks); i++ {
+			if err := f.emitExpr(e.Chunks[i]); err != nil {
+				return err
+			}
+			f.emit(Instruction{Op: OpAdd})
+		}
+		return nil
 	case *checker.BoolLiteral:
 		imm := 0
 		if e.Value {
@@ -319,13 +358,49 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		f.emit(Instruction{Op: OpConstVoid})
 		return nil
 	case *checker.Variable:
-		index := f.localIndex(e.Name())
-		f.emit(Instruction{Op: OpLoadLocal, A: index})
-		return nil
+		name := e.Name()
+		if idx, ok := f.localLookup(name); ok {
+			f.emit(Instruction{Op: OpLoadLocal, A: idx})
+			return nil
+		}
+		if f.parent != nil && f.parent.hasLocalInChain(name) {
+			idx := f.captureLocal(name)
+			f.emit(Instruction{Op: OpLoadLocal, A: idx})
+			return nil
+		}
+		if fnIndex, ok := f.emitter.funcIndex[name]; ok {
+			fnType, ok := f.emitter.funcTypes[name]
+			if !ok {
+				return fmt.Errorf("missing function type for %s", name)
+			}
+			typeID := f.emitter.addType(fnType)
+			f.emit(Instruction{Op: OpMakeClosure, A: fnIndex, B: 0, C: int(typeID)})
+			f.adjustStack(0, 1)
+			return nil
+		}
+		return fmt.Errorf("unknown identifier: %s", name)
 	case *checker.Identifier:
-		index := f.localIndex(e.Name)
-		f.emit(Instruction{Op: OpLoadLocal, A: index})
-		return nil
+		name := e.Name
+		if idx, ok := f.localLookup(name); ok {
+			f.emit(Instruction{Op: OpLoadLocal, A: idx})
+			return nil
+		}
+		if f.parent != nil && f.parent.hasLocalInChain(name) {
+			idx := f.captureLocal(name)
+			f.emit(Instruction{Op: OpLoadLocal, A: idx})
+			return nil
+		}
+		if fnIndex, ok := f.emitter.funcIndex[name]; ok {
+			fnType, ok := f.emitter.funcTypes[name]
+			if !ok {
+				return fmt.Errorf("missing function type for %s", name)
+			}
+			typeID := f.emitter.addType(fnType)
+			f.emit(Instruction{Op: OpMakeClosure, A: fnIndex, B: 0, C: int(typeID)})
+			f.adjustStack(0, 1)
+			return nil
+		}
+		return fmt.Errorf("unknown identifier: %s", name)
 	case *checker.Negation:
 		if err := f.emitExpr(e.Value); err != nil {
 			return err
@@ -367,10 +442,20 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 	case *checker.If:
 		return f.emitIfExpr(e)
 	case *checker.FunctionDef:
-		if err := f.emitter.emitFunction(e); err != nil {
+		fnIndex, captures, err := f.emitter.emitFunctionWithParent(e, f)
+		if err != nil {
 			return err
 		}
-		f.emit(Instruction{Op: OpConstVoid})
+		for _, name := range captures {
+			idx, ok := f.localLookup(name)
+			if !ok {
+				return fmt.Errorf("missing captured local: %s", name)
+			}
+			f.emit(Instruction{Op: OpLoadLocal, A: idx})
+		}
+		typeID := f.emitter.addType(e.Type())
+		f.emit(Instruction{Op: OpMakeClosure, A: fnIndex, B: len(captures), C: int(typeID)})
+		f.adjustStack(len(captures), 1)
 		return nil
 	case *checker.FunctionCall:
 		return f.emitFunctionCall(e)
@@ -772,18 +857,52 @@ func (f *funcEmitter) localIndex(name string) int {
 	return idx
 }
 
+func (f *funcEmitter) defineLocal(name string) int {
+	return f.localIndex(name)
+}
+
+func (f *funcEmitter) localLookup(name string) (int, bool) {
+	idx, ok := f.locals[name]
+	return idx, ok
+}
+
+func (f *funcEmitter) hasLocalInChain(name string) bool {
+	if _, ok := f.locals[name]; ok {
+		return true
+	}
+	if f.parent != nil {
+		return f.parent.hasLocalInChain(name)
+	}
+	return false
+}
+
+func (f *funcEmitter) captureLocal(name string) int {
+	if idx, ok := f.captureIdx[name]; ok {
+		return idx
+	}
+	idx := f.localIndex(name)
+	f.captureIdx[name] = idx
+	f.captures = append(f.captures, name)
+	f.capLocals = append(f.capLocals, idx)
+	return idx
+}
+
+func (f *funcEmitter) resolveLocal(name string) (int, error) {
+	if idx, ok := f.locals[name]; ok {
+		return idx, nil
+	}
+	if f.parent != nil && f.parent.hasLocalInChain(name) {
+		return f.captureLocal(name), nil
+	}
+	return 0, fmt.Errorf("unknown local: %s", name)
+}
+
 func (f *funcEmitter) resolveTargetLocal(expr checker.Expression) (int, error) {
 	switch e := expr.(type) {
 	case *checker.Variable:
-		if idx, ok := f.locals[e.Name()]; ok {
-			return idx, nil
-		}
-		return f.localIndex(e.Name()), nil
+		return f.resolveLocal(e.Name())
 	case *checker.Identifier:
-		if idx, ok := f.locals[e.Name]; ok {
-			return idx, nil
-		}
-		return f.localIndex(e.Name), nil
+		return f.resolveLocal(e.Name)
 	default:
 		return 0, fmt.Errorf("unsupported reassignment target: %T", expr)
 	}
@@ -803,22 +922,42 @@ func (f *funcEmitter) ensureReturn() {
 }
 
 func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
-	for i := range call.Args {
-		if err := f.emitExpr(call.Args[i]); err != nil {
-			return err
-		}
-	}
 	argc := len(call.Args)
 	if call.ExternalBinding != "" {
+		for i := range call.Args {
+			if err := f.emitExpr(call.Args[i]); err != nil {
+				return err
+			}
+		}
 		bindingIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.ExternalBinding})
 		retID := f.emitter.addType(call.ReturnType)
 		f.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: argc, C: int(retID)})
 		f.adjustStack(argc, 1)
 		return nil
 	}
+	if _, ok := f.locals[call.Name]; ok || (f.parent != nil && f.parent.hasLocalInChain(call.Name)) {
+		idx, err := f.resolveLocal(call.Name)
+		if err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpLoadLocal, A: idx})
+		for i := range call.Args {
+			if err := f.emitExpr(call.Args[i]); err != nil {
+				return err
+			}
+		}
+		f.emit(Instruction{Op: OpCallClosure, B: argc})
+		f.adjustStack(argc+1, 1)
+		return nil
+	}
 	idx, ok := f.emitter.funcIndex[call.Name]
 	if !ok {
 		return fmt.Errorf("unknown function: %s", call.Name)
+	}
+	for i := range call.Args {
+		if err := f.emitExpr(call.Args[i]); err != nil {
+			return err
+		}
 	}
 	f.emit(Instruction{Op: OpCall, A: idx, B: argc})
 	return nil

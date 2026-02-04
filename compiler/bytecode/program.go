@@ -27,6 +27,7 @@ type TypeEntry struct {
 type Function struct {
 	Name     string
 	Arity    int
+	Captures []int
 	Locals   int
 	MaxStack int
 	Code     []Instruction

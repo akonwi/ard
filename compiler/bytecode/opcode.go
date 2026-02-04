@@ -36,6 +36,8 @@ const (
 	OpCall
 	OpCallExtern
 	OpCallModule
+	OpMakeClosure
+	OpCallClosure
 	OpMakeList
 	OpMakeMap
 	OpMakeStruct

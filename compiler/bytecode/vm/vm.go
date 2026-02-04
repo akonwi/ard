@@ -17,6 +17,11 @@ type Frame struct {
 	MaxStack int
 }
 
+type Closure struct {
+	FnIndex  int
+	Captures []*runtime.Object
+}
+
 type VM struct {
 	Program   bytecode.Program
 	Frames    []*Frame
@@ -243,6 +248,74 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				Locals:   make([]*runtime.Object, fnDef.Locals),
 				Stack:    []*runtime.Object{},
 				MaxStack: fnDef.MaxStack,
+			}
+			for i := range args {
+				frame.Locals[i] = args[i]
+			}
+			vm.Frames = append(vm.Frames, frame)
+		case bytecode.OpMakeClosure:
+			fnIndex := inst.A
+			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
+				return nil, fmt.Errorf("function index out of range")
+			}
+			captureCount := inst.B
+			if captureCount < 0 {
+				return nil, fmt.Errorf("invalid capture count")
+			}
+			captures := make([]*runtime.Object, captureCount)
+			for i := captureCount - 1; i >= 0; i-- {
+				val, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				captures[i] = val
+			}
+			fnType, err := vm.typeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			closure := &Closure{FnIndex: fnIndex, Captures: captures}
+			vm.push(curr, runtime.Make(closure, fnType))
+		case bytecode.OpCallClosure:
+			argc := inst.B
+			args := make([]*runtime.Object, argc)
+			for i := argc - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			closureObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			closure, ok := closureObj.Raw().(*Closure)
+			if !ok {
+				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
+			}
+			if closure.FnIndex < 0 || closure.FnIndex >= len(vm.Program.Functions) {
+				return nil, fmt.Errorf("function index out of range")
+			}
+			fnDef := vm.Program.Functions[closure.FnIndex]
+			if argc != fnDef.Arity {
+				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
+			}
+			if len(closure.Captures) != len(fnDef.Captures) {
+				return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(closure.Captures))
+			}
+			frame := &Frame{
+				Fn:       fnDef,
+				IP:       0,
+				Locals:   make([]*runtime.Object, fnDef.Locals),
+				Stack:    []*runtime.Object{},
+				MaxStack: fnDef.MaxStack,
+			}
+			for i, localIdx := range fnDef.Captures {
+				if localIdx < 0 || localIdx >= len(frame.Locals) {
+					return nil, fmt.Errorf("capture local index out of range")
+				}
+				frame.Locals[localIdx] = closure.Captures[i]
 			}
 			for i := range args {
 				frame.Locals[i] = args[i]
