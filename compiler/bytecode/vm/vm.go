@@ -134,6 +134,20 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, res)
+		case bytecode.OpAnd, bytecode.OpOr:
+			b, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			a, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalBinary(inst.Op, a, b)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
 		case bytecode.OpNeg:
 			val, err := vm.pop(curr)
 			if err != nil {
@@ -192,7 +206,36 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return val, nil
 			}
 			vm.push(vm.Frames[len(vm.Frames)-1], val)
-		case bytecode.OpCall, bytecode.OpCallExtern, bytecode.OpCallModule,
+		case bytecode.OpCall:
+			fnIndex := inst.A
+			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
+				return nil, fmt.Errorf("function index out of range")
+			}
+			fnDef := vm.Program.Functions[fnIndex]
+			argc := inst.B
+			if argc != fnDef.Arity {
+				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
+			}
+			args := make([]*runtime.Object, argc)
+			for i := argc - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			frame := &Frame{
+				Fn:       fnDef,
+				IP:       0,
+				Locals:   make([]*runtime.Object, fnDef.Locals),
+				Stack:    []*runtime.Object{},
+				MaxStack: fnDef.MaxStack,
+			}
+			for i := range args {
+				frame.Locals[i] = args[i]
+			}
+			vm.Frames = append(vm.Frames, frame)
+		case bytecode.OpCallExtern, bytecode.OpCallModule,
 			bytecode.OpMakeList, bytecode.OpMakeMap, bytecode.OpMakeStruct, bytecode.OpMakeEnum,
 			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,
 			bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
@@ -287,6 +330,16 @@ func (vm *VM) evalBinary(op bytecode.Opcode, left, right *runtime.Object) (*runt
 	if left.Kind() == runtime.KindStr && right.Kind() == runtime.KindStr {
 		if op == bytecode.OpAdd {
 			return runtime.MakeStr(left.AsString() + right.AsString()), nil
+		}
+	}
+	if left.Kind() == runtime.KindBool && right.Kind() == runtime.KindBool {
+		a := left.AsBool()
+		b := right.AsBool()
+		switch op {
+		case bytecode.OpAnd:
+			return runtime.MakeBool(a && b), nil
+		case bytecode.OpOr:
+			return runtime.MakeBool(a || b), nil
 		}
 	}
 

@@ -9,6 +9,7 @@ import (
 type Emitter struct {
 	program   Program
 	typeIndex map[string]TypeID
+	funcIndex map[string]int
 }
 
 type funcEmitter struct {
@@ -28,6 +29,7 @@ func NewEmitter() *Emitter {
 			Functions: []Function{},
 		},
 		typeIndex: map[string]TypeID{},
+		funcIndex: map[string]int{},
 	}
 }
 
@@ -41,6 +43,18 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 		emitter: e,
 		code:    []Instruction{},
 		locals:  map[string]int{},
+	}
+
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		if stmt.Expr != nil {
+			if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+				if err := e.emitFunction(def); err != nil {
+					return Program{}, err
+				}
+			}
+		}
+		_ = stmt.Stmt
 	}
 	if err := fn.emitStatements(prog.Statements); err != nil {
 		return Program{}, err
@@ -81,6 +95,41 @@ func (e *Emitter) addConst(c Constant) int {
 	index := len(e.program.Constants)
 	e.program.Constants = append(e.program.Constants, c)
 	return index
+}
+
+func (e *Emitter) emitFunction(def *checker.FunctionDef) error {
+	if def.Name == "" {
+		return fmt.Errorf("anonymous functions not yet supported")
+	}
+	if _, ok := e.funcIndex[def.Name]; ok {
+		return nil
+	}
+
+	fnEmitter := &funcEmitter{
+		emitter: e,
+		code:    []Instruction{},
+		locals:  map[string]int{},
+	}
+	for _, param := range def.Parameters {
+		fnEmitter.localIndex(param.Name)
+	}
+	if def.Body != nil {
+		if err := fnEmitter.emitStatements(def.Body.Stmts); err != nil {
+			return err
+		}
+	}
+	fnEmitter.ensureReturn()
+
+	index := len(e.program.Functions)
+	e.funcIndex[def.Name] = index
+	e.program.Functions = append(e.program.Functions, Function{
+		Name:     def.Name,
+		Arity:    len(def.Parameters),
+		Locals:   fnEmitter.localTop,
+		MaxStack: fnEmitter.maxStack,
+		Code:     fnEmitter.code,
+	})
+	return nil
 }
 
 func (f *funcEmitter) emitStatements(stmts []checker.Statement) error {
@@ -202,13 +251,21 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 	case *checker.Equality:
 		return f.emitBinary(expr, OpEq)
 	case *checker.And:
-		return f.emitLogicalAnd(e)
+		return f.emitBinary(expr, OpAnd)
 	case *checker.Or:
-		return f.emitLogicalOr(e)
+		return f.emitBinary(expr, OpOr)
 	case *checker.Block:
 		return f.emitBlockExpr(e)
 	case *checker.If:
 		return f.emitIfExpr(e)
+	case *checker.FunctionDef:
+		if err := f.emitter.emitFunction(e); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpConstVoid})
+		return nil
+	case *checker.FunctionCall:
+		return f.emitFunctionCall(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -256,6 +313,10 @@ func (f *funcEmitter) emitBinary(expr checker.Expression, op Opcode) error {
 		left, right = e.Left, e.Right
 	case *checker.Equality:
 		left, right = e.Left, e.Right
+	case *checker.And:
+		left, right = e.Left, e.Right
+	case *checker.Or:
+		left, right = e.Left, e.Right
 	default:
 		return fmt.Errorf("unsupported binary expression: %T", expr)
 	}
@@ -267,40 +328,6 @@ func (f *funcEmitter) emitBinary(expr checker.Expression, op Opcode) error {
 		return err
 	}
 	f.emit(Instruction{Op: op})
-	return nil
-}
-
-func (f *funcEmitter) emitLogicalAnd(expr *checker.And) error {
-	if err := f.emitExpr(expr.Left); err != nil {
-		return err
-	}
-	falseJump := f.emitJump(OpJumpIfFalse)
-	if err := f.emitExpr(expr.Right); err != nil {
-		return err
-	}
-	endJump := f.emitJump(OpJump)
-	falseLabel := len(f.code)
-	f.patchJump(falseJump, falseLabel)
-	f.emit(Instruction{Op: OpConstBool, Imm: 0})
-	endLabel := len(f.code)
-	f.patchJump(endJump, endLabel)
-	return nil
-}
-
-func (f *funcEmitter) emitLogicalOr(expr *checker.Or) error {
-	if err := f.emitExpr(expr.Left); err != nil {
-		return err
-	}
-	trueJump := f.emitJump(OpJumpIfTrue)
-	if err := f.emitExpr(expr.Right); err != nil {
-		return err
-	}
-	endJump := f.emitJump(OpJump)
-	trueLabel := len(f.code)
-	f.patchJump(trueJump, trueLabel)
-	f.emit(Instruction{Op: OpConstBool, Imm: 1})
-	endLabel := len(f.code)
-	f.patchJump(endJump, endLabel)
 	return nil
 }
 
@@ -396,4 +423,18 @@ func (f *funcEmitter) ensureReturn() {
 		return
 	}
 	f.emit(Instruction{Op: OpReturn})
+}
+
+func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
+	for i := range call.Args {
+		if err := f.emitExpr(call.Args[i]); err != nil {
+			return err
+		}
+	}
+	idx, ok := f.emitter.funcIndex[call.Name]
+	if !ok {
+		return fmt.Errorf("unknown function: %s", call.Name)
+	}
+	f.emit(Instruction{Op: OpCall, A: idx, B: len(call.Args)})
+	return nil
 }

@@ -41,6 +41,10 @@ func (o Opcode) String() string {
 		return "DIV"
 	case OpMod:
 		return "MOD"
+	case OpAnd:
+		return "AND"
+	case OpOr:
+		return "OR"
 	case OpNeg:
 		return "NEG"
 	case OpNot:
@@ -126,7 +130,7 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 2}
 	case OpSwap:
 		return StackEffect{Pop: 2, Push: 2}
-	case OpAdd, OpSub, OpMul, OpDiv, OpMod, OpEq, OpNeq, OpLt, OpLte, OpGt, OpGte:
+	case OpAdd, OpSub, OpMul, OpDiv, OpMod, OpAnd, OpOr, OpEq, OpNeq, OpLt, OpLte, OpGt, OpGte:
 		return StackEffect{Pop: 2, Push: 1}
 	case OpNeg, OpNot:
 		return StackEffect{Pop: 1, Push: 1}

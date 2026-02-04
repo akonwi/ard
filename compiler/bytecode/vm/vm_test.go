@@ -112,3 +112,13 @@ func TestBytecodeLogicalOps(t *testing.T) {
 		t.Fatalf("Expected true, got %v", res)
 	}
 }
+
+func TestBytecodeFunctionCall(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`fn add(a: Int, b: Int) Int { a + b }`,
+		`add(2, 3)`,
+	}, "\n"))
+	if res != 5 {
+		t.Fatalf("Expected 5, got %v", res)
+	}
+}

@@ -20,6 +20,8 @@ const (
 	OpMul
 	OpDiv
 	OpMod
+	OpAnd
+	OpOr
 	OpNeg
 	OpNot
 	OpEq
