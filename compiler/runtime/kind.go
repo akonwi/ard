@@ -64,6 +64,13 @@ func kindForType(t checker.Type) Kind {
 	}
 }
 
+func typeNameForType(t checker.Type) string {
+	if t == nil {
+		return KindUnknown.String()
+	}
+	return t.String()
+}
+
 func (k Kind) String() string {
 	switch k {
 	case KindVoid:

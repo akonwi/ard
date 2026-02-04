@@ -16,6 +16,7 @@ type Object struct {
 	raw   any
 	_type checker.Type
 	kind  Kind
+	name  string
 
 	// Results will set one of these to true
 	isErr bool
@@ -34,6 +35,10 @@ func (o Object) Type() checker.Type {
 
 func (o Object) Kind() Kind {
 	return o.kind
+}
+
+func (o Object) TypeName() string {
+	return o.name
 }
 
 // simply compares the raw representations.
@@ -101,6 +106,7 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 		}
 	}
 	o.kind = kindForType(o._type)
+	o.name = typeNameForType(o._type)
 }
 
 func deepCopy(data any) any {
@@ -133,6 +139,7 @@ func (o *Object) Copy() *Object {
 		raw:    o.raw,
 		_type:  o._type,
 		kind:   o.kind,
+		name:   o.name,
 		isErr:  o.isErr,
 		isOk:   o.isOk,
 		isNone: o.isNone,
@@ -337,6 +344,7 @@ func MakeStr(s string) *Object {
 	return &Object{
 		_type: checker.Str,
 		kind:  KindStr,
+		name:  checker.Str.String(),
 		raw:   s,
 	}
 }
@@ -345,6 +353,7 @@ func MakeInt(i int) *Object {
 	return &Object{
 		_type: checker.Int,
 		kind:  KindInt,
+		name:  checker.Int.String(),
 		raw:   i,
 	}
 }
@@ -353,6 +362,7 @@ func MakeFloat(f float64) *Object {
 	return &Object{
 		_type: checker.Float,
 		kind:  KindFloat,
+		name:  checker.Float.String(),
 		raw:   f,
 	}
 }
@@ -361,6 +371,7 @@ func MakeBool(b bool) *Object {
 	return &Object{
 		_type: checker.Bool,
 		kind:  KindBool,
+		name:  checker.Bool.String(),
 		raw:   b,
 	}
 }
@@ -369,6 +380,7 @@ func MakeNone(of checker.Type) *Object {
 	return &Object{
 		_type:  checker.MakeMaybe(of),
 		kind:   KindMaybe,
+		name:   checker.MakeMaybe(of).String(),
 		raw:    nil,
 		isNone: true,
 	}
@@ -400,6 +412,7 @@ func MakeList(of checker.Type, items ...*Object) *Object {
 	return &Object{
 		_type: checker.MakeList(of),
 		kind:  KindList,
+		name:  checker.MakeList(of).String(),
 		raw:   items,
 	}
 }
@@ -413,6 +426,7 @@ func MakeMap(keyType, valueType checker.Type) *Object {
 	return &Object{
 		_type: checker.MakeMap(keyType, valueType),
 		kind:  KindMap,
+		name:  checker.MakeMap(keyType, valueType).String(),
 		raw:   make(map[string]*Object),
 	}
 }
@@ -522,6 +536,7 @@ func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
 		raw:   fields,
 		_type: of,
 		kind:  KindStruct,
+		name:  of.String(),
 	}
 }
 
@@ -547,6 +562,7 @@ func MakeDynamic(val any) *Object {
 		raw:   val,
 		_type: checker.Dynamic,
 		kind:  KindDynamic,
+		name:  checker.Dynamic.String(),
 	}
 }
 
@@ -555,12 +571,13 @@ func Make(val any, of checker.Type) *Object {
 		raw:   val,
 		_type: of,
 		kind:  kindForType(of),
+		name:  typeNameForType(of),
 	}
 }
 
 // use a single instance of void. lame attempt at optimization
 var void = &Object{
-	raw: nil, _type: checker.Void, kind: KindVoid,
+	raw: nil, _type: checker.Void, kind: KindVoid, name: checker.Void.String(),
 }
 
 func Void() *Object {

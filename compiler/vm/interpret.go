@@ -532,14 +532,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.UnionMatch:
 		{
 			subject := vm.eval(scp, e.Subject)
-			if len(e.TypeCasesByType) > 0 {
-				if arm, ok := e.TypeCasesByType[subject.Type()]; ok {
-					res, _ := vm.evalBlock(scp, arm.Body, func(sc *scope) {
-						sc.add(arm.Pattern.Name, subject)
-					})
-					return res
-				}
-			} else if arm, ok := e.TypeCases[subject.Type().String()]; ok {
+			if arm, ok := e.TypeCases[subject.TypeName()]; ok {
 				res, _ := vm.evalBlock(scp, arm.Body, func(sc *scope) {
 					sc.add(arm.Pattern.Name, subject)
 				})
