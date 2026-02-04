@@ -7,7 +7,7 @@ Goal: generate portable binaries by compiling Ard programs to bytecode and embed
 - Complete AST lowering so backends do not inspect checker.Type.
 - Stabilize runtime.Object, Result, Maybe, Dynamic APIs used by all backends.
 
-Status: mostly complete for current bytecode path (runtime Kind tags + lowered metadata). Remaining gaps include trait dispatch and async lowering for bytecode.
+Status: complete for bytecode path (runtime Kind tags + lowered metadata). Interpreter VM remains legacy and still inspects checker.Type.
 
 ## Phase 1: Lowered IR Stabilization
 
@@ -19,7 +19,7 @@ Deliverables:
 Exit criteria:
 - VM can execute entirely from lowered nodes without reading checker.Type.
 
-Status: complete for supported features. Remaining items are tied to missing bytecode features (async, trait dispatch, extern module calls).
+Status: complete for bytecode path with conformance tests across samples. Interpreter VM is legacy and not fully decoupled.
 
 ## Phase 2: Bytecode Emitter
 
@@ -51,7 +51,7 @@ Deliverables:
 Exit criteria:
 - End-to-end compile + run from bytecode for multiple samples and tests.
 
-Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode.
+Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode. `ard run` now defaults to bytecode with `--legacy` for interpreter.
 
 Performance notes: bytecode VM is ~33% faster with ~24% lower memory and ~28% fewer allocations on the fib(20) benchmark (M3 Pro, Feb 2026).
 
@@ -63,3 +63,5 @@ Deliverables:
 
 Exit criteria:
 - A binary can run without source files or the interpreter frontend.
+
+Status: complete. `ard build FILE` emits a self-contained executable (bytecode embedded in the compiler binary) and supports `--out` for custom output paths.

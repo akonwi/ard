@@ -2,7 +2,7 @@
 
 ## Motivation
 
-Enable multiple backends (VM, Go transpiler, WASM, etc.) by decoupling the interpreter from type system introspection. The VM should be a simple executor that walks pre-lowered instructions, not a system that understands the checker's type representation.
+Enable multiple backends (VM, Go transpiler, WASM, etc.) by decoupling execution from type system introspection. The preferred execution backend is now bytecode; the interpreter VM is considered legacy.
 
 This makes it straightforward to:
 1. Generate different target languages from the same checked code
@@ -24,7 +24,7 @@ VM must introspect checker.Type to execute
 Runtime values
 ```
 
-The VM is tightly coupled to the checker's type system:
+The interpreter VM is tightly coupled to the checker's type system:
 - Calls `.Type()` on AST nodes (38+ times in vm/interpret.go)
 - Does type assertions: `e.Type().(*checker.Map)`, `e.Type().(*checker.StructDef)`
 - Derives type metadata at runtime instead of using pre-computed values
@@ -49,7 +49,7 @@ backend backend backend
  Values  Code  Binary
 ```
 
-Each backend reads pre-computed fields directly from checker nodes instead of doing type introspection.
+The bytecode backend reads pre-computed fields directly from checker nodes instead of doing type introspection.
 
 ## Roadmap
 
@@ -246,7 +246,7 @@ Implemented for three highest-impact node types:
 
 **Impact**: Eliminated 3 major type assertions from VM code. VM now reads pre-computed fields instead of introspecting checker's type system.
 
-### Phase 2: Additional Enrichment (in progress) ✅
+### Phase 2: Additional Enrichment ✅
 
 Implemented for high-impact node type:
 
@@ -258,7 +258,12 @@ Implemented for high-impact node type:
 
 **Impact**: Simplified OptionMatch handling in VM. Pattern matching on Maybe types no longer requires type introspection.
 
-### Phase 3: Simplify Backends
-1. Go transpiler can now read the same lowered AST
-2. WASM compiler can consume the same metadata
-3. Backends no longer need to understand `checker.Type`
+### Phase 3: Simplify Backends ✅
+1. Bytecode backend consumes the lowered AST without checker.Type introspection
+2. Interpreter VM remains legacy and still inspects checker.Type
+
+## Current State
+
+- Bytecode backend is the default execution path (`ard run`) and builds standalone executables (`ard build`).
+- Interpreter VM is legacy and is kept for debugging via `--legacy`.
+- Full removal of checker.Type introspection from the interpreter is deferred since the bytecode VM is now the primary backend.
