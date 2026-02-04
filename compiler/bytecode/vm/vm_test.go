@@ -195,3 +195,31 @@ func TestBytecodeForRangeLoop(t *testing.T) {
 		t.Fatalf("Expected 6, got %v", res)
 	}
 }
+
+func TestBytecodeForInListLoop(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`mut sum = 0`,
+		`let items = [1, 2, 3]`,
+		`for item in items {`,
+		`  sum = sum + item`,
+		`}`,
+		`sum`,
+	}, "\n"))
+	if res != 6 {
+		t.Fatalf("Expected 6, got %v", res)
+	}
+}
+
+func TestBytecodeForInMapLoop(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`mut sum = 0`,
+		`let items = ["a": 1, "b": 2]`,
+		`for key, val in items {`,
+		`  sum = sum + val`,
+		`}`,
+		`sum`,
+	}, "\n"))
+	if res != 3 {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+}

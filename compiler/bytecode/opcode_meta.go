@@ -81,6 +81,14 @@ func (o Opcode) String() string {
 		return "MAKE_STRUCT"
 	case OpMakeEnum:
 		return "MAKE_ENUM"
+	case OpListLen:
+		return "LIST_LEN"
+	case OpListGet:
+		return "LIST_GET"
+	case OpMapKeys:
+		return "MAP_KEYS"
+	case OpMapGet:
+		return "MAP_GET"
 	case OpGetField:
 		return "GET_FIELD"
 	case OpSetField:
@@ -140,6 +148,14 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 0}
 	case OpReturn:
 		return StackEffect{Pop: 1, Push: 0}
+	case OpListLen:
+		return StackEffect{Pop: 1, Push: 1}
+	case OpListGet:
+		return StackEffect{Pop: 2, Push: 1}
+	case OpMapKeys:
+		return StackEffect{Pop: 1, Push: 1}
+	case OpMapGet:
+		return StackEffect{Pop: 2, Push: 1}
 	default:
 		return StackEffect{}
 	}

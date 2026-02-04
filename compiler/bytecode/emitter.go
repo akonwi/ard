@@ -222,6 +222,10 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		return f.emitWhileLoop(s)
 	case *checker.ForIntRange:
 		return f.emitForIntRange(s)
+	case *checker.ForInList:
+		return f.emitForInList(s)
+	case *checker.ForInMap:
+		return f.emitForInMap(s)
 	default:
 		return fmt.Errorf("unsupported statement: %T", s)
 	}
@@ -467,6 +471,116 @@ func (f *funcEmitter) emitForIntRange(loop *checker.ForIntRange) error {
 		f.emit(Instruction{Op: OpAdd})
 		f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
 	}
+
+	f.emit(Instruction{Op: OpJump, A: start})
+	end := len(f.code)
+	f.patchJump(endJump, end)
+	f.patchBreaks(breaks, end)
+	return nil
+}
+
+func (f *funcEmitter) emitForInList(loop *checker.ForInList) error {
+	listTemp := f.tempLocal()
+	if err := f.emitExpr(loop.List); err != nil {
+		return err
+	}
+	listIndex := f.localIndex(listTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: listIndex})
+
+	indexName := loop.Index
+	if indexName == "" {
+		indexName = f.tempLocal()
+	}
+	f.emit(Instruction{Op: OpConstInt, Imm: 0})
+	indexIndex := f.localIndex(indexName)
+	f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+
+	start := len(f.code)
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: listIndex})
+	f.emit(Instruction{Op: OpListLen})
+	f.emit(Instruction{Op: OpLt})
+	endJump := f.emitJump(OpJumpIfFalse)
+
+	// cursor = list[index]
+	f.emit(Instruction{Op: OpLoadLocal, A: listIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpListGet})
+	cursorIndex := f.localIndex(loop.Cursor)
+	f.emit(Instruction{Op: OpStoreLocal, A: cursorIndex})
+	if loop.Index != "" {
+		f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+		f.emit(Instruction{Op: OpStoreLocal, A: f.localIndex(loop.Index)})
+	}
+
+	f.pushBreakList()
+	if err := f.emitStatementsDiscard(loop.Body.Stmts); err != nil {
+		return err
+	}
+	breaks := f.popBreakList()
+
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpConstInt, Imm: 1})
+	f.emit(Instruction{Op: OpAdd})
+	f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+
+	f.emit(Instruction{Op: OpJump, A: start})
+	end := len(f.code)
+	f.patchJump(endJump, end)
+	f.patchBreaks(breaks, end)
+	return nil
+}
+
+func (f *funcEmitter) emitForInMap(loop *checker.ForInMap) error {
+	mapTemp := f.tempLocal()
+	if err := f.emitExpr(loop.Map); err != nil {
+		return err
+	}
+	mapIndex := f.localIndex(mapTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: mapIndex})
+
+	keysTemp := f.tempLocal()
+	f.emit(Instruction{Op: OpLoadLocal, A: mapIndex})
+	f.emit(Instruction{Op: OpMapKeys})
+	keysIndex := f.localIndex(keysTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: keysIndex})
+
+	indexTemp := f.tempLocal()
+	f.emit(Instruction{Op: OpConstInt, Imm: 0})
+	indexIndex := f.localIndex(indexTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+
+	start := len(f.code)
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: keysIndex})
+	f.emit(Instruction{Op: OpListLen})
+	f.emit(Instruction{Op: OpLt})
+	endJump := f.emitJump(OpJumpIfFalse)
+
+	// key = keys[index]
+	f.emit(Instruction{Op: OpLoadLocal, A: keysIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpListGet})
+	keyIndex := f.localIndex(loop.Key)
+	f.emit(Instruction{Op: OpStoreLocal, A: keyIndex})
+
+	// val = map[key]
+	f.emit(Instruction{Op: OpLoadLocal, A: mapIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: keyIndex})
+	f.emit(Instruction{Op: OpMapGet})
+	valIndex := f.localIndex(loop.Val)
+	f.emit(Instruction{Op: OpStoreLocal, A: valIndex})
+
+	f.pushBreakList()
+	if err := f.emitStatementsDiscard(loop.Body.Stmts); err != nil {
+		return err
+	}
+	breaks := f.popBreakList()
+
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpConstInt, Imm: 1})
+	f.emit(Instruction{Op: OpAdd})
+	f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
 
 	f.emit(Instruction{Op: OpJump, A: start})
 	end := len(f.code)

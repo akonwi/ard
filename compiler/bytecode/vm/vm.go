@@ -277,6 +277,58 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				m.Map_Set(key, val)
 			}
 			vm.push(curr, m)
+		case bytecode.OpListLen:
+			listObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			items := listObj.AsList()
+			vm.push(curr, runtime.MakeInt(len(items)))
+		case bytecode.OpListGet:
+			idxObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			listObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			idx := idxObj.AsInt()
+			items := listObj.AsList()
+			if idx < 0 || idx >= len(items) {
+				return nil, fmt.Errorf("list index out of range")
+			}
+			vm.push(curr, items[idx])
+		case bytecode.OpMapKeys:
+			mapObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			mapType := mapObj.MapType()
+			if mapType == nil {
+				return nil, fmt.Errorf("map keys on non-map")
+			}
+			keys := make([]*runtime.Object, 0, len(mapObj.AsMap()))
+			for key := range mapObj.AsMap() {
+				keys = append(keys, mapObj.Map_GetKey(key))
+			}
+			vm.push(curr, runtime.MakeList(mapType.Key(), keys...))
+		case bytecode.OpMapGet:
+			keyObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			mapObj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			m := mapObj.AsMap()
+			keyStr := runtime.ToMapKey(keyObj)
+			val, ok := m[keyStr]
+			if !ok {
+				return nil, fmt.Errorf("map key not found")
+			}
+			vm.push(curr, val)
 		case bytecode.OpCallExtern, bytecode.OpCallModule,
 			bytecode.OpMakeStruct, bytecode.OpMakeEnum,
 			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,

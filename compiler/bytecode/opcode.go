@@ -40,6 +40,10 @@ const (
 	OpMakeMap
 	OpMakeStruct
 	OpMakeEnum
+	OpListLen
+	OpListGet
+	OpMapKeys
+	OpMapGet
 	OpGetField
 	OpSetField
 	OpCallMethod
