@@ -795,7 +795,7 @@ func (vm *VM) evalFunctionCall(scope *scope, call *checker.FunctionCall, _args .
 		return closure.Eval(args...)
 	}
 
-	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.Type()))
+	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.TypeName()))
 }
 
 func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope)) (*runtime.Object, bool) {
