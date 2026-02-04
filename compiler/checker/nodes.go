@@ -95,6 +95,7 @@ func (f *FloatLiteral) Type() Type {
 type ListLiteral struct {
 	Elements []Expression
 	_type    Type
+	ListType Type // Pre-computed by checker
 }
 
 func (l *ListLiteral) Type() Type {
@@ -603,9 +604,10 @@ func (o *OptionMatch) Type() Type {
 }
 
 type EnumMatch struct {
-	Subject  Expression
-	Cases    []*Block
-	CatchAll *Block
+	Subject             Expression
+	Cases               []*Block
+	CatchAll            *Block
+	DiscriminantToIndex map[int]int8 // Pre-computed discriminant lookup
 }
 
 func (e *EnumMatch) Type() Type {
@@ -1053,6 +1055,7 @@ type ModuleStructInstance struct {
 	Module     string
 	Property   *StructInstance
 	FieldTypes map[string]Type // Pre-computed by checker
+	StructType Type            // Pre-computed by checker
 }
 
 func (p *ModuleStructInstance) Type() Type {
@@ -1146,8 +1149,10 @@ func (e Enum) hasTrait(trait *Trait) bool {
 }
 
 type EnumVariant struct {
-	enum    *Enum
-	Variant int8
+	enum         *Enum
+	Variant      int8
+	EnumType     Type // Pre-computed by checker
+	Discriminant int  // Pre-computed by checker
 }
 
 func (ev EnumVariant) Type() Type {
@@ -1304,6 +1309,7 @@ type StructInstance struct {
 	Fields     map[string]Expression
 	_type      *StructDef
 	FieldTypes map[string]Type // Pre-computed by checker
+	StructType Type            // Pre-computed by checker
 }
 
 func (s StructInstance) Type() Type {

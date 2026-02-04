@@ -19,6 +19,11 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
+	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex"),
+	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
+	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
+	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
+	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},
 		checker.BoolMethod{},
@@ -1939,7 +1944,7 @@ func TestEnumValues(t *testing.T) {
 			},
 		},
 		{
-			name: "Enum variant values must be integer literals",
+			name:  "Enum variant values must be integer literals",
 			input: `enum Test { X = "not an int" }`,
 			diagnostics: []checker.Diagnostic{
 				{
@@ -2237,8 +2242,6 @@ func TestMatchingOnInts(t *testing.T) {
 		},
 	})
 }
-
-
 
 func TestGenerics(t *testing.T) {
 	run(t, []test{

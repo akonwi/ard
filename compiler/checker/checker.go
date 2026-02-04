@@ -1345,16 +1345,19 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 			elements[i] = element
 		}
 
+		listType := declaredType.(*List)
 		return &ListLiteral{
 			Elements: elements,
-			_type:    declaredType.(*List),
+			_type:    listType,
+			ListType: listType,
 		}
 	}
 
 	if len(expr.Items) == 0 {
 		c.addError("Empty lists need an explicit type", expr.GetLocation())
 		c.halted = true
-		return &ListLiteral{_type: MakeList(Void), Elements: []Expression{}}
+		listType := MakeList(Void)
+		return &ListLiteral{_type: listType, ListType: listType, Elements: []Expression{}}
 	}
 
 	hasError := false
@@ -1382,9 +1385,11 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		return nil
 	}
 
+	listType := MakeList(elementType)
 	return &ListLiteral{
 		Elements: elements,
-		_type:    MakeList(elementType),
+		_type:    listType,
+		ListType: listType,
 	}
 }
 
@@ -1666,6 +1671,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		Traits:  structDefCopy.Traits,
 		Private: structDefCopy.Private,
 	}
+	instance.StructType = instance._type
 	return instance
 }
 
@@ -3053,10 +3059,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Create the EnumMatch
+			discriminantToIndex := make(map[int]int8, len(enumType.Values))
+			for i, value := range enumType.Values {
+				discriminantToIndex[value.Value] = int8(i)
+			}
 			enumMatch := &EnumMatch{
-				Subject:  subject,
-				Cases:    cases,
-				CatchAll: catchAllBody,
+				Subject:             subject,
+				Cases:               cases,
+				CatchAll:            catchAllBody,
+				DiscriminantToIndex: discriminantToIndex,
 			}
 
 			return enumMatch
@@ -3482,6 +3493,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							Module:     mod.Path(),
 							Property:   instance,
 							FieldTypes: fieldTypes,
+							StructType: instance._type,
 						}
 					case *parse.Identifier:
 						sym := mod.Get(prop.Name)
@@ -3533,7 +3545,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 
-				return &EnumVariant{enum: enum, Variant: variant}
+				return &EnumVariant{
+					enum:         enum,
+					Variant:      variant,
+					EnumType:     enum,
+					Discriminant: enum.Values[variant].Value,
+				}
 			}
 			// Handle nested static properties like http::Method::Get
 			if _, ok := s.Target.(*parse.StaticProperty); ok {
@@ -3558,7 +3575,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					return &EnumVariant{enum: enum, Variant: variant}
+					return &EnumVariant{
+						enum:         enum,
+						Variant:      variant,
+						EnumType:     enum,
+						Discriminant: enum.Values[variant].Value,
+					}
 				}
 
 				c.addError(fmt.Sprintf("Cannot access property on %T", nestedSym.Type()), s.Property.GetLocation())

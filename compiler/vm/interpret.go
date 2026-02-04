@@ -455,7 +455,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			for i, el := range e.Elements {
 				raw[i] = vm.eval(scp, el)
 			}
-			return runtime.Make(raw, e.Type())
+			return runtime.Make(raw, e.ListType)
 		}
 	case *checker.MapLiteral:
 		{
@@ -491,13 +491,9 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			discriminant := subject.Raw().(int)
 
 			// Map discriminant value to variant index
-			enumType := e.Subject.Type().(*checker.Enum)
-			var variantIndex int8 = -1
-			for i, value := range enumType.Values {
-				if value.Value == discriminant {
-					variantIndex = int8(i)
-					break
-				}
+			variantIndex, ok := e.DiscriminantToIndex[discriminant]
+			if !ok {
+				variantIndex = -1
 			}
 
 			// If there is a catch-all case and we do not have a specific handler for this variant
@@ -518,9 +514,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.EnumVariant:
 		// Get the enum type and find the discriminant value for this variant
-		enumType := e.Type().(*checker.Enum)
-		discriminant := enumType.Values[e.Variant].Value
-		return runtime.Make(discriminant, e.Type())
+		return runtime.Make(e.Discriminant, e.EnumType)
 	case *checker.BoolMatch:
 		{
 			subject := vm.eval(scp, e.Subject)
@@ -574,7 +568,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					raw[name] = runtime.MakeNone(ftype)
 				}
 			}
-			return runtime.Make(raw, e.Type())
+			return runtime.Make(raw, e.StructType)
 		}
 	case *checker.ModuleStructInstance:
 		{
@@ -590,7 +584,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					raw[name] = runtime.MakeNone(ftype)
 				}
 			}
-			return runtime.MakeStruct(e.Type(), raw)
+			return runtime.MakeStruct(e.StructType, raw)
 		}
 	case *checker.ResultMatch:
 		{
