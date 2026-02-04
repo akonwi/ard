@@ -2134,13 +2134,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			// Create and return the function call node
-			return &FunctionCall{
+			call := &FunctionCall{
 				Name:       s.Name,
 				Args:       args,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
+			if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
+				call.ExternalBinding = extFnDef.ExternalBinding
+			}
+			return call
 		}
 	case *parse.InstanceProperty:
 		{

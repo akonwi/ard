@@ -1054,10 +1054,11 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name       string
-	Args       []Expression
-	fn         *FunctionDef
-	ReturnType Type // Pre-computed by checker
+	Name            string
+	Args            []Expression
+	fn              *FunctionDef
+	ReturnType      Type // Pre-computed by checker
+	ExternalBinding string
 }
 
 func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {

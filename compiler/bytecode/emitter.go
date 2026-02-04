@@ -808,11 +808,19 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 			return err
 		}
 	}
+	argc := len(call.Args)
+	if call.ExternalBinding != "" {
+		bindingIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.ExternalBinding})
+		retID := f.emitter.addType(call.ReturnType)
+		f.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: argc, C: int(retID)})
+		f.adjustStack(argc, 1)
+		return nil
+	}
 	idx, ok := f.emitter.funcIndex[call.Name]
 	if !ok {
 		return fmt.Errorf("unknown function: %s", call.Name)
 	}
-	f.emit(Instruction{Op: OpCall, A: idx, B: len(call.Args)})
+	f.emit(Instruction{Op: OpCall, A: idx, B: argc})
 	return nil
 }
 

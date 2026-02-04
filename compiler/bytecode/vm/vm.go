@@ -6,6 +6,7 @@ import (
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
+	corevm "github.com/akonwi/ard/vm"
 )
 
 type Frame struct {
@@ -22,10 +23,14 @@ type VM struct {
 	typeCache map[bytecode.TypeID]checker.Type
 	modules   *ModuleRegistry
 	funcIndex map[string]int
+	ffi       *corevm.RuntimeFFIRegistry
 }
 
 func New(program bytecode.Program) *VM {
-	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}}
+	ffi := corevm.NewRuntimeFFIRegistry()
+	_ = ffi.RegisterBuiltinFFIFunctions()
+	_ = ffi.RegisterGeneratedFFIFunctions()
+	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}
 	for i := range program.Functions {
 		vm.funcIndex[program.Functions[i].Name] = i
 	}
@@ -758,8 +763,33 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, res)
-		case bytecode.OpCallExtern,
-			bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
+		case bytecode.OpCallExtern:
+			bindingConst, err := vm.constAt(inst.A)
+			if err != nil {
+				return nil, err
+			}
+			if bindingConst.Kind != bytecode.ConstStr {
+				return nil, fmt.Errorf("extern call expects string binding")
+			}
+			argc := inst.Imm
+			args := make([]*runtime.Object, argc)
+			for i := argc - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.ffi.Call(bindingConst.Str, args, retType)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
 			bytecode.OpMatchMaybe, bytecode.OpMatchResult,
 			bytecode.OpAsyncStart, bytecode.OpAsyncEval:
 			return nil, fmt.Errorf("opcode not implemented: %s", inst.Op)
