@@ -42,8 +42,16 @@ const (
 	OpMakeEnum
 	OpListLen
 	OpListGet
+	OpListSet
+	OpListPush
+	OpListPrepend
 	OpMapKeys
 	OpMapGet
+	OpMapGetValue
+	OpMapSet
+	OpMapDrop
+	OpMapHas
+	OpMapSize
 	OpGetField
 	OpSetField
 	OpCallMethod

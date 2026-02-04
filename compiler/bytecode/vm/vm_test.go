@@ -223,3 +223,37 @@ func TestBytecodeForInMapLoop(t *testing.T) {
 		t.Fatalf("Expected 3, got %v", res)
 	}
 }
+
+func TestBytecodeListMethods(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`let items = [1, 2, 3]`,
+		`items.size()`,
+	}, "\n"))
+	if res != 3 {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+	res = runBytecode(t, strings.Join([]string{
+		`let items = [1, 2, 3]`,
+		`items.at(1)`,
+	}, "\n"))
+	if res != 2 {
+		t.Fatalf("Expected 2, got %v", res)
+	}
+}
+
+func TestBytecodeMapMethods(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`let items = ["a": 1, "b": 2]`,
+		`items.size()`,
+	}, "\n"))
+	if res != 2 {
+		t.Fatalf("Expected 2, got %v", res)
+	}
+	res = runBytecode(t, strings.Join([]string{
+		`let items = ["a": 1, "b": 2]`,
+		`items.has("a")`,
+	}, "\n"))
+	if res != true {
+		t.Fatalf("Expected true, got %v", res)
+	}
+}

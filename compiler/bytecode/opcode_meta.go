@@ -85,10 +85,26 @@ func (o Opcode) String() string {
 		return "LIST_LEN"
 	case OpListGet:
 		return "LIST_GET"
+	case OpListSet:
+		return "LIST_SET"
+	case OpListPush:
+		return "LIST_PUSH"
+	case OpListPrepend:
+		return "LIST_PREPEND"
 	case OpMapKeys:
 		return "MAP_KEYS"
 	case OpMapGet:
 		return "MAP_GET"
+	case OpMapGetValue:
+		return "MAP_GET_VALUE"
+	case OpMapSet:
+		return "MAP_SET"
+	case OpMapDrop:
+		return "MAP_DROP"
+	case OpMapHas:
+		return "MAP_HAS"
+	case OpMapSize:
+		return "MAP_SIZE"
 	case OpGetField:
 		return "GET_FIELD"
 	case OpSetField:
@@ -152,10 +168,26 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 1}
 	case OpListGet:
 		return StackEffect{Pop: 2, Push: 1}
+	case OpListSet:
+		return StackEffect{Pop: 3, Push: 1}
+	case OpListPush:
+		return StackEffect{Pop: 2, Push: 1}
+	case OpListPrepend:
+		return StackEffect{Pop: 2, Push: 1}
 	case OpMapKeys:
 		return StackEffect{Pop: 1, Push: 1}
 	case OpMapGet:
 		return StackEffect{Pop: 2, Push: 1}
+	case OpMapGetValue:
+		return StackEffect{Pop: 2, Push: 1}
+	case OpMapSet:
+		return StackEffect{Pop: 3, Push: 1}
+	case OpMapDrop:
+		return StackEffect{Pop: 2, Push: 1}
+	case OpMapHas:
+		return StackEffect{Pop: 2, Push: 1}
+	case OpMapSize:
+		return StackEffect{Pop: 1, Push: 1}
 	default:
 		return StackEffect{}
 	}

@@ -314,6 +314,10 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitListLiteral(e)
 	case *checker.MapLiteral:
 		return f.emitMapLiteral(e)
+	case *checker.ListMethod:
+		return f.emitListMethod(e)
+	case *checker.MapMethod:
+		return f.emitMapMethod(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -567,7 +571,7 @@ func (f *funcEmitter) emitForInMap(loop *checker.ForInMap) error {
 	// val = map[key]
 	f.emit(Instruction{Op: OpLoadLocal, A: mapIndex})
 	f.emit(Instruction{Op: OpLoadLocal, A: keyIndex})
-	f.emit(Instruction{Op: OpMapGet})
+	f.emit(Instruction{Op: OpMapGetValue})
 	valIndex := f.localIndex(loop.Val)
 	f.emit(Instruction{Op: OpStoreLocal, A: valIndex})
 
@@ -737,4 +741,88 @@ func (f *funcEmitter) emitMapLiteral(lit *checker.MapLiteral) error {
 		f.maxStack = f.stack
 	}
 	return nil
+}
+
+func (f *funcEmitter) emitListMethod(method *checker.ListMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	switch method.Kind {
+	case checker.ListSize:
+		f.emit(Instruction{Op: OpListLen})
+		return nil
+	case checker.ListAt:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpListGet})
+		return nil
+	case checker.ListPush:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpListPush})
+		return nil
+	case checker.ListPrepend:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpListPrepend})
+		return nil
+	case checker.ListSet:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		if err := f.emitExpr(method.Args[1]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpListSet})
+		return nil
+	default:
+		return fmt.Errorf("unsupported list method: %v", method.Kind)
+	}
+}
+
+func (f *funcEmitter) emitMapMethod(method *checker.MapMethod) error {
+	if err := f.emitExpr(method.Subject); err != nil {
+		return err
+	}
+	switch method.Kind {
+	case checker.MapKeys:
+		f.emit(Instruction{Op: OpMapKeys})
+		return nil
+	case checker.MapSize:
+		f.emit(Instruction{Op: OpMapSize})
+		return nil
+	case checker.MapGet:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		mapType := checker.MakeMap(method.KeyType, method.ValueType)
+		f.emit(Instruction{Op: OpMapGet, A: int(f.emitter.addType(mapType))})
+		return nil
+	case checker.MapSet:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		if err := f.emitExpr(method.Args[1]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpMapSet})
+		return nil
+	case checker.MapDrop:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpMapDrop})
+		return nil
+	case checker.MapHas:
+		if err := f.emitExpr(method.Args[0]); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpMapHas})
+		return nil
+	default:
+		return fmt.Errorf("unsupported map method: %v", method.Kind)
+	}
 }
