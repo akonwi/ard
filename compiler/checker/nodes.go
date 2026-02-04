@@ -1342,6 +1342,8 @@ type ResultMatch struct {
 	Subject Expression
 	Ok      *Match
 	Err     *Match
+	OkType  Type // Pre-computed ok type
+	ErrType Type // Pre-computed err type
 }
 
 func (r ResultMatch) Type() Type {

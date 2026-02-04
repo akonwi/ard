@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,7 +18,15 @@ func runBytecode(t *testing.T, input string) any {
 		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 	}
 	tree := result.Program
-	c := checker.New("test.ard", tree, nil)
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	resolver, err := checker.NewModuleResolver(workingDir)
+	if err != nil {
+		t.Fatalf("Failed to init module resolver: %v", err)
+	}
+	c := checker.New("test.ard", tree, resolver)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("Diagnostics found: %v", c.Diagnostics())
@@ -273,5 +282,43 @@ func TestBytecodeStringMethods(t *testing.T) {
 	res = runBytecode(t, `"hello".contains("ell")`)
 	if res != true {
 		t.Fatalf("Expected true, got %v", res)
+	}
+}
+
+func TestBytecodeBoolMatch(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`match (1 < 2) {`,
+		`  true => 1,`,
+		`  false => 2`,
+		`}`,
+	}, "\n"))
+	if res != 1 {
+		t.Fatalf("Expected 1, got %v", res)
+	}
+}
+
+func TestBytecodeMaybeMatch(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/maybe`,
+		`match maybe::some(3) {`,
+		`  n => n + 1,`,
+		`  _ => 0`,
+		`}`,
+	}, "\n"))
+	if res != 4 {
+		t.Fatalf("Expected 4, got %v", res)
+	}
+}
+
+func TestBytecodeResultMatch(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/result`,
+		`match Result::ok(5) {`,
+		`  ok(n) => n,`,
+		`  err => 0`,
+		`}`,
+	}, "\n"))
+	if res != 5 {
+		t.Fatalf("Expected 5, got %v", res)
 	}
 }

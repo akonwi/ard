@@ -61,6 +61,9 @@ const (
 	OpBoolMethod
 	OpMaybeMethod
 	OpResultMethod
+	OpMaybeUnwrap
+	OpResultUnwrap
+	OpTypeName
 	OpMatchBool
 	OpMatchInt
 	OpMatchEnum

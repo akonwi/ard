@@ -20,10 +20,11 @@ type VM struct {
 	Program   bytecode.Program
 	Frames    []*Frame
 	typeCache map[bytecode.TypeID]checker.Type
+	modules   *ModuleRegistry
 }
 
 func New(program bytecode.Program) *VM {
-	return &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}}
+	return &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry()}
 }
 
 func (vm *VM) Run(functionName string) (*runtime.Object, error) {
@@ -534,7 +535,69 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, res)
-		case bytecode.OpCallExtern, bytecode.OpCallModule,
+		case bytecode.OpMaybeUnwrap:
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			if subj.IsNone() {
+				return nil, fmt.Errorf("cannot unwrap none")
+			}
+			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.A))
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, obj)
+		case bytecode.OpResultUnwrap:
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			unwrapped := subj.UnwrapResult()
+			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
+			if err != nil {
+				return nil, err
+			}
+			unwrapped.SetRefinedType(resolved)
+			vm.push(curr, unwrapped)
+		case bytecode.OpTypeName:
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, runtime.MakeStr(subj.TypeName()))
+		case bytecode.OpCallModule:
+			modConst, err := vm.constAt(inst.A)
+			if err != nil {
+				return nil, err
+			}
+			fnConst, err := vm.constAt(inst.B)
+			if err != nil {
+				return nil, err
+			}
+			if modConst.Kind != bytecode.ConstStr || fnConst.Kind != bytecode.ConstStr {
+				return nil, fmt.Errorf("module call expects string constants")
+			}
+			argc := inst.Imm
+			args := make([]*runtime.Object, argc)
+			for i := argc - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			call := &checker.FunctionCall{Name: fnConst.Str, ReturnType: retType}
+			res, err := vm.modules.Call(modConst.Str, call, args)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
+		case bytecode.OpCallExtern,
 			bytecode.OpMakeStruct, bytecode.OpMakeEnum,
 			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,
 			bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,

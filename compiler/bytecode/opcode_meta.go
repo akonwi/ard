@@ -123,6 +123,12 @@ func (o Opcode) String() string {
 		return "MAYBE_METHOD"
 	case OpResultMethod:
 		return "RESULT_METHOD"
+	case OpMaybeUnwrap:
+		return "MAYBE_UNWRAP"
+	case OpResultUnwrap:
+		return "RESULT_UNWRAP"
+	case OpTypeName:
+		return "TYPE_NAME"
 	case OpMatchBool:
 		return "MATCH_BOOL"
 	case OpMatchInt:
@@ -202,6 +208,8 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 1}
 	case OpStrMethod, OpIntMethod, OpFloatMethod, OpBoolMethod, OpMaybeMethod, OpResultMethod:
 		return StackEffect{}
+	case OpMaybeUnwrap, OpResultUnwrap, OpTypeName:
+		return StackEffect{Pop: 1, Push: 1}
 	default:
 		return StackEffect{}
 	}

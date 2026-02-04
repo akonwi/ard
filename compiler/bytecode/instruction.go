@@ -5,4 +5,5 @@ type Instruction struct {
 	A   int
 	B   int
 	Imm int
+	C   int
 }

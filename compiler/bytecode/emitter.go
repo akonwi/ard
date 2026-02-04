@@ -2,6 +2,7 @@ package bytecode
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -330,6 +331,22 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitMaybeMethod(e)
 	case *checker.ResultMethod:
 		return f.emitResultMethod(e)
+	case *checker.ModuleFunctionCall:
+		return f.emitModuleFunctionCall(e)
+	case *checker.BoolMatch:
+		return f.emitBoolMatch(e)
+	case *checker.IntMatch:
+		return f.emitIntMatch(e)
+	case *checker.OptionMatch:
+		return f.emitOptionMatch(e)
+	case *checker.ResultMatch:
+		return f.emitResultMatch(e)
+	case *checker.ConditionalMatch:
+		return f.emitConditionalMatch(e)
+	case *checker.EnumMatch:
+		return f.emitEnumMatch(e)
+	case *checker.UnionMatch:
+		return f.emitUnionMatch(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -724,6 +741,21 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 	return nil
 }
 
+func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) error {
+	for i := range call.Call.Args {
+		if err := f.emitExpr(call.Call.Args[i]); err != nil {
+			return err
+		}
+	}
+	modIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.Module})
+	fnIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.Call.Name})
+	retID := f.emitter.addType(call.Call.ReturnType)
+	argc := len(call.Call.Args)
+	f.emit(Instruction{Op: OpCallModule, A: modIdx, B: fnIdx, Imm: argc, C: int(retID)})
+	f.adjustStack(argc, 1)
+	return nil
+}
+
 func (f *funcEmitter) emitListLiteral(lit *checker.ListLiteral) error {
 	for i := range lit.Elements {
 		if err := f.emitExpr(lit.Elements[i]); err != nil {
@@ -914,5 +946,327 @@ func (f *funcEmitter) emitResultMethod(method *checker.ResultMethod) error {
 	retID := f.emitter.addType(method.ReturnType)
 	f.emit(Instruction{Op: OpResultMethod, A: int(method.Kind), B: len(method.Args), Imm: int(retID)})
 	f.adjustStack(len(method.Args)+1, 1)
+	return nil
+}
+
+func (f *funcEmitter) emitBoolMatch(match *checker.BoolMatch) error {
+	if err := f.emitExpr(match.Subject); err != nil {
+		return err
+	}
+	condTemp := f.tempLocal()
+	condIndex := f.localIndex(condTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: condIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: condIndex})
+	falseJump := f.emitJump(OpJumpIfFalse)
+	if err := f.emitBlockExpr(match.True); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJump)
+	falseLabel := len(f.code)
+	f.patchJump(falseJump, falseLabel)
+	if err := f.emitBlockExpr(match.False); err != nil {
+		return err
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	return nil
+}
+
+func (f *funcEmitter) emitIntMatch(match *checker.IntMatch) error {
+	if err := f.emitExpr(match.Subject); err != nil {
+		return err
+	}
+	subjectTemp := f.tempLocal()
+	subjectIndex := f.localIndex(subjectTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
+
+	endJump := f.emitJump(OpJump)
+	caseJumps := []int{}
+
+	intKeys := make([]int, 0, len(match.IntCases))
+	for key := range match.IntCases {
+		intKeys = append(intKeys, key)
+	}
+	if len(intKeys) > 1 {
+		slices.Sort(intKeys)
+	}
+	for _, key := range intKeys {
+		caseBlock := match.IntCases[key]
+		if caseBlock == nil {
+			continue
+		}
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		f.emit(Instruction{Op: OpConstInt, Imm: key})
+		f.emit(Instruction{Op: OpEq})
+		caseJump := f.emitJump(OpJumpIfFalse)
+		if err := f.emitBlockExpr(caseBlock); err != nil {
+			return err
+		}
+		caseJumps = append(caseJumps, f.emitJump(OpJump))
+		f.patchJump(caseJump, len(f.code))
+	}
+
+	ranges := make([]checker.IntRange, 0, len(match.RangeCases))
+	for r := range match.RangeCases {
+		ranges = append(ranges, r)
+	}
+	if len(ranges) > 1 {
+		slices.SortFunc(ranges, func(a, b checker.IntRange) int {
+			if a.Start != b.Start {
+				return a.Start - b.Start
+			}
+			return a.End - b.End
+		})
+	}
+	for _, r := range ranges {
+		caseBlock := match.RangeCases[r]
+		if caseBlock == nil {
+			continue
+		}
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		f.emit(Instruction{Op: OpConstInt, Imm: r.Start})
+		f.emit(Instruction{Op: OpGte})
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		f.emit(Instruction{Op: OpConstInt, Imm: r.End})
+		f.emit(Instruction{Op: OpLte})
+		f.emit(Instruction{Op: OpAnd})
+		caseJump := f.emitJump(OpJumpIfFalse)
+		if err := f.emitBlockExpr(caseBlock); err != nil {
+			return err
+		}
+		caseJumps = append(caseJumps, f.emitJump(OpJump))
+		f.patchJump(caseJump, len(f.code))
+	}
+
+	if match.CatchAll != nil {
+		if err := f.emitBlockExpr(match.CatchAll); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	for _, j := range caseJumps {
+		f.patchJump(j, endLabel)
+	}
+	return nil
+}
+
+func (f *funcEmitter) emitOptionMatch(match *checker.OptionMatch) error {
+	if err := f.emitExpr(match.Subject); err != nil {
+		return err
+	}
+	subjectTemp := f.tempLocal()
+	subjectIndex := f.localIndex(subjectTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
+
+	f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+	retID := f.emitter.addType(checker.Bool)
+	f.emit(Instruction{Op: OpMaybeMethod, A: int(checker.MaybeIsNone), B: 0, Imm: int(retID)})
+	falseJump := f.emitJump(OpJumpIfFalse)
+	if err := f.emitBlockExpr(match.None); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJump)
+
+	falseLabel := len(f.code)
+	f.patchJump(falseJump, falseLabel)
+	if match.Some != nil {
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		innerID := f.emitter.addType(match.InnerType)
+		f.emit(Instruction{Op: OpMaybeUnwrap, A: int(innerID)})
+		f.emit(Instruction{Op: OpStoreLocal, A: f.localIndex(match.Some.Pattern.Name)})
+		if err := f.emitBlockExpr(match.Some.Body); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	return nil
+}
+
+func (f *funcEmitter) emitResultMatch(match *checker.ResultMatch) error {
+	if err := f.emitExpr(match.Subject); err != nil {
+		return err
+	}
+	subjectTemp := f.tempLocal()
+	subjectIndex := f.localIndex(subjectTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
+
+	f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+	retID := f.emitter.addType(checker.Bool)
+	f.emit(Instruction{Op: OpResultMethod, A: int(checker.ResultIsErr), B: 0, Imm: int(retID)})
+	errJump := f.emitJump(OpJumpIfFalse)
+
+	if match.Err != nil {
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		errTypeID := f.emitter.addType(match.ErrType)
+		f.emit(Instruction{Op: OpResultUnwrap, A: int(errTypeID)})
+		f.emit(Instruction{Op: OpStoreLocal, A: f.localIndex(match.Err.Pattern.Name)})
+		if err := f.emitBlockExpr(match.Err.Body); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endJump := f.emitJump(OpJump)
+
+	falseLabel := len(f.code)
+	f.patchJump(errJump, falseLabel)
+	if match.Ok != nil {
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		okTypeID := f.emitter.addType(match.OkType)
+		f.emit(Instruction{Op: OpResultUnwrap, A: int(okTypeID)})
+		f.emit(Instruction{Op: OpStoreLocal, A: f.localIndex(match.Ok.Pattern.Name)})
+		if err := f.emitBlockExpr(match.Ok.Body); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	return nil
+}
+
+func (f *funcEmitter) emitConditionalMatch(match *checker.ConditionalMatch) error {
+	endJump := f.emitJump(OpJump)
+	caseJumps := []int{}
+	for _, c := range match.Cases {
+		if err := f.emitExpr(c.Condition); err != nil {
+			return err
+		}
+		caseJump := f.emitJump(OpJumpIfFalse)
+		if err := f.emitBlockExpr(c.Body); err != nil {
+			return err
+		}
+		caseJumps = append(caseJumps, f.emitJump(OpJump))
+		f.patchJump(caseJump, len(f.code))
+	}
+	if match.CatchAll != nil {
+		if err := f.emitBlockExpr(match.CatchAll); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	for _, j := range caseJumps {
+		f.patchJump(j, endLabel)
+	}
+	return nil
+}
+
+func (f *funcEmitter) emitEnumMatch(match *checker.EnumMatch) error {
+	if err := f.emitExpr(match.Subject); err != nil {
+		return err
+	}
+	subjectTemp := f.tempLocal()
+	subjectIndex := f.localIndex(subjectTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
+
+	endJump := f.emitJump(OpJump)
+	caseJumps := []int{}
+	discriminants := make([]int, 0, len(match.DiscriminantToIndex))
+	for disc := range match.DiscriminantToIndex {
+		discriminants = append(discriminants, disc)
+	}
+	if len(discriminants) > 1 {
+		slices.Sort(discriminants)
+	}
+	for _, disc := range discriminants {
+		idx := match.DiscriminantToIndex[disc]
+		if int(idx) < 0 || int(idx) >= len(match.Cases) {
+			continue
+		}
+		caseBlock := match.Cases[idx]
+		if caseBlock == nil {
+			continue
+		}
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		f.emit(Instruction{Op: OpConstInt, Imm: disc})
+		f.emit(Instruction{Op: OpEq})
+		caseJump := f.emitJump(OpJumpIfFalse)
+		if err := f.emitBlockExpr(caseBlock); err != nil {
+			return err
+		}
+		caseJumps = append(caseJumps, f.emitJump(OpJump))
+		f.patchJump(caseJump, len(f.code))
+	}
+	if match.CatchAll != nil {
+		if err := f.emitBlockExpr(match.CatchAll); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	for _, j := range caseJumps {
+		f.patchJump(j, endLabel)
+	}
+	return nil
+}
+
+func (f *funcEmitter) emitUnionMatch(match *checker.UnionMatch) error {
+	if err := f.emitExpr(match.Subject); err != nil {
+		return err
+	}
+	subjectTemp := f.tempLocal()
+	subjectIndex := f.localIndex(subjectTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: subjectIndex})
+
+	typeTemp := f.tempLocal()
+	f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+	f.emit(Instruction{Op: OpTypeName})
+	typeIndex := f.localIndex(typeTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: typeIndex})
+
+	endJump := f.emitJump(OpJump)
+	caseJumps := []int{}
+
+	keys := make([]string, 0, len(match.TypeCases))
+	for key := range match.TypeCases {
+		keys = append(keys, key)
+	}
+	if len(keys) > 1 {
+		slices.Sort(keys)
+	}
+	for _, key := range keys {
+		caseMatch := match.TypeCases[key]
+		if caseMatch == nil {
+			continue
+		}
+		idx := f.emitter.addConst(Constant{Kind: ConstStr, Str: key})
+		f.emit(Instruction{Op: OpLoadLocal, A: typeIndex})
+		f.emit(Instruction{Op: OpConst, A: idx})
+		f.emit(Instruction{Op: OpEq})
+		caseJump := f.emitJump(OpJumpIfFalse)
+		f.emit(Instruction{Op: OpLoadLocal, A: subjectIndex})
+		f.emit(Instruction{Op: OpStoreLocal, A: f.localIndex(caseMatch.Pattern.Name)})
+		if err := f.emitBlockExpr(caseMatch.Body); err != nil {
+			return err
+		}
+		caseJumps = append(caseJumps, f.emitJump(OpJump))
+		f.patchJump(caseJump, len(f.code))
+	}
+
+	if match.CatchAll != nil {
+		if err := f.emitBlockExpr(match.CatchAll); err != nil {
+			return err
+		}
+	} else {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	endLabel := len(f.code)
+	f.patchJump(endJump, endLabel)
+	for _, j := range caseJumps {
+		f.patchJump(j, endLabel)
+	}
 	return nil
 }

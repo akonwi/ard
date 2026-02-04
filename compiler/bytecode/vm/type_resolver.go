@@ -39,6 +39,9 @@ func (vm *VM) typeFor(id bytecode.TypeID) (checker.Type, error) {
 
 func parseTypeName(name string) (checker.Type, error) {
 	trimmed := strings.TrimSpace(name)
+	if strings.Contains(trimmed, "$") {
+		return checker.Dynamic, nil
+	}
 	switch trimmed {
 	case checker.Int.String():
 		return checker.Int, nil
@@ -52,6 +55,26 @@ func parseTypeName(name string) (checker.Type, error) {
 		return checker.Void, nil
 	case checker.Dynamic.String():
 		return checker.Dynamic, nil
+	}
+	if strings.HasSuffix(trimmed, "?") {
+		inner := strings.TrimSuffix(trimmed, "?")
+		of, err := parseTypeName(inner)
+		if err != nil {
+			return nil, err
+		}
+		return checker.MakeMaybe(of), nil
+	}
+	leftBang, rightBang := splitTopLevel(trimmed, '!')
+	if rightBang != "" {
+		leftType, err := parseTypeName(leftBang)
+		if err != nil {
+			return nil, err
+		}
+		rightType, err := parseTypeName(rightBang)
+		if err != nil {
+			return nil, err
+		}
+		return checker.MakeResult(leftType, rightType), nil
 	}
 
 	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {

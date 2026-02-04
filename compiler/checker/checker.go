@@ -3339,6 +3339,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				Subject: subject,
 				Ok:      okCase,
 				Err:     errCase,
+				OkType:  resultType.Val(),
+				ErrType: resultType.Err(),
 			}
 		}
 
