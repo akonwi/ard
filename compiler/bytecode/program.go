@@ -17,13 +17,23 @@ type Constant struct {
 	Bool  bool
 }
 
+type TypeID int
+
+type TypeEntry struct {
+	ID   TypeID
+	Name string
+}
+
 type Function struct {
-	Name  string
-	Arity int
-	Code  []Instruction
+	Name     string
+	Arity    int
+	Locals   int
+	MaxStack int
+	Code     []Instruction
 }
 
 type Program struct {
 	Constants []Constant
+	Types     []TypeEntry
 	Functions []Function
 }
