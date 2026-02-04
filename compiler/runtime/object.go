@@ -15,6 +15,7 @@ type Object struct {
 	// Object should only be nested in raw for collections like List, Map.
 	raw   any
 	_type checker.Type
+	kind  Kind
 
 	// Results will set one of these to true
 	isErr bool
@@ -29,6 +30,10 @@ func (o Object) String() string {
 
 func (o Object) Type() checker.Type {
 	return o._type
+}
+
+func (o Object) Kind() Kind {
+	return o.kind
 }
 
 // simply compares the raw representations.
@@ -95,6 +100,7 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 			}
 		}
 	}
+	o.kind = kindForType(o._type)
 }
 
 func deepCopy(data any) any {
@@ -126,6 +132,7 @@ func (o *Object) Copy() *Object {
 	copy := &Object{
 		raw:    o.raw,
 		_type:  o._type,
+		kind:   o.kind,
 		isErr:  o.isErr,
 		isOk:   o.isOk,
 		isNone: o.isNone,
@@ -244,7 +251,7 @@ func (o Object) AsBool() bool {
 }
 
 func (o Object) IsInt() (int, bool) {
-	if o._type == checker.Int {
+	if o.kind == KindInt {
 		return o.raw.(int), true
 	}
 	return 0, false
@@ -258,11 +265,11 @@ func (o Object) AsInt() int {
 }
 
 func (o Object) IsFloat() bool {
-	return o._type == checker.Float
+	return o.kind == KindFloat
 }
 
 func (o Object) AsFloat() float64 {
-	if o._type == checker.Float {
+	if o.kind == KindFloat {
 		return o.raw.(float64)
 	}
 	panic(fmt.Sprintf("%T is not a Float", o._type))
@@ -276,7 +283,7 @@ func (o Object) AsString() string {
 }
 
 func (o Object) IsStr() (string, bool) {
-	if o._type == checker.Str {
+	if o.kind == KindStr {
 		return o.raw.(string), true
 	}
 	return "", false
@@ -296,9 +303,40 @@ func (o *Object) AsMap() map[string]*Object {
 	panic(fmt.Sprintf("%T is not a Map", o._type))
 }
 
+func (o Object) MapType() *checker.Map {
+	if o.kind != KindMap {
+		return nil
+	}
+	if m, ok := o._type.(*checker.Map); ok {
+		return m
+	}
+	return nil
+}
+
+func (o Object) StructType() *checker.StructDef {
+	if o.kind != KindStruct {
+		return nil
+	}
+	if s, ok := o._type.(*checker.StructDef); ok {
+		return s
+	}
+	return nil
+}
+
+func (o Object) EnumType() *checker.Enum {
+	if o.kind != KindEnum {
+		return nil
+	}
+	if e, ok := o._type.(*checker.Enum); ok {
+		return e
+	}
+	return nil
+}
+
 func MakeStr(s string) *Object {
 	return &Object{
 		_type: checker.Str,
+		kind:  KindStr,
 		raw:   s,
 	}
 }
@@ -306,6 +344,7 @@ func MakeStr(s string) *Object {
 func MakeInt(i int) *Object {
 	return &Object{
 		_type: checker.Int,
+		kind:  KindInt,
 		raw:   i,
 	}
 }
@@ -313,6 +352,7 @@ func MakeInt(i int) *Object {
 func MakeFloat(f float64) *Object {
 	return &Object{
 		_type: checker.Float,
+		kind:  KindFloat,
 		raw:   f,
 	}
 }
@@ -320,6 +360,7 @@ func MakeFloat(f float64) *Object {
 func MakeBool(b bool) *Object {
 	return &Object{
 		_type: checker.Bool,
+		kind:  KindBool,
 		raw:   b,
 	}
 }
@@ -327,6 +368,7 @@ func MakeBool(b bool) *Object {
 func MakeNone(of checker.Type) *Object {
 	return &Object{
 		_type:  checker.MakeMaybe(of),
+		kind:   KindMaybe,
 		raw:    nil,
 		isNone: true,
 	}
@@ -357,6 +399,7 @@ func (o Object) IsNone() bool {
 func MakeList(of checker.Type, items ...*Object) *Object {
 	return &Object{
 		_type: checker.MakeList(of),
+		kind:  KindList,
 		raw:   items,
 	}
 }
@@ -369,6 +412,7 @@ func (o *Object) List_Push(item *Object) {
 func MakeMap(keyType, valueType checker.Type) *Object {
 	return &Object{
 		_type: checker.MakeMap(keyType, valueType),
+		kind:  KindMap,
 		raw:   make(map[string]*Object),
 	}
 }
@@ -477,14 +521,12 @@ func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
 	return &Object{
 		raw:   fields,
 		_type: of,
+		kind:  KindStruct,
 	}
 }
 
 func (o Object) IsStruct() bool {
-	if _, ok := o._type.(*checker.StructDef); ok {
-		return true
-	}
-	return false
+	return o.kind == KindStruct
 }
 
 func (o Object) Struct_Get(key string) *Object {
@@ -504,6 +546,7 @@ func MakeDynamic(val any) *Object {
 	return &Object{
 		raw:   val,
 		_type: checker.Dynamic,
+		kind:  KindDynamic,
 	}
 }
 
@@ -511,12 +554,13 @@ func Make(val any, of checker.Type) *Object {
 	return &Object{
 		raw:   val,
 		_type: of,
+		kind:  kindForType(of),
 	}
 }
 
 // use a single instance of void. lame attempt at optimization
 var void = &Object{
-	raw: nil, _type: checker.Void,
+	raw: nil, _type: checker.Void, kind: KindVoid,
 }
 
 func Void() *Object {

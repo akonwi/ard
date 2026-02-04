@@ -35,10 +35,10 @@ type GlobalVM struct {
 
 func NewRuntime(module checker.Module, scripting ...bool) *GlobalVM {
 	g := &GlobalVM{
-		subject:      module,
-		modules:      map[string]*VM{},
-		moduleScopes: map[string]*scope{},
-		ffiRegistry: NewRuntimeFFIRegistry(),
+		subject:        module,
+		modules:        map[string]*VM{},
+		moduleScopes:   map[string]*scope{},
+		ffiRegistry:    NewRuntimeFFIRegistry(),
 		moduleRegistry: NewModuleRegistry(),
 	}
 	g.initFFIRegistry()
@@ -174,13 +174,15 @@ func (g *GlobalVM) getMethod(strct checker.Type, name string) (runtime.Closure, 
 }
 
 type VM struct {
-	hq     *GlobalVM
-	result runtime.Object
+	hq            *GlobalVM
+	result        runtime.Object
+	traitDispatch map[*checker.Trait]map[runtime.Kind]struct{}
 }
 
 func NewVM(hq *GlobalVM) *VM {
 	vm := &VM{
-		hq: hq,
+		hq:            hq,
+		traitDispatch: map[*checker.Trait]map[runtime.Kind]struct{}{},
 	}
 	return vm
 }
@@ -191,6 +193,36 @@ func (vm *VM) init(program *checker.Program, scope *scope) {
 		vm.do(statement, scope)
 	}
 
+}
+
+func (vm *VM) traitDispatchFor(trait *checker.Trait) map[runtime.Kind]struct{} {
+	if trait == nil {
+		return nil
+	}
+	if dispatch, ok := vm.traitDispatch[trait]; ok {
+		return dispatch
+	}
+
+	dispatch := map[runtime.Kind]struct{}{}
+	if checker.HasTrait(checker.Str, trait) {
+		dispatch[runtime.KindStr] = struct{}{}
+	}
+	if checker.HasTrait(checker.Int, trait) {
+		dispatch[runtime.KindInt] = struct{}{}
+	}
+	if checker.HasTrait(checker.Float, trait) {
+		dispatch[runtime.KindFloat] = struct{}{}
+	}
+	if checker.HasTrait(checker.Bool, trait) {
+		dispatch[runtime.KindBool] = struct{}{}
+	}
+
+	// Structs and enums can implement traits, so allow dispatch by kind.
+	dispatch[runtime.KindStruct] = struct{}{}
+	dispatch[runtime.KindEnum] = struct{}{}
+
+	vm.traitDispatch[trait] = dispatch
+	return dispatch
 }
 
 /*
