@@ -169,3 +169,29 @@ func TestBytecodeMapLiteral(t *testing.T) {
 		t.Fatalf("Unexpected map result: %v", res)
 	}
 }
+
+func TestBytecodeWhileLoop(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`mut count = 0`,
+		`while count < 3 {`,
+		`  count = count + 1`,
+		`}`,
+		`count`,
+	}, "\n"))
+	if res != 3 {
+		t.Fatalf("Expected 3, got %v", res)
+	}
+}
+
+func TestBytecodeForRangeLoop(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`mut sum = 0`,
+		`for i in 1..3 {`,
+		`  sum = sum + i`,
+		`}`,
+		`sum`,
+	}, "\n"))
+	if res != 6 {
+		t.Fatalf("Expected 6, got %v", res)
+	}
+}

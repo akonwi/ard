@@ -13,12 +13,14 @@ type Emitter struct {
 }
 
 type funcEmitter struct {
-	emitter  *Emitter
-	code     []Instruction
-	locals   map[string]int
-	localTop int
-	stack    int
-	maxStack int
+	emitter    *Emitter
+	code       []Instruction
+	locals     map[string]int
+	localTop   int
+	stack      int
+	maxStack   int
+	breakStack [][]int
+	tempIndex  int
 }
 
 func NewEmitter() *Emitter {
@@ -136,6 +138,13 @@ func (f *funcEmitter) emitStatements(stmts []checker.Statement) error {
 	for i := range stmts {
 		stmt := stmts[i]
 		isLast := i == len(stmts)-1
+		if stmt.Break {
+			idx := f.emitJump(OpJump)
+			if err := f.addBreakJump(idx); err != nil {
+				return err
+			}
+			continue
+		}
 		if stmt.Stmt != nil {
 			if err := f.emitStatement(stmt.Stmt); err != nil {
 				return err
@@ -163,6 +172,33 @@ func (f *funcEmitter) emitStatements(stmts []checker.Statement) error {
 	return nil
 }
 
+func (f *funcEmitter) emitStatementsDiscard(stmts []checker.Statement) error {
+	for i := range stmts {
+		stmt := stmts[i]
+		if stmt.Break {
+			idx := f.emitJump(OpJump)
+			if err := f.addBreakJump(idx); err != nil {
+				return err
+			}
+			continue
+		}
+		if stmt.Stmt != nil {
+			if err := f.emitStatement(stmt.Stmt); err != nil {
+				return err
+			}
+			continue
+		}
+		if stmt.Expr != nil {
+			if err := f.emitExpr(stmt.Expr); err != nil {
+				return err
+			}
+			f.emit(Instruction{Op: OpPop})
+		}
+		_ = i
+	}
+	return nil
+}
+
 func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
@@ -182,6 +218,10 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		}
 		f.emit(Instruction{Op: OpStoreLocal, A: index})
 		return nil
+	case *checker.WhileLoop:
+		return f.emitWhileLoop(s)
+	case *checker.ForIntRange:
+		return f.emitForIntRange(s)
 	default:
 		return fmt.Errorf("unsupported statement: %T", s)
 	}
@@ -366,6 +406,75 @@ func (f *funcEmitter) emitIfExpr(expr *checker.If) error {
 	return nil
 }
 
+func (f *funcEmitter) emitWhileLoop(loop *checker.WhileLoop) error {
+	start := len(f.code)
+	if err := f.emitExpr(loop.Condition); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJumpIfFalse)
+	f.pushBreakList()
+	if err := f.emitStatementsDiscard(loop.Body.Stmts); err != nil {
+		return err
+	}
+	breaks := f.popBreakList()
+	f.emit(Instruction{Op: OpJump, A: start})
+	end := len(f.code)
+	f.patchJump(endJump, end)
+	f.patchBreaks(breaks, end)
+	return nil
+}
+
+func (f *funcEmitter) emitForIntRange(loop *checker.ForIntRange) error {
+	if err := f.emitExpr(loop.Start); err != nil {
+		return err
+	}
+	cursorIndex := f.localIndex(loop.Cursor)
+	f.emit(Instruction{Op: OpStoreLocal, A: cursorIndex})
+
+	endTemp := f.tempLocal()
+	if err := f.emitExpr(loop.End); err != nil {
+		return err
+	}
+	endIndex := f.localIndex(endTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: endIndex})
+
+	indexIndex := -1
+	if loop.Index != "" {
+		f.emit(Instruction{Op: OpConstInt, Imm: 0})
+		indexIndex = f.localIndex(loop.Index)
+		f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+	}
+
+	start := len(f.code)
+	f.emit(Instruction{Op: OpLoadLocal, A: cursorIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: endIndex})
+	f.emit(Instruction{Op: OpLte})
+	endJump := f.emitJump(OpJumpIfFalse)
+
+	f.pushBreakList()
+	if err := f.emitStatementsDiscard(loop.Body.Stmts); err != nil {
+		return err
+	}
+	breaks := f.popBreakList()
+
+	f.emit(Instruction{Op: OpLoadLocal, A: cursorIndex})
+	f.emit(Instruction{Op: OpConstInt, Imm: 1})
+	f.emit(Instruction{Op: OpAdd})
+	f.emit(Instruction{Op: OpStoreLocal, A: cursorIndex})
+	if indexIndex != -1 {
+		f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+		f.emit(Instruction{Op: OpConstInt, Imm: 1})
+		f.emit(Instruction{Op: OpAdd})
+		f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+	}
+
+	f.emit(Instruction{Op: OpJump, A: start})
+	end := len(f.code)
+	f.patchJump(endJump, end)
+	f.patchBreaks(breaks, end)
+	return nil
+}
+
 func (f *funcEmitter) emit(inst Instruction) {
 	f.code = append(f.code, inst)
 	if effect := inst.Op.StackEffect(); effect.Pop > 0 || effect.Push > 0 {
@@ -387,6 +496,41 @@ func (f *funcEmitter) patchJump(index int, target int) {
 		return
 	}
 	f.code[index].A = target
+}
+
+func (f *funcEmitter) patchBreaks(breaks []int, target int) {
+	for _, idx := range breaks {
+		f.patchJump(idx, target)
+	}
+}
+
+func (f *funcEmitter) pushBreakList() {
+	f.breakStack = append(f.breakStack, []int{})
+}
+
+func (f *funcEmitter) popBreakList() []int {
+	if len(f.breakStack) == 0 {
+		return nil
+	}
+	idx := len(f.breakStack) - 1
+	list := f.breakStack[idx]
+	f.breakStack = f.breakStack[:idx]
+	return list
+}
+
+func (f *funcEmitter) addBreakJump(index int) error {
+	if len(f.breakStack) == 0 {
+		return fmt.Errorf("break used outside of loop")
+	}
+	idx := len(f.breakStack) - 1
+	f.breakStack[idx] = append(f.breakStack[idx], index)
+	return nil
+}
+
+func (f *funcEmitter) tempLocal() string {
+	name := fmt.Sprintf("@tmp%d", f.tempIndex)
+	f.tempIndex++
+	return name
 }
 
 func (f *funcEmitter) localIndex(name string) int {
