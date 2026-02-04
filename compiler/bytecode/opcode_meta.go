@@ -210,6 +210,8 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{}
 	case OpMaybeUnwrap, OpResultUnwrap, OpTypeName:
 		return StackEffect{Pop: 1, Push: 1}
+	case OpTryResult, OpTryMaybe:
+		return StackEffect{Pop: 1, Push: 1}
 	default:
 		return StackEffect{}
 	}

@@ -3707,6 +3707,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						expr:       expr,
 						ok:         _type.val, // Returns unwrapped value for continued execution
 						OkType:     _type.val,
+						ErrType:    _type.err,
 						CatchBlock: block,
 						CatchVar:   s.CatchVar.Name,
 						Kind:       TryResult,
@@ -3718,10 +3719,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("try without catch clause requires function to return a Result type", s.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr:   expr,
-							ok:     _type.val,
-							OkType: _type.val,
-							Kind:   TryResult,
+							expr:    expr,
+							ok:      _type.val,
+							OkType:  _type.val,
+							ErrType: _type.err,
+							Kind:    TryResult,
 						}
 					}
 
@@ -3730,20 +3732,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String()), s.Expression.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr:   expr,
-							ok:     _type.val,
-							OkType: _type.val,
-							Kind:   TryResult,
+							expr:    expr,
+							ok:      _type.val,
+							OkType:  _type.val,
+							ErrType: _type.err,
+							Kind:    TryResult,
 						}
 					}
 
 					// Success: returns the unwrapped value
 					// Error: early returns the error wrapped in the function's Result type
 					return &TryOp{
-						expr:   expr,
-						ok:     _type.val,
-						OkType: _type.val,
-						Kind:   TryResult,
+						expr:    expr,
+						ok:      _type.val,
+						OkType:  _type.val,
+						ErrType: _type.err,
+						Kind:    TryResult,
 					}
 				}
 			case *Maybe:
@@ -3834,10 +3838,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
 				// Return a try op with the expr type to avoid cascading errors
 				return &TryOp{
-					expr:   expr,
-					ok:     expr.Type(),
-					OkType: expr.Type(),
-					Kind:   TryResult, // Default to Result, though this is an error path
+					expr:    expr,
+					ok:      expr.Type(),
+					OkType:  expr.Type(),
+					ErrType: Void,
+					Kind:    TryResult, // Default to Result, though this is an error path
 				}
 			}
 		}

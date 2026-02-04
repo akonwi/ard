@@ -30,6 +30,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMatch{}, "OkType", "ErrType"),
+	cmpopts.IgnoreFields(checker.TryOp{}, "OkType", "ErrType"),
 	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
 	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType"),

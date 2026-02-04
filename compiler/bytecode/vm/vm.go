@@ -566,6 +566,55 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, runtime.MakeStr(subj.TypeName()))
+		case bytecode.OpTryResult:
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			if subj.IsErr() {
+				if inst.A >= 0 {
+					if inst.B >= 0 {
+						unwrapped := subj.UnwrapResult()
+						errType, err := vm.typeFor(bytecode.TypeID(inst.C))
+						if err != nil {
+							return nil, err
+						}
+						unwrapped.SetRefinedType(errType)
+						if inst.B < len(curr.Locals) {
+							curr.Locals[inst.B] = unwrapped
+						}
+					}
+					curr.Stack = curr.Stack[:0]
+					curr.IP = inst.A
+					continue
+				}
+				return subj, nil
+			}
+			unwrapped := subj.UnwrapResult()
+			okType, err := vm.typeFor(bytecode.TypeID(inst.Imm))
+			if err != nil {
+				return nil, err
+			}
+			unwrapped.SetRefinedType(okType)
+			vm.push(curr, unwrapped)
+		case bytecode.OpTryMaybe:
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			if subj.IsNone() {
+				if inst.A >= 0 {
+					curr.Stack = curr.Stack[:0]
+					curr.IP = inst.A
+					continue
+				}
+				return subj, nil
+			}
+			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.Imm))
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, obj)
 		case bytecode.OpCallModule:
 			modConst, err := vm.constAt(inst.A)
 			if err != nil {
@@ -602,7 +651,6 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 			bytecode.OpGetField, bytecode.OpSetField, bytecode.OpCallMethod,
 			bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
 			bytecode.OpMatchMaybe, bytecode.OpMatchResult,
-			bytecode.OpTryResult, bytecode.OpTryMaybe,
 			bytecode.OpAsyncStart, bytecode.OpAsyncEval:
 			return nil, fmt.Errorf("opcode not implemented: %s", inst.Op)
 		default:

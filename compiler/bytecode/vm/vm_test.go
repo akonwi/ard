@@ -322,3 +322,37 @@ func TestBytecodeResultMatch(t *testing.T) {
 		t.Fatalf("Expected 5, got %v", res)
 	}
 }
+
+func TestBytecodeTryResult(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/result`,
+		`fn compute() Int!Str {`,
+		`  let val = try Result::ok(4)`,
+		`  Result::ok(val + 1)`,
+		`}`,
+		`match compute() {`,
+		`  ok(n) => n,`,
+		`  err => 0`,
+		`}`,
+	}, "\n"))
+	if res != 5 {
+		t.Fatalf("Expected 5, got %v", res)
+	}
+}
+
+func TestBytecodeTryMaybe(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`use ard/maybe`,
+		`fn compute() Int? {`,
+		`  let val = try maybe::some(4)`,
+		`  maybe::some(val + 2)`,
+		`}`,
+		`match compute() {`,
+		`  n => n,`,
+		`  _ => 0`,
+		`}`,
+	}, "\n"))
+	if res != 6 {
+		t.Fatalf("Expected 6, got %v", res)
+	}
+}

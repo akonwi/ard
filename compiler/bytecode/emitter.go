@@ -347,6 +347,8 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitEnumMatch(e)
 	case *checker.UnionMatch:
 		return f.emitUnionMatch(e)
+	case *checker.TryOp:
+		return f.emitTryOp(e)
 	default:
 		return fmt.Errorf("unsupported expression: %T", e)
 	}
@@ -1267,6 +1269,43 @@ func (f *funcEmitter) emitUnionMatch(match *checker.UnionMatch) error {
 	f.patchJump(endJump, endLabel)
 	for _, j := range caseJumps {
 		f.patchJump(j, endLabel)
+	}
+	return nil
+}
+
+func (f *funcEmitter) emitTryOp(op *checker.TryOp) error {
+	if err := f.emitExpr(op.Expr()); err != nil {
+		return err
+	}
+
+	okTypeID := f.emitter.addType(op.OkType)
+	errTypeID := f.emitter.addType(op.ErrType)
+	catchIndex := -1
+	if op.CatchVar != "" {
+		catchIndex = f.localIndex(op.CatchVar)
+	}
+	catchJump := f.emitJump(OpJump)
+	tryOp := Instruction{Op: OpTryResult, A: -1, B: catchIndex, Imm: int(okTypeID), C: int(errTypeID)}
+	if op.Kind == checker.TryMaybe {
+		tryOp.Op = OpTryMaybe
+		tryOp.C = 0
+	}
+	// replace jump with try opcode
+	f.code[catchJump] = tryOp
+
+	if op.CatchBlock != nil {
+		endJump := f.emitJump(OpJump)
+		catchLabel := len(f.code)
+		// patch try opcode with catch label
+		f.code[catchJump].A = catchLabel
+		if err := f.emitBlockExpr(op.CatchBlock); err != nil {
+			return err
+		}
+		f.emit(Instruction{Op: OpReturn})
+		endLabel := len(f.code)
+		f.patchJump(endJump, endLabel)
+	} else {
+		f.code[catchJump].A = -1
 	}
 	return nil
 }

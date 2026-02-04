@@ -143,12 +143,14 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 			}
 			return nil, fmt.Errorf("%s: %s", args[0].AsString(), actual)
 		}
-		return subj.UnwrapResult(), nil
+		unwrapped := subj.UnwrapResult()
+		return unwrapped, nil
 	case checker.ResultOr:
 		if subj.IsErr() {
 			return args[0], nil
 		}
-		return subj.UnwrapResult(), nil
+		unwrapped := subj.UnwrapResult()
+		return unwrapped, nil
 	case checker.ResultIsOk:
 		return runtime.MakeBool(!subj.IsErr()), nil
 	case checker.ResultIsErr:

@@ -1377,6 +1377,7 @@ type TryOp struct {
 	expr       Expression
 	ok         Type
 	OkType     Type
+	ErrType    Type
 	CatchBlock *Block
 	CatchVar   string
 	Kind       TryKind // Pre-computed by checker: TryResult or TryMaybe
