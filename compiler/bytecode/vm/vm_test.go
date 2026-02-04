@@ -122,3 +122,13 @@ func TestBytecodeFunctionCall(t *testing.T) {
 		t.Fatalf("Expected 5, got %v", res)
 	}
 }
+
+func TestBytecodeIfInFunction(t *testing.T) {
+	res := runBytecode(t, strings.Join([]string{
+		`fn pick(n: Int) Int { if n > 2 { 10 } else { 20 } }`,
+		`pick(3)`,
+	}, "\n"))
+	if res != 10 {
+		t.Fatalf("Expected 10, got %v", res)
+	}
+}
