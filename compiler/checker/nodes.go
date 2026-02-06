@@ -95,6 +95,7 @@ func (f *FloatLiteral) Type() Type {
 type ListLiteral struct {
 	Elements []Expression
 	_type    Type
+	ListType Type // Pre-computed by checker
 }
 
 func (l *ListLiteral) Type() Type {
@@ -187,8 +188,12 @@ func (i *InstanceProperty) String() string {
 }
 
 type InstanceMethod struct {
-	Subject Expression
-	Method  *FunctionCall
+	Subject      Expression
+	Method       *FunctionCall
+	ReceiverKind InstanceReceiverKind
+	StructType   *StructDef
+	EnumType     *Enum
+	TraitType    *Trait
 }
 
 func (i *InstanceMethod) Type() Type {
@@ -198,6 +203,15 @@ func (i *InstanceMethod) Type() Type {
 func (i *InstanceMethod) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Method.Name)
 }
+
+type InstanceReceiverKind uint8
+
+const (
+	ReceiverUnknown InstanceReceiverKind = iota
+	ReceiverStruct
+	ReceiverEnum
+	ReceiverTrait
+)
 
 // Primitive method types with enum-based dispatch
 
@@ -417,19 +431,21 @@ const (
 )
 
 type MaybeMethod struct {
-	Subject   Expression
-	Kind      MaybeMethodKind
-	Args      []Expression
-	InnerType Type         // Pre-computed inner type
-	fn        *FunctionDef // Function definition for return type resolution
+	Subject    Expression
+	Kind       MaybeMethodKind
+	Args       []Expression
+	InnerType  Type         // Pre-computed inner type
+	fn         *FunctionDef // Function definition for return type resolution
+	ReturnType Type         // Pre-computed by checker
 }
 
 func (m *MaybeMethod) Type() Type {
-	// Use function return type if available (handles generics properly)
+	if m.ReturnType != nil {
+		return m.ReturnType
+	}
 	if m.fn != nil {
 		return m.fn.ReturnType
 	}
-	// Fallback to computed type (for backwards compatibility)
 	switch m.Kind {
 	case MaybeExpect, MaybeOr:
 		return m.InnerType
@@ -450,16 +466,20 @@ const (
 )
 
 type ResultMethod struct {
-	Subject Expression
-	Kind    ResultMethodKind
-	Args    []Expression
-	OkType  Type         // Pre-computed OK type
-	ErrType Type         // Pre-computed Error type
-	fn      *FunctionDef // Function definition for return type resolution
+	Subject    Expression
+	Kind       ResultMethodKind
+	Args       []Expression
+	OkType     Type         // Pre-computed OK type
+	ErrType    Type         // Pre-computed Error type
+	fn         *FunctionDef // Function definition for return type resolution
+	ReturnType Type         // Pre-computed by checker
 }
 
 func (m *ResultMethod) Type() Type {
 	// Use function return type if available (handles generics properly)
+	if m.ReturnType != nil {
+		return m.ReturnType
+	}
 	if m.fn != nil {
 		return m.fn.ReturnType
 	}
@@ -603,9 +623,10 @@ func (o *OptionMatch) Type() Type {
 }
 
 type EnumMatch struct {
-	Subject  Expression
-	Cases    []*Block
-	CatchAll *Block
+	Subject             Expression
+	Cases               []*Block
+	CatchAll            *Block
+	DiscriminantToIndex map[int]int8 // Pre-computed discriminant lookup
 }
 
 func (e *EnumMatch) Type() Type {
@@ -667,9 +688,10 @@ func (i *IntMatch) Type() Type {
 }
 
 type UnionMatch struct {
-	Subject   Expression
-	TypeCases map[string]*Match
-	CatchAll  *Block
+	Subject         Expression
+	TypeCases       map[string]*Match
+	TypeCasesByType map[Type]*Match // Pre-computed type lookup
+	CatchAll        *Block
 }
 
 func (u *UnionMatch) Type() Type {
@@ -1032,27 +1054,31 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name string
-	Args []Expression
-	fn   *FunctionDef
+	Name            string
+	Args            []Expression
+	fn              *FunctionDef
+	ReturnType      Type // Pre-computed by checker
+	ExternalBinding string
 }
 
 func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
 	return &FunctionCall{
-		Name: name,
-		Args: args,
-		fn:   &fn,
+		Name:       name,
+		Args:       args,
+		fn:         &fn,
+		ReturnType: fn.ReturnType,
 	}
 }
 
 func (f *FunctionCall) Type() Type {
-	return f.fn.ReturnType
+	return f.ReturnType
 }
 
 type ModuleStructInstance struct {
 	Module     string
 	Property   *StructInstance
 	FieldTypes map[string]Type // Pre-computed by checker
+	StructType Type            // Pre-computed by checker
 }
 
 func (p *ModuleStructInstance) Type() Type {
@@ -1146,8 +1172,10 @@ func (e Enum) hasTrait(trait *Trait) bool {
 }
 
 type EnumVariant struct {
-	enum    *Enum
-	Variant int8
+	enum         *Enum
+	Variant      int8
+	EnumType     Type // Pre-computed by checker
+	Discriminant int  // Pre-computed by checker
 }
 
 func (ev EnumVariant) Type() Type {
@@ -1304,6 +1332,7 @@ type StructInstance struct {
 	Fields     map[string]Expression
 	_type      *StructDef
 	FieldTypes map[string]Type // Pre-computed by checker
+	StructType Type            // Pre-computed by checker
 }
 
 func (s StructInstance) Type() Type {
@@ -1314,6 +1343,8 @@ type ResultMatch struct {
 	Subject Expression
 	Ok      *Match
 	Err     *Match
+	OkType  Type // Pre-computed ok type
+	ErrType Type // Pre-computed err type
 }
 
 func (r ResultMatch) Type() Type {
@@ -1346,6 +1377,8 @@ const (
 type TryOp struct {
 	expr       Expression
 	ok         Type
+	OkType     Type
+	ErrType    Type
 	CatchBlock *Block
 	CatchVar   string
 	Kind       TryKind // Pre-computed by checker: TryResult or TryMaybe

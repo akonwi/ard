@@ -7,9 +7,10 @@ import (
 )
 
 type FiberExecution struct {
-	module Module
-	_type  Type
-	fnName string
+	module    Module
+	_type     Type
+	fnName    string
+	FiberType Type
 }
 
 func (f FiberExecution) Type() Type {
@@ -25,8 +26,9 @@ func (f FiberExecution) GetMainName() string {
 }
 
 type FiberEval struct {
-	fn    Expression
-	_type Type
+	fn        Expression
+	_type     Type
+	FiberType Type
 }
 
 func (f FiberEval) Type() Type {
@@ -56,30 +58,32 @@ func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type)
 				{Expr: main},
 			},
 		}, &SymbolTable{})
-		
+
 		// Specialize Fiber<Void> since async::start takes fn() Void
 		specializedFiberType := c.specializeFiber(fiberType, Void)
-		
+
 		return &FiberExecution{
-			module: module,
-			_type:  specializedFiberType,
-			fnName: "main",
+			module:    module,
+			_type:     specializedFiberType,
+			fnName:    "main",
+			FiberType: specializedFiberType,
 		}
 	case *parse.StaticProperty:
 		module := c.resolveModule(node.Target.String())
 
 		if module == nil {
 			c.addError(fmt.Sprintf("Module not found: %s", node.Target.String()), node.Location)
-			return &FiberExecution{_type: fiberType}
+			return &FiberExecution{_type: fiberType, FiberType: fiberType}
 		}
 
 		// Specialize Fiber<Void> since async::start takes fn() Void
 		specializedFiberType := c.specializeFiber(fiberType, Void)
-		
+
 		return &FiberExecution{
-			module: module,
-			_type:  specializedFiberType,
-			fnName: node.Property.String(),
+			module:    module,
+			_type:     specializedFiberType,
+			fnName:    node.Property.String(),
+			FiberType: specializedFiberType,
 		}
 	default:
 		// probably need to handle when the function is a variable reference
@@ -99,7 +103,7 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 	// (same rules as async::start)
 	var checkedFn Expression
 	var fnDef *FunctionDef
-	
+
 	if anonFn, ok := fnNode.(*parse.AnonymousFunction); ok {
 		// Check anonymous function with isolated scope (no mutable variable access)
 		block := c.checkBlock(anonFn.Body, func() {
@@ -107,7 +111,7 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 		})
 		params := c.resolveParametersWithContext(anonFn.Parameters, nil)
 		returnType := c.resolveReturnTypeWithContext(anonFn.ReturnType, nil)
-		
+
 		uniqueName := fmt.Sprintf("eval_func_%p", fnNode)
 		fnDef = &FunctionDef{
 			Name:       uniqueName,
@@ -121,9 +125,9 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 		// For non-anonymous functions (variable references, etc.), check normally
 		checkedFn = c.checkExpr(fnNode)
 	}
-	
+
 	if checkedFn == nil {
-		return &FiberEval{fn: nil, _type: Void}
+		return &FiberEval{fn: nil, _type: Void, FiberType: Void}
 	}
 
 	// fnNode should be a function type that returns T
@@ -131,11 +135,11 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 	fnType, ok := checkedFn.Type().(*FunctionDef)
 	if !ok {
 		c.addError(fmt.Sprintf("async::eval expects a function argument, got %T", checkedFn.Type()), fnNode.GetLocation())
-		return &FiberEval{fn: checkedFn, _type: Void}
+		return &FiberEval{fn: checkedFn, _type: Void, FiberType: Void}
 	}
 
 	returnType := fnType.ReturnType
-	
+
 	// If the anonymous function has no explicit return type (Void default) but has a body,
 	// infer the return type from the body
 	if returnType == Void && fnType.Body != nil {
@@ -144,7 +148,7 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 			returnType = bodyType
 		}
 	}
-	
+
 	// Dereference the return type in case it's a TypeVar binding
 	returnType = derefType(returnType)
 
@@ -152,39 +156,40 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 	// Get the actual Fiber struct from the async module and specialize $T with returnType
 	asyncMod := c.resolveModule("async")
 	var fiberType Type = &StructDef{Name: "Fiber"}
-	
+
 	if asyncMod != nil {
 		if fiberSym := asyncMod.Get("Fiber"); fiberSym.Type != nil {
 			if fiberStructDef, ok := fiberSym.Type.(*StructDef); ok {
 				// Create a specialized copy of the Fiber struct where $T is bound to returnType
 				typeVarMap := make(map[string]*TypeVar)
 				typeVarMap["T"] = &TypeVar{name: "T", actual: returnType, bound: true}
-				
+
 				fiberCopy := &StructDef{
 					Name:    fiberStructDef.Name,
 					Fields:  make(map[string]Type),
 					Methods: make(map[string]*FunctionDef),
 					Private: fiberStructDef.Private,
 				}
-				
+
 				// Copy fields, replacing $T with the closure's return type
 				for fieldName, fieldType := range fiberStructDef.Fields {
 					fiberCopy.Fields[fieldName] = copyTypeWithTypeVarMap(fieldType, typeVarMap)
 				}
-				
+
 				// Copy and specialize methods
 				for methodName, methodDef := range fiberStructDef.Methods {
 					methodCopy := copyFunctionWithTypeVarMap(methodDef, typeVarMap)
 					fiberCopy.Methods[methodName] = methodCopy
 				}
-				
+
 				fiberType = fiberCopy
 			}
 		}
 	}
-	
+
 	return &FiberEval{
-		fn:    checkedFn,
-		_type: fiberType,
+		fn:        checkedFn,
+		_type:     fiberType,
+		FiberType: fiberType,
 	}
 }

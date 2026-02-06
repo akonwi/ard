@@ -455,7 +455,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			for i, el := range e.Elements {
 				raw[i] = vm.eval(scp, el)
 			}
-			return runtime.Make(raw, e.Type())
+			return runtime.Make(raw, e.ListType)
 		}
 	case *checker.MapLiteral:
 		{
@@ -491,13 +491,9 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			discriminant := subject.Raw().(int)
 
 			// Map discriminant value to variant index
-			enumType := e.Subject.Type().(*checker.Enum)
-			var variantIndex int8 = -1
-			for i, value := range enumType.Values {
-				if value.Value == discriminant {
-					variantIndex = int8(i)
-					break
-				}
+			variantIndex, ok := e.DiscriminantToIndex[discriminant]
+			if !ok {
+				variantIndex = -1
 			}
 
 			// If there is a catch-all case and we do not have a specific handler for this variant
@@ -518,9 +514,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 		}
 	case *checker.EnumVariant:
 		// Get the enum type and find the discriminant value for this variant
-		enumType := e.Type().(*checker.Enum)
-		discriminant := enumType.Values[e.Variant].Value
-		return runtime.Make(discriminant, e.Type())
+		return runtime.Make(e.Discriminant, e.EnumType)
 	case *checker.BoolMatch:
 		{
 			subject := vm.eval(scp, e.Subject)
@@ -538,12 +532,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 	case *checker.UnionMatch:
 		{
 			subject := vm.eval(scp, e.Subject)
-
-			// Get the concrete type name as a string
-			typeName := subject.Type().String()
-
-			// If we have a case for this specific type
-			if arm, ok := e.TypeCases[typeName]; ok {
+			if arm, ok := e.TypeCases[subject.TypeName()]; ok {
 				res, _ := vm.evalBlock(scp, arm.Body, func(sc *scope) {
 					sc.add(arm.Pattern.Name, subject)
 				})
@@ -558,7 +547,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 
 			// This should never happen if the type checker is working correctly
 			// because it ensures the match is exhaustive
-			panic(fmt.Errorf("No matching case for union type %s", typeName))
+			panic(fmt.Errorf("No matching case for union type %s", subject.Kind()))
 		}
 	case *checker.StructInstance:
 		{
@@ -574,7 +563,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					raw[name] = runtime.MakeNone(ftype)
 				}
 			}
-			return runtime.Make(raw, e.Type())
+			return runtime.Make(raw, e.StructType)
 		}
 	case *checker.ModuleStructInstance:
 		{
@@ -590,7 +579,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					raw[name] = runtime.MakeNone(ftype)
 				}
 			}
-			return runtime.MakeStruct(e.Type(), raw)
+			return runtime.MakeStruct(e.StructType, raw)
 		}
 	case *checker.ResultMatch:
 		{
@@ -692,11 +681,11 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 					} else {
 						// No catch block: propagate none by early returning
 						scp.stop()
-						return runtime.MakeNone(e.Type())
+						return runtime.MakeNone(e.OkType)
 					}
 				}
 				// Some case: unwrap and continue execution
-				return runtime.Make(subj.Raw(), e.Type())
+				return runtime.Make(subj.Raw(), e.OkType)
 
 			default:
 				panic(fmt.Errorf("Unknown try kind: %d", e.Kind))
@@ -731,7 +720,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			}()
 			f.callMain(e.GetMainName(), fscope)
 		})
-		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
+		return runtime.MakeStruct(e.FiberType, map[string]*runtime.Object{
 			"wg": runtime.MakeDynamic(wg),
 		})
 	case *checker.FiberEval:
@@ -773,7 +762,7 @@ func (vm *VM) eval(scp *scope, expr checker.Expression) *runtime.Object {
 			*resultContainer = *result
 		})
 
-		return runtime.MakeStruct(e.Type(), map[string]*runtime.Object{
+		return runtime.MakeStruct(e.FiberType, map[string]*runtime.Object{
 			"wg":     runtime.MakeDynamic(wg),
 			"result": resultContainer,
 		})
@@ -806,7 +795,7 @@ func (vm *VM) evalFunctionCall(scope *scope, call *checker.FunctionCall, _args .
 		return closure.Eval(args...)
 	}
 
-	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.Type()))
+	panic(fmt.Errorf("Not a function: %s: %s", call.Name, sig.TypeName()))
 }
 
 func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope)) (*runtime.Object, bool) {
@@ -833,41 +822,63 @@ func (vm *VM) evalBlock(scope *scope, block *checker.Block, init func(s *scope))
 	return res, false
 }
 
-// this method is for evaluating a checker.InstanceMethod. Even though there are type specific Method instruction nodes,
-// looking at subj.Type() is still necessary here because of dynamic dispatch on traits. (e.g. calling .to_str() on Str::ToString - see io.ard)
+// this method is for evaluating a checker.InstanceMethod.
 func (vm *VM) evalInstanceMethod(scope *scope, subj *runtime.Object, e *checker.InstanceMethod) *runtime.Object {
+	switch e.ReceiverKind {
+	case checker.ReceiverStruct:
+		if e.StructType == nil {
+			break
+		}
+		return vm.EvalStructMethod(scope, subj, e.Method, e.StructType)
+	case checker.ReceiverEnum:
+		if e.EnumType == nil {
+			break
+		}
+		return vm.EvalEnumMethod(scope, subj, e.Method, e.EnumType)
+	case checker.ReceiverTrait:
+		// Fall through to dynamic dispatch based on runtime type.
+	default:
+		// Continue with dynamic dispatch.
+	}
+
+	if e.ReceiverKind == checker.ReceiverTrait && e.TraitType != nil {
+		dispatch := vm.traitDispatchFor(e.TraitType)
+		if dispatch != nil {
+			if _, ok := dispatch[subj.Kind()]; !ok {
+				panic(fmt.Errorf("Trait dispatch missing for %s.%s()", subj.Kind(), e.Method.Name))
+			}
+		}
+	}
+
 	if subj.IsResult() {
 		return vm.evalResultMethod(scope, subj, e.Method)
 	}
-	if subj.Type() == checker.Str {
+	switch subj.Kind() {
+	case runtime.KindStr:
 		return vm.evalStrMethod(scope, subj, e.Method)
-	}
-	if _, isInt := subj.IsInt(); isInt {
+	case runtime.KindInt:
 		return vm.evalIntMethod(subj, e)
-	}
-	if subj.IsFloat() {
+	case runtime.KindFloat:
 		return vm.evalFloatMethod(subj, e.Method)
-	}
-	if subj.Type() == checker.Bool {
+	case runtime.KindBool:
 		return vm.evalBoolMethod(subj, e)
-	}
-	if _, ok := subj.Type().(*checker.List); ok {
+	case runtime.KindList:
 		return vm.evalListMethod(scope, subj, e)
-	}
-	if _, ok := subj.Type().(*checker.Map); ok {
+	case runtime.KindMap:
 		return vm.evalMapMethod(scope, subj, e)
-	}
-	if _, ok := subj.Type().(*checker.Maybe); ok {
+	case runtime.KindMaybe:
 		return vm.evalMaybeMethod(scope, subj, e)
-	}
-	if subj.IsStruct() {
-		return vm.EvalStructMethod(scope, subj, e.Method)
-	}
-	if enum, ok := subj.Type().(*checker.Enum); ok {
-		return vm.EvalEnumMethod(scope, subj, e.Method, enum)
+	case runtime.KindStruct:
+		if structType := subj.StructType(); structType != nil {
+			return vm.EvalStructMethod(scope, subj, e.Method, structType)
+		}
+	case runtime.KindEnum:
+		if enum := subj.EnumType(); enum != nil {
+			return vm.EvalEnumMethod(scope, subj, e.Method, enum)
+		}
 	}
 
-	panic(fmt.Errorf("Unimplemented method: %s.%s()", subj.Type(), e.Method.Name))
+	panic(fmt.Errorf("Unimplemented method: %s.%s()", subj.Kind(), e.Method.Name))
 }
 
 // Handlers for specialized method nodes
@@ -1238,8 +1249,10 @@ func (vm *VM) evalMapMethod(scope *scope, subj *runtime.Object, m *checker.Insta
 	case "get":
 		keyArg := vm.eval(scope, m.Method.Args[0])
 		_key := runtime.ToMapKey(keyArg)
-
-		mapType := subj.Type().(*checker.Map)
+		mapType := subj.MapType()
+		if mapType == nil {
+			panic(fmt.Errorf("Map.get called on %s", subj.Kind()))
+		}
 		out := runtime.MakeNone(mapType.Value())
 		if value, found := raw[_key]; found {
 			out = out.ToSome(value.Raw())
@@ -1266,7 +1279,7 @@ func (vm *VM) evalMapMethod(scope *scope, subj *runtime.Object, m *checker.Insta
 		_, found := raw[keyStr]
 		return runtime.MakeBool(found)
 	default:
-		panic(fmt.Errorf("Unimplemented: %s.%s()", subj.Type(), m.Method.Name))
+		panic(fmt.Errorf("Unimplemented: %s.%s()", subj.Kind(), m.Method.Name))
 	}
 }
 
@@ -1278,7 +1291,7 @@ func (vm *VM) evalMaybeMethod(scope *scope, subj *runtime.Object, m *checker.Ins
 			panic(_msg)
 		}
 		// Return the unwrapped value for some
-		return runtime.Make(subj.Raw(), m.Type())
+		return runtime.Make(subj.Raw(), m.Method.ReturnType)
 	case "is_none":
 		return runtime.MakeBool(subj.Raw() == nil)
 	case "is_some":
@@ -1287,16 +1300,14 @@ func (vm *VM) evalMaybeMethod(scope *scope, subj *runtime.Object, m *checker.Ins
 		if subj.Raw() == nil {
 			return vm.eval(scope, m.Method.Args[0])
 		}
-		return runtime.Make(subj.Raw(), m.Type())
+		return runtime.Make(subj.Raw(), m.Method.ReturnType)
 	default:
-		panic(fmt.Errorf("Unimplemented: %s.%s()", subj.Type(), m.Method.Name))
+		panic(fmt.Errorf("Unimplemented: %s.%s()", subj.Kind(), m.Method.Name))
 	}
 }
 
-func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker.FunctionCall) *runtime.Object {
-	istruct := subj.Type().(*checker.StructDef)
-
-	closure, ok := vm.hq.getMethod(istruct, call.Name)
+func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker.FunctionCall, structType *checker.StructDef) *runtime.Object {
+	closure, ok := vm.hq.getMethod(structType, call.Name)
 	if ok {
 		// Prepare arguments: struct instance first, then regular args
 		args := make([]*runtime.Object, len(call.Args)+1)
@@ -1308,7 +1319,7 @@ func (vm *VM) EvalStructMethod(scope *scope, subj *runtime.Object, call *checker
 		return closure.Eval(args...)
 	}
 
-	panic(fmt.Errorf("Method not found: %s.%s", istruct.Name, call.Name))
+	panic(fmt.Errorf("Method not found: %s.%s", structType.Name, call.Name))
 }
 
 func (vm *VM) createEnumMethodClosure(enum *checker.Enum, methodName string, scope *scope) *VMClosure {

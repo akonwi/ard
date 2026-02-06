@@ -19,6 +19,22 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
+	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex"),
+	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
+	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
+	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
+	cmpopts.IgnoreFields(checker.FiberEval{}, "FiberType"),
+	cmpopts.IgnoreFields(checker.FiberExecution{}, "FiberType"),
+	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
+	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
+	cmpopts.IgnoreFields(checker.FunctionCall{}, "ExternalBinding"),
+	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
+	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),
+	cmpopts.IgnoreFields(checker.ResultMatch{}, "OkType", "ErrType"),
+	cmpopts.IgnoreFields(checker.TryOp{}, "OkType", "ErrType"),
+	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
+	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
+	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType"),
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},
 		checker.BoolMethod{},
@@ -1939,7 +1955,7 @@ func TestEnumValues(t *testing.T) {
 			},
 		},
 		{
-			name: "Enum variant values must be integer literals",
+			name:  "Enum variant values must be integer literals",
 			input: `enum Test { X = "not an int" }`,
 			diagnostics: []checker.Diagnostic{
 				{
@@ -2237,8 +2253,6 @@ func TestMatchingOnInts(t *testing.T) {
 		},
 	})
 }
-
-
 
 func TestGenerics(t *testing.T) {
 	run(t, []test{

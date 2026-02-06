@@ -1345,16 +1345,19 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 			elements[i] = element
 		}
 
+		listType := declaredType.(*List)
 		return &ListLiteral{
 			Elements: elements,
-			_type:    declaredType.(*List),
+			_type:    listType,
+			ListType: listType,
 		}
 	}
 
 	if len(expr.Items) == 0 {
 		c.addError("Empty lists need an explicit type", expr.GetLocation())
 		c.halted = true
-		return &ListLiteral{_type: MakeList(Void), Elements: []Expression{}}
+		listType := MakeList(Void)
+		return &ListLiteral{_type: listType, ListType: listType, Elements: []Expression{}}
 	}
 
 	hasError := false
@@ -1382,9 +1385,11 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		return nil
 	}
 
+	listType := MakeList(elementType)
 	return &ListLiteral{
 		Elements: elements,
-		_type:    MakeList(elementType),
+		_type:    listType,
+		ListType: listType,
 	}
 }
 
@@ -1666,6 +1671,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		Traits:  structDefCopy.Traits,
 		Private: structDefCopy.Private,
 	}
+	instance.StructType = instance._type
 	return instance
 }
 
@@ -1699,13 +1705,33 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	}
 
 	// For user-defined types (structs, enums), use generic InstanceMethod
+	receiverKind := ReceiverUnknown
+	var structType *StructDef
+	var enumType *Enum
+	var traitType *Trait
+	switch receiver := subject.Type().(type) {
+	case *StructDef:
+		receiverKind = ReceiverStruct
+		structType = receiver
+	case *Enum:
+		receiverKind = ReceiverEnum
+		enumType = receiver
+	case *Trait:
+		receiverKind = ReceiverTrait
+		traitType = receiver
+	}
 	return &InstanceMethod{
 		Subject: subject,
 		Method: &FunctionCall{
-			Name: methodName,
-			Args: args,
-			fn:   fnDef,
+			Name:       methodName,
+			Args:       args,
+			fn:         fnDef,
+			ReturnType: fnDef.ReturnType,
 		},
+		ReceiverKind: receiverKind,
+		StructType:   structType,
+		EnumType:     enumType,
+		TraitType:    traitType,
 	}
 }
 
@@ -1868,11 +1894,12 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
 	return &MaybeMethod{
-		Subject:   subject,
-		Kind:      kind,
-		Args:      args,
-		InnerType: maybeType.Of(),
-		fn:        fnDef,
+		Subject:    subject,
+		Kind:       kind,
+		Args:       args,
+		InnerType:  maybeType.Of(),
+		fn:         fnDef,
+		ReturnType: fnDef.ReturnType,
 	}
 }
 
@@ -1892,12 +1919,13 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
 	}
 	return &ResultMethod{
-		Subject: subject,
-		Kind:    kind,
-		Args:    args,
-		OkType:  resultType.Val(),
-		ErrType: resultType.Err(),
-		fn:      fnDef,
+		Subject:    subject,
+		Kind:       kind,
+		Args:       args,
+		OkType:     resultType.Val(),
+		ErrType:    resultType.Err(),
+		fn:         fnDef,
+		ReturnType: fnDef.ReturnType,
 	}
 }
 
@@ -2106,12 +2134,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			// Create and return the function call node
-			return &FunctionCall{
-				Name: s.Name,
-				Args: args,
-				fn:   fnToUse,
+			call := &FunctionCall{
+				Name:       s.Name,
+				Args:       args,
+				fn:         fnToUse,
+				ReturnType: fnToUse.ReturnType,
 			}
+			if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
+				call.ExternalBinding = extFnDef.ExternalBinding
+			}
+			return call
 		}
 	case *parse.InstanceProperty:
 		{
@@ -2659,9 +2691,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 
 				call := &FunctionCall{
-					Name: absolutePath,
-					Args: args,
-					fn:   fnDef,
+					Name:       absolutePath,
+					Args:       args,
+					fn:         fnDef,
+					ReturnType: fnDef.ReturnType,
 				}
 
 				// Use new generic resolution system
@@ -2673,6 +2706,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 
 					call.fn = specialized
+					call.ReturnType = specialized.ReturnType
 				}
 
 				return call
@@ -2758,9 +2792,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Create function call
 			call := &FunctionCall{
-				Name: fnDef.Name,
-				Args: args,
-				fn:   fnToUse,
+				Name:       fnDef.Name,
+				Args:       args,
+				fn:         fnToUse,
+				ReturnType: fnToUse.ReturnType,
+			}
+			if extFn, ok := sym.Type.(*ExternalFunctionDef); ok {
+				call.ExternalBinding = extFn.ExternalBinding
 			}
 
 			// Special validation for async::start calls
@@ -3053,10 +3091,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Create the EnumMatch
+			discriminantToIndex := make(map[int]int8, len(enumType.Values))
+			for i, value := range enumType.Values {
+				discriminantToIndex[value.Value] = int8(i)
+			}
 			enumMatch := &EnumMatch{
-				Subject:  subject,
-				Cases:    cases,
-				CatchAll: catchAllBody,
+				Subject:             subject,
+				Cases:               cases,
+				CatchAll:            catchAllBody,
+				DiscriminantToIndex: discriminantToIndex,
 			}
 
 			return enumMatch
@@ -3135,6 +3178,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		if unionType, ok := subject.Type().(*Union); ok {
 			// Track which union types we've seen and their corresponding bodies
 			typeCases := make(map[string]*Match)
+			typeCasesByType := make(map[Type]*Match)
 			var catchAllBody *Block
 
 			// Record all types in the union
@@ -3147,15 +3191,33 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			for _, matchCase := range s.Cases {
 				switch p := matchCase.Pattern.(type) {
 				case *parse.Identifier:
-					if p.Name != "_" {
-						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
-					} else {
+					if p.Name == "_" {
 						if catchAllBody != nil {
 							c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
 						} else {
 							catchAllBody = c.checkBlock(matchCase.Body, nil)
 						}
+						break
 					}
+					// Allow union type name as implicit binding to "it"
+					matchedType, found := unionTypeSet[p.Name]
+					if !found {
+						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
+						break
+					}
+					if _, exists := typeCases[p.Name]; exists {
+						c.addWarning(fmt.Sprintf("Duplicate case: %s", p.Name), matchCase.Pattern.GetLocation())
+						break
+					}
+					body := c.checkBlock(matchCase.Body, func() {
+						c.scope.add("it", matchedType, false)
+					})
+					matchNode := &Match{
+						Pattern: &Identifier{Name: "it"},
+						Body:    body,
+					}
+					typeCases[p.Name] = matchNode
+					typeCasesByType[matchedType] = matchNode
 				case *parse.FunctionCall:
 					varName := p.Args[0].Value.(*parse.Identifier).Name
 					typeName := p.Name
@@ -3179,10 +3241,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						body := c.checkBlock(matchCase.Body, func() {
 							c.scope.add(varName, matchedType, false)
 						})
-						typeCases[typeName] = &Match{
+						matchNode := &Match{
 							Pattern: &Identifier{Name: varName},
 							Body:    body,
 						}
+						typeCases[typeName] = matchNode
+						typeCasesByType[matchedType] = matchNode
 					}
 				}
 			}
@@ -3222,9 +3286,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Create and return the UnionMatch
 			return &UnionMatch{
-				Subject:   subject,
-				TypeCases: typeCases,
-				CatchAll:  catchAllBody,
+				Subject:         subject,
+				TypeCases:       typeCases,
+				TypeCasesByType: typeCasesByType,
+				CatchAll:        catchAllBody,
 			}
 		}
 
@@ -3298,6 +3363,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				Subject: subject,
 				Ok:      okCase,
 				Err:     errCase,
+				OkType:  resultType.Val(),
+				ErrType: resultType.Err(),
 			}
 		}
 
@@ -3482,6 +3549,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							Module:     mod.Path(),
 							Property:   instance,
 							FieldTypes: fieldTypes,
+							StructType: instance._type,
 						}
 					case *parse.Identifier:
 						sym := mod.Get(prop.Name)
@@ -3533,7 +3601,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 
-				return &EnumVariant{enum: enum, Variant: variant}
+				return &EnumVariant{
+					enum:         enum,
+					Variant:      variant,
+					EnumType:     enum,
+					Discriminant: enum.Values[variant].Value,
+				}
 			}
 			// Handle nested static properties like http::Method::Get
 			if _, ok := s.Target.(*parse.StaticProperty); ok {
@@ -3558,7 +3631,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					return &EnumVariant{enum: enum, Variant: variant}
+					return &EnumVariant{
+						enum:         enum,
+						Variant:      variant,
+						EnumType:     enum,
+						Discriminant: enum.Values[variant].Value,
+					}
 				}
 
 				c.addError(fmt.Sprintf("Cannot access property on %T", nestedSym.Type()), s.Property.GetLocation())
@@ -3652,6 +3730,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return &TryOp{
 						expr:       expr,
 						ok:         _type.val, // Returns unwrapped value for continued execution
+						OkType:     _type.val,
+						ErrType:    _type.err,
 						CatchBlock: block,
 						CatchVar:   s.CatchVar.Name,
 						Kind:       TryResult,
@@ -3663,9 +3743,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("try without catch clause requires function to return a Result type", s.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr: expr,
-							ok:   _type.val,
-							Kind: TryResult,
+							expr:    expr,
+							ok:      _type.val,
+							OkType:  _type.val,
+							ErrType: _type.err,
+							Kind:    TryResult,
 						}
 					}
 
@@ -3674,18 +3756,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String()), s.Expression.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr: expr,
-							ok:   _type.val,
-							Kind: TryResult,
+							expr:    expr,
+							ok:      _type.val,
+							OkType:  _type.val,
+							ErrType: _type.err,
+							Kind:    TryResult,
 						}
 					}
 
 					// Success: returns the unwrapped value
 					// Error: early returns the error wrapped in the function's Result type
 					return &TryOp{
-						expr: expr,
-						ok:   _type.val,
-						Kind: TryResult,
+						expr:    expr,
+						ok:      _type.val,
+						OkType:  _type.val,
+						ErrType: _type.err,
+						Kind:    TryResult,
 					}
 				}
 			case *Maybe:
@@ -3739,6 +3825,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return &TryOp{
 						expr:       expr,
 						ok:         _type.of, // Returns unwrapped value for continued execution
+						OkType:     _type.of,
 						CatchBlock: block,
 						CatchVar:   "", // No variable binding for Maybe catch
 						Kind:       TryMaybe,
@@ -3750,9 +3837,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("try without catch clause on Maybe requires function to return a Maybe type", s.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
-							expr: expr,
-							ok:   _type.of,
-							Kind: TryMaybe,
+							expr:   expr,
+							ok:     _type.of,
+							OkType: _type.of,
+							Kind:   TryMaybe,
 						}
 					}
 
@@ -3764,18 +3852,21 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					// Success: returns the unwrapped value
 					// None: early returns none wrapped in the function's Maybe type
 					return &TryOp{
-						expr: expr,
-						ok:   _type.of,
-						Kind: TryMaybe,
+						expr:   expr,
+						ok:     _type.of,
+						OkType: _type.of,
+						Kind:   TryMaybe,
 					}
 				}
 			default:
 				c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
 				// Return a try op with the expr type to avoid cascading errors
 				return &TryOp{
-					expr: expr,
-					ok:   expr.Type(),
-					Kind: TryResult, // Default to Result, though this is an error path
+					expr:    expr,
+					ok:      expr.Type(),
+					OkType:  expr.Type(),
+					ErrType: Void,
+					Kind:    TryResult, // Default to Result, though this is an error path
 				}
 			}
 		}
@@ -3977,9 +4068,10 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
 				Call: &FunctionCall{
-					Name: fnDef.name(),
-					Args: []Expression{arg},
-					fn:   fnDef,
+					Name:       fnDef.name(),
+					Args:       []Expression{arg},
+					fn:         fnDef,
+					ReturnType: fnDef.ReturnType,
 				},
 			}
 		}
@@ -4274,6 +4366,7 @@ func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
 				ReturnType: paramType, // The return type is the Maybe type we're filling in
 				Body:       nil,       // No body for synthesized calls
 			},
+			ReturnType: paramType,
 		},
 	}
 }
@@ -4299,6 +4392,7 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 				ReturnType: maybeType,
 				Body:       nil, // No body for synthesized calls
 			},
+			ReturnType: maybeType,
 		},
 	}
 }

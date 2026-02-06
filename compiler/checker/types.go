@@ -13,6 +13,13 @@ func areCompatible(expected Type, actual Type) bool {
 	return expected.equal(actual)
 }
 
+func HasTrait(t Type, trait *Trait) bool {
+	if t == nil || trait == nil {
+		return false
+	}
+	return t.hasTrait(trait)
+}
+
 type Type interface {
 	String() string
 	get(name string) Type
