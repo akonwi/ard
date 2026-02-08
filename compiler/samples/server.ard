@@ -1,7 +1,7 @@
 use ard/http
 
 fn main() {
-  http::serve(3000, [
+  let routes: [Str:http::HandlerFn] = [
     "/": fn(req: http::Request, mut res: http::Response) {
       res.body = "Hello, World!"
     },
@@ -12,5 +12,7 @@ fn main() {
       res.status = 400
       res.body = "Bad request"
     },
-  ]).expect("Error serving at 3000")
+  ]
+
+  http::serve(8000, routes).expect("Error serving at 3000")
 }

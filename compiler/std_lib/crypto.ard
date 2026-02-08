@@ -1,0 +1,11 @@
+extern fn md5(input: Str) Str = "CryptoMd5"
+
+extern fn sha256(input: Str) Str = "CryptoSha256"
+
+extern fn sha512(input: Str) Str = "CryptoSha512"
+
+extern fn hash(password: Str, cost: Int?) Str!Str = "CryptoHashPassword"
+
+extern fn verify(password: Str, hashed: Str) Bool!Str = "CryptoVerifyPassword"
+
+extern fn uuid() Str = "CryptoUUID"
