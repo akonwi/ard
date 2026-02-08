@@ -1488,7 +1488,12 @@ func (p *parser) parseStaticPath() *StaticProperty {
 	joint := p.advance()
 	propName := p.advance()
 
-	prop := &StaticProperty{}
+	prop := &StaticProperty{
+		Location: Location{
+			Start: Point{namespace.line, namespace.column},
+			End:   Point{propName.line, propName.column + len(propName.text)},
+		},
+	}
 	prop.Target = &Identifier{
 		Location: Location{
 			Start: Point{namespace.line, namespace.column},
@@ -1508,6 +1513,10 @@ func (p *parser) parseStaticPath() *StaticProperty {
 		if p.check(identifier) {
 			propName := p.advance()
 			prop = &StaticProperty{
+				Location: Location{
+					Start: prop.Location.Start,
+					End:   Point{propName.line, propName.column + len(propName.text)},
+				},
 				Target: prop,
 				Property: &Identifier{
 					Location: Location{

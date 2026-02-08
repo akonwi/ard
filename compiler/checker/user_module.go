@@ -32,32 +32,32 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 	publicSymbols := make(map[string]Symbol)
 
 	// Extract public symbols from the global scope
-	for _, sym := range globalScope.symbols {
+	for name, sym := range globalScope.symbols {
 		switch s := sym.Type.(type) {
 		case *FunctionDef:
 			if !s.Private {
-				publicSymbols[s.Name] = *sym
+				publicSymbols[name] = *sym
 			}
 		case *ExternalFunctionDef:
 			if !s.Private {
-				publicSymbols[s.Name] = *sym
+				publicSymbols[name] = *sym
 			}
 		case *StructDef:
 			if !s.Private {
-				publicSymbols[s.Name] = *sym
+				publicSymbols[name] = *sym
 			}
 		case *Trait:
 			if !s.private {
-				publicSymbols[s.Name] = *sym
+				publicSymbols[name] = *sym
 			}
 		case *Enum:
 			if !s.Private {
-				publicSymbols[s.Name] = *sym
+				publicSymbols[name] = *sym
 			}
 		case *Union:
 			// todo: support 'private' keyword
 			// if !s.Private {
-			publicSymbols[s.Name] = *sym
+			publicSymbols[name] = *sym
 			// }
 		}
 	}
