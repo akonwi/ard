@@ -10,6 +10,24 @@ import (
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
+	if err := r.Register("CryptoMd5", ffi.CryptoMd5); err != nil {
+		return fmt.Errorf("failed to register CryptoMd5: %w", err)
+	}
+	if err := r.Register("CryptoSha256", ffi.CryptoSha256); err != nil {
+		return fmt.Errorf("failed to register CryptoSha256: %w", err)
+	}
+	if err := r.Register("CryptoSha512", ffi.CryptoSha512); err != nil {
+		return fmt.Errorf("failed to register CryptoSha512: %w", err)
+	}
+	if err := r.Register("CryptoHashPassword", ffi.CryptoHashPassword); err != nil {
+		return fmt.Errorf("failed to register CryptoHashPassword: %w", err)
+	}
+	if err := r.Register("CryptoVerifyPassword", ffi.CryptoVerifyPassword); err != nil {
+		return fmt.Errorf("failed to register CryptoVerifyPassword: %w", err)
+	}
+	if err := r.Register("CryptoUUID", ffi.CryptoUUID); err != nil {
+		return fmt.Errorf("failed to register CryptoUUID: %w", err)
+	}
 	if err := r.Register("StrToDynamic", ffi.StrToDynamic); err != nil {
 		return fmt.Errorf("failed to register StrToDynamic: %w", err)
 	}
