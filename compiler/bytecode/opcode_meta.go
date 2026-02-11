@@ -137,6 +137,8 @@ func (o Opcode) String() string {
 		return "RESULT_UNWRAP"
 	case OpTypeName:
 		return "TYPE_NAME"
+	case OpStrChars:
+		return "STR_CHARS"
 	case OpMakeNone:
 		return "MAKE_NONE"
 	case OpMatchBool:
@@ -226,7 +228,7 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 1, Push: 1}
 	case OpStrMethod, OpIntMethod, OpFloatMethod, OpBoolMethod, OpMaybeMethod, OpResultMethod:
 		return StackEffect{}
-	case OpMaybeUnwrap, OpResultUnwrap, OpTypeName:
+	case OpMaybeUnwrap, OpResultUnwrap, OpTypeName, OpStrChars:
 		return StackEffect{Pop: 1, Push: 1}
 	case OpMakeNone:
 		return StackEffect{Pop: 0, Push: 1}

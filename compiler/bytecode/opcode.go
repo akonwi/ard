@@ -68,6 +68,7 @@ const (
 	OpMaybeUnwrap
 	OpResultUnwrap
 	OpTypeName
+	OpStrChars
 	OpMakeNone
 	OpMatchBool
 	OpMatchInt

@@ -481,10 +481,14 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		return f.emitWhileLoop(s)
 	case *checker.ForIntRange:
 		return f.emitForIntRange(s)
+	case *checker.ForInStr:
+		return f.emitForInStr(s)
 	case *checker.ForInList:
 		return f.emitForInList(s)
 	case *checker.ForInMap:
 		return f.emitForInMap(s)
+	case *checker.ForLoop:
+		return f.emitForLoop(s)
 	case *checker.StructDef:
 		return nil
 	case *checker.Enum:
@@ -865,6 +869,91 @@ func (f *funcEmitter) emitForIntRange(loop *checker.ForIntRange) error {
 		f.emit(Instruction{Op: OpConstInt, Imm: 1})
 		f.emit(Instruction{Op: OpAdd})
 		f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+	}
+
+	f.emit(Instruction{Op: OpJump, A: start})
+	end := len(f.code)
+	f.patchJump(endJump, end)
+	f.patchBreaks(breaks, end)
+	return nil
+}
+
+func (f *funcEmitter) emitForInStr(loop *checker.ForInStr) error {
+	charsTemp := f.tempLocal()
+	if err := f.emitExpr(loop.Value); err != nil {
+		return err
+	}
+	f.emit(Instruction{Op: OpStrChars})
+	charsIndex := f.localIndex(charsTemp)
+	f.emit(Instruction{Op: OpStoreLocal, A: charsIndex})
+
+	indexName := loop.Index
+	if indexName == "" {
+		indexName = f.tempLocal()
+	}
+	f.emit(Instruction{Op: OpConstInt, Imm: 0})
+	indexIndex := f.localIndex(indexName)
+	f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+
+	start := len(f.code)
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: charsIndex})
+	f.emit(Instruction{Op: OpListLen})
+	f.emit(Instruction{Op: OpLt})
+	endJump := f.emitJump(OpJumpIfFalse)
+
+	// cursor = chars[index]
+	f.emit(Instruction{Op: OpLoadLocal, A: charsIndex})
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpListGet})
+	cursorIndex := f.localIndex(loop.Cursor)
+	f.emit(Instruction{Op: OpStoreLocal, A: cursorIndex})
+	if loop.Index != "" {
+		f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+		f.emit(Instruction{Op: OpStoreLocal, A: f.localIndex(loop.Index)})
+	}
+
+	f.pushBreakList()
+	if err := f.emitStatementsDiscard(loop.Body.Stmts); err != nil {
+		return err
+	}
+	breaks := f.popBreakList()
+
+	f.emit(Instruction{Op: OpLoadLocal, A: indexIndex})
+	f.emit(Instruction{Op: OpConstInt, Imm: 1})
+	f.emit(Instruction{Op: OpAdd})
+	f.emit(Instruction{Op: OpStoreLocal, A: indexIndex})
+
+	f.emit(Instruction{Op: OpJump, A: start})
+	end := len(f.code)
+	f.patchJump(endJump, end)
+	f.patchBreaks(breaks, end)
+	return nil
+}
+
+func (f *funcEmitter) emitForLoop(loop *checker.ForLoop) error {
+	if loop.Init != nil {
+		if err := f.emitStatement(loop.Init); err != nil {
+			return err
+		}
+	}
+
+	start := len(f.code)
+	if err := f.emitExpr(loop.Condition); err != nil {
+		return err
+	}
+	endJump := f.emitJump(OpJumpIfFalse)
+
+	f.pushBreakList()
+	if err := f.emitStatementsDiscard(loop.Body.Stmts); err != nil {
+		return err
+	}
+	breaks := f.popBreakList()
+
+	if loop.Update != nil {
+		if err := f.emitStatement(loop.Update); err != nil {
+			return err
+		}
 	}
 
 	f.emit(Instruction{Op: OpJump, A: start})

@@ -770,6 +770,17 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, runtime.MakeStr(subj.TypeName()))
+		case bytecode.OpStrChars:
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			runes := []rune(subj.AsString())
+			chars := make([]*runtime.Object, len(runes))
+			for i, r := range runes {
+				chars[i] = runtime.MakeStr(string(r))
+			}
+			vm.push(curr, runtime.MakeList(checker.Str, chars...))
 		case bytecode.OpTryResult:
 			subj, err := vm.pop(curr)
 			if err != nil {
