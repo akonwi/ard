@@ -144,6 +144,18 @@ type sqlRunner interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
+func sqlArgValue(valueObj *runtime.Object) any {
+	if valueObj == nil {
+		return nil
+	}
+
+	if nested, ok := valueObj.Raw().(*runtime.Object); ok {
+		return sqlArgValue(nested)
+	}
+
+	return valueObj.Raw()
+}
+
 // executeQuery is a helper that works with both *sql.DB and *sql.Tx
 func executeQuery(runner sqlRunner, sqlStr string, values []any) *runtime.Object {
 	rows, err := runner.Query(sqlStr, values...)
@@ -216,8 +228,7 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	valuesList := valuesListObj.AsList()
 	var values []any
 	for _, valueObj := range valuesList {
-		// Convert Ard Value union type to Go value
-		values = append(values, valueObj.GoValue())
+		values = append(values, sqlArgValue(valueObj))
 	}
 
 	return executeQuery(runner, sqlStr, values)
@@ -246,8 +257,7 @@ func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	// Extract values from the list
 	var values []any
 	for _, valueObj := range args[2].AsList() {
-		// Convert Ard Value union type to Go value
-		values = append(values, valueObj.GoValue())
+		values = append(values, sqlArgValue(valueObj))
 	}
 
 	_, err := runner.Exec(sqlStr, values...)
