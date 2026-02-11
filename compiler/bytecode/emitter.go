@@ -1756,6 +1756,7 @@ func (f *funcEmitter) emitTryOp(op *checker.TryOp) error {
 		}
 		f.emit(Instruction{Op: OpReturn})
 		endLabel := len(f.code)
+		f.emit(Instruction{Op: OpNoop})
 		f.patchJump(endJump, endLabel)
 	} else {
 		f.code[catchJump].A = -1

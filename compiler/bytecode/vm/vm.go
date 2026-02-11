@@ -774,7 +774,12 @@ func (vm *VM) run() (*runtime.Object, error) {
 					curr.IP = inst.A
 					continue
 				}
-				return subj, nil
+				vm.Frames = vm.Frames[:len(vm.Frames)-1]
+				if len(vm.Frames) == 0 {
+					return subj, nil
+				}
+				vm.push(vm.Frames[len(vm.Frames)-1], subj)
+				continue
 			}
 			unwrapped := subj.UnwrapResult()
 			okType, err := vm.typeFor(bytecode.TypeID(inst.Imm))
@@ -794,7 +799,12 @@ func (vm *VM) run() (*runtime.Object, error) {
 					curr.IP = inst.A
 					continue
 				}
-				return subj, nil
+				vm.Frames = vm.Frames[:len(vm.Frames)-1]
+				if len(vm.Frames) == 0 {
+					return subj, nil
+				}
+				vm.push(vm.Frames[len(vm.Frames)-1], subj)
+				continue
 			}
 			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.Imm))
 			if err != nil {

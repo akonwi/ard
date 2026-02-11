@@ -132,8 +132,6 @@ func TestBytecodeSQLParameterSubstringOverlap(t *testing.T) {
 }
 
 func TestBytecodeSQLMissingParameters(t *testing.T) {
-	t.Skip("TODO(bytecode): enable once try-maybe catch parity matches interpreter behavior")
-
 	testDB := "test_insert.db"
 	defer os.Remove(testDB)
 

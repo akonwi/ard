@@ -102,8 +102,6 @@ func TestBytecodeTryErrorTransformation(t *testing.T) {
 }
 
 func TestBytecodeTryNestedEarlyReturns(t *testing.T) {
-	t.Skip("TODO(bytecode): nested try/catch re-wrap emits invalid jump target")
-
 	input := `
 	fn inner() Int!Str {
 		Result::err("inner error")
@@ -136,7 +134,6 @@ func TestBytecodeTryCatchWithFunction(t *testing.T) {
 		name  string
 		input string
 		want  any
-		skip  bool
 	}{
 		{
 			name: "a simple function name",
@@ -260,7 +257,6 @@ func TestBytecodeTryInMatchBlocks(t *testing.T) {
 				process_status(Status::active).or(-1)
 			`,
 			want: -1,
-			skip: true,
 		},
 		{
 			name: "try in maybe match success",
@@ -340,9 +336,6 @@ func TestBytecodeTryInMatchBlocks(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if test.skip {
-				t.Skip("TODO(bytecode): Result.or fallback parity in try/match error path")
-			}
 			result := runBytecode(t, test.input)
 			if result != test.want {
 				t.Fatalf("Expected %v, got %v", test.want, result)

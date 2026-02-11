@@ -200,7 +200,6 @@ func TestBytecodeFunctionCallFeatures(t *testing.T) {
 		name  string
 		input string
 		want  any
-		skip  bool
 	}{
 		{
 			name: "noop function",
@@ -692,7 +691,6 @@ func TestBytecodeTryOnMaybe(t *testing.T) {
 				}
 			`,
 			want: -999,
-			skip: true,
 		},
 		{
 			name: "try on Maybe with catch block transforms none",
@@ -734,9 +732,6 @@ func TestBytecodeTryOnMaybe(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if test.skip {
-				t.Skip("TODO(bytecode): try Maybe none propagation parity with interpreter")
-			}
 			res := runBytecode(t, test.input)
 			if res != test.want {
 				t.Fatalf("Expected %v, got %v", test.want, res)
@@ -780,7 +775,6 @@ func TestBytecodeTryOnMaybeDifferentTypes(t *testing.T) {
 		name  string
 		input string
 		want  any
-		skip  bool
 	}{
 		{
 			name: "try on Maybe with different inner types - success case",
@@ -825,15 +819,11 @@ func TestBytecodeTryOnMaybeDifferentTypes(t *testing.T) {
 				}
 			`,
 			want: "got none as expected",
-			skip: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if test.skip {
-				t.Skip("TODO(bytecode): try Maybe none propagation parity with interpreter")
-			}
 			res := runBytecode(t, test.input)
 			if res != test.want {
 				t.Fatalf("Expected %v, got %v", test.want, res)
