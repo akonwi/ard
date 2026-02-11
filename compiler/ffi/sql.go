@@ -12,6 +12,16 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+type sqlConnection struct {
+	db     *sql.DB
+	driver string
+}
+
+type sqlTransaction struct {
+	tx     *sql.Tx
+	driver string
+}
+
 // Generic SQL FFI functions supporting multiple database drivers
 // (postgres, mysql, sqlite, etc.)
 
@@ -40,8 +50,10 @@ func SqlCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Object
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Failed to connect to database: %s", err)))
 	}
 
-	// Return the raw db as Dynamic
-	return runtime.MakeOk(runtime.MakeDynamic(db))
+	conn := &sqlConnection{db: db, driver: driver}
+
+	// Return the connection as Dynamic
+	return runtime.MakeOk(runtime.MakeDynamic(conn))
 }
 
 // detectDriver identifies the SQL driver based on the connection string
@@ -68,12 +80,12 @@ func SqlClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		panic(fmt.Errorf("close expects 1 argument, got %d", len(args)))
 	}
 
-	conn, ok := args[0].Raw().(*sql.DB)
+	conn, ok := args[0].Raw().(*sqlConnection)
 	if !ok {
 		panic(fmt.Errorf("SQL Error: invalid connection object"))
 	}
 
-	err := conn.Close()
+	err := conn.db.Close()
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
@@ -144,6 +156,61 @@ type sqlRunner interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
+func normalizePlaceholders(sqlStr, driver string) string {
+	if driver != "pgx" {
+		return sqlStr
+	}
+
+	// PostgreSQL requires positional placeholders like $1, $2, ...
+	// Support both Ard's @name placeholders and ? placeholders.
+	var out strings.Builder
+	out.Grow(len(sqlStr) + 16)
+	index := 1
+	for i := 0; i < len(sqlStr); i++ {
+		ch := sqlStr[i]
+
+		if ch == '@' {
+			j := i + 1
+			for j < len(sqlStr) {
+				c := sqlStr[j]
+				isAlpha := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+				isDigit := c >= '0' && c <= '9'
+				if isAlpha || isDigit || c == '_' {
+					j++
+					continue
+				}
+				break
+			}
+
+			if j > i+1 {
+				out.WriteString(fmt.Sprintf("$%d", index))
+				index++
+				i = j - 1
+				continue
+			}
+		}
+
+		if ch == '?' {
+			out.WriteString(fmt.Sprintf("$%d", index))
+			index++
+			continue
+		}
+		out.WriteByte(ch)
+	}
+
+	return out.String()
+}
+
+func resolveRunner(raw any) (sqlRunner, string, bool) {
+	if conn, ok := raw.(*sqlConnection); ok {
+		return conn.db, conn.driver, true
+	}
+	if tx, ok := raw.(*sqlTransaction); ok {
+		return tx.tx, tx.driver, true
+	}
+	return nil, "", false
+}
+
 func sqlArgValue(valueObj *runtime.Object) any {
 	if valueObj == nil {
 		return nil
@@ -211,17 +278,12 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	connRaw := args[0].Raw()
 
-	// Try to cast to *sql.DB first, then *sql.Tx
-	var runner sqlRunner
-	if db, ok := connRaw.(*sql.DB); ok {
-		runner = db
-	} else if tx, ok := connRaw.(*sql.Tx); ok {
-		runner = tx
-	} else {
+	runner, driver, ok := resolveRunner(connRaw)
+	if !ok {
 		return runtime.MakeStr(fmt.Sprintf("SQL Error: invalid connection object: %T", connRaw))
 	}
 
-	sqlStr := args[1].AsString()
+	sqlStr := normalizePlaceholders(args[1].AsString(), driver)
 	valuesListObj := args[2]
 
 	// Extract values from the list
@@ -242,17 +304,12 @@ func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	connRaw := args[0].Raw()
 
-	// Try to cast to *sql.DB first, then *sql.Tx
-	var runner sqlRunner
-	if db, ok := connRaw.(*sql.DB); ok {
-		runner = db
-	} else if tx, ok := connRaw.(*sql.Tx); ok {
-		runner = tx
-	} else {
+	runner, driver, ok := resolveRunner(connRaw)
+	if !ok {
 		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
 	}
 
-	sqlStr := args[1].AsString()
+	sqlStr := normalizePlaceholders(args[1].AsString(), driver)
 
 	// Extract values from the list
 	var values []any
@@ -276,6 +333,12 @@ func SqlBeginTx(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	db, ok := args[0].Raw().(*sql.DB)
 	if !ok {
+		if conn, isConn := args[0].Raw().(*sqlConnection); isConn {
+			db = conn.db
+			ok = true
+		}
+	}
+	if !ok {
 		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
 	}
 
@@ -284,7 +347,12 @@ func SqlBeginTx(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to begin transaction: %v", err)))
 	}
 
-	return runtime.MakeOk(runtime.MakeDynamic(tx))
+	driver := ""
+	if conn, ok := args[0].Raw().(*sqlConnection); ok {
+		driver = conn.driver
+	}
+
+	return runtime.MakeOk(runtime.MakeDynamic(&sqlTransaction{tx: tx, driver: driver}))
 }
 
 // SqlCommit commits a transaction
@@ -293,12 +361,12 @@ func SqlCommit(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		panic(fmt.Errorf("commit expects 1 argument, got %d", len(args)))
 	}
 
-	tx, ok := args[0].Raw().(*sql.Tx)
+	wrappedTx, ok := args[0].Raw().(*sqlTransaction)
 	if !ok {
 		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid transaction object"))
 	}
 
-	err := tx.Commit()
+	err := wrappedTx.tx.Commit()
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to commit transaction: %s", err)))
 	}
@@ -312,12 +380,12 @@ func SqlRollback(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		panic(fmt.Errorf("rollback expects 1 argument, got %d", len(args)))
 	}
 
-	tx, ok := args[0].Raw().(*sql.Tx)
+	wrappedTx, ok := args[0].Raw().(*sqlTransaction)
 	if !ok {
 		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid transaction object"))
 	}
 
-	err := tx.Rollback()
+	err := wrappedTx.tx.Rollback()
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to rollback transaction: %s", err.Error())))
 	}

@@ -1,6 +1,7 @@
 package vm_test
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -411,4 +412,33 @@ func TestTransactionQueryWithParams(t *testing.T) {
 			panic("Expected name 'User2', got {name}")
 		}
 	`)
+}
+
+func TestSQLPostgresNamedParams(t *testing.T) {
+	dsn := os.Getenv("ARD_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set ARD_TEST_POSTGRES_DSN to run postgres integration tests")
+	}
+
+	run(t, fmt.Sprintf(`
+		use ard/sql
+		use ard/decode
+
+		let db = sql::open(%q).expect("Failed to open postgres database")
+		db.exec("CREATE TEMP TABLE ard_named_params (id TEXT PRIMARY KEY, name TEXT NOT NULL)").expect("Failed to create temp table")
+
+		let insert = db.query("INSERT INTO ard_named_params (id, name) VALUES (@id, @name)")
+		insert.run(["id": "abc", "name": "test"]).expect("Insert failed")
+
+		let query = db.query("SELECT name FROM ard_named_params WHERE id = @id OR id = @id")
+		let rows = query.all(["id": "abc"]).expect("Query failed")
+		if not rows.size() == 1 {
+			panic("Expected 1 result, got {rows.size()}")
+		}
+
+		let name = decode::run(rows.at(0), decode::field("name", decode::string)).expect("Failed to decode name")
+		if not name == "test" {
+			panic("Expected name 'test', got {name}")
+		}
+	`, dsn))
 }
