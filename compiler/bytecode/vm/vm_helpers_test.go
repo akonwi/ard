@@ -1,12 +1,39 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
+
+type vmTestCase struct {
+	name  string
+	input string
+	want  any
+	panic string
+}
+
+func runBytecodeTests(t *testing.T, tests []vmTestCase) {
+	t.Helper()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.panic != "" {
+				expectBytecodeRuntimeError(t, test.panic, test.input)
+				return
+			}
+			if res := runBytecode(t, test.input); test.want != res {
+				t.Fatalf("Expected %v, got %v", test.want, res)
+			}
+		})
+	}
+}
+
+func normalizeJSON(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, " ", ""), "\n", "")
+}
 
 func runBytecodeInDir(t *testing.T, dir, filename, input string) any {
 	t.Helper()

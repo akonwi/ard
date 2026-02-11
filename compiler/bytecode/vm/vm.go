@@ -382,7 +382,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 				_, _ = child.runClosure(closure, nil)
 			}()
 			fields := map[string]*runtime.Object{
-				"wg": runtime.MakeDynamic(wg),
+				"wg":     runtime.MakeDynamic(wg),
+				"result": runtime.Void(),
 			}
 			vm.push(curr, runtime.MakeStruct(fiberType, fields))
 		case bytecode.OpAsyncEval:

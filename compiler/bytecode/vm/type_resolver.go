@@ -106,11 +106,17 @@ func parseTypeName(name string) (checker.Type, error) {
 	if strings.HasPrefix(trimmed, "fn ") || strings.HasPrefix(trimmed, "fn(") {
 		open := strings.Index(trimmed, "(")
 		close := strings.LastIndex(trimmed, ")")
-		if open == -1 || close == -1 || close < open {
+		if open == -1 {
 			return nil, fmt.Errorf("invalid function type: %s", trimmed)
 		}
+		if close == -1 || close < open {
+			close = len(trimmed)
+		}
 		paramsRaw := strings.TrimSpace(trimmed[open+1 : close])
-		retRaw := strings.TrimSpace(trimmed[close+1:])
+		retRaw := ""
+		if close < len(trimmed) {
+			retRaw = strings.TrimSpace(trimmed[close+1:])
+		}
 		params := []checker.Parameter{}
 		if paramsRaw != "" {
 			parts := splitTopLevelList(paramsRaw)
@@ -122,9 +128,13 @@ func parseTypeName(name string) (checker.Type, error) {
 				params = append(params, checker.Parameter{Type: paramType})
 			}
 		}
-		retType, err := parseTypeName(retRaw)
-		if err != nil {
-			return nil, err
+		var retType checker.Type = checker.Dynamic
+		if retRaw != "" {
+			parsedRet, err := parseTypeName(retRaw)
+			if err != nil {
+				return nil, err
+			}
+			retType = parsedRet
 		}
 		return &checker.FunctionDef{Parameters: params, ReturnType: retType}, nil
 	}

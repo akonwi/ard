@@ -147,6 +147,10 @@ func TestBytecodeSQLMissingParameters(t *testing.T) {
 	`)
 }
 
+func TestBytecodeMissingParameters(t *testing.T) {
+	TestBytecodeSQLMissingParameters(t)
+}
+
 func TestBytecodeSQLQueryRun(t *testing.T) {
 	testDB := "test_insert.db"
 	defer os.Remove(testDB)

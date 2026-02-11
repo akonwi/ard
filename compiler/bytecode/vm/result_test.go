@@ -111,3 +111,42 @@ func TestBytecodeTryResultParity(t *testing.T) {
 		})
 	}
 }
+
+func TestBytecodeTry(t *testing.T) {
+	runBytecodeTests(t, []vmTestCase{
+		{
+			name: "trying an ok result",
+			input: `
+				fn divide(a: Int, b: Int) Int!Str {
+					match b == 0 {
+					  true => Result::err("cannot divide by 0"),
+					  false => Result::ok(a / b),
+					}
+				}
+				fn divide_plus_10(a: Int, b: Int) Int!Str {
+					let res = try divide(a, b)
+					Result::ok(res + 10)
+				}
+				divide_plus_10(100, 4)
+			`,
+			want: 35,
+		},
+		{
+			name: "trying an error result",
+			input: `
+				fn divide(a: Int, b: Int) Int!Str {
+					match b == 0 {
+					  true => Result::err("cannot divide by 0"),
+					  false => Result::ok(a / b),
+					}
+				}
+				fn divide_plus_10(a: Int, b: Int) Int!Str {
+					let res = try divide(a, b)
+					Result::ok(res + 10)
+				}
+				divide_plus_10(100, 0)
+			`,
+			want: "cannot divide by 0",
+		},
+	})
+}
