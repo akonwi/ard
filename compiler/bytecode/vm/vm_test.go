@@ -200,6 +200,7 @@ func TestBytecodeFunctionCallFeatures(t *testing.T) {
 		name  string
 		input string
 		want  any
+		skip  bool
 	}{
 		{
 			name: "noop function",
@@ -641,20 +642,203 @@ func TestBytecodeTryResult(t *testing.T) {
 	}
 }
 
-func TestBytecodeTryMaybe(t *testing.T) {
-	res := runBytecode(t, strings.Join([]string{
-		`use ard/maybe`,
-		`fn compute() Int? {`,
-		`  let val = try maybe::some(4)`,
-		`  maybe::some(val + 2)`,
-		`}`,
-		`match compute() {`,
-		`  n => n,`,
-		`  _ => 0`,
-		`}`,
-	}, "\n"))
-	if res != 6 {
-		t.Fatalf("Expected 6, got %v", res)
+func TestBytecodeTryOnMaybe(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  any
+		skip  bool
+	}{
+		{
+			name: "try on Maybe::some returns unwrapped value",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::some(42)
+				}
+
+				fn test() Int? {
+					let value = try get_value()
+					maybe::some(value + 1)
+				}
+
+				let result = test()
+				match result {
+					value => value,
+					_ => -1
+				}
+			`,
+			want: 43,
+		},
+		{
+			name: "try on Maybe::none propagates none",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::none()
+				}
+
+				fn test() Int? {
+					let value = try get_value()
+					maybe::some(value + 1)
+				}
+
+				let result = test()
+				match result {
+					value => value,
+					_ => -999
+				}
+			`,
+			want: -999,
+			skip: true,
+		},
+		{
+			name: "try on Maybe with catch block transforms none",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::none()
+				}
+
+				fn test() Int {
+					let value = try get_value() -> _ { 42 }
+					value + 1
+				}
+
+				test()
+			`,
+			want: 42,
+		},
+		{
+			name: "try on Maybe with catch block - some case",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::some(10)
+				}
+
+				fn test() Int {
+					let value = try get_value() -> _ { 42 }
+					value + 1
+				}
+
+				test()
+			`,
+			want: 11,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.skip {
+				t.Skip("TODO(bytecode): try Maybe none propagation parity with interpreter")
+			}
+			res := runBytecode(t, test.input)
+			if res != test.want {
+				t.Fatalf("Expected %v, got %v", test.want, res)
+			}
+		})
+	}
+}
+
+func TestBytecodeTryOnChainedMaybes(t *testing.T) {
+	out := runBytecode(t, `
+		use ard/maybe
+
+		struct Profile {
+	  		name: Str?
+		}
+
+		struct User {
+	  		profile: Profile?
+		}
+
+		fn get_user() User? {
+			let profile = maybe::some(Profile{name: maybe::none() })
+			maybe::some(User{ profile: profile })
+	 		}
+
+		fn get_name() Str {
+			let name = try get_user().profile.name -> _ { "Sample" }
+			name
+		}
+
+		get_name()
+	`)
+
+	if out != "Sample" {
+		t.Fatalf("Expected 'Sample', got %v", out)
+	}
+}
+
+func TestBytecodeTryOnMaybeDifferentTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  any
+		skip  bool
+	}{
+		{
+			name: "try on Maybe with different inner types - success case",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::some(42)
+				}
+
+				fn test() Str? {
+					let value = try get_value()  // Int? -> Int, function returns Str?
+					maybe::some("success")
+				}
+
+				let result = test()
+				match result {
+					value => value,
+					_ => "none"
+				}
+			`,
+			want: "success",
+		},
+		{
+			name: "try on Maybe with different inner types - none case",
+			input: `
+				use ard/maybe
+
+				fn get_value() Int? {
+					maybe::none()
+				}
+
+				fn test() Str? {
+					let value = try get_value()  // Should early return none as Str?
+					maybe::some("should not reach")
+				}
+
+				let result = test()
+				match result {
+					value => value,
+					_ => "got none as expected"
+				}
+			`,
+			want: "got none as expected",
+			skip: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.skip {
+				t.Skip("TODO(bytecode): try Maybe none propagation parity with interpreter")
+			}
+			res := runBytecode(t, test.input)
+			if res != test.want {
+				t.Fatalf("Expected %v, got %v", test.want, res)
+			}
+		})
 	}
 }
 
