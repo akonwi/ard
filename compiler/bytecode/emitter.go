@@ -499,7 +499,7 @@ func (f *funcEmitter) emitStatements(stmts []checker.Statement) error {
 			if err := f.emitExpr(stmt.Expr); err != nil {
 				return err
 			}
-			if !isLast {
+			if !isLast && stmt.Expr.Type() != checker.Void {
 				f.emit(Instruction{Op: OpPop})
 			}
 			continue
@@ -533,7 +533,9 @@ func (f *funcEmitter) emitStatementsDiscard(stmts []checker.Statement) error {
 			if err := f.emitExpr(stmt.Expr); err != nil {
 				return err
 			}
-			f.emit(Instruction{Op: OpPop})
+			if stmt.Expr.Type() != checker.Void {
+				f.emit(Instruction{Op: OpPop})
+			}
 		}
 		_ = i
 	}
@@ -866,7 +868,14 @@ func (f *funcEmitter) emitBinary(expr checker.Expression, op Opcode) error {
 }
 
 func (f *funcEmitter) emitBlockExpr(block *checker.Block) error {
-	return f.emitStatements(block.Stmts)
+	before := f.stack
+	if err := f.emitStatements(block.Stmts); err != nil {
+		return err
+	}
+	if f.stack == before {
+		f.emit(Instruction{Op: OpConstVoid})
+	}
+	return nil
 }
 
 func (f *funcEmitter) emitIfExpr(expr *checker.If) error {
@@ -1347,6 +1356,7 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 		}
 	}
 	f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+	f.adjustStack(argc, 1)
 	return nil
 }
 
@@ -1372,6 +1382,7 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 			}
 		}
 		f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+		f.adjustStack(argc, 1)
 		return nil
 	}
 	if mod := f.emitter.moduleByPath(call.Module); mod != nil {
@@ -1385,6 +1396,7 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 				}
 			}
 			f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+			f.adjustStack(argc, 1)
 			return nil
 		}
 		callName := call.Call.Name
@@ -1398,6 +1410,7 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 					}
 				}
 				f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+				f.adjustStack(argc, 1)
 				return nil
 			}
 		}
@@ -1410,6 +1423,7 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 				}
 			}
 			f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+			f.adjustStack(argc, 1)
 			return nil
 		}
 	}
