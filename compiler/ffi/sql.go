@@ -7,6 +7,8 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -48,7 +50,7 @@ func detectDriver(connStr string) string {
 
 	// Check for postgres
 	if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
-		return "postgres"
+		return "pgx"
 	}
 
 	// Check for mysql
