@@ -15,13 +15,14 @@ The http module provides:
 ```ard
 use ard/http
 use ard/io
+use ard/maybe
 
 fn main() {
   let req = http::Request {
     method: http::Method::Get,
     url: "https://example.com",
     headers: [:],
-    body: Void?
+    body: maybe::none()
   }
   
   match http::send(req) {
@@ -60,7 +61,9 @@ Represents an HTTP request.
 - **`method: Method`** - The HTTP method
 - **`url: Str`** - The request URL
 - **`headers: [Str:Str]`** - Request headers as a map
-- **`body: Str?`** - Optional request body
+- **`body: Dynamic?`** - Optional request body
+
+`Request.body` is dynamic so you can support text, JSON payloads, and other shapes without forcing a string-only API. For server handlers, decode `req.body` into the expected shape with `ard/decode`.
 
 #### Methods
 
@@ -151,7 +154,7 @@ let req = http::Request {
   method: http::Method::Get,
   url: "https://api.example.com/users",
   headers: [:],
-  body: Void?
+  body: maybe::none()
 }
 
 match http::send(req) {
@@ -195,7 +198,7 @@ fn main() {
     method: http::Method::Get,
     url: "https://jsonplaceholder.typicode.com/posts/1",
     headers: [:],
-    body: Void?
+    body: maybe::none()
   }
   
   match http::send(req) {
@@ -217,6 +220,8 @@ fn main() {
 use ard/http
 use ard/io
 use ard/json
+use ard/maybe
+use ard/dynamic
 
 fn main() {
   let body_data = ["name": "Alice", "age": 30]
@@ -226,13 +231,51 @@ fn main() {
     method: http::Method::Post,
     url: "https://api.example.com/users",
     headers: ["Content-Type": "application/json"],
-    body: body_json
+    body: maybe::some(dynamic::from_str(body_json))
   }
   
   match http::send(req) {
     ok(response) => io::print(response.body),
     err(error) => io::print("Request failed: {error}")
   }
+}
+```
+
+### Decode an Inbound JSON Body
+
+```ard
+use ard/http
+use ard/decode
+
+fn main() {
+  let handlers: [Str:fn(http::Request, mut http::Response)] = [
+    "/api/auth/sign-up": fn(req: http::Request, mut res: http::Response) {
+      let raw_body = try req.body -> _ {
+        res.status = 400
+        res.body = "Missing request body"
+      }
+
+      let body_text = try decode::run(raw_body, decode::string) -> errs {
+        res.status = 400
+        res.body = "Body must be text: {decode::flatten(errs)}"
+      }
+
+      let payload = try decode::from_json(body_text) -> err {
+        res.status = 400
+        res.body = "Invalid JSON: {err}"
+      }
+
+      let email = try decode::run(payload, decode::field("email", decode::string)) -> errs {
+        res.status = 400
+        res.body = "Missing email: {decode::flatten(errs)}"
+      }
+
+      res.status = 201
+      res.body = "Created user with email {email}"
+    }
+  ]
+
+  http::serve(8000, handlers).expect("Failed to start server")
 }
 ```
 

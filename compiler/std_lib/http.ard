@@ -27,7 +27,7 @@ struct Request {
   method:  Method,
 	url:     Str,
 	headers: [Str:Str],
-	body:    Str?,
+	body:    Dynamic?,
 
 	// inbound requests have the *http.Request
   raw: Dynamic?,
@@ -70,7 +70,7 @@ impl Response {
   }
 }
 
-private extern fn _send(method: Str, url: Str, body: Str?, headers: [Str:Str]) Response!Str = "HTTP_Send"
+private extern fn _send(method: Str, url: Str, body: Dynamic?, headers: [Str:Str]) Response!Str = "HTTP_Send"
 
 fn send(req: Request) Response!Str {
   let method = req.method.to_str()

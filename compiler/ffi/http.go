@@ -12,7 +12,7 @@ import (
 )
 
 func requestBodyMaybe(r *http.Request) *runtime.Object {
-	body := runtime.MakeNone(checker.Str)
+	body := runtime.MakeNone(checker.Dynamic)
 	if r.Body == nil {
 		return body
 	}
@@ -50,16 +50,24 @@ func GetQueryParam(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(req.URL.Query().Get(name))
 }
 
-// fn (method: Str, url: Str, body: Str, headers: [Str:Str]) Response!Str
+// fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str]) Response!Str
 func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object {
 	method := args[0].AsString()
 	url := args[1].AsString()
 	body := func() io.Reader {
-		str := ""
-		if string, ok := args[2].IsStr(); ok {
-			str = string
+		if args[2].IsNone() {
+			return strings.NewReader("")
 		}
-		return strings.NewReader(str)
+
+		raw := args[2].Raw()
+		switch value := raw.(type) {
+		case string:
+			return strings.NewReader(value)
+		case []byte:
+			return strings.NewReader(string(value))
+		default:
+			return strings.NewReader(fmt.Sprintf("%v", value))
+		}
 	}()
 	headers := make(http.Header)
 

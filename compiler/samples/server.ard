@@ -1,4 +1,5 @@
 use ard/http
+use ard/decode
 
 fn main() {
   let routes: [Str:http::HandlerFn] = [
@@ -11,6 +12,30 @@ fn main() {
     "/error": fn(req: http::Request, mut res: http::Response) {
       res.status = 400
       res.body = "Bad request"
+    },
+    "/api/auth/sign-up": fn(req: http::Request, mut res: http::Response) {
+      let raw_body = try req.body -> _ {
+        res.status = 400
+        res.body = "Missing request body"
+      }
+
+      let body_text = try decode::run(raw_body, decode::string) -> errs {
+        res.status = 400
+        res.body = "Body must be text: {decode::flatten(errs)}"
+      }
+
+      let payload = try decode::from_json(body_text) -> err {
+        res.status = 400
+        res.body = "Invalid JSON: {err}"
+      }
+
+      let email = try decode::run(payload, decode::field("email", decode::string)) -> errs {
+        res.status = 400
+        res.body = "Missing email: {decode::flatten(errs)}"
+      }
+
+      res.status = 201
+      res.body = "Created user with email {email}"
     },
   ]
 
