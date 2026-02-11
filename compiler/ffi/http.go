@@ -11,6 +11,25 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
+func requestBodyMaybe(r *http.Request) *runtime.Object {
+	body := runtime.MakeNone(checker.Str)
+	if r.Body == nil {
+		return body
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if err != nil {
+		return body
+	}
+
+	if len(bodyBytes) == 0 {
+		return body
+	}
+
+	return body.ToSome(string(bodyBytes))
+}
+
 // fn (req: Dynamic) Str
 func GetReqPath(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	req := args[0].Raw().(*http.Request)
@@ -117,6 +136,8 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	_mux := http.NewServeMux()
 	for path, handler := range handlers {
+		path := path
+		handler := handler
 		_mux.HandleFunc(convertToGoPattern(path), func(w http.ResponseWriter, r *http.Request) {
 			// Convert Go request to http::Request
 			headers := make(map[string]*runtime.Object)
@@ -126,14 +147,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				}
 			}
 
-			body := runtime.MakeNone(checker.Str)
-			if r.Body != nil {
-				bodyBytes, err := io.ReadAll(r.Body)
-				if err == nil {
-					body.Set(string(bodyBytes))
-				}
-				r.Body.Close()
-			}
+			body := requestBodyMaybe(r)
 
 			handle, ok := handler.Raw().(runtime.Closure)
 			if !ok {
