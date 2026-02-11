@@ -528,6 +528,24 @@ func (vm *VM) run() (*runtime.Object, error) {
 			items = append([]*runtime.Object{val}, items...)
 			listObj.Set(items)
 			vm.push(curr, listObj)
+		case bytecode.OpListMethod:
+			args := make([]*runtime.Object, inst.B)
+			for i := inst.B - 1; i >= 0; i-- {
+				arg, err := vm.pop(curr)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = arg
+			}
+			subj, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			res, err := vm.evalListMethod(bytecodeToListKind(inst.A), subj, args)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, res)
 		case bytecode.OpMapKeys:
 			mapObj, err := vm.pop(curr)
 			if err != nil {
@@ -1034,13 +1052,14 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 	if closure.FnIndex < 0 || closure.FnIndex >= len(vm.Program.Functions) {
 		return nil, fmt.Errorf("function index out of range")
 	}
-	fnDef := vm.Program.Functions[closure.FnIndex]
-	frame, err := vm.newFrame(fnDef, args, closure.Captures)
+	child := vm.spawn()
+	fnDef := child.Program.Functions[closure.FnIndex]
+	frame, err := child.newFrame(fnDef, args, closure.Captures)
 	if err != nil {
 		return nil, err
 	}
-	vm.Frames = append(vm.Frames, frame)
-	return vm.run()
+	child.Frames = append(child.Frames, frame)
+	return child.run()
 }
 
 func (vm *VM) push(frame *Frame, obj *runtime.Object) {

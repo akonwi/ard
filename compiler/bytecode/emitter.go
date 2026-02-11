@@ -1292,6 +1292,15 @@ func (f *funcEmitter) emitListMethod(method *checker.ListMethod) error {
 		}
 		f.emit(Instruction{Op: OpListSet})
 		return nil
+	case checker.ListSort, checker.ListSwap:
+		for i := range method.Args {
+			if err := f.emitExpr(method.Args[i]); err != nil {
+				return err
+			}
+		}
+		f.emit(Instruction{Op: OpListMethod, A: int(method.Kind), B: len(method.Args)})
+		f.adjustStack(len(method.Args)+1, 1)
+		return nil
 	default:
 		return fmt.Errorf("unsupported list method: %v", method.Kind)
 	}

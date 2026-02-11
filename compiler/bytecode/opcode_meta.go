@@ -97,6 +97,8 @@ func (o Opcode) String() string {
 		return "LIST_PUSH"
 	case OpListPrepend:
 		return "LIST_PREPEND"
+	case OpListMethod:
+		return "LIST_METHOD"
 	case OpMapKeys:
 		return "MAP_KEYS"
 	case OpMapGet:
@@ -206,6 +208,8 @@ func (o Opcode) StackEffect() StackEffect {
 		return StackEffect{Pop: 2, Push: 1}
 	case OpListPrepend:
 		return StackEffect{Pop: 2, Push: 1}
+	case OpListMethod:
+		return StackEffect{}
 	case OpMapKeys:
 		return StackEffect{Pop: 1, Push: 1}
 	case OpMapGet:

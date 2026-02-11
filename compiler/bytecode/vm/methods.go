@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,10 @@ func bytecodeToMaybeKind(kind int) checker.MaybeMethodKind {
 
 func bytecodeToResultKind(kind int) checker.ResultMethodKind {
 	return checker.ResultMethodKind(kind)
+}
+
+func bytecodeToListKind(kind int) checker.ListMethodKind {
+	return checker.ListMethodKind(kind)
 }
 
 func (vm *VM) evalStrMethod(kind checker.StrMethodKind, subj *runtime.Object, args []*runtime.Object) (*runtime.Object, error) {
@@ -157,6 +162,36 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 		return runtime.MakeBool(subj.IsErr()), nil
 	default:
 		return nil, fmt.Errorf("Unknown ResultMethodKind: %d", kind)
+	}
+}
+
+func (vm *VM) evalListMethod(kind checker.ListMethodKind, subj *runtime.Object, args []*runtime.Object) (*runtime.Object, error) {
+	raw := subj.AsList()
+	switch kind {
+	case checker.ListSort:
+		closureObj := args[0]
+		closure, ok := closureObj.Raw().(*Closure)
+		if !ok {
+			return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
+		}
+		slices.SortFunc(raw, func(a, b *runtime.Object) int {
+			res, err := vm.runClosure(closure, []*runtime.Object{a, b})
+			if err != nil {
+				return 0
+			}
+			if res.AsBool() {
+				return -1
+			}
+			return 0
+		})
+		return runtime.Void(), nil
+	case checker.ListSwap:
+		l := args[0].AsInt()
+		r := args[1].AsInt()
+		raw[l], raw[r] = raw[r], raw[l]
+		return runtime.Void(), nil
+	default:
+		return nil, fmt.Errorf("Unknown ListMethodKind: %d", kind)
 	}
 }
 

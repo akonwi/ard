@@ -48,6 +48,7 @@ const (
 	OpListSet
 	OpListPush
 	OpListPrepend
+	OpListMethod
 	OpMapKeys
 	OpMapGet
 	OpMapGetValue

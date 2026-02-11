@@ -168,9 +168,9 @@ fn map(
 
     for k, v in raw {
       match key(k) {
-        ok(key) => {
+        ok(decoded_key) => {
           match value(v) {
-            ok(val) => { out.set(key, val) },
+            ok(decoded_val) => { out.set(decoded_key, decoded_val) },
             err(errs) => {
               for e in errs {
                 mut path = e.path
