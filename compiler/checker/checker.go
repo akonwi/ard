@@ -2791,8 +2791,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Create function call
+			callName := fnDef.Name
+			if callName == "" {
+				callName = s.Function.Name
+			}
 			call := &FunctionCall{
-				Name:       fnDef.Name,
+				Name:       callName,
 				Args:       args,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,

@@ -288,6 +288,16 @@ func (e *Emitter) emitModule(mod checker.Module) error {
 			}
 		}
 		switch def := stmt.Stmt.(type) {
+		case *checker.VariableDef:
+			if fnExpr, ok := def.Value.(*checker.FunctionDef); ok {
+				copy := *fnExpr
+				copy.Name = def.Name
+				if _, _, err := e.emitFunctionWithParent(&copy, nil); err != nil {
+					e.modulePrefix = prevPrefix
+					e.moduleFuncs = prevFuncs
+					return err
+				}
+			}
 		case *checker.StructDef:
 			if err := e.emitStructMethods(def); err != nil {
 				e.modulePrefix = prevPrefix
@@ -328,6 +338,11 @@ func (e *Emitter) collectModuleFuncs(prog *checker.Program) map[string]struct{} 
 				}
 			}
 		}
+		if def, ok := stmt.Stmt.(*checker.VariableDef); ok {
+			if _, isFn := def.Value.(*checker.FunctionDef); isFn && def.Name != "" {
+				funcs[def.Name] = struct{}{}
+			}
+		}
 	}
 	return funcs
 }
@@ -339,6 +354,86 @@ func (e *Emitter) qualifyName(name string) string {
 		}
 	}
 	return name
+}
+
+func (e *Emitter) moduleByPath(path string) checker.Module {
+	if e.modules == nil {
+		return nil
+	}
+	if mod, ok := e.modules[path]; ok {
+		return mod
+	}
+	for _, mod := range e.modules {
+		if mod != nil && mod.Path() == path {
+			return mod
+		}
+	}
+	return nil
+}
+
+func (e *Emitter) emitModuleVariableFunction(modulePath, name string) (int, bool, error) {
+	qualified := fmt.Sprintf("%s::%s", modulePath, name)
+	if idx, ok := e.funcIndex[qualified]; ok {
+		return idx, true, nil
+	}
+
+	mod := e.moduleByPath(modulePath)
+	if mod == nil || mod.Program() == nil {
+		return 0, false, nil
+	}
+
+	for _, stmt := range mod.Program().Statements {
+		def, ok := stmt.Stmt.(*checker.VariableDef)
+		if !ok || def.Name != name {
+			continue
+		}
+		fnExpr, ok := def.Value.(*checker.FunctionDef)
+		if !ok {
+			return 0, false, nil
+		}
+
+		copy := *fnExpr
+		copy.Name = name
+		prevPrefix := e.modulePrefix
+		prevFuncs := e.moduleFuncs
+		e.modulePrefix = modulePath
+		e.moduleFuncs = map[string]struct{}{name: {}}
+		_, _, err := e.emitFunctionWithParent(&copy, nil)
+		e.modulePrefix = prevPrefix
+		e.moduleFuncs = prevFuncs
+		if err != nil {
+			return 0, false, err
+		}
+
+		idx, ok := e.funcIndex[qualified]
+		return idx, ok, nil
+	}
+
+	return 0, false, nil
+}
+
+func (e *Emitter) emitFirstModuleFunctionVariable(modulePath string, arity int) (int, bool, error) {
+	mod := e.moduleByPath(modulePath)
+	if mod == nil || mod.Program() == nil {
+		return 0, false, nil
+	}
+
+	for _, stmt := range mod.Program().Statements {
+		def, ok := stmt.Stmt.(*checker.VariableDef)
+		if !ok || def.Name == "" {
+			continue
+		}
+		fnExpr, ok := def.Value.(*checker.FunctionDef)
+		if !ok {
+			continue
+		}
+		if len(fnExpr.Parameters) != arity {
+			continue
+		}
+		return e.emitModuleVariableFunction(modulePath, def.Name)
+	}
+
+	return 0, false, nil
 }
 
 func (e *Emitter) nextAnonName(prefix string) string {
@@ -1279,12 +1374,24 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 		f.emit(Instruction{Op: OpCall, A: idx, B: argc})
 		return nil
 	}
-	if f.emitter.modules != nil {
-		if mod, ok := f.emitter.modules[call.Module]; ok {
-			if err := f.emitter.emitModule(mod); err != nil {
-				return err
+	if mod := f.emitter.moduleByPath(call.Module); mod != nil {
+		if err := f.emitter.emitModule(mod); err != nil {
+			return err
+		}
+		if idx, ok := f.emitter.funcIndex[qualified]; ok {
+			for i := range call.Call.Args {
+				if err := f.emitExpr(call.Call.Args[i]); err != nil {
+					return err
+				}
 			}
-			if idx, ok := f.emitter.funcIndex[qualified]; ok {
+			f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+			return nil
+		}
+		callName := call.Call.Name
+		if callName != "" {
+			if idx, ok, err := f.emitter.emitModuleVariableFunction(call.Module, callName); err != nil {
+				return err
+			} else if ok {
 				for i := range call.Call.Args {
 					if err := f.emitExpr(call.Call.Args[i]); err != nil {
 						return err
@@ -1293,6 +1400,17 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 				f.emit(Instruction{Op: OpCall, A: idx, B: argc})
 				return nil
 			}
+		}
+		if idx, ok, err := f.emitter.emitFirstModuleFunctionVariable(call.Module, argc); err != nil {
+			return err
+		} else if ok {
+			for i := range call.Call.Args {
+				if err := f.emitExpr(call.Call.Args[i]); err != nil {
+					return err
+				}
+			}
+			f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+			return nil
 		}
 	}
 	for i := range call.Call.Args {
@@ -1868,7 +1986,24 @@ func (f *funcEmitter) emitModuleSymbol(sym *checker.ModuleSymbol) error {
 	case *checker.FunctionDef:
 		idx, ok := f.emitter.funcIndex[name]
 		if !ok {
-			return fmt.Errorf("unknown module function: %s", name)
+			if mod := f.emitter.moduleByPath(sym.Module); mod != nil {
+				if err := f.emitter.emitModule(mod); err != nil {
+					return err
+				}
+			}
+			idx, ok = f.emitter.funcIndex[name]
+			if !ok {
+				if sym.Symbol.Name != "" {
+					var err error
+					idx, ok, err = f.emitter.emitModuleVariableFunction(sym.Module, sym.Symbol.Name)
+					if err != nil {
+						return err
+					}
+				}
+				if !ok {
+					return fmt.Errorf("unknown module function: %s", name)
+				}
+			}
 		}
 		typeID := f.emitter.addType(def)
 		f.emit(Instruction{Op: OpMakeClosure, A: idx, B: 0, C: int(typeID)})
