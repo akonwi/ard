@@ -493,7 +493,7 @@ func TestBytecodeDeepCustomDecoders(t *testing.T) {
 				use ard/decode
 				use ard/fs
 
-				let text = fs::read("../../vm/fixtures/json_data.json").or("")
+				let text = fs::read("./fixtures/json_data.json").or("")
 				if text.is_empty() { panic("Empty json file") }
 
 				fn first(as: fn(Dynamic) $T![decode::Error]) fn(Dynamic) $T![decode::Error] {
