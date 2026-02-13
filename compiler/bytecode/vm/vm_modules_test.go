@@ -70,4 +70,64 @@ f(10)`)
 			t.Fatalf("Expected 20, got %v", out)
 		}
 	})
+
+	t.Run("async::start module function can call sibling module function", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "ard_bytecode_async_module_fn_test_")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tempDir, "sessions.ard"), []byte(`fn cleanup_expired_sessions() {
+  let _ = 1
+}
+
+fn cleanup_job() {
+  cleanup_expired_sessions()
+}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		out := runBytecodeInDir(t, tempDir, "main.ard", `use ard/async
+use test_project/sessions
+
+let fiber = async::start(sessions::cleanup_job)
+fiber.join()`)
+		if out != nil {
+			t.Fatalf("Expected nil, got %v", out)
+		}
+	})
+
+	t.Run("async::start readonly module function variable works", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "ard_bytecode_async_module_var_test_")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tempDir, "sessions.ard"), []byte(`fn cleanup_expired_sessions() {
+  let _ = 1
+}
+
+let cleanup_job = fn() {
+  cleanup_expired_sessions()
+}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		out := runBytecodeInDir(t, tempDir, "main.ard", `use ard/async
+use test_project/sessions
+
+let fiber = async::start(sessions::cleanup_job)
+fiber.join()`)
+		if out != nil {
+			t.Fatalf("Expected nil, got %v", out)
+		}
+	})
 }

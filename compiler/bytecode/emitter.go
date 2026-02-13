@@ -2046,6 +2046,10 @@ func (f *funcEmitter) emitFiberExecution(exec *checker.FiberExecution) error {
 	if prog == nil {
 		return fmt.Errorf("missing fiber program")
 	}
+	if err := f.emitter.emitModule(mod); err != nil {
+		return err
+	}
+
 	var target *checker.FunctionDef
 	for i := range prog.Statements {
 		stmt := prog.Statements[i]
@@ -2055,13 +2059,28 @@ func (f *funcEmitter) emitFiberExecution(exec *checker.FiberExecution) error {
 				break
 			}
 		}
+		if def, ok := stmt.Stmt.(*checker.VariableDef); ok {
+			if def.Name != exec.GetMainName() || def.Mutable {
+				continue
+			}
+			if fnExpr, ok := def.Value.(*checker.FunctionDef); ok {
+				target = fnExpr
+				break
+			}
+		}
 	}
 	if target == nil {
 		return fmt.Errorf("fiber function not found: %s", exec.GetMainName())
 	}
 	copy := *target
 	copy.Name = f.emitter.nextAnonName("fiber")
+	prevPrefix := f.emitter.modulePrefix
+	prevFuncs := f.emitter.moduleFuncs
+	f.emitter.modulePrefix = mod.Path()
+	f.emitter.moduleFuncs = f.emitter.collectModuleFuncs(prog)
 	fnIndex, _, err := f.emitter.emitFunctionWithParent(&copy, nil)
+	f.emitter.modulePrefix = prevPrefix
+	f.emitter.moduleFuncs = prevFuncs
 	if err != nil {
 		return err
 	}
