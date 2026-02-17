@@ -1,14 +1,15 @@
 ---
 title: Cryptography with ard/crypto
-description: Hash values, hash and verify passwords with bcrypt, and generate UUID v4 values.
+description: Hash values, hash and verify passwords with bcrypt or scrypt, and generate UUID v4 values.
 ---
 
-The `ard/crypto` module provides hashing utilities, bcrypt password helpers, and UUID generation.
+The `ard/crypto` module provides hashing utilities, password helpers (bcrypt and scrypt), and UUID generation.
 
 The crypto module provides:
 - **Digest hashes** with `md5`, `sha256`, and `sha512`
 - **Password hashing** with `hash` (bcrypt, configurable cost)
 - **Password verification** with `verify`
+- **Scrypt hashing and verification** with `scrypt_hash` and `scrypt_verify`
 - **ID generation** with UUID v4 via `uuid`
 
 ```ard
@@ -50,6 +51,29 @@ Verify a plaintext `password` against a bcrypt `hashed` string.
 - Returns `ok(true)` if the password matches.
 - Returns `ok(false)` when it does not match.
 - Returns `err(message)` for malformed hashes or runtime errors.
+
+### `fn scrypt_hash(password: Str, salt_hex: Str?, n: Int?, r: Int?, p: Int?, dk_len: Int?) Str!Str`
+
+Hash `password` with scrypt and return a hash string in the format `<salt_hex>:<derived_key_hex>`.
+
+- `password` is normalized with Unicode NFKC before derivation.
+- If `salt_hex` is omitted (or `none`), a random 16-byte salt is generated.
+- Defaults are used for omitted parameters:
+  - `n = 16384`
+  - `r = 16`
+  - `p = 1`
+  - `dk_len = 64`
+- Returns `ok(hash)` on success or `err(message)` on failure.
+
+### `fn scrypt_verify(password: Str, hash: Str, n: Int?, r: Int?, p: Int?, dk_len: Int?) Bool!Str`
+
+Verify `password` against a scrypt hash string in the format `<salt_hex>:<derived_key_hex>`.
+
+- `password` is normalized with Unicode NFKC before derivation.
+- Uses constant-time comparison for derived key matching.
+- Uses the same default parameters as `scrypt_hash` when omitted.
+- Returns `ok(true)` on match and `ok(false)` on non-match.
+- Returns `err(message)` for malformed hash format or runtime failures.
 
 ### `fn uuid() Str`
 
@@ -118,5 +142,20 @@ fn main() {
   io::print("md5: {crypto::md5(value)}")
   io::print("sha256: {crypto::sha256(value)}")
   io::print("sha512: {crypto::sha512(value)}")
+}
+```
+
+### Scrypt Password Hashing
+
+```ard
+use ard/crypto
+
+fn main() {
+  let hashed = crypto::scrypt_hash("my-secret-password").expect("Could not hash password")
+  let valid = crypto::scrypt_verify("my-secret-password", hashed).expect("Could not verify password")
+
+  if not valid {
+    panic("Expected password verification to succeed")
+  }
 }
 ```

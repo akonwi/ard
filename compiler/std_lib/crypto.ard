@@ -8,4 +8,8 @@ extern fn hash(password: Str, cost: Int?) Str!Str = "CryptoHashPassword"
 
 extern fn verify(password: Str, hashed: Str) Bool!Str = "CryptoVerifyPassword"
 
+extern fn scrypt_hash(password: Str, salt_hex: Str?, n: Int?, r: Int?, p: Int?, dk_len: Int?) Str!Str = "CryptoScryptHash"
+
+extern fn scrypt_verify(password: Str, hash: Str, n: Int?, r: Int?, p: Int?, dk_len: Int?) Bool!Str = "CryptoScryptVerify"
+
 extern fn uuid() Str = "CryptoUUID"

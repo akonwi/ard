@@ -25,6 +25,12 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("CryptoVerifyPassword", ffi.CryptoVerifyPassword); err != nil {
 		return fmt.Errorf("failed to register CryptoVerifyPassword: %w", err)
 	}
+	if err := r.Register("CryptoScryptHash", ffi.CryptoScryptHash); err != nil {
+		return fmt.Errorf("failed to register CryptoScryptHash: %w", err)
+	}
+	if err := r.Register("CryptoScryptVerify", ffi.CryptoScryptVerify); err != nil {
+		return fmt.Errorf("failed to register CryptoScryptVerify: %w", err)
+	}
 	if err := r.Register("CryptoUUID", ffi.CryptoUUID); err != nil {
 		return fmt.Errorf("failed to register CryptoUUID: %w", err)
 	}

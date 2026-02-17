@@ -148,3 +148,63 @@ func TestBytecodeCryptoUUID(t *testing.T) {
 		t.Fatalf("Expected valid UUID v4 format, got %q", uuid)
 	}
 }
+
+func TestBytecodeCryptoScrypt(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  any
+	}{
+		{
+			name: "scrypt hash and verify with defaults",
+			input: `
+				use ard/crypto
+				let hashed = crypto::scrypt_hash("password123").expect("hash failed")
+				crypto::scrypt_verify("password123", hashed).expect("verify failed")
+			`,
+			want: true,
+		},
+		{
+			name: "scrypt verify returns false for wrong password",
+			input: `
+				use ard/crypto
+				let hashed = crypto::scrypt_hash("password123").expect("hash failed")
+				crypto::scrypt_verify("wrong-password", hashed).expect("verify failed")
+			`,
+			want: false,
+		},
+		{
+			name: "scrypt verify returns err for malformed hash",
+			input: `
+				use ard/crypto
+				crypto::scrypt_verify("password123", "bad-hash").is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "scrypt deterministic hash with explicit params",
+			input: `
+				use ard/crypto
+				crypto::scrypt_hash("password", "73616c74", 16, 1, 1, 16).expect("hash failed")
+			`,
+			want: "73616c74:d360147c2a2db7903186e387bb385547",
+		},
+		{
+			name: "scrypt uses NFKC normalization",
+			input: `
+				use ard/crypto
+				let hashed = crypto::scrypt_hash("Ａ", "73616c74", 16, 1, 1, 16).expect("hash failed")
+				crypto::scrypt_verify("A", hashed, 16, 1, 1, 16).expect("verify failed")
+			`,
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := runBytecode(t, test.input); got != test.want {
+				t.Fatalf("Expected %v, got %v", test.want, got)
+			}
+		})
+	}
+}
