@@ -1319,7 +1319,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				c.addError(fmt.Sprintf("Can only implement methods on structs and enums, not %s", sym.Type), s.Target.GetLocation())
 				return nil
 			}
-			return nil
 		}
 	case nil:
 		return nil
