@@ -5,7 +5,6 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
-	corevm "github.com/akonwi/ard/vm"
 )
 
 type ModuleHandler interface {
@@ -19,8 +18,8 @@ type ModuleRegistry struct {
 
 func NewModuleRegistry() *ModuleRegistry {
 	r := &ModuleRegistry{handlers: map[string]ModuleHandler{}}
-	r.Register(&corevm.MaybeModule{})
-	r.Register(&corevm.ResultModule{})
+	r.Register(&MaybeModule{})
+	r.Register(&ResultModule{})
 	return r
 }
 

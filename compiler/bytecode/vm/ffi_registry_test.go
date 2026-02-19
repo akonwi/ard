@@ -7,7 +7,6 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
-	corevm "github.com/akonwi/ard/vm"
 )
 
 func panicTestFFI(args []*runtime.Object, _ checker.Type) *runtime.Object {
@@ -18,7 +17,7 @@ func panicTestFFI(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 func TestBytecodeFFIPanicRecovery(t *testing.T) {
-	registry := corevm.NewRuntimeFFIRegistry()
+	registry := NewRuntimeFFIRegistry()
 	if err := registry.RegisterBuiltinFFIFunctions(); err != nil {
 		t.Fatalf("register builtins: %v", err)
 	}

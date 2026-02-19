@@ -58,7 +58,7 @@ Exit criteria:
 - End-to-end compile + run from bytecode for multiple samples and tests.
 
 <<<<<<< HEAD
-Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode. `ard run` now defaults to bytecode with `--legacy` for interpreter.
+Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode. `ard run` uses bytecode runtime only.
 
 Performance notes: bytecode VM is ~33% faster with ~24% lower memory and ~28% fewer allocations on the fib(20) benchmark (M3 Pro, Feb 2026).
 

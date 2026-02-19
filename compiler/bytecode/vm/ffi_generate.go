@@ -13,7 +13,6 @@ import (
 	"strings"
 )
 
-// FFIFunction represents a discovered FFI function
 type FFIFunction struct {
 	Name   string
 	Module string
@@ -21,14 +20,12 @@ type FFIFunction struct {
 }
 
 func main() {
-	// Find all Go files in ffi directory
-	ffiDir := "../ffi"
+	ffiDir := "../../ffi"
 	functions, err := discoverFFIFunctions(ffiDir)
 	if err != nil {
 		log.Fatalf("Failed to discover FFI functions: %v", err)
 	}
 
-	// Generate the registry file
 	if err := generateRegistry(functions); err != nil {
 		log.Fatalf("Failed to generate registry: %v", err)
 	}
@@ -36,7 +33,6 @@ func main() {
 	fmt.Printf("Generated registry with %d FFI functions\n", len(functions))
 }
 
-// discoverFFIFunctions scans Go files for FFI function signatures
 func discoverFFIFunctions(dir string) ([]FFIFunction, error) {
 	var functions []FFIFunction
 
@@ -45,12 +41,10 @@ func discoverFFIFunctions(dir string) ([]FFIFunction, error) {
 			return err
 		}
 
-		// Skip directories and non-Go files
 		if info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 
-		// Skip generate.go and generated files
 		if strings.HasSuffix(path, "ffi_generate.go") || strings.HasSuffix(path, ".gen.go") {
 			return nil
 		}
@@ -67,7 +61,6 @@ func discoverFFIFunctions(dir string) ([]FFIFunction, error) {
 	return functions, err
 }
 
-// parseFFIFunctions parses a Go file and extracts FFI functions
 func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 	fset := token.NewFileSet()
 	node, err := goparser.ParseFile(fset, filename, nil, goparser.ParseComments)
@@ -77,14 +70,12 @@ func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 
 	var functions []FFIFunction
 
-	// Extract module name from filename (e.g., runtime.go -> runtime, json.go -> json)
 	base := filepath.Base(filename)
 	if !strings.HasSuffix(base, ".go") {
-		return functions, nil // Skip non-Go files
+		return functions, nil
 	}
 	module := strings.TrimSuffix(base, ".go")
 
-	// Walk the AST to find FFI functions
 	ast.Inspect(node, func(n ast.Node) bool {
 		if fn, ok := n.(*ast.FuncDecl); ok {
 			if isFFIFunction(fn) {
@@ -101,14 +92,11 @@ func parseFFIFunctions(filename string) ([]FFIFunction, error) {
 	return functions, nil
 }
 
-// isFFIFunction checks if a function matches the FFI signature
 func isFFIFunction(fn *ast.FuncDecl) bool {
-	// Skip functions that start with underscore (internal/private functions)
 	if strings.HasPrefix(fn.Name.Name, "_") {
 		return false
 	}
 
-	// Check function signature: func(args []*runtime.Object, ret checker.Type) *runtime.Object
 	if fn.Type.Params == nil || len(fn.Type.Params.List) != 2 {
 		return false
 	}
@@ -117,20 +105,17 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	// Validate first parameter: args []*runtime.Object
 	firstParam := fn.Type.Params.List[0]
 	if !isSliceOfPointerToRuntimeObject(firstParam.Type) {
 		return false
 	}
 
-	// Validate second parameter: ret checker.Type
 	secondParam := fn.Type.Params.List[1]
 	if sel, isSelector := secondParam.Type.(*ast.SelectorExpr); isSelector {
 		pkg, ok := sel.X.(*ast.Ident)
 		return ok && pkg.Name == "checker" && sel.Sel.Name == "Type"
 	}
 
-	// Validate return type: *runtime.Object
 	firstReturn := fn.Type.Results.List[0]
 	if !isPointerToRuntimeObject(firstReturn.Type) {
 		return false
@@ -139,30 +124,18 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 	return true
 }
 
-// Helper functions for AST type checking
-func isPointerToType(expr ast.Expr, typeName string) bool {
-	star, ok := expr.(*ast.StarExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := star.X.(*ast.Ident)
-	return ok && ident.Name == typeName
-}
-
 func isPointerToRuntimeObject(expr ast.Expr) bool {
 	star, ok := expr.(*ast.StarExpr)
 	if !ok {
 		return false
 	}
 
-	// Check for runtime.Object (selector expression)
 	sel, ok := star.X.(*ast.SelectorExpr)
 	if ok {
 		pkg, ok := sel.X.(*ast.Ident)
 		return ok && pkg.Name == "runtime" && sel.Sel.Name == "Object"
 	}
 
-	// Also check for just Object (in case it's imported differently)
 	ident, ok := star.X.(*ast.Ident)
 	return ok && ident.Name == "Object"
 }
@@ -175,20 +148,6 @@ func isSliceOfPointerToRuntimeObject(expr ast.Expr) bool {
 	return isPointerToRuntimeObject(array.Elt)
 }
 
-func isSliceOfPointerToType(expr ast.Expr, typeName string) bool {
-	array, ok := expr.(*ast.ArrayType)
-	if !ok {
-		return false
-	}
-	return isPointerToType(array.Elt, typeName)
-}
-
-func isAnyType(expr ast.Expr) bool {
-	ident, ok := expr.(*ast.Ident)
-	return ok && ident.Name == "any"
-}
-
-// generateRegistry creates the registry.gen.go file
 func generateRegistry(functions []FFIFunction) error {
 	var sb strings.Builder
 
@@ -207,7 +166,6 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 `)
 
 	for _, fn := range functions {
-		// Use function name directly as binding name
 		binding := fn.Name
 		functionRef := fmt.Sprintf("ffi.%s", fn.Name)
 		sb.WriteString(fmt.Sprintf("\tif err := r.Register(%q, %s); err != nil {\n", binding, functionRef))

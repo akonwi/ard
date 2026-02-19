@@ -7,7 +7,6 @@ import (
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
-	corevm "github.com/akonwi/ard/vm"
 )
 
 type Frame struct {
@@ -55,14 +54,14 @@ type VM struct {
 	typeCache map[bytecode.TypeID]checker.Type
 	modules   *ModuleRegistry
 	funcIndex map[string]int
-	ffi       *corevm.RuntimeFFIRegistry
+	ffi       *RuntimeFFIRegistry
 	lastOp    bytecode.Opcode
 	lastIP    int
 	lastFn    string
 }
 
 func New(program bytecode.Program) *VM {
-	ffi := corevm.NewRuntimeFFIRegistry()
+	ffi := NewRuntimeFFIRegistry()
 	_ = ffi.RegisterBuiltinFFIFunctions()
 	_ = ffi.RegisterGeneratedFFIFunctions()
 	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}

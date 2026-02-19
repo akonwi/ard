@@ -121,7 +121,7 @@ The FFI system uses Go's `go generate` to automatically discover and register FF
 ### Generated Registry
 
 ```go
-// vm/registry.gen.go (generated)
+// bytecode/vm/registry.gen.go (generated)
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
     if err := r.Register("Print", ffi.Print); err != nil {
         return fmt.Errorf("failed to register Print: %w", err)
@@ -138,7 +138,7 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 
 ```bash
 # Regenerate FFI registry after adding new functions
-go generate ./vm
+go generate ./bytecode/vm
 
 # Build normally - generated code is included automatically
 go build
@@ -220,7 +220,7 @@ func SafeOperation(vm runtime.VM, args []*runtime.Object) *runtime.Object {
 
 2. **Regenerate registry**:
    ```bash
-   go generate ./vm
+   go generate ./bytecode/vm
    ```
 
 3. **Add Ard binding** in `./std_lib/*.ard`:

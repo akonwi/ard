@@ -3,7 +3,7 @@
 This file provides guidance to a coding agent.
 
 ## Project Summary
-This is the source code for the parser, compiler, interpreter, and documentation website of a programming language called Ard.
+This is the source code for the parser, compiler, bytecode VM, and documentation website of a programming language called Ard.
 
 ### Repo structure
 This is a monorepo with the following top-level directories:
@@ -12,7 +12,7 @@ This is a monorepo with the following top-level directories:
   - /compiler/samples: runnable Ard program samples
   - /compiler/parse: parser implementation
   - /compiler/checker: type checker and semantic analysis
-  - /compiler/vm: virtual machine runtime and FFI system
+  - /compiler/bytecode/vm: bytecode VM runtime and module system
   - /compiler/std_lib: standard library definitions
   - /compiler/main.go: compiler CLI entry point
   - /compiler/go.mod & go.sum: Go module dependencies for the compiler
@@ -28,10 +28,10 @@ All commands should be run from the `/compiler` directory:
   > Important: do not stage and commit the built binary
 - Run Ard program: `cd compiler && go run main.go run samples/[file].ard`
 - Run all tests: `cd compiler && go test ./...`
-- Run package tests: `cd compiler && go test ./ast` or `go test ./checker` or `go test ./vm`
+- Run package tests: `cd compiler && go test ./ast` or `go test ./checker` or `go test ./bytecode/vm`
 - Run single test: `cd compiler && go test -run TestName ./[package]`
 - Verbose testing: `cd compiler && go test -v ./...`
-- Generate FFI registry: `cd compiler && go generate ./vm` (run when adding new FFI functions)
+- Generate FFI registry: `cd compiler && go generate ./bytecode/vm` (run when adding new FFI functions)
 
 ## Instructions
 - When searching the codebase, use the codanna tool first and only grep or use search CLI commands if codanna doesn't yield results

@@ -7,19 +7,10 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
-// ResultModule handles Result and ard/result module functions
 type ResultModule struct{}
 
 func (m *ResultModule) Path() string {
 	return "ard/result"
-}
-
-func (m *ResultModule) Program() *checker.Program {
-	return nil
-}
-
-func (m *ResultModule) get(name string) *runtime.Object {
-	return nil
 }
 
 func (m *ResultModule) Handle(call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
@@ -33,8 +24,4 @@ func (m *ResultModule) Handle(call *checker.FunctionCall, args []*runtime.Object
 	default:
 		panic(fmt.Errorf("unimplemented: Result::%s", call.Name))
 	}
-}
-
-func (m *ResultModule) HandleStatic(structName string, call *checker.FunctionCall, args []*runtime.Object) *runtime.Object {
-	panic(fmt.Errorf("Unimplemented: result::%s::%s()", structName, call.Name))
 }

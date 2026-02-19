@@ -114,7 +114,7 @@ The real benefit is **architectural clarity**: all dispatch is now explicit and 
 
 All optimizations are tested via existing test suites:
 - `go test ./checker`: Validates pre-computed Kind values
-- `go test ./vm`: Validates dispatch behavior
+- `go test ./bytecode/vm`: Validates dispatch behavior
 - Sample programs: Verify end-to-end functionality
 
 Changes are transparent to users; behavior is identical before and after.

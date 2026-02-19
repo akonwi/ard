@@ -264,10 +264,9 @@ Implemented for high-impact node type:
 
 ### Phase 3: Simplify Backends ✅
 1. Bytecode backend consumes the lowered AST without checker.Type introspection
-2. Interpreter VM remains legacy and still inspects checker.Type
+2. Legacy interpreter VM removed; bytecode VM is the only runtime backend.
 
 ## Current State
 
 - Bytecode backend is the default execution path (`ard run`) and builds standalone executables (`ard build`).
-- Interpreter VM is legacy and is kept for debugging via `--legacy`.
-- Full removal of checker.Type introspection from the interpreter is deferred since the bytecode VM is now the primary backend.
+- Bytecode backend is now the only runtime execution backend.

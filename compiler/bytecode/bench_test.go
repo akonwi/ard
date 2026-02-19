@@ -9,7 +9,6 @@ import (
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/vm"
 )
 
 const benchSource = `
@@ -24,17 +23,6 @@ fn main() Int {
   fib(20)
 }
 `
-
-func BenchmarkInterpreterRun(b *testing.B) {
-	module := loadBenchModule(b)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		g := vm.NewRuntime(module)
-		if err := g.Run("main"); err != nil {
-			b.Fatalf("Interpreter run error: %v", err)
-		}
-	}
-}
 
 func BenchmarkBytecodeRun(b *testing.B) {
 	module := loadBenchModule(b)

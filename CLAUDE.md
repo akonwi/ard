@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Build: `go build`
 - Run Ard program: `go run main.go run samples/[file].ard`
 - Run all tests: `go test ./...`
-- Run package tests: `go test ./ast` or `go test ./checker` or `go test ./vm`
+- Run tests for a specific package: `go test ./ast` or `go test ./checker`, etc.
 - Run single test: `go test -run TestName ./[package]`
 - Verbose testing: `go test -v ./...`
+- **ALWAYS** add `-count=1` when running tests to skip Go's test cache
 
 ## Code Style Guidelines
 - **Naming**: PascalCase for exported, camelCase for unexported items

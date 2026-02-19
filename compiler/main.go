@@ -14,7 +14,6 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
-	"github.com/akonwi/ard/vm"
 )
 
 const bytecodeFooterMarker = "ARDBYTECODEv1"
@@ -49,7 +48,7 @@ func main() {
 		}
 	case "run":
 		{
-			useLegacy, inputPath, err := parseRunArgs(os.Args[2:])
+			inputPath, err := parseRunArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -57,14 +56,6 @@ func main() {
 			module, err := loadModule(inputPath)
 			if err != nil {
 				os.Exit(1)
-			}
-			if useLegacy {
-				g := vm.NewRuntime(module)
-				if err := g.Run("main"); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				break
 			}
 			program, err := bytecode.NewEmitter().EmitProgram(module)
 			if err != nil {
@@ -143,17 +134,12 @@ func loadModule(inputPath string) (checker.Module, error) {
 	return c.Module(), nil
 }
 
-func parseRunArgs(args []string) (bool, string, error) {
-	useLegacy := false
+func parseRunArgs(args []string) (string, error) {
 	inputPath := ""
 	for i := range args {
 		arg := args[i]
-		if arg == "--legacy" {
-			useLegacy = true
-			continue
-		}
 		if strings.HasPrefix(arg, "-") {
-			return false, "", fmt.Errorf("unknown flag: %s", arg)
+			return "", fmt.Errorf("unknown flag: %s", arg)
 		}
 		if inputPath == "" {
 			inputPath = arg
@@ -161,9 +147,9 @@ func parseRunArgs(args []string) (bool, string, error) {
 		}
 	}
 	if inputPath == "" {
-		return false, "", fmt.Errorf("expected filepath argument")
+		return "", fmt.Errorf("expected filepath argument")
 	}
-	return useLegacy, inputPath, nil
+	return inputPath, nil
 }
 
 func parseBuildArgs(args []string) (string, string, error) {
