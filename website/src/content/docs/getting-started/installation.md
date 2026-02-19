@@ -5,7 +5,7 @@ description: How to install and set up Ard on various platforms.
 
 ## Prerequisites
 
-Ard requires Go 1.25 or later to build and run. Ensure Go is installed on the system:
+Ard requires Go 1.26 or later to build and run. Ensure Go is installed on the system:
 
 ```bash
 go version
