@@ -7,23 +7,20 @@ Goal: generate portable binaries by compiling Ard programs to bytecode and embed
 - Complete AST lowering so backends do not inspect checker.Type.
 - Stabilize runtime.Object, Result, Maybe, Dynamic APIs used by all backends.
 
-Status: complete for bytecode path (runtime Kind tags + lowered metadata). Interpreter VM remains legacy and still inspects checker.Type.
+Status: complete for bytecode path (runtime Kind tags + lowered metadata).
 
 ## Phase 1: Lowered IR Stabilization
 
 Deliverables:
 - No VM code path performs type assertions on checker.Type.
 - Checker nodes carry all metadata required for execution (field types, method dispatch, match shapes).
-- A small conformance test suite that executes the same program via current VM and lowered VM.
+- A conformance test suite for lowered metadata and bytecode execution paths.
 
 Exit criteria:
 - VM can execute entirely from lowered nodes without reading checker.Type.
 
-<<<<<<< HEAD
-Status: complete for bytecode path with conformance tests across samples. Interpreter VM is legacy and not fully decoupled.
+Status: complete for bytecode path with conformance coverage across samples and runtime parity-focused tests.
 
-=======
->>>>>>> e226d11 (:memo: backlog for bytecode)
 ## Phase 2: Bytecode Emitter
 
 Deliverables:
@@ -38,32 +35,26 @@ Deliverables:
 Exit criteria:
 - A representative subset of stdlib samples compiles to bytecode and runs in a new bytecode VM.
 
-<<<<<<< HEAD
 Status: emitter and VM cover literals, ops, control flow, lists/maps, structs/enums, matches, try, FFI, methods, closures, copy semantics, async fibers, and module calls. Bytecode verifier is implemented; representative samples (including io and concurrent stress) are exercised in bytecode tests.
 
 ## Parallel Track: Go Backend (Runtime-Light)
 
 See `backlog/bytecode-roadmap/go-backend.md` for the Go backend plan that preserves Ard semantics with a minimal runtime support layer.
 
-=======
->>>>>>> e226d11 (:memo: backlog for bytecode)
 ## Phase 3: Bytecode VM
 
 Deliverables:
 - A bytecode VM that reuses runtime.Object and result handling.
-- Deterministic behavior matching the interpreter VM for the test suite.
+- Deterministic behavior and stable semantics across the test suite.
 - Bytecode serialization format and a loader.
 
 Exit criteria:
 - End-to-end compile + run from bytecode for multiple samples and tests.
 
-<<<<<<< HEAD
 Status: VM executes current bytecode instruction set; serialization/loader implemented via gob. Async and trait dispatch for primitives are supported; module calls compile embedded stdlib into bytecode. `ard run` uses bytecode runtime only.
 
 Performance notes: bytecode VM is ~33% faster with ~24% lower memory and ~28% fewer allocations on the fib(20) benchmark (M3 Pro, Feb 2026).
 
-=======
->>>>>>> e226d11 (:memo: backlog for bytecode)
 ## Phase 4: Binary Packaging
 
 Deliverables:
@@ -71,9 +62,6 @@ Deliverables:
 - Optional: separate bytecode file + runtime runner.
 
 Exit criteria:
-- A binary can run without source files or the interpreter frontend.
-<<<<<<< HEAD
+- A binary can run without source files.
 
 Status: complete. `ard build FILE` emits a self-contained executable (bytecode embedded in the compiler binary) and supports `--out` for custom output paths.
-=======
->>>>>>> e226d11 (:memo: backlog for bytecode)
