@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/akonwi/ard/bytecode"
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 )
@@ -84,6 +86,33 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Printf("Built %s\n", builtPath)
+		}
+	case "format":
+		{
+			inputPath, checkOnly, err := parseFormatArgs(os.Args[2:])
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			changed, err := formatFile(inputPath, checkOnly)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			if checkOnly {
+				if changed {
+					fmt.Printf("%s is not formatted\n", inputPath)
+					os.Exit(1)
+				}
+				fmt.Printf("%s is formatted\n", inputPath)
+				os.Exit(0)
+			}
+			if changed {
+				fmt.Printf("Formatted %s\n", inputPath)
+				os.Exit(0)
+			}
+			fmt.Printf("%s is already formatted\n", inputPath)
+			os.Exit(0)
 		}
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
@@ -180,6 +209,54 @@ func parseBuildArgs(args []string) (string, string, error) {
 		outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
 	}
 	return inputPath, outputPath, nil
+}
+
+func parseFormatArgs(args []string) (string, bool, error) {
+	inputPath := ""
+	checkOnly := false
+	for i := range args {
+		arg := args[i]
+		if arg == "--check" {
+			checkOnly = true
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			return "", false, fmt.Errorf("unknown flag: %s", arg)
+		}
+		if inputPath == "" {
+			inputPath = arg
+			continue
+		}
+		return "", false, fmt.Errorf("unexpected argument: %s", arg)
+	}
+	if inputPath == "" {
+		return "", false, fmt.Errorf("expected filepath argument")
+	}
+	return inputPath, checkOnly, nil
+}
+
+func formatFile(inputPath string, checkOnly bool) (bool, error) {
+	sourceCode, err := os.ReadFile(inputPath)
+	if err != nil {
+		return false, fmt.Errorf("error reading file %s - %w", inputPath, err)
+	}
+
+	formatted := formatter.Format(sourceCode)
+	changed := !bytes.Equal(sourceCode, formatted)
+	if !changed || checkOnly {
+		return changed, nil
+	}
+
+	fileInfo, err := os.Stat(inputPath)
+	if err != nil {
+		return false, fmt.Errorf("error reading file info %s - %w", inputPath, err)
+	}
+
+	if err := os.WriteFile(inputPath, formatted, fileInfo.Mode()); err != nil {
+		return false, fmt.Errorf("error writing file %s - %w", inputPath, err)
+	}
+
+	return true, nil
 }
 
 func buildBytecodeBinary(inputPath string, outputPath string) (string, error) {
