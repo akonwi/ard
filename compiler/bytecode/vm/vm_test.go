@@ -1023,7 +1023,6 @@ func TestBytecodeSamples(t *testing.T) {
 		"concurrent_stress.ard",
 	}
 	for _, name := range samples {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "samples", name)
 			data, err := os.ReadFile(path)

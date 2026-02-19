@@ -377,12 +377,13 @@ func (l *lexer) take() (token, bool) {
 }
 
 func (l *lexer) comment(start *char) token {
-	text := "//"
+	var text strings.Builder
+	text.WriteString("//")
 	for l.hasMore() && !l.peekMatch(string('\n')) {
-		text += string(l.peek().raw)
+		text.WriteString(string(l.peek().raw))
 		l.advance()
 	}
-	return token{kind: comment, line: start.line, column: start.col, text: text}
+	return token{kind: comment, line: start.line, column: start.col, text: text.String()}
 }
 
 func (l *lexer) takeString(start char) (token, bool) {

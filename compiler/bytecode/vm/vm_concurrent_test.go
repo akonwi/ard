@@ -46,15 +46,13 @@ func TestBytecodeConcurrentMethodAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers)
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			errCh <- runBytecodeErr(`
 				let nums = [3,1,2]
 				List::map(nums, fn(n: Int) Int { n + 1 }).size()
 			`)
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -71,7 +69,7 @@ func TestBytecodeConcurrentMethodAccessWithMultipleMethods(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers)
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -104,16 +102,14 @@ func TestBytecodeConcurrentModuleAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers)
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			errCh <- runBytecodeErr(`
 				use ard/decode
 				let d = decode::from_json("[1,2,3]").expect("")
 				decode::run(d, decode::list(decode::int)).expect("").size()
 			`)
-		}()
+		})
 	}
 
 	wg.Wait()

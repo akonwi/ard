@@ -129,10 +129,8 @@ func (p *parser) synchronizeToTokens(tokens ...kind) {
 
 		// Only stop at target tokens if nesting is balanced (or nesting not needed)
 		if !needsNesting || nestingLevel == 0 {
-			for _, token := range tokens {
-				if current == token {
-					return // Found target token, stop here (don't consume it)
-				}
+			if slices.Contains(tokens, current) {
+				return // Found target token, stop here (don't consume it)
 			}
 		}
 

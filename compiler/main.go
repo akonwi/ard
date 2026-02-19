@@ -146,7 +146,7 @@ func loadModule(inputPath string) (checker.Module, error) {
 func parseRunArgs(args []string) (bool, string, error) {
 	useLegacy := false
 	inputPath := ""
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		arg := args[i]
 		if arg == "--legacy" {
 			useLegacy = true

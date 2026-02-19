@@ -370,9 +370,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, err
 			}
 			wg := &sync.WaitGroup{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				defer func() {
 					if r := recover(); r != nil {
 						fmt.Println(fmt.Errorf("panic in fiber: %v", r))
@@ -380,7 +378,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				}()
 				child := vm.spawn()
 				_, _ = child.runClosure(closure, nil)
-			}()
+			})
 			fields := map[string]*runtime.Object{
 				"wg":     runtime.MakeDynamic(wg),
 				"result": runtime.Void(),
@@ -447,7 +445,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			count := inst.B
 			m := runtime.MakeMap(mapDef.Key(), mapDef.Value())
-			for i := 0; i < count; i++ {
+			for range count {
 				val, err := vm.pop(curr)
 				if err != nil {
 					return nil, err
@@ -848,7 +846,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			count := inst.B
 			fields := map[string]*runtime.Object{}
-			for i := 0; i < count; i++ {
+			for range count {
 				val, err := vm.pop(curr)
 				if err != nil {
 					return nil, err

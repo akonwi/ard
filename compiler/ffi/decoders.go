@@ -4,6 +4,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
@@ -245,15 +246,16 @@ func formatRawValueForError(v any) string {
 		if len(val) == 0 {
 			return "[]"
 		} else if len(val) <= 3 {
-			preview := "["
+			var preview strings.Builder
+			preview.WriteString("[")
 			for i, item := range val {
 				if i > 0 {
-					preview += ", "
+					preview.WriteString(", ")
 				}
-				preview += formatRawValueForError(item)
+				preview.WriteString(formatRawValueForError(item))
 			}
-			preview += "]"
-			return preview
+			preview.WriteString("]")
+			return preview.String()
 		}
 		return fmt.Sprintf("[array with %d elements]", len(val))
 	case map[string]any:
@@ -266,15 +268,16 @@ func formatRawValueForError(v any) string {
 			keys = append(keys, k)
 		}
 		if len(keys) <= 3 {
-			preview := "{"
+			var preview strings.Builder
+			preview.WriteString("{")
 			for i, key := range keys {
 				if i > 0 {
-					preview += ", "
+					preview.WriteString(", ")
 				}
-				preview += fmt.Sprintf("%s: %s", key, formatRawValueForError(val[key]))
+				preview.WriteString(fmt.Sprintf("%s: %s", key, formatRawValueForError(val[key])))
 			}
-			preview += "}"
-			return preview
+			preview.WriteString("}")
+			return preview.String()
 		}
 		return fmt.Sprintf("{object with keys: %v}", keys[:3])
 	case nil:

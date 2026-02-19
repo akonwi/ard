@@ -95,8 +95,8 @@ func parseTypeName(name string) (checker.Type, error) {
 	case checker.Dynamic.String():
 		return checker.Dynamic, nil
 	}
-	if strings.HasSuffix(trimmed, "?") {
-		inner := strings.TrimSuffix(trimmed, "?")
+	if before, ok := strings.CutSuffix(trimmed, "?"); ok {
+		inner := before
 		of, err := parseTypeName(inner)
 		if err != nil {
 			return nil, err

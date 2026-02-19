@@ -28,7 +28,7 @@ func TestConcurrentMethodAccess(t *testing.T) {
 	numGoroutines := 50
 
 	// Half the goroutines write (addMethod), half read (getMethod)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -64,7 +64,7 @@ func TestConcurrentMethodAccessWithMultipleMethods(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 100
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -95,7 +95,7 @@ func TestConcurrentModuleAccess(t *testing.T) {
 	}
 
 	// Pre-populate some modules
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		name := fmt.Sprintf("module_%d", i)
 		s := newScope(nil)
 		vm := &VM{hq: g}
@@ -106,7 +106,7 @@ func TestConcurrentModuleAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 100
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()

@@ -1,5 +1,7 @@
 package checker
 
+import "slices"
+
 import "fmt"
 
 type SymbolTable struct {
@@ -217,12 +219,7 @@ func hasGenericsInType(t Type) bool {
 	case *Result:
 		return hasGenericsInType(t.val) || hasGenericsInType(t.err)
 	case *Union:
-		for _, t := range t.Types {
-			if hasGenericsInType(t) {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(t.Types, hasGenericsInType)
 	case *FunctionDef:
 		for _, param := range t.Parameters {
 			if hasGenericsInType(param.Type) {

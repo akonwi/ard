@@ -144,8 +144,6 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 
 	_mux := http.NewServeMux()
 	for path, handler := range handlers {
-		path := path
-		handler := handler
 		_mux.HandleFunc(convertToGoPattern(path), func(w http.ResponseWriter, r *http.Request) {
 			// Convert Go request to http::Request
 			headers := make(map[string]*runtime.Object)

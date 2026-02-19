@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -3545,9 +3546,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 						// Pre-compute field types for the module instance
 						fieldTypes := make(map[string]Type)
-						for name, t := range structType.Fields {
-							fieldTypes[name] = t
-						}
+						maps.Copy(fieldTypes, structType.Fields)
 
 						return &ModuleStructInstance{
 							Module:     mod.Path(),

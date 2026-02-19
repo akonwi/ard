@@ -22,7 +22,6 @@ func TestBytecodeConformanceSamples(t *testing.T) {
 		t.Fatalf("Failed to list samples: %v", err)
 	}
 	for _, path := range samples {
-		path := path
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			module, err := loadModuleForConformance(path)
 			if err != nil {
