@@ -407,21 +407,55 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 		return dText(header + " {}")
 	}
 
-	items := make([]doc, 0, len(node.Fields)+len(node.Comments))
+	type structItem struct {
+		doc      doc
+		startRow int
+		endRow   int
+	}
+	items := make([]structItem, 0, len(node.Fields)+len(node.Comments))
 	commentIndex := 0
 	for _, field := range node.Fields {
 		fieldRow := field.Name.Location.Start.Row
 		for commentIndex < len(node.Comments) && (fieldRow == 0 || node.Comments[commentIndex].Location.Start.Row < fieldRow) {
-			items = append(items, dText(p.renderComment(node.Comments[commentIndex].Value)))
+			comment := node.Comments[commentIndex]
+			items = append(items, structItem{
+				doc:      dText(p.renderComment(comment.Value)),
+				startRow: comment.Location.Start.Row,
+				endRow:   comment.Location.End.Row,
+			})
 			commentIndex++
 		}
-		items = append(items, dText(fmt.Sprintf("%s: %s,", field.Name.Name, p.renderType(field.Type))))
+		fieldEnd := field.Type.GetLocation().End.Row
+		if fieldEnd <= 0 {
+			fieldEnd = field.Name.Location.End.Row
+		}
+		items = append(items, structItem{
+			doc:      dText(fmt.Sprintf("%s: %s,", field.Name.Name, p.renderType(field.Type))),
+			startRow: field.Name.Location.Start.Row,
+			endRow:   fieldEnd,
+		})
 	}
 	for ; commentIndex < len(node.Comments); commentIndex++ {
-		items = append(items, dText(p.renderComment(node.Comments[commentIndex].Value)))
+		comment := node.Comments[commentIndex]
+		items = append(items, structItem{
+			doc:      dText(p.renderComment(comment.Value)),
+			startRow: comment.Location.Start.Row,
+			endRow:   comment.Location.End.Row,
+		})
 	}
 
-	body := dJoin(dHardLine(), items)
+	parts := make([]doc, 0, len(items)*3)
+	for i, item := range items {
+		parts = append(parts, item.doc)
+		if i < len(items)-1 {
+			parts = append(parts, dHardLine())
+			next := items[i+1]
+			if item.endRow > 0 && next.startRow > 0 && next.startRow-item.endRow > 1 {
+				parts = append(parts, dHardLine())
+			}
+		}
+	}
+	body := dConcat(parts...)
 	return dGroup(dConcat(
 		dText(header+" {"),
 		dIndent(dConcat(dHardLine(), body)),
@@ -1134,6 +1168,17 @@ func (p printer) renderTryDoc(node *parse.Try) doc {
 	prefix += " -> " + node.CatchVar.Name
 	if len(node.CatchBlock) == 0 {
 		return dText(prefix + " {}")
+	}
+	if len(node.CatchBlock) == 1 {
+		if expr, ok := node.CatchBlock[0].(parse.Expression); ok {
+			rendered := p.renderExpression(expr, 0)
+			if !strings.Contains(rendered, "\n") {
+				oneLine := prefix + " { " + rendered + " }"
+				if len(oneLine) <= p.maxLineWidth {
+					return dText(oneLine)
+				}
+			}
+		}
 	}
 	return dGroup(dConcat(
 		dText(prefix+" {"),

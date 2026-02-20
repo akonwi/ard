@@ -96,8 +96,8 @@ func TestFormat(t *testing.T) {
 		},
 		{
 			name:   "no synthetic blank line after multiline declaration expression",
-			input:  "fn example() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n",
-			output: "fn example() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n",
+			input:  "fn example() {\n  let raw = try @raw -> _ {\n    let x = \"\"\n    x\n  }\n  next(raw)\n}\n",
+			output: "fn example() {\n  let raw = try @raw -> _ {\n    let x = \"\"\n    x\n  }\n  next(raw)\n}\n",
 		},
 		{
 			name:   "formats if else chain with stable braces",
@@ -108,6 +108,11 @@ func TestFormat(t *testing.T) {
 			name:   "keeps single-expression match block inline when it fits",
 			input:  "fn main() {\n  match x {\n    true => { total =+ 1 },\n    false => { total =- 1 },\n  }\n}\n",
 			output: "fn main() {\n  match x {\n    true => { total =+ 1 },\n    false => { total =- 1 },\n  }\n}\n",
+		},
+		{
+			name:   "keeps single-expression try catch block inline when it fits",
+			input:  "fn main() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n}\n",
+			output: "fn main() {\n  let raw = try @raw -> _ { \"\" }\n}\n",
 		},
 		{
 			name:   "formats for loop header spacing",
@@ -123,6 +128,11 @@ func TestFormat(t *testing.T) {
 			name:   "preserves blank line between enum and impl",
 			input:  "enum Method {\n  Get\n}\n\nimpl Str::ToString for Method {\n  fn to_str() Str {\n    \"GET\"\n  }\n}\n",
 			output: "enum Method {\n  Get,\n}\n\nimpl Str::ToString for Method {\n  fn to_str() Str {\n    \"GET\"\n  }\n}\n",
+		},
+		{
+			name:   "preserves blank line before struct comment group",
+			input:  "struct Request {\n  body: Dynamic?\n\n  // inbound requests have the *http.Request\n  raw: Dynamic?\n}\n",
+			output: "struct Request {\n  body: Dynamic?,\n\n  // inbound requests have the *http.Request\n  raw: Dynamic?,\n}\n",
 		},
 		{
 			name:  "fails on invalid source",
