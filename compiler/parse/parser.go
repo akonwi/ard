@@ -398,10 +398,8 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	endCol := p.previous().column
-	if p.match(new_line) {
-		endCol = p.previous().column - 1
-	}
+	end := value.GetLocation().End
+	p.match(new_line)
 	return &VariableDeclaration{
 		Mutable: kind == mut,
 		Name:    name.text,
@@ -409,7 +407,7 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		Type:    declaredType,
 		Location: Location{
 			Start: Point{Row: start.line, Col: start.column},
-			End:   Point{Row: start.line, Col: endCol},
+			End:   end,
 		},
 	}, nil
 }
@@ -636,7 +634,14 @@ func (p *parser) forLoop() (Statement, error) {
 }
 
 func (p *parser) typeUnion(private bool) (Statement, error) {
-	decl := &TypeDeclaration{Private: private, Type: []DeclaredType{}}
+	typeToken := p.previous()
+	decl := &TypeDeclaration{
+		Private: private,
+		Type:    []DeclaredType{},
+		Location: Location{
+			Start: Point{Row: typeToken.line, Col: typeToken.column},
+		},
+	}
 
 	if !p.check(identifier) {
 		p.addError(p.peek(), "Expected name after 'type'")
@@ -644,7 +649,7 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 		return nil, nil
 	}
 	nameToken := p.advance()
-	decl.Name = Identifier{Name: nameToken.text}
+	decl.Name = Identifier{Name: nameToken.text, Location: nameToken.getLocation()}
 
 	if !p.check(equal) {
 		p.addError(p.peek(), "Expected '=' after type name")
@@ -664,17 +669,30 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 		hasMore = p.match(pipe)
 	}
 
+	if len(decl.Type) > 0 {
+		decl.Location.End = decl.Type[len(decl.Type)-1].GetLocation().End
+	} else {
+		decl.Location.End = decl.Name.Location.End
+	}
+
 	return decl, nil
 }
 
 func (p *parser) enumDef(private bool) Statement {
+	enumToken := p.previous()
 	if !p.check(identifier) {
 		p.addError(p.peek(), "Expected name after 'enum'")
 		p.synchronize()
 		return nil
 	}
 	nameToken := p.advance()
-	enum := &EnumDefinition{Name: nameToken.text, Private: private}
+	enum := &EnumDefinition{
+		Name:    nameToken.text,
+		Private: private,
+		Location: Location{
+			Start: Point{Row: enumToken.line, Col: enumToken.column},
+		},
+	}
 
 	if !p.check(left_brace) {
 		p.addError(p.peek(), "Expected '{'")
@@ -723,6 +741,8 @@ func (p *parser) enumDef(private bool) Statement {
 		p.match(comma)
 		p.match(new_line)
 	}
+
+	enum.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 
 	return enum
 }
@@ -1852,6 +1872,7 @@ func (p *parser) try() (Expression, error) {
 
 		var catchVar *Identifier
 		var catchBlock []Statement
+		var catchEnd Point
 
 		// Check for catch clause: -> varname { ... } or -> function_name or -> qualified::function
 		if p.match(thin_arrow) {
@@ -1873,6 +1894,7 @@ func (p *parser) try() (Expression, error) {
 					return nil, err
 				}
 				catchBlock = block
+				catchEnd = p.previous().getLocation().End
 			} else {
 				// Function syntax: -> function_name or -> qualified::function
 				// Desugar to: -> err { function_name(err) } or -> err { qualified::function(err) }
@@ -1976,12 +1998,15 @@ func (p *parser) try() (Expression, error) {
 				catchBlock = []Statement{
 					callStmt,
 				}
+				catchEnd = callStmt.GetLocation().End
 			}
 		}
 
 		// Calculate the end location based on what we parsed
 		endLoc := expr.GetLocation().End
-		if len(catchBlock) > 0 {
+		if catchEnd.Row > 0 {
+			endLoc = catchEnd
+		} else if len(catchBlock) > 0 {
 			// If we have a catch block, use the last statement's location
 			lastStmt := catchBlock[len(catchBlock)-1]
 			endLoc = lastStmt.GetLocation().End

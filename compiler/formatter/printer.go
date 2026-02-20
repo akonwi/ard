@@ -110,52 +110,88 @@ func defaultImportName(importPath string) string {
 }
 
 func (p printer) renderStatement(statement parse.Statement, indent int) []string {
+	return p.renderDocAtIndent(p.renderStatementDoc(statement), indent)
+}
+
+func (p printer) renderStatementDoc(statement parse.Statement) doc {
 	if statement == nil {
-		return nil
+		return dText("")
 	}
 
 	switch node := statement.(type) {
 	case *parse.Comment:
-		return []string{p.indent(indent) + p.renderComment(node.Value)}
+		return dText(p.renderComment(node.Value))
 	case *parse.VariableDeclaration:
-		return p.renderVariableDeclarationLines(node, indent)
+		return p.renderVariableDeclarationDoc(node)
 	case *parse.VariableAssignment:
-		return p.renderVariableAssignmentLines(node, indent)
+		return p.renderVariableAssignmentDoc(node)
 	case *parse.FunctionDeclaration:
-		return p.renderFunctionDeclaration(node, indent, false)
+		return p.renderFunctionDeclarationDoc(node, false)
 	case *parse.StaticFunctionDeclaration:
-		return p.renderStaticFunctionDeclaration(node, indent)
+		return p.renderStaticFunctionDeclarationDoc(node)
 	case *parse.ExternalFunction:
-		return []string{p.indent(indent) + p.renderExternalFunction(node)}
+		return p.renderExternalFunctionDoc(node)
 	case *parse.StructDefinition:
-		return p.renderStructDefinition(node, indent)
+		return p.renderStructDefinitionDoc(node)
 	case *parse.TraitDefinition:
-		return p.renderTraitDefinition(node, indent)
+		return p.renderTraitDefinitionDoc(node)
 	case *parse.ImplBlock:
-		return p.renderImplBlock(node, indent)
+		return p.renderImplBlockDoc(node)
 	case *parse.TraitImplementation:
-		return p.renderTraitImplementation(node, indent)
+		return p.renderTraitImplementationDoc(node)
 	case *parse.EnumDefinition:
-		return p.renderEnumDefinition(node, indent)
+		return p.renderEnumDefinitionDoc(node)
 	case *parse.WhileLoop:
-		return p.renderWhileLoop(node, indent)
+		return p.renderWhileLoopDoc(node)
 	case *parse.ForInLoop:
-		return p.renderForInLoop(node, indent)
+		return p.renderForInLoopDoc(node)
 	case *parse.RangeLoop:
-		return p.renderRangeLoop(node, indent)
+		return p.renderRangeLoopDoc(node)
 	case *parse.ForLoop:
-		return p.renderForLoop(node, indent)
+		return p.renderForLoopDoc(node)
 	case *parse.IfStatement:
-		return p.renderIfStatement(node, indent)
+		return p.renderIfStatementDoc(node)
 	case *parse.Break:
-		return []string{p.indent(indent) + "break"}
+		return dText("break")
 	case *parse.TypeDeclaration:
-		return []string{p.indent(indent) + p.renderTypeDeclaration(node)}
+		return p.renderTypeDeclarationDoc(node)
 	default:
 		if expr, ok := statement.(parse.Expression); ok {
-			return p.indentLines(p.renderExpression(expr, 0), indent)
+			return dText(p.renderExpression(expr, 0))
 		}
-		return []string{p.indent(indent) + statement.String()}
+		return dText(statement.String())
+	}
+}
+
+func (p printer) renderVariableDeclarationDoc(node *parse.VariableDeclaration) doc {
+	binding := "let"
+	if node.Mutable {
+		binding = "mut"
+	}
+	prefix := binding + " " + node.Name
+	if node.Type != nil {
+		prefix += ": " + p.renderType(node.Type)
+	}
+	prefix += " = "
+	return dConcat(dText(prefix), p.renderExpressionValueDoc(node.Value, 0))
+}
+
+func (p printer) renderVariableAssignmentDoc(node *parse.VariableAssignment) doc {
+	operator, value := p.assignmentParts(node)
+	prefix := p.renderExpression(node.Target, 0) + " " + operator + " "
+	return dConcat(dText(prefix), p.renderExpressionValueDoc(value, 0))
+}
+
+func (p printer) renderExpressionValueDoc(expression parse.Expression, parentPrecedence int) doc {
+	switch node := expression.(type) {
+	case *parse.AnonymousFunction:
+		return p.renderAnonymousFunctionDoc(node)
+	case *parse.Try:
+		return p.renderTryDoc(node)
+	case *parse.BlockExpression:
+		return p.renderBlockExpressionDoc(node)
+	default:
+		return dText(p.renderExpression(expression, parentPrecedence))
 	}
 }
 
@@ -257,6 +293,29 @@ func (p printer) renderFunctionDeclaration(node *parse.FunctionDeclaration, inde
 	return p.renderBlockWithHeader(header, node.Body, indent)
 }
 
+func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, traitSignatureOnly bool) doc {
+	prefix := ""
+	if node.Private {
+		prefix += "private "
+	}
+	header := prefix + "fn "
+	if node.Mutates {
+		header += "mut "
+	}
+	header += node.Name
+	header += p.renderTypeParams(node.TypeParams)
+	header += p.renderParameterList(node.Parameters, 0, header)
+	if node.ReturnType != nil {
+		header += " " + p.renderType(node.ReturnType)
+	}
+
+	if traitSignatureOnly {
+		return dText(header)
+	}
+
+	return p.renderBlockDoc(header, node.Body)
+}
+
 func (p printer) renderStaticFunctionDeclaration(node *parse.StaticFunctionDeclaration, indent int) []string {
 	prefix := ""
 	if node.Private {
@@ -275,6 +334,24 @@ func (p printer) renderStaticFunctionDeclaration(node *parse.StaticFunctionDecla
 	return p.renderBlockWithHeader(header, node.Body, indent)
 }
 
+func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDeclaration) doc {
+	prefix := ""
+	if node.Private {
+		prefix += "private "
+	}
+	header := prefix + "fn "
+	if node.Mutates {
+		header += "mut "
+	}
+	header += p.renderExpression(&node.Path, 0)
+	header += p.renderTypeParams(node.TypeParams)
+	header += p.renderParameterList(node.Parameters, 0, header)
+	if node.ReturnType != nil {
+		header += " " + p.renderType(node.ReturnType)
+	}
+	return p.renderBlockDoc(header, node.Body)
+}
+
 func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 	prefix := ""
 	if node.Private {
@@ -287,6 +364,10 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 	}
 	header += " = " + strconv.Quote(node.ExternalBinding)
 	return header
+}
+
+func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {
+	return dText(p.renderExternalFunction(node))
 }
 
 func (p printer) renderStructDefinition(node *parse.StructDefinition, indent int) []string {
@@ -316,6 +397,39 @@ func (p printer) renderStructDefinition(node *parse.StructDefinition, indent int
 	return lines
 }
 
+func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
+	prefix := ""
+	if node.Private {
+		prefix = "private "
+	}
+	header := prefix + "struct " + node.Name.Name
+	if len(node.Fields) == 0 && len(node.Comments) == 0 {
+		return dText(header + " {}")
+	}
+
+	items := make([]doc, 0, len(node.Fields)+len(node.Comments))
+	commentIndex := 0
+	for _, field := range node.Fields {
+		fieldRow := field.Name.Location.Start.Row
+		for commentIndex < len(node.Comments) && (fieldRow == 0 || node.Comments[commentIndex].Location.Start.Row < fieldRow) {
+			items = append(items, dText(p.renderComment(node.Comments[commentIndex].Value)))
+			commentIndex++
+		}
+		items = append(items, dText(fmt.Sprintf("%s: %s,", field.Name.Name, p.renderType(field.Type))))
+	}
+	for ; commentIndex < len(node.Comments); commentIndex++ {
+		items = append(items, dText(p.renderComment(node.Comments[commentIndex].Value)))
+	}
+
+	body := dJoin(dHardLine(), items)
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
 func (p printer) renderEnumDefinition(node *parse.EnumDefinition, indent int) []string {
 	prefix := ""
 	if node.Private {
@@ -340,6 +454,36 @@ func (p printer) renderEnumDefinition(node *parse.EnumDefinition, indent int) []
 	return lines
 }
 
+func (p printer) renderEnumDefinitionDoc(node *parse.EnumDefinition) doc {
+	prefix := ""
+	if node.Private {
+		prefix = "private "
+	}
+	header := prefix + "enum " + node.Name
+	if len(node.Variants) == 0 && len(node.Comments) == 0 {
+		return dText(header + " {}")
+	}
+
+	items := make([]doc, 0, len(node.Variants)+len(node.Comments))
+	for _, comment := range node.Comments {
+		items = append(items, dText(p.renderComment(comment.Value)))
+	}
+	for _, variant := range node.Variants {
+		if variant.Value == nil {
+			items = append(items, dText(variant.Name+","))
+		} else {
+			items = append(items, dText(fmt.Sprintf("%s = %s,", variant.Name, p.renderExpression(variant.Value, 0))))
+		}
+	}
+	body := dJoin(dHardLine(), items)
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
 func (p printer) renderTraitDefinition(node *parse.TraitDefinition, indent int) []string {
 	prefix := ""
 	if node.Private {
@@ -358,6 +502,26 @@ func (p printer) renderTraitDefinition(node *parse.TraitDefinition, indent int) 
 	}
 	lines = append(lines, p.indent(indent)+"}")
 	return lines
+}
+
+func (p printer) renderTraitDefinitionDoc(node *parse.TraitDefinition) doc {
+	prefix := ""
+	if node.Private {
+		prefix = "private "
+	}
+	header := prefix + "trait " + node.Name.Name
+	if len(node.Methods) == 0 && len(node.Comments) == 0 {
+		return dText(header + " {}")
+	}
+
+	items := p.interleaveMethodDocs(node.Methods, node.Comments, true)
+	body := dJoin(dHardLine(), items)
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
 }
 
 func (p printer) renderImplBlock(node *parse.ImplBlock, indent int) []string {
@@ -379,6 +543,22 @@ func (p printer) renderImplBlock(node *parse.ImplBlock, indent int) []string {
 	return lines
 }
 
+func (p printer) renderImplBlockDoc(node *parse.ImplBlock) doc {
+	header := "impl " + node.Target.Name
+	if len(node.Methods) == 0 && len(node.Comments) == 0 {
+		return dText(header + " {}")
+	}
+
+	items := p.interleaveMethodDocs(node.Methods, node.Comments, false)
+	body := dJoin(dHardLine(), items)
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
 func (p printer) renderTraitImplementation(node *parse.TraitImplementation, indent int) []string {
 	header := fmt.Sprintf("impl %s for %s", p.renderExpression(node.Trait, 0), node.ForType.Name)
 	if len(node.Methods) == 0 {
@@ -395,6 +575,59 @@ func (p printer) renderTraitImplementation(node *parse.TraitImplementation, inde
 	return lines
 }
 
+func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) doc {
+	header := fmt.Sprintf("impl %s for %s", p.renderExpression(node.Trait, 0), node.ForType.Name)
+	if len(node.Methods) == 0 {
+		return dText(header + " {}")
+	}
+
+	body := dJoin(dHardLine(), p.interleaveMethodDocs(node.Methods, nil, false))
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) interleaveMethodDocs(methods []parse.FunctionDeclaration, comments []parse.Comment, traitSignatureOnly bool) []doc {
+	if len(methods) == 0 && len(comments) == 0 {
+		return nil
+	}
+
+	items := make([]doc, 0, len(methods)+len(comments)*2)
+	lastKind := ""
+	commentIndex := 0
+	for _, method := range methods {
+		methodStart := method.Location.Start.Row
+		for commentIndex < len(comments) && (methodStart == 0 || comments[commentIndex].Location.Start.Row < methodStart) {
+			if lastKind == "method" {
+				items = append(items, dText(""))
+			}
+			items = append(items, dText(p.renderComment(comments[commentIndex].Value)))
+			lastKind = "comment"
+			commentIndex++
+		}
+
+		if lastKind == "method" {
+			items = append(items, dText(""))
+		}
+		items = append(items, p.renderFunctionDeclarationDoc(&method, traitSignatureOnly))
+		lastKind = "method"
+
+	}
+
+	for ; commentIndex < len(comments); commentIndex++ {
+		if lastKind == "method" {
+			items = append(items, dText(""))
+		}
+		items = append(items, dText(p.renderComment(comments[commentIndex].Value)))
+		lastKind = "comment"
+	}
+
+	return items
+}
+
 func (p printer) renderTypeDeclaration(node *parse.TypeDeclaration) string {
 	prefix := ""
 	if node.Private {
@@ -407,12 +640,24 @@ func (p printer) renderTypeDeclaration(node *parse.TypeDeclaration) string {
 	return fmt.Sprintf("%stype %s = %s", prefix, node.Name.Name, strings.Join(parts, " | "))
 }
 
+func (p printer) renderTypeDeclarationDoc(node *parse.TypeDeclaration) doc {
+	return dText(p.renderTypeDeclaration(node))
+}
+
 func (p printer) renderWhileLoop(node *parse.WhileLoop, indent int) []string {
 	header := "while"
 	if node.Condition != nil {
 		header += " " + p.renderExpression(node.Condition, 0)
 	}
 	return p.renderBlockWithHeader(header, node.Body, indent)
+}
+
+func (p printer) renderWhileLoopDoc(node *parse.WhileLoop) doc {
+	header := "while"
+	if node.Condition != nil {
+		header += " " + p.renderExpression(node.Condition, 0)
+	}
+	return p.renderBlockDoc(header, node.Body)
 }
 
 func (p printer) renderRangeLoop(node *parse.RangeLoop, indent int) []string {
@@ -424,6 +669,15 @@ func (p printer) renderRangeLoop(node *parse.RangeLoop, indent int) []string {
 	return p.renderBlockWithHeader(header, node.Body, indent)
 }
 
+func (p printer) renderRangeLoopDoc(node *parse.RangeLoop) doc {
+	header := fmt.Sprintf("for %s", node.Cursor.Name)
+	if node.Cursor2.Name != "" {
+		header += fmt.Sprintf(", %s", node.Cursor2.Name)
+	}
+	header += fmt.Sprintf(" in %s..%s", p.renderExpression(node.Start, 0), p.renderExpression(node.End, 0))
+	return p.renderBlockDoc(header, node.Body)
+}
+
 func (p printer) renderForInLoop(node *parse.ForInLoop, indent int) []string {
 	header := fmt.Sprintf("for %s", node.Cursor.Name)
 	if node.Cursor2.Name != "" {
@@ -431,6 +685,15 @@ func (p printer) renderForInLoop(node *parse.ForInLoop, indent int) []string {
 	}
 	header += " in " + p.renderExpression(node.Iterable, 0)
 	return p.renderBlockWithHeader(header, node.Body, indent)
+}
+
+func (p printer) renderForInLoopDoc(node *parse.ForInLoop) doc {
+	header := fmt.Sprintf("for %s", node.Cursor.Name)
+	if node.Cursor2.Name != "" {
+		header += fmt.Sprintf(", %s", node.Cursor2.Name)
+	}
+	header += " in " + p.renderExpression(node.Iterable, 0)
+	return p.renderBlockDoc(header, node.Body)
 }
 
 func (p printer) renderForLoop(node *parse.ForLoop, indent int) []string {
@@ -448,14 +711,45 @@ func (p printer) renderForLoop(node *parse.ForLoop, indent int) []string {
 	}
 	increment := ""
 	if node.Incrementer != nil {
-		if incrementExpr, ok := node.Incrementer.(parse.Expression); ok {
-			increment = p.renderExpression(incrementExpr, 0)
-		} else if inc, ok := node.Incrementer.(*parse.VariableAssignment); ok {
+		if inc, ok := node.Incrementer.(*parse.VariableAssignment); ok {
 			increment = p.renderVariableAssignment(inc)
+		} else if inc, ok := node.Incrementer.(parse.VariableAssignment); ok {
+			copy := inc
+			increment = p.renderVariableAssignment(&copy)
+		} else if incrementExpr, ok := node.Incrementer.(parse.Expression); ok {
+			increment = p.renderExpression(incrementExpr, 0)
 		}
 	}
 	header := fmt.Sprintf("for %s; %s; %s", init, condition, increment)
 	return p.renderBlockWithHeader(header, node.Body, indent)
+}
+
+func (p printer) renderForLoopDoc(node *parse.ForLoop) doc {
+	init := ""
+	if node.Init != nil {
+		binding := "let"
+		if node.Init.Mutable {
+			binding = "mut"
+		}
+		init = fmt.Sprintf("%s %s = %s", binding, node.Init.Name, p.renderExpression(node.Init.Value, 0))
+	}
+	condition := ""
+	if node.Condition != nil {
+		condition = p.renderExpression(node.Condition, 0)
+	}
+	increment := ""
+	if node.Incrementer != nil {
+		if inc, ok := node.Incrementer.(*parse.VariableAssignment); ok {
+			increment = p.renderVariableAssignment(inc)
+		} else if inc, ok := node.Incrementer.(parse.VariableAssignment); ok {
+			copy := inc
+			increment = p.renderVariableAssignment(&copy)
+		} else if incrementExpr, ok := node.Incrementer.(parse.Expression); ok {
+			increment = p.renderExpression(incrementExpr, 0)
+		}
+	}
+	header := fmt.Sprintf("for %s; %s; %s", init, condition, increment)
+	return p.renderBlockDoc(header, node.Body)
 }
 
 func (p printer) renderIfStatement(node *parse.IfStatement, indent int) []string {
@@ -494,6 +788,40 @@ func (p printer) renderIfStatement(node *parse.IfStatement, indent int) []string
 	return lines
 }
 
+func (p printer) renderIfStatementDoc(node *parse.IfStatement) doc {
+	if node.Condition == nil {
+		return p.renderBlockDoc("else", node.Body)
+	}
+
+	head := "if " + p.renderExpression(node.Condition, 0)
+	current := p.renderBlockDoc(head, node.Body)
+	if node.Else == nil {
+		return current
+	}
+
+	if elseIf, ok := node.Else.(*parse.IfStatement); ok {
+		if elseIf.Condition == nil {
+			return dConcat(current, dText(" "), p.renderBlockDoc("else", elseIf.Body))
+		}
+		return dConcat(current, dText(" else "), p.renderIfStatementDoc(elseIf))
+	}
+
+	return dConcat(current, dText(" else "), p.renderBlockDoc("else", []parse.Statement{node.Else}))
+}
+
+func (p printer) renderBlockDoc(header string, statements []parse.Statement) doc {
+	if len(statements) == 0 {
+		return dText(header + " {}")
+	}
+
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(statements))),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
 func (p printer) renderBlockWithHeader(header string, statements []parse.Statement, indent int) []string {
 	if len(statements) == 0 {
 		return []string{p.indent(indent) + header + " {}"}
@@ -505,26 +833,50 @@ func (p printer) renderBlockWithHeader(header string, statements []parse.Stateme
 }
 
 func (p printer) renderStatements(statements []parse.Statement, indent int) []string {
+	return p.renderDocAtIndent(p.renderStatementsDoc(statements), indent)
+}
+
+func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 	if len(statements) == 0 {
-		return nil
+		return dText("")
 	}
-	lines := make([]string, 0)
+
+	parts := make([]doc, 0, len(statements)*2)
 	var previous parse.Statement
 	haveRendered := false
 	for _, statement := range statements {
 		if statement == nil {
 			continue
 		}
-		if haveRendered && hasSourceBlankLine(previous, statement) {
-			lines = append(lines, "")
+		if haveRendered {
+			parts = append(parts, dHardLine())
+			if hasSourceBlankLine(previous, statement) {
+				parts = append(parts, dHardLine())
+			}
 		}
-		rendered := p.renderStatement(statement, indent)
-		if len(rendered) == 0 {
-			continue
-		}
-		lines = append(lines, rendered...)
+		parts = append(parts, p.renderStatementDoc(statement))
 		previous = statement
 		haveRendered = true
+	}
+	if len(parts) == 0 {
+		return dText("")
+	}
+	return dConcat(parts...)
+}
+
+func (p printer) renderDocAtIndent(document doc, indent int) []string {
+	rendered := p.printDoc(document)
+	if rendered == "" {
+		return nil
+	}
+	parts := strings.Split(rendered, "\n")
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, p.indent(indent)+part)
 	}
 	return lines
 }
@@ -624,52 +976,56 @@ func maybeNullable(base string, nullable bool) string {
 }
 
 func (p printer) renderExpression(expression parse.Expression, parentPrecedence int) string {
+	return p.printDoc(p.renderExpressionDoc(expression, parentPrecedence))
+}
+
+func (p printer) renderExpressionDoc(expression parse.Expression, parentPrecedence int) doc {
 	if expression == nil {
-		return ""
+		return dText("")
 	}
 
 	switch node := expression.(type) {
 	case *parse.Identifier:
-		return node.Name
+		return dText(node.Name)
 	case parse.Identifier:
-		return node.Name
+		return dText(node.Name)
 	case *parse.StrLiteral:
-		return strconv.Quote(node.Value)
+		return dText(strconv.Quote(node.Value))
 	case parse.StrLiteral:
-		return strconv.Quote(node.Value)
+		return dText(strconv.Quote(node.Value))
 	case *parse.InterpolatedStr:
-		return p.renderInterpolatedString(node)
+		return p.renderInterpolatedStringDoc(node)
 	case parse.InterpolatedStr:
 		copy := node
-		return p.renderInterpolatedString(&copy)
+		return p.renderInterpolatedStringDoc(&copy)
 	case *parse.NumLiteral:
-		return node.Value
+		return dText(node.Value)
 	case parse.NumLiteral:
-		return node.Value
+		return dText(node.Value)
 	case *parse.BoolLiteral:
 		if node.Value {
-			return "true"
+			return dText("true")
 		}
-		return "false"
+		return dText("false")
 	case parse.BoolLiteral:
 		if node.Value {
-			return "true"
+			return dText("true")
 		}
-		return "false"
+		return dText("false")
 	case *parse.VoidLiteral:
-		return "()"
+		return dText("()")
 	case parse.VoidLiteral:
-		return "()"
+		return dText("()")
 	case *parse.UnaryExpression:
-		return p.renderUnary(node, parentPrecedence)
+		return dText(p.renderUnary(node, parentPrecedence))
 	case parse.UnaryExpression:
 		copy := node
-		return p.renderUnary(&copy, parentPrecedence)
+		return dText(p.renderUnary(&copy, parentPrecedence))
 	case *parse.BinaryExpression:
-		return p.renderBinary(node, parentPrecedence)
+		return dText(p.renderBinary(node, parentPrecedence))
 	case parse.BinaryExpression:
 		copy := node
-		return p.renderBinary(&copy, parentPrecedence)
+		return dText(p.renderBinary(&copy, parentPrecedence))
 	case *parse.ChainedComparison:
 		parts := make([]string, 0, len(node.Operands)*2)
 		for i, operand := range node.Operands {
@@ -678,112 +1034,127 @@ func (p printer) renderExpression(expression parse.Expression, parentPrecedence 
 			}
 			parts = append(parts, p.renderExpression(operand, precedenceCompare))
 		}
-		return strings.Join(parts, " ")
+		return dText(strings.Join(parts, " "))
 	case *parse.RangeExpression:
-		return p.renderExpression(node.Start, precedenceCompare) + ".." + p.renderExpression(node.End, precedenceCompare)
+		return dConcat(p.renderExpressionDoc(node.Start, precedenceCompare), dText(".."), p.renderExpressionDoc(node.End, precedenceCompare))
 	case parse.RangeExpression:
-		return p.renderExpression(node.Start, precedenceCompare) + ".." + p.renderExpression(node.End, precedenceCompare)
+		return dConcat(p.renderExpressionDoc(node.Start, precedenceCompare), dText(".."), p.renderExpressionDoc(node.End, precedenceCompare))
 	case *parse.ListLiteral:
-		return p.renderListLiteral(node)
+		return p.renderListLiteralDoc(node)
 	case parse.ListLiteral:
 		copy := node
-		return p.renderListLiteral(&copy)
+		return p.renderListLiteralDoc(&copy)
 	case *parse.MapLiteral:
-		return p.renderMapLiteral(node)
+		return p.renderMapLiteralDoc(node)
 	case parse.MapLiteral:
 		copy := node
-		return p.renderMapLiteral(&copy)
+		return p.renderMapLiteralDoc(&copy)
 	case *parse.StructInstance:
-		return p.renderStructInstance(node)
+		return p.renderStructInstanceDoc(node)
 	case parse.StructInstance:
 		copy := node
-		return p.renderStructInstance(&copy)
+		return p.renderStructInstanceDoc(&copy)
 	case *parse.FunctionCall:
-		return p.renderFunctionCall(node)
+		return p.renderFunctionCallDoc(node)
 	case parse.FunctionCall:
 		copy := node
-		return p.renderFunctionCall(&copy)
+		return p.renderFunctionCallDoc(&copy)
 	case *parse.InstanceProperty:
 		if id, ok := node.Target.(*parse.Identifier); ok && id.Name == "@" {
-			return "@" + node.Property.Name
+			return dText("@" + node.Property.Name)
 		}
-		return p.renderExpression(node.Target, precedenceCall) + "." + node.Property.Name
+		return dConcat(p.renderExpressionDoc(node.Target, precedenceCall), dText("."+node.Property.Name))
 	case parse.InstanceProperty:
 		copy := node
-		return p.renderExpression(&copy, parentPrecedence)
+		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.InstanceMethod:
 		if id, ok := node.Target.(*parse.Identifier); ok && id.Name == "@" {
-			return "@" + p.renderFunctionCall(&node.Method)
+			return dConcat(dText("@"), p.renderFunctionCallDoc(&node.Method))
 		}
-		return p.renderExpression(node.Target, precedenceCall) + "." + p.renderFunctionCall(&node.Method)
+		return dConcat(p.renderExpressionDoc(node.Target, precedenceCall), dText("."), p.renderFunctionCallDoc(&node.Method))
 	case parse.InstanceMethod:
 		copy := node
-		return p.renderExpression(&copy, parentPrecedence)
+		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.StaticProperty:
-		return p.renderExpression(node.Target, precedenceCall) + "::" + p.renderExpression(node.Property, precedenceCall)
+		return dConcat(p.renderExpressionDoc(node.Target, precedenceCall), dText("::"), p.renderExpressionDoc(node.Property, precedenceCall))
 	case parse.StaticProperty:
 		copy := node
-		return p.renderExpression(&copy, parentPrecedence)
+		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.StaticFunction:
-		return p.renderExpression(node.Target, precedenceCall) + "::" + p.renderFunctionCall(&node.Function)
+		return dConcat(p.renderExpressionDoc(node.Target, precedenceCall), dText("::"), p.renderFunctionCallDoc(&node.Function))
 	case parse.StaticFunction:
 		copy := node
-		return p.renderExpression(&copy, parentPrecedence)
+		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.MatchExpression:
-		return p.renderMatchExpression(node)
+		return p.renderMatchExpressionDoc(node)
 	case *parse.ConditionalMatchExpression:
-		return p.renderConditionalMatchExpression(node)
+		return p.renderConditionalMatchExpressionDoc(node)
 	case *parse.AnonymousFunction:
-		head := "fn" + p.renderParameterList(node.Parameters, 0, "fn")
-		if node.ReturnType != nil {
-			head += " " + p.renderType(node.ReturnType)
-		}
-		if len(node.Body) == 0 {
-			return head + " {}"
-		}
-		lines := []string{head + " {"}
-		for _, line := range p.renderStatements(node.Body, 1) {
-			lines = append(lines, line)
-		}
-		lines = append(lines, "}")
-		return strings.Join(lines, "\n")
+		return p.renderAnonymousFunctionDoc(node)
 	case *parse.Try:
-		text := "try " + p.renderExpression(node.Expression, precedenceUnary)
-		if node.CatchVar != nil {
-			text += " -> " + node.CatchVar.Name
-			if len(node.CatchBlock) == 0 {
-				text += " {}"
-			} else {
-				lines := []string{text + " {"}
-				for _, line := range p.renderStatements(node.CatchBlock, 1) {
-					lines = append(lines, line)
-				}
-				lines = append(lines, "}")
-				return strings.Join(lines, "\n")
-			}
-		}
-		return text
+		return p.renderTryDoc(node)
 	case *parse.BlockExpression:
-		if len(node.Statements) == 0 {
-			return "{}"
-		}
-		lines := []string{"{"}
-		for _, line := range p.renderStatements(node.Statements, 1) {
-			lines = append(lines, line)
-		}
-		lines = append(lines, "}")
-		return strings.Join(lines, "\n")
+		return p.renderBlockExpressionDoc(node)
 	default:
-		return expression.String()
+		return dText(expression.String())
 	}
 }
 
+func (p printer) renderAnonymousFunctionDoc(node *parse.AnonymousFunction) doc {
+	header := "fn" + p.renderParameterList(node.Parameters, 0, "fn")
+	if node.ReturnType != nil {
+		header += " " + p.renderType(node.ReturnType)
+	}
+	if len(node.Body) == 0 {
+		return dText(header + " {}")
+	}
+	return dGroup(dConcat(
+		dText(header+" {"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.Body))),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) renderTryDoc(node *parse.Try) doc {
+	prefix := "try " + p.renderExpression(node.Expression, precedenceUnary)
+	if node.CatchVar == nil {
+		return dText(prefix)
+	}
+	prefix += " -> " + node.CatchVar.Name
+	if len(node.CatchBlock) == 0 {
+		return dText(prefix + " {}")
+	}
+	return dGroup(dConcat(
+		dText(prefix+" {"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.CatchBlock))),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) renderBlockExpressionDoc(node *parse.BlockExpression) doc {
+	if len(node.Statements) == 0 {
+		return dText("{}")
+	}
+	return dGroup(dConcat(
+		dText("{"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.Statements))),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
 func (p printer) renderInterpolatedString(value *parse.InterpolatedStr) string {
+	return p.printDoc(p.renderInterpolatedStringDoc(value))
+}
+
+func (p printer) renderInterpolatedStringDoc(value *parse.InterpolatedStr) doc {
 	var builder strings.Builder
 	builder.WriteByte('"')
 	p.writeInterpolatedChunks(&builder, value.Chunks)
 	builder.WriteByte('"')
-	return builder.String()
+	return dText(builder.String())
 }
 
 func (p printer) writeInterpolatedChunks(builder *strings.Builder, chunks []parse.Expression) {
@@ -812,54 +1183,84 @@ func escapeInterpolatedText(value string) string {
 }
 
 func (p printer) renderListLiteral(list *parse.ListLiteral) string {
+	return p.printDoc(p.renderListLiteralDoc(list))
+}
+
+func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
 	items := make([]string, 0, len(list.Items))
 	for _, item := range list.Items {
 		items = append(items, p.renderExpression(item, 0))
 	}
-	oneLine := "[" + strings.Join(items, ", ") + "]"
-	if len(items) == 0 || len(oneLine) <= p.maxLineWidth {
-		return oneLine
+	if len(items) == 0 {
+		return dText("[]")
 	}
 
-	lines := []string{"["}
-	for _, comment := range list.Comments {
-		lines = append(lines, p.indent(1)+p.renderComment(comment.Value))
-	}
+	itemDocs := make([]doc, 0, len(items))
 	for _, item := range items {
-		lines = append(lines, p.indent(1)+item+",")
+		itemDocs = append(itemDocs, dText(item))
 	}
-	lines = append(lines, "]")
-	return strings.Join(lines, "\n")
+	body := dJoin(dConcat(dText(","), dLine()), itemDocs)
+	body = dConcat(body, dIfBreak(dText(","), dText("")))
+
+	if len(list.Comments) > 0 {
+		commentDocs := make([]doc, 0, len(list.Comments))
+		for _, comment := range list.Comments {
+			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
+		}
+		body = dConcat(dJoin(dHardLine(), commentDocs), dHardLine(), body)
+	}
+
+	return dGroup(dConcat(
+		dText("["),
+		dIndent(dConcat(dSoftLine(), body)),
+		dSoftLine(),
+		dText("]"),
+	))
 }
 
 func (p printer) renderMapLiteral(m *parse.MapLiteral) string {
+	return p.printDoc(p.renderMapLiteralDoc(m))
+}
+
+func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 	if len(m.Entries) == 0 {
-		return "[:]"
+		return dText("[:]")
 	}
 
 	parts := make([]string, 0, len(m.Entries))
 	for _, entry := range m.Entries {
 		parts = append(parts, p.renderExpression(entry.Key, 0)+": "+p.renderExpression(entry.Value, 0))
 	}
-	oneLine := "[" + strings.Join(parts, ", ") + "]"
-	if len(parts) == 0 || len(oneLine) <= p.maxLineWidth {
-		return oneLine
+
+	partDocs := make([]doc, 0, len(parts))
+	for _, part := range parts {
+		partDocs = append(partDocs, dText(part))
+	}
+	body := dJoin(dConcat(dText(","), dLine()), partDocs)
+	body = dConcat(body, dIfBreak(dText(","), dText("")))
+	if len(m.Comments) > 0 {
+		commentDocs := make([]doc, 0, len(m.Comments))
+		for _, comment := range m.Comments {
+			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
+		}
+		body = dConcat(dJoin(dHardLine(), commentDocs), dHardLine(), body)
 	}
 
-	lines := []string{"["}
-	for _, comment := range m.Comments {
-		lines = append(lines, p.indent(1)+p.renderComment(comment.Value))
-	}
-	for _, part := range parts {
-		lines = append(lines, p.indent(1)+part+",")
-	}
-	lines = append(lines, "]")
-	return strings.Join(lines, "\n")
+	return dGroup(dConcat(
+		dText("["),
+		dIndent(dConcat(dSoftLine(), body)),
+		dSoftLine(),
+		dText("]"),
+	))
 }
 
 func (p printer) renderStructInstance(node *parse.StructInstance) string {
+	return p.printDoc(p.renderStructInstanceDoc(node))
+}
+
+func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 	if len(node.Properties) == 0 && len(node.Comments) == 0 {
-		return node.Name.Name + "{}"
+		return dText(node.Name.Name + "{}")
 	}
 
 	parts := make([]string, 0, len(node.Properties))
@@ -867,22 +1268,32 @@ func (p printer) renderStructInstance(node *parse.StructInstance) string {
 		parts = append(parts, property.Name.Name+": "+p.renderExpression(property.Value, 0))
 	}
 	oneLine := node.Name.Name + "{" + strings.Join(parts, ", ") + "}"
-	if len(parts) <= 1 && len(oneLine) <= p.maxLineWidth {
-		return oneLine
+	if len(node.Properties) <= 2 && len(node.Comments) == 0 && len(oneLine) <= p.maxLineWidth {
+		return dText(oneLine)
 	}
 
-	lines := []string{node.Name.Name + "{"}
+	items := make([]doc, 0, len(parts)+len(node.Comments))
 	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(1)+p.renderComment(comment.Value))
+		items = append(items, dText(p.renderComment(comment.Value)))
 	}
 	for _, part := range parts {
-		lines = append(lines, p.indent(1)+part+",")
+		items = append(items, dText(part+","))
 	}
-	lines = append(lines, "}")
-	return strings.Join(lines, "\n")
+	body := dJoin(dHardLine(), items)
+
+	return dConcat(
+		dText(node.Name.Name+"{"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	)
 }
 
 func (p printer) renderFunctionCall(node *parse.FunctionCall) string {
+	return p.printDoc(p.renderFunctionCallDoc(node))
+}
+
+func (p printer) renderFunctionCallDoc(node *parse.FunctionCall) doc {
 	head := node.Name
 	if len(node.TypeArgs) > 0 {
 		types := make([]string, 0, len(node.TypeArgs))
@@ -891,76 +1302,103 @@ func (p printer) renderFunctionCall(node *parse.FunctionCall) string {
 		}
 		head += "<" + strings.Join(types, ", ") + ">"
 	}
-	args := make([]string, 0, len(node.Args))
+	argDocs := make([]doc, 0, len(node.Args))
 	for _, arg := range node.Args {
-		part := ""
+		prefix := ""
 		if arg.Name != "" {
-			part += arg.Name + ": "
+			prefix += arg.Name + ": "
 		}
 		if arg.Mutable {
-			part += "mut "
+			prefix += "mut "
 		}
-		part += p.renderExpression(arg.Value, 0)
-		args = append(args, part)
+		argDocs = append(argDocs, dConcat(dText(prefix), p.renderExpressionValueDoc(arg.Value, 0)))
 	}
-	oneLine := head + "(" + strings.Join(args, ", ") + ")"
-	if len(args) <= 1 && len(oneLine) <= p.maxLineWidth {
-		return oneLine
-	}
-	if len(args) > 1 && len(oneLine) <= p.maxLineWidth {
-		return oneLine
+	if len(argDocs) == 0 && len(node.Comments) == 0 {
+		return dText(head + "()")
 	}
 
-	lines := []string{head + "("}
-	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(1)+p.renderComment(comment.Value))
+	body := dJoin(dConcat(dText(","), dLine()), argDocs)
+	body = dConcat(body, dIfBreak(dText(","), dText("")))
+
+	if len(node.Comments) > 0 {
+		commentDocs := make([]doc, 0, len(node.Comments))
+		for _, comment := range node.Comments {
+			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
+		}
+		if len(argDocs) > 0 {
+			body = dConcat(dJoin(dHardLine(), commentDocs), dHardLine(), body)
+		} else {
+			body = dJoin(dHardLine(), commentDocs)
+		}
 	}
-	for _, arg := range args {
-		lines = append(lines, p.indent(1)+arg+",")
-	}
-	lines = append(lines, ")")
-	return strings.Join(lines, "\n")
+
+	return dGroup(dConcat(
+		dText(head+"("),
+		dIndent(dConcat(dSoftLine(), body)),
+		dSoftLine(),
+		dText(")"),
+	))
 }
 
 func (p printer) renderMatchExpression(node *parse.MatchExpression) string {
-	lines := []string{"match " + p.renderExpression(node.Subject, 0) + " {"}
+	return p.printDoc(p.renderMatchExpressionDoc(node))
+}
+
+func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
+	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
 	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(1)+p.renderComment(comment.Value))
+		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
 	}
 	for _, matchCase := range node.Cases {
-		caseLines := p.renderMatchCase(matchCase, 1)
-		if len(caseLines) > 0 {
-			caseLines[len(caseLines)-1] += ","
-		}
-		lines = append(lines, caseLines...)
+		caseDocs = append(caseDocs, dConcat(p.renderMatchCaseDoc(matchCase), dText(",")))
 	}
-	lines = append(lines, "}")
-	return strings.Join(lines, "\n")
+
+	body := dText("")
+	if len(caseDocs) > 0 {
+		body = dJoin(dHardLine(), caseDocs)
+	}
+
+	return dGroup(dConcat(
+		dText("match "+p.renderExpression(node.Subject, 0)+" {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
 }
 
 func (p printer) renderConditionalMatchExpression(node *parse.ConditionalMatchExpression) string {
-	lines := []string{"match {"}
-	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(1)+p.renderComment(comment.Value))
-	}
-	for _, matchCase := range node.Cases {
-		caseLines := p.renderConditionalMatchCase(matchCase, 1)
-		if len(caseLines) > 0 {
-			caseLines[len(caseLines)-1] += ","
-		}
-		lines = append(lines, caseLines...)
-	}
-	lines = append(lines, "}")
-	return strings.Join(lines, "\n")
+	return p.printDoc(p.renderConditionalMatchExpressionDoc(node))
 }
 
-func (p printer) renderConditionalMatchCase(matchCase parse.ConditionalMatchCase, indent int) []string {
+func (p printer) renderConditionalMatchExpressionDoc(node *parse.ConditionalMatchExpression) doc {
+	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
+	for _, comment := range node.Comments {
+		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
+	}
+	for _, matchCase := range node.Cases {
+		caseDocs = append(caseDocs, dConcat(p.renderConditionalMatchCaseDoc(matchCase), dText(",")))
+	}
+
+	body := dText("")
+	if len(caseDocs) > 0 {
+		body = dJoin(dHardLine(), caseDocs)
+	}
+
+	return dGroup(dConcat(
+		dText("match {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchCase) doc {
 	pattern := "_"
 	if matchCase.Condition != nil {
 		pattern = p.renderExpression(matchCase.Condition, 0)
 	}
 	if len(matchCase.Body) == 0 {
-		return []string{p.indent(indent) + pattern + " => ()"}
+		return dText(pattern + " => ()")
 	}
 	if len(matchCase.Body) == 1 {
 		if expr, ok := matchCase.Body[0].(parse.Expression); ok {
@@ -968,24 +1406,26 @@ func (p printer) renderConditionalMatchCase(matchCase parse.ConditionalMatchCase
 				rendered := p.renderExpression(expr, 0)
 				if !strings.Contains(rendered, "\n") {
 					line := pattern + " => " + rendered
-					if len(line)+indent*indentWidth <= p.maxLineWidth {
-						return []string{p.indent(indent) + line}
+					if len(line) <= p.maxLineWidth {
+						return dText(line)
 					}
 				}
 			}
 		}
 	}
 
-	lines := []string{p.indent(indent) + pattern + " => {"}
-	lines = append(lines, p.renderStatements(matchCase.Body, indent+1)...)
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
+	return dGroup(dConcat(
+		dText(pattern+" => {"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(matchCase.Body))),
+		dHardLine(),
+		dText("}"),
+	))
 }
 
-func (p printer) renderMatchCase(matchCase parse.MatchCase, indent int) []string {
+func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
 	pattern := p.renderExpression(matchCase.Pattern, 0)
 	if len(matchCase.Body) == 0 {
-		return []string{p.indent(indent) + pattern + " => ()"}
+		return dText(pattern + " => ()")
 	}
 	if len(matchCase.Body) == 1 {
 		if expr, ok := matchCase.Body[0].(parse.Expression); ok {
@@ -993,18 +1433,20 @@ func (p printer) renderMatchCase(matchCase parse.MatchCase, indent int) []string
 				rendered := p.renderExpression(expr, 0)
 				if !strings.Contains(rendered, "\n") {
 					line := pattern + " => " + rendered
-					if len(line)+indent*indentWidth <= p.maxLineWidth {
-						return []string{p.indent(indent) + line}
+					if len(line) <= p.maxLineWidth {
+						return dText(line)
 					}
 				}
 			}
 		}
 	}
 
-	lines := []string{p.indent(indent) + pattern + " => {"}
-	lines = append(lines, p.renderStatements(matchCase.Body, indent+1)...)
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
+	return dGroup(dConcat(
+		dText(pattern+" => {"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(matchCase.Body))),
+		dHardLine(),
+		dText("}"),
+	))
 }
 
 const (

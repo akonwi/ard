@@ -75,9 +75,49 @@ func TestFormat(t *testing.T) {
 			output: "fn main() {\n  let m = [:]\n}\n",
 		},
 		{
+			name:   "keeps small struct literals on one line",
+			input:  "fn main() {\n  let p = Point{ x: 1, y: 2 }\n}\n",
+			output: "fn main() {\n  let p = Point{x: 1, y: 2}\n}\n",
+		},
+		{
+			name:   "formats struct literals with 3 properties across lines",
+			input:  "fn main() {\n  let u = User{ name: \"a\", age: 1, role: \"admin\" }\n}\n",
+			output: "fn main() {\n  let u = User{\n    name: \"a\",\n    age: 1,\n    role: \"admin\",\n  }\n}\n",
+		},
+		{
+			name:   "keeps impl comments attached to following method",
+			input:  "impl Database {\n  fn close() {\n    close_db(@_ptr)\n  }\n\n  // simple one-off executions where the results aren't needed\n  // [note]: could be removed entirely for query.run() once optional params are sorted\n  fn exec(sql: Str) {\n    execute(@_ptr, sql)\n  }\n}\n",
+			output: "impl Database {\n  fn close() {\n    close_db(@_ptr)\n  }\n\n  // simple one-off executions where the results aren't needed\n  // [note]: could be removed entirely for query.run() once optional params are sorted\n  fn exec(sql: Str) {\n    execute(@_ptr, sql)\n  }\n}\n",
+		},
+		{
 			name:   "does not insert blank lines between top-level statements",
 			input:  "fn one() {}\nfn two() {}\n",
 			output: "fn one() {}\nfn two() {}\n",
+		},
+		{
+			name:   "no synthetic blank line after multiline declaration expression",
+			input:  "fn example() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n",
+			output: "fn example() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n",
+		},
+		{
+			name:   "formats if else chain with stable braces",
+			input:  "fn main() {\n  if a{b}else if c{d}else{e}\n}\n",
+			output: "fn main() {\n  if a {\n    b\n  } else if c {\n    d\n  } else {\n    e\n  }\n}\n",
+		},
+		{
+			name:   "formats for loop header spacing",
+			input:  "fn main() {\n  for mut i=0;i<10;i=+1{ i }\n}\n",
+			output: "fn main() {\n  for mut i = 0; i < 10; i =+ 1 {\n    i\n  }\n}\n",
+		},
+		{
+			name:   "preserves blank line after type declaration",
+			input:  "type Value = Str | Int\n\nfn main() {}\n",
+			output: "type Value = Str | Int\n\nfn main() {}\n",
+		},
+		{
+			name:   "preserves blank line between enum and impl",
+			input:  "enum Method {\n  Get\n}\n\nimpl Str::ToString for Method {\n  fn to_str() Str {\n    \"GET\"\n  }\n}\n",
+			output: "enum Method {\n  Get,\n}\n\nimpl Str::ToString for Method {\n  fn to_str() Str {\n    \"GET\"\n  }\n}\n",
 		},
 		{
 			name:  "fails on invalid source",
@@ -102,5 +142,23 @@ func TestFormat(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tt.output, string(got))
 			}
 		})
+	}
+}
+
+func TestFormatIsIdempotent(t *testing.T) {
+	input := "fn example() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n"
+
+	first, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("first format failed: %v", err)
+	}
+
+	second, err := Format(first, "test.ard")
+	if err != nil {
+		t.Fatalf("second format failed: %v", err)
+	}
+
+	if string(first) != string(second) {
+		t.Fatalf("expected idempotent formatting, first=%q second=%q", string(first), string(second))
 	}
 }
