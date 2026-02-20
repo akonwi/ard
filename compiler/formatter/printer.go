@@ -1059,6 +1059,16 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.FunctionCall:
 		copy := node
 		return p.renderFunctionCallDoc(&copy)
+	case *parse.VariableAssignment:
+		return p.renderVariableAssignmentDoc(node)
+	case parse.VariableAssignment:
+		copy := node
+		return p.renderVariableAssignmentDoc(&copy)
+	case *parse.VariableDeclaration:
+		return p.renderVariableDeclarationDoc(node)
+	case parse.VariableDeclaration:
+		copy := node
+		return p.renderVariableDeclarationDoc(&copy)
 	case *parse.InstanceProperty:
 		if id, ok := node.Target.(*parse.Identifier); ok && id.Name == "@" {
 			return dText("@" + node.Property.Name)
@@ -1402,6 +1412,13 @@ func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchC
 	}
 	if len(matchCase.Body) == 1 {
 		if expr, ok := matchCase.Body[0].(parse.Expression); ok {
+			rendered := p.renderExpression(expr, 0)
+			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
+				line := pattern + " => { " + rendered + " }"
+				if len(line) <= p.maxLineWidth {
+					return dText(line)
+				}
+			}
 			if canInlineMatchExpression(expr) {
 				rendered := p.renderExpression(expr, 0)
 				if !strings.Contains(rendered, "\n") {
@@ -1429,6 +1446,13 @@ func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
 	}
 	if len(matchCase.Body) == 1 {
 		if expr, ok := matchCase.Body[0].(parse.Expression); ok {
+			rendered := p.renderExpression(expr, 0)
+			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
+				line := pattern + " => { " + rendered + " }"
+				if len(line) <= p.maxLineWidth {
+					return dText(line)
+				}
+			}
 			if canInlineMatchExpression(expr) {
 				rendered := p.renderExpression(expr, 0)
 				if !strings.Contains(rendered, "\n") {
@@ -1578,6 +1602,15 @@ func canInlineMatchExpression(expression parse.Expression) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func canInlineMatchBlockExpression(expression parse.Expression) bool {
+	switch expression.(type) {
+	case *parse.VariableAssignment, parse.VariableAssignment:
+		return true
+	default:
+		return false
 	}
 }
 

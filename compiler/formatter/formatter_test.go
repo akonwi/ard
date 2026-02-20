@@ -105,6 +105,11 @@ func TestFormat(t *testing.T) {
 			output: "fn main() {\n  if a {\n    b\n  } else if c {\n    d\n  } else {\n    e\n  }\n}\n",
 		},
 		{
+			name:   "keeps single-expression match block inline when it fits",
+			input:  "fn main() {\n  match x {\n    true => { total =+ 1 },\n    false => { total =- 1 },\n  }\n}\n",
+			output: "fn main() {\n  match x {\n    true => { total =+ 1 },\n    false => { total =- 1 },\n  }\n}\n",
+		},
+		{
 			name:   "formats for loop header spacing",
 			input:  "fn main() {\n  for mut i=0;i<10;i=+1{ i }\n}\n",
 			output: "fn main() {\n  for mut i = 0; i < 10; i =+ 1 {\n    i\n  }\n}\n",
