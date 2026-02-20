@@ -1,17 +1,10 @@
 # Ard Formatter Algorithm (Wadler/Prettier Style)
 
-This document defines the formatter architecture we are moving to.
-
-## Why move
-
-The current formatter prints many constructs directly as strings and uses local width heuristics.
-That works for simple cases, but it is hard to keep wrapping behavior consistent across nested constructs.
-
-We are moving to a document-IR based formatter (the same family of algorithms used by Prettier and described in "A prettier printer").
+This document defines the formatter architecture used by Ard.
 
 ## Core idea
 
-Formatting is split into two phases:
+Formatting is split into three phases:
 
 1. Parse source to AST
 2. Lower AST to a formatting Document IR ("Doc")
@@ -48,30 +41,14 @@ For each `group`, we run a `fits(...)` simulation at the current column:
 
 This makes wrap decisions composable and consistent even for deep nesting.
 
-## Incremental rollout plan
+## Current behavior
 
-We will migrate construct families incrementally while keeping the formatter usable at every step.
+The formatter applies Doc-based printing across Ard syntax, including declarations, block constructs, and expression constructs.
 
-1. **Engine foundation**
-   - Introduce Doc nodes and printer
-   - Keep existing parser and command entry points
-
-2. **High-impact constructs**
-   - Function parameters and calls
-   - List/map/struct literals
-   - Trailing commas and multiline wrapping
-
-3. **Block constructs**
-   - `if`, loops, `match`, `try`
-   - Canonical brace + indentation handling via Doc groups
-
-4. **Comments and trivia**
-   - Keep comments conservative initially
-   - Later improve parser/trivia attachment and line-suffix behavior
-
-5. **Full migration**
-   - Remove legacy string-assembly paths once all syntax is lowered to Doc
-   - Keep format idempotence and sample/std_lib regression tests
+- Wrapping decisions are based on `group` + `fits(...)`, not ad hoc per-node width checks.
+- Trailing commas are controlled through Doc branching (`ifBreak`).
+- Indentation and multiline braces are emitted through Doc indentation and hardline commands.
+- Formatting is idempotent and validated against formatter tests and stdlib golden/idempotence coverage.
 
 ## Non-goals (current stage)
 
