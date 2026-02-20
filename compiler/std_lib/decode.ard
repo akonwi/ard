@@ -48,30 +48,22 @@ extern fn is_void(data: Dynamic) Bool = "IsNil"
 type Decoder = fn(Dynamic) $Out![Error]
 
 fn string(data: Dynamic) Str![Error] {
-  let val = try _decode_string(data) -> err {
-    Result::err([err])
-  }
+  let val = try _decode_string(data) -> err { Result::err([err]) }
   Result::ok(val)
 }
 
 fn int(data: Dynamic) Int![Error] {
-  let val = try _decode_int(data) -> err {
-    Result::err([err])
-  }
+  let val = try _decode_int(data) -> err { Result::err([err]) }
   Result::ok(val)
 }
 
 fn float(data: Dynamic) Float![Error] {
-  let val = try _decode_float(data) -> err {
-    Result::err([err])
-  }
+  let val = try _decode_float(data) -> err { Result::err([err]) }
   Result::ok(val)
 }
 
 fn bool(data: Dynamic) Bool![Error] {
-  let val = try _decode_bool(data) -> err {
-    Result::err([err])
-  }
+  let val = try _decode_bool(data) -> err { Result::err([err]) }
   Result::ok(val)
 }
 

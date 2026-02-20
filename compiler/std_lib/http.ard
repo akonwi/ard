@@ -3,11 +3,11 @@ use ard/string as Str
 
 enum Method {
   Get,
-	Post,
-	Put,
-	Del,
-	Patch,
-	Options,
+  Post,
+  Put,
+  Del,
+  Patch,
+  Options,
 }
 
 impl Str::ToString for Method {
@@ -24,12 +24,12 @@ impl Str::ToString for Method {
 }
 
 struct Request {
-  method:  Method,
-	url:     Str,
-	headers: [Str:Str],
-	body:    Dynamic?,
+  method: Method,
+  url: Str,
+  headers: [Str: Str],
+  body: Dynamic?,
 
-	// inbound requests have the *http.Request
+  // inbound requests have the *http.Request
   raw: Dynamic?,
 }
 
@@ -55,13 +55,17 @@ impl Request {
 }
 
 struct Response {
-  status:  Int,
-	headers: [Str: Str],
-	body:    Str,
+  status: Int,
+  headers: [Str: Str],
+  body: Str,
 }
 
 fn Response::new(status: Int, body: Str) Response {
-  Response{status: status, body: body, headers: [:] }
+  Response{
+    status: status,
+    body: body,
+    headers: [:],
+  }
 }
 
 impl Response {
@@ -70,7 +74,7 @@ impl Response {
   }
 }
 
-private extern fn _send(method: Str, url: Str, body: Dynamic?, headers: [Str:Str]) Response!Str = "HTTP_Send"
+private extern fn _send(method: Str, url: Str, body: Dynamic?, headers: [Str: Str]) Response!Str = "HTTP_Send"
 
 fn send(req: Request) Response!Str {
   let method = req.method.to_str()
@@ -79,4 +83,4 @@ fn send(req: Request) Response!Str {
 
 type HandlerFn = fn(Request, mut Response)
 
-extern fn serve(port: Int, handlers: [Str:HandlerFn]) Void!Str = "HTTP_Serve"
+extern fn serve(port: Int, handlers: [Str: HandlerFn]) Void!Str = "HTTP_Serve"

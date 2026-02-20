@@ -31,9 +31,7 @@ impl Query {
     for param in @params {
       // Replace only the first occurrence to handle duplicate parameters correctly
       query_str = query_str.replace("@" + param, "?")
-      let value = try args.get(param) -> _ {
-        Result::err("Missing parameter: " + param)
-      }
+      let value = try args.get(param) -> _ { Result::err("Missing parameter: " + param) }
       values.push(value)
     }
 
