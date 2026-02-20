@@ -16,7 +16,6 @@ func TestStdLibFormattingIsIdempotent(t *testing.T) {
 	}
 
 	for _, path := range paths {
-		path := path
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			input, readErr := os.ReadFile(path)
 			if readErr != nil {
