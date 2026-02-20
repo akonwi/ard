@@ -1,6 +1,6 @@
-# Ard Formatting Standard (Proposed)
+# Ard Formatting Standard
 
-This document proposes a staged formatter standard for Ard and introduces the first compiler command support.
+This document defines the canonical formatting standard enforced by `ard format`.
 
 ## Goals
 
@@ -10,33 +10,37 @@ This document proposes a staged formatter standard for Ard and introduces the fi
 
 ## Command
 
-The compiler now includes:
+The compiler includes:
 
-- `ard format <file.ard>`: rewrites the file in place.
-- `ard format --check <file.ard>`: exits non-zero when the file is not formatted.
+- `ard format <path>`: formats a single `.ard` file or recursively formats all `.ard` files under a directory.
+- `ard format --check <path>`: exits non-zero when formatting changes are needed.
 
-## Phase 1 Rules (implemented)
+## Core Rules
 
-Phase 1 is intentionally conservative so it is safe to adopt immediately:
+The formatter is AST-aware and enforces these rules:
 
-1. Normalize line endings to LF (`\n`).
-2. Remove trailing spaces and tabs from each line.
-3. Ensure a trailing newline at end of non-empty files.
-
-These rules are whitespace-only and do not change syntax structure.
-
-## Phase 2 Candidate Rules (next)
-
-After we have confidence in the command workflow, we can move to AST-aware formatting:
-
-- Canonical indentation and brace placement.
-- Spacing around operators, colons, commas, and arrows.
-- Canonical multiline layout for structs, enums, function params, lists, maps, and match expressions.
-- Import grouping and ordering.
-- Comment anchoring and stable comment placement.
+1. Line width target: 100 columns.
+2. Indentation: 2 spaces.
+3. Brace style: K&R (opening brace on the same line).
+4. Operator spacing: spaces around binary operators.
+5. Range spacing: no spaces around `..`.
+6. Colon spacing: no space before, one space after (`name: Str`, `arg: 1`).
+7. Trailing commas: required for multiline lists, maps, params, args, and enum variants.
+8. Function parameter wrapping: one parameter per line when wrapped.
+9. Match case layout: inline only when case body is a single expression that fits line width.
+10. Import grouping and ordering:
+   - `ard/*`
+   - absolute package paths
+   - relative imports (`./`, `../`)
+   Each group is sorted alphabetically and separated by one blank line.
+11. Whitespace normalization:
+   - line endings normalized to LF (`\n`)
+   - trailing spaces and tabs removed
+   - trailing newline added for non-empty files
+12. Comments: conservatively preserved (re-indented as needed).
 
 ## Rollout Recommendation
 
-1. Introduce `ard format --check` in CI on changed files.
-2. Land a single formatting sweep commit to reduce merge churn.
-3. Add editor integration once syntax-aware formatting lands.
+1. Run `ard format` once across the repository and commit the result in a dedicated formatting commit.
+2. Enforce `ard format --check` in CI.
+3. Configure editor integration to run formatter on save.

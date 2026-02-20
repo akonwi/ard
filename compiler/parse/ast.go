@@ -96,9 +96,10 @@ func (s StringType) GetName() string {
 
 type FunctionType struct {
 	Location
-	Nullable bool
-	Params   []DeclaredType
-	Return   DeclaredType
+	Nullable        bool
+	Params          []DeclaredType
+	ParamMutability []bool
+	Return          DeclaredType
 }
 
 func (f FunctionType) IsNullable() bool {
@@ -285,7 +286,7 @@ func (p Parameter) String() string {
 type FunctionDeclaration struct {
 	Location
 	Name       string
-	TypeParams []string        // Generic type parameters (e.g., ["T", "U"] for fn<$T, $U>(...))
+	TypeParams []string // Generic type parameters (e.g., ["T", "U"] for fn<$T, $U>(...))
 	Mutates    bool
 	Parameters []Parameter
 	ReturnType DeclaredType
@@ -586,7 +587,7 @@ func (b BinaryExpression) String() string {
 
 type ChainedComparison struct {
 	Location
-	Operands []Expression // [a, b, c] for `a op1 b op2 c`
+	Operands  []Expression // [a, b, c] for `a op1 b op2 c`
 	Operators []Operator   // [op1, op2] for `a op1 b op2 c`
 }
 

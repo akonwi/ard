@@ -422,6 +422,10 @@ func (p *parser) ifStatement() (Statement, error) {
 	}
 
 	statements, err := p.block()
+	if err != nil {
+		return nil, err
+	}
+	blockEnd := p.previous()
 	p.match(new_line)
 
 	stmt := &IfStatement{
@@ -429,22 +433,33 @@ func (p *parser) ifStatement() (Statement, error) {
 		Body:      statements,
 		Location: Location{
 			Start: Point{Row: ifToken.line, Col: ifToken.column},
+			End:   Point{Row: blockEnd.line, Col: blockEnd.column},
 		},
 	}
 
 	if p.match(else_) {
+		elseToken := p.previous()
 		if p.match(if_) {
 			elseIf, err := p.ifStatement()
 			if err != nil {
 				return nil, err
 			}
 			stmt.Else = elseIf
+			stmt.Location.End = elseIf.GetLocation().End
 		} else {
 			elseBlock, err := p.block()
 			if err != nil {
 				return nil, err
 			}
-			stmt.Else = &IfStatement{Body: elseBlock}
+			elseEnd := p.previous()
+			stmt.Else = &IfStatement{
+				Body: elseBlock,
+				Location: Location{
+					Start: Point{Row: elseToken.line, Col: elseToken.column},
+					End:   Point{Row: elseEnd.line, Col: elseEnd.column},
+				},
+			}
+			stmt.Location.End = Point{Row: elseEnd.line, Col: elseEnd.column}
 		}
 	}
 
@@ -452,6 +467,7 @@ func (p *parser) ifStatement() (Statement, error) {
 }
 
 func (p *parser) whileLoop() (Statement, error) {
+	whileToken := p.previous()
 	var condition Expression
 
 	// skip condition for infinite loop - `while { foo() }`
@@ -485,18 +501,27 @@ func (p *parser) whileLoop() (Statement, error) {
 		return &WhileLoop{
 			Condition: condition,
 			Body:      statements,
+			Location: Location{
+				Start: Point{Row: whileToken.line, Col: whileToken.column},
+			},
 		}, nil
 	}
 	p.advance() // consume the '}'
+	endToken := p.previous()
 	p.match(new_line)
 
 	return &WhileLoop{
 		Condition: condition,
 		Body:      statements,
+		Location: Location{
+			Start: Point{Row: whileToken.line, Col: whileToken.column},
+			End:   Point{Row: endToken.line, Col: endToken.column},
+		},
 	}, nil
 }
 
 func (p *parser) forLoop() (Statement, error) {
+	forToken := p.previous()
 	// Try to parse a for-in loop by looking ahead
 	current := p.peek()
 	if current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind) {
@@ -536,6 +561,7 @@ func (p *parser) forLoop() (Statement, error) {
 			if err != nil {
 				return nil, err
 			}
+			endToken := p.previous()
 			if seq, ok := seq.(*RangeExpression); ok {
 				return &RangeLoop{
 					Cursor:  cursor,
@@ -543,6 +569,10 @@ func (p *parser) forLoop() (Statement, error) {
 					Start:   seq.Start,
 					End:     seq.End,
 					Body:    body,
+					Location: Location{
+						Start: Point{Row: forToken.line, Col: forToken.column},
+						End:   Point{Row: endToken.line, Col: endToken.column},
+					},
 				}, nil
 			}
 
@@ -551,6 +581,10 @@ func (p *parser) forLoop() (Statement, error) {
 				Cursor2:  cursor2,
 				Iterable: seq,
 				Body:     body,
+				Location: Location{
+					Start: Point{Row: forToken.line, Col: forToken.column},
+					End:   Point{Row: endToken.line, Col: endToken.column},
+				},
 			}, nil
 		}
 	}
@@ -588,11 +622,16 @@ func (p *parser) forLoop() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
+	endToken := p.previous()
 	return &ForLoop{
 		Init:        initial.(*VariableDeclaration),
 		Condition:   condition,
 		Incrementer: incrementer,
 		Body:        body,
+		Location: Location{
+			Start: Point{Row: forToken.line, Col: forToken.column},
+			End:   Point{Row: endToken.line, Col: endToken.column},
+		},
 	}, nil
 }
 
@@ -689,6 +728,7 @@ func (p *parser) enumDef(private bool) Statement {
 }
 
 func (p *parser) structDef(private bool) Statement {
+	structToken := p.previous()
 	if !p.check(identifier) {
 		p.addError(p.peek(), "Expected name after 'struct'")
 		p.synchronize()
@@ -699,6 +739,9 @@ func (p *parser) structDef(private bool) Statement {
 		Private: private,
 		Name:    Identifier{Name: nameToken.text},
 		Fields:  []StructField{},
+		Location: Location{
+			Start: Point{Row: structToken.line, Col: structToken.column},
+		},
 	}
 
 	if !p.check(left_brace) {
@@ -746,7 +789,10 @@ func (p *parser) structDef(private bool) Statement {
 		p.advance()
 		fieldType := p.parseType()
 		structDef.Fields = append(structDef.Fields, StructField{
-			Name: Identifier{Name: fieldName.text},
+			Name: Identifier{
+				Name:     fieldName.text,
+				Location: fieldName.getLocation(),
+			},
 			Type: fieldType,
 		})
 
@@ -774,9 +820,11 @@ func (p *parser) structDef(private bool) Statement {
 
 	if !p.check(right_brace) {
 		p.addError(p.peek(), "Expected '}'")
+		structDef.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 		return structDef
 	}
 	p.advance()
+	structDef.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 
 	return structDef
 }
@@ -1261,16 +1309,29 @@ func (p *parser) parseType() DeclaredType {
 
 		// Parse parameter types
 		paramTypes := []DeclaredType{}
+		paramMutability := []bool{}
 		if hasLeftParen && !p.check(right_paren) {
 			for {
 				// Skip 'mut' keyword if present (marks mutable parameters in type signatures)
-				_ = p.match(mut)
+				isMutable := p.match(mut)
 				paramType := p.parseType()
 				paramTypes = append(paramTypes, paramType)
+				paramMutability = append(paramMutability, isMutable)
 				if !p.match(comma) {
 					break
 				}
 			}
+		}
+
+		hasMutableParam := false
+		for _, isMutable := range paramMutability {
+			if isMutable {
+				hasMutableParam = true
+				break
+			}
+		}
+		if !hasMutableParam {
+			paramMutability = nil
 		}
 
 		// Expect closing paren (only if we had opening paren)
@@ -1295,9 +1356,10 @@ func (p *parser) parseType() DeclaredType {
 		nullable := p.match(question_mark)
 
 		return &FunctionType{
-			Params:   paramTypes,
-			Return:   returnType,
-			Nullable: nullable,
+			Params:          paramTypes,
+			ParamMutability: paramMutability,
+			Return:          returnType,
+			Nullable:        nullable,
 			Location: Location{
 				Start: Point{Row: fnToken.line, Col: fnToken.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},

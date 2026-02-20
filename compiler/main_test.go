@@ -123,3 +123,33 @@ func TestFormatFile(t *testing.T) {
 		}
 	})
 }
+
+func TestFormatPath(t *testing.T) {
+	t.Run("formats directories recursively", func(t *testing.T) {
+		dir := t.TempDir()
+		nestedDir := filepath.Join(dir, "nested")
+		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+			t.Fatalf("failed to create nested dir: %v", err)
+		}
+
+		first := filepath.Join(dir, "first.ard")
+		second := filepath.Join(nestedDir, "second.ard")
+		if err := os.WriteFile(first, []byte("let x = 1  \n"), 0o644); err != nil {
+			t.Fatalf("failed to seed first file: %v", err)
+		}
+		if err := os.WriteFile(second, []byte("let y = 2\n"), 0o644); err != nil {
+			t.Fatalf("failed to seed second file: %v", err)
+		}
+
+		changedPaths, err := formatPath(dir, false)
+		if err != nil {
+			t.Fatalf("did not expect error: %v", err)
+		}
+		if len(changedPaths) != 1 {
+			t.Fatalf("expected one changed path, got %d", len(changedPaths))
+		}
+		if changedPaths[0] != first && changedPaths[0] != second {
+			t.Fatalf("unexpected changed path %q", changedPaths[0])
+		}
+	})
+}

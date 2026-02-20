@@ -94,21 +94,25 @@ func main() {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			changed, err := formatFile(inputPath, checkOnly)
+			changedPaths, err := formatPath(inputPath, checkOnly)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 			if checkOnly {
-				if changed {
-					fmt.Printf("%s is not formatted\n", inputPath)
+				if len(changedPaths) > 0 {
+					for _, changedPath := range changedPaths {
+						fmt.Printf("%s is not formatted\n", changedPath)
+					}
 					os.Exit(1)
 				}
 				fmt.Printf("%s is formatted\n", inputPath)
 				os.Exit(0)
 			}
-			if changed {
-				fmt.Printf("Formatted %s\n", inputPath)
+			if len(changedPaths) > 0 {
+				for _, changedPath := range changedPaths {
+					fmt.Printf("Formatted %s\n", changedPath)
+				}
 				os.Exit(0)
 			}
 			fmt.Printf("%s is already formatted\n", inputPath)
@@ -235,13 +239,66 @@ func parseFormatArgs(args []string) (string, bool, error) {
 	return inputPath, checkOnly, nil
 }
 
+func formatPath(inputPath string, checkOnly bool) ([]string, error) {
+	fileInfo, err := os.Stat(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading path %s - %w", inputPath, err)
+	}
+
+	if !fileInfo.IsDir() {
+		changed, err := formatFile(inputPath, checkOnly)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			return []string{inputPath}, nil
+		}
+		return nil, nil
+	}
+
+	ardFiles := make([]string, 0)
+	err = filepath.WalkDir(inputPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) == ".ard" {
+			ardFiles = append(ardFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error walking directory %s - %w", inputPath, err)
+	}
+
+	changedPaths := make([]string, 0)
+	for _, filePath := range ardFiles {
+		changed, fileErr := formatFile(filePath, checkOnly)
+		if fileErr != nil {
+			return nil, fileErr
+		}
+		if changed {
+			changedPaths = append(changedPaths, filePath)
+		}
+	}
+	return changedPaths, nil
+}
+
 func formatFile(inputPath string, checkOnly bool) (bool, error) {
 	sourceCode, err := os.ReadFile(inputPath)
 	if err != nil {
 		return false, fmt.Errorf("error reading file %s - %w", inputPath, err)
 	}
 
-	formatted := formatter.Format(sourceCode)
+	formatted, err := formatter.Format(sourceCode, inputPath)
+	if err != nil {
+		return false, fmt.Errorf("error formatting file %s - %w", inputPath, err)
+	}
 	changed := !bytes.Equal(sourceCode, formatted)
 	if !changed || checkOnly {
 		return changed, nil
