@@ -3,9 +3,9 @@ private extern fn wait_for(wg: Dynamic) Void = "WaitFor"
 
 struct Fiber {
   // pointer to *WaitGroup
-  wg: Dynamic
+  wg: Dynamic,
   // stores the return value of the function run concurrently
-  result: $T
+  result: $T,
 }
 
 impl Fiber {

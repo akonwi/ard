@@ -17,58 +17,60 @@ private extern fn rollback_tx(tx: Dynamic) Void!Str = "SqlRollback"
 extern fn extract_params(sql: Str) [Str] = "SqlExtractParams"
 
 struct Transaction {
-  _ptr: Dynamic
+  _ptr: Dynamic,
 }
 
 struct Query {
   conn: Dynamic,
   string: Str,
-  params: [Str]
+  params: [Str],
 }
 
 impl Query {
-  fn prepare(mut query_str: Str, mut values: [Value], args: [Str:Value]) Void!Str {
+  fn prepare(mut query_str: Str, mut values: [Value], args: [Str: Value]) Void!Str {
     for param in @params {
       // Replace only the first occurrence to handle duplicate parameters correctly
-      query_str = query_str.replace("@"+param, "?")
-      let value = try args.get(param) -> _ { Result::err("Missing parameter: " + param) }
+      query_str = query_str.replace("@" + param, "?")
+      let value = try args.get(param) -> _ {
+        Result::err("Missing parameter: " + param)
+      }
       values.push(value)
     }
 
     Result::ok(())
   }
 
-  fn run(args: [Str:Value]) Void!Str {
+  fn run(args: [Str: Value]) Void!Str {
     mut sanitized = @string
     mut values: [Value] = []
     try @prepare(sanitized, values, args)
     execute(@conn, sanitized, values)
   }
 
-  fn all(args: [Str:Value]) [Dynamic]!Str {
+  fn all(args: [Str: Value]) [Dynamic]!Str {
     mut sanitized = @string
     mut values: [Value] = []
     try @prepare(sanitized, values, args)
     run_query(@conn, sanitized, values)
   }
 
-  fn first(args: [Str:Value]) Dynamic?!Str {
+  fn first(args: [Str: Value]) Dynamic?!Str {
     let rows = try @all(args)
     match rows.size() {
       0 => Result::ok(maybe::none()),
-      _ => Result::ok(maybe::some(rows.at(0)))
+      _ => Result::ok(maybe::some(rows.at(0))),
     }
   }
 }
 
 struct Database {
-  _ptr: Dynamic
-  path: Str
+  _ptr: Dynamic,
+  path: Str,
 }
 
 fn open(path: Str) Database!Str {
   let conn = try connect(path)
-  Result::ok(Database{ _ptr: conn, path: path })
+  Result::ok(Database{_ptr: conn, path: path})
 }
 
 impl Database {
@@ -92,7 +94,7 @@ impl Database {
 
   fn begin() Transaction!Str {
     let tx = try begin_tx(@_ptr)
-    Result::ok(Transaction{ _ptr: tx })
+    Result::ok(Transaction{_ptr: tx})
   }
 }
 

@@ -70,9 +70,9 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
   for t in list {
     match where(t) {
       true => selected.push(t),
-      false => others.push(t)
+      false => others.push(t),
     }
   }
 
-  Partition{ selected: selected, others: others }
+  Partition{selected: selected, others: others}
 }

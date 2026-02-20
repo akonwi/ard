@@ -9,8 +9,5 @@ struct Argv {
 
 fn load() Argv {
   let args = os_args()
-  Argv {
-    program: args.at(2),
-    arguments: List::drop(from: args, till: 3),
-  }
+  Argv{program: args.at(2), arguments: List::drop(from: args, till: 3)}
 }
