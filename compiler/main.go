@@ -101,21 +101,17 @@ func main() {
 			}
 			if checkOnly {
 				if len(changedPaths) > 0 {
+					fmt.Println("files with format errors:")
 					for _, changedPath := range changedPaths {
-						fmt.Printf("%s is not formatted\n", changedPath)
+						fmt.Println(changedPath)
 					}
 					os.Exit(1)
 				}
-				fmt.Printf("%s is formatted\n", inputPath)
 				os.Exit(0)
 			}
 			if len(changedPaths) > 0 {
-				for _, changedPath := range changedPaths {
-					fmt.Printf("Formatted %s\n", changedPath)
-				}
 				os.Exit(0)
 			}
-			fmt.Printf("%s is already formatted\n", inputPath)
 			os.Exit(0)
 		}
 	default:
