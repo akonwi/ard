@@ -1,4 +1,4 @@
-name: Build Binary
+name: Release Binaries
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
       - "v*"
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout code
@@ -27,36 +27,105 @@ jobs:
         working-directory: compiler
         run: go mod download
 
-      - name: Determine version
-        id: version
-        run: |
-          VERSION="${{ github.ref_name }}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Building version: ${VERSION}"
-
-      - name: Build binary
-        working-directory: compiler
-        run: |
-          go build \
-            -tags=goexperiment.jsonv2 \
-            -ldflags="-X github.com/akonwi/ard/version.Version=${{ steps.version.outputs.version }}" \
-            -o ard \
-            .
-
       - name: Run tests
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./...
 
-      - name: Verify binary
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Download dependencies
         working-directory: compiler
-        run: ./ard version
+        run: go mod download
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          VERSION: ${{ github.ref_name }}
+        working-directory: compiler
+        run: |
+          go build \
+            -tags=goexperiment.jsonv2 \
+            -ldflags="-X github.com/akonwi/ard/version.Version=${VERSION}" \
+            -o ard \
+            .
+
+      - name: Package binary
+        env:
+          VERSION: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          TAR_NAME="ard_${VERSION}_${GOOS}_${GOARCH}.tar.gz"
+          tar -czf "dist/${TAR_NAME}" -C compiler ard
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ard_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: ard_${{ github.ref_name }}_*
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          sha256sum dist/*.tar.gz > dist/checksums.txt
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
-          files: compiler/ard
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
           body: |
-            Binary for version ${{ github.ref_name }}
+            Cross-compiled Ard binaries for version ${{ github.ref_name }}
 
             Commit: ${{ github.sha }}
