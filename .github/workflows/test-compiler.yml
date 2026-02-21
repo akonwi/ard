@@ -1,0 +1,29 @@
+name: test-compiler
+
+on:
+  pull_request:
+    paths:
+      - "compiler/**"
+      - ".github/workflows/test-compiler.yml"
+
+concurrency:
+  group: test-compiler-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-compiler:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Run compiler tests
+        working-directory: compiler
+        run: go test -tags=goexperiment.jsonv2 ./...
