@@ -188,7 +188,7 @@ The parameter `u` is automatically inferred as `User` from the function signatur
 
 ## Limitations and Future Work
 
-1. **Method bodies with generic field access**: Method implementations cannot directly access generic fields (e.g., `@field`), as TypeVars are unbound at definition time. Methods can use generics only in signatures.
+1. **Method bodies with generic field access**: Method implementations cannot directly access generic fields (e.g., `self.field`), as TypeVars are unbound at definition time. Methods can use generics only in signatures.
 
 2. **Non-struct generics**: Currently only supports generic structs. Other generic types (enums, functions, etc.) would need similar implementation.
 

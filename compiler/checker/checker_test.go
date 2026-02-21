@@ -2340,7 +2340,7 @@ func TestGenerics(t *testing.T) {
 				}
 				impl Foo {
 				  fn bar() $T!Str {
-					  json::encode<$T>(@body)
+					  json::encode<$T>(self.body)
 					}
 				}
 			  let foo = Foo{body: "200"}
@@ -2354,7 +2354,7 @@ func TestGenerics(t *testing.T) {
 				struct Box { item: $T }
 				impl Box {
 					fn mut put(new: $T) {
-						@item = new
+						self.item = new
 					}
 				}
 				mut int_box = Box{ item: 42 }
@@ -2375,10 +2375,10 @@ func TestGenerics(t *testing.T) {
 				struct Pair { first: $T, second: $U }
 				impl Pair {
 					fn get_first() $T {
-						@first
+						self.first
 					}
 					fn get_second() $U {
-						@second
+						self.second
 					}
 				}
 				let pair = Pair{ first: 42, second: "hello" }
@@ -2393,10 +2393,10 @@ func TestGenerics(t *testing.T) {
 				struct Pair { first: $T, second: $U }
 				impl Pair {
 					fn mut swap_first(new: $T) {
-						@first = new
+						self.first = new
 					}
 					fn mut swap_second(new: $U) {
-						@second = new
+						self.second = new
 					}
 				}
 				mut pair = Pair{ first: 42, second: "hello" }

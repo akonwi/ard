@@ -10,12 +10,12 @@ struct Fiber {
 
 impl Fiber {
   fn join() {
-    wait_for(@wg)
+    wait_for(self.wg)
   }
 
   fn get() $T {
-    @join()
-    @result
+    self.join()
+    self.result
   }
 }
 

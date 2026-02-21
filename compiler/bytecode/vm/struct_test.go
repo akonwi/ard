@@ -18,7 +18,7 @@ func TestBytecodeStructs(t *testing.T) {
 
 				impl Point {
 					fn print() Str {
-						"{@x.to_str()},{@y.to_str()}"
+						"{self.x.to_str()},{self.y.to_str()}"
 					}
 				}
 

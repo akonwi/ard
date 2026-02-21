@@ -28,13 +28,13 @@ struct Fiber<$T> {
 impl Fiber<$T> {
   fn join() Void {
     // Wait for fiber to complete, discard result
-    wait_for(@wg)
+    wait_for(self.wg)
   }
   
   fn get() $T {
     // Wait for fiber to complete, return the result
-    wait_for(@wg)
-    @result as $T
+    wait_for(self.wg)
+    self.result as $T
   }
 }
 ```

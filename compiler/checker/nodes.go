@@ -180,10 +180,6 @@ func (i *InstanceProperty) Type() Type {
 
 // String returns a string representation of the instance property
 func (i *InstanceProperty) String() string {
-	// Special case for self-reference using @
-	if v, ok := i.Subject.(*Variable); ok && v.Name() == "@" {
-		return fmt.Sprintf("@%s", i.Property)
-	}
 	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
 }
 
@@ -913,6 +909,7 @@ type Parameter struct {
 
 type FunctionDef struct {
 	Name       string
+	Receiver   string
 	Parameters []Parameter
 	ReturnType Type
 	Mutates    bool

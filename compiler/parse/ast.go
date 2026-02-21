@@ -353,6 +353,7 @@ func (s StructDefinition) String() string {
 type ImplBlock struct {
 	Location
 	Target   Identifier
+	Receiver Identifier
 	Methods  []FunctionDeclaration
 	Comments []Comment // Comments found within the impl block
 }
@@ -367,9 +368,10 @@ type TraitDefinition struct {
 
 type TraitImplementation struct {
 	Location
-	Trait   Expression // Identifier | StaticProperty
-	ForType Identifier
-	Methods []FunctionDeclaration
+	Trait    Expression // Identifier | StaticProperty
+	ForType  Identifier
+	Receiver Identifier
+	Methods  []FunctionDeclaration
 }
 
 func (i ImplBlock) String() string {
@@ -502,10 +504,6 @@ type InstanceProperty struct {
 }
 
 func (ip InstanceProperty) String() string {
-	// Special case for self-reference using @
-	if id, ok := ip.Target.(*Identifier); ok && id.Name == "@" {
-		return fmt.Sprintf("@%s", ip.Property)
-	}
 	return fmt.Sprintf("%s.%s", ip.Target, ip.Property)
 }
 

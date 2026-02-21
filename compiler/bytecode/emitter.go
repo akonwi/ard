@@ -211,8 +211,12 @@ func (e *Emitter) emitStructMethods(def *checker.StructDef) error {
 		copy := *method
 		methodDef := &copy
 		methodDef.Name = methodName
+		receiverName := methodDef.Receiver
+		if receiverName == "" {
+			receiverName = "self"
+		}
 		methodDef.Parameters = append([]checker.Parameter{
-			{Name: "@", Type: def},
+			{Name: receiverName, Type: def},
 		}, method.Parameters...)
 		if _, _, err := e.emitFunctionWithParent(methodDef, nil); err != nil {
 			return err
@@ -230,8 +234,12 @@ func (e *Emitter) emitEnumMethods(def *checker.Enum) error {
 		copy := *method
 		methodDef := &copy
 		methodDef.Name = methodName
+		receiverName := methodDef.Receiver
+		if receiverName == "" {
+			receiverName = "self"
+		}
 		methodDef.Parameters = append([]checker.Parameter{
-			{Name: "@", Type: def},
+			{Name: receiverName, Type: def},
 		}, method.Parameters...)
 		if _, _, err := e.emitFunctionWithParent(methodDef, nil); err != nil {
 			return err

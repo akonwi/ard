@@ -97,7 +97,7 @@ func TestUsingPackageTraits(t *testing.T) {
 
 			impl Str::ToString for Person {
 			  fn to_str() Str {
-					"Person: {@name}"
+					"Person: {self.name}"
 				}
 			}
 			`,

@@ -560,6 +560,9 @@ func (p printer) renderTraitDefinitionDoc(node *parse.TraitDefinition) doc {
 
 func (p printer) renderImplBlock(node *parse.ImplBlock, indent int) []string {
 	header := "impl " + node.Target.Name
+	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
+		header += " as " + node.Receiver.Name
+	}
 	if len(node.Methods) == 0 && len(node.Comments) == 0 {
 		return []string{p.indent(indent) + header + " {}"}
 	}
@@ -579,6 +582,9 @@ func (p printer) renderImplBlock(node *parse.ImplBlock, indent int) []string {
 
 func (p printer) renderImplBlockDoc(node *parse.ImplBlock) doc {
 	header := "impl " + node.Target.Name
+	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
+		header += " as " + node.Receiver.Name
+	}
 	if len(node.Methods) == 0 && len(node.Comments) == 0 {
 		return dText(header + " {}")
 	}
@@ -595,6 +601,9 @@ func (p printer) renderImplBlockDoc(node *parse.ImplBlock) doc {
 
 func (p printer) renderTraitImplementation(node *parse.TraitImplementation, indent int) []string {
 	header := fmt.Sprintf("impl %s for %s", p.renderExpression(node.Trait, 0), node.ForType.Name)
+	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
+		header += " as " + node.Receiver.Name
+	}
 	if len(node.Methods) == 0 {
 		return []string{p.indent(indent) + header + " {}"}
 	}
@@ -611,6 +620,9 @@ func (p printer) renderTraitImplementation(node *parse.TraitImplementation, inde
 
 func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) doc {
 	header := fmt.Sprintf("impl %s for %s", p.renderExpression(node.Trait, 0), node.ForType.Name)
+	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
+		header += " as " + node.Receiver.Name
+	}
 	if len(node.Methods) == 0 {
 		return dText(header + " {}")
 	}
@@ -1104,17 +1116,11 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		copy := node
 		return p.renderVariableDeclarationDoc(&copy)
 	case *parse.InstanceProperty:
-		if id, ok := node.Target.(*parse.Identifier); ok && id.Name == "@" {
-			return dText("@" + node.Property.Name)
-		}
 		return dConcat(p.renderExpressionDoc(node.Target, precedenceCall), dText("."+node.Property.Name))
 	case parse.InstanceProperty:
 		copy := node
 		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.InstanceMethod:
-		if id, ok := node.Target.(*parse.Identifier); ok && id.Name == "@" {
-			return dConcat(dText("@"), p.renderFunctionCallDoc(&node.Method))
-		}
 		return dConcat(p.renderExpressionDoc(node.Target, precedenceCall), dText("."), p.renderFunctionCallDoc(&node.Method))
 	case parse.InstanceMethod:
 		copy := node

@@ -866,6 +866,29 @@ func (p *parser) implBlock() *ImplBlock {
 			End:   Point{nameToken.line, nameToken.column + len(nameToken.text)},
 		},
 	}
+	impl.Receiver = Identifier{
+		Name: "self",
+		Location: Location{
+			Start: Point{nameToken.line, nameToken.column},
+			End:   Point{nameToken.line, nameToken.column + len(nameToken.text)},
+		},
+	}
+
+	if p.match(as) {
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected receiver name after 'as'")
+			p.synchronize()
+			return nil
+		}
+		receiverToken := p.advance()
+		impl.Receiver = Identifier{
+			Name: receiverToken.text,
+			Location: Location{
+				Start: Point{receiverToken.line, receiverToken.column},
+				End:   Point{receiverToken.line, receiverToken.column + len(receiverToken.text)},
+			},
+		}
+	}
 
 	if !p.check(left_brace) {
 		p.addError(p.peek(), "Expected '{'")
@@ -1128,6 +1151,27 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		}
 		p.synchronizeToBlockEnd()
 		return traitImpl, nil
+	}
+
+	traitImpl.Receiver = Identifier{
+		Name:     "self",
+		Location: traitImpl.ForType.Location,
+	}
+
+	if p.match(as) {
+		if !p.check(identifier) {
+			p.addError(p.peek(), "Expected receiver name after 'as'")
+			p.synchronizeToBlockEnd()
+			return traitImpl, nil
+		}
+		receiverToken := p.advance()
+		traitImpl.Receiver = Identifier{
+			Name: receiverToken.text,
+			Location: Location{
+				Start: Point{receiverToken.line, receiverToken.column},
+				End:   Point{receiverToken.line, receiverToken.column + len(receiverToken.text)},
+			},
+		}
 	}
 
 	if !p.match(left_brace) {
@@ -2661,29 +2705,6 @@ func (p *parser) memberAccess() (Expression, error) {
 		return nil, err
 	}
 
-	// Handle @property and @method() syntax (no dot)
-	if id, ok := expr.(*Identifier); ok && id.Name == "@" {
-		if p.check(identifier) {
-			call, err := p.call()
-			if err != nil {
-				return nil, err
-			}
-
-			switch prop := call.(type) {
-			case *Identifier:
-				expr = &InstanceProperty{
-					Target:   expr,
-					Property: *prop,
-				}
-			case *FunctionCall:
-				expr = &InstanceMethod{
-					Target: expr,
-					Method: *prop,
-				}
-			}
-		}
-	}
-
 	for p.match(dot, colon_colon) {
 		if p.previous().kind == dot {
 			call, err := p.call()
@@ -2992,14 +3013,6 @@ func (p *parser) primary() (Expression, error) {
 		tok := p.previous()
 		return &BoolLiteral{
 			Value:    tok.text == "true",
-			Location: tok.getLocation(),
-		}, nil
-	}
-	if p.match(at_sign) {
-		// Handle @ token as a special identifier
-		tok := p.previous()
-		return &Identifier{
-			Name:     "@",
 			Location: tok.getLocation(),
 		}, nil
 	}

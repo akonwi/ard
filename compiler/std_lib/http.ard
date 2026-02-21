@@ -12,7 +12,7 @@ enum Method {
 
 impl Str::ToString for Method {
   fn to_str() Str {
-    match @ {
+    match self {
       Method::Get => "GET",
       Method::Post => "POST",
       Method::Put => "PUT",
@@ -39,17 +39,17 @@ private extern fn get_query_param(req: Dynamic, name: Str) Str = "GetQueryParam"
 
 impl Request {
   fn path() Str? {
-    let raw = try @raw
+    let raw = try self.raw
     maybe::some(get_req_path(raw))
   }
 
   fn path_param(name: Str) Str {
-    let raw = try @raw -> _ { "" }
+    let raw = try self.raw -> _ { "" }
     get_path_value(raw, name)
   }
 
   fn query_param(name: Str) Str {
-    let raw = try @raw -> _ { "" }
+    let raw = try self.raw -> _ { "" }
     get_query_param(raw, name)
   }
 }
@@ -70,7 +70,7 @@ fn Response::new(status: Int, body: Str) Response {
 
 impl Response {
   fn is_ok() Bool {
-    @status >= 200 and @status <= 300
+    self.status >= 200 and self.status <= 300
   }
 }
 

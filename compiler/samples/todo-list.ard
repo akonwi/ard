@@ -7,11 +7,11 @@ struct Todo {
 
 impl Todo {
   fn get_str() Str {
-    let box = match (@completed) {
+    let box = match (self.completed) {
       true => "[x]",
       false => "[ ]"
     }
-    "{box} {@title}"
+    "{box} {self.title}"
   }
 }
 
