@@ -1522,9 +1522,7 @@ func expressionStartRow(expression parse.Expression) int {
 		if node.Target != nil {
 			return expressionStartRow(node.Target)
 		}
-		if inner, ok := node.Property.(parse.Expression); ok {
-			return expressionStartRow(inner)
-		}
+		return expressionStartRow(node.Property)
 	case *parse.FunctionCall:
 		for _, arg := range node.Args {
 			if arg.Value != nil {
@@ -1563,8 +1561,8 @@ func expressionEndRow(expression parse.Expression) int {
 			return expressionEndRow(node.Target)
 		}
 	case *parse.StaticProperty:
-		if inner, ok := node.Property.(parse.Expression); ok {
-			return expressionEndRow(inner)
+		if row := expressionEndRow(node.Property); row > 0 {
+			return row
 		}
 		if node.Target != nil {
 			return expressionEndRow(node.Target)
