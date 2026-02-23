@@ -195,46 +195,6 @@ func (p printer) renderExpressionValueDoc(expression parse.Expression, parentPre
 	}
 }
 
-func (p printer) renderVariableDeclarationLines(node *parse.VariableDeclaration, indent int) []string {
-	binding := "let"
-	if node.Mutable {
-		binding = "mut"
-	}
-	prefix := binding + " " + node.Name
-	if node.Type != nil {
-		prefix += ": " + p.renderType(node.Type)
-	}
-	prefix += " = "
-	valueLines := strings.Split(p.renderExpression(node.Value, 0), "\n")
-	lines := []string{p.indent(indent) + prefix + valueLines[0]}
-	for i := 1; i < len(valueLines); i++ {
-		lines = append(lines, p.indent(indent)+valueLines[i])
-	}
-	return lines
-}
-
-func (p printer) renderVariableAssignmentLines(node *parse.VariableAssignment, indent int) []string {
-	operator, value := p.assignmentParts(node)
-	prefix := p.renderExpression(node.Target, 0) + " " + operator + " "
-	valueLines := strings.Split(p.renderExpression(value, 0), "\n")
-	lines := []string{p.indent(indent) + prefix + valueLines[0]}
-	for i := 1; i < len(valueLines); i++ {
-		lines = append(lines, p.indent(indent)+valueLines[i])
-	}
-	return lines
-}
-
-func (p printer) renderVariableDeclaration(node *parse.VariableDeclaration) string {
-	binding := "let"
-	if node.Mutable {
-		binding = "mut"
-	}
-	if node.Type != nil {
-		return fmt.Sprintf("%s %s: %s = %s", binding, node.Name, p.renderType(node.Type), p.renderExpression(node.Value, 0))
-	}
-	return fmt.Sprintf("%s %s = %s", binding, node.Name, p.renderExpression(node.Value, 0))
-}
-
 func (p printer) renderVariableAssignment(node *parse.VariableAssignment) string {
 	operator, value := p.assignmentParts(node)
 	return fmt.Sprintf("%s %s %s", p.renderExpression(node.Target, 0), operator, p.renderExpression(value, 0))
@@ -270,29 +230,6 @@ func sameLocation(left parse.Expression, right parse.Expression) bool {
 	return l.Start.Row == r.Start.Row && l.Start.Col == r.Start.Col && l.End.Row == r.End.Row && l.End.Col == r.End.Col
 }
 
-func (p printer) renderFunctionDeclaration(node *parse.FunctionDeclaration, indent int, traitSignatureOnly bool) []string {
-	prefix := ""
-	if node.Private {
-		prefix += "private "
-	}
-	header := prefix + "fn "
-	if node.Mutates {
-		header += "mut "
-	}
-	header += node.Name
-	header += p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, indent, header)
-	if node.ReturnType != nil {
-		header += " " + p.renderType(node.ReturnType)
-	}
-
-	if traitSignatureOnly {
-		return []string{p.indent(indent) + header}
-	}
-
-	return p.renderBlockWithHeader(header, node.Body, indent)
-}
-
 func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, traitSignatureOnly bool) doc {
 	prefix := ""
 	if node.Private {
@@ -314,24 +251,6 @@ func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, t
 	}
 
 	return p.renderBlockDoc(header, node.Body)
-}
-
-func (p printer) renderStaticFunctionDeclaration(node *parse.StaticFunctionDeclaration, indent int) []string {
-	prefix := ""
-	if node.Private {
-		prefix += "private "
-	}
-	header := prefix + "fn "
-	if node.Mutates {
-		header += "mut "
-	}
-	header += p.renderExpression(&node.Path, 0)
-	header += p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, indent, header)
-	if node.ReturnType != nil {
-		header += " " + p.renderType(node.ReturnType)
-	}
-	return p.renderBlockWithHeader(header, node.Body, indent)
 }
 
 func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDeclaration) doc {
@@ -368,33 +287,6 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 
 func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {
 	return dText(p.renderExternalFunction(node))
-}
-
-func (p printer) renderStructDefinition(node *parse.StructDefinition, indent int) []string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "struct " + node.Name.Name
-	if len(node.Fields) == 0 && len(node.Comments) == 0 {
-		return []string{p.indent(indent) + header + " {}"}
-	}
-
-	lines := []string{p.indent(indent) + header + " {"}
-	commentIndex := 0
-	for _, field := range node.Fields {
-		fieldRow := field.Name.Location.Start.Row
-		for commentIndex < len(node.Comments) && (fieldRow == 0 || node.Comments[commentIndex].Location.Start.Row < fieldRow) {
-			lines = append(lines, p.indent(indent+1)+p.renderComment(node.Comments[commentIndex].Value))
-			commentIndex++
-		}
-		lines = append(lines, p.indent(indent+1)+fmt.Sprintf("%s: %s,", field.Name.Name, p.renderType(field.Type)))
-	}
-	for ; commentIndex < len(node.Comments); commentIndex++ {
-		lines = append(lines, p.indent(indent+1)+p.renderComment(node.Comments[commentIndex].Value))
-	}
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
 }
 
 func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
@@ -464,30 +356,6 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 	))
 }
 
-func (p printer) renderEnumDefinition(node *parse.EnumDefinition, indent int) []string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "enum " + node.Name
-	if len(node.Variants) == 0 && len(node.Comments) == 0 {
-		return []string{p.indent(indent) + header + " {}"}
-	}
-	lines := []string{p.indent(indent) + header + " {"}
-	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(indent+1)+p.renderComment(comment.Value))
-	}
-	for _, variant := range node.Variants {
-		if variant.Value == nil {
-			lines = append(lines, p.indent(indent+1)+variant.Name+",")
-		} else {
-			lines = append(lines, p.indent(indent+1)+fmt.Sprintf("%s = %s,", variant.Name, p.renderExpression(variant.Value, 0)))
-		}
-	}
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
-}
-
 func (p printer) renderEnumDefinitionDoc(node *parse.EnumDefinition) doc {
 	prefix := ""
 	if node.Private {
@@ -518,26 +386,6 @@ func (p printer) renderEnumDefinitionDoc(node *parse.EnumDefinition) doc {
 	))
 }
 
-func (p printer) renderTraitDefinition(node *parse.TraitDefinition, indent int) []string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "trait " + node.Name.Name
-	if len(node.Methods) == 0 && len(node.Comments) == 0 {
-		return []string{p.indent(indent) + header + " {}"}
-	}
-	lines := []string{p.indent(indent) + header + " {"}
-	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(indent+1)+p.renderComment(comment.Value))
-	}
-	for _, method := range node.Methods {
-		lines = append(lines, p.renderFunctionDeclaration(&method, indent+1, true)...)
-	}
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
-}
-
 func (p printer) renderTraitDefinitionDoc(node *parse.TraitDefinition) doc {
 	prefix := ""
 	if node.Private {
@@ -558,28 +406,6 @@ func (p printer) renderTraitDefinitionDoc(node *parse.TraitDefinition) doc {
 	))
 }
 
-func (p printer) renderImplBlock(node *parse.ImplBlock, indent int) []string {
-	header := "impl " + node.Target.Name
-	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
-		header += " as " + node.Receiver.Name
-	}
-	if len(node.Methods) == 0 && len(node.Comments) == 0 {
-		return []string{p.indent(indent) + header + " {}"}
-	}
-	lines := []string{p.indent(indent) + header + " {"}
-	for _, comment := range node.Comments {
-		lines = append(lines, p.indent(indent+1)+p.renderComment(comment.Value))
-	}
-	for i, method := range node.Methods {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, p.renderFunctionDeclaration(&method, indent+1, false)...)
-	}
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
-}
-
 func (p printer) renderImplBlockDoc(node *parse.ImplBlock) doc {
 	header := "impl " + node.Target.Name
 	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
@@ -597,25 +423,6 @@ func (p printer) renderImplBlockDoc(node *parse.ImplBlock) doc {
 		dHardLine(),
 		dText("}"),
 	))
-}
-
-func (p printer) renderTraitImplementation(node *parse.TraitImplementation, indent int) []string {
-	header := fmt.Sprintf("impl %s for %s", p.renderExpression(node.Trait, 0), node.ForType.Name)
-	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
-		header += " as " + node.Receiver.Name
-	}
-	if len(node.Methods) == 0 {
-		return []string{p.indent(indent) + header + " {}"}
-	}
-	lines := []string{p.indent(indent) + header + " {"}
-	for i, method := range node.Methods {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, p.renderFunctionDeclaration(&method, indent+1, false)...)
-	}
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
 }
 
 func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) doc {
@@ -690,29 +497,12 @@ func (p printer) renderTypeDeclarationDoc(node *parse.TypeDeclaration) doc {
 	return dText(p.renderTypeDeclaration(node))
 }
 
-func (p printer) renderWhileLoop(node *parse.WhileLoop, indent int) []string {
-	header := "while"
-	if node.Condition != nil {
-		header += " " + p.renderExpression(node.Condition, 0)
-	}
-	return p.renderBlockWithHeader(header, node.Body, indent)
-}
-
 func (p printer) renderWhileLoopDoc(node *parse.WhileLoop) doc {
 	header := "while"
 	if node.Condition != nil {
 		header += " " + p.renderExpression(node.Condition, 0)
 	}
 	return p.renderBlockDoc(header, node.Body)
-}
-
-func (p printer) renderRangeLoop(node *parse.RangeLoop, indent int) []string {
-	header := fmt.Sprintf("for %s", node.Cursor.Name)
-	if node.Cursor2.Name != "" {
-		header += fmt.Sprintf(", %s", node.Cursor2.Name)
-	}
-	header += fmt.Sprintf(" in %s..%s", p.renderExpression(node.Start, 0), p.renderExpression(node.End, 0))
-	return p.renderBlockWithHeader(header, node.Body, indent)
 }
 
 func (p printer) renderRangeLoopDoc(node *parse.RangeLoop) doc {
@@ -724,15 +514,6 @@ func (p printer) renderRangeLoopDoc(node *parse.RangeLoop) doc {
 	return p.renderBlockDoc(header, node.Body)
 }
 
-func (p printer) renderForInLoop(node *parse.ForInLoop, indent int) []string {
-	header := fmt.Sprintf("for %s", node.Cursor.Name)
-	if node.Cursor2.Name != "" {
-		header += fmt.Sprintf(", %s", node.Cursor2.Name)
-	}
-	header += " in " + p.renderExpression(node.Iterable, 0)
-	return p.renderBlockWithHeader(header, node.Body, indent)
-}
-
 func (p printer) renderForInLoopDoc(node *parse.ForInLoop) doc {
 	header := fmt.Sprintf("for %s", node.Cursor.Name)
 	if node.Cursor2.Name != "" {
@@ -740,34 +521,6 @@ func (p printer) renderForInLoopDoc(node *parse.ForInLoop) doc {
 	}
 	header += " in " + p.renderExpression(node.Iterable, 0)
 	return p.renderBlockDoc(header, node.Body)
-}
-
-func (p printer) renderForLoop(node *parse.ForLoop, indent int) []string {
-	init := ""
-	if node.Init != nil {
-		binding := "let"
-		if node.Init.Mutable {
-			binding = "mut"
-		}
-		init = fmt.Sprintf("%s %s = %s", binding, node.Init.Name, p.renderExpression(node.Init.Value, 0))
-	}
-	condition := ""
-	if node.Condition != nil {
-		condition = p.renderExpression(node.Condition, 0)
-	}
-	increment := ""
-	if node.Incrementer != nil {
-		if inc, ok := node.Incrementer.(*parse.VariableAssignment); ok {
-			increment = p.renderVariableAssignment(inc)
-		} else if inc, ok := node.Incrementer.(parse.VariableAssignment); ok {
-			copy := inc
-			increment = p.renderVariableAssignment(&copy)
-		} else if incrementExpr, ok := node.Incrementer.(parse.Expression); ok {
-			increment = p.renderExpression(incrementExpr, 0)
-		}
-	}
-	header := fmt.Sprintf("for %s; %s; %s", init, condition, increment)
-	return p.renderBlockWithHeader(header, node.Body, indent)
 }
 
 func (p printer) renderForLoopDoc(node *parse.ForLoop) doc {
@@ -796,42 +549,6 @@ func (p printer) renderForLoopDoc(node *parse.ForLoop) doc {
 	}
 	header := fmt.Sprintf("for %s; %s; %s", init, condition, increment)
 	return p.renderBlockDoc(header, node.Body)
-}
-
-func (p printer) renderIfStatement(node *parse.IfStatement, indent int) []string {
-	if node.Condition == nil {
-		return p.renderBlockWithHeader("else", node.Body, indent)
-	}
-
-	lines := []string{p.indent(indent) + "if " + p.renderExpression(node.Condition, 0) + " {"}
-	lines = append(lines, p.renderStatements(node.Body, indent+1)...)
-
-	next := node.Else
-	for next != nil {
-		elseIf, ok := next.(*parse.IfStatement)
-		if !ok {
-			break
-		}
-		if elseIf.Condition == nil {
-			lines = append(lines, p.indent(indent)+"} else {")
-			lines = append(lines, p.renderStatements(elseIf.Body, indent+1)...)
-			lines = append(lines, p.indent(indent)+"}")
-			return lines
-		}
-		lines = append(lines, p.indent(indent)+"} else if "+p.renderExpression(elseIf.Condition, 0)+" {")
-		lines = append(lines, p.renderStatements(elseIf.Body, indent+1)...)
-		next = elseIf.Else
-	}
-
-	if next != nil {
-		lines = append(lines, p.indent(indent)+"} else {")
-		lines = append(lines, p.renderStatement(next, indent+1)...)
-		lines = append(lines, p.indent(indent)+"}")
-		return lines
-	}
-
-	lines = append(lines, p.indent(indent)+"}")
-	return lines
 }
 
 func (p printer) renderIfStatementDoc(node *parse.IfStatement) doc {
@@ -1206,10 +923,6 @@ func (p printer) renderBlockExpressionDoc(node *parse.BlockExpression) doc {
 	))
 }
 
-func (p printer) renderInterpolatedString(value *parse.InterpolatedStr) string {
-	return p.printDoc(p.renderInterpolatedStringDoc(value))
-}
-
 func (p printer) renderInterpolatedStringDoc(value *parse.InterpolatedStr) doc {
 	var builder strings.Builder
 	builder.WriteByte('"')
@@ -1241,10 +954,6 @@ func escapeInterpolatedText(value string) string {
 	quoted = strings.ReplaceAll(quoted, "{", `\{`)
 	quoted = strings.ReplaceAll(quoted, "}", `\}`)
 	return quoted
-}
-
-func (p printer) renderListLiteral(list *parse.ListLiteral) string {
-	return p.printDoc(p.renderListLiteralDoc(list))
 }
 
 func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
@@ -1279,10 +988,6 @@ func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
 	))
 }
 
-func (p printer) renderMapLiteral(m *parse.MapLiteral) string {
-	return p.printDoc(p.renderMapLiteralDoc(m))
-}
-
 func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 	if len(m.Entries) == 0 {
 		return dText("[:]")
@@ -1315,10 +1020,6 @@ func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 	))
 }
 
-func (p printer) renderStructInstance(node *parse.StructInstance) string {
-	return p.printDoc(p.renderStructInstanceDoc(node))
-}
-
 func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 	if len(node.Properties) == 0 && len(node.Comments) == 0 {
 		return dText(node.Name.Name + "{}")
@@ -1348,10 +1049,6 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 		dHardLine(),
 		dText("}"),
 	)
-}
-
-func (p printer) renderFunctionCall(node *parse.FunctionCall) string {
-	return p.printDoc(p.renderFunctionCallDoc(node))
 }
 
 func (p printer) renderFunctionCallDoc(node *parse.FunctionCall) doc {
@@ -1401,10 +1098,6 @@ func (p printer) renderFunctionCallDoc(node *parse.FunctionCall) doc {
 	))
 }
 
-func (p printer) renderMatchExpression(node *parse.MatchExpression) string {
-	return p.printDoc(p.renderMatchExpressionDoc(node))
-}
-
 func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
 	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
 	for _, comment := range node.Comments {
@@ -1425,10 +1118,6 @@ func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
 		dHardLine(),
 		dText("}"),
 	))
-}
-
-func (p printer) renderConditionalMatchExpression(node *parse.ConditionalMatchExpression) string {
-	return p.printDoc(p.renderConditionalMatchExpressionDoc(node))
 }
 
 func (p printer) renderConditionalMatchExpressionDoc(node *parse.ConditionalMatchExpression) doc {
@@ -1663,15 +1352,6 @@ func canInlineMatchBlockExpression(expression parse.Expression) bool {
 	default:
 		return false
 	}
-}
-
-func (p printer) indentLines(text string, indent int) []string {
-	parts := strings.Split(text, "\n")
-	lines := make([]string, 0, len(parts))
-	for _, part := range parts {
-		lines = append(lines, p.indent(indent)+part)
-	}
-	return lines
 }
 
 func hasSourceBlankLine(previous parse.Statement, current parse.Statement) bool {
