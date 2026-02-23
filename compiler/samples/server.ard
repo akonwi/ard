@@ -39,5 +39,5 @@ fn main() {
     },
   ]
 
-  http::serve(8000, routes).expect("Error serving at 3000")
+  http::serve(8000, routes).expect("Error serving at 8000")
 }

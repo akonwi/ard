@@ -73,11 +73,11 @@ struct Todo {
 
 impl Todo {
   fn get_str() Str {
-    let box = match @completed {
+    let box = match self.completed {
       true => "[x]"
       false => "[ ]"
     }
-    "{box} {@title}"
+    "{box} {self.title}"
   }
 }
 
@@ -171,7 +171,7 @@ struct Book {
 
 impl String for Book {
   fn to_str() Str {
-    "{@title} by {@author}"
+    "{self.title} by {self.author}"
   }
 }
 

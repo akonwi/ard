@@ -850,7 +850,7 @@ func TestBytecodeStructMethod(t *testing.T) {
 	res := runBytecode(t, strings.Join([]string{
 		`struct Point { x: Int, y: Int }`,
 		`impl Point {`,
-		`  fn sum() Int { @x + @y }`,
+		`  fn sum() Int { self.x + self.y }`,
 		`}`,
 		`fn main() Int {`,
 		`  let p = Point{x: 2, y: 3}`,

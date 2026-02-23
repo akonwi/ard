@@ -65,7 +65,7 @@ func TestStructDefinitions(t *testing.T) {
 			input: `
 					impl Shape {
 						fn area() Int {
-							@height * @width
+							self.height * self.width
 						}
 
 						private fn mut set_height(h: Int) {}
@@ -77,6 +77,7 @@ func TestStructDefinitions(t *testing.T) {
 						Target: Identifier{
 							Name: "Shape",
 						},
+						Receiver: Identifier{Name: "self"},
 						Methods: []FunctionDeclaration{
 							{
 								Name:       "area",
@@ -86,11 +87,11 @@ func TestStructDefinitions(t *testing.T) {
 									&BinaryExpression{
 										Operator: Multiply,
 										Left: &InstanceProperty{
-											Target:   &Identifier{Name: "@"},
+											Target:   &Identifier{Name: "self"},
 											Property: Identifier{Name: "height"},
 										},
 										Right: &InstanceProperty{
-											Target:   &Identifier{Name: "@"},
+											Target:   &Identifier{Name: "self"},
 											Property: Identifier{Name: "width"},
 										},
 									},

@@ -192,7 +192,7 @@ struct User {
 // Methods can be private
 impl User {
   fn get_display_name() Str {  // Public
-    format_name(@username)     // Calls private method
+    format_name(self.username) // Calls private method
   }
 
   private fn format_name(name: Str) Str {  // Private

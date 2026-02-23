@@ -50,9 +50,9 @@ func TestFormat(t *testing.T) {
 			output: "fn main() {\n  match maybe_name {\n    name => io::print(name),\n    _ => (),\n  }\n}\n",
 		},
 		{
-			name:   "keeps self method calls without dot",
-			input:  "struct Fiber {\n  result: Int\n}\nimpl Fiber {\n  fn join() {}\n  fn get() Int {\n    @join()\n    @result\n  }\n}\n",
-			output: "struct Fiber {\n  result: Int,\n}\nimpl Fiber {\n  fn join() {}\n\n  fn get() Int {\n    @join()\n    @result\n  }\n}\n",
+			name:   "keeps self method calls with dot",
+			input:  "struct Fiber {\n  result: Int\n}\nimpl Fiber {\n  fn join() {}\n  fn get() Int {\n    self.join()\n    self.result\n  }\n}\n",
+			output: "struct Fiber {\n  result: Int,\n}\nimpl Fiber {\n  fn join() {}\n\n  fn get() Int {\n    self.join()\n    self.result\n  }\n}\n",
 		},
 		{
 			name:   "preserves formal result type syntax when written formally",
@@ -86,8 +86,8 @@ func TestFormat(t *testing.T) {
 		},
 		{
 			name:   "keeps impl comments attached to following method",
-			input:  "impl Database {\n  fn close() {\n    close_db(@_ptr)\n  }\n\n  // simple one-off executions where the results aren't needed\n  // [note]: could be removed entirely for query.run() once optional params are sorted\n  fn exec(sql: Str) {\n    execute(@_ptr, sql)\n  }\n}\n",
-			output: "impl Database {\n  fn close() {\n    close_db(@_ptr)\n  }\n\n  // simple one-off executions where the results aren't needed\n  // [note]: could be removed entirely for query.run() once optional params are sorted\n  fn exec(sql: Str) {\n    execute(@_ptr, sql)\n  }\n}\n",
+			input:  "impl Database {\n  fn close() {\n    close_db(self._ptr)\n  }\n\n  // simple one-off executions where the results aren't needed\n  // [note]: could be removed entirely for query.run() once optional params are sorted\n  fn exec(sql: Str) {\n    execute(self._ptr, sql)\n  }\n}\n",
+			output: "impl Database {\n  fn close() {\n    close_db(self._ptr)\n  }\n\n  // simple one-off executions where the results aren't needed\n  // [note]: could be removed entirely for query.run() once optional params are sorted\n  fn exec(sql: Str) {\n    execute(self._ptr, sql)\n  }\n}\n",
 		},
 		{
 			name:   "does not insert blank lines between top-level statements",
@@ -96,8 +96,8 @@ func TestFormat(t *testing.T) {
 		},
 		{
 			name:   "no synthetic blank line after multiline declaration expression",
-			input:  "fn example() {\n  let raw = try @raw -> _ {\n    let x = \"\"\n    x\n  }\n  next(raw)\n}\n",
-			output: "fn example() {\n  let raw = try @raw -> _ {\n    let x = \"\"\n    x\n  }\n  next(raw)\n}\n",
+			input:  "fn example() {\n  let raw = try self.raw -> _ {\n    let x = \"\"\n    x\n  }\n  next(raw)\n}\n",
+			output: "fn example() {\n  let raw = try self.raw -> _ {\n    let x = \"\"\n    x\n  }\n  next(raw)\n}\n",
 		},
 		{
 			name:   "formats if else chain with stable braces",
@@ -111,8 +111,8 @@ func TestFormat(t *testing.T) {
 		},
 		{
 			name:   "keeps single-expression try catch block inline when it fits",
-			input:  "fn main() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n}\n",
-			output: "fn main() {\n  let raw = try @raw -> _ { \"\" }\n}\n",
+			input:  "fn main() {\n  let raw = try self.raw -> _ {\n    \"\"\n  }\n}\n",
+			output: "fn main() {\n  let raw = try self.raw -> _ { \"\" }\n}\n",
 		},
 		{
 			name:   "formats for loop header spacing",
@@ -161,7 +161,7 @@ func TestFormat(t *testing.T) {
 }
 
 func TestFormatIsIdempotent(t *testing.T) {
-	input := "fn example() {\n  let raw = try @raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n"
+	input := "fn example() {\n  let raw = try self.raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n"
 
 	first, err := Format([]byte(input), "test.ard")
 	if err != nil {

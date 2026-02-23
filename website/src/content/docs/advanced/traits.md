@@ -45,7 +45,7 @@ struct Person {
 
 impl Str::ToString for Person {
   fn to_str() Str {
-    "{@name} is {@age} years old"
+    "{self.name} is {self.age} years old"
   }
 }
 ```

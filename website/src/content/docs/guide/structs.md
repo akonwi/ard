@@ -49,31 +49,31 @@ struct Rectangle {
 
 impl Rectangle {
   fn area() Float {
-    @width * @height
+    self.width * self.height
   }
 
   fn perimeter() Float {
-    2.0 * (@width + @height)
+    2.0 * (self.width + self.height)
   }
 
   fn is_square() Bool {
-    @width == @height
+    self.width == self.height
   }
 }
 ```
 
-### The `@` Prefix
+### The `self` Receiver
 
-Within methods, use the `@` prefix to reference the current instance's fields:
+Within methods, use `self` to reference the current instance's fields:
 
 ```ard
 impl Person {
   fn get_intro() Str {
-    "My name is {@name} and I am {@age} years old"
+    "My name is {self.name} and I am {self.age} years old"
   }
 
   fn is_adult() Bool {
-    @age >= 18
+    self.age >= 18
   }
 }
 ```
@@ -85,7 +85,7 @@ Because Ard requires explicit data mutation, methods that can change the struct 
 ```ard
 impl Person {
   fn mut grow_older() {
-    @age =+ 1
+    self.age =+ 1
   }
 }
 ```
@@ -108,7 +108,7 @@ Methods can be made private with the `private` keyword:
 ```ard
 impl User {
   fn get_display_name() Str {
-    format_name(@username)  // Calls private method
+    format_name(self.username) // Calls private method
   }
 
   private fn format_name(name: Str) Str {

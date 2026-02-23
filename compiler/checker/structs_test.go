@@ -175,7 +175,7 @@ func TestMethods(t *testing.T) {
 				`%s
 				impl Shape {
 				  fn get_area() Int {
-						@width * @height
+						self.width * self.height
 					}
 				}`, shapeCode),
 			output: &checker.Program{
@@ -188,13 +188,13 @@ func TestMethods(t *testing.T) {
 				`%s
 				impl Shape {
 				  fn resize(h: Int, w: Int) {
-						@width = w
-						@height = h
+						self.width = w
+						self.height = h
 					}
 				}`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: @width"},
-				{Kind: checker.Error, Message: "Immutable: @height"},
+				{Kind: checker.Error, Message: "Immutable: self.width"},
+				{Kind: checker.Error, Message: "Immutable: self.height"},
 			},
 		},
 		{
@@ -203,8 +203,8 @@ func TestMethods(t *testing.T) {
 				`%s
 				impl Shape {
 				  fn mut resize(width: Int, height: Int) {
-						@width = width
-						@height = height
+						self.width = width
+						self.height = height
 					}
 				}
 

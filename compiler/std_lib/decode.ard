@@ -13,7 +13,7 @@ struct Error {
 impl Str::ToString for Error {
   fn to_str() Str {
     mut path_str = ""
-    for step, i in @path {
+    for step, i in self.path {
       match i {
         0 => {
           // no leading dot
@@ -30,8 +30,8 @@ impl Str::ToString for Error {
     }
 
     match path_str.is_empty() {
-      true => "got {@found}, expected {@expected}",
-      false => "{path_str}: got {@found}, expected {@expected}",
+      true => "got {self.found}, expected {self.expected}",
+      false => "{path_str}: got {self.found}, expected {self.expected}",
     }
   }
 }

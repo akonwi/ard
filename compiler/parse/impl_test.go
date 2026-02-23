@@ -27,6 +27,16 @@ func TestImplBlocks(t *testing.T) {
 			input:    "impl Person {\n}",
 			wantErrs: []string{},
 		},
+		{
+			name:     "Valid impl block with receiver alias",
+			input:    "impl Person as p {\n}",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Missing receiver alias after as",
+			input:    "impl Person as {\n}",
+			wantErrs: []string{"Expected receiver name after 'as'", "Unexpected token: right_brace"},
+		},
 		// Trait implementation error cases
 		{
 			name:     "Missing trait name after impl",
@@ -57,6 +67,16 @@ func TestImplBlocks(t *testing.T) {
 			name:     "Valid trait implementation",
 			input:    "impl Display for Person {\n}",
 			wantErrs: []string{},
+		},
+		{
+			name:     "Valid trait implementation with receiver alias",
+			input:    "impl Display for Person as p {\n}",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Missing receiver alias in trait impl",
+			input:    "impl Display for Person as {\n}",
+			wantErrs: []string{"Expected receiver name after 'as'"},
 		},
 	})
 }

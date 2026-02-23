@@ -7,12 +7,12 @@ struct Board {
 
 impl Board {
   fn mut play(player: Str, pos: Int) {
-    @cells.set(pos, player)
+    self.cells.set(pos, player)
   }
 
   fn is_full() Bool {
     mut full = true
-    for cell in @cells {
+    for cell in self.cells {
       if cell.is_empty() {
         full = false
         break
@@ -22,16 +22,16 @@ impl Board {
   }
 
   fn draw() {
-    io::print("{@cells.at(0)} | {@cells.at(1)} | {@cells.at(2)}")
+    io::print("{self.cells.at(0)} | {self.cells.at(1)} | {self.cells.at(2)}")
     io::print("-------")
-    io::print("{@cells.at(3)} | {@cells.at(4)} | {@cells.at(5)}")
+    io::print("{self.cells.at(3)} | {self.cells.at(4)} | {self.cells.at(5)}")
     io::print("-------")
-    io::print("{@cells.at(6)} | {@cells.at(7)} | {@cells.at(8)}")
+    io::print("{self.cells.at(6)} | {self.cells.at(7)} | {self.cells.at(8)}")
   }
 
   fn can_play(pos: Int) Bool {
-    match pos < @cells.size() {
-      true => @cells.at(pos).is_empty(),
+    match pos < self.cells.size() {
+      true => self.cells.at(pos).is_empty(),
       false => false
     }
   }
@@ -39,43 +39,43 @@ impl Board {
   fn get_winner() Str? {
     mut res: Str? = maybe::none()
 
-    if not @cells.at(0).is_empty() {
+    if not self.cells.at(0).is_empty() {
       // check top row
-      if @cells.at(0) == @cells.at(1) and @cells.at(0) == @cells.at(2) {
-        res = maybe::some(@cells.at(0))
+      if self.cells.at(0) == self.cells.at(1) and self.cells.at(0) == self.cells.at(2) {
+        res = maybe::some(self.cells.at(0))
       }
       // check left column
-      if @cells.at(0) == @cells.at(3) and @cells.at(0) == @cells.at(6) {
-        res = maybe::some(@cells.at(0))
+      if self.cells.at(0) == self.cells.at(3) and self.cells.at(0) == self.cells.at(6) {
+        res = maybe::some(self.cells.at(0))
       }
       // check top-left to bottom-right
-      if @cells.at(0) == @cells.at(4) and @cells.at(0) == @cells.at(8) {
-        res = maybe::some(@cells.at(0))
+      if self.cells.at(0) == self.cells.at(4) and self.cells.at(0) == self.cells.at(8) {
+        res = maybe::some(self.cells.at(0))
       }
     }
 
     // check middle column
-    if not @cells.at(1).is_empty() {
-      if @cells.at(1) == @cells.at(4) and @cells.at(1) == @cells.at(7) {
-        res = maybe::some(@cells.at(1))
+    if not self.cells.at(1).is_empty() {
+      if self.cells.at(1) == self.cells.at(4) and self.cells.at(1) == self.cells.at(7) {
+        res = maybe::some(self.cells.at(1))
       }
     }
 
-    if not @cells.at(2).is_empty() {
+    if not self.cells.at(2).is_empty() {
       // check right column
-      if @cells.at(2) == @cells.at(5) and @cells.at(2) == @cells.at(8) {
-        res = maybe::some(@cells.at(2))
+      if self.cells.at(2) == self.cells.at(5) and self.cells.at(2) == self.cells.at(8) {
+        res = maybe::some(self.cells.at(2))
       }
       // check top-right to bottom-left
-      if @cells.at(2) == @cells.at(4) and @cells.at(2) == @cells.at(6) {
-        res = maybe::some(@cells.at(2))
+      if self.cells.at(2) == self.cells.at(4) and self.cells.at(2) == self.cells.at(6) {
+        res = maybe::some(self.cells.at(2))
       }
     }
 
     // check middle row
-    if not @cells.at(3).is_empty() {
-      if @cells.at(3) == @cells.at(4) and @cells.at(3) == @cells.at(5) {
-        res = maybe::some(@cells.at(3))
+    if not self.cells.at(3).is_empty() {
+      if self.cells.at(3) == self.cells.at(4) and self.cells.at(3) == self.cells.at(5) {
+        res = maybe::some(self.cells.at(3))
       }
     }
 

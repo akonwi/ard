@@ -62,7 +62,7 @@ match ok {
 - `try ... -> var { ... }` catch blocks with a single expression stay inline when they fit
 
 ```ard
-let raw = try @raw -> _ { "" }
+let raw = try self.raw -> _ { "" }
 ```
 
 ## Imports

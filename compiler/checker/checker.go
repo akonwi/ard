@@ -712,8 +712,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					// if we made it this far, it's a valid implementation
 					fnDef := c.checkFunction(&method, func() {
-						c.scope.add("@", targetType, method.Mutates)
+						c.scope.add(s.Receiver.Name, targetType, method.Mutates)
 					})
+					fnDef.Receiver = s.Receiver.Name
 					fnDef.Mutates = method.Mutates
 					// add the method to the struct
 					targetType.Methods[method.Name] = fnDef
@@ -784,8 +785,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					// if we made it this far, it's a valid implementation
 					fnDef := c.checkFunction(&method, func() {
-						c.scope.add("@", targetType, false) // Enums are immutable, so always false
+						c.scope.add(s.Receiver.Name, targetType, false) // Enums are immutable, so always false
 					})
+					fnDef.Receiver = s.Receiver.Name
 					// Enums cannot have mutating methods
 					if method.Mutates {
 						c.addError("Enum methods cannot be mutating", method.GetLocation())
@@ -1293,9 +1295,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			case *StructDef:
 				for _, method := range s.Methods {
 					fnDef := c.checkFunction(&method, func() {
-						c.scope.add("@", def, method.Mutates)
+						c.scope.add(s.Receiver.Name, def, method.Mutates)
 					})
 					if fnDef != nil {
+						fnDef.Receiver = s.Receiver.Name
 						fnDef.Mutates = method.Mutates
 						def.Methods[method.Name] = fnDef
 					}
@@ -1310,8 +1313,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						c.addError("Enum methods cannot be mutating", method.GetLocation())
 					}
 					fnDef := c.checkFunction(&method, func() {
-						c.scope.add("@", def, false)
+						c.scope.add(s.Receiver.Name, def, false)
 					})
+					fnDef.Receiver = s.Receiver.Name
 					def.Methods[method.Name] = fnDef
 				}
 				return &Statement{Stmt: def}

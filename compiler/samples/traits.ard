@@ -7,7 +7,7 @@ struct Book {
 
 impl Str::ToString for Book {
   fn to_str() Str {
-    "Book: " + @title + " by " + @author
+    "Book: " + self.title + " by " + self.author
   }
 }
 

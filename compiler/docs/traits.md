@@ -35,7 +35,7 @@ struct Person {
 
 impl String for Person {
   fn to_str() Str {
-    "{@.name} is {@age.to_str()}"
+    "{self.name} is {self.age.to_str()}"
   }
 }
 ```

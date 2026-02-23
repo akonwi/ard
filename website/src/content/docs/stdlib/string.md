@@ -23,7 +23,7 @@ struct Person {
 
 impl Str::ToString for Person {
   fn to_str() Str {
-    "{@name} ({@age})"
+    "{self.name} ({self.age})"
   }
 }
 
@@ -61,7 +61,7 @@ struct Point {
 
 impl Str::ToString for Point {
   fn to_str() Str {
-    "({@x}, {@y})"
+    "({self.x}, {self.y})"
   }
 }
 ```
@@ -90,7 +90,7 @@ enum Color {
 
 impl Str::ToString for Color {
   fn to_str() Str {
-    match @ {
+    match self {
       Color::red => "Red",
       Color::green => "Green",
       Color::blue => "Blue"
@@ -117,7 +117,7 @@ struct Rectangle {
 
 impl Str::ToString for Rectangle {
   fn to_str() Str {
-    "Rectangle {width: {@width}, height: {@height}}"
+    "Rectangle {width: {self.width}, height: {self.height}}"
   }
 }
 
@@ -141,7 +141,7 @@ struct Date {
 
 impl Str::ToString for Date {
   fn to_str() Str {
-    "{@year}-{@month}-{@day}"
+    "{self.year}-{self.month}-{self.day}"
   }
 }
 
