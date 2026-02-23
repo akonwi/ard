@@ -11,6 +11,7 @@
 (match_expression "match" @keyword)
 (try_expression "try" @keyword)
 (import_statement "use" @keyword)
+(import_statement "as" @keyword)
 (variable_declaration "let" @keyword)
 (variable_declaration "mut" @keyword)
 (function_declaration "fn" @keyword)
@@ -20,6 +21,8 @@
 (enum_declaration "enum" @keyword)
 (trait_declaration "trait" @keyword)
 (impl_block "impl" @keyword)
+(impl_block "for" @keyword)
+(impl_block "as" @keyword)
 
 ; Types
 (primitive_type) @type.builtin
@@ -46,7 +49,7 @@
 (variable_declaration name: (identifier) @variable)
 (struct_field name: (identifier) @property)
 (struct_literal_field name: (identifier) @property)
-(self_expression "@" @keyword (identifier) @property)
+(self_expression) @variable.builtin
 
 ; Member/property vs call (disabled for now; was causing CLI query errors)
 

@@ -8,4 +8,4 @@ repository = "https://github.com/akonwi/ard"
 
 [grammars.ard]
 repository = "file:///Users/akonwi/Developer/agent/ard/tree-sitter-ard"
-commit = "ddcecdb6a59dcc9096fce825d6d2a8057dbdf0ea"
+commit = "0cf7f4e8a313d3648ac7b813bbceb32191749494"
