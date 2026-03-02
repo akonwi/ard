@@ -139,6 +139,11 @@ func TestFormat(t *testing.T) {
 			input: "fn broken( {",
 			error: true,
 		},
+		{
+			name:   "preserves chained method calls with string arguments",
+			input:  "fn test() {\n  let url = get(\"DATABASE_URL\").expect(\"DATABASE_URL is required\").trim().replace(\"'\", \"\")\n}\n",
+			output: "fn test() {\n  let url = get(\"DATABASE_URL\").expect(\"DATABASE_URL is required\").trim().replace(\"'\", \"\")\n}\n",
+		},
 	}
 
 	for _, tt := range tests {

@@ -64,7 +64,9 @@ func (p printer) printDoc(root doc) string {
 			}
 			column = cmd.indent
 		case docGroup:
-			if p.fits(p.maxLineWidth-column, append(stack, printCmd{indent: cmd.indent, mode: modeFlat, doc: node.content})) {
+			testStack := append([]printCmd(nil), stack...)
+			testStack = append(testStack, printCmd{indent: cmd.indent, mode: modeFlat, doc: node.content})
+			if p.fits(p.maxLineWidth-column, testStack) {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: modeFlat, doc: node.content})
 			} else {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: modeBreak, doc: node.content})
