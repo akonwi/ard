@@ -69,6 +69,22 @@ func TestBytecodeAsyncJoin(t *testing.T) {
 }
 
 func TestBytecodeFiberTypeParams(t *testing.T) {
+	t.Run("async::start closure captures readonly outer variable", func(t *testing.T) {
+		if got := runBytecode(t, `
+			use ard/async
+			fn consume(value: Int) {
+				let _ = value
+			}
+			let conn = 42
+			let fiber = async::start(fn() {
+				consume(conn)
+			})
+			fiber.join()
+		`); got != nil {
+			t.Fatalf("Expected nil, got %v", got)
+		}
+	})
+
 	t.Run("async::start returns Fiber<Void>", func(t *testing.T) {
 		if got := runBytecode(t, `
 			use ard/async

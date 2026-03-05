@@ -25,6 +25,20 @@ func (f FiberExecution) GetMainName() string {
 	return f.fnName
 }
 
+type FiberStart struct {
+	fn        Expression
+	_type     Type
+	FiberType Type
+}
+
+func (f FiberStart) Type() Type {
+	return f._type
+}
+
+func (f FiberStart) GetFn() Expression {
+	return f.fn
+}
+
 type FiberEval struct {
 	fn        Expression
 	_type     Type
@@ -39,33 +53,27 @@ func (f FiberEval) GetFn() Expression {
 	return f.fn
 }
 
-func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type) *FiberExecution {
+func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type) Expression {
+	specializedFiberType := c.specializeFiber(fiberType, Void)
+
 	switch node := fnNode.(type) {
 	case *parse.AnonymousFunction:
 		block := c.checkBlock(node.Body, func() {
 			// do not inherit parent scope
 			c.scope.isolate()
 		})
+		uniqueName := fmt.Sprintf("start_func_%p", fnNode)
 		main := &FunctionDef{
-			Name:       "main",
+			Name:       uniqueName,
 			Parameters: []Parameter{},
 			ReturnType: Void,
 			Body:       block,
 		}
-		module := NewUserModule(c.filePath, &Program{
-			Imports: c.program.Imports,
-			Statements: []Statement{
-				{Expr: main},
-			},
-		}, &SymbolTable{})
+		c.scope.add(uniqueName, main, false)
 
-		// Specialize Fiber<Void> since async::start takes fn() Void
-		specializedFiberType := c.specializeFiber(fiberType, Void)
-
-		return &FiberExecution{
-			module:    module,
+		return &FiberStart{
+			fn:        main,
 			_type:     specializedFiberType,
-			fnName:    "main",
 			FiberType: specializedFiberType,
 		}
 	case *parse.StaticProperty:
@@ -76,9 +84,6 @@ func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type)
 			return &FiberExecution{_type: fiberType, FiberType: fiberType}
 		}
 
-		// Specialize Fiber<Void> since async::start takes fn() Void
-		specializedFiberType := c.specializeFiber(fiberType, Void)
-
 		return &FiberExecution{
 			module:    module,
 			_type:     specializedFiberType,
@@ -86,10 +91,13 @@ func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type)
 			FiberType: specializedFiberType,
 		}
 	default:
-		// probably need to handle when the function is a variable reference
-		panic(fmt.Sprintf("Unhandled fiber function node: %T", node))
+		checkedFn := c.checkExpr(fnNode)
+		return &FiberStart{
+			fn:        checkedFn,
+			_type:     specializedFiberType,
+			FiberType: specializedFiberType,
+		}
 	}
-
 }
 
 func (c *Checker) specializeFiber(fiberType Type, returnType Type) Type {
