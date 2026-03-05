@@ -144,6 +144,21 @@ func TestFormat(t *testing.T) {
 			input:  "fn test() {\n  let url = get(\"DATABASE_URL\").expect(\"DATABASE_URL is required\").trim().replace(\"'\", \"\")\n}\n",
 			output: "fn test() {\n  let url = get(\"DATABASE_URL\").expect(\"DATABASE_URL is required\").trim().replace(\"'\", \"\")\n}\n",
 		},
+		{
+			name:   "keeps flat chained or expressions",
+			input:  "fn is_valid(a: Bool, b: Bool, c: Bool, d: Bool) Bool {\n  a or b or c or d\n}\n",
+			output: "fn is_valid(a: Bool, b: Bool, c: Bool, d: Bool) Bool {\n  a or b or c or d\n}\n",
+		},
+		{
+			name:   "keeps not with and expression unparenthesized",
+			input:  "fn should_assign(assigned: Bool, due: Bool) Bool {\n  not assigned and due\n}\n",
+			output: "fn should_assign(assigned: Bool, due: Bool) Bool {\n  not assigned and due\n}\n",
+		},
+		{
+			name:   "preserves escaped braces in plain string literals",
+			input:  "fn main() {\n  let body = \"\\{\\\"status\\\": \\\"ok\\\"\\}\"\n}\n",
+			output: "fn main() {\n  let body = \"\\{\\\"status\\\": \\\"ok\\\"\\}\"\n}\n",
+		},
 	}
 
 	for _, tt := range tests {

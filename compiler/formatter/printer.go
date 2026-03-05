@@ -753,9 +753,9 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.Identifier:
 		return dText(node.Name)
 	case *parse.StrLiteral:
-		return dText(strconv.Quote(node.Value))
+		return dText(quoteArdString(node.Value))
 	case parse.StrLiteral:
-		return dText(strconv.Quote(node.Value))
+		return dText(quoteArdString(node.Value))
 	case *parse.InterpolatedStr:
 		return p.renderInterpolatedStringDoc(node)
 	case parse.InterpolatedStr:
@@ -951,9 +951,42 @@ func escapeInterpolatedText(value string) string {
 	quoted := strconv.Quote(value)
 	quoted = strings.TrimPrefix(quoted, "\"")
 	quoted = strings.TrimSuffix(quoted, "\"")
-	quoted = strings.ReplaceAll(quoted, "{", `\{`)
-	quoted = strings.ReplaceAll(quoted, "}", `\}`)
-	return quoted
+	return escapeArdBraces(quoted)
+}
+
+func quoteArdString(value string) string {
+	quoted := strconv.Quote(value)
+	if len(quoted) < 2 {
+		return quoted
+	}
+	inner := quoted[1 : len(quoted)-1]
+	return `"` + escapeArdBraces(inner) + `"`
+}
+
+func escapeArdBraces(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if (ch == '{' || ch == '}') && !isEscaped(value, i) {
+			builder.WriteByte('\\')
+		}
+		builder.WriteByte(ch)
+	}
+
+	return builder.String()
+}
+
+func isEscaped(value string, idx int) bool {
+	count := 0
+	for i := idx - 1; i >= 0; i-- {
+		if value[i] != '\\' {
+			break
+		}
+		count++
+	}
+	return count%2 == 1
 }
 
 func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
@@ -1229,7 +1262,11 @@ func (p printer) renderUnary(node *parse.UnaryExpression, parentPrecedence int) 
 	if operator == "" {
 		operator = "-"
 	}
-	operand := p.renderExpression(node.Operand, precedenceUnary)
+	operandPrecedence := precedenceUnary
+	if node.Operator == parse.Not {
+		operandPrecedence = precedenceLowest
+	}
+	operand := p.renderExpression(node.Operand, operandPrecedence)
 	text := operator + operand
 	if node.Operator == parse.Not {
 		text = "not " + operand
@@ -1243,7 +1280,11 @@ func (p printer) renderUnary(node *parse.UnaryExpression, parentPrecedence int) 
 func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int) string {
 	precedence := p.binaryPrecedence(node.Operator)
 	left := p.renderExpression(node.Left, precedence)
-	right := p.renderExpression(node.Right, precedence+1)
+	rightPrecedence := precedence + 1
+	if node.Operator == parse.Or || node.Operator == parse.And {
+		rightPrecedence = precedence
+	}
+	right := p.renderExpression(node.Right, rightPrecedence)
 	operator := p.operatorString(node.Operator)
 	separator := " "
 	if node.Operator == parse.Range {
