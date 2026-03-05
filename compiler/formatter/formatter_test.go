@@ -159,6 +159,11 @@ func TestFormat(t *testing.T) {
 			input:  "fn main() {\n  let body = \"\\{\\\"status\\\": \\\"ok\\\"\\}\"\n}\n",
 			output: "fn main() {\n  let body = \"\\{\\\"status\\\": \\\"ok\\\"\\}\"\n}\n",
 		},
+		{
+			name:   "preserves parenthesized try in binary expression",
+			input:  "fn next_batch() Int!Str {\n  let next_batch = (try get_latest_batch()) + 1\n  Result::ok(next_batch)\n}\n",
+			output: "fn next_batch() Int!Str {\n  let next_batch = (try get_latest_batch()) + 1\n  Result::ok(next_batch)\n}\n",
+		},
 	}
 
 	for _, tt := range tests {

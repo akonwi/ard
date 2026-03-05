@@ -1285,6 +1285,12 @@ func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int
 		rightPrecedence = precedence
 	}
 	right := p.renderExpression(node.Right, rightPrecedence)
+	if isTryExpression(node.Left) {
+		left = "(" + left + ")"
+	}
+	if isTryExpression(node.Right) {
+		right = "(" + right + ")"
+	}
 	operator := p.operatorString(node.Operator)
 	separator := " "
 	if node.Operator == parse.Range {
@@ -1298,6 +1304,15 @@ func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int
 		return "(" + text + ")"
 	}
 	return text
+}
+
+func isTryExpression(expression parse.Expression) bool {
+	switch expression.(type) {
+	case *parse.Try, parse.Try:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p printer) binaryPrecedence(operator parse.Operator) int {
