@@ -808,6 +808,8 @@ func (f *funcEmitter) emitExpr(expr checker.Expression) error {
 		return f.emitModuleSymbol(e)
 	case *checker.FiberExecution:
 		return f.emitFiberExecution(e)
+	case *checker.FiberStart:
+		return f.emitFiberStart(e)
 	case *checker.FiberEval:
 		return f.emitFiberEval(e)
 	default:
@@ -2095,6 +2097,18 @@ func (f *funcEmitter) emitFiberExecution(exec *checker.FiberExecution) error {
 	fnTypeID := f.emitter.addType(copy.Type())
 	f.emit(Instruction{Op: OpMakeClosure, A: fnIndex, B: 0, C: int(fnTypeID)})
 	fiberTypeID := f.emitter.addType(exec.FiberType)
+	f.emit(Instruction{Op: OpAsyncStart, C: int(fiberTypeID)})
+	return nil
+}
+
+func (f *funcEmitter) emitFiberStart(start *checker.FiberStart) error {
+	if start.GetFn() == nil {
+		return fmt.Errorf("missing fiber start function")
+	}
+	if err := f.emitExpr(start.GetFn()); err != nil {
+		return err
+	}
+	fiberTypeID := f.emitter.addType(start.FiberType)
 	f.emit(Instruction{Op: OpAsyncStart, C: int(fiberTypeID)})
 	return nil
 }
