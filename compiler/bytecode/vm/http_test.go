@@ -24,7 +24,7 @@ func TestBytecodeHttpMethod(t *testing.T) {
 
 func TestBytecodeHttpSendUsesRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(1100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -32,14 +32,13 @@ func TestBytecodeHttpSendUsesRequestTimeout(t *testing.T) {
 
 	input := fmt.Sprintf(`
 		use ard/http
-		use ard/duration
 		use ard/maybe
 
 		http::send(http::Request{
 			method: http::Method::Get,
 			url: %q,
 			headers: [:],
-			timeout: maybe::some(duration::from_millis(10)),
+			timeout: maybe::some(1),
 		}).or(http::Response::new(-1, "")).status
 	`, server.URL)
 
@@ -50,7 +49,7 @@ func TestBytecodeHttpSendUsesRequestTimeout(t *testing.T) {
 
 func TestBytecodeHttpSendCallSiteTimeoutOverridesRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(1100 * time.Millisecond)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("created"))
 	}))
@@ -58,17 +57,16 @@ func TestBytecodeHttpSendCallSiteTimeoutOverridesRequestTimeout(t *testing.T) {
 
 	input := fmt.Sprintf(`
 		use ard/http
-		use ard/duration
 		use ard/maybe
 
 		let req = http::Request{
 			method: http::Method::Get,
 			url: %q,
 			headers: [:],
-			timeout: maybe::some(duration::from_millis(10)),
+			timeout: maybe::some(1),
 		}
 
-		http::send(req, maybe::some(duration::from_millis(100))).or(http::Response::new(-1, "")).status
+		http::send(req, 2).or(http::Response::new(-1, "")).status
 	`, server.URL)
 
 	if got := runBytecode(t, input); got != http.StatusCreated {

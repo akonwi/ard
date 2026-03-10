@@ -84,7 +84,7 @@ func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object 
 	}
 
 	if len(args) >= 5 && !args[4].IsNone() {
-		ctx, cancel := context.WithTimeout(req.Context(), time.Duration(args[4].AsInt()))
+		ctx, cancel := context.WithTimeout(req.Context(), time.Duration(args[4].AsInt())*time.Second)
 		defer cancel()
 		req = req.WithContext(ctx)
 	}

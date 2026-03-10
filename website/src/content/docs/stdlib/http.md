@@ -17,17 +17,15 @@ The module includes:
 ```ard
 use ard/http
 use ard/io
-use ard/duration
 
 fn main() {
   let req = http::Request{
     method: http::Method::Get,
     url: "https://example.com",
     headers: [:],
-    timeout: duration::from_seconds(10),
   }
 
-  match http::send(req, duration::from_seconds(30)) {
+  match http::send(req, 30) {
     ok(response) => io::print("Status: {response.status.to_str()}"),
     err(e) => io::print("Error: {e}")
   }
@@ -70,24 +68,11 @@ Represents an HTTP request.
 - **`url: Str`** - The request URL
 - **`headers: [Str:Str]`** - Request headers as a map
 - **`body: Dynamic?`** - Optional request body
-- **`timeout: Int?`** - Optional request timeout in nanoseconds
-- **`raw: Dynamic?`** - Internal field for inbound server requests
+- **`timeout: Int?`** - Optional request timeout in seconds
 
 `Request.body` is dynamic so you can support text, JSON payloads, and other shapes without forcing a string-only API. For server handlers, decode `req.body` into the expected shape with `ard/decode`.
 
-Use `ard/duration` helpers when setting timeouts:
-
-```ard
-use ard/http
-use ard/duration
-
-let req = http::Request{
-  method: http::Method::Get,
-  url: "https://api.example.com/users",
-  headers: [:],
-  timeout: duration::from_seconds(90),
-}
-```
+Timeouts are expressed in whole seconds. You can pass a timeout directly to `http::send(req, timeout)` without any duration conversion.
 
 #### Methods
 
@@ -174,16 +159,14 @@ The optional `timeout` argument overrides `req.timeout`.
 ```ard
 use ard/http
 use ard/io
-use ard/duration
 
 let req = http::Request{
   method: http::Method::Get,
   url: "https://api.example.com/users",
   headers: [:],
-  timeout: duration::from_seconds(15),
 }
 
-match http::send(req, duration::from_seconds(60)) {
+match http::send(req, 60) {
   ok(response) => io::print(response.body),
   err(error) => io::print("Request failed: {error}")
 }
@@ -217,14 +200,12 @@ fn main() {
 ```ard
 use ard/http
 use ard/io
-use ard/duration
 
 fn main() {
   let req = http::Request{
     method: http::Method::Get,
     url: "https://jsonplaceholder.typicode.com/posts/1",
     headers: [:],
-    timeout: duration::from_seconds(10),
   }
 
   match http::send(req) {
@@ -269,7 +250,6 @@ fn main() {
 
 ```ard
 use ard/http
-use ard/duration
 
 fn main() {
   let req = http::Request{
@@ -277,11 +257,9 @@ fn main() {
     url: "https://api.openai.com/v1/responses",
     headers: ["content-type": "application/json"],
     body: "{\"model\":\"gpt-4.1\"}",
-    timeout: duration::from_seconds(30),
   }
 
-  // This call uses 90s instead of the 30s request default.
-  let res = http::send(req, duration::from_seconds(90))
+  let res = http::send(req, 90)
 }
 ```
 
