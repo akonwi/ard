@@ -1,7 +1,6 @@
 package ffi
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -77,16 +76,13 @@ func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object 
 	}
 
 	client := &http.Client{}
+	if len(args) >= 5 && !args[4].IsNone() {
+		client.Timeout = time.Duration(args[4].AsInt()) * time.Second
+	}
 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
-	}
-
-	if len(args) >= 5 && !args[4].IsNone() {
-		ctx, cancel := context.WithTimeout(req.Context(), time.Duration(args[4].AsInt())*time.Second)
-		defer cancel()
-		req = req.WithContext(ctx)
 	}
 
 	req.Header = headers
