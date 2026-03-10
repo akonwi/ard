@@ -13,6 +13,7 @@ import (
 	"github.com/akonwi/ard/bytecode"
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/ffi"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
@@ -68,8 +69,11 @@ func main() {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			if _, err := bytecodevm.New(program).Run("main"); err != nil {
-				fmt.Println(err)
+			ffi.SetOSArgs(os.Args)
+			_, runErr := bytecodevm.New(program).Run("main")
+			ffi.SetOSArgs(nil)
+			if runErr != nil {
+				fmt.Println(runErr)
 				os.Exit(1)
 			}
 		}
@@ -338,10 +342,17 @@ func buildBytecodeBinary(inputPath string, outputPath string) (string, error) {
 	return outputPath, nil
 }
 
-func maybeRunEmbedded() bool {
-	if len(os.Args) > 1 && os.Args[1] != "run-embedded" {
-		return false
+func argsForEmbeddedProgram(args []string) []string {
+	if len(args) > 1 && args[1] == "run-embedded" {
+		out := make([]string, 0, len(args)-1)
+		out = append(out, args[0])
+		out = append(out, args[2:]...)
+		return out
 	}
+	return append([]string(nil), args...)
+}
+
+func maybeRunEmbedded() bool {
 	data, err := readEmbeddedBytecode()
 	if err != nil || data == nil {
 		return false
@@ -355,8 +366,11 @@ func maybeRunEmbedded() bool {
 		fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
 		os.Exit(1)
 	}
-	if _, err := bytecodevm.New(program).Run("main"); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	ffi.SetOSArgs(argsForEmbeddedProgram(os.Args))
+	_, runErr := bytecodevm.New(program).Run("main")
+	ffi.SetOSArgs(nil)
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, runErr)
 		os.Exit(1)
 	}
 	return true
