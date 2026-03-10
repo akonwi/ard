@@ -1,6 +1,7 @@
 use ard/io
 use ard/http
 use ard/decode
+use ard/maybe
 
 fn main() {
   io::print("GET from pokemon api")
@@ -39,7 +40,7 @@ fn main() {
     method: http::Method::Post,
     url: "https://postman-echo.com/post",
     headers: ["content-type":"text/plain"],
-    body: "raw text"
+    body: maybe::some("raw text")
   })
   match post_res {
     ok(res) => io::print("got a {res.status}"),
