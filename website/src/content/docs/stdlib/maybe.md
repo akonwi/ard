@@ -142,18 +142,19 @@ fn main() {
 
 ### Process Optional Data
 
-```ard
-use ard/maybe
+Nullable struct fields accept unwrapped values directly — they are automatically wrapped in `maybe::some()`:
 
+```ard
 struct User {
   name: Str,
   bio: Str?
 }
 
 fn main() {
+  // bio is automatically wrapped in maybe::some()
   let user = User {
     name: "Alice",
-    bio: maybe::some("Software engineer")
+    bio: "Software engineer"
   }
   
   match user.bio {
