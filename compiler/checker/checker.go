@@ -1622,6 +1622,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					continue
 				}
 
+				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in maybe::some()
+				if maybeField, isMaybe := field.(*Maybe); isMaybe {
+					if valType := checkVal.Type(); !valType.equal(field) {
+						if maybeField.Of().equal(valType) {
+							checkVal = c.synthesizeMaybeSome(checkVal, field)
+						}
+					}
+				}
+
 				if err := c.unifyTypes(field, checkVal.Type(), genericScope); err != nil {
 					c.addError(err.Error(), property.GetLocation())
 					continue
@@ -1632,8 +1641,30 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				fields[fieldName] = checkVal
 				fieldTypes[fieldName] = field
 			} else {
-				// For non-generic structs, use the original checkExprAs which provides type context
-				if val := c.checkExprAs(property.Value, field); val != nil {
+				// For non-generic structs, handle nullable fields with implicit wrapping
+				var val Expression
+				if maybeField, isMaybe := field.(*Maybe); isMaybe {
+					// For literals and anonymous functions, use inner type for type inference context
+					switch property.Value.(type) {
+					case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+						val = c.checkExprAs(property.Value, maybeField.Of())
+					default:
+						val = c.checkExpr(property.Value)
+					}
+					// Implicit Maybe wrapping: if value is T, wrap in maybe::some(T)
+					if val != nil && !val.Type().equal(field) {
+						if maybeField.Of().equal(val.Type()) {
+							val = c.synthesizeMaybeSome(val, field)
+						} else {
+							c.addError(typeMismatch(field, val.Type()), property.GetLocation())
+							val = nil
+						}
+					}
+				} else {
+					// Non-nullable fields use checkExprAs which provides type context
+					val = c.checkExprAs(property.Value, field)
+				}
+				if val != nil {
 					fields[fieldName] = val
 					fieldTypes[fieldName] = field
 				}

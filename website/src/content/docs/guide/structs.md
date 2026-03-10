@@ -35,6 +35,30 @@ let age = person.age          // 30
 io::print("Hello, {person.name}!")
 ```
 
+## Nullable Fields
+
+Struct fields can be nullable using the `?` suffix. Nullable fields can be omitted when creating an instance, in which case they default to `none`:
+
+```ard
+struct Config {
+  name: Str,
+  timeout: Int?,
+  retries: Int?,
+}
+
+// Omit nullable fields — they become none
+let config = Config{name: "app"}
+
+// Provide values directly — they are automatically wrapped
+let config = Config{name: "app", timeout: 30, retries: 3}
+
+// You can still use maybe::some() explicitly if you prefer
+use ard/maybe
+let config = Config{name: "app", timeout: maybe::some(30)}
+```
+
+This is the same implicit wrapping behavior available for [nullable function parameters](/guide/functions#nullable-parameters).
+
 ## Methods
 
 Methods are like normal functions and are only available on instances of a struct.
