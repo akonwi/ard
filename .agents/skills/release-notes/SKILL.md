@@ -49,8 +49,6 @@ Organize changes into these categories (omit empty categories):
 Follow this template:
 
 ```markdown
-# Ard <version> Release Notes
-
 ## Overview
 
 One or two sentences summarizing the release theme.
