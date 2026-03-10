@@ -28,6 +28,7 @@ struct Request {
   url: Str,
   headers: [Str: Str],
   body: Dynamic?,
+  timeout: Int?,
 
   // inbound requests have the *http.Request
   raw: Dynamic?,
@@ -74,11 +75,15 @@ impl Response {
   }
 }
 
-private extern fn _send(method: Str, url: Str, body: Dynamic?, headers: [Str: Str]) Response!Str = "HTTP_Send"
+private extern fn _send(method: Str, url: Str, body: Dynamic?, headers: [Str: Str], timeout: Int?) Response!Str = "HTTP_Send"
 
-fn send(req: Request) Response!Str {
+fn send(req: Request, timeout: Int?) Response!Str {
   let method = req.method.to_str()
-  _send(method, req.url, req.body, req.headers)
+  let effective_timeout = match timeout {
+    t => maybe::some(t),
+    _ => req.timeout,
+  }
+  _send(method, req.url, req.body, req.headers, effective_timeout)
 }
 
 type HandlerFn = fn(Request, mut Response)

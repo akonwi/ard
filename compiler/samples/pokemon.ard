@@ -1,15 +1,17 @@
 use ard/io
 use ard/http
-use ard/maybe
 use ard/decode
+use ard/duration
 
 fn main() {
   io::print("GET from pokemon api")
-  let res = http::send(http::Request{
+  let req = http::Request{
     method: http::Method::Get,
     url: "https://pokeapi.co/api/v2/pokemon",
     headers: [:],
-  }).expect("Unable to make request")
+    timeout: duration::from_seconds(30),
+  }
+  let res = http::send(req, duration::from_seconds(60)).expect("Unable to make request")
 
   if res.is_ok() {
     let data = decode::from_json(res.body).expect("Unable to decode response body as JSON")
@@ -39,7 +41,7 @@ fn main() {
     method: http::Method::Post,
     url: "https://postman-echo.com/post",
     headers: ["content-type":"text/plain"],
-    body: maybe::some("raw text")
+    body: "raw text"
   })
   match post_res {
     ok(res) => io::print("got a {res.status}"),

@@ -376,12 +376,13 @@ func copyStructWithTypeVarMap(structDef *StructDef, typeVarMap map[string]*TypeV
 	}
 
 	return &StructDef{
-		Name:    structDef.Name,
-		Fields:  newFields,
-		Methods: structDef.Methods, // Methods are not copied; they're shared
-		Self:    structDef.Self,
-		Traits:  structDef.Traits,
-		Private: structDef.Private,
+		Name:          structDef.Name,
+		Fields:        newFields,
+		Methods:       structDef.Methods, // Methods are not copied; they're shared
+		Self:          structDef.Self,
+		Traits:        structDef.Traits,
+		GenericParams: append([]string(nil), structDef.GenericParams...),
+		Private:       structDef.Private,
 	}
 }
 

@@ -1,6 +1,7 @@
 package ffi
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,7 +51,7 @@ func GetQueryParam(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(req.URL.Query().Get(name))
 }
 
-// fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str]) Response!Str
+// fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str], timeout: Int?) Response!Str
 func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object {
 	method := args[0].AsString()
 	url := args[1].AsString()
@@ -75,13 +76,17 @@ func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object 
 		headers.Set(k, v.AsString())
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
+	client := &http.Client{}
 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+
+	if len(args) >= 5 && !args[4].IsNone() {
+		ctx, cancel := context.WithTimeout(req.Context(), time.Duration(args[4].AsInt()))
+		defer cancel()
+		req = req.WithContext(ctx)
 	}
 
 	req.Header = headers
@@ -210,6 +215,7 @@ func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
 				"url":     runtime.MakeStr(r.URL.String()),
 				"headers": runtime.Make(headers, checker.MakeMap(checker.Str, checker.Str)),
 				"body":    body,
+				"timeout": runtime.MakeNone(checker.Int),
 				"raw":     runtime.MakeNone(checker.Dynamic).ToSome(r),
 			}
 

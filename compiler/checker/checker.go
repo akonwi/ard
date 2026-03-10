@@ -408,10 +408,11 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 		collectGenericsFromType(t.val, params, seen)
 		collectGenericsFromType(t.err, params, seen)
 	case *StructDef:
-		// Extract generics from struct fields in a consistent order
-		// We need to iterate in a deterministic order; using sorted keys would work
-		for _, fieldType := range t.Fields {
-			collectGenericsFromType(fieldType, params, seen)
+		for _, genericName := range t.GenericParams {
+			if !seen[genericName] {
+				*params = append(*params, genericName)
+				seen[genericName] = true
+			}
 		}
 	}
 }
@@ -1268,6 +1269,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Methods: make(map[string]*FunctionDef),
 				Private: s.Private,
 			}
+			seenGenerics := make(map[string]bool)
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
 				if fieldType == nil {
@@ -1279,6 +1281,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 				def.Fields[field.Name.Name] = fieldType
+				collectGenericsFromType(fieldType, &def.GenericParams, seenGenerics)
 			}
 			c.scope.add(def.name(), def, false)
 			return &Statement{Stmt: def}
@@ -1668,12 +1671,13 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	instance.FieldTypes = fieldTypes
 	// Store the refined struct definition (with resolved generics) as the instance's type
 	instance._type = &StructDef{
-		Name:    structDefCopy.Name,
-		Fields:  fieldTypes,
-		Methods: structDefCopy.Methods,
-		Self:    structDefCopy.Self,
-		Traits:  structDefCopy.Traits,
-		Private: structDefCopy.Private,
+		Name:          structDefCopy.Name,
+		Fields:        fieldTypes,
+		Methods:       structDefCopy.Methods,
+		Self:          structDefCopy.Self,
+		Traits:        structDefCopy.Traits,
+		GenericParams: structDefCopy.GenericParams,
+		Private:       structDefCopy.Private,
 	}
 	instance.StructType = instance._type
 	return instance
