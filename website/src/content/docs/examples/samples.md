@@ -335,28 +335,24 @@ Basic HTTP server using the `ard/http` module:
 use ard/http
 use ard/io
 
-fn handle_home(req: http::Request) http::Response {
-  http::Response::new(200, "Welcome to Ard server!")
-}
-
-fn handle_about(req: http::Request) http::Response {
-  let content = "This is an Ard-powered web server running on {req.host()}"
-  http::Response::new(200, content)
-}
-
-fn handle_echo(req: http::Request) http::Response {
-  let path = req.path().unwrap_or("/")
-  http::Response::new(200, "You requested: {path}")
-}
-
 fn main() {
   io::print("Starting server on port 3000...")
-  
-  http::serve(3000, [
-    "/": handle_home,
-    "/about": handle_about,
-    "/echo": handle_echo
-  ])
+
+  let routes: [Str:http::HandlerFn] = [
+    "/": fn(req: http::Request, mut res: http::Response) {
+      res.body = "Welcome to Ard server!"
+    },
+    "/about": fn(req: http::Request, mut res: http::Response) {
+      let path = req.path().or("/")
+      res.body = "About page from {path}"
+    },
+    "/echo": fn(req: http::Request, mut res: http::Response) {
+      let path = req.path().or("/")
+      res.body = "You requested: {path}"
+    }
+  ]
+
+  http::serve(3000, routes).expect("Failed to start server")
 }
 ```
 

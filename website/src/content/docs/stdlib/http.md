@@ -3,34 +3,39 @@ title: HTTP Operations with ard/http
 description: Make HTTP requests and handle responses using the ard/http module.
 ---
 
-The `ard/http` module provides functions for making HTTP requests and serving HTTP endpoints.
+The `ard/http` module provides APIs for making outbound HTTP requests and serving inbound HTTP endpoints.
 
-The http module provides:
-- **HTTP methods** (GET, POST, PUT, DELETE, PATCH, OPTIONS)
-- **Request structures** for building and customizing HTTP requests
-- **Response structures** for handling HTTP responses
-- **HTTP client** functionality for making outbound requests
-- **HTTP server** functionality for handling inbound requests
+The module includes:
+- **HTTP methods** (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS`)
+- **Request structures** for outbound and inbound requests
+- **Response structures** for handling responses
+- **HTTP client** functionality for outbound requests
+- **HTTP server** functionality for route handlers
+
+## Quick start
 
 ```ard
 use ard/http
 use ard/io
-use ard/maybe
 
 fn main() {
-  let req = http::Request {
+  let req = http::Request{
     method: http::Method::Get,
     url: "https://example.com",
     headers: [:],
-    body: maybe::none()
   }
-  
-  match http::send(req) {
+
+  match http::send(req, 30) {
     ok(response) => io::print("Status: {response.status.to_str()}"),
     err(e) => io::print("Error: {e}")
   }
 }
 ```
+
+In `http::send(req, timeout)`:
+- the call-site `timeout` wins if provided
+- otherwise `req.timeout` is used
+- if neither is set, no request timeout is applied by Ard
 
 ## API
 
@@ -49,9 +54,10 @@ The `Method` enum implements `ToString`:
 
 ```ard
 use ard/http
+use ard/io
 
 let method = http::Method::Post
-io::print(method)  // "POST"
+io::print(method) // "POST"
 ```
 
 ### `struct Request`
@@ -62,25 +68,28 @@ Represents an HTTP request.
 - **`url: Str`** - The request URL
 - **`headers: [Str:Str]`** - Request headers as a map
 - **`body: Dynamic?`** - Optional request body
+- **`timeout: Int?`** - Optional request timeout in seconds
 
 `Request.body` is dynamic so you can support text, JSON payloads, and other shapes without forcing a string-only API. For server handlers, decode `req.body` into the expected shape with `ard/decode`.
+
+Timeouts are expressed in whole seconds. You can pass a timeout directly to `http::send(req, timeout)` without any duration conversion.
 
 #### Methods
 
 ##### `fn path() Str?`
 
-Get the path from an inbound request (only available on server-side requests).
+Get the path from an inbound request.
 
 ```ard
 use ard/http
 
-fn handler(req: http::Request) http::Response {
+fn handler(req: http::Request, mut res: http::Response) {
   match req.path() {
-    path => {
-      // handle specific path
-      http::Response::new(200, "OK")
-    },
-    _ => http::Response::new(404, "Not Found")
+    path => res.body = "Path: {path}",
+    _ => {
+      res.status = 404
+      res.body = "Not Found"
+    }
   }
 }
 ```
@@ -92,9 +101,9 @@ Get a path parameter value from an inbound request by name.
 ```ard
 use ard/http
 
-fn handler(req: http::Request) http::Response {
+fn handler(req: http::Request, mut res: http::Response) {
   let id = req.path_param("id")
-  http::Response::new(200, "User: {id}")
+  res.body = "User: {id}"
 }
 ```
 
@@ -105,9 +114,9 @@ Get a query parameter value from an inbound request by name.
 ```ard
 use ard/http
 
-fn handler(req: http::Request) http::Response {
+fn handler(req: http::Request, mut res: http::Response) {
   let page = req.query_param("page")
-  http::Response::new(200, "Page: {page}")
+  res.body = "Page: {page}"
 }
 ```
 
@@ -118,8 +127,6 @@ Represents an HTTP response.
 - **`status: Int`** - HTTP status code
 - **`headers: [Str:Str]`** - Response headers as a map
 - **`body: Str`** - Response body
-
-#### Methods
 
 ##### `fn Response::new(status: Int, body: Str) Response`
 
@@ -143,21 +150,23 @@ if response.is_ok() {
 }
 ```
 
-### `fn send(req: Request) Response!Str`
+### `fn send(req: Request, timeout: Int?) Response!Str`
 
 Send an HTTP request and return the response or an error message.
 
+The optional `timeout` argument overrides `req.timeout`.
+
 ```ard
 use ard/http
+use ard/io
 
-let req = http::Request {
+let req = http::Request{
   method: http::Method::Get,
   url: "https://api.example.com/users",
   headers: [:],
-  body: maybe::none()
 }
 
-match http::send(req) {
+match http::send(req, 60) {
   ok(response) => io::print(response.body),
   err(error) => io::print("Request failed: {error}")
 }
@@ -167,11 +176,10 @@ match http::send(req) {
 
 Start an HTTP server on the given port with route handlers.
 
-The handlers map keys are route paths and values are handler functions that take a request and a mutable response object. Handlers modify the response object directly rather than constructing and returning it.
+The handlers map keys are route paths and values are handler functions that take a request and a mutable response object. Handlers modify the response object directly.
 
 ```ard
 use ard/http
-use ard/io
 
 fn main() {
   let handlers: [Str:fn(http::Request, mut http::Response)] = [
@@ -180,27 +188,26 @@ fn main() {
       res.status = 200
     }
   ]
-  
+
   http::serve(8080, handlers).expect("Failed to start server")
 }
 ```
 
 ## Examples
 
-### Make a GET Request
+### Make a GET request
 
 ```ard
 use ard/http
 use ard/io
 
 fn main() {
-  let req = http::Request {
+  let req = http::Request{
     method: http::Method::Get,
     url: "https://jsonplaceholder.typicode.com/posts/1",
     headers: [:],
-    body: maybe::none()
   }
-  
+
   match http::send(req) {
     ok(response) => {
       if response.is_ok() {
@@ -214,26 +221,24 @@ fn main() {
 }
 ```
 
-### Make a POST Request
+### Make a POST request
 
 ```ard
 use ard/http
 use ard/io
 use ard/json
-use ard/maybe
-use ard/dynamic
 
 fn main() {
   let body_data = ["name": "Alice", "age": 30]
   let body_json = json::encode(body_data).expect("Failed to encode")
-  
-  let req = http::Request {
+
+  let req = http::Request{
     method: http::Method::Post,
     url: "https://api.example.com/users",
     headers: ["Content-Type": "application/json"],
-    body: maybe::some(dynamic::from_str(body_json))
+    body: body_json,
   }
-  
+
   match http::send(req) {
     ok(response) => io::print(response.body),
     err(error) => io::print("Request failed: {error}")
@@ -241,7 +246,24 @@ fn main() {
 }
 ```
 
-### Decode an Inbound JSON Body
+### Long-running request with timeout override
+
+```ard
+use ard/http
+
+fn main() {
+  let req = http::Request{
+    method: http::Method::Post,
+    url: "https://api.openai.com/v1/responses",
+    headers: ["content-type": "application/json"],
+    body: "{\"model\":\"gpt-4.1\"}",
+  }
+
+  let res = http::send(req, 90)
+}
+```
+
+### Decode an inbound JSON body
 
 ```ard
 use ard/http
@@ -279,11 +301,10 @@ fn main() {
 }
 ```
 
-### Simple HTTP Server
+### Simple HTTP server
 
 ```ard
 use ard/http
-use ard/io
 
 fn main() {
   let handlers: [Str:fn(http::Request, mut http::Response)] = [
@@ -298,12 +319,12 @@ fn main() {
       res.body = "User ID: {id}"
     }
   ]
-  
+
   http::serve(3000, handlers).expect("Failed to start server")
 }
 ```
 
-### HTTP Server with Query Parameters
+### HTTP server with query parameters
 
 ```ard
 use ard/http
@@ -315,7 +336,7 @@ fn main() {
       res.body = "Results for: {query}"
     }
   ]
-  
+
   http::serve(8080, handlers).expect("Failed to start server")
 }
 ```

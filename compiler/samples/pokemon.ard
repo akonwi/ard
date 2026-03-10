@@ -1,15 +1,16 @@
 use ard/io
 use ard/http
-use ard/maybe
 use ard/decode
+use ard/maybe
 
 fn main() {
   io::print("GET from pokemon api")
-  let res = http::send(http::Request{
+  let req = http::Request{
     method: http::Method::Get,
     url: "https://pokeapi.co/api/v2/pokemon",
     headers: [:],
-  }).expect("Unable to make request")
+  }
+  let res = http::send(req, 60).expect("Unable to make request")
 
   if res.is_ok() {
     let data = decode::from_json(res.body).expect("Unable to decode response body as JSON")

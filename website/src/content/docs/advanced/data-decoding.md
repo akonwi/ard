@@ -235,7 +235,12 @@ use ard/decode
 use ard/io
 
 fn fetch_pokemon() {
-  let response = http::get("https://pokeapi.co/api/v2/pokemon").expect("Request failed")
+  let req = http::Request{
+    method: http::Method::Get,
+    url: "https://pokeapi.co/api/v2/pokemon",
+    headers: [:],
+  }
+  let response = http::send(req, 10).expect("Request failed")
 
   if response.is_ok() {
     // Extract count

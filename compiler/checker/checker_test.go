@@ -2477,5 +2477,12 @@ func TestGenericTypeParams(t *testing.T) {
 				`let box: Box<[Int]> = Box{ item: [1, 2, 3] }`,
 			}, "\n"),
 		},
+		{
+			name: "Multiple type parameters preserve declaration order rather than field-name order",
+			input: strings.Join([]string{
+				`struct Weird { zeta: $T, alpha: $U }`,
+				`let weird: Weird<Int, Str> = Weird{ zeta: 42, alpha: "hello" }`,
+			}, "\n"),
+		},
 	})
 }

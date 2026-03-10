@@ -1245,12 +1245,13 @@ func (u Union) hasTrait(trait *Trait) bool {
 }
 
 type StructDef struct {
-	Name    string
-	Fields  map[string]Type
-	Methods map[string]*FunctionDef
-	Self    string
-	Traits  []*Trait
-	Private bool
+	Name          string
+	Fields        map[string]Type
+	Methods       map[string]*FunctionDef
+	Self          string
+	Traits        []*Trait
+	GenericParams []string
+	Private       bool
 }
 
 func (def StructDef) NonProducing() {}
