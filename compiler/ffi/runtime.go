@@ -11,11 +11,39 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
+var (
+	osArgsMu       sync.RWMutex
+	osArgsOverride []string
+)
+
+func SetOSArgs(args []string) {
+	osArgsMu.Lock()
+	defer osArgsMu.Unlock()
+
+	if args == nil {
+		osArgsOverride = nil
+		return
+	}
+
+	osArgsOverride = append([]string(nil), args...)
+}
+
+func currentOSArgs() []string {
+	osArgsMu.RLock()
+	override := append([]string(nil), osArgsOverride...)
+	osArgsMu.RUnlock()
+	if override != nil {
+		return override
+	}
+	return append([]string(nil), os.Args...)
+}
+
 // Runtime module FFI functions
 
 func OsArgs(_ []*runtime.Object, _ checker.Type) *runtime.Object {
-	var out []*runtime.Object = make([]*runtime.Object, len(os.Args))
-	for i, a := range os.Args {
+	args := currentOSArgs()
+	var out []*runtime.Object = make([]*runtime.Object, len(args))
+	for i, a := range args {
 		out[i] = runtime.MakeStr(a)
 	}
 	return runtime.MakeList(checker.Str, out...)

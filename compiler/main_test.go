@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -150,6 +151,65 @@ func TestFormatPath(t *testing.T) {
 		}
 		if changedPaths[0] != first && changedPaths[0] != second {
 			t.Fatalf("unexpected changed path %q", changedPaths[0])
+		}
+	})
+}
+
+func TestStandaloneBuildPreservesRuntimeArgs(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "argv.ard")
+	source := `use ard/argv
+use ard/io
+
+fn main() {
+  let args = argv::load()
+  match args.arguments.size() {
+    0 => io::print("missing"),
+    _ => io::print(args.arguments.at(0)),
+  }
+}
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+
+	compilerBin := filepath.Join(dir, "ard-test")
+	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
+	buildCompiler.Dir = "."
+	out, err := buildCompiler.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build compiler: %v\n%s", err, out)
+	}
+
+	t.Run("interpreter mode", func(t *testing.T) {
+		cmd := exec.Command(compilerBin, "run", sourcePath, "up")
+		cmd.Dir = "."
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("interpreter run failed: %v\n%s", err, out)
+		}
+		if string(out) != "up\n" {
+			t.Fatalf("expected interpreter output %q, got %q", "up\\n", string(out))
+		}
+	})
+
+	t.Run("compiled binary mode", func(t *testing.T) {
+		programBin := filepath.Join(dir, "argv-bin")
+		buildProgram := exec.Command(compilerBin, "build", sourcePath, "--out", programBin)
+		buildProgram.Dir = "."
+		out, err := buildProgram.CombinedOutput()
+		if err != nil {
+			t.Fatalf("failed to build standalone binary: %v\n%s", err, out)
+		}
+
+		cmd := exec.Command(programBin, "up")
+		cmd.Dir = "."
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("compiled binary failed: %v\n%s", err, out)
+		}
+		if string(out) != "up\n" {
+			t.Fatalf("expected compiled output %q, got %q", "up\\n", string(out))
 		}
 	})
 }

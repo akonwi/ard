@@ -9,5 +9,16 @@ struct Argv {
 
 fn load() Argv {
   let args = os_args()
-  Argv{program: args.at(2), arguments: List::drop(from: args, till: 3)}
+
+  match {
+    args.size() >= 3 and args.at(1) == "run" => Argv{
+      program: args.at(2),
+      arguments: List::drop(from: args, till: 3),
+    },
+    args.size() >= 1 => Argv{
+      program: args.at(0),
+      arguments: List::drop(from: args, till: 1),
+    },
+    _ => Argv{program: "", arguments: []},
+  }
 }
