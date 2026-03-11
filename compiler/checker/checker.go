@@ -1644,20 +1644,29 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				// For non-generic structs, handle nullable fields with implicit wrapping
 				var val Expression
 				if maybeField, isMaybe := field.(*Maybe); isMaybe {
-					// For literals and anonymous functions, use inner type for type inference context
+					// Preserve full Maybe<T> type context for expressions like maybe::some(...)
+					// and maybe::none(), but use the inner type for literals and anonymous
+					// functions so they can still infer their element/parameter types.
 					switch property.Value.(type) {
 					case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
 						val = c.checkExprAs(property.Value, maybeField.Of())
-					default:
-						val = c.checkExpr(property.Value)
-					}
-					// Implicit Maybe wrapping: if value is T, wrap in maybe::some(T)
-					if val != nil && !val.Type().equal(field) {
-						if maybeField.Of().equal(val.Type()) {
+						if val != nil {
 							val = c.synthesizeMaybeSome(val, field)
-						} else {
-							c.addError(typeMismatch(field, val.Type()), property.GetLocation())
-							val = nil
+						}
+					default:
+						diagnosticCount := len(c.diagnostics)
+						val = c.checkExprAs(property.Value, field)
+						if val == nil {
+							c.diagnostics = c.diagnostics[:diagnosticCount]
+							val = c.checkExpr(property.Value)
+							if val != nil && !val.Type().equal(field) {
+								if maybeField.Of().equal(val.Type()) {
+									val = c.synthesizeMaybeSome(val, field)
+								} else {
+									c.addError(typeMismatch(field, val.Type()), property.GetLocation())
+									val = nil
+								}
+							}
 						}
 					}
 				} else {

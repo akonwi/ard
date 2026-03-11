@@ -157,6 +157,36 @@ func TestBytecodeStructMaybeFieldImplicitWrapping(t *testing.T) {
 			`,
 			want: "1,hi,true",
 		},
+		{
+			name: "explicit maybe values still infer against nullable dynamic struct fields",
+			input: `
+				use ard/http
+				use ard/maybe
+				let req = http::Request{
+					method: http::Method::Post,
+					url: "https://example.com",
+					headers: [:],
+					body: maybe::some("payload"),
+				}
+				req.body.is_some()
+			`,
+			want: true,
+		},
+		{
+			name: "maybe none still infers against nullable dynamic struct fields",
+			input: `
+				use ard/http
+				use ard/maybe
+				let req = http::Request{
+					method: http::Method::Del,
+					url: "https://example.com",
+					headers: [:],
+					body: maybe::none(),
+				}
+				req.body.is_none()
+			`,
+			want: true,
+		},
 	}
 
 	for _, test := range tests {
