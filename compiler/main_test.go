@@ -7,6 +7,79 @@ import (
 	"testing"
 )
 
+func TestParseTestArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		path       string
+		filter     string
+		failFast   bool
+		expectErr  bool
+		errMessage string
+	}{
+		{
+			name:     "defaults to current directory",
+			args:     []string{},
+			path:     ".",
+			filter:   "",
+			failFast: false,
+		},
+		{
+			name:     "path and flags",
+			args:     []string{"samples", "--filter", "math", "--fail-fast"},
+			path:     "samples",
+			filter:   "math",
+			failFast: true,
+		},
+		{
+			name:       "missing filter value",
+			args:       []string{"--filter"},
+			expectErr:  true,
+			errMessage: "--filter requires a value",
+		},
+		{
+			name:       "unknown flag",
+			args:       []string{"--list"},
+			expectErr:  true,
+			errMessage: "unknown flag: --list",
+		},
+		{
+			name:       "unexpected extra argument",
+			args:       []string{"a.ard", "b.ard"},
+			expectErr:  true,
+			errMessage: "unexpected argument: b.ard",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, filter, failFast, err := parseTestArgs(tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.errMessage)
+				}
+				if err.Error() != tt.errMessage {
+					t.Fatalf("expected error %q, got %q", tt.errMessage, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("did not expect error: %v", err)
+			}
+			if path != tt.path {
+				t.Fatalf("expected path %q, got %q", tt.path, path)
+			}
+			if filter != tt.filter {
+				t.Fatalf("expected filter %q, got %q", tt.filter, filter)
+			}
+			if failFast != tt.failFast {
+				t.Fatalf("expected failFast %t, got %t", tt.failFast, failFast)
+			}
+		})
+	}
+}
+
 func TestParseFormatArgs(t *testing.T) {
 	tests := []struct {
 		name       string

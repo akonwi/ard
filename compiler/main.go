@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/akonwi/ard/bytecode"
@@ -16,6 +17,7 @@ import (
 	"github.com/akonwi/ard/ffi"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
 )
 
@@ -90,6 +92,18 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Printf("Built %s\n", builtPath)
+		}
+	case "test":
+		{
+			inputPath, filter, failFast, err := parseTestArgs(os.Args[2:])
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			if !runTests(inputPath, filter, failFast) {
+				os.Exit(1)
+			}
+			os.Exit(0)
 		}
 	case "format":
 		{
@@ -239,6 +253,38 @@ func parseFormatArgs(args []string) (string, bool, error) {
 	return inputPath, checkOnly, nil
 }
 
+func parseTestArgs(args []string) (string, string, bool, error) {
+	inputPath := "."
+	filter := ""
+	failFast := false
+	seenPath := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--fail-fast":
+			failFast = true
+		case "--filter":
+			if i+1 >= len(args) {
+				return "", "", false, fmt.Errorf("--filter requires a value")
+			}
+			filter = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return "", "", false, fmt.Errorf("unknown flag: %s", arg)
+			}
+			if seenPath {
+				return "", "", false, fmt.Errorf("unexpected argument: %s", arg)
+			}
+			inputPath = arg
+			seenPath = true
+		}
+	}
+
+	return inputPath, filter, failFast, nil
+}
+
 func formatPath(inputPath string, checkOnly bool) ([]string, error) {
 	fileInfo, err := os.Stat(inputPath)
 	if err != nil {
@@ -314,6 +360,207 @@ func formatFile(inputPath string, checkOnly bool) (bool, error) {
 	}
 
 	return true, nil
+}
+
+type discoveredTest struct {
+	filePath    string
+	displayPath string
+	name        string
+}
+
+type testStatus string
+
+const (
+	testPass  testStatus = "PASS"
+	testFail  testStatus = "FAIL"
+	testPanic testStatus = "PANIC"
+)
+
+type testOutcome struct {
+	test    discoveredTest
+	status  testStatus
+	message string
+}
+
+func runTests(inputPath, filter string, failFast bool) bool {
+	files, err := discoverTestFiles(inputPath)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	outcomes := make([]testOutcome, 0)
+	for _, path := range files {
+		module, err := loadModule(path)
+		if err != nil {
+			return false
+		}
+		tests := collectTests(module, path, filter)
+		if len(tests) == 0 {
+			continue
+		}
+
+		program, err := bytecode.NewEmitter().EmitProgram(module)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		if err := bytecode.VerifyProgram(program); err != nil {
+			fmt.Println(err)
+			return false
+		}
+
+		for _, test := range tests {
+			outcome := runCompiledTest(program, test)
+			outcomes = append(outcomes, outcome)
+			reportTestOutcome(outcome)
+			if failFast && outcome.status != testPass {
+				reportTestSummary(outcomes)
+				return false
+			}
+		}
+	}
+
+	if len(outcomes) == 0 {
+		fmt.Println("No tests found")
+		return true
+	}
+
+	reportTestSummary(outcomes)
+	for _, outcome := range outcomes {
+		if outcome.status != testPass {
+			return false
+		}
+	}
+	return true
+}
+
+func discoverTestFiles(inputPath string) ([]string, error) {
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading path %s - %w", inputPath, err)
+	}
+
+	if !info.IsDir() {
+		if filepath.Ext(inputPath) != ".ard" {
+			return nil, fmt.Errorf("expected an .ard file or directory: %s", inputPath)
+		}
+		return []string{filepath.Clean(inputPath)}, nil
+	}
+
+	files := make([]string, 0)
+	seen := make(map[string]struct{})
+	err = filepath.WalkDir(inputPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if strings.HasPrefix(entry.Name(), ".") && path != inputPath {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".ard" {
+			return nil
+		}
+		cleaned := filepath.Clean(path)
+		if _, ok := seen[cleaned]; ok {
+			return nil
+		}
+		seen[cleaned] = struct{}{}
+		files = append(files, cleaned)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func collectTests(module checker.Module, filePath string, filter string) []discoveredTest {
+	program := module.Program()
+	if program == nil {
+		return nil
+	}
+
+	displayPath := strings.TrimSuffix(filepath.Clean(filePath), filepath.Ext(filePath))
+	tests := make([]discoveredTest, 0)
+	for _, stmt := range program.Statements {
+		fn, ok := stmt.Expr.(*checker.FunctionDef)
+		if !ok || !fn.IsTest {
+			continue
+		}
+		test := discoveredTest{
+			filePath:    filePath,
+			displayPath: displayPath,
+			name:        fn.Name,
+		}
+		if filter != "" && !strings.Contains(test.displayName(), filter) {
+			continue
+		}
+		tests = append(tests, test)
+	}
+	return tests
+}
+
+func (t discoveredTest) displayName() string {
+	return fmt.Sprintf("%s::%s", t.displayPath, t.name)
+}
+
+func runCompiledTest(program bytecode.Program, test discoveredTest) testOutcome {
+	ffi.SetOSArgs(os.Args)
+	defer ffi.SetOSArgs(nil)
+
+	res, err := bytecodevm.New(program).Run(test.name)
+	if err != nil {
+		return testOutcome{test: test, status: testPanic, message: err.Error()}
+	}
+	if res == nil {
+		return testOutcome{test: test, status: testPanic, message: "test returned no result"}
+	}
+	if !res.IsResult() {
+		return testOutcome{test: test, status: testPanic, message: "test did not return a Result"}
+	}
+	if res.IsErr() {
+		return testOutcome{test: test, status: testFail, message: resultMessage(res)}
+	}
+	return testOutcome{test: test, status: testPass}
+}
+
+func resultMessage(res *runtime.Object) string {
+	if res == nil {
+		return ""
+	}
+	unwrapped := res.UnwrapResult()
+	if msg, ok := unwrapped.IsStr(); ok {
+		return msg
+	}
+	return fmt.Sprintf("%v", unwrapped.GoValue())
+}
+
+func reportTestOutcome(outcome testOutcome) {
+	fmt.Printf("%s  %s\n", outcome.status, outcome.test.displayName())
+	if outcome.message != "" && outcome.status != testPass {
+		fmt.Printf("  %s\n", outcome.message)
+	}
+}
+
+func reportTestSummary(outcomes []testOutcome) {
+	passed := 0
+	failed := 0
+	panicked := 0
+	for _, outcome := range outcomes {
+		switch outcome.status {
+		case testPass:
+			passed++
+		case testFail:
+			failed++
+		case testPanic:
+			panicked++
+		}
+	}
+	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
 }
 
 func buildBytecodeBinary(inputPath string, outputPath string) (string, error) {
