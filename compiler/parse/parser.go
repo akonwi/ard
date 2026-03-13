@@ -318,6 +318,11 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.forLoop()
 	}
 
+	if p.check(identifier, fn) && p.peek().text == "test" {
+		p.advance() // consume contextual 'test'
+		return p.functionDef(false, true)
+	}
+
 	if p.check(private, type_) {
 		p.match(private)
 		p.match(type_)
@@ -917,7 +922,7 @@ func (p *parser) implBlock() *ImplBlock {
 			continue
 		}
 
-		stmt, err := p.functionDef(true)
+		stmt, err := p.functionDef(true, false)
 		if err != nil {
 			// For now, keep the old error handling until functionDef is converted
 			p.addError(p.peek(), err.Error())
@@ -1189,7 +1194,7 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		if p.match(new_line) {
 			continue
 		}
-		stmt, err := p.functionDef(true)
+		stmt, err := p.functionDef(true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1909,7 +1914,7 @@ func (p *parser) try() (Expression, error) {
 			Name:     idToken.text,
 			Location: idToken.getLocation(),
 		}
-		expr, err := p.functionDef(false)
+		expr, err := p.functionDef(false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -2072,7 +2077,7 @@ func (p *parser) try() (Expression, error) {
 	}
 
 	// Not a `try` expression: parse the underlying expression as usual.
-	expr, err := p.functionDef(false)
+	expr, err := p.functionDef(false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2100,7 +2105,7 @@ func (p *parser) try() (Expression, error) {
 	return expr, nil
 }
 
-func (p *parser) functionDef(asMethod bool) (Statement, error) {
+func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 	private := p.match(private)
 	isExtern := p.match(extern)
 	if p.match(fn) {
@@ -2290,6 +2295,7 @@ func (p *parser) functionDef(asMethod bool) (Statement, error) {
 			Private:    private,
 			TypeParams: typeParams,
 			Mutates:    asMethod && mutates,
+			IsTest:     isTest,
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       statements,
@@ -3116,7 +3122,7 @@ func (p *parser) list() (Expression, error) {
 			continue
 		}
 
-		item, err := p.functionDef(false)
+		item, err := p.functionDef(false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -3185,7 +3191,7 @@ func (p *parser) map_() (Expression, error) {
 			}
 		}
 		p.advance() // consume the ':'
-		val, err := p.functionDef(false)
+		val, err := p.functionDef(false, false)
 		if err != nil {
 			return nil, err
 		}

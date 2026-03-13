@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestFunctions(t *testing.T) {
@@ -161,6 +162,46 @@ func TestFunctions(t *testing.T) {
 			),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "missing argument for parameter: b"},
+			},
+		},
+	})
+}
+
+func TestTestFunctions(t *testing.T) {
+	t.Run("marks valid test functions", func(t *testing.T) {
+		result := parse.Parse([]byte(`test fn works() Void!Str { Result::ok(()) }`), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("Parse errors: %v", result.Errors[0].Message)
+		}
+
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("Diagnostics found: %v", c.Diagnostics())
+		}
+
+		fn, ok := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+		if !ok {
+			t.Fatalf("Expected first statement to be a function definition, got %T", c.Module().Program().Statements[0].Expr)
+		}
+		if !fn.IsTest {
+			t.Fatalf("Expected function to be marked as test")
+		}
+	})
+
+	run(t, []test{
+		{
+			name:  "test functions must not take parameters",
+			input: `test fn invalid(name: Str) Void!Str { Result::ok(()) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must not take parameters"},
+			},
+		},
+		{
+			name:  "test functions must return Void!Str",
+			input: `test fn invalid() {}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must return Void!Str"},
 			},
 		},
 	})

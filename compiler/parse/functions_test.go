@@ -56,6 +56,21 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
+			name:  "Test function",
+			input: `test fn empty() {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						IsTest:     true,
+						Name:       "empty",
+						Parameters: []Parameter{},
+						Body:       []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name:  "Function with generics",
 			input: `fn decode(str: $In) $Out {}`,
 			output: Program{

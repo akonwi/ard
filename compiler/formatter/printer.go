@@ -235,6 +235,9 @@ func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, t
 	if node.Private {
 		prefix += "private "
 	}
+	if node.IsTest {
+		prefix += "test "
+	}
 	header := prefix + "fn "
 	if node.Mutates {
 		header += "mut "

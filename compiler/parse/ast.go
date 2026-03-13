@@ -288,6 +288,7 @@ type FunctionDeclaration struct {
 	Name       string
 	TypeParams []string // Generic type parameters (e.g., ["T", "U"] for fn<$T, $U>(...))
 	Mutates    bool
+	IsTest     bool
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
