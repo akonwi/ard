@@ -1,6 +1,6 @@
 # Ard Testing Framework RFC
 
-Status: proposed
+Status: implemented
 
 ## Summary
 
