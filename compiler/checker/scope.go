@@ -145,8 +145,14 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 		return nil
 	}
 
+	// Avoid self-referential binding (TypeVar bound to itself)
+	resolved := deref(concreteType)
+	if resolved == typeVar {
+		return nil
+	}
+
 	// Bind it now - mutate the TypeVar in-place
-	typeVar.actual = deref(concreteType)
+	typeVar.actual = resolved
 	typeVar.bound = true
 
 	return nil

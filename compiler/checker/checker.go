@@ -47,6 +47,9 @@ func (d Diagnostic) String() string {
 // If $T is bound to [$U], deref($T) returns [$U] (not the resolved contents).
 func deref(t Type) Type {
 	if typeVar, ok := t.(*TypeVar); ok && typeVar.bound {
+		if typeVar.actual == t {
+			return t // break self-referential cycle
+		}
 		return deref(typeVar.actual) // Recursively follow chains
 	}
 	return t
