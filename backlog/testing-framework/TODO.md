@@ -110,6 +110,6 @@ Keep this checklist updated as implementation progresses.
 
 ## Tree-sitter / Editor support
 
-- [ ] Update tree-sitter grammar to recognize the `test` keyword in `test fn` declarations
-- [ ] Update highlighting queries to highlight `test` as a keyword
-- [ ] Sync highlights to the Zed plugin
+- [x] Update tree-sitter grammar to recognize the `test` keyword in `test fn` declarations
+- [x] Update highlighting queries to highlight `test` as a keyword
+- [x] Sync highlights to the Zed plugin
