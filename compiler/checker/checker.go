@@ -4276,6 +4276,9 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 		if len(def.Parameters) > 0 {
 			c.addError("test functions must not take parameters", def.GetLocation())
 		}
+		if len(def.TypeParams) > 0 {
+			c.addError("test functions must not be generic", def.GetLocation())
+		}
 		expectedReturnType := MakeResult(Void, Str)
 		if !returnType.equal(expectedReturnType) {
 			c.addError("test functions must return Void!Str", def.GetLocation())

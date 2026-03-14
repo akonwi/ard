@@ -545,6 +545,73 @@ func TestAnonymousFunctions(t *testing.T) {
 	runTests(t, tests)
 }
 
+func TestTestFunctionEdgeCases(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Test function with comments before",
+			input: "// a test\ntest fn my_test() Void!Str { Result::ok(()) }",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&Comment{Value: "// a test"},
+					&FunctionDeclaration{
+						IsTest:     true,
+						Name:       "my_test",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &VoidType{},
+							Err: &StringType{},
+						},
+						Body: []Statement{
+							&StaticFunction{
+								Target: &Identifier{Name: "Result"},
+								Function: FunctionCall{
+									Name: "ok",
+									Args: []Argument{
+										{Name: "", Value: &VoidLiteral{}},
+									},
+									Comments: []Comment{},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Test function with generic type params",
+			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						IsTest:     true,
+						Name:       "generic_test",
+						TypeParams: []string{"T"},
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &VoidType{},
+							Err: &StringType{},
+						},
+						Body: []Statement{
+							&StaticFunction{
+								Target: &Identifier{Name: "Result"},
+								Function: FunctionCall{
+									Name: "ok",
+									Args: []Argument{
+										{Name: "", Value: &VoidLiteral{}},
+									},
+									Comments: []Comment{},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestGenericFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{

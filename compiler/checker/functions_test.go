@@ -204,6 +204,27 @@ func TestTestFunctions(t *testing.T) {
 				{Kind: checker.Error, Message: "test functions must return Void!Str"},
 			},
 		},
+		{
+			name:  "test functions must not be generic",
+			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must not be generic"},
+			},
+		},
+		{
+			name:  "test functions returning wrong error type",
+			input: `test fn wrong_err() Void!Int { Result::ok(()) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must return Void!Str"},
+			},
+		},
+		{
+			name:  "test functions returning plain value",
+			input: `test fn returns_int() Int { 42 }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must return Void!Str"},
+			},
+		},
 	})
 }
 

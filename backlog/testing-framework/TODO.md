@@ -21,8 +21,8 @@ Keep this checklist updated as implementation progresses.
 - [x] Keep `test` contextual rather than globally reserved if possible
 - [x] Restrict `test fn` to top-level declarations
 - [x] Add parser tests for valid `test fn`
-- [ ] Add parser tests for invalid test declarations
-- [ ] Add parser tests for comments around test declarations
+- [x] Add parser tests for invalid test declarations
+- [x] Add parser tests for comments around test declarations
 
 ## Formatter
 
@@ -35,7 +35,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Validate test functions are top-level
 - [x] Validate test functions have zero parameters
 - [x] Validate test functions return `Void!Str`
-- [ ] Decide whether generic test functions are disallowed in v1
+- [x] Decide whether generic test functions are disallowed in v1 (disallowed)
 - [x] Preserve test metadata in checked output
 - [ ] Implement test-mode semantics in checker pipeline
 - [x] Add checker tests for invalid test signatures
@@ -101,9 +101,9 @@ Keep this checklist updated as implementation progresses.
 
 ## Docs
 
-- [ ] Add compiler/user docs for writing tests
-- [ ] Document co-located tests vs `/test`
-- [ ] Document `FAIL` vs `PANIC`
-- [ ] Document `--filter` and `--fail-fast`
+- [x] Add compiler/user docs for writing tests
+- [x] Document co-located tests vs `/test`
+- [x] Document `FAIL` vs `PANIC`
+- [x] Document `--filter` and `--fail-fast`
 - [ ] Update root README if appropriate
 - [ ] Keep this backlog checklist updated during implementation
