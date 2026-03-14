@@ -1,6 +1,6 @@
 # Testing Framework TODO
 
-Status: in progress
+Status: complete
 
 Keep this checklist updated as implementation progresses.
 
@@ -10,9 +10,9 @@ Keep this checklist updated as implementation progresses.
 - [x] Confirm all test functions must return `Void!Str`
 - [x] Confirm failure classification: `PASS`, `FAIL`, `PANIC`
 - [x] Confirm `/test` directory semantics
-- [ ] Confirm co-located test visibility semantics
+- [x] Confirm co-located test visibility semantics
 - [x] Confirm `ard test` CLI scope behavior for project, directory, and file paths
-- [ ] Confirm initialization semantics for individually executed tests
+- [x] Confirm initialization semantics for individually executed tests (each test runs in a fresh VM)
 
 ## Parser and AST
 
@@ -39,8 +39,8 @@ Keep this checklist updated as implementation progresses.
 - [x] Preserve test metadata in checked output
 - [x] Implement test-mode semantics in checker/emitter pipeline (test functions stripped from `run`/`build`, included via `NewTestEmitter()` for `ard test`)
 - [x] Add checker tests for invalid test signatures
-- [ ] Add checker tests for co-located test visibility
-- [ ] Add checker tests for `/test` privacy behavior
+- [x] Add checker tests for co-located test visibility
+- [x] Add checker tests for `/test` privacy behavior
 
 ## CLI and discovery
 
@@ -74,7 +74,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Add `testing::equal(actual: $T, expected: $T) Void!Str`
 - [x] Add `testing::not_equal(actual: $T, expected: $T) Void!Str`
 - [x] Decide whether equality helpers can be implemented purely in Ard
-- [ ] Add stdlib tests for testing helpers
+- [x] Add stdlib tests for testing helpers (co-located in std_lib/testing.ard)
 
 ## Reporting
 
@@ -106,7 +106,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Document `FAIL` vs `PANIC`
 - [x] Document `--filter` and `--fail-fast`
 - [x] Update root README if appropriate
-- [ ] Keep this backlog checklist updated during implementation
+- [x] Keep this backlog checklist updated during implementation
 
 ## Tree-sitter / Editor support
 
