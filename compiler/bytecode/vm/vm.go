@@ -1196,6 +1196,14 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 			}
 			return runtime.MakeBool(!eq), nil
 		}
+		// Handle KindDynamic: compare underlying Go values when kinds don't match
+		if left.Kind() == runtime.KindDynamic || right.Kind() == runtime.KindDynamic {
+			eq := left.Raw() == right.Raw()
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
 		return runtime.MakeBool(false), nil
 	}
 	if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindInt {
