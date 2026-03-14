@@ -371,10 +371,23 @@ type discoveredTest struct {
 type testStatus string
 
 const (
-	testPass  testStatus = "PASS"
-	testFail  testStatus = "FAIL"
-	testPanic testStatus = "PANIC"
+	testPass  testStatus = "pass"
+	testFail  testStatus = "fail"
+	testPanic testStatus = "panic"
 )
+
+func (s testStatus) symbol() string {
+	switch s {
+	case testPass:
+		return "✓"
+	case testFail:
+		return "✗"
+	case testPanic:
+		return "💥"
+	default:
+		return "?"
+	}
+}
 
 type testOutcome struct {
 	test    discoveredTest
@@ -540,7 +553,7 @@ func resultMessage(res *runtime.Object) string {
 }
 
 func reportTestOutcome(outcome testOutcome) {
-	fmt.Printf("%s  %s\n", outcome.status, outcome.test.displayName())
+	fmt.Printf("%s  %s\n", outcome.status.symbol(), outcome.test.displayName())
 	if outcome.message != "" && outcome.status != testPass {
 		fmt.Printf("  %s\n", outcome.message)
 	}

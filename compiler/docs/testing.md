@@ -234,14 +234,14 @@ Recommended output shape:
 ```text
 running 4 tests
 
-PASS  math::add_works
-FAIL  math::subtract_handles_negative
+✓  math::add_works
+✗  math::subtract_handles_negative
   expected -1, got 1
 
-PANIC parser::invalid_input_crashes
+💥  parser::invalid_input_crashes
   panic: index out of range
 
-PASS  result::ok_wraps_value
+✓  result::ok_wraps_value
 
 2 passed; 1 failed; 1 panicked
 ```

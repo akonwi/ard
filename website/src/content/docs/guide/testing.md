@@ -109,10 +109,10 @@ Each test produces one of three results:
 - **PANIC** — the test crashed with an unexpected runtime error
 
 ```
-PASS  math::test_add
-FAIL  math::test_subtract
+✓  math::test_add
+✗  math::test_subtract
   Expected values to be equal
-PANIC  math::test_divide
+💥  math::test_divide
   division by zero
 
 2 passed; 1 failed; 1 panicked

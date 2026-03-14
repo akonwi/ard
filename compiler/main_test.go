@@ -298,7 +298,7 @@ test fn panics() Void!Str {
 		if !ok {
 			t.Fatalf("expected tests to pass\n%s", output)
 		}
-		if !strings.Contains(output, "PASS") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
+		if !strings.Contains(output, "✓") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
@@ -311,7 +311,7 @@ test fn panics() Void!Str {
 		if ok {
 			t.Fatalf("expected failing test command behavior\n%s", output)
 		}
-		if !strings.Contains(output, "FAIL") || !strings.Contains(output, "PANIC") || !strings.Contains(output, "0 passed; 1 failed; 1 panicked") {
+		if !strings.Contains(output, "✗") || !strings.Contains(output, "💥") || !strings.Contains(output, "0 passed; 1 failed; 1 panicked") {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
@@ -324,7 +324,7 @@ test fn panics() Void!Str {
 		if ok {
 			t.Fatalf("expected failing test command behavior\n%s", output)
 		}
-		if strings.Contains(output, "PANIC") || !strings.Contains(output, "0 passed; 1 failed; 0 panicked") {
+		if strings.Contains(output, "💥") || !strings.Contains(output, "0 passed; 1 failed; 0 panicked") {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
