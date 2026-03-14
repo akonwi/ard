@@ -107,3 +107,9 @@ Keep this checklist updated as implementation progresses.
 - [x] Document `--filter` and `--fail-fast`
 - [ ] Update root README if appropriate
 - [ ] Keep this backlog checklist updated during implementation
+
+## Tree-sitter / Editor support
+
+- [ ] Update tree-sitter grammar to recognize the `test` keyword in `test fn` declarations
+- [ ] Update highlighting queries to highlight `test` as a keyword
+- [ ] Sync highlights to the Zed plugin
