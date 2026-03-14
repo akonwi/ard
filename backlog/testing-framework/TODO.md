@@ -27,8 +27,8 @@ Keep this checklist updated as implementation progresses.
 ## Formatter
 
 - [x] Add formatter support for `test fn`
-- [ ] Add formatter tests for `test fn`
-- [ ] Validate formatter idempotence for test declarations
+- [x] Add formatter tests for `test fn`
+- [x] Validate formatter idempotence for test declarations
 
 ## Checker
 

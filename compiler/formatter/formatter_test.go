@@ -135,6 +135,21 @@ func TestFormat(t *testing.T) {
 			output: "struct Request {\n  body: Dynamic?,\n\n  // inbound requests have the *http.Request\n  raw: Dynamic?,\n}\n",
 		},
 		{
+			name:   "formats test function",
+			input:  "test fn my_test() Void!Str { Result::ok(()) }",
+			output: "test fn my_test() Void!Str {\n  Result::ok(())\n}\n",
+		},
+		{
+			name:   "formats test function with body",
+			input:  "test fn check() Void!Str { try testing::assert(true,\"ok\")\nResult::ok(()) }",
+			output: "test fn check() Void!Str {\n  try testing::assert(true, \"ok\")\n  Result::ok(())\n}\n",
+		},
+		{
+			name:   "test fn alongside regular fn",
+			input:  "fn helper() Int { 1 }\ntest fn test_helper() Void!Str { Result::ok(()) }\n",
+			output: "fn helper() Int {\n  1\n}\ntest fn test_helper() Void!Str {\n  Result::ok(())\n}\n",
+		},
+		{
 			name:  "fails on invalid source",
 			input: "fn broken( {",
 			error: true,
@@ -186,19 +201,39 @@ func TestFormat(t *testing.T) {
 }
 
 func TestFormatIsIdempotent(t *testing.T) {
-	input := "fn example() {\n  let raw = try self.raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n"
-
-	first, err := Format([]byte(input), "test.ard")
-	if err != nil {
-		t.Fatalf("first format failed: %v", err)
+	inputs := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "try catch block",
+			input: "fn example() {\n  let raw = try self.raw -> _ {\n    \"\"\n  }\n  next(raw)\n}\n",
+		},
+		{
+			name:  "test function",
+			input: "test fn my_test() Void!Str {\n  try testing::assert(true, \"ok\")\n  Result::ok(())\n}\n",
+		},
+		{
+			name:  "test and regular functions together",
+			input: "fn helper() Int {\n  1\n}\ntest fn test_helper() Void!Str {\n  Result::ok(())\n}\n",
+		},
 	}
 
-	second, err := Format(first, "test.ard")
-	if err != nil {
-		t.Fatalf("second format failed: %v", err)
-	}
+	for _, tt := range inputs {
+		t.Run(tt.name, func(t *testing.T) {
+			first, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("first format failed: %v", err)
+			}
 
-	if string(first) != string(second) {
-		t.Fatalf("expected idempotent formatting, first=%q second=%q", string(first), string(second))
+			second, err := Format(first, "test.ard")
+			if err != nil {
+				t.Fatalf("second format failed: %v", err)
+			}
+
+			if string(first) != string(second) {
+				t.Fatalf("expected idempotent formatting, first=%q second=%q", string(first), string(second))
+			}
+		})
 	}
 }
