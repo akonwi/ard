@@ -1,6 +1,7 @@
-// Standard library JSON module implemented with FFI
 use ard/maybe
 use ard/testing
+
+// Standard library JSON module implemented with FFI
 
 extern fn encode(value: $T) Str!Str = "JsonEncode"
 

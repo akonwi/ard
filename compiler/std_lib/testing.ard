@@ -2,12 +2,14 @@ fn fail(message: Str) Void!Str {
   Result::err(message)
 }
 
-fn pass() Void!Str { Result::ok(()) }
+fn pass() Void!Str {
+  Result::ok(())
+}
 
 fn assert(condition: Bool, message: Str) Void!Str {
   match condition {
     true => Result::ok(()),
-    false => Result::err(message)
+    false => Result::err(message),
   }
 }
 
@@ -20,7 +22,7 @@ test fn test_assert_false_fails_with_message() Void!Str {
   let result = assert(false, "custom message")
   match result {
     ok => fail("assert(false) should have returned an error"),
-    err(msg) => assert(msg == "custom message", "Expected custom message")
+    err(msg) => assert(msg == "custom message", "Expected custom message"),
   }
 }
 
@@ -28,6 +30,6 @@ test fn test_fail_returns_error() Void!Str {
   let result = fail("boom")
   match result {
     ok => assert(false, "fail() should have returned an error"),
-    err(msg) => assert(msg == "boom", "Expected error message 'boom'")
+    err(msg) => assert(msg == "boom", "Expected error message 'boom'"),
   }
 }
