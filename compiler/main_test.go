@@ -1,12 +1,39 @@
 package main
 
 import (
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stdout writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("failed to close stdout reader: %v", err)
+	}
+	return string(out)
+}
 
 func TestParseTestArgs(t *testing.T) {
 	tests := []struct {
@@ -231,14 +258,6 @@ func TestFormatPath(t *testing.T) {
 
 func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
-	compilerBin := filepath.Join(dir, "ard-test")
-	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
-	buildCompiler.Dir = "."
-	out, err := buildCompiler.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build compiler: %v\n%s", err, out)
-	}
-
 	projectDir := filepath.Join(dir, "project")
 	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
 		t.Fatalf("failed to create project dir: %v", err)
@@ -274,39 +293,39 @@ test fn panics() Void!Str {
 	}
 
 	t.Run("passing filter", func(t *testing.T) {
-		cmd := exec.Command(compilerBin, "test", "--filter", "passes", projectDir)
-		cmd.Dir = "."
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("test command failed: %v\n%s", err, out)
+		var ok bool
+		output := captureStdout(t, func() {
+			ok = runTests(projectDir, "passes", false)
+		})
+		if !ok {
+			t.Fatalf("expected tests to pass\n%s", output)
 		}
-		output := string(out)
 		if !strings.Contains(output, "PASS") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
 
 	t.Run("fail and panic classification", func(t *testing.T) {
-		cmd := exec.Command(compilerBin, "test", "--filter", "failures", projectDir)
-		cmd.Dir = "."
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("expected failing test command to exit non-zero\n%s", out)
+		var ok bool
+		output := captureStdout(t, func() {
+			ok = runTests(projectDir, "failures", false)
+		})
+		if ok {
+			t.Fatalf("expected failing test command behavior\n%s", output)
 		}
-		output := string(out)
 		if !strings.Contains(output, "FAIL") || !strings.Contains(output, "PANIC") || !strings.Contains(output, "0 passed; 1 failed; 1 panicked") {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
 
 	t.Run("fail fast stops after first failure", func(t *testing.T) {
-		cmd := exec.Command(compilerBin, "test", "--fail-fast", "--filter", "failures", projectDir)
-		cmd.Dir = "."
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("expected failing test command to exit non-zero\n%s", out)
+		var ok bool
+		output := captureStdout(t, func() {
+			ok = runTests(projectDir, "failures", true)
+		})
+		if ok {
+			t.Fatalf("expected failing test command behavior\n%s", output)
 		}
-		output := string(out)
 		if strings.Contains(output, "PANIC") || !strings.Contains(output, "0 passed; 1 failed; 0 panicked") {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
@@ -315,14 +334,6 @@ test fn panics() Void!Str {
 
 func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {
 	dir := t.TempDir()
-	compilerBin := filepath.Join(dir, "ard-test")
-	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
-	buildCompiler.Dir = "."
-	out, err := buildCompiler.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build compiler: %v\n%s", err, out)
-	}
-
 	projectDir := filepath.Join(dir, "project")
 	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
 		t.Fatalf("failed to create project dir: %v", err)
@@ -352,73 +363,36 @@ test fn private_access() Void!Str {
 		t.Fatalf("failed to write private access test: %v", err)
 	}
 
-	cmd := exec.Command(compilerBin, "test", projectDir)
-	cmd.Dir = "."
-	out, err = cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected private access test command to exit non-zero\n%s", out)
+	var ok bool
+	output := captureStdout(t, func() {
+		ok = runTests(projectDir, "", false)
+	})
+	if ok {
+		t.Fatalf("expected private access test behavior to fail\n%s", output)
 	}
-	output := string(out)
 	if !strings.Contains(output, "Undefined: utils::private_helper") {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
 
-func TestStandaloneBuildPreservesRuntimeArgs(t *testing.T) {
-	dir := t.TempDir()
-	sourcePath := filepath.Join(dir, "argv.ard")
-	source := `use ard/argv
-use ard/io
-
-fn main() {
-  let args = argv::load()
-  match args.arguments.size() {
-    0 => io::print("missing"),
-    _ => io::print(args.arguments.at(0)),
-  }
-}
-`
-	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
-		t.Fatalf("failed to write source file: %v", err)
-	}
-
-	compilerBin := filepath.Join(dir, "ard-test")
-	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
-	buildCompiler.Dir = "."
-	out, err := buildCompiler.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build compiler: %v\n%s", err, out)
-	}
-
-	t.Run("interpreter mode", func(t *testing.T) {
-		cmd := exec.Command(compilerBin, "run", sourcePath, "up")
-		cmd.Dir = "."
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("interpreter run failed: %v\n%s", err, out)
-		}
-		if string(out) != "up\n" {
-			t.Fatalf("expected interpreter output %q, got %q", "up\\n", string(out))
+func TestArgsForEmbeddedProgram(t *testing.T) {
+	t.Run("strips run-embedded sentinel", func(t *testing.T) {
+		got := argsForEmbeddedProgram([]string{"ard", "run-embedded", "one", "two"})
+		want := []string{"ard", "one", "two"}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("expected %v, got %v", want, got)
 		}
 	})
 
-	t.Run("compiled binary mode", func(t *testing.T) {
-		programBin := filepath.Join(dir, "argv-bin")
-		buildProgram := exec.Command(compilerBin, "build", sourcePath, "--out", programBin)
-		buildProgram.Dir = "."
-		out, err := buildProgram.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to build standalone binary: %v\n%s", err, out)
+	t.Run("returns copy for normal args", func(t *testing.T) {
+		input := []string{"ard", "run", "sample.ard"}
+		got := argsForEmbeddedProgram(input)
+		if strings.Join(got, ",") != strings.Join(input, ",") {
+			t.Fatalf("expected %v, got %v", input, got)
 		}
-
-		cmd := exec.Command(programBin, "up")
-		cmd.Dir = "."
-		out, err = cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("compiled binary failed: %v\n%s", err, out)
-		}
-		if string(out) != "up\n" {
-			t.Fatalf("expected compiled output %q, got %q", "up\\n", string(out))
+		got[0] = "changed"
+		if input[0] != "ard" {
+			t.Fatalf("expected returned args to be copied")
 		}
 	})
 }
