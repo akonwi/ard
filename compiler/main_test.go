@@ -313,6 +313,57 @@ test fn panics() Void!Str {
 	})
 }
 
+func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {
+	dir := t.TempDir()
+	compilerBin := filepath.Join(dir, "ard-test")
+	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
+	buildCompiler.Dir = "."
+	out, err := buildCompiler.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build compiler: %v\n%s", err, out)
+	}
+
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	utilsSource := `private fn private_helper() Int {
+  42
+}
+
+fn public_helper() Int {
+  7
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "utils.ard"), []byte(utilsSource), 0o644); err != nil {
+		t.Fatalf("failed to write utils source: %v", err)
+	}
+	privateAccessSource := `use demo/utils
+
+test fn private_access() Void!Str {
+  utils::private_helper()
+  Result::ok(())
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "test", "private_access.ard"), []byte(privateAccessSource), 0o644); err != nil {
+		t.Fatalf("failed to write private access test: %v", err)
+	}
+
+	cmd := exec.Command(compilerBin, "test", projectDir)
+	cmd.Dir = "."
+	out, err = cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected private access test command to exit non-zero\n%s", out)
+	}
+	output := string(out)
+	if !strings.Contains(output, "Undefined: utils::private_helper") {
+		t.Fatalf("unexpected output:\n%s", output)
+	}
+}
+
 func TestStandaloneBuildPreservesRuntimeArgs(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "argv.ard")
