@@ -19,14 +19,14 @@ use ard/testing
 
 test fn addition_works() Void!Str {
   try testing::equal(1 + 1, 2)
-  Result::ok(())
+  testing::pass()
 }
 
 test fn greeting_format() Void!Str {
   let name = "World"
   let greeting = "Hello, {name}!"
   try testing::equal(greeting, "Hello, World!")
-  Result::ok(())
+  testing::pass()
 }
 ```
 
@@ -36,10 +36,11 @@ The `ard/testing` module provides assertion helpers that return `Void!Str`, so y
 
 | Function | Description |
 |----------|-------------|
+| `pass()` | Returns a successful test result (`Result::ok(())`) |
+| `fail(message)` | Always fails with the given message |
 | `assert(condition, message?)` | Fails with the message if the condition is false |
 | `equal(actual, expected)` | Fails if the two values are not equal |
 | `not_equal(actual, expected)` | Fails if the two values are equal |
-| `fail(message)` | Always fails with the given message |
 
 ```ard
 use ard/testing
@@ -48,11 +49,11 @@ test fn test_assertions() Void!Str {
   try testing::assert(true, "should be true")
   try testing::equal(2 * 3, 6)
   try testing::not_equal("a", "b")
-  Result::ok(())
+  testing::pass()
 }
 ```
 
-Since test helpers return `Void!Str`, you use `try` to short-circuit on the first failure — just like normal error propagation in Ard.
+Since test helpers return `Void!Str`, you use `try` to short-circuit on the first failure — just like normal error propagation in Ard. End each test with `testing::pass()` to signal success.
 
 ## Where to Put Tests
 
@@ -139,6 +140,6 @@ test fn bad_generic<$T>() Void!Str { Result::ok(()) }
 
 // ✓ Valid test function
 test fn good_test() Void!Str {
-  Result::ok(())
+  testing::pass()
 }
 ```

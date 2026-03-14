@@ -7,6 +7,19 @@ The `ard/testing` module provides assertion functions for use in `test fn` decla
 
 ## Functions
 
+### `pass() Void!Str`
+
+Returns a successful test result. A shorthand for `Result::ok(())`.
+
+```ard
+use ard/testing
+
+test fn test_example() Void!Str {
+  try testing::assert(1 + 1 == 2, "math works")
+  testing::pass()
+}
+```
+
 ### `fail(message: Str) Void!Str`
 
 Always returns an error with the given message. Useful for marking unreachable branches as failures.
@@ -70,7 +83,7 @@ test fn test_not_equal() Void!Str {
 
 ## Usage Pattern
 
-Since all helpers return `Void!Str`, the idiomatic pattern is to `try` each assertion and end with `Result::ok(())`:
+Since all helpers return `Void!Str`, the idiomatic pattern is to `try` each assertion and end with `testing::pass()`:
 
 ```ard
 use ard/testing
@@ -78,7 +91,7 @@ use ard/testing
 test fn example() Void!Str {
   try testing::assert(condition(), "check one")
   try testing::equal(compute(), expected)
-  Result::ok(())
+  testing::pass()
 }
 ```
 
