@@ -1,11 +1,112 @@
 package main
 
 import (
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stdout writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("failed to close stdout reader: %v", err)
+	}
+	return string(out)
+}
+
+func TestParseTestArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		path       string
+		filter     string
+		failFast   bool
+		expectErr  bool
+		errMessage string
+	}{
+		{
+			name:     "defaults to current directory",
+			args:     []string{},
+			path:     ".",
+			filter:   "",
+			failFast: false,
+		},
+		{
+			name:     "path and flags",
+			args:     []string{"samples", "--filter", "math", "--fail-fast"},
+			path:     "samples",
+			filter:   "math",
+			failFast: true,
+		},
+		{
+			name:       "missing filter value",
+			args:       []string{"--filter"},
+			expectErr:  true,
+			errMessage: "--filter requires a value",
+		},
+		{
+			name:       "unknown flag",
+			args:       []string{"--list"},
+			expectErr:  true,
+			errMessage: "unknown flag: --list",
+		},
+		{
+			name:       "unexpected extra argument",
+			args:       []string{"a.ard", "b.ard"},
+			expectErr:  true,
+			errMessage: "unexpected argument: b.ard",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, filter, failFast, err := parseTestArgs(tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.errMessage)
+				}
+				if err.Error() != tt.errMessage {
+					t.Fatalf("expected error %q, got %q", tt.errMessage, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("did not expect error: %v", err)
+			}
+			if path != tt.path {
+				t.Fatalf("expected path %q, got %q", tt.path, path)
+			}
+			if filter != tt.filter {
+				t.Fatalf("expected filter %q, got %q", tt.filter, filter)
+			}
+			if failFast != tt.failFast {
+				t.Fatalf("expected failFast %t, got %t", tt.failFast, failFast)
+			}
+		})
+	}
+}
 
 func TestParseFormatArgs(t *testing.T) {
 	tests := []struct {
@@ -155,61 +256,141 @@ func TestFormatPath(t *testing.T) {
 	})
 }
 
-func TestStandaloneBuildPreservesRuntimeArgs(t *testing.T) {
+func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
-	sourcePath := filepath.Join(dir, "argv.ard")
-	source := `use ard/argv
-use ard/io
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainSource := `use ard/testing
 
-fn main() {
-  let args = argv::load()
-  match args.arguments.size() {
-    0 => io::print("missing"),
-    _ => io::print(args.arguments.at(0)),
-  }
+test fn passes() Void!Str {
+  try testing::assert(true, "true should pass")
+  try testing::assert(1 + 1 == 2, "math should hold")
+  testing::pass()
 }
 `
-	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
-		t.Fatalf("failed to write source file: %v", err)
+	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(mainSource), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+	failureSource := `use ard/testing
+
+test fn fails() Void!Str {
+  testing::fail("nope")
+}
+
+test fn panics() Void!Str {
+  panic("boom")
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "test", "failures.ard"), []byte(failureSource), 0o644); err != nil {
+		t.Fatalf("failed to write test source: %v", err)
 	}
 
-	compilerBin := filepath.Join(dir, "ard-test")
-	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
-	buildCompiler.Dir = "."
-	out, err := buildCompiler.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build compiler: %v\n%s", err, out)
-	}
-
-	t.Run("interpreter mode", func(t *testing.T) {
-		cmd := exec.Command(compilerBin, "run", sourcePath, "up")
-		cmd.Dir = "."
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("interpreter run failed: %v\n%s", err, out)
+	t.Run("passing filter", func(t *testing.T) {
+		var ok bool
+		output := captureStdout(t, func() {
+			ok = runTests(projectDir, "passes", false)
+		})
+		if !ok {
+			t.Fatalf("expected tests to pass\n%s", output)
 		}
-		if string(out) != "up\n" {
-			t.Fatalf("expected interpreter output %q, got %q", "up\\n", string(out))
+		if !strings.Contains(output, "✓") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
+			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
 
-	t.Run("compiled binary mode", func(t *testing.T) {
-		programBin := filepath.Join(dir, "argv-bin")
-		buildProgram := exec.Command(compilerBin, "build", sourcePath, "--out", programBin)
-		buildProgram.Dir = "."
-		out, err := buildProgram.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to build standalone binary: %v\n%s", err, out)
+	t.Run("fail and panic classification", func(t *testing.T) {
+		var ok bool
+		output := captureStdout(t, func() {
+			ok = runTests(projectDir, "failures", false)
+		})
+		if ok {
+			t.Fatalf("expected failing test command behavior\n%s", output)
 		}
+		if !strings.Contains(output, "✗") || !strings.Contains(output, "💥") || !strings.Contains(output, "0 passed; 1 failed; 1 panicked") {
+			t.Fatalf("unexpected output:\n%s", output)
+		}
+	})
 
-		cmd := exec.Command(programBin, "up")
-		cmd.Dir = "."
-		out, err = cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("compiled binary failed: %v\n%s", err, out)
+	t.Run("fail fast stops after first failure", func(t *testing.T) {
+		var ok bool
+		output := captureStdout(t, func() {
+			ok = runTests(projectDir, "failures", true)
+		})
+		if ok {
+			t.Fatalf("expected failing test command behavior\n%s", output)
 		}
-		if string(out) != "up\n" {
-			t.Fatalf("expected compiled output %q, got %q", "up\\n", string(out))
+		if strings.Contains(output, "💥") || !strings.Contains(output, "0 passed; 1 failed; 0 panicked") {
+			t.Fatalf("unexpected output:\n%s", output)
+		}
+	})
+}
+
+func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	utilsSource := `private fn private_helper() Int {
+  42
+}
+
+fn public_helper() Int {
+  7
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "utils.ard"), []byte(utilsSource), 0o644); err != nil {
+		t.Fatalf("failed to write utils source: %v", err)
+	}
+	privateAccessSource := `use demo/utils
+
+test fn private_access() Void!Str {
+  utils::private_helper()
+  Result::ok(())
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "test", "private_access.ard"), []byte(privateAccessSource), 0o644); err != nil {
+		t.Fatalf("failed to write private access test: %v", err)
+	}
+
+	var ok bool
+	output := captureStdout(t, func() {
+		ok = runTests(projectDir, "", false)
+	})
+	if ok {
+		t.Fatalf("expected private access test behavior to fail\n%s", output)
+	}
+	if !strings.Contains(output, "Undefined: utils::private_helper") {
+		t.Fatalf("unexpected output:\n%s", output)
+	}
+}
+
+func TestArgsForEmbeddedProgram(t *testing.T) {
+	t.Run("strips run-embedded sentinel", func(t *testing.T) {
+		got := argsForEmbeddedProgram([]string{"ard", "run-embedded", "one", "two"})
+		want := []string{"ard", "one", "two"}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	})
+
+	t.Run("returns copy for normal args", func(t *testing.T) {
+		input := []string{"ard", "run", "sample.ard"}
+		got := argsForEmbeddedProgram(input)
+		if strings.Join(got, ",") != strings.Join(input, ",") {
+			t.Fatalf("expected %v, got %v", input, got)
+		}
+		got[0] = "changed"
+		if input[0] != "ard" {
+			t.Fatalf("expected returned args to be copied")
 		}
 	})
 }

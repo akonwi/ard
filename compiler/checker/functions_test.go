@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestFunctions(t *testing.T) {
@@ -161,6 +162,89 @@ func TestFunctions(t *testing.T) {
 			),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "missing argument for parameter: b"},
+			},
+		},
+	})
+}
+
+func TestTestFunctions(t *testing.T) {
+	t.Run("marks valid test functions", func(t *testing.T) {
+		result := parse.Parse([]byte(`test fn works() Void!Str { Result::ok(()) }`), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("Parse errors: %v", result.Errors[0].Message)
+		}
+
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("Diagnostics found: %v", c.Diagnostics())
+		}
+
+		fn, ok := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+		if !ok {
+			t.Fatalf("Expected first statement to be a function definition, got %T", c.Module().Program().Statements[0].Expr)
+		}
+		if !fn.IsTest {
+			t.Fatalf("Expected function to be marked as test")
+		}
+	})
+
+	run(t, []test{
+		{
+			name:  "test functions must not take parameters",
+			input: `test fn invalid(name: Str) Void!Str { Result::ok(()) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must not take parameters"},
+			},
+		},
+		{
+			name:  "test functions must return Void!Str",
+			input: `test fn invalid() {}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must return Void!Str"},
+			},
+		},
+		{
+			name: "co-located test can call private functions",
+			input: strings.Join([]string{
+				`private fn secret() Int { 42 }`,
+				`test fn test_secret() Void!Str {`,
+				`  secret()`,
+				`  Result::ok(())`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "co-located test can call public functions",
+			input: strings.Join([]string{
+				`fn public_fn() Int { 7 }`,
+				`test fn test_public() Void!Str {`,
+				`  public_fn()`,
+				`  Result::ok(())`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name:  "test functions must not be generic",
+			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must not be generic"},
+			},
+		},
+		{
+			name:  "test functions returning wrong error type",
+			input: `test fn wrong_err() Void!Int { Result::ok(()) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must return Void!Str"},
+			},
+		},
+		{
+			name:  "test functions returning plain value",
+			input: `test fn returns_int() Int { 42 }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "test functions must return Void!Str"},
 			},
 		},
 	})

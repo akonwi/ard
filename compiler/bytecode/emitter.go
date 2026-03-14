@@ -17,6 +17,7 @@ type Emitter struct {
 	moduleFuncs  map[string]struct{}
 	visitedMods  map[string]struct{}
 	modules      map[string]checker.Module
+	includeTests bool
 }
 
 type funcEmitter struct {
@@ -48,6 +49,12 @@ func NewEmitter() *Emitter {
 	}
 }
 
+func NewTestEmitter() *Emitter {
+	e := NewEmitter()
+	e.includeTests = true
+	return e
+}
+
 func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 	prog := module.Program()
 	if prog == nil {
@@ -65,6 +72,9 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 		stmt := prog.Statements[i]
 		if stmt.Expr != nil {
 			if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+				if def.IsTest && !e.includeTests {
+					continue
+				}
 				if err := e.emitFunction(def); err != nil {
 					return Program{}, err
 				}
@@ -95,7 +105,7 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 			}
 		}
 	}
-	if err := fn.emitStatements(prog.Statements); err != nil {
+	if err := fn.emitStatements(topLevelExecutableStatements(prog.Statements)); err != nil {
 		return Program{}, err
 	}
 	fn.ensureReturn()
@@ -134,6 +144,18 @@ func (e *Emitter) addConst(c Constant) int {
 	index := len(e.program.Constants)
 	e.program.Constants = append(e.program.Constants, c)
 	return index
+}
+
+func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
+	filtered := make([]checker.Statement, 0, len(stmts))
+	for _, stmt := range stmts {
+		switch stmt.Expr.(type) {
+		case *checker.FunctionDef, *checker.ExternalFunctionDef:
+			continue
+		}
+		filtered = append(filtered, stmt)
+	}
+	return filtered
 }
 
 func (e *Emitter) emitFunction(def *checker.FunctionDef) error {
@@ -280,6 +302,9 @@ func (e *Emitter) emitModule(mod checker.Module) error {
 		stmt := prog.Statements[i]
 		if stmt.Expr != nil {
 			if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+				if def.IsTest && !e.includeTests {
+					continue
+				}
 				if err := e.emitFunction(def); err != nil {
 					e.modulePrefix = prevPrefix
 					e.moduleFuncs = prevFuncs

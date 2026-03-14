@@ -1,0 +1,7 @@
+use samples/maths
+use ard/testing
+
+test fn can_use_public_add() Void!Str {
+  try testing::assert(maths::add(1, 2) == 3, "Expected maths::add(1, 2) to equal 3")
+  testing::pass()
+}

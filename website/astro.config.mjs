@@ -197,6 +197,7 @@ export default defineConfig({
             { label: "Error Handling", slug: "guide/error-handling" },
             { label: "Pattern Matching", slug: "guide/pattern-matching" },
             { label: "Modules", slug: "guide/modules" },
+            { label: "Testing", slug: "guide/testing" },
           ],
         },
         {
@@ -233,6 +234,7 @@ export default defineConfig({
             { label: "ard/result", slug: "stdlib/result" },
             { label: "ard/sql", slug: "stdlib/sql" },
             { label: "ard/string", slug: "stdlib/string" },
+            { label: "ard/testing", slug: "stdlib/testing" },
           ],
         },
         {

@@ -1,3 +1,5 @@
+use ard/testing
+
 // converters to nanoseconds
 
 fn from_hours(h: Int) Int {
@@ -14,4 +16,32 @@ fn from_minutes(m: Int) Int {
 
 fn from_millis(ms: Int) Int {
   ms * 1000000
+}
+
+test fn test_from_seconds() Void!Str {
+  testing::assert(
+    from_seconds(20) == 20_000_000_000,
+    "from_seconds should convert seconds to nanoseconds",
+  )
+}
+
+test fn test_from_minutes() Void!Str {
+  testing::assert(
+    from_minutes(5) == 300_000_000_000,
+    "from_minutes should convert minutes to nanoseconds",
+  )
+}
+
+test fn test_from_hours() Void!Str {
+  testing::assert(
+    from_hours(2) == 7_200_000_000_000,
+    "from_hours should convert hours to nanoseconds",
+  )
+}
+
+test fn test_from_millis() Void!Str {
+  testing::assert(
+    from_millis(250) == 250_000_000,
+    "from_millis should convert milliseconds to nanoseconds",
+  )
 }

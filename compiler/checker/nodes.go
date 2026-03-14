@@ -913,6 +913,7 @@ type FunctionDef struct {
 	Parameters []Parameter
 	ReturnType Type
 	Mutates    bool
+	IsTest     bool
 	Body       *Block
 	Private    bool
 }

@@ -47,6 +47,9 @@ func (d Diagnostic) String() string {
 // If $T is bound to [$U], deref($T) returns [$U] (not the resolved contents).
 func deref(t Type) Type {
 	if typeVar, ok := t.(*TypeVar); ok && typeVar.bound {
+		if typeVar.actual == t {
+			return t // break self-referential cycle
+		}
 		return deref(typeVar.actual) // Recursively follow chains
 	}
 	return t
@@ -135,6 +138,7 @@ func derefType(t Type) Type {
 			ReturnType: derefReturnType,
 			Body:       typ.Body,
 			Mutates:    typ.Mutates,
+			IsTest:     typ.IsTest,
 			Private:    typ.Private,
 		}
 	default:
@@ -4265,6 +4269,23 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 		ReturnType: returnType,
 		Body:       nil,
 		Private:    def.Private,
+		IsTest:     def.IsTest,
+	}
+
+	if def.IsTest {
+		if init != nil {
+			c.addError("test functions must be top-level declarations", def.GetLocation())
+		}
+		if len(def.Parameters) > 0 {
+			c.addError("test functions must not take parameters", def.GetLocation())
+		}
+		if len(def.TypeParams) > 0 {
+			c.addError("test functions must not be generic", def.GetLocation())
+		}
+		expectedReturnType := MakeResult(Void, Str)
+		if !returnType.equal(expectedReturnType) {
+			c.addError("test functions must return Void!Str", def.GetLocation())
+		}
 	}
 
 	// Add function to scope before checking body (for recursion support)
@@ -4323,6 +4344,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			ReturnType: substituteType(typ.ReturnType, typeMap),
 			Body:       typ.Body,
 			Mutates:    typ.Mutates,
+			IsTest:     typ.IsTest,
 			Private:    typ.Private,
 		}
 	// Handle other compound types

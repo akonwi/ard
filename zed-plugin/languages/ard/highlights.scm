@@ -14,6 +14,7 @@
 (import_statement "as" @keyword)
 (variable_declaration "let" @keyword)
 (variable_declaration "mut" @keyword)
+(function_declaration "test" @keyword)
 (function_declaration "fn" @keyword)
 (extern_function "extern" @keyword)
 (extern_function "fn" @keyword)
