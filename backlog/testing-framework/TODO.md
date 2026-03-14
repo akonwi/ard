@@ -37,7 +37,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Validate test functions return `Void!Str`
 - [x] Decide whether generic test functions are disallowed in v1 (disallowed)
 - [x] Preserve test metadata in checked output
-- [ ] Implement test-mode semantics in checker pipeline
+- [ ] Implement test-mode semantics in checker/emitter pipeline (test functions are currently compiled but never called during `run`/`build` — low risk dead code, but ideally should be stripped)
 - [x] Add checker tests for invalid test signatures
 - [ ] Add checker tests for co-located test visibility
 - [ ] Add checker tests for `/test` privacy behavior
@@ -82,7 +82,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Add `FAIL` output with message
 - [x] Add `PANIC` output with panic details
 - [x] Add final summary counts for passed/failed/panicked
-- [ ] Review output for readability and scanability
+- [x] Review output for readability and scanability
 
 ## Integration and regression coverage
 
@@ -97,7 +97,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Run `go test ./...`
 - [x] Run `go build`
 - [x] Run manual `go run main.go test ...` checks
-- [ ] If needed, run `go generate ./bytecode/vm`
+- [x] If needed, run `go generate ./bytecode/vm` (not needed — no new FFI)
 
 ## Docs
 
@@ -105,7 +105,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Document co-located tests vs `/test`
 - [x] Document `FAIL` vs `PANIC`
 - [x] Document `--filter` and `--fail-fast`
-- [ ] Update root README if appropriate
+- [x] Update root README if appropriate
 - [ ] Keep this backlog checklist updated during implementation
 
 ## Tree-sitter / Editor support

@@ -408,6 +408,34 @@ fn do_math(a Int, b Int) Int!Str {
 
 The `try` keyword will unwrap the result and if the result is an error, it will act as an early return to pass on the failure result.
 
+### Testing
+
+Ard has a built-in test framework. Tests are declared with `test fn` and must return `Void!Str`:
+
+```ard
+use ard/testing
+
+fn add(a: Int, b: Int) Int { a + b }
+
+test fn test_add() Void!Str {
+  try testing::equal(add(1, 2), 3)
+  testing::pass()
+}
+```
+
+Run tests with `ard test`:
+
+```bash
+ard test              # run all tests in the project
+ard test math.ard     # run tests in a specific file
+ard test --filter add # filter by name
+ard test --fail-fast  # stop on first failure
+```
+
+Tests can be co-located in the same file as the code they test, or placed under a `/test` directory for integration-style tests that only access public APIs.
+
+The `ard/testing` module provides helpers: `pass()`, `fail(message)`, `assert(condition, message?)`, `equal(actual, expected)`, and `not_equal(actual, expected)`.
+
 ### Modules
 See the docs in [modules](./modules)
 
