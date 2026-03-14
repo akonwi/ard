@@ -205,6 +205,28 @@ func TestTestFunctions(t *testing.T) {
 			},
 		},
 		{
+			name: "co-located test can call private functions",
+			input: strings.Join([]string{
+				`private fn secret() Int { 42 }`,
+				`test fn test_secret() Void!Str {`,
+				`  secret()`,
+				`  Result::ok(())`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "co-located test can call public functions",
+			input: strings.Join([]string{
+				`fn public_fn() Int { 7 }`,
+				`test fn test_public() Void!Str {`,
+				`  public_fn()`,
+				`  Result::ok(())`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name:  "test functions must not be generic",
 			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
 			diagnostics: []checker.Diagnostic{
