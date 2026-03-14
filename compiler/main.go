@@ -400,7 +400,7 @@ func runTests(inputPath, filter string, failFast bool) bool {
 			continue
 		}
 
-		program, err := bytecode.NewEmitter().EmitProgram(module)
+		program, err := bytecode.NewTestEmitter().EmitProgram(module)
 		if err != nil {
 			fmt.Println(err)
 			return false

@@ -37,7 +37,7 @@ Keep this checklist updated as implementation progresses.
 - [x] Validate test functions return `Void!Str`
 - [x] Decide whether generic test functions are disallowed in v1 (disallowed)
 - [x] Preserve test metadata in checked output
-- [ ] Implement test-mode semantics in checker/emitter pipeline (test functions are currently compiled but never called during `run`/`build` — low risk dead code, but ideally should be stripped)
+- [x] Implement test-mode semantics in checker/emitter pipeline (test functions stripped from `run`/`build`, included via `NewTestEmitter()` for `ard test`)
 - [x] Add checker tests for invalid test signatures
 - [ ] Add checker tests for co-located test visibility
 - [ ] Add checker tests for `/test` privacy behavior
