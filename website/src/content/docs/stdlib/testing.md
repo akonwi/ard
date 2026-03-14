@@ -32,52 +32,24 @@ test fn test_unreachable() Void!Str {
   match result {
     value => {
       try testing::assert(value > 0, "expected positive")
-      Result::ok(())
+      testing::pass()
     }
     _ => testing::fail("Expected a value")
   }
 }
 ```
 
-### `assert(condition: Bool, message: Str?) Void!Str`
+### `assert(condition: Bool, message: Str) Void!Str`
 
-Fails with the message if the condition is false. If no message is provided, the default message is `"Assertion failed"`.
+Fails with the provided message if the condition is false.
 
 ```ard
 use ard/testing
 
 test fn test_assert() Void!Str {
   try testing::assert(1 + 1 == 2, "math works")
-  try testing::assert(true)
-  Result::ok(())
-}
-```
-
-### `equal(actual: $T, expected: $T) Void!Str`
-
-Fails if the two values are not equal.
-
-```ard
-use ard/testing
-
-test fn test_equal() Void!Str {
-  try testing::equal(2 + 2, 4)
-  try testing::equal("hello", "hello")
-  Result::ok(())
-}
-```
-
-### `not_equal(actual: $T, expected: $T) Void!Str`
-
-Fails if the two values are equal.
-
-```ard
-use ard/testing
-
-test fn test_not_equal() Void!Str {
-  try testing::not_equal(1, 2)
-  try testing::not_equal("a", "b")
-  Result::ok(())
+  try testing::assert("hello".size() == 5, "string size should be 5")
+  testing::pass()
 }
 ```
 
@@ -90,7 +62,7 @@ use ard/testing
 
 test fn example() Void!Str {
   try testing::assert(condition(), "check one")
-  try testing::equal(compute(), expected)
+  try testing::assert(compute() == expected, "compute() should match expected")
   testing::pass()
 }
 ```

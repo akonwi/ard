@@ -266,13 +266,11 @@ func TestTestCommand(t *testing.T) {
 		t.Fatalf("failed to write ard.toml: %v", err)
 	}
 	mainSource := `use ard/testing
-use ard/maybe
 
 test fn passes() Void!Str {
-  try testing::assert(true, maybe::none())
-  try testing::equal(1 + 1, 2)
-  try testing::not_equal(1, 2)
-  Result::ok(())
+  try testing::assert(true, "true should pass")
+  try testing::assert(1 + 1 == 2, "math should hold")
+  testing::pass()
 }
 `
 	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(mainSource), 0o644); err != nil {

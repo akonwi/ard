@@ -418,7 +418,7 @@ use ard/testing
 fn add(a: Int, b: Int) Int { a + b }
 
 test fn test_add() Void!Str {
-  try testing::equal(add(1, 2), 3)
+  try testing::assert(add(1, 2) == 3, "Expected add(1, 2) to equal 3")
   testing::pass()
 }
 ```
@@ -434,7 +434,7 @@ ard test --fail-fast  # stop on first failure
 
 Tests can be co-located in the same file as the code they test, or placed under a `/test` directory for integration-style tests that only access public APIs.
 
-The `ard/testing` module provides helpers: `pass()`, `fail(message)`, `assert(condition, message?)`, `equal(actual, expected)`, and `not_equal(actual, expected)`.
+The `ard/testing` module provides helpers: `pass()`, `fail(message)`, and `assert(condition, message)`.
 
 ### Modules
 See the docs in [modules](./modules)

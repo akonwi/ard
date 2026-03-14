@@ -42,8 +42,8 @@ Tests are declared with `test fn`.
 
 ```ard
 test fn adds_numbers() Void!Str {
-  try testing::equal(1 + 1, 2)
-  Result::ok(())
+  try testing::assert(1 + 1 == 2, "Expected 1 + 1 to equal 2")
+  testing::pass()
 }
 ```
 
@@ -68,8 +68,8 @@ fn add(a: Int, b: Int) Int {
 }
 
 test fn add_works() Void!Str {
-  try testing::equal(add(1, 2), 3)
-  Result::ok(())
+  try testing::assert(add(1, 2) == 3, "Expected add(1, 2) to equal 3")
+  testing::pass()
 }
 ```
 
@@ -142,11 +142,10 @@ Add a standard library module:
 use "ard/testing"
 ```
 
-Initial API:
+Implemented API:
+- `testing::pass() Void!Str`
 - `testing::fail(message: Str) Void!Str`
-- `testing::assert(condition: Bool, message: Str?) Void!Str`
-- `testing::equal(actual: $T, expected: $T) Void!Str`
-- `testing::not_equal(actual: $T, expected: $T) Void!Str`
+- `testing::assert(condition: Bool, message: Str) Void!Str`
 
 These helpers should return `Void!Str`, not panic.
 
@@ -154,9 +153,9 @@ These helpers should return `Void!Str`, not panic.
 
 ```ard
 test fn adds() Void!Str {
-  try testing::equal(1 + 1, 2)
-  try testing::equal(2 + 2, 4)
-  Result::ok(())
+  try testing::assert(1 + 1 == 2, "Expected 1 + 1 to equal 2")
+  try testing::assert(2 + 2 == 4, "Expected 2 + 2 to equal 4")
+  testing::pass()
 }
 ```
 

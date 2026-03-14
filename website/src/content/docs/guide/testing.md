@@ -18,14 +18,14 @@ A test passes when it returns `Result::ok(())` and fails when it returns `Result
 use ard/testing
 
 test fn addition_works() Void!Str {
-  try testing::equal(1 + 1, 2)
+  try testing::assert(1 + 1 == 2, "Expected 1 + 1 to equal 2")
   testing::pass()
 }
 
 test fn greeting_format() Void!Str {
   let name = "World"
   let greeting = "Hello, {name}!"
-  try testing::equal(greeting, "Hello, World!")
+  try testing::assert(greeting == "Hello, World!", "Expected greeting format")
   testing::pass()
 }
 ```
@@ -38,17 +38,15 @@ The `ard/testing` module provides assertion helpers that return `Void!Str`, so y
 |----------|-------------|
 | `pass()` | Returns a successful test result (`Result::ok(())`) |
 | `fail(message)` | Always fails with the given message |
-| `assert(condition, message?)` | Fails with the message if the condition is false |
-| `equal(actual, expected)` | Fails if the two values are not equal |
-| `not_equal(actual, expected)` | Fails if the two values are equal |
+| `assert(condition, message)` | Fails with the message if the condition is false |
 
 ```ard
 use ard/testing
 
 test fn test_assertions() Void!Str {
   try testing::assert(true, "should be true")
-  try testing::equal(2 * 3, 6)
-  try testing::not_equal("a", "b")
+  try testing::assert(2 * 3 == 6, "multiplication should work")
+  try testing::assert("a" == "a", "string equality should work")
   testing::pass()
 }
 ```

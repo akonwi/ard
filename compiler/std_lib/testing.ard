@@ -1,32 +1,13 @@
-use ard/maybe
-
 fn fail(message: Str) Void!Str {
   Result::err(message)
 }
 
 fn pass() Void!Str { Result::ok(()) }
 
-fn assert(condition: Bool, message: Str?) Void!Str {
+fn assert(condition: Bool, message: Str) Void!Str {
   match condition {
     true => Result::ok(()),
-    false => match message {
-      text => Result::err(text),
-      _ => Result::err("Assertion failed")
-    }
-  }
-}
-
-fn equal<$T>(actual: $T, expected: $T) Void!Str {
-  match actual == expected {
-    true => Result::ok(()),
-    false => Result::err("Values were expected to be equal")
-  }
-}
-
-fn not_equal<$T>(actual: $T, expected: $T) Void!Str {
-  match actual == expected {
-    true => Result::err("Values were expected to be different"),
-    false => Result::ok(())
+    false => Result::err(message)
   }
 }
 
@@ -35,24 +16,11 @@ test fn test_assert_true_passes() Void!Str {
   pass()
 }
 
-test fn test_assert_true_without_message() Void!Str {
-  try assert(true, maybe::none())
-  pass()
-}
-
 test fn test_assert_false_fails_with_message() Void!Str {
   let result = assert(false, "custom message")
   match result {
     ok => fail("assert(false) should have returned an error"),
-    err(msg) => equal(msg, "custom message")
-  }
-}
-
-test fn test_assert_false_without_message_uses_default() Void!Str {
-  let result = assert(false, maybe::none())
-  match result {
-    ok => fail("assert(false) should have returned an error"),
-    err(msg) => equal(msg, "Assertion failed")
+    err(msg) => assert(msg == "custom message", "Expected custom message")
   }
 }
 
@@ -60,37 +28,6 @@ test fn test_fail_returns_error() Void!Str {
   let result = fail("boom")
   match result {
     ok => assert(false, "fail() should have returned an error"),
-    err(msg) => equal(msg, "boom")
-  }
-}
-
-test fn test_equal_matching_ints() Void!Str {
-  try equal(42, 42)
-  pass()
-}
-
-test fn test_equal_matching_strings() Void!Str {
-  try equal("hello", "hello")
-  pass()
-}
-
-test fn test_equal_mismatch() Void!Str {
-  let result = equal(1, 2)
-  match result {
-    ok => fail("equal(1, 2) should have returned an error"),
-    err(msg) => equal(msg, "Values were expected to be equal")
-  }
-}
-
-test fn test_not_equal_different_values() Void!Str {
-  try not_equal(1, 2)
-  pass()
-}
-
-test fn test_not_equal_same_values() Void!Str {
-  let result = not_equal(5, 5)
-  match result {
-    ok => fail("not_equal(5, 5) should have returned an error"),
-    err(msg) => equal(msg, "Values were expected to be different")
+    err(msg) => assert(msg == "boom", "Expected error message 'boom'")
   }
 }
