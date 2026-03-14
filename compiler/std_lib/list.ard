@@ -76,3 +76,4 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
 
   Partition{selected: selected, others: others}
 }
+

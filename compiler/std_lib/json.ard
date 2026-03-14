@@ -1,3 +1,21 @@
 // Standard library JSON module implemented with FFI
+use ard/maybe
+use ard/testing
 
 extern fn encode(value: $T) Str!Str = "JsonEncode"
+
+test fn test_encode_int() Void!Str {
+  let out = try encode(200)
+  testing::equal(out, "200")
+}
+
+test fn test_encode_string() Void!Str {
+  let out = try encode("hello")
+  testing::equal(out, "\"hello\"")
+}
+
+test fn test_encode_none() Void!Str {
+  let val: Str? = maybe::none()
+  let out = try encode(val)
+  testing::equal(out, "null")
+}

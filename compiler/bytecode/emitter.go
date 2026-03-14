@@ -95,7 +95,7 @@ func (e *Emitter) EmitProgram(module checker.Module) (Program, error) {
 			}
 		}
 	}
-	if err := fn.emitStatements(prog.Statements); err != nil {
+	if err := fn.emitStatements(topLevelExecutableStatements(prog.Statements)); err != nil {
 		return Program{}, err
 	}
 	fn.ensureReturn()
@@ -134,6 +134,18 @@ func (e *Emitter) addConst(c Constant) int {
 	index := len(e.program.Constants)
 	e.program.Constants = append(e.program.Constants, c)
 	return index
+}
+
+func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
+	filtered := make([]checker.Statement, 0, len(stmts))
+	for _, stmt := range stmts {
+		switch stmt.Expr.(type) {
+		case *checker.FunctionDef, *checker.ExternalFunctionDef:
+			continue
+		}
+		filtered = append(filtered, stmt)
+	}
+	return filtered
 }
 
 func (e *Emitter) emitFunction(def *checker.FunctionDef) error {

@@ -1,4 +1,5 @@
 // converters to nanoseconds
+use ard/testing
 
 fn from_hours(h: Int) Int {
   h * 3600 * 1000000000
@@ -14,4 +15,20 @@ fn from_minutes(m: Int) Int {
 
 fn from_millis(ms: Int) Int {
   ms * 1000000
+}
+
+test fn test_from_seconds() Void!Str {
+  testing::equal(from_seconds(20), 20_000_000_000)
+}
+
+test fn test_from_minutes() Void!Str {
+  testing::equal(from_minutes(5), 300_000_000_000)
+}
+
+test fn test_from_hours() Void!Str {
+  testing::equal(from_hours(2), 7_200_000_000_000)
+}
+
+test fn test_from_millis() Void!Str {
+  testing::equal(from_millis(250), 250_000_000)
 }
