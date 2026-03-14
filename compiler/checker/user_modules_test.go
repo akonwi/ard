@@ -1016,3 +1016,68 @@ mut private_variable: Str = "secret"
 		t.Error("Expected nonexistent symbol to be nil")
 	}
 }
+
+func TestTestDirCannotAccessPrivateSymbols(t *testing.T) {
+	samplesDir := filepath.Join("..", "samples")
+	testDir := filepath.Join(samplesDir, "test")
+	testFile := filepath.Join(testDir, "maths_test.ard")
+
+	t.Run("public symbol access works", func(t *testing.T) {
+		src, err := os.ReadFile(testFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result := parse.Parse(src, testFile)
+		if len(result.Errors) > 0 {
+			t.Fatal(result.Errors[0].Message)
+		}
+
+		resolver, err := checker.NewModuleResolver(samplesDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		c := checker.New(testFile, result.Program, resolver)
+		c.Check()
+		diagnostics := c.Diagnostics()
+
+		if len(diagnostics) > 0 {
+			t.Errorf("Expected no errors when accessing public symbols, got: %v", diagnostics)
+		}
+	})
+
+	t.Run("private symbol access produces error", func(t *testing.T) {
+		privateSource := `use samples/maths
+
+test fn access_private() Void!Str {
+  maths::multiply(2, 3)
+  Result::ok(())
+}
+`
+		result := parse.Parse([]byte(privateSource), testFile)
+		if len(result.Errors) > 0 {
+			t.Fatal(result.Errors[0].Message)
+		}
+
+		resolver, err := checker.NewModuleResolver(samplesDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		c := checker.New(testFile, result.Program, resolver)
+		c.Check()
+		diagnostics := c.Diagnostics()
+
+		found := false
+		for _, diag := range diagnostics {
+			if strings.Contains(diag.Message, "Undefined: maths::multiply") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected 'Undefined: maths::multiply' error, got: %v", diagnostics)
+		}
+	})
+}
