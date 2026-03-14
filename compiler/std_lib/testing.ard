@@ -1,0 +1,27 @@
+fn fail(message: Str) Void!Str {
+  Result::err(message)
+}
+
+fn assert(condition: Bool, message: Str?) Void!Str {
+  match condition {
+    true => Result::ok(()),
+    false => match message {
+      text => Result::err(text),
+      _ => Result::err("Assertion failed")
+    }
+  }
+}
+
+fn equal<$T>(actual: $T, expected: $T) Void!Str {
+  match actual == expected {
+    true => Result::ok(()),
+    false => Result::err("Values were expected to be equal")
+  }
+}
+
+fn not_equal<$T>(actual: $T, expected: $T) Void!Str {
+  match actual == expected {
+    true => Result::err("Values were expected to be different"),
+    false => Result::ok(())
+  }
+}

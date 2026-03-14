@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -224,6 +225,90 @@ func TestFormatPath(t *testing.T) {
 		}
 		if changedPaths[0] != first && changedPaths[0] != second {
 			t.Fatalf("unexpected changed path %q", changedPaths[0])
+		}
+	})
+}
+
+func TestTestCommand(t *testing.T) {
+	dir := t.TempDir()
+	compilerBin := filepath.Join(dir, "ard-test")
+	buildCompiler := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-o", compilerBin, ".")
+	buildCompiler.Dir = "."
+	out, err := buildCompiler.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build compiler: %v\n%s", err, out)
+	}
+
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainSource := `use ard/testing
+use ard/maybe
+
+test fn passes() Void!Str {
+  try testing::assert(true, maybe::none())
+  try testing::equal(1 + 1, 2)
+  try testing::not_equal(1, 2)
+  Result::ok(())
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(mainSource), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+	failureSource := `use ard/testing
+
+test fn fails() Void!Str {
+  testing::fail("nope")
+}
+
+test fn panics() Void!Str {
+  panic("boom")
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "test", "failures.ard"), []byte(failureSource), 0o644); err != nil {
+		t.Fatalf("failed to write test source: %v", err)
+	}
+
+	t.Run("passing filter", func(t *testing.T) {
+		cmd := exec.Command(compilerBin, "test", "--filter", "passes", projectDir)
+		cmd.Dir = "."
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("test command failed: %v\n%s", err, out)
+		}
+		output := string(out)
+		if !strings.Contains(output, "PASS") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
+			t.Fatalf("unexpected output:\n%s", output)
+		}
+	})
+
+	t.Run("fail and panic classification", func(t *testing.T) {
+		cmd := exec.Command(compilerBin, "test", "--filter", "failures", projectDir)
+		cmd.Dir = "."
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("expected failing test command to exit non-zero\n%s", out)
+		}
+		output := string(out)
+		if !strings.Contains(output, "FAIL") || !strings.Contains(output, "PANIC") || !strings.Contains(output, "0 passed; 1 failed; 1 panicked") {
+			t.Fatalf("unexpected output:\n%s", output)
+		}
+	})
+
+	t.Run("fail fast stops after first failure", func(t *testing.T) {
+		cmd := exec.Command(compilerBin, "test", "--fail-fast", "--filter", "failures", projectDir)
+		cmd.Dir = "."
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("expected failing test command to exit non-zero\n%s", out)
+		}
+		output := string(out)
+		if strings.Contains(output, "PANIC") || !strings.Contains(output, "0 passed; 1 failed; 0 panicked") {
+			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
 }

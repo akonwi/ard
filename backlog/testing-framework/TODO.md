@@ -1,102 +1,102 @@
 # Testing Framework TODO
 
-Status: planned
+Status: in progress
 
 Keep this checklist updated as implementation progresses.
 
 ## Spec and design
 
-- [ ] Confirm final v1 syntax: `test fn`
-- [ ] Confirm all test functions must return `Void!Str`
-- [ ] Confirm failure classification: `PASS`, `FAIL`, `PANIC`
-- [ ] Confirm `/test` directory semantics
+- [x] Confirm final v1 syntax: `test fn`
+- [x] Confirm all test functions must return `Void!Str`
+- [x] Confirm failure classification: `PASS`, `FAIL`, `PANIC`
+- [x] Confirm `/test` directory semantics
 - [ ] Confirm co-located test visibility semantics
-- [ ] Confirm `ard test` CLI scope behavior for project, directory, and file paths
+- [x] Confirm `ard test` CLI scope behavior for project, directory, and file paths
 - [ ] Confirm initialization semantics for individually executed tests
 
 ## Parser and AST
 
-- [ ] Add AST metadata for test functions
-- [ ] Parse `test fn`
-- [ ] Keep `test` contextual rather than globally reserved if possible
-- [ ] Restrict `test fn` to top-level declarations
-- [ ] Add parser tests for valid `test fn`
+- [x] Add AST metadata for test functions
+- [x] Parse `test fn`
+- [x] Keep `test` contextual rather than globally reserved if possible
+- [x] Restrict `test fn` to top-level declarations
+- [x] Add parser tests for valid `test fn`
 - [ ] Add parser tests for invalid test declarations
 - [ ] Add parser tests for comments around test declarations
 
 ## Formatter
 
-- [ ] Add formatter support for `test fn`
+- [x] Add formatter support for `test fn`
 - [ ] Add formatter tests for `test fn`
 - [ ] Validate formatter idempotence for test declarations
 
 ## Checker
 
-- [ ] Validate test functions are top-level
-- [ ] Validate test functions have zero parameters
-- [ ] Validate test functions return `Void!Str`
+- [x] Validate test functions are top-level
+- [x] Validate test functions have zero parameters
+- [x] Validate test functions return `Void!Str`
 - [ ] Decide whether generic test functions are disallowed in v1
-- [ ] Preserve test metadata in checked output
+- [x] Preserve test metadata in checked output
 - [ ] Implement test-mode semantics in checker pipeline
-- [ ] Add checker tests for invalid test signatures
+- [x] Add checker tests for invalid test signatures
 - [ ] Add checker tests for co-located test visibility
 - [ ] Add checker tests for `/test` privacy behavior
 
 ## CLI and discovery
 
-- [ ] Add `test` subcommand to `compiler/main.go`
-- [ ] Add `--filter` flag
-- [ ] Add `--fail-fast` flag
-- [ ] Implement project-root/path-scoped discovery
-- [ ] Include `/test` directory in discovery
-- [ ] Avoid duplicate file discovery
-- [ ] Enumerate tests from checked programs/modules
-- [ ] Add CLI/discovery tests
+- [x] Add `test` subcommand to `compiler/main.go`
+- [x] Add `--filter` flag
+- [x] Add `--fail-fast` flag
+- [x] Implement project-root/path-scoped discovery
+- [x] Include `/test` directory in discovery
+- [x] Avoid duplicate file discovery
+- [x] Enumerate tests from checked programs/modules
+- [x] Add CLI/discovery tests
 
 ## Runner and execution
 
-- [ ] Add test runner orchestration code
-- [ ] Run each test in a fresh VM execution
-- [ ] Classify `Result::ok(())` as `PASS`
-- [ ] Classify `Result::err(...)` as `FAIL`
-- [ ] Classify panic/runtime errors as `PANIC`
-- [ ] Implement continue-on-failure default behavior
-- [ ] Implement `--fail-fast`
-- [ ] Add runner tests for pass/fail/panic outcomes
-- [ ] Add tests for filter behavior
-- [ ] Add tests for fail-fast behavior
+- [x] Add test runner orchestration code
+- [x] Run each test in a fresh VM execution
+- [x] Classify `Result::ok(())` as `PASS`
+- [x] Classify `Result::err(...)` as `FAIL`
+- [x] Classify panic/runtime errors as `PANIC`
+- [x] Implement continue-on-failure default behavior
+- [x] Implement `--fail-fast`
+- [x] Add runner tests for pass/fail/panic outcomes
+- [x] Add tests for filter behavior
+- [x] Add tests for fail-fast behavior
 
 ## Stdlib
 
-- [ ] Add `compiler/std_lib/testing.ard`
-- [ ] Add `testing::fail(message: Str) Void!Str`
-- [ ] Add `testing::assert(condition: Bool, message: Str?) Void!Str`
-- [ ] Add `testing::equal(actual: $T, expected: $T) Void!Str`
-- [ ] Add `testing::not_equal(actual: $T, expected: $T) Void!Str`
-- [ ] Decide whether equality helpers can be implemented purely in Ard
+- [x] Add `compiler/std_lib/testing.ard`
+- [x] Add `testing::fail(message: Str) Void!Str`
+- [x] Add `testing::assert(condition: Bool, message: Str?) Void!Str`
+- [x] Add `testing::equal(actual: $T, expected: $T) Void!Str`
+- [x] Add `testing::not_equal(actual: $T, expected: $T) Void!Str`
+- [x] Decide whether equality helpers can be implemented purely in Ard
 - [ ] Add stdlib tests for testing helpers
 
 ## Reporting
 
-- [ ] Add `PASS` output
-- [ ] Add `FAIL` output with message
-- [ ] Add `PANIC` output with panic details
-- [ ] Add final summary counts for passed/failed/panicked
+- [x] Add `PASS` output
+- [x] Add `FAIL` output with message
+- [x] Add `PANIC` output with panic details
+- [x] Add final summary counts for passed/failed/panicked
 - [ ] Review output for readability and scanability
 
 ## Integration and regression coverage
 
-- [ ] Add end-to-end tests for co-located tests
-- [ ] Add end-to-end tests for `/test` discovery
-- [ ] Add end-to-end tests for explicit failure via `Result::err(...)`
-- [ ] Add end-to-end tests for panic classification
-- [ ] Run `go test ./parse`
-- [ ] Run `go test ./checker`
-- [ ] Run `go test ./bytecode/vm`
-- [ ] Run `go test ./formatter`
-- [ ] Run `go test ./...`
-- [ ] Run `go build`
-- [ ] Run manual `go run main.go test ...` checks
+- [x] Add end-to-end tests for co-located tests
+- [x] Add end-to-end tests for `/test` discovery
+- [x] Add end-to-end tests for explicit failure via `Result::err(...)`
+- [x] Add end-to-end tests for panic classification
+- [x] Run `go test ./parse`
+- [x] Run `go test ./checker`
+- [x] Run `go test ./bytecode/vm`
+- [x] Run `go test ./formatter`
+- [x] Run `go test ./...`
+- [x] Run `go build`
+- [x] Run manual `go run main.go test ...` checks
 - [ ] If needed, run `go generate ./bytecode/vm`
 
 ## Docs
