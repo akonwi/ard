@@ -106,8 +106,26 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("FS_IsDir", ffi.FS_IsDir); err != nil {
 		return fmt.Errorf("failed to register FS_IsDir: %w", err)
 	}
+	if err := r.Register("FS_Copy", ffi.FS_Copy); err != nil {
+		return fmt.Errorf("failed to register FS_Copy: %w", err)
+	}
+	if err := r.Register("FS_Rename", ffi.FS_Rename); err != nil {
+		return fmt.Errorf("failed to register FS_Rename: %w", err)
+	}
+	if err := r.Register("FS_FileSize", ffi.FS_FileSize); err != nil {
+		return fmt.Errorf("failed to register FS_FileSize: %w", err)
+	}
+	if err := r.Register("FS_Cwd", ffi.FS_Cwd); err != nil {
+		return fmt.Errorf("failed to register FS_Cwd: %w", err)
+	}
+	if err := r.Register("FS_Abs", ffi.FS_Abs); err != nil {
+		return fmt.Errorf("failed to register FS_Abs: %w", err)
+	}
 	if err := r.Register("FS_CreateDir", ffi.FS_CreateDir); err != nil {
 		return fmt.Errorf("failed to register FS_CreateDir: %w", err)
+	}
+	if err := r.Register("FS_DeleteDir", ffi.FS_DeleteDir); err != nil {
+		return fmt.Errorf("failed to register FS_DeleteDir: %w", err)
 	}
 	if err := r.Register("FS_ListDir", ffi.FS_ListDir); err != nil {
 		return fmt.Errorf("failed to register FS_ListDir: %w", err)
