@@ -830,9 +830,11 @@ func (b *Block) Type() Type {
 	if len(b.Stmts) == 0 {
 		return Void
 	}
-	last := b.Stmts[len(b.Stmts)-1]
-	if last.Expr != nil {
-		return last.Expr.Type()
+	// Find the last non-empty statement (skip trailing empty statements from blank lines)
+	for i := len(b.Stmts) - 1; i >= 0; i-- {
+		if b.Stmts[i].Expr != nil {
+			return b.Stmts[i].Expr.Type()
+		}
 	}
 	return Void
 }
@@ -1130,6 +1132,12 @@ func (e Enum) String() string {
 func (e Enum) equal(other Type) bool {
 	o, ok := other.(*Enum)
 	if !ok {
+		if tv, ok := other.(*TypeVar); ok {
+			if tv.actual == nil {
+				return true
+			}
+			return e.equal(tv.actual)
+		}
 		return false
 	}
 	if e.Name != o.Name {

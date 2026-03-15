@@ -385,6 +385,86 @@ func TestTry(t *testing.T) {
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
+		{
+			name: "Result with enum value type in bool match branches",
+			input: `
+				enum Command { init, create, help }
+
+				fn command_from_index(index: Int) Command {
+					match index {
+						0 => Command::init,
+						1 => Command::create,
+						_ => Command::help,
+					}
+				}
+
+				fn parse_command(name: Str) Command!Str {
+					let index = 0
+					match index >= 0 {
+						true => Result::ok(command_from_index(index)),
+						false => Result::err("Unknown command"),
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result with enum value type in bool match with map lookup",
+			input: `
+				enum Command { init, create, help }
+
+				fn command_map() [Str: Int] {
+					let cmds: [Str: Int] = [
+						"init": 0,
+						"create": 1,
+						"help": 2,
+					]
+					cmds
+				}
+
+				fn command_from_index(index: Int) Command {
+					match index {
+						0 => Command::init,
+						1 => Command::create,
+						_ => Command::help,
+					}
+				}
+
+				fn parse_command(name: Str) Command!Str {
+					let cmds = command_map()
+					let index = cmds.get(name).or(-1)
+					match index >= 0 {
+						true => Result::ok(command_from_index(index)),
+						false => Result::err("Unknown command: {name}"),
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result with enum in bool match with trailing blank line",
+			input: `
+				enum Command { init, create, help }
+
+				fn command_from_index(index: Int) Command {
+					match index {
+						0 => Command::init,
+						1 => Command::create,
+						_ => Command::help,
+					}
+				}
+
+				fn parse_command(name: Str) Command!Str {
+					let index = 0
+					match index >= 0 {
+						true => Result::ok(command_from_index(index)),
+						false => Result::err("Unknown command"),
+					}
+
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }
 
