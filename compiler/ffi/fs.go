@@ -2,7 +2,9 @@ package ffi
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
@@ -88,6 +90,70 @@ func FS_IsDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
 		return runtime.MakeBool(false)
 	}
 	return runtime.MakeBool(info.IsDir())
+}
+
+func FS_Copy(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	from := args[0].Raw().(string)
+	to := args[1].Raw().(string)
+
+	src, err := os.Open(from)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	defer src.Close()
+
+	dst, err := os.Create(to)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func FS_Rename(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	from := args[0].Raw().(string)
+	to := args[1].Raw().(string)
+	if err := os.Rename(from, to); err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func FS_Cwd(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+	dir, err := os.Getwd()
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(dir))
+}
+
+func FS_Abs(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(absPath))
+}
+
+func FS_CreateDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func FS_DeleteDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	if err := os.RemoveAll(path); err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
 }
 
 func FS_ListDir(args []*runtime.Object, outType checker.Type) *runtime.Object {

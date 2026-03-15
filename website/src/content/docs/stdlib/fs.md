@@ -6,9 +6,10 @@ description: Read, write, and manage files and directories using Ard's filesyste
 The `ard/fs` module provides functions for working with files and directories in a safe, error-aware manner.
 
 The filesystem module provides:
-- **File operations** for reading, writing, and deleting files
-- **File inspection** to check if paths are files or directories
-- **Directory listing** to discover directory contents
+- **File operations** for reading, writing, copying, and deleting files
+- **File inspection** to check existence and type of paths
+- **Directory operations** for creating, listing, and deleting directories
+- **Path utilities** for resolving the current working directory and absolute paths
 - **Result types** for proper error handling
 
 ```ard
@@ -120,6 +121,70 @@ Delete a file. Returns an error if the file doesn't exist.
 use ard/fs
 
 fs::delete("tempfile.txt").expect("Failed to delete")
+```
+
+### `fn copy(from: Str, to: Str) Void!Str`
+
+Copy a file from one path to another. Creates the destination file if it doesn't exist, or overwrites it if it does.
+
+```ard
+use ard/fs
+
+fs::copy("original.txt", "backup.txt").expect("Failed to copy")
+```
+
+### `fn rename(from: Str, to: Str) Void!Str`
+
+Move or rename a file or directory. The source is removed after a successful rename.
+
+```ard
+use ard/fs
+
+fs::rename("old_name.txt", "new_name.txt").expect("Failed to rename")
+```
+
+## Path Utilities
+
+### `fn cwd() Str!Str`
+
+Get the current working directory.
+
+```ard
+use ard/fs
+
+let dir = fs::cwd().expect("Failed to get cwd")
+```
+
+### `fn abs(path: Str) Str!Str`
+
+Resolve a relative path to an absolute path.
+
+```ard
+use ard/fs
+
+let full_path = fs::abs("./src").expect("Failed to resolve path")
+```
+
+## Directory Operations
+
+### `fn create_dir(path: Str) Void!Str`
+
+Create a directory at the given path, including any missing parent directories. Returns an error if the operation fails.
+
+```ard
+use ard/fs
+
+fs::create_dir("output/reports/2024").expect("Failed to create directory")
+```
+
+### `fn delete_dir(path: Str) Void!Str`
+
+Delete a directory and all its contents recursively. Returns an error if the operation fails.
+
+```ard
+use ard/fs
+
+fs::delete_dir("build/output").expect("Failed to delete directory")
 ```
 
 ## Directory Listing

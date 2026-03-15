@@ -14,9 +14,21 @@ extern fn read(path: Str) Str!Str = "FS_ReadFile"
 
 extern fn delete(path: Str) Void!Str = "FS_DeleteFile"
 
+extern fn copy(from: Str, to: Str) Void!Str = "FS_Copy"
+
+extern fn rename(from: Str, to: Str) Void!Str = "FS_Rename"
+
+extern fn cwd() Str!Str = "FS_Cwd"
+
+extern fn abs(path: Str) Str!Str = "FS_Abs"
+
 struct DirEntry {
   name: Str,
   is_file: Bool,
 }
+
+extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
+
+extern fn delete_dir(path: Str) Void!Str = "FS_DeleteDir"
 
 extern fn list_dir(path: Str) [DirEntry]!Str = "FS_ListDir"
