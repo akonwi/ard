@@ -26,8 +26,8 @@ type ModuleResolver struct {
 	loadingChain []string                // track import paths currently being loaded for circular dependency detection
 }
 
-// findProjectRoot walks up the directory tree to find ard.toml or falls back to directory name
-func findProjectRoot(startPath string) (*ProjectInfo, error) {
+// FindProjectRoot walks up the directory tree to find ard.toml or falls back to directory name
+func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 	absPath, err := filepath.Abs(startPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path: %w", err)
@@ -83,7 +83,7 @@ func parseProjectName(tomlPath string) (string, error) {
 
 // NewModuleResolver creates a new module resolver for the given working directory
 func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
-	project, err := findProjectRoot(workingDir)
+	project, err := FindProjectRoot(workingDir)
 	if err != nil {
 		return nil, err
 	}

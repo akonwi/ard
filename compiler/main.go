@@ -224,7 +224,21 @@ func parseBuildArgs(args []string) (string, string, error) {
 		return "", "", fmt.Errorf("expected filepath argument")
 	}
 	if outputPath == "" {
-		outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+		// Try to use the project name from ard.toml
+		inputDir := filepath.Dir(inputPath)
+		if inputDir == "" {
+			inputDir = "."
+		}
+		if project, err := checker.FindProjectRoot(inputDir); err == nil && project.ProjectName != "" {
+			// Check if the project name came from ard.toml (not just directory fallback)
+			tomlPath := filepath.Join(project.RootPath, "ard.toml")
+			if _, statErr := os.Stat(tomlPath); statErr == nil {
+				outputPath = project.ProjectName
+			}
+		}
+		if outputPath == "" {
+			outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+		}
 	}
 	return inputPath, outputPath, nil
 }
