@@ -8,7 +8,7 @@ The `ard/fs` module provides functions for working with files and directories in
 The filesystem module provides:
 - **File operations** for reading, writing, and deleting files
 - **File inspection** to check if paths are files or directories
-- **Directory listing** to discover directory contents
+- **Directory operations** for creating and listing directories
 - **Result types** for proper error handling
 
 ```ard
@@ -120,6 +120,18 @@ Delete a file. Returns an error if the file doesn't exist.
 use ard/fs
 
 fs::delete("tempfile.txt").expect("Failed to delete")
+```
+
+## Directory Operations
+
+### `fn create_dir(path: Str) Void!Str`
+
+Create a directory at the given path, including any missing parent directories. Returns an error if the operation fails.
+
+```ard
+use ard/fs
+
+fs::create_dir("output/reports/2024").expect("Failed to create directory")
 ```
 
 ## Directory Listing
