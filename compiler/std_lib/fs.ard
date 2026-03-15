@@ -19,4 +19,6 @@ struct DirEntry {
   is_file: Bool,
 }
 
+extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
+
 extern fn list_dir(path: Str) [DirEntry]!Str = "FS_ListDir"

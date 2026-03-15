@@ -14,6 +14,7 @@ func TestBytecodeFS(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 	filePath := filepath.Join(tmpDir, "fake.file")
+	dirPath := filepath.Join(tmpDir, "a", "b", "c")
 
 	runBytecodeTests(t, []vmTestCase{
 		{name: "fs::exists false for missing path", input: `
@@ -24,6 +25,14 @@ func TestBytecodeFS(t *testing.T) {
 			use ard/fs
 			fs::exists("../../main.go")
 		`, want: true},
+		{name: "fs::create_dir", input: fmt.Sprintf(`
+			use ard/fs
+			fs::create_dir(%q)
+		`, dirPath), want: nil},
+		{name: "fs::create_dir created nested dirs", input: fmt.Sprintf(`
+			use ard/fs
+			fs::is_dir(%q)
+		`, dirPath), want: true},
 		{name: "fs::create_file", input: fmt.Sprintf(`
 			use ard/fs
 			fs::create_file(%q).expect("Failed to create file")

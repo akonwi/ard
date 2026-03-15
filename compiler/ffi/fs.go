@@ -90,6 +90,14 @@ func FS_IsDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeBool(info.IsDir())
 }
 
+func FS_CreateDir(args []*runtime.Object, _ checker.Type) *runtime.Object {
+	path := args[0].Raw().(string)
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
 func FS_ListDir(args []*runtime.Object, outType checker.Type) *runtime.Object {
 	path := args[0].Raw().(string)
 	entries, err := os.ReadDir(path)
