@@ -123,15 +123,6 @@ func FS_Rename(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(runtime.Void())
 }
 
-func FS_FileSize(args []*runtime.Object, _ checker.Type) *runtime.Object {
-	path := args[0].Raw().(string)
-	info, err := os.Stat(path)
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
-	}
-	return runtime.MakeOk(runtime.MakeInt(int(info.Size())))
-}
-
 func FS_Cwd(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 	dir, err := os.Getwd()
 	if err != nil {

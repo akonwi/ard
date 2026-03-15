@@ -117,26 +117,6 @@ func TestBytecodeFS_Rename(t *testing.T) {
 	})
 }
 
-func TestBytecodeFS_FileSize(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "ard_bytecode_fs_size_")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-	filePath := filepath.Join(tmpDir, "sized.txt")
-
-	runBytecodeTests(t, []vmTestCase{
-		{name: "setup: create file", input: fmt.Sprintf(`
-			use ard/fs
-			fs::write(%q, "hello")
-		`, filePath), want: nil},
-		{name: "fs::file_size", input: fmt.Sprintf(`
-			use ard/fs
-			fs::file_size(%q).expect("stat failed")
-		`, filePath), want: 5},
-	})
-}
-
 func TestBytecodeFS_DeleteDir(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "ard_bytecode_fs_deldir_")
 	if err != nil {

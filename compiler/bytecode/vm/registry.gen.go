@@ -112,9 +112,6 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("FS_Rename", ffi.FS_Rename); err != nil {
 		return fmt.Errorf("failed to register FS_Rename: %w", err)
 	}
-	if err := r.Register("FS_FileSize", ffi.FS_FileSize); err != nil {
-		return fmt.Errorf("failed to register FS_FileSize: %w", err)
-	}
 	if err := r.Register("FS_Cwd", ffi.FS_Cwd); err != nil {
 		return fmt.Errorf("failed to register FS_Cwd: %w", err)
 	}

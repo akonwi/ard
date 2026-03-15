@@ -18,8 +18,6 @@ extern fn copy(from: Str, to: Str) Void!Str = "FS_Copy"
 
 extern fn rename(from: Str, to: Str) Void!Str = "FS_Rename"
 
-extern fn file_size(path: Str) Int!Str = "FS_FileSize"
-
 extern fn cwd() Str!Str = "FS_Cwd"
 
 extern fn abs(path: Str) Str!Str = "FS_Abs"

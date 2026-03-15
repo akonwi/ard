@@ -7,7 +7,7 @@ The `ard/fs` module provides functions for working with files and directories in
 
 The filesystem module provides:
 - **File operations** for reading, writing, copying, and deleting files
-- **File inspection** to check existence, type, and size of paths
+- **File inspection** to check existence and type of paths
 - **Directory operations** for creating, listing, and deleting directories
 - **Path utilities** for resolving the current working directory and absolute paths
 - **Result types** for proper error handling
@@ -141,16 +141,6 @@ Move or rename a file or directory. The source is removed after a successful ren
 use ard/fs
 
 fs::rename("old_name.txt", "new_name.txt").expect("Failed to rename")
-```
-
-### `fn file_size(path: Str) Int!Str`
-
-Get the size of a file in bytes.
-
-```ard
-use ard/fs
-
-let size = fs::file_size("data.bin").expect("Failed to get size")
 ```
 
 ## Path Utilities
