@@ -7,25 +7,26 @@ use ard/result as Result
 type Value = Str | Bool | Int | Float | Void
 
 // Opaque pointers to Go-side database objects
-private extern type ConnectionPtr
-private extern type TransactionPtr
+private extern type Db
+private extern type Tx
+private type Conn = Db | Tx
 
-private extern fn connect(connection_string: Str) ConnectionPtr!Str = "SqlCreateConnection"
-private extern fn close_db(db: ConnectionPtr) Void!Str = "SqlClose"
-private extern fn execute(db: Dynamic, sql: Str, values: [Value]) Void!Str = "SqlExecute"
-private extern fn run_query(db: Dynamic, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
-private extern fn begin_tx(db: ConnectionPtr) TransactionPtr!Str = "SqlBeginTx"
-private extern fn commit_tx(tx: TransactionPtr) Void!Str = "SqlCommit"
-private extern fn rollback_tx(tx: TransactionPtr) Void!Str = "SqlRollback"
+private extern fn connect(connection_string: Str) Db!Str = "SqlCreateConnection"
+private extern fn close_db(db: Db) Void!Str = "SqlClose"
+private extern fn execute(conn: Conn, sql: Str, values: [Value]) Void!Str = "SqlExecute"
+private extern fn run_query(conn: Conn, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
+private extern fn begin_tx(db: Db) Tx!Str = "SqlBeginTx"
+private extern fn commit_tx(tx: Tx) Void!Str = "SqlCommit"
+private extern fn rollback_tx(tx: Tx) Void!Str = "SqlRollback"
 
 extern fn extract_params(sql: Str) [Str] = "SqlExtractParams"
 
 struct Transaction {
-  _ptr: TransactionPtr,
+  _tx: Tx,
 }
 
 struct Query {
-  conn: Dynamic,
+  conn: Conn,
   string: Str,
   params: [Str],
 }
@@ -66,58 +67,58 @@ impl Query {
 }
 
 struct Database {
-  _ptr: ConnectionPtr,
+  _db: Db,
   path: Str,
 }
 
 fn open(path: Str) Database!Str {
   let conn = try connect(path)
-  Result::ok(Database{_ptr: conn, path: path})
+  Result::ok(Database{_db: conn, path: path})
 }
 
 impl Database {
   fn close() Void!Str {
-    close_db(self._ptr)
+    close_db(self._db)
   }
 
   // simple one-off executions where the results aren't needed
   // [note]: could be removed entirely for query.run() once optional params are sorted
   fn exec(sql: Str) Void!Str {
-    execute(self._ptr, sql, List::new<Value>())
+    execute(self._db, sql, List::new<Value>())
   }
 
   fn query(sql: Str) Query {
     Query{
-      conn: self._ptr,
+      conn: self._db,
       string: sql,
       params: extract_params(sql),
     }
   }
 
   fn begin() Transaction!Str {
-    let tx = try begin_tx(self._ptr)
-    Result::ok(Transaction{_ptr: tx})
+    let tx = try begin_tx(self._db)
+    Result::ok(Transaction{_tx: tx})
   }
 }
 
 impl Transaction {
   fn query(sql: Str) Query {
     Query{
-      conn: self._ptr,
+      conn: self._tx,
       string: sql,
       params: extract_params(sql),
     }
   }
 
   fn exec(sql: Str) Void!Str {
-    execute(self._ptr, sql, List::new<Value>())
+    execute(self._tx, sql, List::new<Value>())
   }
 
   fn commit() Void!Str {
-    commit_tx(self._ptr)
+    commit_tx(self._tx)
   }
 
   fn rollback() Void!Str {
-    rollback_tx(self._ptr)
+    rollback_tx(self._tx)
   }
 }
