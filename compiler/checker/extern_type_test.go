@@ -84,16 +84,6 @@ func TestExternType(t *testing.T) {
 			},
 		},
 		{
-			name: "extern type is assignable to Dynamic",
-			input: strings.Join([]string{
-				`extern type ConnectionPtr`,
-				`extern fn connect(cs: Str) ConnectionPtr = "SqlConnect"`,
-				`extern fn use_dynamic(d: Dynamic) Void = "UseDynamic"`,
-				`let conn = connect("x")`,
-				`use_dynamic(conn)`,
-			}, "\n"),
-		},
-		{
 			name: "different extern types are not interchangeable",
 			input: strings.Join([]string{
 				`extern type ConnectionPtr`,

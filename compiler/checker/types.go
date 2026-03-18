@@ -691,10 +691,6 @@ func (d dynamicType) equal(other Type) bool {
 	if _, ok := other.(*dynamicType); ok {
 		return true
 	}
-	// Extern types are assignable to Dynamic (opaque handle erasure)
-	if _, ok := other.(*ExternType); ok {
-		return true
-	}
 	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
 		return true
 	}
