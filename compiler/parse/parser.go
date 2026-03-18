@@ -2108,6 +2108,24 @@ func (p *parser) try() (Expression, error) {
 func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 	private := p.match(private)
 	isExtern := p.match(extern)
+
+	// Handle extern type declarations
+	if isExtern && p.match(type_) {
+		keyword := p.previous()
+		if !p.check(identifier) {
+			return nil, p.makeError(p.peek(), "Expected type name after 'extern type'")
+		}
+		nameToken := p.advance()
+		return &ExternTypeDeclaration{
+			Name:    nameToken.text,
+			Private: private,
+			Location: Location{
+				Start: Point{Row: keyword.line, Col: keyword.column},
+				End:   Point{Row: nameToken.line, Col: nameToken.column + len(nameToken.text)},
+			},
+		}, nil
+	}
+
 	if p.match(fn) {
 		keyword := p.previous()
 		var name any = ""

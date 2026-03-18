@@ -300,6 +300,16 @@ func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType.GetName())
 }
 
+type ExternTypeDeclaration struct {
+	Location
+	Name    string
+	Private bool
+}
+
+func (e ExternTypeDeclaration) String() string {
+	return fmt.Sprintf("extern type %s", e.Name)
+}
+
 type ExternalFunction struct {
 	Location
 	Name            string
