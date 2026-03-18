@@ -256,6 +256,13 @@ func parseGoType(expr ast.Expr) (GoType, bool) {
 		switch t.Name {
 		case "string", "int", "float64", "bool", "error":
 			return GoType{Base: t.Name}, true
+		case "any":
+			return GoType{Base: "any"}, true
+		}
+	case *ast.InterfaceType:
+		// interface{} is equivalent to any
+		if t.Methods == nil || len(t.Methods.List) == 0 {
+			return GoType{Base: "any"}, true
 		}
 	case *ast.StarExpr:
 		if ident, ok := t.X.(*ast.Ident); ok {
@@ -435,6 +442,8 @@ func unwrapScalar(expr, base string) string {
 		return expr + ".AsFloat()"
 	case "bool":
 		return expr + ".AsBool()"
+	case "any":
+		return expr + ".Raw()"
 	default:
 		panic("unsupported base type for unwrap: " + base)
 	}
@@ -491,6 +500,8 @@ func wrapScalar(expr, base string) string {
 		return fmt.Sprintf("runtime.MakeFloat(%s)", expr)
 	case "bool":
 		return fmt.Sprintf("runtime.MakeBool(%s)", expr)
+	case "any":
+		return fmt.Sprintf("runtime.MakeDynamic(%s)", expr)
 	default:
 		panic("unsupported base type for wrap: " + base)
 	}

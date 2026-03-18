@@ -52,23 +52,22 @@ func requestBodyMaybe(r *http.Request) *runtime.Object {
 }
 
 // fn (req: Dynamic) Str
-func GetReqPath(args []*runtime.Object) *runtime.Object {
-	req := args[0].Raw().(*http.Request)
-	return runtime.MakeStr(req.URL.Path)
+// GetReqPath extracts the URL path from an opaque *http.Request handle.
+func GetReqPath(handle any) string {
+	req := handle.(*http.Request)
+	return req.URL.Path
 }
 
-// fn (req: Dynamic, name: Str) Str
-func GetPathValue(args []*runtime.Object) *runtime.Object {
-	req := args[0].Raw().(*http.Request)
-	name := args[1].Raw().(string)
-	return runtime.MakeStr(req.PathValue(name))
+// GetPathValue extracts a path parameter from an opaque *http.Request handle.
+func GetPathValue(handle any, name string) string {
+	req := handle.(*http.Request)
+	return req.PathValue(name)
 }
 
-// fn (req: Dynamic, name: Str) Str
-func GetQueryParam(args []*runtime.Object) *runtime.Object {
-	req := args[0].Raw().(*http.Request)
-	name := args[1].Raw().(string)
-	return runtime.MakeStr(req.URL.Query().Get(name))
+// GetQueryParam extracts a query parameter from an opaque *http.Request handle.
+func GetQueryParam(handle any, name string) string {
+	req := handle.(*http.Request)
+	return req.URL.Query().Get(name)
 }
 
 // fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str], timeout: Int?) Response!Str

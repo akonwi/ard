@@ -69,10 +69,10 @@ func Sleep(ns int) {
 }
 
 // fn (wg: Dynamic) Void
-func WaitFor(args []*runtime.Object) *runtime.Object {
-	wg := args[0].Raw().(*sync.WaitGroup)
+// WaitFor waits for an opaque *sync.WaitGroup handle to complete.
+func WaitFor(handle any) {
+	wg := handle.(*sync.WaitGroup)
 	wg.Wait()
-	return runtime.Void()
 }
 
 // fn (fibers: [Fiber]) Void
