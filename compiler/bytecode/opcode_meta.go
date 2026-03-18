@@ -157,6 +157,8 @@ func (o Opcode) String() string {
 		return "TRY_RESULT"
 	case OpTryMaybe:
 		return "TRY_MAYBE"
+	case OpToDynamic:
+		return "TO_DYNAMIC"
 	case OpAsyncStart:
 		return "ASYNC_START"
 	case OpAsyncEval:
@@ -233,6 +235,8 @@ func (o Opcode) StackEffect() StackEffect {
 	case OpMakeNone:
 		return StackEffect{Pop: 0, Push: 1}
 	case OpTryResult, OpTryMaybe:
+		return StackEffect{Pop: 1, Push: 1}
+	case OpToDynamic:
 		return StackEffect{Pop: 1, Push: 1}
 	case OpAsyncStart, OpAsyncEval:
 		return StackEffect{Pop: 1, Push: 1}

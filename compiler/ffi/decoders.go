@@ -31,29 +31,6 @@ func getDecodeErrorType() checker.Type {
 	return decodeErrorType
 }
 
-func StrToDynamic(args []*runtime.Object) *runtime.Object {
-	strValue := args[0].AsString()
-	return runtime.MakeDynamic(strValue)
-}
-
-func IntToDynamic(args []*runtime.Object) *runtime.Object {
-	intValue := args[0].AsInt()
-	return runtime.MakeDynamic(intValue)
-}
-
-func FloatToDynamic(args []*runtime.Object) *runtime.Object {
-	floatValue := args[0].AsFloat()
-	return runtime.MakeDynamic(floatValue)
-}
-
-func BoolToDynamic(args []*runtime.Object) *runtime.Object {
-	return runtime.MakeDynamic(args[0].Raw())
-}
-
-func VoidToDynamic(args []*runtime.Object) *runtime.Object {
-	return runtime.MakeDynamic(nil)
-}
-
 func ListToDynamic(args []*runtime.Object) *runtime.Object {
 	arg := args[0].AsList()
 	raw := make([]any, len(arg))

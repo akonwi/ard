@@ -361,21 +361,6 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("CryptoUUID", _ffi_CryptoUUID); err != nil {
 		return fmt.Errorf("failed to register CryptoUUID: %w", err)
 	}
-	if err := r.Register("StrToDynamic", ffi.StrToDynamic); err != nil {
-		return fmt.Errorf("failed to register StrToDynamic: %w", err)
-	}
-	if err := r.Register("IntToDynamic", ffi.IntToDynamic); err != nil {
-		return fmt.Errorf("failed to register IntToDynamic: %w", err)
-	}
-	if err := r.Register("FloatToDynamic", ffi.FloatToDynamic); err != nil {
-		return fmt.Errorf("failed to register FloatToDynamic: %w", err)
-	}
-	if err := r.Register("BoolToDynamic", ffi.BoolToDynamic); err != nil {
-		return fmt.Errorf("failed to register BoolToDynamic: %w", err)
-	}
-	if err := r.Register("VoidToDynamic", ffi.VoidToDynamic); err != nil {
-		return fmt.Errorf("failed to register VoidToDynamic: %w", err)
-	}
 	if err := r.Register("ListToDynamic", ffi.ListToDynamic); err != nil {
 		return fmt.Errorf("failed to register ListToDynamic: %w", err)
 	}
