@@ -30,7 +30,7 @@ type sqlTransaction struct {
 // - SQLite: "file:test.db" or "test.db"
 // - PostgreSQL: "postgres://user:password@localhost:5432/dbname"
 // - MySQL: "user:password@tcp(localhost:3306)/dbname"
-func SqlCreateConnection(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlCreateConnection(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("open expects 1 argument, got %d", len(args)))
 	}
@@ -75,7 +75,7 @@ func detectDriver(connStr string) string {
 }
 
 // SqlClose closes a database connection
-func SqlClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlClose(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("close expects 1 argument, got %d", len(args)))
 	}
@@ -94,7 +94,7 @@ func SqlClose(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // Extract parameter names from a sql expression in the order they appear
-func SqlExtractParams(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlExtractParams(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("extract_params expects 1 argument, got %d", len(args)))
 	}
@@ -271,7 +271,7 @@ func executeQuery(runner sqlRunner, sqlStr string, values []any) *runtime.Object
 }
 
 // executes a query and returns the rows
-func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlQuery(args []*runtime.Object) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
 	}
@@ -297,7 +297,7 @@ func SqlQuery(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // executes a query and doesn't return rows
-func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlExecute(args []*runtime.Object) *runtime.Object {
 	if len(args) != 3 {
 		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
 	}
@@ -326,7 +326,7 @@ func SqlExecute(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // SqlBeginTx begins a new transaction
-func SqlBeginTx(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlBeginTx(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("begin expects 1 argument, got %d", len(args)))
 	}
@@ -356,7 +356,7 @@ func SqlBeginTx(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // SqlCommit commits a transaction
-func SqlCommit(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlCommit(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("commit expects 1 argument, got %d", len(args)))
 	}
@@ -375,7 +375,7 @@ func SqlCommit(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // SqlRollback rolls back a transaction
-func SqlRollback(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func SqlRollback(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("rollback expects 1 argument, got %d", len(args)))
 	}

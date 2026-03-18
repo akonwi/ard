@@ -5,35 +5,56 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
 
-func StrToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+var (
+	decodeErrorType     checker.Type
+	decodeErrorTypeOnce sync.Once
+)
+
+func getDecodeErrorType() checker.Type {
+	decodeErrorTypeOnce.Do(func() {
+		mod, ok := checker.FindEmbeddedModule("ard/decode")
+		if !ok {
+			panic("failed to load ard/decode embedded module")
+		}
+		sym := mod.Get("Error")
+		if sym.Type == nil {
+			panic("Error type not found in ard/decode module")
+		}
+		decodeErrorType = sym.Type
+	})
+	return decodeErrorType
+}
+
+func StrToDynamic(args []*runtime.Object) *runtime.Object {
 	strValue := args[0].AsString()
 	return runtime.MakeDynamic(strValue)
 }
 
-func IntToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func IntToDynamic(args []*runtime.Object) *runtime.Object {
 	intValue := args[0].AsInt()
 	return runtime.MakeDynamic(intValue)
 }
 
-func FloatToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func FloatToDynamic(args []*runtime.Object) *runtime.Object {
 	floatValue := args[0].AsFloat()
 	return runtime.MakeDynamic(floatValue)
 }
 
-func BoolToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func BoolToDynamic(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeDynamic(args[0].Raw())
 }
 
-func VoidToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func VoidToDynamic(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeDynamic(nil)
 }
 
-func ListToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func ListToDynamic(args []*runtime.Object) *runtime.Object {
 	arg := args[0].AsList()
 	raw := make([]any, len(arg))
 	for i, item := range arg {
@@ -42,7 +63,7 @@ func ListToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeDynamic(raw)
 }
 
-func MapToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func MapToDynamic(args []*runtime.Object) *runtime.Object {
 	arg := args[0].AsMap()
 	raw := map[string]any{}
 	for key, val := range arg {
@@ -52,7 +73,7 @@ func MapToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // Parse external data (JSON text) into Dynamic object
-func JsonToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func JsonToDynamic(args []*runtime.Object) *runtime.Object {
 	jsonString := args[0].AsString()
 	jsonBytes := []byte(jsonString)
 
@@ -67,27 +88,27 @@ func JsonToDynamic(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (Dynamic) Str!Error
-func DecodeString(args []*runtime.Object, outType checker.Type) *runtime.Object {
-	resultType := outType.(*checker.Result)
+func DecodeString(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Str", "null", resultType.Err()))
+		return runtime.MakeErr(makeError("Str", "null", errType))
 	}
 	if str, ok := data.(string); ok {
 		return runtime.MakeOk(runtime.MakeStr(str))
 	}
 
-	return runtime.MakeErr(makeError("Str", formatRawValueForError(arg.GoValue()), resultType.Err()))
+	return runtime.MakeErr(makeError("Str", formatRawValueForError(arg.GoValue()), errType))
 }
 
 // fn (Dynamic) Int!Error
-func DecodeInt(args []*runtime.Object, outType checker.Type) *runtime.Object {
-	resultType := outType.(*checker.Result)
+func DecodeInt(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Int", "null", resultType.Err()))
+		return runtime.MakeErr(makeError("Int", "null", errType))
 	}
 	if int, ok := data.(int); ok {
 		return runtime.MakeOk(runtime.MakeInt(int))
@@ -104,16 +125,16 @@ func DecodeInt(args []*runtime.Object, outType checker.Type) *runtime.Object {
 		}
 	}
 
-	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue()), resultType.Err()))
+	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue()), errType))
 }
 
 // fn (Dynamic) Float!Error
-func DecodeFloat(args []*runtime.Object, outType checker.Type) *runtime.Object {
-	resultType := outType.(*checker.Result)
+func DecodeFloat(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Float", "null", resultType.Err()))
+		return runtime.MakeErr(makeError("Float", "null", errType))
 	}
 	if float, ok := data.(float64); ok {
 		return runtime.MakeOk(runtime.MakeFloat(float))
@@ -126,32 +147,32 @@ func DecodeFloat(args []*runtime.Object, outType checker.Type) *runtime.Object {
 		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
 	}
 
-	return runtime.MakeErr(makeError("Float", formatRawValueForError(arg.GoValue()), resultType.Err()))
+	return runtime.MakeErr(makeError("Float", formatRawValueForError(arg.GoValue()), errType))
 }
 
 // fn (Dynamic) Bool!Error
-func DecodeBool(args []*runtime.Object, outType checker.Type) *runtime.Object {
-	resultType := outType.(*checker.Result)
+func DecodeBool(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Bool", "null", resultType.Err()))
+		return runtime.MakeErr(makeError("Bool", "null", errType))
 	}
 	if val, ok := data.(bool); ok {
 		return runtime.MakeOk(runtime.MakeBool(val))
 	}
 
-	return runtime.MakeErr(makeError("Bool", formatRawValueForError(arg.GoValue()), resultType.Err()))
+	return runtime.MakeErr(makeError("Bool", formatRawValueForError(arg.GoValue()), errType))
 }
 
 // fn (Dynamic) Bool
-func IsNil(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func IsNil(args []*runtime.Object) *runtime.Object {
 	isNil := args[0].Raw() == nil
 	return runtime.MakeBool(isNil)
 }
 
 // fn (Dyanmic) [Dynamic]!Str
-func DynamicToList(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func DynamicToList(args []*runtime.Object) *runtime.Object {
 	arg := args[0]
 	data := arg.Raw()
 
@@ -171,7 +192,7 @@ func DynamicToList(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (Dyanmic) [Dynamic:Dynamic]!Str
-func DynamicToMap(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func DynamicToMap(args []*runtime.Object) *runtime.Object {
 	arg := args[0]
 	data := arg.Raw()
 
@@ -191,7 +212,7 @@ func DynamicToMap(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (Dynamic, Str) Dynamic!Str
-func ExtractField(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func ExtractField(args []*runtime.Object) *runtime.Object {
 	arg := args[0]
 	data := arg.Raw()
 

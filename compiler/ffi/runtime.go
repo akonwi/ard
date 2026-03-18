@@ -40,7 +40,7 @@ func currentOSArgs() []string {
 
 // Runtime module FFI functions
 
-func OsArgs(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+func OsArgs(_ []*runtime.Object) *runtime.Object {
 	args := currentOSArgs()
 	var out []*runtime.Object = make([]*runtime.Object, len(args))
 	for i, a := range args {
@@ -50,7 +50,7 @@ func OsArgs(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // Print prints a value to stdout
-func Print(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func Print(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
 	}
@@ -62,7 +62,7 @@ func Print(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // ReadLine reads a line from stdin
-func ReadLine(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func ReadLine(args []*runtime.Object) *runtime.Object {
 	if len(args) != 0 {
 		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
 	}
@@ -82,7 +82,7 @@ func ReadLine(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // PanicWithMessage panics with a message
-func PanicWithMessage(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func PanicWithMessage(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
 	}
@@ -98,7 +98,7 @@ func PanicWithMessage(args []*runtime.Object, _ checker.Type) *runtime.Object {
 // Environment module FFI functions
 
 // EnvGet retrieves an environment variable
-func EnvGet(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func EnvGet(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
 	}
@@ -118,7 +118,7 @@ func EnvGet(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeNone(checker.Str).ToSome(value)
 }
 
-func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+func GetTodayString(_ []*runtime.Object) *runtime.Object {
 	year, month, day := time.Now().Date()
 	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
 }
@@ -126,26 +126,26 @@ func GetTodayString(_ []*runtime.Object, _ checker.Type) *runtime.Object {
 // Chrono module FFI functions
 
 // fn now() Int
-func Now(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+func Now(_ []*runtime.Object) *runtime.Object {
 	seconds := time.Now().Unix()
 	return runtime.MakeInt(int(seconds))
 }
 
 // fn (ns: Int) Void
-func Sleep(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func Sleep(args []*runtime.Object) *runtime.Object {
 	time.Sleep(time.Duration(args[0].AsInt()))
 	return runtime.Void()
 }
 
 // fn (wg: Dynamic) Void
-func WaitFor(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func WaitFor(args []*runtime.Object) *runtime.Object {
 	wg := args[0].Raw().(*sync.WaitGroup)
 	wg.Wait()
 	return runtime.Void()
 }
 
 // fn (fibers: [Fiber]) Void
-func Join(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func Join(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("join expects 1 argument, got %d", len(args)))
 	}

@@ -97,7 +97,8 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 		return false
 	}
 
-	if fn.Type.Params == nil || len(fn.Type.Params.List) != 2 {
+	// Check function signature: func(args []*runtime.Object) *runtime.Object
+	if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 {
 		return false
 	}
 
@@ -108,12 +109,6 @@ func isFFIFunction(fn *ast.FuncDecl) bool {
 	firstParam := fn.Type.Params.List[0]
 	if !isSliceOfPointerToRuntimeObject(firstParam.Type) {
 		return false
-	}
-
-	secondParam := fn.Type.Params.List[1]
-	if sel, isSelector := secondParam.Type.(*ast.SelectorExpr); isSelector {
-		pkg, ok := sel.X.(*ast.Ident)
-		return ok && pkg.Name == "checker" && sel.Sel.Name == "Type"
 	}
 
 	firstReturn := fn.Type.Results.List[0]

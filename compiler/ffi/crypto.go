@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/scrypt"
@@ -26,7 +25,7 @@ const (
 	defaultScryptSaltLen = 16
 )
 
-func CryptoMd5(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoMd5(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("CryptoMd5 expects 1 argument, got %d", len(args)))
 	}
@@ -35,7 +34,7 @@ func CryptoMd5(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(hex.EncodeToString(sum[:]))
 }
 
-func CryptoSha256(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoSha256(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("CryptoSha256 expects 1 argument, got %d", len(args)))
 	}
@@ -44,7 +43,7 @@ func CryptoSha256(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(hex.EncodeToString(sum[:]))
 }
 
-func CryptoSha512(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoSha512(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("CryptoSha512 expects 1 argument, got %d", len(args)))
 	}
@@ -53,7 +52,7 @@ func CryptoSha512(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeStr(hex.EncodeToString(sum[:]))
 }
 
-func CryptoHashPassword(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoHashPassword(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 && len(args) != 2 {
 		panic(fmt.Errorf("CryptoHashPassword expects 1 or 2 arguments, got %d", len(args)))
 	}
@@ -73,7 +72,7 @@ func CryptoHashPassword(args []*runtime.Object, _ checker.Type) *runtime.Object 
 	return runtime.MakeOk(runtime.MakeStr(string(hashed)))
 }
 
-func CryptoVerifyPassword(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoVerifyPassword(args []*runtime.Object) *runtime.Object {
 	if len(args) != 2 {
 		panic(fmt.Errorf("CryptoVerifyPassword expects 2 arguments, got %d", len(args)))
 	}
@@ -92,7 +91,7 @@ func CryptoVerifyPassword(args []*runtime.Object, _ checker.Type) *runtime.Objec
 	return runtime.MakeErr(runtime.MakeStr(err.Error()))
 }
 
-func CryptoScryptHash(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoScryptHash(args []*runtime.Object) *runtime.Object {
 	if len(args) < 1 || len(args) > 6 {
 		panic(fmt.Errorf("CryptoScryptHash expects 1 to 6 arguments, got %d", len(args)))
 	}
@@ -148,7 +147,7 @@ func CryptoScryptHash(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return runtime.MakeOk(runtime.MakeStr(hash))
 }
 
-func CryptoScryptVerify(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoScryptVerify(args []*runtime.Object) *runtime.Object {
 	if len(args) < 2 || len(args) > 6 {
 		panic(fmt.Errorf("CryptoScryptVerify expects 2 to 6 arguments, got %d", len(args)))
 	}
@@ -228,7 +227,7 @@ func validateScryptParams(n, r, p, dkLen int) error {
 	return nil
 }
 
-func CryptoUUID(_ []*runtime.Object, _ checker.Type) *runtime.Object {
+func CryptoUUID(_ []*runtime.Object) *runtime.Object {
 	u := make([]byte, 16)
 	if _, err := rand.Read(u); err != nil {
 		panic(fmt.Errorf("CryptoUUID failed: %w", err))

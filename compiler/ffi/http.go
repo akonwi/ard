@@ -52,27 +52,27 @@ func requestBodyMaybe(r *http.Request) *runtime.Object {
 }
 
 // fn (req: Dynamic) Str
-func GetReqPath(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func GetReqPath(args []*runtime.Object) *runtime.Object {
 	req := args[0].Raw().(*http.Request)
 	return runtime.MakeStr(req.URL.Path)
 }
 
 // fn (req: Dynamic, name: Str) Str
-func GetPathValue(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func GetPathValue(args []*runtime.Object) *runtime.Object {
 	req := args[0].Raw().(*http.Request)
 	name := args[1].Raw().(string)
 	return runtime.MakeStr(req.PathValue(name))
 }
 
 // fn (req: Dynamic, name: Str) Str
-func GetQueryParam(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func GetQueryParam(args []*runtime.Object) *runtime.Object {
 	req := args[0].Raw().(*http.Request)
 	name := args[1].Raw().(string)
 	return runtime.MakeStr(req.URL.Query().Get(name))
 }
 
 // fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str], timeout: Int?) Response!Str
-func HTTP_Send(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func HTTP_Send(args []*runtime.Object) *runtime.Object {
 	method := args[0].AsString()
 	url := args[1].AsString()
 	body := func() io.Reader {
@@ -158,7 +158,7 @@ func convertToGoPattern(path string) string {
 }
 
 // fn serve(port: Int, handlers: [Str:fn(Request, mut Response)])
-func HTTP_Serve(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func HTTP_Serve(args []*runtime.Object) *runtime.Object {
 	port := args[0].AsInt()
 	handlers := args[1].AsMap()
 
