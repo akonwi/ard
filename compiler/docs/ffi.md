@@ -2,289 +2,290 @@
 
 ## Overview
 
-The Ard FFI system enables the standard library to be written in Ard rather than Go by providing a clean, type-safe interface to call compiled Go functions from interpreted Ard code. This design keeps Ard as an interpreted language while allowing performance-critical operations to be implemented in Go.
+Ard's FFI lets standard library functions declared in Ard call Go implementations inside `compiler/ffi/`.
+
+The system is intentionally narrow:
+- it is for Ard's built-in standard library, not user-installed native extensions
+- it uses **zero reflection** at runtime
+- registration is fully code-generated with `go generate`
+- unsupported exported signatures in `ffi/*.go` are treated as **generator errors**
 
 ## Architecture
 
-### Core Design Principles
+### Directory structure
 
-- **Standard library focus**: FFI is designed specifically for standard library development, not general user extensions
-- **Type safety**: Full type checking and validation between Ard and Go boundaries
-- **Zero reflection**: Direct function calls using uniform signatures for maximum performance
-- **Automatic discovery**: Code generation eliminates manual registration overhead
-- **Clean separation**: Go implementations in `./ffi/`, Ard interfaces in `./std_lib/`
-
-### Directory Structure
-
-```
-ard/
-├── ffi/                    # FFI implementations (compiled into VM)
-│   ├── runtime.go         # Print, ReadLine, PanicWithMessage, EnvGet
-│   └── json.go            # JsonEncode
-├── std_lib/               # Standard library (interpreted Ard)
-│   ├── io.ard             # Uses "Print", "ReadLine"
-│   ├── env.ard            # Uses "EnvGet"
-│   └── json.ard           # Uses "JsonEncode"
-└── vm/
-    ├── ffi_generate.go    # Auto-discovery and registry generation
-    ├── ffi_registry.go    # Runtime FFI registry
-    └── registry.gen.go    # Generated function bindings
+```text
+compiler/
+├── ffi/                    # Go implementations of extern bindings
+├── std_lib/                # Ard declarations using extern fn ... = "BindingName"
+├── runtime/                # Ard runtime object model and VM-facing helpers
+└── bytecode/vm/
+    ├── ffi_registry.go     # Runtime registry + panic recovery
+    ├── ffi_generate.go     # AST-based FFI discovery + wrapper generation
+    └── registry.gen.go     # Generated registrations and idiomatic wrappers
 ```
 
-## FFI Function Implementation
+### Two-tier FFI model
 
-### Function Signature
+FFI functions can be written in one of two styles.
 
-All FFI functions follow a uniform signature for consistency and performance:
+#### 1. Raw FFI
+
+Raw functions work directly with Ard runtime objects.
 
 ```go
-func FunctionName(vm runtime.VM, args []*runtime.Object) *runtime.Object
+func HTTP_Send(args []*runtime.Object) *runtime.Object
 ```
 
-**Parameters:**
-- `vm runtime.VM`: Interface providing access to VM methods for object evaluation
-- `args []*runtime.Object`: Array of Ard values converted to VM's internal object representation
+Use raw FFI when the function needs:
+- `Dynamic` values
+- Ard structs/enums/results built manually
+- closures or VM/runtime internals
+- embedded Ard type lookups from `checker`
+- custom marshalling logic
 
-**Return:**
-- `*runtime.Object`: Single return value (use Result types for error handling)
+#### 2. Idiomatic Go FFI
 
-### Example Implementation
+Idiomatic functions use ordinary Go types, and the generator creates a raw wrapper automatically.
 
 ```go
-// ffi/runtime.go
-func Print(vm runtime.VM, args []*runtime.Object) *runtime.Object {
-    if len(args) != 1 {
-        panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
-    }
+func CryptoMd5(input string) string
+func EnvGet(key string) *string
+func FS_ReadFile(path string) (string, error)
+func OsArgs() []string
+```
 
-    arg := args[0]
-    switch raw := arg.Raw().(type) {
-    case string, bool, int, float64:
-        fmt.Printf("%v\n", raw)
-        return runtime.Void()
-    default:
-        // Handle complex types by calling Ard's to_str method
-        if _, ok := arg.Type().(*checker.StructDef); ok {
-            call := &checker.FunctionCall{Name: "to_str", Args: []checker.Expression{}}
-            str := vm.EvalStructMethod(arg, call).Raw().(string)
-            fmt.Println(str)
-            return runtime.Void()
-        }
-        panic(fmt.Errorf("unprintable type: %T", raw))
-    }
+The generated wrapper in `registry.gen.go`:
+- unwraps Ard arguments from `[]*runtime.Object`
+- calls the Go function directly
+- wraps the Go result back into Ard runtime objects
+
+## Supported idiomatic types
+
+### Parameters
+
+The generator currently supports these Go parameter types:
+- `string`
+- `int`
+- `float64`
+- `bool`
+- `*string`
+- `*int`
+- `*float64`
+- `*bool`
+- `[]string`
+- `[]int`
+- `[]float64`
+- `[]bool`
+- `map[string]string`
+
+Meaning:
+- scalar types map to Ard scalar values
+- pointer-to-scalar types map to Ard `Maybe<T>`
+- slice-of-scalar types map to Ard `[T]`
+- `map[string]string` maps to Ard `[Str:Str]`
+
+### Returns
+
+The generator supports these return shapes:
+- no return value
+- `T`
+- `*T`
+- `[]T`
+- `error`
+- `(T, error)`
+
+Where `T` is one of:
+- `string`
+- `int`
+- `float64`
+- `bool`
+- `*string`
+- `*int`
+- `*float64`
+- `*bool`
+- `[]string`
+- `[]int`
+- `[]float64`
+- `[]bool`
+- `map[string]string`
+
+### Ard mapping rules
+
+| Go type | Ard type |
+|---|---|
+| `string` | `Str` |
+| `int` | `Int` |
+| `float64` | `Float` |
+| `bool` | `Bool` |
+| `*string` | `Str?` |
+| `*int` | `Int?` |
+| `*float64` | `Float?` |
+| `*bool` | `Bool?` |
+| `[]string` | `[Str]` |
+| `[]int` | `[Int]` |
+| `[]float64` | `[Float]` |
+| `[]bool` | `[Bool]` |
+| `error` | `Void!Str` |
+| `(T, error)` | `T!Str` |
+
+Notes:
+- `nil` pointer return becomes `None`
+- non-`nil` pointer return becomes `Some(value)`
+- an `error` return is wrapped as `Err(Str)`
+- successful `(T, error)` returns are wrapped as `Ok(T)`
+
+## Generator behavior
+
+`go generate ./bytecode/vm` scans every exported, non-underscore-prefixed function in `compiler/ffi/*.go`.
+
+Each function must be exactly one of:
+1. a raw FFI function: `func([]*runtime.Object) *runtime.Object`
+2. a supported idiomatic Go FFI function
+
+Anything else is a generation error.
+
+That means functions in `ffi/` cannot silently disappear from the registry.
+
+### Example raw registration
+
+```go
+if err := r.Register("HTTP_Send", ffi.HTTP_Send); err != nil {
+    return fmt.Errorf("failed to register HTTP_Send: %w", err)
 }
 ```
 
-## Standard Library Integration
+### Example generated idiomatic wrapper
 
-### Extern Function Declaration
+Source function:
 
-Standard library modules use `extern fn` declarations to bind Ard functions to Go implementations:
+```go
+func FS_ReadFile(path string) (string, error)
+```
+
+Generated wrapper:
+
+```go
+func _ffi_FS_ReadFile(args []*runtime.Object) *runtime.Object {
+    arg0 := args[0].AsString()
+    result, err := ffi.FS_ReadFile(arg0)
+    if err != nil {
+        return runtime.MakeErr(runtime.MakeStr(err.Error()))
+    }
+    return runtime.MakeOk(runtime.MakeStr(result))
+}
+```
+
+## Standard library integration
+
+Ard code binds extern functions by string name:
 
 ```ard
-// std_lib/io.ard
-extern fn print(value: $T) Void = "Print"
-extern fn read_line() Str!Str = "ReadLine"
+extern fn read(path: Str) Str!Str = "FS_ReadFile"
+extern fn get(key: Str) Str? = "EnvGet"
+extern fn os_args() [Str] = "OsArgs"
 ```
 
-**Syntax:**
-- `extern fn` keyword introduces external function
-- Full Ard type signature for type safety
-- String binding directly references Go function name (no module prefix needed)
+The checker validates the Ard side. The generator validates the Go side.
 
-### Usage in User Code
+## Error handling
 
-```ard
-use ard/io
+### Explicit errors
 
-fn main() {
-    io::print("Hello from FFI!")
-
-    match io::read_line() {
-        Ok(input) -> io::print("You entered: " + input)
-        Err(error) -> io::print("Error: " + error)
-    }
-}
-```
-
-## Automatic Code Generation
-
-### Discovery Process
-
-The FFI system uses Go's `go generate` to automatically discover and register FFI functions:
-
-1. **Parse**: Scan all `./ffi/*.go` files using Go's AST parser
-2. **Validate**: Verify functions match required signature `func(vm runtime.VM, args []*runtime.Object) *runtime.Object`
-3. **Generate**: Create `vm/registry.gen.go` with registration code
-4. **Register**: VM automatically loads generated bindings at startup
-
-### Generated Registry
+Idiomatic functions should use normal Go `error` returns when possible:
 
 ```go
-// bytecode/vm/registry.gen.go (generated)
-func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
-    if err := r.Register("Print", ffi.Print); err != nil {
-        return fmt.Errorf("failed to register Print: %w", err)
+func ReadLine() (string, error)
+func FS_WriteFile(path, content string) error
+```
+
+### Panic recovery
+
+`RuntimeFFIRegistry.Call()` still wraps panics.
+
+Behavior:
+- if the Ard return type is a `Result`, a panic becomes `Err("panic in FFI function ...")`
+- otherwise the panic is re-thrown with FFI context
+
+This applies to both raw functions and generated idiomatic wrappers.
+
+## Raw FFI examples
+
+Use raw FFI when you need full control over Ard values:
+
+```go
+func FS_ListDir(args []*runtime.Object) *runtime.Object {
+    path := args[0].Raw().(string)
+    entries, err := os.ReadDir(path)
+    if err != nil {
+        return runtime.MakeErr(runtime.MakeStr(err.Error()))
     }
-    if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
-        return fmt.Errorf("failed to register JsonEncode: %w", err)
+
+    dirEntryType := getFSDirEntryType()
+
+    var dirEntries []*runtime.Object
+    for _, entry := range entries {
+        dirEntries = append(dirEntries, runtime.MakeStruct(dirEntryType, map[string]*runtime.Object{
+            "name":    runtime.MakeStr(entry.Name()),
+            "is_file": runtime.MakeBool(!entry.IsDir()),
+        }))
     }
-    // ... more registrations
-    return nil
+
+    return runtime.MakeOk(runtime.MakeList(dirEntryType, dirEntries...))
 }
 ```
 
-### Build Integration
+This stays raw because it needs embedded Ard type lookup and manual struct construction.
+
+## Development workflow
+
+### Adding a new FFI binding
+
+1. Add a Go function in `compiler/ffi/`
+2. Choose either raw or idiomatic style
+3. Run:
 
 ```bash
-# Regenerate FFI registry after adding new functions
+cd compiler
 go generate ./bytecode/vm
+```
 
-# Build normally - generated code is included automatically
+4. Add or update the Ard declaration in `compiler/std_lib/*.ard`
+5. Validate with:
+
+```bash
 go build
+go test ./...
 ```
 
-## Type Marshalling
+### When to choose idiomatic vs raw
 
-### VM Interface
+Prefer **idiomatic** when the binding is mostly scalar/list/maybe/result marshalling.
 
-The `runtime.VM` interface provides access to VM operations needed by FFI functions:
+Prefer **raw** when the binding needs:
+- `Dynamic`
+- runtime closures
+- Ard structs/enums/maps beyond simple scalar collections
+- manual construction of Ard-specific types
+- special VM/runtime behavior
 
-```go
-// vm/runtime/vm.go
-type VM interface {
-    EvalStructMethod(obj *Object, call *checker.FunctionCall) *Object
-    EvalEnumMethod(obj *Object, call *checker.FunctionCall, enum *checker.Enum) *Object
-}
-```
+## Current status
 
-This interface enables FFI functions to:
-- Call Ard methods on objects (like `to_str()` for custom string conversion)
-- Evaluate enum methods for proper formatting
-- Maintain type safety across the FFI boundary
+The FFI system is incremental by design.
 
-### Runtime Objects
+Today the codebase uses both tiers:
+- many simple crypto, fs, runtime, prelude, and SQL helper bindings are idiomatic Go
+- HTTP, SQL execution, decode/dynamic conversion, and other complex bindings remain raw
 
-All values are marshalled through the VM's `*runtime.Object` type:
+This keeps the common cases ergonomic without weakening the low-level escape hatch.
 
-```go
-// Creating Ard values from Go
-runtime.MakeStr("hello")           // String
-runtime.MakeInt(42)                // Integer
-runtime.MakeBool(true)             // Boolean
-runtime.Void()                     // Void return
+## Summary
 
-// Result types for error handling
-runtime.MakeOk(value)              // Success case
-runtime.MakeErr(error)             // Error case
-runtime.MakeMaybe(value, type)     // Maybe types
-```
+Ard's FFI now provides:
+- zero-reflection dispatch
+- generated registration
+- generated marshalling for common Go types
+- hard errors for unsupported exported signatures
+- an escape hatch for complex runtime-aware bindings
 
-## Error Handling
-
-### Panic Recovery
-
-The FFI registry automatically recovers from panics and converts them appropriately:
-
-- **Result return types**: Panics become `Err(message)`
-- **Other return types**: Panics propagate with enhanced context
-
-### Example Error Patterns
-
-```go
-func SafeOperation(vm runtime.VM, args []*runtime.Object) *runtime.Object {
-    // Input validation - panic will be caught by registry
-    if len(args) != 1 {
-        panic(fmt.Errorf("expected 1 argument, got %d", len(args)))
-    }
-
-    // Operation that might fail
-    if result, err := riskyOperation(args[0]); err != nil {
-        return runtime.MakeErr(runtime.MakeStr(err.Error()))
-    } else {
-        return runtime.MakeOk(result)
-    }
-}
-```
-
-## Development Workflow
-
-### Adding New FFI Functions
-
-1. **Implement Go function** in appropriate `./ffi/*.go` file:
-   ```go
-   func NewFunction(vm runtime.VM, args []*runtime.Object) *runtime.Object {
-       // Implementation
-   }
-   ```
-
-2. **Regenerate registry**:
-   ```bash
-   go generate ./bytecode/vm
-   ```
-
-3. **Add Ard binding** in `./std_lib/*.ard`:
-   ```ard
-   extern fn new_function(param: Type) ReturnType = "NewFunction"
-   ```
-
-4. **Build and test**:
-   ```bash
-   go build && go run main.go run test_program.ard
-   ```
-
-### Function Organization
-
-- **`ffi/runtime.go`**: Core runtime functions (print, input, panic, environment)
-- **`ffi/json.go`**: JSON encoding/decoding operations
-- **Future modules**: File system, networking, cryptography, etc.
-
-## Current Implementation Status
-
-### ✅ Completed Features
-
-- **Complete FFI syntax**: `extern fn` declarations with direct Go function bindings
-- **Type-safe integration**: Full type checking between Ard and Go
-- **Automatic discovery**: Code generation eliminates manual registration
-- **Runtime execution**: Direct function calls with uniform signatures
-- **VM interface**: Clean access to VM operations for complex type handling
-- **Error handling**: Panic recovery and Result type integration
-- **Standard library migration**: Proof-of-concept with `io`, `env`, and `json` modules
-
-### 🎯 Architecture Achievements
-
-- **Zero reflection**: All function calls are direct for maximum performance
-- **Clean separation**: Go implementations completely separate from Ard interfaces
-- **Scalable design**: Adding new functions requires no manual registration
-- **Type safety**: Full marshalling between Ard and Go type systems
-- **Backward compatibility**: All existing sample programs work unchanged
-
-### 📊 Testing Coverage
-
-- **Unit tests**: Comprehensive FFI registry and marshalling tests
-- **Integration tests**: All VM tests pass with FFI-based standard library
-- **Sample programs**: All existing samples work with new FFI system
-- **Performance**: Equivalent or better than previous hardcoded implementations
-
-## Future Expansions
-
-### Standard Library Migration Candidates
-
-- **File system**: `ard/fs` for file operations
-- **HTTP client**: `ard/http` for web requests
-- **Cryptography**: `ard/crypto` for hashing and encryption
-- **Date/time**: `ard/time` for temporal operations
-- **Regular expressions**: `ard/regex` for pattern matching
-
-### Enhancement Opportunities
-
-- **Cross-compilation**: JavaScript target support with same syntax
-- **Documentation generation**: Auto-generate docs from Go function comments
-- **IDE integration**: Navigate from Ard declarations to Go implementations
-- **Validation**: Check Ard bindings match Go function signatures
-
-## Conclusion
-
-The FFI system successfully achieves its primary goal: enabling the standard library to be written in Ard rather than Go while maintaining the performance and type safety of a compiled implementation. The automatic discovery and registration system provides an excellent developer experience that scales naturally as new functionality is added.
-
-This architecture positions Ard well for future growth, with a clean separation between the interpreted language layer and high-performance system operations implemented in Go.
+That gives standard library authors a much more idiomatic Go authoring model while preserving Ard's existing runtime representation and safety checks.

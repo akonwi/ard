@@ -5,33 +5,360 @@ package vm
 import (
 	"fmt"
 
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/ffi"
+	"github.com/akonwi/ard/runtime"
 )
+
+func _ffi_CryptoMd5(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.CryptoMd5(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_CryptoSha256(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.CryptoSha256(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_CryptoSha512(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.CryptoSha512(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_CryptoHashPassword(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	var arg1 *int
+	if !args[1].IsNone() {
+		_v1 := args[1].AsInt()
+		arg1 = &_v1
+	}
+	result, err := ffi.CryptoHashPassword(arg0, arg1)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_CryptoVerifyPassword(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	result, err := ffi.CryptoVerifyPassword(arg0, arg1)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeBool(result))
+}
+
+func _ffi_CryptoScryptHash(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	var arg1 *string
+	if !args[1].IsNone() {
+		_v1 := args[1].AsString()
+		arg1 = &_v1
+	}
+	var arg2 *int
+	if !args[2].IsNone() {
+		_v2 := args[2].AsInt()
+		arg2 = &_v2
+	}
+	var arg3 *int
+	if !args[3].IsNone() {
+		_v3 := args[3].AsInt()
+		arg3 = &_v3
+	}
+	var arg4 *int
+	if !args[4].IsNone() {
+		_v4 := args[4].AsInt()
+		arg4 = &_v4
+	}
+	var arg5 *int
+	if !args[5].IsNone() {
+		_v5 := args[5].AsInt()
+		arg5 = &_v5
+	}
+	result, err := ffi.CryptoScryptHash(arg0, arg1, arg2, arg3, arg4, arg5)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_CryptoScryptVerify(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	var arg2 *int
+	if !args[2].IsNone() {
+		_v2 := args[2].AsInt()
+		arg2 = &_v2
+	}
+	var arg3 *int
+	if !args[3].IsNone() {
+		_v3 := args[3].AsInt()
+		arg3 = &_v3
+	}
+	var arg4 *int
+	if !args[4].IsNone() {
+		_v4 := args[4].AsInt()
+		arg4 = &_v4
+	}
+	var arg5 *int
+	if !args[5].IsNone() {
+		_v5 := args[5].AsInt()
+		arg5 = &_v5
+	}
+	result, err := ffi.CryptoScryptVerify(arg0, arg1, arg2, arg3, arg4, arg5)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeBool(result))
+}
+
+func _ffi_CryptoUUID(args []*runtime.Object) *runtime.Object {
+	result := ffi.CryptoUUID()
+	return runtime.MakeStr(result)
+}
+
+func _ffi_FS_Exists(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.FS_Exists(arg0)
+	return runtime.MakeBool(result)
+}
+
+func _ffi_FS_CreateFile(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.FS_CreateFile(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeBool(result))
+}
+
+func _ffi_FS_WriteFile(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	err := ffi.FS_WriteFile(arg0, arg1)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FS_AppendFile(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	err := ffi.FS_AppendFile(arg0, arg1)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FS_ReadFile(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.FS_ReadFile(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_FS_DeleteFile(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	err := ffi.FS_DeleteFile(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FS_IsFile(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.FS_IsFile(arg0)
+	return runtime.MakeBool(result)
+}
+
+func _ffi_FS_IsDir(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.FS_IsDir(arg0)
+	return runtime.MakeBool(result)
+}
+
+func _ffi_FS_Copy(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	err := ffi.FS_Copy(arg0, arg1)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FS_Rename(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	err := ffi.FS_Rename(arg0, arg1)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FS_Cwd(args []*runtime.Object) *runtime.Object {
+	result, err := ffi.FS_Cwd()
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_FS_Abs(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.FS_Abs(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_FS_CreateDir(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	err := ffi.FS_CreateDir(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FS_DeleteDir(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	err := ffi.FS_DeleteDir(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_FloatFromStr(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.FloatFromStr(arg0)
+	if result == nil {
+		return runtime.MakeNone(checker.Float)
+	}
+	return runtime.MakeNone(checker.Float).ToSome(*result)
+}
+
+func _ffi_FloatFromInt(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsInt()
+	result := ffi.FloatFromInt(arg0)
+	return runtime.MakeFloat(result)
+}
+
+func _ffi_FloatFloor(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsFloat()
+	result := ffi.FloatFloor(arg0)
+	return runtime.MakeFloat(result)
+}
+
+func _ffi_IntFromStr(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.IntFromStr(arg0)
+	if result == nil {
+		return runtime.MakeNone(checker.Int)
+	}
+	return runtime.MakeNone(checker.Int).ToSome(*result)
+}
+
+func _ffi_OsArgs(args []*runtime.Object) *runtime.Object {
+	result := ffi.OsArgs()
+	_items := make([]*runtime.Object, len(result))
+	for _i, _v := range result {
+		_items[_i] = runtime.MakeStr(_v)
+	}
+	return runtime.MakeList(checker.Str, _items...)
+}
+
+func _ffi_Print(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	ffi.Print(arg0)
+	return runtime.Void()
+}
+
+func _ffi_ReadLine(args []*runtime.Object) *runtime.Object {
+	result, err := ffi.ReadLine()
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_PanicWithMessage(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	ffi.PanicWithMessage(arg0)
+	return runtime.Void()
+}
+
+func _ffi_EnvGet(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.EnvGet(arg0)
+	if result == nil {
+		return runtime.MakeNone(checker.Str)
+	}
+	return runtime.MakeNone(checker.Str).ToSome(*result)
+}
+
+func _ffi_GetTodayString(args []*runtime.Object) *runtime.Object {
+	result := ffi.GetTodayString()
+	return runtime.MakeStr(result)
+}
+
+func _ffi_Now(args []*runtime.Object) *runtime.Object {
+	result := ffi.Now()
+	return runtime.MakeInt(result)
+}
+
+func _ffi_Sleep(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsInt()
+	ffi.Sleep(arg0)
+	return runtime.Void()
+}
+
+func _ffi_SqlExtractParams(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.SqlExtractParams(arg0)
+	_items := make([]*runtime.Object, len(result))
+	for _i, _v := range result {
+		_items[_i] = runtime.MakeStr(_v)
+	}
+	return runtime.MakeList(checker.Str, _items...)
+}
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
-	if err := r.Register("CryptoMd5", ffi.CryptoMd5); err != nil {
+	if err := r.Register("CryptoMd5", _ffi_CryptoMd5); err != nil {
 		return fmt.Errorf("failed to register CryptoMd5: %w", err)
 	}
-	if err := r.Register("CryptoSha256", ffi.CryptoSha256); err != nil {
+	if err := r.Register("CryptoSha256", _ffi_CryptoSha256); err != nil {
 		return fmt.Errorf("failed to register CryptoSha256: %w", err)
 	}
-	if err := r.Register("CryptoSha512", ffi.CryptoSha512); err != nil {
+	if err := r.Register("CryptoSha512", _ffi_CryptoSha512); err != nil {
 		return fmt.Errorf("failed to register CryptoSha512: %w", err)
 	}
-	if err := r.Register("CryptoHashPassword", ffi.CryptoHashPassword); err != nil {
+	if err := r.Register("CryptoHashPassword", _ffi_CryptoHashPassword); err != nil {
 		return fmt.Errorf("failed to register CryptoHashPassword: %w", err)
 	}
-	if err := r.Register("CryptoVerifyPassword", ffi.CryptoVerifyPassword); err != nil {
+	if err := r.Register("CryptoVerifyPassword", _ffi_CryptoVerifyPassword); err != nil {
 		return fmt.Errorf("failed to register CryptoVerifyPassword: %w", err)
 	}
-	if err := r.Register("CryptoScryptHash", ffi.CryptoScryptHash); err != nil {
+	if err := r.Register("CryptoScryptHash", _ffi_CryptoScryptHash); err != nil {
 		return fmt.Errorf("failed to register CryptoScryptHash: %w", err)
 	}
-	if err := r.Register("CryptoScryptVerify", ffi.CryptoScryptVerify); err != nil {
+	if err := r.Register("CryptoScryptVerify", _ffi_CryptoScryptVerify); err != nil {
 		return fmt.Errorf("failed to register CryptoScryptVerify: %w", err)
 	}
-	if err := r.Register("CryptoUUID", ffi.CryptoUUID); err != nil {
+	if err := r.Register("CryptoUUID", _ffi_CryptoUUID); err != nil {
 		return fmt.Errorf("failed to register CryptoUUID: %w", err)
 	}
 	if err := r.Register("StrToDynamic", ffi.StrToDynamic); err != nil {
@@ -82,46 +409,46 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("ExtractField", ffi.ExtractField); err != nil {
 		return fmt.Errorf("failed to register ExtractField: %w", err)
 	}
-	if err := r.Register("FS_Exists", ffi.FS_Exists); err != nil {
+	if err := r.Register("FS_Exists", _ffi_FS_Exists); err != nil {
 		return fmt.Errorf("failed to register FS_Exists: %w", err)
 	}
-	if err := r.Register("FS_CreateFile", ffi.FS_CreateFile); err != nil {
+	if err := r.Register("FS_CreateFile", _ffi_FS_CreateFile); err != nil {
 		return fmt.Errorf("failed to register FS_CreateFile: %w", err)
 	}
-	if err := r.Register("FS_WriteFile", ffi.FS_WriteFile); err != nil {
+	if err := r.Register("FS_WriteFile", _ffi_FS_WriteFile); err != nil {
 		return fmt.Errorf("failed to register FS_WriteFile: %w", err)
 	}
-	if err := r.Register("FS_AppendFile", ffi.FS_AppendFile); err != nil {
+	if err := r.Register("FS_AppendFile", _ffi_FS_AppendFile); err != nil {
 		return fmt.Errorf("failed to register FS_AppendFile: %w", err)
 	}
-	if err := r.Register("FS_ReadFile", ffi.FS_ReadFile); err != nil {
+	if err := r.Register("FS_ReadFile", _ffi_FS_ReadFile); err != nil {
 		return fmt.Errorf("failed to register FS_ReadFile: %w", err)
 	}
-	if err := r.Register("FS_DeleteFile", ffi.FS_DeleteFile); err != nil {
+	if err := r.Register("FS_DeleteFile", _ffi_FS_DeleteFile); err != nil {
 		return fmt.Errorf("failed to register FS_DeleteFile: %w", err)
 	}
-	if err := r.Register("FS_IsFile", ffi.FS_IsFile); err != nil {
+	if err := r.Register("FS_IsFile", _ffi_FS_IsFile); err != nil {
 		return fmt.Errorf("failed to register FS_IsFile: %w", err)
 	}
-	if err := r.Register("FS_IsDir", ffi.FS_IsDir); err != nil {
+	if err := r.Register("FS_IsDir", _ffi_FS_IsDir); err != nil {
 		return fmt.Errorf("failed to register FS_IsDir: %w", err)
 	}
-	if err := r.Register("FS_Copy", ffi.FS_Copy); err != nil {
+	if err := r.Register("FS_Copy", _ffi_FS_Copy); err != nil {
 		return fmt.Errorf("failed to register FS_Copy: %w", err)
 	}
-	if err := r.Register("FS_Rename", ffi.FS_Rename); err != nil {
+	if err := r.Register("FS_Rename", _ffi_FS_Rename); err != nil {
 		return fmt.Errorf("failed to register FS_Rename: %w", err)
 	}
-	if err := r.Register("FS_Cwd", ffi.FS_Cwd); err != nil {
+	if err := r.Register("FS_Cwd", _ffi_FS_Cwd); err != nil {
 		return fmt.Errorf("failed to register FS_Cwd: %w", err)
 	}
-	if err := r.Register("FS_Abs", ffi.FS_Abs); err != nil {
+	if err := r.Register("FS_Abs", _ffi_FS_Abs); err != nil {
 		return fmt.Errorf("failed to register FS_Abs: %w", err)
 	}
-	if err := r.Register("FS_CreateDir", ffi.FS_CreateDir); err != nil {
+	if err := r.Register("FS_CreateDir", _ffi_FS_CreateDir); err != nil {
 		return fmt.Errorf("failed to register FS_CreateDir: %w", err)
 	}
-	if err := r.Register("FS_DeleteDir", ffi.FS_DeleteDir); err != nil {
+	if err := r.Register("FS_DeleteDir", _ffi_FS_DeleteDir); err != nil {
 		return fmt.Errorf("failed to register FS_DeleteDir: %w", err)
 	}
 	if err := r.Register("FS_ListDir", ffi.FS_ListDir); err != nil {
@@ -145,40 +472,40 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}
-	if err := r.Register("FloatFromStr", ffi.FloatFromStr); err != nil {
+	if err := r.Register("FloatFromStr", _ffi_FloatFromStr); err != nil {
 		return fmt.Errorf("failed to register FloatFromStr: %w", err)
 	}
-	if err := r.Register("FloatFromInt", ffi.FloatFromInt); err != nil {
+	if err := r.Register("FloatFromInt", _ffi_FloatFromInt); err != nil {
 		return fmt.Errorf("failed to register FloatFromInt: %w", err)
 	}
-	if err := r.Register("FloatFloor", ffi.FloatFloor); err != nil {
+	if err := r.Register("FloatFloor", _ffi_FloatFloor); err != nil {
 		return fmt.Errorf("failed to register FloatFloor: %w", err)
 	}
-	if err := r.Register("IntFromStr", ffi.IntFromStr); err != nil {
+	if err := r.Register("IntFromStr", _ffi_IntFromStr); err != nil {
 		return fmt.Errorf("failed to register IntFromStr: %w", err)
 	}
-	if err := r.Register("OsArgs", ffi.OsArgs); err != nil {
+	if err := r.Register("OsArgs", _ffi_OsArgs); err != nil {
 		return fmt.Errorf("failed to register OsArgs: %w", err)
 	}
-	if err := r.Register("Print", ffi.Print); err != nil {
+	if err := r.Register("Print", _ffi_Print); err != nil {
 		return fmt.Errorf("failed to register Print: %w", err)
 	}
-	if err := r.Register("ReadLine", ffi.ReadLine); err != nil {
+	if err := r.Register("ReadLine", _ffi_ReadLine); err != nil {
 		return fmt.Errorf("failed to register ReadLine: %w", err)
 	}
-	if err := r.Register("PanicWithMessage", ffi.PanicWithMessage); err != nil {
+	if err := r.Register("PanicWithMessage", _ffi_PanicWithMessage); err != nil {
 		return fmt.Errorf("failed to register PanicWithMessage: %w", err)
 	}
-	if err := r.Register("EnvGet", ffi.EnvGet); err != nil {
+	if err := r.Register("EnvGet", _ffi_EnvGet); err != nil {
 		return fmt.Errorf("failed to register EnvGet: %w", err)
 	}
-	if err := r.Register("GetTodayString", ffi.GetTodayString); err != nil {
+	if err := r.Register("GetTodayString", _ffi_GetTodayString); err != nil {
 		return fmt.Errorf("failed to register GetTodayString: %w", err)
 	}
-	if err := r.Register("Now", ffi.Now); err != nil {
+	if err := r.Register("Now", _ffi_Now); err != nil {
 		return fmt.Errorf("failed to register Now: %w", err)
 	}
-	if err := r.Register("Sleep", ffi.Sleep); err != nil {
+	if err := r.Register("Sleep", _ffi_Sleep); err != nil {
 		return fmt.Errorf("failed to register Sleep: %w", err)
 	}
 	if err := r.Register("WaitFor", ffi.WaitFor); err != nil {
@@ -193,7 +520,7 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("SqlClose", ffi.SqlClose); err != nil {
 		return fmt.Errorf("failed to register SqlClose: %w", err)
 	}
-	if err := r.Register("SqlExtractParams", ffi.SqlExtractParams); err != nil {
+	if err := r.Register("SqlExtractParams", _ffi_SqlExtractParams); err != nil {
 		return fmt.Errorf("failed to register SqlExtractParams: %w", err)
 	}
 	if err := r.Register("SqlQuery", ffi.SqlQuery); err != nil {

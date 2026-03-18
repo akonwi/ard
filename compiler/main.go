@@ -14,7 +14,6 @@ import (
 	"github.com/akonwi/ard/bytecode"
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/ffi"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/runtime"
@@ -71,9 +70,9 @@ func main() {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			ffi.SetOSArgs(os.Args)
+			runtime.SetOSArgs(os.Args)
 			_, runErr := bytecodevm.New(program).Run("main")
-			ffi.SetOSArgs(nil)
+			runtime.SetOSArgs(nil)
 			if runErr != nil {
 				fmt.Println(runErr)
 				os.Exit(1)
@@ -536,8 +535,8 @@ func (t discoveredTest) displayName() string {
 }
 
 func runCompiledTest(program bytecode.Program, test discoveredTest) testOutcome {
-	ffi.SetOSArgs(os.Args)
-	defer ffi.SetOSArgs(nil)
+	runtime.SetOSArgs(os.Args)
+	defer runtime.SetOSArgs(nil)
 
 	res, err := bytecodevm.New(program).Run(test.name)
 	if err != nil {
@@ -640,9 +639,9 @@ func maybeRunEmbedded() bool {
 		fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
 		os.Exit(1)
 	}
-	ffi.SetOSArgs(argsForEmbeddedProgram(os.Args))
+	runtime.SetOSArgs(argsForEmbeddedProgram(os.Args))
 	_, runErr := bytecodevm.New(program).Run("main")
-	ffi.SetOSArgs(nil)
+	runtime.SetOSArgs(nil)
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, runErr)
 		os.Exit(1)

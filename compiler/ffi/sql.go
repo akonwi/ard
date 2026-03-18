@@ -94,13 +94,7 @@ func SqlClose(args []*runtime.Object) *runtime.Object {
 }
 
 // Extract parameter names from a sql expression in the order they appear
-func SqlExtractParams(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("extract_params expects 1 argument, got %d", len(args)))
-	}
-
-	sqlStr := args[0].AsString()
-
+func SqlExtractParams(sqlStr string) []string {
 	// Split SQL into tokens by multiple delimiters
 	delimiters := []string{" ", "(", ")", ",", ";", "=", "<", ">", "!", "\t", "\n", "\r"}
 	tokens := splitSQLByMultipleDelimiters(sqlStr, delimiters)
@@ -119,13 +113,7 @@ func SqlExtractParams(args []*runtime.Object) *runtime.Object {
 		}
 	}
 
-	// Convert to runtime objects
-	var result []*runtime.Object
-	for _, paramName := range paramNames {
-		result = append(result, runtime.MakeStr(paramName))
-	}
-
-	return runtime.MakeList(checker.Str, result...)
+	return paramNames
 }
 
 // splitSQLByMultipleDelimiters is a helper function to split string by multiple delimiters

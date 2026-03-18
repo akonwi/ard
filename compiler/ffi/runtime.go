@@ -7,134 +7,65 @@ import (
 	"sync"
 	"time"
 
-	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
 
-var (
-	osArgsMu       sync.RWMutex
-	osArgsOverride []string
-)
-
-func SetOSArgs(args []string) {
-	osArgsMu.Lock()
-	defer osArgsMu.Unlock()
-
-	if args == nil {
-		osArgsOverride = nil
-		return
-	}
-
-	osArgsOverride = append([]string(nil), args...)
-}
-
-func currentOSArgs() []string {
-	osArgsMu.RLock()
-	override := append([]string(nil), osArgsOverride...)
-	osArgsMu.RUnlock()
-	if override != nil {
-		return override
-	}
-	return append([]string(nil), os.Args...)
-}
-
 // Runtime module FFI functions
 
-func OsArgs(_ []*runtime.Object) *runtime.Object {
-	args := currentOSArgs()
-	var out []*runtime.Object = make([]*runtime.Object, len(args))
-	for i, a := range args {
-		out[i] = runtime.MakeStr(a)
-	}
-	return runtime.MakeList(checker.Str, out...)
+func OsArgs() []string {
+	return runtime.CurrentOSArgs()
 }
 
 // Print prints a value to stdout
-func Print(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("print expects 1 argument, got %d", len(args)))
-	}
-
-	str := args[0].AsString()
-
+func Print(str string) {
 	fmt.Println(str)
-	return runtime.Void()
 }
 
 // ReadLine reads a line from stdin
-func ReadLine(args []*runtime.Object) *runtime.Object {
-	if len(args) != 0 {
-		panic(fmt.Errorf("read_line expects 0 arguments, got %d", len(args)))
-	}
-
+func ReadLine() (string, error) {
 	scanner := bufio.NewScanner(os.Stdin)
-
 	if !scanner.Scan() {
-		// No more input available or EOF
 		if err := scanner.Err(); err != nil {
-			return runtime.MakeErr(runtime.MakeStr(err.Error()))
+			return "", err
 		}
 		// EOF - return empty string as success
-		return runtime.MakeOk(runtime.MakeStr(""))
+		return "", nil
 	}
-
-	return runtime.MakeOk(runtime.MakeStr(scanner.Text()))
+	return scanner.Text(), nil
 }
 
 // PanicWithMessage panics with a message
-func PanicWithMessage(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("panic expects 1 argument, got %d", len(args)))
-	}
-
-	message, ok := args[0].Raw().(string)
-	if !ok {
-		panic(fmt.Errorf("panic expects string argument, got %T", args[0].Raw()))
-	}
-
+func PanicWithMessage(message string) {
 	panic(message)
 }
 
 // Environment module FFI functions
 
 // EnvGet retrieves an environment variable
-func EnvGet(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("get expects 1 argument, got %d", len(args)))
-	}
-
-	key, ok := args[0].Raw().(string)
-	if !ok {
-		panic(fmt.Errorf("get expects string argument, got %T", args[0].Raw()))
-	}
-
+func EnvGet(key string) *string {
 	value, exists := os.LookupEnv(key)
 	if !exists {
-		// Return None
-		return runtime.MakeNone(checker.Str)
+		return nil
 	}
-
-	// Return Some(value)
-	return runtime.MakeNone(checker.Str).ToSome(value)
+	return &value
 }
 
-func GetTodayString(_ []*runtime.Object) *runtime.Object {
+func GetTodayString() string {
 	year, month, day := time.Now().Date()
-	return runtime.MakeStr(fmt.Sprintf("%d-%02d-%02d", year, month, day))
+	return fmt.Sprintf("%d-%02d-%02d", year, month, day)
 }
 
 // Chrono module FFI functions
 
 // fn now() Int
-func Now(_ []*runtime.Object) *runtime.Object {
-	seconds := time.Now().Unix()
-	return runtime.MakeInt(int(seconds))
+func Now() int {
+	return int(time.Now().Unix())
 }
 
-// fn (ns: Int) Void
-func Sleep(args []*runtime.Object) *runtime.Object {
-	time.Sleep(time.Duration(args[0].AsInt()))
-	return runtime.Void()
+// fn sleep(ms: Int) Void — the Ard param is named "ms" but the
+// duration module converts to nanoseconds, so the value is actually ns.
+func Sleep(ns int) {
+	time.Sleep(time.Duration(ns))
 }
 
 // fn (wg: Dynamic) Void
