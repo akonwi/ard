@@ -1398,6 +1398,17 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) error {
 	argc := len(call.Call.Args)
 	if call.Call.ExternalBinding != "" {
+		// Emit list::new() as OpMakeList with 0 elements instead of an FFI call
+		if call.Call.ExternalBinding == "NewList" {
+			listType, ok := call.Call.ReturnType.(*checker.List)
+			if !ok {
+				return fmt.Errorf("NewList return type is not a list: %T", call.Call.ReturnType)
+			}
+			typeID := f.emitter.addType(listType)
+			f.emit(Instruction{Op: OpMakeList, A: int(typeID), B: 0})
+			f.adjustStack(0, 1)
+			return nil
+		}
 		for i := range call.Call.Args {
 			if err := f.emitExpr(call.Call.Args[i]); err != nil {
 				return err

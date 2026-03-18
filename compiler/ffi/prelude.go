@@ -1,7 +1,6 @@
 package ffi
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 
@@ -56,10 +55,4 @@ func IntFromStr(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	return out
 }
 
-func NewList(args []*runtime.Object, ret checker.Type) *runtime.Object {
-	retList, ok := ret.(*checker.List)
-	if !ok {
-		panic(fmt.Errorf("expected *checker.List, got %T", ret))
-	}
-	return runtime.MakeList(retList.Of())
-}
+

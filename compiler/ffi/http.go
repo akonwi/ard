@@ -5,11 +5,32 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
+
+var (
+	httpResponseType     checker.Type
+	httpResponseTypeOnce sync.Once
+)
+
+func getHTTPResponseType() checker.Type {
+	httpResponseTypeOnce.Do(func() {
+		mod, ok := checker.FindEmbeddedModule("ard/http")
+		if !ok {
+			panic("failed to load ard/http embedded module")
+		}
+		sym := mod.Get("Response")
+		if sym.Type == nil {
+			panic("Response type not found in ard/http module")
+		}
+		httpResponseType = sym.Type
+	})
+	return httpResponseType
+}
 
 func requestBodyMaybe(r *http.Request) *runtime.Object {
 	body := runtime.MakeNone(checker.Dynamic)
@@ -51,7 +72,7 @@ func GetQueryParam(args []*runtime.Object, _ checker.Type) *runtime.Object {
 }
 
 // fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str], timeout: Int?) Response!Str
-func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object {
+func HTTP_Send(args []*runtime.Object, _ checker.Type) *runtime.Object {
 	method := args[0].AsString()
 	url := args[1].AsString()
 	body := func() io.Reader {
@@ -115,9 +136,7 @@ func HTTP_Send(args []*runtime.Object, returnType checker.Type) *runtime.Object 
 		"body":    runtime.MakeStr(bodyStr),
 	}
 
-	resultType := returnType.(*checker.Result)
-
-	return runtime.MakeOk(runtime.MakeStruct(resultType.Val(), respMap))
+	return runtime.MakeOk(runtime.MakeStruct(getHTTPResponseType(), respMap))
 }
 
 /*
