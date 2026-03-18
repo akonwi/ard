@@ -9,5 +9,3 @@
   * `ard add [git-path]` to install from git repo
     * optionally add `@[version]` for a particular tag
 - [ ] build Agent sdk
-- [x] Opaque types — `extern type` for opaque FFI handles (SQL connections, HTTP requests, WaitGroups)
-- [x] Idiomatic FFI `any` type support — Go `any`/`interface{}` maps to Ard Dynamic/extern types
