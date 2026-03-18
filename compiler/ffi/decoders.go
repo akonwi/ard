@@ -50,18 +50,14 @@ func MapToDynamic(args []*runtime.Object) *runtime.Object {
 }
 
 // Parse external data (JSON text) into Dynamic object
-func JsonToDynamic(args []*runtime.Object) *runtime.Object {
-	jsonString := args[0].AsString()
-	jsonBytes := []byte(jsonString)
-
-	// Parse JSON into Dynamic object, fallback to nil if parsing fails
+// JsonToDynamic parses a JSON string into a Dynamic value.
+func JsonToDynamic(jsonString string) (any, error) {
 	var raw any
-	err := json.Unmarshal(jsonBytes, &raw)
+	err := json.Unmarshal([]byte(jsonString), &raw)
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Error parsing JSON: %s", err.Error())))
+		return nil, fmt.Errorf("Error parsing JSON: %s", err.Error())
 	}
-
-	return runtime.MakeOk(runtime.MakeDynamic(raw))
+	return raw, nil
 }
 
 // fn (Dynamic) Str!Error
@@ -143,9 +139,9 @@ func DecodeBool(args []*runtime.Object) *runtime.Object {
 }
 
 // fn (Dynamic) Bool
-func IsNil(args []*runtime.Object) *runtime.Object {
-	isNil := args[0].Raw() == nil
-	return runtime.MakeBool(isNil)
+// IsNil checks if a Dynamic value is nil.
+func IsNil(value any) bool {
+	return value == nil
 }
 
 // fn (Dyanmic) [Dynamic]!Str

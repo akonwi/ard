@@ -4,6 +4,37 @@ import (
 	"testing"
 )
 
+func TestExternTypeDeclaration(t *testing.T) {
+	tests := []test{
+		{
+			name:  "Extern type",
+			input: `extern type ConnectionPtr`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternTypeDeclaration{
+						Name: "ConnectionPtr",
+					},
+				},
+			},
+		},
+		{
+			name:  "Private extern type",
+			input: `private extern type ConnectionPtr`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternTypeDeclaration{
+						Name:    "ConnectionPtr",
+						Private: true,
+					},
+				},
+			},
+		},
+	}
+	runTests(t, tests)
+}
+
 func TestFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{

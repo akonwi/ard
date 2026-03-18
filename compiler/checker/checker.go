@@ -825,6 +825,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 		}
+	case *parse.ExternTypeDeclaration:
+		{
+			if _, dup := c.scope.get(s.Name); dup {
+				c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Name), s.GetLocation())
+				return nil
+			}
+			externType := &ExternType{Name_: s.Name, private: s.Private}
+			c.scope.add(s.Name, externType, false)
+			return &Statement{Stmt: externType}
+		}
 	case *parse.TypeDeclaration:
 		{
 			// Handle type declaration (type unions/aliases)

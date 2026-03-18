@@ -23,6 +23,9 @@ impl Str::ToString for Method {
   }
 }
 
+// Opaque pointer to Go's *http.Request for inbound requests
+private extern type RawRequest
+
 struct Request {
   method: Method,
   url: Str,
@@ -31,12 +34,12 @@ struct Request {
   timeout: Int?,
 
   // inbound requests have the *http.Request
-  raw: Dynamic?,
+  raw: RawRequest?,
 }
 
-private extern fn get_req_path(req: Dynamic) Str = "GetReqPath"
-private extern fn get_path_value(req: Dynamic, name: Str) Str = "GetPathValue"
-private extern fn get_query_param(req: Dynamic, name: Str) Str = "GetQueryParam"
+private extern fn get_req_path(req: RawRequest) Str = "GetReqPath"
+private extern fn get_path_value(req: RawRequest, name: Str) Str = "GetPathValue"
+private extern fn get_query_param(req: RawRequest, name: Str) Str = "GetQueryParam"
 
 impl Request {
   fn path() Str? {

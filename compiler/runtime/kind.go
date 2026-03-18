@@ -45,6 +45,8 @@ func kindForType(t checker.Type) Kind {
 	}
 
 	switch t.(type) {
+	case *checker.ExternType:
+		return KindDynamic
 	case *checker.List:
 		return KindList
 	case *checker.Map:

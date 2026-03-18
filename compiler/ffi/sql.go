@@ -25,35 +25,21 @@ type sqlTransaction struct {
 // Generic SQL FFI functions supporting multiple database drivers
 // (postgres, mysql, sqlite, etc.)
 
-// SqlCreateConnection creates a new database connection from a connection string
-// Supports connection strings for various drivers:
-// - SQLite: "file:test.db" or "test.db"
-// - PostgreSQL: "postgres://user:password@localhost:5432/dbname"
-// - MySQL: "user:password@tcp(localhost:3306)/dbname"
-func SqlCreateConnection(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("open expects 1 argument, got %d", len(args)))
-	}
-
-	connectionString := args[0].Raw().(string)
-
-	// Determine driver from connection string
+// SqlCreateConnection creates a new database connection from a connection string.
+// Returns an opaque *sqlConnection handle.
+func SqlCreateConnection(connectionString string) (any, error) {
 	driver := detectDriver(connectionString)
 
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+		return nil, err
 	}
 
-	// Test the connection
 	if err := db.Ping(); err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("Failed to connect to database: %s", err)))
+		return nil, fmt.Errorf("Failed to connect to database: %s", err)
 	}
 
-	conn := &sqlConnection{db: db, driver: driver}
-
-	// Return the connection as Dynamic
-	return runtime.MakeOk(runtime.MakeDynamic(conn))
+	return &sqlConnection{db: db, driver: driver}, nil
 }
 
 // detectDriver identifies the SQL driver based on the connection string
@@ -74,23 +60,14 @@ func detectDriver(connStr string) string {
 	return "sqlite3"
 }
 
-// SqlClose closes a database connection
-func SqlClose(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("close expects 1 argument, got %d", len(args)))
-	}
-
-	conn, ok := args[0].Raw().(*sqlConnection)
+// SqlClose closes a database connection.
+// Takes an opaque *sqlConnection handle.
+func SqlClose(handle any) error {
+	conn, ok := handle.(*sqlConnection)
 	if !ok {
-		panic(fmt.Errorf("SQL Error: invalid connection object"))
+		return fmt.Errorf("SQL Error: invalid connection object")
 	}
-
-	err := conn.db.Close()
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
-	}
-
-	return runtime.MakeOk(runtime.Void())
+	return conn.db.Close()
 }
 
 // Extract parameter names from a sql expression in the order they appear
@@ -313,70 +290,38 @@ func SqlExecute(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeOk(runtime.Void())
 }
 
-// SqlBeginTx begins a new transaction
-func SqlBeginTx(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("begin expects 1 argument, got %d", len(args)))
+// SqlBeginTx begins a new transaction.
+// Takes an opaque *sqlConnection handle, returns an opaque *sqlTransaction handle.
+func SqlBeginTx(handle any) (any, error) {
+	conn, ok := handle.(*sqlConnection)
+	if !ok {
+		return nil, fmt.Errorf("SQL Error: invalid connection object")
 	}
 
-	db, ok := args[0].Raw().(*sql.DB)
-	if !ok {
-		if conn, isConn := args[0].Raw().(*sqlConnection); isConn {
-			db = conn.db
-			ok = true
-		}
-	}
-	if !ok {
-		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
-	}
-
-	tx, err := db.Begin()
+	tx, err := conn.db.Begin()
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to begin transaction: %v", err)))
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
 	}
 
-	driver := ""
-	if conn, ok := args[0].Raw().(*sqlConnection); ok {
-		driver = conn.driver
-	}
-
-	return runtime.MakeOk(runtime.MakeDynamic(&sqlTransaction{tx: tx, driver: driver}))
+	return &sqlTransaction{tx: tx, driver: conn.driver}, nil
 }
 
-// SqlCommit commits a transaction
-func SqlCommit(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("commit expects 1 argument, got %d", len(args)))
-	}
-
-	wrappedTx, ok := args[0].Raw().(*sqlTransaction)
+// SqlCommit commits a transaction.
+// Takes an opaque *sqlTransaction handle.
+func SqlCommit(handle any) error {
+	wrappedTx, ok := handle.(*sqlTransaction)
 	if !ok {
-		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid transaction object"))
+		return fmt.Errorf("SQL Error: invalid transaction object")
 	}
-
-	err := wrappedTx.tx.Commit()
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to commit transaction: %s", err)))
-	}
-
-	return runtime.MakeOk(runtime.Void())
+	return wrappedTx.tx.Commit()
 }
 
-// SqlRollback rolls back a transaction
-func SqlRollback(args []*runtime.Object) *runtime.Object {
-	if len(args) != 1 {
-		panic(fmt.Errorf("rollback expects 1 argument, got %d", len(args)))
-	}
-
-	wrappedTx, ok := args[0].Raw().(*sqlTransaction)
+// SqlRollback rolls back a transaction.
+// Takes an opaque *sqlTransaction handle.
+func SqlRollback(handle any) error {
+	wrappedTx, ok := handle.(*sqlTransaction)
 	if !ok {
-		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid transaction object"))
+		return fmt.Errorf("SQL Error: invalid transaction object")
 	}
-
-	err := wrappedTx.tx.Rollback()
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to rollback transaction: %s", err.Error())))
-	}
-
-	return runtime.MakeOk(runtime.Void())
+	return wrappedTx.tx.Rollback()
 }

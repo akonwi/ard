@@ -636,6 +636,8 @@ func (f *funcEmitter) emitStatement(stmt checker.NonProducing) error {
 		return nil
 	case *checker.Enum:
 		return nil
+	case *checker.ExternType:
+		return nil
 	default:
 		return fmt.Errorf("unsupported statement: %T", s)
 	}

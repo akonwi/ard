@@ -699,3 +699,24 @@ func (d dynamicType) equal(other Type) bool {
 func (d dynamicType) hasTrait(trait *Trait) bool { return false }
 
 var Dynamic = &dynamicType{}
+
+// ExternType represents an opaque type whose values can only be created by FFI.
+// Identity is by pointer — two different extern type declarations are distinct types.
+type ExternType struct {
+	Name_   string
+	private bool
+}
+
+func (e *ExternType) String() string       { return e.Name_ }
+func (e *ExternType) get(name string) Type { return nil }
+func (e *ExternType) equal(other Type) bool {
+	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
+		return true
+	}
+	if otherExtern, ok := other.(*ExternType); ok {
+		return e.Name_ == otherExtern.Name_
+	}
+	return false
+}
+func (e *ExternType) hasTrait(trait *Trait) bool { return false }
+func (e *ExternType) NonProducing()              {}

@@ -121,6 +121,21 @@ func _ffi_CryptoUUID(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeStr(result)
 }
 
+func _ffi_JsonToDynamic(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.JsonToDynamic(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeDynamic(result))
+}
+
+func _ffi_IsNil(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result := ffi.IsNil(arg0)
+	return runtime.MakeBool(result)
+}
+
 func _ffi_FS_Exists(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.FS_Exists(arg0)
@@ -241,6 +256,26 @@ func _ffi_FS_DeleteDir(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeOk(runtime.Void())
 }
 
+func _ffi_GetReqPath(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result := ffi.GetReqPath(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_GetPathValue(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	arg1 := args[1].AsString()
+	result := ffi.GetPathValue(arg0, arg1)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_GetQueryParam(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	arg1 := args[1].AsString()
+	result := ffi.GetQueryParam(arg0, arg1)
+	return runtime.MakeStr(result)
+}
+
 func _ffi_FloatFromStr(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.FloatFromStr(arg0)
@@ -325,6 +360,30 @@ func _ffi_Sleep(args []*runtime.Object) *runtime.Object {
 	return runtime.Void()
 }
 
+func _ffi_WaitFor(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	ffi.WaitFor(arg0)
+	return runtime.Void()
+}
+
+func _ffi_SqlCreateConnection(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.SqlCreateConnection(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeDynamic(result))
+}
+
+func _ffi_SqlClose(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	err := ffi.SqlClose(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
 func _ffi_SqlExtractParams(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.SqlExtractParams(arg0)
@@ -333,6 +392,33 @@ func _ffi_SqlExtractParams(args []*runtime.Object) *runtime.Object {
 		_items[_i] = runtime.MakeStr(_v)
 	}
 	return runtime.MakeList(checker.Str, _items...)
+}
+
+func _ffi_SqlBeginTx(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result, err := ffi.SqlBeginTx(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeDynamic(result))
+}
+
+func _ffi_SqlCommit(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	err := ffi.SqlCommit(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
+func _ffi_SqlRollback(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	err := ffi.SqlRollback(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
 }
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
@@ -367,7 +453,7 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("MapToDynamic", ffi.MapToDynamic); err != nil {
 		return fmt.Errorf("failed to register MapToDynamic: %w", err)
 	}
-	if err := r.Register("JsonToDynamic", ffi.JsonToDynamic); err != nil {
+	if err := r.Register("JsonToDynamic", _ffi_JsonToDynamic); err != nil {
 		return fmt.Errorf("failed to register JsonToDynamic: %w", err)
 	}
 	if err := r.Register("DecodeString", ffi.DecodeString); err != nil {
@@ -382,7 +468,7 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("DecodeBool", ffi.DecodeBool); err != nil {
 		return fmt.Errorf("failed to register DecodeBool: %w", err)
 	}
-	if err := r.Register("IsNil", ffi.IsNil); err != nil {
+	if err := r.Register("IsNil", _ffi_IsNil); err != nil {
 		return fmt.Errorf("failed to register IsNil: %w", err)
 	}
 	if err := r.Register("DynamicToList", ffi.DynamicToList); err != nil {
@@ -439,13 +525,13 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("FS_ListDir", ffi.FS_ListDir); err != nil {
 		return fmt.Errorf("failed to register FS_ListDir: %w", err)
 	}
-	if err := r.Register("GetReqPath", ffi.GetReqPath); err != nil {
+	if err := r.Register("GetReqPath", _ffi_GetReqPath); err != nil {
 		return fmt.Errorf("failed to register GetReqPath: %w", err)
 	}
-	if err := r.Register("GetPathValue", ffi.GetPathValue); err != nil {
+	if err := r.Register("GetPathValue", _ffi_GetPathValue); err != nil {
 		return fmt.Errorf("failed to register GetPathValue: %w", err)
 	}
-	if err := r.Register("GetQueryParam", ffi.GetQueryParam); err != nil {
+	if err := r.Register("GetQueryParam", _ffi_GetQueryParam); err != nil {
 		return fmt.Errorf("failed to register GetQueryParam: %w", err)
 	}
 	if err := r.Register("HTTP_Send", ffi.HTTP_Send); err != nil {
@@ -493,16 +579,16 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("Sleep", _ffi_Sleep); err != nil {
 		return fmt.Errorf("failed to register Sleep: %w", err)
 	}
-	if err := r.Register("WaitFor", ffi.WaitFor); err != nil {
+	if err := r.Register("WaitFor", _ffi_WaitFor); err != nil {
 		return fmt.Errorf("failed to register WaitFor: %w", err)
 	}
 	if err := r.Register("Join", ffi.Join); err != nil {
 		return fmt.Errorf("failed to register Join: %w", err)
 	}
-	if err := r.Register("SqlCreateConnection", ffi.SqlCreateConnection); err != nil {
+	if err := r.Register("SqlCreateConnection", _ffi_SqlCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqlCreateConnection: %w", err)
 	}
-	if err := r.Register("SqlClose", ffi.SqlClose); err != nil {
+	if err := r.Register("SqlClose", _ffi_SqlClose); err != nil {
 		return fmt.Errorf("failed to register SqlClose: %w", err)
 	}
 	if err := r.Register("SqlExtractParams", _ffi_SqlExtractParams); err != nil {
@@ -514,13 +600,13 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("SqlExecute", ffi.SqlExecute); err != nil {
 		return fmt.Errorf("failed to register SqlExecute: %w", err)
 	}
-	if err := r.Register("SqlBeginTx", ffi.SqlBeginTx); err != nil {
+	if err := r.Register("SqlBeginTx", _ffi_SqlBeginTx); err != nil {
 		return fmt.Errorf("failed to register SqlBeginTx: %w", err)
 	}
-	if err := r.Register("SqlCommit", ffi.SqlCommit); err != nil {
+	if err := r.Register("SqlCommit", _ffi_SqlCommit); err != nil {
 		return fmt.Errorf("failed to register SqlCommit: %w", err)
 	}
-	if err := r.Register("SqlRollback", ffi.SqlRollback); err != nil {
+	if err := r.Register("SqlRollback", _ffi_SqlRollback); err != nil {
 		return fmt.Errorf("failed to register SqlRollback: %w", err)
 	}
 
