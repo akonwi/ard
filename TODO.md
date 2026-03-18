@@ -9,3 +9,5 @@
   * `ard add [git-path]` to install from git repo
     * optionally add `@[version]` for a particular tag
 - [ ] build Agent sdk
+- [ ] Opaque types — explicit language support for opaque FFI handles (e.g., SQL connections, HTTP requests) instead of using Dynamic
+- [ ] Idiomatic FFI `any` type support — map Go `any`/`interface{}` to Ard Dynamic for FFI functions (see backlog/idiomatic-ffi-any-type.md)
