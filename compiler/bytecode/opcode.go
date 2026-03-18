@@ -78,6 +78,7 @@ const (
 	OpMatchResult
 	OpTryResult
 	OpTryMaybe
+	OpToDynamic
 	OpAsyncStart
 	OpAsyncEval
 	OpPanic

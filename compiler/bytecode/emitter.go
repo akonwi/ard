@@ -487,13 +487,26 @@ func (e *Emitter) emitExternWrapper(name string, def *checker.ExternalFunctionDe
 	for _, param := range def.Parameters {
 		fnEmitter.defineLocal(param.Name)
 	}
-	for i := range def.Parameters {
-		fnEmitter.emit(Instruction{Op: OpLoadLocal, A: i})
+
+	// Emit scalar-to-Dynamic conversions as OpToDynamic instead of FFI calls
+	switch def.ExternalBinding {
+	case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
+		fnEmitter.emit(Instruction{Op: OpLoadLocal, A: 0})
+		fnEmitter.emit(Instruction{Op: OpToDynamic})
+		fnEmitter.adjustStack(0, 1)
+	case "VoidToDynamic":
+		fnEmitter.emit(Instruction{Op: OpConstVoid})
+		fnEmitter.emit(Instruction{Op: OpToDynamic})
+		fnEmitter.adjustStack(0, 1)
+	default:
+		for i := range def.Parameters {
+			fnEmitter.emit(Instruction{Op: OpLoadLocal, A: i})
+		}
+		bindingIdx := e.addConst(Constant{Kind: ConstStr, Str: def.ExternalBinding})
+		retID := e.addType(def.ReturnType)
+		fnEmitter.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: len(def.Parameters), C: int(retID)})
+		fnEmitter.adjustStack(len(def.Parameters), 1)
 	}
-	bindingIdx := e.addConst(Constant{Kind: ConstStr, Str: def.ExternalBinding})
-	retID := e.addType(def.ReturnType)
-	fnEmitter.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: len(def.Parameters), C: int(retID)})
-	fnEmitter.adjustStack(len(def.Parameters), 1)
 	fnEmitter.ensureReturn()
 	index := len(e.program.Functions)
 	e.funcIndex[name] = index
@@ -1354,6 +1367,20 @@ func (f *funcEmitter) ensureReturn() {
 func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 	argc := len(call.Args)
 	if call.ExternalBinding != "" {
+		// Emit scalar-to-Dynamic conversions as OpToDynamic instead of FFI calls
+		switch call.ExternalBinding {
+		case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
+			if err := f.emitExpr(call.Args[0]); err != nil {
+				return err
+			}
+			f.emit(Instruction{Op: OpToDynamic})
+			return nil
+		case "VoidToDynamic":
+			f.emit(Instruction{Op: OpConstVoid})
+			f.emit(Instruction{Op: OpToDynamic})
+			f.adjustStack(0, 1)
+			return nil
+		}
 		for i := range call.Args {
 			if err := f.emitExpr(call.Args[i]); err != nil {
 				return err
@@ -1398,6 +1425,33 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) error {
 	argc := len(call.Call.Args)
 	if call.Call.ExternalBinding != "" {
+		// Emit list::new() as OpMakeList with 0 elements instead of an FFI call
+		if call.Call.ExternalBinding == "NewList" {
+			listType, ok := call.Call.ReturnType.(*checker.List)
+			if !ok {
+				return fmt.Errorf("NewList return type is not a list: %T", call.Call.ReturnType)
+			}
+			typeID := f.emitter.addType(listType)
+			f.emit(Instruction{Op: OpMakeList, A: int(typeID), B: 0})
+			f.adjustStack(0, 1)
+			return nil
+		}
+
+		// Emit scalar-to-Dynamic conversions as OpToDynamic instead of FFI calls
+		switch call.Call.ExternalBinding {
+		case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
+			if err := f.emitExpr(call.Call.Args[0]); err != nil {
+				return err
+			}
+			f.emit(Instruction{Op: OpToDynamic})
+			// emitExpr pushed 1, OpToDynamic pops 1 and pushes 1 → net 0 adjustment
+			return nil
+		case "VoidToDynamic":
+			f.emit(Instruction{Op: OpConstVoid})
+			f.emit(Instruction{Op: OpToDynamic})
+			f.adjustStack(0, 1)
+			return nil
+		}
 		for i := range call.Call.Args {
 			if err := f.emitExpr(call.Call.Args[i]); err != nil {
 				return err

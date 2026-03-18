@@ -1001,6 +1001,12 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, err
 			}
 			vm.push(curr, res)
+		case bytecode.OpToDynamic:
+			val, err := vm.pop(curr)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(curr, runtime.MakeDynamic(val.Raw()))
 		case bytecode.OpMatchBool, bytecode.OpMatchInt, bytecode.OpMatchEnum, bytecode.OpMatchUnion,
 			bytecode.OpMatchMaybe, bytecode.OpMatchResult:
 			return nil, fmt.Errorf("opcode not implemented: %s", inst.Op)

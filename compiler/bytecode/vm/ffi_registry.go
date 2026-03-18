@@ -10,7 +10,7 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
-type FFIFunc func(args []*runtime.Object, returnType checker.Type) *runtime.Object
+type FFIFunc func(args []*runtime.Object) *runtime.Object
 
 type RuntimeFFIRegistry struct {
 	functions map[string]FFIFunc
@@ -53,7 +53,7 @@ func (r *RuntimeFFIRegistry) Call(binding string, args []*runtime.Object, return
 		}
 	}()
 
-	result = fn(args, returnType)
+	result = fn(args)
 	return result, nil
 }
 

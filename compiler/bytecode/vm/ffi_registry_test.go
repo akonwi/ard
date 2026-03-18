@@ -9,7 +9,7 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
-func panicTestFFI(args []*runtime.Object, _ checker.Type) *runtime.Object {
+func panicTestFFI(args []*runtime.Object) *runtime.Object {
 	if len(args) != 1 {
 		panic(fmt.Errorf("panicTestFFI expects 1 arg, got %d", len(args)))
 	}
