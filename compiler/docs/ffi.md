@@ -321,15 +321,27 @@ Prefer **raw** when the binding needs:
 
 62 FFI functions total: 16 raw, 46 idiomatic.
 
-Remaining raw functions:
-- `HTTP_Send`, `HTTP_Serve` — complex multi-type with closures/structs
-- `SqlQuery`, `SqlExecute` — mixed `[Value]` list unwrapping
-- `DecodeString/Int/Float/Bool` — return custom error struct from embedded module
-- `DynamicToList`, `DynamicToMap`, `ExtractField` — return Dynamic collections
-- `MapToDynamic` — needs `map[string]any` support
-- `FS_ListDir` — embedded module struct construction
-- `Join` — iterates Fiber struct list
-- `JsonEncode` — generic `$T` input needs full Object
+### Remaining raw functions
+
+| Function(s) | Why raw | Possible future migration |
+|---|---|---|
+| `HTTP_Send`, `HTTP_Serve` | Complex multi-type with closures/structs | Unlikely without major generator changes |
+| `SqlQuery`, `SqlExecute` | Mixed `[Value]` list with `sqlArgValue` unwrapping | `[]any` param support would help |
+| `DecodeString/Int/Float/Bool` | Return custom error struct from embedded module lookup | Needs struct return support |
+| `DynamicToList`, `DynamicToMap`, `ExtractField` | Return Dynamic collections + Object for error formatting | `[]any` return support would help |
+| `MapToDynamic` | Needs `map[string]any` support | `map[string]any` param type |
+| `FS_ListDir` | Embedded module struct construction | Needs struct return support |
+| `Join` | Iterates Fiber struct list, extracts WaitGroups | Needs struct field access |
+| `JsonEncode` | Generic `$T` input needs full Object for marshaling | Unlikely |
+
+### Potential future type extensions
+
+Adding `[]any` support would enable migrating `SqlQuery`, `SqlExecute`, `ListToDynamic`,
+`DynamicToList`, and similar functions. `[]any` params would iterate `.AsList()` and call
+`.Raw()` on each element; `[]any` returns would wrap each element with `MakeDynamic` and
+build a list with `MakeList(checker.Dynamic, ...)`.
+
+Adding `map[string]any` would enable `MapToDynamic`.
 
 ## Summary
 
