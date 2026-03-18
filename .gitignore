@@ -11,3 +11,4 @@ build
 *.wasm
 
 zed-plugin/grammars/*
+compiler/ard

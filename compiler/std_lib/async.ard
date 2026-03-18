@@ -1,9 +1,12 @@
 extern fn sleep(ms: Int) Void = "Sleep"
-private extern fn wait_for(wg: Dynamic) Void = "WaitFor"
+
+// Opaque pointer to Go's *sync.WaitGroup
+private extern type WaitGroup
+
+private extern fn wait_for(wg: WaitGroup) Void = "WaitFor"
 
 struct Fiber {
-  // pointer to *WaitGroup
-  wg: Dynamic,
+  wg: WaitGroup,
   // stores the return value of the function run concurrently
   result: $T,
 }
