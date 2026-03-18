@@ -69,6 +69,7 @@ The generator currently supports these Go parameter types:
 - `int`
 - `float64`
 - `bool`
+- `any` (or `interface{}`)
 - `*string`
 - `*int`
 - `*float64`
@@ -81,6 +82,7 @@ The generator currently supports these Go parameter types:
 
 Meaning:
 - scalar types map to Ard scalar values
+- `any` maps to Ard `Dynamic` or `extern type` (opaque handles)
 - pointer-to-scalar types map to Ard `Maybe<T>`
 - slice-of-scalar types map to Ard `[T]`
 - `map[string]string` maps to Ard `[Str:Str]`
@@ -100,6 +102,7 @@ Where `T` is one of:
 - `int`
 - `float64`
 - `bool`
+- `any`
 - `*string`
 - `*int`
 - `*float64`
@@ -118,6 +121,7 @@ Where `T` is one of:
 | `int` | `Int` |
 | `float64` | `Float` |
 | `bool` | `Bool` |
+| `any` | `Dynamic` or `extern type` |
 | `*string` | `Str?` |
 | `*int` | `Int?` |
 | `*float64` | `Float?` |
@@ -130,6 +134,8 @@ Where `T` is one of:
 | `(T, error)` | `T!Str` |
 
 Notes:
+- `any` params are unwrapped via `.Raw()`, returns are wrapped via `runtime.MakeDynamic()`
+- `any` is the Go-side representation for Ard `extern type` values (opaque FFI handles)
 - `nil` pointer return becomes `None`
 - non-`nil` pointer return becomes `Some(value)`
 - an `error` return is wrapped as `Err(Str)`
@@ -175,6 +181,47 @@ func _ffi_FS_ReadFile(args []*runtime.Object) *runtime.Object {
     return runtime.MakeOk(runtime.MakeStr(result))
 }
 ```
+
+## Extern types (opaque handles)
+
+Ard supports `extern type` declarations for opaque FFI handles — values that Ard code
+can hold and pass around but never inspect or construct:
+
+```ard
+private extern type ConnectionPtr
+
+private extern fn connect(cs: Str) ConnectionPtr!Str = "SqlCreateConnection"
+private extern fn close(db: ConnectionPtr) Void!Str = "SqlClose"
+
+struct Database {
+  _ptr: ConnectionPtr,
+  path: Str,
+}
+```
+
+On the Go side, extern types map to `any`. The Go function receives/returns the raw
+Go value (e.g., a `*sqlConnection` pointer) and the runtime wraps it as a Dynamic object:
+
+```go
+func SqlCreateConnection(connectionString string) (any, error) {
+    conn := &sqlConnection{db: db, driver: driver}
+    return conn, nil
+}
+
+func SqlClose(handle any) error {
+    conn := handle.(*sqlConnection)
+    return conn.db.Close()
+}
+```
+
+### Properties
+
+- **Type-safe**: `ConnectionPtr` ≠ `TransactionPtr` — the checker catches misuse
+- **No construction**: Ard code cannot create extern type values; only FFI can
+- **No equality**: `==` on extern types is a checker error
+- **No pattern matching**: extern types cannot be matched
+- **Coercion to Dynamic**: extern types can be passed where `Dynamic` is expected
+- **Runtime representation**: identical to Dynamic (wraps Go `any`), zero overhead
 
 ## Standard library integration
 
@@ -260,32 +307,36 @@ go test ./...
 
 ### When to choose idiomatic vs raw
 
-Prefer **idiomatic** when the binding is mostly scalar/list/maybe/result marshalling.
+Prefer **idiomatic** when the binding uses:
+- scalar types, lists, maps, maybe, results
+- opaque handles (use `any` on the Go side, `extern type` on the Ard side)
 
 Prefer **raw** when the binding needs:
-- `Dynamic`
 - runtime closures
-- Ard structs/enums/maps beyond simple scalar collections
-- manual construction of Ard-specific types
+- Ard structs/enums constructed manually
+- embedded Ard type lookups from the checker
 - special VM/runtime behavior
 
 ## Current status
 
-The FFI system is incremental by design.
+62 FFI functions total: 16 raw, 46 idiomatic.
 
-Today the codebase uses both tiers:
-- many simple crypto, fs, runtime, prelude, and SQL helper bindings are idiomatic Go
-- HTTP, SQL execution, decode/dynamic conversion, and other complex bindings remain raw
-
-This keeps the common cases ergonomic without weakening the low-level escape hatch.
+Remaining raw functions:
+- `HTTP_Send`, `HTTP_Serve` — complex multi-type with closures/structs
+- `SqlQuery`, `SqlExecute` — mixed `[Value]` list unwrapping
+- `DecodeString/Int/Float/Bool` — return custom error struct from embedded module
+- `DynamicToList`, `DynamicToMap`, `ExtractField` — return Dynamic collections
+- `MapToDynamic` — needs `map[string]any` support
+- `FS_ListDir` — embedded module struct construction
+- `Join` — iterates Fiber struct list
+- `JsonEncode` — generic `$T` input needs full Object
 
 ## Summary
 
-Ard's FFI now provides:
+Ard's FFI provides:
 - zero-reflection dispatch
-- generated registration
-- generated marshalling for common Go types
+- generated registration and marshalling
+- `extern type` for type-safe opaque handles
+- `any` support for Go-side handle functions
 - hard errors for unsupported exported signatures
 - an escape hatch for complex runtime-aware bindings
-
-That gives standard library authors a much more idiomatic Go authoring model while preserving Ard's existing runtime representation and safety checks.
