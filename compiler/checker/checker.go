@@ -2195,6 +2195,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if args == nil {
 				return nil
 			}
+			if fnDef.hasGenerics() && len(s.TypeArgs) > 0 {
+				specialized, err := c.resolveGenericFunction(fnDef, args, s.TypeArgs, s.GetLocation())
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+				fnToUse = specialized
+			}
 
 			call := &FunctionCall{
 				Name:       s.Name,
@@ -2364,6 +2372,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
+			}
+			if fnDef.hasGenerics() && len(s.Method.TypeArgs) > 0 {
+				specialized, err := c.resolveGenericFunction(fnDef, args, s.Method.TypeArgs, s.GetLocation())
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+				fnToUse = specialized
 			}
 
 			// Create function call
@@ -2850,6 +2866,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
+			}
+			if fnDef.hasGenerics() && len(s.Function.TypeArgs) > 0 {
+				specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+				fnToUse = specialized
 			}
 
 			// Create function call
@@ -4527,7 +4551,11 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		var checkedArg Expression
 		switch resolvedExprs[i].(type) {
 		case *parse.ListLiteral, *parse.MapLiteral:
-			checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
+			if hasGenericsInType(expectedType) {
+				checkedArg = c.checkExpr(resolvedExprs[i])
+			} else {
+				checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
+			}
 		case *parse.AnonymousFunction:
 			checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
 		default:

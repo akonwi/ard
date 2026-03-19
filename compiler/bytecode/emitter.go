@@ -1405,7 +1405,8 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 				return err
 			}
 		}
-		f.emit(Instruction{Op: OpCallClosure, B: argc})
+		retID := f.emitter.addType(call.ReturnType)
+		f.emit(Instruction{Op: OpCallClosure, B: argc, C: int(retID)})
 		f.adjustStack(argc+1, 1)
 		return nil
 	}
@@ -1419,7 +1420,8 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 			return err
 		}
 	}
-	f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+	retID := f.emitter.addType(call.ReturnType)
+	f.emit(Instruction{Op: OpCall, A: idx, B: argc, C: int(retID)})
 	f.adjustStack(argc, 1)
 	return nil
 }
@@ -1472,7 +1474,8 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 				return err
 			}
 		}
-		f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+		retID := f.emitter.addType(call.Call.ReturnType)
+		f.emit(Instruction{Op: OpCall, A: idx, B: argc, C: int(retID)})
 		f.adjustStack(argc, 1)
 		return nil
 	}
@@ -1486,7 +1489,8 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 					return err
 				}
 			}
-			f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+			retID := f.emitter.addType(call.Call.ReturnType)
+			f.emit(Instruction{Op: OpCall, A: idx, B: argc, C: int(retID)})
 			f.adjustStack(argc, 1)
 			return nil
 		}
@@ -1500,7 +1504,8 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 						return err
 					}
 				}
-				f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+				retID := f.emitter.addType(call.Call.ReturnType)
+				f.emit(Instruction{Op: OpCall, A: idx, B: argc, C: int(retID)})
 				f.adjustStack(argc, 1)
 				return nil
 			}
@@ -1513,7 +1518,8 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 					return err
 				}
 			}
-			f.emit(Instruction{Op: OpCall, A: idx, B: argc})
+			retID := f.emitter.addType(call.Call.ReturnType)
+			f.emit(Instruction{Op: OpCall, A: idx, B: argc, C: int(retID)})
 			f.adjustStack(argc, 1)
 			return nil
 		}
@@ -2274,7 +2280,8 @@ func (f *funcEmitter) emitInstanceMethod(method *checker.InstanceMethod) error {
 		}
 	}
 	nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: method.Method.Name})
-	f.emit(Instruction{Op: OpCallMethod, A: nameIdx, B: len(method.Method.Args)})
+	retID := f.emitter.addType(method.Method.ReturnType)
+	f.emit(Instruction{Op: OpCallMethod, A: nameIdx, B: len(method.Method.Args), C: int(retID)})
 	f.adjustStack(len(method.Method.Args)+1, 1)
 	return nil
 }
