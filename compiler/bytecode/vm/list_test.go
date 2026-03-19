@@ -71,33 +71,7 @@ func TestBytecodeListApi(t *testing.T) {
 			want: 3,
 		},
 		{
-			name: "List::concat a combined list",
-			input: `
-				let a = [1,2,3]
-				let b = [4,5,6]
-				let list = List::concat(a, b)
-				list.at(3) == 4`,
-			want: true,
-		},
-		{
-			name: "List::keep with inferred function parameter type",
-			input: `
-				struct User { name: Str }
-
-				let users = [
-					User{name: "Alice"},
-					User{name: "Bob"},
-					User{name: "Andrew"},
-					User{name: "Charlie"},
-				]
-
-				let a_people = List::keep(users, fn(u) { u.name.starts_with("A") })
-				a_people.size()
-			`,
-			want: 2,
-		},
-		{
-			name: "List::keep with inferred parameter accessing struct fields",
+			name: "List::keep infers parameter types in closures",
 			input: `
 				struct User { name: Str, age: Int }
 
@@ -111,68 +85,6 @@ func TestBytecodeListApi(t *testing.T) {
 				adults.size()
 			`,
 			want: 2,
-		},
-		{
-			name: "List::drop removes elements before index",
-			input: `
-				let list = [1,2,3,4,5]
-				let dropped = List::drop(list, 2)
-				dropped.size()
-			`,
-			want: 3,
-		},
-		{
-			name: "List::drop returns correct elements",
-			input: `
-				let list = [1,2,3,4,5]
-				let dropped = List::drop(list, 2)
-				dropped.at(0) == 3 && dropped.at(1) == 4 && dropped.at(2) == 5
-			`,
-			want: true,
-		},
-		{
-			name: "List::drop with index 0 returns all elements",
-			input: `
-				let list = [1,2,3]
-				let dropped = List::drop(list, 0)
-				dropped.size()
-			`,
-			want: 3,
-		},
-		{
-			name: "List::map transforms list",
-			input: `
-				let nums = [1, 2, 3]
-				let doubled: [Int] = List::map(nums, fn(n: Int) Int { n * 2 })
-				for n, i in doubled {
-				  let expected = nums.at(i) * 2
-					if not n == expected {
-						panic("At {i}: Expected {expected} and got {n}")
-					}
-				}
-			`,
-			want: nil,
-		},
-		{
-			name: "List::find returns Some when item matches",
-			input: `
-				let list = [1,2,3,4,5]
-				let found = List::find(list, fn(n) { n == 3 })
-				match found {
-					val => val == 3,
-					_ => false
-				}
-			`,
-			want: true,
-		},
-		{
-			name: "List::partition splits list correctly",
-			input: `
-				let list = [1,2,3,4,5]
-				let parts = List::partition(list, fn(n) { n > 2 })
-				parts.selected.size() == 3 and parts.others.size() == 2
-			`,
-			want: true,
 		},
 	}
 

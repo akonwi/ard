@@ -1,9 +1,27 @@
+use ard/dynamic as Dynamic
 use ard/maybe
 use ard/testing
 
 // Standard library JSON module implemented with FFI
 
 extern fn encode(value: $T) Str!Str = "JsonEncode"
+
+struct Person {
+  name: Str,
+  age: Int,
+  employed: Bool?,
+}
+
+struct Winner {
+  id: Int,
+  name: Str,
+  comment: Str,
+}
+
+struct Prediction {
+  advice: Str?,
+  winner: Winner?,
+}
 
 test fn test_encode_int() Void!Str {
   let out = try encode(200)
@@ -15,8 +33,105 @@ test fn test_encode_string() Void!Str {
   testing::assert(out == "\"hello\"", "Expected string JSON encoding")
 }
 
+test fn test_encode_float() Void!Str {
+  let out = try encode(98.6)
+  testing::assert(out == "98.6", "Expected float JSON encoding")
+}
+
+test fn test_encode_bool() Void!Str {
+  let out = try encode(true)
+  testing::assert(out == "true", "Expected bool JSON encoding")
+}
+
 test fn test_encode_none() Void!Str {
   let val: Str? = maybe::none()
   let out = try encode(val)
   testing::assert(out == "null", "Expected none to encode as null")
+}
+
+test fn test_encode_some_int() Void!Str {
+  let out = try encode(maybe::some(200))
+  testing::assert(out == "200", "Expected some(Int) to encode as the wrapped value")
+}
+
+test fn test_encode_list() Void!Str {
+  let out = try encode([1, 2, 3])
+  testing::assert(out == "[1,2,3]", "Expected list JSON encoding")
+}
+
+test fn test_encode_struct_with_nullable_field() Void!Str {
+  let john = Person{
+    name: "John",
+    age: 30,
+    employed: maybe::none(),
+  }
+  let out = try encode(john)
+  try testing::assert(out.contains("\"name\":\"John\""), "Expected encoded struct to include name")
+  try testing::assert(out.contains("\"age\":30"), "Expected encoded struct to include age")
+  testing::assert(out.contains("\"employed\":null"), "Expected nullable field to encode as null")
+}
+
+test fn test_encode_result_ok() Void!Str {
+  let result: Int!Bool = Result::ok(200)
+  let out = try encode(result)
+  testing::assert(out == "200", "Expected ok result to encode its value")
+}
+
+test fn test_encode_result_err() Void!Str {
+  let result: Int!Bool = Result::err(false)
+  let out = try encode(result)
+  testing::assert(out == "false", "Expected err result to encode its error value")
+}
+
+test fn test_encode_map() Void!Str {
+  mut values: [Str: Int] = [:]
+  values.set("foo", 42)
+  values.set("bar", 24)
+  let out = try encode(values)
+  try testing::assert(out.contains("\"foo\":42"), "Expected encoded map to include foo")
+  testing::assert(out.contains("\"bar\":24"), "Expected encoded map to include bar")
+}
+
+test fn test_encode_nullable_nested_struct_with_value() Void!Str {
+  let prediction = Prediction{
+    advice: maybe::some("Double chance"),
+    winner: maybe::some(
+      Winner{
+        id: 1598,
+        name: "Orlando City SC",
+        comment: "Win or draw",
+      },
+    ),
+  }
+  let out = try encode(prediction)
+  try testing::assert(
+    out.contains("Orlando City SC"),
+    "Expected encoded struct to include nested winner name",
+  )
+  try testing::assert(out.contains("1598"), "Expected encoded struct to include nested winner id")
+  testing::assert(out.contains("Double chance"), "Expected encoded struct to include advice")
+}
+
+test fn test_encode_nullable_nested_struct_with_null() Void!Str {
+  let prediction = Prediction{advice: maybe::some("No prediction"), winner: maybe::none()}
+  let out = try encode(prediction)
+  try testing::assert(
+    out.contains("\"winner\":null"),
+    "Expected nullable nested struct to encode as null",
+  )
+  testing::assert(out.contains("No prediction"), "Expected encoded struct to include advice")
+}
+
+test fn test_encode_nullable_struct_none() Void!Str {
+  let maybe_person: Person? = maybe::none()
+  let out = try encode(maybe_person)
+  testing::assert(out == "null", "Expected none struct to encode as null")
+}
+
+test fn test_encode_dynamic_object() Void!Str {
+  let data = Dynamic::object(["foo": Dynamic::from_int(0), "baz": Dynamic::from_int(1)])
+
+  let out = try encode(data)
+  try testing::assert(out.contains("\"foo\":0"), "Expected encoded object to include foo")
+  testing::assert(out.contains("\"baz\":1"), "Expected encoded object to include baz")
 }
