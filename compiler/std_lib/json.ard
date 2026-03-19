@@ -6,23 +6,6 @@ use ard/testing
 
 extern fn encode(value: $T) Str!Str = "JsonEncode"
 
-struct Person {
-  name: Str,
-  age: Int,
-  employed: Bool?,
-}
-
-struct Winner {
-  id: Int,
-  name: Str,
-  comment: Str,
-}
-
-struct Prediction {
-  advice: Str?,
-  winner: Winner?,
-}
-
 test fn test_encode_int() Void!Str {
   let out = try encode(200)
   testing::assert(out == "200", "Expected integer JSON encoding")
@@ -60,6 +43,12 @@ test fn test_encode_list() Void!Str {
 }
 
 test fn test_encode_struct_with_nullable_field() Void!Str {
+  struct Person {
+    name: Str,
+    age: Int,
+    employed: Bool?,
+  }
+
   let john = Person{
     name: "John",
     age: 30,
@@ -93,6 +82,17 @@ test fn test_encode_map() Void!Str {
 }
 
 test fn test_encode_nullable_nested_struct_with_value() Void!Str {
+  struct Winner {
+    id: Int,
+    name: Str,
+    comment: Str,
+  }
+
+  struct Prediction {
+    advice: Str?,
+    winner: Winner?,
+  }
+
   let prediction = Prediction{
     advice: maybe::some("Double chance"),
     winner: maybe::some(
@@ -114,6 +114,17 @@ test fn test_encode_nullable_nested_struct_with_value() Void!Str {
 }
 
 test fn test_encode_nullable_nested_struct_with_null() Void!Str {
+  struct Winner {
+    id: Int,
+    name: Str,
+    comment: Str,
+  }
+
+  struct Prediction {
+    advice: Str?,
+    winner: Winner?,
+  }
+
   let prediction = Prediction{advice: maybe::some("No prediction"), winner: maybe::none()}
   let out = try encode(prediction)
   try testing::assert(
@@ -125,6 +136,12 @@ test fn test_encode_nullable_nested_struct_with_null() Void!Str {
 }
 
 test fn test_encode_nullable_struct_none() Void!Str {
+  struct Person {
+    name: Str,
+    age: Int,
+    employed: Bool?,
+  }
+
   let maybe_person: Person? = maybe::none()
   let out = try encode(maybe_person)
   testing::assert(out == "null", "Expected none struct to encode as null")
