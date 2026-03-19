@@ -10,18 +10,20 @@ import (
 )
 
 type Frame struct {
-	Fn       bytecode.Function
-	IP       int
-	Locals   []*runtime.Object
-	Stack    []*runtime.Object
-	MaxStack int
+	Fn         bytecode.Function
+	IP         int
+	Locals     []*runtime.Object
+	Stack      []*runtime.Object
+	MaxStack   int
+	ReturnType checker.Type
 }
 
 type Closure struct {
-	FnIndex  int
-	Captures []*runtime.Object
-	Program  *bytecode.Program
-	Params   []checker.Parameter
+	FnIndex    int
+	Captures   []*runtime.Object
+	Program    *bytecode.Program
+	Params     []checker.Parameter
+	ReturnType checker.Type
 }
 
 func (c *Closure) Eval(args ...*runtime.Object) *runtime.Object {
@@ -265,6 +267,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpReturn:
 			if len(curr.Stack) == 0 {
 				val := runtime.Void()
+				if curr.ReturnType != nil {
+					val.SetRefinedType(curr.ReturnType)
+				}
 				vm.Frames = vm.Frames[:len(vm.Frames)-1]
 				if len(vm.Frames) == 0 {
 					return val, nil
@@ -275,6 +280,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			val, err := vm.pop(curr)
 			if err != nil {
 				return nil, err
+			}
+			if curr.ReturnType != nil {
+				val.SetRefinedType(curr.ReturnType)
 			}
 			vm.Frames = vm.Frames[:len(vm.Frames)-1]
 			if len(vm.Frames) == 0 {
@@ -296,7 +304,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 				}
 				args[i] = arg
 			}
-			frame, err := vm.newFrame(fnDef, args, nil)
+			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			frame, err := vm.newFrame(fnDef, args, nil, retType)
 			if err != nil {
 				return nil, err
 			}
@@ -326,7 +338,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if def, ok := fnType.(*checker.FunctionDef); ok {
 				params = def.Parameters
 			}
-			closure := &Closure{FnIndex: fnIndex, Captures: captures, Program: &vm.Program, Params: params}
+			var returnType checker.Type = checker.Dynamic
+			if def, ok := fnType.(*checker.FunctionDef); ok {
+				returnType = def.ReturnType
+			}
+			closure := &Closure{FnIndex: fnIndex, Captures: captures, Program: &vm.Program, Params: params, ReturnType: returnType}
 			vm.push(curr, runtime.Make(closure, fnType))
 		case bytecode.OpCallClosure:
 			argc := inst.B
@@ -350,7 +366,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, fmt.Errorf("function index out of range")
 			}
 			fnDef := vm.Program.Functions[closure.FnIndex]
-			frame, err := vm.newFrame(fnDef, args, closure.Captures)
+			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
+			frame, err := vm.newFrame(fnDef, args, closure.Captures, retType)
 			if err != nil {
 				return nil, err
 			}
@@ -932,12 +952,17 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if fnDef.Arity != argc+1 {
 				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc+1)
 			}
+			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
+			if err != nil {
+				return nil, err
+			}
 			frame := &Frame{
-				Fn:       fnDef,
-				IP:       0,
-				Locals:   make([]*runtime.Object, fnDef.Locals),
-				Stack:    []*runtime.Object{},
-				MaxStack: fnDef.MaxStack,
+				Fn:         fnDef,
+				IP:         0,
+				Locals:     make([]*runtime.Object, fnDef.Locals),
+				Stack:      []*runtime.Object{},
+				MaxStack:   fnDef.MaxStack,
+				ReturnType: retType,
 			}
 			frame.Locals[0] = subj
 			for i := range args {
@@ -1034,7 +1059,7 @@ func (vm *VM) spawn() *VM {
 	return child
 }
 
-func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures []*runtime.Object) (*Frame, error) {
+func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
 	if len(args) != fnDef.Arity {
 		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
 	}
@@ -1045,11 +1070,12 @@ func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures
 		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(captures))
 	}
 	frame := &Frame{
-		Fn:       fnDef,
-		IP:       0,
-		Locals:   make([]*runtime.Object, fnDef.Locals),
-		Stack:    []*runtime.Object{},
-		MaxStack: fnDef.MaxStack,
+		Fn:         fnDef,
+		IP:         0,
+		Locals:     make([]*runtime.Object, fnDef.Locals),
+		Stack:      []*runtime.Object{},
+		MaxStack:   fnDef.MaxStack,
+		ReturnType: returnType,
 	}
 	for i, localIdx := range fnDef.Captures {
 		if localIdx < 0 || localIdx >= len(frame.Locals) {
@@ -1069,7 +1095,7 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 	}
 	child := vm.spawn()
 	fnDef := child.Program.Functions[closure.FnIndex]
-	frame, err := child.newFrame(fnDef, args, closure.Captures)
+	frame, err := child.newFrame(fnDef, args, closure.Captures, closure.ReturnType)
 	if err != nil {
 		return nil, err
 	}
@@ -1197,14 +1223,6 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 		}
 		if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindEnum {
 			eq := left.AsInt() == right.Raw().(int)
-			if op == bytecode.OpEq {
-				return runtime.MakeBool(eq), nil
-			}
-			return runtime.MakeBool(!eq), nil
-		}
-		// Handle KindDynamic: compare underlying Go values when kinds don't match
-		if left.Kind() == runtime.KindDynamic || right.Kind() == runtime.KindDynamic {
-			eq := left.Raw() == right.Raw()
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
 			}

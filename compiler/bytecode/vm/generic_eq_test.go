@@ -3,6 +3,19 @@ package vm
 import "testing"
 
 func TestGenericValueEquality(t *testing.T) {
+	t.Run("direct generic return compared with ==", func(t *testing.T) {
+		res := runBytecode(t, `
+fn id<$T>(value: $T) $T {
+  value
+}
+
+id(3) == 3
+`)
+		if res != true {
+			t.Fatalf("Expected true, got %v (%T)", res, res)
+		}
+	})
+
 	t.Run("find result compared with ==", func(t *testing.T) {
 		res := runBytecode(t, `
 use ard/list
