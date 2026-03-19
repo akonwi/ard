@@ -2,9 +2,6 @@ name: test-compiler
 
 on:
   pull_request:
-    paths:
-      - "compiler/**"
-      - ".github/workflows/test-compiler.yml"
 
 concurrency:
   group: test-compiler-${{ github.event.pull_request.number || github.ref }}

@@ -11,6 +11,8 @@
 Ard is a modern, programming language designed for legibility, simplicity, and type-safety.
 It combines elements from JavaScript, Swift, Go, and Rust.
 
+Contribution and commit message guidelines live in [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ## Goals
 
 - **Readability**: Ard code should be easy to read and understand.
