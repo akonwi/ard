@@ -27,6 +27,7 @@ All commands should be run from the `/compiler` directory:
 - Build: `cd compiler && go build`
   > Important: do not stage and commit the built binary
 - Run Ard program: `cd compiler && go run main.go run samples/[file].ard`
+- Format Ard files: `cd compiler && go run main.go format [path]`
 - Run all tests: `cd compiler && go test ./...`
 - Run package tests: `cd compiler && go test ./ast` or `go test ./checker` or `go test ./bytecode/vm`
 - Run single test: `cd compiler && go test -run TestName ./[package]`
@@ -46,7 +47,11 @@ All commands should be run from the `/compiler` directory:
   - use TDD
   - when adding new features or fixing bugs, recreate them with a test where possible instead of creating sample programs
   - prefer vm tests over checker tests. use vm tests to validate that written code functions as expected. use checker tests to document expected compiler errors
-- **Formatting**: Standard Go formatting (`gofmt`)
+- **Formatting**:
+  - Go: standard Go formatting (`gofmt`)
+  - Ard: use `cd compiler && go run main.go format [path]`
+  - When changing `.ard` files, include a formatter verification pass as part of validation. At minimum, run `ard format` on the touched file(s) or containing directory and make sure formatting does not introduce unintended semantic changes.
+  - When changing formatter behavior or stdlib `.ard` files, also run the relevant formatter tests (at least `cd compiler && go test ./formatter`) and, for stdlib changes, prefer `cd compiler && go run main.go format std_lib` as a regression check.
 - **Project Structure**: Compiler follows ast → checker → vm pipeline
 - **Development Tracking**: Use TODO.md for feature development progress
 - **Sample Programs**: Reference samples directory for example Ard programs

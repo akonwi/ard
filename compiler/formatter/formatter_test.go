@@ -60,6 +60,16 @@ func TestFormat(t *testing.T) {
 			output: "extern fn hash(password: Str, cost: Int?) Result<Str, Str> = \"CryptoHashPassword\"\n",
 		},
 		{
+			name:   "formats extern type declaration",
+			input:  "extern type ConnectionPtr\n",
+			output: "extern type ConnectionPtr\n",
+		},
+		{
+			name:   "formats private extern type declaration",
+			input:  "private extern type ConnectionPtr\n",
+			output: "private extern type ConnectionPtr\n",
+		},
+		{
 			name:   "preserves mut in function type parameters",
 			input:  "type Handler = fn(Request, mut Response)\n",
 			output: "type Handler = fn(Request, mut Response)\n",
@@ -216,6 +226,10 @@ func TestFormatIsIdempotent(t *testing.T) {
 		{
 			name:  "test and regular functions together",
 			input: "fn helper() Int {\n  1\n}\ntest fn test_helper() Void!Str {\n  Result::ok(())\n}\n",
+		},
+		{
+			name:  "private extern type declaration",
+			input: "private extern type ConnectionPtr\n",
 		},
 	}
 

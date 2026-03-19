@@ -129,6 +129,8 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return p.renderFunctionDeclarationDoc(node, false)
 	case *parse.StaticFunctionDeclaration:
 		return p.renderStaticFunctionDeclarationDoc(node)
+	case *parse.ExternTypeDeclaration:
+		return p.renderExternTypeDeclarationDoc(node)
 	case *parse.ExternalFunction:
 		return p.renderExternalFunctionDoc(node)
 	case *parse.StructDefinition:
@@ -272,6 +274,18 @@ func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDe
 		header += " " + p.renderType(node.ReturnType)
 	}
 	return p.renderBlockDoc(header, node.Body)
+}
+
+func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) string {
+	prefix := ""
+	if node.Private {
+		prefix = "private "
+	}
+	return prefix + "extern type " + node.Name
+}
+
+func (p printer) renderExternTypeDeclarationDoc(node *parse.ExternTypeDeclaration) doc {
+	return dText(p.renderExternTypeDeclaration(node))
 }
 
 func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
