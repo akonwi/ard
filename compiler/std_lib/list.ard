@@ -78,29 +78,11 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
   Partition{selected: selected, others: others}
 }
 
-struct TestUser {
-  name: Str,
-  age: Int,
-}
-
 test fn test_concat_combines_lists() Void!Str {
   let combined = concat([1, 2, 3], [4, 5, 6])
   try testing::assert(combined.size() == 6, "concat should keep all elements")
   try testing::assert(combined.at(3) == 4, "concat should append the second list in order")
   testing::assert(combined.at(5) == 6, "concat should keep the tail of the second list")
-}
-
-test fn test_keep_infers_struct_field_access() Void!Str {
-  let users = [
-    TestUser{name: "Alice", age: 25},
-    TestUser{name: "Bob", age: 30},
-    TestUser{name: "Andrew", age: 35},
-  ]
-
-  let adults = keep(users, fn(u: TestUser) Bool { u.age >= 30 })
-  try testing::assert(adults.size() == 2, "keep should keep only matching items")
-  try testing::assert(adults.at(0).name == "Bob", "keep should preserve the original order")
-  testing::assert(adults.at(1).name == "Andrew", "keep should keep later matches too")
 }
 
 test fn test_drop_keeps_suffix() Void!Str {

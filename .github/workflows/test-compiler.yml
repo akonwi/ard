@@ -30,4 +30,4 @@ jobs:
 
       - name: Standard Libary tests
         working-directory: compiler
-        run: go run -tags=goexperiment.jsonv2 main.go test std_lib --fail-fast
+        run: go run -tags=goexperiment.jsonv2 main.go test std_lib

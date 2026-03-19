@@ -7,4 +7,8 @@
   * `ard add [git-path]` to install from git repo
     * optionally add `@[version]` for a particular tag
 - [ ] build Agent sdk
-- [ ] I had to keep anonymous closure inference coverage in Go for List::keep; putting untyped closure params in stdlib Ard tests currently trips formatter/idempotence testsI had to keep anonymous closure inference coverage in Go for List::keep; putting untyped closure params in stdlib Ard tests currently trips formatter/idempotence tests
+- [ ] Revisit moving `List::keep` anonymous closure inference coverage into Ard stdlib tests.
+  * Today that coverage stays in `compiler/bytecode/vm/list_test.go` instead of `compiler/std_lib/list.ard`.
+  * The desired Ard test shape is an untyped closure like `List::keep(users, fn(u) { u.age >= 30 })`, which exercises checker inference on closure params and field access.
+  * When that style appears in `std_lib/*.ard`, formatter/idempotence tests currently fail; the formatter crashes while rendering anonymous function params whose types are omitted/inferred.
+  * Revisit after fixing the formatter path so stdlib Ard tests can cover this compiler behavior without needing an explicit type annotation workaround.
