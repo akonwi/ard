@@ -100,14 +100,24 @@ test fn test_drop_zero_returns_all_elements() Void!Str {
 
 test fn test_map_transforms_in_order() Void!Str {
   let nums = [1, 2, 3]
-  let doubled: [Int] = map(nums, fn(n: Int) Int { n * 2 })
+  let doubled: [Int] = map(
+    nums,
+    fn(n: Int) Int {
+      n * 2
+    },
+  )
   try testing::assert(doubled.size() == 3, "map should preserve list size")
   try testing::assert(doubled.at(0) == 2, "map should transform the first element")
   testing::assert(doubled.at(2) == 6, "map should transform later elements too")
 }
 
 test fn test_find_returns_some_for_match() Void!Str {
-  let found = find([1, 2, 3, 4, 5], fn(n: Int) Bool { n == 3 })
+  let found = find(
+    [1, 2, 3, 4, 5],
+    fn(n: Int) Bool {
+      n == 3
+    },
+  )
   match found {
     value => testing::assert(value == 3, "find should return the matching value"),
     _ => testing::fail("find should have returned some(3)"),
@@ -115,7 +125,12 @@ test fn test_find_returns_some_for_match() Void!Str {
 }
 
 test fn test_partition_splits_matching_and_other_values() Void!Str {
-  let parts = partition([1, 2, 3, 4, 5], fn(n: Int) Bool { n > 2 })
+  let parts = partition(
+    [1, 2, 3, 4, 5],
+    fn(n: Int) Bool {
+      n > 2
+    },
+  )
   try testing::assert(parts.selected.size() == 3, "partition should collect matches")
   try testing::assert(parts.others.size() == 2, "partition should collect non-matches")
   try testing::assert(parts.selected.at(0) == 3, "partition should preserve selected order")

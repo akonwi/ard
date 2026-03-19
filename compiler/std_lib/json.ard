@@ -108,6 +108,7 @@ test fn test_encode_nullable_nested_struct_with_value() Void!Str {
     out.contains("Orlando City SC"),
     "Expected encoded struct to include nested winner name",
   )
+
   try testing::assert(out.contains("1598"), "Expected encoded struct to include nested winner id")
   testing::assert(out.contains("Double chance"), "Expected encoded struct to include advice")
 }
@@ -119,6 +120,7 @@ test fn test_encode_nullable_nested_struct_with_null() Void!Str {
     out.contains("\"winner\":null"),
     "Expected nullable nested struct to encode as null",
   )
+
   testing::assert(out.contains("No prediction"), "Expected encoded struct to include advice")
 }
 
