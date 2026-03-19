@@ -679,7 +679,10 @@ func (p printer) renderParameterList(params []parse.Parameter, indent int, heade
 		if parameter.Mutable {
 			part += "mut "
 		}
-		part += parameter.Name + ": " + p.renderType(parameter.Type)
+		part += parameter.Name
+		if parameter.Type != nil {
+			part += ": " + p.renderType(parameter.Type)
+		}
 		parts = append(parts, part)
 	}
 	oneLine := "(" + strings.Join(parts, ", ") + ")"

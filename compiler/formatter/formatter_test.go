@@ -189,6 +189,11 @@ func TestFormat(t *testing.T) {
 			input:  "fn next_batch() Int!Str {\n  let next_batch = (try get_latest_batch()) + 1\n  Result::ok(next_batch)\n}\n",
 			output: "fn next_batch() Int!Str {\n  let next_batch = (try get_latest_batch()) + 1\n  Result::ok(next_batch)\n}\n",
 		},
+		{
+			name:   "formats anonymous function with inferred parameter type",
+			input:  "fn main() {\n  let adults = List::keep(users, fn(u) { u.age >= 30 })\n}\n",
+			output: "fn main() {\n  let adults = List::keep(\n    users,\n    fn(u) {\n      u.age >= 30\n    },\n  )\n}\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -230,6 +235,10 @@ func TestFormatIsIdempotent(t *testing.T) {
 		{
 			name:  "private extern type declaration",
 			input: "private extern type ConnectionPtr\n",
+		},
+		{
+			name:  "anonymous function with inferred parameter type",
+			input: "fn main() {\n  let adults = List::keep(\n    users,\n    fn(u) {\n      u.age >= 30\n    },\n  )\n}\n",
 		},
 	}
 
