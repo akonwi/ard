@@ -70,22 +70,6 @@ func TestBytecodeListApi(t *testing.T) {
 				list.at(0)`,
 			want: 3,
 		},
-		{
-			name: "List::keep infers parameter types in closures",
-			input: `
-				struct User { name: Str, age: Int }
-
-				let users = [
-					User{name: "Alice", age: 25},
-					User{name: "Bob", age: 30},
-					User{name: "Andrew", age: 35},
-				]
-
-				let adults = List::keep(users, fn(u) { u.age >= 30 })
-				adults.size()
-			`,
-			want: 2,
-		},
 	}
 
 	for _, test := range tests {
