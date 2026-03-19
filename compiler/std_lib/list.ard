@@ -1,4 +1,5 @@
 use ard/maybe
+use ard/testing
 
 extern fn new() [$T] = "NewList"
 
@@ -75,4 +76,63 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
   }
 
   Partition{selected: selected, others: others}
+}
+
+test fn test_concat_combines_lists() Void!Str {
+  let combined = concat([1, 2, 3], [4, 5, 6])
+  try testing::assert(combined.size() == 6, "concat should keep all elements")
+  try testing::assert(combined.at(3) == 4, "concat should append the second list in order")
+  testing::assert(combined.at(5) == 6, "concat should keep the tail of the second list")
+}
+
+test fn test_drop_keeps_suffix() Void!Str {
+  let dropped = drop([1, 2, 3, 4, 5], 2)
+  try testing::assert(dropped.size() == 3, "drop should remove the prefix")
+  try testing::assert(dropped.at(0) == 3, "drop should keep the element at the cutoff")
+  testing::assert(dropped.at(2) == 5, "drop should keep the tail of the list")
+}
+
+test fn test_drop_zero_returns_all_elements() Void!Str {
+  let dropped = drop([1, 2, 3], 0)
+  try testing::assert(dropped.size() == 3, "drop(0) should keep all elements")
+  testing::assert(dropped.at(2) == 3, "drop(0) should preserve element order")
+}
+
+test fn test_map_transforms_in_order() Void!Str {
+  let nums = [1, 2, 3]
+  let doubled: [Int] = map(
+    nums,
+    fn(n: Int) Int {
+      n * 2
+    },
+  )
+  try testing::assert(doubled.size() == 3, "map should preserve list size")
+  try testing::assert(doubled.at(0) == 2, "map should transform the first element")
+  testing::assert(doubled.at(2) == 6, "map should transform later elements too")
+}
+
+test fn test_find_returns_some_for_match() Void!Str {
+  let found = find(
+    [1, 2, 3, 4, 5],
+    fn(n: Int) Bool {
+      n == 3
+    },
+  )
+  match found {
+    value => testing::assert(value == 3, "find should return the matching value"),
+    _ => testing::fail("find should have returned some(3)"),
+  }
+}
+
+test fn test_partition_splits_matching_and_other_values() Void!Str {
+  let parts = partition(
+    [1, 2, 3, 4, 5],
+    fn(n: Int) Bool {
+      n > 2
+    },
+  )
+  try testing::assert(parts.selected.size() == 3, "partition should collect matches")
+  try testing::assert(parts.others.size() == 2, "partition should collect non-matches")
+  try testing::assert(parts.selected.at(0) == 3, "partition should preserve selected order")
+  testing::assert(parts.others.at(1) == 2, "partition should preserve other order")
 }
