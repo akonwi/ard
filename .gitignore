@@ -12,3 +12,4 @@ build
 
 zed-plugin/grammars/*
 compiler/ard
+.tmp/
