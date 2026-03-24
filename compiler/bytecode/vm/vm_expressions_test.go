@@ -1,6 +1,10 @@
 package vm
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/akonwi/ard/formatter"
+)
 
 func TestBytecodeVMParityCoreExpressions(t *testing.T) {
 	tests := []struct {
@@ -54,5 +58,33 @@ func TestBytecodeVMParityCoreExpressions(t *testing.T) {
 				t.Fatalf("Expected %v, got %v", test.want, got)
 			}
 		})
+	}
+}
+
+func TestBytecodeVMNotGroupingChangesSemantics(t *testing.T) {
+	if got := runBytecode(t, `(not false) and false`); got != false {
+		t.Fatalf("Expected (not false) and false to be false, got %v", got)
+	}
+
+	if got := runBytecode(t, `not false and false`); got != true {
+		t.Fatalf("Expected not false and false to be true, got %v", got)
+	}
+}
+
+func TestBytecodeVMFormatterPreservesGroupedNotSemantics(t *testing.T) {
+	input := `(not false) and false`
+	formatted, err := formatter.Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	before := runBytecode(t, input)
+	after := runBytecode(t, string(formatted))
+
+	if before != false {
+		t.Fatalf("Expected source to evaluate to false, got %v", before)
+	}
+	if after != false {
+		t.Fatalf("Expected formatted source to evaluate to false, got %v", after)
 	}
 }

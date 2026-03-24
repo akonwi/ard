@@ -1311,6 +1311,12 @@ func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int
 	if isTryExpression(node.Right) {
 		right = "(" + right + ")"
 	}
+	if isUnaryNotExpression(node.Left) {
+		left = "(" + left + ")"
+	}
+	if isUnaryNotExpression(node.Right) && parentPrecedence > precedenceLowest {
+		right = "(" + right + ")"
+	}
 	operator := p.operatorString(node.Operator)
 	separator := " "
 	if node.Operator == parse.Range {
@@ -1330,6 +1336,17 @@ func isTryExpression(expression parse.Expression) bool {
 	switch expression.(type) {
 	case *parse.Try, parse.Try:
 		return true
+	default:
+		return false
+	}
+}
+
+func isUnaryNotExpression(expression parse.Expression) bool {
+	switch node := expression.(type) {
+	case *parse.UnaryExpression:
+		return node.Operator == parse.Not
+	case parse.UnaryExpression:
+		return node.Operator == parse.Not
 	default:
 		return false
 	}

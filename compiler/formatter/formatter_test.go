@@ -180,6 +180,26 @@ func TestFormat(t *testing.T) {
 			output: "fn should_assign(assigned: Bool, due: Bool) Bool {\n  not assigned and due\n}\n",
 		},
 		{
+			name:   "preserves parentheses around left not in and expression",
+			input:  "fn should_assign(assigned: Bool, due: Bool) Bool {\n  (not assigned) and due\n}\n",
+			output: "fn should_assign(assigned: Bool, due: Bool) Bool {\n  (not assigned) and due\n}\n",
+		},
+		{
+			name:   "preserves parentheses around left not in or expression",
+			input:  "fn should_assign(assigned: Bool, due: Bool) Bool {\n  (not assigned) or due\n}\n",
+			output: "fn should_assign(assigned: Bool, due: Bool) Bool {\n  (not assigned) or due\n}\n",
+		},
+		{
+			name:   "preserves parentheses around right not in nested binary expression",
+			input:  "fn should_assign(a: Bool, b: Bool, c: Bool) Bool {\n  a and (not b) or c\n}\n",
+			output: "fn should_assign(a: Bool, b: Bool, c: Bool) Bool {\n  a and (not b) or c\n}\n",
+		},
+		{
+			name:   "keeps terminal right not operand unparenthesized",
+			input:  "fn should_assign(a: Bool, b: Bool) Bool {\n  a and not b\n}\n",
+			output: "fn should_assign(a: Bool, b: Bool) Bool {\n  a and not b\n}\n",
+		},
+		{
 			name:   "preserves escaped braces in plain string literals",
 			input:  "fn main() {\n  let body = \"\\{\\\"status\\\": \\\"ok\\\"\\}\"\n}\n",
 			output: "fn main() {\n  let body = \"\\{\\\"status\\\": \\\"ok\\\"\\}\"\n}\n",
