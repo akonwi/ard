@@ -106,6 +106,85 @@ func TestResults(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Result.map() can change ok type",
+			input: `
+			fn foo() Str!Str {
+				let res: Int!Str = Result::ok(10)
+				res.map(fn(value: Int) Str { "{value}" })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.map() infers anonymous callback types",
+			input: `
+			fn foo() Int!Str {
+				let res: Int!Str = Result::ok(10)
+				res.map(fn(value) { value + 1 })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.map_err() can change err type",
+			input: `
+			fn foo() Int!Int {
+				let res: Int!Str = Result::err("bad")
+				res.map_err(fn(err: Str) Int { 3 })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.map_err() infers anonymous callback types",
+			input: `
+			fn foo() Int!Int {
+				let res: Int!Str = Result::err("bad")
+				res.map_err(fn(err) { err.size() })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.map() enforces closure parameter type",
+			input: `
+			fn foo() {
+				let res: Int!Str = Result::ok(10)
+				res.map(fn(value: Str) Int { 1 })
+			}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
+			},
+		},
+		{
+			name: "Maybe.map() can change inner type",
+			input: `
+			use ard/maybe
+			fn foo() Str? {
+				let value: Int? = maybe::some(10)
+				value.map(fn(v: Int) Str { "{v}" })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Maybe.map() infers anonymous callback types",
+			input: `
+			use ard/maybe
+			fn foo() Int? {
+				let value: Int? = maybe::some(10)
+				value.map(fn(v) { v + 1 })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Maybe.map() enforces closure parameter type",
+			input: `
+			use ard/maybe
+			fn foo() {
+				let value: Int? = maybe::some(10)
+				value.map(fn(v: Str) Int { 1 })
+			}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
+			},
+		},
+		{
 			name: "Matching on results",
 			input: `
 			use ard/io

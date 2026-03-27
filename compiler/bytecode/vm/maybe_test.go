@@ -78,6 +78,24 @@ func TestBytecodeMaybes(t *testing.T) {
 			`,
 			want: 42,
 		},
+		{
+			name: ".map() transforms some values with inferred callback types",
+			input: `
+				use ard/maybe
+				let result = maybe::some(41).map(fn(value) { value + 1 })
+				result.or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: ".map() keeps none values with inferred callback types",
+			input: `
+				use ard/maybe
+				let result: Int? = maybe::none()
+				result.map(fn(value) { value + 1 }).is_none()
+			`,
+			want: true,
+		},
 	}
 
 	for _, test := range tests {

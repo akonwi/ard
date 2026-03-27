@@ -1952,6 +1952,8 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		kind = MaybeIsSome
 	case "or":
 		kind = MaybeOr
+	case "map":
+		kind = MaybeMap
 	default:
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
@@ -1977,6 +1979,10 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		kind = ResultIsOk
 	case "is_err":
 		kind = ResultIsErr
+	case "map":
+		kind = ResultMap
+	case "map_err":
+		kind = ResultMapErr
 	default:
 		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
 	}
@@ -4073,6 +4079,18 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 
 			// Add function to scope after checking body
 			c.scope.add(uniqueName, fn, false)
+
+			// Nuance: for context-inferred anonymous callbacks (e.g. Result.map/map_err, Maybe.map),
+			// the expected function return type can be an unbound TypeVar. If we leave it unbound,
+			// later method/property lookups on the callback result can panic with
+			// "Cannot look up symbols in unrefined $T". Bind that TypeVar to the body type here.
+			//
+			// This is in a shared anonymous-function inference path (not map/map_err-specific),
+			// so keep an eye on other closure call sites if this logic changes.
+			if typeVar, ok := returnType.(*TypeVar); ok && typeVar.actual == nil {
+				typeVar.actual = body.Type()
+				typeVar.bound = true
+			}
 
 			// Validate return type
 			if returnType != Void && !returnType.equal(body.Type()) {

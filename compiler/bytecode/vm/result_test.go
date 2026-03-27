@@ -48,6 +48,48 @@ func TestBytecodeResults(t *testing.T) {
 			`,
 			want: -1,
 		},
+		{
+			name: "Result.map() transforms ok values with inferred callback types",
+			input: `
+				let res: Int!Str = Result::ok(21)
+				let mapped = res.map(fn(value) { value * 2 })
+				mapped.or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: "Result.map() leaves err values unchanged with inferred callback types",
+			input: `
+				let res: Int!Str = Result::err("bad")
+				let mapped = res.map(fn(value) { value * 2 })
+				match mapped {
+					err(msg) => msg,
+					ok(value) => value.to_str(),
+				}
+			`,
+			want: "bad",
+		},
+		{
+			name: "Result.map_err() transforms err values with inferred callback types",
+			input: `
+				let res: Int!Str = Result::err("bad")
+				let mapped = res.map_err(fn(err) { err.size() })
+				match mapped {
+					err(size) => size,
+					ok(value) => value,
+				}
+			`,
+			want: 3,
+		},
+		{
+			name: "Result.map_err() leaves ok values unchanged with inferred callback types",
+			input: `
+				let res: Int!Str = Result::ok(42)
+				let mapped = res.map_err(fn(err) { err.size() })
+				mapped.or(0)
+			`,
+			want: 42,
+		},
 	}
 
 	for _, test := range tests {
