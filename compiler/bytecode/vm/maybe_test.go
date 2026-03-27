@@ -114,6 +114,15 @@ func TestBytecodeMaybes(t *testing.T) {
 			`,
 			want: true,
 		},
+		{
+			name: ".and_then() supports explicit type args",
+			input: `
+				use ard/maybe
+				let result = maybe::some(21).and_then<Str>(fn(value) { maybe::some("{value}") })
+				result.or("")
+			`,
+			want: "21",
+		},
 	}
 
 	for _, test := range tests {

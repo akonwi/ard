@@ -117,6 +117,27 @@ func TestBytecodeResults(t *testing.T) {
 			`,
 			want: true,
 		},
+		{
+			name: "Result.and_then() supports explicit type args",
+			input: `
+				let res: Int!Str = Result::ok(21)
+				let chained = res.and_then<Str>(fn(value) { Result::ok("{value}") })
+				chained.or("")
+			`,
+			want: "21",
+		},
+		{
+			name: "Result.and_then() explicit type args resolve err-only callbacks",
+			input: `
+				let res: Int!Str = Result::err("bad")
+				let chained = res.and_then<Str>(fn(value) { Result::err("boom") })
+				match chained {
+					err(msg) => msg,
+					ok(value) => value,
+				}
+			`,
+			want: "bad",
+		},
 	}
 
 	for _, test := range tests {

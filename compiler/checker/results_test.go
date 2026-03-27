@@ -142,11 +142,38 @@ func TestResults(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Result.map_err() accepts explicit type args",
+			input: `
+			fn foo() Int!Int {
+				let res: Int!Str = Result::err("bad")
+				res.map_err<Int>(fn(err) { err.size() })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Result.and_then() can change ok type",
 			input: `
 			fn foo() Str!Str {
 				let res: Int!Str = Result::ok(10)
 				res.and_then(fn(value: Int) Str!Str { Result::ok("{value}") })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.and_then() accepts explicit type args",
+			input: `
+			fn foo() Str!Str {
+				let res: Int!Str = Result::ok(10)
+				res.and_then<Str>(fn(value) { Result::ok("{value}") })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.and_then() explicit type args support err-only callbacks",
+			input: `
+			fn foo() Str!Str {
+				let res: Int!Str = Result::err("bad")
+				res.and_then<Str>(fn(value) { Result::err("boom") })
 			}`,
 			diagnostics: []checker.Diagnostic{},
 		},
@@ -192,6 +219,16 @@ func TestResults(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Maybe.map() accepts explicit type args",
+			input: `
+			use ard/maybe
+			fn foo() Str? {
+				let value: Int? = maybe::some(10)
+				value.map<Str>(fn(v) { "{v}" })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Maybe.map() infers anonymous callback types",
 			input: `
 			use ard/maybe
@@ -208,6 +245,16 @@ func TestResults(t *testing.T) {
 			fn foo() Str? {
 				let value: Int? = maybe::some(10)
 				value.and_then(fn(v: Int) Str? { maybe::some("{v}") })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Maybe.and_then() accepts explicit type args",
+			input: `
+			use ard/maybe
+			fn foo() Str? {
+				let value: Int? = maybe::some(10)
+				value.and_then<Str>(fn(v) { maybe::some("{v}") })
 			}`,
 			diagnostics: []checker.Diagnostic{},
 		},
