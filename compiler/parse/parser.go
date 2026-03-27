@@ -2729,7 +2729,18 @@ func (p *parser) memberAccess() (Expression, error) {
 		return nil, err
 	}
 
-	for p.match(dot, colon_colon) {
+	for {
+		// Allow dot-chaining across newlines: skip newlines and check for a
+		// leading dot, but restore position if the next non-newline token
+		// isn't a dot (so we don't swallow newlines that act as statement
+		// terminators).
+		savedIndex := p.index
+		p.skipNewlines()
+		if !p.match(dot, colon_colon) {
+			p.index = savedIndex
+			break
+		}
+
 		if p.previous().kind == dot {
 			call, err := p.call()
 			if err != nil {
@@ -2747,8 +2758,6 @@ func (p *parser) memberAccess() (Expression, error) {
 					Target: expr,
 					Method: *prop,
 				}
-				// match line break for multi-line chaining
-				p.match(new_line)
 			}
 		} else {
 			// Check for type arguments in static function calls

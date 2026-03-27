@@ -61,6 +61,62 @@ func TestBytecodeVMParityCoreExpressions(t *testing.T) {
 	}
 }
 
+func TestBytecodeVMMultilineDotChaining(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  any
+	}{
+		{
+			name: "property access on next line",
+			input: `
+				let x = [1, 2, 3]
+					.size()
+				x
+			`,
+			want: 3,
+		},
+		{
+			name: "chained methods across multiple lines",
+			input: `
+				let x = "hello"
+					.size()
+				x
+			`,
+			want: 5,
+		},
+		{
+			name: "three-level chain across lines",
+			input: `
+				let x: Int!Str = Result::ok(42)
+				let y = x
+					.map(fn(v: Int) Str { "{v}!" })
+					.or("fail")
+				y
+			`,
+			want: "42!",
+		},
+		{
+			name: "mixed single and multi-line chaining",
+			input: `
+				let a = [10, 20, 30].size()
+				let b = [1, 2]
+					.size()
+				a + b
+			`,
+			want: 5,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := runBytecode(t, test.input); got != test.want {
+				t.Fatalf("Expected %v, got %v", test.want, got)
+			}
+		})
+	}
+}
+
 func TestBytecodeVMNotGroupingChangesSemantics(t *testing.T) {
 	if got := runBytecode(t, `(not false) and false`); got != false {
 		t.Fatalf("Expected (not false) and false to be false, got %v", got)
