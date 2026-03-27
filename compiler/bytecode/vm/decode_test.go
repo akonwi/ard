@@ -142,7 +142,7 @@ func TestBytecodeFromJSONInputTypes(t *testing.T) {
 					ok(_) => "unexpected success",
 				}
 			`,
-			want: "from_json expected JSON text (Str), got 42",
+			want: "Expected a JSON string, got 42",
 		},
 	})
 }
