@@ -46,24 +46,33 @@ let safe_result = divide(10, 0).or(-1)  // Returns -1 on error
 
 For transformation-heavy code, use combinators instead of nested `match` expressions:
 
+- **`map`** — transforms the ok value; the callback returns a **plain value** that is automatically wrapped in `ok(...)`. Use when the transformation cannot fail.
+- **`map_err`** — same idea but for the error side.
+- **`and_then`** — the callback returns a **Result** itself, so it can succeed or fail. Use when the next step can produce its own error.
+
 ```ard
 let res: Int!Str = Result::ok(21)
-let doubled = res.map(fn(v) { v * 2 })
-let normalized = doubled.map_err(fn(err) { "calc failed: {err}" })
-```
 
-Chain operations that may fail with `and_then`:
+// map: always succeeds — callback returns a plain value
+let doubled = res.map(fn(v) { v * 2 })          // ok(42)
 
-```ard
-fn parse_num(raw: Str) Int!Str { ... }
-fn ensure_even(num: Int) Int!Str { ... }
+// and_then: can fail — callback returns a Result
+fn ensure_positive(n: Int) Int!Str {
+  match n > 0 {
+    true => Result::ok(n),
+    false => Result::err("not positive"),
+  }
+}
+let checked = doubled.and_then(ensure_positive)  // ok(42)
 
-let checked = parse_num("42").and_then(ensure_even)
+// map_err: transform the error side
+let normalized = res.map_err(fn(err) { "calc failed: {err}" })
 ```
 
 If inference is ambiguous, explicit type args can guide the checker:
 
 ```ard
+fn parse_num(raw: Str) Int!Str { ... }
 let text = parse_num("42").and_then<Str>(fn(v) { Result::ok("{v}") })
 ```
 
@@ -102,29 +111,26 @@ match user {
 
 ### Maybe Combinators
 
-Use `map` to transform a present value and keep `none` unchanged:
+- **`map`** — transforms a present value; the callback returns a **plain value** that is automatically wrapped in `some(...)`. Use when the transformation always produces a value.
+- **`and_then`** — the callback returns a **Maybe** itself, so it can produce `some(...)` or `none()`. Use when the next step might not produce a value.
 
 ```ard
 use ard/maybe
 
+// map: always produces a value — callback returns a plain value
 let maybe_name: Str? = maybe::some("Alice")
-let maybe_len = maybe_name.map(fn(name) { name.size() })
-```
+let maybe_len = maybe_name.map(fn(name) { name.size() }) // some(5)
 
-Use `and_then` to chain Maybe-producing operations:
-
-```ard
-use ard/maybe
-
+// and_then: can produce none — callback returns a Maybe
 fn non_empty(name: Str) Str? {
   match name.is_empty() {
     true => maybe::none(),
     false => maybe::some(name),
   }
 }
-
-let maybe_name: Str? = maybe::some("Alice")
-let checked = maybe_name.and_then(non_empty)
+let checked = maybe_name.and_then(non_empty) // some("Alice")
+let empty: Str? = maybe::some("")
+empty.and_then(non_empty) // none
 ```
 
 As with Results, explicit type args can guide inference when needed:
