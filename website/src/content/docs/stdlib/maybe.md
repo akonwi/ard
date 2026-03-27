@@ -87,6 +87,53 @@ let val: Int? = maybe::none()
 let result = val.or(0)  // 0
 ```
 
+### `fn expect(message: Str) $T`
+
+Get the value from the Maybe, or panic with a message if it's empty.
+
+```ard
+use ard/maybe
+
+let val: Int? = maybe::some(42)
+let result = val.expect("expected a value")  // 42
+```
+
+### `fn map(with: fn($T) $U) $U?`
+
+Transform a `some` value and keep `none` unchanged.
+
+```ard
+use ard/maybe
+
+let num: Int? = maybe::some(21)
+let doubled = num.map(fn(v) { v * 2 })
+let value = doubled.or(0) // 42
+```
+
+You can also provide explicit type arguments when you want to guide inference:
+
+```ard
+let as_text = num.map<Str>(fn(v) { "{v}" })
+```
+
+### `fn and_then(with: fn($T) $U?) $U?`
+
+Chain Maybe-producing operations (also known as `flat_map` in other languages).
+
+```ard
+use ard/maybe
+
+fn even_only(num: Int) Int? {
+  match num % 2 == 0 {
+    true => maybe::some(num),
+    false => maybe::none(),
+  }
+}
+
+let result = maybe::some(20).and_then(even_only)
+result.is_some() // true
+```
+
 ## Pattern Matching with Maybe
 
 Use `match` expressions to safely handle optional values:

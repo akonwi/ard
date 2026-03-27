@@ -1952,6 +1952,10 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		kind = MaybeIsSome
 	case "or":
 		kind = MaybeOr
+	case "map":
+		kind = MaybeMap
+	case "and_then":
+		kind = MaybeAndThen
 	default:
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
@@ -1977,6 +1981,12 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		kind = ResultIsOk
 	case "is_err":
 		kind = ResultIsErr
+	case "map":
+		kind = ResultMap
+	case "map_err":
+		kind = ResultMapErr
+	case "and_then":
+		kind = ResultAndThen
 	default:
 		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
 	}
@@ -4016,6 +4026,54 @@ func (c *Checker) areTypesComparable(left, right Type) bool {
 }
 
 // use this when we know what the expr's Type should be
+func bindInferredTypeVars(expected Type, actual Type) {
+	if expected == nil || actual == nil {
+		return
+	}
+
+	expected = derefType(expected)
+	actual = derefType(actual)
+
+	switch exp := expected.(type) {
+	case *TypeVar:
+		if exp.actual == nil {
+			exp.actual = actual
+			exp.bound = true
+			return
+		}
+		bindInferredTypeVars(exp.actual, actual)
+	case *Maybe:
+		if act, ok := actual.(*Maybe); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
+	case *Result:
+		if act, ok := actual.(*Result); ok {
+			bindInferredTypeVars(exp.Val(), act.Val())
+			bindInferredTypeVars(exp.Err(), act.Err())
+		}
+	case *List:
+		if act, ok := actual.(*List); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
+	case *Map:
+		if act, ok := actual.(*Map); ok {
+			bindInferredTypeVars(exp.Key(), act.Key())
+			bindInferredTypeVars(exp.Value(), act.Value())
+		}
+	case *FunctionDef:
+		if act, ok := actual.(*FunctionDef); ok {
+			limit := len(exp.Parameters)
+			if len(act.Parameters) < limit {
+				limit = len(act.Parameters)
+			}
+			for i := 0; i < limit; i++ {
+				bindInferredTypeVars(exp.Parameters[i].Type, act.Parameters[i].Type)
+			}
+			bindInferredTypeVars(exp.ReturnType, act.ReturnType)
+		}
+	}
+}
+
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
 	case *parse.ListLiteral:
@@ -4073,6 +4131,15 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 
 			// Add function to scope after checking body
 			c.scope.add(uniqueName, fn, false)
+
+			// Nuance: in context-inferred callbacks (map/map_err/and_then, etc), the expected return
+			// type can contain unbound generics (for example Result<$Mapped, E>). If these remain
+			// unresolved, later method/property lookup can panic with
+			// "Cannot look up symbols in unrefined $T". Bind generics from the checked body type here.
+			//
+			// This is a shared anonymous-function inference path, so changes here affect closure typing
+			// beyond Result/Maybe combinators.
+			bindInferredTypeVars(returnType, body.Type())
 
 			// Validate return type
 			if returnType != Void && !returnType.equal(body.Type()) {
@@ -4143,6 +4210,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
+				bindInferredTypeVars(resultType.Val(), arg.Type())
 			}
 			if fnDef.name() == "err" {
 				arg = c.checkExpr(s.Function.Args[0].Value)
@@ -4150,6 +4218,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
+				bindInferredTypeVars(resultType.Err(), arg.Type())
 			}
 
 			fnDef.ReturnType = resultType

@@ -78,6 +78,51 @@ func TestBytecodeMaybes(t *testing.T) {
 			`,
 			want: 42,
 		},
+		{
+			name: ".map() transforms some values with inferred callback types",
+			input: `
+				use ard/maybe
+				let result = maybe::some(41).map(fn(value) { value + 1 })
+				result.or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: ".map() keeps none values with inferred callback types",
+			input: `
+				use ard/maybe
+				let result: Int? = maybe::none()
+				result.map(fn(value) { value + 1 }).is_none()
+			`,
+			want: true,
+		},
+		{
+			name: ".and_then() transforms and flattens some values",
+			input: `
+				use ard/maybe
+				let result = maybe::some(21).and_then(fn(value) { maybe::some(value * 2) })
+				result.or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: ".and_then() keeps none values",
+			input: `
+				use ard/maybe
+				let result: Int? = maybe::none()
+				result.and_then(fn(value) { maybe::some(value + 1) }).is_none()
+			`,
+			want: true,
+		},
+		{
+			name: ".and_then() supports explicit type args",
+			input: `
+				use ard/maybe
+				let result = maybe::some(21).and_then<Str>(fn(value) { maybe::some("{value}") })
+				result.or("")
+			`,
+			want: "21",
+		},
 	}
 
 	for _, test := range tests {

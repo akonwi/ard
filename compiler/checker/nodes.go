@@ -424,6 +424,8 @@ const (
 	MaybeIsNone
 	MaybeIsSome
 	MaybeOr
+	MaybeMap
+	MaybeAndThen
 )
 
 type MaybeMethod struct {
@@ -459,6 +461,9 @@ const (
 	ResultOr
 	ResultIsOk
 	ResultIsErr
+	ResultMap
+	ResultMapErr
+	ResultAndThen
 )
 
 type ResultMethod struct {
