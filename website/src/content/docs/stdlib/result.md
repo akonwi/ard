@@ -111,17 +111,23 @@ let value = result.expect("Expected success")  // 42
 
 ### `fn map(with: fn($T) $U) $U!$E`
 
-Transform the `ok` value while preserving the same error type.
+Transform the `ok` value with a function that **returns a plain value**. The result is automatically wrapped in `ok(...)`. If the Result is an error, the callback is not called and the error passes through unchanged.
+
+Use `map` when the transformation itself cannot fail.
 
 ```ard
 let result: Int!Str = Result::ok(21)
 let doubled = result.map(fn(v) { v * 2 })
 let value = doubled.or(0) // 42
+
+// Errors pass through untouched
+let err: Int!Str = Result::err("bad")
+err.map(fn(v) { v * 2 }).is_err() // true
 ```
 
 ### `fn map_err(with: fn($E) $F) $T!$F`
 
-Transform the `err` value while preserving the same success type.
+Transform the `err` value while preserving the same success type. The counterpart to `map` for the error side.
 
 ```ard
 let result: Int!Str = Result::err("bad")
@@ -131,7 +137,9 @@ sized.is_err() // true (type is Int!Int)
 
 ### `fn and_then(with: fn($T) $U!$E) $U!$E`
 
-Chain Result-producing operations (also known as `flat_map` in other languages).
+Chain operations that **return a Result themselves** (also known as `flat_map` in other languages). Unlike `map`, the callback is responsible for wrapping its return value in `ok(...)` or `err(...)`. This lets the callback itself decide whether to succeed or fail.
+
+Use `and_then` when the next step can produce its own error.
 
 ```ard
 fn ensure_even(num: Int) Int!Str {
@@ -144,6 +152,10 @@ fn ensure_even(num: Int) Int!Str {
 let res: Int!Str = Result::ok(20)
 let checked = res.and_then(ensure_even)
 checked.is_ok() // true
+
+// The callback can fail, unlike map:
+let odd: Int!Str = Result::ok(21)
+odd.and_then(ensure_even).is_err() // true — "not even"
 ```
 
 You can provide explicit type arguments to guide inference when needed:

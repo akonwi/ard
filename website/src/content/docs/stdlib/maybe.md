@@ -100,7 +100,9 @@ let result = val.expect("expected a value")  // 42
 
 ### `fn map(with: fn($T) $U) $U?`
 
-Transform a `some` value and keep `none` unchanged.
+Transform a `some` value with a function that **returns a plain value**. The result is automatically wrapped in `some(...)`. If the Maybe is `none`, the callback is not called and `none` passes through unchanged.
+
+Use `map` when the transformation always produces a value.
 
 ```ard
 use ard/maybe
@@ -108,6 +110,10 @@ use ard/maybe
 let num: Int? = maybe::some(21)
 let doubled = num.map(fn(v) { v * 2 })
 let value = doubled.or(0) // 42
+
+// none passes through untouched
+let empty: Int? = maybe::none()
+empty.map(fn(v) { v * 2 }).is_none() // true
 ```
 
 You can also provide explicit type arguments when you want to guide inference:
@@ -118,7 +124,9 @@ let as_text = num.map<Str>(fn(v) { "{v}" })
 
 ### `fn and_then(with: fn($T) $U?) $U?`
 
-Chain Maybe-producing operations (also known as `flat_map` in other languages).
+Chain operations that **return a Maybe themselves** (also known as `flat_map` in other languages). Unlike `map`, the callback is responsible for wrapping its return value in `some(...)` or returning `none()`. This lets the callback itself decide whether a value is present.
+
+Use `and_then` when the next step might not produce a value.
 
 ```ard
 use ard/maybe
@@ -132,6 +140,10 @@ fn even_only(num: Int) Int? {
 
 let result = maybe::some(20).and_then(even_only)
 result.is_some() // true
+
+// The callback can return none, unlike map:
+let odd = maybe::some(21).and_then(even_only)
+odd.is_none() // true
 ```
 
 ## Pattern Matching with Maybe
