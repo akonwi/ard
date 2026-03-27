@@ -109,6 +109,49 @@ let result: Int!Str = Result::ok(42)
 let value = result.expect("Expected success")  // 42
 ```
 
+### `fn map(with: fn($T) $U) $U!$E`
+
+Transform the `ok` value while preserving the same error type.
+
+```ard
+let result: Int!Str = Result::ok(21)
+let doubled = result.map(fn(v) { v * 2 })
+let value = doubled.or(0) // 42
+```
+
+### `fn map_err(with: fn($E) $F) $T!$F`
+
+Transform the `err` value while preserving the same success type.
+
+```ard
+let result: Int!Str = Result::err("bad")
+let sized = result.map_err(fn(err) { err.size() })
+sized.is_err() // true (type is Int!Int)
+```
+
+### `fn and_then(with: fn($T) $U!$E) $U!$E`
+
+Chain Result-producing operations (also known as `flat_map` in other languages).
+
+```ard
+fn ensure_even(num: Int) Int!Str {
+  match num % 2 == 0 {
+    true => Result::ok(num),
+    false => Result::err("not even"),
+  }
+}
+
+let res: Int!Str = Result::ok(20)
+let checked = res.and_then(ensure_even)
+checked.is_ok() // true
+```
+
+You can provide explicit type arguments to guide inference when needed:
+
+```ard
+let as_text = res.and_then<Str>(fn(v) { Result::ok("{v}") })
+```
+
 ## Pattern Matching with Result
 
 Use `match` expressions to handle both success and error cases:

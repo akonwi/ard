@@ -42,6 +42,31 @@ Or use the `.or(default)` method to provide a fallback value:
 let safe_result = divide(10, 0).or(-1)  // Returns -1 on error
 ```
 
+### Result Combinators
+
+For transformation-heavy code, use combinators instead of nested `match` expressions:
+
+```ard
+let res: Int!Str = Result::ok(21)
+let doubled = res.map(fn(v) { v * 2 })
+let normalized = doubled.map_err(fn(err) { "calc failed: {err}" })
+```
+
+Chain operations that may fail with `and_then`:
+
+```ard
+fn parse_num(raw: Str) Int!Str { ... }
+fn ensure_even(num: Int) Int!Str { ... }
+
+let checked = parse_num("42").and_then(ensure_even)
+```
+
+If inference is ambiguous, explicit type args can guide the checker:
+
+```ard
+let text = parse_num("42").and_then<Str>(fn(v) { Result::ok("{v}") })
+```
+
 ## Maybe Types
 
 Maybe types represent values that may or may not exist. They are written as `Type?` and are equivalent to `Maybe<Type>`:
@@ -73,6 +98,39 @@ match user {
     user => io::print("Found user: {user.name}"),
     _ => io::print("User not found")
 }
+```
+
+### Maybe Combinators
+
+Use `map` to transform a present value and keep `none` unchanged:
+
+```ard
+use ard/maybe
+
+let maybe_name: Str? = maybe::some("Alice")
+let maybe_len = maybe_name.map(fn(name) { name.size() })
+```
+
+Use `and_then` to chain Maybe-producing operations:
+
+```ard
+use ard/maybe
+
+fn non_empty(name: Str) Str? {
+  match name.is_empty() {
+    true => maybe::none(),
+    false => maybe::some(name),
+  }
+}
+
+let maybe_name: Str? = maybe::some("Alice")
+let checked = maybe_name.and_then(non_empty)
+```
+
+As with Results, explicit type args can guide inference when needed:
+
+```ard
+let maybe_text = maybe::some(42).map<Str>(fn(v) { "{v}" })
 ```
 
 ## The try Keyword
