@@ -156,6 +156,31 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 			return nil, err
 		}
 		return runtime.MakeNone(mappedMaybe.Of()).ToSome(mapped.Raw()), nil
+	case checker.MaybeAndThen:
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, err
+		}
+		chainedMaybe, ok := resolved.(*checker.Maybe)
+		if !ok {
+			return nil, fmt.Errorf("expected Maybe return type for and_then, got %s", resolved)
+		}
+		if subj.Raw() == nil {
+			return runtime.MakeNone(chainedMaybe.Of()), nil
+		}
+		closure, ok := args[0].Raw().(*Closure)
+		if !ok {
+			return nil, fmt.Errorf("expected closure for Maybe.and_then, got %T", args[0].Raw())
+		}
+		subjType, ok := subj.Type().(*checker.Maybe)
+		if !ok {
+			return nil, fmt.Errorf("expected Maybe subject for and_then, got %s", subj.Type())
+		}
+		mapped, err := vm.runClosure(closure, []*runtime.Object{runtime.Make(subj.Raw(), subjType.Of())})
+		if err != nil {
+			return nil, err
+		}
+		return mapped, nil
 	default:
 		return nil, fmt.Errorf("Unknown MaybeMethodKind: %d", kind)
 	}
@@ -211,6 +236,19 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 			return nil, err
 		}
 		return runtime.MakeErr(mapped), nil
+	case checker.ResultAndThen:
+		if subj.IsErr() {
+			return subj, nil
+		}
+		closure, ok := args[0].Raw().(*Closure)
+		if !ok {
+			return nil, fmt.Errorf("expected closure for Result.and_then, got %T", args[0].Raw())
+		}
+		mapped, err := vm.runClosure(closure, []*runtime.Object{subj.UnwrapResult()})
+		if err != nil {
+			return nil, err
+		}
+		return mapped, nil
 	default:
 		return nil, fmt.Errorf("Unknown ResultMethodKind: %d", kind)
 	}

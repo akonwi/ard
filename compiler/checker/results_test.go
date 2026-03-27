@@ -142,6 +142,35 @@ func TestResults(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Result.and_then() can change ok type",
+			input: `
+			fn foo() Str!Str {
+				let res: Int!Str = Result::ok(10)
+				res.and_then(fn(value: Int) Str!Str { Result::ok("{value}") })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.and_then() infers anonymous callback types",
+			input: `
+			fn foo() Int!Str {
+				let res: Int!Str = Result::ok(10)
+				res.and_then(fn(value) { Result::ok(value + 1) })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Result.and_then() enforces closure parameter type",
+			input: `
+			fn foo() {
+				let res: Int!Str = Result::ok(10)
+				res.and_then(fn(value: Str) Int!Str { Result::ok(1) })
+			}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
+			},
+		},
+		{
 			name: "Result.map() enforces closure parameter type",
 			input: `
 			fn foo() {
@@ -171,6 +200,38 @@ func TestResults(t *testing.T) {
 				value.map(fn(v) { v + 1 })
 			}`,
 			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Maybe.and_then() can change inner type",
+			input: `
+			use ard/maybe
+			fn foo() Str? {
+				let value: Int? = maybe::some(10)
+				value.and_then(fn(v: Int) Str? { maybe::some("{v}") })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Maybe.and_then() infers anonymous callback types",
+			input: `
+			use ard/maybe
+			fn foo() Int? {
+				let value: Int? = maybe::some(10)
+				value.and_then(fn(v) { maybe::some(v + 1) })
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Maybe.and_then() enforces closure parameter type",
+			input: `
+			use ard/maybe
+			fn foo() {
+				let value: Int? = maybe::some(10)
+				value.and_then(fn(v: Str) Int? { maybe::some(1) })
+			}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
+			},
 		},
 		{
 			name: "Maybe.map() enforces closure parameter type",

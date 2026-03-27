@@ -90,6 +90,33 @@ func TestBytecodeResults(t *testing.T) {
 			`,
 			want: 42,
 		},
+		{
+			name: "Result.and_then() chains ok values",
+			input: `
+				let res: Int!Str = Result::ok(21)
+				let chained = res.and_then(fn(value) { Result::ok(value * 2) })
+				chained.or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: "Result.and_then() propagates callback errors",
+			input: `
+				let res: Int!Str = Result::ok(21)
+				let chained = res.and_then(fn(value) { Result::err("bad") })
+				chained.is_err()
+			`,
+			want: true,
+		},
+		{
+			name: "Result.and_then() leaves err values unchanged",
+			input: `
+				let res: Int!Str = Result::err("bad")
+				let chained = res.and_then(fn(value) { Result::ok(value * 2) })
+				chained.is_err()
+			`,
+			want: true,
+		},
 	}
 
 	for _, test := range tests {

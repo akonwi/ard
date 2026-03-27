@@ -96,6 +96,24 @@ func TestBytecodeMaybes(t *testing.T) {
 			`,
 			want: true,
 		},
+		{
+			name: ".and_then() transforms and flattens some values",
+			input: `
+				use ard/maybe
+				let result = maybe::some(21).and_then(fn(value) { maybe::some(value * 2) })
+				result.or(0)
+			`,
+			want: 42,
+		},
+		{
+			name: ".and_then() keeps none values",
+			input: `
+				use ard/maybe
+				let result: Int? = maybe::none()
+				result.and_then(fn(value) { maybe::some(value + 1) }).is_none()
+			`,
+			want: true,
+		},
 	}
 
 	for _, test := range tests {

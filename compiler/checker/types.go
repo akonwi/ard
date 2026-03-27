@@ -569,6 +569,20 @@ func (m *Maybe) get(name string) Type {
 			}},
 			ReturnType: MakeMaybe(mapped),
 		}
+	case "and_then":
+		mapped := &TypeVar{name: "Mapped"}
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{{
+				Name: "with",
+				Type: &FunctionDef{
+					Name:       "<function>",
+					Parameters: []Parameter{{Name: "value", Type: m.of}},
+					ReturnType: MakeMaybe(mapped),
+				},
+			}},
+			ReturnType: MakeMaybe(mapped),
+		}
 	default:
 		return nil
 	}
@@ -693,6 +707,20 @@ func (r Result) get(name string) Type {
 				},
 			}},
 			ReturnType: MakeResult(r.val, mappedErr),
+		}
+	case "and_then":
+		mappedVal := &TypeVar{name: "MappedVal"}
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{{
+				Name: "with",
+				Type: &FunctionDef{
+					Name:       "<function>",
+					Parameters: []Parameter{{Name: "value", Type: r.val}},
+					ReturnType: MakeResult(mappedVal, r.err),
+				},
+			}},
+			ReturnType: MakeResult(mappedVal, r.err),
 		}
 	default:
 		return nil

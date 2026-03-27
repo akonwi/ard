@@ -425,6 +425,7 @@ const (
 	MaybeIsSome
 	MaybeOr
 	MaybeMap
+	MaybeAndThen
 )
 
 type MaybeMethod struct {
@@ -462,6 +463,7 @@ const (
 	ResultIsErr
 	ResultMap
 	ResultMapErr
+	ResultAndThen
 )
 
 type ResultMethod struct {

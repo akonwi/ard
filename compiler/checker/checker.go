@@ -1954,6 +1954,8 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		kind = MaybeOr
 	case "map":
 		kind = MaybeMap
+	case "and_then":
+		kind = MaybeAndThen
 	default:
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
@@ -1983,6 +1985,8 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		kind = ResultMap
 	case "map_err":
 		kind = ResultMapErr
+	case "and_then":
+		kind = ResultAndThen
 	default:
 		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
 	}
