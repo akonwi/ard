@@ -111,6 +111,42 @@ func TestBytecodeDecodeErrors(t *testing.T) {
 	})
 }
 
+func TestBytecodeFromJSONInputTypes(t *testing.T) {
+	runBytecodeTests(t, []vmTestCase{
+		{
+			name: "from_json accepts Str input",
+			input: `
+				use ard/decode
+				let data = decode::from_json("42").expect("parse")
+				decode::run(data, decode::int).expect("decode")
+			`,
+			want: 42,
+		},
+		{
+			name: "from_json accepts Dynamic string input",
+			input: `
+				use ard/decode
+				let raw = Dynamic::from("\{\"count\": 7\}")
+				let data = decode::from_json(raw).expect("parse")
+				decode::run(data, decode::field("count", decode::int)).expect("decode")
+			`,
+			want: 7,
+		},
+		{
+			name: "from_json rejects non-string Dynamic input",
+			input: `
+				use ard/decode
+				let raw = Dynamic::from(42)
+				match decode::from_json(raw) {
+					err(msg) => msg,
+					ok(_) => "unexpected success",
+				}
+			`,
+			want: "Expected a JSON string, got 42",
+		},
+	})
+}
+
 func TestBytecodeDecodeNullable(t *testing.T) {
 	runBytecodeTests(t, []vmTestCase{
 		{

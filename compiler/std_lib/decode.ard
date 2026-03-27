@@ -36,14 +36,30 @@ impl Str::ToString for Error {
   }
 }
 
-// parse json text
-extern fn from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+type JsonInput = Str | Dynamic
 
 private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
 private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
 private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
 private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
 extern fn is_void(data: Dynamic) Bool = "IsNil"
+
+// parse json text
+private extern fn _from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+
+fn from_json(input: JsonInput) Dynamic!Str {
+  let json = match input {
+    Str(text) => text,
+    Dynamic(raw) => {
+      let text = try _decode_string(raw) -> err {
+        Result::err("Expected a JSON string, got {err.found}")
+      }
+      text
+    },
+  }
+
+  _from_json(json)
+}
 
 type Decoder = fn(Dynamic) $Out![Error]
 

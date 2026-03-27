@@ -1,4 +1,5 @@
 # TODO
+- [ ] still need some sort of mapping for Result/Maybe 
 - [ ] allow FFI in user land
 - [ ] Dependency system
   * needs more thought
