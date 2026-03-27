@@ -149,6 +149,148 @@ func TestBytecodeResults(t *testing.T) {
 	}
 }
 
+func TestBytecodeResultOrThenMaybeCombinators(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  any
+	}{
+		{
+			name: "map after or(maybe::none()) on ok result",
+			input: `
+				use ard/maybe
+				let res: Str?!Str = Result::ok(maybe::some("hello"))
+				let val = res
+					.or(maybe::none())
+					.map(fn(s: Str) Int { s.size() })
+					.or(0)
+				val
+			`,
+			want: 5,
+		},
+		{
+			name: "map after or(maybe::none()) on err result",
+			input: `
+				use ard/maybe
+				let res: Str?!Str = Result::err("bad")
+				let val = res
+					.or(maybe::none())
+					.map(fn(s: Str) Int { s.size() })
+					.or(0)
+				val
+			`,
+			want: 0,
+		},
+		{
+			name: "and_then after or(maybe::none()) on ok result",
+			input: `
+				use ard/maybe
+				let res: Str?!Str = Result::ok(maybe::some("world"))
+				let val = res
+					.or(maybe::none())
+					.and_then(fn(s: Str) Int? { maybe::some(s.size()) })
+					.or(0)
+				val
+			`,
+			want: 5,
+		},
+		{
+			name: "and_then after or(maybe::none()) on err result",
+			input: `
+				use ard/maybe
+				let res: Str?!Str = Result::err("bad")
+				let val = res
+					.or(maybe::none())
+					.and_then(fn(s: Str) Int? { maybe::some(s.size()) })
+					.or(0)
+				val
+			`,
+			want: 0,
+		},
+		{
+			name: "or(fallback) after or(maybe::none())",
+			input: `
+				use ard/maybe
+				let res: Str?!Str = Result::err("bad")
+				let val = res
+					.or(maybe::none())
+					.or("default")
+				val
+			`,
+			want: "default",
+		},
+		{
+			name: "intermediate let binding preserves Maybe type",
+			input: `
+				use ard/maybe
+				let res: Str?!Str = Result::ok(maybe::some("test"))
+				let maybe_val: Str? = res.or(maybe::none())
+				let mapped = maybe_val.map(fn(s: Str) Int { s.size() })
+				mapped.or(0)
+			`,
+			want: 4,
+		},
+		{
+			name: "map after or(maybe::none()) on function return value",
+			input: `
+				use ard/maybe
+
+				fn returns_result() Dynamic?!Str {
+					Result::ok(maybe::some(Dynamic::from("hello")))
+				}
+
+				let val = returns_result()
+					.or(maybe::none())
+					.map(fn(d: Dynamic) Str { "got it" })
+					.or("nope")
+				val
+			`,
+			want: "got it",
+		},
+		{
+			name: "and_then after or(maybe::none()) on function return value",
+			input: `
+				use ard/maybe
+
+				fn returns_result() Dynamic?!Str {
+					Result::ok(maybe::some(Dynamic::from("hello")))
+				}
+
+				let val = returns_result()
+					.or(maybe::none())
+					.and_then(fn(d: Dynamic) Str? { maybe::some("chained") })
+					.or("nope")
+				val
+			`,
+			want: "chained",
+		},
+		{
+			name: "map with intermediate binding from function return",
+			input: `
+				use ard/maybe
+
+				fn returns_result() Dynamic?!Str {
+					Result::ok(maybe::some(Dynamic::from("test")))
+				}
+
+				let res = returns_result()
+				let maybe_val = res.or(maybe::none())
+				let mapped = maybe_val.map(fn(d: Dynamic) Str { "mapped" })
+				mapped.or("nope")
+			`,
+			want: "mapped",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := runBytecode(t, test.input); got != test.want {
+				t.Fatalf("Expected %v, got %v", test.want, got)
+			}
+		})
+	}
+}
+
 func TestBytecodeTryResultParity(t *testing.T) {
 	tests := []struct {
 		name  string
