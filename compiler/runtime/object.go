@@ -74,6 +74,19 @@ func (o *Object) Set(v any) {
 //     let result = returns_generic()
 //     result.expect("foobar").do_stuff() // .expect(...) returns an open generic
 func (o *Object) SetRefinedType(declared checker.Type) {
+	// When the declared type is a Result and this object is already a result
+	// value (isOk/isErr), refine to the appropriate inner type rather than
+	// the full Result wrapper. This prevents .or() unwraps from losing their
+	// inner type (e.g. Maybe<Dynamic>) when the function return type is
+	// Result<Dynamic?, Str>.
+	if declResult, ok := declared.(*checker.Result); ok && (o.isOk || o.isErr) {
+		if o.isOk {
+			declared = declResult.Val()
+		} else {
+			declared = declResult.Err()
+		}
+	}
+
 	if result, ok := o._type.(*checker.Result); ok {
 		if o.isErr {
 			o._type = result.Err()
