@@ -17,27 +17,34 @@ func (v Semver) String() string {
 	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 
-// Compare returns -1 if v < other, 0 if equal, 1 if v > other.
+// Comparison results for Semver.Compare.
+const (
+	LessThan    = -1
+	Equal       = 0
+	GreaterThan = 1
+)
+
+// Compare returns LessThan if v < other, Equal if v == other, GreaterThan if v > other.
 func (v Semver) Compare(other Semver) int {
 	if v.Major != other.Major {
 		if v.Major < other.Major {
-			return -1
+			return LessThan
 		}
-		return 1
+		return GreaterThan
 	}
 	if v.Minor != other.Minor {
 		if v.Minor < other.Minor {
-			return -1
+			return LessThan
 		}
-		return 1
+		return GreaterThan
 	}
 	if v.Patch != other.Patch {
 		if v.Patch < other.Patch {
-			return -1
+			return LessThan
 		}
-		return 1
+		return GreaterThan
 	}
-	return 0
+	return Equal
 }
 
 // ParseSemver parses a version string like "0.13.0" or "v0.13.0".
@@ -80,15 +87,15 @@ func (c Constraint) Check(v Semver) bool {
 	cmp := v.Compare(c.Version)
 	switch c.Op {
 	case ">=":
-		return cmp >= 0
+		return cmp == GreaterThan || cmp == Equal
 	case ">":
-		return cmp > 0
+		return cmp == GreaterThan
 	case "=", "==":
-		return cmp == 0
+		return cmp == Equal
 	case "<=":
-		return cmp <= 0
+		return cmp == LessThan || cmp == Equal
 	case "<":
-		return cmp < 0
+		return cmp == LessThan
 	default:
 		return false
 	}
