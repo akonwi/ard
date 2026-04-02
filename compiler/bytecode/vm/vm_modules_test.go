@@ -14,7 +14,7 @@ func TestBytecodeVMParityModuleIntegration(t *testing.T) {
 		}
 		defer os.RemoveAll(tempDir)
 
-		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(tempDir, "math.ard"), []byte("fn add(a: Int, b: Int) Int { a + b }"), 0644); err != nil {
@@ -35,7 +35,7 @@ math::add(10, 20)`)
 		}
 		defer os.RemoveAll(tempDir)
 
-		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(`let add_one = fn(x: Int) Int { x + 1 }`), 0644); err != nil {
@@ -56,7 +56,7 @@ utils::add_one(5)`)
 		}
 		defer os.RemoveAll(tempDir)
 
-		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(`let double = fn(x: Int) Int { x * 2 }`), 0644); err != nil {
@@ -78,7 +78,7 @@ f(10)`)
 		}
 		defer os.RemoveAll(tempDir)
 
-		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(tempDir, "sessions.ard"), []byte(`fn cleanup_expired_sessions() {
@@ -108,7 +108,7 @@ fiber.join()`)
 		}
 		defer os.RemoveAll(tempDir)
 
-		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(tempDir, "sessions.ard"), []byte(`fn cleanup_expired_sessions() {

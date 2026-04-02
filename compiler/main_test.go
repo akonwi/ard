@@ -262,7 +262,7 @@ func TestTestCommand(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
 		t.Fatalf("failed to create project dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
 	}
 	mainSource := `use ard/testing
@@ -336,7 +336,7 @@ func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "test"), 0o755); err != nil {
 		t.Fatalf("failed to create project dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
 	}
 	utilsSource := `private fn private_helper() Int {

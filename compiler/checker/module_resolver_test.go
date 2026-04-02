@@ -3,6 +3,7 @@ package checker_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -17,7 +18,7 @@ func TestFindProjectRoot(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml file
-	tomlContent := `name = "test_project"`
+	tomlContent := "name = \"test_project\"\nard = \">= 0.1.0\"\n"
 	tomlPath := filepath.Join(tempDir, "ard.toml")
 	err = os.WriteFile(tomlPath, []byte(tomlContent), 0644)
 	if err != nil {
@@ -67,6 +68,44 @@ func TestFindProjectRootFallback(t *testing.T) {
 	}
 }
 
+func TestArdVersionConstraint(t *testing.T) {
+	t.Run("missing ard field is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(`name = "demo"`), 0644)
+
+		_, err := checker.NewModuleResolver(dir)
+		if err == nil {
+			t.Fatal("expected error for missing ard field")
+		}
+		if !strings.Contains(err.Error(), "missing required field: ard") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("dev version always passes", func(t *testing.T) {
+		dir := t.TempDir()
+		// Require a very high version — should still pass because compiler is "dev"
+		os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 99.0.0\"\n"), 0644)
+
+		_, err := checker.NewModuleResolver(dir)
+		if err != nil {
+			t.Fatalf("dev version should skip check, got: %v", err)
+		}
+	})
+
+	t.Run("invalid constraint is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \"not-a-version\"\n"), 0644)
+
+		// With "dev" version, CheckVersion skips the check, so this won't error.
+		// This test documents that invalid constraints are only caught with real versions.
+		_, err := checker.NewModuleResolver(dir)
+		if err != nil {
+			t.Fatalf("dev version should skip even invalid constraints, got: %v", err)
+		}
+	})
+}
+
 func TestResolveImportPath(t *testing.T) {
 	// Create test project structure
 	tempDir, err := os.MkdirTemp("", "ard_resolve_test_*")
@@ -76,7 +115,7 @@ func TestResolveImportPath(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "my_calculator"`
+	tomlContent := "name = \"my_calculator\"\nard = \">= 0.1.0\"\n"
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)

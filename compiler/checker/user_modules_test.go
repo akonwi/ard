@@ -19,7 +19,8 @@ func TestUserModulePathResolution(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "test_project"`
+	tomlContent := `name = "test_project"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +90,8 @@ func TestUserModuleImports(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "my_calculator"`
+	tomlContent := `name = "my_calculator"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +155,7 @@ func TestUserModuleSymbolResolution(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create project structure
-	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +240,7 @@ func TestUserModulePrivateAccessError(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create project structure
-	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +299,7 @@ func TestUserModuleCaching(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create project structure
-	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +380,8 @@ func TestUserModuleErrors(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "error_project"`
+	tomlContent := `name = "error_project"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -484,7 +487,8 @@ func TestLoadModule(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "load_test"`
+	tomlContent := `name = "load_test"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -540,7 +544,8 @@ func TestLoadModuleErrors(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "error_test"`
+	tomlContent := `name = "error_test"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -607,7 +612,8 @@ func TestModuleAST_Caching(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "cache_test"`
+	tomlContent := `name = "cache_test"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -674,7 +680,8 @@ func TestCircularDependencyDetection(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "circular_test"`
+	tomlContent := `name = "circular_test"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -734,7 +741,8 @@ func TestComplexCircularDependency(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "complex_circular"`
+	tomlContent := `name = "complex_circular"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -784,7 +792,8 @@ func TestNonCircularDependencies(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create ard.toml
-	tomlContent := `name = "valid_deps"`
+	tomlContent := `name = "valid_deps"
+ard = ">= 0.1.0"`
 	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(tomlContent), 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -837,7 +846,7 @@ func TestVariableModuleExports(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create project structure
-	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\""), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
