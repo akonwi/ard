@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/version"
 )
 
 // ProjectInfo holds information about the current project
@@ -43,6 +44,16 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
 			}
+
+			// Check ard version constraint (required in ard.toml)
+			constraint, ok := parseArdVersion(tomlPath)
+			if !ok {
+				return nil, fmt.Errorf("ard.toml is missing required field: ard (e.g. ard = \">= 0.13.0\")")
+			}
+			if err := version.CheckVersion(constraint); err != nil {
+				return nil, err
+			}
+
 			return &ProjectInfo{
 				RootPath:    current,
 				ProjectName: projectName,
@@ -79,6 +90,23 @@ func parseProjectName(tomlPath string) (string, error) {
 	}
 
 	return matches[1], nil
+}
+
+// parseArdVersion extracts the ard constraint from ard.toml if present.
+// Format: ard = ">= 0.13.0" or ard = "0.13.0"
+func parseArdVersion(tomlPath string) (string, bool) {
+	content, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return "", false
+	}
+
+	re := regexp.MustCompile(`(?m)^\s*ard\s*=\s*["']([^"']+)["']`)
+	matches := re.FindStringSubmatch(string(content))
+	if len(matches) < 2 {
+		return "", false
+	}
+
+	return matches[1], true
 }
 
 // NewModuleResolver creates a new module resolver for the given working directory
