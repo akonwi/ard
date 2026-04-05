@@ -225,6 +225,7 @@ export default defineConfig({
             { label: "ard/env", slug: "stdlib/env" },
             { label: "ard/float", slug: "stdlib/float" },
             { label: "ard/fs", slug: "stdlib/fs" },
+            { label: "ard/hex", slug: "stdlib/hex" },
             { label: "ard/http", slug: "stdlib/http" },
             { label: "ard/int", slug: "stdlib/int" },
             { label: "ard/io", slug: "stdlib/io" },

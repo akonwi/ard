@@ -306,6 +306,21 @@ func _ffi_FS_DeleteDir(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeOk(runtime.Void())
 }
 
+func _ffi_HexEncode(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.HexEncode(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_HexDecode(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.HexDecode(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
 func _ffi_GetReqPath(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].Raw()
 	result := ffi.GetReqPath(arg0)
@@ -586,6 +601,12 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	}
 	if err := r.Register("FS_ListDir", ffi.FS_ListDir); err != nil {
 		return fmt.Errorf("failed to register FS_ListDir: %w", err)
+	}
+	if err := r.Register("HexEncode", _ffi_HexEncode); err != nil {
+		return fmt.Errorf("failed to register HexEncode: %w", err)
+	}
+	if err := r.Register("HexDecode", _ffi_HexDecode); err != nil {
+		return fmt.Errorf("failed to register HexDecode: %w", err)
 	}
 	if err := r.Register("GetReqPath", _ffi_GetReqPath); err != nil {
 		return fmt.Errorf("failed to register GetReqPath: %w", err)

@@ -29,14 +29,18 @@ func CryptoMd5(input string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// CryptoSha256 returns the raw 32-byte SHA-256 digest of input as a string.
+// Use ard/hex::encode or ard/base64 to render it as text.
 func CryptoSha256(input string) string {
 	sum := sha256.Sum256([]byte(input))
-	return hex.EncodeToString(sum[:])
+	return string(sum[:])
 }
 
+// CryptoSha512 returns the raw 64-byte SHA-512 digest of input as a string.
+// Use ard/hex::encode or ard/base64 to render it as text.
 func CryptoSha512(input string) string {
 	sum := sha512.Sum512([]byte(input))
-	return hex.EncodeToString(sum[:])
+	return string(sum[:])
 }
 
 func CryptoHashPassword(password string, cost *int) (string, error) {

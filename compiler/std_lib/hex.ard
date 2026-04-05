@@ -1,0 +1,43 @@
+use ard/testing
+
+// Encode raw bytes to a lowercase hexadecimal string.
+//
+// Note: in Ard, byte buffers are represented as `Str`. Functions that
+// return binary data (like `crypto::sha256`) use this representation.
+extern fn encode(bytes: Str) Str = "HexEncode"
+
+// Decode a hexadecimal string back into raw bytes.
+// Returns an error if `input` is not valid hex.
+extern fn decode(input: Str) Str!Str = "HexDecode"
+
+test fn test_encode_empty() Void!Str {
+  testing::assert(encode("") == "", "Expected empty input to encode to empty string")
+}
+
+test fn test_encode_ascii() Void!Str {
+  testing::assert(encode("abc") == "616263", "Expected 'abc' to encode as '616263'")
+}
+
+test fn test_encode_uses_lowercase() Void!Str {
+  testing::assert(encode("hello") == "68656c6c6f", "Expected lowercase hex output")
+}
+
+test fn test_decode_roundtrip() Void!Str {
+  let original = "hello world"
+  let encoded = encode(original)
+  let decoded = try decode(encoded)
+  testing::assert(decoded == original, "Expected encode/decode to roundtrip")
+}
+
+test fn test_decode_empty() Void!Str {
+  let decoded = try decode("")
+  testing::assert(decoded == "", "Expected empty hex to decode to empty string")
+}
+
+test fn test_decode_rejects_odd_length() Void!Str {
+  testing::assert(decode("abc").is_err(), "Expected odd-length hex to be rejected")
+}
+
+test fn test_decode_rejects_invalid_characters() Void!Str {
+  testing::assert(decode("zz").is_err(), "Expected non-hex characters to be rejected")
+}
