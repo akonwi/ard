@@ -264,10 +264,10 @@ func (o *Object) GoValue() any {
 }
 
 func (o Object) AsBool() bool {
-	if o._type == checker.Bool {
-		return o.raw.(bool)
+	if b, ok := o.raw.(bool); ok {
+		return b
 	}
-	panic(fmt.Sprintf("%T is not a Bool", o._type))
+	panic(fmt.Sprintf("%s is not a Bool", o))
 }
 
 func (o Object) IsInt() (int, bool) {
@@ -289,10 +289,10 @@ func (o Object) IsFloat() bool {
 }
 
 func (o Object) AsFloat() float64 {
-	if o.kind == KindFloat {
-		return o.raw.(float64)
+	if f, ok := o.raw.(float64); ok {
+		return f
 	}
-	panic(fmt.Sprintf("%T is not a Float", o._type))
+	panic(fmt.Sprintf("%s is not a Float", o))
 }
 
 func (o Object) AsString() string {
