@@ -6,17 +6,14 @@ extern fn encode(input: Str) Str = "Base64Encode"
 
 extern fn decode(input: Str) Str!Str = "Base64Decode"
 
-// URL-safe base64 (base64url) with `=` padding. Uses the alphabet
-// A-Z, a-z, 0-9, -, _.
-extern fn encode_url(input: Str) Str = "Base64EncodeURL"
+// URL-safe base64 (base64url). Uses the alphabet A-Z, a-z, 0-9, -, _.
+//
+// Output includes `=` padding by default. Pass `no_pad: true` to opt out
+// of padding - this is the form required by JWT headers/payloads and by
+// PKCE (OAuth 2.1) code challenges.
+extern fn encode_url(input: Str, no_pad: Bool?) Str = "Base64EncodeURL"
 
-extern fn decode_url(input: Str) Str!Str = "Base64DecodeURL"
-
-// URL-safe base64 (base64url) without trailing `=` padding.
-// This is the form used by JWT and required by PKCE (OAuth 2.1).
-extern fn encode_url_no_pad(input: Str) Str = "Base64EncodeURLNoPad"
-
-extern fn decode_url_no_pad(input: Str) Str!Str = "Base64DecodeURLNoPad"
+extern fn decode_url(input: Str, no_pad: Bool?) Str!Str = "Base64DecodeURL"
 
 test fn test_encode_standard() Void!Str {
   testing::assert(encode("hello") == "aGVsbG8=", "Expected standard base64 encoding of 'hello'")
@@ -57,27 +54,18 @@ test fn test_encode_url_uses_urlsafe_alphabet() Void!Str {
   )
 }
 
-test fn test_encode_url_has_padding() Void!Str {
-  testing::assert(encode_url("f") == "Zg==", "Expected url encoding with padding")
+test fn test_encode_url_has_padding_by_default() Void!Str {
+  testing::assert(encode_url("f") == "Zg==", "Expected url encoding to pad by default")
+  testing::assert(encode_url("fo") == "Zm8=", "Expected url encoding to pad by default")
 }
 
 test fn test_encode_url_no_pad_strips_padding() Void!Str {
-  testing::assert(encode_url_no_pad("f") == "Zg", "Expected no-pad variant to strip '=' padding")
+  testing::assert(encode_url("f", true) == "Zg", "Expected no_pad=true to strip '=' padding")
+  testing::assert(encode_url("fo", true) == "Zm8", "Expected no_pad=true to strip single '=' padding")
   testing::assert(
-    encode_url_no_pad("fo") == "Zm8",
-    "Expected no-pad variant to strip single '=' padding",
-  )
-  testing::assert(
-    encode_url_no_pad("foo") == "Zm9v",
+    encode_url("foo", true) == "Zm9v",
     "Expected unchanged output when no padding needed",
   )
-}
-
-test fn test_decode_url_no_pad_roundtrip() Void!Str {
-  let original = "hello world"
-  let encoded = encode_url_no_pad(original)
-  let decoded = try decode_url_no_pad(encoded)
-  testing::assert(decoded == original, "Expected base64url no-pad encode/decode to roundtrip")
 }
 
 test fn test_decode_url_roundtrip() Void!Str {
@@ -87,13 +75,20 @@ test fn test_decode_url_roundtrip() Void!Str {
   testing::assert(decoded == original, "Expected base64url encode/decode to roundtrip")
 }
 
+test fn test_decode_url_no_pad_roundtrip() Void!Str {
+  let original = "hello world"
+  let encoded = encode_url(original, true)
+  let decoded = try decode_url(encoded, true)
+  testing::assert(decoded == original, "Expected base64url no-pad encode/decode to roundtrip")
+}
+
 test fn test_decode_url_rejects_invalid_input() Void!Str {
   testing::assert(decode_url("$$$$").is_err(), "Expected invalid base64url to return an error")
 }
 
 test fn test_decode_url_no_pad_rejects_invalid_input() Void!Str {
   testing::assert(
-    decode_url_no_pad("$$$$").is_err(),
+    decode_url("$$$$", true).is_err(),
     "Expected invalid base64url no-pad to return an error",
   )
 }

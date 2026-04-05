@@ -1,16 +1,15 @@
 ---
 title: Base64 encoding with ard/base64
-description: Encode and decode strings using standard base64, base64url, and base64url without padding.
+description: Encode and decode strings using standard base64 and base64url, with optional no-padding mode for JWT and PKCE.
 ---
 
-The `ard/base64` module provides base64 encoding and decoding in the three common variants: standard, URL-safe (base64url), and URL-safe without padding.
+The `ard/base64` module provides base64 encoding and decoding in two variants: standard (`+`/`/` alphabet) and URL-safe base64url (`-`/`_` alphabet). The URL-safe functions accept an optional `no_pad` flag to strip `=` padding when required.
 
 Base64 is a reversible text encoding (not a cryptographic primitive). It is commonly used to embed binary data in text-only contexts like JSON payloads, URLs, JWTs, and HTTP headers.
 
 The base64 module provides:
 - **Standard base64** with `encode` and `decode`
-- **URL-safe base64** with `encode_url` and `decode_url`
-- **URL-safe base64 without padding** with `encode_url_no_pad` and `decode_url_no_pad`
+- **URL-safe base64** with `encode_url` and `decode_url`, with optional no-padding mode
 
 ```ard
 use ard/base64
@@ -29,13 +28,12 @@ fn main() {
 
 ## When to use which variant
 
-| Variant               | Alphabet                   | Padding | Use for                                  |
-|-----------------------|----------------------------|---------|------------------------------------------|
-| `encode` / `decode`   | `A–Z a–z 0–9 + /`          | `=`     | Email, generic binary-to-text            |
-| `encode_url` / `decode_url` | `A–Z a–z 0–9 - _`    | `=`     | URL-safe contexts that accept padding    |
-| `encode_url_no_pad` / `decode_url_no_pad` | `A–Z a–z 0–9 - _` | none    | JWTs, PKCE, URL query parameters         |
+| Variant     | Alphabet            | Padding          | Use for                                  |
+|-------------|---------------------|------------------|------------------------------------------|
+| `encode` / `decode`         | `A–Z a–z 0–9 + /` | `=`              | Email, generic binary-to-text            |
+| `encode_url` / `decode_url` | `A–Z a–z 0–9 - _` | `=` (default) or none | URLs, JWTs, PKCE, filenames         |
 
-The no-pad URL-safe variant is required by:
+The no-pad URL-safe form (`encode_url(input, true)`) is required by:
 - **JWT** (JSON Web Tokens) — header and payload segments
 - **PKCE** (OAuth 2.1) — `base64url(sha256(verifier))` must have no `=` padding
 
@@ -64,41 +62,36 @@ let decoded = try base64::decode("aGVsbG8=") -> _ { "" }
 base64::decode("not!valid!").is_err()  // true
 ```
 
-### `fn encode_url(input: Str) Str`
+### `fn encode_url(input: Str, no_pad: Bool?) Str`
 
-Encode `input` using base64url with `=` padding. Uses the URL-safe alphabet `A–Z`, `a–z`, `0–9`, `-`, `_` — so the result is safe to use in URLs and filenames without further escaping.
+Encode `input` using base64url (URL-safe alphabet: `A–Z`, `a–z`, `0–9`, `-`, `_`).
+
+The optional `no_pad` flag controls trailing `=` padding:
+- Omitted or `none`: padded (default)
+- `true`: no padding — required by JWT and PKCE
 
 ```ard
-base64::encode_url("subjects?")  // "c3ViamVjdHM_"
-base64::encode_url("f")          // "Zg=="
+// With padding (default)
+base64::encode_url("subjects?")       // "c3ViamVjdHM_"
+base64::encode_url("f")               // "Zg=="
+
+// Without padding (JWT, PKCE)
+base64::encode_url("f", true)         // "Zg"
+base64::encode_url("fo", true)        // "Zm8"
 ```
 
-### `fn decode_url(input: Str) Str!Str`
+### `fn decode_url(input: Str, no_pad: Bool?) Str!Str`
 
-Decode a base64url-encoded string (with padding).
+Decode a base64url-encoded string. The `no_pad` flag must match how the input was encoded:
+- Omitted or `none`: expect `=` padding
+- `true`: expect input without padding
 
 ```ard
+// Padded input
 let decoded = try base64::decode_url("aGVsbG8gd29ybGQ=") -> _ { "" }
-// decoded == "hello world"
-```
 
-### `fn encode_url_no_pad(input: Str) Str`
-
-Encode `input` using base64url **without** trailing `=` padding. Use this for JWT segments and PKCE code challenges.
-
-```ard
-base64::encode_url_no_pad("f")    // "Zg"
-base64::encode_url_no_pad("fo")   // "Zm8"
-base64::encode_url_no_pad("foo")  // "Zm9v"
-```
-
-### `fn decode_url_no_pad(input: Str) Str!Str`
-
-Decode a base64url string that has no padding.
-
-```ard
-let decoded = try base64::decode_url_no_pad("aGVsbG8gd29ybGQ") -> _ { "" }
-// decoded == "hello world"
+// No-padding input (JWT, PKCE)
+let decoded = try base64::decode_url("aGVsbG8gd29ybGQ", true) -> _ { "" }
 ```
 
 ## Examples
@@ -130,7 +123,7 @@ use ard/crypto
 
 fn pkce_challenge(verifier: Str) Str {
   let hashed = crypto::sha256(verifier)
-  base64::encode_url_no_pad(hashed)
+  base64::encode_url(hashed, true)  // no padding for PKCE
 }
 ```
 
@@ -142,7 +135,7 @@ use ard/json
 
 fn encode_segment(payload: Dynamic) Str!Str {
   let raw = try json::encode(payload)
-  Result::ok(base64::encode_url_no_pad(raw))
+  Result::ok(base64::encode_url(raw, true))  // no padding for JWT
 }
 ```
 

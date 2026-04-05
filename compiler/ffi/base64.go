@@ -19,31 +19,24 @@ func Base64Decode(input string) (string, error) {
 	return string(decoded), nil
 }
 
-// Base64EncodeURL encodes the input using base64url encoding with padding.
-// This uses the URL-safe alphabet (- and _ instead of + and /).
-func Base64EncodeURL(input string) string {
+// Base64EncodeURL encodes the input using base64url (URL-safe alphabet).
+// By default the output includes '=' padding. Pass noPad=true to opt out of
+// padding (required for JWTs and PKCE code challenges).
+func Base64EncodeURL(input string, noPad *bool) string {
+	if noPad != nil && *noPad {
+		return base64.RawURLEncoding.EncodeToString([]byte(input))
+	}
 	return base64.URLEncoding.EncodeToString([]byte(input))
 }
 
-// Base64DecodeURL decodes a base64url-encoded string (with padding).
-func Base64DecodeURL(input string) (string, error) {
-	decoded, err := base64.URLEncoding.DecodeString(input)
-	if err != nil {
-		return "", err
+// Base64DecodeURL decodes a base64url-encoded string. By default it expects
+// '=' padding; pass noPad=true to decode input that has no padding.
+func Base64DecodeURL(input string, noPad *bool) (string, error) {
+	enc := base64.URLEncoding
+	if noPad != nil && *noPad {
+		enc = base64.RawURLEncoding
 	}
-	return string(decoded), nil
-}
-
-// Base64EncodeURLNoPad encodes the input using base64url encoding without
-// trailing `=` padding. This is the form required by PKCE (OAuth 2.1),
-// JWTs, and other specifications that disallow padding.
-func Base64EncodeURLNoPad(input string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(input))
-}
-
-// Base64DecodeURLNoPad decodes a base64url-encoded string without padding.
-func Base64DecodeURLNoPad(input string) (string, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(input)
+	decoded, err := enc.DecodeString(input)
 	if err != nil {
 		return "", err
 	}
