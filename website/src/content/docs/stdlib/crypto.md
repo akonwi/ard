@@ -14,11 +14,13 @@ The crypto module provides:
 
 ```ard
 use ard/crypto
+use ard/hex
 use ard/io
 
 fn main() {
+  // sha256/sha512 return raw bytes — use hex or base64 to render them.
   let digest = crypto::sha256("hello")
-  io::print(digest)
+  io::print(hex::encode(digest))
 }
 ```
 
@@ -30,11 +32,19 @@ Return the MD5 digest of `input` as a lowercase hex string.
 
 ### `fn sha256(input: Str) Str`
 
-Return the SHA-256 digest of `input` as a lowercase hex string.
+Return the SHA-256 digest of `input` as **raw bytes** (32 bytes, represented as a `Str`). Use [`hex::encode`](/stdlib/hex) or [`base64::encode`](/stdlib/base64) to render the result as text:
+
+```ard
+use ard/crypto
+use ard/hex
+
+hex::encode(crypto::sha256("hello"))
+// "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+```
 
 ### `fn sha512(input: Str) Str`
 
-Return the SHA-512 digest of `input` as a lowercase hex string.
+Return the SHA-512 digest of `input` as **raw bytes** (64 bytes, represented as a `Str`). As with `sha256`, wrap the result in `hex::encode` or `base64::encode` to produce a text representation.
 
 ### `fn hash(password: Str, cost: Int?) Str!Str`
 
@@ -134,14 +144,28 @@ fn main() {
 
 ```ard
 use ard/crypto
+use ard/hex
 use ard/io
 
 fn main() {
   let value = "hello"
 
-  io::print("md5: {crypto::md5(value)}")
-  io::print("sha256: {crypto::sha256(value)}")
-  io::print("sha512: {crypto::sha512(value)}")
+  io::print("md5:    {crypto::md5(value)}")
+  io::print("sha256: {hex::encode(crypto::sha256(value))}")
+  io::print("sha512: {hex::encode(crypto::sha512(value))}")
+}
+```
+
+### PKCE Code Challenge
+
+For OAuth 2.1 / PKCE, hash the verifier with SHA-256 and base64url-encode the raw bytes (no padding). Since `sha256` now returns raw bytes directly, the challenge is a one-liner:
+
+```ard
+use ard/base64
+use ard/crypto
+
+fn pkce_challenge(verifier: Str) Str {
+  base64::encode_url(crypto::sha256(verifier), true)
 }
 ```
 
