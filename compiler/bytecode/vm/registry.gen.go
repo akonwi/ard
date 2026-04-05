@@ -10,6 +10,51 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
+func _ffi_Base64Encode(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.Base64Encode(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_Base64Decode(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.Base64Decode(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_Base64EncodeURL(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.Base64EncodeURL(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_Base64DecodeURL(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.Base64DecodeURL(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_Base64EncodeURLNoPad(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result := ffi.Base64EncodeURLNoPad(arg0)
+	return runtime.MakeStr(result)
+}
+
+func _ffi_Base64DecodeURLNoPad(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.Base64DecodeURLNoPad(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
 func _ffi_CryptoMd5(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.CryptoMd5(arg0)
@@ -423,6 +468,24 @@ func _ffi_SqlRollback(args []*runtime.Object) *runtime.Object {
 
 // RegisterGeneratedFFIFunctions registers all discovered FFI functions
 func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
+	if err := r.Register("Base64Encode", _ffi_Base64Encode); err != nil {
+		return fmt.Errorf("failed to register Base64Encode: %w", err)
+	}
+	if err := r.Register("Base64Decode", _ffi_Base64Decode); err != nil {
+		return fmt.Errorf("failed to register Base64Decode: %w", err)
+	}
+	if err := r.Register("Base64EncodeURL", _ffi_Base64EncodeURL); err != nil {
+		return fmt.Errorf("failed to register Base64EncodeURL: %w", err)
+	}
+	if err := r.Register("Base64DecodeURL", _ffi_Base64DecodeURL); err != nil {
+		return fmt.Errorf("failed to register Base64DecodeURL: %w", err)
+	}
+	if err := r.Register("Base64EncodeURLNoPad", _ffi_Base64EncodeURLNoPad); err != nil {
+		return fmt.Errorf("failed to register Base64EncodeURLNoPad: %w", err)
+	}
+	if err := r.Register("Base64DecodeURLNoPad", _ffi_Base64DecodeURLNoPad); err != nil {
+		return fmt.Errorf("failed to register Base64DecodeURLNoPad: %w", err)
+	}
 	if err := r.Register("CryptoMd5", _ffi_CryptoMd5); err != nil {
 		return fmt.Errorf("failed to register CryptoMd5: %w", err)
 	}
