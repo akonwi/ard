@@ -1,10 +1,12 @@
 use ard/testing
 
-// Standard base64 encoding (with `=` padding). Uses the alphabet
-// A-Z, a-z, 0-9, +, /.
-extern fn encode(input: Str) Str = "Base64Encode"
+// Standard base64 encoding. Uses the alphabet A-Z, a-z, 0-9, +, /.
+//
+// Output includes `=` padding by default. Pass `no_pad: true` to strip
+// padding from the output.
+extern fn encode(input: Str, no_pad: Bool?) Str = "Base64Encode"
 
-extern fn decode(input: Str) Str!Str = "Base64Decode"
+extern fn decode(input: Str, no_pad: Bool?) Str!Str = "Base64Decode"
 
 // URL-safe base64 (base64url). Uses the alphabet A-Z, a-z, 0-9, -, _.
 //
@@ -27,6 +29,19 @@ test fn test_encode_adds_padding() Void!Str {
   testing::assert(encode("f") == "Zg==", "Expected single byte to produce two padding chars")
   testing::assert(encode("fo") == "Zm8=", "Expected two bytes to produce one padding char")
   testing::assert(encode("foo") == "Zm9v", "Expected three bytes to produce no padding")
+}
+
+test fn test_encode_no_pad_strips_padding() Void!Str {
+  testing::assert(encode("f", true) == "Zg", "Expected no_pad=true to strip '=' padding")
+  testing::assert(encode("fo", true) == "Zm8", "Expected no_pad=true to strip single '=' padding")
+  testing::assert(encode("foo", true) == "Zm9v", "Expected unchanged output when no padding needed")
+}
+
+test fn test_decode_no_pad_roundtrip() Void!Str {
+  let original = "hello world"
+  let encoded = encode(original, true)
+  let decoded = try decode(encoded, true)
+  testing::assert(decoded == original, "Expected standard no-pad encode/decode to roundtrip")
 }
 
 test fn test_decode_standard() Void!Str {

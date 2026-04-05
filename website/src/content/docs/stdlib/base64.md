@@ -3,13 +3,14 @@ title: Base64 encoding with ard/base64
 description: Encode and decode strings using standard base64 and base64url, with optional no-padding mode for JWT and PKCE.
 ---
 
-The `ard/base64` module provides base64 encoding and decoding in two variants: standard (`+`/`/` alphabet) and URL-safe base64url (`-`/`_` alphabet). The URL-safe functions accept an optional `no_pad` flag to strip `=` padding when required.
+The `ard/base64` module provides base64 encoding and decoding in two variants: standard (`+`/`/` alphabet) and URL-safe base64url (`-`/`_` alphabet). Both variants accept an optional `no_pad` flag to strip `=` padding when required.
 
 Base64 is a reversible text encoding (not a cryptographic primitive). It is commonly used to embed binary data in text-only contexts like JSON payloads, URLs, JWTs, and HTTP headers.
 
 The base64 module provides:
 - **Standard base64** with `encode` and `decode`
-- **URL-safe base64** with `encode_url` and `decode_url`, with optional no-padding mode
+- **URL-safe base64** with `encode_url` and `decode_url`
+- Both variants support an optional `no_pad` flag to strip `=` padding
 
 ```ard
 use ard/base64
@@ -28,36 +29,49 @@ fn main() {
 
 ## When to use which variant
 
-| Variant     | Alphabet            | Padding          | Use for                                  |
-|-------------|---------------------|------------------|------------------------------------------|
-| `encode` / `decode`         | `A–Z a–z 0–9 + /` | `=`              | Email, generic binary-to-text            |
-| `encode_url` / `decode_url` | `A–Z a–z 0–9 - _` | `=` (default) or none | URLs, JWTs, PKCE, filenames         |
+| Variant     | Alphabet            | Use for                                  |
+|-------------|---------------------|------------------------------------------|
+| `encode` / `decode`         | `A–Z a–z 0–9 + /` | Email, generic binary-to-text            |
+| `encode_url` / `decode_url` | `A–Z a–z 0–9 - _` | URLs, JWTs, PKCE, filenames              |
 
-The no-pad URL-safe form (`encode_url(input, true)`) is required by:
-- **JWT** (JSON Web Tokens) — header and payload segments
+Both variants pad with `=` by default. Pass `no_pad: true` to strip padding — this is required by:
+- **JWT** (JSON Web Tokens) — header and payload segments use `encode_url(..., true)`
 - **PKCE** (OAuth 2.1) — `base64url(sha256(verifier))` must have no `=` padding
 
 ## API
 
-### `fn encode(input: Str) Str`
+### `fn encode(input: Str, no_pad: Bool?) Str`
 
-Encode `input` using standard base64 with `=` padding. Uses the alphabet `A–Z`, `a–z`, `0–9`, `+`, `/`.
+Encode `input` using standard base64 (alphabet `A–Z`, `a–z`, `0–9`, `+`, `/`).
+
+The optional `no_pad` flag controls trailing `=` padding:
+- Omitted or `none`: padded (default)
+- `true`: no padding
 
 ```ard
+// With padding (default)
 base64::encode("hello")  // "aGVsbG8="
 base64::encode("f")      // "Zg=="
 base64::encode("fo")     // "Zm8="
 base64::encode("foo")    // "Zm9v"
 base64::encode("")       // ""
+
+// Without padding
+base64::encode("f", true)    // "Zg"
+base64::encode("fo", true)   // "Zm8"
 ```
 
-### `fn decode(input: Str) Str!Str`
+### `fn decode(input: Str, no_pad: Bool?) Str!Str`
 
-Decode a standard base64 string. Returns `ok(decoded)` or `err(message)` if the input is not valid base64.
+Decode a standard base64 string. The `no_pad` flag must match how the input was encoded. Returns `ok(decoded)` or `err(message)` if the input is not valid base64.
 
 ```ard
+// Padded input (default)
 let decoded = try base64::decode("aGVsbG8=") -> _ { "" }
 // decoded == "hello"
+
+// No-padding input
+let decoded = try base64::decode("aGVsbG8", true) -> _ { "" }
 
 base64::decode("not!valid!").is_err()  // true
 ```

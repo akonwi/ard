@@ -12,13 +12,23 @@ import (
 
 func _ffi_Base64Encode(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
-	result := ffi.Base64Encode(arg0)
+	var arg1 *bool
+	if !args[1].IsNone() {
+		_v1 := args[1].AsBool()
+		arg1 = &_v1
+	}
+	result := ffi.Base64Encode(arg0, arg1)
 	return runtime.MakeStr(result)
 }
 
 func _ffi_Base64Decode(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
-	result, err := ffi.Base64Decode(arg0)
+	var arg1 *bool
+	if !args[1].IsNone() {
+		_v1 := args[1].AsBool()
+		arg1 = &_v1
+	}
+	result, err := ffi.Base64Decode(arg0, arg1)
 	if err != nil {
 		return runtime.MakeErr(runtime.MakeStr(err.Error()))
 	}
