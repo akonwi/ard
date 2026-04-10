@@ -554,6 +554,40 @@ func _ffi_SqlExtractParams(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeList(checker.Str, _items...)
 }
 
+func _ffi_SqlQuery(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	arg1 := args[1].AsString()
+	_sl2 := args[2].AsList()
+	arg2 := make([]any, len(_sl2))
+	for _i2, _e2 := range _sl2 {
+		arg2[_i2] = _e2.Raw()
+	}
+	result, err := ffi.SqlQuery(arg0, arg1, arg2)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	_items := make([]*runtime.Object, len(result))
+	for _i, _v := range result {
+		_items[_i] = runtime.MakeDynamic(_v)
+	}
+	return runtime.MakeOk(runtime.MakeList(checker.Dynamic, _items...))
+}
+
+func _ffi_SqlExecute(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	arg1 := args[1].AsString()
+	_sl2 := args[2].AsList()
+	arg2 := make([]any, len(_sl2))
+	for _i2, _e2 := range _sl2 {
+		arg2[_i2] = _e2.Raw()
+	}
+	err := ffi.SqlExecute(arg0, arg1, arg2)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.Void())
+}
+
 func _ffi_SqlBeginTx(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].Raw()
 	result, err := ffi.SqlBeginTx(arg0)
@@ -787,10 +821,10 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("SqlExtractParams", _ffi_SqlExtractParams); err != nil {
 		return fmt.Errorf("failed to register SqlExtractParams: %w", err)
 	}
-	if err := r.Register("SqlQuery", ffi.SqlQuery); err != nil {
+	if err := r.Register("SqlQuery", _ffi_SqlQuery); err != nil {
 		return fmt.Errorf("failed to register SqlQuery: %w", err)
 	}
-	if err := r.Register("SqlExecute", ffi.SqlExecute); err != nil {
+	if err := r.Register("SqlExecute", _ffi_SqlExecute); err != nil {
 		return fmt.Errorf("failed to register SqlExecute: %w", err)
 	}
 	if err := r.Register("SqlBeginTx", _ffi_SqlBeginTx); err != nil {
