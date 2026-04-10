@@ -1,3 +1,4 @@
+use ard/dynamic
 use ard/maybe
 use ard/string as Str
 
@@ -25,6 +26,9 @@ impl Str::ToString for Method {
 
 // Opaque pointer to Go's *http.Request for inbound requests
 private extern type RawRequest
+
+// Opaque pointer to Go's *http.Response for outbound responses
+private extern type RawResponse
 
 struct Request {
   method: Method,
@@ -78,7 +82,13 @@ impl Response {
   }
 }
 
-private extern fn _send(method: Str, url: Str, body: Dynamic?, headers: [Str: Str], timeout: Int?) Response!Str = "HTTP_Send"
+// HTTP client FFI functions - operate on opaque RawResponse handle
+// body is Dynamic (nil means no body)
+private extern fn http_do(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) RawResponse!Str = "HTTP_Do"
+private extern fn http_response_status(resp: RawResponse) Int = "HTTP_ResponseStatus"
+private extern fn http_response_headers(resp: RawResponse) [Str: Str] = "HTTP_ResponseHeaders"
+private extern fn http_response_body(resp: RawResponse) Str!Str = "HTTP_ResponseBody"
+private extern fn http_response_close(resp: RawResponse) Void = "HTTP_ResponseClose"
 
 fn send(req: Request, timeout: Int?) Response!Str {
   let method = req.method.to_str()
@@ -86,7 +96,33 @@ fn send(req: Request, timeout: Int?) Response!Str {
     t => maybe::some(t),
     _ => req.timeout,
   }
-  _send(method, req.url, req.body, req.headers, effective_timeout)
+
+  // Extract body: Dynamic? -> Dynamic (nil means no body)
+  let body: Dynamic = match req.body {
+    d => d,
+    _ => dynamic::from_void(),
+  }
+
+  // Make the HTTP request
+  let resp = try http_do(method, req.url, body, req.headers, effective_timeout)
+
+  // Extract response data
+  let status = http_response_status(resp)
+  let headers = http_response_headers(resp)
+  let body_result = http_response_body(resp)
+
+  // Clean up resources
+  http_response_close(resp)
+
+  // Build response
+  let body = try body_result
+  Result::ok(
+    Response{
+      status: status,
+      headers: headers,
+      body: body,
+    },
+  )
 }
 
 type HandlerFn = fn(Request, mut Response)
