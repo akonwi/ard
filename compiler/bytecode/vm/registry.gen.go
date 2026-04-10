@@ -306,6 +306,19 @@ func _ffi_FS_DeleteDir(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeOk(runtime.Void())
 }
 
+func _ffi_FS_ListDir(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	result, err := ffi.FS_ListDir(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	_map := runtime.MakeMap(checker.Str, checker.Bool)
+	for _k, _v := range result {
+		_map.Map_Set(runtime.MakeStr(_k), runtime.MakeBool(_v))
+	}
+	return runtime.MakeOk(_map)
+}
+
 func _ffi_HexEncode(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.HexEncode(arg0)
@@ -661,7 +674,7 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("FS_DeleteDir", _ffi_FS_DeleteDir); err != nil {
 		return fmt.Errorf("failed to register FS_DeleteDir: %w", err)
 	}
-	if err := r.Register("FS_ListDir", ffi.FS_ListDir); err != nil {
+	if err := r.Register("FS_ListDir", _ffi_FS_ListDir); err != nil {
 		return fmt.Errorf("failed to register FS_ListDir: %w", err)
 	}
 	if err := r.Register("HexEncode", _ffi_HexEncode); err != nil {
