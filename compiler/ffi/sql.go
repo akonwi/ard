@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/runtime"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
@@ -176,34 +174,22 @@ func resolveRunner(raw any) (sqlRunner, string, bool) {
 	return nil, "", false
 }
 
-func sqlArgValue(valueObj *runtime.Object) any {
-	if valueObj == nil {
-		return nil
-	}
-
-	if nested, ok := valueObj.Raw().(*runtime.Object); ok {
-		return sqlArgValue(nested)
-	}
-
-	return valueObj.Raw()
-}
-
 // executeQuery is a helper that works with both *sql.DB and *sql.Tx
-func executeQuery(runner sqlRunner, sqlStr string, values []any) *runtime.Object {
+func executeQuery(runner sqlRunner, sqlStr string, values []any) ([]any, error) {
 	rows, err := runner.Query(sqlStr, values...)
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to execute query: %v", err)))
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to get column names: %v", err)))
+		return nil, fmt.Errorf("failed to get column names: %w", err)
 	}
 
-	// Build result list - each row is a map[string]interface{}
-	var results []*runtime.Object
+	// Build result list - each row is a map[string]any
+	var results []any
 
 	for rows.Next() {
 		// Create scan targets for each column
@@ -215,7 +201,7 @@ func executeQuery(runner sqlRunner, sqlStr string, values []any) *runtime.Object
 
 		// Scan the row
 		if err := rows.Scan(scanTargets...); err != nil {
-			return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("failed to scan row: %v", err)))
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Create map for this row
@@ -224,70 +210,37 @@ func executeQuery(runner sqlRunner, sqlStr string, values []any) *runtime.Object
 			rowMap[columnName] = scanValues[i]
 		}
 
-		results = append(results, runtime.MakeDynamic(rowMap))
+		results = append(results, rowMap)
 	}
 
 	if err := rows.Err(); err != nil {
-		return runtime.MakeErr(runtime.MakeStr(fmt.Sprintf("row iteration error: %v", err)))
+		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 
-	// Return Dynamic object containing list of row maps
-	return runtime.MakeOk(runtime.MakeList(checker.Dynamic, results...))
+	return results, nil
 }
 
-// executes a query and returns the rows
-func SqlQuery(args []*runtime.Object) *runtime.Object {
-	if len(args) != 3 {
-		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
-	}
-
-	connRaw := args[0].Raw()
-
-	runner, driver, ok := resolveRunner(connRaw)
+// SqlQuery executes a query and returns the rows as a list of Dynamic maps.
+func SqlQuery(conn any, sqlStr string, values []any) ([]any, error) {
+	runner, driver, ok := resolveRunner(conn)
 	if !ok {
-		return runtime.MakeStr(fmt.Sprintf("SQL Error: invalid connection object: %T", connRaw))
+		return nil, fmt.Errorf("SQL Error: invalid connection object")
 	}
 
-	sqlStr := normalizePlaceholders(args[1].AsString(), driver)
-	valuesListObj := args[2]
-
-	// Extract values from the list
-	valuesList := valuesListObj.AsList()
-	var values []any
-	for _, valueObj := range valuesList {
-		values = append(values, sqlArgValue(valueObj))
-	}
-
+	sqlStr = normalizePlaceholders(sqlStr, driver)
 	return executeQuery(runner, sqlStr, values)
 }
 
-// executes a query and doesn't return rows
-func SqlExecute(args []*runtime.Object) *runtime.Object {
-	if len(args) != 3 {
-		panic(fmt.Errorf("query_run expects 3 arguments, got %d", len(args)))
-	}
-
-	connRaw := args[0].Raw()
-
-	runner, driver, ok := resolveRunner(connRaw)
+// SqlExecute executes a query without returning rows.
+func SqlExecute(conn any, sqlStr string, values []any) error {
+	runner, driver, ok := resolveRunner(conn)
 	if !ok {
-		return runtime.MakeErr(runtime.MakeStr("SQL Error: invalid connection object"))
+		return fmt.Errorf("SQL Error: invalid connection object")
 	}
 
-	sqlStr := normalizePlaceholders(args[1].AsString(), driver)
-
-	// Extract values from the list
-	var values []any
-	for _, valueObj := range args[2].AsList() {
-		values = append(values, sqlArgValue(valueObj))
-	}
-
+	sqlStr = normalizePlaceholders(sqlStr, driver)
 	_, err := runner.Exec(sqlStr, values...)
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
-	}
-
-	return runtime.MakeOk(runtime.Void())
+	return err
 }
 
 // SqlBeginTx begins a new transaction.
