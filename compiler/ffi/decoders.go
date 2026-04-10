@@ -31,22 +31,18 @@ func getDecodeErrorType() checker.Type {
 	return decodeErrorType
 }
 
-func ListToDynamic(args []*runtime.Object) *runtime.Object {
-	arg := args[0].AsList()
-	raw := make([]any, len(arg))
-	for i, item := range arg {
-		raw[i] = item.Raw()
-	}
-	return runtime.MakeDynamic(raw)
+func ListToDynamic(items []any) any {
+	raw := make([]any, len(items))
+	copy(raw, items)
+	return raw
 }
 
-func MapToDynamic(args []*runtime.Object) *runtime.Object {
-	arg := args[0].AsMap()
-	raw := map[string]any{}
-	for key, val := range arg {
-		raw[key] = val.Raw()
+func MapToDynamic(m map[string]any) any {
+	raw := make(map[string]any, len(m))
+	for k, v := range m {
+		raw[k] = v
 	}
-	return runtime.MakeDynamic(raw)
+	return raw
 }
 
 // Parse external data (JSON text) into Dynamic object
