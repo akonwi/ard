@@ -341,6 +341,68 @@ func _ffi_GetQueryParam(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeStr(result)
 }
 
+func _ffi_HTTP_Do(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].AsString()
+	arg1 := args[1].AsString()
+	arg2 := args[2].Raw()
+	_rawMap3 := args[3].AsMap()
+	arg3 := make(map[string]string, len(_rawMap3))
+	for _k3, _v3 := range _rawMap3 {
+		arg3[_k3] = _v3.AsString()
+	}
+	var arg4 *int
+	if !args[4].IsNone() {
+		_v4 := args[4].AsInt()
+		arg4 = &_v4
+	}
+	result, err := ffi.HTTP_Do(arg0, arg1, arg2, arg3, arg4)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeDynamic(result))
+}
+
+func _ffi_HTTP_ResponseStatus(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result := ffi.HTTP_ResponseStatus(arg0)
+	return runtime.MakeInt(result)
+}
+
+func _ffi_HTTP_ResponseHeader(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	arg1 := args[1].AsString()
+	result := ffi.HTTP_ResponseHeader(arg0, arg1)
+	if result == nil {
+		return runtime.MakeNone(checker.Str)
+	}
+	return runtime.MakeNone(checker.Str).ToSome(*result)
+}
+
+func _ffi_HTTP_ResponseHeaders(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result := ffi.HTTP_ResponseHeaders(arg0)
+	_map := runtime.MakeMap(checker.Str, checker.Str)
+	for _k, _v := range result {
+		_map.Map_Set(runtime.MakeStr(_k), runtime.MakeStr(_v))
+	}
+	return _map
+}
+
+func _ffi_HTTP_ResponseBody(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result, err := ffi.HTTP_ResponseBody(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
+func _ffi_HTTP_ResponseClose(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	ffi.HTTP_ResponseClose(arg0)
+	return runtime.Void()
+}
+
 func _ffi_FloatFromStr(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.FloatFromStr(arg0)
@@ -617,8 +679,23 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("GetQueryParam", _ffi_GetQueryParam); err != nil {
 		return fmt.Errorf("failed to register GetQueryParam: %w", err)
 	}
-	if err := r.Register("HTTP_Send", ffi.HTTP_Send); err != nil {
-		return fmt.Errorf("failed to register HTTP_Send: %w", err)
+	if err := r.Register("HTTP_Do", _ffi_HTTP_Do); err != nil {
+		return fmt.Errorf("failed to register HTTP_Do: %w", err)
+	}
+	if err := r.Register("HTTP_ResponseStatus", _ffi_HTTP_ResponseStatus); err != nil {
+		return fmt.Errorf("failed to register HTTP_ResponseStatus: %w", err)
+	}
+	if err := r.Register("HTTP_ResponseHeader", _ffi_HTTP_ResponseHeader); err != nil {
+		return fmt.Errorf("failed to register HTTP_ResponseHeader: %w", err)
+	}
+	if err := r.Register("HTTP_ResponseHeaders", _ffi_HTTP_ResponseHeaders); err != nil {
+		return fmt.Errorf("failed to register HTTP_ResponseHeaders: %w", err)
+	}
+	if err := r.Register("HTTP_ResponseBody", _ffi_HTTP_ResponseBody); err != nil {
+		return fmt.Errorf("failed to register HTTP_ResponseBody: %w", err)
+	}
+	if err := r.Register("HTTP_ResponseClose", _ffi_HTTP_ResponseClose); err != nil {
+		return fmt.Errorf("failed to register HTTP_ResponseClose: %w", err)
 	}
 	if err := r.Register("HTTP_Serve", ffi.HTTP_Serve); err != nil {
 		return fmt.Errorf("failed to register HTTP_Serve: %w", err)

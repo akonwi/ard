@@ -352,3 +352,5 @@ Ard's FFI provides:
 - `any` support for Go-side handle functions
 - hard errors for unsupported exported signatures
 - an escape hatch for complex runtime-aware bindings
+
+See [ffi-refactoring.md](./ffi-refactoring.md) for identified improvement opportunities.

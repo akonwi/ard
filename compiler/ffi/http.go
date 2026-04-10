@@ -5,32 +5,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
-
-var (
-	httpResponseType     checker.Type
-	httpResponseTypeOnce sync.Once
-)
-
-func getHTTPResponseType() checker.Type {
-	httpResponseTypeOnce.Do(func() {
-		mod, ok := checker.FindEmbeddedModule("ard/http")
-		if !ok {
-			panic("failed to load ard/http embedded module")
-		}
-		sym := mod.Get("Response")
-		if sym.Type == nil {
-			panic("Response type not found in ard/http module")
-		}
-		httpResponseType = sym.Type
-	})
-	return httpResponseType
-}
 
 func requestBodyMaybe(r *http.Request) *runtime.Object {
 	body := runtime.MakeNone(checker.Dynamic)
@@ -70,72 +49,89 @@ func GetQueryParam(handle any, name string) string {
 	return req.URL.Query().Get(name)
 }
 
-// fn (method: Str, url: Str, body: Dynamic?, headers: [Str:Str], timeout: Int?) Response!Str
-func HTTP_Send(args []*runtime.Object) *runtime.Object {
-	method := args[0].AsString()
-	url := args[1].AsString()
-	body := func() io.Reader {
-		if args[2].IsNone() {
-			return strings.NewReader("")
-		}
-
-		raw := args[2].Raw()
-		switch value := raw.(type) {
+// HTTP_Do executes an HTTP request and returns an opaque *http.Response handle.
+// The caller must close the response using HTTP_ResponseClose.
+func HTTP_Do(method, url string, body any, headers map[string]string, timeout *int) (any, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		switch v := body.(type) {
 		case string:
-			return strings.NewReader(value)
+			bodyReader = strings.NewReader(v)
 		case []byte:
-			return strings.NewReader(string(value))
+			bodyReader = strings.NewReader(string(v))
 		default:
-			return strings.NewReader(fmt.Sprintf("%v", value))
+			bodyReader = strings.NewReader(fmt.Sprintf("%v", v))
 		}
-	}()
-	headers := make(http.Header)
+	} else {
+		bodyReader = strings.NewReader("")
+	}
 
-	for k, v := range args[3].AsMap() {
-		headers.Set(k, v.AsString())
+	req, err := http.NewRequest(method, url, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	client := &http.Client{}
-	if len(args) >= 5 && !args[4].IsNone() {
-		client.Timeout = time.Duration(args[4].AsInt()) * time.Second
+	if timeout != nil {
+		client.Timeout = time.Duration(*timeout) * time.Second
 	}
-
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
-	}
-
-	req.Header = headers
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+		return nil, err
 	}
-	defer resp.Body.Close()
 
-	// Read the response body
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	return resp, nil
+}
+
+// HTTP_ResponseStatus returns the HTTP status code from a response handle.
+func HTTP_ResponseStatus(handle any) int {
+	resp := handle.(*http.Response)
+	return resp.StatusCode
+}
+
+// HTTP_ResponseHeader returns a single header value from a response handle.
+// Returns nil if the header is not present.
+func HTTP_ResponseHeader(handle any, name string) *string {
+	resp := handle.(*http.Response)
+	values := resp.Header.Values(name)
+	if len(values) == 0 {
+		return nil
 	}
-	bodyStr := string(bodyBytes)
+	return &values[0]
+}
 
-	// Create response headers map
-	respHeadersMap := runtime.MakeMap(checker.Str, checker.Str)
+// HTTP_ResponseHeaders returns all headers from a response handle.
+func HTTP_ResponseHeaders(handle any) map[string]string {
+	resp := handle.(*http.Response)
+	headers := make(map[string]string)
 	for k, v := range resp.Header {
 		if len(v) > 0 {
-			respHeadersMap.Map_Set(runtime.MakeStr(k), runtime.MakeStr(v[0]))
+			headers[k] = v[0]
 		}
 	}
+	return headers
+}
 
-	// Create the response object
-	respMap := map[string]*runtime.Object{
-		"status":  runtime.MakeInt(resp.StatusCode),
-		"headers": respHeadersMap,
-		"body":    runtime.MakeStr(bodyStr),
+// HTTP_ResponseBody reads and returns the response body.
+// This consumes the body; subsequent calls will return an error.
+func HTTP_ResponseBody(handle any) (string, error) {
+	resp := handle.(*http.Response)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
 	}
+	return string(bodyBytes), nil
+}
 
-	return runtime.MakeOk(runtime.MakeStruct(getHTTPResponseType(), respMap))
+// HTTP_ResponseClose closes a response handle, freeing resources.
+func HTTP_ResponseClose(handle any) {
+	resp := handle.(*http.Response)
+	_ = resp.Body.Close()
 }
 
 /*
