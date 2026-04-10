@@ -4,31 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
-
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/runtime"
 )
-
-var (
-	fsDirEntryType     checker.Type
-	fsDirEntryTypeOnce sync.Once
-)
-
-func getFSDirEntryType() checker.Type {
-	fsDirEntryTypeOnce.Do(func() {
-		mod, ok := checker.FindEmbeddedModule("ard/fs")
-		if !ok {
-			panic("failed to load ard/fs embedded module")
-		}
-		sym := mod.Get("DirEntry")
-		if sym.Type == nil {
-			panic("DirEntry type not found in ard/fs module")
-		}
-		fsDirEntryType = sym.Type
-	})
-	return fsDirEntryType
-}
 
 func FS_Exists(path string) bool {
 	_, err := os.Stat(path)
@@ -131,23 +107,17 @@ func FS_DeleteDir(path string) error {
 	return os.RemoveAll(path)
 }
 
-func FS_ListDir(args []*runtime.Object) *runtime.Object {
-	path := args[0].Raw().(string)
+// FS_ListDir returns a map of entry names to is_file flag.
+// Returns error if the directory cannot be read.
+func FS_ListDir(path string) (map[string]bool, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+		return nil, err
 	}
 
-	dirEntryType := getFSDirEntryType()
-
-	var dirEntries []*runtime.Object
+	result := make(map[string]bool, len(entries))
 	for _, entry := range entries {
-		dirEntryObj := runtime.MakeStruct(dirEntryType, map[string]*runtime.Object{
-			"name":    runtime.MakeStr(entry.Name()),
-			"is_file": runtime.MakeBool(!entry.IsDir()),
-		})
-		dirEntries = append(dirEntries, dirEntryObj)
+		result[entry.Name()] = !entry.IsDir()
 	}
-
-	return runtime.MakeOk(runtime.MakeList(dirEntryType, dirEntries...))
+	return result, nil
 }

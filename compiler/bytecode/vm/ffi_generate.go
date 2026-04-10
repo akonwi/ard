@@ -22,10 +22,10 @@ const (
 
 // GoType represents a supported Go type for idiomatic FFI functions.
 type GoType struct {
-	Base        string // "string", "int", "float64", "bool", "error"
-	IsPtr       bool   // *string, *int, etc. → maps to Maybe
-	IsSlice     bool   // []string, []int, etc. → maps to List
-	IsStringMap bool   // map[string]string → maps to [Str:Str]
+	Base       string // "string", "int", "float64", "bool", "error"
+	IsPtr      bool   // *string, *int, etc. → maps to Maybe
+	IsSlice    bool   // []string, []int, etc. → maps to List
+	MapValue   string // "string", "int", "float64", "bool" for map[string]T
 }
 
 type FFIFunction struct {
@@ -283,8 +283,11 @@ func parseGoType(expr ast.Expr) (GoType, bool) {
 	case *ast.MapType:
 		keyIdent, keyOK := t.Key.(*ast.Ident)
 		valueIdent, valueOK := t.Value.(*ast.Ident)
-		if keyOK && valueOK && keyIdent.Name == "string" && valueIdent.Name == "string" {
-			return GoType{IsStringMap: true}, true
+		if keyOK && valueOK && keyIdent.Name == "string" {
+			switch valueIdent.Name {
+			case "string", "int", "float64", "bool":
+				return GoType{MapValue: valueIdent.Name}, true
+			}
 		}
 	}
 	return GoType{}, false
@@ -304,12 +307,12 @@ func generateRegistry(functions []FFIFunction) error {
 		}
 		hasIdiomatic = true
 		for _, t := range fn.Returns {
-			if t.IsPtr || t.IsSlice || t.IsStringMap {
+			if t.IsPtr || t.IsSlice || t.MapValue != "" {
 				needsChecker = true
 			}
 		}
 		for _, t := range fn.Params {
-			if t.IsPtr || t.IsSlice || t.IsStringMap {
+			if t.IsPtr || t.IsSlice || t.MapValue != "" {
 				needsChecker = true
 			}
 		}
@@ -420,11 +423,11 @@ func generateParamUnwrap(sb *strings.Builder, idx int, t GoType) {
 		sb.WriteString(fmt.Sprintf("\t\t%s[_i%d] = %s\n", varName, idx, unwrapScalar(fmt.Sprintf("_e%d", idx), t.Base)))
 		sb.WriteString("\t}\n")
 
-	case t.IsStringMap:
+	case t.MapValue != "":
 		sb.WriteString(fmt.Sprintf("\t_rawMap%d := %s.AsMap()\n", idx, argRef))
-		sb.WriteString(fmt.Sprintf("\t%s := make(map[string]string, len(_rawMap%d))\n", varName, idx))
+		sb.WriteString(fmt.Sprintf("\t%s := make(map[string]%s, len(_rawMap%d))\n", varName, t.MapValue, idx))
 		sb.WriteString(fmt.Sprintf("\tfor _k%d, _v%d := range _rawMap%d {\n", idx, idx, idx))
-		sb.WriteString(fmt.Sprintf("\t\t%s[_k%d] = _v%d.AsString()\n", varName, idx, idx))
+		sb.WriteString(fmt.Sprintf("\t\t%s[_k%d] = %s\n", varName, idx, unwrapScalar(fmt.Sprintf("_v%d", idx), t.MapValue)))
 		sb.WriteString("\t}\n")
 
 	default:
@@ -478,10 +481,11 @@ func generateReturnWrap(sb *strings.Builder, t GoType, varName string, isResult 
 		sb.WriteString("\t}\n")
 		wrap(fmt.Sprintf("runtime.MakeList(%s, _items...)", checkerType))
 
-	case t.IsStringMap:
-		sb.WriteString(fmt.Sprintf("\t_map := runtime.MakeMap(checker.Str, checker.Str)\n"))
+	case t.MapValue != "":
+		valueCheckerType := checkerTypeStr(t.MapValue)
+		sb.WriteString(fmt.Sprintf("\t_map := runtime.MakeMap(checker.Str, %s)\n", valueCheckerType))
 		sb.WriteString(fmt.Sprintf("\tfor _k, _v := range %s {\n", varName))
-		sb.WriteString("\t\t_map.Map_Set(runtime.MakeStr(_k), runtime.MakeStr(_v))\n")
+		sb.WriteString(fmt.Sprintf("\t\t_map.Map_Set(runtime.MakeStr(_k), %s)\n", wrapScalar("_v", t.MapValue)))
 		sb.WriteString("\t}\n")
 		wrap("_map")
 

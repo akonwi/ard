@@ -31,4 +31,14 @@ extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
 
 extern fn delete_dir(path: Str) Void!Str = "FS_DeleteDir"
 
-extern fn list_dir(path: Str) [DirEntry]!Str = "FS_ListDir"
+// Private FFI returns map of name -> is_file
+private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = "FS_ListDir"
+
+fn list_dir(path: Str) [DirEntry]!Str {
+  let entries_map = try _list_dir_map(path)
+  mut entries: [DirEntry] = []
+  for name, is_file in entries_map {
+    entries.push(DirEntry{name: name, is_file: is_file})
+  }
+  Result::ok(entries)
+}
