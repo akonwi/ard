@@ -171,6 +171,26 @@ func _ffi_CryptoUUID(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeStr(result)
 }
 
+func _ffi_ListToDynamic(args []*runtime.Object) *runtime.Object {
+	_sl0 := args[0].AsList()
+	arg0 := make([]any, len(_sl0))
+	for _i0, _e0 := range _sl0 {
+		arg0[_i0] = _e0.Raw()
+	}
+	result := ffi.ListToDynamic(arg0)
+	return runtime.MakeDynamic(result)
+}
+
+func _ffi_MapToDynamic(args []*runtime.Object) *runtime.Object {
+	_rawMap0 := args[0].AsMap()
+	arg0 := make(map[string]any, len(_rawMap0))
+	for _k0, _v0 := range _rawMap0 {
+		arg0[_k0] = _v0.Raw()
+	}
+	result := ffi.MapToDynamic(arg0)
+	return runtime.MakeDynamic(result)
+}
+
 func _ffi_JsonToDynamic(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result, err := ffi.JsonToDynamic(arg0)
@@ -599,10 +619,10 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("CryptoUUID", _ffi_CryptoUUID); err != nil {
 		return fmt.Errorf("failed to register CryptoUUID: %w", err)
 	}
-	if err := r.Register("ListToDynamic", ffi.ListToDynamic); err != nil {
+	if err := r.Register("ListToDynamic", _ffi_ListToDynamic); err != nil {
 		return fmt.Errorf("failed to register ListToDynamic: %w", err)
 	}
-	if err := r.Register("MapToDynamic", ffi.MapToDynamic); err != nil {
+	if err := r.Register("MapToDynamic", _ffi_MapToDynamic); err != nil {
 		return fmt.Errorf("failed to register MapToDynamic: %w", err)
 	}
 	if err := r.Register("JsonToDynamic", _ffi_JsonToDynamic); err != nil {
