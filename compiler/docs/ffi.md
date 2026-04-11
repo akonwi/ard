@@ -319,29 +319,26 @@ Prefer **raw** when the binding needs:
 
 ## Current status
 
-62 FFI functions total: 16 raw, 46 idiomatic.
-
 ### Remaining raw functions
 
 | Function(s) | Why raw | Possible future migration |
 |---|---|---|
-| `HTTP_Send`, `HTTP_Serve` | Complex multi-type with closures/structs | Unlikely without major generator changes |
-| `SqlQuery`, `SqlExecute` | Mixed `[Value]` list with `sqlArgValue` unwrapping | `[]any` param support would help |
-| `DecodeString/Int/Float/Bool` | Return custom error struct from embedded module lookup | Needs struct return support |
-| `DynamicToList`, `DynamicToMap`, `ExtractField` | Return Dynamic collections + Object for error formatting | `[]any` return support would help |
-| `MapToDynamic` | Needs `map[string]any` support | `map[string]any` param type |
-| `FS_ListDir` | Embedded module struct construction | Needs struct return support |
-| `Join` | Iterates Fiber struct list, extracts WaitGroups | Needs struct field access |
-| `JsonEncode` | Generic `$T` input needs full Object for marshaling | Unlikely |
+| `HTTP_Serve` | Needs runtime closure invocation, Ard `Request`/`Response` struct construction, and embedded checker type lookup | Unlikely without major generator/runtime changes |
+| `DecodeString/Int/Float/Bool` | Returns `ard/decode::Error` structs built from embedded module types | Needs struct-return support plus embedded type lookup |
+| `DynamicToList`, `DynamicToMap`, `ExtractField` | Need direct `runtime.Object` access for Dynamic coercion and richer raw-value error formatting | Would need more object-aware generated helpers |
+| `Join` | Reaches into Fiber structs to extract and wait on opaque `WaitGroup` handles | Needs struct field access in generated wrappers |
 
-### Potential future type extensions
+### Current generator gaps
 
-Adding `[]any` support would enable migrating `SqlQuery`, `SqlExecute`, `ListToDynamic`,
-`DynamicToList`, and similar functions. `[]any` params would iterate `.AsList()` and call
-`.Raw()` on each element; `[]any` returns would wrap each element with `MakeDynamic` and
-build a list with `MakeList(checker.Dynamic, ...)`.
+The generator already supports `[]any` and `map[string]any`, which is why bindings like
+`SqlQuery`, `SqlExecute`, `ListToDynamic`, `MapToDynamic`, `FS_ListDir`, and `JsonEncode`
+now use the idiomatic path.
 
-Adding `map[string]any` would enable `MapToDynamic`.
+The main remaining gaps are:
+- Ard struct/enum construction on return
+- embedded module type lookup during marshalling
+- generated access to fields inside Ard runtime structs
+- closure-aware bindings that need VM/runtime participation
 
 ## Summary
 
