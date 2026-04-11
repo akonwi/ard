@@ -397,6 +397,15 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		}
 	case *checker.InstanceProperty:
 		collectImportsFromExpr(v.Subject, imports)
+	case *checker.ListLiteral:
+		for _, element := range v.Elements {
+			collectImportsFromExpr(element, imports)
+		}
+	case *checker.ListMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, arg := range v.Args {
+			collectImportsFromExpr(arg, imports)
+		}
 	case *checker.ModuleStructInstance:
 		if !strings.HasPrefix(v.Module, "ard/") {
 			imports[v.Module] = packageNameForModulePath(v.Module)
@@ -768,6 +777,23 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.ListLiteral:
+		for _, element := range v.Elements {
+			if usesNameInExpr(element, name) {
+				return true
+			}
+		}
+		return false
+	case *checker.ListMethod:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, arg := range v.Args {
+			if usesNameInExpr(arg, name) {
+				return true
+			}
+		}
+		return false
 	case *checker.StructInstance:
 		for _, fieldName := range sortedStringKeys(v.Fields) {
 			if usesNameInExpr(v.Fields[fieldName], name) {
@@ -902,6 +928,20 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return "false", nil
 	case *checker.VoidLiteral:
 		return "struct{}{}", nil
+	case *checker.ListLiteral:
+		elements := make([]string, 0, len(v.Elements))
+		for _, element := range v.Elements {
+			emitted, err := e.emitExpr(element)
+			if err != nil {
+				return "", err
+			}
+			elements = append(elements, emitted)
+		}
+		typeName, err := emitType(v.ListType)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s{%s}", typeName, strings.Join(elements, ", ")), nil
 	case *checker.StructInstance:
 		fields := make([]string, 0, len(v.Fields))
 		for _, fieldName := range sortedStringKeys(v.Fields) {
@@ -992,6 +1032,26 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("%s.%s", subject, goName(v.Property, true)), nil
+	case *checker.ListMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.ListSize:
+			return fmt.Sprintf("len(%s)", subject), nil
+		case checker.ListAt:
+			if len(v.Args) != 1 {
+				return "", fmt.Errorf("list.at expects one arg")
+			}
+			index, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s[%s]", subject, index), nil
+		default:
+			return "", fmt.Errorf("unsupported list method: %v", v.Kind)
+		}
 	case *checker.ModuleStructInstance:
 		if strings.HasPrefix(v.Module, "ard/") {
 			return "", fmt.Errorf("standard library module struct instances are not supported yet: %s::%s", v.Module, v.Property.Name)
@@ -1073,6 +1133,12 @@ func emitType(t checker.Type) (string, error) {
 	}
 
 	switch typed := t.(type) {
+	case *checker.List:
+		elementType, err := emitType(typed.Of())
+		if err != nil {
+			return "", err
+		}
+		return "[]" + elementType, nil
 	case *checker.StructDef:
 		return goName(typed.Name, true), nil
 	default:
