@@ -66,18 +66,26 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	}
 	e.line("")
 
-	if !entrypoint {
-		for _, stmt := range module.Program().Statements {
-			if stmt.Stmt == nil {
+	for _, stmt := range module.Program().Statements {
+		if stmt.Stmt == nil {
+			continue
+		}
+		switch def := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if err := e.emitStructDef(def); err != nil {
+				return nil, err
+			}
+			e.line("")
+		case *checker.VariableDef:
+			if entrypoint {
 				continue
 			}
-			switch def := stmt.Stmt.(type) {
-			case *checker.VariableDef:
-				if err := e.emitPackageVariable(def); err != nil {
-					return nil, err
-				}
-				e.line("")
-			default:
+			if err := e.emitPackageVariable(def); err != nil {
+				return nil, err
+			}
+			e.line("")
+		default:
+			if !entrypoint {
 				return nil, fmt.Errorf("unsupported top-level statement in imported module: %T", stmt.Stmt)
 			}
 		}
@@ -262,6 +270,10 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 		case *checker.FunctionDef, *checker.ExternalFunctionDef:
 			continue
 		}
+		switch stmt.Stmt.(type) {
+		case *checker.StructDef:
+			continue
+		}
 		filtered = append(filtered, stmt)
 	}
 	return filtered
@@ -291,6 +303,18 @@ func collectImportsFromNonProducing(stmt checker.NonProducing, imports map[strin
 	case *checker.Reassignment:
 		collectImportsFromExpr(s.Target, imports)
 		collectImportsFromExpr(s.Value, imports)
+	case *checker.WhileLoop:
+		collectImportsFromExpr(s.Condition, imports)
+		for _, stmt := range s.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	case *checker.ForLoop:
+		collectImportsFromExpr(s.Init.Value, imports)
+		collectImportsFromExpr(s.Condition, imports)
+		collectImportsFromExpr(s.Update.Value, imports)
+		for _, stmt := range s.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
 	}
 }
 
@@ -326,6 +350,30 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 	case *checker.StrAddition:
 		collectImportsFromExpr(v.Left, imports)
 		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntGreater:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntGreaterEqual:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntLess:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntLessEqual:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatGreater:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatGreaterEqual:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatLess:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatLessEqual:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
 	case *checker.Equality:
 		collectImportsFromExpr(v.Left, imports)
 		collectImportsFromExpr(v.Right, imports)
@@ -343,6 +391,19 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
 		}
+	case *checker.StructInstance:
+		for _, fieldName := range sortedStringKeys(v.Fields) {
+			collectImportsFromExpr(v.Fields[fieldName], imports)
+		}
+	case *checker.InstanceProperty:
+		collectImportsFromExpr(v.Subject, imports)
+	case *checker.ModuleStructInstance:
+		if !strings.HasPrefix(v.Module, "ard/") {
+			imports[v.Module] = packageNameForModulePath(v.Module)
+		}
+		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
+			collectImportsFromExpr(v.Property.Fields[fieldName], imports)
+		}
 	case *checker.ModuleFunctionCall:
 		if !strings.HasPrefix(v.Module, "ard/") {
 			imports[v.Module] = packageNameForModulePath(v.Module)
@@ -353,6 +414,19 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 	case *checker.ModuleSymbol:
 		if !strings.HasPrefix(v.Module, "ard/") {
 			imports[v.Module] = packageNameForModulePath(v.Module)
+		}
+	case *checker.If:
+		collectImportsFromExpr(v.Condition, imports)
+		for _, stmt := range v.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+		if v.ElseIf != nil {
+			collectImportsFromExpr(v.ElseIf, imports)
+		}
+		if v.Else != nil {
+			for _, stmt := range v.Else.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
 		}
 	case *checker.FunctionDef:
 		for _, stmt := range v.Body.Stmts {
@@ -383,6 +457,15 @@ func sortedModules(imports map[string]checker.Module) []checker.Module {
 	return modules
 }
 
+func sortedStringKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func packageNameForModulePath(modulePath string) string {
 	base := filepath.Base(strings.TrimSuffix(modulePath, ".ard"))
 	return goName(base, false)
@@ -411,6 +494,22 @@ func (e *emitter) indexFunctions() {
 		}
 		e.functionNames[def.Name] = name
 	}
+}
+
+func (e *emitter) emitStructDef(def *checker.StructDef) error {
+	e.line("type " + goName(def.Name, true) + " struct {")
+	e.indent++
+	fieldNames := sortedStringKeys(def.Fields)
+	for _, fieldName := range fieldNames {
+		typeName, err := emitType(def.Fields[fieldName])
+		if err != nil {
+			return fmt.Errorf("struct %s: %w", def.Name, err)
+		}
+		e.line(fmt.Sprintf("%s %s", goName(fieldName, true), typeName))
+	}
+	e.indent--
+	e.line("}")
+	return nil
 }
 
 func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
@@ -452,8 +551,13 @@ func (e *emitter) emitFunction(def *checker.FunctionDef) error {
 }
 
 func (e *emitter) emitStatements(stmts []checker.Statement, returnType checker.Type) error {
+	lastMeaningful := lastMeaningfulStatementIndex(stmts)
 	for i, stmt := range stmts {
-		isLastExpr := i == len(stmts)-1 && stmt.Expr != nil
+		if stmt.Break {
+			e.line("break")
+			continue
+		}
+		isLastExpr := i == lastMeaningful && stmt.Expr != nil
 		remaining := stmts[i+1:]
 		if stmt.Stmt != nil {
 			if err := e.emitNonProducing(stmt.Stmt, remaining); err != nil {
@@ -471,6 +575,15 @@ func (e *emitter) emitStatements(stmts []checker.Statement, returnType checker.T
 	return nil
 }
 
+func lastMeaningfulStatementIndex(stmts []checker.Statement) int {
+	for i := len(stmts) - 1; i >= 0; i-- {
+		if stmts[i].Break || stmts[i].Expr != nil || stmts[i].Stmt != nil {
+			return i
+		}
+	}
+	return -1
+}
+
 func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checker.Statement) error {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
@@ -485,19 +598,69 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 		}
 		return nil
 	case *checker.Reassignment:
-		target, ok := s.Target.(*checker.Identifier)
-		if !ok {
-			return fmt.Errorf("unsupported reassignment target: %T", s.Target)
+		targetName, err := emitAssignmentTarget(s.Target)
+		if err != nil {
+			return err
 		}
 		value, err := e.emitExpr(s.Value)
 		if err != nil {
 			return err
 		}
-		e.line(fmt.Sprintf("%s = %s", goName(target.Name, false), value))
+		e.line(fmt.Sprintf("%s = %s", targetName, value))
 		return nil
+	case *checker.WhileLoop:
+		return e.emitWhileLoop(s)
+	case *checker.ForLoop:
+		return e.emitForLoop(s)
 	default:
 		return fmt.Errorf("unsupported statement: %T", stmt)
 	}
+}
+
+func (e *emitter) emitWhileLoop(loop *checker.WhileLoop) error {
+	condition, err := e.emitExpr(loop.Condition)
+	if err != nil {
+		return err
+	}
+	e.line("for " + condition + " {")
+	e.indent++
+	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForLoop(loop *checker.ForLoop) error {
+	if loop.Init == nil || loop.Update == nil {
+		return fmt.Errorf("unsupported for loop: missing init or update")
+	}
+	initName := goName(loop.Init.Name, false)
+	initValue, err := e.emitExpr(loop.Init.Value)
+	if err != nil {
+		return err
+	}
+	condition, err := e.emitExpr(loop.Condition)
+	if err != nil {
+		return err
+	}
+	updateTarget, err := emitAssignmentTarget(loop.Update.Target)
+	if err != nil {
+		return err
+	}
+	updateValue, err := e.emitExpr(loop.Update.Value)
+	if err != nil {
+		return err
+	}
+	e.line(fmt.Sprintf("for %s := %s; %s; %s = %s {", initName, initValue, condition, updateTarget, updateValue))
+	e.indent++
+	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
 }
 
 func usesNameInStatements(stmts []checker.Statement, name string) bool {
@@ -530,7 +693,11 @@ func usesNameInNonProducing(stmt checker.NonProducing, name string) bool {
 	case *checker.VariableDef:
 		return usesNameInExpr(s.Value, name)
 	case *checker.Reassignment:
-		return usesNameInExpr(s.Value, name)
+		return usesNameInExpr(s.Target, name) || usesNameInExpr(s.Value, name)
+	case *checker.WhileLoop:
+		return usesNameInExpr(s.Condition, name) || usesNameInStatements(s.Body.Stmts, name)
+	case *checker.ForLoop:
+		return usesNameInExpr(s.Init.Value, name) || usesNameInExpr(s.Condition, name) || usesNameInExpr(s.Update.Value, name) || usesNameInStatements(s.Body.Stmts, name)
 	default:
 		return false
 	}
@@ -568,6 +735,22 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
 	case *checker.StrAddition:
 		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.IntGreater:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.IntGreaterEqual:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.IntLess:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.IntLessEqual:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.FloatGreater:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.FloatGreaterEqual:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.FloatLess:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
+	case *checker.FloatLessEqual:
+		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
 	case *checker.Equality:
 		return usesNameInExpr(v.Left, name) || usesNameInExpr(v.Right, name)
 	case *checker.And:
@@ -585,11 +768,38 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.StructInstance:
+		for _, fieldName := range sortedStringKeys(v.Fields) {
+			if usesNameInExpr(v.Fields[fieldName], name) {
+				return true
+			}
+		}
+		return false
+	case *checker.InstanceProperty:
+		return usesNameInExpr(v.Subject, name)
+	case *checker.ModuleStructInstance:
+		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
+			if usesNameInExpr(v.Property.Fields[fieldName], name) {
+				return true
+			}
+		}
+		return false
 	case *checker.ModuleFunctionCall:
 		for _, arg := range v.Call.Args {
 			if usesNameInExpr(arg, name) {
 				return true
 			}
+		}
+		return false
+	case *checker.If:
+		if usesNameInExpr(v.Condition, name) || usesNameInStatements(v.Body.Stmts, name) {
+			return true
+		}
+		if v.ElseIf != nil && usesNameInExpr(v.ElseIf, name) {
+			return true
+		}
+		if v.Else != nil && usesNameInStatements(v.Else.Stmts, name) {
+			return true
 		}
 		return false
 	default:
@@ -598,6 +808,9 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 }
 
 func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType checker.Type, isLast bool) error {
+	if ifExpr, ok := expr.(*checker.If); ok {
+		return e.emitIfStatement(ifExpr, returnType, isLast)
+	}
 	if isLast && returnType != nil && returnType != checker.Void {
 		value, err := e.emitExpr(expr)
 		if err != nil {
@@ -620,6 +833,48 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 		return nil
 	}
 	e.line("_ = " + value)
+	return nil
+}
+
+func (e *emitter) emitIfStatement(expr *checker.If, returnType checker.Type, isLast bool) error {
+	condition, err := e.emitExpr(expr.Condition)
+	if err != nil {
+		return err
+	}
+	e.line("if " + condition + " {")
+	e.indent++
+	var branchReturnType checker.Type = checker.Void
+	if isLast && returnType != nil && returnType != checker.Void {
+		branchReturnType = returnType
+	}
+	if err := e.emitStatements(expr.Body.Stmts, branchReturnType); err != nil {
+		return err
+	}
+	e.indent--
+	if expr.ElseIf != nil {
+		e.line("} else {")
+		e.indent++
+		if err := e.emitIfStatement(expr.ElseIf, returnType, isLast); err != nil {
+			return err
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	}
+	if expr.Else != nil {
+		e.line("} else {")
+		e.indent++
+		if err := e.emitStatements(expr.Else.Stmts, branchReturnType); err != nil {
+			return err
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	}
+	if isLast && returnType != nil && returnType != checker.Void {
+		return fmt.Errorf("if expression without else is not supported in return position")
+	}
+	e.line("}")
 	return nil
 }
 
@@ -647,6 +902,16 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return "false", nil
 	case *checker.VoidLiteral:
 		return "struct{}{}", nil
+	case *checker.StructInstance:
+		fields := make([]string, 0, len(v.Fields))
+		for _, fieldName := range sortedStringKeys(v.Fields) {
+			value, err := e.emitExpr(v.Fields[fieldName])
+			if err != nil {
+				return "", err
+			}
+			fields = append(fields, fmt.Sprintf("%s: %s", goName(fieldName, true), value))
+		}
+		return fmt.Sprintf("%s{%s}", goName(v.Name, true), strings.Join(fields, ", ")), nil
 	case *checker.Identifier:
 		return goName(v.Name, false), nil
 	case checker.Variable:
@@ -673,6 +938,22 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitBinary(v.Left, "/", v.Right)
 	case *checker.StrAddition:
 		return e.emitBinary(v.Left, "+", v.Right)
+	case *checker.IntGreater:
+		return e.emitBinary(v.Left, ">", v.Right)
+	case *checker.IntGreaterEqual:
+		return e.emitBinary(v.Left, ">=", v.Right)
+	case *checker.IntLess:
+		return e.emitBinary(v.Left, "<", v.Right)
+	case *checker.IntLessEqual:
+		return e.emitBinary(v.Left, "<=", v.Right)
+	case *checker.FloatGreater:
+		return e.emitBinary(v.Left, ">", v.Right)
+	case *checker.FloatGreaterEqual:
+		return e.emitBinary(v.Left, ">=", v.Right)
+	case *checker.FloatLess:
+		return e.emitBinary(v.Left, "<", v.Right)
+	case *checker.FloatLessEqual:
+		return e.emitBinary(v.Left, "<=", v.Right)
 	case *checker.Equality:
 		return e.emitBinary(v.Left, "==", v.Right)
 	case *checker.And:
@@ -705,6 +986,26 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			name = goName(v.Name, false)
 		}
 		return fmt.Sprintf("%s(%s)", name, strings.Join(args, ", ")), nil
+	case *checker.InstanceProperty:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.%s", subject, goName(v.Property, true)), nil
+	case *checker.ModuleStructInstance:
+		if strings.HasPrefix(v.Module, "ard/") {
+			return "", fmt.Errorf("standard library module struct instances are not supported yet: %s::%s", v.Module, v.Property.Name)
+		}
+		fields := make([]string, 0, len(v.Property.Fields))
+		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
+			value, err := e.emitExpr(v.Property.Fields[fieldName])
+			if err != nil {
+				return "", err
+			}
+			fields = append(fields, fmt.Sprintf("%s: %s", goName(fieldName, true), value))
+		}
+		alias := packageNameForModulePath(v.Module)
+		return fmt.Sprintf("%s.%s{%s}", alias, goName(v.Property.Name, true), strings.Join(fields, ", ")), nil
 	case *checker.ModuleFunctionCall:
 		if strings.HasPrefix(v.Module, "ard/") {
 			return "", fmt.Errorf("standard library module calls are not supported yet: %s::%s", v.Module, v.Call.Name)
@@ -732,6 +1033,19 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	}
 }
 
+func emitAssignmentTarget(expr checker.Expression) (string, error) {
+	switch target := expr.(type) {
+	case *checker.Identifier:
+		return goName(target.Name, false), nil
+	case checker.Variable:
+		return goName(target.Name(), false), nil
+	case *checker.Variable:
+		return goName(target.Name(), false), nil
+	default:
+		return "", fmt.Errorf("unsupported reassignment target: %T", expr)
+	}
+}
+
 func (e *emitter) emitBinary(left checker.Expression, op string, right checker.Expression) (string, error) {
 	leftExpr, err := e.emitExpr(left)
 	if err != nil {
@@ -756,6 +1070,11 @@ func emitType(t checker.Type) (string, error) {
 		return "bool", nil
 	case checker.Void:
 		return "", nil
+	}
+
+	switch typed := t.(type) {
+	case *checker.StructDef:
+		return goName(typed.Name, true), nil
 	default:
 		return "", fmt.Errorf("unsupported type: %s", t.String())
 	}

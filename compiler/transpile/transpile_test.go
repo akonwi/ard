@@ -142,6 +142,170 @@ let result = utils::add(1, 2)
 	}
 }
 
+func TestBuildBinaryCompilesIfReturn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn choose(num: Int) Int {
+  if num > 1 {
+    10
+  } else {
+    20
+  }
+}
+
+let result = choose(2)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesWhileLoop(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn count(limit: Int) Int {
+  mut total = 0
+  while total < limit {
+    total = total + 1
+  }
+  total
+}
+
+let result = count(3)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesForLoop(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn count(limit: Int) Int {
+  mut total = 0
+  for mut i = 0; i < limit; i = i + 1 {
+    total = total + 1
+  }
+  total
+}
+
+let result = count(3)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesBreakInWhileLoop(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn count(limit: Int) Int {
+  mut total = 0
+  while total < limit {
+    total = total + 1
+    break
+  }
+  total
+}
+
+let result = count(3)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesStructLiteralAndFieldAccess(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Person {
+  age: Int,
+}
+
+fn get_age() Int {
+  let person = Person{age: 30}
+  person.age
+}
+
+let result = get_age()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesImportedModuleStructLiteral(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "models.ard"), []byte(`
+struct Person {
+  age: Int,
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write models source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/models
+
+fn get_age() Int {
+  let person = models::Person{age: 30}
+  person.age
+}
+
+let result = get_age()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesImportedModuleSymbol(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
