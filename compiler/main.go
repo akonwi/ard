@@ -11,12 +11,14 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/bytecode"
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/runtime"
+	"github.com/akonwi/ard/transpile"
 	"github.com/akonwi/ard/version"
 )
 
@@ -52,40 +54,69 @@ func main() {
 		}
 	case "run":
 		{
-			inputPath, err := parseRunArgs(os.Args[2:])
+			inputPath, requestedTarget, err := parseRunArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			module, err := loadModule(inputPath)
-			if err != nil {
-				os.Exit(1)
-			}
-			program, err := bytecode.NewEmitter().EmitProgram(module)
+			target, err := resolveTarget(inputPath, requestedTarget)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			if err := bytecode.VerifyProgram(program); err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			runtime.SetOSArgs(os.Args)
-			_, runErr := bytecodevm.New(program).Run("main")
-			runtime.SetOSArgs(nil)
-			if runErr != nil {
-				fmt.Println(runErr)
+			switch target {
+			case backend.TargetBytecode:
+				module, err := loadModule(inputPath)
+				if err != nil {
+					os.Exit(1)
+				}
+				program, err := bytecode.NewEmitter().EmitProgram(module)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if err := bytecode.VerifyProgram(program); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				runtime.SetOSArgs(os.Args)
+				_, runErr := bytecodevm.New(program).Run("main")
+				runtime.SetOSArgs(nil)
+				if runErr != nil {
+					fmt.Println(runErr)
+					os.Exit(1)
+				}
+			case backend.TargetGo:
+				if err := transpile.Run(inputPath, os.Args); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+			default:
+				fmt.Printf("unknown target: %s\n", target)
 				os.Exit(1)
 			}
 		}
 	case "build":
 		{
-			inputPath, outputPath, err := parseBuildArgs(os.Args[2:])
+			inputPath, outputPath, requestedTarget, err := parseBuildArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			builtPath, err := buildBytecodeBinary(inputPath, outputPath)
+			target, err := resolveTarget(inputPath, requestedTarget)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			var builtPath string
+			switch target {
+			case backend.TargetBytecode:
+				builtPath, err = buildBytecodeBinary(inputPath, outputPath)
+			case backend.TargetGo:
+				builtPath, err = transpile.BuildBinary(inputPath, outputPath)
+			default:
+				err = fmt.Errorf("unknown target: %s", target)
+			}
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -180,34 +211,20 @@ func loadModule(inputPath string) (checker.Module, error) {
 	return c.Module(), nil
 }
 
-func parseRunArgs(args []string) (string, error) {
+func parseRunArgs(args []string) (string, string, error) {
 	inputPath := ""
-	for i := range args {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			return "", fmt.Errorf("unknown flag: %s", arg)
-		}
-		if inputPath == "" {
-			inputPath = arg
-			continue
-		}
-	}
-	if inputPath == "" {
-		return "", fmt.Errorf("expected filepath argument")
-	}
-	return inputPath, nil
-}
-
-func parseBuildArgs(args []string) (string, string, error) {
-	inputPath := ""
-	outputPath := ""
+	target := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--out" {
+		if arg == "--target" {
 			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("--out requires a path")
+				return "", "", fmt.Errorf("--target requires a value")
 			}
-			outputPath = args[i+1]
+			parsedTarget, err := backend.ParseTarget(args[i+1])
+			if err != nil {
+				return "", "", err
+			}
+			target = parsedTarget
 			i++
 			continue
 		}
@@ -221,6 +238,46 @@ func parseBuildArgs(args []string) (string, string, error) {
 	}
 	if inputPath == "" {
 		return "", "", fmt.Errorf("expected filepath argument")
+	}
+	return inputPath, target, nil
+}
+
+func parseBuildArgs(args []string) (string, string, string, error) {
+	inputPath := ""
+	outputPath := ""
+	target := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--out" {
+			if i+1 >= len(args) {
+				return "", "", "", fmt.Errorf("--out requires a path")
+			}
+			outputPath = args[i+1]
+			i++
+			continue
+		}
+		if arg == "--target" {
+			if i+1 >= len(args) {
+				return "", "", "", fmt.Errorf("--target requires a value")
+			}
+			parsedTarget, err := backend.ParseTarget(args[i+1])
+			if err != nil {
+				return "", "", "", err
+			}
+			target = parsedTarget
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			return "", "", "", fmt.Errorf("unknown flag: %s", arg)
+		}
+		if inputPath == "" {
+			inputPath = arg
+			continue
+		}
+	}
+	if inputPath == "" {
+		return "", "", "", fmt.Errorf("expected filepath argument")
 	}
 	if outputPath == "" {
 		// Try to use the project name from ard.toml
@@ -239,7 +296,22 @@ func parseBuildArgs(args []string) (string, string, error) {
 			outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
 		}
 	}
-	return inputPath, outputPath, nil
+	return inputPath, outputPath, target, nil
+}
+
+func resolveTarget(inputPath, requestedTarget string) (string, error) {
+	if requestedTarget != "" {
+		return requestedTarget, nil
+	}
+	inputDir := filepath.Dir(inputPath)
+	if inputDir == "" {
+		inputDir = "."
+	}
+	project, err := checker.FindProjectRoot(inputDir)
+	if err != nil {
+		return "", err
+	}
+	return backend.ParseTarget(project.Target)
 }
 
 func parseFormatArgs(args []string) (string, bool, error) {
