@@ -527,6 +527,10 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
 		}
+	case *checker.TemplateStr:
+		for _, chunk := range v.Chunks {
+			collectImportsFromExpr(chunk, imports)
+		}
 	case *checker.StrMethod:
 		collectImportsFromExpr(v.Subject, imports)
 		for _, arg := range v.Args {
@@ -1282,6 +1286,13 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.TemplateStr:
+		for _, chunk := range v.Chunks {
+			if usesNameInExpr(chunk, name) {
+				return true
+			}
+		}
+		return false
 	case *checker.StrMethod:
 		if usesNameInExpr(v.Subject, name) {
 			return true
@@ -1383,6 +1394,22 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 }
 
 func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType checker.Type, isLast bool) error {
+	if panicExpr, ok := expr.(*checker.Panic); ok {
+		message, err := e.emitExpr(panicExpr.Message)
+		if err != nil {
+			return err
+		}
+		e.line("panic(" + message + ")")
+		return nil
+	}
+	if panicExpr, ok := expr.(checker.Panic); ok {
+		message, err := e.emitExpr(panicExpr.Message)
+		if err != nil {
+			return err
+		}
+		e.line("panic(" + message + ")")
+		return nil
+	}
 	if ifExpr, ok := expr.(*checker.If); ok {
 		return e.emitIfStatement(ifExpr, returnType, isLast)
 	}
@@ -1475,10 +1502,27 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "true", nil
 		}
 		return "false", nil
+	case *checker.TemplateStr:
+		if len(v.Chunks) == 0 {
+			return strconv.Quote(""), nil
+		}
+		chunks := make([]string, 0, len(v.Chunks))
+		for _, chunk := range v.Chunks {
+			emitted, err := e.emitExpr(chunk)
+			if err != nil {
+				return "", err
+			}
+			chunks = append(chunks, emitted)
+		}
+		return "(" + strings.Join(chunks, " + ") + ")", nil
 	case *checker.VoidLiteral:
 		return "struct{}{}", nil
 	case *checker.EnumVariant:
 		return e.emitEnumVariant(v)
+	case checker.Panic:
+		return e.emitPanicExpr(v.Message, v.Type())
+	case *checker.Panic:
+		return e.emitPanicExpr(v.Message, v.Type())
 	case *checker.CopyExpression:
 		return e.emitCopyExpr(v)
 	case *checker.ListLiteral:
@@ -2107,6 +2151,17 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 		}
 		inner.indent--
 		inner.line("}")
+		return nil
+	})
+}
+
+func (e *emitter) emitPanicExpr(message checker.Expression, resultType checker.Type) (string, error) {
+	messageExpr, err := e.emitExpr(message)
+	if err != nil {
+		return "", err
+	}
+	return e.emitInlineFunc(resultType, func(inner *emitter) error {
+		inner.line("panic(" + messageExpr + ")")
 		return nil
 	})
 }
