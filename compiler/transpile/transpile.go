@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -19,24 +20,68 @@ const generatedGoVersion = "1.26.0"
 type emitter struct {
 	module        checker.Module
 	packageName   string
+	entrypoint    bool
+	imports       map[string]string
 	functionNames map[string]string
 	builder       strings.Builder
 	indent        int
 }
 
 func EmitEntrypoint(module checker.Module) ([]byte, error) {
+	return emitModuleSource(module, "main", true)
+}
+
+func emitPackageSource(module checker.Module) ([]byte, error) {
+	return emitModuleSource(module, packageNameForModulePath(module.Path()), false)
+}
+
+func emitModuleSource(module checker.Module, packageName string, entrypoint bool) ([]byte, error) {
 	if module == nil || module.Program() == nil {
 		return nil, fmt.Errorf("module has no program")
 	}
 
 	e := &emitter{
 		module:        module,
-		packageName:   "main",
+		packageName:   packageName,
+		entrypoint:    entrypoint,
+		imports:       collectModuleImports(module.Program().Statements),
 		functionNames: make(map[string]string),
 	}
 	e.indexFunctions()
-	e.line("package main")
+	if entrypoint {
+		e.line("package main")
+	} else {
+		e.line("package " + packageName)
+	}
+	if len(e.imports) > 0 {
+		e.line("")
+		e.line("import (")
+		e.indent++
+		paths := sortedImportPaths(e.imports)
+		for _, path := range paths {
+			e.line(fmt.Sprintf("%s %q", e.imports[path], path))
+		}
+		e.indent--
+		e.line(")")
+	}
 	e.line("")
+
+	if !entrypoint {
+		for _, stmt := range module.Program().Statements {
+			if stmt.Stmt == nil {
+				continue
+			}
+			switch def := stmt.Stmt.(type) {
+			case *checker.VariableDef:
+				if err := e.emitPackageVariable(def); err != nil {
+					return nil, err
+				}
+				e.line("")
+			default:
+				return nil, fmt.Errorf("unsupported top-level statement in imported module: %T", stmt.Stmt)
+			}
+		}
+	}
 
 	for _, stmt := range module.Program().Statements {
 		if stmt.Expr == nil {
@@ -56,13 +101,15 @@ func EmitEntrypoint(module checker.Module) ([]byte, error) {
 		}
 	}
 
-	e.line("func main() {")
-	e.indent++
-	if err := e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil); err != nil {
-		return nil, err
+	if entrypoint {
+		e.line("func main() {")
+		e.indent++
+		if err := e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil); err != nil {
+			return nil, err
+		}
+		e.indent--
+		e.line("}")
 	}
-	e.indent--
-	e.line("}")
 
 	formatted, err := gofmt.Source([]byte(e.builder.String()))
 	if err != nil {
@@ -77,19 +124,8 @@ func BuildBinary(inputPath, outputPath string) (string, error) {
 		return "", err
 	}
 
-	source, err := EmitEntrypoint(module)
-	if err != nil {
-		return "", err
-	}
-
 	generatedDir := filepath.Join(project.RootPath, "generated")
-	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(fmt.Sprintf("module %s\n\ngo %s\n", project.ProjectName, generatedGoVersion)), 0o644); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(filepath.Join(generatedDir, "main.go"), source, 0o644); err != nil {
+	if err := writeGeneratedProject(generatedDir, project, module); err != nil {
 		return "", err
 	}
 
@@ -111,19 +147,8 @@ func Run(inputPath string, args []string) error {
 	}
 	_ = args
 
-	source, err := EmitEntrypoint(module)
-	if err != nil {
-		return err
-	}
-
 	generatedDir := filepath.Join(project.RootPath, "generated")
-	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(fmt.Sprintf("module %s\n\ngo %s\n", project.ProjectName, generatedGoVersion)), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(generatedDir, "main.go"), source, 0o644); err != nil {
+	if err := writeGeneratedProject(generatedDir, project, module); err != nil {
 		return err
 	}
 
@@ -133,6 +158,65 @@ func Run(inputPath string, args []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, entrypoint checker.Module) error {
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(fmt.Sprintf("module %s\n\ngo %s\n", project.ProjectName, generatedGoVersion)), 0o644); err != nil {
+		return err
+	}
+
+	source, err := EmitEntrypoint(entrypoint)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(generatedDir, "main.go"), source, 0o644); err != nil {
+		return err
+	}
+
+	written := map[string]struct{}{}
+	for _, mod := range sortedModules(entrypoint.Program().Imports) {
+		if err := writeImportedModule(generatedDir, project.ProjectName, mod, written); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeImportedModule(generatedDir, projectName string, module checker.Module, written map[string]struct{}) error {
+	if module == nil {
+		return nil
+	}
+	if strings.HasPrefix(module.Path(), "ard/") {
+		return nil
+	}
+	if _, ok := written[module.Path()]; ok {
+		return nil
+	}
+	written[module.Path()] = struct{}{}
+
+	source, err := emitPackageSource(module)
+	if err != nil {
+		return err
+	}
+	outputPath, err := generatedPathForModule(generatedDir, projectName, module.Path())
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(outputPath, source, 0o644); err != nil {
+		return err
+	}
+	for _, mod := range sortedModules(module.Program().Imports) {
+		if err := writeImportedModule(generatedDir, projectName, mod, written); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func loadModule(inputPath string) (checker.Module, *checker.ProjectInfo, error) {
@@ -183,6 +267,138 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 	return filtered
 }
 
+func collectModuleImports(stmts []checker.Statement) map[string]string {
+	imports := make(map[string]string)
+	for _, stmt := range stmts {
+		collectImportsFromStatement(stmt, imports)
+	}
+	return imports
+}
+
+func collectImportsFromStatement(stmt checker.Statement, imports map[string]string) {
+	if stmt.Expr != nil {
+		collectImportsFromExpr(stmt.Expr, imports)
+	}
+	if stmt.Stmt != nil {
+		collectImportsFromNonProducing(stmt.Stmt, imports)
+	}
+}
+
+func collectImportsFromNonProducing(stmt checker.NonProducing, imports map[string]string) {
+	switch s := stmt.(type) {
+	case *checker.VariableDef:
+		collectImportsFromExpr(s.Value, imports)
+	case *checker.Reassignment:
+		collectImportsFromExpr(s.Target, imports)
+		collectImportsFromExpr(s.Value, imports)
+	}
+}
+
+func collectImportsFromExpr(expr checker.Expression, imports map[string]string) {
+	switch v := expr.(type) {
+	case *checker.IntAddition:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntSubtraction:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntMultiplication:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntDivision:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.IntModulo:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatAddition:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatSubtraction:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatMultiplication:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.FloatDivision:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.StrAddition:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.Equality:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.And:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.Or:
+		collectImportsFromExpr(v.Left, imports)
+		collectImportsFromExpr(v.Right, imports)
+	case *checker.Negation:
+		collectImportsFromExpr(v.Value, imports)
+	case *checker.Not:
+		collectImportsFromExpr(v.Value, imports)
+	case *checker.FunctionCall:
+		for _, arg := range v.Args {
+			collectImportsFromExpr(arg, imports)
+		}
+	case *checker.ModuleFunctionCall:
+		if !strings.HasPrefix(v.Module, "ard/") {
+			imports[v.Module] = packageNameForModulePath(v.Module)
+		}
+		for _, arg := range v.Call.Args {
+			collectImportsFromExpr(arg, imports)
+		}
+	case *checker.ModuleSymbol:
+		if !strings.HasPrefix(v.Module, "ard/") {
+			imports[v.Module] = packageNameForModulePath(v.Module)
+		}
+	case *checker.FunctionDef:
+		for _, stmt := range v.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	}
+}
+
+func sortedImportPaths(imports map[string]string) []string {
+	paths := make([]string, 0, len(imports))
+	for path := range imports {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func sortedModules(imports map[string]checker.Module) []checker.Module {
+	paths := make([]string, 0, len(imports))
+	for path := range imports {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	modules := make([]checker.Module, 0, len(paths))
+	for _, path := range paths {
+		modules = append(modules, imports[path])
+	}
+	return modules
+}
+
+func packageNameForModulePath(modulePath string) string {
+	base := filepath.Base(strings.TrimSuffix(modulePath, ".ard"))
+	return goName(base, false)
+}
+
+func generatedPathForModule(generatedDir, projectName, modulePath string) (string, error) {
+	prefix := projectName + "/"
+	if !strings.HasPrefix(modulePath, prefix) {
+		return "", fmt.Errorf("module path %q does not match project %q", modulePath, projectName)
+	}
+	relative := strings.TrimPrefix(modulePath, prefix)
+	dir := filepath.Join(generatedDir, filepath.FromSlash(relative))
+	base := filepath.Base(relative)
+	return filepath.Join(dir, base+".go"), nil
+}
+
 func (e *emitter) indexFunctions() {
 	for _, stmt := range e.module.Program().Statements {
 		def, ok := stmt.Expr.(*checker.FunctionDef)
@@ -195,6 +411,16 @@ func (e *emitter) indexFunctions() {
 		}
 		e.functionNames[def.Name] = name
 	}
+}
+
+func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
+	value, err := e.emitExpr(def.Value)
+	if err != nil {
+		return err
+	}
+	name := goName(def.Name, !def.Mutable)
+	e.line(fmt.Sprintf("var %s = %s", name, value))
+	return nil
 }
 
 func (e *emitter) emitFunction(def *checker.FunctionDef) error {
@@ -479,6 +705,28 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			name = goName(v.Name, false)
 		}
 		return fmt.Sprintf("%s(%s)", name, strings.Join(args, ", ")), nil
+	case *checker.ModuleFunctionCall:
+		if strings.HasPrefix(v.Module, "ard/") {
+			return "", fmt.Errorf("standard library module calls are not supported yet: %s::%s", v.Module, v.Call.Name)
+		}
+		args := make([]string, 0, len(v.Call.Args))
+		for _, arg := range v.Call.Args {
+			emitted, err := e.emitExpr(arg)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, emitted)
+		}
+		alias := packageNameForModulePath(v.Module)
+		name := goName(v.Call.Name, true)
+		return fmt.Sprintf("%s.%s(%s)", alias, name, strings.Join(args, ", ")), nil
+	case *checker.ModuleSymbol:
+		if strings.HasPrefix(v.Module, "ard/") {
+			return "", fmt.Errorf("standard library module symbols are not supported yet: %s::%s", v.Module, v.Symbol.Name)
+		}
+		alias := packageNameForModulePath(v.Module)
+		name := goName(v.Symbol.Name, true)
+		return fmt.Sprintf("%s.%s", alias, name), nil
 	default:
 		return "", fmt.Errorf("unsupported expression: %T", expr)
 	}

@@ -105,6 +105,75 @@ noop()
 	}
 }
 
+func TestBuildBinaryCompilesUserModuleImport(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+fn add(a: Int, b: Int) Int {
+  a + b
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write utils source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/utils
+
+let result = utils::add(1, 2)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	builtPath, err := BuildBinary(mainPath, outputPath)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+	if builtPath != outputPath {
+		t.Fatalf("expected built path %q, got %q", outputPath, builtPath)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("expected output binary to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "generated", "utils", "utils.go")); err != nil {
+		t.Fatalf("expected generated module file to exist: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesImportedModuleSymbol(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+let answer = 42
+`), 0o644); err != nil {
+		t.Fatalf("failed to write utils source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/utils
+
+let result = utils::answer
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	builtPath, err := BuildBinary(mainPath, outputPath)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+	if builtPath != outputPath {
+		t.Fatalf("expected built path %q, got %q", outputPath, builtPath)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("expected output binary to exist: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesSimpleProgram(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
