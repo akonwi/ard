@@ -1,5 +1,6 @@
 # TODO
 - [ ] allow FFI in user land
+- [ ] make duplicate FFI binding registration return an error
 - [ ] Dependency system
   * needs more thought
   * likely just a vendoring system

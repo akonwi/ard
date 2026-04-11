@@ -65,7 +65,6 @@ type VM struct {
 func New(program bytecode.Program) *VM {
 	ffi := NewRuntimeFFIRegistry()
 	_ = ffi.RegisterBuiltinFFIFunctions()
-	_ = ffi.RegisterGeneratedFFIFunctions()
 	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}
 	for i := range program.Functions {
 		vm.funcIndex[program.Functions[i].Name] = i
