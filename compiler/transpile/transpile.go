@@ -397,11 +397,23 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		}
 	case *checker.InstanceProperty:
 		collectImportsFromExpr(v.Subject, imports)
+	case *checker.CopyExpression:
+		collectImportsFromExpr(v.Expr, imports)
 	case *checker.ListLiteral:
 		for _, element := range v.Elements {
 			collectImportsFromExpr(element, imports)
 		}
 	case *checker.ListMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, arg := range v.Args {
+			collectImportsFromExpr(arg, imports)
+		}
+	case *checker.MapLiteral:
+		for i := range v.Keys {
+			collectImportsFromExpr(v.Keys[i], imports)
+			collectImportsFromExpr(v.Values[i], imports)
+		}
+	case *checker.MapMethod:
 		collectImportsFromExpr(v.Subject, imports)
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
@@ -777,6 +789,8 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.CopyExpression:
+		return usesNameInExpr(v.Expr, name)
 	case *checker.ListLiteral:
 		for _, element := range v.Elements {
 			if usesNameInExpr(element, name) {
@@ -785,6 +799,23 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 		}
 		return false
 	case *checker.ListMethod:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, arg := range v.Args {
+			if usesNameInExpr(arg, name) {
+				return true
+			}
+		}
+		return false
+	case *checker.MapLiteral:
+		for i := range v.Keys {
+			if usesNameInExpr(v.Keys[i], name) || usesNameInExpr(v.Values[i], name) {
+				return true
+			}
+		}
+		return false
+	case *checker.MapMethod:
 		if usesNameInExpr(v.Subject, name) {
 			return true
 		}
@@ -928,6 +959,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return "false", nil
 	case *checker.VoidLiteral:
 		return "struct{}{}", nil
+	case *checker.CopyExpression:
+		return e.emitCopyExpr(v)
 	case *checker.ListLiteral:
 		elements := make([]string, 0, len(v.Elements))
 		for _, element := range v.Elements {
@@ -942,6 +975,24 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("%s{%s}", typeName, strings.Join(elements, ", ")), nil
+	case *checker.MapLiteral:
+		entries := make([]string, 0, len(v.Keys))
+		for i := range v.Keys {
+			key, err := e.emitExpr(v.Keys[i])
+			if err != nil {
+				return "", err
+			}
+			value, err := e.emitExpr(v.Values[i])
+			if err != nil {
+				return "", err
+			}
+			entries = append(entries, fmt.Sprintf("%s: %s", key, value))
+		}
+		typeName, err := emitType(v.Type())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s{%s}", typeName, strings.Join(entries, ", ")), nil
 	case *checker.StructInstance:
 		fields := make([]string, 0, len(v.Fields))
 		for _, fieldName := range sortedStringKeys(v.Fields) {
@@ -1049,8 +1100,32 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 				return "", err
 			}
 			return fmt.Sprintf("%s[%s]", subject, index), nil
+		case checker.ListPush, checker.ListPrepend, checker.ListSet:
+			return e.emitListMutationExpr(v)
 		default:
 			return "", fmt.Errorf("unsupported list method: %v", v.Kind)
+		}
+	case *checker.MapMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.MapSize:
+			return fmt.Sprintf("len(%s)", subject), nil
+		case checker.MapHas:
+			if len(v.Args) != 1 {
+				return "", fmt.Errorf("map.has expects one arg")
+			}
+			key, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("func() bool { _, ok := %s[%s]; return ok }()", subject, key), nil
+		case checker.MapSet, checker.MapDrop:
+			return e.emitMapMutationExpr(v)
+		default:
+			return "", fmt.Errorf("unsupported map method: %v", v.Kind)
 		}
 	case *checker.ModuleStructInstance:
 		if strings.HasPrefix(v.Module, "ard/") {
@@ -1106,6 +1181,107 @@ func emitAssignmentTarget(expr checker.Expression) (string, error) {
 	}
 }
 
+func (e *emitter) emitCopyExpr(copy *checker.CopyExpression) (string, error) {
+	inner, err := e.emitExpr(copy.Expr)
+	if err != nil {
+		return "", err
+	}
+	switch typed := copy.Type_.(type) {
+	case *checker.List:
+		typeName, err := emitType(typed)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("append(%s(nil), %s...)", typeName, inner), nil
+	default:
+		return inner, nil
+	}
+}
+
+func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, error) {
+	target, err := emitAssignmentTarget(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	subjectType, ok := method.Subject.Type().(*checker.List)
+	if !ok {
+		return "", fmt.Errorf("expected list subject, got %s", method.Subject.Type())
+	}
+	typeName, err := emitType(subjectType)
+	if err != nil {
+		return "", err
+	}
+
+	switch method.Kind {
+	case checker.ListPush:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("list.push expects one arg")
+		}
+		value, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() %s { %s = append(%s, %s); return %s }()", typeName, target, target, value, target), nil
+	case checker.ListPrepend:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("list.prepend expects one arg")
+		}
+		value, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() %s { %s = append(%s{%s}, %s...); return %s }()", typeName, target, typeName, value, target, target), nil
+	case checker.ListSet:
+		if len(method.Args) != 2 {
+			return "", fmt.Errorf("list.set expects two args")
+		}
+		index, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		value, err := e.emitExpr(method.Args[1])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() bool { if %s >= 0 && %s < len(%s) { %s[%s] = %s; return true }; return false }()", index, index, target, target, index, value), nil
+	default:
+		return "", fmt.Errorf("unsupported mutable list method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitMapMutationExpr(method *checker.MapMethod) (string, error) {
+	target, err := emitAssignmentTarget(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	switch method.Kind {
+	case checker.MapSet:
+		if len(method.Args) != 2 {
+			return "", fmt.Errorf("map.set expects two args")
+		}
+		key, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		value, err := e.emitExpr(method.Args[1])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() bool { %s[%s] = %s; return true }()", target, key, value), nil
+	case checker.MapDrop:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("map.drop expects one arg")
+		}
+		key, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() struct{} { delete(%s, %s); return struct{}{} }()", target, key), nil
+	default:
+		return "", fmt.Errorf("unsupported mutable map method: %v", method.Kind)
+	}
+}
+
 func (e *emitter) emitBinary(left checker.Expression, op string, right checker.Expression) (string, error) {
 	leftExpr, err := e.emitExpr(left)
 	if err != nil {
@@ -1139,6 +1315,16 @@ func emitType(t checker.Type) (string, error) {
 			return "", err
 		}
 		return "[]" + elementType, nil
+	case *checker.Map:
+		keyType, err := emitType(typed.Key())
+		if err != nil {
+			return "", err
+		}
+		valueType, err := emitType(typed.Value())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("map[%s]%s", keyType, valueType), nil
 	case *checker.StructDef:
 		return goName(typed.Name, true), nil
 	default:
