@@ -462,6 +462,255 @@ let g = true.to_str()
 	}
 }
 
+func TestBuildBinaryCompilesRangeAndForInLoops(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn sum_range() Int {
+  mut total = 0
+  for i in 1..3 {
+    total = total + i
+  }
+  total
+}
+
+fn sum_list() Int {
+  let values = [1, 2, 3]
+  mut total = 0
+  for value, idx in values {
+    total = total + value + idx
+  }
+  total
+}
+
+fn sum_chars() Int {
+  mut total = 0
+  for char, idx in "ab" {
+    total = total + idx
+    let char_copy = char
+  }
+  total
+}
+
+fn sum_map() Int {
+  let values: [Str: Int] = ["a": 1, "b": 2]
+  mut total = 0
+  for key, value in values {
+    let key_copy = key
+    total = total + value
+  }
+  total
+}
+
+let a = sum_range()
+let b = sum_list()
+let c = sum_chars()
+let d = sum_map()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesEnums(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "colors.ard"), []byte(`
+enum Color {
+  red,
+  green,
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write colors source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/colors
+
+enum Status {
+  active,
+  inactive,
+}
+
+let a = Status::active == Status::inactive
+let b = colors::Color::green == colors::Color::red
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesExternStubs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+extern fn meaning() Int = "Meaning"
+`), 0o644); err != nil {
+		t.Fatalf("failed to write utils source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/utils
+
+extern fn add(a: Int, b: Int) Int = "Add"
+
+let a = add(1, 2)
+let b = utils::meaning()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesStructMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Box {
+  value: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.value
+  }
+
+  fn mut set(value: Int) {
+    self.value = value
+  }
+}
+
+fn run() Int {
+  mut box = Box{value: 1}
+  box.set(2)
+  box.get()
+}
+
+let result = run()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesBoolAndIntMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn pick(flag: Bool) Int {
+  match flag {
+    true => 1,
+    false => 2,
+  }
+}
+
+fn bucket(num: Int) Str {
+  match num {
+    0 => "zero",
+    1..3 => "few",
+    _ => "many",
+  }
+}
+
+let a = pick(true)
+let b = bucket(2)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesEnumMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+enum Status {
+  active,
+  inactive,
+}
+
+fn label(status: Status) Int {
+  match status {
+    Status::active => 1,
+    Status::inactive => 2,
+  }
+}
+
+let result = label(Status::active)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesMaybeMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn pick(value: Int?) Int {
+  match value {
+    num => num,
+    _ => 0,
+  }
+}
+
+let a = pick(maybe::some(1))
+let b = pick(maybe::none())
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesImportedModuleSymbol(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

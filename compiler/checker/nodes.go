@@ -1079,6 +1079,10 @@ func (f *FunctionCall) Type() Type {
 	return f.ReturnType
 }
 
+func (f *FunctionCall) Definition() *FunctionDef {
+	return f.fn
+}
+
 type ModuleStructInstance struct {
 	Module     string
 	Property   *StructInstance

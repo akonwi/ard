@@ -31,6 +31,7 @@ type emitter struct {
 	entrypoint    bool
 	imports       map[string]string
 	functionNames map[string]string
+	emittedTypes  map[string]struct{}
 	builder       strings.Builder
 	indent        int
 }
@@ -54,6 +55,7 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 		entrypoint:    entrypoint,
 		imports:       collectModuleImports(module.Program().Statements),
 		functionNames: make(map[string]string),
+		emittedTypes:  make(map[string]struct{}),
 	}
 	e.indexFunctions()
 	if entrypoint {
@@ -81,6 +83,11 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 		switch def := stmt.Stmt.(type) {
 		case *checker.StructDef:
 			if err := e.emitStructDef(def); err != nil {
+				return nil, err
+			}
+			e.line("")
+		case *checker.Enum:
+			if err := e.emitEnumDef(def); err != nil {
 				return nil, err
 			}
 			e.line("")
@@ -113,7 +120,10 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 			}
 			e.line("")
 		case *checker.ExternalFunctionDef:
-			return nil, fmt.Errorf("extern functions are not supported yet: %s", def.Name)
+			if err := e.emitExternFunction(def); err != nil {
+				return nil, err
+			}
+			e.line("")
 		}
 	}
 
@@ -284,7 +294,7 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 			continue
 		}
 		switch stmt.Stmt.(type) {
-		case *checker.StructDef:
+		case *checker.StructDef, *checker.Enum:
 			continue
 		}
 		filtered = append(filtered, stmt)
@@ -301,6 +311,13 @@ func collectModuleImports(stmts []checker.Statement) map[string]string {
 }
 
 func collectImportsFromStatement(stmt checker.Statement, imports map[string]string) {
+	if extern, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok {
+		imports[helperImportPath] = helperImportAlias
+		for _, param := range extern.Parameters {
+			collectImportsFromType(param.Type, imports)
+		}
+		collectImportsFromType(extern.ReturnType, imports)
+	}
 	if stmt.Expr != nil {
 		collectImportsFromExpr(stmt.Expr, imports)
 		collectImportsFromExprTypes(stmt.Expr, imports)
@@ -372,6 +389,27 @@ func collectImportsFromNonProducing(stmt checker.NonProducing, imports map[strin
 		collectImportsFromExpr(s.Init.Value, imports)
 		collectImportsFromExpr(s.Condition, imports)
 		collectImportsFromExpr(s.Update.Value, imports)
+		for _, stmt := range s.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	case *checker.ForIntRange:
+		collectImportsFromExpr(s.Start, imports)
+		collectImportsFromExpr(s.End, imports)
+		for _, stmt := range s.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	case *checker.ForInStr:
+		collectImportsFromExpr(s.Value, imports)
+		for _, stmt := range s.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	case *checker.ForInList:
+		collectImportsFromExpr(s.List, imports)
+		for _, stmt := range s.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	case *checker.ForInMap:
+		collectImportsFromExpr(s.Map, imports)
 		for _, stmt := range s.Body.Stmts {
 			collectImportsFromStatement(stmt, imports)
 		}
@@ -457,6 +495,11 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		}
 	case *checker.InstanceProperty:
 		collectImportsFromExpr(v.Subject, imports)
+	case *checker.InstanceMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, arg := range v.Method.Args {
+			collectImportsFromExpr(arg, imports)
+		}
 	case *checker.CopyExpression:
 		collectImportsFromExpr(v.Expr, imports)
 	case *checker.ListLiteral:
@@ -541,6 +584,54 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 				collectImportsFromStatement(stmt, imports)
 			}
 		}
+	case *checker.BoolMatch:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, stmt := range v.True.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+		for _, stmt := range v.False.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+	case *checker.IntMatch:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, block := range v.IntCases {
+			for _, stmt := range block.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
+		}
+		for _, block := range v.RangeCases {
+			for _, stmt := range block.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
+		}
+		if v.CatchAll != nil {
+			for _, stmt := range v.CatchAll.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
+		}
+	case *checker.EnumMatch:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, block := range v.Cases {
+			if block == nil {
+				continue
+			}
+			for _, stmt := range block.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
+		}
+		if v.CatchAll != nil {
+			for _, stmt := range v.CatchAll.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
+		}
+	case *checker.OptionMatch:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, stmt := range v.Some.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+		for _, stmt := range v.None.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
 	case *checker.FunctionDef:
 		for _, stmt := range v.Body.Stmts {
 			collectImportsFromStatement(stmt, imports)
@@ -570,6 +661,29 @@ func sortedModules(imports map[string]checker.Module) []checker.Module {
 	return modules
 }
 
+func sortedIntKeys[T any](values map[int]T) []int {
+	keys := make([]int, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Ints(keys)
+	return keys
+}
+
+func sortedIntRanges(values map[checker.IntRange]*checker.Block) []checker.IntRange {
+	ranges := make([]checker.IntRange, 0, len(values))
+	for key := range values {
+		ranges = append(ranges, key)
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].Start != ranges[j].Start {
+			return ranges[i].Start < ranges[j].Start
+		}
+		return ranges[i].End < ranges[j].End
+	})
+	return ranges
+}
+
 func sortedStringKeys[T any](values map[string]T) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -597,19 +711,28 @@ func generatedPathForModule(generatedDir, projectName, modulePath string) (strin
 
 func (e *emitter) indexFunctions() {
 	for _, stmt := range e.module.Program().Statements {
-		def, ok := stmt.Expr.(*checker.FunctionDef)
-		if !ok {
-			continue
+		switch def := stmt.Expr.(type) {
+		case *checker.FunctionDef:
+			name := goName(def.Name, !def.Private)
+			if e.packageName == "main" && name == "main" {
+				name = "ardMain"
+			}
+			e.functionNames[def.Name] = name
+		case *checker.ExternalFunctionDef:
+			name := goName(def.Name, !def.Private)
+			if e.packageName == "main" && name == "main" {
+				name = "ardMain"
+			}
+			e.functionNames[def.Name] = name
 		}
-		name := goName(def.Name, !def.Private)
-		if e.packageName == "main" && name == "main" {
-			name = "ardMain"
-		}
-		e.functionNames[def.Name] = name
 	}
 }
 
 func (e *emitter) emitStructDef(def *checker.StructDef) error {
+	if _, ok := e.emittedTypes["struct:"+def.Name]; ok {
+		return nil
+	}
+	e.emittedTypes["struct:"+def.Name] = struct{}{}
 	e.line("type " + goName(def.Name, true) + " struct {")
 	e.indent++
 	fieldNames := sortedStringKeys(def.Fields)
@@ -619,6 +742,46 @@ func (e *emitter) emitStructDef(def *checker.StructDef) error {
 			return fmt.Errorf("struct %s: %w", def.Name, err)
 		}
 		e.line(fmt.Sprintf("%s %s", goName(fieldName, true), typeName))
+	}
+	e.indent--
+	e.line("}")
+	methodNames := sortedStringKeys(def.Methods)
+	for _, methodName := range methodNames {
+		e.line("")
+		if err := e.emitStructMethod(def, def.Methods[methodName]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.FunctionDef) error {
+	params := make([]string, 0, len(method.Parameters))
+	for _, param := range method.Parameters {
+		typeName, err := emitType(param.Type)
+		if err != nil {
+			return fmt.Errorf("method %s.%s: %w", def.Name, method.Name, err)
+		}
+		params = append(params, fmt.Sprintf("%s %s", goName(param.Name, false), typeName))
+	}
+	receiverType := goName(def.Name, true)
+	if method.Mutates {
+		receiverType = "*" + receiverType
+	}
+	receiverName := goName(method.Receiver, false)
+	name := goName(method.Name, !method.Private)
+	signature := fmt.Sprintf("func (%s %s) %s(%s)", receiverName, receiverType, name, strings.Join(params, ", "))
+	if method.ReturnType != checker.Void {
+		returnType, err := emitType(method.ReturnType)
+		if err != nil {
+			return fmt.Errorf("method %s.%s: %w", def.Name, method.Name, err)
+		}
+		signature += " " + returnType
+	}
+	e.line(signature + " {")
+	e.indent++
+	if err := e.emitStatements(method.Body.Stmts, method.ReturnType); err != nil {
+		return err
 	}
 	e.indent--
 	e.line("}")
@@ -641,6 +804,19 @@ func typeNeedsExplicitVarAnnotation(t checker.Type) bool {
 	}
 }
 
+func (e *emitter) emitEnumDef(def *checker.Enum) error {
+	if _, ok := e.emittedTypes["enum:"+def.Name]; ok {
+		return nil
+	}
+	e.emittedTypes["enum:"+def.Name] = struct{}{}
+	e.line("type " + goName(def.Name, true) + " struct {")
+	e.indent++
+	e.line("Tag int")
+	e.indent--
+	e.line("}")
+	return nil
+}
+
 func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
 	value, err := e.emitValueForType(def.Value, def.Type())
 	if err != nil {
@@ -657,6 +833,52 @@ func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
 		return nil
 	}
 	e.line(fmt.Sprintf("var %s %s = %s", name, typeName, value))
+	return nil
+}
+
+func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
+	params := make([]string, 0, len(def.Parameters))
+	args := make([]string, 0, len(def.Parameters))
+	for _, param := range def.Parameters {
+		typeName, err := emitType(param.Type)
+		if err != nil {
+			return fmt.Errorf("extern function %s: %w", def.Name, err)
+		}
+		paramName := goName(param.Name, false)
+		params = append(params, fmt.Sprintf("%s %s", paramName, typeName))
+		args = append(args, paramName)
+	}
+
+	name := e.functionNames[def.Name]
+	signature := fmt.Sprintf("func %s(%s)", name, strings.Join(params, ", "))
+	returnType := ""
+	if def.ReturnType != checker.Void {
+		var err error
+		returnType, err = emitType(def.ReturnType)
+		if err != nil {
+			return fmt.Errorf("extern function %s: %w", def.Name, err)
+		}
+		signature += " " + returnType
+	}
+
+	e.line(signature + " {")
+	e.indent++
+	call := fmt.Sprintf("%s.CallExtern(%q", helperImportAlias, def.ExternalBinding)
+	if len(args) > 0 {
+		call += ", " + strings.Join(args, ", ")
+	}
+	call += ")"
+	e.line("result, err := " + call)
+	e.line("if err != nil {")
+	e.indent++
+	e.line("panic(err)")
+	e.indent--
+	e.line("}")
+	if def.ReturnType != checker.Void {
+		e.line(fmt.Sprintf("return result.(%s)", returnType))
+	}
+	e.indent--
+	e.line("}")
 	return nil
 }
 
@@ -759,9 +981,100 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 		return e.emitWhileLoop(s)
 	case *checker.ForLoop:
 		return e.emitForLoop(s)
+	case *checker.ForIntRange:
+		return e.emitForIntRange(s)
+	case *checker.ForInStr:
+		return e.emitForInStr(s)
+	case *checker.ForInList:
+		return e.emitForInList(s)
+	case *checker.ForInMap:
+		return e.emitForInMap(s)
 	default:
 		return fmt.Errorf("unsupported statement: %T", stmt)
 	}
+}
+
+func (e *emitter) emitForIntRange(loop *checker.ForIntRange) error {
+	start, err := e.emitExpr(loop.Start)
+	if err != nil {
+		return err
+	}
+	end, err := e.emitExpr(loop.End)
+	if err != nil {
+		return err
+	}
+	cursor := goName(loop.Cursor, false)
+	if loop.Index == "" {
+		e.line(fmt.Sprintf("for %s := %s; %s <= %s; %s++ {", cursor, start, cursor, end, cursor))
+	} else {
+		index := goName(loop.Index, false)
+		e.line(fmt.Sprintf("for %s, %s := %s, 0; %s <= %s; %s, %s = %s+1, %s+1 {", cursor, index, start, cursor, end, cursor, index, cursor, index))
+	}
+	e.indent++
+	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForInStr(loop *checker.ForInStr) error {
+	value, err := e.emitExpr(loop.Value)
+	if err != nil {
+		return err
+	}
+	cursor := goName(loop.Cursor, false)
+	indexName := "_"
+	if loop.Index != "" {
+		indexName = goName(loop.Index, false)
+	}
+	e.line(fmt.Sprintf("for %s, __ardRune := range []rune(%s) {", indexName, value))
+	e.indent++
+	e.line(fmt.Sprintf("%s := string(__ardRune)", cursor))
+	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForInList(loop *checker.ForInList) error {
+	list, err := e.emitExpr(loop.List)
+	if err != nil {
+		return err
+	}
+	cursor := goName(loop.Cursor, false)
+	indexName := "_"
+	if loop.Index != "" {
+		indexName = goName(loop.Index, false)
+	}
+	e.line(fmt.Sprintf("for %s, %s := range %s {", indexName, cursor, list))
+	e.indent++
+	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForInMap(loop *checker.ForInMap) error {
+	mapExpr, err := e.emitExpr(loop.Map)
+	if err != nil {
+		return err
+	}
+	key := goName(loop.Key, false)
+	val := goName(loop.Val, false)
+	e.line(fmt.Sprintf("for %s, %s := range %s {", key, val, mapExpr))
+	e.indent++
+	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
 }
 
 func (e *emitter) emitWhileLoop(loop *checker.WhileLoop) error {
@@ -845,6 +1158,14 @@ func usesNameInNonProducing(stmt checker.NonProducing, name string) bool {
 		return usesNameInExpr(s.Condition, name) || usesNameInStatements(s.Body.Stmts, name)
 	case *checker.ForLoop:
 		return usesNameInExpr(s.Init.Value, name) || usesNameInExpr(s.Condition, name) || usesNameInExpr(s.Update.Value, name) || usesNameInStatements(s.Body.Stmts, name)
+	case *checker.ForIntRange:
+		return usesNameInExpr(s.Start, name) || usesNameInExpr(s.End, name) || usesNameInStatements(s.Body.Stmts, name)
+	case *checker.ForInStr:
+		return usesNameInExpr(s.Value, name) || usesNameInStatements(s.Body.Stmts, name)
+	case *checker.ForInList:
+		return usesNameInExpr(s.List, name) || usesNameInStatements(s.Body.Stmts, name)
+	case *checker.ForInMap:
+		return usesNameInExpr(s.Map, name) || usesNameInStatements(s.Body.Stmts, name)
 	default:
 		return false
 	}
@@ -986,6 +1307,16 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 		return false
 	case *checker.InstanceProperty:
 		return usesNameInExpr(v.Subject, name)
+	case *checker.InstanceMethod:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, arg := range v.Method.Args {
+			if usesNameInExpr(arg, name) {
+				return true
+			}
+		}
+		return false
 	case *checker.ModuleStructInstance:
 		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
 			if usesNameInExpr(v.Property.Fields[fieldName], name) {
@@ -1011,6 +1342,41 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			return true
 		}
 		return false
+	case *checker.BoolMatch:
+		return usesNameInExpr(v.Subject, name) || usesNameInStatements(v.True.Stmts, name) || usesNameInStatements(v.False.Stmts, name)
+	case *checker.IntMatch:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, block := range v.IntCases {
+			if usesNameInStatements(block.Stmts, name) {
+				return true
+			}
+		}
+		for _, block := range v.RangeCases {
+			if usesNameInStatements(block.Stmts, name) {
+				return true
+			}
+		}
+		if v.CatchAll != nil && usesNameInStatements(v.CatchAll.Stmts, name) {
+			return true
+		}
+		return false
+	case *checker.EnumMatch:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, block := range v.Cases {
+			if block != nil && usesNameInStatements(block.Stmts, name) {
+				return true
+			}
+		}
+		if v.CatchAll != nil && usesNameInStatements(v.CatchAll.Stmts, name) {
+			return true
+		}
+		return false
+	case *checker.OptionMatch:
+		return usesNameInExpr(v.Subject, name) || usesNameInStatements(v.Some.Body.Stmts, name) || usesNameInStatements(v.None.Stmts, name)
 	default:
 		return false
 	}
@@ -1089,7 +1455,7 @@ func (e *emitter) emitIfStatement(expr *checker.If, returnType checker.Type, isL
 
 func isCallExpression(expr checker.Expression) bool {
 	switch expr.(type) {
-	case *checker.FunctionCall, *checker.ModuleFunctionCall:
+	case *checker.FunctionCall, *checker.ModuleFunctionCall, *checker.InstanceMethod:
 		return true
 	default:
 		return false
@@ -1111,6 +1477,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return "false", nil
 	case *checker.VoidLiteral:
 		return "struct{}{}", nil
+	case *checker.EnumVariant:
+		return e.emitEnumVariant(v)
 	case *checker.CopyExpression:
 		return e.emitCopyExpr(v)
 	case *checker.ListLiteral:
@@ -1145,6 +1513,14 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("%s{%s}", typeName, strings.Join(entries, ", ")), nil
+	case *checker.BoolMatch:
+		return e.emitBoolMatch(v)
+	case *checker.IntMatch:
+		return e.emitIntMatch(v)
+	case *checker.EnumMatch:
+		return e.emitEnumMatch(v)
+	case *checker.OptionMatch:
+		return e.emitOptionMatch(v)
 	case *checker.MaybeMethod:
 		subject, err := e.emitExpr(v.Subject)
 		if err != nil {
@@ -1337,13 +1713,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		return "(!" + inner + ")", nil
 	case *checker.FunctionCall:
-		args := make([]string, 0, len(v.Args))
-		for _, arg := range v.Args {
-			emitted, err := e.emitExpr(arg)
-			if err != nil {
-				return "", err
-			}
-			args = append(args, emitted)
+		args, err := e.emitCallArgs(v)
+		if err != nil {
+			return "", err
 		}
 		name := e.functionNames[v.Name]
 		if name == "" {
@@ -1356,6 +1728,22 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("%s.%s", subject, goName(v.Property, true)), nil
+	case *checker.InstanceMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		args, err := e.emitCallArgs(v.Method)
+		if err != nil {
+			return "", err
+		}
+		methodName := goName(v.Method.Name, false)
+		if v.StructType != nil {
+			if method, ok := v.StructType.Methods[v.Method.Name]; ok {
+				methodName = goName(method.Name, !method.Private)
+			}
+		}
+		return fmt.Sprintf("%s.%s(%s)", subject, methodName, strings.Join(args, ", ")), nil
 	case *checker.ListMethod:
 		subject, err := e.emitExpr(v.Subject)
 		if err != nil {
@@ -1452,13 +1840,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if strings.HasPrefix(v.Module, "ard/") {
 			return "", fmt.Errorf("standard library module calls are not supported yet: %s::%s", v.Module, v.Call.Name)
 		}
-		args := make([]string, 0, len(v.Call.Args))
-		for _, arg := range v.Call.Args {
-			emitted, err := e.emitExpr(arg)
-			if err != nil {
-				return "", err
-			}
-			args = append(args, emitted)
+		args, err := e.emitCallArgs(v.Call)
+		if err != nil {
+			return "", err
 		}
 		alias := packageNameForModulePath(v.Module)
 		name := goName(v.Call.Name, true)
@@ -1483,8 +1867,37 @@ func emitAssignmentTarget(expr checker.Expression) (string, error) {
 		return goName(target.Name(), false), nil
 	case *checker.Variable:
 		return goName(target.Name(), false), nil
+	case *checker.InstanceProperty:
+		subject, err := emitAssignmentTarget(target.Subject)
+		if err != nil {
+			subjectExpr, exprErr := emitBareExpr(target.Subject)
+			if exprErr != nil {
+				return "", exprErr
+			}
+			subject = subjectExpr
+		}
+		return fmt.Sprintf("%s.%s", subject, goName(target.Property, true)), nil
 	default:
 		return "", fmt.Errorf("unsupported reassignment target: %T", expr)
+	}
+}
+
+func emitBareExpr(expr checker.Expression) (string, error) {
+	switch v := expr.(type) {
+	case *checker.Identifier:
+		return goName(v.Name, false), nil
+	case checker.Variable:
+		return goName(v.Name(), false), nil
+	case *checker.Variable:
+		return goName(v.Name(), false), nil
+	case *checker.InstanceProperty:
+		subject, err := emitBareExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.%s", subject, goName(v.Property, true)), nil
+	default:
+		return "", fmt.Errorf("unsupported bare expression: %T", expr)
 	}
 }
 
@@ -1556,6 +1969,177 @@ func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, erro
 	}
 }
 
+func (e *emitter) emitEnumVariant(variant *checker.EnumVariant) (string, error) {
+	return fmt.Sprintf("struct{ Tag int }{Tag: %d}", variant.Discriminant), nil
+}
+
+func (e *emitter) emitBoolMatch(match *checker.BoolMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+		inner.line("if " + subject + " {")
+		inner.indent++
+		if err := inner.emitStatements(match.True.Stmts, match.Type()); err != nil {
+			return err
+		}
+		inner.indent--
+		inner.line("} else {")
+		inner.indent++
+		if err := inner.emitStatements(match.False.Stmts, match.Type()); err != nil {
+			return err
+		}
+		inner.indent--
+		inner.line("}")
+		return nil
+	})
+}
+
+func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+		inner.line("switch {")
+		inner.indent++
+		for _, value := range sortedIntKeys(match.IntCases) {
+			block := match.IntCases[value]
+			inner.line(fmt.Sprintf("case %s == %d:", subject, value))
+			inner.indent++
+			if err := inner.emitStatements(block.Stmts, match.Type()); err != nil {
+				return err
+			}
+			inner.indent--
+		}
+		for _, intRange := range sortedIntRanges(match.RangeCases) {
+			block := match.RangeCases[intRange]
+			inner.line(fmt.Sprintf("case %s >= %d && %s <= %d:", subject, intRange.Start, subject, intRange.End))
+			inner.indent++
+			if err := inner.emitStatements(block.Stmts, match.Type()); err != nil {
+				return err
+			}
+			inner.indent--
+		}
+		if match.CatchAll != nil {
+			inner.line("default:")
+			inner.indent++
+			if err := inner.emitStatements(match.CatchAll.Stmts, match.Type()); err != nil {
+				return err
+			}
+			inner.indent--
+		} else if match.Type() != checker.Void {
+			inner.line("default:")
+			inner.indent++
+			inner.line(`panic("non-exhaustive int match")`)
+			inner.indent--
+		}
+		inner.indent--
+		inner.line("}")
+		return nil
+	})
+}
+
+func (e *emitter) emitOptionMatch(match *checker.OptionMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	patternName := goName(match.Some.Pattern.Name, false)
+	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+		inner.line("__ardMaybe := " + subject)
+		inner.line("if __ardMaybe.IsSome() {")
+		inner.indent++
+		inner.line(fmt.Sprintf("%s := __ardMaybe.Expect(%q)", patternName, "unreachable none in maybe match"))
+		if err := inner.emitStatements(match.Some.Body.Stmts, match.Type()); err != nil {
+			return err
+		}
+		inner.indent--
+		inner.line("} else {")
+		inner.indent++
+		if err := inner.emitStatements(match.None.Stmts, match.Type()); err != nil {
+			return err
+		}
+		inner.indent--
+		inner.line("}")
+		return nil
+	})
+}
+
+func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+		inner.line("switch " + subject + ".Tag {")
+		inner.indent++
+		discriminants := make([]int, 0, len(match.DiscriminantToIndex))
+		for discriminant := range match.DiscriminantToIndex {
+			discriminants = append(discriminants, discriminant)
+		}
+		sort.Ints(discriminants)
+		for _, discriminant := range discriminants {
+			idx := match.DiscriminantToIndex[discriminant]
+			if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
+				continue
+			}
+			inner.line(fmt.Sprintf("case %d:", discriminant))
+			inner.indent++
+			if err := inner.emitStatements(match.Cases[idx].Stmts, match.Type()); err != nil {
+				return err
+			}
+			inner.indent--
+		}
+		if match.CatchAll != nil {
+			inner.line("default:")
+			inner.indent++
+			if err := inner.emitStatements(match.CatchAll.Stmts, match.Type()); err != nil {
+				return err
+			}
+			inner.indent--
+		} else if match.Type() != checker.Void {
+			inner.line("default:")
+			inner.indent++
+			inner.line(`panic("non-exhaustive enum match")`)
+			inner.indent--
+		}
+		inner.indent--
+		inner.line("}")
+		return nil
+	})
+}
+
+func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitter) error) (string, error) {
+	inner := &emitter{
+		module:        e.module,
+		packageName:   e.packageName,
+		entrypoint:    e.entrypoint,
+		imports:       e.imports,
+		functionNames: e.functionNames,
+		emittedTypes:  e.emittedTypes,
+		indent:        1,
+	}
+	if err := body(inner); err != nil {
+		return "", err
+	}
+	var builder strings.Builder
+	builder.WriteString("func()")
+	if returnType != nil && returnType != checker.Void {
+		typeName, err := emitType(returnType)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteString(" ")
+		builder.WriteString(typeName)
+	}
+	builder.WriteString(" {\n")
+	builder.WriteString(inner.builder.String())
+	builder.WriteString("}()")
+	return builder.String(), nil
+}
+
 func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expectedType checker.Type) (string, error) {
 	switch call.Call.Name {
 	case "some":
@@ -1596,6 +2180,26 @@ func maybeHasUnresolvedTypeVar(maybeType *checker.Maybe) bool {
 		return true
 	}
 	return false
+}
+
+func (e *emitter) emitCallArgs(call *checker.FunctionCall) ([]string, error) {
+	args := make([]string, 0, len(call.Args))
+	var params []checker.Parameter
+	if def := call.Definition(); def != nil {
+		params = def.Parameters
+	}
+	for i, arg := range call.Args {
+		expectedType := checker.Type(nil)
+		if i < len(params) {
+			expectedType = params[i].Type
+		}
+		emitted, err := e.emitValueForType(arg, expectedType)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, emitted)
+	}
+	return args, nil
 }
 
 func (e *emitter) emitMapMutationExpr(method *checker.MapMethod) (string, error) {
@@ -1663,6 +2267,8 @@ func emitType(t checker.Type) (string, error) {
 			return emitType(actual)
 		}
 		return "any", nil
+	case *checker.Enum:
+		return "struct{ Tag int }", nil
 	case *checker.Maybe:
 		innerType, err := emitType(typed.Of())
 		if err != nil {
