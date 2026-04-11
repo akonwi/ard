@@ -436,6 +436,15 @@ func _ffi_HTTP_ResponseClose(args []*runtime.Object) *runtime.Object {
 	return runtime.Void()
 }
 
+func _ffi_JsonEncode(args []*runtime.Object) *runtime.Object {
+	arg0 := args[0].Raw()
+	result, err := ffi.JsonEncode(arg0)
+	if err != nil {
+		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+	}
+	return runtime.MakeOk(runtime.MakeStr(result))
+}
+
 func _ffi_FloatFromStr(args []*runtime.Object) *runtime.Object {
 	arg0 := args[0].AsString()
 	result := ffi.FloatFromStr(arg0)
@@ -767,7 +776,7 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("HTTP_Serve", ffi.HTTP_Serve); err != nil {
 		return fmt.Errorf("failed to register HTTP_Serve: %w", err)
 	}
-	if err := r.Register("JsonEncode", ffi.JsonEncode); err != nil {
+	if err := r.Register("JsonEncode", _ffi_JsonEncode); err != nil {
 		return fmt.Errorf("failed to register JsonEncode: %w", err)
 	}
 	if err := r.Register("FloatFromStr", _ffi_FloatFromStr); err != nil {

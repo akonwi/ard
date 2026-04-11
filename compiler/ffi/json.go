@@ -2,15 +2,13 @@ package ffi
 
 import (
 	"encoding/json/v2"
-
-	"github.com/akonwi/ard/runtime"
 )
 
-// Encode an Ard value into a JSON string
-func JsonEncode(args []*runtime.Object) *runtime.Object {
-	bytes, err := json.Marshal(args[0])
+// JsonEncode marshals an Ard value to a JSON string.
+func JsonEncode(value any) (string, error) {
+	bytes, err := json.Marshal(value)
 	if err != nil {
-		return runtime.MakeErr(runtime.MakeStr(err.Error()))
+		return "", err
 	}
-	return runtime.MakeOk(runtime.MakeStr(string(bytes)))
+	return string(bytes), nil
 }
