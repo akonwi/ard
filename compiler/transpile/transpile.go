@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,7 +16,14 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
-const generatedGoVersion = "1.26.0"
+const (
+	generatedGoVersion = "1.26.0"
+	ardModulePath      = "github.com/akonwi/ard"
+	helperImportPath   = ardModulePath + "/go"
+	helperImportAlias  = "ardgo"
+	stringsImportPath  = "strings"
+	strconvImportPath  = "strconv"
+)
 
 type emitter struct {
 	module        checker.Module
@@ -172,7 +180,12 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(fmt.Sprintf("module %s\n\ngo %s\n", project.ProjectName, generatedGoVersion)), 0o644); err != nil {
+	moduleRoot, err := compilerModuleRoot()
+	if err != nil {
+		return err
+	}
+	goMod := fmt.Sprintf("module %s\n\ngo %s\n\nrequire %s v0.0.0\n\nreplace %s => %s\n", project.ProjectName, generatedGoVersion, ardModulePath, ardModulePath, filepath.Clean(moduleRoot))
+	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		return err
 	}
 
@@ -290,9 +303,56 @@ func collectModuleImports(stmts []checker.Statement) map[string]string {
 func collectImportsFromStatement(stmt checker.Statement, imports map[string]string) {
 	if stmt.Expr != nil {
 		collectImportsFromExpr(stmt.Expr, imports)
+		collectImportsFromExprTypes(stmt.Expr, imports)
 	}
 	if stmt.Stmt != nil {
 		collectImportsFromNonProducing(stmt.Stmt, imports)
+		collectImportsFromStmtTypes(stmt.Stmt, imports)
+	}
+}
+
+func collectImportsFromExprTypes(expr checker.Expression, imports map[string]string) {
+	collectImportsFromType(expr.Type(), imports)
+	if fn, ok := expr.(*checker.FunctionDef); ok {
+		for _, param := range fn.Parameters {
+			collectImportsFromType(param.Type, imports)
+		}
+		collectImportsFromType(fn.ReturnType, imports)
+	}
+}
+
+func collectImportsFromStmtTypes(stmt checker.NonProducing, imports map[string]string) {
+	switch s := stmt.(type) {
+	case *checker.StructDef:
+		for _, fieldName := range sortedStringKeys(s.Fields) {
+			collectImportsFromType(s.Fields[fieldName], imports)
+		}
+	case *checker.VariableDef:
+		collectImportsFromType(s.Type(), imports)
+	}
+}
+
+func collectImportsFromType(t checker.Type, imports map[string]string) {
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			collectImportsFromType(actual, imports)
+		}
+	case *checker.Maybe:
+		imports[helperImportPath] = helperImportAlias
+		collectImportsFromType(typed.Of(), imports)
+	case *checker.List:
+		collectImportsFromType(typed.Of(), imports)
+	case *checker.Map:
+		collectImportsFromType(typed.Key(), imports)
+		collectImportsFromType(typed.Value(), imports)
+	case *checker.Result:
+		collectImportsFromType(typed.Val(), imports)
+		collectImportsFromType(typed.Err(), imports)
+	case *checker.StructDef:
+		for _, fieldName := range sortedStringKeys(typed.Fields) {
+			collectImportsFromType(typed.Fields[fieldName], imports)
+		}
 	}
 }
 
@@ -418,6 +478,36 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
 		}
+	case *checker.MaybeMethod:
+		imports[helperImportPath] = helperImportAlias
+		collectImportsFromExpr(v.Subject, imports)
+		for _, arg := range v.Args {
+			collectImportsFromExpr(arg, imports)
+		}
+	case *checker.StrMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		for _, arg := range v.Args {
+			collectImportsFromExpr(arg, imports)
+		}
+		switch v.Kind {
+		case checker.StrContains, checker.StrReplace, checker.StrReplaceAll, checker.StrSplit, checker.StrStartsWith, checker.StrTrim:
+			imports[stringsImportPath] = "strings"
+		}
+	case *checker.IntMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		if v.Kind == checker.IntToStr {
+			imports[strconvImportPath] = "strconv"
+		}
+	case *checker.FloatMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		if v.Kind == checker.FloatToStr {
+			imports[strconvImportPath] = "strconv"
+		}
+	case *checker.BoolMethod:
+		collectImportsFromExpr(v.Subject, imports)
+		if v.Kind == checker.BoolToStr {
+			imports[strconvImportPath] = "strconv"
+		}
 	case *checker.ModuleStructInstance:
 		if !strings.HasPrefix(v.Module, "ard/") {
 			imports[v.Module] = packageNameForModulePath(v.Module)
@@ -426,7 +516,9 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 			collectImportsFromExpr(v.Property.Fields[fieldName], imports)
 		}
 	case *checker.ModuleFunctionCall:
-		if !strings.HasPrefix(v.Module, "ard/") {
+		if v.Module == "ard/maybe" {
+			imports[helperImportPath] = helperImportAlias
+		} else if !strings.HasPrefix(v.Module, "ard/") {
 			imports[v.Module] = packageNameForModulePath(v.Module)
 		}
 		for _, arg := range v.Call.Args {
@@ -533,13 +625,38 @@ func (e *emitter) emitStructDef(def *checker.StructDef) error {
 	return nil
 }
 
+func (e *emitter) emitValueForType(expr checker.Expression, expectedType checker.Type) (string, error) {
+	if call, ok := expr.(*checker.ModuleFunctionCall); ok && call.Module == "ard/maybe" {
+		return e.emitMaybeModuleCall(call, expectedType)
+	}
+	return e.emitExpr(expr)
+}
+
+func typeNeedsExplicitVarAnnotation(t checker.Type) bool {
+	switch t.(type) {
+	case *checker.Maybe:
+		return true
+	default:
+		return false
+	}
+}
+
 func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
-	value, err := e.emitExpr(def.Value)
+	value, err := e.emitValueForType(def.Value, def.Type())
 	if err != nil {
 		return err
 	}
 	name := goName(def.Name, !def.Mutable)
-	e.line(fmt.Sprintf("var %s = %s", name, value))
+	if !typeNeedsExplicitVarAnnotation(def.Type()) {
+		e.line(fmt.Sprintf("var %s = %s", name, value))
+		return nil
+	}
+	typeName, err := emitType(def.Type())
+	if err != nil || typeName == "" {
+		e.line(fmt.Sprintf("var %s = %s", name, value))
+		return nil
+	}
+	e.line(fmt.Sprintf("var %s %s = %s", name, typeName, value))
 	return nil
 }
 
@@ -608,12 +725,21 @@ func lastMeaningfulStatementIndex(stmts []checker.Statement) int {
 func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checker.Statement) error {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
-		value, err := e.emitExpr(s.Value)
+		value, err := e.emitValueForType(s.Value, s.Type())
 		if err != nil {
 			return err
 		}
 		name := goName(s.Name, false)
-		e.line(fmt.Sprintf("%s := %s", name, value))
+		if typeNeedsExplicitVarAnnotation(s.Type()) {
+			typeName, err := emitType(s.Type())
+			if err != nil || typeName == "" {
+				e.line(fmt.Sprintf("%s := %s", name, value))
+			} else {
+				e.line(fmt.Sprintf("var %s %s = %s", name, typeName, value))
+			}
+		} else {
+			e.line(fmt.Sprintf("%s := %s", name, value))
+		}
 		if !usesNameInStatements(remaining, s.Name) {
 			e.line(fmt.Sprintf("_ = %s", name))
 		}
@@ -825,6 +951,32 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.MaybeMethod:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, arg := range v.Args {
+			if usesNameInExpr(arg, name) {
+				return true
+			}
+		}
+		return false
+	case *checker.StrMethod:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, arg := range v.Args {
+			if usesNameInExpr(arg, name) {
+				return true
+			}
+		}
+		return false
+	case *checker.IntMethod:
+		return usesNameInExpr(v.Subject, name)
+	case *checker.FloatMethod:
+		return usesNameInExpr(v.Subject, name)
+	case *checker.BoolMethod:
+		return usesNameInExpr(v.Subject, name)
 	case *checker.StructInstance:
 		for _, fieldName := range sortedStringKeys(v.Fields) {
 			if usesNameInExpr(v.Fields[fieldName], name) {
@@ -993,6 +1145,127 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("%s{%s}", typeName, strings.Join(entries, ", ")), nil
+	case *checker.MaybeMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.MaybeExpect:
+			if len(v.Args) != 1 {
+				return "", fmt.Errorf("maybe.expect expects one arg")
+			}
+			message, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s.Expect(%s)", subject, message), nil
+		case checker.MaybeIsNone:
+			return fmt.Sprintf("%s.IsNone()", subject), nil
+		case checker.MaybeIsSome:
+			return fmt.Sprintf("%s.IsSome()", subject), nil
+		case checker.MaybeOr:
+			if len(v.Args) != 1 {
+				return "", fmt.Errorf("maybe.or expects one arg")
+			}
+			fallback, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s.Or(%s)", subject, fallback), nil
+		default:
+			return "", fmt.Errorf("unsupported maybe method: %v", v.Kind)
+		}
+	case *checker.StrMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.StrSize:
+			return fmt.Sprintf("len(%s)", subject), nil
+		case checker.StrIsEmpty:
+			return fmt.Sprintf("len(%s) == 0", subject), nil
+		case checker.StrContains:
+			arg, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("strings.Contains(%s, %s)", subject, arg), nil
+		case checker.StrReplace:
+			oldValue, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			newValue, err := e.emitExpr(v.Args[1])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("strings.Replace(%s, %s, %s, 1)", subject, oldValue, newValue), nil
+		case checker.StrReplaceAll:
+			oldValue, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			newValue, err := e.emitExpr(v.Args[1])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", subject, oldValue, newValue), nil
+		case checker.StrSplit:
+			arg, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("strings.Split(%s, %s)", subject, arg), nil
+		case checker.StrStartsWith:
+			arg, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("strings.HasPrefix(%s, %s)", subject, arg), nil
+		case checker.StrToStr:
+			return subject, nil
+		case checker.StrTrim:
+			return fmt.Sprintf("strings.TrimSpace(%s)", subject), nil
+		default:
+			return "", fmt.Errorf("unsupported string method: %v", v.Kind)
+		}
+	case *checker.IntMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.IntToStr:
+			return fmt.Sprintf("strconv.Itoa(%s)", subject), nil
+		default:
+			return "", fmt.Errorf("unsupported int method: %v", v.Kind)
+		}
+	case *checker.FloatMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.FloatToStr:
+			return fmt.Sprintf("strconv.FormatFloat(%s, 'f', -1, 64)", subject), nil
+		case checker.FloatToInt:
+			return fmt.Sprintf("func() int { value := float64(%s); return int(value) }()", subject), nil
+		default:
+			return "", fmt.Errorf("unsupported float method: %v", v.Kind)
+		}
+	case *checker.BoolMethod:
+		subject, err := e.emitExpr(v.Subject)
+		if err != nil {
+			return "", err
+		}
+		switch v.Kind {
+		case checker.BoolToStr:
+			return fmt.Sprintf("strconv.FormatBool(%s)", subject), nil
+		default:
+			return "", fmt.Errorf("unsupported bool method: %v", v.Kind)
+		}
 	case *checker.StructInstance:
 		fields := make([]string, 0, len(v.Fields))
 		for _, fieldName := range sortedStringKeys(v.Fields) {
@@ -1111,8 +1384,39 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		switch v.Kind {
+		case checker.MapKeys:
+			mapType, ok := v.Subject.Type().(*checker.Map)
+			if !ok {
+				return "", fmt.Errorf("expected map subject, got %s", v.Subject.Type())
+			}
+			keysType, err := emitType(checker.MakeList(mapType.Key()))
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("func() %s { keys := make(%s, 0, len(%s)); for key := range %s { keys = append(keys, key) }; return keys }()", keysType, keysType, subject, subject), nil
 		case checker.MapSize:
 			return fmt.Sprintf("len(%s)", subject), nil
+		case checker.MapGet:
+			if len(v.Args) != 1 {
+				return "", fmt.Errorf("map.get expects one arg")
+			}
+			key, err := e.emitExpr(v.Args[0])
+			if err != nil {
+				return "", err
+			}
+			resultType, err := emitType(v.Type())
+			if err != nil {
+				return "", err
+			}
+			maybeType, ok := v.Type().(*checker.Maybe)
+			if !ok {
+				return "", fmt.Errorf("expected maybe return type for map.get, got %s", v.Type())
+			}
+			innerType, err := emitType(maybeType.Of())
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("func() %s { if value, ok := %s[%s]; ok { return %s.Some(value) }; return %s.None[%s]() }()", resultType, subject, key, helperImportAlias, helperImportAlias, innerType), nil
 		case checker.MapHas:
 			if len(v.Args) != 1 {
 				return "", fmt.Errorf("map.has expects one arg")
@@ -1142,6 +1446,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		alias := packageNameForModulePath(v.Module)
 		return fmt.Sprintf("%s.%s{%s}", alias, goName(v.Property.Name, true), strings.Join(fields, ", ")), nil
 	case *checker.ModuleFunctionCall:
+		if v.Module == "ard/maybe" {
+			return e.emitMaybeModuleCall(v, nil)
+		}
 		if strings.HasPrefix(v.Module, "ard/") {
 			return "", fmt.Errorf("standard library module calls are not supported yet: %s::%s", v.Module, v.Call.Name)
 		}
@@ -1249,6 +1556,48 @@ func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, erro
 	}
 }
 
+func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expectedType checker.Type) (string, error) {
+	switch call.Call.Name {
+	case "some":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("maybe::some expects one arg")
+		}
+		arg, err := e.emitExpr(call.Call.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Some(%s)", helperImportAlias, arg), nil
+	case "none":
+		maybeType, ok := call.Call.ReturnType.(*checker.Maybe)
+		if (!ok || maybeHasUnresolvedTypeVar(maybeType)) && expectedType != nil {
+			if expectedMaybe, ok := expectedType.(*checker.Maybe); ok {
+				maybeType = expectedMaybe
+				ok = true
+			}
+		}
+		if !ok {
+			return "", fmt.Errorf("maybe::none expected Maybe return type, got %s", call.Call.ReturnType)
+		}
+		innerType, err := emitType(maybeType.Of())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.None[%s]()", helperImportAlias, innerType), nil
+	default:
+		return "", fmt.Errorf("unsupported maybe module call: %s", call.Call.Name)
+	}
+}
+
+func maybeHasUnresolvedTypeVar(maybeType *checker.Maybe) bool {
+	if maybeType == nil {
+		return true
+	}
+	if tv, ok := maybeType.Of().(*checker.TypeVar); ok && tv.Actual() == nil {
+		return true
+	}
+	return false
+}
+
 func (e *emitter) emitMapMutationExpr(method *checker.MapMethod) (string, error) {
 	target, err := emitAssignmentTarget(method.Subject)
 	if err != nil {
@@ -1309,6 +1658,17 @@ func emitType(t checker.Type) (string, error) {
 	}
 
 	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			return emitType(actual)
+		}
+		return "any", nil
+	case *checker.Maybe:
+		innerType, err := emitType(typed.Of())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Maybe[%s]", helperImportAlias, innerType), nil
 	case *checker.List:
 		elementType, err := emitType(typed.Of())
 		if err != nil {
@@ -1387,6 +1747,14 @@ func lowerFirst(value string) string {
 	runes := []rune(value)
 	runes[0] = unicode.ToLower(runes[0])
 	return string(runes)
+}
+
+func compilerModuleRoot() (string, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("failed to determine compiler module root")
+	}
+	return filepath.Dir(filepath.Dir(file)), nil
 }
 
 func isGoKeyword(value string) bool {
