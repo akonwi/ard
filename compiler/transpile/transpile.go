@@ -670,6 +670,10 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 			collectImportsFromStatement(stmt, imports)
 		}
 	case *checker.FunctionDef:
+		for _, param := range v.Parameters {
+			collectImportsFromType(param.Type, imports)
+		}
+		collectImportsFromType(effectiveFunctionReturnType(v), imports)
 		for _, stmt := range v.Body.Stmts {
 			collectImportsFromStatement(stmt, imports)
 		}
@@ -891,6 +895,94 @@ func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
 	return nil
 }
 
+func isFunctionLiteralDef(def *checker.FunctionDef) bool {
+	if def == nil {
+		return false
+	}
+	return strings.HasPrefix(def.Name, "anon_func_") || strings.HasPrefix(def.Name, "start_func_") || strings.HasPrefix(def.Name, "eval_func_")
+}
+
+func effectiveFunctionReturnType(def *checker.FunctionDef) checker.Type {
+	if def == nil {
+		return checker.Void
+	}
+	if isFunctionLiteralDef(def) && def.ReturnType == checker.Void && def.Body != nil && def.Body.Type() != checker.Void {
+		return def.Body.Type()
+	}
+	return def.ReturnType
+}
+
+func emitFunctionParams(params []checker.Parameter, includeNames bool) ([]string, error) {
+	parts := make([]string, 0, len(params))
+	for _, param := range params {
+		typeName, err := emitType(param.Type)
+		if err != nil {
+			return nil, err
+		}
+		if includeNames {
+			parts = append(parts, fmt.Sprintf("%s %s", goName(param.Name, false), typeName))
+		} else {
+			parts = append(parts, typeName)
+		}
+	}
+	return parts, nil
+}
+
+func emitFunctionType(def *checker.FunctionDef) (string, error) {
+	params, err := emitFunctionParams(def.Parameters, false)
+	if err != nil {
+		return "", err
+	}
+	typeName := fmt.Sprintf("func(%s)", strings.Join(params, ", "))
+	returnType := effectiveFunctionReturnType(def)
+	if returnType != checker.Void {
+		emittedReturnType, err := emitType(returnType)
+		if err != nil {
+			return "", err
+		}
+		typeName += " " + emittedReturnType
+	}
+	return typeName, nil
+}
+
+func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
+	params, err := emitFunctionParams(def.Parameters, true)
+	if err != nil {
+		return "", err
+	}
+	returnType := effectiveFunctionReturnType(def)
+	inner := &emitter{
+		module:        e.module,
+		packageName:   e.packageName,
+		entrypoint:    e.entrypoint,
+		imports:       e.imports,
+		functionNames: e.functionNames,
+		emittedTypes:  e.emittedTypes,
+		indent:        1,
+		tempCounter:   e.tempCounter,
+	}
+	if err := inner.emitStatements(def.Body.Stmts, returnType); err != nil {
+		return "", err
+	}
+	e.tempCounter = inner.tempCounter
+	var builder strings.Builder
+	builder.WriteString("func(")
+	builder.WriteString(strings.Join(params, ", "))
+	builder.WriteString(")")
+	if returnType != checker.Void {
+		emittedReturnType, err := emitType(returnType)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteString(" ")
+		builder.WriteString(emittedReturnType)
+	}
+	builder.WriteString(" {\n")
+	builder.WriteString(inner.builder.String())
+	builder.WriteString("}")
+	return builder.String(), nil
+}
+
 func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
 	params := make([]string, 0, len(def.Parameters))
 	args := make([]string, 0, len(def.Parameters))
@@ -938,26 +1030,23 @@ func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
 }
 
 func (e *emitter) emitFunction(def *checker.FunctionDef) error {
-	params := make([]string, 0, len(def.Parameters))
-	for _, param := range def.Parameters {
-		typeName, err := emitType(param.Type)
-		if err != nil {
-			return fmt.Errorf("function %s: %w", def.Name, err)
-		}
-		params = append(params, fmt.Sprintf("%s %s", goName(param.Name, false), typeName))
+	params, err := emitFunctionParams(def.Parameters, true)
+	if err != nil {
+		return fmt.Errorf("function %s: %w", def.Name, err)
 	}
 
+	returnType := effectiveFunctionReturnType(def)
 	signature := fmt.Sprintf("func %s(%s)", e.functionNames[def.Name], strings.Join(params, ", "))
-	if def.ReturnType != checker.Void {
-		returnType, err := emitType(def.ReturnType)
+	if returnType != checker.Void {
+		emittedReturnType, err := emitType(returnType)
 		if err != nil {
 			return fmt.Errorf("function %s: %w", def.Name, err)
 		}
-		signature += " " + returnType
+		signature += " " + emittedReturnType
 	}
 	e.line(signature + " {")
 	e.indent++
-	if err := e.emitStatements(def.Body.Stmts, def.ReturnType); err != nil {
+	if err := e.emitStatements(def.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1508,6 +1597,16 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return okUses || errUses
+	case *checker.FunctionDef:
+		for _, param := range v.Parameters {
+			if param.Name == name {
+				return false
+			}
+		}
+		if v.Body != nil {
+			return usesNameInStatements(v.Body.Stmts, name)
+		}
+		return false
 	default:
 		return false
 	}
@@ -2026,6 +2125,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return "(!" + inner + ")", nil
+	case *checker.FunctionDef:
+		return e.emitFunctionLiteral(v)
 	case *checker.FunctionCall:
 		args, err := e.emitCallArgs(v)
 		if err != nil {
@@ -2162,7 +2263,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		alias := packageNameForModulePath(v.Module)
-		name := goName(v.Call.Name, true)
+		name := goName(e.resolvedModuleFunctionName(v.Module, v.Call), true)
 		return fmt.Sprintf("%s.%s(%s)", alias, name, strings.Join(args, ", ")), nil
 	case *checker.ModuleSymbol:
 		if strings.HasPrefix(v.Module, "ard/") {
@@ -2591,12 +2692,18 @@ func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error)
 	if err != nil {
 		return "", err
 	}
+	emitResultArg := func(index int) (string, error) {
+		if index >= len(method.Args) {
+			return "", fmt.Errorf("result method missing arg %d", index)
+		}
+		return e.emitExpr(method.Args[index])
+	}
 	switch method.Kind {
 	case checker.ResultExpect:
 		if len(method.Args) != 1 {
 			return "", fmt.Errorf("result.expect expects one arg")
 		}
-		message, err := e.emitExpr(method.Args[0])
+		message, err := emitResultArg(0)
 		if err != nil {
 			return "", err
 		}
@@ -2605,7 +2712,7 @@ func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error)
 		if len(method.Args) != 1 {
 			return "", fmt.Errorf("result.or expects one arg")
 		}
-		fallback, err := e.emitExpr(method.Args[0])
+		fallback, err := emitResultArg(0)
 		if err != nil {
 			return "", err
 		}
@@ -2614,6 +2721,33 @@ func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error)
 		return fmt.Sprintf("%s.IsOk()", subject), nil
 	case checker.ResultIsErr:
 		return fmt.Sprintf("%s.IsErr()", subject), nil
+	case checker.ResultMap:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("result.map expects one arg")
+		}
+		mapper, err := emitResultArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.ResultMap(%s, %s)", helperImportAlias, subject, mapper), nil
+	case checker.ResultMapErr:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("result.map_err expects one arg")
+		}
+		mapper, err := emitResultArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.ResultMapErr(%s, %s)", helperImportAlias, subject, mapper), nil
+	case checker.ResultAndThen:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("result.and_then expects one arg")
+		}
+		mapper, err := emitResultArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.ResultAndThen(%s, %s)", helperImportAlias, subject, mapper), nil
 	default:
 		return "", fmt.Errorf("unsupported result method: %v", method.Kind)
 	}
@@ -2692,6 +2826,38 @@ func (e *emitter) emitCallArgs(call *checker.FunctionCall) ([]string, error) {
 		args = append(args, emitted)
 	}
 	return args, nil
+}
+
+func moduleFunctionValueName(module checker.Module, def *checker.FunctionDef) string {
+	if module == nil || module.Program() == nil || def == nil {
+		return ""
+	}
+	for _, stmt := range module.Program().Statements {
+		variableDef, ok := stmt.Stmt.(*checker.VariableDef)
+		if !ok {
+			continue
+		}
+		if valueFn, ok := variableDef.Value.(*checker.FunctionDef); ok && (valueFn == def || valueFn.Name == def.Name) {
+			return variableDef.Name
+		}
+		if typeFn, ok := variableDef.Type().(*checker.FunctionDef); ok && (typeFn == def || typeFn.Name == def.Name) {
+			return variableDef.Name
+		}
+	}
+	return ""
+}
+
+func (e *emitter) resolvedModuleFunctionName(modulePath string, call *checker.FunctionCall) string {
+	if call == nil {
+		return ""
+	}
+	name := call.Name
+	if def := call.Definition(); def != nil && isFunctionLiteralDef(def) {
+		if resolved := moduleFunctionValueName(e.module.Program().Imports[modulePath], def); resolved != "" {
+			return resolved
+		}
+	}
+	return name
 }
 
 func (e *emitter) emitMapMutationExpr(method *checker.MapMethod) (string, error) {
@@ -2795,6 +2961,8 @@ func emitType(t checker.Type) (string, error) {
 		return fmt.Sprintf("map[%s]%s", keyType, valueType), nil
 	case *checker.StructDef:
 		return goName(typed.Name, true), nil
+	case *checker.FunctionDef:
+		return emitFunctionType(typed)
 	default:
 		return "", fmt.Errorf("unsupported type: %s", t.String())
 	}

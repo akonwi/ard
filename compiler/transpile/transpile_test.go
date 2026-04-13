@@ -780,6 +780,54 @@ let d = forced()
 	}
 }
 
+func TestBuildBinaryCompilesResultCombinators(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn mapped() Int {
+  let res: Int!Str = Result::ok(21)
+  let out = res.map(fn(value) { value * 2 })
+  out.or(0)
+}
+
+fn mapped_err() Int {
+  let res: Int!Str = Result::err("bad")
+  let out = res.map_err(fn(err) { err.size() })
+  match out {
+    err(size) => size,
+    ok(value) => value,
+  }
+}
+
+fn chained() Str {
+  let res: Int!Str = Result::ok(21)
+  let out = res.and_then<Str>(fn(value) { Result::ok("{value}") })
+  out.or("")
+}
+
+fn chained_err() Bool {
+  let res: Int!Str = Result::err("boom")
+  let out = res.and_then<Str>(fn(value) { Result::ok("{value}") })
+  out.is_err()
+}
+
+let a = mapped()
+let b = mapped_err()
+let c = chained()
+let d = chained_err()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesResultMatches(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -912,6 +960,47 @@ let d = maybe_fallback(0)
 let e = ignore_success()
 let f = sum_all([1, 2, 3])
 let g = loop_catch([1, 2])
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesAnonymousFunctions(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+let add_one = fn(x: Int) Int { x + 1 }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write utils source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/utils
+
+fn apply_twice(value: Int, callback: fn(Int) Int) Int {
+  let first = callback(value)
+  callback(first)
+}
+
+fn has_text(callback: fn(Str) Bool) Bool {
+  callback("hello")
+}
+
+let base = 2
+let multiply = fn(a: Int, b: Int) Int {
+  a * b * base
+}
+let mapped = apply_twice(3, fn(x) { x + 1 })
+let checked = has_text(fn(x) { x.size() > 0 })
+let imported = utils::add_one(5)
+let local = multiply(3, 4)
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}

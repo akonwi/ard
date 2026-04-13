@@ -45,3 +45,33 @@ func TestResultExpectPanicsOnErr(t *testing.T) {
 
 	Err[int, string]("bad").Expect("boom")
 }
+
+func TestResultMapHelpers(t *testing.T) {
+	mapped := ResultMap(Ok[int, string](21), func(value int) int {
+		return value * 2
+	})
+	if got := mapped.Or(0); got != 42 {
+		t.Fatalf("expected mapped ok value, got %d", got)
+	}
+
+	mappedErr := ResultMapErr(Err[int, string]("bad"), func(err string) int {
+		return len(err)
+	})
+	if got := mappedErr.UnwrapErr(); got != 3 {
+		t.Fatalf("expected mapped err value 3, got %d", got)
+	}
+
+	chained := ResultAndThen(Ok[int, string](5), func(value int) Result[string, string] {
+		return Ok[string, string]("done")
+	})
+	if got := chained.Or(""); got != "done" {
+		t.Fatalf("expected chained ok value %q, got %q", "done", got)
+	}
+
+	propagated := ResultAndThen(Err[int, string]("boom"), func(value int) Result[string, string] {
+		return Ok[string, string]("nope")
+	})
+	if got := propagated.UnwrapErr(); got != "boom" {
+		t.Fatalf("expected propagated err %q, got %q", "boom", got)
+	}
+}

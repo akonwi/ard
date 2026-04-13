@@ -43,3 +43,24 @@ func (r Result[T, E]) UnwrapOk() T {
 func (r Result[T, E]) UnwrapErr() E {
 	return r.err
 }
+
+func ResultMap[T, U, E any](r Result[T, E], with func(T) U) Result[U, E] {
+	if r.ok {
+		return Ok[U, E](with(r.value))
+	}
+	return Err[U, E](r.err)
+}
+
+func ResultMapErr[T, E, F any](r Result[T, E], with func(E) F) Result[T, F] {
+	if r.ok {
+		return Ok[T, F](r.value)
+	}
+	return Err[T, F](with(r.err))
+}
+
+func ResultAndThen[T, U, E any](r Result[T, E], with func(T) Result[U, E]) Result[U, E] {
+	if r.ok {
+		return with(r.value)
+	}
+	return Err[U, E](r.err)
+}
