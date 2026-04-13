@@ -34,6 +34,13 @@ type emitter struct {
 	emittedTypes  map[string]struct{}
 	builder       strings.Builder
 	indent        int
+	tempCounter   int
+}
+
+func (e *emitter) nextTemp(prefix string) string {
+	name := fmt.Sprintf("__ard%s%d", prefix, e.tempCounter)
+	e.tempCounter++
+	return name
 }
 
 func EmitEntrypoint(module checker.Module) ([]byte, error) {
@@ -528,6 +535,16 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
 		}
+	case *checker.TryOp:
+		imports[helperImportPath] = helperImportAlias
+		collectImportsFromExpr(v.Expr(), imports)
+		collectImportsFromType(v.OkType, imports)
+		collectImportsFromType(v.ErrType, imports)
+		if v.CatchBlock != nil {
+			for _, stmt := range v.CatchBlock.Stmts {
+				collectImportsFromStatement(stmt, imports)
+			}
+		}
 	case *checker.MaybeMethod:
 		imports[helperImportPath] = helperImportAlias
 		collectImportsFromExpr(v.Subject, imports)
@@ -820,6 +837,19 @@ func typeNeedsExplicitVarAnnotation(t checker.Type) bool {
 	}
 }
 
+func emitCopiedValue(value string, t checker.Type) (string, error) {
+	switch typed := t.(type) {
+	case *checker.List:
+		typeName, err := emitType(typed)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("append(%s(nil), %s...)", typeName, value), nil
+	default:
+		return value, nil
+	}
+}
+
 func (e *emitter) emitEnumDef(def *checker.Enum) error {
 	if _, ok := e.emittedTypes["enum:"+def.Name]; ok {
 		return nil
@@ -936,7 +966,7 @@ func (e *emitter) emitStatements(stmts []checker.Statement, returnType checker.T
 		isLastExpr := i == lastMeaningful && stmt.Expr != nil
 		remaining := stmts[i+1:]
 		if stmt.Stmt != nil {
-			if err := e.emitNonProducing(stmt.Stmt, remaining); err != nil {
+			if err := e.emitNonProducing(stmt.Stmt, remaining, returnType); err != nil {
 				return err
 			}
 			continue
@@ -960,14 +990,35 @@ func lastMeaningfulStatementIndex(stmts []checker.Statement) int {
 	return -1
 }
 
-func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checker.Statement) error {
+func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checker.Statement, returnType checker.Type) error {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
+		name := goName(s.Name, false)
+		if tryOp, ok := s.Value.(*checker.TryOp); ok {
+			if err := e.emitTryOp(tryOp, returnType, func(successValue string) error {
+				if typeNeedsExplicitVarAnnotation(s.Type()) {
+					typeName, err := emitType(s.Type())
+					if err != nil || typeName == "" {
+						e.line(fmt.Sprintf("%s := %s", name, successValue))
+					} else {
+						e.line(fmt.Sprintf("var %s %s = %s", name, typeName, successValue))
+					}
+				} else {
+					e.line(fmt.Sprintf("%s := %s", name, successValue))
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			if !usesNameInStatements(remaining, s.Name) {
+				e.line(fmt.Sprintf("_ = %s", name))
+			}
+			return nil
+		}
 		value, err := e.emitValueForType(s.Value, s.Type())
 		if err != nil {
 			return err
 		}
-		name := goName(s.Name, false)
 		if typeNeedsExplicitVarAnnotation(s.Type()) {
 			typeName, err := emitType(s.Type())
 			if err != nil || typeName == "" {
@@ -987,6 +1038,12 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 		if err != nil {
 			return err
 		}
+		if tryOp, ok := s.Value.(*checker.TryOp); ok {
+			return e.emitTryOp(tryOp, returnType, func(successValue string) error {
+				e.line(fmt.Sprintf("%s = %s", targetName, successValue))
+				return nil
+			})
+		}
 		value, err := e.emitExpr(s.Value)
 		if err != nil {
 			return err
@@ -994,23 +1051,23 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 		e.line(fmt.Sprintf("%s = %s", targetName, value))
 		return nil
 	case *checker.WhileLoop:
-		return e.emitWhileLoop(s)
+		return e.emitWhileLoop(s, returnType)
 	case *checker.ForLoop:
-		return e.emitForLoop(s)
+		return e.emitForLoop(s, returnType)
 	case *checker.ForIntRange:
-		return e.emitForIntRange(s)
+		return e.emitForIntRange(s, returnType)
 	case *checker.ForInStr:
-		return e.emitForInStr(s)
+		return e.emitForInStr(s, returnType)
 	case *checker.ForInList:
-		return e.emitForInList(s)
+		return e.emitForInList(s, returnType)
 	case *checker.ForInMap:
-		return e.emitForInMap(s)
+		return e.emitForInMap(s, returnType)
 	default:
 		return fmt.Errorf("unsupported statement: %T", stmt)
 	}
 }
 
-func (e *emitter) emitForIntRange(loop *checker.ForIntRange) error {
+func (e *emitter) emitForIntRange(loop *checker.ForIntRange, returnType checker.Type) error {
 	start, err := e.emitExpr(loop.Start)
 	if err != nil {
 		return err
@@ -1027,7 +1084,7 @@ func (e *emitter) emitForIntRange(loop *checker.ForIntRange) error {
 		e.line(fmt.Sprintf("for %s, %s := %s, 0; %s <= %s; %s, %s = %s+1, %s+1 {", cursor, index, start, cursor, end, cursor, index, cursor, index))
 	}
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1035,7 +1092,7 @@ func (e *emitter) emitForIntRange(loop *checker.ForIntRange) error {
 	return nil
 }
 
-func (e *emitter) emitForInStr(loop *checker.ForInStr) error {
+func (e *emitter) emitForInStr(loop *checker.ForInStr, returnType checker.Type) error {
 	value, err := e.emitExpr(loop.Value)
 	if err != nil {
 		return err
@@ -1048,7 +1105,7 @@ func (e *emitter) emitForInStr(loop *checker.ForInStr) error {
 	e.line(fmt.Sprintf("for %s, __ardRune := range []rune(%s) {", indexName, value))
 	e.indent++
 	e.line(fmt.Sprintf("%s := string(__ardRune)", cursor))
-	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1056,7 +1113,7 @@ func (e *emitter) emitForInStr(loop *checker.ForInStr) error {
 	return nil
 }
 
-func (e *emitter) emitForInList(loop *checker.ForInList) error {
+func (e *emitter) emitForInList(loop *checker.ForInList, returnType checker.Type) error {
 	list, err := e.emitExpr(loop.List)
 	if err != nil {
 		return err
@@ -1068,7 +1125,7 @@ func (e *emitter) emitForInList(loop *checker.ForInList) error {
 	}
 	e.line(fmt.Sprintf("for %s, %s := range %s {", indexName, cursor, list))
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1076,7 +1133,7 @@ func (e *emitter) emitForInList(loop *checker.ForInList) error {
 	return nil
 }
 
-func (e *emitter) emitForInMap(loop *checker.ForInMap) error {
+func (e *emitter) emitForInMap(loop *checker.ForInMap, returnType checker.Type) error {
 	mapExpr, err := e.emitExpr(loop.Map)
 	if err != nil {
 		return err
@@ -1085,7 +1142,7 @@ func (e *emitter) emitForInMap(loop *checker.ForInMap) error {
 	val := goName(loop.Val, false)
 	e.line(fmt.Sprintf("for %s, %s := range %s {", key, val, mapExpr))
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1093,14 +1150,14 @@ func (e *emitter) emitForInMap(loop *checker.ForInMap) error {
 	return nil
 }
 
-func (e *emitter) emitWhileLoop(loop *checker.WhileLoop) error {
+func (e *emitter) emitWhileLoop(loop *checker.WhileLoop, returnType checker.Type) error {
 	condition, err := e.emitExpr(loop.Condition)
 	if err != nil {
 		return err
 	}
 	e.line("for " + condition + " {")
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1108,7 +1165,7 @@ func (e *emitter) emitWhileLoop(loop *checker.WhileLoop) error {
 	return nil
 }
 
-func (e *emitter) emitForLoop(loop *checker.ForLoop) error {
+func (e *emitter) emitForLoop(loop *checker.ForLoop, returnType checker.Type) error {
 	if loop.Init == nil || loop.Update == nil {
 		return fmt.Errorf("unsupported for loop: missing init or update")
 	}
@@ -1131,7 +1188,7 @@ func (e *emitter) emitForLoop(loop *checker.ForLoop) error {
 	}
 	e.line(fmt.Sprintf("for %s := %s; %s; %s = %s {", initName, initValue, condition, updateTarget, updateValue))
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, nil); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
 		return err
 	}
 	e.indent--
@@ -1298,6 +1355,17 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.TryOp:
+		if usesNameInExpr(v.Expr(), name) {
+			return true
+		}
+		if v.CatchBlock == nil {
+			return false
+		}
+		if v.CatchVar != "" && v.CatchVar == name {
+			return false
+		}
+		return usesNameInStatements(v.CatchBlock.Stmts, name)
 	case *checker.MaybeMethod:
 		if usesNameInExpr(v.Subject, name) {
 			return true
@@ -1415,6 +1483,99 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 	}
 }
 
+func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSuccess func(successValue string) error) error {
+	subject, err := e.emitExpr(op.Expr())
+	if err != nil {
+		return err
+	}
+	tempName := e.nextTemp("Try")
+	e.line(tempName + " := " + subject)
+
+	switch op.Kind {
+	case checker.TryResult:
+		e.line("if " + tempName + ".IsErr() {")
+		e.indent++
+		if op.CatchBlock != nil {
+			if op.CatchVar != "" && op.CatchVar != "_" {
+				e.line(fmt.Sprintf("%s := %s.UnwrapErr()", goName(op.CatchVar, false), tempName))
+			}
+			if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
+				return err
+			}
+			if op.CatchBlock.Type() == checker.Void {
+				if returnType == nil || returnType == checker.Void {
+					e.line("return")
+				} else {
+					return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
+				}
+			}
+		} else {
+			resultType, ok := returnType.(*checker.Result)
+			if !ok {
+				return fmt.Errorf("try without catch on Result requires Result return type, got %v", returnType)
+			}
+			valueType, err := emitType(resultType.Val())
+			if err != nil {
+				return err
+			}
+			errType, err := emitType(resultType.Err())
+			if err != nil {
+				return err
+			}
+			e.line(fmt.Sprintf("return %s.Err[%s, %s](%s.UnwrapErr())", helperImportAlias, valueType, errType, tempName))
+		}
+		e.indent--
+		e.line("}")
+
+		if onSuccess != nil {
+			successValue, err := emitCopiedValue(tempName+".UnwrapOk()", op.OkType)
+			if err != nil {
+				return err
+			}
+			return onSuccess(successValue)
+		}
+		return nil
+	case checker.TryMaybe:
+		e.line("if " + tempName + ".IsNone() {")
+		e.indent++
+		if op.CatchBlock != nil {
+			if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
+				return err
+			}
+			if op.CatchBlock.Type() == checker.Void {
+				if returnType == nil || returnType == checker.Void {
+					e.line("return")
+				} else {
+					return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
+				}
+			}
+		} else {
+			maybeType, ok := returnType.(*checker.Maybe)
+			if !ok {
+				return fmt.Errorf("try without catch on Maybe requires Maybe return type, got %v", returnType)
+			}
+			innerType, err := emitType(maybeType.Of())
+			if err != nil {
+				return err
+			}
+			e.line(fmt.Sprintf("return %s.None[%s]()", helperImportAlias, innerType))
+		}
+		e.indent--
+		e.line("}")
+
+		if onSuccess != nil {
+			successValue, err := emitCopiedValue(tempName+".Expect("+strconv.Quote("unreachable none in try success path")+")", op.OkType)
+			if err != nil {
+				return err
+			}
+			return onSuccess(successValue)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported try kind: %v", op.Kind)
+	}
+}
+
 func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType checker.Type, isLast bool) error {
 	if panicExpr, ok := expr.(*checker.Panic); ok {
 		message, err := e.emitExpr(panicExpr.Message)
@@ -1434,6 +1595,16 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 	}
 	if ifExpr, ok := expr.(*checker.If); ok {
 		return e.emitIfStatement(ifExpr, returnType, isLast)
+	}
+	if tryOp, ok := expr.(*checker.TryOp); ok {
+		var onSuccess func(string) error
+		if isLast && returnType != nil && returnType != checker.Void {
+			onSuccess = func(successValue string) error {
+				e.line("return " + successValue)
+				return nil
+			}
+		}
+		return e.emitTryOp(tryOp, returnType, onSuccess)
 	}
 	if isLast && returnType != nil && returnType != checker.Void {
 		switch typed := expr.(type) {
@@ -1617,6 +1788,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitEnumMatch(v, nil)
 	case *checker.OptionMatch:
 		return e.emitOptionMatch(v, nil)
+	case *checker.TryOp:
+		return "", fmt.Errorf("try expressions are only supported in statement position")
 	case *checker.ResultMethod:
 		return e.emitResultMethod(v)
 	case *checker.MaybeMethod:
