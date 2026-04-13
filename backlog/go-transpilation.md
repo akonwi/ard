@@ -392,7 +392,7 @@ Create test infrastructure to run the same tests through both backends and compa
 | Union | `interface{}` + type switch |
 | Dynamic | `any` + JSON helpers |
 | Module mapping | One .ard file → One Go package |
-| CLI flag | `--target <value>` (bytecode/go) |
+| CLI override | `build`/`run` support `--target <value>`; `test` uses config target |
 | Config | `target` field in `ard.toml` |
 | Stdlib | Pre-transpiled Go packages |
 | Externs | Registry + stub functions |
@@ -407,3 +407,118 @@ Create test infrastructure to run the same tests through both backends and compa
 2. **Circular dependencies** — Go requires all imports to exist. How to handle circular module dependencies in Ard?
 
 3. **Dependency ordering** — Transpiler needs to emit packages in dependency order. Might need a dependency graph analysis pass.
+
+## Go Backend Test Mode Sketch
+
+This section sketches how Ard's existing test model should map onto the Go backend. This is not implemented yet, but it should become the path for validating transpiled code once the backend is further along.
+
+### Backend selection
+
+`ard test` should **not** take a `--target` flag.
+
+Instead:
+- `ard build` / `ard run` may continue to support `--target`
+- `ard test` should use the backend selected in `ard.toml`
+- if `target` is omitted, `ard test` should default to bytecode just like the rest of the toolchain
+
+### Goals
+
+- Preserve Ard's current test semantics: `test fn`, `Void!Str`, pass/fail/panic
+- Preserve the visibility split between co-located tests and `/test` integration tests
+- Reuse Go's `go test` runner when the configured backend is Go
+- Provide a future validation harness for transpiled code parity
+
+### Lowering model
+
+An Ard test should remain an Ard-shaped function in the generated code.
+
+For example:
+
+```ard
+test fn adds() Void!Str {
+  try testing::assert(1 + 1 == 2, "bad math")
+  testing::pass()
+}
+```
+
+should lower conceptually to:
+
+```go
+func ardTestAdds() ardgo.Result[struct{}, string] {
+    // transpiled Ard body
+}
+
+func TestAdds(t *testing.T) {
+    res := ardTestAdds()
+    if res.IsErr() {
+        t.Fatal(res.UnwrapErr())
+    }
+}
+```
+
+This keeps the source-of-truth semantics in Ard itself:
+- `Result::ok(())` => pass
+- `Result::err(msg)` => fail
+- panic => panic/failing Go test
+
+`testing::assert`, `testing::fail`, and `testing::pass` should stay ordinary Ard stdlib functions. They should **not** be rewritten directly into `testing.T` calls.
+
+### Co-located tests
+
+Co-located tests should be emitted into the **same Go package** as the Ard module they live beside.
+
+That preserves Ard's intended unit/internal-test behavior:
+- same-module visibility
+- access to private/internal declarations already allowed by the checker
+
+Implementation shape:
+- emit the regular transpiled module file as usual
+- emit a sibling `_test.go` wrapper file in the same Go package
+- include transpiled test functions only in test mode
+
+### `/test` integration tests
+
+Files under `/test` should be treated as ordinary external Ard modules and transpiled as their own Go packages in test mode.
+
+That preserves Ard's intended integration/public-API behavior:
+- no special private access
+- imports must go through the public module surface
+- checker remains the authority on visibility
+
+Each such package should also get `_test.go` wrappers that call the transpiled Ard test functions.
+
+### Test-mode output shape
+
+The Go backend should have a separate **test mode** rather than reusing normal production emission unchanged.
+
+Test mode should:
+- include `test fn` declarations instead of skipping them
+- emit `_test.go` wrappers
+- generate a temporary or dedicated test-only Go project tree
+- invoke `go test` instead of `go build` / `go run`
+
+Prefer keeping this output separate from normal `generated/` production builds so that test-only artifacts do not leak into ordinary transpilation output.
+
+### Runner behavior
+
+When `target = "go"`, `ard test` should conceptually do:
+
+1. discover Ard tests exactly as today (`test fn` is source of truth)
+2. transpile the project in test mode
+3. run `go test` over the generated test project
+4. report pass/fail/panic through the existing Ard CLI UX
+
+Existing Ard test CLI options can map naturally:
+- `--filter` -> `go test -run`
+- `--fail-fast` -> `go test -failfast`
+
+### Why this matters for backend validation
+
+Once this exists, the Ard test suite itself becomes a backend validation tool.
+
+That gives us a natural path to:
+- run Ard tests through the transpiled Go backend
+- use real project tests as validation for new lowering work
+- later compare bytecode and Go backend results for parity on the same test corpus
+
+In other words, Go-backed `ard test` is not just a product feature; it can also become the main semantic regression harness for the transpiler.
