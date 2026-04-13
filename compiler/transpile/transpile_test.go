@@ -780,6 +780,56 @@ let d = forced()
 	}
 }
 
+func TestBuildBinaryCompilesResultMatches(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
+fn describe(res: Int!Str) Str {
+  match res {
+    ok(value) => "ok: {value.to_str()}",
+    err(msg) => "err: {msg}",
+  }
+}
+
+fn classify(res: Int!Str) Str {
+  match res {
+    ok => ok.to_str(),
+    err => err,
+  }
+}
+
+fn from_call() Int {
+  match divide(1, 0) {
+    ok(value) => value,
+    err(msg) => -1,
+  }
+}
+
+let a = describe(Result::ok(4))
+let b = describe(Result::err("bad"))
+let c = classify(Result::ok(9))
+let d = classify(Result::err("oops"))
+let e = from_call()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesTryExpressions(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

@@ -660,6 +660,15 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		for _, stmt := range v.None.Stmts {
 			collectImportsFromStatement(stmt, imports)
 		}
+	case *checker.ResultMatch:
+		imports[helperImportPath] = helperImportAlias
+		collectImportsFromExpr(v.Subject, imports)
+		for _, stmt := range v.Ok.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
+		for _, stmt := range v.Err.Body.Stmts {
+			collectImportsFromStatement(stmt, imports)
+		}
 	case *checker.FunctionDef:
 		for _, stmt := range v.Body.Stmts {
 			collectImportsFromStatement(stmt, imports)
@@ -1478,6 +1487,27 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 		return false
 	case *checker.OptionMatch:
 		return usesNameInExpr(v.Subject, name) || usesNameInStatements(v.Some.Body.Stmts, name) || usesNameInStatements(v.None.Stmts, name)
+	case *checker.ResultMatch:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		okUses := false
+		if v.Ok != nil {
+			if v.Ok.Pattern != nil && v.Ok.Pattern.Name == name {
+				okUses = false
+			} else {
+				okUses = usesNameInStatements(v.Ok.Body.Stmts, name)
+			}
+		}
+		errUses := false
+		if v.Err != nil {
+			if v.Err.Pattern != nil && v.Err.Pattern.Name == name {
+				errUses = false
+			} else {
+				errUses = usesNameInStatements(v.Err.Body.Stmts, name)
+			}
+		}
+		return okUses || errUses
 	default:
 		return false
 	}
@@ -1497,7 +1527,11 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 		e.indent++
 		if op.CatchBlock != nil {
 			if op.CatchVar != "" && op.CatchVar != "_" {
-				e.line(fmt.Sprintf("%s := %s.UnwrapErr()", goName(op.CatchVar, false), tempName))
+				catchName := goName(op.CatchVar, false)
+				e.line(fmt.Sprintf("%s := %s.UnwrapErr()", catchName, tempName))
+				if !usesNameInStatements(op.CatchBlock.Stmts, op.CatchVar) {
+					e.line("_ = " + catchName)
+				}
 			}
 			if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
 				return err
@@ -1631,6 +1665,13 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 			return nil
 		case *checker.OptionMatch:
 			value, err := e.emitOptionMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
+		case *checker.ResultMatch:
+			value, err := e.emitResultMatch(typed, returnType)
 			if err != nil {
 				return err
 			}
@@ -1788,6 +1829,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitEnumMatch(v, nil)
 	case *checker.OptionMatch:
 		return e.emitOptionMatch(v, nil)
+	case *checker.ResultMatch:
+		return e.emitResultMatch(v, nil)
 	case *checker.TryOp:
 		return "", fmt.Errorf("try expressions are only supported in statement position")
 	case *checker.ResultMethod:
@@ -2336,6 +2379,9 @@ func (e *emitter) emitOptionMatch(match *checker.OptionMatch, expectedType check
 		inner.line("if __ardMaybe.IsSome() {")
 		inner.indent++
 		inner.line(fmt.Sprintf("%s := __ardMaybe.Expect(%q)", patternName, "unreachable none in maybe match"))
+		if !usesNameInStatements(match.Some.Body.Stmts, match.Some.Pattern.Name) {
+			inner.line("_ = " + patternName)
+		}
 		if err := inner.emitStatements(match.Some.Body.Stmts, returnType); err != nil {
 			return err
 		}
@@ -2343,6 +2389,49 @@ func (e *emitter) emitOptionMatch(match *checker.OptionMatch, expectedType check
 		inner.line("} else {")
 		inner.indent++
 		if err := inner.emitStatements(match.None.Stmts, returnType); err != nil {
+			return err
+		}
+		inner.indent--
+		inner.line("}")
+		return nil
+	})
+}
+
+func (e *emitter) emitResultMatch(match *checker.ResultMatch, expectedType checker.Type) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	returnType := matchReturnType(expectedType, match.Type())
+	return e.emitInlineFunc(returnType, func(inner *emitter) error {
+		inner.line("__ardResult := " + subject)
+		inner.line("if __ardResult.IsOk() {")
+		inner.indent++
+		if match.Ok != nil && match.Ok.Pattern != nil {
+			boundValue, err := emitCopiedValue("__ardResult.UnwrapOk()", match.OkType)
+			if err != nil {
+				return err
+			}
+			okName := goName(match.Ok.Pattern.Name, false)
+			inner.line(fmt.Sprintf("%s := %s", okName, boundValue))
+			if !usesNameInStatements(match.Ok.Body.Stmts, match.Ok.Pattern.Name) {
+				inner.line("_ = " + okName)
+			}
+		}
+		if err := inner.emitStatements(match.Ok.Body.Stmts, returnType); err != nil {
+			return err
+		}
+		inner.indent--
+		inner.line("} else {")
+		inner.indent++
+		if match.Err != nil && match.Err.Pattern != nil {
+			errName := goName(match.Err.Pattern.Name, false)
+			inner.line(fmt.Sprintf("%s := __ardResult.UnwrapErr()", errName))
+			if !usesNameInStatements(match.Err.Body.Stmts, match.Err.Pattern.Name) {
+				inner.line("_ = " + errName)
+			}
+		}
+		if err := inner.emitStatements(match.Err.Body.Stmts, returnType); err != nil {
 			return err
 		}
 		inner.indent--
