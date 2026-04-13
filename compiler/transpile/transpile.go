@@ -23,6 +23,7 @@ const (
 	helperImportAlias  = "ardgo"
 	stringsImportPath  = "strings"
 	strconvImportPath  = "strconv"
+	sortImportPath     = "sort"
 )
 
 type emitter struct {
@@ -518,6 +519,9 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		collectImportsFromExpr(v.Subject, imports)
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
+		}
+		if v.Kind == checker.ListSort {
+			imports[sortImportPath] = "sort"
 		}
 	case *checker.MapLiteral:
 		for i := range v.Keys {
@@ -1935,36 +1939,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.ResultMethod:
 		return e.emitResultMethod(v)
 	case *checker.MaybeMethod:
-		subject, err := e.emitExpr(v.Subject)
-		if err != nil {
-			return "", err
-		}
-		switch v.Kind {
-		case checker.MaybeExpect:
-			if len(v.Args) != 1 {
-				return "", fmt.Errorf("maybe.expect expects one arg")
-			}
-			message, err := e.emitExpr(v.Args[0])
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%s.Expect(%s)", subject, message), nil
-		case checker.MaybeIsNone:
-			return fmt.Sprintf("%s.IsNone()", subject), nil
-		case checker.MaybeIsSome:
-			return fmt.Sprintf("%s.IsSome()", subject), nil
-		case checker.MaybeOr:
-			if len(v.Args) != 1 {
-				return "", fmt.Errorf("maybe.or expects one arg")
-			}
-			fallback, err := e.emitExpr(v.Args[0])
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%s.Or(%s)", subject, fallback), nil
-		default:
-			return "", fmt.Errorf("unsupported maybe method: %v", v.Kind)
-		}
+		return e.emitMaybeMethod(v)
 	case *checker.StrMethod:
 		subject, err := e.emitExpr(v.Subject)
 		if err != nil {
@@ -2176,7 +2151,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 				return "", err
 			}
 			return fmt.Sprintf("%s[%s]", subject, index), nil
-		case checker.ListPush, checker.ListPrepend, checker.ListSet:
+		case checker.ListPush, checker.ListPrepend, checker.ListSet, checker.ListSort, checker.ListSwap:
 			return e.emitListMutationExpr(v)
 		default:
 			return "", fmt.Errorf("unsupported list method: %v", v.Kind)
@@ -2382,6 +2357,28 @@ func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, erro
 			return "", err
 		}
 		return fmt.Sprintf("func() bool { if %s >= 0 && %s < len(%s) { %s[%s] = %s; return true }; return false }()", index, index, target, target, index, value), nil
+	case checker.ListSort:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("list.sort expects one arg")
+		}
+		cmp, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() struct{} { sort.SliceStable(%s, func(i, j int) bool { return %s(%s[i], %s[j]) }); return struct{}{} }()", target, cmp, target, target), nil
+	case checker.ListSwap:
+		if len(method.Args) != 2 {
+			return "", fmt.Errorf("list.swap expects two args")
+		}
+		left, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		right, err := e.emitExpr(method.Args[1])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() struct{} { %s[%s], %s[%s] = %s[%s], %s[%s]; return struct{}{} }()", target, left, target, right, target, right, target, left), nil
 	default:
 		return "", fmt.Errorf("unsupported mutable list method: %v", method.Kind)
 	}
@@ -2684,6 +2681,63 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expecte
 		return fmt.Sprintf("%s.Err[%s, %s](%s)", helperImportAlias, valueType, errType, arg), nil
 	default:
 		return "", fmt.Errorf("unsupported result module call: %s", call.Call.Name)
+	}
+}
+
+func (e *emitter) emitMaybeMethod(method *checker.MaybeMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	emitMaybeArg := func(index int) (string, error) {
+		if index >= len(method.Args) {
+			return "", fmt.Errorf("maybe method missing arg %d", index)
+		}
+		return e.emitExpr(method.Args[index])
+	}
+	switch method.Kind {
+	case checker.MaybeExpect:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("maybe.expect expects one arg")
+		}
+		message, err := emitMaybeArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Expect(%s)", subject, message), nil
+	case checker.MaybeIsNone:
+		return fmt.Sprintf("%s.IsNone()", subject), nil
+	case checker.MaybeIsSome:
+		return fmt.Sprintf("%s.IsSome()", subject), nil
+	case checker.MaybeOr:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("maybe.or expects one arg")
+		}
+		fallback, err := emitMaybeArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Or(%s)", subject, fallback), nil
+	case checker.MaybeMap:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("maybe.map expects one arg")
+		}
+		mapper, err := emitMaybeArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.MaybeMap(%s, %s)", helperImportAlias, subject, mapper), nil
+	case checker.MaybeAndThen:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("maybe.and_then expects one arg")
+		}
+		mapper, err := emitMaybeArg(0)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.MaybeAndThen(%s, %s)", helperImportAlias, subject, mapper), nil
+	default:
+		return "", fmt.Errorf("unsupported maybe method: %v", method.Kind)
 	}
 }
 

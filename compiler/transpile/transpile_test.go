@@ -330,6 +330,31 @@ let second = get_second()
 	}
 }
 
+func TestBuildBinaryCompilesListSortAndSwap(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn reordered() Int {
+  mut list = [3, 7, 8, 5, 2, 9, 5, 4]
+  list.sort(fn(a: Int, b: Int) Bool { a < b })
+  list.swap(0, 7)
+  list.at(0)
+}
+
+let value = reordered()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesMutableListMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -673,6 +698,51 @@ fn label(status: Status) Int {
 }
 
 let result = label(Status::active)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesMaybeCombinators(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn mapped() Int {
+  let value = maybe::some(21)
+  let out = value.map(fn(v) { v * 2 })
+  out.or(0)
+}
+
+fn mapped_none() Bool {
+  let value: Int? = maybe::none()
+  value.map(fn(v) { v + 1 }).is_none()
+}
+
+fn chained() Str {
+  let value = maybe::some(21)
+  let out = value.and_then<Str>(fn(v) { maybe::some("{v}") })
+  out.or("")
+}
+
+fn chained_none() Bool {
+  let value: Int? = maybe::none()
+  value.and_then<Str>(fn(v) { maybe::some("{v}") }).is_none()
+}
+
+let a = mapped()
+let b = mapped_none()
+let c = chained()
+let d = chained_none()
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}

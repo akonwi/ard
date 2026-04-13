@@ -42,3 +42,33 @@ func TestMaybeExpectPanicsOnNone(t *testing.T) {
 
 	None[int]().Expect("boom")
 }
+
+func TestMaybeMapHelpers(t *testing.T) {
+	mapped := MaybeMap(Some(21), func(value int) int {
+		return value * 2
+	})
+	if got := mapped.Or(0); got != 42 {
+		t.Fatalf("expected mapped some value, got %d", got)
+	}
+
+	noneMapped := MaybeMap(None[int](), func(value int) int {
+		return value * 2
+	})
+	if !noneMapped.IsNone() {
+		t.Fatalf("expected mapped none to remain none")
+	}
+
+	chained := MaybeAndThen(Some(5), func(value int) Maybe[string] {
+		return Some("done")
+	})
+	if got := chained.Or(""); got != "done" {
+		t.Fatalf("expected chained some value %q, got %q", "done", got)
+	}
+
+	propagated := MaybeAndThen(None[int](), func(value int) Maybe[string] {
+		return Some("nope")
+	})
+	if !propagated.IsNone() {
+		t.Fatalf("expected none to propagate through and_then")
+	}
+}

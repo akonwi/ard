@@ -34,3 +34,17 @@ func (m Maybe[T]) Or(defaultValue T) T {
 	}
 	return m.value
 }
+
+func MaybeMap[T, U any](m Maybe[T], with func(T) U) Maybe[U] {
+	if m.none {
+		return None[U]()
+	}
+	return Some(with(m.value))
+}
+
+func MaybeAndThen[T, U any](m Maybe[T], with func(T) Maybe[U]) Maybe[U] {
+	if m.none {
+		return None[U]()
+	}
+	return with(m.value)
+}
