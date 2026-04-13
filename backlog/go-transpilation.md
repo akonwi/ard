@@ -20,7 +20,7 @@ The current Ard compiler produces bytecode that runs on a stack-based VM. This p
 | `Struct` | Go `struct` | Direct |
 | `Enum` | `struct { tag int }` + const tags | Simple discriminant pattern |
 | `Union` | `interface{}` + type switch | |
-| `Result<T,E>` | Go `(T, error)` tuple | Idiomatic Go error handling |
+| `Result<T,E>` | `ard/go.Result[T,E]` | Canonical helper-backed Result value |
 | `Maybe<T>` | `ard/go.Maybe[T]` struct | Custom struct preserves semantics |
 | `Dynamic` | `any` + JSON helpers | |
 | `extern fn` | Registry stub | Calls `ardgo.CallExtern()` |
@@ -210,6 +210,7 @@ compiler/go/
   dynamic.go        # Dynamic type + JSON helpers
   enum.go           # Enum tag construction
   extern.go         # Extern function registry
+  result.go         # Result[T,E] helper
 ```
 
 ### `maybe.go`
@@ -238,6 +239,43 @@ func (m Maybe[T]) Or(default_ T) T {
     }
     return m.value
 }
+```
+
+### `result.go`
+
+```go
+package ardgo
+
+type Result[T, E any] struct {
+    value T
+    err   E
+    ok    bool
+}
+
+func Ok[T, E any](value T) Result[T, E] {
+    return Result[T, E]{value: value, ok: true}
+}
+
+func Err[T, E any](err E) Result[T, E] {
+    return Result[T, E]{err: err}
+}
+
+func (r Result[T, E]) IsOk() bool { return r.ok }
+func (r Result[T, E]) IsErr() bool { return !r.ok }
+func (r Result[T, E]) Or(fallback T) T {
+    if r.ok {
+        return r.value
+    }
+    return fallback
+}
+func (r Result[T, E]) Expect(message string) T {
+    if !r.ok {
+        panic(message)
+    }
+    return r.value
+}
+func (r Result[T, E]) UnwrapOk() T { return r.value }
+func (r Result[T, E]) UnwrapErr() E { return r.err }
 ```
 
 ### `copy.go`
@@ -348,7 +386,7 @@ Create test infrastructure to run the same tests through both backends and compa
 
 | Aspect | Decision |
 |--------|----------|
-| Result | Go `(T, error)` tuple |
+| Result | `ard/go.Result[T,E]` |
 | Maybe | `ard/go.Maybe[T]` struct |
 | Enum | `struct { tag int }` + const |
 | Union | `interface{}` + type switch |

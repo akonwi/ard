@@ -355,6 +355,10 @@ func collectImportsFromType(t checker.Type, imports map[string]string) {
 		if actual := typed.Actual(); actual != nil {
 			collectImportsFromType(actual, imports)
 		}
+	case *checker.Result:
+		imports[helperImportPath] = helperImportAlias
+		collectImportsFromType(typed.Val(), imports)
+		collectImportsFromType(typed.Err(), imports)
 	case *checker.Maybe:
 		imports[helperImportPath] = helperImportAlias
 		collectImportsFromType(typed.Of(), imports)
@@ -363,9 +367,6 @@ func collectImportsFromType(t checker.Type, imports map[string]string) {
 	case *checker.Map:
 		collectImportsFromType(typed.Key(), imports)
 		collectImportsFromType(typed.Value(), imports)
-	case *checker.Result:
-		collectImportsFromType(typed.Val(), imports)
-		collectImportsFromType(typed.Err(), imports)
 	case *checker.StructDef:
 		for _, fieldName := range sortedStringKeys(typed.Fields) {
 			collectImportsFromType(typed.Fields[fieldName], imports)
@@ -521,6 +522,12 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports)
 		}
+	case *checker.ResultMethod:
+		imports[helperImportPath] = helperImportAlias
+		collectImportsFromExpr(v.Subject, imports)
+		for _, arg := range v.Args {
+			collectImportsFromExpr(arg, imports)
+		}
 	case *checker.MaybeMethod:
 		imports[helperImportPath] = helperImportAlias
 		collectImportsFromExpr(v.Subject, imports)
@@ -563,7 +570,7 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 			collectImportsFromExpr(v.Property.Fields[fieldName], imports)
 		}
 	case *checker.ModuleFunctionCall:
-		if v.Module == "ard/maybe" {
+		if v.Module == "ard/maybe" || v.Module == "ard/result" {
 			imports[helperImportPath] = helperImportAlias
 		} else if !strings.HasPrefix(v.Module, "ard/") {
 			imports[v.Module] = packageNameForModulePath(v.Module)
@@ -793,8 +800,13 @@ func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.Funct
 }
 
 func (e *emitter) emitValueForType(expr checker.Expression, expectedType checker.Type) (string, error) {
-	if call, ok := expr.(*checker.ModuleFunctionCall); ok && call.Module == "ard/maybe" {
-		return e.emitMaybeModuleCall(call, expectedType)
+	if call, ok := expr.(*checker.ModuleFunctionCall); ok {
+		switch call.Module {
+		case "ard/maybe":
+			return e.emitMaybeModuleCall(call, expectedType)
+		case "ard/result":
+			return e.emitResultModuleCall(call, expectedType)
+		}
 	}
 	return e.emitExpr(expr)
 }
@@ -1276,6 +1288,16 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return false
+	case *checker.ResultMethod:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, arg := range v.Args {
+			if usesNameInExpr(arg, name) {
+				return true
+			}
+		}
+		return false
 	case *checker.MaybeMethod:
 		if usesNameInExpr(v.Subject, name) {
 			return true
@@ -1414,7 +1436,37 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 		return e.emitIfStatement(ifExpr, returnType, isLast)
 	}
 	if isLast && returnType != nil && returnType != checker.Void {
-		value, err := e.emitExpr(expr)
+		switch typed := expr.(type) {
+		case *checker.BoolMatch:
+			value, err := e.emitBoolMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
+		case *checker.IntMatch:
+			value, err := e.emitIntMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
+		case *checker.EnumMatch:
+			value, err := e.emitEnumMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
+		case *checker.OptionMatch:
+			value, err := e.emitOptionMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
+		}
+		value, err := e.emitValueForType(expr, returnType)
 		if err != nil {
 			return err
 		}
@@ -1558,13 +1610,15 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		return fmt.Sprintf("%s{%s}", typeName, strings.Join(entries, ", ")), nil
 	case *checker.BoolMatch:
-		return e.emitBoolMatch(v)
+		return e.emitBoolMatch(v, nil)
 	case *checker.IntMatch:
-		return e.emitIntMatch(v)
+		return e.emitIntMatch(v, nil)
 	case *checker.EnumMatch:
-		return e.emitEnumMatch(v)
+		return e.emitEnumMatch(v, nil)
 	case *checker.OptionMatch:
-		return e.emitOptionMatch(v)
+		return e.emitOptionMatch(v, nil)
+	case *checker.ResultMethod:
+		return e.emitResultMethod(v)
 	case *checker.MaybeMethod:
 		subject, err := e.emitExpr(v.Subject)
 		if err != nil {
@@ -1881,6 +1935,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if v.Module == "ard/maybe" {
 			return e.emitMaybeModuleCall(v, nil)
 		}
+		if v.Module == "ard/result" {
+			return e.emitResultModuleCall(v, nil)
+		}
 		if strings.HasPrefix(v.Module, "ard/") {
 			return "", fmt.Errorf("standard library module calls are not supported yet: %s::%s", v.Module, v.Call.Name)
 		}
@@ -2017,21 +2074,29 @@ func (e *emitter) emitEnumVariant(variant *checker.EnumVariant) (string, error) 
 	return fmt.Sprintf("struct{ Tag int }{Tag: %d}", variant.Discriminant), nil
 }
 
-func (e *emitter) emitBoolMatch(match *checker.BoolMatch) (string, error) {
+func matchReturnType(expected, fallback checker.Type) checker.Type {
+	if expected != nil {
+		return expected
+	}
+	return fallback
+}
+
+func (e *emitter) emitBoolMatch(match *checker.BoolMatch, expectedType checker.Type) (string, error) {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
 		return "", err
 	}
-	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+	returnType := matchReturnType(expectedType, match.Type())
+	return e.emitInlineFunc(returnType, func(inner *emitter) error {
 		inner.line("if " + subject + " {")
 		inner.indent++
-		if err := inner.emitStatements(match.True.Stmts, match.Type()); err != nil {
+		if err := inner.emitStatements(match.True.Stmts, returnType); err != nil {
 			return err
 		}
 		inner.indent--
 		inner.line("} else {")
 		inner.indent++
-		if err := inner.emitStatements(match.False.Stmts, match.Type()); err != nil {
+		if err := inner.emitStatements(match.False.Stmts, returnType); err != nil {
 			return err
 		}
 		inner.indent--
@@ -2040,19 +2105,20 @@ func (e *emitter) emitBoolMatch(match *checker.BoolMatch) (string, error) {
 	})
 }
 
-func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
+func (e *emitter) emitIntMatch(match *checker.IntMatch, expectedType checker.Type) (string, error) {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
 		return "", err
 	}
-	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+	returnType := matchReturnType(expectedType, match.Type())
+	return e.emitInlineFunc(returnType, func(inner *emitter) error {
 		inner.line("switch {")
 		inner.indent++
 		for _, value := range sortedIntKeys(match.IntCases) {
 			block := match.IntCases[value]
 			inner.line(fmt.Sprintf("case %s == %d:", subject, value))
 			inner.indent++
-			if err := inner.emitStatements(block.Stmts, match.Type()); err != nil {
+			if err := inner.emitStatements(block.Stmts, returnType); err != nil {
 				return err
 			}
 			inner.indent--
@@ -2061,7 +2127,7 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
 			block := match.RangeCases[intRange]
 			inner.line(fmt.Sprintf("case %s >= %d && %s <= %d:", subject, intRange.Start, subject, intRange.End))
 			inner.indent++
-			if err := inner.emitStatements(block.Stmts, match.Type()); err != nil {
+			if err := inner.emitStatements(block.Stmts, returnType); err != nil {
 				return err
 			}
 			inner.indent--
@@ -2069,11 +2135,11 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
 		if match.CatchAll != nil {
 			inner.line("default:")
 			inner.indent++
-			if err := inner.emitStatements(match.CatchAll.Stmts, match.Type()); err != nil {
+			if err := inner.emitStatements(match.CatchAll.Stmts, returnType); err != nil {
 				return err
 			}
 			inner.indent--
-		} else if match.Type() != checker.Void {
+		} else if returnType != checker.Void {
 			inner.line("default:")
 			inner.indent++
 			inner.line(`panic("non-exhaustive int match")`)
@@ -2085,24 +2151,25 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
 	})
 }
 
-func (e *emitter) emitOptionMatch(match *checker.OptionMatch) (string, error) {
+func (e *emitter) emitOptionMatch(match *checker.OptionMatch, expectedType checker.Type) (string, error) {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
 		return "", err
 	}
 	patternName := goName(match.Some.Pattern.Name, false)
-	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+	returnType := matchReturnType(expectedType, match.Type())
+	return e.emitInlineFunc(returnType, func(inner *emitter) error {
 		inner.line("__ardMaybe := " + subject)
 		inner.line("if __ardMaybe.IsSome() {")
 		inner.indent++
 		inner.line(fmt.Sprintf("%s := __ardMaybe.Expect(%q)", patternName, "unreachable none in maybe match"))
-		if err := inner.emitStatements(match.Some.Body.Stmts, match.Type()); err != nil {
+		if err := inner.emitStatements(match.Some.Body.Stmts, returnType); err != nil {
 			return err
 		}
 		inner.indent--
 		inner.line("} else {")
 		inner.indent++
-		if err := inner.emitStatements(match.None.Stmts, match.Type()); err != nil {
+		if err := inner.emitStatements(match.None.Stmts, returnType); err != nil {
 			return err
 		}
 		inner.indent--
@@ -2111,12 +2178,13 @@ func (e *emitter) emitOptionMatch(match *checker.OptionMatch) (string, error) {
 	})
 }
 
-func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
+func (e *emitter) emitEnumMatch(match *checker.EnumMatch, expectedType checker.Type) (string, error) {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
 		return "", err
 	}
-	return e.emitInlineFunc(match.Type(), func(inner *emitter) error {
+	returnType := matchReturnType(expectedType, match.Type())
+	return e.emitInlineFunc(returnType, func(inner *emitter) error {
 		inner.line("switch " + subject + ".Tag {")
 		inner.indent++
 		discriminants := make([]int, 0, len(match.DiscriminantToIndex))
@@ -2131,7 +2199,7 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 			}
 			inner.line(fmt.Sprintf("case %d:", discriminant))
 			inner.indent++
-			if err := inner.emitStatements(match.Cases[idx].Stmts, match.Type()); err != nil {
+			if err := inner.emitStatements(match.Cases[idx].Stmts, returnType); err != nil {
 				return err
 			}
 			inner.indent--
@@ -2139,11 +2207,11 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 		if match.CatchAll != nil {
 			inner.line("default:")
 			inner.indent++
-			if err := inner.emitStatements(match.CatchAll.Stmts, match.Type()); err != nil {
+			if err := inner.emitStatements(match.CatchAll.Stmts, returnType); err != nil {
 				return err
 			}
 			inner.indent--
-		} else if match.Type() != checker.Void {
+		} else if returnType != checker.Void {
 			inner.line("default:")
 			inner.indent++
 			inner.line(`panic("non-exhaustive enum match")`)
@@ -2195,6 +2263,100 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 	return builder.String(), nil
 }
 
+func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expectedType checker.Type) (string, error) {
+	switch call.Call.Name {
+	case "ok":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Result::ok expects one arg")
+		}
+		resultType, ok := call.Call.ReturnType.(*checker.Result)
+		if (!ok || resultHasUnresolvedTypeVar(resultType)) && expectedType != nil {
+			if expectedResult, ok := expectedType.(*checker.Result); ok {
+				resultType = expectedResult
+				ok = true
+			}
+		}
+		if !ok {
+			return "", fmt.Errorf("Result::ok expected Result return type, got %s", call.Call.ReturnType)
+		}
+		arg, err := e.emitValueForType(call.Call.Args[0], resultType.Val())
+		if err != nil {
+			return "", err
+		}
+		valueType, err := emitType(resultType.Val())
+		if err != nil {
+			return "", err
+		}
+		errType, err := emitType(resultType.Err())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Ok[%s, %s](%s)", helperImportAlias, valueType, errType, arg), nil
+	case "err":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Result::err expects one arg")
+		}
+		resultType, ok := call.Call.ReturnType.(*checker.Result)
+		if (!ok || resultHasUnresolvedTypeVar(resultType)) && expectedType != nil {
+			if expectedResult, ok := expectedType.(*checker.Result); ok {
+				resultType = expectedResult
+				ok = true
+			}
+		}
+		if !ok {
+			return "", fmt.Errorf("Result::err expected Result return type, got %s", call.Call.ReturnType)
+		}
+		arg, err := e.emitValueForType(call.Call.Args[0], resultType.Err())
+		if err != nil {
+			return "", err
+		}
+		valueType, err := emitType(resultType.Val())
+		if err != nil {
+			return "", err
+		}
+		errType, err := emitType(resultType.Err())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Err[%s, %s](%s)", helperImportAlias, valueType, errType, arg), nil
+	default:
+		return "", fmt.Errorf("unsupported result module call: %s", call.Call.Name)
+	}
+}
+
+func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	switch method.Kind {
+	case checker.ResultExpect:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("result.expect expects one arg")
+		}
+		message, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Expect(%s)", subject, message), nil
+	case checker.ResultOr:
+		if len(method.Args) != 1 {
+			return "", fmt.Errorf("result.or expects one arg")
+		}
+		fallback, err := e.emitExpr(method.Args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Or(%s)", subject, fallback), nil
+	case checker.ResultIsOk:
+		return fmt.Sprintf("%s.IsOk()", subject), nil
+	case checker.ResultIsErr:
+		return fmt.Sprintf("%s.IsErr()", subject), nil
+	default:
+		return "", fmt.Errorf("unsupported result method: %v", method.Kind)
+	}
+}
+
 func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expectedType checker.Type) (string, error) {
 	switch call.Call.Name {
 	case "some":
@@ -2225,6 +2387,19 @@ func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expected
 	default:
 		return "", fmt.Errorf("unsupported maybe module call: %s", call.Call.Name)
 	}
+}
+
+func resultHasUnresolvedTypeVar(resultType *checker.Result) bool {
+	if resultType == nil {
+		return true
+	}
+	if tv, ok := resultType.Val().(*checker.TypeVar); ok && tv.Actual() == nil {
+		return true
+	}
+	if tv, ok := resultType.Err().(*checker.TypeVar); ok && tv.Actual() == nil {
+		return true
+	}
+	return false
 }
 
 func maybeHasUnresolvedTypeVar(maybeType *checker.Maybe) bool {
@@ -2322,6 +2497,16 @@ func emitType(t checker.Type) (string, error) {
 			return emitType(actual)
 		}
 		return "any", nil
+	case *checker.Result:
+		valueType, err := emitType(typed.Val())
+		if err != nil {
+			return "", err
+		}
+		errType, err := emitType(typed.Err())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Result[%s, %s]", helperImportAlias, valueType, errType), nil
 	case *checker.Enum:
 		return "struct{ Tag int }", nil
 	case *checker.Maybe:

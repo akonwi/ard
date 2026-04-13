@@ -737,6 +737,49 @@ let msg = greet("Ard")
 	}
 }
 
+func TestBuildBinaryCompilesBasicResults(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
+fn fallback() Int {
+  let res: Int!Str = Result::err("bad")
+  res.or(7)
+}
+
+fn check() Bool {
+  let res: Int!Str = Result::ok(10)
+  res.is_ok() and not res.is_err()
+}
+
+fn forced() Int {
+  let res: Int!Str = Result::ok(9)
+  res.expect("boom")
+}
+
+let a = divide(4, 2)
+let b = fallback()
+let c = check()
+let d = forced()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesImportedModuleSymbol(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
