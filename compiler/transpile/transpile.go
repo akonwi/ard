@@ -424,6 +424,9 @@ func collectModuleImports(stmts []checker.Statement, projectName string) map[str
 }
 
 func collectImportsFromStatement(stmt checker.Statement, imports map[string]string, projectName string) {
+	if fn, ok := stmt.Expr.(*checker.FunctionDef); ok && fn.IsTest {
+		return
+	}
 	if extern, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok {
 		imports[helperImportPath] = helperImportAlias
 		for _, param := range extern.Parameters {
@@ -437,7 +440,7 @@ func collectImportsFromStatement(stmt checker.Statement, imports map[string]stri
 	}
 	if stmt.Stmt != nil {
 		collectImportsFromNonProducing(stmt.Stmt, imports, projectName)
-		collectImportsFromStmtTypes(stmt.Stmt, imports)
+		collectImportsFromStmtTypes(stmt.Stmt, imports, projectName)
 	}
 }
 
@@ -451,11 +454,32 @@ func collectImportsFromExprTypes(expr checker.Expression, imports map[string]str
 	}
 }
 
-func collectImportsFromStmtTypes(stmt checker.NonProducing, imports map[string]string) {
+func collectImportsFromStmtTypes(stmt checker.NonProducing, imports map[string]string, projectName string) {
 	switch s := stmt.(type) {
 	case *checker.StructDef:
 		for _, fieldName := range sortedStringKeys(s.Fields) {
 			collectImportsFromType(s.Fields[fieldName], imports)
+		}
+		for _, methodName := range sortedStringKeys(s.Methods) {
+			method := s.Methods[methodName]
+			for _, param := range method.Parameters {
+				collectImportsFromType(param.Type, imports)
+			}
+			collectImportsFromType(method.ReturnType, imports)
+			for _, stmt := range method.Body.Stmts {
+				collectImportsFromStatement(stmt, imports, projectName)
+			}
+		}
+	case *checker.Enum:
+		for _, methodName := range sortedStringKeys(s.Methods) {
+			method := s.Methods[methodName]
+			for _, param := range method.Parameters {
+				collectImportsFromType(param.Type, imports)
+			}
+			collectImportsFromType(method.ReturnType, imports)
+			for _, stmt := range method.Body.Stmts {
+				collectImportsFromStatement(stmt, imports, projectName)
+			}
 		}
 	case *checker.VariableDef:
 		collectImportsFromType(s.Type(), imports)
@@ -716,7 +740,7 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 	case *checker.ModuleFunctionCall:
 		if v.Module == "ard/maybe" || v.Module == "ard/result" {
 			imports[helperImportPath] = helperImportAlias
-		} else {
+		} else if !(v.Module == "ard/list" && v.Call != nil && v.Call.Name == "concat") {
 			imports[moduleImportPath(projectName, v.Module)] = packageNameForModulePath(v.Module)
 		}
 		if def := v.Call.Definition(); def != nil {
@@ -916,20 +940,58 @@ func generatedPathForModule(generatedDir, projectName, modulePath string) (strin
 }
 
 func (e *emitter) indexFunctions() {
+	usedNames := make(map[string]struct{})
+	for _, stmt := range e.module.Program().Statements {
+		switch def := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			usedNames[goName(def.Name, true)] = struct{}{}
+		case checker.StructDef:
+			usedNames[goName(def.Name, true)] = struct{}{}
+		case *checker.Enum:
+			usedNames[goName(def.Name, true)] = struct{}{}
+		case checker.Enum:
+			usedNames[goName(def.Name, true)] = struct{}{}
+		}
+	}
 	for _, stmt := range e.module.Program().Statements {
 		switch def := stmt.Expr.(type) {
 		case *checker.FunctionDef:
+			if def.IsTest {
+				continue
+			}
 			name := goName(def.Name, !def.Private)
 			if e.packageName == "main" && name == "main" {
 				name = "ardMain"
 			}
-			e.functionNames[def.Name] = name
+			resolved := uniquePackageName(name, usedNames)
+			e.functionNames[def.Name] = resolved
 		case *checker.ExternalFunctionDef:
 			name := goName(def.Name, !def.Private)
 			if e.packageName == "main" && name == "main" {
 				name = "ardMain"
 			}
-			e.functionNames[def.Name] = name
+			resolved := uniquePackageName(name, usedNames)
+			e.functionNames[def.Name] = resolved
+		}
+	}
+}
+
+func uniquePackageName(base string, used map[string]struct{}) string {
+	name := base
+	if _, ok := used[name]; !ok {
+		used[name] = struct{}{}
+		return name
+	}
+	name = base + "Fn"
+	if _, ok := used[name]; !ok {
+		used[name] = struct{}{}
+		return name
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%sFn%d", base, i)
+		if _, ok := used[candidate]; !ok {
+			used[candidate] = struct{}{}
+			return candidate
 		}
 	}
 }
@@ -1375,7 +1437,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 				return nil
 			}, nil)
 		}
-		value, err := e.emitExpr(s.Value)
+		value, err := e.emitValueForType(s.Value, s.Target.Type())
 		if err != nil {
 			return err
 		}
@@ -1893,8 +1955,11 @@ func (e *emitter) emitExpressionIntoValue(expr checker.Expression, expectedType 
 }
 
 func (e *emitter) emitBlockValue(block *checker.Block, expectedType checker.Type, onValue func(string) error) error {
-	if block == nil || block.Type() == checker.Void {
-		return fmt.Errorf("expected value-producing block")
+	if block == nil {
+		return fmt.Errorf("expected value-producing block, got nil")
+	}
+	if block.Type() == checker.Void {
+		return fmt.Errorf("expected value-producing block, got Void")
 	}
 	e.pushScope()
 	defer e.popScope()
@@ -2138,6 +2203,22 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 			}
 		}
 		return e.emitTryOp(tryOp, returnType, onSuccess, nil)
+	}
+	if !(isLast && returnType != nil && returnType != checker.Void) {
+		switch typed := expr.(type) {
+		case *checker.BoolMatch:
+			return e.emitBoolMatchStatement(typed)
+		case *checker.IntMatch:
+			return e.emitIntMatchStatement(typed)
+		case *checker.EnumMatch:
+			return e.emitEnumMatchStatement(typed)
+		case *checker.OptionMatch:
+			return e.emitOptionMatchStatement(typed)
+		case *checker.ResultMatch:
+			return e.emitResultMatchStatement(typed)
+		case *checker.UnionMatch:
+			return e.emitUnionMatchStatement(typed)
+		}
 	}
 	if isLast && returnType != nil && returnType != checker.Void {
 		switch typed := expr.(type) {
@@ -2640,6 +2721,11 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if v.Module == "ard/result" {
 			return e.emitResultModuleCall(v, nil)
 		}
+		if v.Module == "ard/list" {
+			if emitted, ok, err := e.emitListModuleCall(v); ok || err != nil {
+				return emitted, err
+			}
+		}
 		args, err := e.emitCallArgs(v.Call)
 		if err != nil {
 			return "", err
@@ -2804,9 +2890,244 @@ func matchReturnType(expected, fallback checker.Type) checker.Type {
 	return fallback
 }
 
+func (e *emitter) emitBoolMatchStatement(match *checker.BoolMatch) error {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.line("if " + subject + " {")
+	e.indent++
+	if err := e.emitStatements(match.True.Stmts, checker.Void); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("} else {")
+	e.indent++
+	if err := e.emitStatements(match.False.Stmts, checker.Void); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitIntMatchStatement(match *checker.IntMatch) error {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.line("switch {")
+	e.indent++
+	for _, value := range sortedIntKeys(match.IntCases) {
+		block := match.IntCases[value]
+		e.line(fmt.Sprintf("case %s == %d:", subject, value))
+		e.indent++
+		if err := e.emitStatements(block.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	for _, intRange := range sortedIntRanges(match.RangeCases) {
+		block := match.RangeCases[intRange]
+		e.line(fmt.Sprintf("case %s >= %d && %s <= %d:", subject, intRange.Start, subject, intRange.End))
+		e.indent++
+		if err := e.emitStatements(block.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		e.line("default:")
+		e.indent++
+		if err := e.emitStatements(match.CatchAll.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitOptionMatchStatement(match *checker.OptionMatch) error {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	maybeName := e.nextTemp("Maybe")
+	e.line(maybeName + " := " + subject)
+	e.line("if " + maybeName + ".IsSome() {")
+	e.indent++
+	e.pushScope()
+	if match.Some != nil && match.Some.Pattern != nil {
+		patternName := e.bindLocal(match.Some.Pattern.Name)
+		e.line(fmt.Sprintf("%s := %s.Expect(%q)", patternName, maybeName, "unreachable none in maybe match"))
+		if !usesNameInStatements(match.Some.Body.Stmts, match.Some.Pattern.Name) {
+			e.line("_ = " + patternName)
+		}
+	}
+	if err := e.emitStatements(match.Some.Body.Stmts, checker.Void); err != nil {
+		e.popScope()
+		return err
+	}
+	e.popScope()
+	e.indent--
+	e.line("} else {")
+	e.indent++
+	if err := e.emitStatements(match.None.Stmts, checker.Void); err != nil {
+		return err
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitResultMatchStatement(match *checker.ResultMatch) error {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	resultName := e.nextTemp("Result")
+	e.line(resultName + " := " + subject)
+	e.line("if " + resultName + ".IsOk() {")
+	e.indent++
+	e.pushScope()
+	if match.Ok != nil && match.Ok.Pattern != nil {
+		boundValue, err := emitCopiedValue(resultName+".UnwrapOk()", match.OkType)
+		if err != nil {
+			e.popScope()
+			return err
+		}
+		okName := e.bindLocal(match.Ok.Pattern.Name)
+		e.line(fmt.Sprintf("%s := %s", okName, boundValue))
+		if !usesNameInStatements(match.Ok.Body.Stmts, match.Ok.Pattern.Name) {
+			e.line("_ = " + okName)
+		}
+	}
+	if err := e.emitStatements(match.Ok.Body.Stmts, checker.Void); err != nil {
+		e.popScope()
+		return err
+	}
+	e.popScope()
+	e.indent--
+	e.line("} else {")
+	e.indent++
+	e.pushScope()
+	if match.Err != nil && match.Err.Pattern != nil {
+		errName := e.bindLocal(match.Err.Pattern.Name)
+		e.line(fmt.Sprintf("%s := %s.UnwrapErr()", errName, resultName))
+		if !usesNameInStatements(match.Err.Body.Stmts, match.Err.Pattern.Name) {
+			e.line("_ = " + errName)
+		}
+	}
+	if err := e.emitStatements(match.Err.Body.Stmts, checker.Void); err != nil {
+		e.popScope()
+		return err
+	}
+	e.popScope()
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitEnumMatchStatement(match *checker.EnumMatch) error {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.line("switch " + subject + ".Tag {")
+	e.indent++
+	discriminants := make([]int, 0, len(match.DiscriminantToIndex))
+	for discriminant := range match.DiscriminantToIndex {
+		discriminants = append(discriminants, discriminant)
+	}
+	sort.Ints(discriminants)
+	for _, discriminant := range discriminants {
+		idx := match.DiscriminantToIndex[discriminant]
+		if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
+			continue
+		}
+		e.line(fmt.Sprintf("case %d:", discriminant))
+		e.indent++
+		if err := e.emitStatements(match.Cases[idx].Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		e.line("default:")
+		e.indent++
+		if err := e.emitStatements(match.CatchAll.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitUnionMatchStatement(match *checker.UnionMatch) error {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	subjectName := e.nextTemp("Union")
+	e.line("switch " + subjectName + " := any(" + subject + ").(type) {")
+	e.indent++
+	caseNames := sortedStringKeys(match.TypeCases)
+	for _, caseName := range caseNames {
+		matchCase := match.TypeCases[caseName]
+		if matchCase == nil {
+			continue
+		}
+		caseType := checker.Type(nil)
+		for t := range match.TypeCasesByType {
+			if t.String() == caseName {
+				caseType = t
+				break
+			}
+		}
+		if caseType == nil {
+			return fmt.Errorf("missing union case type for %s", caseName)
+		}
+		typeName, err := emitTypeArg(caseType)
+		if err != nil {
+			return err
+		}
+		e.line("case " + typeName + ":")
+		e.indent++
+		e.pushScope()
+		if matchCase.Pattern != nil {
+			boundName := e.bindLocal(matchCase.Pattern.Name)
+			e.line(fmt.Sprintf("%s := %s", boundName, subjectName))
+			if !usesNameInStatements(matchCase.Body.Stmts, matchCase.Pattern.Name) {
+				e.line("_ = " + boundName)
+			}
+		}
+		if err := e.emitStatements(matchCase.Body.Stmts, checker.Void); err != nil {
+			e.popScope()
+			return err
+		}
+		e.popScope()
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		e.line("default:")
+		e.indent++
+		if err := e.emitStatements(match.CatchAll.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	e.indent--
+	e.line("}")
+	return nil
+}
+
 func (e *emitter) emitValueTemp(prefix string, valueType checker.Type) (string, func(string) error, error) {
 	if valueType == nil || valueType == checker.Void {
-		return "", nil, fmt.Errorf("expected non-void value type")
+		return "", nil, fmt.Errorf("expected non-void value type for %s", prefix)
 	}
 	tempName := e.nextTemp(prefix)
 	typeName, err := emitType(valueType)
@@ -3143,6 +3464,33 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 	builder.WriteString(inner.builder.String())
 	builder.WriteString("}()")
 	return builder.String(), nil
+}
+
+func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, bool, error) {
+	if call == nil || call.Call == nil {
+		return "", false, nil
+	}
+	switch call.Call.Name {
+	case "concat":
+		if len(call.Call.Args) != 2 {
+			return "", true, fmt.Errorf("List::concat expects two args")
+		}
+		left, err := e.emitExpr(call.Call.Args[0])
+		if err != nil {
+			return "", true, err
+		}
+		right, err := e.emitExpr(call.Call.Args[1])
+		if err != nil {
+			return "", true, err
+		}
+		typeName, err := emitType(call.Call.ReturnType)
+		if err != nil {
+			return "", true, err
+		}
+		return fmt.Sprintf("func() %s { out := append(%s(nil), %s...); return append(out, %s...) }()", typeName, typeName, left, right), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expectedType checker.Type) (string, error) {
