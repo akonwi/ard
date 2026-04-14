@@ -394,6 +394,16 @@ func collectImportsFromType(t checker.Type, imports map[string]string) {
 		for _, fieldName := range sortedStringKeys(typed.Fields) {
 			collectImportsFromType(typed.Fields[fieldName], imports)
 		}
+	case *checker.Trait:
+		if typed.Name == "ToString" || typed.Name == "Encodable" {
+			imports[helperImportPath] = helperImportAlias
+		}
+		for _, method := range typed.GetMethods() {
+			for _, param := range method.Parameters {
+				collectImportsFromType(param.Type, imports)
+			}
+			collectImportsFromType(method.ReturnType, imports)
+		}
 	}
 }
 
@@ -510,6 +520,11 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 	case *checker.Not:
 		collectImportsFromExpr(v.Value, imports, projectName)
 	case *checker.FunctionCall:
+		if def := v.Definition(); def != nil {
+			for _, param := range def.Parameters {
+				collectImportsFromType(param.Type, imports)
+			}
+		}
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports, projectName)
 		}
@@ -521,6 +536,11 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 		collectImportsFromExpr(v.Subject, imports, projectName)
 	case *checker.InstanceMethod:
 		collectImportsFromExpr(v.Subject, imports, projectName)
+		if def := v.Method.Definition(); def != nil {
+			for _, param := range def.Parameters {
+				collectImportsFromType(param.Type, imports)
+			}
+		}
 		for _, arg := range v.Method.Args {
 			collectImportsFromExpr(arg, imports, projectName)
 		}
@@ -608,6 +628,11 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 			imports[helperImportPath] = helperImportAlias
 		} else {
 			imports[moduleImportPath(projectName, v.Module)] = packageNameForModulePath(v.Module)
+		}
+		if def := v.Call.Definition(); def != nil {
+			for _, param := range def.Parameters {
+				collectImportsFromType(param.Type, imports)
+			}
 		}
 		for _, arg := range v.Call.Args {
 			collectImportsFromExpr(arg, imports, projectName)
@@ -873,7 +898,22 @@ func (e *emitter) emitValueForType(expr checker.Expression, expectedType checker
 			return e.emitResultModuleCall(call, expectedType)
 		}
 	}
-	return e.emitExpr(expr)
+	value, err := e.emitExpr(expr)
+	if err != nil {
+		return "", err
+	}
+	trait, ok := expectedType.(*checker.Trait)
+	if !ok {
+		return value, nil
+	}
+	switch trait.Name {
+	case "ToString":
+		return fmt.Sprintf("%s.AsToString(%s)", helperImportAlias, value), nil
+	case "Encodable":
+		return fmt.Sprintf("%s.AsEncodable(%s)", helperImportAlias, value), nil
+	default:
+		return value, nil
+	}
 }
 
 func typeNeedsExplicitVarAnnotation(t checker.Type) bool {
@@ -1052,7 +1092,11 @@ func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
 		call += ", " + strings.Join(args, ", ")
 	}
 	call += ")"
-	e.line("result, err := " + call)
+	resultBinding := "result"
+	if def.ReturnType == checker.Void {
+		resultBinding = "_"
+	}
+	e.line(resultBinding + ", err := " + call)
 	e.line("if err != nil {")
 	e.indent++
 	e.line("panic(err)")
@@ -2295,6 +2339,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 				methodName = goName(method.Name, !method.Private)
 			}
 		}
+		if v.TraitType != nil {
+			methodName = goName(v.Method.Name, true)
+		}
 		return fmt.Sprintf("%s.%s(%s)", subject, methodName, strings.Join(args, ", ")), nil
 	case *checker.ListMethod:
 		subject, err := e.emitExpr(v.Subject)
@@ -3156,6 +3203,36 @@ func emitTypeArg(t checker.Type) (string, error) {
 	return typeName, nil
 }
 
+func emitTraitType(trait *checker.Trait) (string, error) {
+	if trait == nil {
+		return "", fmt.Errorf("nil trait")
+	}
+	switch trait.Name {
+	case "ToString":
+		return fmt.Sprintf("%s.ToString", helperImportAlias), nil
+	case "Encodable":
+		return fmt.Sprintf("%s.Encodable", helperImportAlias), nil
+	}
+	methods := trait.GetMethods()
+	parts := make([]string, 0, len(methods))
+	for _, method := range methods {
+		params, err := emitFunctionParams(method.Parameters, false)
+		if err != nil {
+			return "", err
+		}
+		signature := fmt.Sprintf("%s(%s)", goName(method.Name, true), strings.Join(params, ", "))
+		if method.ReturnType != checker.Void {
+			returnType, err := emitType(method.ReturnType)
+			if err != nil {
+				return "", err
+			}
+			signature += " " + returnType
+		}
+		parts = append(parts, signature)
+	}
+	return fmt.Sprintf("interface{ %s }", strings.Join(parts, "; ")), nil
+}
+
 func emitType(t checker.Type) (string, error) {
 	switch t {
 	case checker.Int:
@@ -3168,6 +3245,8 @@ func emitType(t checker.Type) (string, error) {
 		return "bool", nil
 	case checker.Void:
 		return "", nil
+	case checker.Dynamic:
+		return "any", nil
 	}
 
 	switch typed := t.(type) {
@@ -3214,6 +3293,12 @@ func emitType(t checker.Type) (string, error) {
 		return goName(typed.Name, true), nil
 	case *checker.FunctionDef:
 		return emitFunctionType(typed)
+	case *checker.Trait:
+		return emitTraitType(typed)
+	case *checker.ExternType:
+		return "any", nil
+	case *checker.Union:
+		return "any", nil
 	default:
 		return "", fmt.Errorf("unsupported type: %s", t.String())
 	}

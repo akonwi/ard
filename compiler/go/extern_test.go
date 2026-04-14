@@ -30,3 +30,15 @@ func TestExternRegistryMissingBinding(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestTraitWrappers(t *testing.T) {
+	if got := AsToString("hello").ToStr(); got != "hello" {
+		t.Fatalf("expected wrapped string, got %q", got)
+	}
+	if got := AsToString(42).ToStr(); got != "42" {
+		t.Fatalf("expected wrapped int, got %q", got)
+	}
+	if got := AsEncodable(true).ToDyn(); got != true {
+		t.Fatalf("expected wrapped bool, got %v", got)
+	}
+}
