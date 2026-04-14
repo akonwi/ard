@@ -28,23 +28,97 @@ const (
 )
 
 type emitter struct {
-	module        checker.Module
-	packageName   string
-	projectName   string
-	entrypoint    bool
-	imports       map[string]string
-	functionNames map[string]string
-	emittedTypes  map[string]struct{}
-	builder       strings.Builder
-	indent        int
-	tempCounter   int
-	fnReturnType  checker.Type
+	module          checker.Module
+	packageName     string
+	projectName     string
+	entrypoint      bool
+	imports         map[string]string
+	functionNames   map[string]string
+	emittedTypes    map[string]struct{}
+	builder         strings.Builder
+	indent          int
+	tempCounter     int
+	fnReturnType    checker.Type
+	localScopes     []map[string]string
+	localNameCounts map[string]int
 }
 
 func (e *emitter) nextTemp(prefix string) string {
 	name := fmt.Sprintf("__ard%s%d", prefix, e.tempCounter)
 	e.tempCounter++
 	return name
+}
+
+func (e *emitter) withFreshLocals(fn func() error) error {
+	prevScopes := e.localScopes
+	prevCounts := e.localNameCounts
+	e.localScopes = nil
+	e.localNameCounts = make(map[string]int)
+	defer func() {
+		e.localScopes = prevScopes
+		e.localNameCounts = prevCounts
+	}()
+	return fn()
+}
+
+func (e *emitter) pushScope() {
+	e.localScopes = append(e.localScopes, make(map[string]string))
+}
+
+func (e *emitter) popScope() {
+	if len(e.localScopes) == 0 {
+		return
+	}
+	e.localScopes = e.localScopes[:len(e.localScopes)-1]
+}
+
+func (e *emitter) bindLocal(name string) string {
+	if len(e.localScopes) == 0 {
+		e.pushScope()
+	}
+	base := goName(name, false)
+	count := e.localNameCounts[base]
+	resolved := base
+	if count > 0 {
+		resolved = fmt.Sprintf("%s%d", base, count+1)
+	}
+	e.localNameCounts[base] = count + 1
+	e.localScopes[len(e.localScopes)-1][name] = resolved
+	return resolved
+}
+
+func (e *emitter) resolveLocal(name string) string {
+	for i := len(e.localScopes) - 1; i >= 0; i-- {
+		if resolved, ok := e.localScopes[i][name]; ok {
+			return resolved
+		}
+	}
+	return goName(name, false)
+}
+
+func cloneLocalScopes(scopes []map[string]string) []map[string]string {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]string, len(scopes))
+	for i := range scopes {
+		cloned[i] = make(map[string]string, len(scopes[i]))
+		for k, v := range scopes[i] {
+			cloned[i][k] = v
+		}
+	}
+	return cloned
+}
+
+func cloneLocalNameCounts(counts map[string]int) map[string]int {
+	if len(counts) == 0 {
+		return make(map[string]int)
+	}
+	cloned := make(map[string]int, len(counts))
+	for k, v := range counts {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func EmitEntrypoint(module checker.Module) ([]byte, error) {
@@ -98,8 +172,20 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 				return nil, err
 			}
 			e.line("")
+		case checker.StructDef:
+			defCopy := def
+			if err := e.emitStructDef(&defCopy); err != nil {
+				return nil, err
+			}
+			e.line("")
 		case *checker.Enum:
 			if err := e.emitEnumDef(def); err != nil {
+				return nil, err
+			}
+			e.line("")
+		case checker.Enum:
+			defCopy := def
+			if err := e.emitEnumDef(&defCopy); err != nil {
 				return nil, err
 			}
 			e.line("")
@@ -144,7 +230,9 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	if entrypoint {
 		e.line("func main() {")
 		e.indent++
-		if err := e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil); err != nil {
+		if err := e.withFreshLocals(func() error {
+			return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
+		}); err != nil {
 			return nil, err
 		}
 		e.indent--
@@ -319,7 +407,7 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 			continue
 		}
 		switch stmt.Stmt.(type) {
-		case *checker.StructDef, *checker.Enum:
+		case *checker.StructDef, checker.StructDef, *checker.Enum, checker.Enum:
 			continue
 		}
 		filtered = append(filtered, stmt)
@@ -874,41 +962,48 @@ func (e *emitter) emitStructDef(def *checker.StructDef) error {
 }
 
 func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.FunctionDef) error {
-	params := make([]string, 0, len(method.Parameters))
-	for _, param := range method.Parameters {
-		typeName, err := emitType(param.Type)
-		if err != nil {
-			return fmt.Errorf("method %s.%s: %w", def.Name, method.Name, err)
+	return e.emitReceiverMethod(def.Name, method)
+}
+
+func (e *emitter) emitEnumMethod(def *checker.Enum, method *checker.FunctionDef) error {
+	return e.emitReceiverMethod(def.Name, method)
+}
+
+func (e *emitter) emitReceiverMethod(typeName string, method *checker.FunctionDef) error {
+	return e.withFreshLocals(func() error {
+		e.pushScope()
+		receiverType := goName(typeName, true)
+		if method.Mutates {
+			receiverType = "*" + receiverType
 		}
-		params = append(params, fmt.Sprintf("%s %s", goName(param.Name, false), typeName))
-	}
-	receiverType := goName(def.Name, true)
-	if method.Mutates {
-		receiverType = "*" + receiverType
-	}
-	receiverName := goName(method.Receiver, false)
-	name := goName(method.Name, !method.Private)
-	signature := fmt.Sprintf("func (%s %s) %s(%s)", receiverName, receiverType, name, strings.Join(params, ", "))
-	if method.ReturnType != checker.Void {
-		returnType, err := emitType(method.ReturnType)
+		receiverName := e.bindLocal(method.Receiver)
+		params, err := e.emitBoundFunctionParams(method.Parameters)
 		if err != nil {
-			return fmt.Errorf("method %s.%s: %w", def.Name, method.Name, err)
+			return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
 		}
-		signature += " " + returnType
-	}
-	e.line(signature + " {")
-	e.indent++
-	prevReturnType := e.fnReturnType
-	e.fnReturnType = method.ReturnType
-	defer func() {
-		e.fnReturnType = prevReturnType
-	}()
-	if err := e.emitStatements(method.Body.Stmts, method.ReturnType); err != nil {
-		return err
-	}
-	e.indent--
-	e.line("}")
-	return nil
+		name := goName(method.Name, !method.Private)
+		signature := fmt.Sprintf("func (%s %s) %s(%s)", receiverName, receiverType, name, strings.Join(params, ", "))
+		if method.ReturnType != checker.Void {
+			returnType, err := emitType(method.ReturnType)
+			if err != nil {
+				return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
+			}
+			signature += " " + returnType
+		}
+		e.line(signature + " {")
+		e.indent++
+		prevReturnType := e.fnReturnType
+		e.fnReturnType = method.ReturnType
+		defer func() {
+			e.fnReturnType = prevReturnType
+		}()
+		if err := e.emitStatements(method.Body.Stmts, method.ReturnType); err != nil {
+			return err
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	})
 }
 
 func (e *emitter) emitValueForType(expr checker.Expression, expectedType checker.Type) (string, error) {
@@ -970,6 +1065,13 @@ func (e *emitter) emitEnumDef(def *checker.Enum) error {
 	e.line("Tag int")
 	e.indent--
 	e.line("}")
+	methodNames := sortedStringKeys(def.Methods)
+	for _, methodName := range methodNames {
+		e.line("")
+		if err := e.emitEnumMethod(def, def.Methods[methodName]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1025,6 +1127,18 @@ func emitFunctionParams(params []checker.Parameter, includeNames bool) ([]string
 	return parts, nil
 }
 
+func (e *emitter) emitBoundFunctionParams(params []checker.Parameter) ([]string, error) {
+	parts := make([]string, 0, len(params))
+	for _, param := range params {
+		typeName, err := emitType(param.Type)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, fmt.Sprintf("%s %s", e.bindLocal(param.Name), typeName))
+	}
+	return parts, nil
+}
+
 func emitFunctionType(def *checker.FunctionDef) (string, error) {
 	params, err := emitFunctionParams(def.Parameters, false)
 	if err != nil {
@@ -1043,22 +1157,25 @@ func emitFunctionType(def *checker.FunctionDef) (string, error) {
 }
 
 func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
-	params, err := emitFunctionParams(def.Parameters, true)
-	if err != nil {
-		return "", err
-	}
 	returnType := effectiveFunctionReturnType(def)
 	inner := &emitter{
-		module:        e.module,
-		packageName:   e.packageName,
-		projectName:   e.projectName,
-		entrypoint:    e.entrypoint,
-		imports:       e.imports,
-		functionNames: e.functionNames,
-		emittedTypes:  e.emittedTypes,
-		indent:        1,
-		tempCounter:   e.tempCounter,
-		fnReturnType:  returnType,
+		module:          e.module,
+		packageName:     e.packageName,
+		projectName:     e.projectName,
+		entrypoint:      e.entrypoint,
+		imports:         e.imports,
+		functionNames:   e.functionNames,
+		emittedTypes:    e.emittedTypes,
+		indent:          1,
+		tempCounter:     e.tempCounter,
+		fnReturnType:    returnType,
+		localScopes:     cloneLocalScopes(e.localScopes),
+		localNameCounts: cloneLocalNameCounts(e.localNameCounts),
+	}
+	inner.pushScope()
+	params, err := inner.emitBoundFunctionParams(def.Parameters)
+	if err != nil {
+		return "", err
 	}
 	if err := inner.emitStatements(def.Body.Stmts, returnType); err != nil {
 		return "", err
@@ -1083,86 +1200,94 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 }
 
 func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
-	params := make([]string, 0, len(def.Parameters))
-	args := make([]string, 0, len(def.Parameters))
-	for _, param := range def.Parameters {
-		typeName, err := emitType(param.Type)
-		if err != nil {
-			return fmt.Errorf("extern function %s: %w", def.Name, err)
+	return e.withFreshLocals(func() error {
+		e.pushScope()
+		params := make([]string, 0, len(def.Parameters))
+		args := make([]string, 0, len(def.Parameters))
+		for _, param := range def.Parameters {
+			typeName, err := emitType(param.Type)
+			if err != nil {
+				return fmt.Errorf("extern function %s: %w", def.Name, err)
+			}
+			paramName := e.bindLocal(param.Name)
+			params = append(params, fmt.Sprintf("%s %s", paramName, typeName))
+			args = append(args, paramName)
 		}
-		paramName := goName(param.Name, false)
-		params = append(params, fmt.Sprintf("%s %s", paramName, typeName))
-		args = append(args, paramName)
-	}
 
-	name := e.functionNames[def.Name]
-	signature := fmt.Sprintf("func %s(%s)", name, strings.Join(params, ", "))
-	returnType := ""
-	if def.ReturnType != checker.Void {
-		var err error
-		returnType, err = emitType(def.ReturnType)
-		if err != nil {
-			return fmt.Errorf("extern function %s: %w", def.Name, err)
+		name := e.functionNames[def.Name]
+		signature := fmt.Sprintf("func %s(%s)", name, strings.Join(params, ", "))
+		returnType := ""
+		if def.ReturnType != checker.Void {
+			var err error
+			returnType, err = emitType(def.ReturnType)
+			if err != nil {
+				return fmt.Errorf("extern function %s: %w", def.Name, err)
+			}
+			signature += " " + returnType
 		}
-		signature += " " + returnType
-	}
 
-	e.line(signature + " {")
-	e.indent++
-	call := fmt.Sprintf("%s.CallExtern(%q", helperImportAlias, def.ExternalBinding)
-	if len(args) > 0 {
-		call += ", " + strings.Join(args, ", ")
-	}
-	call += ")"
-	resultBinding := "result"
-	if def.ReturnType == checker.Void {
-		resultBinding = "_"
-	}
-	e.line(resultBinding + ", err := " + call)
-	e.line("if err != nil {")
-	e.indent++
-	e.line("panic(err)")
-	e.indent--
-	e.line("}")
-	if def.ReturnType != checker.Void {
-		e.line(fmt.Sprintf("return result.(%s)", returnType))
-	}
-	e.indent--
-	e.line("}")
-	return nil
+		e.line(signature + " {")
+		e.indent++
+		call := fmt.Sprintf("%s.CallExtern(%q", helperImportAlias, def.ExternalBinding)
+		if len(args) > 0 {
+			call += ", " + strings.Join(args, ", ")
+		}
+		call += ")"
+		resultBinding := "result"
+		if def.ReturnType == checker.Void {
+			resultBinding = "_"
+		}
+		e.line(resultBinding + ", err := " + call)
+		e.line("if err != nil {")
+		e.indent++
+		e.line("panic(err)")
+		e.indent--
+		e.line("}")
+		if def.ReturnType != checker.Void {
+			e.line(fmt.Sprintf("return result.(%s)", returnType))
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	})
 }
 
 func (e *emitter) emitFunction(def *checker.FunctionDef) error {
-	params, err := emitFunctionParams(def.Parameters, true)
-	if err != nil {
-		return fmt.Errorf("function %s: %w", def.Name, err)
-	}
-
-	returnType := effectiveFunctionReturnType(def)
-	signature := fmt.Sprintf("func %s(%s)", e.functionNames[def.Name], strings.Join(params, ", "))
-	if returnType != checker.Void {
-		emittedReturnType, err := emitType(returnType)
+	return e.withFreshLocals(func() error {
+		e.pushScope()
+		params, err := e.emitBoundFunctionParams(def.Parameters)
 		if err != nil {
 			return fmt.Errorf("function %s: %w", def.Name, err)
 		}
-		signature += " " + emittedReturnType
-	}
-	e.line(signature + " {")
-	e.indent++
-	prevReturnType := e.fnReturnType
-	e.fnReturnType = returnType
-	defer func() {
-		e.fnReturnType = prevReturnType
-	}()
-	if err := e.emitStatements(def.Body.Stmts, returnType); err != nil {
-		return err
-	}
-	e.indent--
-	e.line("}")
-	return nil
+
+		returnType := effectiveFunctionReturnType(def)
+		signature := fmt.Sprintf("func %s(%s)", e.functionNames[def.Name], strings.Join(params, ", "))
+		if returnType != checker.Void {
+			emittedReturnType, err := emitType(returnType)
+			if err != nil {
+				return fmt.Errorf("function %s: %w", def.Name, err)
+			}
+			signature += " " + emittedReturnType
+		}
+		e.line(signature + " {")
+		e.indent++
+		prevReturnType := e.fnReturnType
+		e.fnReturnType = returnType
+		defer func() {
+			e.fnReturnType = prevReturnType
+		}()
+		if err := e.emitStatements(def.Body.Stmts, returnType); err != nil {
+			return err
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	})
 }
 
 func (e *emitter) emitStatements(stmts []checker.Statement, returnType checker.Type) error {
+	e.pushScope()
+	defer e.popScope()
 	lastMeaningful := lastMeaningfulStatementIndex(stmts)
 	for i, stmt := range stmts {
 		if stmt.Break {
@@ -1199,7 +1324,7 @@ func lastMeaningfulStatementIndex(stmts []checker.Statement) int {
 func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checker.Statement, returnType checker.Type) error {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
-		name := goName(s.Name, false)
+		name := e.bindLocal(s.Name)
 		if tryOp, ok := s.Value.(*checker.TryOp); ok {
 			if err := e.emitTryOp(tryOp, returnType, func(successValue string) error {
 				if typeNeedsExplicitVarAnnotation(s.Type()) {
@@ -1240,7 +1365,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 		}
 		return nil
 	case *checker.Reassignment:
-		targetName, err := emitAssignmentTarget(s.Target)
+		targetName, err := e.emitAssignmentTarget(s.Target)
 		if err != nil {
 			return err
 		}
@@ -1282,11 +1407,13 @@ func (e *emitter) emitForIntRange(loop *checker.ForIntRange, returnType checker.
 	if err != nil {
 		return err
 	}
-	cursor := goName(loop.Cursor, false)
+	e.pushScope()
+	defer e.popScope()
+	cursor := e.bindLocal(loop.Cursor)
 	if loop.Index == "" {
 		e.line(fmt.Sprintf("for %s := %s; %s <= %s; %s++ {", cursor, start, cursor, end, cursor))
 	} else {
-		index := goName(loop.Index, false)
+		index := e.bindLocal(loop.Index)
 		e.line(fmt.Sprintf("for %s, %s := %s, 0; %s <= %s; %s, %s = %s+1, %s+1 {", cursor, index, start, cursor, end, cursor, index, cursor, index))
 	}
 	e.indent++
@@ -1303,10 +1430,12 @@ func (e *emitter) emitForInStr(loop *checker.ForInStr, returnType checker.Type) 
 	if err != nil {
 		return err
 	}
-	cursor := goName(loop.Cursor, false)
+	e.pushScope()
+	defer e.popScope()
+	cursor := e.bindLocal(loop.Cursor)
 	indexName := "_"
 	if loop.Index != "" {
-		indexName = goName(loop.Index, false)
+		indexName = e.bindLocal(loop.Index)
 	}
 	e.line(fmt.Sprintf("for %s, __ardRune := range []rune(%s) {", indexName, value))
 	e.indent++
@@ -1324,10 +1453,12 @@ func (e *emitter) emitForInList(loop *checker.ForInList, returnType checker.Type
 	if err != nil {
 		return err
 	}
-	cursor := goName(loop.Cursor, false)
+	e.pushScope()
+	defer e.popScope()
+	cursor := e.bindLocal(loop.Cursor)
 	indexName := "_"
 	if loop.Index != "" {
-		indexName = goName(loop.Index, false)
+		indexName = e.bindLocal(loop.Index)
 	}
 	e.line(fmt.Sprintf("for %s, %s := range %s {", indexName, cursor, list))
 	e.indent++
@@ -1344,8 +1475,10 @@ func (e *emitter) emitForInMap(loop *checker.ForInMap, returnType checker.Type) 
 	if err != nil {
 		return err
 	}
-	key := goName(loop.Key, false)
-	val := goName(loop.Val, false)
+	e.pushScope()
+	defer e.popScope()
+	key := e.bindLocal(loop.Key)
+	val := e.bindLocal(loop.Val)
 	e.line(fmt.Sprintf("for %s, %s := range %s {", key, val, mapExpr))
 	e.indent++
 	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
@@ -1375,7 +1508,9 @@ func (e *emitter) emitForLoop(loop *checker.ForLoop, returnType checker.Type) er
 	if loop.Init == nil || loop.Update == nil {
 		return fmt.Errorf("unsupported for loop: missing init or update")
 	}
-	initName := goName(loop.Init.Name, false)
+	e.pushScope()
+	defer e.popScope()
+	initName := e.bindLocal(loop.Init.Name)
 	initValue, err := e.emitExpr(loop.Init.Value)
 	if err != nil {
 		return err
@@ -1384,7 +1519,7 @@ func (e *emitter) emitForLoop(loop *checker.ForLoop, returnType checker.Type) er
 	if err != nil {
 		return err
 	}
-	updateTarget, err := emitAssignmentTarget(loop.Update.Target)
+	updateTarget, err := e.emitAssignmentTarget(loop.Update.Target)
 	if err != nil {
 		return err
 	}
@@ -1761,6 +1896,8 @@ func (e *emitter) emitBlockValue(block *checker.Block, expectedType checker.Type
 	if block == nil || block.Type() == checker.Void {
 		return fmt.Errorf("expected value-producing block")
 	}
+	e.pushScope()
+	defer e.popScope()
 	lastMeaningful := lastMeaningfulStatementIndex(block.Stmts)
 	for i, stmt := range block.Stmts {
 		if stmt.Break {
@@ -1858,8 +1995,9 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 		e.line("if " + tempName + ".IsErr() {")
 		e.indent++
 		if op.CatchBlock != nil {
+			e.pushScope()
 			if op.CatchVar != "" && op.CatchVar != "_" {
-				catchName := goName(op.CatchVar, false)
+				catchName := e.bindLocal(op.CatchVar)
 				e.line(fmt.Sprintf("%s := %s.UnwrapErr()", catchName, tempName))
 				if !usesNameInStatements(op.CatchBlock.Stmts, op.CatchVar) {
 					e.line("_ = " + catchName)
@@ -1867,23 +2005,28 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 			}
 			if onCatchValue != nil {
 				if op.CatchBlock.Type() == checker.Void {
+					e.popScope()
 					return fmt.Errorf("void try catch block is not supported in value position")
 				}
 				if err := e.emitBlockValue(op.CatchBlock, op.CatchBlock.Type(), onCatchValue); err != nil {
+					e.popScope()
 					return err
 				}
 			} else {
 				if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
+					e.popScope()
 					return err
 				}
 				if op.CatchBlock.Type() == checker.Void {
 					if returnType == nil || returnType == checker.Void {
 						e.line("return")
 					} else {
+						e.popScope()
 						return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
 					}
 				}
 			}
+			e.popScope()
 		} else {
 			resultType, ok := e.fnReturnType.(*checker.Result)
 			if !ok {
@@ -1914,25 +2057,31 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 		e.line("if " + tempName + ".IsNone() {")
 		e.indent++
 		if op.CatchBlock != nil {
+			e.pushScope()
 			if onCatchValue != nil {
 				if op.CatchBlock.Type() == checker.Void {
+					e.popScope()
 					return fmt.Errorf("void try catch block is not supported in value position")
 				}
 				if err := e.emitBlockValue(op.CatchBlock, op.CatchBlock.Type(), onCatchValue); err != nil {
+					e.popScope()
 					return err
 				}
 			} else {
 				if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
+					e.popScope()
 					return err
 				}
 				if op.CatchBlock.Type() == checker.Void {
 					if returnType == nil || returnType == checker.Void {
 						e.line("return")
 					} else {
+						e.popScope()
 						return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
 					}
 				}
 			}
+			e.popScope()
 		} else {
 			maybeType, ok := e.fnReturnType.(*checker.Maybe)
 			if !ok {
@@ -2297,11 +2446,11 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		return fmt.Sprintf("%s{%s}", goName(v.Name, true), strings.Join(fields, ", ")), nil
 	case *checker.Identifier:
-		return goName(v.Name, false), nil
+		return e.resolveLocal(v.Name), nil
 	case checker.Variable:
-		return goName(v.Name(), false), nil
+		return e.resolveLocal(v.Name()), nil
 	case *checker.Variable:
-		return goName(v.Name(), false), nil
+		return e.resolveLocal(v.Name()), nil
 	case *checker.IntAddition:
 		return e.emitBinary(v.Left, "+", v.Right)
 	case *checker.IntSubtraction:
@@ -2386,6 +2535,11 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		methodName := goName(v.Method.Name, false)
 		if v.StructType != nil {
 			if method, ok := v.StructType.Methods[v.Method.Name]; ok {
+				methodName = goName(method.Name, !method.Private)
+			}
+		}
+		if v.EnumType != nil {
+			if method, ok := v.EnumType.Methods[v.Method.Name]; ok {
 				methodName = goName(method.Name, !method.Private)
 			}
 		}
@@ -2502,18 +2656,18 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	}
 }
 
-func emitAssignmentTarget(expr checker.Expression) (string, error) {
+func (e *emitter) emitAssignmentTarget(expr checker.Expression) (string, error) {
 	switch target := expr.(type) {
 	case *checker.Identifier:
-		return goName(target.Name, false), nil
+		return e.resolveLocal(target.Name), nil
 	case checker.Variable:
-		return goName(target.Name(), false), nil
+		return e.resolveLocal(target.Name()), nil
 	case *checker.Variable:
-		return goName(target.Name(), false), nil
+		return e.resolveLocal(target.Name()), nil
 	case *checker.InstanceProperty:
-		subject, err := emitAssignmentTarget(target.Subject)
+		subject, err := e.emitAssignmentTarget(target.Subject)
 		if err != nil {
-			subjectExpr, exprErr := emitBareExpr(target.Subject)
+			subjectExpr, exprErr := e.emitBareExpr(target.Subject)
 			if exprErr != nil {
 				return "", exprErr
 			}
@@ -2525,16 +2679,16 @@ func emitAssignmentTarget(expr checker.Expression) (string, error) {
 	}
 }
 
-func emitBareExpr(expr checker.Expression) (string, error) {
+func (e *emitter) emitBareExpr(expr checker.Expression) (string, error) {
 	switch v := expr.(type) {
 	case *checker.Identifier:
-		return goName(v.Name, false), nil
+		return e.resolveLocal(v.Name), nil
 	case checker.Variable:
-		return goName(v.Name(), false), nil
+		return e.resolveLocal(v.Name()), nil
 	case *checker.Variable:
-		return goName(v.Name(), false), nil
+		return e.resolveLocal(v.Name()), nil
 	case *checker.InstanceProperty:
-		subject, err := emitBareExpr(v.Subject)
+		subject, err := e.emitBareExpr(v.Subject)
 		if err != nil {
 			return "", err
 		}
@@ -2562,7 +2716,7 @@ func (e *emitter) emitCopyExpr(copy *checker.CopyExpression) (string, error) {
 }
 
 func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, error) {
-	target, err := emitAssignmentTarget(method.Subject)
+	target, err := e.emitAssignmentTarget(method.Subject)
 	if err != nil {
 		return "", err
 	}
@@ -2635,6 +2789,11 @@ func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, erro
 }
 
 func (e *emitter) emitEnumVariant(variant *checker.EnumVariant) (string, error) {
+	if variant != nil && variant.EnumType != nil {
+		if enumType, ok := variant.EnumType.(*checker.Enum); ok && len(enumType.Methods) > 0 {
+			return fmt.Sprintf("%s{Tag: %d}", goName(enumType.Name, true), variant.Discriminant), nil
+		}
+	}
 	return fmt.Sprintf("struct{ Tag int }{Tag: %d}", variant.Discriminant), nil
 }
 
@@ -2750,16 +2909,19 @@ func (e *emitter) emitOptionMatch(match *checker.OptionMatch, expectedType check
 	e.line(maybeName + " := " + subject)
 	e.line("if " + maybeName + ".IsSome() {")
 	e.indent++
+	e.pushScope()
 	if match.Some != nil && match.Some.Pattern != nil {
-		patternName := goName(match.Some.Pattern.Name, false)
+		patternName := e.bindLocal(match.Some.Pattern.Name)
 		e.line(fmt.Sprintf("%s := %s.Expect(%q)", patternName, maybeName, "unreachable none in maybe match"))
 		if !usesNameInStatements(match.Some.Body.Stmts, match.Some.Pattern.Name) {
 			e.line("_ = " + patternName)
 		}
 	}
 	if err := e.emitBlockValue(match.Some.Body, returnType, assign); err != nil {
+		e.popScope()
 		return "", err
 	}
+	e.popScope()
 	e.indent--
 	e.line("} else {")
 	e.indent++
@@ -2785,33 +2947,40 @@ func (e *emitter) emitResultMatch(match *checker.ResultMatch, expectedType check
 	e.line(resultName + " := " + subject)
 	e.line("if " + resultName + ".IsOk() {")
 	e.indent++
+	e.pushScope()
 	if match.Ok != nil && match.Ok.Pattern != nil {
 		boundValue, err := emitCopiedValue(resultName+".UnwrapOk()", match.OkType)
 		if err != nil {
+			e.popScope()
 			return "", err
 		}
-		okName := goName(match.Ok.Pattern.Name, false)
+		okName := e.bindLocal(match.Ok.Pattern.Name)
 		e.line(fmt.Sprintf("%s := %s", okName, boundValue))
 		if !usesNameInStatements(match.Ok.Body.Stmts, match.Ok.Pattern.Name) {
 			e.line("_ = " + okName)
 		}
 	}
 	if err := e.emitBlockValue(match.Ok.Body, returnType, assign); err != nil {
+		e.popScope()
 		return "", err
 	}
+	e.popScope()
 	e.indent--
 	e.line("} else {")
 	e.indent++
+	e.pushScope()
 	if match.Err != nil && match.Err.Pattern != nil {
-		errName := goName(match.Err.Pattern.Name, false)
+		errName := e.bindLocal(match.Err.Pattern.Name)
 		e.line(fmt.Sprintf("%s := %s.UnwrapErr()", errName, resultName))
 		if !usesNameInStatements(match.Err.Body.Stmts, match.Err.Pattern.Name) {
 			e.line("_ = " + errName)
 		}
 	}
 	if err := e.emitBlockValue(match.Err.Body, returnType, assign); err != nil {
+		e.popScope()
 		return "", err
 	}
+	e.popScope()
 	e.indent--
 	e.line("}")
 	return tempName, nil
@@ -2899,16 +3068,19 @@ func (e *emitter) emitUnionMatch(match *checker.UnionMatch, expectedType checker
 		}
 		e.line("case " + typeName + ":")
 		e.indent++
+		e.pushScope()
 		if matchCase.Pattern != nil {
-			boundName := goName(matchCase.Pattern.Name, false)
+			boundName := e.bindLocal(matchCase.Pattern.Name)
 			e.line(fmt.Sprintf("%s := %s", boundName, subjectName))
 			if !usesNameInStatements(matchCase.Body.Stmts, matchCase.Pattern.Name) {
 				e.line("_ = " + boundName)
 			}
 		}
 		if err := e.emitBlockValue(matchCase.Body, returnType, assign); err != nil {
+			e.popScope()
 			return "", err
 		}
+		e.popScope()
 		e.indent--
 	}
 	if match.CatchAll != nil {
@@ -2942,15 +3114,17 @@ func (e *emitter) emitPanicExpr(message checker.Expression, resultType checker.T
 
 func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitter) error) (string, error) {
 	inner := &emitter{
-		module:        e.module,
-		packageName:   e.packageName,
-		projectName:   e.projectName,
-		entrypoint:    e.entrypoint,
-		imports:       e.imports,
-		functionNames: e.functionNames,
-		emittedTypes:  e.emittedTypes,
-		indent:        1,
-		fnReturnType:  e.fnReturnType,
+		module:          e.module,
+		packageName:     e.packageName,
+		projectName:     e.projectName,
+		entrypoint:      e.entrypoint,
+		imports:         e.imports,
+		functionNames:   e.functionNames,
+		emittedTypes:    e.emittedTypes,
+		indent:          1,
+		fnReturnType:    e.fnReturnType,
+		localScopes:     cloneLocalScopes(e.localScopes),
+		localNameCounts: cloneLocalNameCounts(e.localNameCounts),
 	}
 	if err := body(inner); err != nil {
 		return "", err
@@ -3263,7 +3437,7 @@ func (e *emitter) resolvedModuleFunctionName(modulePath string, call *checker.Fu
 }
 
 func (e *emitter) emitMapMutationExpr(method *checker.MapMethod) (string, error) {
-	target, err := emitAssignmentTarget(method.Subject)
+	target, err := e.emitAssignmentTarget(method.Subject)
 	if err != nil {
 		return "", err
 	}
@@ -3381,6 +3555,9 @@ func emitType(t checker.Type) (string, error) {
 		}
 		return fmt.Sprintf("%s.Result[%s, %s]", helperImportAlias, valueType, errType), nil
 	case *checker.Enum:
+		if len(typed.Methods) > 0 {
+			return goName(typed.Name, true), nil
+		}
 		return "struct{ Tag int }", nil
 	case *checker.Maybe:
 		innerType, err := emitTypeArg(typed.Of())
