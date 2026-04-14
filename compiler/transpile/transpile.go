@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -41,6 +42,7 @@ type emitter struct {
 	fnReturnType    checker.Type
 	localScopes     []map[string]string
 	localNameCounts map[string]int
+	typeParams      map[string]string
 }
 
 func (e *emitter) nextTemp(prefix string) string {
@@ -119,6 +121,252 @@ func cloneLocalNameCounts(counts map[string]int) map[string]int {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func cloneTypeParams(params map[string]string) map[string]string {
+	if len(params) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(params))
+	for k, v := range params {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func (e *emitter) withTypeParams(params map[string]string, fn func() error) error {
+	prev := e.typeParams
+	e.typeParams = cloneTypeParams(params)
+	defer func() {
+		e.typeParams = prev
+	}()
+	return fn()
+}
+
+func typeVarName(tv *checker.TypeVar) string {
+	if tv == nil {
+		return ""
+	}
+	name := tv.String()
+	return strings.TrimPrefix(name, "$")
+}
+
+func collectTypeParamNames(t checker.Type, out *[]string, seen map[string]struct{}) {
+	if t == nil {
+		return
+	}
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			collectTypeParamNames(actual, out, seen)
+			return
+		}
+		name := typeVarName(typed)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		*out = append(*out, name)
+	case *checker.List:
+		collectTypeParamNames(typed.Of(), out, seen)
+	case *checker.Map:
+		collectTypeParamNames(typed.Key(), out, seen)
+		collectTypeParamNames(typed.Value(), out, seen)
+	case *checker.Maybe:
+		collectTypeParamNames(typed.Of(), out, seen)
+	case *checker.Result:
+		collectTypeParamNames(typed.Val(), out, seen)
+		collectTypeParamNames(typed.Err(), out, seen)
+	case *checker.Union:
+		for _, member := range typed.Types {
+			collectTypeParamNames(member, out, seen)
+		}
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectTypeParamNames(param.Type, out, seen)
+		}
+		collectTypeParamNames(effectiveFunctionReturnType(typed), out, seen)
+	case *checker.StructDef:
+		for _, name := range typed.GenericParams {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			*out = append(*out, name)
+		}
+	}
+}
+
+func collectTypeParamConstraints(t checker.Type, constraints map[string]string, mapKey bool) {
+	if t == nil {
+		return
+	}
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			collectTypeParamConstraints(actual, constraints, mapKey)
+			return
+		}
+		name := typeVarName(typed)
+		if name == "" {
+			return
+		}
+		if mapKey {
+			constraints[name] = "comparable"
+			return
+		}
+		if constraints[name] == "" {
+			constraints[name] = "any"
+		}
+	case *checker.List:
+		collectTypeParamConstraints(typed.Of(), constraints, false)
+	case *checker.Map:
+		collectTypeParamConstraints(typed.Key(), constraints, true)
+		collectTypeParamConstraints(typed.Value(), constraints, false)
+	case *checker.Maybe:
+		collectTypeParamConstraints(typed.Of(), constraints, false)
+	case *checker.Result:
+		collectTypeParamConstraints(typed.Val(), constraints, false)
+		collectTypeParamConstraints(typed.Err(), constraints, false)
+	case *checker.Union:
+		for _, member := range typed.Types {
+			collectTypeParamConstraints(member, constraints, false)
+		}
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectTypeParamConstraints(param.Type, constraints, false)
+		}
+		collectTypeParamConstraints(effectiveFunctionReturnType(typed), constraints, false)
+	}
+}
+
+func signatureTypeParams(params []checker.Parameter, returnType checker.Type) ([]string, map[string]string, map[string]string) {
+	seen := make(map[string]struct{})
+	order := make([]string, 0)
+	for _, param := range params {
+		collectTypeParamNames(param.Type, &order, seen)
+	}
+	collectTypeParamNames(returnType, &order, seen)
+	if len(order) == 0 {
+		return nil, nil, nil
+	}
+	used := make(map[string]struct{})
+	mapping := make(map[string]string, len(order))
+	for _, name := range order {
+		emitted := goName(name, true)
+		if emitted == "Any" {
+			emitted = "T"
+		}
+		if _, ok := used[emitted]; !ok {
+			used[emitted] = struct{}{}
+			mapping[name] = emitted
+			continue
+		}
+		for i := 2; ; i++ {
+			candidate := fmt.Sprintf("%s%d", emitted, i)
+			if _, ok := used[candidate]; ok {
+				continue
+			}
+			used[candidate] = struct{}{}
+			mapping[name] = candidate
+			break
+		}
+	}
+	constraints := make(map[string]string, len(order))
+	for _, param := range params {
+		collectTypeParamConstraints(param.Type, constraints, false)
+	}
+	collectTypeParamConstraints(returnType, constraints, false)
+	for _, name := range order {
+		if constraints[name] == "" {
+			constraints[name] = "any"
+		}
+	}
+	return order, mapping, constraints
+}
+
+func functionTypeParams(def *checker.FunctionDef) ([]string, map[string]string, map[string]string) {
+	if def == nil {
+		return nil, nil, nil
+	}
+	return signatureTypeParams(def.Parameters, effectiveFunctionReturnType(def))
+}
+
+func formatTypeParamDecls(order []string, mapping map[string]string, constraints map[string]string) string {
+	if len(order) == 0 || len(mapping) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		emitted := mapping[name]
+		if emitted == "" {
+			continue
+		}
+		constraint := constraints[name]
+		if constraint == "" {
+			constraint = "any"
+		}
+		parts = append(parts, emitted+" "+constraint)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func sameImportedType(target checker.Type, sym checker.Type) bool {
+	if target == nil || sym == nil {
+		return false
+	}
+	vt := reflect.ValueOf(target)
+	vs := reflect.ValueOf(sym)
+	if vt.IsValid() && vs.IsValid() && vt.Kind() == reflect.Pointer && vs.Kind() == reflect.Pointer && !vt.IsNil() && !vs.IsNil() {
+		if vt.Pointer() == vs.Pointer() {
+			return true
+		}
+	}
+	if reflect.TypeOf(target) != reflect.TypeOf(sym) {
+		return false
+	}
+	return target.String() == sym.String()
+}
+
+func (e *emitter) importedTypeAlias(name string, t checker.Type) string {
+	if e == nil || e.module == nil || e.module.Program() == nil {
+		return ""
+	}
+	for _, mod := range sortedModules(e.module.Program().Imports) {
+		sym := mod.Get(name)
+		if sym.IsZero() || !sameImportedType(t, sym.Type) {
+			continue
+		}
+		return packageNameForModulePath(mod.Path())
+	}
+	return ""
+}
+
+func (e *emitter) emitType(t checker.Type) (string, error) {
+	return emitTypeWithOptions(t, e.typeParams, func(name string, typ checker.Type) string {
+		alias := e.importedTypeAlias(name, typ)
+		if alias == "" {
+			return goName(name, true)
+		}
+		return alias + "." + goName(name, true)
+	})
+}
+
+func (e *emitter) emitTypeArg(t checker.Type) (string, error) {
+	typeName, err := e.emitType(t)
+	if err != nil {
+		return "", err
+	}
+	if typeName == "" {
+		return "struct{}", nil
+	}
+	return typeName, nil
 }
 
 func EmitEntrypoint(module checker.Module) ([]byte, error) {
@@ -445,7 +693,9 @@ func collectImportsFromStatement(stmt checker.Statement, imports map[string]stri
 }
 
 func collectImportsFromExprTypes(expr checker.Expression, imports map[string]string) {
-	collectImportsFromType(expr.Type(), imports)
+	if _, ok := expr.Type().(*checker.FunctionDef); !ok {
+		collectImportsFromType(expr.Type(), imports)
+	}
 	if fn, ok := expr.(*checker.FunctionDef); ok {
 		for _, param := range fn.Parameters {
 			collectImportsFromType(param.Type, imports)
@@ -482,6 +732,9 @@ func collectImportsFromStmtTypes(stmt checker.NonProducing, imports map[string]s
 			}
 		}
 	case *checker.VariableDef:
+		if _, ok := s.Type().(*checker.FunctionDef); ok {
+			return
+		}
 		collectImportsFromType(s.Type(), imports)
 	}
 }
@@ -508,6 +761,11 @@ func collectImportsFromType(t checker.Type, imports map[string]string) {
 		for _, fieldName := range sortedStringKeys(typed.Fields) {
 			collectImportsFromType(typed.Fields[fieldName], imports)
 		}
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectImportsFromType(param.Type, imports)
+		}
+		collectImportsFromType(effectiveFunctionReturnType(typed), imports)
 	case *checker.Trait:
 		if typed.Name == "ToString" || typed.Name == "Encodable" {
 			imports[helperImportPath] = helperImportAlias
@@ -664,6 +922,7 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 		for _, element := range v.Elements {
 			collectImportsFromExpr(element, imports, projectName)
 		}
+		collectImportsFromType(v.ListType, imports)
 	case *checker.ListMethod:
 		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
@@ -677,6 +936,7 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 			collectImportsFromExpr(v.Keys[i], imports, projectName)
 			collectImportsFromExpr(v.Values[i], imports, projectName)
 		}
+		collectImportsFromType(v.Type(), imports)
 	case *checker.MapMethod:
 		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
@@ -1005,7 +1265,7 @@ func (e *emitter) emitStructDef(def *checker.StructDef) error {
 	e.indent++
 	fieldNames := sortedStringKeys(def.Fields)
 	for _, fieldName := range fieldNames {
-		typeName, err := emitType(def.Fields[fieldName])
+		typeName, err := e.emitType(def.Fields[fieldName])
 		if err != nil {
 			return fmt.Errorf("struct %s: %w", def.Name, err)
 		}
@@ -1046,7 +1306,7 @@ func (e *emitter) emitReceiverMethod(typeName string, method *checker.FunctionDe
 		name := goName(method.Name, !method.Private)
 		signature := fmt.Sprintf("func (%s %s) %s(%s)", receiverName, receiverType, name, strings.Join(params, ", "))
 		if method.ReturnType != checker.Void {
-			returnType, err := emitType(method.ReturnType)
+			returnType, err := e.emitType(method.ReturnType)
 			if err != nil {
 				return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
 			}
@@ -1147,7 +1407,7 @@ func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
 		e.line(fmt.Sprintf("var %s = %s", name, value))
 		return nil
 	}
-	typeName, err := emitType(def.Type())
+	typeName, err := e.emitType(def.Type())
 	if err != nil || typeName == "" {
 		e.line(fmt.Sprintf("var %s = %s", name, value))
 		return nil
@@ -1173,10 +1433,10 @@ func effectiveFunctionReturnType(def *checker.FunctionDef) checker.Type {
 	return def.ReturnType
 }
 
-func emitFunctionParams(params []checker.Parameter, includeNames bool) ([]string, error) {
+func emitFunctionParamsWithOptions(params []checker.Parameter, includeNames bool, typeParams map[string]string, namedTypeRef func(string, checker.Type) string) ([]string, error) {
 	parts := make([]string, 0, len(params))
 	for _, param := range params {
-		typeName, err := emitType(param.Type)
+		typeName, err := emitTypeWithOptions(param.Type, typeParams, namedTypeRef)
 		if err != nil {
 			return nil, err
 		}
@@ -1189,10 +1449,14 @@ func emitFunctionParams(params []checker.Parameter, includeNames bool) ([]string
 	return parts, nil
 }
 
+func emitFunctionParams(params []checker.Parameter, includeNames bool) ([]string, error) {
+	return emitFunctionParamsWithOptions(params, includeNames, nil, nil)
+}
+
 func (e *emitter) emitBoundFunctionParams(params []checker.Parameter) ([]string, error) {
 	parts := make([]string, 0, len(params))
 	for _, param := range params {
-		typeName, err := emitType(param.Type)
+		typeName, err := e.emitType(param.Type)
 		if err != nil {
 			return nil, err
 		}
@@ -1201,21 +1465,25 @@ func (e *emitter) emitBoundFunctionParams(params []checker.Parameter) ([]string,
 	return parts, nil
 }
 
-func emitFunctionType(def *checker.FunctionDef) (string, error) {
-	params, err := emitFunctionParams(def.Parameters, false)
+func emitFunctionTypeWithOptions(def *checker.FunctionDef, typeParams map[string]string, namedTypeRef func(string, checker.Type) string) (string, error) {
+	params, err := emitFunctionParamsWithOptions(def.Parameters, false, typeParams, namedTypeRef)
 	if err != nil {
 		return "", err
 	}
 	typeName := fmt.Sprintf("func(%s)", strings.Join(params, ", "))
 	returnType := effectiveFunctionReturnType(def)
 	if returnType != checker.Void {
-		emittedReturnType, err := emitType(returnType)
+		emittedReturnType, err := emitTypeWithOptions(returnType, typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
 		typeName += " " + emittedReturnType
 	}
 	return typeName, nil
+}
+
+func emitFunctionType(def *checker.FunctionDef) (string, error) {
+	return emitFunctionTypeWithOptions(def, nil, nil)
 }
 
 func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
@@ -1233,6 +1501,7 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 		fnReturnType:    returnType,
 		localScopes:     cloneLocalScopes(e.localScopes),
 		localNameCounts: cloneLocalNameCounts(e.localNameCounts),
+		typeParams:      cloneTypeParams(e.typeParams),
 	}
 	inner.pushScope()
 	params, err := inner.emitBoundFunctionParams(def.Parameters)
@@ -1248,7 +1517,7 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 	builder.WriteString(strings.Join(params, ", "))
 	builder.WriteString(")")
 	if returnType != checker.Void {
-		emittedReturnType, err := emitType(returnType)
+		emittedReturnType, err := inner.emitType(returnType)
 		if err != nil {
 			return "", err
 		}
@@ -1262,88 +1531,94 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 }
 
 func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
+	order, paramsMap, constraints := signatureTypeParams(def.Parameters, def.ReturnType)
 	return e.withFreshLocals(func() error {
-		e.pushScope()
-		params := make([]string, 0, len(def.Parameters))
-		args := make([]string, 0, len(def.Parameters))
-		for _, param := range def.Parameters {
-			typeName, err := emitType(param.Type)
-			if err != nil {
-				return fmt.Errorf("extern function %s: %w", def.Name, err)
+		return e.withTypeParams(paramsMap, func() error {
+			e.pushScope()
+			params := make([]string, 0, len(def.Parameters))
+			args := make([]string, 0, len(def.Parameters))
+			for _, param := range def.Parameters {
+				typeName, err := e.emitType(param.Type)
+				if err != nil {
+					return fmt.Errorf("extern function %s: %w", def.Name, err)
+				}
+				paramName := e.bindLocal(param.Name)
+				params = append(params, fmt.Sprintf("%s %s", paramName, typeName))
+				args = append(args, paramName)
 			}
-			paramName := e.bindLocal(param.Name)
-			params = append(params, fmt.Sprintf("%s %s", paramName, typeName))
-			args = append(args, paramName)
-		}
 
-		name := e.functionNames[def.Name]
-		signature := fmt.Sprintf("func %s(%s)", name, strings.Join(params, ", "))
-		returnType := ""
-		if def.ReturnType != checker.Void {
-			var err error
-			returnType, err = emitType(def.ReturnType)
-			if err != nil {
-				return fmt.Errorf("extern function %s: %w", def.Name, err)
+			name := e.functionNames[def.Name]
+			signature := fmt.Sprintf("func %s%s(%s)", name, formatTypeParamDecls(order, paramsMap, constraints), strings.Join(params, ", "))
+			returnType := ""
+			if def.ReturnType != checker.Void {
+				var err error
+				returnType, err = e.emitType(def.ReturnType)
+				if err != nil {
+					return fmt.Errorf("extern function %s: %w", def.Name, err)
+				}
+				signature += " " + returnType
 			}
-			signature += " " + returnType
-		}
 
-		e.line(signature + " {")
-		e.indent++
-		call := fmt.Sprintf("%s.CallExtern(%q", helperImportAlias, def.ExternalBinding)
-		if len(args) > 0 {
-			call += ", " + strings.Join(args, ", ")
-		}
-		call += ")"
-		resultBinding := "result"
-		if def.ReturnType == checker.Void {
-			resultBinding = "_"
-		}
-		e.line(resultBinding + ", err := " + call)
-		e.line("if err != nil {")
-		e.indent++
-		e.line("panic(err)")
-		e.indent--
-		e.line("}")
-		if def.ReturnType != checker.Void {
-			e.line(fmt.Sprintf("return result.(%s)", returnType))
-		}
-		e.indent--
-		e.line("}")
-		return nil
+			e.line(signature + " {")
+			e.indent++
+			call := fmt.Sprintf("%s.CallExtern(%q", helperImportAlias, def.ExternalBinding)
+			if len(args) > 0 {
+				call += ", " + strings.Join(args, ", ")
+			}
+			call += ")"
+			resultBinding := "result"
+			if def.ReturnType == checker.Void {
+				resultBinding = "_"
+			}
+			e.line(resultBinding + ", err := " + call)
+			e.line("if err != nil {")
+			e.indent++
+			e.line("panic(err)")
+			e.indent--
+			e.line("}")
+			if def.ReturnType != checker.Void {
+				e.line(fmt.Sprintf("return result.(%s)", returnType))
+			}
+			e.indent--
+			e.line("}")
+			return nil
+		})
 	})
 }
 
 func (e *emitter) emitFunction(def *checker.FunctionDef) error {
+	order, paramsMap, constraints := functionTypeParams(def)
 	return e.withFreshLocals(func() error {
-		e.pushScope()
-		params, err := e.emitBoundFunctionParams(def.Parameters)
-		if err != nil {
-			return fmt.Errorf("function %s: %w", def.Name, err)
-		}
-
-		returnType := effectiveFunctionReturnType(def)
-		signature := fmt.Sprintf("func %s(%s)", e.functionNames[def.Name], strings.Join(params, ", "))
-		if returnType != checker.Void {
-			emittedReturnType, err := emitType(returnType)
+		return e.withTypeParams(paramsMap, func() error {
+			e.pushScope()
+			params, err := e.emitBoundFunctionParams(def.Parameters)
 			if err != nil {
 				return fmt.Errorf("function %s: %w", def.Name, err)
 			}
-			signature += " " + emittedReturnType
-		}
-		e.line(signature + " {")
-		e.indent++
-		prevReturnType := e.fnReturnType
-		e.fnReturnType = returnType
-		defer func() {
-			e.fnReturnType = prevReturnType
-		}()
-		if err := e.emitStatements(def.Body.Stmts, returnType); err != nil {
-			return err
-		}
-		e.indent--
-		e.line("}")
-		return nil
+
+			returnType := effectiveFunctionReturnType(def)
+			signature := fmt.Sprintf("func %s%s(%s)", e.functionNames[def.Name], formatTypeParamDecls(order, paramsMap, constraints), strings.Join(params, ", "))
+			if returnType != checker.Void {
+				emittedReturnType, err := e.emitType(returnType)
+				if err != nil {
+					return fmt.Errorf("function %s: %w", def.Name, err)
+				}
+				signature += " " + emittedReturnType
+			}
+			e.line(signature + " {")
+			e.indent++
+			prevReturnType := e.fnReturnType
+			e.fnReturnType = returnType
+			defer func() {
+				e.fnReturnType = prevReturnType
+			}()
+			if err := e.emitStatements(def.Body.Stmts, returnType); err != nil {
+				return err
+			}
+			e.indent--
+			e.line("}")
+			return nil
+		})
 	})
 }
 
@@ -1390,7 +1665,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 		if tryOp, ok := s.Value.(*checker.TryOp); ok {
 			if err := e.emitTryOp(tryOp, returnType, func(successValue string) error {
 				if typeNeedsExplicitVarAnnotation(s.Type()) {
-					typeName, err := emitType(s.Type())
+					typeName, err := e.emitType(s.Type())
 					if err != nil || typeName == "" {
 						e.line(fmt.Sprintf("%s := %s", name, successValue))
 					} else {
@@ -1413,7 +1688,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 			return err
 		}
 		if typeNeedsExplicitVarAnnotation(s.Type()) {
-			typeName, err := emitType(s.Type())
+			typeName, err := e.emitType(s.Type())
 			if err != nil || typeName == "" {
 				e.line(fmt.Sprintf("%s := %s", name, value))
 			} else {
@@ -2028,7 +2303,7 @@ func (e *emitter) emitTryExpr(op *checker.TryOp) (string, error) {
 		return "", fmt.Errorf("try expressions are only supported in function bodies")
 	}
 	tempName := e.nextTemp("TryValue")
-	typeName, err := emitType(op.Type())
+	typeName, err := e.emitType(op.Type())
 	if err != nil {
 		return "", err
 	}
@@ -2097,11 +2372,11 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 			if !ok {
 				return fmt.Errorf("try without catch on Result requires function to return a Result type, got %v", e.fnReturnType)
 			}
-			valueType, err := emitTypeArg(resultType.Val())
+			valueType, err := e.emitTypeArg(resultType.Val())
 			if err != nil {
 				return err
 			}
-			errType, err := emitTypeArg(resultType.Err())
+			errType, err := e.emitTypeArg(resultType.Err())
 			if err != nil {
 				return err
 			}
@@ -2152,7 +2427,7 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 			if !ok {
 				return fmt.Errorf("try without catch on Maybe requires function to return a Maybe type, got %v", e.fnReturnType)
 			}
-			innerType, err := emitTypeArg(maybeType.Of())
+			innerType, err := e.emitTypeArg(maybeType.Of())
 			if err != nil {
 				return err
 			}
@@ -2385,7 +2660,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			}
 			elements = append(elements, emitted)
 		}
-		typeName, err := emitType(v.ListType)
+		typeName, err := e.emitType(v.ListType)
 		if err != nil {
 			return "", err
 		}
@@ -2403,7 +2678,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			}
 			entries = append(entries, fmt.Sprintf("%s: %s", key, value))
 		}
-		typeName, err := emitType(v.Type())
+		typeName, err := e.emitType(v.Type())
 		if err != nil {
 			return "", err
 		}
@@ -2661,7 +2936,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("expected map subject, got %s", v.Subject.Type())
 			}
-			keysType, err := emitType(checker.MakeList(mapType.Key()))
+			keysType, err := e.emitType(checker.MakeList(mapType.Key()))
 			if err != nil {
 				return "", err
 			}
@@ -2676,7 +2951,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			resultType, err := emitType(v.Type())
+			resultType, err := e.emitType(v.Type())
 			if err != nil {
 				return "", err
 			}
@@ -2684,7 +2959,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("expected maybe return type for map.get, got %s", v.Type())
 			}
-			innerType, err := emitTypeArg(maybeType.Of())
+			innerType, err := e.emitTypeArg(maybeType.Of())
 			if err != nil {
 				return "", err
 			}
@@ -2791,7 +3066,7 @@ func (e *emitter) emitCopyExpr(copy *checker.CopyExpression) (string, error) {
 	}
 	switch typed := copy.Type_.(type) {
 	case *checker.List:
-		typeName, err := emitType(typed)
+		typeName, err := e.emitType(typed)
 		if err != nil {
 			return "", err
 		}
@@ -2810,7 +3085,7 @@ func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, erro
 	if !ok {
 		return "", fmt.Errorf("expected list subject, got %s", method.Subject.Type())
 	}
-	typeName, err := emitType(subjectType)
+	typeName, err := e.emitType(subjectType)
 	if err != nil {
 		return "", err
 	}
@@ -3091,7 +3366,7 @@ func (e *emitter) emitUnionMatchStatement(match *checker.UnionMatch) error {
 		if caseType == nil {
 			return fmt.Errorf("missing union case type for %s", caseName)
 		}
-		typeName, err := emitTypeArg(caseType)
+		typeName, err := e.emitTypeArg(caseType)
 		if err != nil {
 			return err
 		}
@@ -3130,7 +3405,7 @@ func (e *emitter) emitValueTemp(prefix string, valueType checker.Type) (string, 
 		return "", nil, fmt.Errorf("expected non-void value type for %s", prefix)
 	}
 	tempName := e.nextTemp(prefix)
-	typeName, err := emitType(valueType)
+	typeName, err := e.emitType(valueType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -3383,7 +3658,7 @@ func (e *emitter) emitUnionMatch(match *checker.UnionMatch, expectedType checker
 		if caseType == nil {
 			return "", fmt.Errorf("missing union case type for %s", caseName)
 		}
-		typeName, err := emitTypeArg(caseType)
+		typeName, err := e.emitTypeArg(caseType)
 		if err != nil {
 			return "", err
 		}
@@ -3446,6 +3721,7 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 		fnReturnType:    e.fnReturnType,
 		localScopes:     cloneLocalScopes(e.localScopes),
 		localNameCounts: cloneLocalNameCounts(e.localNameCounts),
+		typeParams:      cloneTypeParams(e.typeParams),
 	}
 	if err := body(inner); err != nil {
 		return "", err
@@ -3453,7 +3729,7 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 	var builder strings.Builder
 	builder.WriteString("func()")
 	if returnType != nil && returnType != checker.Void {
-		typeName, err := emitType(returnType)
+		typeName, err := inner.emitType(returnType)
 		if err != nil {
 			return "", err
 		}
@@ -3483,7 +3759,7 @@ func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, 
 		if err != nil {
 			return "", true, err
 		}
-		typeName, err := emitType(call.Call.ReturnType)
+		typeName, err := e.emitType(call.Call.ReturnType)
 		if err != nil {
 			return "", true, err
 		}
@@ -3513,11 +3789,11 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expecte
 		if err != nil {
 			return "", err
 		}
-		valueType, err := emitTypeArg(resultType.Val())
+		valueType, err := e.emitTypeArg(resultType.Val())
 		if err != nil {
 			return "", err
 		}
-		errType, err := emitTypeArg(resultType.Err())
+		errType, err := e.emitTypeArg(resultType.Err())
 		if err != nil {
 			return "", err
 		}
@@ -3540,11 +3816,11 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expecte
 		if err != nil {
 			return "", err
 		}
-		valueType, err := emitTypeArg(resultType.Val())
+		valueType, err := e.emitTypeArg(resultType.Val())
 		if err != nil {
 			return "", err
 		}
-		errType, err := emitTypeArg(resultType.Err())
+		errType, err := e.emitTypeArg(resultType.Err())
 		if err != nil {
 			return "", err
 		}
@@ -3699,7 +3975,7 @@ func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expected
 		if !ok {
 			return "", fmt.Errorf("maybe::none expected Maybe return type, got %s", call.Call.ReturnType)
 		}
-		innerType, err := emitTypeArg(maybeType.Of())
+		innerType, err := e.emitTypeArg(maybeType.Of())
 		if err != nil {
 			return "", err
 		}
@@ -3829,8 +4105,8 @@ func (e *emitter) emitBinary(left checker.Expression, op string, right checker.E
 	return fmt.Sprintf("(%s %s %s)", leftExpr, op, rightExpr), nil
 }
 
-func emitTypeArg(t checker.Type) (string, error) {
-	typeName, err := emitType(t)
+func emitTypeArgWithOptions(t checker.Type, typeParams map[string]string, namedTypeRef func(string, checker.Type) string) (string, error) {
+	typeName, err := emitTypeWithOptions(t, typeParams, namedTypeRef)
 	if err != nil {
 		return "", err
 	}
@@ -3840,7 +4116,11 @@ func emitTypeArg(t checker.Type) (string, error) {
 	return typeName, nil
 }
 
-func emitTraitType(trait *checker.Trait) (string, error) {
+func emitTypeArg(t checker.Type) (string, error) {
+	return emitTypeArgWithOptions(t, nil, nil)
+}
+
+func emitTraitTypeWithOptions(trait *checker.Trait, typeParams map[string]string, namedTypeRef func(string, checker.Type) string) (string, error) {
 	if trait == nil {
 		return "", fmt.Errorf("nil trait")
 	}
@@ -3853,13 +4133,13 @@ func emitTraitType(trait *checker.Trait) (string, error) {
 	methods := trait.GetMethods()
 	parts := make([]string, 0, len(methods))
 	for _, method := range methods {
-		params, err := emitFunctionParams(method.Parameters, false)
+		params, err := emitFunctionParamsWithOptions(method.Parameters, false, typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
 		signature := fmt.Sprintf("%s(%s)", goName(method.Name, true), strings.Join(params, ", "))
 		if method.ReturnType != checker.Void {
-			returnType, err := emitType(method.ReturnType)
+			returnType, err := emitTypeWithOptions(method.ReturnType, typeParams, namedTypeRef)
 			if err != nil {
 				return "", err
 			}
@@ -3870,7 +4150,11 @@ func emitTraitType(trait *checker.Trait) (string, error) {
 	return fmt.Sprintf("interface{ %s }", strings.Join(parts, "; ")), nil
 }
 
-func emitType(t checker.Type) (string, error) {
+func emitTraitType(trait *checker.Trait) (string, error) {
+	return emitTraitTypeWithOptions(trait, nil, nil)
+}
+
+func emitTypeWithOptions(t checker.Type, typeParams map[string]string, namedTypeRef func(string, checker.Type) string) (string, error) {
 	switch t {
 	case checker.Int:
 		return "int", nil
@@ -3889,52 +4173,63 @@ func emitType(t checker.Type) (string, error) {
 	switch typed := t.(type) {
 	case *checker.TypeVar:
 		if actual := typed.Actual(); actual != nil {
-			return emitType(actual)
+			return emitTypeWithOptions(actual, typeParams, namedTypeRef)
+		}
+		if typeParams != nil {
+			if resolved := typeParams[typeVarName(typed)]; resolved != "" {
+				return resolved, nil
+			}
 		}
 		return "any", nil
 	case *checker.Result:
-		valueType, err := emitTypeArg(typed.Val())
+		valueType, err := emitTypeArgWithOptions(typed.Val(), typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
-		errType, err := emitTypeArg(typed.Err())
+		errType, err := emitTypeArgWithOptions(typed.Err(), typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%s.Result[%s, %s]", helperImportAlias, valueType, errType), nil
 	case *checker.Enum:
 		if len(typed.Methods) > 0 {
+			if namedTypeRef != nil {
+				return namedTypeRef(typed.Name, typed), nil
+			}
 			return goName(typed.Name, true), nil
 		}
 		return "struct{ Tag int }", nil
 	case *checker.Maybe:
-		innerType, err := emitTypeArg(typed.Of())
+		innerType, err := emitTypeArgWithOptions(typed.Of(), typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%s.Maybe[%s]", helperImportAlias, innerType), nil
 	case *checker.List:
-		elementType, err := emitType(typed.Of())
+		elementType, err := emitTypeWithOptions(typed.Of(), typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
 		return "[]" + elementType, nil
 	case *checker.Map:
-		keyType, err := emitType(typed.Key())
+		keyType, err := emitTypeWithOptions(typed.Key(), typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
-		valueType, err := emitType(typed.Value())
+		valueType, err := emitTypeWithOptions(typed.Value(), typeParams, namedTypeRef)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("map[%s]%s", keyType, valueType), nil
 	case *checker.StructDef:
+		if namedTypeRef != nil {
+			return namedTypeRef(typed.Name, typed), nil
+		}
 		return goName(typed.Name, true), nil
 	case *checker.FunctionDef:
-		return emitFunctionType(typed)
+		return emitFunctionTypeWithOptions(typed, typeParams, namedTypeRef)
 	case *checker.Trait:
-		return emitTraitType(typed)
+		return emitTraitTypeWithOptions(typed, typeParams, namedTypeRef)
 	case *checker.ExternType:
 		return "any", nil
 	case *checker.Union:
@@ -3942,6 +4237,10 @@ func emitType(t checker.Type) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported type: %s", t.String())
 	}
+}
+
+func emitType(t checker.Type) (string, error) {
+	return emitTypeWithOptions(t, nil, nil)
 }
 
 func (e *emitter) line(text string) {
