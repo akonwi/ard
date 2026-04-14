@@ -1242,6 +1242,18 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 		for _, stmt := range v.Err.Body.Stmts {
 			collectImportsFromStatement(stmt, imports, projectName)
 		}
+	case *checker.ConditionalMatch:
+		for _, matchCase := range v.Cases {
+			collectImportsFromExpr(matchCase.Condition, imports, projectName)
+			for _, stmt := range matchCase.Body.Stmts {
+				collectImportsFromStatement(stmt, imports, projectName)
+			}
+		}
+		if v.CatchAll != nil {
+			for _, stmt := range v.CatchAll.Stmts {
+				collectImportsFromStatement(stmt, imports, projectName)
+			}
+		}
 	case *checker.FunctionDef:
 		for _, param := range v.Parameters {
 			collectImportsFromType(param.Type, imports)
@@ -1324,7 +1336,11 @@ func sortedStringKeys[T any](values map[string]T) []string {
 
 func packageNameForModulePath(modulePath string) string {
 	base := filepath.Base(strings.TrimSuffix(modulePath, ".ard"))
-	return goName(base, false)
+	name := goName(base, false)
+	if isGoPredeclaredIdentifier(name) {
+		return name + "_"
+	}
+	return name
 }
 
 func stdlibGeneratedRelativePath(modulePath string) string {
@@ -2343,6 +2359,16 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return okUses || errUses
+	case *checker.ConditionalMatch:
+		for _, matchCase := range v.Cases {
+			if usesNameInExpr(matchCase.Condition, name) || usesNameInStatements(matchCase.Body.Stmts, name) {
+				return true
+			}
+		}
+		if v.CatchAll != nil {
+			return usesNameInStatements(v.CatchAll.Stmts, name)
+		}
+		return false
 	case *checker.UnionMatch:
 		if usesNameInExpr(v.Subject, name) {
 			return true
@@ -2669,6 +2695,8 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 			return e.emitOptionMatchStatement(typed)
 		case *checker.ResultMatch:
 			return e.emitResultMatchStatement(typed)
+		case *checker.ConditionalMatch:
+			return e.emitConditionalMatchStatement(typed)
 		case *checker.UnionMatch:
 			return e.emitUnionMatchStatement(typed)
 		}
@@ -2705,6 +2733,13 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 			return nil
 		case *checker.ResultMatch:
 			value, err := e.emitResultMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
+		case *checker.ConditionalMatch:
+			value, err := e.emitConditionalMatch(typed, returnType)
 			if err != nil {
 				return err
 			}
@@ -2871,6 +2906,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitOptionMatch(v, nil)
 	case *checker.ResultMatch:
 		return e.emitResultMatch(v, nil)
+	case *checker.ConditionalMatch:
+		return e.emitConditionalMatch(v, nil)
 	case *checker.UnionMatch:
 		return e.emitUnionMatch(v, nil)
 	case *checker.TryOp:
@@ -3425,6 +3462,41 @@ func (e *emitter) emitIntMatchStatement(match *checker.IntMatch) error {
 	return nil
 }
 
+func (e *emitter) emitConditionalMatchStatement(match *checker.ConditionalMatch) error {
+	for i, matchCase := range match.Cases {
+		condition, err := e.emitExpr(matchCase.Condition)
+		if err != nil {
+			return err
+		}
+		prefix := "if"
+		if i > 0 {
+			prefix = "} else if"
+		}
+		e.line(prefix + " " + condition + " {")
+		e.indent++
+		if err := e.emitStatements(matchCase.Body.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		if len(match.Cases) == 0 {
+			e.line("{")
+		} else {
+			e.line("} else {")
+		}
+		e.indent++
+		if err := e.emitStatements(match.CatchAll.Stmts, checker.Void); err != nil {
+			return err
+		}
+		e.indent--
+	}
+	if len(match.Cases) > 0 || match.CatchAll != nil {
+		e.line("}")
+	}
+	return nil
+}
+
 func (e *emitter) emitOptionMatchStatement(match *checker.OptionMatch) error {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
@@ -3689,6 +3761,55 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch, expectedType checker.Typ
 	}
 	e.indent--
 	e.line("}")
+	return tempName, nil
+}
+
+func (e *emitter) emitConditionalMatch(match *checker.ConditionalMatch, expectedType checker.Type) (string, error) {
+	returnType := matchReturnType(expectedType, match.Type())
+	tempName, assign, err := e.emitValueTemp("ConditionalMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	for i, matchCase := range match.Cases {
+		condition, err := e.emitExpr(matchCase.Condition)
+		if err != nil {
+			return "", err
+		}
+		prefix := "if"
+		if i > 0 {
+			prefix = "} else if"
+		}
+		e.line(prefix + " " + condition + " {")
+		e.indent++
+		if err := e.emitBlockValue(matchCase.Body, returnType, assign); err != nil {
+			return "", err
+		}
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		if len(match.Cases) == 0 {
+			e.line("{")
+		} else {
+			e.line("} else {")
+		}
+		e.indent++
+		if err := e.emitBlockValue(match.CatchAll, returnType, assign); err != nil {
+			return "", err
+		}
+		e.indent--
+	} else if returnType != checker.Void {
+		if len(match.Cases) == 0 {
+			e.line("{")
+		} else {
+			e.line("} else {")
+		}
+		e.indent++
+		e.line(`panic("non-exhaustive conditional match")`)
+		e.indent--
+	}
+	if len(match.Cases) > 0 || match.CatchAll != nil || returnType != checker.Void {
+		e.line("}")
+	}
 	return tempName, nil
 }
 
@@ -4731,6 +4852,18 @@ func isGoKeyword(value string) bool {
 		"chan", "else", "goto", "package", "switch",
 		"const", "fallthrough", "if", "range", "type",
 		"continue", "for", "import", "return", "var":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGoPredeclaredIdentifier(value string) bool {
+	switch value {
+	case "any", "bool", "byte", "comparable", "complex64", "complex128",
+		"error", "false", "float32", "float64", "iota", "int", "int8",
+		"int16", "int32", "int64", "nil", "rune", "string", "true",
+		"uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
 		return true
 	default:
 		return false
