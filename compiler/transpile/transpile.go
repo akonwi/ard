@@ -5,6 +5,7 @@ import (
 	gofmt "go/format"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -29,6 +30,7 @@ const (
 type emitter struct {
 	module        checker.Module
 	packageName   string
+	projectName   string
 	entrypoint    bool
 	imports       map[string]string
 	functionNames map[string]string
@@ -46,14 +48,14 @@ func (e *emitter) nextTemp(prefix string) string {
 }
 
 func EmitEntrypoint(module checker.Module) ([]byte, error) {
-	return emitModuleSource(module, "main", true)
+	return emitModuleSource(module, "main", true, "")
 }
 
-func emitPackageSource(module checker.Module) ([]byte, error) {
-	return emitModuleSource(module, packageNameForModulePath(module.Path()), false)
+func emitPackageSource(module checker.Module, projectName string) ([]byte, error) {
+	return emitModuleSource(module, packageNameForModulePath(module.Path()), false, projectName)
 }
 
-func emitModuleSource(module checker.Module, packageName string, entrypoint bool) ([]byte, error) {
+func emitModuleSource(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
 	if module == nil || module.Program() == nil {
 		return nil, fmt.Errorf("module has no program")
 	}
@@ -61,8 +63,9 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	e := &emitter{
 		module:        module,
 		packageName:   packageName,
+		projectName:   projectName,
 		entrypoint:    entrypoint,
-		imports:       collectModuleImports(module.Program().Statements),
+		imports:       collectModuleImports(module.Program().Statements, projectName),
 		functionNames: make(map[string]string),
 		emittedTypes:  make(map[string]struct{}),
 	}
@@ -208,7 +211,7 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 		return err
 	}
 
-	source, err := EmitEntrypoint(entrypoint)
+	source, err := emitModuleSource(entrypoint, "main", true, project.ProjectName)
 	if err != nil {
 		return err
 	}
@@ -217,7 +220,7 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 	}
 
 	written := map[string]struct{}{}
-	for _, mod := range sortedModules(entrypoint.Program().Imports) {
+	for _, mod := range requiredImportedModules(entrypoint.Program(), project.ProjectName) {
 		if err := writeImportedModule(generatedDir, project.ProjectName, mod, written); err != nil {
 			return err
 		}
@@ -225,11 +228,22 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 	return nil
 }
 
-func writeImportedModule(generatedDir, projectName string, module checker.Module, written map[string]struct{}) error {
-	if module == nil {
+func requiredImportedModules(program *checker.Program, projectName string) []checker.Module {
+	if program == nil {
 		return nil
 	}
-	if strings.HasPrefix(module.Path(), "ard/") {
+	imports := collectModuleImports(program.Statements, projectName)
+	mods := make([]checker.Module, 0, len(program.Imports))
+	for _, mod := range sortedModules(program.Imports) {
+		if _, ok := imports[moduleImportPath(projectName, mod.Path())]; ok {
+			mods = append(mods, mod)
+		}
+	}
+	return mods
+}
+
+func writeImportedModule(generatedDir, projectName string, module checker.Module, written map[string]struct{}) error {
+	if module == nil {
 		return nil
 	}
 	if _, ok := written[module.Path()]; ok {
@@ -237,7 +251,7 @@ func writeImportedModule(generatedDir, projectName string, module checker.Module
 	}
 	written[module.Path()] = struct{}{}
 
-	source, err := emitPackageSource(module)
+	source, err := emitPackageSource(module, projectName)
 	if err != nil {
 		return err
 	}
@@ -251,7 +265,7 @@ func writeImportedModule(generatedDir, projectName string, module checker.Module
 	if err := os.WriteFile(outputPath, source, 0o644); err != nil {
 		return err
 	}
-	for _, mod := range sortedModules(module.Program().Imports) {
+	for _, mod := range requiredImportedModules(module.Program(), projectName) {
 		if err := writeImportedModule(generatedDir, projectName, mod, written); err != nil {
 			return err
 		}
@@ -311,15 +325,15 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 	return filtered
 }
 
-func collectModuleImports(stmts []checker.Statement) map[string]string {
+func collectModuleImports(stmts []checker.Statement, projectName string) map[string]string {
 	imports := make(map[string]string)
 	for _, stmt := range stmts {
-		collectImportsFromStatement(stmt, imports)
+		collectImportsFromStatement(stmt, imports, projectName)
 	}
 	return imports
 }
 
-func collectImportsFromStatement(stmt checker.Statement, imports map[string]string) {
+func collectImportsFromStatement(stmt checker.Statement, imports map[string]string, projectName string) {
 	if extern, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok {
 		imports[helperImportPath] = helperImportAlias
 		for _, param := range extern.Parameters {
@@ -328,11 +342,11 @@ func collectImportsFromStatement(stmt checker.Statement, imports map[string]stri
 		collectImportsFromType(extern.ReturnType, imports)
 	}
 	if stmt.Expr != nil {
-		collectImportsFromExpr(stmt.Expr, imports)
+		collectImportsFromExpr(stmt.Expr, imports, projectName)
 		collectImportsFromExprTypes(stmt.Expr, imports)
 	}
 	if stmt.Stmt != nil {
-		collectImportsFromNonProducing(stmt.Stmt, imports)
+		collectImportsFromNonProducing(stmt.Stmt, imports, projectName)
 		collectImportsFromStmtTypes(stmt.Stmt, imports)
 	}
 }
@@ -383,296 +397,292 @@ func collectImportsFromType(t checker.Type, imports map[string]string) {
 	}
 }
 
-func collectImportsFromNonProducing(stmt checker.NonProducing, imports map[string]string) {
+func collectImportsFromNonProducing(stmt checker.NonProducing, imports map[string]string, projectName string) {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
-		collectImportsFromExpr(s.Value, imports)
+		collectImportsFromExpr(s.Value, imports, projectName)
 	case *checker.Reassignment:
-		collectImportsFromExpr(s.Target, imports)
-		collectImportsFromExpr(s.Value, imports)
+		collectImportsFromExpr(s.Target, imports, projectName)
+		collectImportsFromExpr(s.Value, imports, projectName)
 	case *checker.WhileLoop:
-		collectImportsFromExpr(s.Condition, imports)
+		collectImportsFromExpr(s.Condition, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ForLoop:
-		collectImportsFromExpr(s.Init.Value, imports)
-		collectImportsFromExpr(s.Condition, imports)
-		collectImportsFromExpr(s.Update.Value, imports)
+		collectImportsFromExpr(s.Init.Value, imports, projectName)
+		collectImportsFromExpr(s.Condition, imports, projectName)
+		collectImportsFromExpr(s.Update.Value, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ForIntRange:
-		collectImportsFromExpr(s.Start, imports)
-		collectImportsFromExpr(s.End, imports)
+		collectImportsFromExpr(s.Start, imports, projectName)
+		collectImportsFromExpr(s.End, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ForInStr:
-		collectImportsFromExpr(s.Value, imports)
+		collectImportsFromExpr(s.Value, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ForInList:
-		collectImportsFromExpr(s.List, imports)
+		collectImportsFromExpr(s.List, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ForInMap:
-		collectImportsFromExpr(s.Map, imports)
+		collectImportsFromExpr(s.Map, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	}
 }
 
-func collectImportsFromExpr(expr checker.Expression, imports map[string]string) {
+func collectImportsFromExpr(expr checker.Expression, imports map[string]string, projectName string) {
 	switch v := expr.(type) {
 	case *checker.IntAddition:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntSubtraction:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntMultiplication:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntDivision:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntModulo:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatAddition:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatSubtraction:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatMultiplication:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatDivision:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.StrAddition:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntGreater:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntGreaterEqual:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntLess:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.IntLessEqual:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatGreater:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatGreaterEqual:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatLess:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.FloatLessEqual:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.Equality:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.And:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.Or:
-		collectImportsFromExpr(v.Left, imports)
-		collectImportsFromExpr(v.Right, imports)
+		collectImportsFromExpr(v.Left, imports, projectName)
+		collectImportsFromExpr(v.Right, imports, projectName)
 	case *checker.Negation:
-		collectImportsFromExpr(v.Value, imports)
+		collectImportsFromExpr(v.Value, imports, projectName)
 	case *checker.Not:
-		collectImportsFromExpr(v.Value, imports)
+		collectImportsFromExpr(v.Value, imports, projectName)
 	case *checker.FunctionCall:
 		for _, arg := range v.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 	case *checker.StructInstance:
 		for _, fieldName := range sortedStringKeys(v.Fields) {
-			collectImportsFromExpr(v.Fields[fieldName], imports)
+			collectImportsFromExpr(v.Fields[fieldName], imports, projectName)
 		}
 	case *checker.InstanceProperty:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 	case *checker.InstanceMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Method.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 	case *checker.CopyExpression:
-		collectImportsFromExpr(v.Expr, imports)
+		collectImportsFromExpr(v.Expr, imports, projectName)
 	case *checker.ListLiteral:
 		for _, element := range v.Elements {
-			collectImportsFromExpr(element, imports)
+			collectImportsFromExpr(element, imports, projectName)
 		}
 	case *checker.ListMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 		if v.Kind == checker.ListSort {
 			imports[sortImportPath] = "sort"
 		}
 	case *checker.MapLiteral:
 		for i := range v.Keys {
-			collectImportsFromExpr(v.Keys[i], imports)
-			collectImportsFromExpr(v.Values[i], imports)
+			collectImportsFromExpr(v.Keys[i], imports, projectName)
+			collectImportsFromExpr(v.Values[i], imports, projectName)
 		}
 	case *checker.MapMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 	case *checker.ResultMethod:
 		imports[helperImportPath] = helperImportAlias
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 	case *checker.TryOp:
 		imports[helperImportPath] = helperImportAlias
-		collectImportsFromExpr(v.Expr(), imports)
+		collectImportsFromExpr(v.Expr(), imports, projectName)
 		collectImportsFromType(v.OkType, imports)
 		collectImportsFromType(v.ErrType, imports)
 		if v.CatchBlock != nil {
 			for _, stmt := range v.CatchBlock.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 	case *checker.MaybeMethod:
 		imports[helperImportPath] = helperImportAlias
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 	case *checker.TemplateStr:
 		for _, chunk := range v.Chunks {
-			collectImportsFromExpr(chunk, imports)
+			collectImportsFromExpr(chunk, imports, projectName)
 		}
 	case *checker.StrMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 		switch v.Kind {
 		case checker.StrContains, checker.StrReplace, checker.StrReplaceAll, checker.StrSplit, checker.StrStartsWith, checker.StrTrim:
 			imports[stringsImportPath] = "strings"
 		}
 	case *checker.IntMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		if v.Kind == checker.IntToStr {
 			imports[strconvImportPath] = "strconv"
 		}
 	case *checker.FloatMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		if v.Kind == checker.FloatToStr {
 			imports[strconvImportPath] = "strconv"
 		}
 	case *checker.BoolMethod:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		if v.Kind == checker.BoolToStr {
 			imports[strconvImportPath] = "strconv"
 		}
 	case *checker.ModuleStructInstance:
-		if !strings.HasPrefix(v.Module, "ard/") {
-			imports[v.Module] = packageNameForModulePath(v.Module)
-		}
+		imports[moduleImportPath(projectName, v.Module)] = packageNameForModulePath(v.Module)
 		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
-			collectImportsFromExpr(v.Property.Fields[fieldName], imports)
+			collectImportsFromExpr(v.Property.Fields[fieldName], imports, projectName)
 		}
 	case *checker.ModuleFunctionCall:
 		if v.Module == "ard/maybe" || v.Module == "ard/result" {
 			imports[helperImportPath] = helperImportAlias
-		} else if !strings.HasPrefix(v.Module, "ard/") {
-			imports[v.Module] = packageNameForModulePath(v.Module)
+		} else {
+			imports[moduleImportPath(projectName, v.Module)] = packageNameForModulePath(v.Module)
 		}
 		for _, arg := range v.Call.Args {
-			collectImportsFromExpr(arg, imports)
+			collectImportsFromExpr(arg, imports, projectName)
 		}
 	case *checker.ModuleSymbol:
-		if !strings.HasPrefix(v.Module, "ard/") {
-			imports[v.Module] = packageNameForModulePath(v.Module)
-		}
+		imports[moduleImportPath(projectName, v.Module)] = packageNameForModulePath(v.Module)
 	case *checker.If:
-		collectImportsFromExpr(v.Condition, imports)
+		collectImportsFromExpr(v.Condition, imports, projectName)
 		for _, stmt := range v.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 		if v.ElseIf != nil {
-			collectImportsFromExpr(v.ElseIf, imports)
+			collectImportsFromExpr(v.ElseIf, imports, projectName)
 		}
 		if v.Else != nil {
 			for _, stmt := range v.Else.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 	case *checker.BoolMatch:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, stmt := range v.True.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 		for _, stmt := range v.False.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.IntMatch:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, block := range v.IntCases {
 			for _, stmt := range block.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 		for _, block := range v.RangeCases {
 			for _, stmt := range block.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 		if v.CatchAll != nil {
 			for _, stmt := range v.CatchAll.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 	case *checker.EnumMatch:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, block := range v.Cases {
 			if block == nil {
 				continue
 			}
 			for _, stmt := range block.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 		if v.CatchAll != nil {
 			for _, stmt := range v.CatchAll.Stmts {
-				collectImportsFromStatement(stmt, imports)
+				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
 	case *checker.OptionMatch:
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, stmt := range v.Some.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 		for _, stmt := range v.None.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ResultMatch:
 		imports[helperImportPath] = helperImportAlias
-		collectImportsFromExpr(v.Subject, imports)
+		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, stmt := range v.Ok.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 		for _, stmt := range v.Err.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.FunctionDef:
 		for _, param := range v.Parameters {
@@ -680,7 +690,7 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string) 
 		}
 		collectImportsFromType(effectiveFunctionReturnType(v), imports)
 		for _, stmt := range v.Body.Stmts {
-			collectImportsFromStatement(stmt, imports)
+			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	}
 }
@@ -744,12 +754,32 @@ func packageNameForModulePath(modulePath string) string {
 	return goName(base, false)
 }
 
-func generatedPathForModule(generatedDir, projectName, modulePath string) (string, error) {
-	prefix := projectName + "/"
-	if !strings.HasPrefix(modulePath, prefix) {
-		return "", fmt.Errorf("module path %q does not match project %q", modulePath, projectName)
+func stdlibGeneratedRelativePath(modulePath string) string {
+	return path.Join("__ard_stdlib", strings.TrimPrefix(modulePath, "ard/"))
+}
+
+func moduleImportPath(projectName, modulePath string) string {
+	if strings.HasPrefix(modulePath, "ard/") {
+		relative := stdlibGeneratedRelativePath(modulePath)
+		if projectName == "" {
+			return relative
+		}
+		return path.Join(projectName, relative)
 	}
-	relative := strings.TrimPrefix(modulePath, prefix)
+	return modulePath
+}
+
+func generatedPathForModule(generatedDir, projectName, modulePath string) (string, error) {
+	var relative string
+	if strings.HasPrefix(modulePath, "ard/") {
+		relative = stdlibGeneratedRelativePath(modulePath)
+	} else {
+		prefix := projectName + "/"
+		if !strings.HasPrefix(modulePath, prefix) {
+			return "", fmt.Errorf("module path %q does not match project %q", modulePath, projectName)
+		}
+		relative = strings.TrimPrefix(modulePath, prefix)
+	}
 	dir := filepath.Join(generatedDir, filepath.FromSlash(relative))
 	base := filepath.Base(relative)
 	return filepath.Join(dir, base+".go"), nil
@@ -959,6 +989,7 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 	inner := &emitter{
 		module:        e.module,
 		packageName:   e.packageName,
+		projectName:   e.projectName,
 		entrypoint:    e.entrypoint,
 		imports:       e.imports,
 		functionNames: e.functionNames,
@@ -1193,7 +1224,7 @@ func (e *emitter) emitForIntRange(loop *checker.ForIntRange, returnType checker.
 		e.line(fmt.Sprintf("for %s, %s := %s, 0; %s <= %s; %s, %s = %s+1, %s+1 {", cursor, index, start, cursor, end, cursor, index, cursor, index))
 	}
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
 	e.indent--
@@ -1214,7 +1245,7 @@ func (e *emitter) emitForInStr(loop *checker.ForInStr, returnType checker.Type) 
 	e.line(fmt.Sprintf("for %s, __ardRune := range []rune(%s) {", indexName, value))
 	e.indent++
 	e.line(fmt.Sprintf("%s := string(__ardRune)", cursor))
-	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
 	e.indent--
@@ -1234,7 +1265,7 @@ func (e *emitter) emitForInList(loop *checker.ForInList, returnType checker.Type
 	}
 	e.line(fmt.Sprintf("for %s, %s := range %s {", indexName, cursor, list))
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
 	e.indent--
@@ -1251,7 +1282,7 @@ func (e *emitter) emitForInMap(loop *checker.ForInMap, returnType checker.Type) 
 	val := goName(loop.Val, false)
 	e.line(fmt.Sprintf("for %s, %s := range %s {", key, val, mapExpr))
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
 	e.indent--
@@ -1266,7 +1297,7 @@ func (e *emitter) emitWhileLoop(loop *checker.WhileLoop, returnType checker.Type
 	}
 	e.line("for " + condition + " {")
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
 	e.indent--
@@ -1297,7 +1328,7 @@ func (e *emitter) emitForLoop(loop *checker.ForLoop, returnType checker.Type) er
 	}
 	e.line(fmt.Sprintf("for %s := %s; %s; %s = %s {", initName, initValue, condition, updateTarget, updateValue))
 	e.indent++
-	if err := e.emitStatements(loop.Body.Stmts, returnType); err != nil {
+	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
 	e.indent--
@@ -1773,11 +1804,11 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 			if !ok {
 				return fmt.Errorf("try without catch on Result requires function to return a Result type, got %v", e.fnReturnType)
 			}
-			valueType, err := emitType(resultType.Val())
+			valueType, err := emitTypeArg(resultType.Val())
 			if err != nil {
 				return err
 			}
-			errType, err := emitType(resultType.Err())
+			errType, err := emitTypeArg(resultType.Err())
 			if err != nil {
 				return err
 			}
@@ -1822,7 +1853,7 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 			if !ok {
 				return fmt.Errorf("try without catch on Maybe requires function to return a Maybe type, got %v", e.fnReturnType)
 			}
-			innerType, err := emitType(maybeType.Of())
+			innerType, err := emitTypeArg(maybeType.Of())
 			if err != nil {
 				return err
 			}
@@ -2321,7 +2352,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("expected maybe return type for map.get, got %s", v.Type())
 			}
-			innerType, err := emitType(maybeType.Of())
+			innerType, err := emitTypeArg(maybeType.Of())
 			if err != nil {
 				return "", err
 			}
@@ -2341,9 +2372,6 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", fmt.Errorf("unsupported map method: %v", v.Kind)
 		}
 	case *checker.ModuleStructInstance:
-		if strings.HasPrefix(v.Module, "ard/") {
-			return "", fmt.Errorf("standard library module struct instances are not supported yet: %s::%s", v.Module, v.Property.Name)
-		}
 		fields := make([]string, 0, len(v.Property.Fields))
 		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
 			value, err := e.emitExpr(v.Property.Fields[fieldName])
@@ -2361,9 +2389,6 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if v.Module == "ard/result" {
 			return e.emitResultModuleCall(v, nil)
 		}
-		if strings.HasPrefix(v.Module, "ard/") {
-			return "", fmt.Errorf("standard library module calls are not supported yet: %s::%s", v.Module, v.Call.Name)
-		}
 		args, err := e.emitCallArgs(v.Call)
 		if err != nil {
 			return "", err
@@ -2372,9 +2397,6 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		name := goName(e.resolvedModuleFunctionName(v.Module, v.Call), true)
 		return fmt.Sprintf("%s.%s(%s)", alias, name, strings.Join(args, ", ")), nil
 	case *checker.ModuleSymbol:
-		if strings.HasPrefix(v.Module, "ard/") {
-			return "", fmt.Errorf("standard library module symbols are not supported yet: %s::%s", v.Module, v.Symbol.Name)
-		}
 		alias := packageNameForModulePath(v.Module)
 		name := goName(v.Symbol.Name, true)
 		return fmt.Sprintf("%s.%s", alias, name), nil
@@ -2760,6 +2782,7 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 	inner := &emitter{
 		module:        e.module,
 		packageName:   e.packageName,
+		projectName:   e.projectName,
 		entrypoint:    e.entrypoint,
 		imports:       e.imports,
 		functionNames: e.functionNames,
@@ -2806,11 +2829,11 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expecte
 		if err != nil {
 			return "", err
 		}
-		valueType, err := emitType(resultType.Val())
+		valueType, err := emitTypeArg(resultType.Val())
 		if err != nil {
 			return "", err
 		}
-		errType, err := emitType(resultType.Err())
+		errType, err := emitTypeArg(resultType.Err())
 		if err != nil {
 			return "", err
 		}
@@ -2833,11 +2856,11 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expecte
 		if err != nil {
 			return "", err
 		}
-		valueType, err := emitType(resultType.Val())
+		valueType, err := emitTypeArg(resultType.Val())
 		if err != nil {
 			return "", err
 		}
-		errType, err := emitType(resultType.Err())
+		errType, err := emitTypeArg(resultType.Err())
 		if err != nil {
 			return "", err
 		}
@@ -2992,7 +3015,7 @@ func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expected
 		if !ok {
 			return "", fmt.Errorf("maybe::none expected Maybe return type, got %s", call.Call.ReturnType)
 		}
-		innerType, err := emitType(maybeType.Of())
+		innerType, err := emitTypeArg(maybeType.Of())
 		if err != nil {
 			return "", err
 		}
@@ -3122,6 +3145,17 @@ func (e *emitter) emitBinary(left checker.Expression, op string, right checker.E
 	return fmt.Sprintf("(%s %s %s)", leftExpr, op, rightExpr), nil
 }
 
+func emitTypeArg(t checker.Type) (string, error) {
+	typeName, err := emitType(t)
+	if err != nil {
+		return "", err
+	}
+	if typeName == "" {
+		return "struct{}", nil
+	}
+	return typeName, nil
+}
+
 func emitType(t checker.Type) (string, error) {
 	switch t {
 	case checker.Int:
@@ -3143,11 +3177,11 @@ func emitType(t checker.Type) (string, error) {
 		}
 		return "any", nil
 	case *checker.Result:
-		valueType, err := emitType(typed.Val())
+		valueType, err := emitTypeArg(typed.Val())
 		if err != nil {
 			return "", err
 		}
-		errType, err := emitType(typed.Err())
+		errType, err := emitTypeArg(typed.Err())
 		if err != nil {
 			return "", err
 		}
@@ -3155,7 +3189,7 @@ func emitType(t checker.Type) (string, error) {
 	case *checker.Enum:
 		return "struct{ Tag int }", nil
 	case *checker.Maybe:
-		innerType, err := emitType(typed.Of())
+		innerType, err := emitTypeArg(typed.Of())
 		if err != nil {
 			return "", err
 		}
