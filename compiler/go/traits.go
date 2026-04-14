@@ -28,7 +28,7 @@ type boolEncodable bool
 
 func (v stringToString) ToStr() string { return string(v) }
 func (v intToString) ToStr() string    { return strconv.Itoa(int(v)) }
-func (v floatToString) ToStr() string  { return strconv.FormatFloat(float64(v), 'f', -1, 64) }
+func (v floatToString) ToStr() string  { return strconv.FormatFloat(float64(v), 'f', 2, 64) }
 func (v boolToString) ToStr() string   { return strconv.FormatBool(bool(v)) }
 
 func (v stringEncodable) ToDyn() any { return string(v) }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,7 @@ type cliSnippetCase struct {
 	name  string
 	env   map[string]string
 	args  []string
+	stdin string
 	files map[string]string
 }
 
@@ -268,6 +270,108 @@ fn main() {
 			},
 		},
 		{
+			name:  "stdin_read_line",
+			stdin: "kit\n",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn main() {
+  match io::read_line() {
+    ok(line) => io::print(line.trim()),
+    err(message) => io::print(message),
+  }
+}
+`,
+			},
+		},
+		{
+			name: "int_from_str",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn main() {
+  io::print(Int::from_str("42").or(-1))
+  io::print(Int::from_str("oops").or(-1))
+}
+`,
+			},
+		},
+		{
+			name: "float_helpers",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn main() {
+  let parsed = Float::from_str("3.75").or(0.0)
+  io::print(Float::floor(parsed))
+  io::print(Float::from_str("oops").or(1.25))
+}
+`,
+			},
+		},
+		{
+			name: "hex_codec",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/hex
+
+fn main() {
+  let encoded = hex::encode("abc")
+  io::print(encoded)
+  match hex::decode(encoded) {
+    ok(decoded) => io::print(decoded),
+    err(message) => io::print(message),
+  }
+  io::print(hex::decode("zz").is_err().to_str())
+}
+`,
+			},
+		},
+		{
+			name: "base64_codec",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/base64
+
+fn main() {
+  let encoded = base64::encode("hello")
+  io::print(encoded)
+  match base64::decode(encoded) {
+    ok(decoded) => io::print(decoded),
+    err(message) => io::print(message),
+  }
+  let encoded_url = base64::encode_url("hello world", true)
+  io::print(encoded_url)
+  match base64::decode_url(encoded_url, true) {
+    ok(decoded) => io::print(decoded),
+    err(message) => io::print(message),
+  }
+  io::print(base64::decode("not!valid!base64").is_err().to_str())
+}
+`,
+			},
+		},
+		{
+			name: "json_encode",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/encode
+
+fn main() {
+  io::print(encode::json("hello").or("err"))
+  io::print(encode::json(42).or("err"))
+  io::print(encode::json(true).or("err"))
+}
+`,
+			},
+		},
+		{
 			name: "enum_match",
 			files: map[string]string{
 				"main.ard": `
@@ -330,13 +434,13 @@ fn main() {
 			projectRoot := writeSnippetProject(t, tc.files)
 
 			vmArgs := append([]string{"run", "main.ard"}, tc.args...)
-			vmResult := runArdCLI(t, ardPath, projectRoot, tc.env, vmArgs...)
+			vmResult := runArdCLI(t, ardPath, projectRoot, tc.env, tc.stdin, vmArgs...)
 			if vmResult.err != nil {
 				t.Fatalf("vm snippet run failed: %s", formatCLIRunFailure(vmResult))
 			}
 
 			goArgs := append([]string{"run", "--target", "go", "main.ard"}, tc.args...)
-			goResult := runArdCLI(t, ardPath, projectRoot, tc.env, goArgs...)
+			goResult := runArdCLI(t, ardPath, projectRoot, tc.env, tc.stdin, goArgs...)
 			if goResult.err != nil {
 				t.Fatalf("go snippet run failed: %s", formatCLIRunFailure(goResult))
 			}
@@ -382,13 +486,16 @@ func writeSnippetProject(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func runArdCLI(t *testing.T, ardPath, dir string, env map[string]string, args ...string) cliRunResult {
+func runArdCLI(t *testing.T, ardPath, dir string, env map[string]string, stdin string, args ...string) cliRunResult {
 	t.Helper()
 	cmd := exec.Command(ardPath, args...)
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	for key, value := range env {
 		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
