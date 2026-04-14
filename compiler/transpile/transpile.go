@@ -535,6 +535,9 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 		functionNames: make(map[string]string),
 		emittedTypes:  make(map[string]struct{}),
 	}
+	if entrypoint {
+		e.imports[helperImportPath] = helperImportAlias
+	}
 	e.indexFunctions()
 	if entrypoint {
 		e.line("package main")
@@ -622,10 +625,32 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	if entrypoint {
 		e.line("func main() {")
 		e.indent++
-		if err := e.withFreshLocals(func() error {
-			return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
-		}); err != nil {
-			return nil, err
+		e.line(helperImportAlias + ".RegisterBuiltinExterns()")
+		if mainExpr := entrypointMainExpr(module.Program().Statements); mainExpr != nil {
+			mainName := e.functionNames["main"]
+			if mainName == "" {
+				mainName = "main"
+			}
+			switch typed := mainExpr.(type) {
+			case *checker.FunctionDef:
+				if effectiveFunctionReturnType(typed) == checker.Void {
+					e.line(mainName + "()")
+				} else {
+					e.line("_ = " + mainName + "()")
+				}
+			case *checker.ExternalFunctionDef:
+				if typed.ReturnType == checker.Void {
+					e.line(mainName + "()")
+				} else {
+					e.line("_ = " + mainName + "()")
+				}
+			}
+		} else {
+			if err := e.withFreshLocals(func() error {
+				return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
+			}); err != nil {
+				return nil, err
+			}
 		}
 		e.indent--
 		e.line("}")
@@ -649,7 +674,7 @@ func BuildBinary(inputPath, outputPath string) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("go", "build", "-o", outputPath, ".")
+	cmd := exec.Command("go", "build", "-mod=mod", "-o", outputPath, ".")
 	cmd.Dir = generatedDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -672,7 +697,7 @@ func Run(inputPath string, args []string) error {
 		return err
 	}
 
-	cmd := exec.Command("go", "run", ".")
+	cmd := exec.Command("go", "run", "-mod=mod", ".")
 	cmd.Dir = generatedDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -691,6 +716,11 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 	goMod := fmt.Sprintf("module %s\n\ngo %s\n\nrequire %s v0.0.0\n\nreplace %s => %s\n", project.ProjectName, generatedGoVersion, ardModulePath, ardModulePath, filepath.Clean(moduleRoot))
 	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		return err
+	}
+	if goSum, err := os.ReadFile(filepath.Join(moduleRoot, "go.sum")); err == nil {
+		if err := os.WriteFile(filepath.Join(generatedDir, "go.sum"), goSum, 0o644); err != nil {
+			return err
+		}
 	}
 
 	source, err := emitModuleSource(entrypoint, "main", true, project.ProjectName)
@@ -805,6 +835,24 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 		filtered = append(filtered, stmt)
 	}
 	return filtered
+}
+
+func entrypointMainExpr(stmts []checker.Statement) checker.Expression {
+	for _, stmt := range stmts {
+		switch def := stmt.Expr.(type) {
+		case *checker.FunctionDef:
+			if def.IsTest || def.Name != "main" {
+				continue
+			}
+			return def
+		case *checker.ExternalFunctionDef:
+			if def.Name != "main" {
+				continue
+			}
+			return def
+		}
+	}
+	return nil
 }
 
 func collectModuleImports(stmts []checker.Statement, projectName string) map[string]string {
@@ -2468,6 +2516,21 @@ func (e *emitter) emitBlockValue(block *checker.Block, expectedType checker.Type
 	return fmt.Errorf("expected value-producing block")
 }
 
+func withElseFallback(expr *checker.If, fallback *checker.Block) *checker.If {
+	if expr == nil {
+		return nil
+	}
+	copy := *expr
+	if copy.ElseIf != nil {
+		copy.ElseIf = withElseFallback(copy.ElseIf, fallback)
+		return &copy
+	}
+	if copy.Else == nil {
+		copy.Else = fallback
+	}
+	return &copy
+}
+
 func (e *emitter) emitIfIntoValue(expr *checker.If, expectedType checker.Type, onValue func(string) error) error {
 	condition, err := e.emitExpr(expr.Condition)
 	if err != nil {
@@ -2482,7 +2545,7 @@ func (e *emitter) emitIfIntoValue(expr *checker.If, expectedType checker.Type, o
 	if expr.ElseIf != nil {
 		e.line("} else {")
 		e.indent++
-		if err := e.emitIfIntoValue(expr.ElseIf, expectedType, onValue); err != nil {
+		if err := e.emitIfIntoValue(withElseFallback(expr.ElseIf, expr.Else), expectedType, onValue); err != nil {
 			return err
 		}
 		e.indent--
@@ -2795,7 +2858,7 @@ func (e *emitter) emitIfStatement(expr *checker.If, returnType checker.Type, isL
 	if expr.ElseIf != nil {
 		e.line("} else {")
 		e.indent++
-		if err := e.emitIfStatement(expr.ElseIf, returnType, isLast); err != nil {
+		if err := e.emitIfStatement(withElseFallback(expr.ElseIf, expr.Else), returnType, isLast); err != nil {
 			return err
 		}
 		e.indent--
@@ -2989,7 +3052,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		switch v.Kind {
 		case checker.FloatToStr:
-			return fmt.Sprintf("strconv.FormatFloat(%s, 'f', -1, 64)", subject), nil
+			return fmt.Sprintf("strconv.FormatFloat(%s, 'f', 2, 64)", subject), nil
 		case checker.FloatToInt:
 			return fmt.Sprintf("func() int { value := float64(%s); return int(value) }()", subject), nil
 		default:
