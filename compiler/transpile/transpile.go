@@ -111,6 +111,8 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 				return nil, err
 			}
 			e.line("")
+		case *checker.ExternType:
+			continue
 		default:
 			if !entrypoint {
 				return nil, fmt.Errorf("unsupported top-level statement in imported module: %T", stmt.Stmt)
@@ -652,6 +654,21 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 				collectImportsFromStatement(stmt, imports, projectName)
 			}
 		}
+	case *checker.UnionMatch:
+		collectImportsFromExpr(v.Subject, imports, projectName)
+		for _, matchCase := range v.TypeCases {
+			if matchCase == nil {
+				continue
+			}
+			for _, stmt := range matchCase.Body.Stmts {
+				collectImportsFromStatement(stmt, imports, projectName)
+			}
+		}
+		if v.CatchAll != nil {
+			for _, stmt := range v.CatchAll.Stmts {
+				collectImportsFromStatement(stmt, imports, projectName)
+			}
+		}
 	case *checker.BoolMatch:
 		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, stmt := range v.True.Stmts {
@@ -881,6 +898,11 @@ func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.Funct
 	}
 	e.line(signature + " {")
 	e.indent++
+	prevReturnType := e.fnReturnType
+	e.fnReturnType = method.ReturnType
+	defer func() {
+		e.fnReturnType = prevReturnType
+	}()
 	if err := e.emitStatements(method.Body.Stmts, method.ReturnType); err != nil {
 		return err
 	}
@@ -1683,6 +1705,25 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			}
 		}
 		return okUses || errUses
+	case *checker.UnionMatch:
+		if usesNameInExpr(v.Subject, name) {
+			return true
+		}
+		for _, matchCase := range v.TypeCases {
+			if matchCase == nil {
+				continue
+			}
+			if matchCase.Pattern != nil && matchCase.Pattern.Name == name {
+				continue
+			}
+			if usesNameInStatements(matchCase.Body.Stmts, name) {
+				return true
+			}
+		}
+		if v.CatchAll != nil {
+			return usesNameInStatements(v.CatchAll.Stmts, name)
+		}
+		return false
 	case *checker.FunctionDef:
 		for _, param := range v.Parameters {
 			if param.Name == name {
@@ -1986,6 +2027,13 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 			}
 			e.line("return " + value)
 			return nil
+		case *checker.UnionMatch:
+			value, err := e.emitUnionMatch(typed, returnType)
+			if err != nil {
+				return err
+			}
+			e.line("return " + value)
+			return nil
 		}
 		value, err := e.emitValueForType(expr, returnType)
 		if err != nil {
@@ -2140,6 +2188,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitOptionMatch(v, nil)
 	case *checker.ResultMatch:
 		return e.emitResultMatch(v, nil)
+	case *checker.UnionMatch:
+		return e.emitUnionMatch(v, nil)
 	case *checker.TryOp:
 		return e.emitTryExpr(v)
 	case *checker.ResultMethod:
@@ -2814,6 +2864,71 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch, expectedType checker.T
 	return tempName, nil
 }
 
+func (e *emitter) emitUnionMatch(match *checker.UnionMatch, expectedType checker.Type) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	returnType := matchReturnType(expectedType, match.Type())
+	tempName, assign, err := e.emitValueTemp("UnionMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	subjectName := e.nextTemp("Union")
+	e.line("switch " + subjectName + " := any(" + subject + ").(type) {")
+	e.indent++
+	caseNames := sortedStringKeys(match.TypeCases)
+	for _, caseName := range caseNames {
+		matchCase := match.TypeCases[caseName]
+		if matchCase == nil {
+			continue
+		}
+		caseType := checker.Type(nil)
+		for t := range match.TypeCasesByType {
+			if t.String() == caseName {
+				caseType = t
+				break
+			}
+		}
+		if caseType == nil {
+			return "", fmt.Errorf("missing union case type for %s", caseName)
+		}
+		typeName, err := emitTypeArg(caseType)
+		if err != nil {
+			return "", err
+		}
+		e.line("case " + typeName + ":")
+		e.indent++
+		if matchCase.Pattern != nil {
+			boundName := goName(matchCase.Pattern.Name, false)
+			e.line(fmt.Sprintf("%s := %s", boundName, subjectName))
+			if !usesNameInStatements(matchCase.Body.Stmts, matchCase.Pattern.Name) {
+				e.line("_ = " + boundName)
+			}
+		}
+		if err := e.emitBlockValue(matchCase.Body, returnType, assign); err != nil {
+			return "", err
+		}
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		e.line("default:")
+		e.indent++
+		if err := e.emitBlockValue(match.CatchAll, returnType, assign); err != nil {
+			return "", err
+		}
+		e.indent--
+	} else if returnType != checker.Void {
+		e.line("default:")
+		e.indent++
+		e.line(`panic("non-exhaustive union match")`)
+		e.indent--
+	}
+	e.indent--
+	e.line("}")
+	return tempName, nil
+}
+
 func (e *emitter) emitPanicExpr(message checker.Expression, resultType checker.Type) (string, error) {
 	messageExpr, err := e.emitExpr(message)
 	if err != nil {
@@ -3316,7 +3431,7 @@ func (e *emitter) line(text string) {
 
 func goName(name string, exported bool) string {
 	parts := strings.FieldsFunc(name, func(r rune) bool {
-		return r == '_' || r == '-' || r == ' '
+		return r == '_' || r == '-' || r == ' ' || r == ':'
 	})
 	if len(parts) == 0 {
 		return "value"
