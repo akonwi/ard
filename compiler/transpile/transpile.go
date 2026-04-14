@@ -189,14 +189,6 @@ func collectTypeParamNames(t checker.Type, out *[]string, seen map[string]struct
 			collectTypeParamNames(param.Type, out, seen)
 		}
 		collectTypeParamNames(effectiveFunctionReturnType(typed), out, seen)
-	case *checker.StructDef:
-		for _, name := range typed.GenericParams {
-			if _, ok := seen[name]; ok {
-				continue
-			}
-			seen[name] = struct{}{}
-			*out = append(*out, name)
-		}
 	}
 }
 
@@ -732,7 +724,7 @@ func collectImportsFromStmtTypes(stmt checker.NonProducing, imports map[string]s
 			}
 		}
 	case *checker.VariableDef:
-		if _, ok := s.Type().(*checker.FunctionDef); ok {
+		if !typeNeedsExplicitVarAnnotation(s.Type()) {
 			return
 		}
 		collectImportsFromType(s.Type(), imports)
@@ -1105,6 +1097,21 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 		collectImportsFromType(effectiveFunctionReturnType(v), imports)
 		for _, stmt := range v.Body.Stmts {
 			collectImportsFromStatement(stmt, imports, projectName)
+		}
+	case *checker.FiberStart:
+		imports[moduleImportPath(projectName, "ard/async")] = packageNameForModulePath("ard/async")
+		if fn := v.GetFn(); fn != nil {
+			collectImportsFromExpr(fn, imports, projectName)
+		}
+	case *checker.FiberEval:
+		imports[moduleImportPath(projectName, "ard/async")] = packageNameForModulePath("ard/async")
+		if fn := v.GetFn(); fn != nil {
+			collectImportsFromExpr(fn, imports, projectName)
+		}
+	case *checker.FiberExecution:
+		imports[moduleImportPath(projectName, "ard/async")] = packageNameForModulePath("ard/async")
+		if mod := v.GetModule(); mod != nil {
+			imports[moduleImportPath(projectName, mod.Path())] = packageNameForModulePath(mod.Path())
 		}
 	}
 }
@@ -2206,6 +2213,18 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 			return usesNameInStatements(v.Body.Stmts, name)
 		}
 		return false
+	case *checker.FiberStart:
+		if v.GetFn() == nil {
+			return false
+		}
+		return usesNameInExpr(v.GetFn(), name)
+	case *checker.FiberEval:
+		if v.GetFn() == nil {
+			return false
+		}
+		return usesNameInExpr(v.GetFn(), name)
+	case *checker.FiberExecution:
+		return false
 	default:
 		return false
 	}
@@ -3012,6 +3031,12 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		alias := packageNameForModulePath(v.Module)
 		name := goName(v.Symbol.Name, true)
 		return fmt.Sprintf("%s.%s", alias, name), nil
+	case *checker.FiberStart:
+		return e.emitFiberStart(v)
+	case *checker.FiberEval:
+		return e.emitFiberEval(v)
+	case *checker.FiberExecution:
+		return e.emitFiberExecution(v)
 	default:
 		return "", fmt.Errorf("unsupported expression: %T", expr)
 	}
@@ -3767,6 +3792,37 @@ func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, 
 	default:
 		return "", false, nil
 	}
+}
+
+func (e *emitter) emitFiberStart(start *checker.FiberStart) (string, error) {
+	if start == nil || start.GetFn() == nil {
+		return "", fmt.Errorf("missing fiber start function")
+	}
+	fn, err := e.emitExpr(start.GetFn())
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.%s(%s)", packageNameForModulePath("ard/async"), goName("start", true), fn), nil
+}
+
+func (e *emitter) emitFiberEval(eval *checker.FiberEval) (string, error) {
+	if eval == nil || eval.GetFn() == nil {
+		return "", fmt.Errorf("missing fiber eval function")
+	}
+	fn, err := e.emitExpr(eval.GetFn())
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.%s(%s)", packageNameForModulePath("ard/async"), goName("eval", true), fn), nil
+}
+
+func (e *emitter) emitFiberExecution(exec *checker.FiberExecution) (string, error) {
+	if exec == nil || exec.GetModule() == nil {
+		return "", fmt.Errorf("missing fiber execution module")
+	}
+	moduleAlias := packageNameForModulePath(exec.GetModule().Path())
+	asyncAlias := packageNameForModulePath("ard/async")
+	return fmt.Sprintf("%s.%s(%s.%s)", asyncAlias, goName("start", true), moduleAlias, goName(exec.GetMainName(), true)), nil
 }
 
 func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall, expectedType checker.Type) (string, error) {

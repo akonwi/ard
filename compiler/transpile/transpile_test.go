@@ -702,6 +702,55 @@ let flatten_errors = decode::flatten
 	}
 }
 
+func TestBuildBinaryCompilesStdlibDecodeFromJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/decode
+
+let raw = decode::from_json("\{\"age\":1\}")
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesDecodeEndToEndFlow(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/decode
+
+fn run() Int!Str {
+  let raw = try decode::from_json("\{\"age\":1\}")
+  let age = decode::field("age", decode::int)
+  match age(raw) {
+    ok => Result::ok(ok),
+    err(errs) => Result::err(decode::flatten(errs)),
+  }
+}
+
+let out = run()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesGenericStdlibDecodeCombinators(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -739,6 +788,61 @@ use ard/dynamic
 let a = dynamic::from("hello")
 let b = dynamic::from(42)
 let c = dynamic::from(true)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesStdlibAsyncModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/async
+
+let fiber = async::eval(
+  fn() Int {
+    1
+  },
+)
+let value = fiber.get()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesStdlibAsyncStartModuleFunction(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "worker.ard"), []byte(`
+fn run() {
+  let value = 1
+  let _ = value
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write worker source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/async
+use demo/worker
+
+let fiber = async::start(worker::run)
+fiber.join()
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}
