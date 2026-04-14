@@ -18,6 +18,7 @@ type cliRunResult struct {
 
 type cliSnippetCase struct {
 	name  string
+	env   map[string]string
 	files map[string]string
 }
 
@@ -128,6 +129,126 @@ fn main() {
 			},
 		},
 		{
+			name: "try_fallback",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/maybe
+
+fn half(n: Int) Int? {
+  match n > 0 {
+    true => maybe::some(n / 2),
+    false => maybe::none(),
+  }
+}
+
+fn maybe_fallback(n: Int) Int {
+  let value = try half(n) -> _ {
+    0
+  }
+  value + 1
+}
+
+fn main() {
+  io::print(maybe_fallback(0))
+  io::print(maybe_fallback(8))
+}
+`,
+			},
+		},
+		{
+			name: "map_operations",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn main() {
+  mut values: [Str: Int] = ["a": 1]
+  values.set("b", 2)
+  io::print(values.has("a").to_str())
+  io::print(values.get("b").or(0))
+  values.drop("a")
+  io::print(values.has("a").to_str())
+}
+`,
+			},
+		},
+		{
+			name: "struct_methods",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+struct Box {
+  value: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.value
+  }
+
+  fn mut set(value: Int) {
+    self.value = value
+  }
+}
+
+fn main() {
+  mut box = Box{value: 1}
+  box.set(2)
+  io::print(box.get())
+}
+`,
+			},
+		},
+		{
+			name: "trait_dispatch",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+struct Book {
+  title: Str,
+  author: Str,
+}
+
+impl Str::ToString for Book {
+  fn to_str() Str {
+    "Book: " + self.title + " by " + self.author
+  }
+}
+
+fn show(item: Str::ToString) {
+  io::print(item)
+}
+
+fn main() {
+  let book = Book{title: "The Hobbit", author: "J.R.R. Tolkien"}
+  show(book)
+}
+`,
+			},
+		},
+		{
+			name: "env_lookup",
+			env: map[string]string{
+				"ARD_PARITY_VALUE": "parity-ok",
+			},
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/env
+
+fn main() {
+  match env::get("ARD_PARITY_VALUE") {
+    value => io::print(value),
+    _ => io::print("missing")
+  }
+}
+`,
+			},
+		},
+		{
 			name: "enum_match",
 			files: map[string]string{
 				"main.ard": `
@@ -189,12 +310,12 @@ fn main() {
 		t.Run(tc.name, func(t *testing.T) {
 			projectRoot := writeSnippetProject(t, tc.files)
 
-			vmResult := runArdCLI(t, ardPath, projectRoot, "run", "main.ard")
+			vmResult := runArdCLI(t, ardPath, projectRoot, tc.env, "run", "main.ard")
 			if vmResult.err != nil {
 				t.Fatalf("vm snippet run failed: %s", formatCLIRunFailure(vmResult))
 			}
 
-			goResult := runArdCLI(t, ardPath, projectRoot, "run", "--target", "go", "main.ard")
+			goResult := runArdCLI(t, ardPath, projectRoot, tc.env, "run", "--target", "go", "main.ard")
 			if goResult.err != nil {
 				t.Fatalf("go snippet run failed: %s", formatCLIRunFailure(goResult))
 			}
@@ -240,10 +361,14 @@ func writeSnippetProject(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func runArdCLI(t *testing.T, ardPath, dir string, args ...string) cliRunResult {
+func runArdCLI(t *testing.T, ardPath, dir string, env map[string]string, args ...string) cliRunResult {
 	t.Helper()
 	cmd := exec.Command(ardPath, args...)
 	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
