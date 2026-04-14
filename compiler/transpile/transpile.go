@@ -287,6 +287,60 @@ func functionTypeParams(def *checker.FunctionDef) ([]string, map[string]string, 
 	return signatureTypeParams(def.Parameters, effectiveFunctionReturnType(def))
 }
 
+func structTypeParamOrder(def *checker.StructDef) []string {
+	if def == nil {
+		return nil
+	}
+	if len(def.GenericParams) > 0 {
+		return append([]string(nil), def.GenericParams...)
+	}
+	seen := make(map[string]struct{})
+	order := make([]string, 0)
+	for _, fieldName := range sortedStringKeys(def.Fields) {
+		collectTypeParamNames(def.Fields[fieldName], &order, seen)
+	}
+	return order
+}
+
+func structTypeParams(def *checker.StructDef) ([]string, map[string]string, map[string]string) {
+	order := structTypeParamOrder(def)
+	if len(order) == 0 {
+		return nil, nil, nil
+	}
+	used := make(map[string]struct{}, len(order))
+	mapping := make(map[string]string, len(order))
+	for _, name := range order {
+		emitted := goName(name, true)
+		if emitted == "Any" {
+			emitted = "T"
+		}
+		if _, ok := used[emitted]; !ok {
+			used[emitted] = struct{}{}
+			mapping[name] = emitted
+			continue
+		}
+		for i := 2; ; i++ {
+			candidate := fmt.Sprintf("%s%d", emitted, i)
+			if _, ok := used[candidate]; ok {
+				continue
+			}
+			used[candidate] = struct{}{}
+			mapping[name] = candidate
+			break
+		}
+	}
+	constraints := make(map[string]string, len(order))
+	for _, fieldName := range sortedStringKeys(def.Fields) {
+		collectTypeParamConstraints(def.Fields[fieldName], constraints, false)
+	}
+	for _, name := range order {
+		if constraints[name] == "" {
+			constraints[name] = "any"
+		}
+	}
+	return order, mapping, constraints
+}
+
 func formatTypeParamDecls(order []string, mapping map[string]string, constraints map[string]string) string {
 	if len(order) == 0 || len(mapping) == 0 {
 		return ""
@@ -302,6 +356,24 @@ func formatTypeParamDecls(order []string, mapping map[string]string, constraints
 			constraint = "any"
 		}
 		parts = append(parts, emitted+" "+constraint)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatTypeParamUses(order []string, mapping map[string]string) string {
+	if len(order) == 0 || len(mapping) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		emitted := mapping[name]
+		if emitted == "" {
+			continue
+		}
+		parts = append(parts, emitted)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -340,7 +412,87 @@ func (e *emitter) importedTypeAlias(name string, t checker.Type) string {
 	return ""
 }
 
+func (e *emitter) structTypeTemplate(def *checker.StructDef) *checker.StructDef {
+	if e == nil || def == nil || e.module == nil || e.module.Program() == nil {
+		return def
+	}
+	for _, stmt := range e.module.Program().Statements {
+		switch candidate := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if candidate.Name == def.Name {
+				return candidate
+			}
+		case checker.StructDef:
+			if candidate.Name == def.Name {
+				candidateCopy := candidate
+				return &candidateCopy
+			}
+		}
+	}
+	for _, mod := range sortedModules(e.module.Program().Imports) {
+		sym := mod.Get(def.Name)
+		if sym.IsZero() {
+			continue
+		}
+		if candidate, ok := sym.Type.(*checker.StructDef); ok {
+			return candidate
+		}
+	}
+	return def
+}
+
+func (e *emitter) emitStructType(def *checker.StructDef) (string, error) {
+	baseName := goName(def.Name, true)
+	alias := e.importedTypeAlias(def.Name, def)
+	if alias != "" {
+		baseName = alias + "." + goName(def.Name, true)
+	}
+	template := e.structTypeTemplate(def)
+	order := structTypeParamOrder(template)
+	if len(order) == 0 {
+		return baseName, nil
+	}
+	bindings := make(map[string]checker.Type, len(order))
+	if template != nil {
+		for _, fieldName := range sortedStringKeys(template.Fields) {
+			specializedField, ok := def.Fields[fieldName]
+			if !ok {
+				continue
+			}
+			inferGenericTypeBindings(template.Fields[fieldName], specializedField, bindings)
+		}
+	}
+	args := make([]string, 0, len(order))
+	for _, name := range order {
+		if resolved := e.typeParams[name]; resolved != "" {
+			args = append(args, resolved)
+			continue
+		}
+		bound := bindings[name]
+		if tv, ok := bound.(*checker.TypeVar); ok {
+			if actual := tv.Actual(); actual != nil {
+				bound = actual
+			} else {
+				bound = nil
+			}
+		}
+		if bound != nil {
+			emitted, err := e.emitTypeArg(bound)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, emitted)
+			continue
+		}
+		args = append(args, "any")
+	}
+	return fmt.Sprintf("%s[%s]", baseName, strings.Join(args, ", ")), nil
+}
+
 func (e *emitter) emitType(t checker.Type) (string, error) {
+	if structDef, ok := t.(*checker.StructDef); ok {
+		return e.emitStructType(structDef)
+	}
 	return emitTypeWithOptions(t, e.typeParams, func(name string, typ checker.Type) string {
 		alias := e.importedTypeAlias(name, typ)
 		if alias == "" {
@@ -1268,70 +1420,77 @@ func (e *emitter) emitStructDef(def *checker.StructDef) error {
 		return nil
 	}
 	e.emittedTypes["struct:"+def.Name] = struct{}{}
-	e.line("type " + goName(def.Name, true) + " struct {")
-	e.indent++
-	fieldNames := sortedStringKeys(def.Fields)
-	for _, fieldName := range fieldNames {
-		typeName, err := e.emitType(def.Fields[fieldName])
-		if err != nil {
-			return fmt.Errorf("struct %s: %w", def.Name, err)
-		}
-		e.line(fmt.Sprintf("%s %s", goName(fieldName, true), typeName))
-	}
-	e.indent--
-	e.line("}")
-	methodNames := sortedStringKeys(def.Methods)
-	for _, methodName := range methodNames {
-		e.line("")
-		if err := e.emitStructMethod(def, def.Methods[methodName]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.FunctionDef) error {
-	return e.emitReceiverMethod(def.Name, method)
-}
-
-func (e *emitter) emitEnumMethod(def *checker.Enum, method *checker.FunctionDef) error {
-	return e.emitReceiverMethod(def.Name, method)
-}
-
-func (e *emitter) emitReceiverMethod(typeName string, method *checker.FunctionDef) error {
-	return e.withFreshLocals(func() error {
-		e.pushScope()
-		receiverType := goName(typeName, true)
-		if method.Mutates {
-			receiverType = "*" + receiverType
-		}
-		receiverName := e.bindLocal(method.Receiver)
-		params, err := e.emitBoundFunctionParams(method.Parameters)
-		if err != nil {
-			return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
-		}
-		name := goName(method.Name, !method.Private)
-		signature := fmt.Sprintf("func (%s %s) %s(%s)", receiverName, receiverType, name, strings.Join(params, ", "))
-		if method.ReturnType != checker.Void {
-			returnType, err := e.emitType(method.ReturnType)
-			if err != nil {
-				return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
-			}
-			signature += " " + returnType
-		}
-		e.line(signature + " {")
+	order, mapping, constraints := structTypeParams(def)
+	decls := formatTypeParamDecls(order, mapping, constraints)
+	return e.withTypeParams(mapping, func() error {
+		e.line("type " + goName(def.Name, true) + decls + " struct {")
 		e.indent++
-		prevReturnType := e.fnReturnType
-		e.fnReturnType = method.ReturnType
-		defer func() {
-			e.fnReturnType = prevReturnType
-		}()
-		if err := e.emitStatements(method.Body.Stmts, method.ReturnType); err != nil {
-			return err
+		fieldNames := sortedStringKeys(def.Fields)
+		for _, fieldName := range fieldNames {
+			typeName, err := e.emitType(def.Fields[fieldName])
+			if err != nil {
+				return fmt.Errorf("struct %s: %w", def.Name, err)
+			}
+			e.line(fmt.Sprintf("%s %s", goName(fieldName, true), typeName))
 		}
 		e.indent--
 		e.line("}")
+		methodNames := sortedStringKeys(def.Methods)
+		for _, methodName := range methodNames {
+			e.line("")
+			if err := e.emitStructMethod(def, def.Methods[methodName]); err != nil {
+				return err
+			}
+		}
 		return nil
+	})
+}
+
+func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.FunctionDef) error {
+	order, mapping, _ := structTypeParams(def)
+	receiverType := goName(def.Name, true) + formatTypeParamUses(order, mapping)
+	return e.emitReceiverMethod(def.Name, receiverType, mapping, method)
+}
+
+func (e *emitter) emitEnumMethod(def *checker.Enum, method *checker.FunctionDef) error {
+	return e.emitReceiverMethod(def.Name, goName(def.Name, true), nil, method)
+}
+
+func (e *emitter) emitReceiverMethod(typeName, receiverType string, typeParams map[string]string, method *checker.FunctionDef) error {
+	return e.withFreshLocals(func() error {
+		return e.withTypeParams(typeParams, func() error {
+			e.pushScope()
+			if method.Mutates {
+				receiverType = "*" + receiverType
+			}
+			receiverName := e.bindLocal(method.Receiver)
+			params, err := e.emitBoundFunctionParams(method.Parameters)
+			if err != nil {
+				return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
+			}
+			name := goName(method.Name, !method.Private)
+			signature := fmt.Sprintf("func (%s %s) %s(%s)", receiverName, receiverType, name, strings.Join(params, ", "))
+			if method.ReturnType != checker.Void {
+				returnType, err := e.emitType(method.ReturnType)
+				if err != nil {
+					return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
+				}
+				signature += " " + returnType
+			}
+			e.line(signature + " {")
+			e.indent++
+			prevReturnType := e.fnReturnType
+			e.fnReturnType = method.ReturnType
+			defer func() {
+				e.fnReturnType = prevReturnType
+			}()
+			if err := e.emitStatements(method.Body.Stmts, method.ReturnType); err != nil {
+				return err
+			}
+			e.indent--
+			e.line("}")
+			return nil
+		})
 	})
 }
 
@@ -2813,13 +2972,18 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.StructInstance:
 		fields := make([]string, 0, len(v.Fields))
 		for _, fieldName := range sortedStringKeys(v.Fields) {
-			value, err := e.emitExpr(v.Fields[fieldName])
+			expectedType := v.FieldTypes[fieldName]
+			value, err := e.emitValueForType(v.Fields[fieldName], expectedType)
 			if err != nil {
 				return "", err
 			}
 			fields = append(fields, fmt.Sprintf("%s: %s", goName(fieldName, true), value))
 		}
-		return fmt.Sprintf("%s{%s}", goName(v.Name, true), strings.Join(fields, ", ")), nil
+		typeName, err := e.emitType(v.StructType)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s{%s}", typeName, strings.Join(fields, ", ")), nil
 	case *checker.Identifier:
 		return e.resolveLocal(v.Name), nil
 	case checker.Variable:
@@ -2887,11 +3051,15 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		typeArgs, err := e.emitFunctionCallTypeArgsFromDefs(e.originalFunctionDef(v), v.Definition())
+		if err != nil {
+			return "", err
+		}
 		name := e.functionNames[v.Name]
 		if name == "" {
 			name = goName(v.Name, false)
 		}
-		return fmt.Sprintf("%s(%s)", name, strings.Join(args, ", ")), nil
+		return fmt.Sprintf("%s%s(%s)", name, typeArgs, strings.Join(args, ", ")), nil
 	case *checker.InstanceProperty:
 		subject, err := e.emitExpr(v.Subject)
 		if err != nil {
@@ -3000,14 +3168,18 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.ModuleStructInstance:
 		fields := make([]string, 0, len(v.Property.Fields))
 		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
-			value, err := e.emitExpr(v.Property.Fields[fieldName])
+			expectedType := v.FieldTypes[fieldName]
+			value, err := e.emitValueForType(v.Property.Fields[fieldName], expectedType)
 			if err != nil {
 				return "", err
 			}
 			fields = append(fields, fmt.Sprintf("%s: %s", goName(fieldName, true), value))
 		}
-		alias := packageNameForModulePath(v.Module)
-		return fmt.Sprintf("%s.%s{%s}", alias, goName(v.Property.Name, true), strings.Join(fields, ", ")), nil
+		typeName, err := e.emitType(v.StructType)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s{%s}", typeName, strings.Join(fields, ", ")), nil
 	case *checker.ModuleFunctionCall:
 		if v.Module == "ard/maybe" {
 			return e.emitMaybeModuleCall(v, nil)
@@ -3024,9 +3196,13 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		typeArgs, err := e.emitFunctionCallTypeArgsFromDefs(e.originalModuleFunctionDef(v.Module, v.Call), v.Call.Definition())
+		if err != nil {
+			return "", err
+		}
 		alias := packageNameForModulePath(v.Module)
 		name := goName(e.resolvedModuleFunctionName(v.Module, v.Call), true)
-		return fmt.Sprintf("%s.%s(%s)", alias, name, strings.Join(args, ", ")), nil
+		return fmt.Sprintf("%s.%s%s(%s)", alias, name, typeArgs, strings.Join(args, ", ")), nil
 	case *checker.ModuleSymbol:
 		alias := packageNameForModulePath(v.Module)
 		name := goName(v.Symbol.Name, true)
@@ -4084,6 +4260,174 @@ func (e *emitter) emitCallArgs(call *checker.FunctionCall) ([]string, error) {
 	return args, nil
 }
 
+func functionDefFromType(t checker.Type) *checker.FunctionDef {
+	switch fn := t.(type) {
+	case *checker.FunctionDef:
+		return fn
+	case *checker.ExternalFunctionDef:
+		return &checker.FunctionDef{
+			Name:       fn.Name,
+			Parameters: fn.Parameters,
+			ReturnType: fn.ReturnType,
+			Private:    fn.Private,
+		}
+	default:
+		return nil
+	}
+}
+
+func inferGenericTypeBindings(original, specialized checker.Type, bindings map[string]checker.Type) {
+	if original == nil || specialized == nil {
+		return
+	}
+	if tv, ok := specialized.(*checker.TypeVar); ok {
+		if actual := tv.Actual(); actual != nil {
+			specialized = actual
+		}
+	}
+	switch originalTyped := original.(type) {
+	case *checker.TypeVar:
+		if actual := originalTyped.Actual(); actual != nil {
+			inferGenericTypeBindings(actual, specialized, bindings)
+			return
+		}
+		name := typeVarName(originalTyped)
+		if name == "" {
+			return
+		}
+		if _, ok := bindings[name]; !ok {
+			bindings[name] = specialized
+		}
+	case *checker.List:
+		specializedTyped, ok := specialized.(*checker.List)
+		if !ok {
+			return
+		}
+		inferGenericTypeBindings(originalTyped.Of(), specializedTyped.Of(), bindings)
+	case *checker.Map:
+		specializedTyped, ok := specialized.(*checker.Map)
+		if !ok {
+			return
+		}
+		inferGenericTypeBindings(originalTyped.Key(), specializedTyped.Key(), bindings)
+		inferGenericTypeBindings(originalTyped.Value(), specializedTyped.Value(), bindings)
+	case *checker.Maybe:
+		specializedTyped, ok := specialized.(*checker.Maybe)
+		if !ok {
+			return
+		}
+		inferGenericTypeBindings(originalTyped.Of(), specializedTyped.Of(), bindings)
+	case *checker.Result:
+		specializedTyped, ok := specialized.(*checker.Result)
+		if !ok {
+			return
+		}
+		inferGenericTypeBindings(originalTyped.Val(), specializedTyped.Val(), bindings)
+		inferGenericTypeBindings(originalTyped.Err(), specializedTyped.Err(), bindings)
+	case *checker.FunctionDef:
+		specializedTyped, ok := specialized.(*checker.FunctionDef)
+		if !ok {
+			return
+		}
+		for i := 0; i < len(originalTyped.Parameters) && i < len(specializedTyped.Parameters); i++ {
+			inferGenericTypeBindings(originalTyped.Parameters[i].Type, specializedTyped.Parameters[i].Type, bindings)
+		}
+		inferGenericTypeBindings(effectiveFunctionReturnType(originalTyped), effectiveFunctionReturnType(specializedTyped), bindings)
+	case *checker.StructDef:
+		specializedTyped, ok := specialized.(*checker.StructDef)
+		if !ok {
+			return
+		}
+		for _, fieldName := range sortedStringKeys(originalTyped.Fields) {
+			specializedField, ok := specializedTyped.Fields[fieldName]
+			if !ok {
+				continue
+			}
+			inferGenericTypeBindings(originalTyped.Fields[fieldName], specializedField, bindings)
+		}
+	case *checker.Union:
+		specializedTyped, ok := specialized.(*checker.Union)
+		if !ok {
+			return
+		}
+		for i := 0; i < len(originalTyped.Types) && i < len(specializedTyped.Types); i++ {
+			inferGenericTypeBindings(originalTyped.Types[i], specializedTyped.Types[i], bindings)
+		}
+	}
+}
+
+func (e *emitter) emitFunctionCallTypeArgsFromDefs(originalDef, specializedDef *checker.FunctionDef) (string, error) {
+	if originalDef == nil || specializedDef == nil {
+		return "", nil
+	}
+	order, _, _ := functionTypeParams(originalDef)
+	if len(order) == 0 {
+		return "", nil
+	}
+	bindings := make(map[string]checker.Type, len(order))
+	for i := 0; i < len(originalDef.Parameters) && i < len(specializedDef.Parameters); i++ {
+		inferGenericTypeBindings(originalDef.Parameters[i].Type, specializedDef.Parameters[i].Type, bindings)
+	}
+	inferGenericTypeBindings(effectiveFunctionReturnType(originalDef), effectiveFunctionReturnType(specializedDef), bindings)
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		bound := bindings[name]
+		if bound == nil {
+			return "", nil
+		}
+		if tv, ok := bound.(*checker.TypeVar); ok {
+			if actual := tv.Actual(); actual != nil {
+				bound = actual
+			} else {
+				return "", nil
+			}
+		}
+		emitted, err := e.emitTypeArg(bound)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, emitted)
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return "[" + strings.Join(parts, ", ") + "]", nil
+}
+
+func (e *emitter) originalFunctionDef(call *checker.FunctionCall) *checker.FunctionDef {
+	if e == nil || e.module == nil || e.module.Program() == nil || call == nil {
+		return nil
+	}
+	for _, stmt := range e.module.Program().Statements {
+		switch def := stmt.Expr.(type) {
+		case *checker.FunctionDef:
+			if def.Name == call.Name {
+				return def
+			}
+		case *checker.ExternalFunctionDef:
+			if def.Name == call.Name {
+				return functionDefFromType(def)
+			}
+		}
+	}
+	return nil
+}
+
+func (e *emitter) originalModuleFunctionDef(modulePath string, call *checker.FunctionCall) *checker.FunctionDef {
+	if e == nil || e.module == nil || e.module.Program() == nil || call == nil {
+		return nil
+	}
+	mod := e.module.Program().Imports[modulePath]
+	if mod == nil {
+		return nil
+	}
+	sym := mod.Get(call.Name)
+	if sym.IsZero() {
+		return nil
+	}
+	return functionDefFromType(sym.Type)
+}
+
 func moduleFunctionValueName(module checker.Module, def *checker.FunctionDef) string {
 	if module == nil || module.Program() == nil || def == nil {
 		return ""
@@ -4278,10 +4622,26 @@ func emitTypeWithOptions(t checker.Type, typeParams map[string]string, namedType
 		}
 		return fmt.Sprintf("map[%s]%s", keyType, valueType), nil
 	case *checker.StructDef:
+		baseName := goName(typed.Name, true)
 		if namedTypeRef != nil {
-			return namedTypeRef(typed.Name, typed), nil
+			baseName = namedTypeRef(typed.Name, typed)
 		}
-		return goName(typed.Name, true), nil
+		order := structTypeParamOrder(typed)
+		if len(order) == 0 {
+			return baseName, nil
+		}
+		args := make([]string, 0, len(order))
+		for _, name := range order {
+			arg := ""
+			if typeParams != nil {
+				arg = typeParams[name]
+			}
+			if arg == "" {
+				arg = "any"
+			}
+			args = append(args, arg)
+		}
+		return fmt.Sprintf("%s[%s]", baseName, strings.Join(args, ", ")), nil
 	case *checker.FunctionDef:
 		return emitFunctionTypeWithOptions(typed, typeParams, namedTypeRef)
 	case *checker.Trait:

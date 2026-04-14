@@ -776,6 +776,26 @@ let _ = first
 	}
 }
 
+func TestBuildBinaryCompilesStdlibJsonModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/json
+
+let out = json::encode(["age": 1])
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesStdlibDynamicModule(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -853,6 +873,62 @@ fiber.join()
 	}
 }
 
+func TestBuildBinaryCompilesStdlibSqlModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/sql
+
+fn run() Void!Str {
+  let db = try sql::open("demo.db")
+  let query = db.query("SELECT 1 WHERE 1 = @id")
+  let _ = query.all(["id": 1])
+  db.close()
+}
+
+let out = run()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesStdlibSqlTransactionFlow(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/sql
+
+fn run() Dynamic?!Str {
+  let db = try sql::open("demo.db")
+  let tx = try db.begin()
+  let row = try tx.query("SELECT 1 WHERE 1 = @id").first(["id": 1])
+  try tx.rollback()
+  try db.close()
+  Result::ok(row)
+}
+
+let out = run()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
 func TestBuildBinaryCompilesStdlibHttpModule(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -863,6 +939,29 @@ func TestBuildBinaryCompilesStdlibHttpModule(t *testing.T) {
 use ard/http
 
 let ok = http::Response::new(200, "ok").is_ok()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "demo-bin")
+	if _, err := BuildBinary(mainPath, outputPath); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestBuildBinaryCompilesExplicitTypeArgsOnZeroArgGenericFunction(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn empty() [$T] {
+  let out: [$T] = []
+  out
+}
+
+let values = empty<Int>()
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}
