@@ -1623,14 +1623,14 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 	}
 }
 
-func (e *emitter) emitExpressionIntoValue(expr checker.Expression, onValue func(string) error) error {
+func (e *emitter) emitExpressionIntoValue(expr checker.Expression, expectedType checker.Type, onValue func(string) error) error {
 	if ifExpr, ok := expr.(*checker.If); ok {
-		return e.emitIfIntoValue(ifExpr, onValue)
+		return e.emitIfIntoValue(ifExpr, expectedType, onValue)
 	}
 	if tryOp, ok := expr.(*checker.TryOp); ok {
-		return e.emitTryOp(tryOp, nil, onValue, onValue)
+		return e.emitTryOp(tryOp, e.fnReturnType, onValue, nil)
 	}
-	value, err := e.emitExpr(expr)
+	value, err := e.emitValueForType(expr, expectedType)
 	if err != nil {
 		return err
 	}
@@ -1641,7 +1641,7 @@ func (e *emitter) emitExpressionIntoValue(expr checker.Expression, onValue func(
 	return onValue(copied)
 }
 
-func (e *emitter) emitBlockValue(block *checker.Block, onValue func(string) error) error {
+func (e *emitter) emitBlockValue(block *checker.Block, expectedType checker.Type, onValue func(string) error) error {
 	if block == nil || block.Type() == checker.Void {
 		return fmt.Errorf("expected value-producing block")
 	}
@@ -1653,7 +1653,7 @@ func (e *emitter) emitBlockValue(block *checker.Block, onValue func(string) erro
 		}
 		remaining := block.Stmts[i+1:]
 		if stmt.Stmt != nil {
-			if err := e.emitNonProducing(stmt.Stmt, remaining, checker.Void); err != nil {
+			if err := e.emitNonProducing(stmt.Stmt, remaining, e.fnReturnType); err != nil {
 				return err
 			}
 			continue
@@ -1662,30 +1662,30 @@ func (e *emitter) emitBlockValue(block *checker.Block, onValue func(string) erro
 			continue
 		}
 		if i == lastMeaningful {
-			return e.emitExpressionIntoValue(stmt.Expr, onValue)
+			return e.emitExpressionIntoValue(stmt.Expr, expectedType, onValue)
 		}
-		if err := e.emitExpressionStatement(stmt.Expr, checker.Void, false); err != nil {
+		if err := e.emitExpressionStatement(stmt.Expr, e.fnReturnType, false); err != nil {
 			return err
 		}
 	}
 	return fmt.Errorf("expected value-producing block")
 }
 
-func (e *emitter) emitIfIntoValue(expr *checker.If, onValue func(string) error) error {
+func (e *emitter) emitIfIntoValue(expr *checker.If, expectedType checker.Type, onValue func(string) error) error {
 	condition, err := e.emitExpr(expr.Condition)
 	if err != nil {
 		return err
 	}
 	e.line("if " + condition + " {")
 	e.indent++
-	if err := e.emitBlockValue(expr.Body, onValue); err != nil {
+	if err := e.emitBlockValue(expr.Body, expectedType, onValue); err != nil {
 		return err
 	}
 	e.indent--
 	if expr.ElseIf != nil {
 		e.line("} else {")
 		e.indent++
-		if err := e.emitIfIntoValue(expr.ElseIf, onValue); err != nil {
+		if err := e.emitIfIntoValue(expr.ElseIf, expectedType, onValue); err != nil {
 			return err
 		}
 		e.indent--
@@ -1695,7 +1695,7 @@ func (e *emitter) emitIfIntoValue(expr *checker.If, onValue func(string) error) 
 	if expr.Else != nil {
 		e.line("} else {")
 		e.indent++
-		if err := e.emitBlockValue(expr.Else, onValue); err != nil {
+		if err := e.emitBlockValue(expr.Else, expectedType, onValue); err != nil {
 			return err
 		}
 		e.indent--
@@ -1753,7 +1753,7 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 				if op.CatchBlock.Type() == checker.Void {
 					return fmt.Errorf("void try catch block is not supported in value position")
 				}
-				if err := e.emitBlockValue(op.CatchBlock, onCatchValue); err != nil {
+				if err := e.emitBlockValue(op.CatchBlock, op.CatchBlock.Type(), onCatchValue); err != nil {
 					return err
 				}
 			} else {
@@ -1802,7 +1802,7 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 				if op.CatchBlock.Type() == checker.Void {
 					return fmt.Errorf("void try catch block is not supported in value position")
 				}
-				if err := e.emitBlockValue(op.CatchBlock, onCatchValue); err != nil {
+				if err := e.emitBlockValue(op.CatchBlock, op.CatchBlock.Type(), onCatchValue); err != nil {
 					return err
 				}
 			} else {
@@ -2526,28 +2526,47 @@ func matchReturnType(expected, fallback checker.Type) checker.Type {
 	return fallback
 }
 
+func (e *emitter) emitValueTemp(prefix string, valueType checker.Type) (string, func(string) error, error) {
+	if valueType == nil || valueType == checker.Void {
+		return "", nil, fmt.Errorf("expected non-void value type")
+	}
+	tempName := e.nextTemp(prefix)
+	typeName, err := emitType(valueType)
+	if err != nil {
+		return "", nil, err
+	}
+	e.line(fmt.Sprintf("var %s %s", tempName, typeName))
+	assign := func(value string) error {
+		e.line(fmt.Sprintf("%s = %s", tempName, value))
+		return nil
+	}
+	return tempName, assign, nil
+}
+
 func (e *emitter) emitBoolMatch(match *checker.BoolMatch, expectedType checker.Type) (string, error) {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
 		return "", err
 	}
 	returnType := matchReturnType(expectedType, match.Type())
-	return e.emitInlineFunc(returnType, func(inner *emitter) error {
-		inner.line("if " + subject + " {")
-		inner.indent++
-		if err := inner.emitStatements(match.True.Stmts, returnType); err != nil {
-			return err
-		}
-		inner.indent--
-		inner.line("} else {")
-		inner.indent++
-		if err := inner.emitStatements(match.False.Stmts, returnType); err != nil {
-			return err
-		}
-		inner.indent--
-		inner.line("}")
-		return nil
-	})
+	tempName, assign, err := e.emitValueTemp("BoolMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	e.line("if " + subject + " {")
+	e.indent++
+	if err := e.emitBlockValue(match.True, returnType, assign); err != nil {
+		return "", err
+	}
+	e.indent--
+	e.line("} else {")
+	e.indent++
+	if err := e.emitBlockValue(match.False, returnType, assign); err != nil {
+		return "", err
+	}
+	e.indent--
+	e.line("}")
+	return tempName, nil
 }
 
 func (e *emitter) emitIntMatch(match *checker.IntMatch, expectedType checker.Type) (string, error) {
@@ -2556,44 +2575,46 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch, expectedType checker.Typ
 		return "", err
 	}
 	returnType := matchReturnType(expectedType, match.Type())
-	return e.emitInlineFunc(returnType, func(inner *emitter) error {
-		inner.line("switch {")
-		inner.indent++
-		for _, value := range sortedIntKeys(match.IntCases) {
-			block := match.IntCases[value]
-			inner.line(fmt.Sprintf("case %s == %d:", subject, value))
-			inner.indent++
-			if err := inner.emitStatements(block.Stmts, returnType); err != nil {
-				return err
-			}
-			inner.indent--
+	tempName, assign, err := e.emitValueTemp("IntMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	e.line("switch {")
+	e.indent++
+	for _, value := range sortedIntKeys(match.IntCases) {
+		block := match.IntCases[value]
+		e.line(fmt.Sprintf("case %s == %d:", subject, value))
+		e.indent++
+		if err := e.emitBlockValue(block, returnType, assign); err != nil {
+			return "", err
 		}
-		for _, intRange := range sortedIntRanges(match.RangeCases) {
-			block := match.RangeCases[intRange]
-			inner.line(fmt.Sprintf("case %s >= %d && %s <= %d:", subject, intRange.Start, subject, intRange.End))
-			inner.indent++
-			if err := inner.emitStatements(block.Stmts, returnType); err != nil {
-				return err
-			}
-			inner.indent--
+		e.indent--
+	}
+	for _, intRange := range sortedIntRanges(match.RangeCases) {
+		block := match.RangeCases[intRange]
+		e.line(fmt.Sprintf("case %s >= %d && %s <= %d:", subject, intRange.Start, subject, intRange.End))
+		e.indent++
+		if err := e.emitBlockValue(block, returnType, assign); err != nil {
+			return "", err
 		}
-		if match.CatchAll != nil {
-			inner.line("default:")
-			inner.indent++
-			if err := inner.emitStatements(match.CatchAll.Stmts, returnType); err != nil {
-				return err
-			}
-			inner.indent--
-		} else if returnType != checker.Void {
-			inner.line("default:")
-			inner.indent++
-			inner.line(`panic("non-exhaustive int match")`)
-			inner.indent--
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		e.line("default:")
+		e.indent++
+		if err := e.emitBlockValue(match.CatchAll, returnType, assign); err != nil {
+			return "", err
 		}
-		inner.indent--
-		inner.line("}")
-		return nil
-	})
+		e.indent--
+	} else if returnType != checker.Void {
+		e.line("default:")
+		e.indent++
+		e.line(`panic("non-exhaustive int match")`)
+		e.indent--
+	}
+	e.indent--
+	e.line("}")
+	return tempName, nil
 }
 
 func (e *emitter) emitOptionMatch(match *checker.OptionMatch, expectedType checker.Type) (string, error) {
@@ -2601,29 +2622,34 @@ func (e *emitter) emitOptionMatch(match *checker.OptionMatch, expectedType check
 	if err != nil {
 		return "", err
 	}
-	patternName := goName(match.Some.Pattern.Name, false)
 	returnType := matchReturnType(expectedType, match.Type())
-	return e.emitInlineFunc(returnType, func(inner *emitter) error {
-		inner.line("__ardMaybe := " + subject)
-		inner.line("if __ardMaybe.IsSome() {")
-		inner.indent++
-		inner.line(fmt.Sprintf("%s := __ardMaybe.Expect(%q)", patternName, "unreachable none in maybe match"))
+	tempName, assign, err := e.emitValueTemp("MaybeMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	maybeName := e.nextTemp("Maybe")
+	e.line(maybeName + " := " + subject)
+	e.line("if " + maybeName + ".IsSome() {")
+	e.indent++
+	if match.Some != nil && match.Some.Pattern != nil {
+		patternName := goName(match.Some.Pattern.Name, false)
+		e.line(fmt.Sprintf("%s := %s.Expect(%q)", patternName, maybeName, "unreachable none in maybe match"))
 		if !usesNameInStatements(match.Some.Body.Stmts, match.Some.Pattern.Name) {
-			inner.line("_ = " + patternName)
+			e.line("_ = " + patternName)
 		}
-		if err := inner.emitStatements(match.Some.Body.Stmts, returnType); err != nil {
-			return err
-		}
-		inner.indent--
-		inner.line("} else {")
-		inner.indent++
-		if err := inner.emitStatements(match.None.Stmts, returnType); err != nil {
-			return err
-		}
-		inner.indent--
-		inner.line("}")
-		return nil
-	})
+	}
+	if err := e.emitBlockValue(match.Some.Body, returnType, assign); err != nil {
+		return "", err
+	}
+	e.indent--
+	e.line("} else {")
+	e.indent++
+	if err := e.emitBlockValue(match.None, returnType, assign); err != nil {
+		return "", err
+	}
+	e.indent--
+	e.line("}")
+	return tempName, nil
 }
 
 func (e *emitter) emitResultMatch(match *checker.ResultMatch, expectedType checker.Type) (string, error) {
@@ -2632,41 +2658,44 @@ func (e *emitter) emitResultMatch(match *checker.ResultMatch, expectedType check
 		return "", err
 	}
 	returnType := matchReturnType(expectedType, match.Type())
-	return e.emitInlineFunc(returnType, func(inner *emitter) error {
-		inner.line("__ardResult := " + subject)
-		inner.line("if __ardResult.IsOk() {")
-		inner.indent++
-		if match.Ok != nil && match.Ok.Pattern != nil {
-			boundValue, err := emitCopiedValue("__ardResult.UnwrapOk()", match.OkType)
-			if err != nil {
-				return err
-			}
-			okName := goName(match.Ok.Pattern.Name, false)
-			inner.line(fmt.Sprintf("%s := %s", okName, boundValue))
-			if !usesNameInStatements(match.Ok.Body.Stmts, match.Ok.Pattern.Name) {
-				inner.line("_ = " + okName)
-			}
+	tempName, assign, err := e.emitValueTemp("ResultMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	resultName := e.nextTemp("Result")
+	e.line(resultName + " := " + subject)
+	e.line("if " + resultName + ".IsOk() {")
+	e.indent++
+	if match.Ok != nil && match.Ok.Pattern != nil {
+		boundValue, err := emitCopiedValue(resultName+".UnwrapOk()", match.OkType)
+		if err != nil {
+			return "", err
 		}
-		if err := inner.emitStatements(match.Ok.Body.Stmts, returnType); err != nil {
-			return err
+		okName := goName(match.Ok.Pattern.Name, false)
+		e.line(fmt.Sprintf("%s := %s", okName, boundValue))
+		if !usesNameInStatements(match.Ok.Body.Stmts, match.Ok.Pattern.Name) {
+			e.line("_ = " + okName)
 		}
-		inner.indent--
-		inner.line("} else {")
-		inner.indent++
-		if match.Err != nil && match.Err.Pattern != nil {
-			errName := goName(match.Err.Pattern.Name, false)
-			inner.line(fmt.Sprintf("%s := __ardResult.UnwrapErr()", errName))
-			if !usesNameInStatements(match.Err.Body.Stmts, match.Err.Pattern.Name) {
-				inner.line("_ = " + errName)
-			}
+	}
+	if err := e.emitBlockValue(match.Ok.Body, returnType, assign); err != nil {
+		return "", err
+	}
+	e.indent--
+	e.line("} else {")
+	e.indent++
+	if match.Err != nil && match.Err.Pattern != nil {
+		errName := goName(match.Err.Pattern.Name, false)
+		e.line(fmt.Sprintf("%s := %s.UnwrapErr()", errName, resultName))
+		if !usesNameInStatements(match.Err.Body.Stmts, match.Err.Pattern.Name) {
+			e.line("_ = " + errName)
 		}
-		if err := inner.emitStatements(match.Err.Body.Stmts, returnType); err != nil {
-			return err
-		}
-		inner.indent--
-		inner.line("}")
-		return nil
-	})
+	}
+	if err := e.emitBlockValue(match.Err.Body, returnType, assign); err != nil {
+		return "", err
+	}
+	e.indent--
+	e.line("}")
+	return tempName, nil
 }
 
 func (e *emitter) emitEnumMatch(match *checker.EnumMatch, expectedType checker.Type) (string, error) {
@@ -2675,43 +2704,45 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch, expectedType checker.T
 		return "", err
 	}
 	returnType := matchReturnType(expectedType, match.Type())
-	return e.emitInlineFunc(returnType, func(inner *emitter) error {
-		inner.line("switch " + subject + ".Tag {")
-		inner.indent++
-		discriminants := make([]int, 0, len(match.DiscriminantToIndex))
-		for discriminant := range match.DiscriminantToIndex {
-			discriminants = append(discriminants, discriminant)
+	tempName, assign, err := e.emitValueTemp("EnumMatch", returnType)
+	if err != nil {
+		return "", err
+	}
+	e.line("switch " + subject + ".Tag {")
+	e.indent++
+	discriminants := make([]int, 0, len(match.DiscriminantToIndex))
+	for discriminant := range match.DiscriminantToIndex {
+		discriminants = append(discriminants, discriminant)
+	}
+	sort.Ints(discriminants)
+	for _, discriminant := range discriminants {
+		idx := match.DiscriminantToIndex[discriminant]
+		if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
+			continue
 		}
-		sort.Ints(discriminants)
-		for _, discriminant := range discriminants {
-			idx := match.DiscriminantToIndex[discriminant]
-			if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
-				continue
-			}
-			inner.line(fmt.Sprintf("case %d:", discriminant))
-			inner.indent++
-			if err := inner.emitStatements(match.Cases[idx].Stmts, returnType); err != nil {
-				return err
-			}
-			inner.indent--
+		e.line(fmt.Sprintf("case %d:", discriminant))
+		e.indent++
+		if err := e.emitBlockValue(match.Cases[idx], returnType, assign); err != nil {
+			return "", err
 		}
-		if match.CatchAll != nil {
-			inner.line("default:")
-			inner.indent++
-			if err := inner.emitStatements(match.CatchAll.Stmts, returnType); err != nil {
-				return err
-			}
-			inner.indent--
-		} else if returnType != checker.Void {
-			inner.line("default:")
-			inner.indent++
-			inner.line(`panic("non-exhaustive enum match")`)
-			inner.indent--
+		e.indent--
+	}
+	if match.CatchAll != nil {
+		e.line("default:")
+		e.indent++
+		if err := e.emitBlockValue(match.CatchAll, returnType, assign); err != nil {
+			return "", err
 		}
-		inner.indent--
-		inner.line("}")
-		return nil
-	})
+		e.indent--
+	} else if returnType != checker.Void {
+		e.line("default:")
+		e.indent++
+		e.line(`panic("non-exhaustive enum match")`)
+		e.indent--
+	}
+	e.indent--
+	e.line("}")
+	return tempName, nil
 }
 
 func (e *emitter) emitPanicExpr(message checker.Expression, resultType checker.Type) (string, error) {

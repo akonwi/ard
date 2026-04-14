@@ -555,6 +555,23 @@ func TestTry(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "try works in typed list literals",
+			input: `
+				fn divide(a: Int, b: Int) Int!Str {
+					match b == 0 {
+						true => Result::err("division by zero"),
+						false => Result::ok(a / b),
+					}
+				}
+
+				fn values(a: Int, b: Int) [Int]!Str {
+					let nums: [Int] = [(try divide(a, b)), 2]
+					Result::ok(nums)
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Result::err with inferred value type matches expected Result",
 			input: `
 				fn process(x: Int) Str!Str {
