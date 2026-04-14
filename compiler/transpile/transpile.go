@@ -1,6 +1,7 @@
 package transpile
 
 import (
+	"encoding/json"
 	"fmt"
 	gofmt "go/format"
 	"os"
@@ -26,6 +27,7 @@ const (
 	stringsImportPath  = "strings"
 	strconvImportPath  = "strconv"
 	sortImportPath     = "sort"
+	osArgsEnvVar       = "ARDGO_OS_ARGS_JSON"
 )
 
 type emitter struct {
@@ -690,19 +692,39 @@ func Run(inputPath string, args []string) error {
 	if err != nil {
 		return err
 	}
-	_ = args
 
 	generatedDir := filepath.Join(project.RootPath, "generated")
 	if err := writeGeneratedProject(generatedDir, project, module); err != nil {
 		return err
 	}
 
+	normalizedArgs, err := json.Marshal(normalizeCLIArgs(args))
+	if err != nil {
+		return err
+	}
+
 	cmd := exec.Command("go", "run", "-mod=mod", ".")
 	cmd.Dir = generatedDir
+	cmd.Env = append(os.Environ(), osArgsEnvVar+"="+string(normalizedArgs))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func normalizeCLIArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--target" {
+			i++
+			continue
+		}
+		normalized = append(normalized, args[i])
+	}
+	return normalized
 }
 
 func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, entrypoint checker.Module) error {

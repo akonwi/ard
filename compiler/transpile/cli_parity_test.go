@@ -19,6 +19,7 @@ type cliRunResult struct {
 type cliSnippetCase struct {
 	name  string
 	env   map[string]string
+	args  []string
 	files map[string]string
 }
 
@@ -249,6 +250,24 @@ fn main() {
 			},
 		},
 		{
+			name: "argv_load",
+			args: []string{"alpha", "beta"},
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/argv
+
+fn main() {
+  let args = argv::load()
+  io::print(args.program)
+  io::print(args.arguments.size())
+  io::print(args.arguments.at(0))
+  io::print(args.arguments.at(1))
+}
+`,
+			},
+		},
+		{
 			name: "enum_match",
 			files: map[string]string{
 				"main.ard": `
@@ -310,12 +329,14 @@ fn main() {
 		t.Run(tc.name, func(t *testing.T) {
 			projectRoot := writeSnippetProject(t, tc.files)
 
-			vmResult := runArdCLI(t, ardPath, projectRoot, tc.env, "run", "main.ard")
+			vmArgs := append([]string{"run", "main.ard"}, tc.args...)
+			vmResult := runArdCLI(t, ardPath, projectRoot, tc.env, vmArgs...)
 			if vmResult.err != nil {
 				t.Fatalf("vm snippet run failed: %s", formatCLIRunFailure(vmResult))
 			}
 
-			goResult := runArdCLI(t, ardPath, projectRoot, tc.env, "run", "--target", "go", "main.ard")
+			goArgs := append([]string{"run", "--target", "go", "main.ard"}, tc.args...)
+			goResult := runArdCLI(t, ardPath, projectRoot, tc.env, goArgs...)
 			if goResult.err != nil {
 				t.Fatalf("go snippet run failed: %s", formatCLIRunFailure(goResult))
 			}
