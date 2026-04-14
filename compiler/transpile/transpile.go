@@ -36,6 +36,7 @@ type emitter struct {
 	builder       strings.Builder
 	indent        int
 	tempCounter   int
+	fnReturnType  checker.Type
 }
 
 func (e *emitter) nextTemp(prefix string) string {
@@ -964,6 +965,7 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 		emittedTypes:  e.emittedTypes,
 		indent:        1,
 		tempCounter:   e.tempCounter,
+		fnReturnType:  returnType,
 	}
 	if err := inner.emitStatements(def.Body.Stmts, returnType); err != nil {
 		return "", err
@@ -1050,6 +1052,11 @@ func (e *emitter) emitFunction(def *checker.FunctionDef) error {
 	}
 	e.line(signature + " {")
 	e.indent++
+	prevReturnType := e.fnReturnType
+	e.fnReturnType = returnType
+	defer func() {
+		e.fnReturnType = prevReturnType
+	}()
 	if err := e.emitStatements(def.Body.Stmts, returnType); err != nil {
 		return err
 	}
@@ -1109,7 +1116,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 					e.line(fmt.Sprintf("%s := %s", name, successValue))
 				}
 				return nil
-			}); err != nil {
+			}, nil); err != nil {
 				return err
 			}
 			if !usesNameInStatements(remaining, s.Name) {
@@ -1144,7 +1151,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing, remaining []checke
 			return e.emitTryOp(tryOp, returnType, func(successValue string) error {
 				e.line(fmt.Sprintf("%s = %s", targetName, successValue))
 				return nil
-			})
+			}, nil)
 		}
 		value, err := e.emitExpr(s.Value)
 		if err != nil {
@@ -1616,7 +1623,113 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 	}
 }
 
-func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSuccess func(successValue string) error) error {
+func (e *emitter) emitExpressionIntoValue(expr checker.Expression, onValue func(string) error) error {
+	if ifExpr, ok := expr.(*checker.If); ok {
+		return e.emitIfIntoValue(ifExpr, onValue)
+	}
+	if tryOp, ok := expr.(*checker.TryOp); ok {
+		return e.emitTryOp(tryOp, nil, onValue, onValue)
+	}
+	value, err := e.emitExpr(expr)
+	if err != nil {
+		return err
+	}
+	copied, err := emitCopiedValue(value, expr.Type())
+	if err != nil {
+		return err
+	}
+	return onValue(copied)
+}
+
+func (e *emitter) emitBlockValue(block *checker.Block, onValue func(string) error) error {
+	if block == nil || block.Type() == checker.Void {
+		return fmt.Errorf("expected value-producing block")
+	}
+	lastMeaningful := lastMeaningfulStatementIndex(block.Stmts)
+	for i, stmt := range block.Stmts {
+		if stmt.Break {
+			e.line("break")
+			continue
+		}
+		remaining := block.Stmts[i+1:]
+		if stmt.Stmt != nil {
+			if err := e.emitNonProducing(stmt.Stmt, remaining, checker.Void); err != nil {
+				return err
+			}
+			continue
+		}
+		if stmt.Expr == nil {
+			continue
+		}
+		if i == lastMeaningful {
+			return e.emitExpressionIntoValue(stmt.Expr, onValue)
+		}
+		if err := e.emitExpressionStatement(stmt.Expr, checker.Void, false); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("expected value-producing block")
+}
+
+func (e *emitter) emitIfIntoValue(expr *checker.If, onValue func(string) error) error {
+	condition, err := e.emitExpr(expr.Condition)
+	if err != nil {
+		return err
+	}
+	e.line("if " + condition + " {")
+	e.indent++
+	if err := e.emitBlockValue(expr.Body, onValue); err != nil {
+		return err
+	}
+	e.indent--
+	if expr.ElseIf != nil {
+		e.line("} else {")
+		e.indent++
+		if err := e.emitIfIntoValue(expr.ElseIf, onValue); err != nil {
+			return err
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	}
+	if expr.Else != nil {
+		e.line("} else {")
+		e.indent++
+		if err := e.emitBlockValue(expr.Else, onValue); err != nil {
+			return err
+		}
+		e.indent--
+		e.line("}")
+		return nil
+	}
+	return fmt.Errorf("if expression without else is not supported in value position")
+}
+
+func (e *emitter) emitTryExpr(op *checker.TryOp) (string, error) {
+	if e.fnReturnType == nil {
+		return "", fmt.Errorf("try expressions are only supported in function bodies")
+	}
+	tempName := e.nextTemp("TryValue")
+	typeName, err := emitType(op.Type())
+	if err != nil {
+		return "", err
+	}
+	e.line(fmt.Sprintf("var %s %s", tempName, typeName))
+	assignValue := func(value string) error {
+		copied, err := emitCopiedValue(value, op.Type())
+		if err != nil {
+			return err
+		}
+		e.line(fmt.Sprintf("%s = %s", tempName, copied))
+		return nil
+	}
+	if err := e.emitTryOp(op, e.fnReturnType, assignValue, nil); err != nil {
+		return "", err
+	}
+	return tempName, nil
+}
+
+func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSuccess func(successValue string) error, onCatchValue func(catchValue string) error) error {
 	subject, err := e.emitExpr(op.Expr())
 	if err != nil {
 		return err
@@ -1636,20 +1749,29 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 					e.line("_ = " + catchName)
 				}
 			}
-			if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
-				return err
-			}
-			if op.CatchBlock.Type() == checker.Void {
-				if returnType == nil || returnType == checker.Void {
-					e.line("return")
-				} else {
-					return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
+			if onCatchValue != nil {
+				if op.CatchBlock.Type() == checker.Void {
+					return fmt.Errorf("void try catch block is not supported in value position")
+				}
+				if err := e.emitBlockValue(op.CatchBlock, onCatchValue); err != nil {
+					return err
+				}
+			} else {
+				if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
+					return err
+				}
+				if op.CatchBlock.Type() == checker.Void {
+					if returnType == nil || returnType == checker.Void {
+						e.line("return")
+					} else {
+						return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
+					}
 				}
 			}
 		} else {
-			resultType, ok := returnType.(*checker.Result)
+			resultType, ok := e.fnReturnType.(*checker.Result)
 			if !ok {
-				return fmt.Errorf("try without catch on Result requires Result return type, got %v", returnType)
+				return fmt.Errorf("try without catch on Result requires function to return a Result type, got %v", e.fnReturnType)
 			}
 			valueType, err := emitType(resultType.Val())
 			if err != nil {
@@ -1676,20 +1798,29 @@ func (e *emitter) emitTryOp(op *checker.TryOp, returnType checker.Type, onSucces
 		e.line("if " + tempName + ".IsNone() {")
 		e.indent++
 		if op.CatchBlock != nil {
-			if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
-				return err
-			}
-			if op.CatchBlock.Type() == checker.Void {
-				if returnType == nil || returnType == checker.Void {
-					e.line("return")
-				} else {
-					return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
+			if onCatchValue != nil {
+				if op.CatchBlock.Type() == checker.Void {
+					return fmt.Errorf("void try catch block is not supported in value position")
+				}
+				if err := e.emitBlockValue(op.CatchBlock, onCatchValue); err != nil {
+					return err
+				}
+			} else {
+				if err := e.emitStatements(op.CatchBlock.Stmts, returnType); err != nil {
+					return err
+				}
+				if op.CatchBlock.Type() == checker.Void {
+					if returnType == nil || returnType == checker.Void {
+						e.line("return")
+					} else {
+						return fmt.Errorf("void try catch block is not supported for return type %s", returnType)
+					}
 				}
 			}
 		} else {
-			maybeType, ok := returnType.(*checker.Maybe)
+			maybeType, ok := e.fnReturnType.(*checker.Maybe)
 			if !ok {
-				return fmt.Errorf("try without catch on Maybe requires Maybe return type, got %v", returnType)
+				return fmt.Errorf("try without catch on Maybe requires function to return a Maybe type, got %v", e.fnReturnType)
 			}
 			innerType, err := emitType(maybeType.Of())
 			if err != nil {
@@ -1741,7 +1872,7 @@ func (e *emitter) emitExpressionStatement(expr checker.Expression, returnType ch
 				return nil
 			}
 		}
-		return e.emitTryOp(tryOp, returnType, onSuccess)
+		return e.emitTryOp(tryOp, returnType, onSuccess, nil)
 	}
 	if isLast && returnType != nil && returnType != checker.Void {
 		switch typed := expr.(type) {
@@ -1935,7 +2066,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.ResultMatch:
 		return e.emitResultMatch(v, nil)
 	case *checker.TryOp:
-		return "", fmt.Errorf("try expressions are only supported in statement position")
+		return e.emitTryExpr(v)
 	case *checker.ResultMethod:
 		return e.emitResultMethod(v)
 	case *checker.MaybeMethod:
@@ -2603,6 +2734,7 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 		functionNames: e.functionNames,
 		emittedTypes:  e.emittedTypes,
 		indent:        1,
+		fnReturnType:  e.fnReturnType,
 	}
 	if err := body(inner); err != nil {
 		return "", err

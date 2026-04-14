@@ -948,6 +948,50 @@ let e = from_call()
 	}
 }
 
+func TestEmitEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/maybe
+
+fn half(n: Int) Int? {
+  match n > 0 {
+    true => maybe::some(n / 2),
+    false => maybe::none(),
+  }
+}
+
+fn maybe_fallback(n: Int) Int {
+  let value = (try half(n) -> _ { 0 }) + 1
+  value
+}
+
+let result = maybe_fallback(0)
+`)
+
+	out, err := EmitEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"__ardTryValue",
+		"value := (__ardTryValue",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if !strings.Contains(generated, "return 0") {
+		t.Fatalf("expected nested try catch to early-return catch value from function\n%s", generated)
+	}
+}
+
 func TestBuildBinaryCompilesTryExpressions(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1023,6 +1067,19 @@ fn loop_catch(values: [Int]) Int!Str {
   Result::ok(0)
 }
 
+fn sum2(a: Int, b: Int) Int {
+  a + b
+}
+
+fn nested_binary(a: Int, b: Int) Int!Str {
+  let value = (try divide(a, b)) + 1
+  Result::ok(value)
+}
+
+fn nested_call_arg(a: Int, b: Int) Int!Str {
+  Result::ok(sum2(1, try divide(a, b)))
+}
+
 let a = final_message()
 let b = unwrap_local()
 let c = maybe_chain(4)
@@ -1030,6 +1087,8 @@ let d = maybe_fallback(0)
 let e = ignore_success()
 let f = sum_all([1, 2, 3])
 let g = loop_catch([1, 2])
+let h = nested_binary(4, 2)
+let i = nested_call_arg(8, 2)
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}
