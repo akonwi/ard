@@ -1356,14 +1356,23 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 	if declaredType != nil {
 		expectedElementType := declaredType.(*List).of
 		elements := make([]Expression, len(expr.Items))
+		hasError := false
 		for i := range expr.Items {
 			item := expr.Items[i]
 			element := c.checkExpr(item)
+			if element == nil {
+				hasError = true
+				continue
+			}
 			if !expectedElementType.equal(element.Type()) {
 				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
-				return nil
+				hasError = true
+				continue
 			}
 			elements[i] = element
+		}
+		if hasError {
+			return nil
 		}
 
 		listType := declaredType.(*List)
@@ -1388,10 +1397,11 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		item := expr.Items[i]
 		element := c.checkExpr(item)
 		if element == nil {
+			hasError = true
 			continue
 		}
 
-		if i == 0 {
+		if elementType == nil {
 			elementType = element.Type()
 		} else if !elementType.equal(element.Type()) {
 			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
@@ -1402,7 +1412,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		elements[i] = element
 	}
 
-	if hasError {
+	if hasError || elementType == nil {
 		return nil
 	}
 
@@ -4727,6 +4737,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		}
 	} else {
 		fnToUse = fnDef
+	}
+
+	if fnToUse != nil {
+		if derefFn, ok := derefType(fnToUse).(*FunctionDef); ok {
+			fnToUse = derefFn
+		}
 	}
 
 	return allExprs, fnToUse

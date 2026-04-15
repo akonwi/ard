@@ -100,5 +100,20 @@ func TestAsyncEvalIsolation(t *testing.T) {
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
+		{
+			name: "async::eval get return type is concrete in expressions",
+			input: `
+			use ard/async
+
+			let a = async::eval(fn() Int {
+				1
+			})
+			let b = async::eval(fn() Int {
+				2
+			})
+			let total = a.get() + b.get()
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }
