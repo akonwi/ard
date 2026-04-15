@@ -1,0 +1,53 @@
+use ard/io
+
+struct WordCount {
+  word: Str,
+  count: Int,
+}
+
+fn expand_words(rounds: Int) [Str] {
+  let base = ["ard", "go", "vm", "parser", "checker", "runtime", "async", "trait", "result", "maybe"]
+
+  mut words: [Str] = []
+  for i in 0..rounds {
+    words.push(base.at(i % base.size()))
+    words.push(base.at((i + 3) % base.size()))
+    words.push(base.at((i + 7) % base.size()))
+  }
+
+  words
+}
+
+fn count_words(words: [Str]) [WordCount] {
+  mut counts: [Str: Int] = [:]
+
+  for word in words {
+    counts.set(word, counts.get(word).or(0) + 1)
+  }
+
+  mut res: [WordCount] = []
+  for word, count in counts {
+    res.push(WordCount{word: word, count: count})
+  }
+
+  res.sort(
+    fn(a: WordCount, b: WordCount) Bool {
+      a.count > b.count
+    },
+  )
+
+  res
+}
+
+fn main() {
+  let words = expand_words(40000)
+  let counts = count_words(words)
+
+  mut checksum = 0
+  for entry, idx in counts {
+    checksum =+ (idx + 1) * entry.count
+    checksum =+ entry.word.size()
+  }
+
+  io::print(checksum)
+}

@@ -1,0 +1,107 @@
+use ard/io
+
+enum Region {
+  North,
+  South,
+  East,
+  West,
+}
+
+impl Region {
+  fn weight() Int {
+    match self {
+      Region::North => 3,
+      Region::South => 2,
+      Region::East => 4,
+      Region::West => 5,
+    }
+  }
+}
+
+struct Sale {
+  rep: Str,
+  region: Region,
+  units: Int,
+  price: Int,
+}
+
+impl Sale {
+  fn revenue() Int {
+    self.units * self.price * self.region.weight()
+  }
+}
+
+struct RepTotal {
+  rep: Str,
+  revenue: Int,
+  volume: Int,
+}
+
+fn build_sales(count: Int) [Sale] {
+  let reps = ["Ava", "Ben", "Cy", "Di", "Eli", "Fae"]
+  mut sales: [Sale] = []
+
+  for i in 0..count {
+    mut region = Region::North
+    if i % 4 == 1 {
+      region = Region::South
+    } else if i % 4 == 2 {
+      region = Region::East
+    } else if i % 4 == 3 {
+      region = Region::West
+    }
+
+    sales.push(
+      Sale{
+        rep: reps.at(i % reps.size()),
+        region: region,
+        units: i % 11 + 1,
+        price: i * 7 % 13 + 5,
+      },
+    )
+  }
+
+  sales
+}
+
+fn summarize(sales: [Sale]) [RepTotal] {
+  mut revenue_by_rep: [Str: Int] = [:]
+  mut volume_by_rep: [Str: Int] = [:]
+
+  for sale in sales {
+    revenue_by_rep.set(sale.rep, revenue_by_rep.get(sale.rep).or(0) + sale.revenue())
+    volume_by_rep.set(sale.rep, volume_by_rep.get(sale.rep).or(0) + sale.units)
+  }
+
+  mut totals: [RepTotal] = []
+  for rep, revenue in revenue_by_rep {
+    totals.push(
+      RepTotal{
+        rep: rep,
+        revenue: revenue,
+        volume: volume_by_rep.get(rep).or(0),
+      },
+    )
+  }
+
+  totals.sort(
+    fn(a: RepTotal, b: RepTotal) Bool {
+      a.revenue * 1000 + a.volume > b.revenue * 1000 + b.volume
+    },
+  )
+
+  totals
+}
+
+fn main() {
+  let sales = build_sales(40000)
+  let totals = summarize(sales)
+
+  mut checksum = 0
+  for total, idx in totals {
+    checksum =+ (idx + 1) * total.revenue
+    checksum =+ total.volume
+  }
+
+  io::print(checksum)
+}
