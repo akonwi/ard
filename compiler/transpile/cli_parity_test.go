@@ -222,6 +222,45 @@ fn main() {
 			},
 		},
 		{
+			name: "mutable_function_params",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+struct Box {
+  value: Int,
+}
+
+fn set_box(mut box: Box) {
+  box.value = 2
+}
+
+fn bump(mut value: Int) {
+  value = value + 1
+}
+
+fn append_one(mut values: [Int]) {
+  values.push(1)
+}
+
+fn main() {
+  mut box = Box{value: 1}
+  set_box(box)
+  io::print(box.value)
+
+  mut value = 1
+  bump(value)
+  io::print(value)
+
+  mut values = [1]
+  append_one(values)
+  io::print(values.size())
+  io::print(values.at(1))
+}
+`,
+			},
+		},
+		{
 			name: "trait_dispatch",
 			files: map[string]string{
 				"main.ard": `

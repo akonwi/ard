@@ -43,6 +43,7 @@ type emitter struct {
 	tempCounter     int
 	fnReturnType    checker.Type
 	localScopes     []map[string]string
+	pointerScopes   []map[string]bool
 	localNameCounts map[string]int
 	typeParams      map[string]string
 }
@@ -55,11 +56,14 @@ func (e *emitter) nextTemp(prefix string) string {
 
 func (e *emitter) withFreshLocals(fn func() error) error {
 	prevScopes := e.localScopes
+	prevPointerScopes := e.pointerScopes
 	prevCounts := e.localNameCounts
 	e.localScopes = nil
+	e.pointerScopes = nil
 	e.localNameCounts = make(map[string]int)
 	defer func() {
 		e.localScopes = prevScopes
+		e.pointerScopes = prevPointerScopes
 		e.localNameCounts = prevCounts
 	}()
 	return fn()
@@ -67,6 +71,7 @@ func (e *emitter) withFreshLocals(fn func() error) error {
 
 func (e *emitter) pushScope() {
 	e.localScopes = append(e.localScopes, make(map[string]string))
+	e.pointerScopes = append(e.pointerScopes, make(map[string]bool))
 }
 
 func (e *emitter) popScope() {
@@ -74,9 +79,14 @@ func (e *emitter) popScope() {
 		return
 	}
 	e.localScopes = e.localScopes[:len(e.localScopes)-1]
+	e.pointerScopes = e.pointerScopes[:len(e.pointerScopes)-1]
 }
 
 func (e *emitter) bindLocal(name string) string {
+	return e.bindLocalWithPointer(name, false)
+}
+
+func (e *emitter) bindLocalWithPointer(name string, pointer bool) string {
 	if len(e.localScopes) == 0 {
 		e.pushScope()
 	}
@@ -88,6 +98,7 @@ func (e *emitter) bindLocal(name string) string {
 	}
 	e.localNameCounts[base] = count + 1
 	e.localScopes[len(e.localScopes)-1][name] = resolved
+	e.pointerScopes[len(e.pointerScopes)-1][name] = pointer
 	return resolved
 }
 
@@ -100,6 +111,47 @@ func (e *emitter) resolveLocal(name string) string {
 	return goName(name, false)
 }
 
+func (e *emitter) isPointerLocal(name string) bool {
+	for i := len(e.pointerScopes) - 1; i >= 0; i-- {
+		if pointer, ok := e.pointerScopes[i][name]; ok {
+			return pointer
+		}
+	}
+	return false
+}
+
+func (e *emitter) emitLocalValue(name string) string {
+	resolved := e.resolveLocal(name)
+	if e.isPointerLocal(name) {
+		return "(*" + resolved + ")"
+	}
+	return resolved
+}
+
+func (e *emitter) emitLocalTarget(name string) string {
+	resolved := e.resolveLocal(name)
+	if e.isPointerLocal(name) {
+		return "(*" + resolved + ")"
+	}
+	return resolved
+}
+
+func mutableParamNeedsPointer(t checker.Type) bool {
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			return mutableParamNeedsPointer(actual)
+		}
+		return false
+	case *checker.StructDef:
+		return true
+	case *checker.List:
+		return true
+	default:
+		return false
+	}
+}
+
 func cloneLocalScopes(scopes []map[string]string) []map[string]string {
 	if len(scopes) == 0 {
 		return nil
@@ -107,6 +159,20 @@ func cloneLocalScopes(scopes []map[string]string) []map[string]string {
 	cloned := make([]map[string]string, len(scopes))
 	for i := range scopes {
 		cloned[i] = make(map[string]string, len(scopes[i]))
+		for k, v := range scopes[i] {
+			cloned[i][k] = v
+		}
+	}
+	return cloned
+}
+
+func clonePointerScopes(scopes []map[string]bool) []map[string]bool {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]bool, len(scopes))
+	for i := range scopes {
+		cloned[i] = make(map[string]bool, len(scopes[i]))
 		for k, v := range scopes[i] {
 			cloned[i][k] = v
 		}
@@ -1808,6 +1874,9 @@ func emitFunctionParamsWithOptions(params []checker.Parameter, includeNames bool
 		if err != nil {
 			return nil, err
 		}
+		if param.Mutable && mutableParamNeedsPointer(param.Type) {
+			typeName = "*" + typeName
+		}
 		if includeNames {
 			parts = append(parts, fmt.Sprintf("%s %s", goName(param.Name, false), typeName))
 		} else {
@@ -1828,7 +1897,12 @@ func (e *emitter) emitBoundFunctionParams(params []checker.Parameter) ([]string,
 		if err != nil {
 			return nil, err
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", e.bindLocal(param.Name), typeName))
+		usePointer := param.Mutable && mutableParamNeedsPointer(param.Type)
+		name := e.bindLocalWithPointer(param.Name, usePointer)
+		if usePointer {
+			typeName = "*" + typeName
+		}
+		parts = append(parts, fmt.Sprintf("%s %s", name, typeName))
 	}
 	return parts, nil
 }
@@ -1868,6 +1942,7 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 		tempCounter:     e.tempCounter,
 		fnReturnType:    returnType,
 		localScopes:     cloneLocalScopes(e.localScopes),
+		pointerScopes:   clonePointerScopes(e.pointerScopes),
 		localNameCounts: cloneLocalNameCounts(e.localNameCounts),
 		typeParams:      cloneTypeParams(e.typeParams),
 	}
@@ -3223,11 +3298,11 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		return fmt.Sprintf("%s{%s}", typeName, strings.Join(fields, ", ")), nil
 	case *checker.Identifier:
-		return e.resolveLocal(v.Name), nil
+		return e.emitLocalValue(v.Name), nil
 	case checker.Variable:
-		return e.resolveLocal(v.Name()), nil
+		return e.emitLocalValue(v.Name()), nil
 	case *checker.Variable:
-		return e.resolveLocal(v.Name()), nil
+		return e.emitLocalValue(v.Name()), nil
 	case *checker.IntAddition:
 		return e.emitBinary(v.Left, "+", v.Right)
 	case *checker.IntSubtraction:
@@ -3464,11 +3539,11 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 func (e *emitter) emitAssignmentTarget(expr checker.Expression) (string, error) {
 	switch target := expr.(type) {
 	case *checker.Identifier:
-		return e.resolveLocal(target.Name), nil
+		return e.emitLocalTarget(target.Name), nil
 	case checker.Variable:
-		return e.resolveLocal(target.Name()), nil
+		return e.emitLocalTarget(target.Name()), nil
 	case *checker.Variable:
-		return e.resolveLocal(target.Name()), nil
+		return e.emitLocalTarget(target.Name()), nil
 	case *checker.InstanceProperty:
 		subject, err := e.emitAssignmentTarget(target.Subject)
 		if err != nil {
@@ -3487,11 +3562,11 @@ func (e *emitter) emitAssignmentTarget(expr checker.Expression) (string, error) 
 func (e *emitter) emitBareExpr(expr checker.Expression) (string, error) {
 	switch v := expr.(type) {
 	case *checker.Identifier:
-		return e.resolveLocal(v.Name), nil
+		return e.emitLocalValue(v.Name), nil
 	case checker.Variable:
-		return e.resolveLocal(v.Name()), nil
+		return e.emitLocalValue(v.Name()), nil
 	case *checker.Variable:
-		return e.resolveLocal(v.Name()), nil
+		return e.emitLocalValue(v.Name()), nil
 	case *checker.InstanceProperty:
 		subject, err := e.emitBareExpr(v.Subject)
 		if err != nil {
@@ -4252,6 +4327,7 @@ func (e *emitter) emitInlineFunc(returnType checker.Type, body func(inner *emitt
 		indent:          1,
 		fnReturnType:    e.fnReturnType,
 		localScopes:     cloneLocalScopes(e.localScopes),
+		pointerScopes:   clonePointerScopes(e.pointerScopes),
 		localNameCounts: cloneLocalNameCounts(e.localNameCounts),
 		typeParams:      cloneTypeParams(e.typeParams),
 	}
@@ -4599,6 +4675,52 @@ func maybeHasUnresolvedTypeVar(maybeType *checker.Maybe) bool {
 	return false
 }
 
+func (e *emitter) emitMutableCallArg(arg checker.Expression, param checker.Parameter) (string, error) {
+	if !mutableParamNeedsPointer(param.Type) {
+		return e.emitValueForType(arg, param.Type)
+	}
+	typeName, err := e.emitType(param.Type)
+	if err != nil {
+		return "", err
+	}
+	switch v := arg.(type) {
+	case *checker.CopyExpression:
+		value, err := e.emitExpr(v)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() *%s { value := %s; return &value }()", typeName, value), nil
+	case *checker.Identifier:
+		resolved := e.resolveLocal(v.Name)
+		if e.isPointerLocal(v.Name) {
+			return resolved, nil
+		}
+		return "&" + resolved, nil
+	case checker.Variable:
+		resolved := e.resolveLocal(v.Name())
+		if e.isPointerLocal(v.Name()) {
+			return resolved, nil
+		}
+		return "&" + resolved, nil
+	case *checker.Variable:
+		resolved := e.resolveLocal(v.Name())
+		if e.isPointerLocal(v.Name()) {
+			return resolved, nil
+		}
+		return "&" + resolved, nil
+	default:
+		target, err := e.emitAssignmentTarget(arg)
+		if err == nil {
+			return "&" + target, nil
+		}
+		value, err := e.emitExpr(arg)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() *%s { value := %s; return &value }()", typeName, value), nil
+	}
+}
+
 func (e *emitter) emitCallArgs(call *checker.FunctionCall) ([]string, error) {
 	args := make([]string, 0, len(call.Args))
 	var params []checker.Parameter
@@ -4607,10 +4729,19 @@ func (e *emitter) emitCallArgs(call *checker.FunctionCall) ([]string, error) {
 	}
 	for i, arg := range call.Args {
 		expectedType := checker.Type(nil)
-		if i < len(params) {
-			expectedType = params[i].Type
+		var param checker.Parameter
+		hasParam := i < len(params)
+		if hasParam {
+			param = params[i]
+			expectedType = param.Type
 		}
-		emitted, err := e.emitValueForType(arg, expectedType)
+		var emitted string
+		var err error
+		if hasParam && param.Mutable {
+			emitted, err = e.emitMutableCallArg(arg, param)
+		} else {
+			emitted, err = e.emitValueForType(arg, expectedType)
+		}
 		if err != nil {
 			return nil, err
 		}
