@@ -917,6 +917,7 @@ func BuildBinary(inputPath, outputPath string) (string, error) {
 	}
 
 	cmd := exec.Command("go", "build", "-mod=mod", "-o", outputPath, ".")
+	configureGoCommand(cmd)
 	cmd.Dir = generatedDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -944,12 +945,27 @@ func Run(inputPath string, args []string) error {
 	}
 
 	cmd := exec.Command("go", "run", "-mod=mod", ".")
+	configureGoCommand(cmd)
 	cmd.Dir = generatedDir
-	cmd.Env = append(os.Environ(), osArgsEnvVar+"="+string(normalizedArgs))
+	cmd.Env = append(cmd.Env, osArgsEnvVar+"="+string(normalizedArgs))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func configureGoCommand(cmd *exec.Cmd) {
+	cmd.Env = append([]string{}, os.Environ()...)
+	const requiredFlag = "-tags=goexperiment.jsonv2"
+	goFlags := os.Getenv("GOFLAGS")
+	if strings.Contains(goFlags, requiredFlag) {
+		return
+	}
+	if strings.TrimSpace(goFlags) == "" {
+		cmd.Env = append(cmd.Env, "GOFLAGS="+requiredFlag)
+		return
+	}
+	cmd.Env = append(cmd.Env, "GOFLAGS="+goFlags+" "+requiredFlag)
 }
 
 func normalizeCLIArgs(args []string) []string {

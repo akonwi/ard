@@ -1004,6 +1004,7 @@ func ensureArdBinary(t *testing.T) string {
 	}
 	ardPath := filepath.Join(t.TempDir(), "ard")
 	cmd := exec.Command("go", "build", "-o", ardPath, ".")
+	configureGoCommand(cmd)
 	cmd.Dir = compilerRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {
