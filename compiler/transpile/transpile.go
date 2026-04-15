@@ -1829,7 +1829,7 @@ func (e *emitter) emitExternFunction(def *checker.ExternalFunctionDef) error {
 			e.indent--
 			e.line("}")
 			if def.ReturnType != checker.Void {
-				e.line(fmt.Sprintf("return result.(%s)", returnType))
+				e.line(fmt.Sprintf("return %s.CoerceExtern[%s](result)", helperImportAlias, returnType))
 			}
 			e.indent--
 			e.line("}")

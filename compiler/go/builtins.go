@@ -31,6 +31,22 @@ func maybeBoolPointer(value Maybe[bool]) *bool {
 	return &boolValue
 }
 
+func maybeIntPointer(value Maybe[int]) *int {
+	if value.IsNone() {
+		return nil
+	}
+	intValue := value.Or(0)
+	return &intValue
+}
+
+func maybeStringPointer(value Maybe[string]) *string {
+	if value.IsNone() {
+		return nil
+	}
+	stringValue := value.Or("")
+	return &stringValue
+}
+
 func builtinDynamicValue(value any) any {
 	if encodable, ok := value.(Encodable); ok {
 		return encodable.ToDyn()
@@ -117,6 +133,156 @@ func RegisterBuiltinExterns() {
 				return Err[string, string](err.Error()), nil
 			}
 			return Ok[string, string](value), nil
+		})
+		RegisterExtern("DecodeString", func(args ...any) (any, error) {
+			return builtinDecodeString(args[0]), nil
+		})
+		RegisterExtern("DecodeInt", func(args ...any) (any, error) {
+			return builtinDecodeInt(args[0]), nil
+		})
+		RegisterExtern("DecodeFloat", func(args ...any) (any, error) {
+			return builtinDecodeFloat(args[0]), nil
+		})
+		RegisterExtern("DecodeBool", func(args ...any) (any, error) {
+			return builtinDecodeBool(args[0]), nil
+		})
+		RegisterExtern("IsNil", func(args ...any) (any, error) {
+			return builtinDynamicValue(args[0]) == nil, nil
+		})
+		RegisterExtern("JsonToDynamic", func(args ...any) (any, error) {
+			return builtinJsonToDynamic(args[0].(string)), nil
+		})
+		RegisterExtern("DynamicToList", func(args ...any) (any, error) {
+			return builtinDynamicToList(args[0]), nil
+		})
+		RegisterExtern("DynamicToMap", func(args ...any) (any, error) {
+			return builtinDynamicToMap(args[0]), nil
+		})
+		RegisterExtern("ExtractField", func(args ...any) (any, error) {
+			return builtinExtractField(args[0], args[1].(string)), nil
+		})
+		RegisterExtern("FS_Exists", func(args ...any) (any, error) {
+			return ffi.FS_Exists(args[0].(string)), nil
+		})
+		RegisterExtern("FS_IsFile", func(args ...any) (any, error) {
+			return ffi.FS_IsFile(args[0].(string)), nil
+		})
+		RegisterExtern("FS_IsDir", func(args ...any) (any, error) {
+			return ffi.FS_IsDir(args[0].(string)), nil
+		})
+		RegisterExtern("FS_CreateFile", func(args ...any) (any, error) {
+			return builtinFSCreateFile(args[0].(string)), nil
+		})
+		RegisterExtern("FS_WriteFile", func(args ...any) (any, error) {
+			return builtinFSWriteFile(args[0].(string), args[1].(string)), nil
+		})
+		RegisterExtern("FS_AppendFile", func(args ...any) (any, error) {
+			return builtinFSAppendFile(args[0].(string), args[1].(string)), nil
+		})
+		RegisterExtern("FS_ReadFile", func(args ...any) (any, error) {
+			return builtinFSReadFile(args[0].(string)), nil
+		})
+		RegisterExtern("FS_DeleteFile", func(args ...any) (any, error) {
+			return builtinFSDeleteFile(args[0].(string)), nil
+		})
+		RegisterExtern("FS_Copy", func(args ...any) (any, error) {
+			return builtinFSCopy(args[0].(string), args[1].(string)), nil
+		})
+		RegisterExtern("FS_Rename", func(args ...any) (any, error) {
+			return builtinFSRename(args[0].(string), args[1].(string)), nil
+		})
+		RegisterExtern("FS_Cwd", func(args ...any) (any, error) {
+			return builtinFSCwd(), nil
+		})
+		RegisterExtern("FS_Abs", func(args ...any) (any, error) {
+			return builtinFSAbs(args[0].(string)), nil
+		})
+		RegisterExtern("FS_CreateDir", func(args ...any) (any, error) {
+			return builtinFSCreateDir(args[0].(string)), nil
+		})
+		RegisterExtern("FS_DeleteDir", func(args ...any) (any, error) {
+			return builtinFSDeleteDir(args[0].(string)), nil
+		})
+		RegisterExtern("FS_ListDir", func(args ...any) (any, error) {
+			return builtinFSListDir(args[0].(string)), nil
+		})
+		RegisterExtern("CryptoMd5", func(args ...any) (any, error) {
+			return ffi.CryptoMd5(args[0].(string)), nil
+		})
+		RegisterExtern("CryptoSha256", func(args ...any) (any, error) {
+			return ffi.CryptoSha256(args[0].(string)), nil
+		})
+		RegisterExtern("CryptoSha512", func(args ...any) (any, error) {
+			return ffi.CryptoSha512(args[0].(string)), nil
+		})
+		RegisterExtern("CryptoHashPassword", func(args ...any) (any, error) {
+			value, err := ffi.CryptoHashPassword(args[0].(string), maybeIntPointer(args[1].(Maybe[int])))
+			if err != nil {
+				return Err[string, string](err.Error()), nil
+			}
+			return Ok[string, string](value), nil
+		})
+		RegisterExtern("CryptoVerifyPassword", func(args ...any) (any, error) {
+			value, err := ffi.CryptoVerifyPassword(args[0].(string), args[1].(string))
+			if err != nil {
+				return Err[bool, string](err.Error()), nil
+			}
+			return Ok[bool, string](value), nil
+		})
+		RegisterExtern("CryptoScryptHash", func(args ...any) (any, error) {
+			value, err := ffi.CryptoScryptHash(
+				args[0].(string),
+				maybeStringPointer(args[1].(Maybe[string])),
+				maybeIntPointer(args[2].(Maybe[int])),
+				maybeIntPointer(args[3].(Maybe[int])),
+				maybeIntPointer(args[4].(Maybe[int])),
+				maybeIntPointer(args[5].(Maybe[int])),
+			)
+			if err != nil {
+				return Err[string, string](err.Error()), nil
+			}
+			return Ok[string, string](value), nil
+		})
+		RegisterExtern("CryptoScryptVerify", func(args ...any) (any, error) {
+			value, err := ffi.CryptoScryptVerify(
+				args[0].(string),
+				args[1].(string),
+				maybeIntPointer(args[2].(Maybe[int])),
+				maybeIntPointer(args[3].(Maybe[int])),
+				maybeIntPointer(args[4].(Maybe[int])),
+				maybeIntPointer(args[5].(Maybe[int])),
+			)
+			if err != nil {
+				return Err[bool, string](err.Error()), nil
+			}
+			return Ok[bool, string](value), nil
+		})
+		RegisterExtern("SqlCreateConnection", func(args ...any) (any, error) {
+			return builtinSqlCreateConnection(args[0].(string)), nil
+		})
+		RegisterExtern("SqlClose", func(args ...any) (any, error) {
+			return builtinSqlClose(args[0]), nil
+		})
+		RegisterExtern("SqlExecute", func(args ...any) (any, error) {
+			return builtinSqlExecute(args[0], args[1].(string), args[2].([]any)), nil
+		})
+		RegisterExtern("SqlQuery", func(args ...any) (any, error) {
+			return builtinSqlQuery(args[0], args[1].(string), args[2].([]any)), nil
+		})
+		RegisterExtern("SqlBeginTx", func(args ...any) (any, error) {
+			return builtinSqlBeginTx(args[0]), nil
+		})
+		RegisterExtern("SqlCommit", func(args ...any) (any, error) {
+			return builtinSqlCommit(args[0]), nil
+		})
+		RegisterExtern("SqlRollback", func(args ...any) (any, error) {
+			return builtinSqlRollback(args[0]), nil
+		})
+		RegisterExtern("SqlExtractParams", func(args ...any) (any, error) {
+			return ffi.SqlExtractParams(args[0].(string)), nil
+		})
+		RegisterExtern("NewList", func(args ...any) (any, error) {
+			return []any{}, nil
 		})
 	})
 }
