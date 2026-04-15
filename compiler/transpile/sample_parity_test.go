@@ -57,6 +57,7 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 		{name: "modules.ard"},
 		{name: "nullables.ard"},
 		{name: "temperatures.ard"},
+		{name: "tic-tac-toe.ard", stdin: "1\n4\n2\n5\n3\n"},
 		{name: "todo-list.ard", stdin: "Write tests\n\n"},
 		{name: "traits.ard"},
 		{name: "type-unions.ard"},

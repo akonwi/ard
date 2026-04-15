@@ -3421,7 +3421,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return "(!" + inner + ")", nil
+		return "(!(" + inner + "))", nil
 	case *checker.FunctionDef:
 		return e.emitFunctionLiteral(v)
 	case *checker.FunctionCall:
