@@ -4739,6 +4739,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		fnToUse = fnDef
 	}
 
+	if fnToUse != nil {
+		if derefFn, ok := derefType(fnToUse).(*FunctionDef); ok {
+			fnToUse = derefFn
+		}
+	}
+
 	return allExprs, fnToUse
 }
 

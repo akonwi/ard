@@ -564,10 +564,14 @@ use ard/io
 use ard/async
 
 fn main() {
-  let a = async::start(fn() {})
-  let b = async::start(fn() {})
+  let a = async::eval(fn() Int {
+    1
+  })
+  let b = async::eval(fn() Int {
+    2
+  })
   async::join([a, b])
-  io::print("done")
+  io::print(a.get() + b.get())
 }
 `,
 			},
