@@ -90,6 +90,12 @@ func RegisterBuiltinExterns() {
 			}
 			return Some(*value), nil
 		})
+		RegisterExtern("Now", func(args ...any) (any, error) {
+			return ffi.Now(), nil
+		})
+		RegisterExtern("GetTodayString", func(args ...any) (any, error) {
+			return ffi.GetTodayString(), nil
+		})
 		RegisterExtern("ReadLine", func(args ...any) (any, error) {
 			value, err := ffi.ReadLine()
 			if err != nil {
@@ -134,6 +140,27 @@ func RegisterBuiltinExterns() {
 			}
 			return Ok[string, string](value), nil
 		})
+		RegisterExtern("StrToDynamic", func(args ...any) (any, error) {
+			return args[0].(string), nil
+		})
+		RegisterExtern("IntToDynamic", func(args ...any) (any, error) {
+			return args[0].(int), nil
+		})
+		RegisterExtern("FloatToDynamic", func(args ...any) (any, error) {
+			return args[0].(float64), nil
+		})
+		RegisterExtern("BoolToDynamic", func(args ...any) (any, error) {
+			return args[0].(bool), nil
+		})
+		RegisterExtern("VoidToDynamic", func(args ...any) (any, error) {
+			return nil, nil
+		})
+		RegisterExtern("ListToDynamic", func(args ...any) (any, error) {
+			return ffi.ListToDynamic(args[0].([]any)), nil
+		})
+		RegisterExtern("MapToDynamic", func(args ...any) (any, error) {
+			return ffi.MapToDynamic(args[0].(map[string]any)), nil
+		})
 		RegisterExtern("DecodeString", func(args ...any) (any, error) {
 			return builtinDecodeString(args[0]), nil
 		})
@@ -160,6 +187,36 @@ func RegisterBuiltinExterns() {
 		})
 		RegisterExtern("ExtractField", func(args ...any) (any, error) {
 			return builtinExtractField(args[0], args[1].(string)), nil
+		})
+		RegisterExtern("HTTP_Do", func(args ...any) (any, error) {
+			value, err := ffi.HTTP_Do(
+				args[0].(string),
+				args[1].(string),
+				builtinDynamicValue(args[2]),
+				args[3].(map[string]string),
+				maybeIntPointer(args[4].(Maybe[int])),
+			)
+			if err != nil {
+				return Err[any, string](err.Error()), nil
+			}
+			return Ok[any, string](value), nil
+		})
+		RegisterExtern("HTTP_ResponseStatus", func(args ...any) (any, error) {
+			return ffi.HTTP_ResponseStatus(args[0]), nil
+		})
+		RegisterExtern("HTTP_ResponseHeaders", func(args ...any) (any, error) {
+			return ffi.HTTP_ResponseHeaders(args[0]), nil
+		})
+		RegisterExtern("HTTP_ResponseBody", func(args ...any) (any, error) {
+			value, err := ffi.HTTP_ResponseBody(args[0])
+			if err != nil {
+				return Err[string, string](err.Error()), nil
+			}
+			return Ok[string, string](value), nil
+		})
+		RegisterExtern("HTTP_ResponseClose", func(args ...any) (any, error) {
+			ffi.HTTP_ResponseClose(args[0])
+			return nil, nil
 		})
 		RegisterExtern("FS_Exists", func(args ...any) (any, error) {
 			return ffi.FS_Exists(args[0].(string)), nil
@@ -256,6 +313,9 @@ func RegisterBuiltinExterns() {
 				return Err[bool, string](err.Error()), nil
 			}
 			return Ok[bool, string](value), nil
+		})
+		RegisterExtern("CryptoUUID", func(args ...any) (any, error) {
+			return ffi.CryptoUUID(), nil
 		})
 		RegisterExtern("SqlCreateConnection", func(args ...any) (any, error) {
 			return builtinSqlCreateConnection(args[0].(string)), nil

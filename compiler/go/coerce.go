@@ -18,6 +18,13 @@ func CoerceExtern[T any](value any) T {
 	if err != nil {
 		panic(err)
 	}
+	var zero T
+	if !coerced.IsValid() {
+		return zero
+	}
+	if targetType != nil && targetType.Kind() == reflect.Interface && valueCanBeNil(coerced.Kind()) && coerced.IsNil() {
+		return zero
+	}
 	return coerced.Interface().(T)
 }
 
@@ -91,6 +98,15 @@ func zeroValue(targetType reflect.Type) (reflect.Value, error) {
 		return reflect.Value{}, fmt.Errorf("nil target type")
 	}
 	return reflect.Zero(targetType), nil
+}
+
+func valueCanBeNil(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return true
+	default:
+		return false
+	}
 }
 
 func coercePointerValue(source reflect.Value, targetType reflect.Type) (reflect.Value, error) {

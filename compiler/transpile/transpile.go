@@ -3596,7 +3596,11 @@ func (e *emitter) emitListMutationExpr(method *checker.ListMethod) (string, erro
 func (e *emitter) emitEnumVariant(variant *checker.EnumVariant) (string, error) {
 	if variant != nil && variant.EnumType != nil {
 		if enumType, ok := variant.EnumType.(*checker.Enum); ok && len(enumType.Methods) > 0 {
-			return fmt.Sprintf("%s{Tag: %d}", goName(enumType.Name, true), variant.Discriminant), nil
+			typeName, err := e.emitTypeArg(enumType)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s{Tag: %d}", typeName, variant.Discriminant), nil
 		}
 	}
 	return fmt.Sprintf("struct{ Tag int }{Tag: %d}", variant.Discriminant), nil

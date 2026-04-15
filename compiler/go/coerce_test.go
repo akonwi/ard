@@ -63,3 +63,10 @@ func TestCoerceExternMapToDynamicMap(t *testing.T) {
 		t.Fatalf("expected ok entry to equal true, got %v", got["ok"])
 	}
 }
+
+func TestCoerceExternNilToDynamic(t *testing.T) {
+	got := CoerceExtern[any](nil)
+	if got != nil {
+		t.Fatalf("expected nil dynamic coercion, got %v", got)
+	}
+}

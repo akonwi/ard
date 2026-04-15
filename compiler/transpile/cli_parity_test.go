@@ -3,6 +3,9 @@ package transpile
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +30,20 @@ type cliSnippetCase struct {
 
 func TestCLIRunMatchesVMSnippetParity(t *testing.T) {
 	ardPath := ensureArdBinary(t)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(err.Error()))
+			return
+		}
+		w.Header().Set("X-Echo-Method", r.Method)
+		w.Header().Set("X-Echo-Query", r.URL.Query().Get("lang"))
+		w.Header().Set("X-Echo-Header", r.Header.Get("X-Demo"))
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write(bodyBytes)
+	}))
+	defer httpServer.Close()
 
 	cases := []cliSnippetCase{
 		{
@@ -572,6 +589,157 @@ fn main() {
   })
   async::join([a, b])
   io::print(a.get() + b.get())
+}
+`,
+			},
+		},
+		{
+			name: "dynamic_builders",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/dynamic
+use ard/decode
+
+fn main() {
+  let numbers = dynamic::list([1, 2, 3], dynamic::from_int)
+  let value = dynamic::object([
+    "name": dynamic::from_str("kit"),
+    "ok": dynamic::from_bool(true),
+    "nums": numbers,
+  ])
+
+  match decode::extract_field(value, "name") {
+    ok(name) => io::print(decode::string(name).or("bad")),
+    err(message) => io::print(message),
+  }
+
+  match decode::extract_field(value, "nums") {
+    ok(items) => match decode::to_list(items) {
+      ok(list) => io::print(list.size()),
+      err(message) => io::print(message),
+    },
+    err(message) => io::print(message),
+  }
+
+  io::print(decode::is_void(dynamic::from_void()).to_str())
+}
+`,
+			},
+		},
+		{
+			name: "sql_transactions",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/sql
+use ard/decode
+
+fn main() {
+  match sql::open("test.db") {
+    ok(db) => {
+      let no_args: [Str: sql::Value] = [:]
+      let name_decoder = decode::field("name", decode::string)
+
+      io::print(db.exec("CREATE TABLE items(name TEXT)").is_ok().to_str())
+
+      match db.begin() {
+        ok(tx) => {
+          let insert = tx.query("INSERT INTO items(name) VALUES (@name)")
+          io::print(insert.run(["name": "rolled-back"]).is_ok().to_str())
+          io::print(tx.rollback().is_ok().to_str())
+        },
+        err(message) => io::print(message),
+      }
+
+      match db.query("SELECT name FROM items").all(no_args) {
+        ok(rows) => io::print(rows.size()),
+        err(message) => io::print(message),
+      }
+
+      match db.begin() {
+        ok(tx) => {
+          let insert = tx.query("INSERT INTO items(name) VALUES (@name)")
+          io::print(insert.run(["name": "committed"]).is_ok().to_str())
+          io::print(tx.commit().is_ok().to_str())
+        },
+        err(message) => io::print(message),
+      }
+
+      match db.query("SELECT name FROM items").all(no_args) {
+        ok(rows) => {
+          io::print(rows.size())
+          io::print(name_decoder(rows.at(0)).or("bad"))
+        },
+        err(message) => io::print(message),
+      }
+
+      io::print(db.close().is_ok().to_str())
+    },
+    err(message) => io::print(message),
+  }
+}
+`,
+			},
+		},
+		{
+			name: "time_and_uuid_properties",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/chrono
+use ard/dates
+use ard/crypto
+
+fn main() {
+  let now = chrono::now()
+  let today = dates::get_today()
+  let id = crypto::uuid()
+
+  io::print((now > 0).to_str())
+  io::print(today.size())
+  io::print(today.contains("-").to_str())
+  io::print(today.split("-").size())
+  io::print(id.size())
+  io::print(id.contains("-").to_str())
+  io::print(id.split("-").size())
+}
+`,
+			},
+		},
+		{
+			name: "http_client_roundtrip",
+			env: map[string]string{
+				"ARD_HTTP_BASE_URL": httpServer.URL,
+			},
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/http
+use ard/env
+use ard/maybe
+use ard/dynamic
+
+fn main() {
+  let base = env::get("ARD_HTTP_BASE_URL").or("")
+  let req = http::Request{
+    method: http::Method::Post,
+    url: base + "/echo?lang=ard",
+    headers: ["content-type": "text/plain", "x-demo": "kit"],
+    body: maybe::some(dynamic::from_str("hello")),
+  }
+
+  match http::send(req, 5) {
+    ok(res) => {
+      io::print(res.status)
+      io::print(res.is_ok().to_str())
+      io::print(res.headers.get("X-Echo-Method").or("missing"))
+      io::print(res.headers.get("X-Echo-Query").or("missing"))
+      io::print(res.headers.get("X-Echo-Header").or("missing"))
+      io::print(res.body)
+    },
+    err(message) => io::print(message),
+  }
 }
 `,
 			},
