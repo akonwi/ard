@@ -27,13 +27,13 @@ fn build_shapes(count: Int) [Shape] {
 
   for i in 0..count {
     if i % 4 == 0 {
-      shapes.push(Square{size: i % 23 + 2})
+      shapes.push(Square{size: i % (23 + 2)})
     } else if i % 4 == 1 {
-      shapes.push(Circle{radius: i % 19 + 3})
+      shapes.push(Circle{radius: i % (19 + 3)})
     } else if i % 4 == 2 {
-      shapes.push(Triangle{base: i % 17 + 4, height: i % 13 + 5})
+      shapes.push(Triangle{base: i % (17 + 4), height: i % (13 + 5)})
     } else {
-      shapes.push(Hexagon{side: i % 11 + 6})
+      shapes.push(Hexagon{side: i % (11 + 6)})
     }
   }
 

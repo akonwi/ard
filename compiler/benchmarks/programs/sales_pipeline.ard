@@ -55,8 +55,8 @@ fn build_sales(count: Int) [Sale] {
       Sale{
         rep: reps.at(i % reps.size()),
         region: region,
-        units: i % 11 + 1,
-        price: i * 7 % 13 + 5,
+        units: i % (11 + 1),
+        price: i * 7 % (13 + 5),
       },
     )
   }

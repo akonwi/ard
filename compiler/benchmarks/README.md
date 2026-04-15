@@ -19,6 +19,10 @@ The benchmarks are intentionally more realistic than tiny microbenchmarks, but s
   - string-heavy list processing, map counting, sort
 - `async_batches.ard`
   - async fibers, join, CPU-bound concurrent work
+- `fs_batch.ard`
+  - directory lifecycle, repeated file write/read/copy/rename/delete
+- `sql_batch.ard`
+  - SQLite setup, transactional inserts, row query/decode, cleanup
 
 ## Requirements
 

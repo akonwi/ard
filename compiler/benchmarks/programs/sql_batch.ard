@@ -1,0 +1,55 @@
+use ard/decode
+use ard/fs
+use ard/io
+use ard/sql
+
+fn main() {
+  let db_path = ".ard-bench-sql.db"
+  if fs::exists(db_path) {
+    fs::delete(db_path).expect("remove previous benchmark db")
+  }
+
+  let db = sql::open(db_path).expect("open benchmark db")
+  db.exec(
+    "CREATE TABLE items(name TEXT, qty INTEGER, price INTEGER, region TEXT)",
+  ).expect("create benchmark table")
+
+  let tx = db.begin().expect("begin benchmark transaction")
+  let insert = tx.query("INSERT INTO items(name, qty, price, region) VALUES (@name, @qty, @price, @region)")
+  for i in 0..5000 {
+    mut region = "north"
+    if i % 3 == 1 {
+      region = "south"
+    } else if i % 3 == 2 {
+      region = "west"
+    }
+
+    insert.run(
+      ["name": "item-{i}", "qty": i % 11 + 1, "price": i * 7 % 19 + 3, "region": region],
+    ).expect("insert benchmark row")
+  }
+  tx.commit().expect("commit benchmark transaction")
+
+  let no_args: [Str: sql::Value] = [:]
+  let rows = db.query("SELECT name, qty, price, region FROM items").all(no_args).expect("query benchmark rows")
+  let name_decoder = decode::field("name", decode::string)
+  let qty_decoder = decode::field("qty", decode::int)
+  let price_decoder = decode::field("price", decode::int)
+  let region_decoder = decode::field("region", decode::string)
+
+  mut checksum = rows.size()
+  for row in rows {
+    let name = name_decoder(row).expect("decode name")
+    let qty = qty_decoder(row).expect("decode qty")
+    let price = price_decoder(row).expect("decode price")
+    let region = region_decoder(row).expect("decode region")
+
+    checksum =+ name.size()
+    checksum =+ qty * price
+    checksum =+ region.size()
+  }
+
+  db.close().expect("close benchmark db")
+  fs::delete(db_path).expect("delete benchmark db")
+  io::print(checksum)
+}

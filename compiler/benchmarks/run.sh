@@ -15,6 +15,8 @@ BENCHMARKS=(
   "decode_pipeline:benchmarks/programs/decode_pipeline.ard"
   "word_frequency_batch:benchmarks/programs/word_frequency_batch.ard"
   "async_batches:benchmarks/programs/async_batches.ard"
+  "fs_batch:benchmarks/programs/fs_batch.ard"
+  "sql_batch:benchmarks/programs/sql_batch.ard"
 )
 
 usage() {
@@ -34,6 +36,8 @@ Available benchmarks:
   decode_pipeline
   word_frequency_batch
   async_batches
+  fs_batch
+  sql_batch
 EOF
 }
 
