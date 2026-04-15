@@ -527,6 +527,9 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	if module == nil || module.Program() == nil {
 		return nil, fmt.Errorf("module has no program")
 	}
+	if !entrypoint && module.Path() == "ard/async" {
+		return emitAsyncModuleSource(packageName)
+	}
 
 	e := &emitter{
 		module:        module,
@@ -661,6 +664,119 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	formatted, err := gofmt.Source([]byte(e.builder.String()))
 	if err != nil {
 		return nil, fmt.Errorf("format generated go: %w\n%s", err, e.builder.String())
+	}
+	return formatted, nil
+}
+
+func emitAsyncModuleSource(packageName string) ([]byte, error) {
+	source := fmt.Sprintf(`package %s
+
+import (
+	%s %q
+	%q
+)
+
+type fiberState[T any] struct {
+	wg sync.WaitGroup
+	result T
+}
+
+type Fiber[T any] struct {
+	Result T
+	Wg any
+}
+
+func (self Fiber[T]) fiberHandle() any {
+	return self.Wg
+}
+
+func (self Fiber[T]) Get() T {
+	self.Join()
+	return fiberGet[T](self.Wg)
+}
+
+func (self Fiber[T]) Join() {
+	fiberWait(self.Wg)
+}
+
+func Sleep(ms int) {
+	_, err := %s.CallExtern("Sleep", ms)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func Start(do func()) Fiber[struct{}] {
+	state := &fiberState[struct{}]{}
+	state.wg.Add(1)
+	go func() {
+		defer state.wg.Done()
+		do()
+	}()
+	return Fiber[struct{}]{Wg: state}
+}
+
+func Eval[T any](do func() T) Fiber[T] {
+	state := &fiberState[T]{}
+	state.wg.Add(1)
+	go func() {
+		defer state.wg.Done()
+		state.result = do()
+	}()
+	return Fiber[T]{Wg: state}
+}
+
+func Join[T any](fibers []Fiber[T]) {
+	for _, fiber := range fibers {
+		fiberWait(fiber.Wg)
+	}
+}
+
+func JoinAny(fibers []any) {
+	for _, fiber := range fibers {
+		handleProvider, ok := fiber.(interface{ fiberHandle() any })
+		if !ok {
+			panic("unexpected async fiber")
+		}
+		fiberWait(handleProvider.fiberHandle())
+	}
+}
+
+type fiberWaiter interface {
+	wait()
+}
+
+type fiberGetter[T any] interface {
+	get() T
+}
+
+func (state *fiberState[T]) wait() {
+	state.wg.Wait()
+}
+
+func (state *fiberState[T]) get() T {
+	state.wg.Wait()
+	return state.result
+}
+
+func fiberWait(handle any) {
+	if waiter, ok := handle.(fiberWaiter); ok {
+		waiter.wait()
+		return
+	}
+	panic("unexpected async fiber handle")
+}
+
+func fiberGet[T any](handle any) T {
+	if getter, ok := handle.(fiberGetter[T]); ok {
+		return getter.get()
+	}
+	panic("unexpected async fiber handle")
+}
+`, packageName, helperImportAlias, helperImportPath, "sync", helperImportAlias)
+	formatted, err := gofmt.Source([]byte(source))
+	if err != nil {
+		return nil, fmt.Errorf("format generated go: %w\n%s", err, source)
 	}
 	return formatted, nil
 }
@@ -3314,6 +3430,11 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 				return emitted, err
 			}
 		}
+		if v.Module == "ard/async" {
+			if emitted, ok, err := e.emitAsyncModuleCall(v); ok || err != nil {
+				return emitted, err
+			}
+		}
 		args, err := e.emitCallArgs(v.Call)
 		if err != nil {
 			return "", err
@@ -4171,6 +4292,34 @@ func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, 
 			return "", true, err
 		}
 		return fmt.Sprintf("func() %s { out := append(%s(nil), %s...); return append(out, %s...) }()", typeName, typeName, left, right), true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+func (e *emitter) emitAsyncModuleCall(call *checker.ModuleFunctionCall) (string, bool, error) {
+	if call == nil || call.Call == nil {
+		return "", false, nil
+	}
+	switch call.Call.Name {
+	case "join":
+		if len(call.Call.Args) != 1 {
+			return "", true, fmt.Errorf("async::join expects one arg")
+		}
+		list, ok := call.Call.Args[0].(*checker.ListLiteral)
+		if !ok {
+			return "", false, nil
+		}
+		elements := make([]string, 0, len(list.Elements))
+		for _, element := range list.Elements {
+			emitted, err := e.emitExpr(element)
+			if err != nil {
+				return "", true, err
+			}
+			elements = append(elements, emitted)
+		}
+		alias := packageNameForModulePath("ard/async")
+		return fmt.Sprintf("%s.JoinAny([]any{%s})", alias, strings.Join(elements, ", ")), true, nil
 	default:
 		return "", false, nil
 	}

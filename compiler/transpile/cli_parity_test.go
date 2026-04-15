@@ -524,6 +524,55 @@ fn main() {
 			},
 		},
 		{
+			name: "async_eval",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/async
+
+fn main() {
+  let fiber = async::eval(fn() Int {
+    41 + 1
+  })
+  io::print(fiber.get())
+}
+`,
+			},
+		},
+		{
+			name: "async_start_join",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/async
+
+fn main() {
+  let fiber = async::start(fn() {
+    io::print("hi")
+  })
+  fiber.join()
+  io::print("done")
+}
+`,
+			},
+		},
+		{
+			name: "async_join_list",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/async
+
+fn main() {
+  let a = async::start(fn() {})
+  let b = async::start(fn() {})
+  async::join([a, b])
+  io::print("done")
+}
+`,
+			},
+		},
+		{
 			name: "enum_match",
 			files: map[string]string{
 				"main.ard": `
