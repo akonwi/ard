@@ -572,10 +572,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if mapType == nil {
 				return nil, fmt.Errorf("map keys on non-map")
 			}
-			keys := make([]*runtime.Object, 0, len(mapObj.AsMap()))
-			for key := range mapObj.AsMap() {
-				keys = append(keys, mapObj.Map_GetKey(key))
-			}
+			keys := runtime.SortedMapKeys(mapObj)
 			vm.push(curr, runtime.MakeList(mapType.Key(), keys...))
 		case bytecode.OpMapGet:
 			keyObj, err := vm.pop(curr)

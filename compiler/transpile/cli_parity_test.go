@@ -197,6 +197,27 @@ fn main() {
 			},
 		},
 		{
+			name: "map_iteration_order",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn main() {
+  mut values: [Int: Str] = [3: "c", 1: "a"]
+  values.set(2, "b")
+
+  for key, value in values {
+    io::print("{key}:{value}")
+  }
+
+  for key in values.keys() {
+    io::print(key)
+  }
+}
+`,
+			},
+		},
+		{
 			name: "struct_methods",
 			files: map[string]string{
 				"main.ard": `

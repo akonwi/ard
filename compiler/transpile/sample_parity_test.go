@@ -46,6 +46,7 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 		"grades.ard",
 		"lights.ard",
 		"loops.ard",
+		"maps.ard",
 		"modules.ard",
 		"nullables.ard",
 		"temperatures.ard",

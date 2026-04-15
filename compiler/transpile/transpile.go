@@ -1211,6 +1211,7 @@ func collectImportsFromNonProducing(stmt checker.NonProducing, imports map[strin
 			collectImportsFromStatement(stmt, imports, projectName)
 		}
 	case *checker.ForInMap:
+		imports[helperImportPath] = helperImportAlias
 		collectImportsFromExpr(s.Map, imports, projectName)
 		for _, stmt := range s.Body.Stmts {
 			collectImportsFromStatement(stmt, imports, projectName)
@@ -1334,6 +1335,9 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 		}
 		collectImportsFromType(v.Type(), imports)
 	case *checker.MapMethod:
+		if v.Kind == checker.MapKeys {
+			imports[helperImportPath] = helperImportAlias
+		}
 		collectImportsFromExpr(v.Subject, imports, projectName)
 		for _, arg := range v.Args {
 			collectImportsFromExpr(arg, imports, projectName)
@@ -2257,10 +2261,13 @@ func (e *emitter) emitForInMap(loop *checker.ForInMap, returnType checker.Type) 
 	}
 	e.pushScope()
 	defer e.popScope()
+	mapName := e.nextTemp("Map")
+	e.line(fmt.Sprintf("%s := %s", mapName, mapExpr))
 	key := e.bindLocal(loop.Key)
 	val := e.bindLocal(loop.Val)
-	e.line(fmt.Sprintf("for %s, %s := range %s {", key, val, mapExpr))
+	e.line(fmt.Sprintf("for _, %s := range %s.MapKeys(%s) {", key, helperImportAlias, mapName))
 	e.indent++
+	e.line(fmt.Sprintf("%s := %s[%s]", val, mapName, key))
 	if err := e.emitStatements(loop.Body.Stmts, checker.Void); err != nil {
 		return err
 	}
@@ -3440,7 +3447,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("func() %s { keys := make(%s, 0, len(%s)); for key := range %s { keys = append(keys, key) }; return keys }()", keysType, keysType, subject, subject), nil
+			return fmt.Sprintf("func() %s { return %s.MapKeys(%s) }()", keysType, helperImportAlias, subject), nil
 		case checker.MapSize:
 			return fmt.Sprintf("len(%s)", subject), nil
 		case checker.MapGet:
