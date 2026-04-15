@@ -64,10 +64,11 @@ func (c *Checker) validateFiberFunction(fnNode parse.Expression, fiberType Type)
 		})
 		uniqueName := fmt.Sprintf("start_func_%p", fnNode)
 		main := &FunctionDef{
-			Name:       uniqueName,
-			Parameters: []Parameter{},
-			ReturnType: Void,
-			Body:       block,
+			Name:                    uniqueName,
+			Parameters:              []Parameter{},
+			ReturnType:              Void,
+			InferReturnTypeFromBody: false,
+			Body:                    block,
 		}
 		c.scope.add(uniqueName, main, false)
 
@@ -122,10 +123,11 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 
 		uniqueName := fmt.Sprintf("eval_func_%p", fnNode)
 		fnDef = &FunctionDef{
-			Name:       uniqueName,
-			Parameters: params,
-			ReturnType: returnType,
-			Body:       block,
+			Name:                    uniqueName,
+			Parameters:              params,
+			ReturnType:              returnType,
+			InferReturnTypeFromBody: anonFn.ReturnType == nil,
+			Body:                    block,
 		}
 		checkedFn = fnDef
 		c.scope.add(uniqueName, fnDef, false)
@@ -148,9 +150,7 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 
 	returnType := fnType.ReturnType
 
-	// If the anonymous function has no explicit return type (Void default) but has a body,
-	// infer the return type from the body
-	if returnType == Void && fnType.Body != nil {
+	if fnType.InferReturnTypeFromBody && fnType.Body != nil {
 		bodyType := fnType.Body.Type()
 		if bodyType != Void {
 			returnType = bodyType

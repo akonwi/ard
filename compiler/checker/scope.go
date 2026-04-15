@@ -291,12 +291,13 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		newReturnType := replaceGeneric(t.ReturnType, genericName, concreteType)
 		// Create a new FunctionDef, don't modify the original
 		return &FunctionDef{
-			Name:       t.Name,
-			Parameters: newParams,
-			ReturnType: newReturnType,
-			Mutates:    t.Mutates,
-			Body:       t.Body,
-			Private:    t.Private,
+			Name:                    t.Name,
+			Parameters:              newParams,
+			ReturnType:              newReturnType,
+			InferReturnTypeFromBody: t.InferReturnTypeFromBody,
+			Mutates:                 t.Mutates,
+			Body:                    t.Body,
+			Private:                 t.Private,
 		}
 	case *StructDef:
 		// Check if any fields or methods actually need specialization
@@ -364,12 +365,13 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 	}
 
 	return &FunctionDef{
-		Name:       fnDef.Name,
-		Parameters: newParams,
-		ReturnType: copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
-		Body:       fnDef.Body,
-		Mutates:    fnDef.Mutates,
-		Private:    fnDef.Private,
+		Name:                    fnDef.Name,
+		Parameters:              newParams,
+		ReturnType:              copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
+		InferReturnTypeFromBody: fnDef.InferReturnTypeFromBody,
+		Body:                    fnDef.Body,
+		Mutates:                 fnDef.Mutates,
+		Private:                 fnDef.Private,
 	}
 }
 

@@ -1861,7 +1861,7 @@ func effectiveFunctionReturnType(def *checker.FunctionDef) checker.Type {
 	if def == nil {
 		return checker.Void
 	}
-	if isFunctionLiteralDef(def) && def.ReturnType == checker.Void && def.Body != nil && def.Body.Type() != checker.Void {
+	if def.InferReturnTypeFromBody && def.Body != nil && def.Body.Type() != checker.Void {
 		return def.Body.Type()
 	}
 	return def.ReturnType

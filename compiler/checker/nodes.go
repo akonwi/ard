@@ -915,14 +915,15 @@ type Parameter struct {
 }
 
 type FunctionDef struct {
-	Name       string
-	Receiver   string
-	Parameters []Parameter
-	ReturnType Type
-	Mutates    bool
-	IsTest     bool
-	Body       *Block
-	Private    bool
+	Name                    string
+	Receiver                string
+	Parameters              []Parameter
+	ReturnType              Type
+	InferReturnTypeFromBody bool
+	Mutates                 bool
+	IsTest                  bool
+	Body                    *Block
+	Private                 bool
 }
 
 func (f FunctionDef) String() string {

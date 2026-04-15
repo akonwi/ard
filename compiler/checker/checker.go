@@ -133,13 +133,14 @@ func derefType(t Type) Type {
 			return typ // No change, return original
 		}
 		return &FunctionDef{
-			Name:       typ.Name,
-			Parameters: newParams,
-			ReturnType: derefReturnType,
-			Body:       typ.Body,
-			Mutates:    typ.Mutates,
-			IsTest:     typ.IsTest,
-			Private:    typ.Private,
+			Name:                    typ.Name,
+			Parameters:              newParams,
+			ReturnType:              derefReturnType,
+			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
+			Body:                    typ.Body,
+			Mutates:                 typ.Mutates,
+			IsTest:                  typ.IsTest,
+			Private:                 typ.Private,
 		}
 	default:
 		return t
@@ -3003,10 +3004,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Create function definition
 			uniqueName := fmt.Sprintf("anon_func_%p", s)
 			fn := &FunctionDef{
-				Name:       uniqueName,
-				Parameters: params,
-				ReturnType: returnType,
-				Body:       nil,
+				Name:                    uniqueName,
+				Parameters:              params,
+				ReturnType:              returnType,
+				InferReturnTypeFromBody: s.ReturnType == nil,
+				Body:                    nil,
 			}
 
 			// Check body (anonymous functions use equal, not areCompatible)
@@ -4130,10 +4132,11 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			// Create function definition
 			uniqueName := fmt.Sprintf("anon_func_%p", s)
 			fn := &FunctionDef{
-				Name:       uniqueName,
-				Parameters: params,
-				ReturnType: returnType,
-				Body:       nil,
+				Name:                    uniqueName,
+				Parameters:              params,
+				ReturnType:              returnType,
+				InferReturnTypeFromBody: false,
+				Body:                    nil,
 			}
 
 			// Check body
@@ -4457,13 +4460,14 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			}
 		}
 		return &FunctionDef{
-			Name:       typ.Name,
-			Parameters: substitutedParams,
-			ReturnType: substituteType(typ.ReturnType, typeMap),
-			Body:       typ.Body,
-			Mutates:    typ.Mutates,
-			IsTest:     typ.IsTest,
-			Private:    typ.Private,
+			Name:                    typ.Name,
+			Parameters:              substitutedParams,
+			ReturnType:              substituteType(typ.ReturnType, typeMap),
+			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
+			Body:                    typ.Body,
+			Mutates:                 typ.Mutates,
+			IsTest:                  typ.IsTest,
+			Private:                 typ.Private,
 		}
 	// Handle other compound types
 	default:
@@ -4723,12 +4727,13 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 		} else {
 			// Create specialized function with resolved generics
 			fnToUse = &FunctionDef{
-				Name:       fnDefCopy.Name,
-				Parameters: make([]Parameter, len(fnDefCopy.Parameters)),
-				ReturnType: substituteType(fnDefCopy.ReturnType, bindings),
-				Body:       fnDefCopy.Body,
-				Mutates:    fnDefCopy.Mutates,
-				Private:    fnDefCopy.Private,
+				Name:                    fnDefCopy.Name,
+				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
+				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
+				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
+				Body:                    fnDefCopy.Body,
+				Mutates:                 fnDefCopy.Mutates,
+				Private:                 fnDefCopy.Private,
 			}
 
 			// Replace generics in parameters
@@ -4819,12 +4824,13 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	// The function copy already has fresh TypeVar instances that have been bound.
 	// We now need to substitute the bindings to create the final specialized function.
 	specialized := &FunctionDef{
-		Name:       fnDefCopy.Name,
-		Parameters: make([]Parameter, len(fnDefCopy.Parameters)),
-		ReturnType: substituteType(fnDefCopy.ReturnType, bindings),
-		Body:       fnDefCopy.Body,
-		Mutates:    fnDefCopy.Mutates,
-		Private:    fnDefCopy.Private,
+		Name:                    fnDefCopy.Name,
+		Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
+		ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
+		InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
+		Body:                    fnDefCopy.Body,
+		Mutates:                 fnDefCopy.Mutates,
+		Private:                 fnDefCopy.Private,
 	}
 
 	// Replace generics in parameters

@@ -825,7 +825,6 @@ fn main() {
         res.headers.set("x-path", req.path().or(""))
         res.headers.set("x-query", req.query_param("lang"))
         res.body = "hello"
-        ()
       }
     ]
     http::serve(port, routes).expect("serve failed")
