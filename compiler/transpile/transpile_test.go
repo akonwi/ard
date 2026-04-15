@@ -66,10 +66,7 @@ let result = choose(2)
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesWhileLoop(t *testing.T) {
@@ -92,10 +89,7 @@ let result = count(3)
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesForLoop(t *testing.T) {
@@ -118,10 +112,7 @@ let result = count(3)
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesBreakInWhileLoop(t *testing.T) {
@@ -145,10 +136,7 @@ let result = count(3)
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStructLiteralAndFieldAccess(t *testing.T) {
@@ -172,10 +160,7 @@ let result = get_age()
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesImportedModuleStructLiteral(t *testing.T) {
@@ -204,10 +189,7 @@ let result = get_age()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesListLiteralAndMethods(t *testing.T) {
@@ -228,10 +210,7 @@ let second = get_second()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesListSortAndSwap(t *testing.T) {
@@ -253,10 +232,7 @@ let value = reordered()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesMutableListMethods(t *testing.T) {
@@ -279,10 +255,7 @@ let result = update()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesBasicMapMethods(t *testing.T) {
@@ -305,10 +278,7 @@ let has_b = update()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesMaybeValues(t *testing.T) {
@@ -337,10 +307,7 @@ let has_none = maybe::none<Int>().is_none()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesMapGetAndKeys(t *testing.T) {
@@ -361,10 +328,7 @@ let found = lookup()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesPrimitiveMethods(t *testing.T) {
@@ -385,10 +349,7 @@ let g = true.to_str()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesRangeAndForInLoops(t *testing.T) {
@@ -442,10 +403,7 @@ let d = sum_map()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesEnums(t *testing.T) {
@@ -476,10 +434,7 @@ let b = colors::Color::green == colors::Color::red
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesExternStubs(t *testing.T) {
@@ -524,10 +479,7 @@ let exists = fs::exists("./demo.txt")
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibIoModule(t *testing.T) {
@@ -556,10 +508,7 @@ io::print(Person{name: "world"})
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibEncodeModule(t *testing.T) {
@@ -578,10 +527,7 @@ let c = encode::json(true)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibDecodeModule(t *testing.T) {
@@ -600,10 +546,7 @@ let flatten_errors = decode::flatten
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibDecodeFromJSON(t *testing.T) {
@@ -620,10 +563,7 @@ let raw = decode::from_json("\{\"age\":1\}")
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesDecodeEndToEndFlow(t *testing.T) {
@@ -649,10 +589,7 @@ let out = run()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesGenericStdlibDecodeCombinators(t *testing.T) {
@@ -674,10 +611,7 @@ let _ = first
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibArgvModule(t *testing.T) {
@@ -694,10 +628,7 @@ let args = argv::load()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibDatesModule(t *testing.T) {
@@ -714,10 +645,7 @@ let today = dates::get_today()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibDurationModule(t *testing.T) {
@@ -737,10 +665,7 @@ let millis = duration::from_millis(4)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibBase64Module(t *testing.T) {
@@ -758,10 +683,7 @@ let decoded = base64::decode(encoded, true)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibChronoModule(t *testing.T) {
@@ -778,10 +700,7 @@ let now = chrono::now()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibCryptoModule(t *testing.T) {
@@ -805,10 +724,7 @@ let id = crypto::uuid()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibEnvModule(t *testing.T) {
@@ -825,10 +741,7 @@ let home = env::get("HOME")
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibFloatModule(t *testing.T) {
@@ -847,10 +760,7 @@ let c = float::floor(3.9)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibHexModule(t *testing.T) {
@@ -868,10 +778,7 @@ let decoded = hex::decode(encoded)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibIntModule(t *testing.T) {
@@ -888,10 +795,7 @@ let parsed = int::from_str("42")
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibJsonModule(t *testing.T) {
@@ -908,10 +812,7 @@ let out = json::encode(["age": 1])
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibMapModule(t *testing.T) {
@@ -928,10 +829,7 @@ let values = map::new<Int>()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibDynamicModule(t *testing.T) {
@@ -950,10 +848,7 @@ let c = dynamic::from(true)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibAsyncModule(t *testing.T) {
@@ -975,10 +870,7 @@ let value = fiber.get()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibAsyncStartModuleFunction(t *testing.T) {
@@ -1005,10 +897,7 @@ fiber.join()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibSqlModule(t *testing.T) {
@@ -1032,10 +921,7 @@ let out = run()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibSqlTransactionFlow(t *testing.T) {
@@ -1061,10 +947,7 @@ let out = run()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStdlibHttpModule(t *testing.T) {
@@ -1081,10 +964,7 @@ let ok = http::Response::new(200, "ok").is_ok()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesExplicitTypeArgsOnZeroArgGenericFunction(t *testing.T) {
@@ -1104,10 +984,7 @@ let values = empty<Int>()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesVariableShadowing(t *testing.T) {
@@ -1129,10 +1006,7 @@ let out = run()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesStructMethods(t *testing.T) {
@@ -1167,10 +1041,7 @@ let result = run()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesBoolAndIntMatch(t *testing.T) {
@@ -1201,10 +1072,7 @@ let b = bucket(2)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesEnumMatch(t *testing.T) {
@@ -1231,10 +1099,7 @@ let result = label(Status::active)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesMaybeCombinators(t *testing.T) {
@@ -1276,10 +1141,7 @@ let d = chained_none()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesMaybeMatch(t *testing.T) {
@@ -1304,10 +1166,7 @@ let b = pick(maybe::none())
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesTemplateStringsAndPanic(t *testing.T) {
@@ -1330,10 +1189,7 @@ let msg = greet("Ard")
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesBasicResults(t *testing.T) {
@@ -1373,10 +1229,7 @@ let d = forced()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesResultCombinators(t *testing.T) {
@@ -1421,10 +1274,7 @@ let d = chained_err()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesResultMatches(t *testing.T) {
@@ -1471,10 +1321,7 @@ let e = from_call()
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestEmitEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
@@ -1628,10 +1475,7 @@ let j = nested_list(6, 3)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesTryInMatchExpressions(t *testing.T) {
@@ -1670,10 +1514,7 @@ let b = sum_from_result_match(Result::ok(4))
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesAnonymousFunctions(t *testing.T) {
@@ -1711,10 +1552,7 @@ let local = multiply(3, 4)
 		t.Fatalf("failed to write main source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesExplicitVoidAnonymousFunctions(t *testing.T) {
@@ -1737,10 +1575,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesContextualVoidAnonymousFunctions(t *testing.T) {
@@ -1763,10 +1598,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesGenericAsyncFiberLists(t *testing.T) {
@@ -1791,10 +1623,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesNotMethodPrecedence(t *testing.T) {
@@ -1817,10 +1646,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesMaybeSomeCoercionInStructFields(t *testing.T) {
@@ -1846,10 +1672,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	outputPath := filepath.Join(dir, "demo-bin")
-	if _, err := BuildBinary(mainPath, outputPath); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
 func TestBuildBinaryCompilesImportedModuleSymbol(t *testing.T) {

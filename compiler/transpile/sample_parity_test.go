@@ -91,7 +91,7 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 }
 
 func TestBuildBinaryMatchesVMServerSampleParity(t *testing.T) {
-	ardPath := ensureArdBinary(t)
+	ardPath := requireIntegrationArdBinary(t)
 
 	vmRoot := copySamplesProject(t)
 	vmPort := reserveLocalPort(t)
@@ -211,25 +211,8 @@ func runVMSample(t *testing.T, sampleRoot string, sample sampleSpec) sampleRunRe
 
 func runGoSample(t *testing.T, sampleRoot string, sample sampleSpec) sampleRunResult {
 	t.Helper()
-	samplePath := filepath.Join(sampleRoot, sample.name)
-	outputPath := filepath.Join(sampleRoot, strings.TrimSuffix(sample.name, filepath.Ext(sample.name))+"-bin")
-	if _, err := BuildBinary(samplePath, outputPath); err != nil {
-		return sampleRunResult{err: err}
-	}
-	cmd := exec.Command(outputPath)
-	cmd.Dir = sampleRoot
-	if sample.stdin != "" {
-		cmd.Stdin = strings.NewReader(sample.stdin)
-	}
-	stdout, err := cmd.Output()
-	if err != nil {
-		var stderr []byte
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr = exitErr.Stderr
-		}
-		return sampleRunResult{stdout: normalizeOutput(string(stdout)), stderr: normalizeOutput(string(stderr)), err: err}
-	}
-	return sampleRunResult{stdout: normalizeOutput(string(stdout))}
+	result := runArdCLI(t, requireIntegrationArdBinary(t), sampleRoot, nil, sample.stdin, "run", "--target", "go", sample.name)
+	return sampleRunResult{stdout: result.stdout, stderr: result.stderr, err: result.err}
 }
 
 func captureOutput(stdin string, fn func() error) (string, string, error) {

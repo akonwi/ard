@@ -32,7 +32,7 @@ type cliSnippetCase struct {
 }
 
 func TestCLIRunMatchesVMSnippetParity(t *testing.T) {
-	ardPath := ensureArdBinary(t)
+	ardPath := requireIntegrationArdBinary(t)
 	servePort := reserveLocalPort(t)
 	serveBaseURL := fmt.Sprintf("http://127.0.0.1:%d", servePort)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -995,23 +995,6 @@ func reserveLocalPort(t *testing.T) int {
 		t.Fatalf("expected TCP listener address, got %T", listener.Addr())
 	}
 	return addr.Port
-}
-
-func ensureArdBinary(t *testing.T) string {
-	t.Helper()
-	compilerRoot, err := compilerModuleRoot()
-	if err != nil {
-		t.Fatalf("failed to determine compiler root: %v", err)
-	}
-	ardPath := filepath.Join(t.TempDir(), "ard")
-	cmd := exec.Command("go", "build", "-o", ardPath, ".")
-	configureGoCommand(cmd)
-	cmd.Dir = compilerRoot
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build ard CLI: %v\n%s", err, string(output))
-	}
-	return ardPath
 }
 
 func writeSnippetProject(t *testing.T, files map[string]string) string {
