@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,6 +111,41 @@ func TestBuildBinaryMatchesVMServerSampleParity(t *testing.T) {
 
 	if vmSnapshot != goSnapshot {
 		t.Fatalf("server sample mismatch\nvm:\n%s\ngo:\n%s\nvm stderr:\n%s\ngo stderr:\n%s", vmSnapshot, goSnapshot, vmResult.stderr, goResult.stderr)
+	}
+}
+
+func TestBuildBinaryMatchesVMPokemonSampleParity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pokemon":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count": 2, "results": [{"name": "bulbasaur", "url": "https://example.com/1"}, {"name": "ivysaur", "url": "https://example.com/2"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/post":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	sampleRoot := copySamplesProject(t)
+	rewritePokemonSampleURLs(t, sampleRoot, server.URL)
+	sample := sampleSpec{name: "pokemon.ard"}
+
+	vmResult := runVMSample(t, sampleRoot, sample)
+	if vmResult.err != nil {
+		t.Fatalf("vm pokemon sample run failed: %v\nstdout:\n%s\nstderr:\n%s", vmResult.err, vmResult.stdout, vmResult.stderr)
+	}
+
+	goResult := runGoSample(t, sampleRoot, sample)
+	if goResult.err != nil {
+		t.Fatalf("go pokemon sample run failed: %v\nstdout:\n%s\nstderr:\n%s", goResult.err, goResult.stdout, goResult.stderr)
+	}
+
+	if vmResult.stdout != goResult.stdout {
+		t.Fatalf("pokemon sample stdout mismatch\nvm:\n%s\ngo:\n%s\nvm stderr:\n%s\ngo stderr:\n%s", vmResult.stdout, goResult.stdout, vmResult.stderr, goResult.stderr)
 	}
 }
 
@@ -276,6 +312,24 @@ func rewriteServerSamplePort(t *testing.T, sampleRoot string, port int) {
 	}
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		t.Fatalf("failed to rewrite server sample: %v", err)
+	}
+}
+
+func rewritePokemonSampleURLs(t *testing.T, sampleRoot, baseURL string) {
+	t.Helper()
+	path := filepath.Join(sampleRoot, "pokemon.ard")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read pokemon sample: %v", err)
+	}
+	updated := string(content)
+	updated = strings.ReplaceAll(updated, "https://pokeapi.co/api/v2/pokemon", baseURL+"/api/v2/pokemon")
+	updated = strings.ReplaceAll(updated, "https://postman-echo.com/post", baseURL+"/post")
+	if updated == string(content) {
+		t.Fatalf("failed to rewrite pokemon sample URLs")
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("failed to rewrite pokemon sample: %v", err)
 	}
 }
 

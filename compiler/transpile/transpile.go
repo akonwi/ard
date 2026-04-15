@@ -4691,18 +4691,36 @@ func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall, expected
 		if len(call.Call.Args) != 1 {
 			return "", fmt.Errorf("maybe::some expects one arg")
 		}
-		arg, err := e.emitExpr(call.Call.Args[0])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%s.Some(%s)", helperImportAlias, arg), nil
-	case "none":
 		maybeType, ok := call.Call.ReturnType.(*checker.Maybe)
-		if (!ok || maybeHasUnresolvedTypeVar(maybeType)) && expectedType != nil {
-			if expectedMaybe, ok := expectedType.(*checker.Maybe); ok {
+		if expectedType != nil {
+			if expectedMaybe, expectedOk := expectedType.(*checker.Maybe); expectedOk {
 				maybeType = expectedMaybe
 				ok = true
 			}
+		} else if !ok || maybeHasUnresolvedTypeVar(maybeType) {
+			ok = false
+		}
+		if !ok {
+			return "", fmt.Errorf("maybe::some expected Maybe return type, got %s", call.Call.ReturnType)
+		}
+		arg, err := e.emitValueForType(call.Call.Args[0], maybeType.Of())
+		if err != nil {
+			return "", err
+		}
+		innerType, err := e.emitTypeArg(maybeType.Of())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.Some[%s](%s)", helperImportAlias, innerType, arg), nil
+	case "none":
+		maybeType, ok := call.Call.ReturnType.(*checker.Maybe)
+		if expectedType != nil {
+			if expectedMaybe, expectedOk := expectedType.(*checker.Maybe); expectedOk {
+				maybeType = expectedMaybe
+				ok = true
+			}
+		} else if !ok || maybeHasUnresolvedTypeVar(maybeType) {
+			ok = false
 		}
 		if !ok {
 			return "", fmt.Errorf("maybe::none expected Maybe return type, got %s", call.Call.ReturnType)
