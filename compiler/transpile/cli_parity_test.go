@@ -366,6 +366,20 @@ fn main() {
 			},
 		},
 		{
+			name:  "stdin_read_line_multiple",
+			stdin: "first\nsecond\n",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn main() {
+  io::print(io::read_line().or("missing"))
+  io::print(io::read_line().or("missing"))
+}
+`,
+			},
+		},
+		{
 			name: "int_from_str",
 			files: map[string]string{
 				"main.ard": `

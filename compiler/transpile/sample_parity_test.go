@@ -20,14 +20,19 @@ type sampleRunResult struct {
 	err    error
 }
 
+type sampleSpec struct {
+	name  string
+	stdin string
+}
+
 func TestBuildBinaryRunsSampleSmoke(t *testing.T) {
 	sampleRoot := copySamplesProject(t)
-	samples := []string{
-		"maps.ard",
+	samples := []sampleSpec{
+		{name: "maps.ard"},
 	}
 
 	for _, sample := range samples {
-		t.Run(sample, func(t *testing.T) {
+		t.Run(sample.name, func(t *testing.T) {
 			result := runGoSample(t, sampleRoot, sample)
 			if result.err != nil {
 				t.Fatalf("go backend sample run failed: %v\nstdout:\n%s\nstderr:\n%s", result.err, result.stdout, result.stderr)
@@ -38,25 +43,28 @@ func TestBuildBinaryRunsSampleSmoke(t *testing.T) {
 
 func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 	sampleRoot := copySamplesProject(t)
-	samples := []string{
-		"collections.ard",
-		"escape-sequences.ard",
-		"fibonacci.ard",
-		"fizzbuzz.ard",
-		"grades.ard",
-		"lights.ard",
-		"loops.ard",
-		"maps.ard",
-		"modules.ard",
-		"nullables.ard",
-		"temperatures.ard",
-		"traits.ard",
-		"type-unions.ard",
-		"variables.ard",
+	samples := []sampleSpec{
+		{name: "collections.ard"},
+		{name: "escape-sequences.ard"},
+		{name: "fibonacci.ard"},
+		{name: "fizzbuzz.ard"},
+		{name: "grades.ard"},
+		{name: "guess.ard", stdin: "10\n50\n47\n"},
+		{name: "lights.ard"},
+		{name: "loops.ard"},
+		{name: "maps.ard"},
+		{name: "modules.ard"},
+		{name: "nullables.ard"},
+		{name: "temperatures.ard"},
+		{name: "todo-list.ard", stdin: "Write tests\n\n"},
+		{name: "traits.ard"},
+		{name: "type-unions.ard"},
+		{name: "variables.ard"},
+		{name: "word_frequency.ard", stdin: "go ard go\n"},
 	}
 
 	for _, sample := range samples {
-		t.Run(sample, func(t *testing.T) {
+		t.Run(sample.name, func(t *testing.T) {
 			vmResult := runVMSample(t, sampleRoot, sample)
 			if vmResult.err != nil {
 				t.Fatalf("vm sample run failed: %v\nstdout:\n%s\nstderr:\n%s", vmResult.err, vmResult.stdout, vmResult.stderr)
@@ -109,10 +117,10 @@ func copyDir(src, dst string) error {
 	})
 }
 
-func runVMSample(t *testing.T, sampleRoot, sample string) sampleRunResult {
+func runVMSample(t *testing.T, sampleRoot string, sample sampleSpec) sampleRunResult {
 	t.Helper()
-	samplePath := filepath.Join(sampleRoot, sample)
-	stdout, stderr, err := captureOutput(func() error {
+	samplePath := filepath.Join(sampleRoot, sample.name)
+	stdout, stderr, err := captureOutput(sample.stdin, func() error {
 		module, _, err := loadModule(samplePath)
 		if err != nil {
 			return err
@@ -132,15 +140,18 @@ func runVMSample(t *testing.T, sampleRoot, sample string) sampleRunResult {
 	return sampleRunResult{stdout: normalizeOutput(stdout), stderr: normalizeOutput(stderr), err: err}
 }
 
-func runGoSample(t *testing.T, sampleRoot, sample string) sampleRunResult {
+func runGoSample(t *testing.T, sampleRoot string, sample sampleSpec) sampleRunResult {
 	t.Helper()
-	samplePath := filepath.Join(sampleRoot, sample)
-	outputPath := filepath.Join(sampleRoot, strings.TrimSuffix(sample, filepath.Ext(sample))+"-bin")
+	samplePath := filepath.Join(sampleRoot, sample.name)
+	outputPath := filepath.Join(sampleRoot, strings.TrimSuffix(sample.name, filepath.Ext(sample.name))+"-bin")
 	if _, err := BuildBinary(samplePath, outputPath); err != nil {
 		return sampleRunResult{err: err}
 	}
 	cmd := exec.Command(outputPath)
 	cmd.Dir = sampleRoot
+	if sample.stdin != "" {
+		cmd.Stdin = strings.NewReader(sample.stdin)
+	}
 	stdout, err := cmd.Output()
 	if err != nil {
 		var stderr []byte
@@ -152,9 +163,10 @@ func runGoSample(t *testing.T, sampleRoot, sample string) sampleRunResult {
 	return sampleRunResult{stdout: normalizeOutput(string(stdout))}
 }
 
-func captureOutput(fn func() error) (string, string, error) {
+func captureOutput(stdin string, fn func() error) (string, string, error) {
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr
+	oldStdin := os.Stdin
 	stdoutReader, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return "", "", err
@@ -167,9 +179,32 @@ func captureOutput(fn func() error) (string, string, error) {
 	}
 	os.Stdout = stdoutWriter
 	os.Stderr = stderrWriter
+	if stdin != "" {
+		stdinReader, stdinWriter, pipeErr := os.Pipe()
+		if pipeErr != nil {
+			stdoutReader.Close()
+			stdoutWriter.Close()
+			stderrReader.Close()
+			stderrWriter.Close()
+			return "", "", pipeErr
+		}
+		if _, pipeErr = stdinWriter.WriteString(stdin); pipeErr != nil {
+			stdinReader.Close()
+			stdinWriter.Close()
+			stdoutReader.Close()
+			stdoutWriter.Close()
+			stderrReader.Close()
+			stderrWriter.Close()
+			return "", "", pipeErr
+		}
+		stdinWriter.Close()
+		os.Stdin = stdinReader
+		defer stdinReader.Close()
+	}
 	defer func() {
 		os.Stdout = oldStdout
 		os.Stderr = oldStderr
+		os.Stdin = oldStdin
 	}()
 
 	stdoutCh := make(chan string, 1)
