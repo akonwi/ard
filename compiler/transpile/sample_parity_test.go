@@ -1,13 +1,16 @@
 package transpile
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akonwi/ard/bytecode"
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
@@ -81,6 +84,32 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 				t.Fatalf("sample stdout mismatch\nvm:\n%s\ngo:\n%s\nvm stderr:\n%s\ngo stderr:\n%s", vmResult.stdout, goResult.stdout, vmResult.stderr, goResult.stderr)
 			}
 		})
+	}
+}
+
+func TestBuildBinaryMatchesVMServerSampleParity(t *testing.T) {
+	ardPath := ensureArdBinary(t)
+
+	vmRoot := copySamplesProject(t)
+	vmPort := reserveLocalPort(t)
+	vmBaseURL := fmt.Sprintf("http://127.0.0.1:%d", vmPort)
+	rewriteServerSamplePort(t, vmRoot, vmPort)
+	vmRun := startArdSampleProcess(t, ardPath, vmRoot, "run", "server.ard")
+	waitForSampleServer(t, vmBaseURL)
+	vmSnapshot := captureServerSampleSnapshot(t, vmBaseURL)
+	vmResult := vmRun.stop()
+
+	goRoot := copySamplesProject(t)
+	goPort := reserveLocalPort(t)
+	goBaseURL := fmt.Sprintf("http://127.0.0.1:%d", goPort)
+	rewriteServerSamplePort(t, goRoot, goPort)
+	goRun := startArdSampleProcess(t, ardPath, goRoot, "run", "--target", "go", "server.ard")
+	waitForSampleServer(t, goBaseURL)
+	goSnapshot := captureServerSampleSnapshot(t, goBaseURL)
+	goResult := goRun.stop()
+
+	if vmSnapshot != goSnapshot {
+		t.Fatalf("server sample mismatch\nvm:\n%s\ngo:\n%s\nvm stderr:\n%s\ngo stderr:\n%s", vmSnapshot, goSnapshot, vmResult.stderr, goResult.stderr)
 	}
 }
 
@@ -228,6 +257,122 @@ func captureOutput(stdin string, fn func() error) (string, string, error) {
 	stdoutReader.Close()
 	stderrReader.Close()
 	return stdout, stderr, runErr
+}
+
+type sampleProcess struct {
+	stop func() sampleRunResult
+}
+
+func rewriteServerSamplePort(t *testing.T, sampleRoot string, port int) {
+	t.Helper()
+	path := filepath.Join(sampleRoot, "server.ard")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read server sample: %v", err)
+	}
+	updated := strings.Replace(string(content), "http::serve(8000, routes)", fmt.Sprintf("http::serve(%d, routes)", port), 1)
+	if updated == string(content) {
+		t.Fatalf("failed to rewrite server sample port")
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("failed to rewrite server sample: %v", err)
+	}
+}
+
+func startArdSampleProcess(t *testing.T, ardPath, dir string, args ...string) sampleProcess {
+	t.Helper()
+	cmd := exec.Command(ardPath, args...)
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sample process: %v", err)
+	}
+	return sampleProcess{stop: func() sampleRunResult {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+		var err error
+		select {
+		case err = <-done:
+		case <-time.After(2 * time.Second):
+			err = nil
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == -1 || strings.Contains(exitErr.Error(), "signal: killed") {
+				err = nil
+			}
+		}
+		return sampleRunResult{stdout: normalizeOutput(stdout.String()), stderr: normalizeOutput(stderr.String()), err: err}
+	}}
+}
+
+func waitForSampleServer(t *testing.T, baseURL string) {
+	t.Helper()
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(baseURL + "/")
+		if err == nil {
+			_, _ = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("server did not become ready: %s", baseURL)
+}
+
+func captureServerSampleSnapshot(t *testing.T, baseURL string) string {
+	t.Helper()
+	client := &http.Client{Timeout: 2 * time.Second}
+	requests := []struct {
+		method      string
+		path        string
+		body        string
+		contentType string
+	}{
+		{method: http.MethodGet, path: "/"},
+		{method: http.MethodGet, path: "/me"},
+		{method: http.MethodGet, path: "/error"},
+		{method: http.MethodPost, path: "/api/auth/sign-up"},
+		{method: http.MethodPost, path: "/api/auth/sign-up", body: "{not-json", contentType: "application/json"},
+		{method: http.MethodPost, path: "/api/auth/sign-up", body: "{}", contentType: "application/json"},
+		{method: http.MethodPost, path: "/api/auth/sign-up", body: "{\"email\":\"kit@example.com\"}", contentType: "application/json"},
+	}
+
+	var snapshot strings.Builder
+	for _, tc := range requests {
+		var bodyReader io.Reader
+		if tc.body != "" {
+			bodyReader = strings.NewReader(tc.body)
+		}
+		req, err := http.NewRequest(tc.method, baseURL+tc.path, bodyReader)
+		if err != nil {
+			t.Fatalf("failed to build request %s %s: %v", tc.method, tc.path, err)
+		}
+		if tc.contentType != "" {
+			req.Header.Set("Content-Type", tc.contentType)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request failed %s %s: %v", tc.method, tc.path, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("failed to read response body %s %s: %v", tc.method, tc.path, err)
+		}
+		fmt.Fprintf(&snapshot, "%s %s\n%d\n%s\n", tc.method, tc.path, resp.StatusCode, string(body))
+	}
+	return snapshot.String()
 }
 
 func normalizeOutput(value string) string {
