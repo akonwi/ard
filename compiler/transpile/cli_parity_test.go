@@ -574,6 +574,21 @@ fn main() {
 			},
 		},
 		{
+			name: "async_sleep",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/async
+
+fn main() {
+  io::print("before")
+  async::sleep(0)
+  io::print("after")
+}
+`,
+			},
+		},
+		{
 			name: "async_join_list",
 			files: map[string]string{
 				"main.ard": `

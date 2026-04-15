@@ -103,6 +103,10 @@ func RegisterBuiltinExterns() {
 			}
 			return Ok[string, string](value), nil
 		})
+		RegisterExtern("Sleep", func(args ...any) (any, error) {
+			ffi.Sleep(args[0].(int))
+			return nil, nil
+		})
 		RegisterExtern("HexEncode", func(args ...any) (any, error) {
 			return ffi.HexEncode(args[0].(string)), nil
 		})
