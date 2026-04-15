@@ -173,10 +173,11 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 				typeVarMap["T"] = &TypeVar{name: "T", actual: returnType, bound: true}
 
 				fiberCopy := &StructDef{
-					Name:    fiberStructDef.Name,
-					Fields:  make(map[string]Type),
-					Methods: make(map[string]*FunctionDef),
-					Private: fiberStructDef.Private,
+					Name:          fiberStructDef.Name,
+					Fields:        make(map[string]Type),
+					Methods:       make(map[string]*FunctionDef),
+					GenericParams: append([]string(nil), fiberStructDef.GenericParams...),
+					Private:       fiberStructDef.Private,
 				}
 
 				// Copy fields, replacing $T with the closure's return type

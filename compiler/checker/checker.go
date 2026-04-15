@@ -438,6 +438,20 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 		return originalType
 	}
 
+	if structDef, ok := originalType.(*StructDef); ok {
+		typeVarMap := make(map[string]*TypeVar, len(genericParams))
+		for i, typeArg := range typeArgs {
+			resolvedArgType := c.resolveType(typeArg)
+			typeVarMap[genericParams[i]] = &TypeVar{name: genericParams[i], actual: resolvedArgType, bound: true}
+		}
+		structCopy := copyStructWithTypeVarMap(structDef, typeVarMap)
+		structCopy.Methods = make(map[string]*FunctionDef, len(structDef.Methods))
+		for methodName, methodDef := range structDef.Methods {
+			structCopy.Methods[methodName] = copyFunctionWithTypeVarMap(methodDef, typeVarMap)
+		}
+		return structCopy
+	}
+
 	// 3. Replace generics
 	specializedType := originalType
 	for i, typeArg := range typeArgs {

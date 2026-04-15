@@ -45,6 +45,7 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 	sampleRoot := copySamplesProject(t)
 	samples := []sampleSpec{
 		{name: "collections.ard"},
+		{name: "concurrent_stress.ard"},
 		{name: "escape-sequences.ard"},
 		{name: "fibonacci.ard"},
 		{name: "fizzbuzz.ard"},

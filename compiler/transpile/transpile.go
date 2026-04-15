@@ -215,8 +215,7 @@ func typeVarName(tv *checker.TypeVar) string {
 	if tv == nil {
 		return ""
 	}
-	name := tv.String()
-	return strings.TrimPrefix(name, "$")
+	return tv.Name()
 }
 
 func collectTypeParamNames(t checker.Type, out *[]string, seen map[string]struct{}) {
@@ -409,6 +408,64 @@ func structTypeParams(def *checker.StructDef) ([]string, map[string]string, map[
 	return order, mapping, constraints
 }
 
+func collectBoundTypeVarBindings(t checker.Type, bindings map[string]checker.Type) {
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			bindings[typeVarName(typed)] = actual
+			collectBoundTypeVarBindings(actual, bindings)
+		}
+	case *checker.List:
+		collectBoundTypeVarBindings(typed.Of(), bindings)
+	case *checker.Map:
+		collectBoundTypeVarBindings(typed.Key(), bindings)
+		collectBoundTypeVarBindings(typed.Value(), bindings)
+	case *checker.Maybe:
+		collectBoundTypeVarBindings(typed.Of(), bindings)
+	case *checker.Result:
+		collectBoundTypeVarBindings(typed.Val(), bindings)
+		collectBoundTypeVarBindings(typed.Err(), bindings)
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectBoundTypeVarBindings(param.Type, bindings)
+		}
+		collectBoundTypeVarBindings(typed.ReturnType, bindings)
+	case *checker.Union:
+		for _, member := range typed.Types {
+			collectBoundTypeVarBindings(member, bindings)
+		}
+	}
+}
+
+func inferStructBoundTypeArgs(def *checker.StructDef, order []string, existing map[string]checker.Type) map[string]checker.Type {
+	bindings := make(map[string]checker.Type, len(order))
+	allowed := make(map[string]struct{}, len(order))
+	for _, name := range order {
+		allowed[name] = struct{}{}
+	}
+	for name, bound := range existing {
+		if _, ok := allowed[name]; ok && bound != nil {
+			bindings[name] = bound
+		}
+	}
+	for _, fieldName := range sortedStringKeys(def.Fields) {
+		collectBoundTypeVarBindings(def.Fields[fieldName], bindings)
+	}
+	for _, methodName := range sortedStringKeys(def.Methods) {
+		method := def.Methods[methodName]
+		for _, param := range method.Parameters {
+			collectBoundTypeVarBindings(param.Type, bindings)
+		}
+		collectBoundTypeVarBindings(method.ReturnType, bindings)
+	}
+	for name := range bindings {
+		if _, ok := allowed[name]; !ok {
+			delete(bindings, name)
+		}
+	}
+	return bindings
+}
+
 func formatTypeParamDecls(order []string, mapping map[string]string, constraints map[string]string) string {
 	if len(order) == 0 || len(mapping) == 0 {
 		return ""
@@ -530,6 +587,7 @@ func (e *emitter) emitStructType(def *checker.StructDef) (string, error) {
 			inferGenericTypeBindings(template.Fields[fieldName], specializedField, bindings)
 		}
 	}
+	bindings = inferStructBoundTypeArgs(def, order, bindings)
 	args := make([]string, 0, len(order))
 	for _, name := range order {
 		if resolved := e.typeParams[name]; resolved != "" {
@@ -5127,16 +5185,32 @@ func emitTypeWithOptions(t checker.Type, typeParams map[string]string, namedType
 		if len(order) == 0 {
 			return baseName, nil
 		}
+		bindings := inferStructBoundTypeArgs(typed, order, nil)
 		args := make([]string, 0, len(order))
 		for _, name := range order {
-			arg := ""
 			if typeParams != nil {
-				arg = typeParams[name]
+				if resolved := typeParams[name]; resolved != "" {
+					args = append(args, resolved)
+					continue
+				}
 			}
-			if arg == "" {
-				arg = "any"
+			bound := bindings[name]
+			if tv, ok := bound.(*checker.TypeVar); ok {
+				if actual := tv.Actual(); actual != nil {
+					bound = actual
+				} else {
+					bound = nil
+				}
 			}
-			args = append(args, arg)
+			if bound != nil {
+				emitted, err := emitTypeArgWithOptions(bound, typeParams, namedTypeRef)
+				if err != nil {
+					return "", err
+				}
+				args = append(args, emitted)
+				continue
+			}
+			args = append(args, "any")
 		}
 		return fmt.Sprintf("%s[%s]", baseName, strings.Join(args, ", ")), nil
 	case *checker.FunctionDef:
