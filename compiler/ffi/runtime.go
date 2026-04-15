@@ -3,7 +3,9 @@ package ffi
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,17 +23,33 @@ func Print(str string) {
 	fmt.Println(str)
 }
 
+var (
+	stdinReaderMu sync.Mutex
+	stdinReader   *bufio.Reader
+	stdinSource   *os.File
+)
+
 // ReadLine reads a line from stdin
 func ReadLine() (string, error) {
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", err
-		}
-		// EOF - return empty string as success
-		return "", nil
+	stdinReaderMu.Lock()
+	defer stdinReaderMu.Unlock()
+
+	if stdinReader == nil || stdinSource != os.Stdin {
+		stdinSource = os.Stdin
+		stdinReader = bufio.NewReader(os.Stdin)
 	}
-	return scanner.Text(), nil
+
+	line, err := stdinReader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
+			if line == "" {
+				return "", nil
+			}
+			return strings.TrimRight(line, "\r\n"), nil
+		}
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 // PanicWithMessage panics with a message
