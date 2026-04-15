@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -338,6 +339,7 @@ func startArdSampleProcess(t *testing.T, ardPath, dir string, args ...string) sa
 	cmd := exec.Command(ardPath, args...)
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -347,7 +349,7 @@ func startArdSampleProcess(t *testing.T, ardPath, dir string, args ...string) sa
 	}
 	return sampleProcess{stop: func() sampleRunResult {
 		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
 		done := make(chan error, 1)
 		go func() {
@@ -356,8 +358,9 @@ func startArdSampleProcess(t *testing.T, ardPath, dir string, args ...string) sa
 		var err error
 		select {
 		case err = <-done:
-		case <-time.After(2 * time.Second):
-			err = nil
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			err = <-done
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if exitErr.ExitCode() == -1 || strings.Contains(exitErr.Error(), "signal: killed") {
