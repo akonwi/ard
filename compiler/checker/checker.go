@@ -465,9 +465,14 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		// Convert each parameter type and return type
 		params := make([]Parameter, len(ty.Params))
 		for i, param := range ty.Params {
+			mutable := false
+			if i < len(ty.ParamMutability) {
+				mutable = ty.ParamMutability[i]
+			}
 			params[i] = Parameter{
-				Name: fmt.Sprintf("arg%d", i),
-				Type: c.resolveType(param),
+				Name:    fmt.Sprintf("arg%d", i),
+				Type:    c.resolveType(param),
+				Mutable: mutable,
 			}
 		}
 		// If no return type specified, default to Void

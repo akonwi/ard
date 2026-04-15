@@ -192,6 +192,15 @@ func RegisterBuiltinExterns() {
 		RegisterExtern("ExtractField", func(args ...any) (any, error) {
 			return builtinExtractField(args[0], args[1].(string)), nil
 		})
+		RegisterExtern("GetReqPath", func(args ...any) (any, error) {
+			return ffi.GetReqPath(args[0]), nil
+		})
+		RegisterExtern("GetPathValue", func(args ...any) (any, error) {
+			return ffi.GetPathValue(args[0], args[1].(string)), nil
+		})
+		RegisterExtern("GetQueryParam", func(args ...any) (any, error) {
+			return ffi.GetQueryParam(args[0], args[1].(string)), nil
+		})
 		RegisterExtern("HTTP_Do", func(args ...any) (any, error) {
 			value, err := ffi.HTTP_Do(
 				args[0].(string),
@@ -221,6 +230,9 @@ func RegisterBuiltinExterns() {
 		RegisterExtern("HTTP_ResponseClose", func(args ...any) (any, error) {
 			ffi.HTTP_ResponseClose(args[0])
 			return nil, nil
+		})
+		RegisterExtern("HTTP_Serve", func(args ...any) (any, error) {
+			return builtinHTTPServe(args[0].(int), args[1]), nil
 		})
 		RegisterExtern("FS_Exists", func(args ...any) (any, error) {
 			return ffi.FS_Exists(args[0].(string)), nil

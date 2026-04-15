@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,8 @@ type cliSnippetCase struct {
 
 func TestCLIRunMatchesVMSnippetParity(t *testing.T) {
 	ardPath := ensureArdBinary(t)
+	servePort := reserveLocalPort(t)
+	serveBaseURL := fmt.Sprintf("http://127.0.0.1:%d", servePort)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -799,6 +802,72 @@ fn main() {
 			},
 		},
 		{
+			name: "http_server_roundtrip",
+			env: map[string]string{
+				"ARD_HTTP_SERVE_PORT":     fmt.Sprintf("%d", servePort),
+				"ARD_HTTP_SERVE_BASE_URL": serveBaseURL,
+			},
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+use ard/http
+use ard/env
+use ard/async
+
+fn main() {
+  let port = Int::from_str(env::get("ARD_HTTP_SERVE_PORT").or("0")).or(0)
+  let base = env::get("ARD_HTTP_SERVE_BASE_URL").or("")
+
+  async::start(fn() {
+    let routes: [Str: http::HandlerFn] = [
+      "/": fn(req: http::Request, mut res: http::Response) Void {
+        res.status = 201
+        res.headers.set("x-path", req.path().or(""))
+        res.headers.set("x-query", req.query_param("lang"))
+        res.body = "hello"
+        ()
+      }
+    ]
+    http::serve(port, routes).expect("serve failed")
+  })
+
+  mut ok = false
+  mut status = 0
+  mut path = ""
+  mut query = ""
+  mut body = ""
+  mut attempts = 0
+
+  while ok == false and attempts < 200 {
+    let req = http::Request{
+      method: http::Method::Get,
+      url: base + "/?lang=ard",
+      headers: [:],
+    }
+    match http::send(req, 1) {
+      ok(res) => {
+        ok = true
+        status = res.status
+        path = res.headers.get("X-Path").or("missing")
+        query = res.headers.get("X-Query").or("missing")
+        body = res.body
+      },
+      err(_) => {
+        attempts = attempts + 1
+      },
+    }
+  }
+
+  io::print(ok.to_str())
+  io::print(status)
+  io::print(path)
+  io::print(query)
+  io::print(body)
+}
+`,
+			},
+		},
+		{
 			name: "enum_match",
 			files: map[string]string{
 				"main.ard": `
@@ -877,6 +946,20 @@ fn main() {
 			}
 		})
 	}
+}
+
+func reserveLocalPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve local port: %v", err)
+	}
+	defer listener.Close()
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("expected TCP listener address, got %T", listener.Addr())
+	}
+	return addr.Port
 }
 
 func ensureArdBinary(t *testing.T) string {
