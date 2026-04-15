@@ -69,6 +69,7 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 		{name: "variables.ard"},
 		{name: "word_frequency.ard", stdin: "go ard go\n"},
 	}
+	samples = selectSampleParityCases(samples)
 
 	for _, sample := range samples {
 		t.Run(sample.name, func(t *testing.T) {
@@ -90,6 +91,9 @@ func TestBuildBinaryMatchesVMSampleParity(t *testing.T) {
 }
 
 func TestBuildBinaryMatchesVMServerSampleParity(t *testing.T) {
+	if !fullParityEnabled() {
+		t.Skip("set ARD_FULL_PARITY=1 to run full server sample parity")
+	}
 	ardPath := ensureArdBinary(t)
 
 	vmRoot := copySamplesProject(t)
@@ -116,6 +120,9 @@ func TestBuildBinaryMatchesVMServerSampleParity(t *testing.T) {
 }
 
 func TestBuildBinaryMatchesVMPokemonSampleParity(t *testing.T) {
+	if !fullParityEnabled() {
+		t.Skip("set ARD_FULL_PARITY=1 to run full pokemon sample parity")
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pokemon":
@@ -148,6 +155,35 @@ func TestBuildBinaryMatchesVMPokemonSampleParity(t *testing.T) {
 	if vmResult.stdout != goResult.stdout {
 		t.Fatalf("pokemon sample stdout mismatch\nvm:\n%s\ngo:\n%s\nvm stderr:\n%s\ngo stderr:\n%s", vmResult.stdout, goResult.stdout, vmResult.stderr, goResult.stderr)
 	}
+}
+
+func selectSampleParityCases(samples []sampleSpec) []sampleSpec {
+	if fullParityEnabled() {
+		return samples
+	}
+	return filterSampleParityCases(samples,
+		"collections.ard",
+		"concurrent_stress.ard",
+		"guess.ard",
+		"maps.ard",
+		"modules.ard",
+		"tic-tac-toe.ard",
+		"traits.ard",
+	)
+}
+
+func filterSampleParityCases(samples []sampleSpec, names ...string) []sampleSpec {
+	allowed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		allowed[name] = struct{}{}
+	}
+	selected := make([]sampleSpec, 0, len(names))
+	for _, sample := range samples {
+		if _, ok := allowed[sample.name]; ok {
+			selected = append(selected, sample)
+		}
+	}
+	return selected
 }
 
 func copySamplesProject(t *testing.T) string {

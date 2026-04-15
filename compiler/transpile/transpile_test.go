@@ -80,6 +80,14 @@ let result = add(1, 2)
 	}
 }
 
+func requireFullBuildBinaryCoverage(t *testing.T) {
+	t.Helper()
+	if fullParityEnabled() {
+		return
+	}
+	t.Skip("set ARD_FULL_PARITY=1 to run exhaustive BuildBinary coverage")
+}
+
 func TestEmitEntrypointUnusedLocalGetsDiscard(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -143,6 +151,7 @@ let result = utils::add(1, 2)
 }
 
 func TestBuildBinaryCompilesIfReturn(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -169,6 +178,7 @@ let result = choose(2)
 }
 
 func TestBuildBinaryCompilesWhileLoop(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -195,6 +205,7 @@ let result = count(3)
 }
 
 func TestBuildBinaryCompilesForLoop(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -221,6 +232,7 @@ let result = count(3)
 }
 
 func TestBuildBinaryCompilesBreakInWhileLoop(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -275,6 +287,7 @@ let result = get_age()
 }
 
 func TestBuildBinaryCompilesImportedModuleStructLiteral(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -307,6 +320,7 @@ let result = get_age()
 }
 
 func TestBuildBinaryCompilesListLiteralAndMethods(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -331,6 +345,7 @@ let second = get_second()
 }
 
 func TestBuildBinaryCompilesListSortAndSwap(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -356,6 +371,7 @@ let value = reordered()
 }
 
 func TestBuildBinaryCompilesMutableListMethods(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -440,6 +456,7 @@ let has_none = maybe::none<Int>().is_none()
 }
 
 func TestBuildBinaryCompilesMapGetAndKeys(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -464,6 +481,7 @@ let found = lookup()
 }
 
 func TestBuildBinaryCompilesPrimitiveMethods(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -488,6 +506,7 @@ let g = true.to_str()
 }
 
 func TestBuildBinaryCompilesRangeAndForInLoops(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -545,6 +564,7 @@ let d = sum_map()
 }
 
 func TestBuildBinaryCompilesEnums(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -579,6 +599,7 @@ let b = colors::Color::green == colors::Color::red
 }
 
 func TestBuildBinaryCompilesExternStubs(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -607,6 +628,7 @@ let b = utils::meaning()
 }
 
 func TestBuildBinaryCompilesStdlibFsModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -627,6 +649,7 @@ let exists = fs::exists("./demo.txt")
 }
 
 func TestBuildBinaryCompilesStdlibIoModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -659,6 +682,7 @@ io::print(Person{name: "world"})
 }
 
 func TestBuildBinaryCompilesStdlibEncodeModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -681,6 +705,7 @@ let c = encode::json(true)
 }
 
 func TestBuildBinaryCompilesStdlibDecodeModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -723,6 +748,7 @@ let raw = decode::from_json("\{\"age\":1\}")
 }
 
 func TestBuildBinaryCompilesDecodeEndToEndFlow(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -752,6 +778,7 @@ let out = run()
 }
 
 func TestBuildBinaryCompilesGenericStdlibDecodeCombinators(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -777,6 +804,7 @@ let _ = first
 }
 
 func TestBuildBinaryCompilesStdlibArgvModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -797,6 +825,7 @@ let args = argv::load()
 }
 
 func TestBuildBinaryCompilesStdlibDatesModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -817,6 +846,7 @@ let today = dates::get_today()
 }
 
 func TestBuildBinaryCompilesStdlibDurationModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -840,6 +870,7 @@ let millis = duration::from_millis(4)
 }
 
 func TestBuildBinaryCompilesStdlibBase64Module(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -861,6 +892,7 @@ let decoded = base64::decode(encoded, true)
 }
 
 func TestBuildBinaryCompilesStdlibChronoModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -881,6 +913,7 @@ let now = chrono::now()
 }
 
 func TestBuildBinaryCompilesStdlibCryptoModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -908,6 +941,7 @@ let id = crypto::uuid()
 }
 
 func TestBuildBinaryCompilesStdlibEnvModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -928,6 +962,7 @@ let home = env::get("HOME")
 }
 
 func TestBuildBinaryCompilesStdlibFloatModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -950,6 +985,7 @@ let c = float::floor(3.9)
 }
 
 func TestBuildBinaryCompilesStdlibHexModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -971,6 +1007,7 @@ let decoded = hex::decode(encoded)
 }
 
 func TestBuildBinaryCompilesStdlibIntModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -991,6 +1028,7 @@ let parsed = int::from_str("42")
 }
 
 func TestBuildBinaryCompilesStdlibJsonModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1011,6 +1049,7 @@ let out = json::encode(["age": 1])
 }
 
 func TestBuildBinaryCompilesStdlibMapModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1031,6 +1070,7 @@ let values = map::new<Int>()
 }
 
 func TestBuildBinaryCompilesStdlibDynamicModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1078,6 +1118,7 @@ let value = fiber.get()
 }
 
 func TestBuildBinaryCompilesStdlibAsyncStartModuleFunction(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1108,6 +1149,7 @@ fiber.join()
 }
 
 func TestBuildBinaryCompilesStdlibSqlModule(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1135,6 +1177,7 @@ let out = run()
 }
 
 func TestBuildBinaryCompilesStdlibSqlTransactionFlow(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1184,6 +1227,7 @@ let ok = http::Response::new(200, "ok").is_ok()
 }
 
 func TestBuildBinaryCompilesExplicitTypeArgsOnZeroArgGenericFunction(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1207,6 +1251,7 @@ let values = empty<Int>()
 }
 
 func TestBuildBinaryCompilesVariableShadowing(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1232,6 +1277,7 @@ let out = run()
 }
 
 func TestBuildBinaryCompilesStructMethods(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1270,6 +1316,7 @@ let result = run()
 }
 
 func TestBuildBinaryCompilesBoolAndIntMatch(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1304,6 +1351,7 @@ let b = bucket(2)
 }
 
 func TestBuildBinaryCompilesEnumMatch(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1334,6 +1382,7 @@ let result = label(Status::active)
 }
 
 func TestBuildBinaryCompilesMaybeCombinators(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1379,6 +1428,7 @@ let d = chained_none()
 }
 
 func TestBuildBinaryCompilesMaybeMatch(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1407,6 +1457,7 @@ let b = pick(maybe::none())
 }
 
 func TestBuildBinaryCompilesTemplateStringsAndPanic(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1433,6 +1484,7 @@ let msg = greet("Ard")
 }
 
 func TestBuildBinaryCompilesBasicResults(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1476,6 +1528,7 @@ let d = forced()
 }
 
 func TestBuildBinaryCompilesResultCombinators(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1524,6 +1577,7 @@ let d = chained_err()
 }
 
 func TestBuildBinaryCompilesResultMatches(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1731,6 +1785,7 @@ let j = nested_list(6, 3)
 }
 
 func TestBuildBinaryCompilesTryInMatchExpressions(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1814,6 +1869,7 @@ let local = multiply(3, 4)
 }
 
 func TestBuildBinaryCompilesExplicitVoidAnonymousFunctions(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1840,6 +1896,7 @@ fn main() {
 }
 
 func TestBuildBinaryCompilesContextualVoidAnonymousFunctions(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1866,6 +1923,7 @@ fn main() {
 }
 
 func TestBuildBinaryCompilesGenericAsyncFiberLists(t *testing.T) {
+	requireFullBuildBinaryCoverage(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)

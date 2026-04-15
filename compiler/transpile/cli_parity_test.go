@@ -958,6 +958,7 @@ fn main() {
 			},
 		},
 	}
+	cases = selectCLISnippetCases(cases)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -980,6 +981,43 @@ fn main() {
 			}
 		})
 	}
+}
+
+func fullParityEnabled() bool {
+	return os.Getenv("ARD_FULL_PARITY") == "1"
+}
+
+func selectCLISnippetCases(cases []cliSnippetCase) []cliSnippetCase {
+	if fullParityEnabled() {
+		return cases
+	}
+	return filterCLISnippetCases(cases,
+		"entrypoint_main",
+		"user_module_import",
+		"try_fallback",
+		"map_iteration_order",
+		"mutable_function_params",
+		"stdin_read_line_multiple",
+		"decode_collections_and_field",
+		"sql_sqlite_roundtrip",
+		"async_sleep",
+		"http_client_roundtrip",
+		"http_server_roundtrip",
+	)
+}
+
+func filterCLISnippetCases(cases []cliSnippetCase, names ...string) []cliSnippetCase {
+	allowed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		allowed[name] = struct{}{}
+	}
+	selected := make([]cliSnippetCase, 0, len(names))
+	for _, tc := range cases {
+		if _, ok := allowed[tc.name]; ok {
+			selected = append(selected, tc)
+		}
+	}
+	return selected
 }
 
 func reserveLocalPort(t *testing.T) int {
