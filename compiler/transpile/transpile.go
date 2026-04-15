@@ -916,7 +916,12 @@ func BuildBinary(inputPath, outputPath string) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("go", "build", "-mod=mod", "-o", outputPath, ".")
+	resolvedOutputPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("go", "build", "-mod=mod", "-o", resolvedOutputPath, ".")
 	configureGoCommand(cmd)
 	cmd.Dir = generatedDir
 	cmd.Stdout = os.Stdout

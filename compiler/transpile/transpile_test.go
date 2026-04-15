@@ -1675,6 +1675,45 @@ fn main() {
 	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
+func TestBuildBinaryRespectsRelativeOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldCwd)
+	}()
+
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn main() {
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	builtPath, err := BuildBinary("main.ard", "./demo-bin")
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+	if builtPath != "./demo-bin" {
+		t.Fatalf("expected built path %q, got %q", "./demo-bin", builtPath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "demo-bin")); err != nil {
+		t.Fatalf("expected output binary in cwd: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "generated", "demo-bin")); !os.IsNotExist(err) {
+		t.Fatalf("did not expect output binary under generated dir, got err=%v", err)
+	}
+}
+
 func TestBuildBinaryCompilesImportedModuleSymbol(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
