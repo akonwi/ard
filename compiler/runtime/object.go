@@ -363,6 +363,9 @@ func MakeStr(s string) *Object {
 }
 
 func MakeInt(i int) *Object {
+	if i >= smallIntCacheMin && i <= smallIntCacheMax {
+		return smallInts[i-smallIntCacheMin]
+	}
 	return &Object{
 		_type: checker.Int,
 		kind:  KindInt,
@@ -381,12 +384,10 @@ func MakeFloat(f float64) *Object {
 }
 
 func MakeBool(b bool) *Object {
-	return &Object{
-		_type: checker.Bool,
-		kind:  KindBool,
-		name:  checker.Bool.String(),
-		raw:   b,
+	if b {
+		return trueObj
 	}
+	return falseObj
 }
 
 func MakeNone(of checker.Type) *Object {
@@ -588,10 +589,26 @@ func Make(val any, of checker.Type) *Object {
 	}
 }
 
-// use a single instance of void. lame attempt at optimization
-var void = &Object{
-	raw: nil, _type: checker.Void, kind: KindVoid, name: checker.Void.String(),
-}
+const (
+	smallIntCacheMin = -1
+	smallIntCacheMax = 255
+)
+
+var (
+	trueObj  = &Object{raw: true, _type: checker.Bool, kind: KindBool, name: checker.Bool.String()}
+	falseObj = &Object{raw: false, _type: checker.Bool, kind: KindBool, name: checker.Bool.String()}
+
+	smallInts = func() []*Object {
+		objs := make([]*Object, smallIntCacheMax-smallIntCacheMin+1)
+		for i := range objs {
+			objs[i] = &Object{raw: i + smallIntCacheMin, _type: checker.Int, kind: KindInt, name: checker.Int.String()}
+		}
+		return objs
+	}()
+
+	// use a single instance of void. lame attempt at optimization
+	void = &Object{raw: nil, _type: checker.Void, kind: KindVoid, name: checker.Void.String()}
+)
 
 func Void() *Object {
 	return void
