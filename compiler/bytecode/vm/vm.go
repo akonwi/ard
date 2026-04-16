@@ -256,11 +256,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			argc := inst.B
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -282,11 +278,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			captures := make([]*runtime.Object, captureCount)
 			for i := captureCount - 1; i >= 0; i-- {
-				val, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				captures[i] = val
+				captures[i] = vm.popUnsafe(curr)
 			}
 			fnType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -306,16 +298,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			argc := inst.B
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			closureObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
@@ -334,10 +319,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpAsyncStart:
-			closureObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
@@ -362,10 +344,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, runtime.MakeStruct(fiberType, fields))
 		case bytecode.OpAsyncEval:
-			closureObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
@@ -403,11 +382,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			count := inst.B
 			items := make([]*runtime.Object, count)
 			for i := count - 1; i >= 0; i-- {
-				item, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				items[i] = item
+				items[i] = vm.popUnsafe(curr)
 			}
 			vm.push(curr, runtime.Make(items, listType))
 		case bytecode.OpMakeMap:
@@ -423,33 +398,18 @@ func (vm *VM) run() (*runtime.Object, error) {
 			count := inst.B
 			m := runtime.MakeMap(mapDef.Key(), mapDef.Value())
 			for range count {
-				val, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				key, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
+				val := vm.popUnsafe(curr)
+				key := vm.popUnsafe(curr)
 				m.Map_Set(key, val)
 			}
 			vm.push(curr, m)
 		case bytecode.OpListLen:
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			listObj := vm.popUnsafe(curr)
 			items := listObj.AsList()
 			vm.push(curr, runtime.MakeInt(len(items)))
 		case bytecode.OpListGet:
-			idxObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			idxObj := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			idx := idxObj.AsInt()
 			items := listObj.AsList()
 			if idx < 0 || idx >= len(items) {
@@ -457,18 +417,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, items[idx])
 		case bytecode.OpListSet:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			idxObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			idxObj := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			idx := idxObj.AsInt()
 			items := listObj.AsList()
 			result := runtime.MakeBool(false)
@@ -479,27 +430,15 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, result)
 		case bytecode.OpListPush:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			items := listObj.AsList()
 			items = append(items, val)
 			listObj.Set(items)
 			vm.push(curr, listObj)
 		case bytecode.OpListPrepend:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			items := listObj.AsList()
 			items = append([]*runtime.Object{val}, items...)
 			listObj.Set(items)
@@ -507,26 +446,16 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpListMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			res, err := vm.evalListMethod(bytecodeToListKind(inst.A), subj, args)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpMapKeys:
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			mapObj := vm.popUnsafe(curr)
 			mapType := mapObj.MapType()
 			if mapType == nil {
 				return nil, fmt.Errorf("map keys on non-map")
@@ -534,14 +463,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			keys := runtime.SortedMapKeys(mapObj)
 			vm.push(curr, runtime.MakeList(mapType.Key(), keys...))
 		case bytecode.OpMapGet:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			mapType, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
@@ -558,14 +481,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, out)
 		case bytecode.OpMapGetValue:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			val, ok := m[keyStr]
@@ -574,53 +491,29 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, val)
 		case bytecode.OpMapSet:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			m[keyStr] = val
 			vm.push(curr, runtime.MakeBool(true))
 		case bytecode.OpMapDrop:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			delete(m, keyStr)
 			vm.push(curr, runtime.Void())
 		case bytecode.OpMapHas:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			_, ok := m[keyStr]
 			vm.push(curr, runtime.MakeBool(ok))
 		case bytecode.OpMapSize:
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			mapObj := vm.popUnsafe(curr)
 			vm.push(curr, runtime.MakeInt(len(mapObj.AsMap())))
 		case bytecode.OpMakeNone:
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
@@ -631,46 +524,30 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpStrMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalStrMethod(bytecodeToStrKind(inst.A), obj, args)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpIntMethod:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalIntMethod(bytecodeToIntKind(inst.A), obj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpFloatMethod:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalFloatMethod(bytecodeToFloatKind(inst.A), obj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpBoolMethod:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalBoolMethod(bytecodeToBoolKind(inst.A), obj)
 			if err != nil {
 				return nil, err
@@ -679,16 +556,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpMaybeMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			res, err := vm.evalMaybeMethod(bytecodeToMaybeKind(inst.A), subj, args, bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
@@ -697,26 +567,16 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpResultMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			res, err := vm.evalResultMethod(bytecodeToResultKind(inst.A), subj, args)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpMaybeUnwrap:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			if subj.IsNone() {
 				return nil, fmt.Errorf("cannot unwrap none")
 			}
@@ -726,10 +586,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, obj)
 		case bytecode.OpResultUnwrap:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			unwrapped := subj.UnwrapResult()
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
@@ -738,16 +595,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 			unwrapped.SetRefinedType(resolved)
 			vm.push(curr, unwrapped)
 		case bytecode.OpTypeName:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			vm.push(curr, runtime.MakeStr(subj.TypeName()))
 		case bytecode.OpStrChars:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			runes := []rune(subj.AsString())
 			chars := make([]*runtime.Object, len(runes))
 			for i, r := range runes {
@@ -755,10 +606,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, runtime.MakeList(checker.Str, chars...))
 		case bytecode.OpTryResult:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			if subj.IsErr() {
 				if inst.A >= 0 {
 					if inst.B >= 0 {
@@ -791,10 +639,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			unwrapped.SetRefinedType(okType)
 			vm.push(curr, unwrapped)
 		case bytecode.OpTryMaybe:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			if subj.IsNone() {
 				if inst.A >= 0 {
 					curr.StackTop = 0
@@ -821,33 +666,21 @@ func (vm *VM) run() (*runtime.Object, error) {
 			count := inst.B
 			fields := map[string]*runtime.Object{}
 			for range count {
-				val, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				keyObj, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
+				val := vm.popUnsafe(curr)
+				keyObj := vm.popUnsafe(curr)
 				key := keyObj.AsString()
 				fields[key] = val
 			}
 			vm.push(curr, runtime.MakeStruct(structType, fields))
 		case bytecode.OpMakeEnum:
-			discObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			discObj := vm.popUnsafe(curr)
 			enumType, err := vm.enumTypeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, runtime.Make(discObj.AsInt(), enumType))
 		case bytecode.OpGetField:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			nameConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
@@ -858,14 +691,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, val)
 		case bytecode.OpSetField:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			obj := vm.popUnsafe(curr)
 			nameConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
@@ -883,16 +710,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			argc := inst.B
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			fnName := fmt.Sprintf("%s.%s", subj.TypeName(), methodConst.Str)
 			fnIndex, ok := vm.funcIndex[fnName]
 			if !ok {
@@ -936,11 +756,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			argc := inst.Imm
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -963,11 +779,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			argc := inst.Imm
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
