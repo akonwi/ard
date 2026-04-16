@@ -1198,22 +1198,37 @@ func (vm *VM) evalUnary(op bytecode.Opcode, val *runtime.Object) (*runtime.Objec
 }
 
 func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*runtime.Object, error) {
+	leftKind, rightKind := left.Kind(), right.Kind()
 	if op == bytecode.OpEq || op == bytecode.OpNeq {
-		if left.Kind() == right.Kind() {
+		if leftKind == runtime.KindStr && rightKind == runtime.KindStr {
+			eq := left.AsString() == right.AsString()
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		if leftKind == runtime.KindBool && rightKind == runtime.KindBool {
+			eq := left.AsBool() == right.AsBool()
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		if leftKind == rightKind {
 			eq := left.Equals(*right)
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
 			}
 			return runtime.MakeBool(!eq), nil
 		}
-		if left.Kind() == runtime.KindEnum && right.Kind() == runtime.KindInt {
+		if leftKind == runtime.KindEnum && rightKind == runtime.KindInt {
 			eq := left.Raw().(int) == right.AsInt()
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
 			}
 			return runtime.MakeBool(!eq), nil
 		}
-		if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindEnum {
+		if leftKind == runtime.KindInt && rightKind == runtime.KindEnum {
 			eq := left.AsInt() == right.Raw().(int)
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
@@ -1222,7 +1237,7 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 		}
 		return runtime.MakeBool(false), nil
 	}
-	if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindInt {
+	if leftKind == runtime.KindInt && rightKind == runtime.KindInt {
 		a := left.AsInt()
 		b := right.AsInt()
 		switch op {
@@ -1240,7 +1255,7 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 			return runtime.MakeBool(a >= b), nil
 		}
 	}
-	if left.Kind() == runtime.KindFloat && right.Kind() == runtime.KindFloat {
+	if leftKind == runtime.KindFloat && rightKind == runtime.KindFloat {
 		a := left.AsFloat()
 		b := right.AsFloat()
 		switch op {
@@ -1258,5 +1273,5 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 			return runtime.MakeBool(a >= b), nil
 		}
 	}
-	return nil, fmt.Errorf("unsupported comparison %s for %s and %s", op, left.Kind(), right.Kind())
+	return nil, fmt.Errorf("unsupported comparison %s for %s and %s", op, leftKind, rightKind)
 }
