@@ -14,6 +14,7 @@ type Frame struct {
 	IP         int
 	Locals     []*runtime.Object
 	Stack      []*runtime.Object
+	StackTop   int
 	MaxStack   int
 	ReturnType checker.Type
 }
@@ -262,7 +263,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				curr.IP = inst.A
 			}
 		case bytecode.OpReturn:
-			if len(curr.Stack) == 0 {
+			if curr.StackTop == 0 {
 				val := runtime.Void()
 				if curr.ReturnType != nil {
 					val.SetRefinedType(curr.ReturnType)
@@ -813,7 +814,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 							curr.Locals[inst.B] = unwrapped
 						}
 					}
-					curr.Stack = curr.Stack[:0]
+					curr.StackTop = 0
 					curr.IP = inst.A
 					continue
 				}
@@ -838,7 +839,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			if subj.IsNone() {
 				if inst.A >= 0 {
-					curr.Stack = curr.Stack[:0]
+					curr.StackTop = 0
 					curr.IP = inst.A
 					continue
 				}
@@ -1084,11 +1085,12 @@ func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures
 		frame.Locals = frame.Locals[:fnDef.Locals]
 		clear(frame.Locals)
 	}
-	if cap(frame.Stack) < fnDef.MaxStack {
-		frame.Stack = make([]*runtime.Object, 0, fnDef.MaxStack)
+	if len(frame.Stack) < fnDef.MaxStack {
+		frame.Stack = make([]*runtime.Object, fnDef.MaxStack)
 	} else {
-		frame.Stack = frame.Stack[:0]
+		clear(frame.Stack[:frame.StackTop])
 	}
+	frame.StackTop = 0
 
 	for i, localIdx := range fnDef.Captures {
 		if localIdx < 0 || localIdx >= len(frame.Locals) {
@@ -1118,24 +1120,30 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 
 func (vm *VM) recycleFrame(frame *Frame) {
 	clear(frame.Locals)
-	clear(frame.Stack[:len(frame.Stack)])
+	clear(frame.Stack[:frame.StackTop])
 	frame.Locals = frame.Locals[:0]
-	frame.Stack = frame.Stack[:0]
+	frame.StackTop = 0
 	frame.ReturnType = nil
 	vm.freeFrames = append(vm.freeFrames, frame)
 }
 
 func (vm *VM) push(frame *Frame, obj *runtime.Object) {
-	frame.Stack = append(frame.Stack, obj)
+	if frame.StackTop >= len(frame.Stack) {
+		frame.Stack = append(frame.Stack, obj)
+		frame.StackTop++
+		return
+	}
+	frame.Stack[frame.StackTop] = obj
+	frame.StackTop++
 }
 
 func (vm *VM) pop(frame *Frame) (*runtime.Object, error) {
-	if len(frame.Stack) == 0 {
+	if frame.StackTop == 0 {
 		return nil, fmt.Errorf("stack underflow at %s ip=%d fn=%s", vm.lastOp, vm.lastIP, vm.lastFn)
 	}
-	idx := len(frame.Stack) - 1
-	val := frame.Stack[idx]
-	frame.Stack = frame.Stack[:idx]
+	frame.StackTop--
+	val := frame.Stack[frame.StackTop]
+	frame.Stack[frame.StackTop] = nil
 	return val, nil
 }
 
