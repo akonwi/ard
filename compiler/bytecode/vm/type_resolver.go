@@ -50,6 +50,9 @@ func (vm *VM) typeNameFor(id bytecode.TypeID) (string, error) {
 }
 
 func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
+	if vm.typeCache == nil {
+		vm.typeCache = map[bytecode.TypeID]checker.Type{}
+	}
 	if t, ok := vm.typeCache[id]; ok {
 		if s, ok := t.(*checker.StructDef); ok {
 			return s, nil
@@ -65,6 +68,9 @@ func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
 }
 
 func (vm *VM) enumTypeFor(id bytecode.TypeID) (*checker.Enum, error) {
+	if vm.typeCache == nil {
+		vm.typeCache = map[bytecode.TypeID]checker.Type{}
+	}
 	if t, ok := vm.typeCache[id]; ok {
 		if e, ok := t.(*checker.Enum); ok {
 			return e, nil

@@ -85,7 +85,7 @@ type VM struct {
 }
 
 func New(program bytecode.Program) *VM {
-	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), typeCache: map[bytecode.TypeID]checker.Type{}, modules: defaultModuleRegistry(), funcIndex: map[string]int{}, ffi: defaultFFIRegistry()}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), funcIndex: map[string]int{}, ffi: defaultFFIRegistry()}
 	for i := range program.Functions {
 		vm.funcIndex[program.Functions[i].Name] = i
 	}
