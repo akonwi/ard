@@ -33,7 +33,7 @@ func defaultFFIRegistry() *RuntimeFFIRegistry {
 }
 
 type Frame struct {
-	Fn         bytecode.Function
+	Fn         *bytecode.Function
 	IP         int
 	Locals     []*runtime.Object
 	Stack      []*runtime.Object
@@ -252,7 +252,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
 				return nil, fmt.Errorf("function index out of range")
 			}
-			fnDef := vm.Program.Functions[fnIndex]
+			fnDef := &vm.Program.Functions[fnIndex]
 			argc := inst.B
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
@@ -323,7 +323,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if closure.FnIndex < 0 || closure.FnIndex >= len(vm.Program.Functions) {
 				return nil, fmt.Errorf("function index out of range")
 			}
-			fnDef := vm.Program.Functions[closure.FnIndex]
+			fnDef := &vm.Program.Functions[closure.FnIndex]
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
@@ -903,7 +903,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				vm.push(curr, res)
 				continue
 			}
-			fnDef := vm.Program.Functions[fnIndex]
+			fnDef := &vm.Program.Functions[fnIndex]
 			if fnDef.Arity != argc+1 {
 				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc+1)
 			}
@@ -911,17 +911,14 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			frame := &Frame{
-				Fn:         fnDef,
-				IP:         0,
-				Locals:     make([]*runtime.Object, fnDef.Locals),
-				Stack:      []*runtime.Object{},
-				MaxStack:   fnDef.MaxStack,
-				ReturnType: retType,
-			}
-			frame.Locals[0] = subj
+			callArgs := make([]*runtime.Object, argc+1)
+			callArgs[0] = subj
 			for i := range args {
-				frame.Locals[i+1] = args[i]
+				callArgs[i+1] = args[i]
+			}
+			frame, err := vm.newFrame(fnDef, callArgs, nil, retType)
+			if err != nil {
+				return nil, err
 			}
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpCallModule:
@@ -998,13 +995,13 @@ func (vm *VM) run() (*runtime.Object, error) {
 	return nil, fmt.Errorf("no frames left")
 }
 
-func (vm *VM) lookupFunction(name string) (bytecode.Function, bool) {
-	for _, fn := range vm.Program.Functions {
-		if fn.Name == name {
-			return fn, true
+func (vm *VM) lookupFunction(name string) (*bytecode.Function, bool) {
+	for i := range vm.Program.Functions {
+		if vm.Program.Functions[i].Name == name {
+			return &vm.Program.Functions[i], true
 		}
 	}
-	return bytecode.Function{}, false
+	return nil, false
 }
 
 func (vm *VM) spawn() *VM {
@@ -1014,7 +1011,7 @@ func (vm *VM) spawn() *VM {
 	return child
 }
 
-func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
 	if len(args) != fnDef.Arity {
 		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
 	}
@@ -1067,7 +1064,7 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 		return nil, fmt.Errorf("function index out of range")
 	}
 	child := vm.spawn()
-	fnDef := child.Program.Functions[closure.FnIndex]
+	fnDef := &child.Program.Functions[closure.FnIndex]
 	frame, err := child.newFrame(fnDef, args, closure.Captures, closure.ReturnType)
 	if err != nil {
 		return nil, err
