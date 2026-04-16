@@ -9,6 +9,29 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
+var (
+	sharedModulesOnce sync.Once
+	sharedModules     *ModuleRegistry
+	sharedFFIOnce     sync.Once
+	sharedFFI         *RuntimeFFIRegistry
+)
+
+func defaultModuleRegistry() *ModuleRegistry {
+	sharedModulesOnce.Do(func() {
+		sharedModules = NewModuleRegistry()
+	})
+	return sharedModules
+}
+
+func defaultFFIRegistry() *RuntimeFFIRegistry {
+	sharedFFIOnce.Do(func() {
+		ffi := NewRuntimeFFIRegistry()
+		_ = ffi.RegisterBuiltinFFIFunctions()
+		sharedFFI = ffi
+	})
+	return sharedFFI
+}
+
 type Frame struct {
 	Fn         bytecode.Function
 	IP         int
@@ -62,9 +85,7 @@ type VM struct {
 }
 
 func New(program bytecode.Program) *VM {
-	ffi := NewRuntimeFFIRegistry()
-	_ = ffi.RegisterBuiltinFFIFunctions()
-	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), typeCache: map[bytecode.TypeID]checker.Type{}, modules: defaultModuleRegistry(), funcIndex: map[string]int{}, ffi: defaultFFIRegistry()}
 	for i := range program.Functions {
 		vm.funcIndex[program.Functions[i].Name] = i
 	}
