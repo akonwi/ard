@@ -74,6 +74,15 @@ func (o *Object) Set(v any) {
 //     let result = returns_generic()
 //     result.expect("foobar").do_stuff() // .expect(...) returns an open generic
 func (o *Object) SetRefinedType(declared checker.Type) {
+	if declared == nil || o._type == nil {
+		return
+	}
+	if o._type == declared && !o.isOk && !o.isErr {
+		return
+	}
+
+	originalType := o._type
+
 	// When the declared type is a Result and this object is already a result
 	// value (isOk/isErr), refine to the appropriate inner type rather than
 	// the full Result wrapper. This prevents .or() unwraps from losing their
@@ -117,6 +126,9 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 				v.SetRefinedType(declared.Value())
 			}
 		}
+	}
+	if o._type == originalType {
+		return
 	}
 	o.kind = kindForType(o._type)
 	o.name = typeNameForType(o._type)
