@@ -1,0 +1,1 @@
+{"type":"config","name":"Optimize Ard bytecode VM against PR #93 Go-backend benchmark suite","metricName":"total_vm_ms","metricUnit":"ms","bestDirection":"lower"}
