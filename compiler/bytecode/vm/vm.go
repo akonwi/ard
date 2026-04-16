@@ -141,98 +141,49 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if inst.A < 0 || inst.A >= len(curr.Locals) {
 				return nil, fmt.Errorf("local index out of range")
 			}
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			curr.Locals[inst.A] = val
+			curr.Locals[inst.A] = vm.popUnsafe(curr)
 		case bytecode.OpPop:
-			if _, err := vm.pop(curr); err != nil {
-				return nil, err
-			}
+			_ = vm.popUnsafe(curr)
 		case bytecode.OpDup:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
 			vm.push(curr, val)
 			vm.push(curr, val)
 		case bytecode.OpSwap:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
 			vm.push(curr, b)
 			vm.push(curr, a)
 		case bytecode.OpCopy:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			vm.push(curr, val.Copy())
+			vm.push(curr, vm.popUnsafe(curr).Copy())
 		case bytecode.OpPanic:
-			msgObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("panic: %s", msgObj.AsString())
+			return nil, fmt.Errorf("panic: %s", vm.popUnsafe(curr).AsString())
 		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv, bytecode.OpMod:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
 			res, err := vm.evalBinary(inst.Op, a, b)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpAnd, bytecode.OpOr:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
 			res, err := vm.evalBinary(inst.Op, a, b)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpNeg:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			res, err := vm.evalUnary(inst.Op, val)
+			res, err := vm.evalUnary(inst.Op, vm.popUnsafe(curr))
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpNot:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			vm.push(curr, runtime.MakeBool(!val.AsBool()))
+			vm.push(curr, runtime.MakeBool(!vm.popUnsafe(curr).AsBool()))
 		case bytecode.OpEq, bytecode.OpNeq, bytecode.OpLt, bytecode.OpLte, bytecode.OpGt, bytecode.OpGte:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
 			res, err := vm.evalCompare(inst.Op, a, b)
 			if err != nil {
 				return nil, err
@@ -241,19 +192,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpJump:
 			curr.IP = inst.A
 		case bytecode.OpJumpIfFalse:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			if !val.AsBool() {
+			if !vm.popUnsafe(curr).AsBool() {
 				curr.IP = inst.A
 			}
 		case bytecode.OpJumpIfTrue:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			if val.AsBool() {
+			if vm.popUnsafe(curr).AsBool() {
 				curr.IP = inst.A
 			}
 		case bytecode.OpReturn:
@@ -1135,10 +1078,14 @@ func (vm *VM) pop(frame *Frame) (*runtime.Object, error) {
 	if frame.StackTop == 0 {
 		return nil, fmt.Errorf("stack underflow")
 	}
+	return vm.popUnsafe(frame), nil
+}
+
+func (vm *VM) popUnsafe(frame *Frame) *runtime.Object {
 	frame.StackTop--
 	val := frame.Stack[frame.StackTop]
 	frame.Stack[frame.StackTop] = nil
-	return val, nil
+	return val
 }
 
 func (vm *VM) constAt(index int) (bytecode.Constant, error) {

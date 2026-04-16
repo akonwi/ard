@@ -57,10 +57,16 @@ Closer-to-parity workloads:
 - Verified the benchmark harness from PR #93 and confirmed it compares prebuilt VM binaries against prebuilt Go-target binaries in runtime mode.
 - Verified current tests pass on the starting branch.
 - **Kept:** interned immutable bool objects and cached small integer objects in `compiler/runtime/object.go`. This reduced the suite from ~968.6 ms to ~851.7 ms (~12.1% faster), with especially strong gains in `sales_pipeline`, `shape_catalog`, `word_frequency_batch`, `async_batches`, and a meaningful gain in `decode_pipeline`.
+- **Kept:** reused VM frames and their locals/stack backing slices across calls in `compiler/bytecode/vm/vm.go`. This cut major per-call allocation churn and dropped the suite to ~830.6 ms.
+- **Kept:** switched the VM operand stack to a fixed backing slice plus explicit stack pointer. This removed append/reslice overhead and dropped the suite to ~818.1 ms.
+- **Kept:** added fast-path exits in `Object.SetRefinedType` so already-stable values skip repeated refinement and kind/name recomputation. This was especially strong for `decode_pipeline` and dropped the suite to ~788.5 ms.
+- **Kept:** removed per-instruction debug bookkeeping (`lastOp`/`lastIP`/`lastFn`) from the VM loop. This produced another broad CPU-side win and dropped the suite to ~773.2 ms.
 - **Discarded:** preallocating frame stack slices. Too small to matter at suite level.
 - **Discarded:** a function-name map for `lookupFunction`. It broke semantics because function names are not globally unique across modules.
 - **Discarded:** checker composite type memoization via `sync.Map`. Slight microbenchmark improvement, but real-suite regressions from cache overhead.
-- **Discarded:** inlining arithmetic/comparison fast paths directly in the VM loop. Some workloads improved, but not enough to beat the current best.
+- **Discarded:** inlining arithmetic/comparison fast paths directly in the VM loop. Some workloads improved, but not enough to beat the best suite state.
+- **Discarded:** helper-level `evalBinary`/`evalCompare` cleanups. Too small to matter at suite level.
 - **Discarded:** sharing primitive results from `Object.Copy()`. Did not help the full suite enough.
-- Current working theory: broad wins come from reducing runtime object allocation churn with near-zero overhead, not from adding cache lookups or making the interpreter loop larger/more branchy.
-- Next likely areas: more primitive/value constructor churn (especially strings/floats), collection/struct-heavy runtime helpers, and hot method paths used by the pure workloads.
+- **Discarded:** widening the small-int cache, lightweight child-VM spawn, removing duplicate local clearing in `newFrame`, primitive fast paths in `makeValueWithType`, and lazy stack-slot clearing on `pop`. These either regressed or failed to beat the best suite state.
+- Current working theory: the best wins come from removing always-on interpreter overhead that executes on nearly every opcode or function call. Tiny helper tweaks and extra lookup/cache layers tend not to survive full-suite measurement.
+- Next likely areas: remaining always-on per-op work (`pop`, comparisons, frame setup), plus decode-heavy paths if they can be improved without adding overhead elsewhere.
