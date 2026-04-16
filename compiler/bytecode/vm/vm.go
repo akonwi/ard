@@ -59,9 +59,6 @@ type VM struct {
 	modules    *ModuleRegistry
 	funcIndex  map[string]int
 	ffi        *RuntimeFFIRegistry
-	lastOp     bytecode.Opcode
-	lastIP     int
-	lastFn     string
 }
 
 func New(program bytecode.Program) *VM {
@@ -97,9 +94,6 @@ func (vm *VM) run() (*runtime.Object, error) {
 		}
 		inst := curr.Fn.Code[curr.IP]
 		curr.IP++
-		vm.lastOp = inst.Op
-		vm.lastIP = curr.IP - 1
-		vm.lastFn = curr.Fn.Name
 
 		switch inst.Op {
 		case bytecode.OpNoop:
@@ -1139,7 +1133,7 @@ func (vm *VM) push(frame *Frame, obj *runtime.Object) {
 
 func (vm *VM) pop(frame *Frame) (*runtime.Object, error) {
 	if frame.StackTop == 0 {
-		return nil, fmt.Errorf("stack underflow at %s ip=%d fn=%s", vm.lastOp, vm.lastIP, vm.lastFn)
+		return nil, fmt.Errorf("stack underflow")
 	}
 	frame.StackTop--
 	val := frame.Stack[frame.StackTop]
