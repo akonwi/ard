@@ -51,21 +51,22 @@ func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
 }
 
 type VM struct {
-	Program   bytecode.Program
-	Frames    []*Frame
-	typeCache map[bytecode.TypeID]checker.Type
-	modules   *ModuleRegistry
-	funcIndex map[string]int
-	ffi       *RuntimeFFIRegistry
-	lastOp    bytecode.Opcode
-	lastIP    int
-	lastFn    string
+	Program    bytecode.Program
+	Frames     []*Frame
+	freeFrames []*Frame
+	typeCache  map[bytecode.TypeID]checker.Type
+	modules    *ModuleRegistry
+	funcIndex  map[string]int
+	ffi        *RuntimeFFIRegistry
+	lastOp     bytecode.Opcode
+	lastIP     int
+	lastFn     string
 }
 
 func New(program bytecode.Program) *VM {
 	ffi := NewRuntimeFFIRegistry()
 	_ = ffi.RegisterBuiltinFFIFunctions()
-	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}
 	for i := range program.Functions {
 		vm.funcIndex[program.Functions[i].Name] = i
 	}
@@ -78,12 +79,9 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 		return nil, fmt.Errorf("function not found: %s", functionName)
 	}
 
-	frame := &Frame{
-		Fn:       fn,
-		IP:       0,
-		Locals:   make([]*runtime.Object, fn.Locals),
-		Stack:    []*runtime.Object{},
-		MaxStack: fn.MaxStack,
+	frame, err := vm.newFrame(fn, nil, nil, nil)
+	if err != nil {
+		return nil, err
 	}
 	vm.Frames = append(vm.Frames, frame)
 	return vm.run()
@@ -270,6 +268,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 					val.SetRefinedType(curr.ReturnType)
 				}
 				vm.Frames = vm.Frames[:len(vm.Frames)-1]
+				vm.recycleFrame(curr)
 				if len(vm.Frames) == 0 {
 					return val, nil
 				}
@@ -284,6 +283,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				val.SetRefinedType(curr.ReturnType)
 			}
 			vm.Frames = vm.Frames[:len(vm.Frames)-1]
+			vm.recycleFrame(curr)
 			if len(vm.Frames) == 0 {
 				return val, nil
 			}
@@ -1065,14 +1065,31 @@ func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures
 	if len(captures) != len(fnDef.Captures) {
 		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(captures))
 	}
-	frame := &Frame{
-		Fn:         fnDef,
-		IP:         0,
-		Locals:     make([]*runtime.Object, fnDef.Locals),
-		Stack:      []*runtime.Object{},
-		MaxStack:   fnDef.MaxStack,
-		ReturnType: returnType,
+
+	var frame *Frame
+	if n := len(vm.freeFrames); n > 0 {
+		frame = vm.freeFrames[n-1]
+		vm.freeFrames = vm.freeFrames[:n-1]
+	} else {
+		frame = &Frame{}
 	}
+
+	frame.Fn = fnDef
+	frame.IP = 0
+	frame.MaxStack = fnDef.MaxStack
+	frame.ReturnType = returnType
+	if cap(frame.Locals) < fnDef.Locals {
+		frame.Locals = make([]*runtime.Object, fnDef.Locals)
+	} else {
+		frame.Locals = frame.Locals[:fnDef.Locals]
+		clear(frame.Locals)
+	}
+	if cap(frame.Stack) < fnDef.MaxStack {
+		frame.Stack = make([]*runtime.Object, 0, fnDef.MaxStack)
+	} else {
+		frame.Stack = frame.Stack[:0]
+	}
+
 	for i, localIdx := range fnDef.Captures {
 		if localIdx < 0 || localIdx >= len(frame.Locals) {
 			return nil, fmt.Errorf("capture local index out of range")
@@ -1097,6 +1114,15 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 	}
 	child.Frames = append(child.Frames, frame)
 	return child.run()
+}
+
+func (vm *VM) recycleFrame(frame *Frame) {
+	clear(frame.Locals)
+	clear(frame.Stack[:len(frame.Stack)])
+	frame.Locals = frame.Locals[:0]
+	frame.Stack = frame.Stack[:0]
+	frame.ReturnType = nil
+	vm.freeFrames = append(vm.freeFrames, frame)
 }
 
 func (vm *VM) push(frame *Frame, obj *runtime.Object) {

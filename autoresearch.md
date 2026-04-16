@@ -56,4 +56,11 @@ Closer-to-parity workloads:
 - Session setup complete.
 - Verified the benchmark harness from PR #93 and confirmed it compares prebuilt VM binaries against prebuilt Go-target binaries in runtime mode.
 - Verified current tests pass on the starting branch.
-- Initial hypothesis: the biggest opportunity is reducing interpreter overhead in `compiler/bytecode/vm/vm.go` and object/frame allocation churn in VM hot paths, because IO-heavy workloads are already near parity while pure dispatch-heavy workloads are much slower.
+- **Kept:** interned immutable bool objects and cached small integer objects in `compiler/runtime/object.go`. This reduced the suite from ~968.6 ms to ~851.7 ms (~12.1% faster), with especially strong gains in `sales_pipeline`, `shape_catalog`, `word_frequency_batch`, `async_batches`, and a meaningful gain in `decode_pipeline`.
+- **Discarded:** preallocating frame stack slices. Too small to matter at suite level.
+- **Discarded:** a function-name map for `lookupFunction`. It broke semantics because function names are not globally unique across modules.
+- **Discarded:** checker composite type memoization via `sync.Map`. Slight microbenchmark improvement, but real-suite regressions from cache overhead.
+- **Discarded:** inlining arithmetic/comparison fast paths directly in the VM loop. Some workloads improved, but not enough to beat the current best.
+- **Discarded:** sharing primitive results from `Object.Copy()`. Did not help the full suite enough.
+- Current working theory: broad wins come from reducing runtime object allocation churn with near-zero overhead, not from adding cache lookups or making the interpreter loop larger/more branchy.
+- Next likely areas: more primitive/value constructor churn (especially strings/floats), collection/struct-heavy runtime helpers, and hot method paths used by the pure workloads.
