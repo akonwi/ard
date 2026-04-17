@@ -438,13 +438,32 @@ func MakeBool(b bool) *Object {
 }
 
 func MakeNone(of checker.Type) *Object {
-	maybeType := checker.MakeMaybe(of)
+	maybeType := maybeTypeFor(of)
 	return &Object{
 		_type:  maybeType,
 		kind:   KindMaybe,
 		name:   maybeType.String(),
 		raw:    nil,
 		isNone: true,
+	}
+}
+
+func maybeTypeFor(of checker.Type) *checker.Maybe {
+	switch of {
+	case checker.Int:
+		return maybeIntType
+	case checker.Float:
+		return maybeFloatType
+	case checker.Bool:
+		return maybeBoolType
+	case checker.Str:
+		return maybeStrType
+	case checker.Dynamic:
+		return maybeDynamicType
+	case checker.Void:
+		return maybeVoidType
+	default:
+		return checker.MakeMaybe(of)
 	}
 }
 
@@ -675,6 +694,13 @@ const (
 )
 
 var (
+	maybeIntType     = checker.MakeMaybe(checker.Int)
+	maybeFloatType   = checker.MakeMaybe(checker.Float)
+	maybeBoolType    = checker.MakeMaybe(checker.Bool)
+	maybeStrType     = checker.MakeMaybe(checker.Str)
+	maybeDynamicType = checker.MakeMaybe(checker.Dynamic)
+	maybeVoidType    = checker.MakeMaybe(checker.Void)
+
 	trueObj  = &Object{raw: true, _type: checker.Bool, kind: KindBool, name: checker.Bool.String()}
 	falseObj = &Object{raw: false, _type: checker.Bool, kind: KindBool, name: checker.Bool.String()}
 
