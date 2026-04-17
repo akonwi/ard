@@ -288,15 +288,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			fnDef := &vm.Program.Functions[fnIndex]
 			argc := inst.B
-			args := make([]*runtime.Object, argc)
-			for i := argc - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
-			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
 			}
-			frame, err := vm.newFrame(fnDef, args, nil, retType)
+			frame, err := vm.newFrameFromStack(curr, fnDef, argc, nil, retType)
 			if err != nil {
 				return nil, err
 			}
@@ -857,10 +853,7 @@ func (vm *VM) spawn() *VM {
 	return child
 }
 
-func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
-	if len(args) != fnDef.Arity {
-		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
-	}
+func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
 	if captures == nil {
 		captures = []*runtime.Object{}
 	}
@@ -899,8 +892,33 @@ func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, capture
 		}
 		frame.Locals[localIdx] = captures[i]
 	}
+	return frame, nil
+}
+
+func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	if len(args) != fnDef.Arity {
+		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
+	}
+	frame, err := vm.newFrameBase(fnDef, captures, returnType)
+	if err != nil {
+		return nil, err
+	}
 	for i := range args {
 		frame.Locals[i] = args[i]
+	}
+	return frame, nil
+}
+
+func (vm *VM) newFrameFromStack(caller *Frame, fnDef *bytecode.Function, argc int, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	if argc != fnDef.Arity {
+		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
+	}
+	frame, err := vm.newFrameBase(fnDef, captures, returnType)
+	if err != nil {
+		return nil, err
+	}
+	for i := argc - 1; i >= 0; i-- {
+		frame.Locals[i] = vm.popUnsafe(caller)
 	}
 	return frame, nil
 }
