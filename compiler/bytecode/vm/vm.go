@@ -81,16 +81,12 @@ type VM struct {
 	freeFrames  []*Frame
 	typeCache   map[bytecode.TypeID]checker.Type
 	modules     *ModuleRegistry
-	funcIndex   map[string]int
 	methodIndex map[string]map[string]int
 	ffi         *RuntimeFFIRegistry
 }
 
 func New(program bytecode.Program) *VM {
-	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), funcIndex: map[string]int{}, ffi: defaultFFIRegistry()}
-	for i := range program.Functions {
-		vm.funcIndex[program.Functions[i].Name] = i
-	}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), ffi: defaultFFIRegistry()}
 	return vm
 }
 
@@ -855,7 +851,6 @@ func (vm *VM) lookupFunction(name string) (*bytecode.Function, bool) {
 func (vm *VM) spawn() *VM {
 	child := New(vm.Program)
 	child.modules = vm.modules
-	child.funcIndex = vm.funcIndex
 	child.methodIndex = vm.methodIndex
 	return child
 }
