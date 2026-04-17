@@ -738,14 +738,19 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, err
 			}
 			argc := inst.B
-			args := make([]*runtime.Object, argc)
-			for i := argc - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
+			subjIndex := curr.StackTop - argc - 1
+			if subjIndex < 0 {
+				return nil, fmt.Errorf("stack underflow")
 			}
-			subj := vm.popUnsafe(curr)
+			subj := curr.Stack[subjIndex]
 			fnName := fmt.Sprintf("%s.%s", subj.TypeName(), methodConst.Str)
 			fnIndex, ok := vm.funcIndex[fnName]
 			if !ok {
+				args := make([]*runtime.Object, argc)
+				for i := argc - 1; i >= 0; i-- {
+					args[i] = vm.popUnsafe(curr)
+				}
+				subj = vm.popUnsafe(curr)
 				res, err := vm.evalTraitMethodByName(subj, methodConst.Str, args)
 				if err != nil {
 					return nil, fmt.Errorf("unknown method: %s", fnName)
@@ -761,15 +766,14 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			callArgs := make([]*runtime.Object, argc+1)
-			callArgs[0] = subj
-			for i := range args {
-				callArgs[i+1] = args[i]
-			}
-			frame, err := vm.newFrame(fnDef, callArgs, nil, retType)
+			frame, err := vm.newFrameBase(fnDef, nil, retType)
 			if err != nil {
 				return nil, err
 			}
+			for i := argc; i >= 1; i-- {
+				frame.Locals[i] = vm.popUnsafe(curr)
+			}
+			frame.Locals[0] = vm.popUnsafe(curr)
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpCallModule:
 			modConst, err := vm.constAt(inst.A)
