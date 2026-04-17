@@ -597,6 +597,31 @@ func MakeDynamic(val any) *Object {
 }
 
 func Make(val any, of checker.Type) *Object {
+	if val != nil {
+		if of == checker.Int {
+			if i, ok := val.(int); ok {
+				return MakeInt(i)
+			}
+		}
+		if of == checker.Float {
+			if f, ok := val.(float64); ok {
+				return MakeFloat(f)
+			}
+		}
+		if of == checker.Bool {
+			if b, ok := val.(bool); ok {
+				return MakeBool(b)
+			}
+		}
+		if of == checker.Str {
+			if s, ok := val.(string); ok {
+				return MakeStr(s)
+			}
+		}
+		if of == checker.Dynamic {
+			return MakeDynamic(val)
+		}
+	}
 	return &Object{
 		raw:   val,
 		_type: of,
