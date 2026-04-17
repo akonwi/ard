@@ -556,9 +556,13 @@ func (o *Object) IsErr() bool {
 }
 
 func (o *Object) UnwrapResult() *Object {
-	new := Make(o.raw, o._type)
-	new.isNone = o.isNone
-	return new
+	return &Object{
+		raw:    o.raw,
+		_type:  o._type,
+		kind:   o.kind,
+		name:   o.name,
+		isNone: o.isNone,
+	}
 }
 
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
