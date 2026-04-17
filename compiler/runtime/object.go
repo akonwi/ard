@@ -532,28 +532,28 @@ func (o *Object) Map_GetKey(str string) *Object {
 	keyType := o._type.(*checker.Map).Key()
 	key := Make(nil, keyType)
 
-	switch keyType.String() {
-	case checker.Str.String():
+	switch keyType {
+	case checker.Str:
 		key.raw = str
-	case checker.Int.String():
+	case checker.Int:
 		if _num, err := strconv.Atoi(str); err != nil {
 			panic(fmt.Errorf("Couldn't turn map key %s into int", str))
 		} else {
 			key.raw = _num
 		}
-	case checker.Bool.String():
+	case checker.Bool:
 		if _bool, err := strconv.ParseBool(str); err != nil {
 			panic(fmt.Errorf("Couldn't turn map key %s into bool", str))
 		} else {
 			key.raw = _bool
 		}
-	case checker.Float.String():
+	case checker.Float:
 		if _float, err := strconv.ParseFloat(str, 64); err != nil {
 			panic(fmt.Errorf("Couldn't turn map key %s into float", str))
 		} else {
 			key.raw = _float
 		}
-	case checker.Dynamic.String():
+	case checker.Dynamic:
 		key.raw = str
 	default:
 		panic(fmt.Errorf("Unsupported map key: %s", keyType))
