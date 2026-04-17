@@ -779,9 +779,6 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			if modConst.Kind != bytecode.ConstStr || fnConst.Kind != bytecode.ConstStr {
-				return nil, fmt.Errorf("module call expects string constants")
-			}
 			argc := inst.Imm
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
@@ -801,9 +798,6 @@ func (vm *VM) run() (*runtime.Object, error) {
 			bindingConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
-			}
-			if bindingConst.Kind != bytecode.ConstStr {
-				return nil, fmt.Errorf("extern call expects string binding")
 			}
 			argc := inst.Imm
 			args := make([]*runtime.Object, argc)
