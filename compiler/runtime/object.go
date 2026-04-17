@@ -135,9 +135,10 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 }
 
 func typeHasOpenGeneric(t checker.Type) bool {
-	switch tt := t.(type) {
-	case nil:
+	if t == nil || t == checker.Int || t == checker.Float || t == checker.Bool || t == checker.Str || t == checker.Void || t == checker.Dynamic {
 		return false
+	}
+	switch tt := t.(type) {
 	case *checker.TypeVar:
 		return tt.Actual() == nil || typeHasOpenGeneric(tt.Actual())
 	case *checker.List:
@@ -148,6 +149,8 @@ func typeHasOpenGeneric(t checker.Type) bool {
 		return typeHasOpenGeneric(tt.Of())
 	case *checker.Result:
 		return typeHasOpenGeneric(tt.Val()) || typeHasOpenGeneric(tt.Err())
+	case *checker.StructDef, *checker.Enum, *checker.ExternType:
+		return false
 	case *checker.FunctionDef:
 		for i := range tt.Parameters {
 			if typeHasOpenGeneric(tt.Parameters[i].Type) {
