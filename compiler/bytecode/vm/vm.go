@@ -283,10 +283,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpCall:
 			fnDef := &vm.Program.Functions[inst.A]
 			argc := inst.B
-			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
-			if err != nil {
-				return nil, err
-			}
+			retType, _ := vm.typeFor(bytecode.TypeID(inst.C))
 			frame, err := vm.newFrameFromStackUnchecked(curr, fnDef, argc, nil, retType)
 			if err != nil {
 				return nil, err
