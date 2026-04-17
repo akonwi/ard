@@ -282,7 +282,7 @@ func (o *Object) AsBool() bool {
 	panic(fmt.Sprintf("%s is not a Bool", o))
 }
 
-func (o Object) IsInt() (int, bool) {
+func (o *Object) IsInt() (int, bool) {
 	if o.kind == KindInt {
 		return o.raw.(int), true
 	}
@@ -296,7 +296,7 @@ func (o *Object) AsInt() int {
 	panic(fmt.Sprintf("%s is not an Int", o))
 }
 
-func (o Object) IsFloat() bool {
+func (o *Object) IsFloat() bool {
 	return o.kind == KindFloat
 }
 
@@ -314,7 +314,7 @@ func (o *Object) AsString() string {
 	panic(fmt.Sprintf("%s is not a string", o))
 }
 
-func (o Object) IsStr() (string, bool) {
+func (o *Object) IsStr() (string, bool) {
 	if o.kind == KindStr {
 		return o.raw.(string), true
 	}
@@ -335,7 +335,7 @@ func (o *Object) AsMap() map[string]*Object {
 	panic(fmt.Sprintf("%T is not a Map", o._type))
 }
 
-func (o Object) MapType() *checker.Map {
+func (o *Object) MapType() *checker.Map {
 	if o.kind != KindMap {
 		return nil
 	}
@@ -345,7 +345,7 @@ func (o Object) MapType() *checker.Map {
 	return nil
 }
 
-func (o Object) StructType() *checker.StructDef {
+func (o *Object) StructType() *checker.StructDef {
 	if o.kind != KindStruct {
 		return nil
 	}
@@ -355,7 +355,7 @@ func (o Object) StructType() *checker.StructDef {
 	return nil
 }
 
-func (o Object) EnumType() *checker.Enum {
+func (o *Object) EnumType() *checker.Enum {
 	if o.kind != KindEnum {
 		return nil
 	}
@@ -430,7 +430,7 @@ func (o Object) ToSome(val any) *Object {
 	return &o
 }
 
-func (o Object) IsNone() bool {
+func (o *Object) IsNone() bool {
 	return o.isNone
 }
 
@@ -489,7 +489,7 @@ func (o *Object) Map_Set(key, val *Object) bool {
 }
 
 // Ard primitives can be used as keys. The raw representation is a string, so convert the string from Go back to Ard
-func (o Object) Map_GetKey(str string) *Object {
+func (o *Object) Map_GetKey(str string) *Object {
 	keyType := o._type.(*checker.Map).Key()
 	key := Make(nil, keyType)
 
@@ -539,15 +539,15 @@ func MakeOk(err *Object) *Object {
 	return unwrapped
 }
 
-func (o Object) IsResult() bool {
+func (o *Object) IsResult() bool {
 	return o.isOk || o.isErr
 }
 
-func (o Object) IsOk() bool {
+func (o *Object) IsOk() bool {
 	return o.isOk
 }
 
-func (o Object) IsErr() bool {
+func (o *Object) IsErr() bool {
 	return o.isErr
 }
 
@@ -566,11 +566,11 @@ func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
 	}
 }
 
-func (o Object) IsStruct() bool {
+func (o *Object) IsStruct() bool {
 	return o.kind == KindStruct
 }
 
-func (o Object) Struct_Get(key string) *Object {
+func (o *Object) Struct_Get(key string) *Object {
 	if !o.IsStruct() {
 		panic(fmt.Errorf("%s is not a struct", o._type))
 	}
