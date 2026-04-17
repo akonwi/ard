@@ -25,7 +25,7 @@ type Object struct {
 	isNone bool
 }
 
-func (o Object) String() string {
+func (o *Object) String() string {
 	return fmt.Sprintf("%v:%s", o.raw, o._type)
 }
 
