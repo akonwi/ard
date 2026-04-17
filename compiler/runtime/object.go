@@ -29,22 +29,22 @@ func (o Object) String() string {
 	return fmt.Sprintf("%v:%s", o.raw, o._type)
 }
 
-func (o Object) Type() checker.Type {
+func (o *Object) Type() checker.Type {
 	return o._type
 }
 
-func (o Object) Kind() Kind {
+func (o *Object) Kind() Kind {
 	return o.kind
 }
 
-func (o Object) TypeName() string {
+func (o *Object) TypeName() string {
 	return o.name
 }
 
 // simply compares the raw representations.
 //
 // the checker rules should prevent more complex comparisons.
-func (o Object) Equals(other Object) bool {
+func (o *Object) Equals(other Object) bool {
 	switch o._type {
 	case checker.Int:
 		return o.raw.(int) == other.raw.(int)
@@ -59,7 +59,7 @@ func (o Object) Equals(other Object) bool {
 	}
 }
 
-func (o Object) Raw() any {
+func (o *Object) Raw() any {
 	return o.raw
 }
 
@@ -275,7 +275,7 @@ func (o *Object) GoValue() any {
 	return o.raw
 }
 
-func (o Object) AsBool() bool {
+func (o *Object) AsBool() bool {
 	if b, ok := o.raw.(bool); ok {
 		return b
 	}
@@ -289,7 +289,7 @@ func (o Object) IsInt() (int, bool) {
 	return 0, false
 }
 
-func (o Object) AsInt() int {
+func (o *Object) AsInt() int {
 	if int, ok := o.raw.(int); ok {
 		return int
 	}
@@ -300,14 +300,14 @@ func (o Object) IsFloat() bool {
 	return o.kind == KindFloat
 }
 
-func (o Object) AsFloat() float64 {
+func (o *Object) AsFloat() float64 {
 	if f, ok := o.raw.(float64); ok {
 		return f
 	}
 	panic(fmt.Sprintf("%s is not a Float", o))
 }
 
-func (o Object) AsString() string {
+func (o *Object) AsString() string {
 	if str, ok := o.raw.(string); ok {
 		return str
 	}
