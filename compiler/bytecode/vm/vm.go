@@ -181,6 +181,22 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv, bytecode.OpMod:
 			b := vm.popUnsafe(curr)
 			a := vm.popUnsafe(curr)
+			if a.Kind() == runtime.KindInt && b.Kind() == runtime.KindInt {
+				left, right := a.AsInt(), b.AsInt()
+				switch inst.Op {
+				case bytecode.OpAdd:
+					vm.push(curr, runtime.MakeInt(left+right))
+				case bytecode.OpSub:
+					vm.push(curr, runtime.MakeInt(left-right))
+				case bytecode.OpMul:
+					vm.push(curr, runtime.MakeInt(left*right))
+				case bytecode.OpDiv:
+					vm.push(curr, runtime.MakeInt(left/right))
+				case bytecode.OpMod:
+					vm.push(curr, runtime.MakeInt(left%right))
+				}
+				continue
+			}
 			res, err := vm.evalBinary(inst.Op, a, b)
 			if err != nil {
 				return nil, err
@@ -205,6 +221,24 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpEq, bytecode.OpNeq, bytecode.OpLt, bytecode.OpLte, bytecode.OpGt, bytecode.OpGte:
 			b := vm.popUnsafe(curr)
 			a := vm.popUnsafe(curr)
+			if a.Kind() == runtime.KindInt && b.Kind() == runtime.KindInt {
+				left, right := a.AsInt(), b.AsInt()
+				switch inst.Op {
+				case bytecode.OpEq:
+					vm.push(curr, runtime.MakeBool(left == right))
+				case bytecode.OpNeq:
+					vm.push(curr, runtime.MakeBool(left != right))
+				case bytecode.OpLt:
+					vm.push(curr, runtime.MakeBool(left < right))
+				case bytecode.OpLte:
+					vm.push(curr, runtime.MakeBool(left <= right))
+				case bytecode.OpGt:
+					vm.push(curr, runtime.MakeBool(left > right))
+				case bytecode.OpGte:
+					vm.push(curr, runtime.MakeBool(left >= right))
+				}
+				continue
+			}
 			res, err := vm.evalCompare(inst.Op, a, b)
 			if err != nil {
 				return nil, err
