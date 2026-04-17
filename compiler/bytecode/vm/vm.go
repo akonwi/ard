@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/akonwi/ard/bytecode"
@@ -75,13 +76,14 @@ func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
 }
 
 type VM struct {
-	Program    bytecode.Program
-	Frames     []*Frame
-	freeFrames []*Frame
-	typeCache  map[bytecode.TypeID]checker.Type
-	modules    *ModuleRegistry
-	funcIndex  map[string]int
-	ffi        *RuntimeFFIRegistry
+	Program     bytecode.Program
+	Frames      []*Frame
+	freeFrames  []*Frame
+	typeCache   map[bytecode.TypeID]checker.Type
+	modules     *ModuleRegistry
+	funcIndex   map[string]int
+	methodIndex map[string]map[string]int
+	ffi         *RuntimeFFIRegistry
 }
 
 func New(program bytecode.Program) *VM {
@@ -743,8 +745,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, fmt.Errorf("stack underflow")
 			}
 			subj := curr.Stack[subjIndex]
-			fnName := fmt.Sprintf("%s.%s", subj.TypeName(), methodConst.Str)
-			fnIndex, ok := vm.funcIndex[fnName]
+			receiverType := subj.TypeName()
+			fnIndex, ok := vm.methodFunctionIndex(receiverType, methodConst.Str)
 			if !ok {
 				args := make([]*runtime.Object, argc)
 				for i := argc - 1; i >= 0; i-- {
@@ -753,7 +755,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				subj = vm.popUnsafe(curr)
 				res, err := vm.evalTraitMethodByName(subj, methodConst.Str, args)
 				if err != nil {
-					return nil, fmt.Errorf("unknown method: %s", fnName)
+					return nil, fmt.Errorf("unknown method: %s.%s", receiverType, methodConst.Str)
 				}
 				vm.push(curr, res)
 				continue
@@ -854,7 +856,35 @@ func (vm *VM) spawn() *VM {
 	child := New(vm.Program)
 	child.modules = vm.modules
 	child.funcIndex = vm.funcIndex
+	child.methodIndex = vm.methodIndex
 	return child
+}
+
+func (vm *VM) methodFunctionIndex(receiverType, methodName string) (int, bool) {
+	if vm.methodIndex == nil {
+		index := make(map[string]map[string]int)
+		for i := range vm.Program.Functions {
+			name := vm.Program.Functions[i].Name
+			dot := strings.LastIndexByte(name, '.')
+			if dot <= 0 || dot >= len(name)-1 {
+				continue
+			}
+			recv := name[:dot]
+			byType, ok := index[recv]
+			if !ok {
+				byType = map[string]int{}
+				index[recv] = byType
+			}
+			byType[name[dot+1:]] = i
+		}
+		vm.methodIndex = index
+	}
+	byType, ok := vm.methodIndex[receiverType]
+	if !ok {
+		return 0, false
+	}
+	fnIndex, ok := byType[methodName]
+	return fnIndex, ok
 }
 
 func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
