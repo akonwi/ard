@@ -281,11 +281,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(vm.Frames[len(vm.Frames)-1], val)
 		case bytecode.OpCall:
-			fnIndex := inst.A
-			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
-				return nil, fmt.Errorf("function index out of range")
-			}
-			fnDef := &vm.Program.Functions[fnIndex]
+			fnDef := &vm.Program.Functions[inst.A]
 			argc := inst.B
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
