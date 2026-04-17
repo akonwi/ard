@@ -291,7 +291,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			frame, err := vm.newFrameFromStack(curr, fnDef, argc, nil, retType)
+			frame, err := vm.newFrameFromStackUnchecked(curr, fnDef, argc, nil, retType)
 			if err != nil {
 				return nil, err
 			}
@@ -953,6 +953,10 @@ func (vm *VM) newFrameFromStack(caller *Frame, fnDef *bytecode.Function, argc in
 	if argc != fnDef.Arity {
 		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
 	}
+	return vm.newFrameFromStackUnchecked(caller, fnDef, argc, captures, returnType)
+}
+
+func (vm *VM) newFrameFromStackUnchecked(caller *Frame, fnDef *bytecode.Function, argc int, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
 	frame, err := vm.newFrameBase(fnDef, captures, returnType)
 	if err != nil {
 		return nil, err
