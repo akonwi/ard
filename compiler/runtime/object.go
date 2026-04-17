@@ -403,10 +403,11 @@ func MakeBool(b bool) *Object {
 }
 
 func MakeNone(of checker.Type) *Object {
+	maybeType := checker.MakeMaybe(of)
 	return &Object{
-		_type:  checker.MakeMaybe(of),
+		_type:  maybeType,
 		kind:   KindMaybe,
-		name:   checker.MakeMaybe(of).String(),
+		name:   maybeType.String(),
 		raw:    nil,
 		isNone: true,
 	}
@@ -436,10 +437,11 @@ func (o *Object) IsNone() bool {
 }
 
 func MakeList(of checker.Type, items ...*Object) *Object {
+	listType := checker.MakeList(of)
 	return &Object{
-		_type: checker.MakeList(of),
+		_type: listType,
 		kind:  KindList,
-		name:  checker.MakeList(of).String(),
+		name:  listType.String(),
 		raw:   items,
 	}
 }
@@ -450,10 +452,11 @@ func (o *Object) List_Push(item *Object) {
 }
 
 func MakeMap(keyType, valueType checker.Type) *Object {
+	mapType := checker.MakeMap(keyType, valueType)
 	return &Object{
-		_type: checker.MakeMap(keyType, valueType),
+		_type: mapType,
 		kind:  KindMap,
-		name:  checker.MakeMap(keyType, valueType).String(),
+		name:  mapType.String(),
 		raw:   make(map[string]*Object),
 	}
 }
