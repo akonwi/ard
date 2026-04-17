@@ -528,16 +528,16 @@ func (o *Object) Map_GetKey(str string) *Object {
 
 // create Result::Err
 func MakeErr(err *Object) *Object {
-	unwrapped := err.UnwrapResult()
-	unwrapped.isErr = true
-	return unwrapped
+	err.isOk = false
+	err.isErr = true
+	return err
 }
 
 // create Result::Ok
 func MakeOk(err *Object) *Object {
-	unwrapped := err.UnwrapResult()
-	unwrapped.isOk = true
-	return unwrapped
+	err.isErr = false
+	err.isOk = true
+	return err
 }
 
 func (o *Object) IsResult() bool {
