@@ -412,22 +412,23 @@ func MakeNone(of checker.Type) *Object {
 	}
 }
 
-func (o Object) ToNone() *Object {
+func (o *Object) ToNone() *Object {
 	if !checker.IsMaybe(o._type) {
 		panic(fmt.Errorf("Cannot make Maybe::none from %s", o))
 	}
+	o.raw = nil
 	o.isNone = true
-	return &o
+	return o
 }
 
 // create a Maybe::Some from an existing Maybe
-func (o Object) ToSome(val any) *Object {
+func (o *Object) ToSome(val any) *Object {
 	if !checker.IsMaybe(o._type) {
 		panic(fmt.Errorf("Cannot make Maybe::some from %s", o))
 	}
 	o.raw = val
 	o.isNone = false
-	return &o
+	return o
 }
 
 func (o *Object) IsNone() bool {
