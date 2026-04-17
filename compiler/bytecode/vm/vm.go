@@ -84,6 +84,7 @@ type VM struct {
 	methodIndex       map[string]map[string]int
 	functionLookup    map[string]int
 	moduleCallScratch checker.FunctionCall
+	moduleArgsScratch []*runtime.Object
 	ffi               *RuntimeFFIRegistry
 }
 
@@ -778,7 +779,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, err
 			}
 			argc := inst.Imm
-			args := make([]*runtime.Object, argc)
+			if cap(vm.moduleArgsScratch) < argc {
+				vm.moduleArgsScratch = make([]*runtime.Object, argc)
+			}
+			args := vm.moduleArgsScratch[:argc]
 			for i := argc - 1; i >= 0; i-- {
 				args[i] = vm.popUnsafe(curr)
 			}
