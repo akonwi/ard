@@ -80,10 +80,11 @@ type VM struct {
 	Frames      []*Frame
 	freeFrames  []*Frame
 	typeCache   map[bytecode.TypeID]checker.Type
-	modules        *ModuleRegistry
-	methodIndex    map[string]map[string]int
-	functionLookup map[string]int
-	ffi            *RuntimeFFIRegistry
+	modules           *ModuleRegistry
+	methodIndex       map[string]map[string]int
+	functionLookup    map[string]int
+	moduleCallScratch checker.FunctionCall
+	ffi               *RuntimeFFIRegistry
 }
 
 func New(program bytecode.Program) *VM {
@@ -785,8 +786,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			call := &checker.FunctionCall{Name: fnConst.Str, ReturnType: retType}
-			res, err := vm.modules.Call(modConst.Str, call, args)
+			vm.moduleCallScratch.Name = fnConst.Str
+			vm.moduleCallScratch.ReturnType = retType
+			res, err := vm.modules.Call(modConst.Str, &vm.moduleCallScratch, args)
 			if err != nil {
 				return nil, err
 			}
