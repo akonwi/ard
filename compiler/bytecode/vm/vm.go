@@ -884,11 +884,12 @@ func (vm *VM) methodFunctionIndex(receiverType, methodName string) (int, bool) {
 }
 
 func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	captureLen := len(captures)
 	if captures == nil {
-		captures = []*runtime.Object{}
+		captureLen = 0
 	}
-	if len(captures) != len(fnDef.Captures) {
-		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(captures))
+	if captureLen != len(fnDef.Captures) {
+		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), captureLen)
 	}
 
 	var frame *Frame
