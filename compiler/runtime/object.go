@@ -82,6 +82,12 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	}
 
 	originalType := o._type
+	if !o.isOk && !o.isErr {
+		switch o.kind {
+		case KindVoid, KindStr, KindInt, KindFloat, KindBool, KindStruct, KindEnum, KindFunction, KindDynamic:
+			return
+		}
+	}
 
 	// When the declared type is a Result and this object is already a result
 	// value (isOk/isErr), refine to the appropriate inner type rather than
