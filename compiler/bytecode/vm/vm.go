@@ -80,9 +80,10 @@ type VM struct {
 	Frames      []*Frame
 	freeFrames  []*Frame
 	typeCache   map[bytecode.TypeID]checker.Type
-	modules     *ModuleRegistry
-	methodIndex map[string]map[string]int
-	ffi         *RuntimeFFIRegistry
+	modules        *ModuleRegistry
+	methodIndex    map[string]map[string]int
+	functionLookup map[string]int
+	ffi            *RuntimeFFIRegistry
 }
 
 func New(program bytecode.Program) *VM {
@@ -840,18 +841,28 @@ func (vm *VM) run() (*runtime.Object, error) {
 }
 
 func (vm *VM) lookupFunction(name string) (*bytecode.Function, bool) {
-	for i := range vm.Program.Functions {
-		if vm.Program.Functions[i].Name == name {
-			return &vm.Program.Functions[i], true
+	if vm.functionLookup == nil {
+		lookup := map[string]int{}
+		for i := range vm.Program.Functions {
+			fnName := vm.Program.Functions[i].Name
+			if _, exists := lookup[fnName]; !exists {
+				lookup[fnName] = i
+			}
 		}
+		vm.functionLookup = lookup
 	}
-	return nil, false
+	idx, ok := vm.functionLookup[name]
+	if !ok {
+		return nil, false
+	}
+	return &vm.Program.Functions[idx], true
 }
 
 func (vm *VM) spawn() *VM {
 	child := New(vm.Program)
 	child.modules = vm.modules
 	child.methodIndex = vm.methodIndex
+	child.functionLookup = vm.functionLookup
 	return child
 }
 
