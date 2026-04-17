@@ -110,7 +110,7 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	if _, ok := o._type.(*checker.TypeVar); ok {
 		o._type = declared
 	}
-	if strings.Contains(o.Type().String(), "$") && !strings.Contains(declared.String(), "$") {
+	if typeHasOpenGeneric(o._type) && !typeHasOpenGeneric(declared) {
 		o._type = declared
 
 		// for collections, refine insides
@@ -132,6 +132,32 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	}
 	o.kind = kindForType(o._type)
 	o.name = typeNameForType(o._type)
+}
+
+func typeHasOpenGeneric(t checker.Type) bool {
+	switch tt := t.(type) {
+	case nil:
+		return false
+	case *checker.TypeVar:
+		return tt.Actual() == nil || typeHasOpenGeneric(tt.Actual())
+	case *checker.List:
+		return typeHasOpenGeneric(tt.Of())
+	case *checker.Map:
+		return typeHasOpenGeneric(tt.Key()) || typeHasOpenGeneric(tt.Value())
+	case *checker.Maybe:
+		return typeHasOpenGeneric(tt.Of())
+	case *checker.Result:
+		return typeHasOpenGeneric(tt.Val()) || typeHasOpenGeneric(tt.Err())
+	case *checker.FunctionDef:
+		for i := range tt.Parameters {
+			if typeHasOpenGeneric(tt.Parameters[i].Type) {
+				return true
+			}
+		}
+		return typeHasOpenGeneric(tt.ReturnType)
+	default:
+		return strings.Contains(t.String(), "$")
+	}
 }
 
 func deepCopy(data any) any {
