@@ -121,7 +121,11 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		if subj.Raw() == nil {
 			return nil, fmt.Errorf("%s", args[0].AsString())
 		}
-		return vm.makeValueWithType(subj.Raw(), returnType)
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, err
+		}
+		return subj.UnwrapMaybeInPlace(resolved), nil
 	case checker.MaybeIsNone:
 		return runtime.MakeBool(subj.Raw() == nil), nil
 	case checker.MaybeIsSome:
@@ -130,7 +134,11 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		if subj.Raw() == nil {
 			return args[0], nil
 		}
-		return vm.makeValueWithType(subj.Raw(), returnType)
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, err
+		}
+		return subj.UnwrapMaybeInPlace(resolved), nil
 	case checker.MaybeMap:
 		resolved, err := vm.typeFor(returnType)
 		if err != nil {
