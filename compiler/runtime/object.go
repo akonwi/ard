@@ -625,6 +625,14 @@ func (o *Object) UnwrapResultInPlace() *Object {
 	return o
 }
 
+func (o *Object) UnwrapMaybeInPlace(of checker.Type) *Object {
+	o._type = of
+	o.kind = kindForType(of)
+	o.name = typeNameForType(of)
+	o.isNone = false
+	return o
+}
+
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
 	return &Object{
 		raw:   fields,

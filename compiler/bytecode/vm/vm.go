@@ -605,11 +605,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if subj.IsNone() {
 				return nil, fmt.Errorf("cannot unwrap none")
 			}
-			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.A))
+			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, obj)
+			vm.push(curr, subj.UnwrapMaybeInPlace(resolved))
 		case bytecode.OpResultUnwrap:
 			subj := vm.popUnsafe(curr)
 			unwrapped := subj.UnwrapResultInPlace()
@@ -678,11 +678,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 				vm.push(vm.Frames[len(vm.Frames)-1], subj)
 				continue
 			}
-			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.Imm))
+			okType, err := vm.typeFor(bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, obj)
+			vm.push(curr, subj.UnwrapMaybeInPlace(okType))
 		case bytecode.OpMakeStruct:
 			structType, err := vm.structTypeFor(bytecode.TypeID(inst.A))
 			if err != nil {
