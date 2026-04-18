@@ -627,8 +627,29 @@ func (o *Object) UnwrapResultInPlace() *Object {
 
 func (o *Object) UnwrapMaybeInPlace(of checker.Type) *Object {
 	o._type = of
-	o.kind = kindForType(of)
-	o.name = typeNameForType(of)
+	switch of {
+	case checker.Int:
+		o.kind = KindInt
+		o.name = checker.Int.String()
+	case checker.Float:
+		o.kind = KindFloat
+		o.name = checker.Float.String()
+	case checker.Bool:
+		o.kind = KindBool
+		o.name = checker.Bool.String()
+	case checker.Str:
+		o.kind = KindStr
+		o.name = checker.Str.String()
+	case checker.Void:
+		o.kind = KindVoid
+		o.name = checker.Void.String()
+	case checker.Dynamic:
+		o.kind = KindDynamic
+		o.name = checker.Dynamic.String()
+	default:
+		o.kind = kindForType(of)
+		o.name = typeNameForType(of)
+	}
 	o.isNone = false
 	return o
 }
