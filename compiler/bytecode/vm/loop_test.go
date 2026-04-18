@@ -93,6 +93,17 @@ func TestBytecodeForInLoops(t *testing.T) {
 			`,
 			want: 9,
 		},
+		{
+			name: "looping over a map uses sorted keys",
+			input: `
+				mut out = ""
+				for key,val in [3:"c", 1:"a", 2:"b"] {
+					out = out + "{key}:{val};"
+				}
+				out
+			`,
+			want: "1:a;2:b;3:c;",
+		},
 	}
 
 	for _, test := range tests {

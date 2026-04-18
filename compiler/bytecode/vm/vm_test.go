@@ -573,6 +573,14 @@ func TestBytecodeMapMethods(t *testing.T) {
 	if res != 1 {
 		t.Fatalf("Expected 1, got %v", res)
 	}
+	res = runBytecode(t, strings.Join([]string{
+		`let items = [3: "c", 1: "a", 2: "b"]`,
+		`let keys = items.keys()`,
+		`"{keys.at(0)}-{keys.at(1)}-{keys.at(2)}"`,
+	}, "\n"))
+	if res != "1-2-3" {
+		t.Fatalf("Expected sorted map keys, got %v", res)
+	}
 }
 
 func TestBytecodeStringMethods(t *testing.T) {

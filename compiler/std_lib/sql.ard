@@ -25,6 +25,11 @@ struct Transaction {
   _tx: Tx,
 }
 
+struct PreparedQuery {
+  string: Str,
+  values: [Value],
+}
+
 struct Query {
   conn: Conn,
   string: Str,
@@ -32,7 +37,10 @@ struct Query {
 }
 
 impl Query {
-  fn prepare(mut query_str: Str, mut values: [Value], args: [Str: Value]) Void!Str {
+  fn prepare(args: [Str: Value]) PreparedQuery!Str {
+    mut query_str = self.string
+    mut values: [Value] = []
+
     for param in self.params {
       // Replace only the first occurrence to handle duplicate parameters correctly
       query_str = query_str.replace("@" + param, "?")
@@ -40,21 +48,17 @@ impl Query {
       values.push(value)
     }
 
-    Result::ok(())
+    Result::ok(PreparedQuery{string: query_str, values: values})
   }
 
   fn run(args: [Str: Value]) Void!Str {
-    mut sanitized = self.string
-    mut values: [Value] = []
-    try self.prepare(sanitized, values, args)
-    execute(self.conn, sanitized, values)
+    let prepared = try self.prepare(args)
+    execute(self.conn, prepared.string, prepared.values)
   }
 
   fn all(args: [Str: Value]) [Dynamic]!Str {
-    mut sanitized = self.string
-    mut values: [Value] = []
-    try self.prepare(sanitized, values, args)
-    run_query(self.conn, sanitized, values)
+    let prepared = try self.prepare(args)
+    run_query(self.conn, prepared.string, prepared.values)
   }
 
   fn first(args: [Str: Value]) Dynamic?!Str {

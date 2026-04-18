@@ -21,10 +21,27 @@ jobs:
           go-version: "1.26"
           cache: true
 
-      - name: Run compiler tests
+      - name: Run compiler unit tests
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./...
 
       - name: Standard Libary tests
         working-directory: compiler
         run: go run -tags=goexperiment.jsonv2 main.go test std_lib
+
+  test-go-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Run Go backend integration tests
+        working-directory: compiler
+        run: go test -tags='goexperiment.jsonv2 integration' ./transpile -count=1

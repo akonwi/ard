@@ -915,14 +915,15 @@ type Parameter struct {
 }
 
 type FunctionDef struct {
-	Name       string
-	Receiver   string
-	Parameters []Parameter
-	ReturnType Type
-	Mutates    bool
-	IsTest     bool
-	Body       *Block
-	Private    bool
+	Name                    string
+	Receiver                string
+	Parameters              []Parameter
+	ReturnType              Type
+	InferReturnTypeFromBody bool
+	Mutates                 bool
+	IsTest                  bool
+	Body                    *Block
+	Private                 bool
 }
 
 func (f FunctionDef) String() string {
@@ -1077,6 +1078,10 @@ func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
 
 func (f *FunctionCall) Type() Type {
 	return f.ReturnType
+}
+
+func (f *FunctionCall) Definition() *FunctionDef {
+	return f.fn
 }
 
 type ModuleStructInstance struct {

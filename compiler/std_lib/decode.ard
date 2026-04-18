@@ -51,9 +51,7 @@ fn from_json(input: JsonInput) Dynamic!Str {
   let json = match input {
     Str(text) => text,
     Dynamic(raw) => {
-      let text = try _decode_string(raw) -> err {
-        Result::err("Expected a JSON string, got {err.found}")
-      }
+      let text = try _decode_string(raw) -> err { Result::err("Expected a JSON string, got {err.found}") }
       text
     },
   }

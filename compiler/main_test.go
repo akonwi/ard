@@ -35,6 +35,73 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
+func TestParseRunArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		path       string
+		target     string
+		expectErr  bool
+		errMessage string
+	}{
+		{
+			name:   "input only",
+			args:   []string{"samples/main.ard"},
+			path:   "samples/main.ard",
+			target: "",
+		},
+		{
+			name:   "explicit target",
+			args:   []string{"--target", "go", "samples/main.ard"},
+			path:   "samples/main.ard",
+			target: "go",
+		},
+		{
+			name:       "missing target value",
+			args:       []string{"--target"},
+			expectErr:  true,
+			errMessage: "--target requires a value",
+		},
+		{
+			name:       "unknown target",
+			args:       []string{"--target", "wasm", "samples/main.ard"},
+			expectErr:  true,
+			errMessage: "unknown target: wasm",
+		},
+		{
+			name:       "unknown flag",
+			args:       []string{"--watch", "samples/main.ard"},
+			expectErr:  true,
+			errMessage: "unknown flag: --watch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, target, err := parseRunArgs(tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.errMessage)
+				}
+				if err.Error() != tt.errMessage {
+					t.Fatalf("expected error %q, got %q", tt.errMessage, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("did not expect error: %v", err)
+			}
+			if path != tt.path {
+				t.Fatalf("expected path %q, got %q", tt.path, path)
+			}
+			if target != tt.target {
+				t.Fatalf("expected target %q, got %q", tt.target, target)
+			}
+		})
+	}
+}
+
 func TestParseTestArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -103,6 +170,79 @@ func TestParseTestArgs(t *testing.T) {
 			}
 			if failFast != tt.failFast {
 				t.Fatalf("expected failFast %t, got %t", tt.failFast, failFast)
+			}
+		})
+	}
+}
+
+func TestParseBuildArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		path       string
+		out        string
+		target     string
+		expectErr  bool
+		errMessage string
+	}{
+		{
+			name:   "input only",
+			args:   []string{"demo.ard"},
+			path:   "demo.ard",
+			out:    "demo",
+			target: "",
+		},
+		{
+			name:   "explicit output and target",
+			args:   []string{"samples/main.ard", "--out", "demo", "--target", "go"},
+			path:   "samples/main.ard",
+			out:    "demo",
+			target: "go",
+		},
+		{
+			name:       "missing target value",
+			args:       []string{"samples/main.ard", "--target"},
+			expectErr:  true,
+			errMessage: "--target requires a value",
+		},
+		{
+			name:       "unknown target",
+			args:       []string{"samples/main.ard", "--target", "wasm"},
+			expectErr:  true,
+			errMessage: "unknown target: wasm",
+		},
+		{
+			name:       "unknown flag",
+			args:       []string{"samples/main.ard", "--wat"},
+			expectErr:  true,
+			errMessage: "unknown flag: --wat",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, out, target, err := parseBuildArgs(tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.errMessage)
+				}
+				if err.Error() != tt.errMessage {
+					t.Fatalf("expected error %q, got %q", tt.errMessage, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("did not expect error: %v", err)
+			}
+			if path != tt.path {
+				t.Fatalf("expected path %q, got %q", tt.path, path)
+			}
+			if out != tt.out {
+				t.Fatalf("expected output %q, got %q", tt.out, out)
+			}
+			if target != tt.target {
+				t.Fatalf("expected target %q, got %q", tt.target, target)
 			}
 		})
 	}

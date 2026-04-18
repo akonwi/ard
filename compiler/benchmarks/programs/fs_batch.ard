@@ -1,0 +1,60 @@
+use ard/fs
+use ard/io
+
+fn file_path(dir: Str, name: Str) Str {
+  "{dir}/{name}"
+}
+
+fn cleanup_dir(dir: Str) {
+  if fs::exists(dir) {
+    let entries = fs::list_dir(dir).expect("list benchmark dir")
+    for entry in entries {
+      fs::delete(file_path(dir, entry.name)).expect("delete benchmark file")
+    }
+    fs::delete_dir(dir).expect("delete benchmark dir")
+  }
+}
+
+fn main() {
+  let dir = ".ard-bench-fs"
+  cleanup_dir(dir)
+  fs::create_dir(dir).expect("create benchmark dir")
+
+  mut checksum = 0
+
+  for i in 0..400 {
+    let base_name = "item-{i}.txt"
+    let copy_name = "copy-{i}.txt"
+    let final_name = "final-{i}.txt"
+    let base_path = file_path(dir, base_name)
+    let copy_path = file_path(dir, copy_name)
+    let final_path = file_path(dir, final_name)
+    let content = "record:{i}:{i % 17}:{i * 13 % 29}:{i * i % 97}"
+
+    fs::write(base_path, content).expect("write benchmark file")
+    fs::copy(base_path, copy_path).expect("copy benchmark file")
+    fs::rename(copy_path, final_path).expect("rename benchmark file")
+
+    let text = fs::read(final_path).expect("read benchmark file")
+    checksum =+ text.size()
+
+    if fs::exists(base_path) {
+      checksum =+ 1
+    }
+
+    if fs::is_file(final_path) {
+      checksum =+ 2
+    }
+  }
+
+  let entries = fs::list_dir(dir).expect("list benchmark dir at end")
+  checksum =+ entries.size()
+
+  for entry in entries {
+    checksum =+ entry.name.size()
+    fs::delete(file_path(dir, entry.name)).expect("delete benchmark file at end")
+  }
+
+  fs::delete_dir(dir).expect("delete benchmark dir at end")
+  io::print(checksum)
+}

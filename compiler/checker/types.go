@@ -614,6 +614,11 @@ func (a TypeVar) String() string {
 	}
 	return "$" + a.name
 }
+
+func (a TypeVar) Name() string {
+	return a.name
+}
+
 func (a TypeVar) Actual() Type {
 	return a.actual
 }

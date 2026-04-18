@@ -9,6 +9,7 @@ import (
 
 	"slices"
 
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 )
@@ -17,14 +18,15 @@ import (
 type ProjectInfo struct {
 	RootPath    string // absolute path to project root
 	ProjectName string // project name from ard.toml or directory name
+	Target      string // default build target from ard.toml
 }
 
 // ModuleResolver handles finding and loading user modules
 type ModuleResolver struct {
 	project      *ProjectInfo
-	moduleCache  map[string]Module       // cache loaded modules by file path
+	moduleCache  map[string]Module         // cache loaded modules by file path
 	astCache     map[string]*parse.Program // cache parsed ASTs by file path
-	loadingChain []string                // track import paths currently being loaded for circular dependency detection
+	loadingChain []string                  // track import paths currently being loaded for circular dependency detection
 }
 
 // FindProjectRoot walks up the directory tree to find ard.toml or falls back to directory name
@@ -45,6 +47,11 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
 			}
 
+			target, err := parseProjectTarget(tomlPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
+			}
+
 			// Check ard version constraint (required in ard.toml)
 			constraint, ok := parseArdVersion(tomlPath)
 			if !ok {
@@ -57,6 +64,7 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			return &ProjectInfo{
 				RootPath:    current,
 				ProjectName: projectName,
+				Target:      target,
 			}, nil
 		}
 
@@ -68,6 +76,7 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			return &ProjectInfo{
 				RootPath:    absPath,
 				ProjectName: dirName,
+				Target:      backend.DefaultTarget,
 			}, nil
 		}
 		current = parent
@@ -107,6 +116,21 @@ func parseArdVersion(tomlPath string) (string, bool) {
 	}
 
 	return matches[1], true
+}
+
+func parseProjectTarget(tomlPath string) (string, error) {
+	content, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return "", err
+	}
+
+	re := regexp.MustCompile(`(?m)^\s*target\s*=\s*["']([^"']+)["']`)
+	matches := re.FindStringSubmatch(string(content))
+	if len(matches) < 2 {
+		return backend.DefaultTarget, nil
+	}
+
+	return backend.ParseTarget(matches[1])
 }
 
 // NewModuleResolver creates a new module resolver for the given working directory
