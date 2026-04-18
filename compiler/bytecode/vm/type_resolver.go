@@ -50,6 +50,9 @@ func (vm *VM) typeNameFor(id bytecode.TypeID) (string, error) {
 }
 
 func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
+	if vm.typeCache == nil {
+		vm.typeCache = map[bytecode.TypeID]checker.Type{}
+	}
 	if t, ok := vm.typeCache[id]; ok {
 		if s, ok := t.(*checker.StructDef); ok {
 			return s, nil
@@ -65,6 +68,9 @@ func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
 }
 
 func (vm *VM) enumTypeFor(id bytecode.TypeID) (*checker.Enum, error) {
+	if vm.typeCache == nil {
+		vm.typeCache = map[bytecode.TypeID]checker.Type{}
+	}
 	if t, ok := vm.typeCache[id]; ok {
 		if e, ok := t.(*checker.Enum); ok {
 			return e, nil
@@ -82,17 +88,17 @@ func (vm *VM) enumTypeFor(id bytecode.TypeID) (*checker.Enum, error) {
 func parseTypeName(name string) (checker.Type, error) {
 	trimmed := strings.TrimSpace(name)
 	switch trimmed {
-	case checker.Int.String():
+	case "Int":
 		return checker.Int, nil
-	case checker.Float.String():
+	case "Float":
 		return checker.Float, nil
-	case checker.Str.String():
+	case "Str":
 		return checker.Str, nil
-	case checker.Bool.String():
+	case "Bool":
 		return checker.Bool, nil
-	case checker.Void.String():
+	case "Void":
 		return checker.Void, nil
-	case checker.Dynamic.String():
+	case "Dynamic":
 		return checker.Dynamic, nil
 	}
 	if before, ok := strings.CutSuffix(trimmed, "?"); ok {

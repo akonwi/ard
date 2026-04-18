@@ -424,7 +424,7 @@ func (l *List) equal(other Type) bool {
 func (l *List) hasTrait(trait *Trait) bool {
 	return false // Lists don't implement any traits by default
 }
-func (l List) Of() Type {
+func (l *List) Of() Type {
 	return l.of
 }
 
@@ -615,11 +615,11 @@ func (a TypeVar) String() string {
 	return "$" + a.name
 }
 
-func (a TypeVar) Name() string {
+func (a *TypeVar) Name() string {
 	return a.name
 }
 
-func (a TypeVar) Actual() Type {
+func (a *TypeVar) Actual() Type {
 	return a.actual
 }
 

@@ -70,6 +70,24 @@ func typeNameForType(t checker.Type) string {
 	if t == nil {
 		return KindUnknown.String()
 	}
+	if t == checker.Void {
+		return checker.Void.String()
+	}
+	if t == checker.Str {
+		return checker.Str.String()
+	}
+	if t == checker.Int {
+		return checker.Int.String()
+	}
+	if t == checker.Float {
+		return checker.Float.String()
+	}
+	if t == checker.Bool {
+		return checker.Bool.String()
+	}
+	if t == checker.Dynamic {
+		return checker.Dynamic.String()
+	}
 	return t.String()
 }
 
