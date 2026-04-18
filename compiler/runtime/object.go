@@ -619,6 +619,12 @@ func (o *Object) UnwrapResult() *Object {
 	}
 }
 
+func (o *Object) UnwrapResultInPlace() *Object {
+	o.isOk = false
+	o.isErr = false
+	return o
+}
+
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
 	return &Object{
 		raw:   fields,

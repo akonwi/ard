@@ -612,7 +612,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			vm.push(curr, obj)
 		case bytecode.OpResultUnwrap:
 			subj := vm.popUnsafe(curr)
-			unwrapped := subj.UnwrapResult()
+			unwrapped := subj.UnwrapResultInPlace()
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
@@ -635,7 +635,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if subj.IsErr() {
 				if inst.A >= 0 {
 					if inst.B >= 0 {
-						unwrapped := subj.UnwrapResult()
+						unwrapped := subj.UnwrapResultInPlace()
 						errType, err := vm.typeFor(bytecode.TypeID(inst.C))
 						if err != nil {
 							return nil, err
@@ -656,7 +656,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				vm.push(vm.Frames[len(vm.Frames)-1], subj)
 				continue
 			}
-			unwrapped := subj.UnwrapResult()
+			unwrapped := subj.UnwrapResultInPlace()
 			okType, err := vm.typeFor(bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
