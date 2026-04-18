@@ -979,6 +979,11 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 	return child.run()
 }
 
+func (vm *VM) runClosure1(closure *Closure, arg *runtime.Object) (*runtime.Object, error) {
+	args := [1]*runtime.Object{arg}
+	return vm.runClosure(closure, args[:])
+}
+
 func (vm *VM) recycleFrame(frame *Frame) {
 	clear(frame.Locals)
 	clear(frame.Stack[:frame.StackTop])
