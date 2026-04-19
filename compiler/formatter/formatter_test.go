@@ -60,6 +60,11 @@ func TestFormat(t *testing.T) {
 			output: "extern fn hash(password: Str, cost: Int?) Result<Str, Str> = \"CryptoHashPassword\"\n",
 		},
 		{
+			name:   "formats extern binding blocks",
+			input:  "extern fn read_line() Str!Str = {\n  js-server = \"readLine\"\n  go = \"ReadLine\"\n}\n",
+			output: "extern fn read_line() Str!Str = {\n  go = \"ReadLine\"\n  js-server = \"readLine\"\n}\n",
+		},
+		{
 			name:   "formats extern type declaration",
 			input:  "extern type ConnectionPtr\n",
 			output: "extern type ConnectionPtr\n",

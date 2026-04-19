@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akonwi/ard/backend"
 	checker "github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
@@ -287,6 +288,46 @@ func TestCallingPackageFunctions(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestExternalFunctionBindingsResolvePerTarget(t *testing.T) {
+	source := `extern fn read_line() Str!Str = {
+  go = "ReadLine"
+  js-server = "readLine"
+}`
+
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected parse errors: %v", result.Errors)
+	}
+
+	goChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
+	goChecker.Check()
+	if goChecker.HasErrors() {
+		t.Fatalf("unexpected go diagnostics: %v", goChecker.Diagnostics())
+	}
+	goProgram := goChecker.Module().Program()
+	goFn, ok := goProgram.Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if !ok {
+		t.Fatalf("expected external function def, got %#v", goProgram.Statements[0].Expr)
+	}
+	if goFn.ExternalBinding != "ReadLine" || goFn.ExternalBindings["js-server"] != "readLine" {
+		t.Fatalf("unexpected go extern bindings: %#v", goFn)
+	}
+
+	jsChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSServer})
+	jsChecker.Check()
+	if jsChecker.HasErrors() {
+		t.Fatalf("unexpected js diagnostics: %v", jsChecker.Diagnostics())
+	}
+	jsProgram := jsChecker.Module().Program()
+	jsFn, ok := jsProgram.Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if !ok {
+		t.Fatalf("expected external function def, got %#v", jsProgram.Statements[0].Expr)
+	}
+	if jsFn.ExternalBinding != "readLine" || jsFn.ExternalBindings["go"] != "ReadLine" {
+		t.Fatalf("unexpected js extern bindings: %#v", jsFn)
+	}
 }
 
 func TestCallingInstanceMethods(t *testing.T) {

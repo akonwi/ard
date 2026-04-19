@@ -1,6 +1,10 @@
 package parse
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
 
 type Statement interface {
 	String() string
@@ -312,16 +316,33 @@ func (e ExternTypeDeclaration) String() string {
 
 type ExternalFunction struct {
 	Location
-	Name            string
-	TypeParams      []string // Generic type parameters
-	Parameters      []Parameter
-	ReturnType      DeclaredType
-	ExternalBinding string
-	Private         bool
+	Name             string
+	TypeParams       []string // Generic type parameters
+	Parameters       []Parameter
+	ReturnType       DeclaredType
+	ExternalBinding  string
+	ExternalBindings map[string]string
+	Private          bool
 }
 
 func (e ExternalFunction) String() string {
-	return fmt.Sprintf("extern fn %s(%v) %s = %q", e.Name, e.Parameters, e.ReturnType.GetName(), e.ExternalBinding)
+	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBinding == "") {
+		keys := make([]string, 0, len(e.ExternalBindings))
+		for key := range e.ExternalBindings {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
+		}
+		return fmt.Sprintf("extern fn %s(%v) %s = { %s }", e.Name, e.Parameters, e.ReturnType.GetName(), strings.Join(parts, ", "))
+	}
+	binding := e.ExternalBinding
+	if binding == "" && len(e.ExternalBindings) == 1 {
+		binding = e.ExternalBindings["go"]
+	}
+	return fmt.Sprintf("extern fn %s(%v) %s = %q", e.Name, e.Parameters, e.ReturnType.GetName(), binding)
 }
 
 type StaticFunctionDeclaration struct {

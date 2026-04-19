@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -4290,6 +4291,37 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
+func resolveExternalBindingForTarget(target string, bindings map[string]string) string {
+	if len(bindings) == 0 {
+		return ""
+	}
+	if target != "" {
+		if binding := bindings[target]; binding != "" {
+			return binding
+		}
+	}
+	if binding := bindings[backend.TargetGo]; binding != "" {
+		return binding
+	}
+	if target == backend.TargetGo || target == backend.TargetBytecode || target == "" {
+		if binding := bindings[backend.TargetBytecode]; binding != "" {
+			return binding
+		}
+	}
+	return ""
+}
+
+func cloneExternalBindings(bindings map[string]string) map[string]string {
+	if len(bindings) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(bindings))
+	for key, value := range bindings {
+		out[key] = value
+	}
+	return out
+}
+
 func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFunctionDef {
 	// Check for duplicate function names
 	if _, dup := c.scope.get(def.Name); dup {
@@ -4311,19 +4343,23 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	// Resolve return type
 	returnType := c.resolveType(def.ReturnType)
 
-	// Validate external binding format and existence
-	if def.ExternalBinding == "" {
+	bindings := cloneExternalBindings(def.ExternalBindings)
+	if len(bindings) == 0 && def.ExternalBinding != "" {
+		bindings = map[string]string{backend.TargetGo: def.ExternalBinding}
+	}
+	if len(bindings) == 0 {
 		c.addError("External binding cannot be empty", def.GetLocation())
 		return nil
 	}
 
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
-		Name:            def.Name,
-		Parameters:      params,
-		ReturnType:      returnType,
-		ExternalBinding: def.ExternalBinding,
-		Private:         def.Private,
+		Name:             def.Name,
+		Parameters:       params,
+		ReturnType:       returnType,
+		ExternalBinding:  resolveExternalBindingForTarget(c.options.Target, bindings),
+		ExternalBindings: bindings,
+		Private:          def.Private,
 	}
 
 	// Add to scope
