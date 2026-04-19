@@ -904,6 +904,12 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitFloatMethod(expr)
 	case *checker.BoolMethod:
 		return e.emitBoolMethod(expr)
+	case *checker.BoolMatch:
+		return e.emitBoolMatch(expr)
+	case *checker.OptionMatch:
+		return e.emitOptionMatch(expr)
+	case *checker.ResultMatch:
+		return e.emitResultMatch(expr)
 	case *checker.ListMethod:
 		return e.emitListMethod(expr)
 	case *checker.MaybeMethod:
@@ -1216,6 +1222,89 @@ func (e *emitter) emitBoolMethod(method *checker.BoolMethod) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported bool method: %v", method.Kind)
 	}
+}
+
+func (e *emitter) emitBoundBlockExpr(block *checker.Block, bindings []string) (string, error) {
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		for _, binding := range bindings {
+			child.line(binding)
+		}
+		err := child.emitBlock(block, true)
+		if err != nil {
+			panic(err)
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
+}
+
+func (e *emitter) emitBoolMatch(match *checker.BoolMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	trueExpr, err := e.emitBoundBlockExpr(match.True, nil)
+	if err != nil {
+		return "", err
+	}
+	falseExpr, err := e.emitBoundBlockExpr(match.False, nil)
+	if err != nil {
+		return "", err
+	}
+	return "(() => { const __match = " + subject + "; return __match ? " + trueExpr + " : " + falseExpr + "; })()", nil
+}
+
+func (e *emitter) emitOptionMatch(match *checker.OptionMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	someBindings := []string{}
+	if match.Some != nil && match.Some.Pattern != nil {
+		someBindings = append(someBindings, "const "+jsName(match.Some.Pattern.Name)+" = __match.value;")
+	}
+	someExpr, err := e.emitBoundBlockExpr(match.Some.Body, someBindings)
+	if err != nil {
+		return "", err
+	}
+	noneExpr, err := e.emitBoundBlockExpr(match.None, nil)
+	if err != nil {
+		return "", err
+	}
+	return "(() => { const __match = " + subject + "; return __match.isSome() ? " + someExpr + " : " + noneExpr + "; })()", nil
+}
+
+func (e *emitter) emitResultMatch(match *checker.ResultMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	okBindings := []string{}
+	if match.Ok != nil && match.Ok.Pattern != nil {
+		okBindings = append(okBindings, "const "+jsName(match.Ok.Pattern.Name)+" = __match.ok;")
+	}
+	okExpr, err := e.emitBoundBlockExpr(match.Ok.Body, okBindings)
+	if err != nil {
+		return "", err
+	}
+	errBindings := []string{}
+	if match.Err != nil && match.Err.Pattern != nil {
+		errBindings = append(errBindings, "const "+jsName(match.Err.Pattern.Name)+" = __match.error;")
+	}
+	errExpr, err := e.emitBoundBlockExpr(match.Err.Body, errBindings)
+	if err != nil {
+		return "", err
+	}
+	return "(() => { const __match = " + subject + "; return __match.isOk() ? " + okExpr + " : " + errExpr + "; })()", nil
 }
 
 func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall) (string, error) {

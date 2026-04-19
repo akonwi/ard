@@ -301,6 +301,64 @@ let d = result_flow()
 	}
 }
 
+func TestBuildWritesMatchLowering(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn pick(flag: Bool) Int {
+  match flag {
+    true => 1,
+    false => 2,
+  }
+}
+
+fn maybe_pick(value: Int?) Int {
+  match value {
+    num => num,
+    _ => 0,
+  }
+}
+
+fn result_pick(value: Int!Str) Str {
+  match value {
+    ok(num) => num.to_str(),
+    err(msg) => msg,
+  }
+}
+
+let a = pick(true)
+let b = maybe_pick(maybe::some(1))
+let c = result_pick(Result::err("bad"))
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "return __match ?") {
+		t.Fatalf("expected bool match lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return __match.isSome() ?") || !strings.Contains(source, "const num = __match.value;") {
+		t.Fatalf("expected maybe match lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return __match.isOk() ?") || !strings.Contains(source, "const msg = __match.error;") {
+		t.Fatalf("expected result match lowering, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesTryLowering(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
