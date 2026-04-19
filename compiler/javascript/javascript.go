@@ -26,6 +26,7 @@ type emitter struct {
 	moduleVars      map[string]string
 	currentModule   string
 	currentFunction string
+	currentReceiver string
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -335,7 +336,7 @@ func (e *emitter) emitTopLevelStatement(stmt checker.Statement) error {
 
 func (e *emitter) emitFunctionDef(fn *checker.FunctionDef) error {
 	if fn.Receiver != "" {
-		return fmt.Errorf("js backend does not yet support methods: %s.%s", fn.Receiver, fn.Name)
+		return nil
 	}
 	params := make([]string, 0, len(fn.Parameters))
 	for _, param := range fn.Parameters {
@@ -578,7 +579,7 @@ func (e *emitter) emitReassignmentInline(stmt *checker.Reassignment) (string, er
 func (e *emitter) emitAssignable(expr checker.Expression) (string, error) {
 	switch expr := expr.(type) {
 	case *checker.Variable:
-		return jsName(expr.Name()), nil
+		return e.emitVariableName(expr.Name()), nil
 	case *checker.InstanceProperty:
 		subject, err := e.emitExpr(expr.Subject)
 		if err != nil {
@@ -606,6 +607,12 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return subject + "." + jsName(expr.Property), nil
+	case *checker.ListLiteral:
+		elements, err := e.emitArgs(expr.Elements)
+		if err != nil {
+			return "", err
+		}
+		return "[" + strings.Join(elements, ", ") + "]", nil
 	case *checker.StrLiteral:
 		return strconv.Quote(expr.Value), nil
 	case *checker.TemplateStr:
@@ -622,13 +629,15 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.FloatLiteral:
 		return strconv.FormatFloat(expr.Value, 'g', -1, 64), nil
 	case *checker.Variable:
-		return jsName(expr.Name()), nil
+		return e.emitVariableName(expr.Name()), nil
 	case *checker.ModuleSymbol:
 		moduleVar, ok := e.moduleVars[expr.Module]
 		if !ok {
 			return "", fmt.Errorf("unknown imported module %s", expr.Module)
 		}
 		return moduleVar + "." + jsName(expr.Symbol.Name), nil
+	case *checker.FunctionDef:
+		return e.emitFunctionLiteral(expr)
 	case *checker.FunctionCall:
 		args, err := e.emitArgs(expr.Args)
 		if err != nil {
@@ -645,6 +654,20 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return moduleVar + "." + jsName(expr.Call.Name) + "(" + strings.Join(args, ", ") + ")", nil
+	case *checker.InstanceMethod:
+		subject, err := e.emitExpr(expr.Subject)
+		if err != nil {
+			return "", err
+		}
+		args, err := e.emitArgs(expr.Method.Args)
+		if err != nil {
+			return "", err
+		}
+		return subject + "." + jsName(expr.Method.Name) + "(" + strings.Join(args, ", ") + ")", nil
+	case *checker.CopyExpression:
+		return e.emitExpr(expr.Expr)
+	case *checker.ListMethod:
+		return e.emitListMethod(expr)
 	case *checker.IntAddition:
 		return e.emitBinary(expr.Left, "+", expr.Right)
 	case *checker.IntSubtraction:
@@ -731,9 +754,40 @@ func (e *emitter) emitStructDef(def *checker.StructDef) error {
 			}
 		})
 		e.line("}")
+		methodNames := sortedFunctionNames(def.Methods)
+		for _, methodName := range methodNames {
+			e.line("")
+			err := e.emitStructMethod(def, def.Methods[methodName])
+			if err != nil {
+				panic(err)
+			}
+		}
 	})
 	e.line("}")
 	e.line("")
+	return nil
+}
+
+func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.FunctionDef) error {
+	params := make([]string, 0, len(method.Parameters))
+	for _, param := range method.Parameters {
+		params = append(params, jsName(param.Name))
+	}
+
+	e.line(fmt.Sprintf("%s(%s) {", jsName(method.Name), strings.Join(params, ", ")))
+	prevFunction := e.currentFunction
+	prevReceiver := e.currentReceiver
+	e.currentFunction = def.Name + "." + method.Name
+	e.currentReceiver = method.Receiver
+	e.indent(func() {
+		err := e.emitBlock(method.Body, true)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.currentFunction = prevFunction
+	e.currentReceiver = prevReceiver
+	e.line("}")
 	return nil
 }
 
@@ -748,6 +802,99 @@ func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor stri
 		args = append(args, value)
 	}
 	return "new " + ctor + "(" + strings.Join(args, ", ") + ")", nil
+}
+
+func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
+	child := &emitter{
+		target:          e.target,
+		moduleVars:      e.moduleVars,
+		currentModule:   e.currentModule,
+		currentFunction: e.currentFunction,
+		currentReceiver: e.currentReceiver,
+	}
+	params := make([]string, 0, len(def.Parameters))
+	for _, param := range def.Parameters {
+		params = append(params, jsName(param.Name))
+	}
+	child.line("function(" + strings.Join(params, ", ") + ") {")
+	child.indent(func() {
+		if err := child.emitBlock(def.Body, true); err != nil {
+			panic(err)
+		}
+	})
+	child.line("}")
+	return strings.TrimSpace(child.builder.String()), nil
+}
+
+func (e *emitter) emitListMethod(method *checker.ListMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	args, err := e.emitArgs(method.Args)
+	if err != nil {
+		return "", err
+	}
+
+	switch method.Kind {
+	case checker.ListSize:
+		return subject + ".length", nil
+	case checker.ListAt:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.at expects one arg")
+		}
+		return subject + "[" + args[0] + "]", nil
+	case checker.ListPush:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.push expects one arg")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.push(" + args[0] + ");"}, "__value")
+	case checker.ListPrepend:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.prepend expects one arg")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.unshift(" + args[0] + ");"}, "__value")
+	case checker.ListSet:
+		if len(args) != 2 {
+			return "", fmt.Errorf("list.set expects two args")
+		}
+		return e.emitMutationExpr(subject, []string{"__value[" + args[0] + "] = " + args[1] + ";"}, "true")
+	case checker.ListSwap:
+		if len(args) != 2 {
+			return "", fmt.Errorf("list.swap expects two args")
+		}
+		lines := []string{
+			"const __tmp = __value[" + args[0] + "];",
+			"__value[" + args[0] + "] = __value[" + args[1] + "];",
+			"__value[" + args[1] + "] = __tmp;",
+		}
+		return e.emitMutationExpr(subject, lines, "undefined")
+	case checker.ListSort:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.sort expects one arg")
+		}
+		cmp := args[0]
+		lines := []string{
+			"__value.sort((a, b) => " + cmp + "(a, b) ? -1 : (" + cmp + "(b, a) ? 1 : 0));",
+		}
+		return e.emitMutationExpr(subject, lines, "undefined")
+	default:
+		return "", fmt.Errorf("unsupported list method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitMutationExpr(subject string, lines []string, returnExpr string) (string, error) {
+	child := &emitter{}
+	child.line("(() => {")
+	child.indent(func() {
+		child.line("const __value = " + subject + ";")
+		for _, line := range lines {
+			child.line(line)
+		}
+		child.line("return " + returnExpr + ";")
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
 }
 
 func (e *emitter) emitTemplateStr(expr *checker.TemplateStr) (string, error) {
@@ -776,6 +923,7 @@ func (e *emitter) emitInlineClosure(expr checker.Expression) (string, error) {
 		moduleVars:      e.moduleVars,
 		currentModule:   e.currentModule,
 		currentFunction: e.currentFunction,
+		currentReceiver: e.currentReceiver,
 	}
 	child.line("(() => {")
 	child.indent(func() {
@@ -838,6 +986,13 @@ func (e *emitter) indent(fn func()) {
 	fn()
 }
 
+func (e *emitter) emitVariableName(name string) string {
+	if e.currentReceiver != "" && name == e.currentReceiver {
+		return "this"
+	}
+	return jsName(name)
+}
+
 func sortedStructInstanceFields(instance *checker.StructInstance) []string {
 	if instance == nil {
 		return nil
@@ -854,6 +1009,15 @@ func sortedStructInstanceFields(instance *checker.StructInstance) []string {
 	}
 	sort.Strings(fields)
 	return fields
+}
+
+func sortedFunctionNames(methods map[string]*checker.FunctionDef) []string {
+	names := make([]string, 0, len(methods))
+	for name := range methods {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func sortedFieldNames(fields map[string]checker.Type) []string {

@@ -183,6 +183,124 @@ let result = get_age()
 	}
 }
 
+func TestBuildWritesListLiteralsAndMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn reordered() Int {
+  mut list = [3, 7, 8, 5, 2, 9, 5, 4]
+  list.sort(fn(a: Int, b: Int) Bool { a < b })
+  list.swap(0, 7)
+  list.at(0)
+}
+
+fn update() Int {
+  mut values = [1, 2]
+  values.push(3)
+  values.prepend(0)
+  values.set(1, 9)
+  values.at(1)
+}
+
+let size = [1, 2, 3].size()
+let first = reordered()
+let result = update()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "const size = [1, 2, 3].length;") {
+		t.Fatalf("expected list size lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "__value.push(3);") || !strings.Contains(source, "__value.unshift(0);") {
+		t.Fatalf("expected push/prepend lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "__value[1] = 9;") {
+		t.Fatalf("expected set lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "__value.sort((a, b) => function(a, b)") {
+		t.Fatalf("expected sort comparator lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return list[0];") || !strings.Contains(source, "return values[1];") {
+		t.Fatalf("expected at() lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const __tmp = __value[0];") {
+		t.Fatalf("expected swap lowering, got:\n%s", source)
+	}
+}
+
+func TestBuildWritesStructMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Box {
+  value: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.value
+  }
+
+  fn mut set(value: Int) {
+    self.value = value
+  }
+}
+
+fn run() Int {
+  mut box = Box{value: 1}
+  box.set(2)
+  box.get()
+}
+
+let result = run()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "get() {") {
+		t.Fatalf("expected getter method, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return this.value;") {
+		t.Fatalf("expected self access lowered to this, got:\n%s", source)
+	}
+	if !strings.Contains(source, "set(value) {") {
+		t.Fatalf("expected setter method, got:\n%s", source)
+	}
+	if !strings.Contains(source, "this.value = value;") {
+		t.Fatalf("expected mutating method body, got:\n%s", source)
+	}
+	if !strings.Contains(source, "box.set(2);") || !strings.Contains(source, "return box.get();") {
+		t.Fatalf("expected instance method calls, got:\n%s", source)
+	}
+}
+
 func TestRunRejectsBrowserTarget(t *testing.T) {
 	err := Run("main.ard", backend.TargetJSBrowser, nil)
 	if err == nil {
