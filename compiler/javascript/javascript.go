@@ -158,6 +158,124 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 	})
 	e.line("}")
 	e.line("")
+	e.line("class Maybe {")
+	e.indent(func() {
+		e.line("static some(value) {")
+		e.indent(func() {
+			e.line("const maybe = new Maybe();")
+			e.line("maybe.value = value;")
+			e.line("return maybe;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("static none() {")
+		e.indent(func() {
+			e.line("return new Maybe();")
+		})
+		e.line("}")
+		e.line("")
+		e.line("isSome() {")
+		e.indent(func() {
+			e.line(`return Object.prototype.hasOwnProperty.call(this, "value");`)
+		})
+		e.line("}")
+		e.line("")
+		e.line("isNone() {")
+		e.indent(func() {
+			e.line("return !this.isSome();")
+		})
+		e.line("}")
+		e.line("")
+		e.line("or(fallback) {")
+		e.indent(func() {
+			e.line("return this.isSome() ? this.value : fallback;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("expect(message) {")
+		e.indent(func() {
+			e.line("if (this.isSome()) return this.value;")
+			e.line(`throw makeArdError("panic", "ard/maybe", "expect", 0, message);`)
+		})
+		e.line("}")
+		e.line("")
+		e.line("map(fn) {")
+		e.indent(func() {
+			e.line("return this.isSome() ? Maybe.some(fn(this.value)) : Maybe.none();")
+		})
+		e.line("}")
+		e.line("")
+		e.line("andThen(fn) {")
+		e.indent(func() {
+			e.line("return this.isSome() ? fn(this.value) : Maybe.none();")
+		})
+		e.line("}")
+	})
+	e.line("}")
+	e.line("")
+	e.line("class Result {")
+	e.indent(func() {
+		e.line("static ok(value) {")
+		e.indent(func() {
+			e.line("const result = new Result();")
+			e.line("result.ok = value;")
+			e.line("return result;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("static err(error) {")
+		e.indent(func() {
+			e.line("const result = new Result();")
+			e.line("result.error = error;")
+			e.line("return result;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("isOk() {")
+		e.indent(func() {
+			e.line(`return Object.prototype.hasOwnProperty.call(this, "ok");`)
+		})
+		e.line("}")
+		e.line("")
+		e.line("isErr() {")
+		e.indent(func() {
+			e.line(`return Object.prototype.hasOwnProperty.call(this, "error");`)
+		})
+		e.line("}")
+		e.line("")
+		e.line("or(fallback) {")
+		e.indent(func() {
+			e.line("return this.isOk() ? this.ok : fallback;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("expect(message) {")
+		e.indent(func() {
+			e.line("if (this.isOk()) return this.ok;")
+			e.line(`throw makeArdError("panic", "ard/result", "expect", 0, message);`)
+		})
+		e.line("}")
+		e.line("")
+		e.line("map(fn) {")
+		e.indent(func() {
+			e.line("return this.isOk() ? Result.ok(fn(this.ok)) : this;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("mapErr(fn) {")
+		e.indent(func() {
+			e.line("return this.isErr() ? Result.err(fn(this.error)) : this;")
+		})
+		e.line("}")
+		e.line("")
+		e.line("andThen(fn) {")
+		e.indent(func() {
+			e.line("return this.isOk() ? fn(this.ok) : this;")
+		})
+		e.line("}")
+	})
+	e.line("}")
+	e.line("")
 
 	for _, module := range modules {
 		if err := e.emitModuleWrapper(module); err != nil {
@@ -645,6 +763,12 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		return jsName(expr.Name) + "(" + strings.Join(args, ", ") + ")", nil
 	case *checker.ModuleFunctionCall:
+		if expr.Module == "ard/maybe" {
+			return e.emitMaybeModuleCall(expr)
+		}
+		if expr.Module == "ard/result" {
+			return e.emitResultModuleCall(expr)
+		}
 		moduleVar, ok := e.moduleVars[expr.Module]
 		if !ok {
 			return "", fmt.Errorf("unknown imported module %s", expr.Module)
@@ -666,8 +790,20 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return subject + "." + jsName(expr.Method.Name) + "(" + strings.Join(args, ", ") + ")", nil
 	case *checker.CopyExpression:
 		return e.emitExpr(expr.Expr)
+	case *checker.StrMethod:
+		return e.emitStrMethod(expr)
+	case *checker.IntMethod:
+		return e.emitIntMethod(expr)
+	case *checker.FloatMethod:
+		return e.emitFloatMethod(expr)
+	case *checker.BoolMethod:
+		return e.emitBoolMethod(expr)
 	case *checker.ListMethod:
 		return e.emitListMethod(expr)
+	case *checker.MaybeMethod:
+		return e.emitMaybeMethod(expr)
+	case *checker.ResultMethod:
+		return e.emitResultMethod(expr)
 	case *checker.IntAddition:
 		return e.emitBinary(expr.Left, "+", expr.Right)
 	case *checker.IntSubtraction:
@@ -880,6 +1016,229 @@ func (e *emitter) emitListMethod(method *checker.ListMethod) (string, error) {
 		return e.emitMutationExpr(subject, lines, "undefined")
 	default:
 		return "", fmt.Errorf("unsupported list method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitStrMethod(method *checker.StrMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	args, err := e.emitArgs(method.Args)
+	if err != nil {
+		return "", err
+	}
+	switch method.Kind {
+	case checker.StrSize:
+		return subject + ".length", nil
+	case checker.StrIsEmpty:
+		return "(" + subject + ".length === 0)", nil
+	case checker.StrContains:
+		if len(args) != 1 {
+			return "", fmt.Errorf("str.contains expects one arg")
+		}
+		return subject + ".includes(" + args[0] + ")", nil
+	case checker.StrReplace:
+		if len(args) != 2 {
+			return "", fmt.Errorf("str.replace expects two args")
+		}
+		return subject + ".replace(" + args[0] + ", " + args[1] + ")", nil
+	case checker.StrReplaceAll:
+		if len(args) != 2 {
+			return "", fmt.Errorf("str.replace_all expects two args")
+		}
+		return subject + ".replaceAll(" + args[0] + ", " + args[1] + ")", nil
+	case checker.StrSplit:
+		if len(args) != 1 {
+			return "", fmt.Errorf("str.split expects one arg")
+		}
+		return subject + ".split(" + args[0] + ")", nil
+	case checker.StrStartsWith:
+		if len(args) != 1 {
+			return "", fmt.Errorf("str.starts_with expects one arg")
+		}
+		return subject + ".startsWith(" + args[0] + ")", nil
+	case checker.StrToStr:
+		return subject, nil
+	case checker.StrTrim:
+		return subject + ".trim()", nil
+	default:
+		return "", fmt.Errorf("unsupported str method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitIntMethod(method *checker.IntMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	switch method.Kind {
+	case checker.IntToStr:
+		return "String(" + subject + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported int method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitFloatMethod(method *checker.FloatMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	switch method.Kind {
+	case checker.FloatToStr:
+		return "String(" + subject + ")", nil
+	case checker.FloatToInt:
+		return "Math.trunc(" + subject + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported float method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitBoolMethod(method *checker.BoolMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	switch method.Kind {
+	case checker.BoolToStr:
+		return "String(" + subject + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported bool method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall) (string, error) {
+	switch call.Call.Name {
+	case "some":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("maybe::some expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "Maybe.some(" + args[0] + ")", nil
+	case "none":
+		return "Maybe.none()", nil
+	default:
+		return "", fmt.Errorf("unsupported maybe module call: %s", call.Call.Name)
+	}
+}
+
+func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall) (string, error) {
+	switch call.Call.Name {
+	case "ok":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Result::ok expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "Result.ok(" + args[0] + ")", nil
+	case "err":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Result::err expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "Result.err(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported Result module call: %s", call.Call.Name)
+	}
+}
+
+func (e *emitter) emitMaybeMethod(method *checker.MaybeMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	args, err := e.emitArgs(method.Args)
+	if err != nil {
+		return "", err
+	}
+	failArgs := func(name string, want int) error {
+		return fmt.Errorf("maybe.%s expects %d arg(s)", name, want)
+	}
+
+	switch method.Kind {
+	case checker.MaybeExpect:
+		if len(args) != 1 {
+			return "", failArgs("expect", 1)
+		}
+		return subject + ".expect(" + args[0] + ")", nil
+	case checker.MaybeIsNone:
+		return subject + ".isNone()", nil
+	case checker.MaybeIsSome:
+		return subject + ".isSome()", nil
+	case checker.MaybeOr:
+		if len(args) != 1 {
+			return "", failArgs("or", 1)
+		}
+		return subject + ".or(" + args[0] + ")", nil
+	case checker.MaybeMap:
+		if len(args) != 1 {
+			return "", failArgs("map", 1)
+		}
+		return subject + ".map(" + args[0] + ")", nil
+	case checker.MaybeAndThen:
+		if len(args) != 1 {
+			return "", failArgs("and_then", 1)
+		}
+		return subject + ".andThen(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported maybe method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	args, err := e.emitArgs(method.Args)
+	if err != nil {
+		return "", err
+	}
+	failArgs := func(name string, want int) error {
+		return fmt.Errorf("result.%s expects %d arg(s)", name, want)
+	}
+
+	switch method.Kind {
+	case checker.ResultExpect:
+		if len(args) != 1 {
+			return "", failArgs("expect", 1)
+		}
+		return subject + ".expect(" + args[0] + ")", nil
+	case checker.ResultOr:
+		if len(args) != 1 {
+			return "", failArgs("or", 1)
+		}
+		return subject + ".or(" + args[0] + ")", nil
+	case checker.ResultIsOk:
+		return subject + ".isOk()", nil
+	case checker.ResultIsErr:
+		return subject + ".isErr()", nil
+	case checker.ResultMap:
+		if len(args) != 1 {
+			return "", failArgs("map", 1)
+		}
+		return subject + ".map(" + args[0] + ")", nil
+	case checker.ResultMapErr:
+		if len(args) != 1 {
+			return "", failArgs("map_err", 1)
+		}
+		return subject + ".mapErr(" + args[0] + ")", nil
+	case checker.ResultAndThen:
+		if len(args) != 1 {
+			return "", failArgs("and_then", 1)
+		}
+		return subject + ".andThen(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported result method: %v", method.Kind)
 	}
 }
 

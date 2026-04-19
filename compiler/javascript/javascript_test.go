@@ -242,6 +242,65 @@ let result = update()
 	}
 }
 
+func TestBuildWritesMaybeAndResultMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn maybe_flow() Str {
+  let value = maybe::some(21)
+  let out = value.and_then<Str>(fn(v) { maybe::some("{v}") })
+  out.or("")
+}
+
+fn result_flow() Str {
+  let res: Int!Str = Result::ok(21)
+  let out = res.map(fn(value) { value * 2 }).and_then<Str>(fn(value) { Result::ok("{value}") })
+  out.or("")
+}
+
+let a = maybe::none<Int>().is_none()
+let b = Result::err("boom").is_err()
+let c = maybe_flow()
+let d = result_flow()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "class Maybe {") || !strings.Contains(source, "class Result {") {
+		t.Fatalf("expected Maybe/Result runtime classes, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const a = Maybe.none().isNone();") {
+		t.Fatalf("expected maybe none/is_none lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const b = Result.err(\"boom\").isErr();") {
+		t.Fatalf("expected result err/is_err lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, ".andThen(function(v)") {
+		t.Fatalf("expected maybe and_then lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, ".map(function(value)") || !strings.Contains(source, ".andThen(function(value)") {
+		t.Fatalf("expected result combinator lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return out.or(\"\");") {
+		t.Fatalf("expected final .or lowering, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesStructMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
