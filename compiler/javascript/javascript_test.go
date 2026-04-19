@@ -242,6 +242,70 @@ let result = update()
 	}
 }
 
+func TestBuildWritesEnumAwareUnionMatchAndComparisonLowering(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+ enum Status {
+   active,
+   inactive,
+ }
+ 
+ type Value = Status | Int | Bool
+ 
+ fn label(value: Value) Str {
+   match value {
+     Status(status) => "enum",
+     Int(int) => int.to_str(),
+     _ => "boolean value",
+   }
+ }
+ 
+ fn compare(status: Status) Bool {
+   status == 0 and status < 1
+ }
+ 
+ let a = label(Status::active)
+ let b = label(20)
+ let c = label(true)
+ let d = compare(Status::inactive)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, `const __ard_enum = Symbol.for("ard.enum");`) {
+		t.Fatalf("expected enum brand helper, got:\n%s", source)
+	}
+	if !strings.Contains(source, `const Status = Object.freeze({ active: makeEnum("Status", "active", 0), inactive: makeEnum("Status", "inactive", 1) });`) {
+		t.Fatalf("expected branded enum object lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `if (isEnumOf(__match, "Status")) return`) {
+		t.Fatalf("expected enum-specific union predicate, got:\n%s", source)
+	}
+	if !strings.Contains(source, `typeof __match === "number"`) {
+		t.Fatalf("expected int union predicate, got:\n%s", source)
+	}
+	if !strings.Contains(source, `ardEq(status, 0)`) {
+		t.Fatalf("expected enum-aware equality lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `(ardEnumValue(status) < ardEnumValue(1))`) {
+		t.Fatalf("expected enum-aware ordering lowering, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesUnionMatchLowering(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -481,14 +545,14 @@ let f = result_pick(Result::err("bad"))
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, "const Status = { active: 0, inactive: 1 };") {
-		t.Fatalf("expected enum object lowering, got:\n%s", source)
+	if !strings.Contains(source, `const Status = Object.freeze({ active: makeEnum("Status", "active", 0), inactive: makeEnum("Status", "inactive", 1) });`) {
+		t.Fatalf("expected branded enum object lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "let d = label(Status.active)") && !strings.Contains(source, "const d = label(Status.active)") {
 		t.Fatalf("expected enum variant lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "if (__match === 0) return") || !strings.Contains(source, "if (__match === 1) return") {
-		t.Fatalf("expected enum/int exact match lowering, got:\n%s", source)
+	if !strings.Contains(source, `if (isEnumOf(__match, "Status") && __match.value === 0) return`) || !strings.Contains(source, `if (isEnumOf(__match, "Status") && __match.value === 1) return`) {
+		t.Fatalf("expected branded enum match lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "return __match ?") {
 		t.Fatalf("expected bool match lowering, got:\n%s", source)

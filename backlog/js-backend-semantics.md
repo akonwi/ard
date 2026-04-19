@@ -138,25 +138,35 @@ This is the most idiomatic JS shape and matches Ard method syntax naturally.
 
 Ard enums are discrete tagged ints, not class-backed variants.
 
-They should compile to numeric discriminants exposed through an object namespace.
+In JavaScript they should compile to **frozen branded singleton objects** exposed through an object namespace, while still carrying their numeric discriminant.
 
 Example:
 
 ```js
-export const Color = {
-  Red: 0,
-  Green: 1,
-  Blue: 2,
-};
-```
+const __ard_enum = Symbol.for("ard.enum");
 
-Enum comparisons and matches then lower to numeric comparisons:
-
-```js
-if (color === Color.Red) {
-  ...
+function makeEnum(enumName, variantName, value) {
+  return Object.freeze({
+    [__ard_enum]: true,
+    enum: enumName,
+    variant: variantName,
+    value,
+  });
 }
+
+export const Color = Object.freeze({
+  Red: makeEnum("Color", "Red", 0),
+  Green: makeEnum("Color", "Green", 1),
+  Blue: makeEnum("Color", "Blue", 2),
+});
 ```
+
+This preserves an important Ard distinction:
+
+- enums are their own runtime category for union matching
+- enums remain comparable to `Int` by their numeric discriminant
+
+That means JS lowering should use helpers when enum/int comparisons occur rather than assuming raw `===` on the emitted enum values.
 
 ## 6. Unions
 
@@ -169,7 +179,7 @@ Union matching should lower to runtime tests over the underlying value categorie
 - `typeof` for primitives
 - `instanceof` for class-backed values
 - `instanceof Result` / `instanceof Maybe` for wrapper types
-- enum numeric comparison
+- branded enum checks like `isEnumOf(value, "Color")`
 - `Array.isArray(...)` for lists if needed
 - `value instanceof Map` for maps if needed
 
@@ -189,7 +199,7 @@ Current direction:
 
 - user-defined class-backed values: `instanceof ConcreteType`
 - `Result` / `Maybe`: `instanceof BaseWrapper` plus predicate methods
-- enums: direct numeric comparison
+- enums: branded object checks plus numeric discriminant access
 
 ## 8. `Result`
 
@@ -417,8 +427,8 @@ So the JS backend should keep equality lightweight.
 Current direction:
 
 - primitives: use `===`
-- enums: use `===`
-- enum/int comparisons: use `===`
+- enums: use a small helper that compares their numeric discriminants
+- enum/int comparisons: use that same helper rather than raw `===`
 - `Maybe`: use a small wrapper-aware helper or equivalent inline logic
 - do not add general struct/list/map structural equality for v1
 

@@ -165,6 +165,38 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 	})
 	e.line("}")
 	e.line("")
+	e.line(`const __ard_enum = Symbol.for("ard.enum");`)
+	e.line("")
+	e.line("function makeEnum(enumName, variantName, value) {")
+	e.indent(func() {
+		e.line("return Object.freeze({ [__ard_enum]: true, enum: enumName, variant: variantName, value });")
+	})
+	e.line("}")
+	e.line("")
+	e.line("function isArdEnum(value) {")
+	e.indent(func() {
+		e.line(`return !!(value && typeof value === "object" && value[__ard_enum] === true);`)
+	})
+	e.line("}")
+	e.line("")
+	e.line("function isEnumOf(value, enumName) {")
+	e.indent(func() {
+		e.line("return isArdEnum(value) && value.enum === enumName;")
+	})
+	e.line("}")
+	e.line("")
+	e.line("function ardEnumValue(value) {")
+	e.indent(func() {
+		e.line("return isArdEnum(value) ? value.value : value;")
+	})
+	e.line("}")
+	e.line("")
+	e.line("function ardEq(left, right) {")
+	e.indent(func() {
+		e.line("return ardEnumValue(left) === ardEnumValue(right);")
+	})
+	e.line("}")
+	e.line("")
 	e.line("class Maybe {")
 	e.indent(func() {
 		e.line("static some(value) {")
@@ -986,13 +1018,13 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.IntModulo:
 		return e.emitBinary(expr.Left, "%", expr.Right)
 	case *checker.IntGreater:
-		return e.emitBinary(expr.Left, ">", expr.Right)
+		return e.emitIntComparison(expr.Left, ">", expr.Right)
 	case *checker.IntGreaterEqual:
-		return e.emitBinary(expr.Left, ">=", expr.Right)
+		return e.emitIntComparison(expr.Left, ">=", expr.Right)
 	case *checker.IntLess:
-		return e.emitBinary(expr.Left, "<", expr.Right)
+		return e.emitIntComparison(expr.Left, "<", expr.Right)
 	case *checker.IntLessEqual:
-		return e.emitBinary(expr.Left, "<=", expr.Right)
+		return e.emitIntComparison(expr.Left, "<=", expr.Right)
 	case *checker.FloatAddition:
 		return e.emitBinary(expr.Left, "+", expr.Right)
 	case *checker.FloatSubtraction:
@@ -1012,7 +1044,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.StrAddition:
 		return e.emitBinary(expr.Left, "+", expr.Right)
 	case *checker.Equality:
-		return e.emitBinary(expr.Left, "===", expr.Right)
+		return e.emitEquality(expr.Left, expr.Right)
 	case *checker.And:
 		return e.emitBinary(expr.Left, "&&", expr.Right)
 	case *checker.Or:
@@ -1047,9 +1079,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 func (e *emitter) emitEnumDef(def *checker.Enum) error {
 	entries := make([]string, 0, len(def.Values))
 	for _, value := range def.Values {
-		entries = append(entries, jsName(value.Name)+": "+strconv.Itoa(value.Value))
+		entries = append(entries, jsName(value.Name)+": makeEnum("+strconv.Quote(def.Name)+", "+strconv.Quote(value.Name)+", "+strconv.Itoa(value.Value)+")")
 	}
-	e.line("const " + jsName(def.Name) + " = { " + strings.Join(entries, ", ") + " };")
+	e.line("const " + jsName(def.Name) + " = Object.freeze({ " + strings.Join(entries, ", ") + " });")
 	e.line("")
 	return nil
 }
@@ -1388,6 +1420,10 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 	child.line("(() => {")
 	child.indent(func() {
 		child.line("const __match = " + subject + ";")
+		enumName, err := enumTypeName(match.Subject.Type())
+		if err != nil {
+			panic(err)
+		}
 		for _, discriminant := range sortedEnumDiscriminants(match.DiscriminantToIndex) {
 			idx := match.DiscriminantToIndex[discriminant]
 			if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
@@ -1397,7 +1433,7 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 			if err != nil {
 				panic(err)
 			}
-			child.line(fmt.Sprintf("if (__match === %d) return %s;", discriminant, blockExpr))
+			child.line("if (isEnumOf(__match, " + strconv.Quote(enumName) + ") && __match.value === " + strconv.Itoa(discriminant) + ") return " + blockExpr + ";")
 		}
 		if match.CatchAll != nil {
 			catchAllExpr, err := e.emitBoundBlockExpr(match.CatchAll, nil)
@@ -1799,6 +1835,36 @@ func (e *emitter) emitBinary(left checker.Expression, op string, right checker.E
 	return "(" + leftValue + " " + op + " " + rightValue + ")", nil
 }
 
+func (e *emitter) emitEquality(left checker.Expression, right checker.Expression) (string, error) {
+	leftValue, err := e.emitExpr(left)
+	if err != nil {
+		return "", err
+	}
+	rightValue, err := e.emitExpr(right)
+	if err != nil {
+		return "", err
+	}
+	if requiresEnumAwareComparison(left.Type(), right.Type()) {
+		return "ardEq(" + leftValue + ", " + rightValue + ")", nil
+	}
+	return "(" + leftValue + " === " + rightValue + ")", nil
+}
+
+func (e *emitter) emitIntComparison(left checker.Expression, op string, right checker.Expression) (string, error) {
+	leftValue, err := e.emitExpr(left)
+	if err != nil {
+		return "", err
+	}
+	rightValue, err := e.emitExpr(right)
+	if err != nil {
+		return "", err
+	}
+	if requiresEnumAwareComparison(left.Type(), right.Type()) {
+		return "(ardEnumValue(" + leftValue + ") " + op + " ardEnumValue(" + rightValue + "))", nil
+	}
+	return "(" + leftValue + " " + op + " " + rightValue + ")", nil
+}
+
 func (e *emitter) emitArgs(args []checker.Expression) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -2138,6 +2204,30 @@ func collectEnumDefs(program *checker.Program) []*checker.Enum {
 	return out
 }
 
+func isEnumType(t checker.Type) bool {
+	switch t.(type) {
+	case *checker.Enum, checker.Enum:
+		return true
+	default:
+		return false
+	}
+}
+
+func enumTypeName(t checker.Type) (string, error) {
+	switch typed := t.(type) {
+	case *checker.Enum:
+		return typed.Name, nil
+	case checker.Enum:
+		return typed.Name, nil
+	default:
+		return "", fmt.Errorf("expected enum type, got %s", t.String())
+	}
+}
+
+func requiresEnumAwareComparison(left checker.Type, right checker.Type) bool {
+	return isEnumType(left) || isEnumType(right)
+}
+
 func sortedUnionCaseNames(cases map[string]*checker.Match) []string {
 	names := make([]string, 0, len(cases))
 	for name := range cases {
@@ -2161,7 +2251,7 @@ func (e *emitter) emitUnionTypePredicate(t checker.Type, subject string) (string
 	case *checker.StructDef:
 		return subject + " instanceof " + jsName(typed.Name), nil
 	case *checker.Enum:
-		return "typeof " + subject + " === \"number\"", nil
+		return "isEnumOf(" + subject + ", " + strconv.Quote(typed.Name) + ")", nil
 	case *checker.Maybe:
 		return subject + " instanceof Maybe", nil
 	case *checker.Result:
