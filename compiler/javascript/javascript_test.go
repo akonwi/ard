@@ -242,6 +242,60 @@ let result = update()
 	}
 }
 
+func TestBuildWritesMapLiteralsAndMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn update() Bool {
+  mut values: [Str: Int] = ["a": 1]
+  values.set("b", 2)
+  values.drop("a")
+  values.has("b")
+}
+
+fn lookup() Int {
+  let values: [Str: Int] = ["a": 1]
+  values.get("a").or(0)
+}
+
+let size = ["a": 1].size()
+let keys = ["a": 1].keys()
+let has_b = update()
+let found = lookup()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "new Map([[\"a\", 1]])") {
+		t.Fatalf("expected map literal lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, ".size") || !strings.Contains(source, "Array.from(new Map([[\"a\", 1]]).keys())") {
+		t.Fatalf("expected size/keys lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "__value.set(\"b\", 2);") || !strings.Contains(source, "__value.delete(\"a\");") {
+		t.Fatalf("expected set/drop lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, ".has(\"b\")") {
+		t.Fatalf("expected has lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "Maybe.some(values.get(\"a\"))") || !strings.Contains(source, "values.has(\"a\")") {
+		t.Fatalf("expected get lowering, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesMaybeAndResultMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

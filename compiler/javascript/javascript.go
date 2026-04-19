@@ -864,6 +864,20 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", err
 		}
 		return "[" + strings.Join(elements, ", ") + "]", nil
+	case *checker.MapLiteral:
+		entries := make([]string, 0, len(expr.Keys))
+		for i := range expr.Keys {
+			key, err := e.emitExpr(expr.Keys[i])
+			if err != nil {
+				return "", err
+			}
+			value, err := e.emitExpr(expr.Values[i])
+			if err != nil {
+				return "", err
+			}
+			entries = append(entries, "["+key+", "+value+"]")
+		}
+		return "new Map([" + strings.Join(entries, ", ") + "])", nil
 	case *checker.StrLiteral:
 		return strconv.Quote(expr.Value), nil
 	case *checker.TemplateStr:
@@ -953,6 +967,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitResultMatch(expr)
 	case *checker.ListMethod:
 		return e.emitListMethod(expr)
+	case *checker.MapMethod:
+		return e.emitMapMethod(expr)
 	case *checker.MaybeMethod:
 		return e.emitMaybeMethod(expr)
 	case *checker.ResultMethod:
@@ -1183,6 +1199,46 @@ func (e *emitter) emitListMethod(method *checker.ListMethod) (string, error) {
 		return e.emitMutationExpr(subject, lines, "undefined")
 	default:
 		return "", fmt.Errorf("unsupported list method: %v", method.Kind)
+	}
+}
+
+func (e *emitter) emitMapMethod(method *checker.MapMethod) (string, error) {
+	subject, err := e.emitExpr(method.Subject)
+	if err != nil {
+		return "", err
+	}
+	args, err := e.emitArgs(method.Args)
+	if err != nil {
+		return "", err
+	}
+
+	switch method.Kind {
+	case checker.MapKeys:
+		return "Array.from(" + subject + ".keys())", nil
+	case checker.MapSize:
+		return subject + ".size", nil
+	case checker.MapGet:
+		if len(args) != 1 {
+			return "", fmt.Errorf("map.get expects one arg")
+		}
+		return "(" + subject + ".has(" + args[0] + ") ? Maybe.some(" + subject + ".get(" + args[0] + ")) : Maybe.none())", nil
+	case checker.MapSet:
+		if len(args) != 2 {
+			return "", fmt.Errorf("map.set expects two args")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.set(" + args[0] + ", " + args[1] + ");"}, "true")
+	case checker.MapDrop:
+		if len(args) != 1 {
+			return "", fmt.Errorf("map.drop expects one arg")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.delete(" + args[0] + ");"}, "undefined")
+	case checker.MapHas:
+		if len(args) != 1 {
+			return "", fmt.Errorf("map.has expects one arg")
+		}
+		return subject + ".has(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported map method: %v", method.Kind)
 	}
 }
 
