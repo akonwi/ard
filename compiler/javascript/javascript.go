@@ -276,8 +276,15 @@ func exportedNames(program *checker.Program) []string {
 			seen[expr.Name] = true
 			names = append(names, expr.Name)
 		}
-		if def, ok := stmt.Stmt.(*checker.VariableDef); ok {
+		switch def := stmt.Stmt.(type) {
+		case *checker.VariableDef:
 			if def.Mutable || seen[def.Name] {
+				continue
+			}
+			seen[def.Name] = true
+			names = append(names, def.Name)
+		case *checker.StructDef:
+			if def.Private || seen[def.Name] {
 				continue
 			}
 			seen[def.Name] = true
@@ -476,6 +483,8 @@ func (e *emitter) emitIf(expr *checker.If, returns bool) error {
 
 func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 	switch stmt := stmt.(type) {
+	case *checker.StructDef:
+		return e.emitStructDef(stmt)
 	case *checker.VariableDef:
 		value, err := e.emitExpr(stmt.Value)
 		if err != nil {
@@ -583,6 +592,20 @@ func (e *emitter) emitAssignable(expr checker.Expression) (string, error) {
 
 func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	switch expr := expr.(type) {
+	case *checker.StructInstance:
+		return e.emitStructInstance(expr, jsName(expr.Name))
+	case *checker.ModuleStructInstance:
+		moduleVar, ok := e.moduleVars[expr.Module]
+		if !ok {
+			return "", fmt.Errorf("unknown imported module %s", expr.Module)
+		}
+		return e.emitStructInstance(expr.Property, moduleVar+"."+jsName(expr.Property.Name))
+	case *checker.InstanceProperty:
+		subject, err := e.emitExpr(expr.Subject)
+		if err != nil {
+			return "", err
+		}
+		return subject + "." + jsName(expr.Property), nil
 	case *checker.StrLiteral:
 		return strconv.Quote(expr.Value), nil
 	case *checker.TemplateStr:
@@ -691,6 +714,42 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	}
 }
 
+func (e *emitter) emitStructDef(def *checker.StructDef) error {
+	fieldNames := sortedFieldNames(def.Fields)
+	params := make([]string, 0, len(fieldNames))
+	for _, field := range fieldNames {
+		params = append(params, jsName(field))
+	}
+
+	e.line(fmt.Sprintf("class %s {", jsName(def.Name)))
+	e.indent(func() {
+		e.line("constructor(" + strings.Join(params, ", ") + ") {")
+		e.indent(func() {
+			for _, field := range fieldNames {
+				name := jsName(field)
+				e.line("this." + name + " = " + name + ";")
+			}
+		})
+		e.line("}")
+	})
+	e.line("}")
+	e.line("")
+	return nil
+}
+
+func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor string) (string, error) {
+	fieldNames := sortedStructInstanceFields(instance)
+	args := make([]string, 0, len(fieldNames))
+	for _, field := range fieldNames {
+		value, err := e.emitExpr(instance.Fields[field])
+		if err != nil {
+			return "", err
+		}
+		args = append(args, value)
+	}
+	return "new " + ctor + "(" + strings.Join(args, ", ") + ")", nil
+}
+
 func (e *emitter) emitTemplateStr(expr *checker.TemplateStr) (string, error) {
 	var out bytes.Buffer
 	out.WriteByte('`')
@@ -777,6 +836,33 @@ func (e *emitter) indent(fn func()) {
 	e.indentLevel++
 	defer func() { e.indentLevel-- }()
 	fn()
+}
+
+func sortedStructInstanceFields(instance *checker.StructInstance) []string {
+	if instance == nil {
+		return nil
+	}
+	if structDef, ok := instance.StructType.(*checker.StructDef); ok && structDef != nil {
+		return sortedFieldNames(structDef.Fields)
+	}
+	if len(instance.FieldTypes) > 0 {
+		return sortedFieldNames(instance.FieldTypes)
+	}
+	fields := make([]string, 0, len(instance.Fields))
+	for field := range instance.Fields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+func sortedFieldNames(fields map[string]checker.Type) []string {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func moduleVarName(path string) string {

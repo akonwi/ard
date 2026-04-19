@@ -94,6 +94,95 @@ let result = utils::add(1, 2)
 	}
 }
 
+func TestBuildWritesStructLiteralAndFieldAccess(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Person {
+  age: Int,
+}
+
+fn get_age() Int {
+  let person = Person{age: 30}
+  person.age
+}
+
+let result = get_age()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSBrowser); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "class Person {") {
+		t.Fatalf("expected struct class definition, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const person = new Person(30);") {
+		t.Fatalf("expected struct instantiation, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return person.age;") {
+		t.Fatalf("expected field access, got:\n%s", source)
+	}
+}
+
+func TestBuildWritesImportedModuleStructLiteral(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "models.ard"), []byte(`
+struct Person {
+  age: Int,
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write models source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/models
+
+fn get_age() Int {
+  let person = models::Person{age: 30}
+  person.age
+}
+
+let result = get_age()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "class Person {") {
+		t.Fatalf("expected imported struct class definition, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return { Person: Person };") {
+		t.Fatalf("expected imported struct export, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const person = new __module_demo_models.Person(30);") {
+		t.Fatalf("expected imported struct instantiation, got:\n%s", source)
+	}
+}
+
 func TestRunRejectsBrowserTarget(t *testing.T) {
 	err := Run("main.ard", backend.TargetJSBrowser, nil)
 	if err == nil {
