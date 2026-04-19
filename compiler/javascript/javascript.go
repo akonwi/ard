@@ -805,42 +805,36 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 		}
 		e.line(target + " = " + value + ";")
 		return nil
+	case *checker.WhileLoop:
+		return e.emitWhileLoop(stmt)
 	case checker.WhileLoop:
-		condition, err := e.emitExpr(stmt.Condition)
-		if err != nil {
-			return err
-		}
-		e.line("while (" + condition + ") {")
-		e.indent(func() {
-			err = e.emitBlock(stmt.Body, false)
-			if err != nil {
-				panic(err)
-			}
-		})
-		e.line("}")
-		return nil
+		loop := stmt
+		return e.emitWhileLoop(&loop)
+	case *checker.ForLoop:
+		return e.emitForLoop(stmt)
 	case checker.ForLoop:
-		init, err := e.emitForInit(stmt.Init)
-		if err != nil {
-			return err
-		}
-		condition, err := e.emitExpr(stmt.Condition)
-		if err != nil {
-			return err
-		}
-		update, err := e.emitReassignmentInline(stmt.Update)
-		if err != nil {
-			return err
-		}
-		e.line("for (" + init + "; " + condition + "; " + update + ") {")
-		e.indent(func() {
-			err = e.emitBlock(stmt.Body, false)
-			if err != nil {
-				panic(err)
-			}
-		})
-		e.line("}")
-		return nil
+		loop := stmt
+		return e.emitForLoop(&loop)
+	case *checker.ForIntRange:
+		return e.emitForIntRange(stmt)
+	case checker.ForIntRange:
+		loop := stmt
+		return e.emitForIntRange(&loop)
+	case *checker.ForInStr:
+		return e.emitForInStr(stmt)
+	case checker.ForInStr:
+		loop := stmt
+		return e.emitForInStr(&loop)
+	case *checker.ForInList:
+		return e.emitForInList(stmt)
+	case checker.ForInList:
+		loop := stmt
+		return e.emitForInList(&loop)
+	case *checker.ForInMap:
+		return e.emitForInMap(stmt)
+	case checker.ForInMap:
+		loop := stmt
+		return e.emitForInMap(&loop)
 	default:
 		return fmt.Errorf("js backend does not yet support statement type %T", stmt)
 	}
@@ -871,6 +865,147 @@ func (e *emitter) emitReassignmentInline(stmt *checker.Reassignment) (string, er
 		return "", err
 	}
 	return target + " = " + value, nil
+}
+
+func (e *emitter) emitWhileLoop(loop *checker.WhileLoop) error {
+	condition, err := e.emitExpr(loop.Condition)
+	if err != nil {
+		return err
+	}
+	e.line("while (" + condition + ") {")
+	e.indent(func() {
+		err = e.emitBlock(loop.Body, false)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForLoop(loop *checker.ForLoop) error {
+	init, err := e.emitForInit(loop.Init)
+	if err != nil {
+		return err
+	}
+	condition, err := e.emitExpr(loop.Condition)
+	if err != nil {
+		return err
+	}
+	update, err := e.emitReassignmentInline(loop.Update)
+	if err != nil {
+		return err
+	}
+	e.line("for (" + init + "; " + condition + "; " + update + ") {")
+	e.indent(func() {
+		err = e.emitBlock(loop.Body, false)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForIntRange(loop *checker.ForIntRange) error {
+	start, err := e.emitExpr(loop.Start)
+	if err != nil {
+		return err
+	}
+	end, err := e.emitExpr(loop.End)
+	if err != nil {
+		return err
+	}
+	e.line("{")
+	e.indent(func() {
+		e.line("const __range_start = " + start + ";")
+		e.line("const __range_end = " + end + ";")
+		if loop.Index == "" {
+			e.line("for (let " + jsName(loop.Cursor) + " = __range_start; " + jsName(loop.Cursor) + " <= __range_end; " + jsName(loop.Cursor) + "++) {")
+		} else {
+			e.line("for (let " + jsName(loop.Cursor) + " = __range_start, " + jsName(loop.Index) + " = 0; " + jsName(loop.Cursor) + " <= __range_end; " + jsName(loop.Cursor) + "++, " + jsName(loop.Index) + "++) {")
+		}
+		e.indent(func() {
+			err = e.emitBlock(loop.Body, false)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForInStr(loop *checker.ForInStr) error {
+	value, err := e.emitExpr(loop.Value)
+	if err != nil {
+		return err
+	}
+	e.line("{")
+	e.indent(func() {
+		e.line("const __string_value = Array.from(" + value + ");")
+		if loop.Index == "" {
+			e.line("for (const " + jsName(loop.Cursor) + " of __string_value) {")
+		} else {
+			e.line("for (const [" + jsName(loop.Index) + ", " + jsName(loop.Cursor) + "] of __string_value.entries()) {")
+		}
+		e.indent(func() {
+			err = e.emitBlock(loop.Body, false)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForInList(loop *checker.ForInList) error {
+	list, err := e.emitExpr(loop.List)
+	if err != nil {
+		return err
+	}
+	e.line("{")
+	e.indent(func() {
+		e.line("const __list_value = " + list + ";")
+		if loop.Index == "" {
+			e.line("for (const " + jsName(loop.Cursor) + " of __list_value) {")
+		} else {
+			e.line("for (const [" + jsName(loop.Index) + ", " + jsName(loop.Cursor) + "] of __list_value.entries()) {")
+		}
+		e.indent(func() {
+			err = e.emitBlock(loop.Body, false)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitForInMap(loop *checker.ForInMap) error {
+	mapExpr, err := e.emitExpr(loop.Map)
+	if err != nil {
+		return err
+	}
+	e.line("{")
+	e.indent(func() {
+		e.line("const __map_value = " + mapExpr + ";")
+		e.line("for (const [" + jsName(loop.Key) + ", " + jsName(loop.Val) + "] of __map_value.entries()) {")
+		e.indent(func() {
+			err = e.emitBlock(loop.Body, false)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	})
+	e.line("}")
+	return nil
 }
 
 func (e *emitter) emitAssignable(expr checker.Expression) (string, error) {
@@ -967,6 +1102,12 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		if expr.Module == "ard/result" {
 			return e.emitResultModuleCall(expr)
+		}
+		if expr.Module == "ard/float" {
+			return e.emitFloatModuleCall(expr)
+		}
+		if expr.Module == "ard/int" {
+			return e.emitIntModuleCall(expr)
 		}
 		moduleVar, ok := e.moduleVars[expr.Module]
 		if !ok {
@@ -1682,6 +1823,56 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall) (string
 		return "Result.err(" + args[0] + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported Result module call: %s", call.Call.Name)
+	}
+}
+
+func (e *emitter) emitFloatModuleCall(call *checker.ModuleFunctionCall) (string, error) {
+	switch call.Call.Name {
+	case "from_int":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Float::from_int expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "Number(" + args[0] + ")", nil
+	case "from_str":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Float::from_str expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "(() => { const __input = String(" + args[0] + ").trim(); if (__input === \"\") return Maybe.none(); const __value = Number(__input); return Number.isNaN(__value) ? Maybe.none() : Maybe.some(__value); })()", nil
+	case "floor":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Float::floor expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "Math.floor(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported Float module call: %s", call.Call.Name)
+	}
+}
+
+func (e *emitter) emitIntModuleCall(call *checker.ModuleFunctionCall) (string, error) {
+	switch call.Call.Name {
+	case "from_str":
+		if len(call.Call.Args) != 1 {
+			return "", fmt.Errorf("Int::from_str expects one arg")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "(() => { const __input = String(" + args[0] + ").trim(); if (!/^[-+]?\\d+$/.test(__input)) return Maybe.none(); return Maybe.some(Number.parseInt(__input, 10)); })()", nil
+	default:
+		return "", fmt.Errorf("unsupported Int module call: %s", call.Call.Name)
 	}
 }
 

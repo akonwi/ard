@@ -183,6 +183,178 @@ let result = get_age()
 	}
 }
 
+func TestBuildWritesLoopStatements(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn countdown() Int {
+  mut n = 3
+  while n > 0 {
+    n = n - 1
+  }
+  n
+}
+
+fn sum_range() Int {
+  mut total = 0
+  for i in 1..3 {
+    total = total + i
+  }
+  total
+}
+
+fn sum_list() Int {
+  let values = [1, 2, 3]
+  mut total = 0
+  for value, idx in values {
+    total = total + value + idx
+  }
+  total
+}
+
+fn sum_chars() Int {
+  mut total = 0
+  for char, idx in "ab" {
+    let char_copy = char
+    total = total + idx
+  }
+  total
+}
+
+fn sum_map() Int {
+  let values: [Str: Int] = ["a": 1, "b": 2]
+  mut total = 0
+  for key, value in values {
+    let key_copy = key
+    total = total + value
+  }
+  total
+}
+
+let a = countdown()
+let b = sum_range()
+let c = sum_list()
+let d = sum_chars()
+let e = sum_map()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "while ((n > 0)) {") {
+		t.Fatalf("expected while lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const __range_start = 1;") || !strings.Contains(source, "for (let i = __range_start; i <= __range_end; i++) {") {
+		t.Fatalf("expected int-range lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "for (const [idx, value] of __list_value.entries()) {") {
+		t.Fatalf("expected list iteration lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const __string_value = Array.from(\"ab\");") || !strings.Contains(source, "for (const [idx, char] of __string_value.entries()) {") {
+		t.Fatalf("expected string iteration lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "for (const [key, value] of __map_value.entries()) {") {
+		t.Fatalf("expected map iteration lowering, got:\n%s", source)
+	}
+}
+
+func TestRunExecutesCoreLoopProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn countdown() Int {
+  mut n = 3
+  while n > 0 {
+    n = n - 1
+  }
+  n
+}
+
+fn sum_range() Int {
+  mut total = 0
+  for i in 1..3 {
+    total = total + i
+  }
+  total
+}
+
+fn sum_list() Int {
+  let values = [1, 2, 3]
+  mut total = 0
+  for value, idx in values {
+    total = total + value + idx
+  }
+  total
+}
+
+fn sum_chars() Int {
+  mut total = 0
+  for char, idx in "ab" {
+    let char_copy = char
+    total = total + idx
+  }
+  total
+}
+
+fn sum_map() Int {
+  let values: [Str: Int] = ["a": 1, "b": 2]
+  mut total = 0
+  for key, value in values {
+    let key_copy = key
+    total = total + value
+  }
+  total
+}
+
+let a = countdown()
+let b = sum_range()
+let c = sum_list()
+let d = sum_chars()
+let e = sum_map()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	cmd := exec.Command("node", "--input-type=module", "-e", `
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (mod.a !== 0) throw new Error("countdown");
+if (mod.b !== 6) throw new Error("range");
+if (mod.c !== 9) throw new Error("list");
+if (mod.d !== 1) throw new Error("chars");
+if (mod.e !== 3) throw new Error("map");
+`, outputPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("did not expect node assertion error: %v", err)
+	}
+}
+
 func TestBuildWritesListLiteralsAndMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -405,6 +577,90 @@ let found = lookup()
 	}
 	if !strings.Contains(source, "Maybe.some(values.get(\"a\"))") || !strings.Contains(source, "values.has(\"a\")") {
 		t.Fatalf("expected get lowering, got:\n%s", source)
+	}
+}
+
+func TestBuildWritesPrimitiveModuleLowering(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+let a = Int::from_str("42").or(-1)
+let b = Int::from_str("oops").or(-1)
+let c = Float::from_int(100)
+let d = Float::floor(3.75)
+let e = Float::from_str("3.5").or(0.0)
+let f = Float::from_str("oops").or(1.25)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, `Number.parseInt(__input, 10)`) {
+		t.Fatalf("expected Int::from_str lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `const c = Number(100);`) {
+		t.Fatalf("expected Float::from_int lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `const d = Math.floor(3.75);`) {
+		t.Fatalf("expected Float::floor lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `const __value = Number(__input);`) {
+		t.Fatalf("expected Float::from_str lowering, got:\n%s", source)
+	}
+}
+
+func TestRunExecutesPrimitiveModuleProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+let a = Int::from_str("42").or(-1)
+let b = Int::from_str("oops").or(-1)
+let c = Float::from_int(100)
+let d = Float::floor(3.75)
+let e = Float::from_str("3.5").or(0.0)
+let f = Float::from_str("oops").or(1.25)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	cmd := exec.Command("node", "--input-type=module", "-e", `
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (mod.a !== 42) throw new Error("int parse success");
+if (mod.b !== -1) throw new Error("int parse fallback");
+if (mod.c !== 100) throw new Error("float from int");
+if (mod.d !== 3) throw new Error("float floor");
+if (mod.e !== 3.5) throw new Error("float parse success");
+if (mod.f !== 1.25) throw new Error("float parse fallback");
+`, outputPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("did not expect node assertion error: %v", err)
 	}
 }
 
