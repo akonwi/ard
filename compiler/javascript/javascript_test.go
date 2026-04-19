@@ -301,6 +301,79 @@ let d = result_flow()
 	}
 }
 
+func TestBuildWritesTryLowering(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn render_result(value: Int!Str) Str!Str {
+  let out = try value
+  Result::ok(out.to_str())
+}
+
+fn final_message() Str {
+  try render_result(Result::err("division by zero")) -> err {
+    "bad: " + err
+  }
+}
+
+fn maybe_chain(value: Int?) Int? {
+  let out = try value
+  maybe::some(out + 1)
+}
+
+fn nested_binary(value: Int!Str) Int!Str {
+  let out = (try value) + 1
+  Result::ok(out)
+}
+
+let a = final_message()
+let b = maybe_chain(maybe::some(4))
+let c = nested_binary(Result::ok(2))
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "function makeTryReturn(value) {") {
+		t.Fatalf("expected try sentinel helper, got:\n%s", source)
+	}
+	if !strings.Contains(source, "catch (__ard_try) {") || !strings.Contains(source, "if (__ard_try && __ard_try.__ard_try_return) return __ard_try.value;") {
+		t.Fatalf("expected function try boundary, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (__try.isErr()) throw makeTryReturn(Result.err(__try.error));") {
+		t.Fatalf("expected result try propagation, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (__try.isErr()) throw makeTryReturn((() => {") {
+		t.Fatalf("expected result try catch lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const err = __try.error;") {
+		t.Fatalf("expected catch var binding, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (__try.isNone()) throw makeTryReturn(Maybe.none());") {
+		t.Fatalf("expected maybe try propagation, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return __try.ok;") || !strings.Contains(source, "return __try.value;") {
+		t.Fatalf("expected try success unwrapping, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const out = (() => {") {
+		t.Fatalf("expected try expression lowering in let binding, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesStructMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

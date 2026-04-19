@@ -20,13 +20,14 @@ type emitOptions struct {
 }
 
 type emitter struct {
-	target          string
-	builder         strings.Builder
-	indentLevel     int
-	moduleVars      map[string]string
-	currentModule   string
-	currentFunction string
-	currentReceiver string
+	target            string
+	builder           strings.Builder
+	indentLevel       int
+	moduleVars        map[string]string
+	currentModule     string
+	currentFunction   string
+	currentReceiver   string
+	currentReturnType checker.Type
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -155,6 +156,12 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 		e.line("error.line = line;")
 		e.line("for (const key in extra) error[key] = extra[key];")
 		e.line("return error;")
+	})
+	e.line("}")
+	e.line("")
+	e.line("function makeTryReturn(value) {")
+	e.indent(func() {
+		e.line("return { __ard_try_return: true, value };")
 	})
 	e.line("}")
 	e.line("")
@@ -462,14 +469,17 @@ func (e *emitter) emitFunctionDef(fn *checker.FunctionDef) error {
 	}
 	e.line(fmt.Sprintf("function %s(%s) {", jsName(fn.Name), strings.Join(params, ", ")))
 	prevFunction := e.currentFunction
+	prevReturnType := e.currentReturnType
 	e.currentFunction = fn.Name
+	e.currentReturnType = fn.ReturnType
 	e.indent(func() {
-		err := e.emitBlock(fn.Body, true)
+		err := e.emitFunctionBoundary(fn.Body)
 		if err != nil {
 			panic(err)
 		}
 	})
 	e.currentFunction = prevFunction
+	e.currentReturnType = prevReturnType
 	e.line("}")
 	e.line("")
 	return nil
@@ -487,6 +497,23 @@ func (e *emitter) emitExternalFunctionDef(fn *checker.ExternalFunctionDef) error
 	})
 	e.line("}")
 	e.line("")
+	return nil
+}
+
+func (e *emitter) emitFunctionBoundary(body *checker.Block) error {
+	e.line("try {")
+	e.indent(func() {
+		err := e.emitBlock(body, true)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("} catch (__ard_try) {")
+	e.indent(func() {
+		e.line("if (__ard_try && __ard_try.__ard_try_return) return __ard_try.value;")
+		e.line("throw __ard_try;")
+	})
+	e.line("}")
 	return nil
 }
 
@@ -549,6 +576,13 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 		}
 		e.line("throw makeArdError(\"panic\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(e.currentFunction) + ", 0, " + message + ");")
 		return nil
+	case *checker.TryOp:
+		value, err := e.emitExpr(expr)
+		if err != nil {
+			return err
+		}
+		e.line("return " + value + ";")
+		return nil
 	default:
 		value, err := e.emitExpr(expr)
 		if err != nil {
@@ -557,6 +591,76 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 		e.line("return " + value + ";")
 		return nil
 	}
+}
+
+func (e *emitter) emitTryCatchBlockValue(block *checker.Block, catchVar string, catchValue string) (string, error) {
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		if catchVar != "" && catchVar != "_" {
+			child.line("const " + jsName(catchVar) + " = " + catchValue + ";")
+		}
+		err := child.emitBlock(block, true)
+		if err != nil {
+			panic(err)
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
+}
+
+func (e *emitter) emitTryExpr(op *checker.TryOp) (string, error) {
+	subject, err := e.emitExpr(op.Expr())
+	if err != nil {
+		return "", err
+	}
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		child.line("const __try = " + subject + ";")
+		switch op.Kind {
+		case checker.TryResult:
+			if op.CatchBlock != nil {
+				catchExpr, err := e.emitTryCatchBlockValue(op.CatchBlock, op.CatchVar, "__try.error")
+				if err != nil {
+					panic(err)
+				}
+				child.line("if (__try.isErr()) throw makeTryReturn(" + catchExpr + ");")
+			} else {
+				child.line("if (__try.isErr()) throw makeTryReturn(Result.err(__try.error));")
+			}
+			child.line("return __try.ok;")
+		case checker.TryMaybe:
+			if op.CatchBlock != nil {
+				catchExpr, err := e.emitTryCatchBlockValue(op.CatchBlock, op.CatchVar, "undefined")
+				if err != nil {
+					panic(err)
+				}
+				child.line("if (__try.isNone()) throw makeTryReturn(" + catchExpr + ");")
+			} else {
+				child.line("if (__try.isNone()) throw makeTryReturn(Maybe.none());")
+			}
+			child.line("return __try.value;")
+		default:
+			panic(fmt.Errorf("unsupported try kind: %v", op.Kind))
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
 }
 
 func (e *emitter) emitIf(expr *checker.If, returns bool) error {
@@ -790,6 +894,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return subject + "." + jsName(expr.Method.Name) + "(" + strings.Join(args, ", ") + ")", nil
 	case *checker.CopyExpression:
 		return e.emitExpr(expr.Expr)
+	case *checker.TryOp:
+		return e.emitTryExpr(expr)
 	case *checker.StrMethod:
 		return e.emitStrMethod(expr)
 	case *checker.IntMethod:
@@ -913,16 +1019,19 @@ func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.Funct
 	e.line(fmt.Sprintf("%s(%s) {", jsName(method.Name), strings.Join(params, ", ")))
 	prevFunction := e.currentFunction
 	prevReceiver := e.currentReceiver
+	prevReturnType := e.currentReturnType
 	e.currentFunction = def.Name + "." + method.Name
 	e.currentReceiver = method.Receiver
+	e.currentReturnType = method.ReturnType
 	e.indent(func() {
-		err := e.emitBlock(method.Body, true)
+		err := e.emitFunctionBoundary(method.Body)
 		if err != nil {
 			panic(err)
 		}
 	})
 	e.currentFunction = prevFunction
 	e.currentReceiver = prevReceiver
+	e.currentReturnType = prevReturnType
 	e.line("}")
 	return nil
 }
@@ -942,11 +1051,12 @@ func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor stri
 
 func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
 	child := &emitter{
-		target:          e.target,
-		moduleVars:      e.moduleVars,
-		currentModule:   e.currentModule,
-		currentFunction: e.currentFunction,
-		currentReceiver: e.currentReceiver,
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: def.ReturnType,
 	}
 	params := make([]string, 0, len(def.Parameters))
 	for _, param := range def.Parameters {
@@ -954,7 +1064,7 @@ func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) 
 	}
 	child.line("function(" + strings.Join(params, ", ") + ") {")
 	child.indent(func() {
-		if err := child.emitBlock(def.Body, true); err != nil {
+		if err := child.emitFunctionBoundary(def.Body); err != nil {
 			panic(err)
 		}
 	})
