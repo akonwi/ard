@@ -52,20 +52,33 @@ func TestFindProjectRoot(t *testing.T) {
 }
 
 func TestFindProjectRootReadsTarget(t *testing.T) {
-	dir := t.TempDir()
-	tomlContent := "name = \"test_project\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(tomlContent), 0o644); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "go", target: "go"},
+		{name: "js-browser", target: "js-browser"},
+		{name: "js-server", target: "js-server"},
 	}
 
-	resolver, err := checker.NewModuleResolver(dir)
-	if err != nil {
-		t.Fatalf("Failed to create module resolver: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tomlContent := "name = \"test_project\"\nard = \">= 0.1.0\"\ntarget = \"" + tt.target + "\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(tomlContent), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	project := resolver.GetProjectInfo()
-	if project.Target != "go" {
-		t.Fatalf("Expected target 'go', got '%s'", project.Target)
+			resolver, err := checker.NewModuleResolver(dir)
+			if err != nil {
+				t.Fatalf("Failed to create module resolver: %v", err)
+			}
+
+			project := resolver.GetProjectInfo()
+			if project.Target != tt.target {
+				t.Fatalf("Expected target '%s', got '%s'", tt.target, project.Target)
+			}
+		})
 	}
 }
 

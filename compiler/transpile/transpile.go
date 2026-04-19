@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
@@ -1092,7 +1093,7 @@ func loadModule(inputPath string) (checker.Module, *checker.ProjectInfo, error) 
 		relPath = inputPath
 	}
 
-	c := checker.New(relPath, program, moduleResolver)
+	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{Target: backend.TargetGo})
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {

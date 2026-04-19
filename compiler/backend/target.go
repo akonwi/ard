@@ -3,9 +3,11 @@ package backend
 import "fmt"
 
 const (
-	TargetBytecode = "bytecode"
-	TargetGo       = "go"
-	DefaultTarget  = TargetBytecode
+	TargetBytecode  = "bytecode"
+	TargetGo        = "go"
+	TargetJSBrowser = "js-browser"
+	TargetJSServer  = "js-server"
+	DefaultTarget   = TargetBytecode
 )
 
 func ParseTarget(raw string) (string, error) {
@@ -14,6 +16,10 @@ func ParseTarget(raw string) (string, error) {
 		return DefaultTarget, nil
 	case TargetGo:
 		return TargetGo, nil
+	case TargetJSBrowser:
+		return TargetJSBrowser, nil
+	case TargetJSServer:
+		return TargetJSServer, nil
 	default:
 		return "", fmt.Errorf("unknown target: %s", raw)
 	}

@@ -66,7 +66,7 @@ func main() {
 			}
 			switch target {
 			case backend.TargetBytecode:
-				module, err := loadModule(inputPath)
+				module, err := loadModule(inputPath, target)
 				if err != nil {
 					os.Exit(1)
 				}
@@ -91,6 +91,12 @@ func main() {
 					fmt.Println(err)
 					os.Exit(1)
 				}
+			case backend.TargetJSBrowser, backend.TargetJSServer:
+				if _, err := loadModule(inputPath, target); err != nil {
+					os.Exit(1)
+				}
+				fmt.Printf("target not yet implemented: %s\n", target)
+				os.Exit(1)
 			default:
 				fmt.Printf("unknown target: %s\n", target)
 				os.Exit(1)
@@ -111,9 +117,14 @@ func main() {
 			var builtPath string
 			switch target {
 			case backend.TargetBytecode:
-				builtPath, err = buildBytecodeBinary(inputPath, outputPath)
+				builtPath, err = buildBytecodeBinary(inputPath, outputPath, target)
 			case backend.TargetGo:
 				builtPath, err = transpile.BuildBinary(inputPath, outputPath)
+			case backend.TargetJSBrowser, backend.TargetJSServer:
+				_, err = loadModule(inputPath, target)
+				if err == nil {
+					err = fmt.Errorf("target not yet implemented: %s", target)
+				}
 			default:
 				err = fmt.Errorf("unknown target: %s", target)
 			}
@@ -169,11 +180,11 @@ func main() {
 }
 
 func check(inputPath string) bool {
-	_, err := loadModule(inputPath)
+	_, err := loadModule(inputPath, "")
 	return err == nil
 }
 
-func loadModule(inputPath string) (checker.Module, error) {
+func loadModule(inputPath string, target string) (checker.Module, error) {
 	sourceCode, err := os.ReadFile(inputPath)
 	if err != nil {
 		fmt.Printf("Error reading file %s - %v\n", inputPath, err)
@@ -199,7 +210,7 @@ func loadModule(inputPath string) (checker.Module, error) {
 		relPath = inputPath // fallback to absolute path
 	}
 
-	c := checker.New(relPath, program, moduleResolver)
+	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{Target: target})
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {
@@ -489,7 +500,7 @@ func runTests(inputPath, filter string, failFast bool) bool {
 
 	outcomes := make([]testOutcome, 0)
 	for _, path := range files {
-		module, err := loadModule(path)
+		module, err := loadModule(path, "")
 		if err != nil {
 			return false
 		}
@@ -661,8 +672,8 @@ func reportTestSummary(outcomes []testOutcome) {
 	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
 }
 
-func buildBytecodeBinary(inputPath string, outputPath string) (string, error) {
-	module, err := loadModule(inputPath)
+func buildBytecodeBinary(inputPath string, outputPath string, target string) (string, error) {
+	module, err := loadModule(inputPath, target)
 	if err != nil {
 		return "", err
 	}

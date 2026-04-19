@@ -185,15 +185,17 @@ type Checker struct {
 	program        *Program
 	halted         bool
 	moduleResolver *ModuleResolver
+	options        CheckOptions
 }
 
-func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver) *Checker {
+func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
 	rootScope := makeScope(nil)
 	c := &Checker{
 		diagnostics:    []Diagnostic{},
 		input:          input,
 		filePath:       filePath,
 		moduleResolver: moduleResolver,
+		options:        normalizeCheckOptions(moduleResolver, options),
 		program: &Program{
 			Imports:    map[string]Module{},
 			Statements: []Statement{},
@@ -225,6 +227,10 @@ func (c *Checker) Check() {
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
+			if err := ValidateStdlibImportTarget(imp.Path, c.options.Target); err != nil {
+				c.addError(err.Error(), imp.GetLocation())
+				continue
+			}
 			if mod, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
@@ -256,7 +262,7 @@ func (c *Checker) Check() {
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard")
+			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard", c.options)
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
@@ -340,8 +346,8 @@ func (c *Checker) Module() Module {
 
 // check is an internal helper for recursive module checking.
 // Use New() + Check() + Module() for the public API.
-func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
-	c := New(filePath, input, moduleResolver)
+func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string, options CheckOptions) (Module, []Diagnostic) {
+	c := New(filePath, input, moduleResolver, options)
 
 	c.Check()
 
