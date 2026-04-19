@@ -242,6 +242,54 @@ let result = update()
 	}
 }
 
+func TestBuildWritesUnionMatchLowering(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+ type Printable = Str | Int | Bool
+ 
+ fn print(p: Printable) Str {
+   match p {
+     Str(str) => str,
+     Int(int) => int.to_str(),
+     _ => "boolean value",
+   }
+ }
+ 
+ let a = print(20)
+ let b = print("hi")
+ let c = print(true)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "typeof __match === \"string\"") {
+		t.Fatalf("expected string union predicate, got:\n%s", source)
+	}
+	if !strings.Contains(source, "typeof __match === \"number\"") {
+		t.Fatalf("expected number union predicate, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const str = __match;") || !strings.Contains(source, "const int = __match;") {
+		t.Fatalf("expected union case bindings, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return (() => {") || !strings.Contains(source, "return \"boolean value\";") {
+		t.Fatalf("expected catch-all union lowering, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesMapLiteralsAndMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

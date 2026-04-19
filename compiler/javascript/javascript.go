@@ -957,6 +957,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitBoolMatch(expr)
 	case *checker.EnumMatch:
 		return e.emitEnumMatch(expr)
+	case *checker.UnionMatch:
+		return e.emitUnionMatch(expr)
 	case *checker.IntMatch:
 		return e.emitIntMatch(expr)
 	case *checker.ConditionalMatch:
@@ -1405,6 +1407,59 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 			child.line("return " + catchAllExpr + ";")
 		} else {
 			child.line(`throw makeArdError("panic", "match", "enum", 0, "non-exhaustive enum match");`)
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
+}
+
+func (e *emitter) emitUnionMatch(match *checker.UnionMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		child.line("const __match = " + subject + ";")
+		for _, caseName := range sortedUnionCaseNames(match.TypeCases) {
+			matchCase := match.TypeCases[caseName]
+			if matchCase == nil {
+				continue
+			}
+			caseType := unionCaseType(match.TypeCasesByType, caseName)
+			if caseType == nil {
+				panic(fmt.Errorf("missing union case type for %s", caseName))
+			}
+			predicate, err := e.emitUnionTypePredicate(caseType, "__match")
+			if err != nil {
+				panic(err)
+			}
+			bindings := []string{}
+			if matchCase.Pattern != nil {
+				bindings = append(bindings, "const "+jsName(matchCase.Pattern.Name)+" = __match;")
+			}
+			blockExpr, err := e.emitBoundBlockExpr(matchCase.Body, bindings)
+			if err != nil {
+				panic(err)
+			}
+			child.line("if (" + predicate + ") return " + blockExpr + ";")
+		}
+		if match.CatchAll != nil {
+			catchAllExpr, err := e.emitBoundBlockExpr(match.CatchAll, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line("return " + catchAllExpr + ";")
+		} else {
+			child.line(`throw makeArdError("panic", "match", "union", 0, "non-exhaustive union match");`)
 		}
 	})
 	child.line("})()")
@@ -2081,6 +2136,54 @@ func collectEnumDefs(program *checker.Program) []*checker.Enum {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func sortedUnionCaseNames(cases map[string]*checker.Match) []string {
+	names := make([]string, 0, len(cases))
+	for name := range cases {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func unionCaseType(typeCasesByType map[checker.Type]*checker.Match, caseName string) checker.Type {
+	for t := range typeCasesByType {
+		if t.String() == caseName {
+			return t
+		}
+	}
+	return nil
+}
+
+func (e *emitter) emitUnionTypePredicate(t checker.Type, subject string) (string, error) {
+	switch typed := t.(type) {
+	case *checker.StructDef:
+		return subject + " instanceof " + jsName(typed.Name), nil
+	case *checker.Enum:
+		return "typeof " + subject + " === \"number\"", nil
+	case *checker.Maybe:
+		return subject + " instanceof Maybe", nil
+	case *checker.Result:
+		return subject + " instanceof Result", nil
+	case *checker.List:
+		return "Array.isArray(" + subject + ")", nil
+	case *checker.Map:
+		return subject + " instanceof Map", nil
+	}
+
+	switch t {
+	case checker.Str:
+		return "typeof " + subject + " === \"string\"", nil
+	case checker.Int, checker.Float:
+		return "typeof " + subject + " === \"number\"", nil
+	case checker.Bool:
+		return "typeof " + subject + " === \"boolean\"", nil
+	case checker.Dynamic:
+		return "true", nil
+	default:
+		return "", fmt.Errorf("unsupported union case type %s", t.String())
+	}
 }
 
 func sortedEnumDiscriminants(values map[int]int8) []int {
