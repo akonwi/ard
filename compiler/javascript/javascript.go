@@ -906,6 +906,10 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitBoolMethod(expr)
 	case *checker.BoolMatch:
 		return e.emitBoolMatch(expr)
+	case *checker.IntMatch:
+		return e.emitIntMatch(expr)
+	case *checker.ConditionalMatch:
+		return e.emitConditionalMatch(expr)
 	case *checker.OptionMatch:
 		return e.emitOptionMatch(expr)
 	case *checker.ResultMatch:
@@ -1263,6 +1267,88 @@ func (e *emitter) emitBoolMatch(match *checker.BoolMatch) (string, error) {
 	return "(() => { const __match = " + subject + "; return __match ? " + trueExpr + " : " + falseExpr + "; })()", nil
 }
 
+func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		child.line("const __match = " + subject + ";")
+		for _, value := range sortedIntCaseKeys(match.IntCases) {
+			block := match.IntCases[value]
+			blockExpr, err := e.emitBoundBlockExpr(block, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line(fmt.Sprintf("if (__match === %d) return %s;", value, blockExpr))
+		}
+		for _, intRange := range sortedIntRangeKeys(match.RangeCases) {
+			block := match.RangeCases[intRange]
+			blockExpr, err := e.emitBoundBlockExpr(block, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line(fmt.Sprintf("if (__match >= %d && __match <= %d) return %s;", intRange.Start, intRange.End, blockExpr))
+		}
+		if match.CatchAll != nil {
+			catchAllExpr, err := e.emitBoundBlockExpr(match.CatchAll, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line("return " + catchAllExpr + ";")
+		} else {
+			child.line(`throw makeArdError("panic", "match", "int", 0, "non-exhaustive int match");`)
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
+}
+
+func (e *emitter) emitConditionalMatch(match *checker.ConditionalMatch) (string, error) {
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		for _, matchCase := range match.Cases {
+			condition, err := e.emitExpr(matchCase.Condition)
+			if err != nil {
+				panic(err)
+			}
+			blockExpr, err := e.emitBoundBlockExpr(matchCase.Body, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line("if (" + condition + ") return " + blockExpr + ";")
+		}
+		if match.CatchAll != nil {
+			catchAllExpr, err := e.emitBoundBlockExpr(match.CatchAll, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line("return " + catchAllExpr + ";")
+		} else {
+			child.line(`throw makeArdError("panic", "match", "conditional", 0, "non-exhaustive conditional match");`)
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
+}
+
 func (e *emitter) emitOptionMatch(match *checker.OptionMatch) (string, error) {
 	subject, err := e.emitExpr(match.Subject)
 	if err != nil {
@@ -1549,6 +1635,29 @@ func (e *emitter) emitVariableName(name string) string {
 		return "this"
 	}
 	return jsName(name)
+}
+
+func sortedIntCaseKeys(cases map[int]*checker.Block) []int {
+	keys := make([]int, 0, len(cases))
+	for value := range cases {
+		keys = append(keys, value)
+	}
+	sort.Ints(keys)
+	return keys
+}
+
+func sortedIntRangeKeys(cases map[checker.IntRange]*checker.Block) []checker.IntRange {
+	ranges := make([]checker.IntRange, 0, len(cases))
+	for intRange := range cases {
+		ranges = append(ranges, intRange)
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].Start != ranges[j].Start {
+			return ranges[i].Start < ranges[j].Start
+		}
+		return ranges[i].End < ranges[j].End
+	})
+	return ranges
 }
 
 func sortedStructInstanceFields(instance *checker.StructInstance) []string {

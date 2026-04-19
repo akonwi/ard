@@ -317,6 +317,22 @@ fn pick(flag: Bool) Int {
   }
 }
 
+fn bucket(num: Int) Str {
+  match num {
+    0 => "zero",
+    1..3 => "few",
+    _ => "many",
+  }
+}
+
+fn classify(score: Int) Str {
+  match {
+    score >= 90 => "A",
+    score >= 80 => "B",
+    _ => "F",
+  }
+}
+
 fn maybe_pick(value: Int?) Int {
   match value {
     num => num,
@@ -332,8 +348,10 @@ fn result_pick(value: Int!Str) Str {
 }
 
 let a = pick(true)
-let b = maybe_pick(maybe::some(1))
-let c = result_pick(Result::err("bad"))
+let b = bucket(2)
+let c = classify(85)
+let d = maybe_pick(maybe::some(1))
+let e = result_pick(Result::err("bad"))
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
 	}
@@ -350,6 +368,12 @@ let c = result_pick(Result::err("bad"))
 	source := string(out)
 	if !strings.Contains(source, "return __match ?") {
 		t.Fatalf("expected bool match lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (__match === 0) return") || !strings.Contains(source, "if (__match >= 1 && __match <= 3) return") {
+		t.Fatalf("expected int/range match lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if ((score >= 90)) return") || !strings.Contains(source, "if ((score >= 80)) return") {
+		t.Fatalf("expected conditional match lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "return __match.isSome() ?") || !strings.Contains(source, "const num = __match.value;") {
 		t.Fatalf("expected maybe match lowering, got:\n%s", source)
