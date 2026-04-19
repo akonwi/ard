@@ -310,6 +310,11 @@ func TestBuildWritesMatchLowering(t *testing.T) {
 	if err := os.WriteFile(mainPath, []byte(`
 use ard/maybe
 
+enum Status {
+  active,
+  inactive,
+}
+
 fn pick(flag: Bool) Int {
   match flag {
     true => 1,
@@ -333,6 +338,13 @@ fn classify(score: Int) Str {
   }
 }
 
+fn label(status: Status) Int {
+  match status {
+    Status::active => 1,
+    Status::inactive => 2,
+  }
+}
+
 fn maybe_pick(value: Int?) Int {
   match value {
     num => num,
@@ -350,8 +362,9 @@ fn result_pick(value: Int!Str) Str {
 let a = pick(true)
 let b = bucket(2)
 let c = classify(85)
-let d = maybe_pick(maybe::some(1))
-let e = result_pick(Result::err("bad"))
+let d = label(Status::active)
+let e = maybe_pick(maybe::some(1))
+let f = result_pick(Result::err("bad"))
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
 	}
@@ -366,10 +379,19 @@ let e = result_pick(Result::err("bad"))
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
+	if !strings.Contains(source, "const Status = { active: 0, inactive: 1 };") {
+		t.Fatalf("expected enum object lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "let d = label(Status.active)") && !strings.Contains(source, "const d = label(Status.active)") {
+		t.Fatalf("expected enum variant lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (__match === 0) return") || !strings.Contains(source, "if (__match === 1) return") {
+		t.Fatalf("expected enum/int exact match lowering, got:\n%s", source)
+	}
 	if !strings.Contains(source, "return __match ?") {
 		t.Fatalf("expected bool match lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "if (__match === 0) return") || !strings.Contains(source, "if (__match >= 1 && __match <= 3) return") {
+	if !strings.Contains(source, "if (__match >= 1 && __match <= 3) return") {
 		t.Fatalf("expected int/range match lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "if ((score >= 90)) return") || !strings.Contains(source, "if ((score >= 80)) return") {

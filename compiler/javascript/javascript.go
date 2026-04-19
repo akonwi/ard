@@ -387,6 +387,13 @@ func (e *emitter) emitRootModule(module checker.Module) error {
 func exportedNames(program *checker.Program) []string {
 	names := make([]string, 0)
 	seen := map[string]bool{}
+	for _, enum := range collectEnumDefs(program) {
+		if enum.Private || seen[enum.Name] {
+			continue
+		}
+		seen[enum.Name] = true
+		names = append(names, enum.Name)
+	}
 	for _, stmt := range program.Statements {
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
@@ -415,6 +422,18 @@ func exportedNames(program *checker.Program) []string {
 			}
 			seen[def.Name] = true
 			names = append(names, def.Name)
+		case *checker.Enum:
+			if def.Private || seen[def.Name] {
+				continue
+			}
+			seen[def.Name] = true
+			names = append(names, def.Name)
+		case checker.Enum:
+			if def.Private || seen[def.Name] {
+				continue
+			}
+			seen[def.Name] = true
+			names = append(names, def.Name)
 		}
 	}
 	sort.Strings(names)
@@ -426,6 +445,11 @@ func (e *emitter) emitModuleStatements(module checker.Module) error {
 	e.currentModule = module.Path()
 	defer func() { e.currentModule = prevModule }()
 
+	for _, enum := range collectEnumDefs(module.Program()) {
+		if err := e.emitEnumDef(enum); err != nil {
+			return err
+		}
+	}
 	for _, stmt := range module.Program().Statements {
 		if err := e.emitTopLevelStatement(stmt); err != nil {
 			return err
@@ -708,6 +732,11 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 	switch stmt := stmt.(type) {
 	case *checker.StructDef:
 		return e.emitStructDef(stmt)
+	case *checker.Enum:
+		return e.emitEnumDef(stmt)
+	case checker.Enum:
+		defCopy := stmt
+		return e.emitEnumDef(&defCopy)
 	case *checker.VariableDef:
 		value, err := e.emitExpr(stmt.Value)
 		if err != nil {
@@ -858,6 +887,12 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			return "", fmt.Errorf("unknown imported module %s", expr.Module)
 		}
 		return moduleVar + "." + jsName(expr.Symbol.Name), nil
+	case *checker.EnumVariant:
+		if enum, ok := expr.Type().(*checker.Enum); ok {
+			variantName := enum.Values[expr.Variant].Name
+			return jsName(enum.Name) + "." + jsName(variantName), nil
+		}
+		return strconv.Itoa(expr.Discriminant), nil
 	case *checker.FunctionDef:
 		return e.emitFunctionLiteral(expr)
 	case *checker.FunctionCall:
@@ -906,6 +941,8 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		return e.emitBoolMethod(expr)
 	case *checker.BoolMatch:
 		return e.emitBoolMatch(expr)
+	case *checker.EnumMatch:
+		return e.emitEnumMatch(expr)
 	case *checker.IntMatch:
 		return e.emitIntMatch(expr)
 	case *checker.ConditionalMatch:
@@ -987,6 +1024,16 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	default:
 		return "", fmt.Errorf("js backend does not yet support expression type %T", expr)
 	}
+}
+
+func (e *emitter) emitEnumDef(def *checker.Enum) error {
+	entries := make([]string, 0, len(def.Values))
+	for _, value := range def.Values {
+		entries = append(entries, jsName(value.Name)+": "+strconv.Itoa(value.Value))
+	}
+	e.line("const " + jsName(def.Name) + " = { " + strings.Join(entries, ", ") + " };")
+	e.line("")
+	return nil
 }
 
 func (e *emitter) emitStructDef(def *checker.StructDef) error {
@@ -1265,6 +1312,47 @@ func (e *emitter) emitBoolMatch(match *checker.BoolMatch) (string, error) {
 		return "", err
 	}
 	return "(() => { const __match = " + subject + "; return __match ? " + trueExpr + " : " + falseExpr + "; })()", nil
+}
+
+func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
+	subject, err := e.emitExpr(match.Subject)
+	if err != nil {
+		return "", err
+	}
+	child := &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+	}
+	child.line("(() => {")
+	child.indent(func() {
+		child.line("const __match = " + subject + ";")
+		for _, discriminant := range sortedEnumDiscriminants(match.DiscriminantToIndex) {
+			idx := match.DiscriminantToIndex[discriminant]
+			if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
+				continue
+			}
+			blockExpr, err := e.emitBoundBlockExpr(match.Cases[idx], nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line(fmt.Sprintf("if (__match === %d) return %s;", discriminant, blockExpr))
+		}
+		if match.CatchAll != nil {
+			catchAllExpr, err := e.emitBoundBlockExpr(match.CatchAll, nil)
+			if err != nil {
+				panic(err)
+			}
+			child.line("return " + catchAllExpr + ";")
+		} else {
+			child.line(`throw makeArdError("panic", "match", "enum", 0, "non-exhaustive enum match");`)
+		}
+	})
+	child.line("})()")
+	return strings.TrimSpace(child.builder.String()), nil
 }
 
 func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
@@ -1635,6 +1723,317 @@ func (e *emitter) emitVariableName(name string) string {
 		return "this"
 	}
 	return jsName(name)
+}
+
+func collectEnumDefs(program *checker.Program) []*checker.Enum {
+	collected := map[string]*checker.Enum{}
+	var visitType func(t checker.Type)
+	visitType = func(t checker.Type) {
+		switch typed := t.(type) {
+		case *checker.Enum:
+			collected[typed.Name] = typed
+		case *checker.FunctionDef:
+			for _, param := range typed.Parameters {
+				visitType(param.Type)
+			}
+			visitType(typed.ReturnType)
+		case *checker.ExternalFunctionDef:
+			for _, param := range typed.Parameters {
+				visitType(param.Type)
+			}
+			visitType(typed.ReturnType)
+		case *checker.Maybe:
+			visitType(typed.Of())
+		case *checker.Result:
+			visitType(typed.Val())
+			visitType(typed.Err())
+		case *checker.List:
+			visitType(typed.Of())
+		case *checker.Map:
+			visitType(typed.Key())
+			visitType(typed.Value())
+		case *checker.Union:
+			for _, inner := range typed.Types {
+				visitType(inner)
+			}
+		case *checker.StructDef:
+			for _, field := range typed.Fields {
+				visitType(field)
+			}
+		}
+	}
+	var visitStmt func(stmt checker.Statement)
+	var visitExpr func(expr checker.Expression)
+	visitExpr = func(expr checker.Expression) {
+		switch expr := expr.(type) {
+		case *checker.EnumVariant:
+			if enum, ok := expr.Type().(*checker.Enum); ok {
+				collected[enum.Name] = enum
+			}
+		case *checker.FunctionDef:
+			visitType(expr)
+			for _, stmt := range expr.Body.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.StructInstance:
+			for _, field := range expr.Fields {
+				visitExpr(field)
+			}
+		case *checker.ModuleStructInstance:
+			visitExpr(expr.Property)
+		case *checker.InstanceProperty:
+			visitExpr(expr.Subject)
+		case *checker.InstanceMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Method.Args {
+				visitExpr(arg)
+			}
+		case *checker.FunctionCall:
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.ModuleFunctionCall:
+			for _, arg := range expr.Call.Args {
+				visitExpr(arg)
+			}
+		case *checker.ListLiteral:
+			for _, element := range expr.Elements {
+				visitExpr(element)
+			}
+		case *checker.MapLiteral:
+			for i := range expr.Keys {
+				visitExpr(expr.Keys[i])
+				visitExpr(expr.Values[i])
+			}
+		case *checker.CopyExpression:
+			visitExpr(expr.Expr)
+		case *checker.TryOp:
+			visitExpr(expr.Expr())
+			if expr.CatchBlock != nil {
+				for _, stmt := range expr.CatchBlock.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.TemplateStr:
+			for _, chunk := range expr.Chunks {
+				visitExpr(chunk)
+			}
+		case *checker.IntAddition:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntSubtraction:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntMultiplication:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntDivision:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntModulo:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntGreater:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntGreaterEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntLess:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntLessEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatAddition:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatSubtraction:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatMultiplication:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatDivision:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatGreater:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatGreaterEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatLess:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatLessEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.StrAddition:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.Equality:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.And:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.Or:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.Negation:
+			visitExpr(expr.Value)
+		case *checker.Not:
+			visitExpr(expr.Value)
+		case *checker.If:
+			visitExpr(expr.Condition)
+			for _, stmt := range expr.Body.Stmts {
+				visitStmt(stmt)
+			}
+			if expr.ElseIf != nil {
+				visitExpr(expr.ElseIf)
+			}
+			if expr.Else != nil {
+				for _, stmt := range expr.Else.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.Block:
+			for _, stmt := range expr.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.ListMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.MapMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.MaybeMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.ResultMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.BoolMatch:
+			visitExpr(expr.Subject)
+			for _, stmt := range expr.True.Stmts {
+				visitStmt(stmt)
+			}
+			for _, stmt := range expr.False.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.IntMatch:
+			visitExpr(expr.Subject)
+			for _, block := range expr.IntCases {
+				for _, stmt := range block.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			for _, block := range expr.RangeCases {
+				for _, stmt := range block.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			if expr.CatchAll != nil {
+				for _, stmt := range expr.CatchAll.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.ConditionalMatch:
+			for _, c := range expr.Cases {
+				visitExpr(c.Condition)
+				for _, stmt := range c.Body.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			if expr.CatchAll != nil {
+				for _, stmt := range expr.CatchAll.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.OptionMatch:
+			visitExpr(expr.Subject)
+			for _, stmt := range expr.Some.Body.Stmts {
+				visitStmt(stmt)
+			}
+			for _, stmt := range expr.None.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.ResultMatch:
+			visitExpr(expr.Subject)
+			for _, stmt := range expr.Ok.Body.Stmts {
+				visitStmt(stmt)
+			}
+			for _, stmt := range expr.Err.Body.Stmts {
+				visitStmt(stmt)
+			}
+		}
+		visitType(expr.Type())
+	}
+	visitStmt = func(stmt checker.Statement) {
+		if stmt.Stmt != nil {
+			switch s := stmt.Stmt.(type) {
+			case *checker.VariableDef:
+				visitExpr(s.Value)
+				visitType(s.Type())
+			case *checker.Reassignment:
+				visitExpr(s.Target)
+				visitExpr(s.Value)
+			case *checker.StructDef:
+				visitType(s)
+			case *checker.Enum:
+				collected[s.Name] = s
+			case checker.Enum:
+				sCopy := s
+				collected[s.Name] = &sCopy
+			case checker.ForLoop:
+				if s.Init != nil {
+					visitExpr(s.Init.Value)
+				}
+				visitExpr(s.Condition)
+				if s.Update != nil {
+					visitExpr(s.Update.Value)
+				}
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			case checker.WhileLoop:
+				visitExpr(s.Condition)
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			}
+		}
+		if stmt.Expr != nil {
+			visitExpr(stmt.Expr)
+		}
+	}
+	for _, stmt := range program.Statements {
+		visitStmt(stmt)
+	}
+	out := make([]*checker.Enum, 0, len(collected))
+	for _, enum := range collected {
+		out = append(out, enum)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func sortedEnumDiscriminants(values map[int]int8) []int {
+	discriminants := make([]int, 0, len(values))
+	for discriminant := range values {
+		discriminants = append(discriminants, discriminant)
+	}
+	sort.Ints(discriminants)
+	return discriminants
 }
 
 func sortedIntCaseKeys(cases map[int]*checker.Block) []int {
