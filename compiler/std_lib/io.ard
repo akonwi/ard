@@ -1,9 +1,15 @@
 use ard/string as Str
 
-private extern fn _print(string: Str) Void = "Print"
+private extern fn _print(string: Str) Void = {
+  go = "Print"
+  js-server = "printLine"
+}
 
 fn print(value: Str::ToString) {
   _print(value.to_str())
 }
 
-extern fn read_line() Str!Str = "ReadLine"
+extern fn read_line() Str!Str = {
+  go = "ReadLine"
+  js-server = "readLine"
+}

@@ -5,6 +5,10 @@ var prelude = map[string]Module{
 }
 
 func findInStdLib(path string) (Module, bool) {
+	return findInStdLibTarget(path, "")
+}
+
+func findInStdLibTarget(path string, target string) (Module, bool) {
 	// Provide minimal hardcoded definitions for special modules
 	// These provide the function signatures for type checking
 	switch path {
@@ -15,9 +19,9 @@ func findInStdLib(path string) (Module, bool) {
 	case "ard/result":
 		return ResultPkg{}, true
 	}
-	
+
 	// Check for embedded .ard modules for other modules
-	if mod, ok := FindEmbeddedModule(path); ok {
+	if mod, ok := FindEmbeddedModuleForTarget(path, target); ok {
 		return mod, true
 	}
 

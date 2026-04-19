@@ -580,6 +580,77 @@ let found = lookup()
 	}
 }
 
+func TestBuildWritesJSStdlibExternImports(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+fn main() {
+  io::print("hello")
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, `import * as __ard_stdlib_ffi from "./ffi.stdlib.js-server.mjs";`) {
+		t.Fatalf("expected stdlib ffi import, got:\n%s", source)
+	}
+	if !strings.Contains(source, `return __ard_stdlib_ffi["printLine"](string);`) {
+		t.Fatalf("expected stdlib extern wrapper call, got:\n%s", source)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-server.mjs")); err != nil {
+		t.Fatalf("expected copied stdlib ffi companion: %v", err)
+	}
+}
+
+func TestRunExecutesJSStdlibIOProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+fn main() {
+  io::print("hello")
+  let line = io::read_line().or("missing")
+  io::print(line)
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd.Dir = ".."
+	cmd.Stdin = strings.NewReader("world\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server io run error: %v\n%s", err, string(out))
+	}
+	if string(out) != "hello\nworld\n" {
+		t.Fatalf("unexpected output:\n%s", string(out))
+	}
+}
+
 func TestBuildWritesPrimitiveModuleLowering(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

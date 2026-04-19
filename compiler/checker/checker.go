@@ -232,7 +232,7 @@ func (c *Checker) Check() {
 				c.addError(err.Error(), imp.GetLocation())
 				continue
 			}
-			if mod, ok := findInStdLib(imp.Path); ok {
+			if mod, ok := findInStdLibTarget(imp.Path, c.options.Target); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
 				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
@@ -285,22 +285,22 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/dynamic"); ok {
+		if mod, ok := findInStdLibTarget("ard/dynamic", c.options.Target); ok {
 			c.program.Imports["Dynamic"] = mod
 		}
-		if mod, ok := findInStdLib("ard/float"); ok {
+		if mod, ok := findInStdLibTarget("ard/float", c.options.Target); ok {
 			c.program.Imports["Float"] = mod
 		}
-		if mod, ok := findInStdLib("ard/int"); ok {
+		if mod, ok := findInStdLibTarget("ard/int", c.options.Target); ok {
 			c.program.Imports["Int"] = mod
 		}
-		if mod, ok := findInStdLib("ard/list"); ok {
+		if mod, ok := findInStdLibTarget("ard/list", c.options.Target); ok {
 			c.program.Imports["List"] = mod
 		}
-		if mod, ok := findInStdLib("ard/map"); ok {
+		if mod, ok := findInStdLibTarget("ard/map", c.options.Target); ok {
 			c.program.Imports["Map"] = mod
 		}
-		if mod, ok := findInStdLib("ard/string"); ok {
+		if mod, ok := findInStdLibTarget("ard/string", c.options.Target); ok {
 			c.program.Imports["Str"] = mod
 		}
 	}

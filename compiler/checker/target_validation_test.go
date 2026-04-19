@@ -47,9 +47,10 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			wantErrPart: "Cannot import ard/sql when targeting js-browser; allowed targets: bytecode, go",
 		},
 		{
-			name:   "unrestricted module still allowed",
-			target: backend.TargetJSBrowser,
-			source: "use ard/io\nfn main() Int { 1 }",
+			name:        "io blocked on js-browser",
+			target:      backend.TargetJSBrowser,
+			source:      "use ard/io\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: bytecode, go, js-server",
 		},
 	}
 
