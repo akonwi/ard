@@ -408,6 +408,55 @@ let found = lookup()
 	}
 }
 
+func TestBuildWritesMaybeEqualityLowering(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+let a = maybe::some("hello") == maybe::some("hello")
+let b = maybe::some("hello") == maybe::none()
+let c = maybe::none<Str>() == maybe::none()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "function isArdMaybe(value) {") {
+		t.Fatalf("expected maybe equality helper, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (left.isNone() && right.isNone()) return true;") {
+		t.Fatalf("expected maybe none equality logic, got:\n%s", source)
+	}
+	if !strings.Contains(source, "return ardEq(left.value, right.value);") {
+		t.Fatalf("expected recursive maybe payload equality, got:\n%s", source)
+	}
+	if strings.Count(source, "ardEq(") < 4 {
+		t.Fatalf("expected ardEq helper and call sites for maybe equality, got:\n%s", source)
+	}
+	if !strings.Contains(source, `const a = ardEq(Maybe.some("hello"), Maybe.some("hello"));`) {
+		t.Fatalf("expected some/some equality lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `const b = ardEq(Maybe.some("hello"), Maybe.none());`) {
+		t.Fatalf("expected some/none equality lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const c = ardEq(Maybe.none(), Maybe.none());") {
+		t.Fatalf("expected none/none equality lowering, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesMaybeAndResultMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

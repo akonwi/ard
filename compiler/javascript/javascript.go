@@ -191,8 +191,22 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 	})
 	e.line("}")
 	e.line("")
+	e.line("function isArdMaybe(value) {")
+	e.indent(func() {
+		e.line("return value instanceof Maybe;")
+	})
+	e.line("}")
+	e.line("")
 	e.line("function ardEq(left, right) {")
 	e.indent(func() {
+		e.line("if (isArdMaybe(left) || isArdMaybe(right)) {")
+		e.indent(func() {
+			e.line("if (!isArdMaybe(left) || !isArdMaybe(right)) return false;")
+			e.line("if (left.isNone() && right.isNone()) return true;")
+			e.line("if (left.isNone() || right.isNone()) return false;")
+			e.line("return ardEq(left.value, right.value);")
+		})
+		e.line("}")
 		e.line("return ardEnumValue(left) === ardEnumValue(right);")
 	})
 	e.line("}")
@@ -1844,7 +1858,7 @@ func (e *emitter) emitEquality(left checker.Expression, right checker.Expression
 	if err != nil {
 		return "", err
 	}
-	if requiresEnumAwareComparison(left.Type(), right.Type()) {
+	if requiresSpecialEquality(left.Type(), right.Type()) {
 		return "ardEq(" + leftValue + ", " + rightValue + ")", nil
 	}
 	return "(" + leftValue + " === " + rightValue + ")", nil
@@ -2222,6 +2236,15 @@ func enumTypeName(t checker.Type) (string, error) {
 	default:
 		return "", fmt.Errorf("expected enum type, got %s", t.String())
 	}
+}
+
+func isMaybeType(t checker.Type) bool {
+	_, ok := t.(*checker.Maybe)
+	return ok
+}
+
+func requiresSpecialEquality(left checker.Type, right checker.Type) bool {
+	return isEnumType(left) || isMaybeType(left) || isMaybeType(right)
 }
 
 func requiresEnumAwareComparison(left checker.Type, right checker.Type) bool {
