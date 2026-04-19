@@ -16,6 +16,7 @@ import (
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
+	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/transpile"
@@ -92,11 +93,10 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetJSBrowser, backend.TargetJSServer:
-				if _, err := loadModule(inputPath, target); err != nil {
+				if err := javascript.Run(inputPath, target, os.Args); err != nil {
+					fmt.Println(err)
 					os.Exit(1)
 				}
-				fmt.Printf("target not yet implemented: %s\n", target)
-				os.Exit(1)
 			default:
 				fmt.Printf("unknown target: %s\n", target)
 				os.Exit(1)
@@ -121,10 +121,7 @@ func main() {
 			case backend.TargetGo:
 				builtPath, err = transpile.BuildBinary(inputPath, outputPath)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
-				_, err = loadModule(inputPath, target)
-				if err == nil {
-					err = fmt.Errorf("target not yet implemented: %s", target)
-				}
+				builtPath, err = javascript.Build(inputPath, outputPath, target)
 			default:
 				err = fmt.Errorf("unknown target: %s", target)
 			}
