@@ -54,6 +54,37 @@ func ValidateStdlibImportTarget(path string, target string) error {
 	)
 }
 
+func ValidateUnionMatchTarget(target string, unionType *Union, typeCases map[string]*Match) error {
+	if target != backend.TargetJSBrowser && target != backend.TargetJSServer {
+		return nil
+	}
+	if unionType == nil || !unionContainsIntAndFloat(unionType) {
+		return nil
+	}
+	if typeCases["Int"] == nil && typeCases["Float"] == nil {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"Cannot discriminate Int from Float in union matches when targeting %s; JavaScript represents both as number",
+		target,
+	)
+}
+
+func unionContainsIntAndFloat(unionType *Union) bool {
+	hasInt := false
+	hasFloat := false
+	for _, t := range unionType.Types {
+		switch t {
+		case Int:
+			hasInt = true
+		case Float:
+			hasFloat = true
+		}
+	}
+	return hasInt && hasFloat
+}
+
 func orderedAllowedTargets(allowedTargets map[string]bool) []string {
 	ordered := make([]string, 0, len(allowedTargets))
 	seen := make(map[string]bool, len(allowedTargets))

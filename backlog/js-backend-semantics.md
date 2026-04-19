@@ -183,6 +183,13 @@ Union matching should lower to runtime tests over the underlying value categorie
 - `Array.isArray(...)` for lists if needed
 - `value instanceof Map` for maps if needed
 
+Important JS limitation:
+
+- Ard `Int` and `Float` both lower to raw JS `number`
+- the JS backend should **not** globally tag or box them just to preserve union discrimination
+- therefore union matches that require runtime discrimination between `Int` and `Float` are unsupported on JS targets and should be rejected during checking/validation
+- unions that contain both `Int` and `Float` but do **not** attempt to distinguish them in a match remain acceptable
+
 ## 7. Pattern Matching
 
 Ard's current matching needs are narrower than Gleam's.
@@ -200,6 +207,7 @@ Current direction:
 - user-defined class-backed values: `instanceof ConcreteType`
 - `Result` / `Maybe`: `instanceof BaseWrapper` plus predicate methods
 - enums: branded object checks plus numeric discriminant access
+- `Int` / `Float`: both remain raw JS `number`, so they are not separately matchable at runtime in erased unions
 
 ## 8. `Result`
 

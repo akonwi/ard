@@ -3421,6 +3421,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 			}
 
+			if err := ValidateUnionMatchTarget(c.options.Target, unionType, typeCases); err != nil {
+				c.addError(err.Error(), s.GetLocation())
+				return nil
+			}
+
 			// Create and return the UnionMatch
 			return &UnionMatch{
 				Subject:         subject,
