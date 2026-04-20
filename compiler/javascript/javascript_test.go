@@ -757,6 +757,65 @@ fn main() {
 	}
 }
 
+func TestRunExecutesDecodeAndJSONStdlibProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+use ard/decode
+use ard/json
+use ard/maybe
+
+struct Person {
+  name: Str,
+  employed: Bool?,
+}
+
+fn main() {
+  let raw = decode::from_json("\{\"name\":\"kit\",\"nums\":[1,2,3],\"counts\":\{\"a\":1\}\}").expect("parse")
+  io::print(decode::run(raw, decode::field("name", decode::string)).expect("name"))
+  io::print(decode::run(raw, decode::field("nums", decode::list(decode::int))).is_ok().to_str())
+  io::print(decode::run(raw, decode::field("counts", decode::map(decode::string, decode::int))).is_ok().to_str())
+  match decode::run(raw, decode::field("name", decode::int)) {
+    ok => io::print("unexpected"),
+    err(errs) => io::print(decode::flatten(errs)),
+  }
+
+  let person = Person{ name: "kit", employed: maybe::none() }
+  let encoded = json::encode(person).expect("json")
+  io::print(encoded.contains("\"name\":\"kit\"").to_str())
+  io::print(encoded.contains("\"employed\":null").to_str())
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	js := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	js.Dir = ".."
+	jsOut, err := js.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server decode/json run error: %v\n%s", err, string(jsOut))
+	}
+
+	base := exec.Command("go", "run", ".", "run", mainPath)
+	base.Dir = ".."
+	baseOut, err := base.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect baseline decode/json run error: %v\n%s", err, string(baseOut))
+	}
+
+	if string(jsOut) != string(baseOut) {
+		t.Fatalf("unexpected decode/json output mismatch\njs:\n%s\nbase:\n%s", string(jsOut), string(baseOut))
+	}
+}
+
 func TestBuildWritesPrimitiveModuleLowering(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

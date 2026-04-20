@@ -444,7 +444,7 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 
 func shouldEmitImportedModule(path string) bool {
 	switch path {
-	case "ard/float", "ard/int", "ard/list", "ard/map", "ard/string", "ard/dynamic":
+	case "ard/float", "ard/int", "ard/list", "ard/map", "ard/string":
 		return false
 	default:
 		return true
@@ -756,13 +756,77 @@ func (e *emitter) externFFIObject() string {
 func (e *emitter) emitExternalReturn(call string, returnType checker.Type) (string, error) {
 	switch typed := returnType.(type) {
 	case *checker.Maybe:
-		_ = typed
-		return "(() => { const __extern = " + call + "; return (__extern === undefined || __extern === null) ? Maybe.none() : Maybe.some(__extern); })()", nil
+		adapted, err := e.emitExternalValueAdapter("__extern", typed.Of())
+		if err != nil {
+			return "", err
+		}
+		return "(() => { const __extern = " + call + "; return (__extern === undefined || __extern === null) ? Maybe.none() : Maybe.some(" + adapted + "); })()", nil
 	case *checker.Result:
-		_ = typed
-		return "(() => { const __extern = " + call + "; if (__extern && Object.prototype.hasOwnProperty.call(__extern, \"ok\")) return Result.ok(__extern.ok); if (__extern && Object.prototype.hasOwnProperty.call(__extern, \"error\")) return Result.err(__extern.error); if (__extern && Object.prototype.hasOwnProperty.call(__extern, \"err\")) return Result.err(__extern.err); throw makeArdError(\"extern\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(e.currentFunction) + ", 0, \"invalid Result return from JS extern\"); })()", nil
+		adaptedOk, err := e.emitExternalValueAdapter("__extern.ok", typed.Val())
+		if err != nil {
+			return "", err
+		}
+		adaptedErr, err := e.emitExternalValueAdapter("__extern.error", typed.Err())
+		if err != nil {
+			return "", err
+		}
+		adaptedAltErr, err := e.emitExternalValueAdapter("__extern.err", typed.Err())
+		if err != nil {
+			return "", err
+		}
+		return "(() => { const __extern = " + call + "; if (__extern && Object.prototype.hasOwnProperty.call(__extern, \"ok\")) return Result.ok(" + adaptedOk + "); if (__extern && Object.prototype.hasOwnProperty.call(__extern, \"error\")) return Result.err(" + adaptedErr + "); if (__extern && Object.prototype.hasOwnProperty.call(__extern, \"err\")) return Result.err(" + adaptedAltErr + "); throw makeArdError(\"extern\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(e.currentFunction) + ", 0, \"invalid Result return from JS extern\"); })()", nil
 	default:
 		return call, nil
+	}
+}
+
+func (e *emitter) emitExternalValueAdapter(value string, t checker.Type) (string, error) {
+	if t == nil {
+		return value, nil
+	}
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if typed.Actual() != nil {
+			return e.emitExternalValueAdapter(value, typed.Actual())
+		}
+		return value, nil
+	case *checker.StructDef:
+		fieldNames := sortedFieldNames(typed.Fields)
+		args := make([]string, 0, len(fieldNames))
+		for _, field := range fieldNames {
+			adapted, err := e.emitExternalValueAdapter(value+"["+strconv.Quote(field)+"]", typed.Fields[field])
+			if err != nil {
+				return "", err
+			}
+			args = append(args, adapted)
+		}
+		return "(" + value + " instanceof " + jsName(typed.Name) + " ? " + value + " : new " + jsName(typed.Name) + "(" + strings.Join(args, ", ") + "))", nil
+	case *checker.List:
+		adapted, err := e.emitExternalValueAdapter("__item", typed.Of())
+		if err != nil {
+			return "", err
+		}
+		return "Array.isArray(" + value + ") ? " + value + ".map((__item) => " + adapted + ") : []", nil
+	case *checker.Map:
+		adaptedKey, err := e.emitExternalValueAdapter("__key", typed.Key())
+		if err != nil {
+			return "", err
+		}
+		adaptedVal, err := e.emitExternalValueAdapter("__value", typed.Value())
+		if err != nil {
+			return "", err
+		}
+		return "(() => { const __map = " + value + "; if (__map instanceof Map) return new Map(Array.from(__map.entries(), ([__key, __value]) => [" + adaptedKey + ", " + adaptedVal + "])); return new Map(Object.entries(__map ?? {}).map(([__key, __value]) => [" + adaptedKey + ", " + adaptedVal + "])); })()", nil
+	case *checker.Maybe:
+		adapted, err := e.emitExternalValueAdapter("__maybe", typed.Of())
+		if err != nil {
+			return "", err
+		}
+		return "(() => { const __maybe = " + value + "; return (__maybe === undefined || __maybe === null) ? Maybe.none() : Maybe.some(" + adapted + "); })()", nil
+	case *checker.Result:
+		return value, nil
+	default:
+		return value, nil
 	}
 }
 
@@ -1379,6 +1443,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		if expr.Module == "ard/int" {
 			return e.emitIntModuleCall(expr)
+		}
+		if expr.Module == "ard/list" {
+			return e.emitListModuleCall(expr)
 		}
 		moduleVar, ok := e.moduleVars[expr.Module]
 		if !ok {
@@ -2121,6 +2188,24 @@ func (e *emitter) emitIntModuleCall(call *checker.ModuleFunctionCall) (string, e
 	}
 }
 
+func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, error) {
+	switch call.Call.Name {
+	case "new":
+		return "[]", nil
+	case "concat":
+		if len(call.Call.Args) != 2 {
+			return "", fmt.Errorf("List::concat expects two args")
+		}
+		args, err := e.emitArgs(call.Call.Args)
+		if err != nil {
+			return "", err
+		}
+		return "(" + args[0] + ").concat(" + args[1] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported List module call: %s", call.Call.Name)
+	}
+}
+
 func (e *emitter) emitMaybeMethod(method *checker.MaybeMethod) (string, error) {
 	subject, err := e.emitExpr(method.Subject)
 	if err != nil {
@@ -2804,7 +2889,13 @@ func moduleVarName(path string) string {
 
 func jsName(name string) string {
 	replacer := strings.NewReplacer("::", "__", "-", "_", ".", "_")
-	return replacer.Replace(name)
+	out := replacer.Replace(name)
+	switch out {
+	case "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "export", "extends", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "return", "super", "switch", "this", "throw", "try", "typeof", "var", "void", "while", "with", "yield", "let", "static", "enum", "await", "implements", "package", "protected", "interface", "private", "public", "null", "true", "false":
+		return out + "_"
+	default:
+		return out
+	}
 }
 
 func escapeTemplateLiteral(raw string) string {
