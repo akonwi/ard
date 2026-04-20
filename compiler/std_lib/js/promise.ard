@@ -1,56 +1,52 @@
 use ard/dynamic as Dynamic
 
-extern type Promise
+extern type Promise<$T>
 
-extern fn resolve(value: Dynamic) Promise = {
+extern fn resolve<$T>(value: $T) Promise<$T> = {
   js = "JSPromiseResolve"
 }
 
-extern fn reject(reason: Dynamic) Promise = {
+extern fn reject<$T>(reason: Dynamic) Promise<$T> = {
   js = "JSPromiseReject"
 }
 
-extern fn map(promise: Promise, with: fn(Dynamic) Dynamic) Promise = {
+extern fn map<$A, $B>(promise: Promise<$A>, with: fn($A) $B) Promise<$B> = {
   js = "JSPromiseMap"
 }
 
-extern fn then(promise: Promise, with: fn(Dynamic) Promise) Promise = {
+extern fn then<$A, $B>(promise: Promise<$A>, with: fn($A) Promise<$B>) Promise<$B> = {
   js = "JSPromiseThen"
 }
 
-extern fn map_error(promise: Promise, with: fn(Dynamic) Dynamic) Promise = {
-  js = "JSPromiseMapError"
+extern fn rescue<$T>(promise: Promise<$T>, with: fn(Dynamic) $T) Promise<$T> = {
+  js = "JSPromiseRescue"
 }
 
-extern fn recover(promise: Promise, with: fn(Dynamic) Promise) Promise = {
-  js = "JSPromiseRecover"
-}
-
-extern fn inspect(promise: Promise, with: fn(Dynamic) Void) Promise = {
+extern fn inspect<$T>(promise: Promise<$T>, with: fn($T) Void) Promise<$T> = {
   js = "JSPromiseInspect"
 }
 
-extern fn inspect_error(promise: Promise, with: fn(Dynamic) Void) Promise = {
+extern fn inspect_error<$T>(promise: Promise<$T>, with: fn(Dynamic) Void) Promise<$T> = {
   js = "JSPromiseInspectError"
 }
 
-extern fn finally(promise: Promise, with: fn() Void) Promise = {
+extern fn finally<$T>(promise: Promise<$T>, with: fn() Void) Promise<$T> = {
   js = "JSPromiseFinally"
 }
 
-extern fn all(promises: [Promise]) Promise = {
+extern fn all<$T>(promises: [Promise<$T>]) Promise<[$T]> = {
   js = "JSPromiseAll"
 }
 
-extern fn race(promises: [Promise]) Promise = {
+extern fn race<$T>(promises: [Promise<$T>]) Promise<$T> = {
   js = "JSPromiseRace"
 }
 
-extern fn delay(ms: Int, value: Dynamic) Promise = {
+extern fn delay<$T>(ms: Int, value: $T) Promise<$T> = {
   js = "JSPromiseDelay"
 }
 
-fn from_result(value: Dynamic!Dynamic) Promise {
+fn from_result<$T>(value: $T!Dynamic) Promise<$T> {
   match value {
     ok => resolve(ok),
     err => reject(err),

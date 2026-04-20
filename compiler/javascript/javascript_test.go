@@ -855,23 +855,17 @@ fn main() {
 	}
 }
 
-func TestBuildWritesJSBrowserHTTPStdlibCompanion(t *testing.T) {
+func TestBuildWritesJSBrowserFetchStdlibCompanion(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`
-use ard/http
-use ard/js/http as js_http
+use ard/js/fetch
 
 fn main() {
-  let req = http::Request{
-    method: http::Method::Get,
-    url: "https://example.com",
-    headers: [:],
-  }
-  js_http::send(req, 1)
+  fetch::fetch("https://example.com")
 }
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
@@ -917,8 +911,7 @@ fn main() {
     promise::delay(1, Dynamic::from_int(22)),
   ])
 
-  let summed = promise::map(pair, fn(raw: Dynamic) Dynamic {
-    let values = decode::to_list(raw).expect("values")
+  let summed = promise::map(pair, fn(values: [Dynamic]) Dynamic {
     let a = decode::int(values.at(0)).expect("a")
     let b = decode::int(values.at(1)).expect("b")
     Dynamic::from_int(a + b)
@@ -926,11 +919,11 @@ fn main() {
 
   let chained = promise::then(summed, fn(sum: Dynamic) {
     io::print(decode::int(sum).expect("sum"))
-    let recovered = promise::recover(
+    let recovered = promise::rescue(
       promise::reject(Dynamic::from_str("boom")),
       fn(reason: Dynamic) {
         io::print(decode::string(reason).expect("reason"))
-        promise::resolve(Dynamic::from_str("recovered"))
+        Dynamic::from_str("recovered")
       },
     )
     promise::inspect(recovered, fn(value: Dynamic) {
@@ -957,7 +950,7 @@ fn main() {
 	}
 }
 
-func TestRunExecutesJSHTTPFetchProgram(t *testing.T) {
+func TestRunExecutesJSFetchProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")
 	}
@@ -982,40 +975,40 @@ func TestRunExecutesJSHTTPFetchProgram(t *testing.T) {
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(fmt.Sprintf(`
+use ard/decode
 use ard/dynamic as Dynamic
-use ard/http
 use ard/io
-use ard/js/http as js_http
+use ard/js/fetch
 use ard/js/promise as promise
 use ard/maybe
 
 fn main() {
-  let req = http::Request{
-    method: http::Method::Post,
-    url: %q,
-    headers: ["content-type": "text/plain", "x-demo": "kit"],
-    body: maybe::some(Dynamic::from_str("hello")),
-  }
+  let sent = promise::inspect(
+    fetch::fetch(
+      %q,
+      fetch::Options{
+        method: maybe::some(fetch::Method::Post),
+        headers: maybe::some(["content-type": "text/plain", "x-demo": "kit"]),
+        body: maybe::some(Dynamic::from_str("hello")),
+        timeout: maybe::some(5),
+      },
+    ),
+    fn(res: fetch::Response) {
+      io::print(res.status)
+      io::print(res.is_ok().to_str())
+      io::print(res.headers.get("x-echo-method").or("missing"))
+      io::print(res.headers.get("x-echo-query").or("missing"))
+      io::print(res.headers.get("x-echo-header").or("missing"))
+      io::print(res.text())
+    },
+  )
 
-  let sent = js_http::inspect(js_http::send(req, 5), fn(res: http::Response) {
-    io::print(res.status)
-    io::print(res.is_ok().to_str())
-    io::print(res.headers.get("x-echo-method").or("missing"))
-    io::print(res.headers.get("x-echo-query").or("missing"))
-    io::print(res.headers.get("x-echo-header").or("missing"))
-    io::print(res.body)
-  })
-
-  js_http::then(sent, fn(_: http::Response) {
-    js_http::recover(
-      js_http::send(http::Request{
-        method: http::Method::Get,
-        url: "http://127.0.0.1:1/unreachable",
-        headers: [:],
-      }, 1),
-      fn(reason: Str) {
-        io::print((reason.size() > 0).to_str())
-        promise::resolve(Dynamic::from_void())
+  promise::then(sent, fn(_: fetch::Response) {
+    promise::rescue(
+      fetch::fetch("http://127.0.0.1:1/unreachable"),
+      fn(reason: Dynamic) {
+        io::print((decode::string(reason).expect("reason").size() > 0).to_str())
+        fetch::Response{url: "", status: 0, headers: [:], body: ""}
       },
     )
   })
@@ -1028,10 +1021,10 @@ fn main() {
 	cmd.Dir = ".."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("did not expect js http run error: %v\n%s", err, string(out))
+		t.Fatalf("did not expect js fetch run error: %v\n%s", err, string(out))
 	}
 	if string(out) != "201\ntrue\nPOST\nlang=ard\nkit\nhello\ntrue\n" {
-		t.Fatalf("unexpected js http output:\n%s", string(out))
+		t.Fatalf("unexpected js fetch output:\n%s", string(out))
 	}
 }
 

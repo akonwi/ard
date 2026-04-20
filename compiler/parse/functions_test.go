@@ -31,6 +31,19 @@ func TestExternTypeDeclaration(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Generic extern type",
+			input: `extern type Promise<$T>`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternTypeDeclaration{
+						Name:       "Promise",
+						TypeParams: []string{"T"},
+					},
+				},
+			},
+		},
 	}
 	runTests(t, tests)
 }

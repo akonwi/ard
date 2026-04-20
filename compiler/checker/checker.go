@@ -143,6 +143,22 @@ func derefType(t Type) Type {
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
 		}
+	case *ExternType:
+		if len(typ.TypeArgs) == 0 {
+			return typ
+		}
+		newTypeArgs := make([]Type, len(typ.TypeArgs))
+		changed := false
+		for i, typeArg := range typ.TypeArgs {
+			newTypeArgs[i] = derefType(typeArg)
+			if newTypeArgs[i] != typeArg {
+				changed = true
+			}
+		}
+		if !changed {
+			return typ
+		}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, private: typ.private}
 	default:
 		return t
 	}
@@ -425,6 +441,16 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 				*params = append(*params, genericName)
 				seen[genericName] = true
 			}
+		}
+	case *ExternType:
+		for _, genericName := range t.GenericParams {
+			if !seen[genericName] {
+				*params = append(*params, genericName)
+				seen[genericName] = true
+			}
+		}
+		for _, typeArg := range t.TypeArgs {
+			collectGenericsFromType(typeArg, params, seen)
 		}
 	}
 }
@@ -858,7 +884,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Name), s.GetLocation())
 				return nil
 			}
-			externType := &ExternType{Name_: s.Name, private: s.Private}
+			typeArgs := make([]Type, len(s.TypeParams))
+			for i, param := range s.TypeParams {
+				typeArgs[i] = &TypeVar{name: param}
+			}
+			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, private: s.Private}
 			c.scope.add(s.Name, externType, false)
 			return &Statement{Stmt: externType}
 		}
@@ -4114,6 +4144,16 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			}
 			bindInferredTypeVars(exp.ReturnType, act.ReturnType)
 		}
+	case *ExternType:
+		if act, ok := actual.(*ExternType); ok && exp.Name_ == act.Name_ {
+			limit := len(exp.TypeArgs)
+			if len(act.TypeArgs) < limit {
+				limit = len(act.TypeArgs)
+			}
+			for i := 0; i < limit; i++ {
+				bindInferredTypeVars(exp.TypeArgs[i], act.TypeArgs[i])
+			}
+		}
 	}
 }
 
@@ -4535,6 +4575,12 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
 		}
+	case *ExternType:
+		substitutedArgs := make([]Type, len(typ.TypeArgs))
+		for i, typeArg := range typ.TypeArgs {
+			substitutedArgs[i] = substituteType(typeArg, typeMap)
+		}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, private: typ.private}
 	// Handle other compound types
 	default:
 		return t
@@ -4969,6 +5015,17 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
 		}
 		return fmt.Errorf("expected list type, got %T", actual)
+	case *ExternType:
+		actualExtern, ok := actual.(*ExternType)
+		if !ok || expectedType.Name_ != actualExtern.Name_ || len(expectedType.TypeArgs) != len(actualExtern.TypeArgs) {
+			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+		}
+		for i := range expectedType.TypeArgs {
+			if err := c.unifyTypes(expectedType.TypeArgs[i], actualExtern.TypeArgs[i], genericScope); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		// Concrete types - must match exactly
 		if !expected.equal(actual) {

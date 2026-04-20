@@ -207,6 +207,10 @@ func extractGenericNames(t Type, names map[string]bool) {
 			extractGenericNames(param.Type, names)
 		}
 		extractGenericNames(t.ReturnType, names)
+	case *ExternType:
+		for _, typeArg := range t.TypeArgs {
+			extractGenericNames(typeArg, names)
+		}
 	}
 }
 
@@ -233,6 +237,13 @@ func hasGenericsInType(t Type) bool {
 			}
 		}
 		return hasGenericsInType(t.ReturnType)
+	case *ExternType:
+		for _, typeArg := range t.TypeArgs {
+			if hasGenericsInType(typeArg) {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
@@ -330,6 +341,23 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Traits:  t.Traits,
 			Private: t.Private,
 		}
+	case *ExternType:
+		if len(t.TypeArgs) == 0 {
+			return t
+		}
+		newTypeArgs := make([]Type, len(t.TypeArgs))
+		changed := false
+		for i, typeArg := range t.TypeArgs {
+			newTypeArg := replaceGeneric(typeArg, genericName, concreteType)
+			newTypeArgs[i] = newTypeArg
+			if newTypeArg != typeArg {
+				changed = true
+			}
+		}
+		if !changed {
+			return t
+		}
+		return &ExternType{Name_: t.Name_, GenericParams: append([]string(nil), t.GenericParams...), TypeArgs: newTypeArgs, private: t.private}
 	default:
 		return t
 	}
@@ -427,6 +455,12 @@ func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
 		}
 	case *FunctionDef:
 		return copyFunctionWithTypeVarMap(typ, typeVarMap)
+	case *ExternType:
+		newTypeArgs := make([]Type, len(typ.TypeArgs))
+		for i, typeArg := range typ.TypeArgs {
+			newTypeArgs[i] = copyTypeWithTypeVarMap(typeArg, typeVarMap)
+		}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, private: typ.private}
 	default:
 		return t
 	}

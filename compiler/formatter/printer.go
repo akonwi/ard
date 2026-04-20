@@ -281,7 +281,7 @@ func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) 
 	if node.Private {
 		prefix = "private "
 	}
-	return prefix + "extern type " + node.Name
+	return prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
 }
 
 func (p printer) renderExternTypeDeclarationDoc(node *parse.ExternTypeDeclaration) doc {

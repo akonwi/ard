@@ -80,6 +80,11 @@ func TestFormat(t *testing.T) {
 			output: "extern type ConnectionPtr\n",
 		},
 		{
+			name:   "formats generic extern type declaration",
+			input:  "extern type Promise<$T>\n",
+			output: "extern type Promise<$T>\n",
+		},
+		{
 			name:   "formats private extern type declaration",
 			input:  "private extern type ConnectionPtr\n",
 			output: "private extern type ConnectionPtr\n",

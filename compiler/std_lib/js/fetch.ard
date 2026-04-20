@@ -1,0 +1,119 @@
+use ard/decode
+use ard/dynamic as Dynamic
+use ard/js/promise
+use ard/maybe
+use ard/string as Str
+
+enum Method {
+  Get,
+  Post,
+  Put,
+  Delete,
+  Patch,
+  Head,
+  Options,
+}
+
+impl Str::ToString for Method {
+  fn to_str() Str {
+    match self {
+      Method::Get => "GET",
+      Method::Post => "POST",
+      Method::Put => "PUT",
+      Method::Delete => "DELETE",
+      Method::Patch => "PATCH",
+      Method::Head => "HEAD",
+      Method::Options => "OPTIONS",
+    }
+  }
+}
+
+struct Options {
+  method: Method?,
+  headers: [Str: Str]?,
+  body: Dynamic?,
+  timeout: Int?,
+}
+
+struct Response {
+  url: Str,
+  status: Int,
+  headers: [Str: Str],
+  body: Str,
+}
+
+impl Response {
+  fn is_ok() Bool {
+    self.status >= 200 and self.status < 300
+  }
+
+  fn text() Str {
+    self.body
+  }
+
+  fn json() Dynamic!Str {
+    decode::from_json(self.body)
+  }
+}
+
+private extern fn _fetch(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) promise::Promise<Dynamic> = {
+  js = "JSFetch"
+}
+
+private extern fn response_url(response: Dynamic) Str = {
+  js = "JSFetch_ResponseUrl"
+}
+
+private extern fn response_status(response: Dynamic) Int = {
+  js = "JSFetch_ResponseStatus"
+}
+
+private extern fn response_headers(response: Dynamic) [Str: Str] = {
+  js = "JSFetch_ResponseHeaders"
+}
+
+private extern fn response_body(response: Dynamic) Str = {
+  js = "JSFetch_ResponseBody"
+}
+
+fn fetch(url: Str, options: Options?) promise::Promise<Response> {
+  let method: Str = match options {
+    opts => {
+      match opts.method {
+        method => method.to_str(),
+        _ => "GET",
+      }
+    },
+    _ => "GET",
+  }
+  let empty_headers: [Str: Str] = [:]
+  let headers: [Str: Str] = match options {
+    opts => opts.headers.or(empty_headers),
+    _ => empty_headers,
+  }
+  let body: Dynamic = match options {
+    opts => {
+      match opts.body {
+        value => value,
+        _ => Dynamic::from_void(),
+      }
+    },
+    _ => Dynamic::from_void(),
+  }
+  let timeout: Int? = match options {
+    opts => opts.timeout,
+    _ => maybe::none(),
+  }
+
+  promise::map(
+    _fetch(method, url, body, headers, timeout),
+    fn(raw: Dynamic) Response {
+      Response{
+        url: response_url(raw),
+        status: response_status(raw),
+        headers: response_headers(raw),
+        body: response_body(raw),
+      }
+    },
+  )
+}

@@ -50,6 +50,14 @@ func TestExternType(t *testing.T) {
 			}, "\n"),
 		},
 		{
+			name: "generic extern type can be specialized in extern fn signatures",
+			input: strings.Join([]string{
+				`extern type Promise<$T>`,
+				`extern fn resolved() Promise<Str> = "Resolved"`,
+				`extern fn chain(p: Promise<Str>) Promise<Int> = "Chain"`,
+			}, "\n"),
+		},
+		{
 			name: "extern type can be wrapped in Result",
 			input: strings.Join([]string{
 				`extern type ConnectionPtr`,
@@ -111,7 +119,7 @@ func TestImportedExternTypeIsVisible(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tempDir, "helpers"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tempDir, "helpers", "promise.ard"), []byte("extern type Promise\nextern fn resolved() Promise = \"Resolved\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "helpers", "promise.ard"), []byte("extern type Promise<$T>\nextern fn resolved() Promise<Str> = \"Resolved\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,7 +128,7 @@ func TestImportedExternTypeIsVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := parse.Parse([]byte("use demo/helpers/promise as promise\nextern fn keep(p: promise::Promise) promise::Promise = \"Keep\"\n"), filepath.Join(tempDir, "main.ard"))
+	result := parse.Parse([]byte("use demo/helpers/promise as promise\nextern fn keep(p: promise::Promise<Str>) promise::Promise<Str> = \"Keep\"\n"), filepath.Join(tempDir, "main.ard"))
 	if len(result.Errors) > 0 {
 		t.Fatalf("unexpected parse error: %s", result.Errors[0].Message)
 	}

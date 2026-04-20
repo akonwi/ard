@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+func renderTypeParams(params []string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	formatted := make([]string, len(params))
+	for i, param := range params {
+		formatted[i] = "$" + param
+	}
+	return "<" + strings.Join(formatted, ", ") + ">"
+}
+
 type Statement interface {
 	String() string
 	GetLocation() Location
@@ -306,12 +317,13 @@ func (f FunctionDeclaration) String() string {
 
 type ExternTypeDeclaration struct {
 	Location
-	Name    string
-	Private bool
+	Name       string
+	TypeParams []string
+	Private    bool
 }
 
 func (e ExternTypeDeclaration) String() string {
-	return fmt.Sprintf("extern type %s", e.Name)
+	return fmt.Sprintf("extern type %s%s", e.Name, renderTypeParams(e.TypeParams))
 }
 
 type ExternalFunction struct {

@@ -2167,12 +2167,21 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			return nil, p.makeError(p.peek(), "Expected type name after 'extern type'")
 		}
 		nameToken := p.advance()
+		typeParams := p.parseGenericTypeParameters()
+		endRow := nameToken.line
+		endCol := nameToken.column + len(nameToken.text)
+		if len(typeParams) > 0 {
+			endToken := p.previous()
+			endRow = endToken.line
+			endCol = endToken.column + len(endToken.text)
+		}
 		return &ExternTypeDeclaration{
-			Name:    nameToken.text,
-			Private: private,
+			Name:       nameToken.text,
+			TypeParams: typeParams,
+			Private:    private,
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
-				End:   Point{Row: nameToken.line, Col: nameToken.column + len(nameToken.text)},
+				End:   Point{Row: endRow, Col: endCol},
 			},
 		}, nil
 	}

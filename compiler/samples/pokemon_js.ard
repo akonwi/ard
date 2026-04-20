@@ -1,25 +1,18 @@
 use ard/decode
 use ard/dynamic as Dynamic
-use ard/http
 use ard/io
-use ard/js/http as js_http
+use ard/js/fetch
 use ard/js/promise
 use ard/maybe
 
 fn main() {
   io::print("GET from pokemon api")
 
-  let get_request = http::Request{
-    method: http::Method::Get,
-    url: "https://pokeapi.co/api/v2/pokemon",
-    headers: [:],
-  }
-
-  let flow = js_http::then(
-    js_http::send(get_request, 60),
-    fn(res: http::Response) {
+  let flow = promise::then(
+    fetch::fetch("https://pokeapi.co/api/v2/pokemon"),
+    fn(res: fetch::Response) {
       if res.is_ok() {
-        let data = decode::from_json(res.body).expect("Unable to decode response body as JSON")
+        let data = res.json().expect("Unable to decode response body as JSON")
 
         let count = decode::run(data, decode::field("count", decode::int))
         let results_decoder = decode::list(decode::map(decode::string, decode::string))
@@ -39,34 +32,47 @@ fn main() {
         io::print("Received a {res.status}")
       }
 
-      io::print("http::post() to echoing api")
-      let post_request = http::Request{
-        method: http::Method::Post,
-        url: "https://postman-echo.com/post",
-        headers: ["content-type": "text/plain"],
-        body: maybe::some(Dynamic::from_str("raw text")),
-      }
+      io::print("fetch() post to echoing api")
 
-      js_http::recover(
-        js_http::inspect(
-          js_http::send(post_request),
-          fn(post_res: http::Response) {
+      promise::rescue(
+        promise::inspect(
+          fetch::fetch(
+            "https://postman-echo.com/post",
+            fetch::Options{
+              method: maybe::some(fetch::Method::Post),
+              headers: maybe::some(["content-type": "text/plain"]),
+              body: maybe::some(Dynamic::from_str("raw text")),
+            },
+          ),
+          fn(post_res: fetch::Response) {
             io::print("got a {post_res.status}")
           },
         ),
-        fn(message: Str) {
-          io::print("unable to make request: {message}")
-          promise::resolve(Dynamic::from_void())
+        fn(reason: Dynamic) {
+          let reason_text = decode::string(reason).expect("reason")
+          io::print("unable to make request: {reason_text}")
+          fetch::Response{
+            url: "",
+            status: 0,
+            headers: [:],
+            body: "",
+          }
         },
       )
     },
   )
 
-  js_http::recover(
+  promise::rescue(
     flow,
-    fn(message: Str) {
-      io::print("unable to make request: {message}")
-      promise::resolve(Dynamic::from_void())
+    fn(reason: Dynamic) {
+      let reason_text = decode::string(reason).expect("reason")
+      io::print("unable to make request: {reason_text}")
+      fetch::Response{
+        url: "",
+        status: 0,
+        headers: [:],
+        body: "",
+      }
     },
   )
 }

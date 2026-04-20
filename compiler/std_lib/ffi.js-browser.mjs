@@ -247,11 +247,7 @@ export function JSPromiseThen(promise, withFn) {
   return promise.then((value) => withFn(value));
 }
 
-export function JSPromiseMapError(promise, withFn) {
-  return promise.catch((error) => withFn(error));
-}
-
-export function JSPromiseRecover(promise, withFn) {
+export function JSPromiseRescue(promise, withFn) {
   return promise.catch((error) => withFn(error));
 }
 
@@ -289,7 +285,7 @@ export function JSPromiseDelay(ms, value) {
   });
 }
 
-export async function JSHTTP_Fetch(method, url, body, headers, timeout) {
+export async function JSFetch(method, url, body, headers, timeout) {
   const timeoutSeconds = unwrapMaybe(timeout);
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   let timeoutId = null;
@@ -313,6 +309,7 @@ export async function JSHTTP_Fetch(method, url, body, headers, timeout) {
     });
 
     return {
+      url: response.url,
       status: response.status,
       headers: responseHeaders,
       body: responseBody,
@@ -326,22 +323,27 @@ export async function JSHTTP_Fetch(method, url, body, headers, timeout) {
   }
 }
 
-export function JSHTTP_ResponseStatus(response) {
+export function JSFetch_ResponseUrl(response) {
+  if (!response || typeof response !== "object") return "";
+  return typeof response.url === "string" ? response.url : String(response.url ?? "");
+}
+
+export function JSFetch_ResponseStatus(response) {
   if (!response || typeof response !== "object") return 0;
   return typeof response.status === "number" ? response.status : 0;
 }
 
-export function JSHTTP_ResponseHeaders(response) {
+export function JSFetch_ResponseHeaders(response) {
   if (!response || typeof response !== "object") return new Map();
   if (response.headers instanceof Map) return new Map(response.headers);
   return new Map(Object.entries(response.headers ?? {}));
 }
 
-export function JSHTTP_ResponseBody(response) {
+export function JSFetch_ResponseBody(response) {
   if (!response || typeof response !== "object") return "";
   return typeof response.body === "string" ? response.body : String(response.body ?? "");
 }
 
-export function JSHTTP_ErrorMessage(reason) {
+export function JSFetch_ErrorMessage(reason) {
   return messageFromError(reason);
 }
