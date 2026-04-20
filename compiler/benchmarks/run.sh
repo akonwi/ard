@@ -67,6 +67,17 @@ lookup_program() {
   return 1
 }
 
+supports_js_server() {
+  case "$1" in
+    sales_pipeline|shape_catalog|decode_pipeline|word_frequency_batch|fs_batch)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 selected_benchmarks() {
   if [[ "$#" -eq 0 ]]; then
     for entry in "${BENCHMARKS[@]}"; do
@@ -91,6 +102,8 @@ run_runtime_benchmark() {
   local tmp_dir="$3"
   local vm_bin="$tmp_dir/${name}-vm"
   local go_bin="$tmp_dir/${name}-go"
+  local js_out="$tmp_dir/${name}.mjs"
+  local js_runner="$tmp_dir/${name}-runner.mjs"
 
   echo "==> building runtime binaries for $name"
   (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --out "$vm_bin")
@@ -102,11 +115,26 @@ run_runtime_benchmark() {
     export_args+=(--export-json "$EXPORT_DIR/${name}.runtime.json")
   fi
 
+  local commands=(
+    --command-name "vm:$name" "$vm_bin"
+    --command-name "go:$name" "$go_bin"
+  )
+
+  if supports_js_server "$name"; then
+    (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --target js-server --out "$js_out")
+    cat > "$js_runner" <<EOF
+import { main } from "./$(basename "$js_out")";
+main();
+EOF
+    commands+=(--command-name "js:$name" "node '$js_runner'")
+  else
+    echo "==> skipping js-server for $name (unsupported target/module set)"
+  fi
+
   hyperfine \
     --warmup "$WARMUP" \
     --runs "$RUNS" \
-    --command-name "vm:$name" "$vm_bin" \
-    --command-name "go:$name" "$go_bin" \
+    "${commands[@]}" \
     "${export_args[@]}"
 }
 
@@ -120,11 +148,21 @@ run_cli_benchmark() {
     export_args+=(--export-json "$EXPORT_DIR/${name}.cli.json")
   fi
 
+  local commands=(
+    --command-name "vm:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
+    --command-name "go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target go '$rel_path'"
+  )
+
+  if supports_js_server "$name"; then
+    commands+=(--command-name "js:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target js-server '$rel_path'")
+  else
+    echo "==> skipping js-server for $name (unsupported target/module set)"
+  fi
+
   hyperfine \
     --warmup "$WARMUP" \
     --runs "$RUNS" \
-    --command-name "vm:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'" \
-    --command-name "go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target go '$rel_path'" \
+    "${commands[@]}" \
     "${export_args[@]}"
 }
 
