@@ -101,6 +101,42 @@ function toJSONValue(value) {
   return value;
 }
 
+function unwrapMaybe(value) {
+  if (isArdMaybe(value)) {
+    return hasOwn(value, "value") ? value.value : null;
+  }
+  return value;
+}
+
+function toHeaderObject(headers) {
+  if (headers instanceof Map) {
+    const out = {};
+    for (const [key, value] of headers.entries()) {
+      out[String(key)] = String(value);
+    }
+    return out;
+  }
+  if (isPlainObject(headers)) {
+    const out = {};
+    for (const [key, value] of Object.entries(headers)) {
+      out[String(key)] = String(value);
+    }
+    return out;
+  }
+  return {};
+}
+
+function toRequestBody(body) {
+  if (body === null || body === undefined) return undefined;
+  if (typeof body === "string") return body;
+  if (typeof body === "number" || typeof body === "boolean") return String(body);
+  return JSON.stringify(toJSONValue(body));
+}
+
+function messageFromError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function JsonToDynamic(jsonString) {
   try {
     return { ok: JSON.parse(jsonString) };
@@ -251,4 +287,61 @@ export function JSPromiseDelay(ms, value) {
   return new Promise((resolve) => {
     setTimeout(() => resolve(value), ms);
   });
+}
+
+export async function JSHTTP_Fetch(method, url, body, headers, timeout) {
+  const timeoutSeconds = unwrapMaybe(timeout);
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timeoutId = null;
+
+  try {
+    if (controller && typeof timeoutSeconds === "number") {
+      timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers: toHeaderObject(headers),
+      body: toRequestBody(body),
+      signal: controller ? controller.signal : undefined,
+    });
+
+    const responseBody = await response.text();
+    const responseHeaders = new Map();
+    response.headers.forEach((value, key) => {
+      responseHeaders.set(key, value);
+    });
+
+    return {
+      status: response.status,
+      headers: responseHeaders,
+      body: responseBody,
+    };
+  } catch (error) {
+    throw messageFromError(error);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+export function JSHTTP_ResponseStatus(response) {
+  if (!response || typeof response !== "object") return 0;
+  return typeof response.status === "number" ? response.status : 0;
+}
+
+export function JSHTTP_ResponseHeaders(response) {
+  if (!response || typeof response !== "object") return new Map();
+  if (response.headers instanceof Map) return new Map(response.headers);
+  return new Map(Object.entries(response.headers ?? {}));
+}
+
+export function JSHTTP_ResponseBody(response) {
+  if (!response || typeof response !== "object") return "";
+  return typeof response.body === "string" ? response.body : String(response.body ?? "");
+}
+
+export function JSHTTP_ErrorMessage(reason) {
+  return messageFromError(reason);
 }

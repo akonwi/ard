@@ -1,0 +1,72 @@
+use ard/decode
+use ard/dynamic as Dynamic
+use ard/http
+use ard/io
+use ard/js/http as js_http
+use ard/js/promise
+use ard/maybe
+
+fn main() {
+  io::print("GET from pokemon api")
+
+  let get_request = http::Request{
+    method: http::Method::Get,
+    url: "https://pokeapi.co/api/v2/pokemon",
+    headers: [:],
+  }
+
+  let flow = js_http::then(
+    js_http::send(get_request, 60),
+    fn(res: http::Response) {
+      if res.is_ok() {
+        let data = decode::from_json(res.body).expect("Unable to decode response body as JSON")
+
+        let count = decode::run(data, decode::field("count", decode::int))
+        let results_decoder = decode::list(decode::map(decode::string, decode::string))
+
+        let items = decode::run(data, decode::field("results", results_decoder))
+
+        match count {
+          ok(count) => io::print("res.count = {count}"),
+          err(_) => io::print("Failed to extract count"),
+        }
+
+        match items {
+          ok(results) => io::print("res.results.size = {results.size()}"),
+          err(_) => io::print("Failed to extract results"),
+        }
+      } else {
+        io::print("Received a {res.status}")
+      }
+
+      io::print("http::post() to echoing api")
+      let post_request = http::Request{
+        method: http::Method::Post,
+        url: "https://postman-echo.com/post",
+        headers: ["content-type": "text/plain"],
+        body: maybe::some(Dynamic::from_str("raw text")),
+      }
+
+      js_http::recover(
+        js_http::inspect(
+          js_http::send(post_request),
+          fn(post_res: http::Response) {
+            io::print("got a {post_res.status}")
+          },
+        ),
+        fn(message: Str) {
+          io::print("unable to make request: {message}")
+          promise::resolve(Dynamic::from_void())
+        },
+      )
+    },
+  )
+
+  js_http::recover(
+    flow,
+    fn(message: Str) {
+      io::print("unable to make request: {message}")
+      promise::resolve(Dynamic::from_void())
+    },
+  )
+}

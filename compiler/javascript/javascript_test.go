@@ -2,6 +2,9 @@ package javascript
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -852,6 +855,46 @@ fn main() {
 	}
 }
 
+func TestBuildWritesJSBrowserHTTPStdlibCompanion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/http
+use ard/js/http as js_http
+
+fn main() {
+  let req = http::Request{
+    method: http::Method::Get,
+    url: "https://example.com",
+    headers: [:],
+  }
+  js_http::send(req, 1)
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSBrowser); err != nil {
+		t.Fatalf("did not expect browser build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, `import * as __ard_stdlib_ffi from "./ffi.stdlib.js-browser.mjs";`) {
+		t.Fatalf("expected browser stdlib ffi import, got:\n%s", source)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
+		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
+	}
+}
+
 func TestRunExecutesJSPromiseProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")
@@ -911,6 +954,84 @@ fn main() {
 	}
 	if string(out) != "42\nboom\nrecovered\ndone\n" {
 		t.Fatalf("unexpected promise output:\n%s", string(out))
+	}
+}
+
+func TestRunExecutesJSHTTPFetchProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		_ = r.Body.Close()
+		w.Header().Set("X-Echo-Method", r.Method)
+		w.Header().Set("X-Echo-Query", r.URL.RawQuery)
+		w.Header().Set("X-Echo-Header", r.Header.Get("X-Demo"))
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(fmt.Sprintf(`
+use ard/dynamic as Dynamic
+use ard/http
+use ard/io
+use ard/js/http as js_http
+use ard/js/promise as promise
+use ard/maybe
+
+fn main() {
+  let req = http::Request{
+    method: http::Method::Post,
+    url: %q,
+    headers: ["content-type": "text/plain", "x-demo": "kit"],
+    body: maybe::some(Dynamic::from_str("hello")),
+  }
+
+  let sent = js_http::inspect(js_http::send(req, 5), fn(res: http::Response) {
+    io::print(res.status)
+    io::print(res.is_ok().to_str())
+    io::print(res.headers.get("x-echo-method").or("missing"))
+    io::print(res.headers.get("x-echo-query").or("missing"))
+    io::print(res.headers.get("x-echo-header").or("missing"))
+    io::print(res.body)
+  })
+
+  js_http::then(sent, fn(_: http::Response) {
+    js_http::recover(
+      js_http::send(http::Request{
+        method: http::Method::Get,
+        url: "http://127.0.0.1:1/unreachable",
+        headers: [:],
+      }, 1),
+      fn(reason: Str) {
+        io::print((reason.size() > 0).to_str())
+        promise::resolve(Dynamic::from_void())
+      },
+    )
+  })
+}
+`, server.URL+"/echo?lang=ard")), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd.Dir = ".."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js http run error: %v\n%s", err, string(out))
+	}
+	if string(out) != "201\ntrue\nPOST\nlang=ard\nkit\nhello\ntrue\n" {
+		t.Fatalf("unexpected js http output:\n%s", string(out))
 	}
 }
 

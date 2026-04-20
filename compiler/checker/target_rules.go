@@ -37,6 +37,10 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 		backend.TargetJSServer:  true,
 		backend.TargetJSBrowser: true,
 	},
+	"ard/js/http": {
+		backend.TargetJSServer:  true,
+		backend.TargetJSBrowser: true,
+	},
 }
 
 var targetDisplayOrder = []string{

@@ -1707,7 +1707,16 @@ func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor stri
 	fieldNames := sortedStructInstanceFields(instance)
 	args := make([]string, 0, len(fieldNames))
 	for _, field := range fieldNames {
-		value, err := e.emitExpr(instance.Fields[field])
+		expr, ok := instance.Fields[field]
+		if !ok || expr == nil {
+			fieldType := instance.FieldTypes[field]
+			if _, isMaybe := fieldType.(*checker.Maybe); isMaybe {
+				args = append(args, "Maybe.none()")
+				continue
+			}
+			return "", fmt.Errorf("missing struct field value for %s", field)
+		}
+		value, err := e.emitExpr(expr)
 		if err != nil {
 			return "", err
 		}

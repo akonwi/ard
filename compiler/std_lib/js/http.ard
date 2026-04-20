@@ -1,0 +1,101 @@
+use ard/dynamic as Dynamic
+use ard/http
+use ard/js/promise
+use ard/maybe
+
+private extern fn fetch(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) promise::Promise = {
+  js = "JSHTTP_Fetch"
+}
+
+private extern fn response_status(response: Dynamic) Int = {
+  js = "JSHTTP_ResponseStatus"
+}
+
+private extern fn response_headers(response: Dynamic) [Str: Str] = {
+  js = "JSHTTP_ResponseHeaders"
+}
+
+private extern fn response_body(response: Dynamic) Str = {
+  js = "JSHTTP_ResponseBody"
+}
+
+private extern fn error_message(reason: Dynamic) Str = {
+  js = "JSHTTP_ErrorMessage"
+}
+
+fn send(req: http::Request, timeout: Int?) promise::Promise {
+  let method = req.method.to_str()
+  let effective_timeout = match timeout {
+    t => maybe::some(t),
+    _ => req.timeout,
+  }
+
+  let body: Dynamic = match req.body {
+    d => d,
+    _ => Dynamic::from_void(),
+  }
+
+  fetch(method, req.url, body, req.headers, effective_timeout)
+}
+
+fn to_response(raw: Dynamic) http::Response {
+  http::Response{
+    status: response_status(raw),
+    headers: response_headers(raw),
+    body: response_body(raw),
+  }
+}
+
+fn map(request: promise::Promise, with: fn(http::Response) Dynamic) promise::Promise {
+  promise::map(
+    request,
+    fn(raw: Dynamic) Dynamic {
+      with(to_response(raw))
+    },
+  )
+}
+
+fn then(request: promise::Promise, with: fn(http::Response) promise::Promise) promise::Promise {
+  promise::then(
+    request,
+    fn(raw: Dynamic) {
+      with(to_response(raw))
+    },
+  )
+}
+
+fn inspect(request: promise::Promise, with: fn(http::Response) Void) promise::Promise {
+  promise::inspect(
+    request,
+    fn(raw: Dynamic) {
+      with(to_response(raw))
+    },
+  )
+}
+
+fn map_error(request: promise::Promise, with: fn(Str) Dynamic) promise::Promise {
+  promise::map_error(
+    request,
+    fn(reason: Dynamic) Dynamic {
+      with(error_message(reason))
+    },
+  )
+}
+
+fn recover(request: promise::Promise, with: fn(Str) promise::Promise) promise::Promise {
+  promise::recover(
+    request,
+    fn(reason: Dynamic) {
+      with(error_message(reason))
+    },
+  )
+}
+
+fn inspect_error(request: promise::Promise, with: fn(Str) Void) promise::Promise {
+  promise::inspect_error(
+    request,
+    fn(reason: Dynamic) {
+      with(error_message(reason))
+    },
+  )
+}

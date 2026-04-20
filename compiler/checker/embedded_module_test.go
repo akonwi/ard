@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/std_lib"
@@ -39,6 +40,11 @@ func TestStdLibModules(t *testing.T) {
 		modulePath := fmt.Sprintf("ard/%s", moduleName)
 
 		t.Run(modulePath, func(t *testing.T) {
+			target := ""
+			if strings.HasPrefix(modulePath, "ard/js/") {
+				target = backend.TargetJSServer
+			}
+
 			// Read the embedded file using std_lib.Find
 			content, err := std_lib.Find(modulePath)
 			if err != nil {
@@ -56,7 +62,7 @@ func TestStdLibModules(t *testing.T) {
 			}
 
 			// Type check the program to create a Program with symbols
-			c := checker.New(modulePath, result.Program, nil)
+			c := checker.New(modulePath, result.Program, nil, checker.CheckOptions{Target: target})
 			c.Check()
 			if c.HasErrors() {
 				var errorMessages []string
