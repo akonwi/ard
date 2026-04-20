@@ -299,7 +299,7 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 		header += " " + p.renderType(node.ReturnType)
 	}
 
-	if len(node.ExternalBindings) <= 1 {
+	if len(node.ExternalBindings) == 0 || (len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "") {
 		binding := node.ExternalBinding
 		if binding == "" && len(node.ExternalBindings) == 1 {
 			binding = node.ExternalBindings["go"]
@@ -336,10 +336,12 @@ func externBindingOrder(target string) int {
 		return 0
 	case "bytecode":
 		return 1
-	case "js-server":
+	case "js":
 		return 2
-	case "js-browser":
+	case "js-server":
 		return 3
+	case "js-browser":
+		return 4
 	default:
 		return 100
 	}

@@ -330,6 +330,49 @@ func TestExternalFunctionBindingsResolvePerTarget(t *testing.T) {
 	}
 }
 
+func TestExternalFunctionBindingsResolveSharedJSFallback(t *testing.T) {
+	source := `extern fn delay(ms: Int) Void = {
+  go = "Delay"
+  js = "delay"
+  js-browser = "delayBrowser"
+}`
+
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected parse errors: %v", result.Errors)
+	}
+
+	serverChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSServer})
+	serverChecker.Check()
+	if serverChecker.HasErrors() {
+		t.Fatalf("unexpected js-server diagnostics: %v", serverChecker.Diagnostics())
+	}
+	serverFn := serverChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if serverFn.ExternalBinding != "delay" {
+		t.Fatalf("expected shared js binding for js-server, got %#v", serverFn)
+	}
+
+	browserChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSBrowser})
+	browserChecker.Check()
+	if browserChecker.HasErrors() {
+		t.Fatalf("unexpected js-browser diagnostics: %v", browserChecker.Diagnostics())
+	}
+	browserFn := browserChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if browserFn.ExternalBinding != "delayBrowser" {
+		t.Fatalf("expected specific js-browser binding, got %#v", browserFn)
+	}
+
+	goChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
+	goChecker.Check()
+	if goChecker.HasErrors() {
+		t.Fatalf("unexpected go diagnostics: %v", goChecker.Diagnostics())
+	}
+	goFn := goChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if goFn.ExternalBinding != "Delay" {
+		t.Fatalf("expected go binding, got %#v", goFn)
+	}
+}
+
 func TestCallingInstanceMethods(t *testing.T) {
 	run(t, []test{
 		{

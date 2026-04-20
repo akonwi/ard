@@ -84,6 +84,31 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
+			name: "Extern function with shared js binding block",
+			input: `extern fn delay(value: Str) Void = {
+  js = "delay"
+  js-browser = "delayBrowser"
+}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternalFunction{
+						Name: "delay",
+						Parameters: []Parameter{{
+							Name: "value",
+							Type: &StringType{},
+						}},
+						ReturnType:      &VoidType{},
+						ExternalBinding: "",
+						ExternalBindings: map[string]string{
+							"js":         "delay",
+							"js-browser": "delayBrowser",
+						},
+					},
+				},
+			},
+		},
+		{
 			name:  "Empty function",
 			input: `fn empty() {}`,
 			output: Program{

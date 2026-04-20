@@ -4300,6 +4300,11 @@ func resolveExternalBindingForTarget(target string, bindings map[string]string) 
 			return binding
 		}
 	}
+	if target == backend.TargetJSServer || target == backend.TargetJSBrowser {
+		if binding := bindings["js"]; binding != "" {
+			return binding
+		}
+	}
 	if binding := bindings[backend.TargetGo]; binding != "" {
 		return binding
 	}

@@ -952,7 +952,7 @@ func (e ExternalFunctionDef) String() string {
 		paramStrs[i] = e.Parameters[i].Type.String()
 	}
 
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBinding == "") {
+	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
 		keys := make([]string, 0, len(e.ExternalBindings))
 		for key := range e.ExternalBindings {
 			keys = append(keys, key)
