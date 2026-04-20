@@ -1040,6 +1040,67 @@ if (mod.c !== "60.00") throw new Error("float-to-str-2");
 	}
 }
 
+func TestRunExecutesEnumMethods(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+enum Region {
+  North,
+  South,
+}
+
+impl Region {
+  fn weight() Int {
+    match self {
+      Region::North => 3,
+      Region::South => 2,
+    }
+  }
+}
+
+let a = Region::North.weight()
+let b = Region::South.weight()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "function __enum_method__Region__weight(__enum_self) {") {
+		t.Fatalf("expected enum method helper lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const a = __enum_method__Region__weight(Region.North);") {
+		t.Fatalf("expected enum method call lowering, got:\n%s", source)
+	}
+
+	cmd := exec.Command("node", "--input-type=module", "-e", `
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (mod.a !== 3) throw new Error("enum-method-a");
+if (mod.b !== 2) throw new Error("enum-method-b");
+`, outputPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("did not expect node assertion error: %v", err)
+	}
+}
+
 func TestBuildWritesMaybeEqualityLowering(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

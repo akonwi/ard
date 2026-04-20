@@ -26,17 +26,18 @@ type ffiArtifacts struct {
 }
 
 type emitter struct {
-	target            string
-	builder           strings.Builder
-	indentLevel       int
-	moduleVars        map[string]string
-	currentModule     string
-	currentFunction   string
-	currentReceiver   string
-	currentReturnType checker.Type
-	ffi               ffiArtifacts
-	loopDepth         int
-	signalBreaks      bool
+	target              string
+	builder             strings.Builder
+	indentLevel         int
+	moduleVars          map[string]string
+	currentModule       string
+	currentFunction     string
+	currentReceiver     string
+	currentReceiverExpr string
+	currentReturnType   checker.Type
+	ffi                 ffiArtifacts
+	loopDepth           int
+	signalBreaks        bool
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -832,15 +833,16 @@ func (e *emitter) emitExternalValueAdapter(value string, t checker.Type) (string
 
 func (e *emitter) childEmitter() *emitter {
 	return &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-		ffi:               e.ffi,
-		loopDepth:         e.loopDepth,
-		signalBreaks:      e.signalBreaks || e.loopDepth > 0,
+		target:              e.target,
+		moduleVars:          e.moduleVars,
+		currentModule:       e.currentModule,
+		currentFunction:     e.currentFunction,
+		currentReceiver:     e.currentReceiver,
+		currentReceiverExpr: e.currentReceiverExpr,
+		currentReturnType:   e.currentReturnType,
+		ffi:                 e.ffi,
+		loopDepth:           e.loopDepth,
+		signalBreaks:        e.signalBreaks || e.loopDepth > 0,
 	}
 }
 
@@ -1472,6 +1474,10 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if expr.ReceiverKind == checker.ReceiverEnum && expr.EnumType != nil {
+			callArgs := append([]string{subject}, args...)
+			return enumMethodName(expr.EnumType.Name, expr.Method.Name) + "(" + strings.Join(callArgs, ", ") + ")", nil
+		}
 		return subject + "." + jsName(expr.Method.Name) + "(" + strings.Join(args, ", ") + ")", nil
 	case *checker.CopyExpression:
 		return e.emitExpr(expr.Expr)
@@ -1590,7 +1596,44 @@ func (e *emitter) emitEnumDef(def *checker.Enum) error {
 		entries = append(entries, jsName(value.Name)+": makeEnum("+strconv.Quote(def.Name)+", "+strconv.Quote(value.Name)+", "+strconv.Itoa(value.Value)+")")
 	}
 	e.line("const " + jsName(def.Name) + " = Object.freeze({ " + strings.Join(entries, ", ") + " });")
+	methodNames := sortedFunctionNames(def.Methods)
+	for _, methodName := range methodNames {
+		e.line("")
+		if err := e.emitEnumMethod(def, def.Methods[methodName]); err != nil {
+			return err
+		}
+	}
 	e.line("")
+	return nil
+}
+
+func (e *emitter) emitEnumMethod(def *checker.Enum, method *checker.FunctionDef) error {
+	params := make([]string, 0, len(method.Parameters)+1)
+	params = append(params, "__enum_self")
+	for _, param := range method.Parameters {
+		params = append(params, jsName(param.Name))
+	}
+
+	e.line(fmt.Sprintf("function %s(%s) {", enumMethodName(def.Name, method.Name), strings.Join(params, ", ")))
+	prevFunction := e.currentFunction
+	prevReceiver := e.currentReceiver
+	prevReceiverExpr := e.currentReceiverExpr
+	prevReturnType := e.currentReturnType
+	e.currentFunction = def.Name + "." + method.Name
+	e.currentReceiver = method.Receiver
+	e.currentReceiverExpr = "__enum_self"
+	e.currentReturnType = method.ReturnType
+	e.indent(func() {
+		err := e.emitFunctionBoundary(method.Body)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.currentFunction = prevFunction
+	e.currentReceiver = prevReceiver
+	e.currentReceiverExpr = prevReceiverExpr
+	e.currentReturnType = prevReturnType
+	e.line("}")
 	return nil
 }
 
@@ -1634,9 +1677,11 @@ func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.Funct
 	e.line(fmt.Sprintf("%s(%s) {", jsName(method.Name), strings.Join(params, ", ")))
 	prevFunction := e.currentFunction
 	prevReceiver := e.currentReceiver
+	prevReceiverExpr := e.currentReceiverExpr
 	prevReturnType := e.currentReturnType
 	e.currentFunction = def.Name + "." + method.Name
 	e.currentReceiver = method.Receiver
+	e.currentReceiverExpr = "this"
 	e.currentReturnType = method.ReturnType
 	e.indent(func() {
 		err := e.emitFunctionBoundary(method.Body)
@@ -1646,6 +1691,7 @@ func (e *emitter) emitStructMethod(def *checker.StructDef, method *checker.Funct
 	})
 	e.currentFunction = prevFunction
 	e.currentReceiver = prevReceiver
+	e.currentReceiverExpr = prevReceiverExpr
 	e.currentReturnType = prevReturnType
 	e.line("}")
 	return nil
@@ -2426,6 +2472,9 @@ func (e *emitter) indent(fn func()) {
 
 func (e *emitter) emitVariableName(name string) string {
 	if e.currentReceiver != "" && name == e.currentReceiver {
+		if e.currentReceiverExpr != "" {
+			return e.currentReceiverExpr
+		}
 		return "this"
 	}
 	return jsName(name)
@@ -2885,6 +2934,10 @@ func sortedFieldNames(fields map[string]checker.Type) []string {
 func moduleVarName(path string) string {
 	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_")
 	return "__module_" + replacer.Replace(path)
+}
+
+func enumMethodName(enumName, methodName string) string {
+	return "__enum_method__" + jsName(enumName) + "__" + jsName(methodName)
 }
 
 func jsName(name string) string {
