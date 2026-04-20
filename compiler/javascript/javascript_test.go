@@ -1,6 +1,7 @@
 package javascript
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -813,6 +814,96 @@ fn main() {
 
 	if string(jsOut) != string(baseOut) {
 		t.Fatalf("unexpected decode/json output mismatch\njs:\n%s\nbase:\n%s", string(jsOut), string(baseOut))
+	}
+}
+
+func TestRunExecutesJSStdlibFSProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	root := filepath.Join(workspace, "root")
+	nested := filepath.Join(root, "nested")
+	note := filepath.Join(root, "note.txt")
+	copyPath := filepath.Join(root, "copy.txt")
+	renamed := filepath.Join(root, "renamed.txt")
+	mainPath := filepath.Join(dir, "main.ard")
+	source := fmt.Sprintf(`
+use ard/io
+use ard/fs
+
+fn main() {
+  let root = %q
+  let nested = %q
+  let note = %q
+  let copy_path = %q
+  let renamed = %q
+
+  if fs::exists(root) {
+    fs::delete_dir(root).expect("cleanup root")
+  }
+
+  fs::create_dir(root).expect("create root")
+  fs::create_dir(nested).expect("create nested")
+  io::print(fs::exists(root).to_str())
+  io::print(fs::is_dir(root).to_str())
+  io::print(fs::create_file(note).is_ok().to_str())
+  io::print(fs::is_file(note).to_str())
+  io::print(fs::write(note, "hello").is_ok().to_str())
+  io::print(fs::append(note, " world").is_ok().to_str())
+  io::print(fs::read(note).or("bad"))
+  io::print(fs::copy(note, copy_path).is_ok().to_str())
+  io::print(fs::rename(copy_path, renamed).is_ok().to_str())
+  io::print(fs::exists(renamed).to_str())
+  io::print(fs::cwd().is_ok().to_str())
+  io::print((fs::abs(note).or("bad") == note).to_str())
+
+  let entries = fs::list_dir(root).expect("list root")
+  mut saw_note = false
+  mut saw_nested = false
+  mut saw_renamed = false
+  for entry in entries {
+    if entry.name == "note.txt" and entry.is_file {
+      saw_note = true
+    } else if entry.name == "nested" and entry.is_file == false {
+      saw_nested = true
+    } else if entry.name == "renamed.txt" and entry.is_file {
+      saw_renamed = true
+    }
+  }
+  io::print(saw_note.to_str())
+  io::print(saw_nested.to_str())
+  io::print(saw_renamed.to_str())
+
+  fs::delete_dir(root).expect("delete root")
+  io::print(fs::exists(root).to_str())
+}
+`, root, nested, note, copyPath, renamed)
+	if err := os.WriteFile(mainPath, []byte(source), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	js := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	js.Dir = ".."
+	jsOut, err := js.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server fs run error: %v\n%s", err, string(jsOut))
+	}
+
+	base := exec.Command("go", "run", ".", "run", mainPath)
+	base.Dir = ".."
+	baseOut, err := base.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect baseline fs run error: %v\n%s", err, string(baseOut))
+	}
+
+	if string(jsOut) != string(baseOut) {
+		t.Fatalf("unexpected fs output mismatch\njs:\n%s\nbase:\n%s", string(jsOut), string(baseOut))
 	}
 }
 

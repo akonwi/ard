@@ -35,10 +35,15 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: bytecode, go, js-server",
 		},
 		{
-			name:        "fs blocked on js-server",
-			target:      backend.TargetJSServer,
+			name:   "fs allowed on js-server",
+			target: backend.TargetJSServer,
+			source: "use ard/fs\nfn main() Int { 1 }",
+		},
+		{
+			name:        "fs blocked on js-browser",
+			target:      backend.TargetJSBrowser,
 			source:      "use ard/fs\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/fs when targeting js-server; allowed targets: bytecode, go",
+			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: bytecode, go, js-server",
 		},
 		{
 			name:        "sql blocked on js-browser",
