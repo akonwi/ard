@@ -355,6 +355,112 @@ if (mod.e !== 3) throw new Error("map");
 	}
 }
 
+func TestRunExecutesLoopBreakInsideMatch(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn find() Int {
+  mut total = 0
+  while true {
+    match (true) {
+      true => {
+        total = total + 1
+        break
+      },
+      false => {}
+    }
+  }
+  total
+}
+
+let result = find()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "throw makeBreakSignal();") {
+		t.Fatalf("expected break signal lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, "if (__ard_break && __ard_break.__ard_break) break;") {
+		t.Fatalf("expected loop break catch lowering, got:\n%s", source)
+	}
+
+	cmd := exec.Command("node", "--input-type=module", "-e", `
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (mod.result !== 1) throw new Error("break-in-match");
+`, outputPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("did not expect node assertion error: %v", err)
+	}
+}
+
+func TestBuildLowersStaticStructFunctionsWithoutRedeclaration(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Book {
+  title: Str
+}
+
+impl Book {
+  fn get_title() Str {
+    self.title
+  }
+}
+
+fn Book::new(title: Str) Book {
+  Book { title: title }
+}
+
+let title = Book::new("Ard").get_title()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if strings.Count(source, "class Book {") != 1 {
+		t.Fatalf("expected one Book class, got:\n%s", source)
+	}
+	if !strings.Contains(source, "function Book__new(title) {") {
+		t.Fatalf("expected mangled static function name, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const title = Book__new(\"Ard\").get_title();") {
+		t.Fatalf("expected mangled static function call, got:\n%s", source)
+	}
+}
+
 func TestBuildWritesListLiteralsAndMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1086,6 +1192,39 @@ func TestRunRejectsBrowserTarget(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "js-browser cannot be run directly") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDoesNotDoubleInvokeMainWhenCalledAtTopLevel(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+fn main() {
+  io::print("once")
+}
+
+main()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd.Dir = ".."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server run error: %v\n%s", err, string(out))
+	}
+	if string(out) != "once\n" {
+		t.Fatalf("expected single main invocation, got:\n%s", string(out))
 	}
 }
 

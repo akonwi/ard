@@ -35,6 +35,8 @@ type emitter struct {
 	currentReceiver   string
 	currentReturnType checker.Type
 	ffi               ffiArtifacts
+	loopDepth         int
+	signalBreaks      bool
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -235,6 +237,12 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 	})
 	e.line("}")
 	e.line("")
+	e.line("function makeBreakSignal() {")
+	e.indent(func() {
+		e.line("return { __ard_break: true };")
+	})
+	e.line("}")
+	e.line("")
 	e.line(`const __ard_enum = Symbol.for("ard.enum");`)
 	e.line("")
 	e.line("function makeEnum(enumName, variantName, value) {")
@@ -425,8 +433,10 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 		if !moduleHasPublicOrPrivateFunction(root.Program(), "main") {
 			return nil, ffiArtifacts{}, fmt.Errorf("js-server run requires fn main()")
 		}
-		e.line("")
-		e.line("main();")
+		if !moduleCallsTopLevelFunction(root.Program(), "main") {
+			e.line("")
+			e.line("main();")
+		}
 	}
 
 	return []byte(e.builder.String()), ffi, nil
@@ -503,6 +513,16 @@ func moduleHasPublicOrPrivateFunction(program *checker.Program, name string) boo
 	return false
 }
 
+func moduleCallsTopLevelFunction(program *checker.Program, name string) bool {
+	for _, stmt := range program.Statements {
+		call, ok := stmt.Expr.(*checker.FunctionCall)
+		if ok && call.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *emitter) emitModuleWrapper(module checker.Module) error {
 	moduleName := e.moduleVars[module.Path()]
 	e.line(fmt.Sprintf("const %s = (() => {", moduleName))
@@ -518,7 +538,7 @@ func (e *emitter) emitModuleWrapper(module checker.Module) error {
 		}
 		parts := make([]string, 0, len(exports))
 		for _, name := range exports {
-			parts = append(parts, name+": "+jsName(name))
+			parts = append(parts, jsName(name)+": "+jsName(name))
 		}
 		e.line("return { " + strings.Join(parts, ", ") + " };")
 	})
@@ -535,8 +555,12 @@ func (e *emitter) emitRootModule(module checker.Module) error {
 	if len(exports) == 0 {
 		return nil
 	}
+	mangled := make([]string, 0, len(exports))
+	for _, name := range exports {
+		mangled = append(mangled, jsName(name))
+	}
 	e.line("")
-	e.line("export { " + strings.Join(exports, ", ") + " };")
+	e.line("export { " + strings.Join(mangled, ", ") + " };")
 	return nil
 }
 
@@ -601,12 +625,38 @@ func (e *emitter) emitModuleStatements(module checker.Module) error {
 	e.currentModule = module.Path()
 	defer func() { e.currentModule = prevModule }()
 
+	emittedStructs := map[string]bool{}
+	emittedEnums := map[string]bool{}
 	for _, enum := range collectEnumDefs(module.Program()) {
+		if emittedEnums[enum.Name] {
+			continue
+		}
+		emittedEnums[enum.Name] = true
 		if err := e.emitEnumDef(enum); err != nil {
 			return err
 		}
 	}
 	for _, stmt := range module.Program().Statements {
+		skip := false
+		switch def := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if emittedStructs[def.Name] {
+				skip = true
+			} else {
+				emittedStructs[def.Name] = true
+			}
+		case *checker.Enum:
+			if emittedEnums[def.Name] {
+				skip = true
+			}
+		case checker.Enum:
+			if emittedEnums[def.Name] {
+				skip = true
+			}
+		}
+		if skip {
+			continue
+		}
 		if err := e.emitTopLevelStatement(stmt); err != nil {
 			return err
 		}
@@ -716,6 +766,20 @@ func (e *emitter) emitExternalReturn(call string, returnType checker.Type) (stri
 	}
 }
 
+func (e *emitter) childEmitter() *emitter {
+	return &emitter{
+		target:            e.target,
+		moduleVars:        e.moduleVars,
+		currentModule:     e.currentModule,
+		currentFunction:   e.currentFunction,
+		currentReceiver:   e.currentReceiver,
+		currentReturnType: e.currentReturnType,
+		ffi:               e.ffi,
+		loopDepth:         e.loopDepth,
+		signalBreaks:      e.signalBreaks || e.loopDepth > 0,
+	}
+}
+
 func (e *emitter) emitFunctionBoundary(body *checker.Block) error {
 	e.line("try {")
 	e.indent(func() {
@@ -740,16 +804,21 @@ func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
 		}
 		return nil
 	}
-	lastExpr := -1
+	lastNonEmpty := -1
 	for i := len(block.Stmts) - 1; i >= 0; i-- {
-		if block.Stmts[i].Expr != nil {
-			lastExpr = i
+		stmt := block.Stmts[i]
+		if stmt.Break || stmt.Stmt != nil || stmt.Expr != nil {
+			lastNonEmpty = i
 			break
 		}
 	}
 	for i, stmt := range block.Stmts {
 		if stmt.Break {
-			e.line("break;")
+			if e.signalBreaks {
+				e.line("throw makeBreakSignal();")
+			} else {
+				e.line("break;")
+			}
 			continue
 		}
 		if stmt.Stmt != nil {
@@ -761,7 +830,7 @@ func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
 		if stmt.Expr == nil {
 			continue
 		}
-		if returns && i == lastExpr {
+		if returns && i == lastNonEmpty {
 			if err := e.emitTailExpr(stmt.Expr); err != nil {
 				return err
 			}
@@ -773,7 +842,7 @@ func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
 		}
 		e.line(value + ";")
 	}
-	if returns && lastExpr == -1 {
+	if returns && (lastNonEmpty == -1 || block.Stmts[lastNonEmpty].Expr == nil) {
 		e.line("return undefined;")
 	}
 	return nil
@@ -810,14 +879,7 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 }
 
 func (e *emitter) emitTryCatchBlockValue(block *checker.Block, catchVar string, catchValue string) (string, error) {
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		if catchVar != "" && catchVar != "_" {
@@ -837,14 +899,7 @@ func (e *emitter) emitTryExpr(op *checker.TryOp) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		child.line("const __try = " + subject + ";")
@@ -893,9 +948,13 @@ func (e *emitter) emitIf(expr *checker.If, returns bool) error {
 	})
 	e.line("}")
 	if expr.ElseIf != nil {
+		elseIf := *expr.ElseIf
+		if elseIf.Else == nil {
+			elseIf.Else = expr.Else
+		}
 		e.line("else {")
 		e.indent(func() {
-			err = e.emitIf(expr.ElseIf, returns)
+			err = e.emitIf(&elseIf, returns)
 			if err != nil {
 				panic(err)
 			}
@@ -1020,10 +1079,21 @@ func (e *emitter) emitWhileLoop(loop *checker.WhileLoop) error {
 	}
 	e.line("while (" + condition + ") {")
 	e.indent(func() {
-		err = e.emitBlock(loop.Body, false)
-		if err != nil {
-			panic(err)
-		}
+		e.line("try {")
+		e.indent(func() {
+			e.loopDepth++
+			err = e.emitBlock(loop.Body, false)
+			e.loopDepth--
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("} catch (__ard_break) {")
+		e.indent(func() {
+			e.line("if (__ard_break && __ard_break.__ard_break) break;")
+			e.line("throw __ard_break;")
+		})
+		e.line("}")
 	})
 	e.line("}")
 	return nil
@@ -1044,10 +1114,21 @@ func (e *emitter) emitForLoop(loop *checker.ForLoop) error {
 	}
 	e.line("for (" + init + "; " + condition + "; " + update + ") {")
 	e.indent(func() {
-		err = e.emitBlock(loop.Body, false)
-		if err != nil {
-			panic(err)
-		}
+		e.line("try {")
+		e.indent(func() {
+			e.loopDepth++
+			err = e.emitBlock(loop.Body, false)
+			e.loopDepth--
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("} catch (__ard_break) {")
+		e.indent(func() {
+			e.line("if (__ard_break && __ard_break.__ard_break) break;")
+			e.line("throw __ard_break;")
+		})
+		e.line("}")
 	})
 	e.line("}")
 	return nil
@@ -1072,10 +1153,21 @@ func (e *emitter) emitForIntRange(loop *checker.ForIntRange) error {
 			e.line("for (let " + jsName(loop.Cursor) + " = __range_start, " + jsName(loop.Index) + " = 0; " + jsName(loop.Cursor) + " <= __range_end; " + jsName(loop.Cursor) + "++, " + jsName(loop.Index) + "++) {")
 		}
 		e.indent(func() {
-			err = e.emitBlock(loop.Body, false)
-			if err != nil {
-				panic(err)
-			}
+			e.line("try {")
+			e.indent(func() {
+				e.loopDepth++
+				err = e.emitBlock(loop.Body, false)
+				e.loopDepth--
+				if err != nil {
+					panic(err)
+				}
+			})
+			e.line("} catch (__ard_break) {")
+			e.indent(func() {
+				e.line("if (__ard_break && __ard_break.__ard_break) break;")
+				e.line("throw __ard_break;")
+			})
+			e.line("}")
 		})
 		e.line("}")
 	})
@@ -1097,10 +1189,21 @@ func (e *emitter) emitForInStr(loop *checker.ForInStr) error {
 			e.line("for (const [" + jsName(loop.Index) + ", " + jsName(loop.Cursor) + "] of __string_value.entries()) {")
 		}
 		e.indent(func() {
-			err = e.emitBlock(loop.Body, false)
-			if err != nil {
-				panic(err)
-			}
+			e.line("try {")
+			e.indent(func() {
+				e.loopDepth++
+				err = e.emitBlock(loop.Body, false)
+				e.loopDepth--
+				if err != nil {
+					panic(err)
+				}
+			})
+			e.line("} catch (__ard_break) {")
+			e.indent(func() {
+				e.line("if (__ard_break && __ard_break.__ard_break) break;")
+				e.line("throw __ard_break;")
+			})
+			e.line("}")
 		})
 		e.line("}")
 	})
@@ -1122,10 +1225,21 @@ func (e *emitter) emitForInList(loop *checker.ForInList) error {
 			e.line("for (const [" + jsName(loop.Index) + ", " + jsName(loop.Cursor) + "] of __list_value.entries()) {")
 		}
 		e.indent(func() {
-			err = e.emitBlock(loop.Body, false)
-			if err != nil {
-				panic(err)
-			}
+			e.line("try {")
+			e.indent(func() {
+				e.loopDepth++
+				err = e.emitBlock(loop.Body, false)
+				e.loopDepth--
+				if err != nil {
+					panic(err)
+				}
+			})
+			e.line("} catch (__ard_break) {")
+			e.indent(func() {
+				e.line("if (__ard_break && __ard_break.__ard_break) break;")
+				e.line("throw __ard_break;")
+			})
+			e.line("}")
 		})
 		e.line("}")
 	})
@@ -1143,10 +1257,21 @@ func (e *emitter) emitForInMap(loop *checker.ForInMap) error {
 		e.line("const __map_value = " + mapExpr + ";")
 		e.line("for (const [" + jsName(loop.Key) + ", " + jsName(loop.Val) + "] of __map_value.entries()) {")
 		e.indent(func() {
-			err = e.emitBlock(loop.Body, false)
-			if err != nil {
-				panic(err)
-			}
+			e.line("try {")
+			e.indent(func() {
+				e.loopDepth++
+				err = e.emitBlock(loop.Body, false)
+				e.loopDepth--
+				if err != nil {
+					panic(err)
+				}
+			})
+			e.line("} catch (__ard_break) {")
+			e.indent(func() {
+				e.line("if (__ard_break && __ard_break.__ard_break) break;")
+				e.line("throw __ard_break;")
+			})
+			e.line("}")
 		})
 		e.line("}")
 	})
@@ -1465,14 +1590,8 @@ func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor stri
 }
 
 func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: def.ReturnType,
-	}
+	child := e.childEmitter()
+	child.currentReturnType = def.ReturnType
 	params := make([]string, 0, len(def.Parameters))
 	for _, param := range def.Parameters {
 		params = append(params, jsName(param.Name))
@@ -1674,14 +1793,7 @@ func (e *emitter) emitBoolMethod(method *checker.BoolMethod) (string, error) {
 }
 
 func (e *emitter) emitBoundBlockExpr(block *checker.Block, bindings []string) (string, error) {
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		for _, binding := range bindings {
@@ -1717,14 +1829,7 @@ func (e *emitter) emitEnumMatch(match *checker.EnumMatch) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		child.line("const __match = " + subject + ";")
@@ -1762,14 +1867,7 @@ func (e *emitter) emitUnionMatch(match *checker.UnionMatch) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		child.line("const __match = " + subject + ";")
@@ -1815,14 +1913,7 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		child.line("const __match = " + subject + ";")
@@ -1857,14 +1948,7 @@ func (e *emitter) emitIntMatch(match *checker.IntMatch) (string, error) {
 }
 
 func (e *emitter) emitConditionalMatch(match *checker.ConditionalMatch) (string, error) {
-	child := &emitter{
-		target:            e.target,
-		moduleVars:        e.moduleVars,
-		currentModule:     e.currentModule,
-		currentFunction:   e.currentFunction,
-		currentReceiver:   e.currentReceiver,
-		currentReturnType: e.currentReturnType,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		for _, matchCase := range match.Cases {
@@ -2121,7 +2205,7 @@ func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error)
 }
 
 func (e *emitter) emitMutationExpr(subject string, lines []string, returnExpr string) (string, error) {
-	child := &emitter{}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		child.line("const __value = " + subject + ";")
@@ -2155,13 +2239,7 @@ func (e *emitter) emitTemplateStr(expr *checker.TemplateStr) (string, error) {
 }
 
 func (e *emitter) emitInlineClosure(expr checker.Expression) (string, error) {
-	child := &emitter{
-		target:          e.target,
-		moduleVars:      e.moduleVars,
-		currentModule:   e.currentModule,
-		currentFunction: e.currentFunction,
-		currentReceiver: e.currentReceiver,
-	}
+	child := e.childEmitter()
 	child.line("(() => {")
 	child.indent(func() {
 		var err error
@@ -2717,7 +2795,8 @@ func moduleVarName(path string) string {
 }
 
 func jsName(name string) string {
-	return name
+	replacer := strings.NewReplacer("::", "__", "-", "_", ".", "_")
+	return replacer.Replace(name)
 }
 
 func escapeTemplateLiteral(raw string) string {
