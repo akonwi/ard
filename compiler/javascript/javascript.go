@@ -1447,7 +1447,15 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.IntMultiplication:
 		return e.emitBinary(expr.Left, "*", expr.Right)
 	case *checker.IntDivision:
-		return e.emitBinary(expr.Left, "/", expr.Right)
+		leftValue, err := e.emitExpr(expr.Left)
+		if err != nil {
+			return "", err
+		}
+		rightValue, err := e.emitExpr(expr.Right)
+		if err != nil {
+			return "", err
+		}
+		return "Math.trunc((" + leftValue + ") / (" + rightValue + "))", nil
 	case *checker.IntModulo:
 		return e.emitBinary(expr.Left, "%", expr.Right)
 	case *checker.IntGreater:
@@ -1771,7 +1779,7 @@ func (e *emitter) emitFloatMethod(method *checker.FloatMethod) (string, error) {
 	}
 	switch method.Kind {
 	case checker.FloatToStr:
-		return "String(" + subject + ")", nil
+		return "(" + subject + ").toFixed(2)", nil
 	case checker.FloatToInt:
 		return "Math.trunc(" + subject + ")", nil
 	default:

@@ -841,6 +841,55 @@ if (mod.f !== 1.25) throw new Error("float parse fallback");
 	}
 }
 
+func TestRunExecutesNumericSemanticsParity(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+let a = 265 / 3
+let b = 1.5.to_str()
+let c = 60.0.to_str()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, `Math.trunc((265) / (3))`) {
+		t.Fatalf("expected int division truncation lowering, got:\n%s", source)
+	}
+	if !strings.Contains(source, `(1.5).toFixed(2)`) || !strings.Contains(source, `(60).toFixed(2)`) {
+		t.Fatalf("expected float to_str fixed formatting lowering, got:\n%s", source)
+	}
+
+	cmd := exec.Command("node", "--input-type=module", "-e", `
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (mod.a !== 88) throw new Error("int-division");
+if (mod.b !== "1.50") throw new Error("float-to-str-1");
+if (mod.c !== "60.00") throw new Error("float-to-str-2");
+`, outputPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("did not expect node assertion error: %v", err)
+	}
+}
+
 func TestBuildWritesMaybeEqualityLowering(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
