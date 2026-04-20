@@ -1,0 +1,70 @@
+use ard/dynamic as Dynamic
+
+extern type Promise
+
+extern fn resolve(value: Dynamic) Promise = {
+  js-server = "JSPromiseResolve"
+  js-browser = "JSPromiseResolve"
+}
+
+extern fn reject(reason: Dynamic) Promise = {
+  js-server = "JSPromiseReject"
+  js-browser = "JSPromiseReject"
+}
+
+extern fn map(promise: Promise, with: fn(Dynamic) Dynamic) Promise = {
+  js-server = "JSPromiseMap"
+  js-browser = "JSPromiseMap"
+}
+
+extern fn then(promise: Promise, with: fn(Dynamic) Promise) Promise = {
+  js-server = "JSPromiseThen"
+  js-browser = "JSPromiseThen"
+}
+
+extern fn map_error(promise: Promise, with: fn(Dynamic) Dynamic) Promise = {
+  js-server = "JSPromiseMapError"
+  js-browser = "JSPromiseMapError"
+}
+
+extern fn recover(promise: Promise, with: fn(Dynamic) Promise) Promise = {
+  js-server = "JSPromiseRecover"
+  js-browser = "JSPromiseRecover"
+}
+
+extern fn inspect(promise: Promise, with: fn(Dynamic) Void) Promise = {
+  js-server = "JSPromiseInspect"
+  js-browser = "JSPromiseInspect"
+}
+
+extern fn inspect_error(promise: Promise, with: fn(Dynamic) Void) Promise = {
+  js-server = "JSPromiseInspectError"
+  js-browser = "JSPromiseInspectError"
+}
+
+extern fn finally(promise: Promise, with: fn() Void) Promise = {
+  js-server = "JSPromiseFinally"
+  js-browser = "JSPromiseFinally"
+}
+
+extern fn all(promises: [Promise]) Promise = {
+  js-server = "JSPromiseAll"
+  js-browser = "JSPromiseAll"
+}
+
+extern fn race(promises: [Promise]) Promise = {
+  js-server = "JSPromiseRace"
+  js-browser = "JSPromiseRace"
+}
+
+extern fn delay(ms: Int, value: Dynamic) Promise = {
+  js-server = "JSPromiseDelay"
+  js-browser = "JSPromiseDelay"
+}
+
+fn from_result(value: Dynamic!Dynamic) Promise {
+  match value {
+    ok => resolve(ok),
+    err => reject(err),
+  }
+}

@@ -817,6 +817,103 @@ fn main() {
 	}
 }
 
+func TestBuildWritesJSBrowserPromiseStdlibCompanion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/dynamic as Dynamic
+use ard/js/promise as promise
+
+fn main() {
+  promise::resolve(Dynamic::from_int(1))
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSBrowser); err != nil {
+		t.Fatalf("did not expect browser build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, `import * as __ard_stdlib_ffi from "./ffi.stdlib.js-browser.mjs";`) {
+		t.Fatalf("expected browser stdlib ffi import, got:\n%s", source)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
+		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
+	}
+}
+
+func TestRunExecutesJSPromiseProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+use ard/decode
+use ard/dynamic as Dynamic
+use ard/js/promise as promise
+
+fn main() {
+  let pair = promise::all([
+    promise::resolve(Dynamic::from_int(20)),
+    promise::delay(1, Dynamic::from_int(22)),
+  ])
+
+  let summed = promise::map(pair, fn(raw: Dynamic) Dynamic {
+    let values = decode::to_list(raw).expect("values")
+    let a = decode::int(values.at(0)).expect("a")
+    let b = decode::int(values.at(1)).expect("b")
+    Dynamic::from_int(a + b)
+  })
+
+  let chained = promise::then(summed, fn(sum: Dynamic) {
+    io::print(decode::int(sum).expect("sum"))
+    let recovered = promise::recover(
+      promise::reject(Dynamic::from_str("boom")),
+      fn(reason: Dynamic) {
+        io::print(decode::string(reason).expect("reason"))
+        promise::resolve(Dynamic::from_str("recovered"))
+      },
+    )
+    promise::inspect(recovered, fn(value: Dynamic) {
+      io::print(decode::string(value).expect("value"))
+    })
+  })
+
+  promise::finally(chained, fn() {
+    io::print("done")
+  })
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd.Dir = ".."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js promise run error: %v\n%s", err, string(out))
+	}
+	if string(out) != "42\nboom\nrecovered\ndone\n" {
+		t.Fatalf("unexpected promise output:\n%s", string(out))
+	}
+}
+
 func TestRunExecutesJSStdlibFSProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")

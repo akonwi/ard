@@ -57,6 +57,22 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			source:      "use ard/io\nfn main() Int { 1 }",
 			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: bytecode, go, js-server",
 		},
+		{
+			name:   "js promise allowed on js-server",
+			target: backend.TargetJSServer,
+			source: "use ard/js/promise as promise\nfn main() Int { 1 }",
+		},
+		{
+			name:   "js promise allowed on js-browser",
+			target: backend.TargetJSBrowser,
+			source: "use ard/js/promise as promise\nfn main() Int { 1 }",
+		},
+		{
+			name:        "js promise blocked on go",
+			target:      backend.TargetGo,
+			source:      "use ard/js/promise as promise\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/js/promise when targeting go; allowed targets: js-browser, js-server",
+		},
 	}
 
 	for _, tt := range tests {
