@@ -582,7 +582,7 @@ func TestBuildWritesEnumAwareUnionMatchAndComparisonLowering(t *testing.T) {
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum } from "./ard.prelude.mjs";`) {
 		t.Fatalf("expected prelude import, got:\n%s", source)
 	}
 	if !strings.Contains(source, `const Status = Object.freeze({ active: makeEnum("Status", "active", 0), inactive: makeEnum("Status", "inactive", 1) });`) {
@@ -1417,7 +1417,7 @@ let c = maybe::none<Str>() == maybe::none()
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum } from "./ard.prelude.mjs";`) {
 		t.Fatalf("expected prelude import for maybe equality helper, got:\n%s", source)
 	}
 	if strings.Count(source, "ardEq(") < 3 {
@@ -1473,7 +1473,7 @@ let d = result_flow()
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum } from "./ard.prelude.mjs";`) {
 		t.Fatalf("expected prelude import for Maybe/Result runtime helpers, got:\n%s", source)
 	}
 	if !strings.Contains(source, "const a = Maybe.none().isNone();") {
@@ -1644,29 +1644,29 @@ let c = nested_binary(Result::ok(2))
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
-		t.Fatalf("expected prelude import for try sentinel helper, got:\n%s", source)
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum } from "./ard.prelude.mjs";`) {
+		t.Fatalf("expected prelude import for try lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "catch (__ard_try) {") || !strings.Contains(source, "if (__ard_try && __ard_try.__ard_try_return) return __ard_try.value;") {
-		t.Fatalf("expected function try boundary, got:\n%s", source)
+	if strings.Contains(source, "catch (__ard_try) {") || strings.Contains(source, "makeTryReturn(") {
+		t.Fatalf("did not expect try sentinel lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "if (__try.isErr()) throw makeTryReturn(Result.err(__try.error));") {
-		t.Fatalf("expected result try propagation, got:\n%s", source)
+	if !strings.Contains(source, "const __try0 = value;") || !strings.Contains(source, "if (__try0.isErr()) {") {
+		t.Fatalf("expected result try guard lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "if (__try.isErr()) throw makeTryReturn((() => {") {
-		t.Fatalf("expected result try catch lowering, got:\n%s", source)
+	if !strings.Contains(source, "return Result.err(__try0.error);") {
+		t.Fatalf("expected result early return lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "const err = __try.error;") {
+	if !strings.Contains(source, "const err = __try1.error;") {
 		t.Fatalf("expected catch var binding, got:\n%s", source)
 	}
-	if !strings.Contains(source, "if (__try.isNone()) throw makeTryReturn(Maybe.none());") {
+	if !strings.Contains(source, "if (__try2.isNone()) {") || !strings.Contains(source, "return Maybe.none();") {
 		t.Fatalf("expected maybe try propagation, got:\n%s", source)
 	}
-	if !strings.Contains(source, "return __try.ok;") || !strings.Contains(source, "return __try.value;") {
+	if !strings.Contains(source, "const out = __try0.ok;") || !strings.Contains(source, "const out = __try2.value;") {
 		t.Fatalf("expected try success unwrapping, got:\n%s", source)
 	}
-	if !strings.Contains(source, "const out = (() => {") {
-		t.Fatalf("expected try expression lowering in let binding, got:\n%s", source)
+	if !strings.Contains(source, "const out = (__try3.ok + 1);") {
+		t.Fatalf("expected nested try lowering into statement flow, got:\n%s", source)
 	}
 }
 

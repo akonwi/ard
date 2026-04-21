@@ -8,10 +8,6 @@ export function makeArdError(kind, moduleName, fnName, line, message, extra = {}
   return error;
 }
 
-export function makeTryReturn(value) {
-  return { __ard_try_return: true, value };
-}
-
 export function makeBreakSignal() {
   return { __ard_break: true };
 }

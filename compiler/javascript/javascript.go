@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -32,6 +33,7 @@ type emitter struct {
 	indentLevel         int
 	moduleVars          map[string]string
 	usedEnumMethods     map[string]map[string]bool
+	tempCounter         *int
 	currentModule       string
 	currentOutputPath   string
 	currentFunction     string
@@ -41,6 +43,11 @@ type emitter struct {
 	ffi                 ffiArtifacts
 	loopDepth           int
 	signalBreaks        bool
+}
+
+type loweredExpr struct {
+	stmts []string
+	expr  string
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -255,10 +262,12 @@ func emitBundle(root checker.Module, target string, options emitOptions, rootFil
 
 func emitModuleFile(module checker.Module, target string, outputPath string, invokeMain bool) ([]byte, error) {
 	ffi := moduleFFIArtifacts(module)
+	tempCounter := 0
 	e := &emitter{
 		target:            target,
 		moduleVars:        make(map[string]string),
 		usedEnumMethods:   collectUsedEnumMethods(module.Program()),
+		tempCounter:       &tempCounter,
 		ffi:               ffi,
 		currentOutputPath: outputPath,
 	}
@@ -269,7 +278,7 @@ func emitModuleFile(module checker.Module, target string, outputPath string, inv
 	}
 
 	preludeImport := relativeJSImport(outputPath, "ard.prelude.mjs")
-	e.line(`import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from ` + strconv.Quote(preludeImport) + `;`)
+	e.line(`import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum } from ` + strconv.Quote(preludeImport) + `;`)
 	if (target == backend.TargetJSServer || target == backend.TargetJSBrowser) && ffi.useStdlib {
 		e.line(`import * as stdlib from ` + strconv.Quote(relativeJSImport(outputPath, "ffi.stdlib."+target+".mjs")) + `;`)
 	}
@@ -704,6 +713,7 @@ func (e *emitter) childEmitter() *emitter {
 		target:              e.target,
 		moduleVars:          e.moduleVars,
 		usedEnumMethods:     e.usedEnumMethods,
+		tempCounter:         e.tempCounter,
 		currentModule:       e.currentModule,
 		currentOutputPath:   e.currentOutputPath,
 		currentFunction:     e.currentFunction,
@@ -716,21 +726,37 @@ func (e *emitter) childEmitter() *emitter {
 	}
 }
 
+func (e *emitter) temp(prefix string) string {
+	id := *e.tempCounter
+	*e.tempCounter = *e.tempCounter + 1
+	return "__" + prefix + strconv.Itoa(id)
+}
+
+func (e *emitter) captureOutput(fn func(child *emitter) error) (string, error) {
+	child := e.childEmitter()
+	if err := fn(child); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(child.builder.String(), "\n"), nil
+}
+
+func (e *emitter) emitCaptured(text string) {
+	if text == "" {
+		return
+	}
+	for _, line := range strings.Split(text, "\n") {
+		e.line(line)
+	}
+}
+
+func (e *emitter) emitCapturedStatements(stmts []string) {
+	for _, stmt := range stmts {
+		e.emitCaptured(stmt)
+	}
+}
+
 func (e *emitter) emitFunctionBoundary(body *checker.Block) error {
-	e.line("try {")
-	e.indent(func() {
-		err := e.emitBlock(body, true)
-		if err != nil {
-			panic(err)
-		}
-	})
-	e.line("} catch (__ard_try) {")
-	e.indent(func() {
-		e.line("if (__ard_try && __ard_try.__ard_try_return) return __ard_try.value;")
-		e.line("throw __ard_try;")
-	})
-	e.line("}")
-	return nil
+	return e.emitBlock(body, true)
 }
 
 func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
@@ -772,11 +798,12 @@ func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
 			}
 			continue
 		}
-		value, err := e.emitExpr(stmt.Expr)
+		lowered, err := e.lowerExpr(stmt.Expr)
 		if err != nil {
 			return err
 		}
-		e.line(value + ";")
+		e.emitCapturedStatements(lowered.stmts)
+		e.line(lowered.expr + ";")
 	}
 	if returns && (lastNonEmpty == -1 || block.Stmts[lastNonEmpty].Expr == nil) {
 		e.line("return undefined;")
@@ -784,7 +811,66 @@ func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
 	return nil
 }
 
+func (e *emitter) emitBlockInto(block *checker.Block, dest string) error {
+	if block == nil {
+		e.line(dest + " = undefined;")
+		return nil
+	}
+	lastNonEmpty := -1
+	for i := len(block.Stmts) - 1; i >= 0; i-- {
+		stmt := block.Stmts[i]
+		if stmt.Break || stmt.Stmt != nil || stmt.Expr != nil {
+			lastNonEmpty = i
+			break
+		}
+	}
+	for i, stmt := range block.Stmts {
+		if stmt.Break {
+			if e.signalBreaks {
+				e.line("throw makeBreakSignal();")
+			} else {
+				e.line("break;")
+			}
+			continue
+		}
+		if stmt.Stmt != nil {
+			if err := e.emitNonProducing(stmt.Stmt); err != nil {
+				return err
+			}
+			continue
+		}
+		if stmt.Expr == nil {
+			continue
+		}
+		if i == lastNonEmpty {
+			if err := e.emitExprInto(stmt.Expr, dest); err != nil {
+				return err
+			}
+			continue
+		}
+		lowered, err := e.lowerExpr(stmt.Expr)
+		if err != nil {
+			return err
+		}
+		e.emitCapturedStatements(lowered.stmts)
+		e.line(lowered.expr + ";")
+	}
+	if lastNonEmpty == -1 || block.Stmts[lastNonEmpty].Expr == nil {
+		e.line(dest + " = undefined;")
+	}
+	return nil
+}
+
 func (e *emitter) emitTailExpr(expr checker.Expression) error {
+	if containsTry(expr) {
+		lowered, err := e.lowerExpr(expr)
+		if err != nil {
+			return err
+		}
+		e.emitCapturedStatements(lowered.stmts)
+		e.line("return " + lowered.expr + ";")
+		return nil
+	}
 	switch expr := expr.(type) {
 	case *checker.If:
 		return e.emitIf(expr, true)
@@ -797,13 +883,6 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 		}
 		e.line("throw makeArdError(\"panic\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(e.currentFunction) + ", 0, " + message + ");")
 		return nil
-	case *checker.TryOp:
-		value, err := e.emitExpr(expr)
-		if err != nil {
-			return err
-		}
-		e.line("return " + value + ";")
-		return nil
 	default:
 		value, err := e.emitExpr(expr)
 		if err != nil {
@@ -814,60 +893,43 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 	}
 }
 
-func (e *emitter) emitTryCatchBlockValue(block *checker.Block, catchVar string, catchValue string) (string, error) {
-	child := e.childEmitter()
-	child.line("(() => {")
-	child.indent(func() {
-		if catchVar != "" && catchVar != "_" {
-			child.line("const " + jsName(catchVar) + " = " + catchValue + ";")
-		}
-		err := child.emitBlock(block, true)
+func (e *emitter) emitExprInto(expr checker.Expression, dest string) error {
+	if !containsTry(expr) {
+		value, err := e.emitExpr(expr)
 		if err != nil {
-			panic(err)
+			return err
 		}
-	})
-	child.line("})()")
-	return strings.TrimSpace(child.builder.String()), nil
-}
-
-func (e *emitter) emitTryExpr(op *checker.TryOp) (string, error) {
-	subject, err := e.emitExpr(op.Expr())
-	if err != nil {
-		return "", err
+		e.line(dest + " = " + value + ";")
+		return nil
 	}
-	child := e.childEmitter()
-	child.line("(() => {")
-	child.indent(func() {
-		child.line("const __try = " + subject + ";")
-		switch op.Kind {
-		case checker.TryResult:
-			if op.CatchBlock != nil {
-				catchExpr, err := e.emitTryCatchBlockValue(op.CatchBlock, op.CatchVar, "__try.error")
-				if err != nil {
-					panic(err)
-				}
-				child.line("if (__try.isErr()) throw makeTryReturn(" + catchExpr + ");")
-			} else {
-				child.line("if (__try.isErr()) throw makeTryReturn(Result.err(__try.error));")
-			}
-			child.line("return __try.ok;")
-		case checker.TryMaybe:
-			if op.CatchBlock != nil {
-				catchExpr, err := e.emitTryCatchBlockValue(op.CatchBlock, op.CatchVar, "undefined")
-				if err != nil {
-					panic(err)
-				}
-				child.line("if (__try.isNone()) throw makeTryReturn(" + catchExpr + ");")
-			} else {
-				child.line("if (__try.isNone()) throw makeTryReturn(Maybe.none());")
-			}
-			child.line("return __try.value;")
-		default:
-			panic(fmt.Errorf("unsupported try kind: %v", op.Kind))
+	switch expr := expr.(type) {
+	case *checker.If:
+		return e.emitIfInto(expr, dest)
+	case *checker.Block:
+		return e.emitBlockInto(expr, dest)
+	case *checker.BoolMatch:
+		return e.emitBoolMatchInto(expr, dest)
+	case *checker.EnumMatch:
+		return e.emitEnumMatchInto(expr, dest)
+	case *checker.UnionMatch:
+		return e.emitUnionMatchInto(expr, dest)
+	case *checker.IntMatch:
+		return e.emitIntMatchInto(expr, dest)
+	case *checker.ConditionalMatch:
+		return e.emitConditionalMatchInto(expr, dest)
+	case *checker.OptionMatch:
+		return e.emitOptionMatchInto(expr, dest)
+	case *checker.ResultMatch:
+		return e.emitResultMatchInto(expr, dest)
+	default:
+		lowered, err := e.lowerExpr(expr)
+		if err != nil {
+			return err
 		}
-	})
-	child.line("})()")
-	return strings.TrimSpace(child.builder.String()), nil
+		e.emitCapturedStatements(lowered.stmts)
+		e.line(dest + " = " + lowered.expr + ";")
+		return nil
+	}
 }
 
 func (e *emitter) emitIf(expr *checker.If, returns bool) error {
@@ -915,6 +977,1158 @@ func (e *emitter) emitIf(expr *checker.If, returns bool) error {
 	return nil
 }
 
+func (e *emitter) emitIfInto(expr *checker.If, dest string) error {
+	condition, err := e.lowerExpr(expr.Condition)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(condition.stmts)
+	e.line("if (" + condition.expr + ") {")
+	e.indent(func() {
+		err = e.emitBlockInto(expr.Body, dest)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("}")
+	if expr.ElseIf != nil {
+		elseIf := *expr.ElseIf
+		if elseIf.Else == nil {
+			elseIf.Else = expr.Else
+		}
+		e.line("else {")
+		e.indent(func() {
+			err = e.emitIfInto(&elseIf, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+		return nil
+	}
+	if expr.Else != nil {
+		e.line("else {")
+		e.indent(func() {
+			err = e.emitBlockInto(expr.Else, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+		return nil
+	}
+	e.line(dest + " = undefined;")
+	return nil
+}
+
+func (e *emitter) emitBlockIntoWithBindings(block *checker.Block, dest string, bindings []string) error {
+	for _, binding := range bindings {
+		e.line(binding)
+	}
+	return e.emitBlockInto(block, dest)
+}
+
+func (e *emitter) emitBoolMatchInto(match *checker.BoolMatch, dest string) error {
+	subject, err := e.lowerExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(subject.stmts)
+	e.line("if (" + subject.expr + ") {")
+	e.indent(func() {
+		err = e.emitBlockInto(match.True, dest)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("} else {")
+	e.indent(func() {
+		err = e.emitBlockInto(match.False, dest)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitEnumMatchInto(match *checker.EnumMatch, dest string) error {
+	subject, err := e.lowerExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(subject.stmts)
+	matchVar := e.temp("match")
+	e.line("const " + matchVar + " = " + subject.expr + ";")
+	enumName, err := enumTypeName(match.Subject.Type())
+	if err != nil {
+		return err
+	}
+	first := true
+	for _, discriminant := range sortedEnumDiscriminants(match.DiscriminantToIndex) {
+		idx := match.DiscriminantToIndex[discriminant]
+		if idx < 0 || int(idx) >= len(match.Cases) || match.Cases[idx] == nil {
+			continue
+		}
+		prefix := "if"
+		if !first {
+			prefix = "else if"
+		}
+		first = false
+		e.line(prefix + " (isEnumOf(" + matchVar + ", " + strconv.Quote(enumName) + ") && " + matchVar + ".value === " + strconv.Itoa(discriminant) + ") {")
+		e.indent(func() {
+			err = e.emitBlockInto(match.Cases[idx], dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	}
+	if match.CatchAll != nil {
+		if first {
+			e.line("if (true) {")
+		} else {
+			e.line("else {")
+		}
+		e.indent(func() {
+			err = e.emitBlockInto(match.CatchAll, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	} else {
+		e.line(`else { throw makeArdError("panic", "match", "enum", 0, "non-exhaustive enum match"); }`)
+	}
+	return nil
+}
+
+func (e *emitter) emitUnionMatchInto(match *checker.UnionMatch, dest string) error {
+	subject, err := e.lowerExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(subject.stmts)
+	matchVar := e.temp("match")
+	e.line("const " + matchVar + " = " + subject.expr + ";")
+	first := true
+	for _, caseName := range sortedUnionCaseNames(match.TypeCases) {
+		matchCase := match.TypeCases[caseName]
+		if matchCase == nil {
+			continue
+		}
+		caseType := unionCaseType(match.TypeCasesByType, caseName)
+		if caseType == nil {
+			return fmt.Errorf("missing union case type for %s", caseName)
+		}
+		predicate, err := e.emitUnionTypePredicate(caseType, matchVar)
+		if err != nil {
+			return err
+		}
+		prefix := "if"
+		if !first {
+			prefix = "else if"
+		}
+		first = false
+		bindings := []string{}
+		if matchCase.Pattern != nil {
+			bindings = append(bindings, "const "+jsName(matchCase.Pattern.Name)+" = "+matchVar+";")
+		}
+		e.line(prefix + " (" + predicate + ") {")
+		e.indent(func() {
+			err = e.emitBlockIntoWithBindings(matchCase.Body, dest, bindings)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	}
+	if match.CatchAll != nil {
+		if first {
+			e.line("if (true) {")
+		} else {
+			e.line("else {")
+		}
+		e.indent(func() {
+			err = e.emitBlockInto(match.CatchAll, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	} else {
+		if first {
+			e.line(`throw makeArdError("panic", "match", "union", 0, "non-exhaustive union match");`)
+		} else {
+			e.line(`else { throw makeArdError("panic", "match", "union", 0, "non-exhaustive union match"); }`)
+		}
+	}
+	return nil
+}
+
+func (e *emitter) emitIntMatchInto(match *checker.IntMatch, dest string) error {
+	subject, err := e.lowerExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(subject.stmts)
+	matchVar := e.temp("match")
+	e.line("const " + matchVar + " = " + subject.expr + ";")
+	first := true
+	for _, value := range sortedIntCaseKeys(match.IntCases) {
+		prefix := "if"
+		if !first {
+			prefix = "else if"
+		}
+		first = false
+		block := match.IntCases[value]
+		e.line(fmt.Sprintf("%s (%s === %d) {", prefix, matchVar, value))
+		e.indent(func() {
+			err = e.emitBlockInto(block, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	}
+	for _, intRange := range sortedIntRangeKeys(match.RangeCases) {
+		prefix := "if"
+		if !first {
+			prefix = "else if"
+		}
+		first = false
+		block := match.RangeCases[intRange]
+		e.line(fmt.Sprintf("%s (%s >= %d && %s <= %d) {", prefix, matchVar, intRange.Start, matchVar, intRange.End))
+		e.indent(func() {
+			err = e.emitBlockInto(block, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	}
+	if match.CatchAll != nil {
+		if first {
+			e.line("if (true) {")
+		} else {
+			e.line("else {")
+		}
+		e.indent(func() {
+			err = e.emitBlockInto(match.CatchAll, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	} else {
+		if first {
+			e.line(`throw makeArdError("panic", "match", "int", 0, "non-exhaustive int match");`)
+		} else {
+			e.line(`else { throw makeArdError("panic", "match", "int", 0, "non-exhaustive int match"); }`)
+		}
+	}
+	return nil
+}
+
+func (e *emitter) emitConditionalMatchInto(match *checker.ConditionalMatch, dest string) error {
+	first := true
+	var err error
+	for _, matchCase := range match.Cases {
+		condition, err := e.lowerExpr(matchCase.Condition)
+		if err != nil {
+			return err
+		}
+		e.emitCapturedStatements(condition.stmts)
+		prefix := "if"
+		if !first {
+			prefix = "else if"
+		}
+		first = false
+		e.line(prefix + " (" + condition.expr + ") {")
+		e.indent(func() {
+			err = e.emitBlockInto(matchCase.Body, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	}
+	if match.CatchAll != nil {
+		if first {
+			e.line("if (true) {")
+		} else {
+			e.line("else {")
+		}
+		e.indent(func() {
+			err = e.emitBlockInto(match.CatchAll, dest)
+			if err != nil {
+				panic(err)
+			}
+		})
+		e.line("}")
+	} else {
+		if first {
+			e.line(`throw makeArdError("panic", "match", "conditional", 0, "non-exhaustive conditional match");`)
+		} else {
+			e.line(`else { throw makeArdError("panic", "match", "conditional", 0, "non-exhaustive conditional match"); }`)
+		}
+	}
+	return nil
+}
+
+func (e *emitter) emitOptionMatchInto(match *checker.OptionMatch, dest string) error {
+	subject, err := e.lowerExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(subject.stmts)
+	matchVar := e.temp("match")
+	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("if (" + matchVar + ".isSome()) {")
+	e.indent(func() {
+		bindings := []string{}
+		if match.Some != nil && match.Some.Pattern != nil {
+			bindings = append(bindings, "const "+jsName(match.Some.Pattern.Name)+" = "+matchVar+".value;")
+		}
+		err = e.emitBlockIntoWithBindings(match.Some.Body, dest, bindings)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("} else {")
+	e.indent(func() {
+		err = e.emitBlockInto(match.None, dest)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) emitResultMatchInto(match *checker.ResultMatch, dest string) error {
+	subject, err := e.lowerExpr(match.Subject)
+	if err != nil {
+		return err
+	}
+	e.emitCapturedStatements(subject.stmts)
+	matchVar := e.temp("match")
+	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("if (" + matchVar + ".isOk()) {")
+	e.indent(func() {
+		bindings := []string{}
+		if match.Ok != nil && match.Ok.Pattern != nil {
+			bindings = append(bindings, "const "+jsName(match.Ok.Pattern.Name)+" = "+matchVar+".ok;")
+		}
+		err = e.emitBlockIntoWithBindings(match.Ok.Body, dest, bindings)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("} else {")
+	e.indent(func() {
+		bindings := []string{}
+		if match.Err != nil && match.Err.Pattern != nil {
+			bindings = append(bindings, "const "+jsName(match.Err.Pattern.Name)+" = "+matchVar+".error;")
+		}
+		err = e.emitBlockIntoWithBindings(match.Err.Body, dest, bindings)
+		if err != nil {
+			panic(err)
+		}
+	})
+	e.line("}")
+	return nil
+}
+
+func (e *emitter) lowerBranchyExpr(expr checker.Expression, prefix string) (loweredExpr, error) {
+	temp := e.temp(prefix)
+	block, err := e.captureOutput(func(child *emitter) error {
+		child.line("let " + temp + ";")
+		return child.emitExprInto(expr, temp)
+	})
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := []string{}
+	if block != "" {
+		stmts = append(stmts, block)
+	}
+	return loweredExpr{stmts: stmts, expr: temp}, nil
+}
+
+func (e *emitter) lowerArgs(args []checker.Expression) ([]string, []string, error) {
+	stmts := []string{}
+	values := make([]string, 0, len(args))
+	for _, arg := range args {
+		lowered, err := e.lowerExpr(arg)
+		if err != nil {
+			return nil, nil, err
+		}
+		stmts = append(stmts, lowered.stmts...)
+		values = append(values, lowered.expr)
+	}
+	return stmts, values, nil
+}
+
+func (e *emitter) emitStrMethodValue(kind checker.StrMethodKind, subject string, args []string) (string, error) {
+	switch kind {
+	case checker.StrSize:
+		return subject + ".length", nil
+	case checker.StrIsEmpty:
+		return "(" + subject + ".length === 0)", nil
+	case checker.StrContains:
+		if len(args) != 1 {
+			return "", fmt.Errorf("str.contains expects one arg")
+		}
+		return subject + ".includes(" + args[0] + ")", nil
+	case checker.StrReplace:
+		if len(args) != 2 {
+			return "", fmt.Errorf("str.replace expects two args")
+		}
+		return subject + ".replace(" + args[0] + ", " + args[1] + ")", nil
+	case checker.StrReplaceAll:
+		if len(args) != 2 {
+			return "", fmt.Errorf("str.replace_all expects two args")
+		}
+		return subject + ".replaceAll(" + args[0] + ", " + args[1] + ")", nil
+	case checker.StrSplit:
+		if len(args) != 1 {
+			return "", fmt.Errorf("str.split expects one arg")
+		}
+		return subject + ".split(" + args[0] + ")", nil
+	case checker.StrStartsWith:
+		if len(args) != 1 {
+			return "", fmt.Errorf("str.starts_with expects one arg")
+		}
+		return subject + ".startsWith(" + args[0] + ")", nil
+	case checker.StrToStr:
+		return subject, nil
+	case checker.StrTrim:
+		return subject + ".trim()", nil
+	default:
+		return "", fmt.Errorf("unsupported str method: %v", kind)
+	}
+}
+
+func (e *emitter) emitIntMethodValue(kind checker.IntMethodKind, subject string) (string, error) {
+	switch kind {
+	case checker.IntToStr:
+		return "String(" + subject + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported int method: %v", kind)
+	}
+}
+
+func (e *emitter) emitFloatMethodValue(kind checker.FloatMethodKind, subject string) (string, error) {
+	switch kind {
+	case checker.FloatToStr:
+		return "(" + subject + ").toFixed(2)", nil
+	case checker.FloatToInt:
+		return "Math.trunc(" + subject + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported float method: %v", kind)
+	}
+}
+
+func (e *emitter) emitBoolMethodValue(kind checker.BoolMethodKind, subject string) (string, error) {
+	switch kind {
+	case checker.BoolToStr:
+		return "String(" + subject + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported bool method: %v", kind)
+	}
+}
+
+func (e *emitter) emitMaybeModuleCallValue(name string, args []string) (string, error) {
+	switch name {
+	case "some":
+		if len(args) != 1 {
+			return "", fmt.Errorf("maybe::some expects one arg")
+		}
+		return "Maybe.some(" + args[0] + ")", nil
+	case "none":
+		return "Maybe.none()", nil
+	default:
+		return "", fmt.Errorf("unsupported maybe module call: %s", name)
+	}
+}
+
+func (e *emitter) emitResultModuleCallValue(name string, args []string) (string, error) {
+	switch name {
+	case "ok":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Result::ok expects one arg")
+		}
+		return "Result.ok(" + args[0] + ")", nil
+	case "err":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Result::err expects one arg")
+		}
+		return "Result.err(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported Result module call: %s", name)
+	}
+}
+
+func (e *emitter) emitFloatModuleCallValue(name string, args []string) (string, error) {
+	switch name {
+	case "from_int":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Float::from_int expects one arg")
+		}
+		return "Number(" + args[0] + ")", nil
+	case "from_str":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Float::from_str expects one arg")
+		}
+		return "(() => { const __input = String(" + args[0] + ").trim(); if (__input === \"\") return Maybe.none(); const __value = Number(__input); return Number.isNaN(__value) ? Maybe.none() : Maybe.some(__value); })()", nil
+	case "floor":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Float::floor expects one arg")
+		}
+		return "Math.floor(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported Float module call: %s", name)
+	}
+}
+
+func (e *emitter) emitIntModuleCallValue(name string, args []string) (string, error) {
+	switch name {
+	case "from_str":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Int::from_str expects one arg")
+		}
+		return "(() => { const __input = String(" + args[0] + ").trim(); if (!/^[-+]?\\d+$/.test(__input)) return Maybe.none(); return Maybe.some(Number.parseInt(__input, 10)); })()", nil
+	default:
+		return "", fmt.Errorf("unsupported Int module call: %s", name)
+	}
+}
+
+func (e *emitter) emitListModuleCallValue(name string, args []string) (string, error) {
+	switch name {
+	case "new":
+		return "[]", nil
+	case "concat":
+		if len(args) != 2 {
+			return "", fmt.Errorf("List::concat expects two args")
+		}
+		return "(" + args[0] + ").concat(" + args[1] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported List module call: %s", name)
+	}
+}
+
+func (e *emitter) emitListMethodValue(kind checker.ListMethodKind, subject string, args []string) (string, error) {
+	switch kind {
+	case checker.ListSize:
+		return subject + ".length", nil
+	case checker.ListAt:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.at expects one arg")
+		}
+		return subject + "[" + args[0] + "]", nil
+	case checker.ListPush:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.push expects one arg")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.push(" + args[0] + ");"}, "__value")
+	case checker.ListPrepend:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.prepend expects one arg")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.unshift(" + args[0] + ");"}, "__value")
+	case checker.ListSet:
+		if len(args) != 2 {
+			return "", fmt.Errorf("list.set expects two args")
+		}
+		return e.emitMutationExpr(subject, []string{"__value[" + args[0] + "] = " + args[1] + ";"}, "true")
+	case checker.ListSwap:
+		if len(args) != 2 {
+			return "", fmt.Errorf("list.swap expects two args")
+		}
+		lines := []string{"const __tmp = __value[" + args[0] + "];", "__value[" + args[0] + "] = __value[" + args[1] + "];", "__value[" + args[1] + "] = __tmp;"}
+		return e.emitMutationExpr(subject, lines, "undefined")
+	case checker.ListSort:
+		if len(args) != 1 {
+			return "", fmt.Errorf("list.sort expects one arg")
+		}
+		cmp := args[0]
+		lines := []string{"__value.sort((a, b) => " + cmp + "(a, b) ? -1 : (" + cmp + "(b, a) ? 1 : 0));"}
+		return e.emitMutationExpr(subject, lines, "undefined")
+	default:
+		return "", fmt.Errorf("unsupported list method: %v", kind)
+	}
+}
+
+func (e *emitter) emitMapMethodValue(kind checker.MapMethodKind, subject string, args []string) (string, error) {
+	switch kind {
+	case checker.MapKeys:
+		return "Array.from(" + subject + ".keys())", nil
+	case checker.MapSize:
+		return subject + ".size", nil
+	case checker.MapGet:
+		if len(args) != 1 {
+			return "", fmt.Errorf("map.get expects one arg")
+		}
+		return "(" + subject + ".has(" + args[0] + ") ? Maybe.some(" + subject + ".get(" + args[0] + ")) : Maybe.none())", nil
+	case checker.MapSet:
+		if len(args) != 2 {
+			return "", fmt.Errorf("map.set expects two args")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.set(" + args[0] + ", " + args[1] + ");"}, "true")
+	case checker.MapDrop:
+		if len(args) != 1 {
+			return "", fmt.Errorf("map.drop expects one arg")
+		}
+		return e.emitMutationExpr(subject, []string{"__value.delete(" + args[0] + ");"}, "undefined")
+	case checker.MapHas:
+		if len(args) != 1 {
+			return "", fmt.Errorf("map.has expects one arg")
+		}
+		return subject + ".has(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported map method: %v", kind)
+	}
+}
+
+func (e *emitter) emitMaybeMethodValue(kind checker.MaybeMethodKind, subject string, args []string) (string, error) {
+	switch kind {
+	case checker.MaybeExpect:
+		if len(args) != 1 {
+			return "", fmt.Errorf("maybe.expect expects 1 arg(s)")
+		}
+		return subject + ".expect(" + args[0] + ")", nil
+	case checker.MaybeIsNone:
+		return subject + ".isNone()", nil
+	case checker.MaybeIsSome:
+		return subject + ".isSome()", nil
+	case checker.MaybeOr:
+		if len(args) != 1 {
+			return "", fmt.Errorf("maybe.or expects 1 arg(s)")
+		}
+		return subject + ".or(" + args[0] + ")", nil
+	case checker.MaybeMap:
+		if len(args) != 1 {
+			return "", fmt.Errorf("maybe.map expects 1 arg(s)")
+		}
+		return subject + ".map(" + args[0] + ")", nil
+	case checker.MaybeAndThen:
+		if len(args) != 1 {
+			return "", fmt.Errorf("maybe.and_then expects 1 arg(s)")
+		}
+		return subject + ".andThen(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported maybe method: %v", kind)
+	}
+}
+
+func (e *emitter) emitResultMethodValue(kind checker.ResultMethodKind, subject string, args []string) (string, error) {
+	switch kind {
+	case checker.ResultExpect:
+		if len(args) != 1 {
+			return "", fmt.Errorf("result.expect expects 1 arg(s)")
+		}
+		return subject + ".expect(" + args[0] + ")", nil
+	case checker.ResultOr:
+		if len(args) != 1 {
+			return "", fmt.Errorf("result.or expects 1 arg(s)")
+		}
+		return subject + ".or(" + args[0] + ")", nil
+	case checker.ResultIsOk:
+		return subject + ".isOk()", nil
+	case checker.ResultIsErr:
+		return subject + ".isErr()", nil
+	case checker.ResultMap:
+		if len(args) != 1 {
+			return "", fmt.Errorf("result.map expects 1 arg(s)")
+		}
+		return subject + ".map(" + args[0] + ")", nil
+	case checker.ResultMapErr:
+		if len(args) != 1 {
+			return "", fmt.Errorf("result.map_err expects 1 arg(s)")
+		}
+		return subject + ".mapErr(" + args[0] + ")", nil
+	case checker.ResultAndThen:
+		if len(args) != 1 {
+			return "", fmt.Errorf("result.and_then expects 1 arg(s)")
+		}
+		return subject + ".andThen(" + args[0] + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported result method: %v", kind)
+	}
+}
+
+func (e *emitter) lowerTryExpr(op *checker.TryOp) (loweredExpr, error) {
+	subject, err := e.lowerExpr(op.Expr())
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	tryVar := e.temp("try")
+	stmts := append([]string{}, subject.stmts...)
+	stmts = append(stmts, "const "+tryVar+" = "+subject.expr+";")
+	fail, err := e.captureOutput(func(child *emitter) error {
+		switch op.Kind {
+		case checker.TryResult:
+			child.line("if (" + tryVar + ".isErr()) {")
+			child.indent(func() {
+				if op.CatchBlock != nil {
+					if op.CatchVar != "" && op.CatchVar != "_" {
+						child.line("const " + jsName(op.CatchVar) + " = " + tryVar + ".error;")
+					}
+					err = child.emitBlock(op.CatchBlock, true)
+					if err != nil {
+						panic(err)
+					}
+				} else {
+					child.line("return Result.err(" + tryVar + ".error);")
+				}
+			})
+			child.line("}")
+		case checker.TryMaybe:
+			child.line("if (" + tryVar + ".isNone()) {")
+			child.indent(func() {
+				if op.CatchBlock != nil {
+					err = child.emitBlock(op.CatchBlock, true)
+					if err != nil {
+						panic(err)
+					}
+				} else {
+					child.line("return Maybe.none();")
+				}
+			})
+			child.line("}")
+		default:
+			return fmt.Errorf("unsupported try kind: %v", op.Kind)
+		}
+		return nil
+	})
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if fail != "" {
+		stmts = append(stmts, fail)
+	}
+	success := tryVar + ".ok"
+	if op.Kind == checker.TryMaybe {
+		success = tryVar + ".value"
+	}
+	return loweredExpr{stmts: stmts, expr: success}, nil
+}
+
+func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
+	if !containsTry(expr) {
+		value, err := e.emitExpr(expr)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{expr: value}, nil
+	}
+	switch expr := expr.(type) {
+	case *checker.TryOp:
+		return e.lowerTryExpr(expr)
+	case *checker.If:
+		return e.lowerBranchyExpr(expr, "if")
+	case *checker.Block:
+		return e.lowerBranchyExpr(expr, "block")
+	case *checker.BoolMatch:
+		return e.lowerBranchyExpr(expr, "boolmatch")
+	case *checker.EnumMatch:
+		return e.lowerBranchyExpr(expr, "enummatch")
+	case *checker.UnionMatch:
+		return e.lowerBranchyExpr(expr, "unionmatch")
+	case *checker.IntMatch:
+		return e.lowerBranchyExpr(expr, "intmatch")
+	case *checker.ConditionalMatch:
+		return e.lowerBranchyExpr(expr, "condmatch")
+	case *checker.OptionMatch:
+		return e.lowerBranchyExpr(expr, "optionmatch")
+	case *checker.ResultMatch:
+		return e.lowerBranchyExpr(expr, "resultmatch")
+	case *checker.StructInstance:
+		fieldNames := sortedStructInstanceFields(expr)
+		args := make([]string, 0, len(fieldNames))
+		stmts := []string{}
+		for _, field := range fieldNames {
+			fieldExpr, ok := expr.Fields[field]
+			if !ok || fieldExpr == nil {
+				fieldType := expr.FieldTypes[field]
+				if _, isMaybe := fieldType.(*checker.Maybe); isMaybe {
+					args = append(args, "Maybe.none()")
+					continue
+				}
+				return loweredExpr{}, fmt.Errorf("missing struct field value for %s", field)
+			}
+			lowered, err := e.lowerExpr(fieldExpr)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, lowered.stmts...)
+			args = append(args, lowered.expr)
+		}
+		return loweredExpr{stmts: stmts, expr: "new " + jsName(expr.Name) + "(" + strings.Join(args, ", ") + ")"}, nil
+	case *checker.ModuleStructInstance:
+		moduleVar, ok := e.moduleVars[expr.Module]
+		if !ok {
+			return loweredExpr{}, fmt.Errorf("unknown imported module %s", expr.Module)
+		}
+		fieldNames := sortedStructInstanceFields(expr.Property)
+		args := make([]string, 0, len(fieldNames))
+		stmts := []string{}
+		for _, field := range fieldNames {
+			fieldExpr, ok := expr.Property.Fields[field]
+			if !ok || fieldExpr == nil {
+				fieldType := expr.Property.FieldTypes[field]
+				if _, isMaybe := fieldType.(*checker.Maybe); isMaybe {
+					args = append(args, "Maybe.none()")
+					continue
+				}
+				return loweredExpr{}, fmt.Errorf("missing struct field value for %s", field)
+			}
+			lowered, err := e.lowerExpr(fieldExpr)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, lowered.stmts...)
+			args = append(args, lowered.expr)
+		}
+		return loweredExpr{stmts: stmts, expr: "new " + moduleVar + "." + jsName(expr.Property.Name) + "(" + strings.Join(args, ", ") + ")"}, nil
+	case *checker.InstanceProperty:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: subject.stmts, expr: subject.expr + "." + jsName(expr.Property)}, nil
+	case *checker.ListLiteral:
+		stmts, args, err := e.lowerArgs(expr.Elements)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: "[" + strings.Join(args, ", ") + "]"}, nil
+	case *checker.MapLiteral:
+		stmts := []string{}
+		entries := make([]string, 0, len(expr.Keys))
+		for i := range expr.Keys {
+			key, err := e.lowerExpr(expr.Keys[i])
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			val, err := e.lowerExpr(expr.Values[i])
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, key.stmts...)
+			stmts = append(stmts, val.stmts...)
+			entries = append(entries, "["+key.expr+", "+val.expr+"]")
+		}
+		return loweredExpr{stmts: stmts, expr: "new Map([" + strings.Join(entries, ", ") + "])"}, nil
+	case *checker.TemplateStr:
+		stmts := []string{}
+		var out bytes.Buffer
+		out.WriteByte('`')
+		for _, chunk := range expr.Chunks {
+			if literal, ok := chunk.(*checker.StrLiteral); ok {
+				out.WriteString(escapeTemplateLiteral(literal.Value))
+				continue
+			}
+			lowered, err := e.lowerExpr(chunk)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, lowered.stmts...)
+			out.WriteString("${")
+			out.WriteString(lowered.expr)
+			out.WriteByte('}')
+		}
+		out.WriteByte('`')
+		return loweredExpr{stmts: stmts, expr: out.String()}, nil
+	case *checker.FunctionCall:
+		stmts, args, err := e.lowerArgs(expr.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: jsName(expr.Name) + "(" + strings.Join(args, ", ") + ")"}, nil
+	case *checker.ModuleFunctionCall:
+		stmts, args, err := e.lowerArgs(expr.Call.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		var call string
+		switch expr.Module {
+		case "ard/maybe":
+			call, err = e.emitMaybeModuleCallValue(expr.Call.Name, args)
+		case "ard/result":
+			call, err = e.emitResultModuleCallValue(expr.Call.Name, args)
+		case "ard/float":
+			call, err = e.emitFloatModuleCallValue(expr.Call.Name, args)
+		case "ard/int":
+			call, err = e.emitIntModuleCallValue(expr.Call.Name, args)
+		case "ard/list":
+			call, err = e.emitListModuleCallValue(expr.Call.Name, args)
+		default:
+			moduleVar, ok := e.moduleVars[expr.Module]
+			if !ok {
+				return loweredExpr{}, fmt.Errorf("unknown imported module %s", expr.Module)
+			}
+			call = moduleVar + "." + jsName(expr.Call.Name) + "(" + strings.Join(args, ", ") + ")"
+		}
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: call}, nil
+	case *checker.InstanceMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argStmts, args, err := e.lowerArgs(expr.Method.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append([]string{}, subject.stmts...)
+		stmts = append(stmts, argStmts...)
+		if expr.ReceiverKind == checker.ReceiverTrait && expr.TraitType != nil && expr.TraitType.Name == "ToString" && expr.Method.Name == "to_str" {
+			return loweredExpr{stmts: stmts, expr: "ardToString(" + subject.expr + ")"}, nil
+		}
+		if expr.ReceiverKind == checker.ReceiverEnum && expr.EnumType != nil {
+			callArgs := append([]string{subject.expr}, args...)
+			return loweredExpr{stmts: stmts, expr: enumMethodName(expr.EnumType.Name, expr.Method.Name) + "(" + strings.Join(callArgs, ", ") + ")"}, nil
+		}
+		return loweredExpr{stmts: stmts, expr: subject.expr + "." + jsName(expr.Method.Name) + "(" + strings.Join(args, ", ") + ")"}, nil
+	case *checker.CopyExpression:
+		return e.lowerExpr(expr.Expr)
+	case *checker.StrMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argStmts, args, err := e.lowerArgs(expr.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitStrMethodValue(expr.Kind, subject.expr, args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: append(subject.stmts, argStmts...), expr: value}, nil
+	case *checker.IntMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitIntMethodValue(expr.Kind, subject.expr)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: subject.stmts, expr: value}, nil
+	case *checker.FloatMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitFloatMethodValue(expr.Kind, subject.expr)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: subject.stmts, expr: value}, nil
+	case *checker.BoolMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitBoolMethodValue(expr.Kind, subject.expr)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: subject.stmts, expr: value}, nil
+	case *checker.ListMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argStmts, args, err := e.lowerArgs(expr.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitListMethodValue(expr.Kind, subject.expr, args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: append(subject.stmts, argStmts...), expr: value}, nil
+	case *checker.MapMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argStmts, args, err := e.lowerArgs(expr.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitMapMethodValue(expr.Kind, subject.expr, args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: append(subject.stmts, argStmts...), expr: value}, nil
+	case *checker.MaybeMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argStmts, args, err := e.lowerArgs(expr.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitMaybeMethodValue(expr.Kind, subject.expr, args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: append(subject.stmts, argStmts...), expr: value}, nil
+	case *checker.ResultMethod:
+		subject, err := e.lowerExpr(expr.Subject)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argStmts, args, err := e.lowerArgs(expr.Args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := e.emitResultMethodValue(expr.Kind, subject.expr, args)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: append(subject.stmts, argStmts...), expr: value}, nil
+	case *checker.IntAddition:
+		return e.lowerBinary(expr.Left, "+", expr.Right)
+	case *checker.IntSubtraction:
+		return e.lowerBinary(expr.Left, "-", expr.Right)
+	case *checker.IntMultiplication:
+		return e.lowerBinary(expr.Left, "*", expr.Right)
+	case *checker.IntDivision:
+		left, err := e.lowerExpr(expr.Left)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		right, err := e.lowerExpr(expr.Right)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append([]string{}, left.stmts...)
+		stmts = append(stmts, right.stmts...)
+		return loweredExpr{stmts: stmts, expr: "Math.trunc((" + left.expr + ") / (" + right.expr + "))"}, nil
+	case *checker.IntModulo:
+		return e.lowerBinary(expr.Left, "%", expr.Right)
+	case *checker.IntGreater:
+		return e.lowerIntComparison(expr.Left, ">", expr.Right)
+	case *checker.IntGreaterEqual:
+		return e.lowerIntComparison(expr.Left, ">=", expr.Right)
+	case *checker.IntLess:
+		return e.lowerIntComparison(expr.Left, "<", expr.Right)
+	case *checker.IntLessEqual:
+		return e.lowerIntComparison(expr.Left, "<=", expr.Right)
+	case *checker.FloatAddition:
+		return e.lowerBinary(expr.Left, "+", expr.Right)
+	case *checker.FloatSubtraction:
+		return e.lowerBinary(expr.Left, "-", expr.Right)
+	case *checker.FloatMultiplication:
+		return e.lowerBinary(expr.Left, "*", expr.Right)
+	case *checker.FloatDivision:
+		return e.lowerBinary(expr.Left, "/", expr.Right)
+	case *checker.FloatGreater:
+		return e.lowerBinary(expr.Left, ">", expr.Right)
+	case *checker.FloatGreaterEqual:
+		return e.lowerBinary(expr.Left, ">=", expr.Right)
+	case *checker.FloatLess:
+		return e.lowerBinary(expr.Left, "<", expr.Right)
+	case *checker.FloatLessEqual:
+		return e.lowerBinary(expr.Left, "<=", expr.Right)
+	case *checker.StrAddition:
+		return e.lowerBinary(expr.Left, "+", expr.Right)
+	case *checker.Equality:
+		return e.lowerEquality(expr.Left, expr.Right)
+	case *checker.And:
+		return e.lowerBinary(expr.Left, "&&", expr.Right)
+	case *checker.Or:
+		return e.lowerBinary(expr.Left, "||", expr.Right)
+	case *checker.Negation:
+		value, err := e.lowerExpr(expr.Value)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: value.stmts, expr: "(-" + value.expr + ")"}, nil
+	case *checker.Not:
+		value, err := e.lowerExpr(expr.Value)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: value.stmts, expr: "(!" + value.expr + ")"}, nil
+	default:
+		return loweredExpr{}, fmt.Errorf("js backend does not yet support try-aware lowering for expression type %T", expr)
+	}
+}
+
+func (e *emitter) lowerNumericExpr(build func() (string, error), parts ...checker.Expression) (loweredExpr, error) {
+	stmts := []string{}
+	for _, part := range parts {
+		lowered, err := e.lowerExpr(part)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, lowered.stmts...)
+	}
+	value, err := build()
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: stmts, expr: value}, nil
+}
+
+func (e *emitter) lowerBinary(left checker.Expression, op string, right checker.Expression) (loweredExpr, error) {
+	leftValue, err := e.lowerExpr(left)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	rightValue, err := e.lowerExpr(right)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]string{}, leftValue.stmts...)
+	stmts = append(stmts, rightValue.stmts...)
+	return loweredExpr{stmts: stmts, expr: "(" + leftValue.expr + " " + op + " " + rightValue.expr + ")"}, nil
+}
+
+func (e *emitter) lowerEquality(left checker.Expression, right checker.Expression) (loweredExpr, error) {
+	leftValue, err := e.lowerExpr(left)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	rightValue, err := e.lowerExpr(right)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]string{}, leftValue.stmts...)
+	stmts = append(stmts, rightValue.stmts...)
+	if requiresSpecialEquality(left.Type(), right.Type()) {
+		return loweredExpr{stmts: stmts, expr: "ardEq(" + leftValue.expr + ", " + rightValue.expr + ")"}, nil
+	}
+	return loweredExpr{stmts: stmts, expr: "(" + leftValue.expr + " === " + rightValue.expr + ")"}, nil
+}
+
+func (e *emitter) lowerIntComparison(left checker.Expression, op string, right checker.Expression) (loweredExpr, error) {
+	leftValue, err := e.lowerExpr(left)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	rightValue, err := e.lowerExpr(right)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]string{}, leftValue.stmts...)
+	stmts = append(stmts, rightValue.stmts...)
+	if requiresEnumAwareComparison(left.Type(), right.Type()) {
+		return loweredExpr{stmts: stmts, expr: "(ardEnumValue(" + leftValue.expr + ") " + op + " ardEnumValue(" + rightValue.expr + "))"}, nil
+	}
+	return loweredExpr{stmts: stmts, expr: "(" + leftValue.expr + " " + op + " " + rightValue.expr + ")"}, nil
+}
+
 func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 	switch stmt := stmt.(type) {
 	case *checker.StructDef:
@@ -927,7 +2141,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 		defCopy := stmt
 		return e.emitEnumDef(&defCopy)
 	case *checker.VariableDef:
-		value, err := e.emitExpr(stmt.Value)
+		value, err := e.lowerExpr(stmt.Value)
 		if err != nil {
 			return err
 		}
@@ -935,18 +2149,20 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 		if stmt.Mutable {
 			keyword = "let"
 		}
-		e.line(fmt.Sprintf("%s %s = %s;", keyword, jsName(stmt.Name), value))
+		e.emitCapturedStatements(value.stmts)
+		e.line(fmt.Sprintf("%s %s = %s;", keyword, jsName(stmt.Name), value.expr))
 		return nil
 	case *checker.Reassignment:
 		target, err := e.emitAssignable(stmt.Target)
 		if err != nil {
 			return err
 		}
-		value, err := e.emitExpr(stmt.Value)
+		value, err := e.lowerExpr(stmt.Value)
 		if err != nil {
 			return err
 		}
-		e.line(target + " = " + value + ";")
+		e.emitCapturedStatements(value.stmts)
+		e.line(target + " = " + value.expr + ";")
 		return nil
 	case *checker.WhileLoop:
 		return e.emitWhileLoop(stmt)
@@ -1354,7 +2570,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.CopyExpression:
 		return e.emitExpr(expr.Expr)
 	case *checker.TryOp:
-		return e.emitTryExpr(expr)
+		return "", fmt.Errorf("unexpected raw try expression during JavaScript emission")
 	case *checker.StrMethod:
 		return e.emitStrMethod(expr)
 	case *checker.IntMethod:
@@ -2352,6 +3568,264 @@ func (e *emitter) indent(fn func()) {
 	e.indentLevel++
 	defer func() { e.indentLevel-- }()
 	fn()
+}
+
+func containsTry(expr checker.Expression) bool {
+	var exprContains func(checker.Expression) bool
+	var blockContains func(*checker.Block) bool
+	var stmtContains func(checker.Statement) bool
+
+	exprContains = func(expr checker.Expression) bool {
+		if expr == nil {
+			return false
+		}
+		value := reflect.ValueOf(expr)
+		if value.Kind() == reflect.Ptr && value.IsNil() {
+			return false
+		}
+		switch expr := expr.(type) {
+		case *checker.TryOp:
+			return true
+		case *checker.FunctionDef:
+			return false
+		case *checker.StructInstance:
+			for _, field := range expr.Fields {
+				if exprContains(field) {
+					return true
+				}
+			}
+		case *checker.ModuleStructInstance:
+			return exprContains(expr.Property)
+		case *checker.InstanceProperty:
+			return exprContains(expr.Subject)
+		case *checker.ListLiteral:
+			for _, element := range expr.Elements {
+				if exprContains(element) {
+					return true
+				}
+			}
+		case *checker.MapLiteral:
+			for i := range expr.Keys {
+				if exprContains(expr.Keys[i]) || exprContains(expr.Values[i]) {
+					return true
+				}
+			}
+		case *checker.TemplateStr:
+			for _, chunk := range expr.Chunks {
+				if exprContains(chunk) {
+					return true
+				}
+			}
+		case *checker.FunctionCall:
+			for _, arg := range expr.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.ModuleFunctionCall:
+			for _, arg := range expr.Call.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.InstanceMethod:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, arg := range expr.Method.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.CopyExpression:
+			return exprContains(expr.Expr)
+		case *checker.StrMethod:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, arg := range expr.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.IntMethod:
+			return exprContains(expr.Subject)
+		case *checker.FloatMethod:
+			return exprContains(expr.Subject)
+		case *checker.BoolMethod:
+			return exprContains(expr.Subject)
+		case *checker.ListMethod:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, arg := range expr.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.MapMethod:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, arg := range expr.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.MaybeMethod:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, arg := range expr.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.ResultMethod:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, arg := range expr.Args {
+				if exprContains(arg) {
+					return true
+				}
+			}
+		case *checker.If:
+			return exprContains(expr.Condition) || blockContains(expr.Body) || blockContains(expr.Else) || exprContains(expr.ElseIf)
+		case *checker.Block:
+			return blockContains(expr)
+		case *checker.BoolMatch:
+			return exprContains(expr.Subject) || blockContains(expr.True) || blockContains(expr.False)
+		case *checker.EnumMatch:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, block := range expr.Cases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			return blockContains(expr.CatchAll)
+		case *checker.UnionMatch:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, matchCase := range expr.TypeCases {
+				if matchCase != nil && blockContains(matchCase.Body) {
+					return true
+				}
+			}
+			return blockContains(expr.CatchAll)
+		case *checker.IntMatch:
+			if exprContains(expr.Subject) {
+				return true
+			}
+			for _, block := range expr.IntCases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			for _, block := range expr.RangeCases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			return blockContains(expr.CatchAll)
+		case *checker.ConditionalMatch:
+			for _, matchCase := range expr.Cases {
+				if exprContains(matchCase.Condition) || blockContains(matchCase.Body) {
+					return true
+				}
+			}
+			return blockContains(expr.CatchAll)
+		case *checker.OptionMatch:
+			return exprContains(expr.Subject) || (expr.Some != nil && blockContains(expr.Some.Body)) || blockContains(expr.None)
+		case *checker.ResultMatch:
+			return exprContains(expr.Subject) || (expr.Ok != nil && blockContains(expr.Ok.Body)) || (expr.Err != nil && blockContains(expr.Err.Body))
+		case *checker.IntAddition:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntSubtraction:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntMultiplication:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntDivision:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntModulo:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntGreater:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntGreaterEqual:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntLess:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.IntLessEqual:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatAddition:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatSubtraction:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatMultiplication:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatDivision:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatGreater:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatGreaterEqual:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatLess:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.FloatLessEqual:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.StrAddition:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.Equality:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.And:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.Or:
+			return exprContains(expr.Left) || exprContains(expr.Right)
+		case *checker.Negation:
+			return exprContains(expr.Value)
+		case *checker.Not:
+			return exprContains(expr.Value)
+		}
+		return false
+	}
+	blockContains = func(block *checker.Block) bool {
+		if block == nil {
+			return false
+		}
+		for _, stmt := range block.Stmts {
+			if stmtContains(stmt) {
+				return true
+			}
+		}
+		return false
+	}
+	stmtContains = func(stmt checker.Statement) bool {
+		if stmt.Stmt != nil {
+			switch s := stmt.Stmt.(type) {
+			case *checker.VariableDef:
+				return exprContains(s.Value)
+			case *checker.Reassignment:
+				return exprContains(s.Target) || exprContains(s.Value)
+			case checker.ForInList:
+				return exprContains(s.List) || blockContains(s.Body)
+			case checker.ForInMap:
+				return exprContains(s.Map) || blockContains(s.Body)
+			case checker.ForInStr:
+				return exprContains(s.Value) || blockContains(s.Body)
+			case checker.ForIntRange:
+				return exprContains(s.Start) || exprContains(s.End) || blockContains(s.Body)
+			case checker.ForLoop:
+				return (s.Init != nil && exprContains(s.Init.Value)) || exprContains(s.Condition) || (s.Update != nil && exprContains(s.Update.Value)) || blockContains(s.Body)
+			case checker.WhileLoop:
+				return exprContains(s.Condition) || blockContains(s.Body)
+			}
+		}
+		return exprContains(stmt.Expr)
+	}
+	return exprContains(expr)
 }
 
 func (e *emitter) emitVariableName(name string) string {
