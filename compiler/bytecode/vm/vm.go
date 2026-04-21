@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/akonwi/ard/bytecode"
@@ -9,11 +10,35 @@ import (
 	"github.com/akonwi/ard/runtime"
 )
 
+var (
+	sharedModulesOnce sync.Once
+	sharedModules     *ModuleRegistry
+	sharedFFIOnce     sync.Once
+	sharedFFI         *RuntimeFFIRegistry
+)
+
+func defaultModuleRegistry() *ModuleRegistry {
+	sharedModulesOnce.Do(func() {
+		sharedModules = NewModuleRegistry()
+	})
+	return sharedModules
+}
+
+func defaultFFIRegistry() *RuntimeFFIRegistry {
+	sharedFFIOnce.Do(func() {
+		ffi := NewRuntimeFFIRegistry()
+		_ = ffi.RegisterBuiltinFFIFunctions()
+		sharedFFI = ffi
+	})
+	return sharedFFI
+}
+
 type Frame struct {
-	Fn         bytecode.Function
+	Fn         *bytecode.Function
 	IP         int
 	Locals     []*runtime.Object
 	Stack      []*runtime.Object
+	StackTop   int
 	MaxStack   int
 	ReturnType checker.Type
 }
@@ -51,24 +76,21 @@ func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
 }
 
 type VM struct {
-	Program   bytecode.Program
-	Frames    []*Frame
-	typeCache map[bytecode.TypeID]checker.Type
-	modules   *ModuleRegistry
-	funcIndex map[string]int
-	ffi       *RuntimeFFIRegistry
-	lastOp    bytecode.Opcode
-	lastIP    int
-	lastFn    string
+	Program     bytecode.Program
+	Frames      []*Frame
+	freeFrames  []*Frame
+	typeCache   map[bytecode.TypeID]checker.Type
+	modules           *ModuleRegistry
+	methodIndex       map[string]map[string]int
+	functionLookup    map[string]int
+	moduleCallScratch checker.FunctionCall
+	moduleArgsScratch []*runtime.Object
+	externArgsScratch []*runtime.Object
+	ffi               *RuntimeFFIRegistry
 }
 
 func New(program bytecode.Program) *VM {
-	ffi := NewRuntimeFFIRegistry()
-	_ = ffi.RegisterBuiltinFFIFunctions()
-	vm := &VM{Program: program, Frames: []*Frame{}, typeCache: map[bytecode.TypeID]checker.Type{}, modules: NewModuleRegistry(), funcIndex: map[string]int{}, ffi: ffi}
-	for i := range program.Functions {
-		vm.funcIndex[program.Functions[i].Name] = i
-	}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), ffi: defaultFFIRegistry()}
 	return vm
 }
 
@@ -78,12 +100,9 @@ func (vm *VM) Run(functionName string) (*runtime.Object, error) {
 		return nil, fmt.Errorf("function not found: %s", functionName)
 	}
 
-	frame := &Frame{
-		Fn:       fn,
-		IP:       0,
-		Locals:   make([]*runtime.Object, fn.Locals),
-		Stack:    []*runtime.Object{},
-		MaxStack: fn.MaxStack,
+	frame, err := vm.newFrame(fn, nil, nil, nil)
+	if err != nil {
+		return nil, err
 	}
 	vm.Frames = append(vm.Frames, frame)
 	return vm.run()
@@ -98,9 +117,6 @@ func (vm *VM) run() (*runtime.Object, error) {
 		}
 		inst := curr.Fn.Code[curr.IP]
 		curr.IP++
-		vm.lastOp = inst.Op
-		vm.lastIP = curr.IP - 1
-		vm.lastFn = curr.Fn.Name
 
 		switch inst.Op {
 		case bytecode.OpNoop:
@@ -148,53 +164,40 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if inst.A < 0 || inst.A >= len(curr.Locals) {
 				return nil, fmt.Errorf("local index out of range")
 			}
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			curr.Locals[inst.A] = val
+			curr.Locals[inst.A] = vm.popUnsafe(curr)
 		case bytecode.OpPop:
-			if _, err := vm.pop(curr); err != nil {
-				return nil, err
-			}
+			_ = vm.popUnsafe(curr)
 		case bytecode.OpDup:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
 			vm.push(curr, val)
 			vm.push(curr, val)
 		case bytecode.OpSwap:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
 			vm.push(curr, b)
 			vm.push(curr, a)
 		case bytecode.OpCopy:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			vm.push(curr, val.Copy())
+			vm.push(curr, vm.popUnsafe(curr).Copy())
 		case bytecode.OpPanic:
-			msgObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("panic: %s", msgObj.AsString())
+			return nil, fmt.Errorf("panic: %s", vm.popUnsafe(curr).AsString())
 		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv, bytecode.OpMod:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
+			if a.Kind() == runtime.KindInt && b.Kind() == runtime.KindInt {
+				left, right := a.AsInt(), b.AsInt()
+				switch inst.Op {
+				case bytecode.OpAdd:
+					vm.push(curr, runtime.MakeInt(left+right))
+				case bytecode.OpSub:
+					vm.push(curr, runtime.MakeInt(left-right))
+				case bytecode.OpMul:
+					vm.push(curr, runtime.MakeInt(left*right))
+				case bytecode.OpDiv:
+					vm.push(curr, runtime.MakeInt(left/right))
+				case bytecode.OpMod:
+					vm.push(curr, runtime.MakeInt(left%right))
+				}
+				continue
 			}
 			res, err := vm.evalBinary(inst.Op, a, b)
 			if err != nil {
@@ -202,43 +205,41 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpAnd, bytecode.OpOr:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
 			res, err := vm.evalBinary(inst.Op, a, b)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpNeg:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			res, err := vm.evalUnary(inst.Op, val)
+			res, err := vm.evalUnary(inst.Op, vm.popUnsafe(curr))
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpNot:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			vm.push(curr, runtime.MakeBool(!val.AsBool()))
+			vm.push(curr, runtime.MakeBool(!vm.popUnsafe(curr).AsBool()))
 		case bytecode.OpEq, bytecode.OpNeq, bytecode.OpLt, bytecode.OpLte, bytecode.OpGt, bytecode.OpGte:
-			b, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			a, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
+			b := vm.popUnsafe(curr)
+			a := vm.popUnsafe(curr)
+			if a.Kind() == runtime.KindInt && b.Kind() == runtime.KindInt {
+				left, right := a.AsInt(), b.AsInt()
+				switch inst.Op {
+				case bytecode.OpEq:
+					vm.push(curr, runtime.MakeBool(left == right))
+				case bytecode.OpNeq:
+					vm.push(curr, runtime.MakeBool(left != right))
+				case bytecode.OpLt:
+					vm.push(curr, runtime.MakeBool(left < right))
+				case bytecode.OpLte:
+					vm.push(curr, runtime.MakeBool(left <= right))
+				case bytecode.OpGt:
+					vm.push(curr, runtime.MakeBool(left > right))
+				case bytecode.OpGte:
+					vm.push(curr, runtime.MakeBool(left >= right))
+				}
+				continue
 			}
 			res, err := vm.evalCompare(inst.Op, a, b)
 			if err != nil {
@@ -248,28 +249,21 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpJump:
 			curr.IP = inst.A
 		case bytecode.OpJumpIfFalse:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			if !val.AsBool() {
+			if !vm.popUnsafe(curr).AsBool() {
 				curr.IP = inst.A
 			}
 		case bytecode.OpJumpIfTrue:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			if val.AsBool() {
+			if vm.popUnsafe(curr).AsBool() {
 				curr.IP = inst.A
 			}
 		case bytecode.OpReturn:
-			if len(curr.Stack) == 0 {
+			if curr.StackTop == 0 {
 				val := runtime.Void()
 				if curr.ReturnType != nil {
 					val.SetRefinedType(curr.ReturnType)
 				}
 				vm.Frames = vm.Frames[:len(vm.Frames)-1]
+				vm.recycleFrame(curr)
 				if len(vm.Frames) == 0 {
 					return val, nil
 				}
@@ -284,30 +278,16 @@ func (vm *VM) run() (*runtime.Object, error) {
 				val.SetRefinedType(curr.ReturnType)
 			}
 			vm.Frames = vm.Frames[:len(vm.Frames)-1]
+			vm.recycleFrame(curr)
 			if len(vm.Frames) == 0 {
 				return val, nil
 			}
 			vm.push(vm.Frames[len(vm.Frames)-1], val)
 		case bytecode.OpCall:
-			fnIndex := inst.A
-			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
-				return nil, fmt.Errorf("function index out of range")
-			}
-			fnDef := vm.Program.Functions[fnIndex]
+			fnDef := &vm.Program.Functions[inst.A]
 			argc := inst.B
-			args := make([]*runtime.Object, argc)
-			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
-			}
-			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
-			if err != nil {
-				return nil, err
-			}
-			frame, err := vm.newFrame(fnDef, args, nil, retType)
+			retType, _ := vm.typeFor(bytecode.TypeID(inst.C))
+			frame, err := vm.newFrameFromStackUnchecked(curr, fnDef, argc, nil, retType)
 			if err != nil {
 				return nil, err
 			}
@@ -323,11 +303,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			captures := make([]*runtime.Object, captureCount)
 			for i := captureCount - 1; i >= 0; i-- {
-				val, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				captures[i] = val
+				captures[i] = vm.popUnsafe(curr)
 			}
 			fnType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -347,16 +323,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			argc := inst.B
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			closureObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
@@ -364,7 +333,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if closure.FnIndex < 0 || closure.FnIndex >= len(vm.Program.Functions) {
 				return nil, fmt.Errorf("function index out of range")
 			}
-			fnDef := vm.Program.Functions[closure.FnIndex]
+			fnDef := &vm.Program.Functions[closure.FnIndex]
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
@@ -375,10 +344,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpAsyncStart:
-			closureObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
@@ -403,10 +369,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, runtime.MakeStruct(fiberType, fields))
 		case bytecode.OpAsyncEval:
-			closureObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
@@ -444,11 +407,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			count := inst.B
 			items := make([]*runtime.Object, count)
 			for i := count - 1; i >= 0; i-- {
-				item, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				items[i] = item
+				items[i] = vm.popUnsafe(curr)
 			}
 			vm.push(curr, runtime.Make(items, listType))
 		case bytecode.OpMakeMap:
@@ -464,33 +423,18 @@ func (vm *VM) run() (*runtime.Object, error) {
 			count := inst.B
 			m := runtime.MakeMap(mapDef.Key(), mapDef.Value())
 			for range count {
-				val, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				key, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
+				val := vm.popUnsafe(curr)
+				key := vm.popUnsafe(curr)
 				m.Map_Set(key, val)
 			}
 			vm.push(curr, m)
 		case bytecode.OpListLen:
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			listObj := vm.popUnsafe(curr)
 			items := listObj.AsList()
 			vm.push(curr, runtime.MakeInt(len(items)))
 		case bytecode.OpListGet:
-			idxObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			idxObj := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			idx := idxObj.AsInt()
 			items := listObj.AsList()
 			if idx < 0 || idx >= len(items) {
@@ -498,18 +442,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, items[idx])
 		case bytecode.OpListSet:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			idxObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			idxObj := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			idx := idxObj.AsInt()
 			items := listObj.AsList()
 			result := runtime.MakeBool(false)
@@ -520,27 +455,15 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, result)
 		case bytecode.OpListPush:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			items := listObj.AsList()
 			items = append(items, val)
 			listObj.Set(items)
 			vm.push(curr, listObj)
 		case bytecode.OpListPrepend:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			listObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			listObj := vm.popUnsafe(curr)
 			items := listObj.AsList()
 			items = append([]*runtime.Object{val}, items...)
 			listObj.Set(items)
@@ -548,26 +471,16 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpListMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			res, err := vm.evalListMethod(bytecodeToListKind(inst.A), subj, args)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpMapKeys:
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			mapObj := vm.popUnsafe(curr)
 			mapType := mapObj.MapType()
 			if mapType == nil {
 				return nil, fmt.Errorf("map keys on non-map")
@@ -575,14 +488,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			keys := runtime.SortedMapKeys(mapObj)
 			vm.push(curr, runtime.MakeList(mapType.Key(), keys...))
 		case bytecode.OpMapGet:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			mapType, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
@@ -599,14 +506,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, out)
 		case bytecode.OpMapGetValue:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			val, ok := m[keyStr]
@@ -615,53 +516,29 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, val)
 		case bytecode.OpMapSet:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			m[keyStr] = val
 			vm.push(curr, runtime.MakeBool(true))
 		case bytecode.OpMapDrop:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			delete(m, keyStr)
 			vm.push(curr, runtime.Void())
 		case bytecode.OpMapHas:
-			keyObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			keyObj := vm.popUnsafe(curr)
+			mapObj := vm.popUnsafe(curr)
 			m := mapObj.AsMap()
 			keyStr := runtime.ToMapKey(keyObj)
 			_, ok := m[keyStr]
 			vm.push(curr, runtime.MakeBool(ok))
 		case bytecode.OpMapSize:
-			mapObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			mapObj := vm.popUnsafe(curr)
 			vm.push(curr, runtime.MakeInt(len(mapObj.AsMap())))
 		case bytecode.OpMakeNone:
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
@@ -672,46 +549,30 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpStrMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalStrMethod(bytecodeToStrKind(inst.A), obj, args)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpIntMethod:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalIntMethod(bytecodeToIntKind(inst.A), obj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpFloatMethod:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalFloatMethod(bytecodeToFloatKind(inst.A), obj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpBoolMethod:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			res, err := vm.evalBoolMethod(bytecodeToBoolKind(inst.A), obj)
 			if err != nil {
 				return nil, err
@@ -720,16 +581,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpMaybeMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			res, err := vm.evalMaybeMethod(bytecodeToMaybeKind(inst.A), subj, args, bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
@@ -738,40 +592,27 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpResultMethod:
 			args := make([]*runtime.Object, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			res, err := vm.evalResultMethod(bytecodeToResultKind(inst.A), subj, args)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpMaybeUnwrap:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			if subj.IsNone() {
 				return nil, fmt.Errorf("cannot unwrap none")
 			}
-			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.A))
+			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, obj)
+			vm.push(curr, subj.UnwrapMaybeInPlace(resolved))
 		case bytecode.OpResultUnwrap:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			unwrapped := subj.UnwrapResult()
+			subj := vm.popUnsafe(curr)
+			unwrapped := subj.UnwrapResultInPlace()
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
@@ -779,16 +620,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 			unwrapped.SetRefinedType(resolved)
 			vm.push(curr, unwrapped)
 		case bytecode.OpTypeName:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			vm.push(curr, runtime.MakeStr(subj.TypeName()))
 		case bytecode.OpStrChars:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			runes := []rune(subj.AsString())
 			chars := make([]*runtime.Object, len(runes))
 			for i, r := range runes {
@@ -796,14 +631,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, runtime.MakeList(checker.Str, chars...))
 		case bytecode.OpTryResult:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			if subj.IsErr() {
 				if inst.A >= 0 {
 					if inst.B >= 0 {
-						unwrapped := subj.UnwrapResult()
+						unwrapped := subj.UnwrapResultInPlace()
 						errType, err := vm.typeFor(bytecode.TypeID(inst.C))
 						if err != nil {
 							return nil, err
@@ -813,7 +645,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 							curr.Locals[inst.B] = unwrapped
 						}
 					}
-					curr.Stack = curr.Stack[:0]
+					curr.StackTop = 0
 					curr.IP = inst.A
 					continue
 				}
@@ -824,7 +656,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				vm.push(vm.Frames[len(vm.Frames)-1], subj)
 				continue
 			}
-			unwrapped := subj.UnwrapResult()
+			unwrapped := subj.UnwrapResultInPlace()
 			okType, err := vm.typeFor(bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
@@ -832,13 +664,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 			unwrapped.SetRefinedType(okType)
 			vm.push(curr, unwrapped)
 		case bytecode.OpTryMaybe:
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			subj := vm.popUnsafe(curr)
 			if subj.IsNone() {
 				if inst.A >= 0 {
-					curr.Stack = curr.Stack[:0]
+					curr.StackTop = 0
 					curr.IP = inst.A
 					continue
 				}
@@ -849,11 +678,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 				vm.push(vm.Frames[len(vm.Frames)-1], subj)
 				continue
 			}
-			obj, err := vm.makeValueWithType(subj.Raw(), bytecode.TypeID(inst.Imm))
+			okType, err := vm.typeFor(bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, obj)
+			vm.push(curr, subj.UnwrapMaybeInPlace(okType))
 		case bytecode.OpMakeStruct:
 			structType, err := vm.structTypeFor(bytecode.TypeID(inst.A))
 			if err != nil {
@@ -862,33 +691,21 @@ func (vm *VM) run() (*runtime.Object, error) {
 			count := inst.B
 			fields := map[string]*runtime.Object{}
 			for range count {
-				val, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				keyObj, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
+				val := vm.popUnsafe(curr)
+				keyObj := vm.popUnsafe(curr)
 				key := keyObj.AsString()
 				fields[key] = val
 			}
 			vm.push(curr, runtime.MakeStruct(structType, fields))
 		case bytecode.OpMakeEnum:
-			discObj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			discObj := vm.popUnsafe(curr)
 			enumType, err := vm.enumTypeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, runtime.Make(discObj.AsInt(), enumType))
 		case bytecode.OpGetField:
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			obj := vm.popUnsafe(curr)
 			nameConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
@@ -899,14 +716,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, val)
 		case bytecode.OpSetField:
-			val, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			obj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
+			val := vm.popUnsafe(curr)
+			obj := vm.popUnsafe(curr)
 			nameConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
@@ -922,29 +733,27 @@ func (vm *VM) run() (*runtime.Object, error) {
 				return nil, err
 			}
 			argc := inst.B
-			args := make([]*runtime.Object, argc)
-			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+			subjIndex := curr.StackTop - argc - 1
+			if subjIndex < 0 {
+				return nil, fmt.Errorf("stack underflow")
 			}
-			subj, err := vm.pop(curr)
-			if err != nil {
-				return nil, err
-			}
-			fnName := fmt.Sprintf("%s.%s", subj.TypeName(), methodConst.Str)
-			fnIndex, ok := vm.funcIndex[fnName]
+			subj := curr.Stack[subjIndex]
+			receiverType := subj.TypeName()
+			fnIndex, ok := vm.methodFunctionIndex(receiverType, methodConst.Str)
 			if !ok {
+				args := make([]*runtime.Object, argc)
+				for i := argc - 1; i >= 0; i-- {
+					args[i] = vm.popUnsafe(curr)
+				}
+				subj = vm.popUnsafe(curr)
 				res, err := vm.evalTraitMethodByName(subj, methodConst.Str, args)
 				if err != nil {
-					return nil, fmt.Errorf("unknown method: %s", fnName)
+					return nil, fmt.Errorf("unknown method: %s.%s", receiverType, methodConst.Str)
 				}
 				vm.push(curr, res)
 				continue
 			}
-			fnDef := vm.Program.Functions[fnIndex]
+			fnDef := &vm.Program.Functions[fnIndex]
 			if fnDef.Arity != argc+1 {
 				return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc+1)
 			}
@@ -952,18 +761,14 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			frame := &Frame{
-				Fn:         fnDef,
-				IP:         0,
-				Locals:     make([]*runtime.Object, fnDef.Locals),
-				Stack:      []*runtime.Object{},
-				MaxStack:   fnDef.MaxStack,
-				ReturnType: retType,
+			frame, err := vm.newFrameBase(fnDef, nil, retType)
+			if err != nil {
+				return nil, err
 			}
-			frame.Locals[0] = subj
-			for i := range args {
-				frame.Locals[i+1] = args[i]
+			for i := argc; i >= 1; i-- {
+				frame.Locals[i] = vm.popUnsafe(curr)
 			}
+			frame.Locals[0] = vm.popUnsafe(curr)
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpCallModule:
 			modConst, err := vm.constAt(inst.A)
@@ -974,24 +779,21 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			if modConst.Kind != bytecode.ConstStr || fnConst.Kind != bytecode.ConstStr {
-				return nil, fmt.Errorf("module call expects string constants")
-			}
 			argc := inst.Imm
-			args := make([]*runtime.Object, argc)
+			if cap(vm.moduleArgsScratch) < argc {
+				vm.moduleArgsScratch = make([]*runtime.Object, argc)
+			}
+			args := vm.moduleArgsScratch[:argc]
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
 			}
-			call := &checker.FunctionCall{Name: fnConst.Str, ReturnType: retType}
-			res, err := vm.modules.Call(modConst.Str, call, args)
+			vm.moduleCallScratch.Name = fnConst.Str
+			vm.moduleCallScratch.ReturnType = retType
+			res, err := vm.modules.Call(modConst.Str, &vm.moduleCallScratch, args)
 			if err != nil {
 				return nil, err
 			}
@@ -1001,17 +803,13 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			if bindingConst.Kind != bytecode.ConstStr {
-				return nil, fmt.Errorf("extern call expects string binding")
-			}
 			argc := inst.Imm
-			args := make([]*runtime.Object, argc)
+			if cap(vm.externArgsScratch) < argc {
+				vm.externArgsScratch = make([]*runtime.Object, argc)
+			}
+			args := vm.externArgsScratch[:argc]
 			for i := argc - 1; i >= 0; i-- {
-				arg, err := vm.pop(curr)
-				if err != nil {
-					return nil, err
-				}
-				args[i] = arg
+				args[i] = vm.popUnsafe(curr)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -1039,48 +837,130 @@ func (vm *VM) run() (*runtime.Object, error) {
 	return nil, fmt.Errorf("no frames left")
 }
 
-func (vm *VM) lookupFunction(name string) (bytecode.Function, bool) {
-	for _, fn := range vm.Program.Functions {
-		if fn.Name == name {
-			return fn, true
+func (vm *VM) lookupFunction(name string) (*bytecode.Function, bool) {
+	if vm.functionLookup == nil {
+		lookup := map[string]int{}
+		for i := range vm.Program.Functions {
+			fnName := vm.Program.Functions[i].Name
+			if _, exists := lookup[fnName]; !exists {
+				lookup[fnName] = i
+			}
 		}
+		vm.functionLookup = lookup
 	}
-	return bytecode.Function{}, false
+	idx, ok := vm.functionLookup[name]
+	if !ok {
+		return nil, false
+	}
+	return &vm.Program.Functions[idx], true
 }
 
 func (vm *VM) spawn() *VM {
 	child := New(vm.Program)
 	child.modules = vm.modules
-	child.funcIndex = vm.funcIndex
+	child.methodIndex = vm.methodIndex
+	child.functionLookup = vm.functionLookup
 	return child
 }
 
-func (vm *VM) newFrame(fnDef bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
-	if len(args) != fnDef.Arity {
-		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
+func (vm *VM) methodFunctionIndex(receiverType, methodName string) (int, bool) {
+	if vm.methodIndex == nil {
+		index := make(map[string]map[string]int)
+		for i := range vm.Program.Functions {
+			name := vm.Program.Functions[i].Name
+			dot := strings.LastIndexByte(name, '.')
+			if dot <= 0 || dot >= len(name)-1 {
+				continue
+			}
+			recv := name[:dot]
+			byType, ok := index[recv]
+			if !ok {
+				byType = map[string]int{}
+				index[recv] = byType
+			}
+			byType[name[dot+1:]] = i
+		}
+		vm.methodIndex = index
 	}
+	byType, ok := vm.methodIndex[receiverType]
+	if !ok {
+		return 0, false
+	}
+	fnIndex, ok := byType[methodName]
+	return fnIndex, ok
+}
+
+func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	captureLen := len(captures)
 	if captures == nil {
-		captures = []*runtime.Object{}
+		captureLen = 0
 	}
-	if len(captures) != len(fnDef.Captures) {
-		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), len(captures))
+	if captureLen != len(fnDef.Captures) {
+		return nil, fmt.Errorf("capture mismatch: expected %d, got %d", len(fnDef.Captures), captureLen)
 	}
-	frame := &Frame{
-		Fn:         fnDef,
-		IP:         0,
-		Locals:     make([]*runtime.Object, fnDef.Locals),
-		Stack:      []*runtime.Object{},
-		MaxStack:   fnDef.MaxStack,
-		ReturnType: returnType,
+
+	var frame *Frame
+	if n := len(vm.freeFrames); n > 0 {
+		frame = vm.freeFrames[n-1]
+		vm.freeFrames = vm.freeFrames[:n-1]
+	} else {
+		frame = &Frame{}
 	}
+
+	frame.Fn = fnDef
+	frame.IP = 0
+	frame.MaxStack = fnDef.MaxStack
+	frame.ReturnType = returnType
+	if cap(frame.Locals) < fnDef.Locals {
+		frame.Locals = make([]*runtime.Object, fnDef.Locals)
+	} else {
+		frame.Locals = frame.Locals[:fnDef.Locals]
+		clear(frame.Locals)
+	}
+	if len(frame.Stack) < fnDef.MaxStack {
+		frame.Stack = make([]*runtime.Object, fnDef.MaxStack)
+	} else {
+		clear(frame.Stack[:frame.StackTop])
+	}
+	frame.StackTop = 0
+
 	for i, localIdx := range fnDef.Captures {
 		if localIdx < 0 || localIdx >= len(frame.Locals) {
 			return nil, fmt.Errorf("capture local index out of range")
 		}
 		frame.Locals[localIdx] = captures[i]
 	}
+	return frame, nil
+}
+
+func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	if len(args) != fnDef.Arity {
+		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
+	}
+	frame, err := vm.newFrameBase(fnDef, captures, returnType)
+	if err != nil {
+		return nil, err
+	}
 	for i := range args {
 		frame.Locals[i] = args[i]
+	}
+	return frame, nil
+}
+
+func (vm *VM) newFrameFromStack(caller *Frame, fnDef *bytecode.Function, argc int, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	if argc != fnDef.Arity {
+		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
+	}
+	return vm.newFrameFromStackUnchecked(caller, fnDef, argc, captures, returnType)
+}
+
+func (vm *VM) newFrameFromStackUnchecked(caller *Frame, fnDef *bytecode.Function, argc int, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+	frame, err := vm.newFrameBase(fnDef, captures, returnType)
+	if err != nil {
+		return nil, err
+	}
+	for i := argc - 1; i >= 0; i-- {
+		frame.Locals[i] = vm.popUnsafe(caller)
 	}
 	return frame, nil
 }
@@ -1090,7 +970,7 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 		return nil, fmt.Errorf("function index out of range")
 	}
 	child := vm.spawn()
-	fnDef := child.Program.Functions[closure.FnIndex]
+	fnDef := &child.Program.Functions[closure.FnIndex]
 	frame, err := child.newFrame(fnDef, args, closure.Captures, closure.ReturnType)
 	if err != nil {
 		return nil, err
@@ -1099,18 +979,42 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 	return child.run()
 }
 
+func (vm *VM) runClosure1(closure *Closure, arg *runtime.Object) (*runtime.Object, error) {
+	args := [1]*runtime.Object{arg}
+	return vm.runClosure(closure, args[:])
+}
+
+func (vm *VM) recycleFrame(frame *Frame) {
+	clear(frame.Locals)
+	clear(frame.Stack[:frame.StackTop])
+	frame.Locals = frame.Locals[:0]
+	frame.StackTop = 0
+	frame.ReturnType = nil
+	vm.freeFrames = append(vm.freeFrames, frame)
+}
+
 func (vm *VM) push(frame *Frame, obj *runtime.Object) {
-	frame.Stack = append(frame.Stack, obj)
+	if frame.StackTop >= len(frame.Stack) {
+		frame.Stack = append(frame.Stack, obj)
+		frame.StackTop++
+		return
+	}
+	frame.Stack[frame.StackTop] = obj
+	frame.StackTop++
 }
 
 func (vm *VM) pop(frame *Frame) (*runtime.Object, error) {
-	if len(frame.Stack) == 0 {
-		return nil, fmt.Errorf("stack underflow at %s ip=%d fn=%s", vm.lastOp, vm.lastIP, vm.lastFn)
+	if frame.StackTop == 0 {
+		return nil, fmt.Errorf("stack underflow")
 	}
-	idx := len(frame.Stack) - 1
-	val := frame.Stack[idx]
-	frame.Stack = frame.Stack[:idx]
-	return val, nil
+	return vm.popUnsafe(frame), nil
+}
+
+func (vm *VM) popUnsafe(frame *Frame) *runtime.Object {
+	frame.StackTop--
+	val := frame.Stack[frame.StackTop]
+	frame.Stack[frame.StackTop] = nil
+	return val
 }
 
 func (vm *VM) constAt(index int) (bytecode.Constant, error) {
@@ -1202,22 +1106,37 @@ func (vm *VM) evalUnary(op bytecode.Opcode, val *runtime.Object) (*runtime.Objec
 }
 
 func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*runtime.Object, error) {
+	leftKind, rightKind := left.Kind(), right.Kind()
 	if op == bytecode.OpEq || op == bytecode.OpNeq {
-		if left.Kind() == right.Kind() {
+		if leftKind == runtime.KindStr && rightKind == runtime.KindStr {
+			eq := left.AsString() == right.AsString()
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		if leftKind == runtime.KindBool && rightKind == runtime.KindBool {
+			eq := left.AsBool() == right.AsBool()
+			if op == bytecode.OpEq {
+				return runtime.MakeBool(eq), nil
+			}
+			return runtime.MakeBool(!eq), nil
+		}
+		if leftKind == rightKind {
 			eq := left.Equals(*right)
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
 			}
 			return runtime.MakeBool(!eq), nil
 		}
-		if left.Kind() == runtime.KindEnum && right.Kind() == runtime.KindInt {
+		if leftKind == runtime.KindEnum && rightKind == runtime.KindInt {
 			eq := left.Raw().(int) == right.AsInt()
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
 			}
 			return runtime.MakeBool(!eq), nil
 		}
-		if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindEnum {
+		if leftKind == runtime.KindInt && rightKind == runtime.KindEnum {
 			eq := left.AsInt() == right.Raw().(int)
 			if op == bytecode.OpEq {
 				return runtime.MakeBool(eq), nil
@@ -1226,7 +1145,7 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 		}
 		return runtime.MakeBool(false), nil
 	}
-	if left.Kind() == runtime.KindInt && right.Kind() == runtime.KindInt {
+	if leftKind == runtime.KindInt && rightKind == runtime.KindInt {
 		a := left.AsInt()
 		b := right.AsInt()
 		switch op {
@@ -1244,7 +1163,7 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 			return runtime.MakeBool(a >= b), nil
 		}
 	}
-	if left.Kind() == runtime.KindFloat && right.Kind() == runtime.KindFloat {
+	if leftKind == runtime.KindFloat && rightKind == runtime.KindFloat {
 		a := left.AsFloat()
 		b := right.AsFloat()
 		switch op {
@@ -1262,5 +1181,5 @@ func (vm *VM) evalCompare(op bytecode.Opcode, left, right *runtime.Object) (*run
 			return runtime.MakeBool(a >= b), nil
 		}
 	}
-	return nil, fmt.Errorf("unsupported comparison %s for %s and %s", op, left.Kind(), right.Kind())
+	return nil, fmt.Errorf("unsupported comparison %s for %s and %s", op, leftKind, rightKind)
 }

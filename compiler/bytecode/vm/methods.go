@@ -121,7 +121,11 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		if subj.Raw() == nil {
 			return nil, fmt.Errorf("%s", args[0].AsString())
 		}
-		return vm.makeValueWithType(subj.Raw(), returnType)
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, err
+		}
+		return subj.UnwrapMaybeInPlace(resolved), nil
 	case checker.MaybeIsNone:
 		return runtime.MakeBool(subj.Raw() == nil), nil
 	case checker.MaybeIsSome:
@@ -130,7 +134,11 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		if subj.Raw() == nil {
 			return args[0], nil
 		}
-		return vm.makeValueWithType(subj.Raw(), returnType)
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, err
+		}
+		return subj.UnwrapMaybeInPlace(resolved), nil
 	case checker.MaybeMap:
 		resolved, err := vm.typeFor(returnType)
 		if err != nil {
@@ -198,13 +206,13 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 			}
 			return nil, fmt.Errorf("%s: %s", args[0].AsString(), actual)
 		}
-		unwrapped := subj.UnwrapResult()
+		unwrapped := subj.UnwrapResultInPlace()
 		return unwrapped, nil
 	case checker.ResultOr:
 		if subj.IsErr() {
 			return args[0], nil
 		}
-		unwrapped := subj.UnwrapResult()
+		unwrapped := subj.UnwrapResultInPlace()
 		return unwrapped, nil
 	case checker.ResultIsOk:
 		return runtime.MakeBool(!subj.IsErr()), nil
@@ -218,7 +226,7 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 		if !ok {
 			return nil, fmt.Errorf("expected closure for Result.map, got %T", args[0].Raw())
 		}
-		mapped, err := vm.runClosure(closure, []*runtime.Object{subj.UnwrapResult()})
+		mapped, err := vm.runClosure1(closure, subj.UnwrapResultInPlace())
 		if err != nil {
 			return nil, err
 		}
@@ -231,7 +239,7 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 		if !ok {
 			return nil, fmt.Errorf("expected closure for Result.map_err, got %T", args[0].Raw())
 		}
-		mapped, err := vm.runClosure(closure, []*runtime.Object{subj.UnwrapResult()})
+		mapped, err := vm.runClosure1(closure, subj.UnwrapResultInPlace())
 		if err != nil {
 			return nil, err
 		}
@@ -244,7 +252,7 @@ func (vm *VM) evalResultMethod(kind checker.ResultMethodKind, subj *runtime.Obje
 		if !ok {
 			return nil, fmt.Errorf("expected closure for Result.and_then, got %T", args[0].Raw())
 		}
-		mapped, err := vm.runClosure(closure, []*runtime.Object{subj.UnwrapResult()})
+		mapped, err := vm.runClosure1(closure, subj.UnwrapResultInPlace())
 		if err != nil {
 			return nil, err
 		}

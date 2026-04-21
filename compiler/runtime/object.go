@@ -25,26 +25,26 @@ type Object struct {
 	isNone bool
 }
 
-func (o Object) String() string {
+func (o *Object) String() string {
 	return fmt.Sprintf("%v:%s", o.raw, o._type)
 }
 
-func (o Object) Type() checker.Type {
+func (o *Object) Type() checker.Type {
 	return o._type
 }
 
-func (o Object) Kind() Kind {
+func (o *Object) Kind() Kind {
 	return o.kind
 }
 
-func (o Object) TypeName() string {
+func (o *Object) TypeName() string {
 	return o.name
 }
 
 // simply compares the raw representations.
 //
 // the checker rules should prevent more complex comparisons.
-func (o Object) Equals(other Object) bool {
+func (o *Object) Equals(other Object) bool {
 	switch o._type {
 	case checker.Int:
 		return o.raw.(int) == other.raw.(int)
@@ -59,7 +59,7 @@ func (o Object) Equals(other Object) bool {
 	}
 }
 
-func (o Object) Raw() any {
+func (o *Object) Raw() any {
 	return o.raw
 }
 
@@ -74,6 +74,21 @@ func (o *Object) Set(v any) {
 //     let result = returns_generic()
 //     result.expect("foobar").do_stuff() // .expect(...) returns an open generic
 func (o *Object) SetRefinedType(declared checker.Type) {
+	if declared == nil || o._type == nil {
+		return
+	}
+	if o._type == declared && !o.isOk && !o.isErr {
+		return
+	}
+
+	originalType := o._type
+	if !o.isOk && !o.isErr {
+		switch o.kind {
+		case KindVoid, KindStr, KindInt, KindFloat, KindBool, KindStruct, KindEnum, KindFunction, KindDynamic:
+			return
+		}
+	}
+
 	// When the declared type is a Result and this object is already a result
 	// value (isOk/isErr), refine to the appropriate inner type rather than
 	// the full Result wrapper. This prevents .or() unwraps from losing their
@@ -101,7 +116,7 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 	if _, ok := o._type.(*checker.TypeVar); ok {
 		o._type = declared
 	}
-	if strings.Contains(o.Type().String(), "$") && !strings.Contains(declared.String(), "$") {
+	if typeHasOpenGeneric(o._type) && !typeHasOpenGeneric(declared) {
 		o._type = declared
 
 		// for collections, refine insides
@@ -118,8 +133,40 @@ func (o *Object) SetRefinedType(declared checker.Type) {
 			}
 		}
 	}
+	if o._type == originalType {
+		return
+	}
 	o.kind = kindForType(o._type)
 	o.name = typeNameForType(o._type)
+}
+
+func typeHasOpenGeneric(t checker.Type) bool {
+	if t == nil || t == checker.Int || t == checker.Float || t == checker.Bool || t == checker.Str || t == checker.Void || t == checker.Dynamic {
+		return false
+	}
+	switch tt := t.(type) {
+	case *checker.TypeVar:
+		return tt.Actual() == nil || typeHasOpenGeneric(tt.Actual())
+	case *checker.List:
+		return typeHasOpenGeneric(tt.Of())
+	case *checker.Map:
+		return typeHasOpenGeneric(tt.Key()) || typeHasOpenGeneric(tt.Value())
+	case *checker.Maybe:
+		return typeHasOpenGeneric(tt.Of())
+	case *checker.Result:
+		return typeHasOpenGeneric(tt.Val()) || typeHasOpenGeneric(tt.Err())
+	case *checker.StructDef, *checker.Enum, *checker.ExternType:
+		return false
+	case *checker.FunctionDef:
+		for i := range tt.Parameters {
+			if typeHasOpenGeneric(tt.Parameters[i].Type) {
+				return true
+			}
+		}
+		return typeHasOpenGeneric(tt.ReturnType)
+	default:
+		return strings.Contains(t.String(), "$")
+	}
 }
 
 func deepCopy(data any) any {
@@ -263,46 +310,46 @@ func (o *Object) GoValue() any {
 	return o.raw
 }
 
-func (o Object) AsBool() bool {
+func (o *Object) AsBool() bool {
 	if b, ok := o.raw.(bool); ok {
 		return b
 	}
 	panic(fmt.Sprintf("%s is not a Bool", o))
 }
 
-func (o Object) IsInt() (int, bool) {
+func (o *Object) IsInt() (int, bool) {
 	if o.kind == KindInt {
 		return o.raw.(int), true
 	}
 	return 0, false
 }
 
-func (o Object) AsInt() int {
+func (o *Object) AsInt() int {
 	if int, ok := o.raw.(int); ok {
 		return int
 	}
 	panic(fmt.Sprintf("%s is not an Int", o))
 }
 
-func (o Object) IsFloat() bool {
+func (o *Object) IsFloat() bool {
 	return o.kind == KindFloat
 }
 
-func (o Object) AsFloat() float64 {
+func (o *Object) AsFloat() float64 {
 	if f, ok := o.raw.(float64); ok {
 		return f
 	}
 	panic(fmt.Sprintf("%s is not a Float", o))
 }
 
-func (o Object) AsString() string {
+func (o *Object) AsString() string {
 	if str, ok := o.raw.(string); ok {
 		return str
 	}
 	panic(fmt.Sprintf("%s is not a string", o))
 }
 
-func (o Object) IsStr() (string, bool) {
+func (o *Object) IsStr() (string, bool) {
 	if o.kind == KindStr {
 		return o.raw.(string), true
 	}
@@ -323,7 +370,7 @@ func (o *Object) AsMap() map[string]*Object {
 	panic(fmt.Sprintf("%T is not a Map", o._type))
 }
 
-func (o Object) MapType() *checker.Map {
+func (o *Object) MapType() *checker.Map {
 	if o.kind != KindMap {
 		return nil
 	}
@@ -333,7 +380,7 @@ func (o Object) MapType() *checker.Map {
 	return nil
 }
 
-func (o Object) StructType() *checker.StructDef {
+func (o *Object) StructType() *checker.StructDef {
 	if o.kind != KindStruct {
 		return nil
 	}
@@ -343,7 +390,7 @@ func (o Object) StructType() *checker.StructDef {
 	return nil
 }
 
-func (o Object) EnumType() *checker.Enum {
+func (o *Object) EnumType() *checker.Enum {
 	if o.kind != KindEnum {
 		return nil
 	}
@@ -363,6 +410,9 @@ func MakeStr(s string) *Object {
 }
 
 func MakeInt(i int) *Object {
+	if i >= smallIntCacheMin && i <= smallIntCacheMax {
+		return smallInts[i-smallIntCacheMin]
+	}
 	return &Object{
 		_type: checker.Int,
 		kind:  KindInt,
@@ -381,51 +431,71 @@ func MakeFloat(f float64) *Object {
 }
 
 func MakeBool(b bool) *Object {
-	return &Object{
-		_type: checker.Bool,
-		kind:  KindBool,
-		name:  checker.Bool.String(),
-		raw:   b,
+	if b {
+		return trueObj
 	}
+	return falseObj
 }
 
 func MakeNone(of checker.Type) *Object {
+	maybeType := maybeTypeFor(of)
 	return &Object{
-		_type:  checker.MakeMaybe(of),
+		_type:  maybeType,
 		kind:   KindMaybe,
-		name:   checker.MakeMaybe(of).String(),
+		name:   maybeType.String(),
 		raw:    nil,
 		isNone: true,
 	}
 }
 
-func (o Object) ToNone() *Object {
+func maybeTypeFor(of checker.Type) *checker.Maybe {
+	switch of {
+	case checker.Int:
+		return maybeIntType
+	case checker.Float:
+		return maybeFloatType
+	case checker.Bool:
+		return maybeBoolType
+	case checker.Str:
+		return maybeStrType
+	case checker.Dynamic:
+		return maybeDynamicType
+	case checker.Void:
+		return maybeVoidType
+	default:
+		return checker.MakeMaybe(of)
+	}
+}
+
+func (o *Object) ToNone() *Object {
 	if !checker.IsMaybe(o._type) {
 		panic(fmt.Errorf("Cannot make Maybe::none from %s", o))
 	}
+	o.raw = nil
 	o.isNone = true
-	return &o
+	return o
 }
 
 // create a Maybe::Some from an existing Maybe
-func (o Object) ToSome(val any) *Object {
+func (o *Object) ToSome(val any) *Object {
 	if !checker.IsMaybe(o._type) {
 		panic(fmt.Errorf("Cannot make Maybe::some from %s", o))
 	}
 	o.raw = val
 	o.isNone = false
-	return &o
+	return o
 }
 
-func (o Object) IsNone() bool {
+func (o *Object) IsNone() bool {
 	return o.isNone
 }
 
 func MakeList(of checker.Type, items ...*Object) *Object {
+	listType := checker.MakeList(of)
 	return &Object{
-		_type: checker.MakeList(of),
+		_type: listType,
 		kind:  KindList,
-		name:  checker.MakeList(of).String(),
+		name:  listType.String(),
 		raw:   items,
 	}
 }
@@ -436,10 +506,11 @@ func (o *Object) List_Push(item *Object) {
 }
 
 func MakeMap(keyType, valueType checker.Type) *Object {
+	mapType := checker.MakeMap(keyType, valueType)
 	return &Object{
-		_type: checker.MakeMap(keyType, valueType),
+		_type: mapType,
 		kind:  KindMap,
-		name:  checker.MakeMap(keyType, valueType).String(),
+		name:  mapType.String(),
 		raw:   make(map[string]*Object),
 	}
 }
@@ -476,32 +547,32 @@ func (o *Object) Map_Set(key, val *Object) bool {
 }
 
 // Ard primitives can be used as keys. The raw representation is a string, so convert the string from Go back to Ard
-func (o Object) Map_GetKey(str string) *Object {
+func (o *Object) Map_GetKey(str string) *Object {
 	keyType := o._type.(*checker.Map).Key()
 	key := Make(nil, keyType)
 
-	switch keyType.String() {
-	case checker.Str.String():
+	switch keyType {
+	case checker.Str:
 		key.raw = str
-	case checker.Int.String():
+	case checker.Int:
 		if _num, err := strconv.Atoi(str); err != nil {
 			panic(fmt.Errorf("Couldn't turn map key %s into int", str))
 		} else {
 			key.raw = _num
 		}
-	case checker.Bool.String():
+	case checker.Bool:
 		if _bool, err := strconv.ParseBool(str); err != nil {
 			panic(fmt.Errorf("Couldn't turn map key %s into bool", str))
 		} else {
 			key.raw = _bool
 		}
-	case checker.Float.String():
+	case checker.Float:
 		if _float, err := strconv.ParseFloat(str, 64); err != nil {
 			panic(fmt.Errorf("Couldn't turn map key %s into float", str))
 		} else {
 			key.raw = _float
 		}
-	case checker.Dynamic.String():
+	case checker.Dynamic:
 		key.raw = str
 	default:
 		panic(fmt.Errorf("Unsupported map key: %s", keyType))
@@ -514,34 +585,73 @@ func (o Object) Map_GetKey(str string) *Object {
 
 // create Result::Err
 func MakeErr(err *Object) *Object {
-	unwrapped := err.UnwrapResult()
-	unwrapped.isErr = true
-	return unwrapped
+	err.isOk = false
+	err.isErr = true
+	return err
 }
 
 // create Result::Ok
 func MakeOk(err *Object) *Object {
-	unwrapped := err.UnwrapResult()
-	unwrapped.isOk = true
-	return unwrapped
+	err.isErr = false
+	err.isOk = true
+	return err
 }
 
-func (o Object) IsResult() bool {
+func (o *Object) IsResult() bool {
 	return o.isOk || o.isErr
 }
 
-func (o Object) IsOk() bool {
+func (o *Object) IsOk() bool {
 	return o.isOk
 }
 
-func (o Object) IsErr() bool {
+func (o *Object) IsErr() bool {
 	return o.isErr
 }
 
 func (o *Object) UnwrapResult() *Object {
-	new := Make(o.raw, o._type)
-	new.isNone = o.isNone
-	return new
+	return &Object{
+		raw:    o.raw,
+		_type:  o._type,
+		kind:   o.kind,
+		name:   o.name,
+		isNone: o.isNone,
+	}
+}
+
+func (o *Object) UnwrapResultInPlace() *Object {
+	o.isOk = false
+	o.isErr = false
+	return o
+}
+
+func (o *Object) UnwrapMaybeInPlace(of checker.Type) *Object {
+	o._type = of
+	switch of {
+	case checker.Int:
+		o.kind = KindInt
+		o.name = checker.Int.String()
+	case checker.Float:
+		o.kind = KindFloat
+		o.name = checker.Float.String()
+	case checker.Bool:
+		o.kind = KindBool
+		o.name = checker.Bool.String()
+	case checker.Str:
+		o.kind = KindStr
+		o.name = checker.Str.String()
+	case checker.Void:
+		o.kind = KindVoid
+		o.name = checker.Void.String()
+	case checker.Dynamic:
+		o.kind = KindDynamic
+		o.name = checker.Dynamic.String()
+	default:
+		o.kind = kindForType(of)
+		o.name = typeNameForType(of)
+	}
+	o.isNone = false
+	return o
 }
 
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
@@ -553,11 +663,11 @@ func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
 	}
 }
 
-func (o Object) IsStruct() bool {
+func (o *Object) IsStruct() bool {
 	return o.kind == KindStruct
 }
 
-func (o Object) Struct_Get(key string) *Object {
+func (o *Object) Struct_Get(key string) *Object {
 	if !o.IsStruct() {
 		panic(fmt.Errorf("%s is not a struct", o._type))
 	}
@@ -580,6 +690,31 @@ func MakeDynamic(val any) *Object {
 }
 
 func Make(val any, of checker.Type) *Object {
+	if val != nil {
+		if of == checker.Int {
+			if i, ok := val.(int); ok {
+				return MakeInt(i)
+			}
+		}
+		if of == checker.Float {
+			if f, ok := val.(float64); ok {
+				return MakeFloat(f)
+			}
+		}
+		if of == checker.Bool {
+			if b, ok := val.(bool); ok {
+				return MakeBool(b)
+			}
+		}
+		if of == checker.Str {
+			if s, ok := val.(string); ok {
+				return MakeStr(s)
+			}
+		}
+		if of == checker.Dynamic {
+			return MakeDynamic(val)
+		}
+	}
 	return &Object{
 		raw:   val,
 		_type: of,
@@ -588,10 +723,33 @@ func Make(val any, of checker.Type) *Object {
 	}
 }
 
-// use a single instance of void. lame attempt at optimization
-var void = &Object{
-	raw: nil, _type: checker.Void, kind: KindVoid, name: checker.Void.String(),
-}
+const (
+	smallIntCacheMin = -1
+	smallIntCacheMax = 255
+)
+
+var (
+	maybeIntType     = checker.MakeMaybe(checker.Int)
+	maybeFloatType   = checker.MakeMaybe(checker.Float)
+	maybeBoolType    = checker.MakeMaybe(checker.Bool)
+	maybeStrType     = checker.MakeMaybe(checker.Str)
+	maybeDynamicType = checker.MakeMaybe(checker.Dynamic)
+	maybeVoidType    = checker.MakeMaybe(checker.Void)
+
+	trueObj  = &Object{raw: true, _type: checker.Bool, kind: KindBool, name: checker.Bool.String()}
+	falseObj = &Object{raw: false, _type: checker.Bool, kind: KindBool, name: checker.Bool.String()}
+
+	smallInts = func() []*Object {
+		objs := make([]*Object, smallIntCacheMax-smallIntCacheMin+1)
+		for i := range objs {
+			objs[i] = &Object{raw: i + smallIntCacheMin, _type: checker.Int, kind: KindInt, name: checker.Int.String()}
+		}
+		return objs
+	}()
+
+	// use a single instance of void. lame attempt at optimization
+	void = &Object{raw: nil, _type: checker.Void, kind: KindVoid, name: checker.Void.String()}
+)
 
 func Void() *Object {
 	return void
