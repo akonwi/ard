@@ -90,11 +90,19 @@ let result = utils::add(1, 2)
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, "const __module_demo_utils = (() => {") {
-		t.Fatalf("expected imported module wrapper, got:\n%s", source)
+	if !strings.Contains(source, `import * as demo_utils from "./demo/utils.mjs";`) {
+		t.Fatalf("expected imported module file import, got:\n%s", source)
 	}
-	if !strings.Contains(source, "const result = __module_demo_utils.add(1, 2);") {
+	if !strings.Contains(source, "const result = demo_utils.add(1, 2);") {
 		t.Fatalf("expected imported module call, got:\n%s", source)
+	}
+	importedPath := filepath.Join(dir, "demo", "utils.mjs")
+	importedOut, err := os.ReadFile(importedPath)
+	if err != nil {
+		t.Fatalf("expected emitted imported module file: %v", err)
+	}
+	if !strings.Contains(string(importedOut), "function add(a, b) {") || !strings.Contains(string(importedOut), "export { add };") {
+		t.Fatalf("expected emitted imported module contents, got:\n%s", string(importedOut))
 	}
 }
 
@@ -176,14 +184,20 @@ let result = get_age()
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, "class Person {") {
-		t.Fatalf("expected imported struct class definition, got:\n%s", source)
+	if !strings.Contains(source, `import * as demo_models from "./demo/models.mjs";`) {
+		t.Fatalf("expected imported struct module import, got:\n%s", source)
 	}
-	if !strings.Contains(source, "return { Person: Person };") {
-		t.Fatalf("expected imported struct export, got:\n%s", source)
-	}
-	if !strings.Contains(source, "const person = new __module_demo_models.Person(30);") {
+	if !strings.Contains(source, "const person = new demo_models.Person(30);") {
 		t.Fatalf("expected imported struct instantiation, got:\n%s", source)
+	}
+	importedPath := filepath.Join(dir, "demo", "models.mjs")
+	importedOut, err := os.ReadFile(importedPath)
+	if err != nil {
+		t.Fatalf("expected emitted imported struct module file: %v", err)
+	}
+	importedSource := string(importedOut)
+	if !strings.Contains(importedSource, "class Person {") || !strings.Contains(importedSource, "export { Person };") {
+		t.Fatalf("expected imported struct module contents, got:\n%s", importedSource)
 	}
 }
 
@@ -711,13 +725,14 @@ fn main() {
 		t.Fatalf("did not expect error: %v", err)
 	}
 
-	out, err := os.ReadFile(outputPath)
+	modulePath := filepath.Join(dir, "ard", "io.mjs")
+	out, err := os.ReadFile(modulePath)
 	if err != nil {
-		t.Fatalf("failed to read generated module: %v", err)
+		t.Fatalf("failed to read generated io module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-server.mjs";`) {
-		t.Fatalf("expected stdlib ffi import, got:\n%s", source)
+	if !strings.Contains(source, `import * as stdlib from "../ffi.stdlib.js-server.mjs";`) {
+		t.Fatalf("expected stdlib ffi import in io module, got:\n%s", source)
 	}
 	if !strings.Contains(source, `return stdlib.printLine(string);`) {
 		t.Fatalf("expected stdlib extern wrapper call, got:\n%s", source)
@@ -845,13 +860,14 @@ fn main() {
 		t.Fatalf("did not expect browser build error: %v", err)
 	}
 
-	out, err := os.ReadFile(outputPath)
+	modulePath := filepath.Join(dir, "ard", "js", "promise.mjs")
+	out, err := os.ReadFile(modulePath)
 	if err != nil {
-		t.Fatalf("failed to read generated module: %v", err)
+		t.Fatalf("failed to read generated promise module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-browser.mjs";`) {
-		t.Fatalf("expected browser stdlib ffi import, got:\n%s", source)
+	if !strings.Contains(source, `import * as stdlib from "../../ffi.stdlib.js-browser.mjs";`) {
+		t.Fatalf("expected browser stdlib ffi import in promise module, got:\n%s", source)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
 		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
@@ -882,13 +898,14 @@ fn main() {
 		t.Fatalf("did not expect browser build error: %v", err)
 	}
 
-	out, err := os.ReadFile(outputPath)
+	modulePath := filepath.Join(dir, "ard", "js", "fetch.mjs")
+	out, err := os.ReadFile(modulePath)
 	if err != nil {
-		t.Fatalf("failed to read generated module: %v", err)
+		t.Fatalf("failed to read generated fetch module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-browser.mjs";`) {
-		t.Fatalf("expected browser stdlib ffi import, got:\n%s", source)
+	if !strings.Contains(source, `import * as stdlib from "../../ffi.stdlib.js-browser.mjs";`) {
+		t.Fatalf("expected browser stdlib ffi import in fetch module, got:\n%s", source)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
 		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
@@ -1257,6 +1274,59 @@ if (mod.c !== "60.00") throw new Error("float-to-str-2");
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("did not expect node assertion error: %v", err)
+	}
+}
+
+func TestBuildDoesNotEmitUnusedImportedEnumMethodHelper(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fetchish.ard"), []byte(`
+enum Method {
+  Get,
+  Post,
+}
+
+impl Method {
+  fn to_str() Str {
+    match self {
+      Method::Get => "GET",
+      Method::Post => "POST",
+    }
+  }
+}
+
+struct Options {
+  method: Method?,
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write fetchish source: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/fetchish
+use ard/maybe
+
+fn main() {
+  let _ = fetchish::Options{ method: maybe::some(fetchish::Method::Post) }
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect build error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if strings.Contains(source, "function __enum_method__Method__to_str(__enum_self) {") {
+		t.Fatalf("did not expect unused enum method helper in root module, got:\n%s", source)
 	}
 }
 

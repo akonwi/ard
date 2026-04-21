@@ -31,7 +31,9 @@ type emitter struct {
 	builder             strings.Builder
 	indentLevel         int
 	moduleVars          map[string]string
+	usedEnumMethods     map[string]map[string]bool
 	currentModule       string
+	currentOutputPath   string
 	currentFunction     string
 	currentReceiver     string
 	currentReceiverExpr string
@@ -47,22 +49,30 @@ func Build(inputPath, outputPath, target string) (string, error) {
 		return "", err
 	}
 
-	source, ffi, err := emitSource(module, target, emitOptions{})
-	if err != nil {
-		return "", err
-	}
-
 	resolvedOutputPath, err := filepath.Abs(outputPath)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(resolvedOutputPath), 0o755); err != nil {
+	outputDir := filepath.Dir(resolvedOutputPath)
+	rootFileName := filepath.Base(resolvedOutputPath)
+	files, ffi, err := emitBundle(module, target, emitOptions{}, rootFileName)
+	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(resolvedOutputPath, source, 0o644); err != nil {
+
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := writeFFICompanions(filepath.Dir(resolvedOutputPath), target, projectInfo, ffi); err != nil {
+	for relPath, source := range files {
+		absPath := filepath.Join(outputDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(absPath, source, 0o644); err != nil {
+			return "", err
+		}
+	}
+	if err := writeFFICompanions(outputDir, target, projectInfo, ffi); err != nil {
 		return "", err
 	}
 	return outputPath, nil
@@ -84,24 +94,29 @@ func Run(inputPath, target string, _ []string) error {
 		return err
 	}
 
-	source, ffi, err := emitSource(module, target, emitOptions{invokeMain: true})
-	if err != nil {
-		return err
-	}
-
 	tmpDir, err := os.MkdirTemp("", "ard-js-run-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmpDir)
 
-	entryPath := filepath.Join(tmpDir, "main.mjs")
-	if err := os.WriteFile(entryPath, source, 0o644); err != nil {
+	files, ffi, err := emitBundle(module, target, emitOptions{invokeMain: true}, "main.mjs")
+	if err != nil {
 		return err
+	}
+	for relPath, source := range files {
+		absPath := filepath.Join(tmpDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(absPath, source, 0o644); err != nil {
+			return err
+		}
 	}
 	if err := writeFFICompanions(tmpDir, target, projectInfo, ffi); err != nil {
 		return err
 	}
+	entryPath := filepath.Join(tmpDir, "main.mjs")
 
 	cmd := exec.Command("node", entryPath)
 	cmd.Stdout = os.Stdout
@@ -213,49 +228,71 @@ func writeFFICompanions(outputDir string, target string, projectInfo *checker.Pr
 	return nil
 }
 
-func emitSource(root checker.Module, target string, options emitOptions) ([]byte, ffiArtifacts, error) {
+func emitBundle(root checker.Module, target string, options emitOptions, rootFileName string) (map[string][]byte, ffiArtifacts, error) {
 	modules, err := collectImportedModules(root)
 	if err != nil {
 		return nil, ffiArtifacts{}, err
 	}
 
+	allModules := make([]checker.Module, 0, len(modules)+1)
+	allModules = append(allModules, modules...)
+	allModules = append(allModules, root)
 	ffi := collectFFIArtifacts(root, modules)
-	e := &emitter{
-		target:     target,
-		moduleVars: make(map[string]string),
-		ffi:        ffi,
+	files := make(map[string][]byte, len(allModules))
+	for _, module := range allModules {
+		outputPath := rootFileName
+		if module != root {
+			outputPath = moduleOutputPath(module.Path())
+		}
+		source, err := emitModuleFile(module, target, outputPath, options.invokeMain && module == root)
+		if err != nil {
+			return nil, ffiArtifacts{}, err
+		}
+		files[outputPath] = source
 	}
-	for _, module := range modules {
-		e.moduleVars[module.Path()] = moduleVarName(module.Path())
+	return files, ffi, nil
+}
+
+func emitModuleFile(module checker.Module, target string, outputPath string, invokeMain bool) ([]byte, error) {
+	ffi := moduleFFIArtifacts(module)
+	e := &emitter{
+		target:            target,
+		moduleVars:        make(map[string]string),
+		usedEnumMethods:   collectUsedEnumMethods(module.Program()),
+		ffi:               ffi,
+		currentOutputPath: outputPath,
 	}
 
-	e.line(`import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`)
+	imports := directImportedModules(module)
+	for _, imported := range imports {
+		e.moduleVars[imported.Path()] = moduleAlias(imported.Path())
+	}
+
+	preludeImport := relativeJSImport(outputPath, "ard.prelude.mjs")
+	e.line(`import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from ` + strconv.Quote(preludeImport) + `;`)
 	if (target == backend.TargetJSServer || target == backend.TargetJSBrowser) && ffi.useStdlib {
-		e.line(`import * as stdlib from "./ffi.stdlib.` + target + `.mjs";`)
+		e.line(`import * as stdlib from ` + strconv.Quote(relativeJSImport(outputPath, "ffi.stdlib."+target+".mjs")) + `;`)
 	}
 	if (target == backend.TargetJSServer || target == backend.TargetJSBrowser) && ffi.useProject {
-		e.line(`import * as project from "./ffi.project.` + target + `.mjs";`)
+		e.line(`import * as project from ` + strconv.Quote(relativeJSImport(outputPath, "ffi.project."+target+".mjs")) + `;`)
+	}
+	for _, imported := range imports {
+		e.line(`import * as ` + moduleAlias(imported.Path()) + ` from ` + strconv.Quote(relativeJSImport(outputPath, moduleOutputPath(imported.Path()))) + `;`)
 	}
 	e.line("")
 	e.line("// Generated by Ard JavaScript backend (early preview).")
 	e.line("// Target: " + target)
 	e.line("")
 
-	for _, module := range modules {
-		if err := e.emitModuleWrapper(module); err != nil {
-			return nil, ffiArtifacts{}, err
-		}
+	if err := e.emitRootModule(module); err != nil {
+		return nil, err
 	}
 
-	if err := e.emitRootModule(root); err != nil {
-		return nil, ffiArtifacts{}, err
-	}
-
-	if options.invokeMain {
-		if !moduleHasPublicOrPrivateFunction(root.Program(), "main") {
-			return nil, ffiArtifacts{}, fmt.Errorf("js-server run requires fn main()")
+	if invokeMain {
+		if !moduleHasPublicOrPrivateFunction(module.Program(), "main") {
+			return nil, fmt.Errorf("js-server run requires fn main()")
 		}
-		if !moduleCallsTopLevelFunction(root.Program(), "main") {
+		if !moduleCallsTopLevelFunction(module.Program(), "main") {
 			e.line("")
 			if target == backend.TargetJSServer {
 				e.line("await main();")
@@ -265,7 +302,7 @@ func emitSource(root checker.Module, target string, options emitOptions) ([]byte
 		}
 	}
 
-	return []byte(e.builder.String()), ffi, nil
+	return []byte(e.builder.String()), nil
 }
 
 func shouldEmitImportedModule(path string) bool {
@@ -309,24 +346,47 @@ func collectImportedModules(root checker.Module) ([]checker.Module, error) {
 func collectFFIArtifacts(root checker.Module, modules []checker.Module) ffiArtifacts {
 	ffi := ffiArtifacts{}
 	mark := func(module checker.Module) {
-		if module == nil || module.Program() == nil {
-			return
-		}
-		for _, stmt := range module.Program().Statements {
-			if ext, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok && ext.ExternalBinding != "" {
-				if strings.HasPrefix(module.Path(), "ard/") {
-					ffi.useStdlib = true
-				} else {
-					ffi.useProject = true
-				}
-			}
-		}
+		moduleFFI := moduleFFIArtifacts(module)
+		ffi.useStdlib = ffi.useStdlib || moduleFFI.useStdlib
+		ffi.useProject = ffi.useProject || moduleFFI.useProject
 	}
 	mark(root)
 	for _, module := range modules {
 		mark(module)
 	}
 	return ffi
+}
+
+func moduleFFIArtifacts(module checker.Module) ffiArtifacts {
+	ffi := ffiArtifacts{}
+	if module == nil || module.Program() == nil {
+		return ffi
+	}
+	for _, stmt := range module.Program().Statements {
+		if ext, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok && ext.ExternalBinding != "" {
+			if strings.HasPrefix(module.Path(), "ard/") {
+				ffi.useStdlib = true
+			} else {
+				ffi.useProject = true
+			}
+		}
+	}
+	return ffi
+}
+
+func directImportedModules(module checker.Module) []checker.Module {
+	if module == nil || module.Program() == nil {
+		return nil
+	}
+	imports := make([]checker.Module, 0, len(module.Program().Imports))
+	for _, imported := range module.Program().Imports {
+		if imported == nil || imported.Program() == nil || !shouldEmitImportedModule(imported.Path()) {
+			continue
+		}
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].Path() < imports[j].Path() })
+	return imports
 }
 
 func moduleHasPublicOrPrivateFunction(program *checker.Program, name string) bool {
@@ -347,30 +407,6 @@ func moduleCallsTopLevelFunction(program *checker.Program, name string) bool {
 		}
 	}
 	return false
-}
-
-func (e *emitter) emitModuleWrapper(module checker.Module) error {
-	moduleName := e.moduleVars[module.Path()]
-	e.line(fmt.Sprintf("const %s = (() => {", moduleName))
-	e.indent(func() {
-		err := e.emitModuleStatements(module)
-		if err != nil {
-			panic(err)
-		}
-		exports := exportedNames(module.Program())
-		if len(exports) == 0 {
-			e.line("return {};")
-			return
-		}
-		parts := make([]string, 0, len(exports))
-		for _, name := range exports {
-			parts = append(parts, jsName(name)+": "+jsName(name))
-		}
-		e.line("return { " + strings.Join(parts, ", ") + " };")
-	})
-	e.line("})();")
-	e.line("")
-	return nil
 }
 
 func (e *emitter) emitRootModule(module checker.Module) error {
@@ -667,7 +703,9 @@ func (e *emitter) childEmitter() *emitter {
 	return &emitter{
 		target:              e.target,
 		moduleVars:          e.moduleVars,
+		usedEnumMethods:     e.usedEnumMethods,
 		currentModule:       e.currentModule,
+		currentOutputPath:   e.currentOutputPath,
 		currentFunction:     e.currentFunction,
 		currentReceiver:     e.currentReceiver,
 		currentReceiverExpr: e.currentReceiverExpr,
@@ -1432,6 +1470,9 @@ func (e *emitter) emitEnumDef(def *checker.Enum) error {
 	e.line("const " + jsName(def.Name) + " = Object.freeze({ " + strings.Join(entries, ", ") + " });")
 	methodNames := sortedFunctionNames(def.Methods)
 	for _, methodName := range methodNames {
+		if !e.enumMethodUsed(def.Name, methodName) {
+			continue
+		}
 		e.line("")
 		if err := e.emitEnumMethod(def, def.Methods[methodName]); err != nil {
 			return err
@@ -2625,6 +2666,312 @@ func collectEnumDefs(program *checker.Program) []*checker.Enum {
 	return out
 }
 
+func collectUsedEnumMethods(program *checker.Program) map[string]map[string]bool {
+	used := map[string]map[string]bool{}
+	var visitStmt func(stmt checker.Statement)
+	var visitExpr func(expr checker.Expression)
+	visitExpr = func(expr checker.Expression) {
+		switch expr := expr.(type) {
+		case *checker.InstanceMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Method.Args {
+				visitExpr(arg)
+			}
+			if expr.ReceiverKind == checker.ReceiverEnum && expr.EnumType != nil {
+				methods := used[expr.EnumType.Name]
+				if methods == nil {
+					methods = map[string]bool{}
+					used[expr.EnumType.Name] = methods
+				}
+				methods[expr.Method.Name] = true
+			}
+		case *checker.FunctionDef:
+			for _, stmt := range expr.Body.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.StructInstance:
+			for _, field := range expr.Fields {
+				visitExpr(field)
+			}
+		case *checker.ModuleStructInstance:
+			visitExpr(expr.Property)
+		case *checker.InstanceProperty:
+			visitExpr(expr.Subject)
+		case *checker.FunctionCall:
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.ModuleFunctionCall:
+			for _, arg := range expr.Call.Args {
+				visitExpr(arg)
+			}
+		case *checker.ListLiteral:
+			for _, element := range expr.Elements {
+				visitExpr(element)
+			}
+		case *checker.MapLiteral:
+			for i := range expr.Keys {
+				visitExpr(expr.Keys[i])
+				visitExpr(expr.Values[i])
+			}
+		case *checker.CopyExpression:
+			visitExpr(expr.Expr)
+		case *checker.TryOp:
+			visitExpr(expr.Expr())
+			if expr.CatchBlock != nil {
+				for _, stmt := range expr.CatchBlock.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.TemplateStr:
+			for _, chunk := range expr.Chunks {
+				visitExpr(chunk)
+			}
+		case *checker.IntAddition:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntSubtraction:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntMultiplication:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntDivision:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntModulo:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntGreater:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntGreaterEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntLess:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.IntLessEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatAddition:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatSubtraction:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatMultiplication:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatDivision:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatGreater:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatGreaterEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatLess:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.FloatLessEqual:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.StrAddition:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.Equality:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.And:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.Or:
+			visitExpr(expr.Left)
+			visitExpr(expr.Right)
+		case *checker.Negation:
+			visitExpr(expr.Value)
+		case *checker.Not:
+			visitExpr(expr.Value)
+		case *checker.If:
+			visitExpr(expr.Condition)
+			for _, stmt := range expr.Body.Stmts {
+				visitStmt(stmt)
+			}
+			if expr.ElseIf != nil {
+				visitExpr(expr.ElseIf)
+			}
+			if expr.Else != nil {
+				for _, stmt := range expr.Else.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.Block:
+			for _, stmt := range expr.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.ListMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.MapMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.MaybeMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.ResultMethod:
+			visitExpr(expr.Subject)
+			for _, arg := range expr.Args {
+				visitExpr(arg)
+			}
+		case *checker.BoolMatch:
+			visitExpr(expr.Subject)
+			for _, stmt := range expr.True.Stmts {
+				visitStmt(stmt)
+			}
+			for _, stmt := range expr.False.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.IntMatch:
+			visitExpr(expr.Subject)
+			for _, block := range expr.IntCases {
+				for _, stmt := range block.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			for _, block := range expr.RangeCases {
+				for _, stmt := range block.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			if expr.CatchAll != nil {
+				for _, stmt := range expr.CatchAll.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.ConditionalMatch:
+			for _, c := range expr.Cases {
+				visitExpr(c.Condition)
+				for _, stmt := range c.Body.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			if expr.CatchAll != nil {
+				for _, stmt := range expr.CatchAll.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.OptionMatch:
+			visitExpr(expr.Subject)
+			for _, stmt := range expr.Some.Body.Stmts {
+				visitStmt(stmt)
+			}
+			for _, stmt := range expr.None.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.ResultMatch:
+			visitExpr(expr.Subject)
+			for _, stmt := range expr.Ok.Body.Stmts {
+				visitStmt(stmt)
+			}
+			for _, stmt := range expr.Err.Body.Stmts {
+				visitStmt(stmt)
+			}
+		case *checker.EnumMatch:
+			visitExpr(expr.Subject)
+			for _, block := range expr.Cases {
+				for _, stmt := range block.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			if expr.CatchAll != nil {
+				for _, stmt := range expr.CatchAll.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		case *checker.UnionMatch:
+			visitExpr(expr.Subject)
+			for _, block := range expr.TypeCases {
+				for _, stmt := range block.Body.Stmts {
+					visitStmt(stmt)
+				}
+			}
+			if expr.CatchAll != nil {
+				for _, stmt := range expr.CatchAll.Stmts {
+					visitStmt(stmt)
+				}
+			}
+		}
+	}
+	visitStmt = func(stmt checker.Statement) {
+		if stmt.Stmt != nil {
+			switch s := stmt.Stmt.(type) {
+			case *checker.VariableDef:
+				visitExpr(s.Value)
+			case *checker.Reassignment:
+				visitExpr(s.Target)
+				visitExpr(s.Value)
+			case checker.ForInList:
+				visitExpr(s.List)
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			case checker.ForInMap:
+				visitExpr(s.Map)
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			case checker.ForInStr:
+				visitExpr(s.Value)
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			case checker.ForIntRange:
+				visitExpr(s.Start)
+				visitExpr(s.End)
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			case checker.ForLoop:
+				if s.Init != nil {
+					visitExpr(s.Init.Value)
+				}
+				visitExpr(s.Condition)
+				if s.Update != nil {
+					visitExpr(s.Update.Value)
+				}
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			case checker.WhileLoop:
+				visitExpr(s.Condition)
+				for _, bodyStmt := range s.Body.Stmts {
+					visitStmt(bodyStmt)
+				}
+			}
+		}
+		if stmt.Expr != nil {
+			visitExpr(stmt.Expr)
+		}
+	}
+	for _, stmt := range program.Statements {
+		visitStmt(stmt)
+	}
+	return used
+}
+
+func (e *emitter) enumMethodUsed(enumName, methodName string) bool {
+	methods := e.usedEnumMethods[enumName]
+	return methods != nil && methods[methodName]
+}
+
 func isEnumType(t checker.Type) bool {
 	switch t.(type) {
 	case *checker.Enum, checker.Enum:
@@ -2774,9 +3121,27 @@ func sortedFieldNames(fields map[string]checker.Type) []string {
 	return names
 }
 
-func moduleVarName(path string) string {
+func moduleAlias(path string) string {
 	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_")
-	return "__module_" + replacer.Replace(path)
+	return jsName(replacer.Replace(path))
+}
+
+func moduleOutputPath(path string) string {
+	return filepath.ToSlash(path) + ".mjs"
+}
+
+func relativeJSImport(fromOutputPath string, toOutputPath string) string {
+	fromDir := filepath.Dir(filepath.FromSlash(fromOutputPath))
+	toPath := filepath.FromSlash(toOutputPath)
+	rel, err := filepath.Rel(fromDir, toPath)
+	if err != nil {
+		return "./" + filepath.ToSlash(toOutputPath)
+	}
+	out := filepath.ToSlash(rel)
+	if !strings.HasPrefix(out, "./") && !strings.HasPrefix(out, "../") {
+		out = "./" + out
+	}
+	return out
 }
 
 func enumMethodName(enumName, methodName string) string {
