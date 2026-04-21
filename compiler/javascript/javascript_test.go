@@ -719,7 +719,7 @@ fn main() {
 	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-server.mjs";`) {
 		t.Fatalf("expected stdlib ffi import, got:\n%s", source)
 	}
-	if !strings.Contains(source, `return stdlib["printLine"](string);`) {
+	if !strings.Contains(source, `return stdlib.printLine(string);`) {
 		t.Fatalf("expected stdlib extern wrapper call, got:\n%s", source)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-server.mjs")); err != nil {

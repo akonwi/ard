@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
@@ -553,7 +554,7 @@ func (e *emitter) emitExternalFunctionDef(fn *checker.ExternalFunctionDef) error
 			e.line("throw makeArdError(\"extern\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(fn.Name) + ", 0, " + message + ");")
 			return
 		}
-		call := ffiObject + "[" + strconv.Quote(fn.ExternalBinding) + "](" + strings.Join(params, ", ") + ")"
+		call := e.externMemberExpr(ffiObject, fn.ExternalBinding) + "(" + strings.Join(params, ", ") + ")"
 		adapted, err := e.emitExternalReturn(call, fn.ReturnType)
 		if err != nil {
 			panic(err)
@@ -576,6 +577,13 @@ func (e *emitter) externFFIObject() string {
 		return "project"
 	}
 	return ""
+}
+
+func (e *emitter) externMemberExpr(objectName string, binding string) string {
+	if isJSIdentifier(binding) {
+		return objectName + "." + binding
+	}
+	return objectName + "[" + strconv.Quote(binding) + "]"
 }
 
 func (e *emitter) emitExternalReturn(call string, returnType checker.Type) (string, error) {
@@ -2773,6 +2781,24 @@ func moduleVarName(path string) string {
 
 func enumMethodName(enumName, methodName string) string {
 	return "__enum_method__" + jsName(enumName) + "__" + jsName(methodName)
+}
+
+func isJSIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if r != '$' && r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '$' && r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func jsName(name string) string {
