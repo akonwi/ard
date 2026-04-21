@@ -568,8 +568,8 @@ func TestBuildWritesEnumAwareUnionMatchAndComparisonLowering(t *testing.T) {
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `const __ard_enum = Symbol.for("ard.enum");`) {
-		t.Fatalf("expected enum brand helper, got:\n%s", source)
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+		t.Fatalf("expected prelude import, got:\n%s", source)
 	}
 	if !strings.Contains(source, `const Status = Object.freeze({ active: makeEnum("Status", "active", 0), inactive: makeEnum("Status", "inactive", 1) });`) {
 		t.Fatalf("expected branded enum object lowering, got:\n%s", source)
@@ -716,14 +716,17 @@ fn main() {
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as __ard_stdlib_ffi from "./ffi.stdlib.js-server.mjs";`) {
+	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-server.mjs";`) {
 		t.Fatalf("expected stdlib ffi import, got:\n%s", source)
 	}
-	if !strings.Contains(source, `return __ard_stdlib_ffi["printLine"](string);`) {
+	if !strings.Contains(source, `return stdlib["printLine"](string);`) {
 		t.Fatalf("expected stdlib extern wrapper call, got:\n%s", source)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-server.mjs")); err != nil {
 		t.Fatalf("expected copied stdlib ffi companion: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ard.prelude.mjs")); err != nil {
+		t.Fatalf("expected copied js prelude companion: %v", err)
 	}
 }
 
@@ -847,11 +850,14 @@ fn main() {
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as __ard_stdlib_ffi from "./ffi.stdlib.js-browser.mjs";`) {
+	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-browser.mjs";`) {
 		t.Fatalf("expected browser stdlib ffi import, got:\n%s", source)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
 		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ard.prelude.mjs")); err != nil {
+		t.Fatalf("expected copied js prelude companion: %v", err)
 	}
 }
 
@@ -881,11 +887,14 @@ fn main() {
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as __ard_stdlib_ffi from "./ffi.stdlib.js-browser.mjs";`) {
+	if !strings.Contains(source, `import * as stdlib from "./ffi.stdlib.js-browser.mjs";`) {
 		t.Fatalf("expected browser stdlib ffi import, got:\n%s", source)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
 		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ard.prelude.mjs")); err != nil {
+		t.Fatalf("expected copied js prelude companion: %v", err)
 	}
 }
 
@@ -1338,17 +1347,11 @@ let c = maybe::none<Str>() == maybe::none()
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, "function isArdMaybe(value) {") {
-		t.Fatalf("expected maybe equality helper, got:\n%s", source)
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+		t.Fatalf("expected prelude import for maybe equality helper, got:\n%s", source)
 	}
-	if !strings.Contains(source, "if (left.isNone() && right.isNone()) return true;") {
-		t.Fatalf("expected maybe none equality logic, got:\n%s", source)
-	}
-	if !strings.Contains(source, "return ardEq(left.value, right.value);") {
-		t.Fatalf("expected recursive maybe payload equality, got:\n%s", source)
-	}
-	if strings.Count(source, "ardEq(") < 4 {
-		t.Fatalf("expected ardEq helper and call sites for maybe equality, got:\n%s", source)
+	if strings.Count(source, "ardEq(") < 3 {
+		t.Fatalf("expected ardEq call sites for maybe equality, got:\n%s", source)
 	}
 	if !strings.Contains(source, `const a = ardEq(Maybe.some("hello"), Maybe.some("hello"));`) {
 		t.Fatalf("expected some/some equality lowering, got:\n%s", source)
@@ -1400,8 +1403,8 @@ let d = result_flow()
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, "class Maybe {") || !strings.Contains(source, "class Result {") {
-		t.Fatalf("expected Maybe/Result runtime classes, got:\n%s", source)
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+		t.Fatalf("expected prelude import for Maybe/Result runtime helpers, got:\n%s", source)
 	}
 	if !strings.Contains(source, "const a = Maybe.none().isNone();") {
 		t.Fatalf("expected maybe none/is_none lowering, got:\n%s", source)
@@ -1571,8 +1574,8 @@ let c = nested_binary(Result::ok(2))
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, "function makeTryReturn(value) {") {
-		t.Fatalf("expected try sentinel helper, got:\n%s", source)
+	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum, makeTryReturn } from "./ard.prelude.mjs";`) {
+		t.Fatalf("expected prelude import for try sentinel helper, got:\n%s", source)
 	}
 	if !strings.Contains(source, "catch (__ard_try) {") || !strings.Contains(source, "if (__ard_try && __ard_try.__ard_try_return) return __ard_try.value;") {
 		t.Fatalf("expected function try boundary, got:\n%s", source)
