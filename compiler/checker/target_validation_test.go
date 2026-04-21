@@ -74,20 +74,20 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			wantErrPart: "Cannot import ard/js/promise when targeting go; allowed targets: js-browser, js-server",
 		},
 		{
-			name:   "js http allowed on js-server",
+			name:   "js fetch allowed on js-server",
 			target: backend.TargetJSServer,
-			source: "use ard/js/http as http\nfn main() Int { 1 }",
+			source: "use ard/js/fetch as fetch\nfn main() Int { 1 }",
 		},
 		{
-			name:   "js http allowed on js-browser",
+			name:   "js fetch allowed on js-browser",
 			target: backend.TargetJSBrowser,
-			source: "use ard/js/http as http\nfn main() Int { 1 }",
+			source: "use ard/js/fetch as fetch\nfn main() Int { 1 }",
 		},
 		{
-			name:        "js http blocked on go",
+			name:        "js fetch blocked on go",
 			target:      backend.TargetGo,
-			source:      "use ard/js/http as http\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/js/http when targeting go; allowed targets: js-browser, js-server",
+			source:      "use ard/js/fetch as fetch\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/js/fetch when targeting go; allowed targets: js-browser, js-server",
 		},
 	}
 

@@ -37,7 +37,7 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 		backend.TargetJSServer:  true,
 		backend.TargetJSBrowser: true,
 	},
-	"ard/js/http": {
+	"ard/js/fetch": {
 		backend.TargetJSServer:  true,
 		backend.TargetJSBrowser: true,
 	},
