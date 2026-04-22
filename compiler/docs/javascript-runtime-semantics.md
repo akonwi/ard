@@ -20,6 +20,45 @@ Both targets emit modern ESM.
 
 `js-browser` is intentionally narrower. It supports browser-safe and JS-native modules such as `ard/js/promise` and `ard/js/fetch`, but not server-only stdlib modules.
 
+## Target selection and checker validation
+
+Checker-side target validation is part of the current JavaScript target model.
+
+This validation happens during checking and import resolution, not during JavaScript code generation. That means target incompatibilities fail early and transitively through user-module imports.
+
+### Effective target selection
+
+For checking that happens as part of `ard run` or `ard build`, the effective target is resolved in this order:
+
+1. CLI `--target`
+2. `ard.toml` `target`
+3. the compiler default target
+
+`ard check` does not expose a separate `--target` flag.
+
+### What the checker enforces today
+
+The checker currently enforces JavaScript-target compatibility for:
+
+- restricted stdlib imports
+- ambiguous union matches that try to discriminate `Int` from `Float`
+
+These rules apply transitively. If a user module imports a JS-incompatible stdlib module, then any root module that imports that user module also fails when checked for that target.
+
+### Diagnostic shape
+
+Restricted-import diagnostics use the form:
+
+```text
+Cannot import ard/sql when targeting js-browser; allowed targets: bytecode, go
+```
+
+Numeric union diagnostics use the form:
+
+```text
+Cannot discriminate Int from Float in union matches when targeting js-server; JavaScript represents both as number
+```
+
 ## Output model
 
 The JavaScript backend emits real multi-file ESM output:
@@ -236,6 +275,22 @@ Instead, JS-native asynchronous workflows are currently expressed through:
 This means JavaScript targets do support async-style programming, but through JS-native promise/fetch APIs rather than the existing Ard fiber abstraction.
 
 ## Target-specific stdlib scope
+
+The current checker uses module-level allowlists for stdlib portability rules.
+
+Restricted modules currently behave as follows:
+
+| Module | bytecode | go | js-browser | js-server |
+|---|---|---|---|---|
+| `ard/fs` | yes | yes | no | yes |
+| `ard/sql` | yes | yes | no | no |
+| `ard/env` | yes | yes | no | yes |
+| `ard/io` | yes | yes | no | yes |
+| `ard/argv` | yes | yes | no | yes |
+| `ard/js/promise` | no | no | yes | yes |
+| `ard/js/fetch` | no | no | yes | yes |
+
+Stdlib modules not listed in the checker allowlist are currently treated as unrestricted unless they hit some other JS-specific semantic limitation.
 
 ### Available on `js-server`
 
