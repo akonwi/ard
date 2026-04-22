@@ -42,6 +42,8 @@ struct Response {
   body: Str,
 }
 
+private extern type NativeResponse
+
 impl Response {
   fn is_ok() Bool {
     self.status >= 200 and self.status < 300
@@ -56,23 +58,23 @@ impl Response {
   }
 }
 
-private extern fn _fetch(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) promise::Promise<Dynamic> = {
+private extern fn _fetch(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) promise::Promise<NativeResponse> = {
   js = "JSFetch"
 }
 
-private extern fn response_url(response: Dynamic) Str = {
+private extern fn response_url(response: NativeResponse) Str = {
   js = "JSFetch_ResponseUrl"
 }
 
-private extern fn response_status(response: Dynamic) Int = {
+private extern fn response_status(response: NativeResponse) Int = {
   js = "JSFetch_ResponseStatus"
 }
 
-private extern fn response_headers(response: Dynamic) [Str: Str] = {
+private extern fn response_headers(response: NativeResponse) [Str: Str] = {
   js = "JSFetch_ResponseHeaders"
 }
 
-private extern fn response_body(response: Dynamic) Str = {
+private extern fn response_body(response: NativeResponse) Str = {
   js = "JSFetch_ResponseBody"
 }
 
@@ -107,7 +109,7 @@ fn fetch(url: Str, options: Options?) promise::Promise<Response> {
 
   promise::map(
     _fetch(method, url, body, headers, timeout),
-    fn(raw: Dynamic) Response {
+    fn(raw: NativeResponse) Response {
       Response{
         url: response_url(raw),
         status: response_status(raw),
