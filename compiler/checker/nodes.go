@@ -938,12 +938,13 @@ func (f FunctionDef) String() string {
 func (f FunctionDef) get(name string) Type { return nil }
 
 type ExternalFunctionDef struct {
-	Name             string
-	Parameters       []Parameter
-	ReturnType       Type
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
+	Name                  string
+	Parameters            []Parameter
+	ReturnType            Type
+	ExternalBinding       string
+	ExternalBindingTarget string
+	ExternalBindings      map[string]string
+	Private               bool
 }
 
 func (e ExternalFunctionDef) String() string {

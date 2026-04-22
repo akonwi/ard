@@ -866,11 +866,14 @@ fn main() {
 		t.Fatalf("failed to read generated promise module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as stdlib from "../../ffi.stdlib.js-browser.mjs";`) {
-		t.Fatalf("expected browser stdlib ffi import in promise module, got:\n%s", source)
+	if !strings.Contains(source, `import * as prelude from "../../ard.prelude.mjs";`) {
+		t.Fatalf("expected browser promise module to import prelude namespace, got:\n%s", source)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
-		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
+	if !strings.Contains(source, `return prelude.promiseResolve(value);`) {
+		t.Fatalf("expected browser promise module to call prelude directly, got:\n%s", source)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); !os.IsNotExist(err) {
+		t.Fatalf("did not expect copied browser stdlib ffi companion, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ard.prelude.mjs")); err != nil {
 		t.Fatalf("expected copied js prelude companion: %v", err)
@@ -904,11 +907,14 @@ fn main() {
 		t.Fatalf("failed to read generated fetch module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `import * as stdlib from "../../ffi.stdlib.js-browser.mjs";`) {
-		t.Fatalf("expected browser stdlib ffi import in fetch module, got:\n%s", source)
+	if !strings.Contains(source, `import * as prelude from "../../ard.prelude.mjs";`) {
+		t.Fatalf("expected browser fetch module to import prelude namespace, got:\n%s", source)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); err != nil {
-		t.Fatalf("expected copied browser stdlib ffi companion: %v", err)
+	if !strings.Contains(source, `return prelude.fetchNative(method, url, body, headers, timeout);`) {
+		t.Fatalf("expected browser fetch module to call prelude directly, got:\n%s", source)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ffi.stdlib.js-browser.mjs")); !os.IsNotExist(err) {
+		t.Fatalf("did not expect copied browser stdlib ffi companion, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ard.prelude.mjs")); err != nil {
 		t.Fatalf("expected copied js prelude companion: %v", err)

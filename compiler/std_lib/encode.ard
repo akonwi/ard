@@ -5,4 +5,7 @@ trait Encodable {
   fn to_dyn() Dynamic
 }
 
-extern fn json(value: Encodable) Str!Str = "JsonEncode"
+extern fn json(value: Encodable) Str!Str = {
+  go = "JsonEncode"
+  js = "JsonEncode"
+}

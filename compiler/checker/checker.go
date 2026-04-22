@@ -4331,29 +4331,29 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
-func resolveExternalBindingForTarget(target string, bindings map[string]string) string {
+func resolveExternalBindingForTarget(target string, bindings map[string]string) (string, string) {
 	if len(bindings) == 0 {
-		return ""
+		return "", ""
 	}
 	if target != "" {
 		if binding := bindings[target]; binding != "" {
-			return binding
+			return target, binding
 		}
 	}
 	if target == backend.TargetJSServer || target == backend.TargetJSBrowser {
 		if binding := bindings["js"]; binding != "" {
-			return binding
+			return "js", binding
 		}
 	}
 	if binding := bindings[backend.TargetGo]; binding != "" {
-		return binding
+		return backend.TargetGo, binding
 	}
 	if target == backend.TargetGo || target == backend.TargetBytecode || target == "" {
 		if binding := bindings[backend.TargetBytecode]; binding != "" {
-			return binding
+			return backend.TargetBytecode, binding
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func cloneExternalBindings(bindings map[string]string) map[string]string {
@@ -4397,14 +4397,17 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 		return nil
 	}
 
+	resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
+
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
-		Name:             def.Name,
-		Parameters:       params,
-		ReturnType:       returnType,
-		ExternalBinding:  resolveExternalBindingForTarget(c.options.Target, bindings),
-		ExternalBindings: bindings,
-		Private:          def.Private,
+		Name:                  def.Name,
+		Parameters:            params,
+		ReturnType:            returnType,
+		ExternalBinding:       resolvedBinding,
+		ExternalBindingTarget: resolvedTarget,
+		ExternalBindings:      bindings,
+		Private:               def.Private,
 	}
 
 	// Add to scope

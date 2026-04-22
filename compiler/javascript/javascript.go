@@ -286,6 +286,7 @@ func emitModuleFile(module checker.Module, target string, outputPath string, inv
 	preludeImport := relativeJSImport(outputPath, "ard.prelude.mjs")
 	importLines := []string{
 		jsNamedImportLine([]string{"Maybe", "Result", "ardEnumValue", "ardEq", "ardToString", "isArdEnum", "isArdMaybe", "isEnumOf", "makeArdError", "makeBreakSignal", "makeEnum"}, preludeImport),
+		jsNamespaceImportLine("prelude", preludeImport),
 	}
 	if (target == backend.TargetJSServer || target == backend.TargetJSBrowser) && ffi.useStdlib {
 		importLines = append(importLines, jsNamespaceImportLine("stdlib", relativeJSImport(outputPath, "ffi.stdlib."+target+".mjs")))
@@ -377,12 +378,16 @@ func moduleFFIArtifacts(module checker.Module) ffiArtifacts {
 		return ffi
 	}
 	for _, stmt := range module.Program().Statements {
-		if ext, ok := stmt.Expr.(*checker.ExternalFunctionDef); ok && ext.ExternalBinding != "" {
-			if strings.HasPrefix(module.Path(), "ard/") {
+		ext, ok := stmt.Expr.(*checker.ExternalFunctionDef)
+		if !ok || ext.ExternalBinding == "" {
+			continue
+		}
+		if strings.HasPrefix(module.Path(), "ard/") {
+			if ext.ExternalBindingTarget == backend.TargetJSServer || ext.ExternalBindingTarget == backend.TargetJSBrowser {
 				ffi.useStdlib = true
-			} else {
-				ffi.useProject = true
 			}
+		} else {
+			ffi.useProject = true
 		}
 	}
 	return ffi
@@ -598,7 +603,7 @@ func (e *emitter) emitExternalFunctionDef(fn *checker.ExternalFunctionDef) error
 	}
 	header := fmt.Sprintf("function %s(%s)", jsName(fn.Name), strings.Join(params, ", "))
 	body, err := e.captureOutput(func(child *emitter) error {
-		ffiObject := child.externFFIObject()
+		ffiObject := child.externFFIObject(fn)
 		if ffiObject == "" || fn.ExternalBinding == "" {
 			message := strconv.Quote("external function not implemented for JavaScript backend: " + fn.ExternalBinding)
 			child.line("throw makeArdError(\"extern\", " + strconv.Quote(child.currentModule) + ", " + strconv.Quote(fn.Name) + ", 0, " + message + ");")
@@ -620,15 +625,25 @@ func (e *emitter) emitExternalFunctionDef(fn *checker.ExternalFunctionDef) error
 	return nil
 }
 
-func (e *emitter) externFFIObject() string {
+func (e *emitter) externFFIObject(fn *checker.ExternalFunctionDef) string {
+	if fn == nil {
+		return ""
+	}
 	if strings.HasPrefix(e.currentModule, "ard/") {
-		if e.ffi.useStdlib {
-			return "stdlib"
+		if fn.ExternalBindingTarget == "js" {
+			return "prelude"
+		}
+		if fn.ExternalBindingTarget == backend.TargetJSServer || fn.ExternalBindingTarget == backend.TargetJSBrowser {
+			if e.ffi.useStdlib {
+				return "stdlib"
+			}
 		}
 		return ""
 	}
-	if e.ffi.useProject {
-		return "project"
+	if fn.ExternalBindingTarget == "js" || fn.ExternalBindingTarget == backend.TargetJSServer || fn.ExternalBindingTarget == backend.TargetJSBrowser {
+		if e.ffi.useProject {
+			return "project"
+		}
 	}
 	return ""
 }

@@ -1,38 +1,83 @@
-extern fn exists(path: Str) Bool = "FS_Exists"
+extern fn exists(path: Str) Bool = {
+  go = "FS_Exists"
+  js-server = "FS_Exists"
+}
 
-extern fn is_file(path: Str) Bool = "FS_IsFile"
+extern fn is_file(path: Str) Bool = {
+  go = "FS_IsFile"
+  js-server = "FS_IsFile"
+}
 
-extern fn is_dir(path: Str) Bool = "FS_IsDir"
+extern fn is_dir(path: Str) Bool = {
+  go = "FS_IsDir"
+  js-server = "FS_IsDir"
+}
 
-extern fn create_file(path: Str) Bool!Str = "FS_CreateFile"
+extern fn create_file(path: Str) Bool!Str = {
+  go = "FS_CreateFile"
+  js-server = "FS_CreateFile"
+}
 
-extern fn write(path: Str, content: Str) Void!Str = "FS_WriteFile"
+extern fn write(path: Str, content: Str) Void!Str = {
+  go = "FS_WriteFile"
+  js-server = "FS_WriteFile"
+}
 
-extern fn append(path: Str, content: Str) Void!Str = "FS_AppendFile"
+extern fn append(path: Str, content: Str) Void!Str = {
+  go = "FS_AppendFile"
+  js-server = "FS_AppendFile"
+}
 
-extern fn read(path: Str) Str!Str = "FS_ReadFile"
+extern fn read(path: Str) Str!Str = {
+  go = "FS_ReadFile"
+  js-server = "FS_ReadFile"
+}
 
-extern fn delete(path: Str) Void!Str = "FS_DeleteFile"
+extern fn delete(path: Str) Void!Str = {
+  go = "FS_DeleteFile"
+  js-server = "FS_DeleteFile"
+}
 
-extern fn copy(from: Str, to: Str) Void!Str = "FS_Copy"
+extern fn copy(from: Str, to: Str) Void!Str = {
+  go = "FS_Copy"
+  js-server = "FS_Copy"
+}
 
-extern fn rename(from: Str, to: Str) Void!Str = "FS_Rename"
+extern fn rename(from: Str, to: Str) Void!Str = {
+  go = "FS_Rename"
+  js-server = "FS_Rename"
+}
 
-extern fn cwd() Str!Str = "FS_Cwd"
+extern fn cwd() Str!Str = {
+  go = "FS_Cwd"
+  js-server = "FS_Cwd"
+}
 
-extern fn abs(path: Str) Str!Str = "FS_Abs"
+extern fn abs(path: Str) Str!Str = {
+  go = "FS_Abs"
+  js-server = "FS_Abs"
+}
 
 struct DirEntry {
   name: Str,
   is_file: Bool,
 }
 
-extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
+extern fn create_dir(path: Str) Void!Str = {
+  go = "FS_CreateDir"
+  js-server = "FS_CreateDir"
+}
 
-extern fn delete_dir(path: Str) Void!Str = "FS_DeleteDir"
+extern fn delete_dir(path: Str) Void!Str = {
+  go = "FS_DeleteDir"
+  js-server = "FS_DeleteDir"
+}
 
 // Private FFI returns map of name -> is_file
-private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = "FS_ListDir"
+private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = {
+  go = "FS_ListDir"
+  js-server = "FS_ListDir"
+}
 
 fn list_dir(path: Str) [DirEntry]!Str {
   let entries_map = try _list_dir_map(path)

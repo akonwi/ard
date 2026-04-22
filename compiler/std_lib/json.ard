@@ -4,7 +4,10 @@ use ard/testing
 
 // Standard library JSON module implemented with FFI
 
-extern fn encode(value: $T) Str!Str = "JsonEncode"
+extern fn encode(value: $T) Str!Str = {
+  go = "JsonEncode"
+  js = "JsonEncode"
+}
 
 test fn test_encode_int() Void!Str {
   let out = try encode(200)
