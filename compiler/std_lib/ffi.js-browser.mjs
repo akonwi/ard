@@ -231,61 +231,61 @@ export function JsonEncode(value) {
   }
 }
 
-export function JSPromiseResolve(value) {
+export function promiseResolve(value) {
   return Promise.resolve(value);
 }
 
-export function JSPromiseReject(reason) {
+export function promiseReject(reason) {
   return Promise.reject(reason);
 }
 
-export function JSPromiseMap(promise, withFn) {
+export function promiseMap(promise, withFn) {
   return promise.then((value) => withFn(value));
 }
 
-export function JSPromiseThen(promise, withFn) {
+export function promiseThen(promise, withFn) {
   return promise.then((value) => withFn(value));
 }
 
-export function JSPromiseRescue(promise, withFn) {
+export function promiseRescue(promise, withFn) {
   return promise.catch((error) => withFn(error));
 }
 
-export function JSPromiseInspect(promise, withFn) {
+export function promiseInspect(promise, withFn) {
   return promise.then((value) => {
     withFn(value);
     return value;
   });
 }
 
-export function JSPromiseInspectError(promise, withFn) {
+export function promiseInspectError(promise, withFn) {
   return promise.catch((error) => {
     withFn(error);
     throw error;
   });
 }
 
-export function JSPromiseFinally(promise, withFn) {
+export function promiseFinally(promise, withFn) {
   return promise.finally(() => {
     withFn();
   });
 }
 
-export function JSPromiseAll(promises) {
+export function promiseAll(promises) {
   return Promise.all(promises);
 }
 
-export function JSPromiseRace(promises) {
+export function promiseRace(promises) {
   return Promise.race(promises);
 }
 
-export function JSPromiseDelay(ms, value) {
+export function promiseDelay(ms, value) {
   return new Promise((resolve) => {
     setTimeout(() => resolve(value), ms);
   });
 }
 
-export async function JSFetch(method, url, body, headers, timeout) {
+export async function fetchNative(method, url, body, headers, timeout) {
   const timeoutSeconds = unwrapMaybe(timeout);
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   let timeoutId = null;
@@ -323,27 +323,27 @@ export async function JSFetch(method, url, body, headers, timeout) {
   }
 }
 
-export function JSFetch_ResponseUrl(response) {
+export function fetchResponseUrl(response) {
   if (!response || typeof response !== "object") return "";
   return typeof response.url === "string" ? response.url : String(response.url ?? "");
 }
 
-export function JSFetch_ResponseStatus(response) {
+export function fetchResponseStatus(response) {
   if (!response || typeof response !== "object") return 0;
   return typeof response.status === "number" ? response.status : 0;
 }
 
-export function JSFetch_ResponseHeaders(response) {
+export function fetchResponseHeaders(response) {
   if (!response || typeof response !== "object") return new Map();
   if (response.headers instanceof Map) return new Map(response.headers);
   return new Map(Object.entries(response.headers ?? {}));
 }
 
-export function JSFetch_ResponseBody(response) {
+export function fetchResponseBody(response) {
   if (!response || typeof response !== "object") return "";
   return typeof response.body === "string" ? response.body : String(response.body ?? "");
 }
 
-export function JSFetch_ErrorMessage(reason) {
+export function fetchErrorMessage(reason) {
   return messageFromError(reason);
 }

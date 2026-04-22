@@ -59,23 +59,23 @@ impl Response {
 }
 
 private extern fn _fetch(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) promise::Promise<NativeResponse> = {
-  js = "JSFetch"
+  js = "fetchNative"
 }
 
 private extern fn response_url(response: NativeResponse) Str = {
-  js = "JSFetch_ResponseUrl"
+  js = "fetchResponseUrl"
 }
 
 private extern fn response_status(response: NativeResponse) Int = {
-  js = "JSFetch_ResponseStatus"
+  js = "fetchResponseStatus"
 }
 
 private extern fn response_headers(response: NativeResponse) [Str: Str] = {
-  js = "JSFetch_ResponseHeaders"
+  js = "fetchResponseHeaders"
 }
 
 private extern fn response_body(response: NativeResponse) Str = {
-  js = "JSFetch_ResponseBody"
+  js = "fetchResponseBody"
 }
 
 fn fetch(url: Str, options: Options?) promise::Promise<Response> {
