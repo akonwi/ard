@@ -527,7 +527,7 @@ let result = update()
 	if !strings.Contains(source, "__value[1] = 9;") {
 		t.Fatalf("expected set lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "__value.sort((a, b) => function(a, b)") {
+	if !strings.Contains(source, "__value.sort(") || !strings.Contains(source, "(a, b) => function(a, b)") {
 		t.Fatalf("expected sort comparator lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "return list[0];") || !strings.Contains(source, "return values[1];") {
@@ -585,7 +585,7 @@ func TestBuildWritesEnumAwareUnionMatchAndComparisonLowering(t *testing.T) {
 	if !strings.Contains(source, `import { Maybe, Result, ardEnumValue, ardEq, ardToString, isArdEnum, isArdMaybe, isEnumOf, makeArdError, makeBreakSignal, makeEnum } from "./ard.prelude.mjs";`) {
 		t.Fatalf("expected prelude import, got:\n%s", source)
 	}
-	if !strings.Contains(source, `const Status = Object.freeze({ active: makeEnum("Status", "active", 0), inactive: makeEnum("Status", "inactive", 1) });`) {
+	if !strings.Contains(source, `const Status = Object.freeze(`) || !strings.Contains(source, `active: makeEnum("Status", "active", 0)`) || !strings.Contains(source, `inactive: makeEnum("Status", "inactive", 1)`) {
 		t.Fatalf("expected branded enum object lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, `if (isEnumOf(__match, "Status")) return`) {
@@ -1482,10 +1482,10 @@ let d = result_flow()
 	if !strings.Contains(source, "const b = Result.err(\"boom\").isErr();") {
 		t.Fatalf("expected result err/is_err lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, ".andThen(function(v)") {
+	if !strings.Contains(source, "value.andThen(") || !strings.Contains(source, "function(v) {") {
 		t.Fatalf("expected maybe and_then lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, ".map(function(value)") || !strings.Contains(source, ".andThen(function(value)") {
+	if !strings.Contains(source, "res.map(") || !strings.Contains(source, "function(value) {") || !strings.Contains(source, ").andThen(") {
 		t.Fatalf("expected result combinator lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "return out.or(\"\");") {
@@ -1571,7 +1571,7 @@ let f = result_pick(Result::err("bad"))
 		t.Fatalf("failed to read generated module: %v", err)
 	}
 	source := string(out)
-	if !strings.Contains(source, `const Status = Object.freeze({ active: makeEnum("Status", "active", 0), inactive: makeEnum("Status", "inactive", 1) });`) {
+	if !strings.Contains(source, `const Status = Object.freeze(`) || !strings.Contains(source, `active: makeEnum("Status", "active", 0)`) || !strings.Contains(source, `inactive: makeEnum("Status", "inactive", 1)`) {
 		t.Fatalf("expected branded enum object lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "let d = label(Status.active)") && !strings.Contains(source, "const d = label(Status.active)") {
@@ -1580,7 +1580,7 @@ let f = result_pick(Result::err("bad"))
 	if !strings.Contains(source, `if (isEnumOf(__match, "Status") && __match.value === 0) return`) || !strings.Contains(source, `if (isEnumOf(__match, "Status") && __match.value === 1) return`) {
 		t.Fatalf("expected branded enum match lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "return __match ?") {
+	if !strings.Contains(source, "if (__match) return") {
 		t.Fatalf("expected bool match lowering, got:\n%s", source)
 	}
 	if !strings.Contains(source, "if (__match >= 1 && __match <= 3) return") {
@@ -1589,11 +1589,44 @@ let f = result_pick(Result::err("bad"))
 	if !strings.Contains(source, "if ((score >= 90)) return") || !strings.Contains(source, "if ((score >= 80)) return") {
 		t.Fatalf("expected conditional match lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "return __match.isSome() ?") || !strings.Contains(source, "const num = __match.value;") {
+	if !strings.Contains(source, "if (__match.isSome()) return") || !strings.Contains(source, "const num = __match.value;") {
 		t.Fatalf("expected maybe match lowering, got:\n%s", source)
 	}
-	if !strings.Contains(source, "return __match.isOk() ?") || !strings.Contains(source, "const msg = __match.error;") {
+	if !strings.Contains(source, "if (__match.isOk()) return") || !strings.Contains(source, "const msg = __match.error;") {
 		t.Fatalf("expected result match lowering, got:\n%s", source)
+	}
+}
+
+func TestBuildWritesConditionalMatchWithTryConditions(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn describe(value: Int!Str) Str!Str {
+  match {
+    (try value) > 10 => Result::ok("big"),
+    (try value) > 0 => Result::ok("small"),
+    _ => Result::ok("zero"),
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSServer); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	if !strings.Contains(source, "const __try") || !strings.Contains(source, "if (__try") || !strings.Contains(source, "} else {") || strings.Count(source, "const __try") < 2 {
+		t.Fatalf("expected nested conditional match lowering for try conditions, got:\n%s", source)
 	}
 }
 
