@@ -1,5 +1,9 @@
 # JavaScript `try` lowering
 
+This document covers the backend implementation strategy for lowering Ard `try` on JavaScript targets.
+
+It complements `compiler/docs/javascript-runtime-semantics.md`, which defines the semantic guarantees of Ard `try` on JS. This document focuses only on how those semantics are realized in generated JavaScript.
+
 ## Goal
 
 Lower Ard `try` into ordinary JavaScript statement flow instead of using thrown sentinel objects and function-boundary `catch` handlers.
@@ -183,7 +187,7 @@ Generated functions now use ordinary JS control flow:
 
 ## Non-goals
 
-This lowering does **not** change Ard semantics:
+This lowering does **not** change Ard semantics. In particular:
 
 - Ard `try` still only handles `Result` / `Maybe`
 - it does not become JS exception handling

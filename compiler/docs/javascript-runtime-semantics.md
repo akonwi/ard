@@ -234,14 +234,14 @@ Generated panic paths and non-exhaustive match failures use that runtime error s
 
 Ard `try` on JavaScript targets remains value-based only.
 
-It:
+Semantic guarantees:
 
-- unwraps `Result` and `Maybe`
-- performs early returns from the current Ard function or lambda
-- does not become general JS exception handling
-- does not catch `panic(...)` or arbitrary thrown JS exceptions
+- it unwraps `Result` and `Maybe`
+- it performs early returns from the current Ard function or lambda
+- it does not become general JS exception handling
+- it does not catch `panic(...)` or arbitrary thrown JS exceptions
 
-The current lowering strategy is statement-flow based. See `compiler/docs/javascript-try-lowering.md` for the detailed transformation model.
+Lowering details are intentionally documented separately in `compiler/docs/javascript-try-lowering.md`.
 
 ## Externs and FFI
 
