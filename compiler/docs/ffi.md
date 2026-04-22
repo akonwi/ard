@@ -2,13 +2,113 @@
 
 ## Overview
 
-Ard's FFI lets standard library functions declared in Ard call Go implementations inside `compiler/ffi/`.
+Ard's extern/FFI system lets functions declared in Ard call target-specific implementations.
+
+Today that includes:
+- Go implementations inside `compiler/ffi/` for the bytecode VM and Go-oriented runtime paths
+- JavaScript companion modules for `js-server` and `js-browser`
 
 The system is intentionally narrow:
-- it is for Ard's built-in standard library, not user-installed native extensions
-- it uses **zero reflection** at runtime
-- registration is fully code-generated with `go generate`
+- it is primarily for Ard's built-in standard library plus project-local JS companion modules
+- it uses **zero reflection** at runtime on the Go side
+- Go registration is fully code-generated with `go generate`
 - unsupported exported signatures in `ffi/*.go` are treated as **generator errors**
+
+## Target-aware extern bindings
+
+Extern functions can use either the original single-string shorthand or the newer binding-block form.
+
+### Single-string shorthand
+
+```ard
+extern fn read_line() Str!Str = "ReadLine"
+```
+
+This remains supported and is effectively Go-oriented shorthand.
+
+### Binding blocks
+
+```ard
+extern fn read_line() Str!Str = {
+  go = "ReadLine"
+  js = "readLine"
+  js-browser = "readLineBrowser"
+}
+```
+
+Binding blocks let one Ard declaration resolve differently per target.
+
+### Supported binding keys
+
+Current binding keys include:
+- `go`
+- `bytecode`
+- `js`
+- `js-server`
+- `js-browser`
+
+### Resolution precedence
+
+The checker resolves the active extern binding using this precedence:
+
+1. exact target binding, if present
+2. shared `js` binding for `js-server` and `js-browser`
+3. `go`
+4. `bytecode` for `go`, `bytecode`, or target-unspecified checking
+
+Examples:
+- `js-server` prefers `js-server`, then `js`, then `go`
+- `js-browser` prefers `js-browser`, then `js`, then `go`
+- `go` prefers `go`, then `bytecode`
+
+## JavaScript companion modules
+
+JavaScript externs are implemented through companion `.mjs` files rather than per-function module paths embedded in Ard source.
+
+### Standard library companions
+
+The compiler ships standard library companion files at:
+- `compiler/std_lib/ffi.js-server.mjs`
+- `compiler/std_lib/ffi.js-browser.mjs`
+
+These modules export the JS implementations for stdlib extern bindings on each JS target.
+
+### Project companions
+
+Projects can also provide target-specific JS companions at the project root:
+- `ffi.js-server.mjs`
+- `ffi.js-browser.mjs`
+
+When a build uses project JS externs, the compiler copies these into the build output as:
+- `ffi.project.js-server.mjs`
+- `ffi.project.js-browser.mjs`
+
+Standard library companions are copied into output as:
+- `ffi.stdlib.js-server.mjs`
+- `ffi.stdlib.js-browser.mjs`
+
+Generated JS then imports these as normal ESM namespaces.
+
+### Example
+
+Ard declaration:
+
+```ard
+extern fn read_line() Str!Str = {
+  go = "ReadLine"
+  js-server = "readLine"
+}
+```
+
+JS companion export:
+
+```js
+export function readLine() {
+  // ...
+}
+```
+
+On `js-server`, generated JS imports the companion module and calls `readLine(...)` from it.
 
 ## Architecture
 
@@ -225,7 +325,9 @@ func SqlClose(handle any) error {
 
 ## Standard library integration
 
-Ard code binds extern functions by string name:
+Ard code binds extern functions either by string shorthand or by target-aware binding block.
+
+### Shorthand example
 
 ```ard
 extern fn read(path: Str) Str!Str = "FS_ReadFile"
@@ -233,7 +335,24 @@ extern fn get(key: Str) Str? = "EnvGet"
 extern fn os_args() [Str] = "OsArgs"
 ```
 
-The checker validates the Ard side. The generator validates the Go side.
+### Target-aware example
+
+```ard
+private extern fn _print(string: Str) Void = {
+  go = "Print"
+  js-server = "printLine"
+}
+
+extern fn read_line() Str!Str = {
+  go = "ReadLine"
+  js-server = "readLine"
+}
+```
+
+The checker validates the Ard side and resolves the active binding for the current target.
+
+On the Go/bytecode side, the generator validates supported Go FFI signatures.
+On JavaScript targets, the backend imports the relevant JS companion module and calls the exported binding.
 
 ## Error handling
 

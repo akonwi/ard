@@ -1,0 +1,54 @@
+use ard/dynamic as Dynamic
+
+extern type Promise<$T>
+
+extern fn resolve<$T>(value: $T) Promise<$T> = {
+  js = "promiseResolve"
+}
+
+extern fn reject<$T>(reason: Dynamic) Promise<$T> = {
+  js = "promiseReject"
+}
+
+extern fn map<$A, $B>(promise: Promise<$A>, with: fn($A) $B) Promise<$B> = {
+  js = "promiseMap"
+}
+
+extern fn then<$A, $B>(promise: Promise<$A>, with: fn($A) Promise<$B>) Promise<$B> = {
+  js = "promiseThen"
+}
+
+extern fn rescue<$T>(promise: Promise<$T>, with: fn(Dynamic) $T) Promise<$T> = {
+  js = "promiseRescue"
+}
+
+extern fn inspect<$T>(promise: Promise<$T>, with: fn($T) Void) Promise<$T> = {
+  js = "promiseInspect"
+}
+
+extern fn inspect_error<$T>(promise: Promise<$T>, with: fn(Dynamic) Void) Promise<$T> = {
+  js = "promiseInspectError"
+}
+
+extern fn finally<$T>(promise: Promise<$T>, with: fn() Void) Promise<$T> = {
+  js = "promiseFinally"
+}
+
+extern fn all<$T>(promises: [Promise<$T>]) Promise<[$T]> = {
+  js = "promiseAll"
+}
+
+extern fn race<$T>(promises: [Promise<$T>]) Promise<$T> = {
+  js = "promiseRace"
+}
+
+extern fn delay<$T>(ms: Int, value: $T) Promise<$T> = {
+  js = "promiseDelay"
+}
+
+fn from_result<$T>(value: $T!Dynamic) Promise<$T> {
+  match value {
+    ok => resolve(ok),
+    err => reject(err),
+  }
+}

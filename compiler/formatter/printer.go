@@ -281,7 +281,7 @@ func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) 
 	if node.Private {
 		prefix = "private "
 	}
-	return prefix + "extern type " + node.Name
+	return prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
 }
 
 func (p printer) renderExternTypeDeclarationDoc(node *parse.ExternTypeDeclaration) doc {
@@ -298,8 +298,53 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
-	header += " = " + strconv.Quote(node.ExternalBinding)
-	return header
+
+	if len(node.ExternalBindings) == 0 || (len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "") {
+		binding := node.ExternalBinding
+		if binding == "" && len(node.ExternalBindings) == 1 {
+			binding = node.ExternalBindings["go"]
+		}
+		header += " = " + strconv.Quote(binding)
+		return header
+	}
+
+	keys := make([]string, 0, len(node.ExternalBindings))
+	for key := range node.ExternalBindings {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return externBindingOrder(keys[i]) < externBindingOrder(keys[j]) || (externBindingOrder(keys[i]) == externBindingOrder(keys[j]) && keys[i] < keys[j])
+	})
+
+	var builder strings.Builder
+	builder.WriteString(header)
+	builder.WriteString(" = {\n")
+	for _, key := range keys {
+		builder.WriteString(strings.Repeat(" ", indentWidth))
+		builder.WriteString(key)
+		builder.WriteString(" = ")
+		builder.WriteString(strconv.Quote(node.ExternalBindings[key]))
+		builder.WriteString("\n")
+	}
+	builder.WriteString("}")
+	return builder.String()
+}
+
+func externBindingOrder(target string) int {
+	switch target {
+	case "go":
+		return 0
+	case "bytecode":
+		return 1
+	case "js":
+		return 2
+	case "js-server":
+		return 3
+	case "js-browser":
+		return 4
+	default:
+		return 100
+	}
 }
 
 func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {

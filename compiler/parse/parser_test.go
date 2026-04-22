@@ -9,6 +9,7 @@ import (
 )
 
 var compareOptions = cmp.Options{
+	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreUnexported(
 		Identifier{},
 		IntType{},

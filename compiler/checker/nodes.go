@@ -938,11 +938,13 @@ func (f FunctionDef) String() string {
 func (f FunctionDef) get(name string) Type { return nil }
 
 type ExternalFunctionDef struct {
-	Name            string
-	Parameters      []Parameter
-	ReturnType      Type
-	ExternalBinding string
-	Private         bool
+	Name                  string
+	Parameters            []Parameter
+	ReturnType            Type
+	ExternalBinding       string
+	ExternalBindingTarget string
+	ExternalBindings      map[string]string
+	Private               bool
 }
 
 func (e ExternalFunctionDef) String() string {
@@ -951,7 +953,24 @@ func (e ExternalFunctionDef) String() string {
 		paramStrs[i] = e.Parameters[i].Type.String()
 	}
 
-	return fmt.Sprintf("extern fn (%s) %s = %q", strings.Join(paramStrs, ","), e.ReturnType.String(), e.ExternalBinding)
+	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
+		keys := make([]string, 0, len(e.ExternalBindings))
+		for key := range e.ExternalBindings {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
+		}
+		return fmt.Sprintf("extern fn (%s) %s = { %s }", strings.Join(paramStrs, ","), e.ReturnType.String(), strings.Join(parts, ", "))
+	}
+
+	binding := e.ExternalBinding
+	if binding == "" && len(e.ExternalBindings) == 1 {
+		binding = e.ExternalBindings["go"]
+	}
+	return fmt.Sprintf("extern fn (%s) %s = %q", strings.Join(paramStrs, ","), e.ReturnType.String(), binding)
 }
 
 func (e ExternalFunctionDef) get(name string) Type { return nil }
@@ -972,8 +991,18 @@ func (e ExternalFunctionDef) equal(other Type) bool {
 				return false
 			}
 		}
-
-		return e.ReturnType.equal(otherE.ReturnType) && e.ExternalBinding == otherE.ExternalBinding
+		if !e.ReturnType.equal(otherE.ReturnType) || e.ExternalBinding != otherE.ExternalBinding {
+			return false
+		}
+		if len(e.ExternalBindings) != len(otherE.ExternalBindings) {
+			return false
+		}
+		for key, value := range e.ExternalBindings {
+			if otherE.ExternalBindings[key] != value {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Also check if it's compatible with a regular FunctionDef (type-wise)

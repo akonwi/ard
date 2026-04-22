@@ -1,10 +1,13 @@
 package checker_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestExternType(t *testing.T) {
@@ -44,6 +47,14 @@ func TestExternType(t *testing.T) {
 			input: strings.Join([]string{
 				`extern type RawRequest`,
 				`extern fn get_req(r: RawRequest?) Str = "GetReq"`,
+			}, "\n"),
+		},
+		{
+			name: "generic extern type can be specialized in extern fn signatures",
+			input: strings.Join([]string{
+				`extern type Promise<$T>`,
+				`extern fn resolved() Promise<Str> = "Resolved"`,
+				`extern fn chain(p: Promise<Str>) Promise<Int> = "Chain"`,
 			}, "\n"),
 		},
 		{
@@ -98,4 +109,37 @@ func TestExternType(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestImportedExternTypeIsVisible(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "helpers"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "helpers", "promise.ard"), []byte("extern type Promise<$T>\nextern fn resolved() Promise<Str> = \"Resolved\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte("use demo/helpers/promise as promise\nextern fn keep(p: promise::Promise<Str>) promise::Promise<Str> = \"Keep\"\n"), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected parse error: %s", result.Errors[0].Message)
+	}
+
+	c := checker.New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		messages := make([]string, 0, len(c.Diagnostics()))
+		for _, d := range c.Diagnostics() {
+			messages = append(messages, d.String())
+		}
+		t.Fatalf("unexpected diagnostics:\n%s", strings.Join(messages, "\n"))
+	}
 }

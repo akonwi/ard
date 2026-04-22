@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"strings"
 )
 
 // todo: this can return an error with more detailed messaging for the scenario
@@ -776,22 +777,42 @@ func (d dynamicType) hasTrait(trait *Trait) bool { return false }
 var Dynamic = &dynamicType{}
 
 // ExternType represents an opaque type whose values can only be created by FFI.
-// Identity is by pointer — two different extern type declarations are distinct types.
+// Identity is by name plus any instantiated type arguments.
 type ExternType struct {
-	Name_   string
-	private bool
+	Name_         string
+	GenericParams []string
+	TypeArgs      []Type
+	private       bool
 }
 
-func (e *ExternType) String() string       { return e.Name_ }
+func (e *ExternType) String() string {
+	if len(e.TypeArgs) == 0 {
+		return e.Name_
+	}
+	parts := make([]string, len(e.TypeArgs))
+	for i, arg := range e.TypeArgs {
+		parts[i] = arg.String()
+	}
+	return e.Name_ + "<" + strings.Join(parts, ", ") + ">"
+}
 func (e *ExternType) get(name string) Type { return nil }
 func (e *ExternType) equal(other Type) bool {
 	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
 		return true
 	}
-	if otherExtern, ok := other.(*ExternType); ok {
-		return e.Name_ == otherExtern.Name_
+	otherExtern, ok := other.(*ExternType)
+	if !ok {
+		return false
 	}
-	return false
+	if e.Name_ != otherExtern.Name_ || len(e.TypeArgs) != len(otherExtern.TypeArgs) {
+		return false
+	}
+	for i := range e.TypeArgs {
+		if !e.TypeArgs[i].equal(otherExtern.TypeArgs[i]) {
+			return false
+		}
+	}
+	return true
 }
 func (e *ExternType) hasTrait(trait *Trait) bool { return false }
 func (e *ExternType) NonProducing()              {}

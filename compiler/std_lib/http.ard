@@ -98,13 +98,13 @@ fn send(req: Request, timeout: Int?) Response!Str {
   }
 
   // Extract body: Dynamic? -> Dynamic (nil means no body)
-  let body: Dynamic = match req.body {
+  let request_body: Dynamic = match req.body {
     d => d,
     _ => dynamic::from_void(),
   }
 
   // Make the HTTP request
-  let resp = try http_do(method, req.url, body, req.headers, effective_timeout)
+  let resp = try http_do(method, req.url, request_body, req.headers, effective_timeout)
 
   // Extract response data
   let status = http_response_status(resp)
@@ -115,12 +115,12 @@ fn send(req: Request, timeout: Int?) Response!Str {
   http_response_close(resp)
 
   // Build response
-  let body = try body_result
+  let response_body = try body_result
   Result::ok(
     Response{
       status: status,
       headers: headers,
-      body: body,
+      body: response_body,
     },
   )
 }

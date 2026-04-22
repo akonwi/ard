@@ -31,6 +31,19 @@ func TestExternTypeDeclaration(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Generic extern type",
+			input: `extern type Promise<$T>`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternTypeDeclaration{
+						Name:       "Promise",
+						TypeParams: []string{"T"},
+					},
+				},
+			},
+		},
 	}
 	runTests(t, tests)
 }
@@ -51,8 +64,59 @@ func TestFunctionDeclaration(t *testing.T) {
 								Type: &GenericType{Name: "T"},
 							},
 						},
+						ReturnType:       &VoidType{},
+						ExternalBinding:  "runtime.go_print",
+						ExternalBindings: map[string]string{"go": "runtime.go_print"},
+					},
+				},
+			},
+		},
+		{
+			name: "Extern function with binding block",
+			input: `extern fn print(value: Str) Void = {
+  go = "Print"
+  js-server = "printLine"
+}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternalFunction{
+						Name: "print",
+						Parameters: []Parameter{{
+							Name: "value",
+							Type: &StringType{},
+						}},
 						ReturnType:      &VoidType{},
-						ExternalBinding: "runtime.go_print",
+						ExternalBinding: "Print",
+						ExternalBindings: map[string]string{
+							"go":        "Print",
+							"js-server": "printLine",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Extern function with shared js binding block",
+			input: `extern fn delay(value: Str) Void = {
+  js = "delay"
+  js-browser = "delayBrowser"
+}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternalFunction{
+						Name: "delay",
+						Parameters: []Parameter{{
+							Name: "value",
+							Type: &StringType{},
+						}},
+						ReturnType:      &VoidType{},
+						ExternalBinding: "",
+						ExternalBindings: map[string]string{
+							"js":         "delay",
+							"js-browser": "delayBrowser",
+						},
 					},
 				},
 			},

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-//go:embed *.ard
+//go:embed *.ard js/*.ard
 var embeddedFS embed.FS
 
 // Find returns the content of an embedded .ard file by path

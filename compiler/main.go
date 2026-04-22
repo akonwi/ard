@@ -16,6 +16,7 @@ import (
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
+	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/transpile"
@@ -66,7 +67,7 @@ func main() {
 			}
 			switch target {
 			case backend.TargetBytecode:
-				module, err := loadModule(inputPath)
+				module, err := loadModule(inputPath, target)
 				if err != nil {
 					os.Exit(1)
 				}
@@ -91,6 +92,11 @@ func main() {
 					fmt.Println(err)
 					os.Exit(1)
 				}
+			case backend.TargetJSBrowser, backend.TargetJSServer:
+				if err := javascript.Run(inputPath, target, os.Args); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
 			default:
 				fmt.Printf("unknown target: %s\n", target)
 				os.Exit(1)
@@ -111,9 +117,11 @@ func main() {
 			var builtPath string
 			switch target {
 			case backend.TargetBytecode:
-				builtPath, err = buildBytecodeBinary(inputPath, outputPath)
+				builtPath, err = buildBytecodeBinary(inputPath, outputPath, target)
 			case backend.TargetGo:
 				builtPath, err = transpile.BuildBinary(inputPath, outputPath)
+			case backend.TargetJSBrowser, backend.TargetJSServer:
+				builtPath, err = javascript.Build(inputPath, outputPath, target)
 			default:
 				err = fmt.Errorf("unknown target: %s", target)
 			}
@@ -169,11 +177,11 @@ func main() {
 }
 
 func check(inputPath string) bool {
-	_, err := loadModule(inputPath)
+	_, err := loadModule(inputPath, "")
 	return err == nil
 }
 
-func loadModule(inputPath string) (checker.Module, error) {
+func loadModule(inputPath string, target string) (checker.Module, error) {
 	sourceCode, err := os.ReadFile(inputPath)
 	if err != nil {
 		fmt.Printf("Error reading file %s - %v\n", inputPath, err)
@@ -199,7 +207,7 @@ func loadModule(inputPath string) (checker.Module, error) {
 		relPath = inputPath // fallback to absolute path
 	}
 
-	c := checker.New(relPath, program, moduleResolver)
+	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{Target: target})
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {
@@ -489,7 +497,7 @@ func runTests(inputPath, filter string, failFast bool) bool {
 
 	outcomes := make([]testOutcome, 0)
 	for _, path := range files {
-		module, err := loadModule(path)
+		module, err := loadModule(path, "")
 		if err != nil {
 			return false
 		}
@@ -533,6 +541,23 @@ func runTests(inputPath, filter string, failFast bool) bool {
 	return true
 }
 
+func stdlibModulePathForTestFile(root, filePath string) (string, bool) {
+	root = filepath.Clean(root)
+	filePath = filepath.Clean(filePath)
+	if filepath.Base(root) != "std_lib" || filepath.Ext(filePath) != ".ard" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(strings.TrimSuffix(rel, ".ard"))
+	if rel == "" || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return "ard/" + rel, true
+}
+
 func discoverTestFiles(inputPath string) ([]string, error) {
 	info, err := os.Stat(inputPath)
 	if err != nil {
@@ -560,6 +585,11 @@ func discoverTestFiles(inputPath string) ([]string, error) {
 		}
 		if filepath.Ext(path) != ".ard" {
 			return nil
+		}
+		if modulePath, ok := stdlibModulePathForTestFile(inputPath, path); ok {
+			if err := checker.ValidateStdlibImportTarget(modulePath, backend.DefaultTarget); err != nil {
+				return nil
+			}
 		}
 		cleaned := filepath.Clean(path)
 		if _, ok := seen[cleaned]; ok {
@@ -661,8 +691,8 @@ func reportTestSummary(outcomes []testOutcome) {
 	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
 }
 
-func buildBytecodeBinary(inputPath string, outputPath string) (string, error) {
-	module, err := loadModule(inputPath)
+func buildBytecodeBinary(inputPath string, outputPath string, target string) (string, error) {
+	module, err := loadModule(inputPath, target)
 	if err != nil {
 		return "", err
 	}

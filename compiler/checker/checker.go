@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -142,6 +143,22 @@ func derefType(t Type) Type {
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
 		}
+	case *ExternType:
+		if len(typ.TypeArgs) == 0 {
+			return typ
+		}
+		newTypeArgs := make([]Type, len(typ.TypeArgs))
+		changed := false
+		for i, typeArg := range typ.TypeArgs {
+			newTypeArgs[i] = derefType(typeArg)
+			if newTypeArgs[i] != typeArg {
+				changed = true
+			}
+		}
+		if !changed {
+			return typ
+		}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, private: typ.private}
 	default:
 		return t
 	}
@@ -185,15 +202,17 @@ type Checker struct {
 	program        *Program
 	halted         bool
 	moduleResolver *ModuleResolver
+	options        CheckOptions
 }
 
-func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver) *Checker {
+func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
 	rootScope := makeScope(nil)
 	c := &Checker{
 		diagnostics:    []Diagnostic{},
 		input:          input,
 		filePath:       filePath,
 		moduleResolver: moduleResolver,
+		options:        normalizeCheckOptions(moduleResolver, options),
 		program: &Program{
 			Imports:    map[string]Module{},
 			Statements: []Statement{},
@@ -225,7 +244,11 @@ func (c *Checker) Check() {
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
-			if mod, ok := findInStdLib(imp.Path); ok {
+			if err := ValidateStdlibImportTarget(imp.Path, c.options.Target); err != nil {
+				c.addError(err.Error(), imp.GetLocation())
+				continue
+			}
+			if mod, ok := findInStdLibTarget(imp.Path, c.options.Target); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
 				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
@@ -256,7 +279,7 @@ func (c *Checker) Check() {
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard")
+			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard", c.options)
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
@@ -278,22 +301,22 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/dynamic"); ok {
+		if mod, ok := findInStdLibTarget("ard/dynamic", c.options.Target); ok {
 			c.program.Imports["Dynamic"] = mod
 		}
-		if mod, ok := findInStdLib("ard/float"); ok {
+		if mod, ok := findInStdLibTarget("ard/float", c.options.Target); ok {
 			c.program.Imports["Float"] = mod
 		}
-		if mod, ok := findInStdLib("ard/int"); ok {
+		if mod, ok := findInStdLibTarget("ard/int", c.options.Target); ok {
 			c.program.Imports["Int"] = mod
 		}
-		if mod, ok := findInStdLib("ard/list"); ok {
+		if mod, ok := findInStdLibTarget("ard/list", c.options.Target); ok {
 			c.program.Imports["List"] = mod
 		}
-		if mod, ok := findInStdLib("ard/map"); ok {
+		if mod, ok := findInStdLibTarget("ard/map", c.options.Target); ok {
 			c.program.Imports["Map"] = mod
 		}
-		if mod, ok := findInStdLib("ard/string"); ok {
+		if mod, ok := findInStdLibTarget("ard/string", c.options.Target); ok {
 			c.program.Imports["Str"] = mod
 		}
 	}
@@ -340,8 +363,8 @@ func (c *Checker) Module() Module {
 
 // check is an internal helper for recursive module checking.
 // Use New() + Check() + Module() for the public API.
-func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string) (Module, []Diagnostic) {
-	c := New(filePath, input, moduleResolver)
+func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string, options CheckOptions) (Module, []Diagnostic) {
+	c := New(filePath, input, moduleResolver, options)
 
 	c.Check()
 
@@ -418,6 +441,16 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 				*params = append(*params, genericName)
 				seen[genericName] = true
 			}
+		}
+	case *ExternType:
+		for _, genericName := range t.GenericParams {
+			if !seen[genericName] {
+				*params = append(*params, genericName)
+				seen[genericName] = true
+			}
+		}
+		for _, typeArg := range t.TypeArgs {
+			collectGenericsFromType(typeArg, params, seen)
 		}
 	}
 }
@@ -851,7 +884,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Name), s.GetLocation())
 				return nil
 			}
-			externType := &ExternType{Name_: s.Name, private: s.Private}
+			typeArgs := make([]Type, len(s.TypeParams))
+			for i, param := range s.TypeParams {
+				typeArgs[i] = &TypeVar{name: param}
+			}
+			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, private: s.Private}
 			c.scope.add(s.Name, externType, false)
 			return &Statement{Stmt: externType}
 		}
@@ -3415,6 +3452,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 			}
 
+			if err := ValidateUnionMatchTarget(c.options.Target, unionType, typeCases); err != nil {
+				c.addError(err.Error(), s.GetLocation())
+				return nil
+			}
+
 			// Create and return the UnionMatch
 			return &UnionMatch{
 				Subject:         subject,
@@ -4102,6 +4144,16 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			}
 			bindInferredTypeVars(exp.ReturnType, act.ReturnType)
 		}
+	case *ExternType:
+		if act, ok := actual.(*ExternType); ok && exp.Name_ == act.Name_ {
+			limit := len(exp.TypeArgs)
+			if len(act.TypeArgs) < limit {
+				limit = len(act.TypeArgs)
+			}
+			for i := 0; i < limit; i++ {
+				bindInferredTypeVars(exp.TypeArgs[i], act.TypeArgs[i])
+			}
+		}
 	}
 }
 
@@ -4279,6 +4331,42 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
+func resolveExternalBindingForTarget(target string, bindings map[string]string) (string, string) {
+	if len(bindings) == 0 {
+		return "", ""
+	}
+	if target != "" {
+		if binding := bindings[target]; binding != "" {
+			return target, binding
+		}
+	}
+	if target == backend.TargetJSServer || target == backend.TargetJSBrowser {
+		if binding := bindings["js"]; binding != "" {
+			return "js", binding
+		}
+	}
+	if binding := bindings[backend.TargetGo]; binding != "" {
+		return backend.TargetGo, binding
+	}
+	if target == backend.TargetGo || target == backend.TargetBytecode || target == "" {
+		if binding := bindings[backend.TargetBytecode]; binding != "" {
+			return backend.TargetBytecode, binding
+		}
+	}
+	return "", ""
+}
+
+func cloneExternalBindings(bindings map[string]string) map[string]string {
+	if len(bindings) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(bindings))
+	for key, value := range bindings {
+		out[key] = value
+	}
+	return out
+}
+
 func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFunctionDef {
 	// Check for duplicate function names
 	if _, dup := c.scope.get(def.Name); dup {
@@ -4300,19 +4388,26 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	// Resolve return type
 	returnType := c.resolveType(def.ReturnType)
 
-	// Validate external binding format and existence
-	if def.ExternalBinding == "" {
+	bindings := cloneExternalBindings(def.ExternalBindings)
+	if len(bindings) == 0 && def.ExternalBinding != "" {
+		bindings = map[string]string{backend.TargetGo: def.ExternalBinding}
+	}
+	if len(bindings) == 0 {
 		c.addError("External binding cannot be empty", def.GetLocation())
 		return nil
 	}
 
+	resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
+
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
-		Name:            def.Name,
-		Parameters:      params,
-		ReturnType:      returnType,
-		ExternalBinding: def.ExternalBinding,
-		Private:         def.Private,
+		Name:                  def.Name,
+		Parameters:            params,
+		ReturnType:            returnType,
+		ExternalBinding:       resolvedBinding,
+		ExternalBindingTarget: resolvedTarget,
+		ExternalBindings:      bindings,
+		Private:               def.Private,
 	}
 
 	// Add to scope
@@ -4483,6 +4578,12 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
 		}
+	case *ExternType:
+		substitutedArgs := make([]Type, len(typ.TypeArgs))
+		for i, typeArg := range typ.TypeArgs {
+			substitutedArgs[i] = substituteType(typeArg, typeMap)
+		}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, private: typ.private}
 	// Handle other compound types
 	default:
 		return t
@@ -4917,6 +5018,17 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
 		}
 		return fmt.Errorf("expected list type, got %T", actual)
+	case *ExternType:
+		actualExtern, ok := actual.(*ExternType)
+		if !ok || expectedType.Name_ != actualExtern.Name_ || len(expectedType.TypeArgs) != len(actualExtern.TypeArgs) {
+			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+		}
+		for i := range expectedType.TypeArgs {
+			if err := c.unifyTypes(expectedType.TypeArgs[i], actualExtern.TypeArgs[i], genericScope); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		// Concrete types - must match exactly
 		if !expected.equal(actual) {

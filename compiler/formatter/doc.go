@@ -1,85 +1,22 @@
 package formatter
 
-import "strings"
+import "github.com/akonwi/ard/pretty"
 
-type doc interface{ isDoc() }
+type doc = pretty.Doc
 
-type docText struct{ value string }
-type docConcat struct{ parts []doc }
-type docGroup struct{ content doc }
-type docIndent struct{ content doc }
-type docLine struct {
-	hard bool
-	soft bool
-}
-type docIfBreak struct {
-	broken doc
-	flat   doc
-}
+type docText = pretty.Text
+type docConcat = pretty.Concat
+type docGroup = pretty.Group
+type docIndent = pretty.Indent
+type docLine = pretty.Line
+type docIfBreak = pretty.IfBreak
 
-func (docText) isDoc()    {}
-func (docConcat) isDoc()  {}
-func (docGroup) isDoc()   {}
-func (docIndent) isDoc()  {}
-func (docLine) isDoc()    {}
-func (docIfBreak) isDoc() {}
-
-func dText(value string) doc {
-	if value == "" {
-		return docText{value: ""}
-	}
-	if !strings.Contains(value, "\n") {
-		return docText{value: value}
-	}
-	parts := strings.Split(value, "\n")
-	docs := make([]doc, 0, len(parts)*2)
-	for i, part := range parts {
-		docs = append(docs, docText{value: part})
-		if i < len(parts)-1 {
-			docs = append(docs, dHardLine())
-		}
-	}
-	return docConcat{parts: docs}
-}
-
-func dConcat(parts ...doc) doc {
-	flat := make([]doc, 0, len(parts))
-	for _, part := range parts {
-		if part == nil {
-			continue
-		}
-		if concat, ok := part.(docConcat); ok {
-			flat = append(flat, concat.parts...)
-			continue
-		}
-		flat = append(flat, part)
-	}
-	if len(flat) == 0 {
-		return docText{value: ""}
-	}
-	if len(flat) == 1 {
-		return flat[0]
-	}
-	return docConcat{parts: flat}
-}
-
-func dGroup(content doc) doc            { return docGroup{content: content} }
-func dIndent(content doc) doc           { return docIndent{content: content} }
-func dLine() doc                        { return docLine{} }
-func dSoftLine() doc                    { return docLine{soft: true} }
-func dHardLine() doc                    { return docLine{hard: true} }
-func dIfBreak(broken doc, flat doc) doc { return docIfBreak{broken: broken, flat: flat} }
-
-func dJoin(separator doc, docs []doc) doc {
-	if len(docs) == 0 {
-		return docText{value: ""}
-	}
-	parts := make([]doc, 0, len(docs)*2)
-	for i, item := range docs {
-		if i > 0 {
-			parts = append(parts, separator)
-		}
-		parts = append(parts, item)
-	}
-	return dConcat(parts...)
-}
+func dText(value string) doc              { return pretty.TextDoc(value) }
+func dConcat(parts ...doc) doc            { return pretty.ConcatDocs(parts...) }
+func dGroup(content doc) doc              { return pretty.GroupDoc(content) }
+func dIndent(content doc) doc             { return pretty.IndentDoc(content) }
+func dLine() doc                          { return pretty.LineDoc() }
+func dSoftLine() doc                      { return pretty.SoftLine() }
+func dHardLine() doc                      { return pretty.HardLine() }
+func dIfBreak(broken doc, flat doc) doc   { return pretty.IfBreakDoc(broken, flat) }
+func dJoin(separator doc, docs []doc) doc { return pretty.Join(separator, docs) }

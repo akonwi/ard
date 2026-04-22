@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/std_lib"
 )
 
@@ -19,17 +20,31 @@ func TestStdLibModules(t *testing.T) {
 		t.Fatalf("Failed to find ard package: %v", err)
 	}
 
-	// Get all .ard files in the std_lib directory
+	// Get all .ard files in the std_lib directory, including nested modules like js/promise.ard
 	files, err := filepath.Glob(filepath.Join(pkg.Dir, "std_lib", "*.ard"))
 	if err != nil {
 		t.Fatalf("Failed to get std_lib files: %v", err)
 	}
+	nestedFiles, err := filepath.Glob(filepath.Join(pkg.Dir, "std_lib", "*", "*.ard"))
+	if err != nil {
+		t.Fatalf("Failed to get nested std_lib files: %v", err)
+	}
+	files = append(files, nestedFiles...)
 
 	for _, file := range files {
-		moduleName := strings.TrimSuffix(filepath.Base(file), ".ard")
+		rel, err := filepath.Rel(filepath.Join(pkg.Dir, "std_lib"), file)
+		if err != nil {
+			t.Fatalf("Failed to compute std_lib relative path: %v", err)
+		}
+		moduleName := strings.TrimSuffix(filepath.ToSlash(rel), ".ard")
 		modulePath := fmt.Sprintf("ard/%s", moduleName)
 
 		t.Run(modulePath, func(t *testing.T) {
+			target := ""
+			if strings.HasPrefix(modulePath, "ard/js/") {
+				target = backend.TargetJSServer
+			}
+
 			// Read the embedded file using std_lib.Find
 			content, err := std_lib.Find(modulePath)
 			if err != nil {
@@ -47,7 +62,7 @@ func TestStdLibModules(t *testing.T) {
 			}
 
 			// Type check the program to create a Program with symbols
-			c := checker.New(modulePath, result.Program, nil)
+			c := checker.New(modulePath, result.Program, nil, checker.CheckOptions{Target: target})
 			c.Check()
 			if c.HasErrors() {
 				var errorMessages []string

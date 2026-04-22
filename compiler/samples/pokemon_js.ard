@@ -1,0 +1,77 @@
+use ard/decode
+use ard/io
+use ard/js/fetch
+use ard/js/promise
+use ard/maybe
+
+fn main() {
+  io::print("GET from pokemon api")
+
+  let flow = promise::then(
+    fetch::fetch("https://pokeapi.co/api/v2/pokemon"),
+    fn(res: fetch::Response) {
+      if res.is_ok() {
+        let data = res.json().expect("Unable to decode response body as JSON")
+
+        let count = decode::run(data, decode::field("count", decode::int))
+        let results_decoder = decode::list(decode::map(decode::string, decode::string))
+
+        let items = decode::run(data, decode::field("results", results_decoder))
+
+        match count {
+          ok(count) => io::print("res.count = {count}"),
+          err(_) => io::print("Failed to extract count"),
+        }
+
+        match items {
+          ok(results) => io::print("res.results.size = {results.size()}"),
+          err(_) => io::print("Failed to extract results"),
+        }
+      } else {
+        io::print("Received a {res.status}")
+      }
+
+      io::print("fetch() post to echoing api")
+
+      promise::rescue(
+        promise::inspect(
+          fetch::fetch(
+            "https://postman-echo.com/post",
+            fetch::Options{
+              method: maybe::some(fetch::Method::Post),
+              headers: maybe::some(["content-type": "text/plain"]),
+              body: maybe::some(Dynamic::from_str("raw text")),
+            },
+          ),
+          fn(post_res: fetch::Response) {
+            io::print("got a {post_res.status}")
+          },
+        ),
+        fn(reason: Dynamic) {
+          let reason_text = decode::string(reason).expect("reason")
+          io::print("unable to make request: {reason_text}")
+          fetch::Response{
+            url: "",
+            status: 0,
+            headers: [:],
+            body: "",
+          }
+        },
+      )
+    },
+  )
+
+  promise::rescue(
+    flow,
+    fn(reason: Dynamic) {
+      let reason_text = decode::string(reason).expect("reason")
+      io::print("unable to make request: {reason_text}")
+      fetch::Response{
+        url: "",
+        status: 0,
+        headers: [:],
+        body: "",
+      }
+    },
+  )
+}

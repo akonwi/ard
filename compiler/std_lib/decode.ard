@@ -38,14 +38,32 @@ impl Str::ToString for Error {
 
 type JsonInput = Str | Dynamic
 
-private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
-private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
-private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
-private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
-extern fn is_void(data: Dynamic) Bool = "IsNil"
+private extern fn _decode_string(data: Dynamic) Str!Error = {
+  go = "DecodeString"
+  js = "DecodeString"
+}
+private extern fn _decode_int(data: Dynamic) Int!Error = {
+  go = "DecodeInt"
+  js = "DecodeInt"
+}
+private extern fn _decode_float(data: Dynamic) Float!Error = {
+  go = "DecodeFloat"
+  js = "DecodeFloat"
+}
+private extern fn _decode_bool(data: Dynamic) Bool!Error = {
+  go = "DecodeBool"
+  js = "DecodeBool"
+}
+extern fn is_void(data: Dynamic) Bool = {
+  go = "IsNil"
+  js = "IsNil"
+}
 
 // parse json text
-private extern fn _from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+private extern fn _from_json(json: Str) Dynamic!Str = {
+  go = "JsonToDynamic"
+  js = "JsonToDynamic"
+}
 
 fn from_json(input: JsonInput) Dynamic!Str {
   let json = match input {
@@ -97,7 +115,10 @@ fn dynamic(data: Dynamic) Dynamic![Error] {
   Result::ok(data)
 }
 
-extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
+extern fn to_list(data: Dynamic) [Dynamic]!Str = {
+  go = "DynamicToList"
+  js = "DynamicToList"
+}
 
 fn list(decoder: Decoder<$T>) fn(Dynamic) [$T]![Error] {
   fn(data: Dynamic) [$T]![Error] {
@@ -169,7 +190,10 @@ fn at(index: Int, with: Decoder<$T>) fn(Dynamic) $T![Error] {
   }
 }
 
-extern fn to_map(data: Dynamic) [Dynamic: Dynamic]!Str = "DynamicToMap"
+extern fn to_map(data: Dynamic) [Dynamic: Dynamic]!Str = {
+  go = "DynamicToMap"
+  js = "DynamicToMap"
+}
 
 fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
   fn(data: Dynamic) [$Key: $Value]![Error] {
@@ -228,7 +252,10 @@ fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
   }
 }
 
-extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = "ExtractField"
+extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = {
+  go = "ExtractField"
+  js = "ExtractField"
+}
 
 fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
   fn(data: Dynamic) $T![Error] {

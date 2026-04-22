@@ -79,6 +79,57 @@ func (p *parser) skipNewlines() {
 	}
 }
 
+func trimQuotedString(value string) string {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		return value[1 : len(value)-1]
+	}
+	return value
+}
+
+func (p *parser) parseExternalBindingBlock() (map[string]string, error) {
+	bindings := map[string]string{}
+	p.skipNewlines()
+	for !p.check(right_brace) && !p.isAtEnd() {
+		target, err := p.parseExternalBindingTarget()
+		if err != nil {
+			return nil, err
+		}
+		if !p.match(equal) {
+			return nil, p.makeError(p.peek(), "Expected '=' after extern binding target")
+		}
+		if !p.check(string_) {
+			return nil, p.makeError(p.peek(), "Expected string literal for external binding")
+		}
+		binding := trimQuotedString(p.advance().text)
+		bindings[target] = binding
+		p.match(comma)
+		p.skipNewlines()
+	}
+	if !p.match(right_brace) {
+		return nil, p.makeError(p.peek(), "Expected '}' after extern binding block")
+	}
+	if len(bindings) == 0 {
+		return nil, p.makeError(p.peek(), "Extern binding block cannot be empty")
+	}
+	return bindings, nil
+}
+
+func (p *parser) parseExternalBindingTarget() (string, error) {
+	current := p.peek()
+	if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
+		return "", p.makeError(current, "Expected extern binding target")
+	}
+	parts := []string{p.advance().text}
+	for p.match(minus) {
+		current = p.peek()
+		if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
+			return "", p.makeError(current, "Expected extern binding target segment after '-' ")
+		}
+		parts = append(parts, p.advance().text)
+	}
+	return strings.Join(parts, "-"), nil
+}
+
 // synchronize skips tokens until reaching a statement boundary or EOF
 func (p *parser) synchronize() {
 	for !p.check(new_line) && !p.isAtEnd() {
@@ -2116,12 +2167,21 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			return nil, p.makeError(p.peek(), "Expected type name after 'extern type'")
 		}
 		nameToken := p.advance()
+		typeParams := p.parseGenericTypeParameters()
+		endRow := nameToken.line
+		endCol := nameToken.column + len(nameToken.text)
+		if len(typeParams) > 0 {
+			endToken := p.previous()
+			endRow = endToken.line
+			endCol = endToken.column + len(endToken.text)
+		}
 		return &ExternTypeDeclaration{
-			Name:    nameToken.text,
-			Private: private,
+			Name:       nameToken.text,
+			TypeParams: typeParams,
+			Private:    private,
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
-				End:   Point{Row: nameToken.line, Col: nameToken.column + len(nameToken.text)},
+				End:   Point{Row: endRow, Col: endCol},
 			},
 		}, nil
 	}
@@ -2265,24 +2325,31 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				return nil, p.makeError(p.peek(), "Expected '=' after extern function signature")
 			}
 
-			// Parse the external binding string
-			if !p.check(string_) {
-				return nil, p.makeError(p.peek(), "Expected string literal for external binding")
-			}
-			bindingToken := p.advance()
-			externalBinding := bindingToken.text
-			// Remove quotes from string literal
-			if len(externalBinding) >= 2 && externalBinding[0] == '"' && externalBinding[len(externalBinding)-1] == '"' {
-				externalBinding = externalBinding[1 : len(externalBinding)-1]
+			externalBinding := ""
+			externalBindings := map[string]string{}
+			if p.check(string_) {
+				bindingToken := p.advance()
+				externalBinding = trimQuotedString(bindingToken.text)
+				externalBindings["go"] = externalBinding
+			} else if p.match(left_brace) {
+				bindings, err := p.parseExternalBindingBlock()
+				if err != nil {
+					return nil, err
+				}
+				externalBindings = bindings
+				externalBinding = bindings["go"]
+			} else {
+				return nil, p.makeError(p.peek(), "Expected string literal or binding block for external binding")
 			}
 
 			extFn := &ExternalFunction{
-				Private:         private,
-				Name:            name.(string), // External functions must have string names
-				TypeParams:      typeParams,
-				Parameters:      params,
-				ReturnType:      returnType,
-				ExternalBinding: externalBinding,
+				Private:          private,
+				Name:             name.(string), // External functions must have string names
+				TypeParams:       typeParams,
+				Parameters:       params,
+				ReturnType:       returnType,
+				ExternalBinding:  externalBinding,
+				ExternalBindings: externalBindings,
 				Location: Location{
 					Start: Point{Row: keyword.line, Col: keyword.column},
 					End:   Point{Row: p.previous().line, Col: p.previous().column},

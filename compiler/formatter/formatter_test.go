@@ -60,9 +60,29 @@ func TestFormat(t *testing.T) {
 			output: "extern fn hash(password: Str, cost: Int?) Result<Str, Str> = \"CryptoHashPassword\"\n",
 		},
 		{
+			name:   "formats extern binding blocks",
+			input:  "extern fn read_line() Str!Str = {\n  js-server = \"readLine\"\n  go = \"ReadLine\"\n}\n",
+			output: "extern fn read_line() Str!Str = {\n  go = \"ReadLine\"\n  js-server = \"readLine\"\n}\n",
+		},
+		{
+			name:   "formats shared js extern binding before specific js targets",
+			input:  "extern fn read_line() Str!Str = {\n  js-browser = \"readLineBrowser\"\n  js = \"readLine\"\n  go = \"ReadLine\"\n  js-server = \"readLineServer\"\n}\n",
+			output: "extern fn read_line() Str!Str = {\n  go = \"ReadLine\"\n  js = \"readLine\"\n  js-server = \"readLineServer\"\n  js-browser = \"readLineBrowser\"\n}\n",
+		},
+		{
+			name:   "keeps single non-go extern binding as block",
+			input:  "extern fn delay(ms: Int) Void = {\n  js = \"delay\"\n}\n",
+			output: "extern fn delay(ms: Int) Void = {\n  js = \"delay\"\n}\n",
+		},
+		{
 			name:   "formats extern type declaration",
 			input:  "extern type ConnectionPtr\n",
 			output: "extern type ConnectionPtr\n",
+		},
+		{
+			name:   "formats generic extern type declaration",
+			input:  "extern type Promise<$T>\n",
+			output: "extern type Promise<$T>\n",
 		},
 		{
 			name:   "formats private extern type declaration",
