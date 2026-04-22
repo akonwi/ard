@@ -32,6 +32,7 @@ type emitter struct {
 	builder             strings.Builder
 	indentLevel         int
 	moduleVars          map[string]string
+	currentProgram      *checker.Program
 	usedEnumMethods     map[string]map[string]bool
 	tempCounter         *int
 	currentModule       string
@@ -270,6 +271,7 @@ func emitModuleFile(module checker.Module, target string, outputPath string, inv
 	e := &emitter{
 		target:            target,
 		moduleVars:        make(map[string]string),
+		currentProgram:    module.Program(),
 		usedEnumMethods:   collectUsedEnumMethods(module.Program()),
 		tempCounter:       &tempCounter,
 		ffi:               ffi,
@@ -723,6 +725,7 @@ func (e *emitter) childEmitter() *emitter {
 	return &emitter{
 		target:              e.target,
 		moduleVars:          e.moduleVars,
+		currentProgram:      e.currentProgram,
 		usedEnumMethods:     e.usedEnumMethods,
 		tempCounter:         e.tempCounter,
 		currentModule:       e.currentModule,
@@ -2439,7 +2442,13 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	case *checker.EnumVariant:
 		if enum, ok := expr.Type().(*checker.Enum); ok {
 			variantName := enum.Values[expr.Variant].Name
-			return jsName(enum.Name) + "." + jsName(variantName), nil
+			owner := jsName(enum.Name)
+			if imported := importedEnumModulePath(e.currentProgram, enum); imported != "" {
+				if moduleVar, ok := e.moduleVars[imported]; ok {
+					owner = moduleVar + "." + jsName(enum.Name)
+				}
+			}
+			return owner + "." + jsName(variantName), nil
 		}
 		return strconv.Itoa(expr.Discriminant), nil
 	case *checker.FunctionDef:
@@ -3524,6 +3533,38 @@ func (e *emitter) emitVariableName(name string) string {
 	return jsName(name)
 }
 
+func sameEnumType(a, b *checker.Enum) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Name != b.Name || len(a.Values) != len(b.Values) {
+		return false
+	}
+	for i := range a.Values {
+		if a.Values[i] != b.Values[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func importedEnumModulePath(program *checker.Program, enum *checker.Enum) string {
+	if program == nil || enum == nil {
+		return ""
+	}
+	for path, imported := range program.Imports {
+		sym := imported.Get(enum.Name)
+		importedEnum, ok := sym.Type.(*checker.Enum)
+		if !ok {
+			continue
+		}
+		if sameEnumType(importedEnum, enum) {
+			return path
+		}
+	}
+	return ""
+}
+
 func collectEnumDefs(program *checker.Program) []*checker.Enum {
 	collected := map[string]*checker.Enum{}
 	var visitType func(t checker.Type)
@@ -3820,6 +3861,9 @@ func collectEnumDefs(program *checker.Program) []*checker.Enum {
 	}
 	out := make([]*checker.Enum, 0, len(collected))
 	for _, enum := range collected {
+		if importedEnumModulePath(program, enum) != "" {
+			continue
+		}
 		out = append(out, enum)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

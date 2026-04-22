@@ -1328,6 +1328,12 @@ fn main() {
 	if strings.Contains(source, "function __enum_method__Method__to_str(__enum_self) {") {
 		t.Fatalf("did not expect unused enum method helper in root module, got:\n%s", source)
 	}
+	if strings.Contains(source, "const Method = Object.freeze(") {
+		t.Fatalf("did not expect imported enum re-declaration in root module, got:\n%s", source)
+	}
+	if !strings.Contains(source, "demo_fetchish.Method.Post") {
+		t.Fatalf("expected imported enum variant to reference imported module export, got:\n%s", source)
+	}
 }
 
 func TestRunExecutesEnumMethods(t *testing.T) {
