@@ -541,6 +541,23 @@ func runTests(inputPath, filter string, failFast bool) bool {
 	return true
 }
 
+func stdlibModulePathForTestFile(root, filePath string) (string, bool) {
+	root = filepath.Clean(root)
+	filePath = filepath.Clean(filePath)
+	if filepath.Base(root) != "std_lib" || filepath.Ext(filePath) != ".ard" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(strings.TrimSuffix(rel, ".ard"))
+	if rel == "" || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return "ard/" + rel, true
+}
+
 func discoverTestFiles(inputPath string) ([]string, error) {
 	info, err := os.Stat(inputPath)
 	if err != nil {
@@ -568,6 +585,11 @@ func discoverTestFiles(inputPath string) ([]string, error) {
 		}
 		if filepath.Ext(path) != ".ard" {
 			return nil
+		}
+		if modulePath, ok := stdlibModulePathForTestFile(inputPath, path); ok {
+			if err := checker.ValidateStdlibImportTarget(modulePath, backend.DefaultTarget); err != nil {
+				return nil
+			}
 		}
 		cleaned := filepath.Clean(path)
 		if _, ok := seen[cleaned]; ok {
