@@ -767,7 +767,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
 	cmd.Dir = ".."
 	cmd.Stdin = strings.NewReader("world\n")
 	out, err := cmd.CombinedOutput()
@@ -819,14 +819,14 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	js := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	js := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
 	js.Dir = ".."
 	jsOut, err := js.CombinedOutput()
 	if err != nil {
 		t.Fatalf("did not expect js-server decode/json run error: %v\n%s", err, string(jsOut))
 	}
 
-	base := exec.Command("go", "run", ".", "run", mainPath)
+	base := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", mainPath)
 	base.Dir = ".."
 	baseOut, err := base.CombinedOutput()
 	if err != nil {
@@ -965,7 +965,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
 	cmd.Dir = ".."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1043,7 +1043,7 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
 	cmd.Dir = ".."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1125,14 +1125,14 @@ fn main() {
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	js := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	js := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
 	js.Dir = ".."
 	jsOut, err := js.CombinedOutput()
 	if err != nil {
 		t.Fatalf("did not expect js-server fs run error: %v\n%s", err, string(jsOut))
 	}
 
-	base := exec.Command("go", "run", ".", "run", mainPath)
+	base := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", mainPath)
 	base.Dir = ".."
 	baseOut, err := base.CombinedOutput()
 	if err != nil {
@@ -1800,7 +1800,7 @@ main()
 		t.Fatalf("failed to write source: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", ".", "run", "--target", "js-server", mainPath)
+	cmd := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
 	cmd.Dir = ".."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
