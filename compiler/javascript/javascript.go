@@ -46,8 +46,12 @@ type emitter struct {
 }
 
 type loweredExpr struct {
-	stmts []string
-	expr  string
+	stmts []jsStmt
+	expr  jsExpr
+}
+
+func loweredExprText(value loweredExpr) string {
+	return renderJSExpr(value.expr)
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -756,9 +760,9 @@ func (e *emitter) emitCaptured(text string) {
 	}
 }
 
-func (e *emitter) emitCapturedStatements(stmts []string) {
+func (e *emitter) emitCapturedStatements(stmts []jsStmt) {
 	for _, stmt := range stmts {
-		e.emitCaptured(stmt)
+		e.emitCaptured(renderJSStmt(stmt))
 	}
 }
 
@@ -797,7 +801,7 @@ func (e *emitter) renderIfDoc(expr *checker.If, returns bool) (jsDoc, error) {
 	return jsIfDoc(condition, thenBody, elseDoc), nil
 }
 
-func (e *emitter) renderIfIntoDoc(expr *checker.If, dest string) (jsDoc, error) {
+func (e *emitter) lowerIfIntoStmts(expr *checker.If, dest string) ([]jsStmt, error) {
 	condition, err := e.lowerExpr(expr.Condition)
 	if err != nil {
 		return nil, err
@@ -808,13 +812,13 @@ func (e *emitter) renderIfIntoDoc(expr *checker.If, dest string) (jsDoc, error) 
 	if err != nil {
 		return nil, err
 	}
-	var elseDoc jsDoc
+	var elseStmts []jsStmt
 	if expr.ElseIf != nil {
 		elseIf := *expr.ElseIf
 		if elseIf.Else == nil {
 			elseIf.Else = expr.Else
 		}
-		elseDoc, err = e.renderIfIntoDoc(&elseIf, dest)
+		elseStmts, err = e.lowerIfIntoStmts(&elseIf, dest)
 		if err != nil {
 			return nil, err
 		}
@@ -825,15 +829,13 @@ func (e *emitter) renderIfIntoDoc(expr *checker.If, dest string) (jsDoc, error) 
 		if err != nil {
 			return nil, err
 		}
-		elseDoc = jsBareBlockDoc(elseBody)
+		elseStmts = []jsStmt{rawJSStmt(elseBody)}
 	} else {
-		elseDoc = jsBareBlockDoc(dest + " = undefined;")
+		elseStmts = []jsStmt{jsAssignStmtIR{Left: dest, Right: "undefined"}}
 	}
-	ifDoc := jsIfDoc(condition.expr, thenBody, elseDoc)
-	if len(condition.stmts) == 0 {
-		return ifDoc, nil
-	}
-	return jsConcat(jsText(strings.Join(condition.stmts, "\n")), jsHardLine(), ifDoc), nil
+	stmts := append([]jsStmt{}, condition.stmts...)
+	stmts = append(stmts, jsIfStmtIR{Condition: loweredExprText(condition), Then: []jsStmt{rawJSStmt(thenBody)}, Else: elseStmts})
+	return stmts, nil
 }
 
 func (e *emitter) emitFunctionBoundary(body *checker.Block) error {
@@ -884,7 +886,7 @@ func (e *emitter) emitBlock(block *checker.Block, returns bool) error {
 			return err
 		}
 		e.emitCapturedStatements(lowered.stmts)
-		e.emitCaptured(renderJSDoc(jsExprStmtDoc(lowered.expr)))
+		e.emitCaptured(renderJSStmt(jsExprStmtIR{Expr: loweredExprText(lowered)}))
 	}
 	if returns && (lastNonEmpty == -1 || block.Stmts[lastNonEmpty].Expr == nil) {
 		e.line("return undefined;")
@@ -934,7 +936,7 @@ func (e *emitter) emitBlockInto(block *checker.Block, dest string) error {
 			return err
 		}
 		e.emitCapturedStatements(lowered.stmts)
-		e.emitCaptured(renderJSDoc(jsExprStmtDoc(lowered.expr)))
+		e.emitCaptured(renderJSStmt(jsExprStmtIR{Expr: loweredExprText(lowered)}))
 	}
 	if lastNonEmpty == -1 || block.Stmts[lastNonEmpty].Expr == nil {
 		e.line(dest + " = undefined;")
@@ -949,7 +951,7 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 			return err
 		}
 		e.emitCapturedStatements(lowered.stmts)
-		e.emitCaptured(renderJSDoc(jsReturnDoc(lowered.expr)))
+		e.emitCaptured(renderJSStmt(jsReturnStmtIR{Value: loweredExprText(lowered)}))
 		return nil
 	}
 	switch expr := expr.(type) {
@@ -962,14 +964,14 @@ func (e *emitter) emitTailExpr(expr checker.Expression) error {
 		if err != nil {
 			return err
 		}
-		e.emitCaptured(renderJSDoc(jsThrowDoc("makeArdError(\"panic\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(e.currentFunction) + ", 0, " + message + ")")))
+		e.emitCaptured(renderJSStmt(jsThrowStmtIR{Value: "makeArdError(\"panic\", " + strconv.Quote(e.currentModule) + ", " + strconv.Quote(e.currentFunction) + ", 0, " + message + ")"}))
 		return nil
 	default:
 		value, err := e.emitExpr(expr)
 		if err != nil {
 			return err
 		}
-		e.emitCaptured(renderJSDoc(jsReturnDoc(value)))
+		e.emitCaptured(renderJSStmt(jsReturnStmtIR{Value: value}))
 		return nil
 	}
 }
@@ -980,7 +982,7 @@ func (e *emitter) emitExprInto(expr checker.Expression, dest string) error {
 		if err != nil {
 			return err
 		}
-		e.emitCaptured(renderJSDoc(jsAssignDoc(dest, value)))
+		e.emitCaptured(renderJSStmt(jsAssignStmtIR{Left: dest, Right: value}))
 		return nil
 	}
 	switch expr := expr.(type) {
@@ -1008,7 +1010,7 @@ func (e *emitter) emitExprInto(expr checker.Expression, dest string) error {
 			return err
 		}
 		e.emitCapturedStatements(lowered.stmts)
-		e.emitCaptured(renderJSDoc(jsAssignDoc(dest, lowered.expr)))
+		e.emitCaptured(renderJSStmt(jsAssignStmtIR{Left: dest, Right: loweredExprText(lowered)}))
 		return nil
 	}
 }
@@ -1023,11 +1025,11 @@ func (e *emitter) emitIf(expr *checker.If, returns bool) error {
 }
 
 func (e *emitter) emitIfInto(expr *checker.If, dest string) error {
-	doc, err := e.renderIfIntoDoc(expr, dest)
+	stmts, err := e.lowerIfIntoStmts(expr, dest)
 	if err != nil {
 		return err
 	}
-	e.emitCaptured(renderJSDoc(doc))
+	e.emitCapturedStatements(stmts)
 	return nil
 }
 
@@ -1065,7 +1067,7 @@ func (e *emitter) emitBoolMatchInto(match *checker.BoolMatch, dest string) error
 		return err
 	}
 	e.emitCapturedStatements(subject.stmts)
-	e.emitCaptured(renderJSDoc(jsIfDoc(subject.expr, trueBody, jsBareBlockDoc(falseBody))))
+	e.emitCaptured(renderJSDoc(jsIfDoc(loweredExprText(subject), trueBody, jsBareBlockDoc(falseBody))))
 	return nil
 }
 
@@ -1076,7 +1078,7 @@ func (e *emitter) emitEnumMatchInto(match *checker.EnumMatch, dest string) error
 	}
 	e.emitCapturedStatements(subject.stmts)
 	matchVar := e.temp("match")
-	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("const " + matchVar + " = " + loweredExprText(subject) + ";")
 	enumName, err := enumTypeName(match.Subject.Type())
 	if err != nil {
 		return err
@@ -1121,7 +1123,7 @@ func (e *emitter) emitUnionMatchInto(match *checker.UnionMatch, dest string) err
 	}
 	e.emitCapturedStatements(subject.stmts)
 	matchVar := e.temp("match")
-	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("const " + matchVar + " = " + loweredExprText(subject) + ";")
 	clauses := make([]jsIfClause, 0)
 	for _, caseName := range sortedUnionCaseNames(match.TypeCases) {
 		matchCase := match.TypeCases[caseName]
@@ -1169,7 +1171,7 @@ func (e *emitter) emitIntMatchInto(match *checker.IntMatch, dest string) error {
 	}
 	e.emitCapturedStatements(subject.stmts)
 	matchVar := e.temp("match")
-	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("const " + matchVar + " = " + loweredExprText(subject) + ";")
 	clauses := make([]jsIfClause, 0)
 	for _, value := range sortedIntCaseKeys(match.IntCases) {
 		body, err := e.captureOutput(func(child *emitter) error {
@@ -1206,44 +1208,51 @@ func (e *emitter) emitIntMatchInto(match *checker.IntMatch, dest string) error {
 }
 
 func (e *emitter) emitConditionalMatchInto(match *checker.ConditionalMatch, dest string) error {
-	body, err := e.renderConditionalMatchInto(match.Cases, match.CatchAll, dest)
+	stmts, err := e.lowerConditionalMatchInto(match.Cases, match.CatchAll, dest)
 	if err != nil {
 		return err
 	}
-	e.emitCaptured(body)
+	e.emitCapturedStatements(stmts)
 	return nil
 }
 
-func (e *emitter) renderConditionalMatchInto(cases []checker.ConditionalCase, catchAll *checker.Block, dest string) (string, error) {
+func (e *emitter) lowerConditionalMatchInto(cases []checker.ConditionalCase, catchAll *checker.Block, dest string) ([]jsStmt, error) {
 	if len(cases) == 0 {
 		if catchAll != nil {
-			return e.captureOutput(func(child *emitter) error {
+			body, err := e.captureOutput(func(child *emitter) error {
 				return child.emitBlockInto(catchAll, dest)
 			})
+			if err != nil {
+				return nil, err
+			}
+			return []jsStmt{rawJSStmt(body)}, nil
 		}
-		return `throw makeArdError("panic", "match", "conditional", 0, "non-exhaustive conditional match");`, nil
+		return []jsStmt{jsThrowStmtIR{Value: `makeArdError("panic", "match", "conditional", 0, "non-exhaustive conditional match")`}}, nil
 	}
 
 	head := cases[0]
 	condition, err := e.lowerExpr(head.Condition)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	thenBody, err := e.captureOutput(func(child *emitter) error {
 		return child.emitBlockInto(head.Body, dest)
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	elseBody, err := e.renderConditionalMatchInto(cases[1:], catchAll, dest)
+	elseStmts, err := e.lowerConditionalMatchInto(cases[1:], catchAll, dest)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	parts := make([]string, 0, len(condition.stmts)+1)
-	parts = append(parts, condition.stmts...)
-	parts = append(parts, renderJSDoc(jsIfDoc(condition.expr, thenBody, jsBareBlockDoc(elseBody))))
-	return strings.Join(parts, "\n"), nil
+	stmts := append([]jsStmt{}, condition.stmts...)
+	stmts = append(stmts, jsIfStmtIR{
+		Condition: loweredExprText(condition),
+		Then:      []jsStmt{rawJSStmt(thenBody)},
+		Else:      elseStmts,
+	})
+	return stmts, nil
 }
 
 func (e *emitter) emitOptionMatchInto(match *checker.OptionMatch, dest string) error {
@@ -1253,7 +1262,7 @@ func (e *emitter) emitOptionMatchInto(match *checker.OptionMatch, dest string) e
 	}
 	e.emitCapturedStatements(subject.stmts)
 	matchVar := e.temp("match")
-	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("const " + matchVar + " = " + loweredExprText(subject) + ";")
 	bindings := []string{}
 	if match.Some != nil && match.Some.Pattern != nil {
 		bindings = append(bindings, "const "+jsName(match.Some.Pattern.Name)+" = "+matchVar+".value;")
@@ -1279,7 +1288,7 @@ func (e *emitter) emitResultMatchInto(match *checker.ResultMatch, dest string) e
 	}
 	e.emitCapturedStatements(subject.stmts)
 	matchVar := e.temp("match")
-	e.line("const " + matchVar + " = " + subject.expr + ";")
+	e.line("const " + matchVar + " = " + loweredExprText(subject) + ";")
 	okBindings := []string{}
 	if match.Ok != nil && match.Ok.Pattern != nil {
 		okBindings = append(okBindings, "const "+jsName(match.Ok.Pattern.Name)+" = "+matchVar+".ok;")
@@ -1303,21 +1312,20 @@ func (e *emitter) emitResultMatchInto(match *checker.ResultMatch, dest string) e
 func (e *emitter) lowerBranchyExpr(expr checker.Expression, prefix string) (loweredExpr, error) {
 	temp := e.temp(prefix)
 	block, err := e.captureOutput(func(child *emitter) error {
-		child.line("let " + temp + ";")
 		return child.emitExprInto(expr, temp)
 	})
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := []string{}
+	stmts := []jsStmt{jsVarDeclStmtIR{Keyword: "let", Name: temp}}
 	if block != "" {
-		stmts = append(stmts, block)
+		stmts = append(stmts, rawJSStmt(block))
 	}
-	return loweredExpr{stmts: stmts, expr: temp}, nil
+	return loweredExpr{stmts: stmts, expr: rawJSExpr(temp)}, nil
 }
 
-func (e *emitter) lowerArgs(args []checker.Expression) ([]string, []string, error) {
-	stmts := []string{}
+func (e *emitter) lowerArgs(args []checker.Expression) ([]jsStmt, []string, error) {
+	stmts := []jsStmt{}
 	values := make([]string, 0, len(args))
 	for _, arg := range args {
 		lowered, err := e.lowerExpr(arg)
@@ -1325,298 +1333,326 @@ func (e *emitter) lowerArgs(args []checker.Expression) ([]string, []string, erro
 			return nil, nil, err
 		}
 		stmts = append(stmts, lowered.stmts...)
-		values = append(values, lowered.expr)
+		values = append(values, loweredExprText(lowered))
 	}
 	return stmts, values, nil
 }
 
-func (e *emitter) emitStrMethodValue(kind checker.StrMethodKind, subject string, args []string) (string, error) {
+func (e *emitter) emitStrMethodValue(kind checker.StrMethodKind, subject string, args []string) (jsExpr, error) {
 	switch kind {
 	case checker.StrSize:
-		return subject + ".length", nil
+		return rawJSExpr(subject + ".length"), nil
 	case checker.StrIsEmpty:
-		return "(" + subject + ".length === 0)", nil
+		return jsBinaryExprIR{Left: rawJSExpr(subject + ".length"), Op: "===", Right: rawJSExpr("0")}, nil
 	case checker.StrContains:
 		if len(args) != 1 {
-			return "", fmt.Errorf("str.contains expects one arg")
+			return nil, fmt.Errorf("str.contains expects one arg")
 		}
-		return renderJSDoc(jsCallDoc(subject+".includes", args)), nil
+		return jsCallExprIR{Callee: subject + ".includes", Args: args}, nil
 	case checker.StrReplace:
 		if len(args) != 2 {
-			return "", fmt.Errorf("str.replace expects two args")
+			return nil, fmt.Errorf("str.replace expects two args")
 		}
-		return renderJSDoc(jsCallDoc(subject+".replace", args)), nil
+		return jsCallExprIR{Callee: subject + ".replace", Args: args}, nil
 	case checker.StrReplaceAll:
 		if len(args) != 2 {
-			return "", fmt.Errorf("str.replace_all expects two args")
+			return nil, fmt.Errorf("str.replace_all expects two args")
 		}
-		return renderJSDoc(jsCallDoc(subject+".replaceAll", args)), nil
+		return jsCallExprIR{Callee: subject + ".replaceAll", Args: args}, nil
 	case checker.StrSplit:
 		if len(args) != 1 {
-			return "", fmt.Errorf("str.split expects one arg")
+			return nil, fmt.Errorf("str.split expects one arg")
 		}
-		return renderJSDoc(jsCallDoc(subject+".split", args)), nil
+		return jsCallExprIR{Callee: subject + ".split", Args: args}, nil
 	case checker.StrStartsWith:
 		if len(args) != 1 {
-			return "", fmt.Errorf("str.starts_with expects one arg")
+			return nil, fmt.Errorf("str.starts_with expects one arg")
 		}
-		return renderJSDoc(jsCallDoc(subject+".startsWith", args)), nil
+		return jsCallExprIR{Callee: subject + ".startsWith", Args: args}, nil
 	case checker.StrToStr:
-		return subject, nil
+		return rawJSExpr(subject), nil
 	case checker.StrTrim:
-		return renderJSDoc(jsCallDoc(subject+".trim", nil)), nil
+		return jsCallExprIR{Callee: subject + ".trim", Args: nil}, nil
 	default:
-		return "", fmt.Errorf("unsupported str method: %v", kind)
+		return nil, fmt.Errorf("unsupported str method: %v", kind)
 	}
 }
 
-func (e *emitter) emitIntMethodValue(kind checker.IntMethodKind, subject string) (string, error) {
+func (e *emitter) emitIntMethodValue(kind checker.IntMethodKind, subject string) (jsExpr, error) {
 	switch kind {
 	case checker.IntToStr:
-		return renderJSDoc(jsCallDoc("String", []string{subject})), nil
+		return jsCallExprIR{Callee: "String", Args: []string{subject}}, nil
 	default:
-		return "", fmt.Errorf("unsupported int method: %v", kind)
+		return nil, fmt.Errorf("unsupported int method: %v", kind)
 	}
 }
 
-func (e *emitter) emitFloatMethodValue(kind checker.FloatMethodKind, subject string) (string, error) {
+func (e *emitter) emitFloatMethodValue(kind checker.FloatMethodKind, subject string) (jsExpr, error) {
 	switch kind {
 	case checker.FloatToStr:
-		return renderJSDoc(jsCallDoc("("+subject+").toFixed", []string{"2"})), nil
+		return jsCallExprIR{Callee: "(" + subject + ").toFixed", Args: []string{"2"}}, nil
 	case checker.FloatToInt:
-		return renderJSDoc(jsCallDoc("Math.trunc", []string{subject})), nil
+		return jsCallExprIR{Callee: "Math.trunc", Args: []string{subject}}, nil
 	default:
-		return "", fmt.Errorf("unsupported float method: %v", kind)
+		return nil, fmt.Errorf("unsupported float method: %v", kind)
 	}
 }
 
-func (e *emitter) emitBoolMethodValue(kind checker.BoolMethodKind, subject string) (string, error) {
+func (e *emitter) emitBoolMethodValue(kind checker.BoolMethodKind, subject string) (jsExpr, error) {
 	switch kind {
 	case checker.BoolToStr:
-		return renderJSDoc(jsCallDoc("String", []string{subject})), nil
+		return jsCallExprIR{Callee: "String", Args: []string{subject}}, nil
 	default:
-		return "", fmt.Errorf("unsupported bool method: %v", kind)
+		return nil, fmt.Errorf("unsupported bool method: %v", kind)
 	}
 }
 
-func (e *emitter) emitMaybeModuleCallValue(name string, args []string) (string, error) {
+func (e *emitter) emitMaybeModuleCallValue(name string, args []string) (jsExpr, error) {
 	switch name {
 	case "some":
 		if len(args) != 1 {
-			return "", fmt.Errorf("maybe::some expects one arg")
+			return nil, fmt.Errorf("maybe::some expects one arg")
 		}
-		return renderJSDoc(jsCallDoc("Maybe.some", args)), nil
+		return jsCallExprIR{Callee: "Maybe.some", Args: args}, nil
 	case "none":
-		return renderJSDoc(jsCallDoc("Maybe.none", nil)), nil
+		return jsCallExprIR{Callee: "Maybe.none", Args: nil}, nil
 	default:
-		return "", fmt.Errorf("unsupported maybe module call: %s", name)
+		return nil, fmt.Errorf("unsupported maybe module call: %s", name)
 	}
 }
 
-func (e *emitter) emitResultModuleCallValue(name string, args []string) (string, error) {
+func (e *emitter) emitResultModuleCallValue(name string, args []string) (jsExpr, error) {
 	switch name {
 	case "ok":
 		if len(args) != 1 {
-			return "", fmt.Errorf("Result::ok expects one arg")
+			return nil, fmt.Errorf("Result::ok expects one arg")
 		}
-		return renderJSDoc(jsCallDoc("Result.ok", args)), nil
+		return jsCallExprIR{Callee: "Result.ok", Args: args}, nil
 	case "err":
 		if len(args) != 1 {
-			return "", fmt.Errorf("Result::err expects one arg")
+			return nil, fmt.Errorf("Result::err expects one arg")
 		}
-		return renderJSDoc(jsCallDoc("Result.err", args)), nil
+		return jsCallExprIR{Callee: "Result.err", Args: args}, nil
 	default:
-		return "", fmt.Errorf("unsupported Result module call: %s", name)
+		return nil, fmt.Errorf("unsupported Result module call: %s", name)
 	}
 }
 
-func (e *emitter) emitFloatModuleCallValue(name string, args []string) (string, error) {
+func (e *emitter) emitFloatModuleCallValue(name string, args []string) (jsExpr, error) {
 	switch name {
 	case "from_int":
 		if len(args) != 1 {
-			return "", fmt.Errorf("Float::from_int expects one arg")
+			return nil, fmt.Errorf("Float::from_int expects one arg")
 		}
-		return renderJSDoc(jsCallDoc("Number", args)), nil
+		return jsCallExprIR{Callee: "Number", Args: args}, nil
 	case "from_str":
 		if len(args) != 1 {
-			return "", fmt.Errorf("Float::from_str expects one arg")
+			return nil, fmt.Errorf("Float::from_str expects one arg")
 		}
 		body := "const __input = String(" + args[0] + ").trim();\nif (__input === \"\") return Maybe.none();\nconst __value = Number(__input);\nreturn Number.isNaN(__value) ? Maybe.none() : Maybe.some(__value);"
-		return renderJSDoc(jsIIFEDoc(body)), nil
+		return rawJSExpr(renderJSDoc(jsIIFEDoc(body))), nil
 	case "floor":
 		if len(args) != 1 {
-			return "", fmt.Errorf("Float::floor expects one arg")
+			return nil, fmt.Errorf("Float::floor expects one arg")
 		}
-		return renderJSDoc(jsCallDoc("Math.floor", args)), nil
+		return jsCallExprIR{Callee: "Math.floor", Args: args}, nil
 	default:
-		return "", fmt.Errorf("unsupported Float module call: %s", name)
+		return nil, fmt.Errorf("unsupported Float module call: %s", name)
 	}
 }
 
-func (e *emitter) emitIntModuleCallValue(name string, args []string) (string, error) {
+func (e *emitter) emitIntModuleCallValue(name string, args []string) (jsExpr, error) {
 	switch name {
 	case "from_str":
 		if len(args) != 1 {
-			return "", fmt.Errorf("Int::from_str expects one arg")
+			return nil, fmt.Errorf("Int::from_str expects one arg")
 		}
 		body := "const __input = String(" + args[0] + ").trim();\nif (!/^[-+]?\\d+$/.test(__input)) return Maybe.none();\nreturn Maybe.some(Number.parseInt(__input, 10));"
-		return renderJSDoc(jsIIFEDoc(body)), nil
+		return rawJSExpr(renderJSDoc(jsIIFEDoc(body))), nil
 	default:
-		return "", fmt.Errorf("unsupported Int module call: %s", name)
+		return nil, fmt.Errorf("unsupported Int module call: %s", name)
 	}
 }
 
-func (e *emitter) emitListModuleCallValue(name string, args []string) (string, error) {
+func (e *emitter) emitListModuleCallValue(name string, args []string) (jsExpr, error) {
 	switch name {
 	case "new":
-		return renderJSDoc(jsArrayDoc(nil)), nil
+		return jsArrayExprIR{Items: nil}, nil
 	case "concat":
 		if len(args) != 2 {
-			return "", fmt.Errorf("List::concat expects two args")
+			return nil, fmt.Errorf("List::concat expects two args")
 		}
-		return renderJSDoc(jsCallDoc("("+args[0]+")"+".concat", []string{args[1]})), nil
+		return jsCallExprIR{Callee: "(" + args[0] + ")" + ".concat", Args: []string{args[1]}}, nil
 	default:
-		return "", fmt.Errorf("unsupported List module call: %s", name)
+		return nil, fmt.Errorf("unsupported List module call: %s", name)
 	}
 }
 
-func (e *emitter) emitListMethodValue(kind checker.ListMethodKind, subject string, args []string) (string, error) {
+func (e *emitter) emitListMethodValue(kind checker.ListMethodKind, subject string, args []string) (jsExpr, error) {
 	switch kind {
 	case checker.ListSize:
-		return subject + ".length", nil
+		return rawJSExpr(subject + ".length"), nil
 	case checker.ListAt:
 		if len(args) != 1 {
-			return "", fmt.Errorf("list.at expects one arg")
+			return nil, fmt.Errorf("list.at expects one arg")
 		}
-		return subject + "[" + args[0] + "]", nil
+		return rawJSExpr(subject + "[" + args[0] + "]"), nil
 	case checker.ListPush:
 		if len(args) != 1 {
-			return "", fmt.Errorf("list.push expects one arg")
+			return nil, fmt.Errorf("list.push expects one arg")
 		}
-		return e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSDoc(jsCallDoc("__value.push", args))))}, "__value")
+		value, err := e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSExpr(jsCallExprIR{Callee: "__value.push", Args: args})))}, "__value")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	case checker.ListPrepend:
 		if len(args) != 1 {
-			return "", fmt.Errorf("list.prepend expects one arg")
+			return nil, fmt.Errorf("list.prepend expects one arg")
 		}
-		return e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSDoc(jsCallDoc("__value.unshift", args))))}, "__value")
+		value, err := e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSExpr(jsCallExprIR{Callee: "__value.unshift", Args: args})))}, "__value")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	case checker.ListSet:
 		if len(args) != 2 {
-			return "", fmt.Errorf("list.set expects two args")
+			return nil, fmt.Errorf("list.set expects two args")
 		}
-		return e.emitMutationExpr(subject, []string{"__value[" + args[0] + "] = " + args[1] + ";"}, "true")
+		value, err := e.emitMutationExpr(subject, []string{"__value[" + args[0] + "] = " + args[1] + ";"}, "true")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	case checker.ListSwap:
 		if len(args) != 2 {
-			return "", fmt.Errorf("list.swap expects two args")
+			return nil, fmt.Errorf("list.swap expects two args")
 		}
 		lines := []string{"const __tmp = __value[" + args[0] + "];", "__value[" + args[0] + "] = __value[" + args[1] + "];", "__value[" + args[1] + "] = __tmp;"}
-		return e.emitMutationExpr(subject, lines, "undefined")
+		value, err := e.emitMutationExpr(subject, lines, "undefined")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	case checker.ListSort:
 		if len(args) != 1 {
-			return "", fmt.Errorf("list.sort expects one arg")
+			return nil, fmt.Errorf("list.sort expects one arg")
 		}
 		cmp := args[0]
 		lines := []string{"__value.sort((a, b) => " + cmp + "(a, b) ? -1 : (" + cmp + "(b, a) ? 1 : 0));"}
-		return e.emitMutationExpr(subject, lines, "undefined")
+		value, err := e.emitMutationExpr(subject, lines, "undefined")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	default:
-		return "", fmt.Errorf("unsupported list method: %v", kind)
+		return nil, fmt.Errorf("unsupported list method: %v", kind)
 	}
 }
 
-func (e *emitter) emitMapMethodValue(kind checker.MapMethodKind, subject string, args []string) (string, error) {
+func (e *emitter) emitMapMethodValue(kind checker.MapMethodKind, subject string, args []string) (jsExpr, error) {
 	switch kind {
 	case checker.MapKeys:
-		return renderJSDoc(jsCallDoc("Array.from", []string{renderJSDoc(jsCallDoc(subject+".keys", nil))})), nil
+		return jsCallExprIR{Callee: "Array.from", Args: []string{renderJSExpr(jsCallExprIR{Callee: subject + ".keys", Args: nil})}}, nil
 	case checker.MapSize:
-		return subject + ".size", nil
+		return rawJSExpr(subject + ".size"), nil
 	case checker.MapGet:
 		if len(args) != 1 {
-			return "", fmt.Errorf("map.get expects one arg")
+			return nil, fmt.Errorf("map.get expects one arg")
 		}
-		return "(" + renderJSDoc(jsCallDoc(subject+".has", args)) + " ? " + renderJSDoc(jsCallDoc("Maybe.some", []string{renderJSDoc(jsCallDoc(subject+".get", args))})) + " : " + renderJSDoc(jsCallDoc("Maybe.none", nil)) + ")", nil
+		return rawJSExpr("(" + renderJSExpr(jsCallExprIR{Callee: subject + ".has", Args: args}) + " ? " + renderJSExpr(jsCallExprIR{Callee: "Maybe.some", Args: []string{renderJSExpr(jsCallExprIR{Callee: subject + ".get", Args: args})}}) + " : " + renderJSExpr(jsCallExprIR{Callee: "Maybe.none", Args: nil}) + ")"), nil
 	case checker.MapSet:
 		if len(args) != 2 {
-			return "", fmt.Errorf("map.set expects two args")
+			return nil, fmt.Errorf("map.set expects two args")
 		}
-		return e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSDoc(jsCallDoc("__value.set", args))))}, "true")
+		value, err := e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSExpr(jsCallExprIR{Callee: "__value.set", Args: args})))}, "true")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	case checker.MapDrop:
 		if len(args) != 1 {
-			return "", fmt.Errorf("map.drop expects one arg")
+			return nil, fmt.Errorf("map.drop expects one arg")
 		}
-		return e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSDoc(jsCallDoc("__value.delete", args))))}, "undefined")
+		value, err := e.emitMutationExpr(subject, []string{renderJSDoc(jsExprStmtDoc(renderJSExpr(jsCallExprIR{Callee: "__value.delete", Args: args})))}, "undefined")
+		if err != nil {
+			return nil, err
+		}
+		return rawJSExpr(value), nil
 	case checker.MapHas:
 		if len(args) != 1 {
-			return "", fmt.Errorf("map.has expects one arg")
+			return nil, fmt.Errorf("map.has expects one arg")
 		}
-		return renderJSDoc(jsCallDoc(subject+".has", args)), nil
+		return jsCallExprIR{Callee: subject + ".has", Args: args}, nil
 	default:
-		return "", fmt.Errorf("unsupported map method: %v", kind)
+		return nil, fmt.Errorf("unsupported map method: %v", kind)
 	}
 }
 
-func (e *emitter) emitMaybeMethodValue(kind checker.MaybeMethodKind, subject string, args []string) (string, error) {
+func (e *emitter) emitMaybeMethodValue(kind checker.MaybeMethodKind, subject string, args []string) (jsExpr, error) {
 	switch kind {
 	case checker.MaybeExpect:
 		if len(args) != 1 {
-			return "", fmt.Errorf("maybe.expect expects 1 arg(s)")
+			return nil, fmt.Errorf("maybe.expect expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".expect", args)), nil
+		return jsCallExprIR{Callee: subject + ".expect", Args: args}, nil
 	case checker.MaybeIsNone:
-		return renderJSDoc(jsCallDoc(subject+".isNone", nil)), nil
+		return jsCallExprIR{Callee: subject + ".isNone", Args: nil}, nil
 	case checker.MaybeIsSome:
-		return renderJSDoc(jsCallDoc(subject+".isSome", nil)), nil
+		return jsCallExprIR{Callee: subject + ".isSome", Args: nil}, nil
 	case checker.MaybeOr:
 		if len(args) != 1 {
-			return "", fmt.Errorf("maybe.or expects 1 arg(s)")
+			return nil, fmt.Errorf("maybe.or expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".or", args)), nil
+		return jsCallExprIR{Callee: subject + ".or", Args: args}, nil
 	case checker.MaybeMap:
 		if len(args) != 1 {
-			return "", fmt.Errorf("maybe.map expects 1 arg(s)")
+			return nil, fmt.Errorf("maybe.map expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".map", args)), nil
+		return jsCallExprIR{Callee: subject + ".map", Args: args}, nil
 	case checker.MaybeAndThen:
 		if len(args) != 1 {
-			return "", fmt.Errorf("maybe.and_then expects 1 arg(s)")
+			return nil, fmt.Errorf("maybe.and_then expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".andThen", args)), nil
+		return jsCallExprIR{Callee: subject + ".andThen", Args: args}, nil
 	default:
-		return "", fmt.Errorf("unsupported maybe method: %v", kind)
+		return nil, fmt.Errorf("unsupported maybe method: %v", kind)
 	}
 }
 
-func (e *emitter) emitResultMethodValue(kind checker.ResultMethodKind, subject string, args []string) (string, error) {
+func (e *emitter) emitResultMethodValue(kind checker.ResultMethodKind, subject string, args []string) (jsExpr, error) {
 	switch kind {
 	case checker.ResultExpect:
 		if len(args) != 1 {
-			return "", fmt.Errorf("result.expect expects 1 arg(s)")
+			return nil, fmt.Errorf("result.expect expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".expect", args)), nil
+		return jsCallExprIR{Callee: subject + ".expect", Args: args}, nil
 	case checker.ResultOr:
 		if len(args) != 1 {
-			return "", fmt.Errorf("result.or expects 1 arg(s)")
+			return nil, fmt.Errorf("result.or expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".or", args)), nil
+		return jsCallExprIR{Callee: subject + ".or", Args: args}, nil
 	case checker.ResultIsOk:
-		return renderJSDoc(jsCallDoc(subject+".isOk", nil)), nil
+		return jsCallExprIR{Callee: subject + ".isOk", Args: nil}, nil
 	case checker.ResultIsErr:
-		return renderJSDoc(jsCallDoc(subject+".isErr", nil)), nil
+		return jsCallExprIR{Callee: subject + ".isErr", Args: nil}, nil
 	case checker.ResultMap:
 		if len(args) != 1 {
-			return "", fmt.Errorf("result.map expects 1 arg(s)")
+			return nil, fmt.Errorf("result.map expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".map", args)), nil
+		return jsCallExprIR{Callee: subject + ".map", Args: args}, nil
 	case checker.ResultMapErr:
 		if len(args) != 1 {
-			return "", fmt.Errorf("result.map_err expects 1 arg(s)")
+			return nil, fmt.Errorf("result.map_err expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".mapErr", args)), nil
+		return jsCallExprIR{Callee: subject + ".mapErr", Args: args}, nil
 	case checker.ResultAndThen:
 		if len(args) != 1 {
-			return "", fmt.Errorf("result.and_then expects 1 arg(s)")
+			return nil, fmt.Errorf("result.and_then expects 1 arg(s)")
 		}
-		return renderJSDoc(jsCallDoc(subject+".andThen", args)), nil
+		return jsCallExprIR{Callee: subject + ".andThen", Args: args}, nil
 	default:
-		return "", fmt.Errorf("unsupported result method: %v", kind)
+		return nil, fmt.Errorf("unsupported result method: %v", kind)
 	}
 }
 
@@ -1626,55 +1662,59 @@ func (e *emitter) lowerTryExpr(op *checker.TryOp) (loweredExpr, error) {
 		return loweredExpr{}, err
 	}
 	tryVar := e.temp("try")
-	stmts := append([]string{}, subject.stmts...)
-	stmts = append(stmts, "const "+tryVar+" = "+subject.expr+";")
-	fail, err := e.captureOutput(func(child *emitter) error {
-		switch op.Kind {
-		case checker.TryResult:
-			child.line("if (" + tryVar + ".isErr()) {")
-			child.indent(func() {
-				if op.CatchBlock != nil {
-					if op.CatchVar != "" && op.CatchVar != "_" {
-						child.line("const " + jsName(op.CatchVar) + " = " + tryVar + ".error;")
-					}
-					err = child.emitBlock(op.CatchBlock, true)
-					if err != nil {
-						panic(err)
-					}
-				} else {
-					child.line("return Result.err(" + tryVar + ".error);")
-				}
-			})
-			child.line("}")
-		case checker.TryMaybe:
-			child.line("if (" + tryVar + ".isNone()) {")
-			child.indent(func() {
-				if op.CatchBlock != nil {
-					err = child.emitBlock(op.CatchBlock, true)
-					if err != nil {
-						panic(err)
-					}
-				} else {
-					child.line("return Maybe.none();")
-				}
-			})
-			child.line("}")
-		default:
-			return fmt.Errorf("unsupported try kind: %v", op.Kind)
+	stmts := append([]jsStmt{}, subject.stmts...)
+	stmts = append(stmts, jsVarDeclStmtIR{Keyword: "const", Name: tryVar, Value: loweredExprText(subject), HasValue: true})
+
+	buildCatchBody := func(bind string) ([]jsStmt, error) {
+		bodyStmts := []jsStmt{}
+		if bind != "" {
+			bodyStmts = append(bodyStmts, jsVarDeclStmtIR{Keyword: "const", Name: jsName(bind), Value: tryVar + ".error", HasValue: true})
 		}
-		return nil
-	})
-	if err != nil {
-		return loweredExpr{}, err
+		body, err := e.captureOutput(func(child *emitter) error {
+			return child.emitBlock(op.CatchBlock, true)
+		})
+		if err != nil {
+			return nil, err
+		}
+		if body != "" {
+			bodyStmts = append(bodyStmts, rawJSStmt(body))
+		}
+		return bodyStmts, nil
 	}
-	if fail != "" {
-		stmts = append(stmts, fail)
-	}
+
 	success := tryVar + ".ok"
-	if op.Kind == checker.TryMaybe {
+	switch op.Kind {
+	case checker.TryResult:
+		var thenStmts []jsStmt
+		if op.CatchBlock != nil {
+			bind := ""
+			if op.CatchVar != "" && op.CatchVar != "_" {
+				bind = op.CatchVar
+			}
+			thenStmts, err = buildCatchBody(bind)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+		} else {
+			thenStmts = []jsStmt{jsReturnStmtIR{Value: "Result.err(" + tryVar + ".error)"}}
+		}
+		stmts = append(stmts, jsIfStmtIR{Condition: tryVar + ".isErr()", Then: thenStmts})
+	case checker.TryMaybe:
+		var thenStmts []jsStmt
+		if op.CatchBlock != nil {
+			thenStmts, err = buildCatchBody("")
+			if err != nil {
+				return loweredExpr{}, err
+			}
+		} else {
+			thenStmts = []jsStmt{jsReturnStmtIR{Value: "Maybe.none()"}}
+		}
+		stmts = append(stmts, jsIfStmtIR{Condition: tryVar + ".isNone()", Then: thenStmts})
 		success = tryVar + ".value"
+	default:
+		return loweredExpr{}, fmt.Errorf("unsupported try kind: %v", op.Kind)
 	}
-	return loweredExpr{stmts: stmts, expr: success}, nil
+	return loweredExpr{stmts: stmts, expr: rawJSExpr(success)}, nil
 }
 
 func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
@@ -1683,7 +1723,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{expr: value}, nil
+		return loweredExpr{expr: rawJSExpr(value)}, nil
 	}
 	switch expr := expr.(type) {
 	case *checker.TryOp:
@@ -1709,7 +1749,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 	case *checker.StructInstance:
 		fieldNames := sortedStructInstanceFields(expr)
 		args := make([]string, 0, len(fieldNames))
-		stmts := []string{}
+		stmts := []jsStmt{}
 		for _, field := range fieldNames {
 			fieldExpr, ok := expr.Fields[field]
 			if !ok || fieldExpr == nil {
@@ -1725,9 +1765,9 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 				return loweredExpr{}, err
 			}
 			stmts = append(stmts, lowered.stmts...)
-			args = append(args, lowered.expr)
+			args = append(args, loweredExprText(lowered))
 		}
-		return loweredExpr{stmts: stmts, expr: renderJSDoc(jsCallDoc("new "+jsName(expr.Name), args))}, nil
+		return loweredExpr{stmts: stmts, expr: jsNewExprIR{Ctor: jsName(expr.Name), Args: args}}, nil
 	case *checker.ModuleStructInstance:
 		moduleVar, ok := e.moduleVars[expr.Module]
 		if !ok {
@@ -1735,7 +1775,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		}
 		fieldNames := sortedStructInstanceFields(expr.Property)
 		args := make([]string, 0, len(fieldNames))
-		stmts := []string{}
+		stmts := []jsStmt{}
 		for _, field := range fieldNames {
 			fieldExpr, ok := expr.Property.Fields[field]
 			if !ok || fieldExpr == nil {
@@ -1751,23 +1791,23 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 				return loweredExpr{}, err
 			}
 			stmts = append(stmts, lowered.stmts...)
-			args = append(args, lowered.expr)
+			args = append(args, loweredExprText(lowered))
 		}
-		return loweredExpr{stmts: stmts, expr: renderJSDoc(jsCallDoc("new "+moduleVar+"."+jsName(expr.Property.Name), args))}, nil
+		return loweredExpr{stmts: stmts, expr: jsNewExprIR{Ctor: moduleVar + "." + jsName(expr.Property.Name), Args: args}}, nil
 	case *checker.InstanceProperty:
 		subject, err := e.lowerExpr(expr.Subject)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: subject.stmts, expr: subject.expr + "." + jsName(expr.Property)}, nil
+		return loweredExpr{stmts: subject.stmts, expr: jsMemberExprIR{Object: loweredExprText(subject), Property: jsName(expr.Property)}}, nil
 	case *checker.ListLiteral:
 		stmts, args, err := e.lowerArgs(expr.Elements)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: stmts, expr: "[" + strings.Join(args, ", ") + "]"}, nil
+		return loweredExpr{stmts: stmts, expr: jsArrayExprIR{Items: args}}, nil
 	case *checker.MapLiteral:
-		stmts := []string{}
+		stmts := []jsStmt{}
 		entries := make([]string, 0, len(expr.Keys))
 		for i := range expr.Keys {
 			key, err := e.lowerExpr(expr.Keys[i])
@@ -1780,11 +1820,11 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 			}
 			stmts = append(stmts, key.stmts...)
 			stmts = append(stmts, val.stmts...)
-			entries = append(entries, "["+key.expr+", "+val.expr+"]")
+			entries = append(entries, renderJSExpr(jsArrayExprIR{Items: []string{loweredExprText(key), loweredExprText(val)}}))
 		}
-		return loweredExpr{stmts: stmts, expr: "new Map([" + strings.Join(entries, ", ") + "])"}, nil
+		return loweredExpr{stmts: stmts, expr: jsNewExprIR{Ctor: "Map", Args: []string{renderJSExpr(jsArrayExprIR{Items: entries})}}}, nil
 	case *checker.TemplateStr:
-		stmts := []string{}
+		stmts := []jsStmt{}
 		var out bytes.Buffer
 		out.WriteByte('`')
 		for _, chunk := range expr.Chunks {
@@ -1798,23 +1838,23 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 			}
 			stmts = append(stmts, lowered.stmts...)
 			out.WriteString("${")
-			out.WriteString(lowered.expr)
+			out.WriteString(loweredExprText(lowered))
 			out.WriteByte('}')
 		}
 		out.WriteByte('`')
-		return loweredExpr{stmts: stmts, expr: out.String()}, nil
+		return loweredExpr{stmts: stmts, expr: rawJSExpr(out.String())}, nil
 	case *checker.FunctionCall:
 		stmts, args, err := e.lowerArgs(expr.Args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: stmts, expr: renderJSDoc(jsCallDoc(jsName(expr.Name), args))}, nil
+		return loweredExpr{stmts: stmts, expr: jsCallExprIR{Callee: jsName(expr.Name), Args: args}}, nil
 	case *checker.ModuleFunctionCall:
 		stmts, args, err := e.lowerArgs(expr.Call.Args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		var call string
+		var call jsExpr
 		switch expr.Module {
 		case "ard/maybe":
 			call, err = e.emitMaybeModuleCallValue(expr.Call.Name, args)
@@ -1831,7 +1871,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 			if !ok {
 				return loweredExpr{}, fmt.Errorf("unknown imported module %s", expr.Module)
 			}
-			call = renderJSDoc(jsCallDoc(moduleVar+"."+jsName(expr.Call.Name), args))
+			call = jsCallExprIR{Callee: moduleVar + "." + jsName(expr.Call.Name), Args: args}
 		}
 		if err != nil {
 			return loweredExpr{}, err
@@ -1846,16 +1886,16 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append([]string{}, subject.stmts...)
+		stmts := append([]jsStmt{}, subject.stmts...)
 		stmts = append(stmts, argStmts...)
 		if expr.ReceiverKind == checker.ReceiverTrait && expr.TraitType != nil && expr.TraitType.Name == "ToString" && expr.Method.Name == "to_str" {
-			return loweredExpr{stmts: stmts, expr: "ardToString(" + subject.expr + ")"}, nil
+			return loweredExpr{stmts: stmts, expr: jsCallExprIR{Callee: "ardToString", Args: []string{loweredExprText(subject)}}}, nil
 		}
 		if expr.ReceiverKind == checker.ReceiverEnum && expr.EnumType != nil {
-			callArgs := append([]string{subject.expr}, args...)
-			return loweredExpr{stmts: stmts, expr: renderJSDoc(jsCallDoc(enumMethodName(expr.EnumType.Name, expr.Method.Name), callArgs))}, nil
+			callArgs := append([]string{loweredExprText(subject)}, args...)
+			return loweredExpr{stmts: stmts, expr: jsCallExprIR{Callee: enumMethodName(expr.EnumType.Name, expr.Method.Name), Args: callArgs}}, nil
 		}
-		return loweredExpr{stmts: stmts, expr: renderJSDoc(jsCallDoc(subject.expr+"."+jsName(expr.Method.Name), args))}, nil
+		return loweredExpr{stmts: stmts, expr: jsCallExprIR{Callee: loweredExprText(subject) + "." + jsName(expr.Method.Name), Args: args}}, nil
 	case *checker.CopyExpression:
 		return e.lowerExpr(expr.Expr)
 	case *checker.StrMethod:
@@ -1867,7 +1907,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitStrMethodValue(expr.Kind, subject.expr, args)
+		value, err := e.emitStrMethodValue(expr.Kind, loweredExprText(subject), args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1877,7 +1917,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitIntMethodValue(expr.Kind, subject.expr)
+		value, err := e.emitIntMethodValue(expr.Kind, loweredExprText(subject))
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1887,7 +1927,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitFloatMethodValue(expr.Kind, subject.expr)
+		value, err := e.emitFloatMethodValue(expr.Kind, loweredExprText(subject))
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1897,7 +1937,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitBoolMethodValue(expr.Kind, subject.expr)
+		value, err := e.emitBoolMethodValue(expr.Kind, loweredExprText(subject))
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1911,7 +1951,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitListMethodValue(expr.Kind, subject.expr, args)
+		value, err := e.emitListMethodValue(expr.Kind, loweredExprText(subject), args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1925,7 +1965,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitMapMethodValue(expr.Kind, subject.expr, args)
+		value, err := e.emitMapMethodValue(expr.Kind, loweredExprText(subject), args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1939,7 +1979,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitMaybeMethodValue(expr.Kind, subject.expr, args)
+		value, err := e.emitMaybeMethodValue(expr.Kind, loweredExprText(subject), args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1953,7 +1993,7 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := e.emitResultMethodValue(expr.Kind, subject.expr, args)
+		value, err := e.emitResultMethodValue(expr.Kind, loweredExprText(subject), args)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1973,9 +2013,9 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append([]string{}, left.stmts...)
+		stmts := append([]jsStmt{}, left.stmts...)
 		stmts = append(stmts, right.stmts...)
-		return loweredExpr{stmts: stmts, expr: "Math.trunc((" + left.expr + ") / (" + right.expr + "))"}, nil
+		return loweredExpr{stmts: stmts, expr: rawJSExpr("Math.trunc((" + loweredExprText(left) + ") / (" + loweredExprText(right) + "))")}, nil
 	case *checker.IntModulo:
 		return e.lowerBinary(expr.Left, "%", expr.Right)
 	case *checker.IntGreater:
@@ -2015,20 +2055,20 @@ func (e *emitter) lowerExpr(expr checker.Expression) (loweredExpr, error) {
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: value.stmts, expr: "(-" + value.expr + ")"}, nil
+		return loweredExpr{stmts: value.stmts, expr: jsUnaryExprIR{Op: "-", Value: value.expr}}, nil
 	case *checker.Not:
 		value, err := e.lowerExpr(expr.Value)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: value.stmts, expr: "(!" + value.expr + ")"}, nil
+		return loweredExpr{stmts: value.stmts, expr: jsUnaryExprIR{Op: "!", Value: value.expr}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("js backend does not yet support try-aware lowering for expression type %T", expr)
 	}
 }
 
 func (e *emitter) lowerNumericExpr(build func() (string, error), parts ...checker.Expression) (loweredExpr, error) {
-	stmts := []string{}
+	stmts := []jsStmt{}
 	for _, part := range parts {
 		lowered, err := e.lowerExpr(part)
 		if err != nil {
@@ -2040,7 +2080,7 @@ func (e *emitter) lowerNumericExpr(build func() (string, error), parts ...checke
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: stmts, expr: value}, nil
+	return loweredExpr{stmts: stmts, expr: rawJSExpr(value)}, nil
 }
 
 func (e *emitter) lowerBinary(left checker.Expression, op string, right checker.Expression) (loweredExpr, error) {
@@ -2052,9 +2092,9 @@ func (e *emitter) lowerBinary(left checker.Expression, op string, right checker.
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append([]string{}, leftValue.stmts...)
+	stmts := append([]jsStmt{}, leftValue.stmts...)
 	stmts = append(stmts, rightValue.stmts...)
-	return loweredExpr{stmts: stmts, expr: "(" + leftValue.expr + " " + op + " " + rightValue.expr + ")"}, nil
+	return loweredExpr{stmts: stmts, expr: jsBinaryExprIR{Left: leftValue.expr, Op: op, Right: rightValue.expr}}, nil
 }
 
 func (e *emitter) lowerEquality(left checker.Expression, right checker.Expression) (loweredExpr, error) {
@@ -2066,12 +2106,12 @@ func (e *emitter) lowerEquality(left checker.Expression, right checker.Expressio
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append([]string{}, leftValue.stmts...)
+	stmts := append([]jsStmt{}, leftValue.stmts...)
 	stmts = append(stmts, rightValue.stmts...)
 	if requiresSpecialEquality(left.Type(), right.Type()) {
-		return loweredExpr{stmts: stmts, expr: "ardEq(" + leftValue.expr + ", " + rightValue.expr + ")"}, nil
+		return loweredExpr{stmts: stmts, expr: jsCallExprIR{Callee: "ardEq", Args: []string{loweredExprText(leftValue), loweredExprText(rightValue)}}}, nil
 	}
-	return loweredExpr{stmts: stmts, expr: "(" + leftValue.expr + " === " + rightValue.expr + ")"}, nil
+	return loweredExpr{stmts: stmts, expr: jsBinaryExprIR{Left: leftValue.expr, Op: "===", Right: rightValue.expr}}, nil
 }
 
 func (e *emitter) lowerIntComparison(left checker.Expression, op string, right checker.Expression) (loweredExpr, error) {
@@ -2083,12 +2123,12 @@ func (e *emitter) lowerIntComparison(left checker.Expression, op string, right c
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append([]string{}, leftValue.stmts...)
+	stmts := append([]jsStmt{}, leftValue.stmts...)
 	stmts = append(stmts, rightValue.stmts...)
 	if requiresEnumAwareComparison(left.Type(), right.Type()) {
-		return loweredExpr{stmts: stmts, expr: "(ardEnumValue(" + leftValue.expr + ") " + op + " ardEnumValue(" + rightValue.expr + "))"}, nil
+		return loweredExpr{stmts: stmts, expr: jsBinaryExprIR{Left: rawJSExpr("ardEnumValue(" + loweredExprText(leftValue) + ")"), Op: op, Right: rawJSExpr("ardEnumValue(" + loweredExprText(rightValue) + ")")}}, nil
 	}
-	return loweredExpr{stmts: stmts, expr: "(" + leftValue.expr + " " + op + " " + rightValue.expr + ")"}, nil
+	return loweredExpr{stmts: stmts, expr: jsBinaryExprIR{Left: leftValue.expr, Op: op, Right: rightValue.expr}}, nil
 }
 
 func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
@@ -2112,7 +2152,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 			keyword = "let"
 		}
 		e.emitCapturedStatements(value.stmts)
-		e.line(fmt.Sprintf("%s %s = %s;", keyword, jsName(stmt.Name), value.expr))
+		e.line(fmt.Sprintf("%s %s = %s;", keyword, jsName(stmt.Name), loweredExprText(value)))
 		return nil
 	case *checker.Reassignment:
 		target, err := e.emitAssignable(stmt.Target)
@@ -2124,7 +2164,7 @@ func (e *emitter) emitNonProducing(stmt checker.NonProducing) error {
 			return err
 		}
 		e.emitCapturedStatements(value.stmts)
-		e.line(target + " = " + value.expr + ";")
+		e.line(target + " = " + loweredExprText(value) + ";")
 		return nil
 	case *checker.WhileLoop:
 		return e.emitWhileLoop(stmt)
@@ -2332,25 +2372,33 @@ func (e *emitter) emitAssignable(expr checker.Expression) (string, error) {
 func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 	switch expr := expr.(type) {
 	case *checker.StructInstance:
-		return e.emitStructInstance(expr, jsName(expr.Name))
+		value, err := e.emitStructInstance(expr, jsName(expr.Name))
+		if err != nil {
+			return "", err
+		}
+		return renderJSExpr(value), nil
 	case *checker.ModuleStructInstance:
 		moduleVar, ok := e.moduleVars[expr.Module]
 		if !ok {
 			return "", fmt.Errorf("unknown imported module %s", expr.Module)
 		}
-		return e.emitStructInstance(expr.Property, moduleVar+"."+jsName(expr.Property.Name))
+		value, err := e.emitStructInstance(expr.Property, moduleVar+"."+jsName(expr.Property.Name))
+		if err != nil {
+			return "", err
+		}
+		return renderJSExpr(value), nil
 	case *checker.InstanceProperty:
 		subject, err := e.emitExpr(expr.Subject)
 		if err != nil {
 			return "", err
 		}
-		return subject + "." + jsName(expr.Property), nil
+		return renderJSExpr(jsMemberExprIR{Object: subject, Property: jsName(expr.Property)}), nil
 	case *checker.ListLiteral:
 		elements, err := e.emitArgs(expr.Elements)
 		if err != nil {
 			return "", err
 		}
-		return renderJSDoc(jsArrayDoc(elements)), nil
+		return renderJSExpr(jsArrayExprIR{Items: elements}), nil
 	case *checker.MapLiteral:
 		entries := make([]string, 0, len(expr.Keys))
 		for i := range expr.Keys {
@@ -2362,9 +2410,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			entries = append(entries, renderJSDoc(jsArrayDoc([]string{key, value})))
+			entries = append(entries, renderJSExpr(jsArrayExprIR{Items: []string{key, value}}))
 		}
-		return renderJSDoc(jsCallDoc("new Map", []string{renderJSDoc(jsArrayDoc(entries))})), nil
+		return renderJSExpr(jsNewExprIR{Ctor: "Map", Args: []string{renderJSExpr(jsArrayExprIR{Items: entries})}}), nil
 	case *checker.StrLiteral:
 		return strconv.Quote(expr.Value), nil
 	case *checker.TemplateStr:
@@ -2401,7 +2449,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return renderJSDoc(jsCallDoc(jsName(expr.Name), args)), nil
+		return renderJSExpr(jsCallExprIR{Callee: jsName(expr.Name), Args: args}), nil
 	case *checker.ModuleFunctionCall:
 		if expr.Module == "ard/maybe" {
 			return e.emitMaybeModuleCall(expr)
@@ -2426,14 +2474,14 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return renderJSDoc(jsCallDoc(moduleVar+"."+jsName(expr.Call.Name), args)), nil
+		return renderJSExpr(jsCallExprIR{Callee: moduleVar + "." + jsName(expr.Call.Name), Args: args}), nil
 	case *checker.InstanceMethod:
 		if expr.ReceiverKind == checker.ReceiverTrait && expr.TraitType != nil && expr.TraitType.Name == "ToString" && expr.Method.Name == "to_str" {
 			subject, err := e.emitExpr(expr.Subject)
 			if err != nil {
 				return "", err
 			}
-			return "ardToString(" + subject + ")", nil
+			return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{subject}}), nil
 		}
 		subject, err := e.emitExpr(expr.Subject)
 		if err != nil {
@@ -2445,9 +2493,9 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		}
 		if expr.ReceiverKind == checker.ReceiverEnum && expr.EnumType != nil {
 			callArgs := append([]string{subject}, args...)
-			return renderJSDoc(jsCallDoc(enumMethodName(expr.EnumType.Name, expr.Method.Name), callArgs)), nil
+			return renderJSExpr(jsCallExprIR{Callee: enumMethodName(expr.EnumType.Name, expr.Method.Name), Args: callArgs}), nil
 		}
-		return renderJSDoc(jsCallDoc(subject+"."+jsName(expr.Method.Name), args)), nil
+		return renderJSExpr(jsCallExprIR{Callee: subject + "." + jsName(expr.Method.Name), Args: args}), nil
 	case *checker.CopyExpression:
 		return e.emitExpr(expr.Expr)
 	case *checker.TryOp:
@@ -2497,7 +2545,7 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return "Math.trunc((" + leftValue + ") / (" + rightValue + "))", nil
+		return renderJSExpr(rawJSExpr("Math.trunc((" + leftValue + ") / (" + rightValue + "))")), nil
 	case *checker.IntModulo:
 		return e.emitBinary(expr.Left, "%", expr.Right)
 	case *checker.IntGreater:
@@ -2537,13 +2585,13 @@ func (e *emitter) emitExpr(expr checker.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return "(-" + value + ")", nil
+		return renderJSExpr(jsUnaryExprIR{Op: "-", Value: rawJSExpr(value)}), nil
 	case *checker.Not:
 		value, err := e.emitExpr(expr.Value)
 		if err != nil {
 			return "", err
 		}
-		return "(!" + value + ")", nil
+		return renderJSExpr(jsUnaryExprIR{Op: "!", Value: rawJSExpr(value)}), nil
 	case *checker.If:
 		return e.emitInlineClosure(expr)
 	case *checker.Block:
@@ -2669,7 +2717,7 @@ func (e *emitter) renderStructMethod(def *checker.StructDef, method *checker.Fun
 	return renderJSDoc(jsBlockDoc(jsName(method.Name)+"("+strings.Join(params, ", ")+")", body)), nil
 }
 
-func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor string) (string, error) {
+func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor string) (jsExpr, error) {
 	fieldNames := sortedStructInstanceFields(instance)
 	args := make([]string, 0, len(fieldNames))
 	for _, field := range fieldNames {
@@ -2680,15 +2728,15 @@ func (e *emitter) emitStructInstance(instance *checker.StructInstance, ctor stri
 				args = append(args, "Maybe.none()")
 				continue
 			}
-			return "", fmt.Errorf("missing struct field value for %s", field)
+			return nil, fmt.Errorf("missing struct field value for %s", field)
 		}
 		value, err := e.emitExpr(expr)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		args = append(args, value)
 	}
-	return renderJSDoc(jsCallDoc("new "+ctor, args)), nil
+	return jsNewExprIR{Ctor: ctor, Args: args}, nil
 }
 
 func (e *emitter) emitFunctionLiteral(def *checker.FunctionDef) (string, error) {
@@ -2716,7 +2764,11 @@ func (e *emitter) emitListMethod(method *checker.ListMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitListMethodValue(method.Kind, subject, args)
+	value, err := e.emitListMethodValue(method.Kind, subject, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitMapMethod(method *checker.MapMethod) (string, error) {
@@ -2728,7 +2780,11 @@ func (e *emitter) emitMapMethod(method *checker.MapMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitMapMethodValue(method.Kind, subject, args)
+	value, err := e.emitMapMethodValue(method.Kind, subject, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitStrMethod(method *checker.StrMethod) (string, error) {
@@ -2740,7 +2796,11 @@ func (e *emitter) emitStrMethod(method *checker.StrMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitStrMethodValue(method.Kind, subject, args)
+	value, err := e.emitStrMethodValue(method.Kind, subject, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitIntMethod(method *checker.IntMethod) (string, error) {
@@ -2748,7 +2808,11 @@ func (e *emitter) emitIntMethod(method *checker.IntMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitIntMethodValue(method.Kind, subject)
+	value, err := e.emitIntMethodValue(method.Kind, subject)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitFloatMethod(method *checker.FloatMethod) (string, error) {
@@ -2756,7 +2820,11 @@ func (e *emitter) emitFloatMethod(method *checker.FloatMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitFloatMethodValue(method.Kind, subject)
+	value, err := e.emitFloatMethodValue(method.Kind, subject)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitBoolMethod(method *checker.BoolMethod) (string, error) {
@@ -2764,7 +2832,11 @@ func (e *emitter) emitBoolMethod(method *checker.BoolMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitBoolMethodValue(method.Kind, subject)
+	value, err := e.emitBoolMethodValue(method.Kind, subject)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitBoundBlockExpr(block *checker.Block, bindings []string) (string, error) {
@@ -2979,7 +3051,11 @@ func (e *emitter) emitMaybeModuleCall(call *checker.ModuleFunctionCall) (string,
 	if err != nil {
 		return "", err
 	}
-	return e.emitMaybeModuleCallValue(call.Call.Name, args)
+	value, err := e.emitMaybeModuleCallValue(call.Call.Name, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall) (string, error) {
@@ -2987,7 +3063,11 @@ func (e *emitter) emitResultModuleCall(call *checker.ModuleFunctionCall) (string
 	if err != nil {
 		return "", err
 	}
-	return e.emitResultModuleCallValue(call.Call.Name, args)
+	value, err := e.emitResultModuleCallValue(call.Call.Name, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitFloatModuleCall(call *checker.ModuleFunctionCall) (string, error) {
@@ -2995,7 +3075,11 @@ func (e *emitter) emitFloatModuleCall(call *checker.ModuleFunctionCall) (string,
 	if err != nil {
 		return "", err
 	}
-	return e.emitFloatModuleCallValue(call.Call.Name, args)
+	value, err := e.emitFloatModuleCallValue(call.Call.Name, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitIntModuleCall(call *checker.ModuleFunctionCall) (string, error) {
@@ -3003,7 +3087,11 @@ func (e *emitter) emitIntModuleCall(call *checker.ModuleFunctionCall) (string, e
 	if err != nil {
 		return "", err
 	}
-	return e.emitIntModuleCallValue(call.Call.Name, args)
+	value, err := e.emitIntModuleCallValue(call.Call.Name, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, error) {
@@ -3011,7 +3099,11 @@ func (e *emitter) emitListModuleCall(call *checker.ModuleFunctionCall) (string, 
 	if err != nil {
 		return "", err
 	}
-	return e.emitListModuleCallValue(call.Call.Name, args)
+	value, err := e.emitListModuleCallValue(call.Call.Name, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitMaybeMethod(method *checker.MaybeMethod) (string, error) {
@@ -3023,7 +3115,11 @@ func (e *emitter) emitMaybeMethod(method *checker.MaybeMethod) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.emitMaybeMethodValue(method.Kind, subject, args)
+	value, err := e.emitMaybeMethodValue(method.Kind, subject, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error) {
@@ -3035,7 +3131,11 @@ func (e *emitter) emitResultMethod(method *checker.ResultMethod) (string, error)
 	if err != nil {
 		return "", err
 	}
-	return e.emitResultMethodValue(method.Kind, subject, args)
+	value, err := e.emitResultMethodValue(method.Kind, subject, args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(value), nil
 }
 
 func (e *emitter) emitMutationExpr(subject string, lines []string, returnExpr string) (string, error) {
@@ -3093,7 +3193,7 @@ func (e *emitter) emitBinary(left checker.Expression, op string, right checker.E
 	if err != nil {
 		return "", err
 	}
-	return "(" + leftValue + " " + op + " " + rightValue + ")", nil
+	return renderJSExpr(jsBinaryExprIR{Left: rawJSExpr(leftValue), Op: op, Right: rawJSExpr(rightValue)}), nil
 }
 
 func (e *emitter) emitEquality(left checker.Expression, right checker.Expression) (string, error) {
@@ -3106,9 +3206,9 @@ func (e *emitter) emitEquality(left checker.Expression, right checker.Expression
 		return "", err
 	}
 	if requiresSpecialEquality(left.Type(), right.Type()) {
-		return "ardEq(" + leftValue + ", " + rightValue + ")", nil
+		return renderJSExpr(jsCallExprIR{Callee: "ardEq", Args: []string{leftValue, rightValue}}), nil
 	}
-	return "(" + leftValue + " === " + rightValue + ")", nil
+	return renderJSExpr(jsBinaryExprIR{Left: rawJSExpr(leftValue), Op: "===", Right: rawJSExpr(rightValue)}), nil
 }
 
 func (e *emitter) emitIntComparison(left checker.Expression, op string, right checker.Expression) (string, error) {
@@ -3121,9 +3221,9 @@ func (e *emitter) emitIntComparison(left checker.Expression, op string, right ch
 		return "", err
 	}
 	if requiresEnumAwareComparison(left.Type(), right.Type()) {
-		return "(ardEnumValue(" + leftValue + ") " + op + " ardEnumValue(" + rightValue + "))", nil
+		return renderJSExpr(jsBinaryExprIR{Left: rawJSExpr("ardEnumValue(" + leftValue + ")"), Op: op, Right: rawJSExpr("ardEnumValue(" + rightValue + ")")}), nil
 	}
-	return "(" + leftValue + " " + op + " " + rightValue + ")", nil
+	return renderJSExpr(jsBinaryExprIR{Left: rawJSExpr(leftValue), Op: op, Right: rawJSExpr(rightValue)}), nil
 }
 
 func (e *emitter) emitArgs(args []checker.Expression) ([]string, error) {
