@@ -1,5 +1,4 @@
 use ard/decode
-use ard/dynamic as Dynamic
 use ard/io
 use ard/js/fetch
 use ard/js/promise
