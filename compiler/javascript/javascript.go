@@ -4122,6 +4122,18 @@ func collectUsedEnumMethods(program *checker.Program) map[string]map[string]bool
 			case *checker.Reassignment:
 				visitExpr(s.Target)
 				visitExpr(s.Value)
+			case *checker.StructDef:
+				for _, method := range s.Methods {
+					visitExpr(method)
+				}
+			case *checker.Enum:
+				for _, method := range s.Methods {
+					visitExpr(method)
+				}
+			case checker.Enum:
+				for _, method := range s.Methods {
+					visitExpr(method)
+				}
 			case checker.ForInList:
 				visitExpr(s.List)
 				for _, bodyStmt := range s.Body.Stmts {
