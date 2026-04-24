@@ -272,7 +272,7 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 			if err != nil {
 				return nil, false, err
 			}
-			return astCall(ast.NewIdent("append"), nil, []ast.Expr{&ast.CallExpr{Fun: typeExpr}, inner}), false, nil
+			return &ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{&ast.CallExpr{Fun: typeExpr, Args: []ast.Expr{ast.NewIdent("nil")}}, inner}, Ellipsis: token.Pos(1)}, true, nil
 		default:
 			return inner, true, nil
 		}
@@ -291,10 +291,8 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		}
 		return astCall(ast.NewIdent(name), typeArgs, args), true, nil
 	case *checker.ModuleFunctionCall:
-		if v.Module == "ard/async" {
-			if expr, ok, err := e.lowerAsyncModuleCallAST(v); ok || err != nil {
-				return expr, ok, err
-			}
+		if expr, ok, err := e.lowerSpecialModuleCallAST(v); ok || err != nil {
+			return expr, ok, err
 		}
 		args, ok, err := e.lowerCallArgsAST(v.Call)
 		if err != nil || !ok {
@@ -335,6 +333,14 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		return &ast.CallExpr{Fun: selectorExpr(subject, methodName), Args: args}, true, nil
 	case *checker.StrMethod:
 		return e.lowerStrMethodAST(v)
+	case *checker.ListMethod:
+		return e.lowerListMethodAST(v)
+	case *checker.MapMethod:
+		return e.lowerMapMethodAST(v)
+	case *checker.MaybeMethod:
+		return e.lowerMaybeMethodAST(v)
+	case *checker.ResultMethod:
+		return e.lowerResultMethodAST(v)
 	case *checker.IntMethod:
 		subject, ok, err := e.lowerExprAST(v.Subject)
 		if err != nil || !ok {
@@ -353,7 +359,7 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		}
 		switch v.Kind {
 		case checker.FloatToStr:
-			return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent("strconv"), "FormatFloat"), Args: []ast.Expr{subject, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.UnaryExpr{Op: token.SUB, X: &ast.BasicLit{Kind: token.INT, Value: "1"}}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}, true, nil
+			return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent("strconv"), "FormatFloat"), Args: []ast.Expr{subject, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.BasicLit{Kind: token.INT, Value: "2"}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}, true, nil
 		case checker.FloatToInt:
 			return &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{subject}}, true, nil
 		default:
@@ -395,6 +401,8 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		moduleAlias := packageNameForModulePath(v.GetModule().Path())
 		asyncAlias := packageNameForModulePath("ard/async")
 		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(asyncAlias), goName("start", true)), Args: []ast.Expr{selectorExpr(ast.NewIdent(moduleAlias), goName(v.GetMainName(), true))}}, true, nil
+	case *checker.FunctionDef:
+		return e.lowerFunctionLiteralAST(v)
 	default:
 		return nil, false, nil
 	}
