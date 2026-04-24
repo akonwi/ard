@@ -1,6 +1,7 @@
 package transpile
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -175,24 +176,52 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				Body: &ast.BlockStmt{List: body},
 			})
 		} else {
-			mainDecl, err := e.captureOutput(func() error {
-				e.line("func main() {")
-				e.indent++
-				e.line(helperImportAlias + ".RegisterBuiltinExterns()")
-				if err := e.withFreshLocals(func() error {
-					return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
-				}); err != nil {
+			body := []ast.Stmt{
+				&ast.ExprStmt{X: &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "RegisterBuiltinExterns")}},
+			}
+			var block *ast.BlockStmt
+			var ok bool
+			var err error
+			err = e.withFreshLocals(func() error {
+				block, ok, err = e.lowerStatementsBlockAST(topLevelExecutableStatements(module.Program().Statements), nil)
+				if err != nil {
 					return err
 				}
-				e.indent--
-				e.line("}")
+				if !ok {
+					return errStructuredLoweringUnsupported
+				}
 				return nil
 			})
-			if err != nil {
+			if err != nil && !errors.Is(err, errStructuredLoweringUnsupported) {
 				return goFileIR{}, err
 			}
-			if err := appendGoDeclIR(&fileIR, packageName, mainDecl); err != nil {
-				return goFileIR{}, err
+			if err == nil && ok {
+				body = append(body, block.List...)
+				appendASTDecl(&fileIR, &ast.FuncDecl{
+					Name: ast.NewIdent("main"),
+					Type: &ast.FuncType{Params: &ast.FieldList{}},
+					Body: &ast.BlockStmt{List: body},
+				})
+			} else {
+				mainDecl, err := e.captureOutput(func() error {
+					e.line("func main() {")
+					e.indent++
+					e.line(helperImportAlias + ".RegisterBuiltinExterns()")
+					if err := e.withFreshLocals(func() error {
+						return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
+					}); err != nil {
+						return err
+					}
+					e.indent--
+					e.line("}")
+					return nil
+				})
+				if err != nil {
+					return goFileIR{}, err
+				}
+				if err := appendGoDeclIR(&fileIR, packageName, mainDecl); err != nil {
+					return goFileIR{}, err
+				}
 			}
 		}
 	}
