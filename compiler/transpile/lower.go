@@ -40,10 +40,21 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				return goFileIR{}, err
 			}
 			appendASTDecl(&fileIR, decl)
+			order, mapping, _ := structTypeParams(def)
+			receiverType := ast.Expr(ast.NewIdent(goName(def.Name, true)))
+			if len(order) > 0 {
+				args := make([]ast.Expr, 0, len(order))
+				for _, name := range order {
+					args = append(args, ast.NewIdent(mapping[name]))
+				}
+				receiverType = indexExpr(receiverType, args)
+			}
 			for _, methodName := range sortedStringKeys(def.Methods) {
-				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitStructMethod(def, def.Methods[methodName]) }); err != nil {
+				decl, err := e.lowerReceiverMethodDeclNode(def.Name, receiverType, mapping, def.Methods[methodName])
+				if err != nil {
 					return goFileIR{}, err
 				}
+				appendASTDecl(&fileIR, decl)
 			}
 		case checker.StructDef:
 			defCopy := def
@@ -52,25 +63,42 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				return goFileIR{}, err
 			}
 			appendASTDecl(&fileIR, decl)
+			order, mapping, _ := structTypeParams(&defCopy)
+			receiverType := ast.Expr(ast.NewIdent(goName(defCopy.Name, true)))
+			if len(order) > 0 {
+				args := make([]ast.Expr, 0, len(order))
+				for _, name := range order {
+					args = append(args, ast.NewIdent(mapping[name]))
+				}
+				receiverType = indexExpr(receiverType, args)
+			}
 			for _, methodName := range sortedStringKeys(defCopy.Methods) {
-				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitStructMethod(&defCopy, defCopy.Methods[methodName]) }); err != nil {
+				decl, err := e.lowerReceiverMethodDeclNode(defCopy.Name, receiverType, mapping, defCopy.Methods[methodName])
+				if err != nil {
 					return goFileIR{}, err
 				}
+				appendASTDecl(&fileIR, decl)
 			}
 		case *checker.Enum:
 			appendASTDecl(&fileIR, e.lowerEnumTypeDeclNode(def))
+			receiverType := ast.Expr(ast.NewIdent(goName(def.Name, true)))
 			for _, methodName := range sortedStringKeys(def.Methods) {
-				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitEnumMethod(def, def.Methods[methodName]) }); err != nil {
+				decl, err := e.lowerReceiverMethodDeclNode(def.Name, receiverType, nil, def.Methods[methodName])
+				if err != nil {
 					return goFileIR{}, err
 				}
+				appendASTDecl(&fileIR, decl)
 			}
 		case checker.Enum:
 			defCopy := def
 			appendASTDecl(&fileIR, e.lowerEnumTypeDeclNode(&defCopy))
+			receiverType := ast.Expr(ast.NewIdent(goName(defCopy.Name, true)))
 			for _, methodName := range sortedStringKeys(defCopy.Methods) {
-				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitEnumMethod(&defCopy, defCopy.Methods[methodName]) }); err != nil {
+				decl, err := e.lowerReceiverMethodDeclNode(defCopy.Name, receiverType, nil, defCopy.Methods[methodName])
+				if err != nil {
 					return goFileIR{}, err
 				}
+				appendASTDecl(&fileIR, decl)
 			}
 		case *checker.VariableDef:
 			if entrypoint {
@@ -97,9 +125,11 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 			if def.IsTest {
 				continue
 			}
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitFunction(def) }); err != nil {
+			decl, err := e.lowerFunctionDeclNode(def)
+			if err != nil {
 				return goFileIR{}, err
 			}
+			appendASTDecl(&fileIR, decl)
 		case *checker.ExternalFunctionDef:
 			decl, err := e.lowerExternFunctionDeclNode(def)
 			if err != nil {

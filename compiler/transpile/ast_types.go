@@ -71,6 +71,26 @@ func (e *emitter) lowerFunctionParamFields(params []checker.Parameter, includeNa
 	return fields, nil
 }
 
+func (e *emitter) lowerBoundFunctionParamFields(params []checker.Parameter) ([]*ast.Field, error) {
+	fields := make([]*ast.Field, 0, len(params))
+	for _, param := range params {
+		typeExpr, err := e.lowerTypeExpr(param.Type)
+		if err != nil {
+			return nil, err
+		}
+		usePointer := param.Mutable && mutableParamNeedsPointer(param.Type)
+		name := e.bindLocalWithPointer(param.Name, usePointer)
+		if usePointer {
+			typeExpr = &ast.StarExpr{X: typeExpr}
+		}
+		fields = append(fields, &ast.Field{
+			Names: []*ast.Ident{ast.NewIdent(name)},
+			Type:  typeExpr,
+		})
+	}
+	return fields, nil
+}
+
 func funcResults(returnType ast.Expr) *ast.FieldList {
 	if returnType == nil {
 		return nil

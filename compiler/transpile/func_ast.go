@@ -9,6 +9,102 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func (e *emitter) lowerFunctionBodyBlock(stmts []checker.Statement, returnType checker.Type) (*ast.BlockStmt, error) {
+	bodySource, err := e.captureOutput(func() error {
+		prevReturnType := e.fnReturnType
+		e.fnReturnType = returnType
+		defer func() {
+			e.fnReturnType = prevReturnType
+		}()
+		return e.emitStatements(stmts, returnType)
+	})
+	if err != nil {
+		return nil, err
+	}
+	list, err := parseGoBlockStatements(bodySource)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.BlockStmt{List: list}, nil
+}
+
+func (e *emitter) lowerFunctionDeclNode(def *checker.FunctionDef) (ast.Decl, error) {
+	order, paramsMap, constraints := functionTypeParams(def)
+	var decl ast.Decl
+	err := e.withFreshLocals(func() error {
+		return e.withTypeParams(paramsMap, func() error {
+			e.pushScope()
+			defer e.popScope()
+			params, err := e.lowerBoundFunctionParamFields(def.Parameters)
+			if err != nil {
+				return fmt.Errorf("function %s: %w", def.Name, err)
+			}
+			returnType := effectiveFunctionReturnType(def)
+			funcType := &ast.FuncType{
+				TypeParams: typeParamFieldList(order, paramsMap, constraints),
+				Params:     &ast.FieldList{List: params},
+			}
+			if returnType != checker.Void {
+				resultType, err := e.lowerTypeExpr(returnType)
+				if err != nil {
+					return fmt.Errorf("function %s: %w", def.Name, err)
+				}
+				funcType.Results = funcResults(resultType)
+			}
+			body, err := e.lowerFunctionBodyBlock(def.Body.Stmts, returnType)
+			if err != nil {
+				return fmt.Errorf("function %s: %w", def.Name, err)
+			}
+			decl = &ast.FuncDecl{
+				Name: ast.NewIdent(e.functionNames[def.Name]),
+				Type: funcType,
+				Body: body,
+			}
+			return nil
+		})
+	})
+	return decl, err
+}
+
+func (e *emitter) lowerReceiverMethodDeclNode(typeName string, receiverType ast.Expr, typeParams map[string]string, method *checker.FunctionDef) (ast.Decl, error) {
+	var decl ast.Decl
+	err := e.withFreshLocals(func() error {
+		return e.withTypeParams(typeParams, func() error {
+			e.pushScope()
+			defer e.popScope()
+			recvType := receiverType
+			if method.Mutates {
+				recvType = &ast.StarExpr{X: recvType}
+			}
+			receiverName := e.bindLocal(method.Receiver)
+			params, err := e.lowerBoundFunctionParamFields(method.Parameters)
+			if err != nil {
+				return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
+			}
+			funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+			if method.ReturnType != checker.Void {
+				resultType, err := e.lowerTypeExpr(method.ReturnType)
+				if err != nil {
+					return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
+				}
+				funcType.Results = funcResults(resultType)
+			}
+			body, err := e.lowerFunctionBodyBlock(method.Body.Stmts, method.ReturnType)
+			if err != nil {
+				return fmt.Errorf("method %s.%s: %w", typeName, method.Name, err)
+			}
+			decl = &ast.FuncDecl{
+				Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(receiverName)}, Type: recvType}}},
+				Name: ast.NewIdent(goName(method.Name, !method.Private)),
+				Type: funcType,
+				Body: body,
+			}
+			return nil
+		})
+	})
+	return decl, err
+}
+
 func (e *emitter) lowerExternFunctionDeclNode(def *checker.ExternalFunctionDef) (ast.Decl, error) {
 	order, paramsMap, constraints := signatureTypeParams(def.Parameters, def.ReturnType)
 	var decl ast.Decl
