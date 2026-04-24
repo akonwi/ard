@@ -417,6 +417,8 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		return e.lowerResultMatchAST(v)
 	case *checker.EnumMatch:
 		return e.lowerEnumMatchAST(v)
+	case *checker.UnionMatch:
+		return e.lowerUnionMatchAST(v)
 	case *checker.Panic:
 		return e.lowerPanicExprAST(v.Message, v.Type())
 	case checker.Panic:
