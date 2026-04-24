@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,8 +15,8 @@ import (
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
+	"github.com/akonwi/ard/frontend"
 	"github.com/akonwi/ard/javascript"
-	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/transpile"
 	"github.com/akonwi/ard/version"
@@ -182,41 +181,11 @@ func check(inputPath string) bool {
 }
 
 func loadModule(inputPath string, target string) (checker.Module, error) {
-	sourceCode, err := os.ReadFile(inputPath)
+	result, err := frontend.LoadModule(inputPath, target)
 	if err != nil {
-		fmt.Printf("Error reading file %s - %v\n", inputPath, err)
 		return nil, err
 	}
-
-	result := parse.Parse(sourceCode, inputPath)
-	if len(result.Errors) > 0 {
-		result.PrintErrors()
-		return nil, fmt.Errorf("parse errors")
-	}
-	program := result.Program
-
-	workingDir := filepath.Dir(inputPath)
-	moduleResolver, err := checker.NewModuleResolver(workingDir)
-	if err != nil {
-		log.Fatalf("Error initializing module resolver: %v\n", err)
-	}
-
-	// Get relative path for diagnostics
-	relPath, err := filepath.Rel(workingDir, inputPath)
-	if err != nil {
-		relPath = inputPath // fallback to absolute path
-	}
-
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{Target: target})
-	c.Check()
-	if c.HasErrors() {
-		for _, diagnostic := range c.Diagnostics() {
-			fmt.Println(diagnostic)
-		}
-		return nil, fmt.Errorf("type errors")
-	}
-
-	return c.Module(), nil
+	return result.Module, nil
 }
 
 func parseRunArgs(args []string) (string, string, error) {
@@ -308,18 +277,7 @@ func parseBuildArgs(args []string) (string, string, string, error) {
 }
 
 func resolveTarget(inputPath, requestedTarget string) (string, error) {
-	if requestedTarget != "" {
-		return requestedTarget, nil
-	}
-	inputDir := filepath.Dir(inputPath)
-	if inputDir == "" {
-		inputDir = "."
-	}
-	project, err := checker.FindProjectRoot(inputDir)
-	if err != nil {
-		return "", err
-	}
-	return backend.ParseTarget(project.Target)
+	return frontend.ResolveTarget(inputPath, requestedTarget)
 }
 
 func parseFormatArgs(args []string) (string, bool, error) {

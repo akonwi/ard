@@ -17,7 +17,7 @@ import (
 
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/frontend"
 )
 
 const (
@@ -1070,39 +1070,11 @@ func writeImportedModule(generatedDir, projectName string, module checker.Module
 }
 
 func loadModule(inputPath string) (checker.Module, *checker.ProjectInfo, error) {
-	sourceCode, err := os.ReadFile(inputPath)
+	result, err := frontend.LoadModule(inputPath, backend.TargetGo)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error reading file %s - %v", inputPath, err)
+		return nil, nil, err
 	}
-
-	result := parse.Parse(sourceCode, inputPath)
-	if len(result.Errors) > 0 {
-		result.PrintErrors()
-		return nil, nil, fmt.Errorf("parse errors")
-	}
-	program := result.Program
-
-	workingDir := filepath.Dir(inputPath)
-	moduleResolver, err := checker.NewModuleResolver(workingDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error initializing module resolver: %w", err)
-	}
-
-	relPath, err := filepath.Rel(workingDir, inputPath)
-	if err != nil {
-		relPath = inputPath
-	}
-
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{Target: backend.TargetGo})
-	c.Check()
-	if c.HasErrors() {
-		for _, diagnostic := range c.Diagnostics() {
-			fmt.Println(diagnostic)
-		}
-		return nil, nil, fmt.Errorf("type errors")
-	}
-
-	return c.Module(), moduleResolver.GetProjectInfo(), nil
+	return result.Module, result.ProjectInfo, nil
 }
 
 func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
