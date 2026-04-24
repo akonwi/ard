@@ -64,7 +64,7 @@ let result = add(1, 2)
 	checks := []string{
 		"package main",
 		"func Add(a int, b int) int",
-		"sum := (a + b)",
+		"sum := a + b",
 		"return sum",
 		"func main()",
 		"result := Add(1, 2)",

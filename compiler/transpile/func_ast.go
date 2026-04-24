@@ -10,12 +10,26 @@ import (
 )
 
 func (e *emitter) lowerFunctionBodyBlock(stmts []checker.Statement, returnType checker.Type) (*ast.BlockStmt, error) {
+	prevScopes := cloneLocalScopes(e.localScopes)
+	prevPointerScopes := clonePointerScopes(e.pointerScopes)
+	prevCounts := cloneLocalNameCounts(e.localNameCounts)
+	prevTempCounter := e.tempCounter
+	prevReturnType := e.fnReturnType
+	defer func() {
+		e.fnReturnType = prevReturnType
+	}()
+	e.fnReturnType = returnType
+	if block, ok, err := e.lowerStatementsBlockAST(stmts, returnType); err != nil {
+		return nil, err
+	} else if ok {
+		return block, nil
+	}
+	e.localScopes = prevScopes
+	e.pointerScopes = prevPointerScopes
+	e.localNameCounts = prevCounts
+	e.tempCounter = prevTempCounter
+	e.fnReturnType = returnType
 	bodySource, err := e.captureOutput(func() error {
-		prevReturnType := e.fnReturnType
-		e.fnReturnType = returnType
-		defer func() {
-			e.fnReturnType = prevReturnType
-		}()
 		return e.emitStatements(stmts, returnType)
 	})
 	if err != nil {
