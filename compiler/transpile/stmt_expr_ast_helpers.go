@@ -204,21 +204,127 @@ func (e *emitter) lowerListMethodAST(method *checker.ListMethod) (ast.Expr, bool
 	if err != nil || !ok {
 		return nil, ok, err
 	}
+	arg := func(i int) (ast.Expr, bool, error) {
+		if i >= len(method.Args) {
+			return nil, false, errStructuredLoweringUnsupported
+		}
+		return e.lowerExprAST(method.Args[i])
+	}
 	switch method.Kind {
 	case checker.ListSize:
 		return &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{subject}}, true, nil
 	case checker.ListAt:
-		if len(method.Args) != 1 {
-			return nil, false, errStructuredLoweringUnsupported
-		}
-		idx, ok, err := e.lowerExprAST(method.Args[0])
+		idx, ok, err := arg(0)
 		if err != nil || !ok {
 			return nil, ok, err
 		}
 		return &ast.IndexExpr{X: subject, Index: idx}, true, nil
-	default:
-		return nil, false, nil
+	case checker.ListPush, checker.ListPrepend, checker.ListSet, checker.ListSort, checker.ListSwap:
+		target, ok, err := e.lowerAssignmentTargetAST(method.Subject)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		subjectType, ok := method.Subject.Type().(*checker.List)
+		if !ok {
+			return nil, false, errStructuredLoweringUnsupported
+		}
+		switch method.Kind {
+		case checker.ListPush:
+			value, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+				&ast.AssignStmt{
+					Lhs: []ast.Expr{target},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{target, value}}},
+				},
+				&ast.ReturnStmt{Results: []ast.Expr{target}},
+			})
+			return out, err == nil, err
+		case checker.ListPrepend:
+			value, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			typeExpr, err := e.lowerTypeExpr(subjectType)
+			if err != nil {
+				return nil, false, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+				&ast.AssignStmt{
+					Lhs: []ast.Expr{target},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{&ast.CallExpr{
+						Fun:      ast.NewIdent("append"),
+						Args:     []ast.Expr{&ast.CompositeLit{Type: typeExpr, Elts: []ast.Expr{value}}, target},
+						Ellipsis: token.Pos(1),
+					}},
+				},
+				&ast.ReturnStmt{Results: []ast.Expr{target}},
+			})
+			return out, err == nil, err
+		case checker.ListSet:
+			index, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			value, ok, err := arg(1)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+				&ast.IfStmt{
+					Cond: &ast.BinaryExpr{
+						X:  &ast.BinaryExpr{X: index, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+						Op: token.LAND,
+						Y:  &ast.BinaryExpr{X: index, Op: token.LSS, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target}}},
+					},
+					Body: &ast.BlockStmt{List: []ast.Stmt{
+						&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target, Index: index}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}},
+						&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("true")}},
+					}},
+					Else: &ast.BlockStmt{List: []ast.Stmt{
+						&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("false")}},
+					}},
+				},
+			})
+			return out, err == nil, err
+		case checker.ListSort:
+			cmp, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+				&ast.ExprStmt{X: &ast.CallExpr{Fun: selectorExpr(ast.NewIdent("sort"), "SliceStable"), Args: []ast.Expr{
+					target,
+					&ast.FuncLit{
+						Type: &ast.FuncType{
+							Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("i")}, Type: ast.NewIdent("int")}, {Names: []*ast.Ident{ast.NewIdent("j")}, Type: ast.NewIdent("int")}}},
+							Results: funcResults(ast.NewIdent("bool")),
+						},
+						Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: cmp, Args: []ast.Expr{&ast.IndexExpr{X: target, Index: ast.NewIdent("i")}, &ast.IndexExpr{X: target, Index: ast.NewIdent("j")}}}}}}},
+					},
+				}}},
+			})
+			return out, err == nil, err
+		case checker.ListSwap:
+			left, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			right, ok, err := arg(1)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target, Index: left}, &ast.IndexExpr{X: target, Index: right}}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.IndexExpr{X: target, Index: right}, &ast.IndexExpr{X: target, Index: left}}},
+			})
+			return out, err == nil, err
+		}
 	}
+	return nil, false, nil
 }
 
 func (e *emitter) lowerMapMethodAST(method *checker.MapMethod) (ast.Expr, bool, error) {
@@ -226,16 +332,19 @@ func (e *emitter) lowerMapMethodAST(method *checker.MapMethod) (ast.Expr, bool, 
 	if err != nil || !ok {
 		return nil, ok, err
 	}
+	arg := func(i int) (ast.Expr, bool, error) {
+		if i >= len(method.Args) {
+			return nil, false, errStructuredLoweringUnsupported
+		}
+		return e.lowerExprAST(method.Args[i])
+	}
 	switch method.Kind {
 	case checker.MapSize:
 		return &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{subject}}, true, nil
 	case checker.MapKeys:
 		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "MapKeys"), Args: []ast.Expr{subject}}, true, nil
 	case checker.MapHas:
-		if len(method.Args) != 1 {
-			return nil, false, errStructuredLoweringUnsupported
-		}
-		key, ok, err := e.lowerExprAST(method.Args[0])
+		key, ok, err := arg(0)
 		if err != nil || !ok {
 			return nil, ok, err
 		}
@@ -243,12 +352,10 @@ func (e *emitter) lowerMapMethodAST(method *checker.MapMethod) (ast.Expr, bool, 
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_"), ast.NewIdent("ok")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.IndexExpr{X: subject, Index: key}}},
 			&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("ok")}},
 		}
-		return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(ast.NewIdent("bool"))}, Body: &ast.BlockStmt{List: body}}}, true, nil
+		out, err := e.inlineFuncCallAST(method.Type(), body)
+		return out, err == nil, err
 	case checker.MapGet:
-		if len(method.Args) != 1 {
-			return nil, false, errStructuredLoweringUnsupported
-		}
-		key, ok, err := e.lowerExprAST(method.Args[0])
+		key, ok, err := arg(0)
 		if err != nil || !ok {
 			return nil, ok, err
 		}
@@ -268,9 +375,33 @@ func (e *emitter) lowerMapMethodAST(method *checker.MapMethod) (ast.Expr, bool, 
 			&ast.IfStmt{Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("value"), ast.NewIdent("ok")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.IndexExpr{X: subject, Index: key}}}, Cond: ast.NewIdent("ok"), Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{innerType}, []ast.Expr{ast.NewIdent("value")})}}}}, Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{astCall(selectorExpr(ast.NewIdent(helperImportAlias), "None"), []ast.Expr{innerType}, nil)}}}}},
 		}
 		return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(resultType)}, Body: &ast.BlockStmt{List: body}}}, true, nil
-	default:
-		return nil, false, nil
+	case checker.MapSet, checker.MapDrop:
+		target, ok, err := e.lowerAssignmentTargetAST(method.Subject)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		switch method.Kind {
+		case checker.MapSet:
+			key, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			value, ok, err := arg(1)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target, Index: key}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}}, &ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("true")}}})
+			return out, err == nil, err
+		case checker.MapDrop:
+			key, ok, err := arg(0)
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target, key}}}})
+			return out, err == nil, err
+		}
 	}
+	return nil, false, nil
 }
 
 func (e *emitter) lowerFunctionLiteralAST(def *checker.FunctionDef) (ast.Expr, bool, error) {

@@ -405,6 +405,18 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		return e.lowerFunctionLiteralAST(v)
 	case *checker.If:
 		return e.lowerIfExprAST(v)
+	case *checker.BoolMatch:
+		return e.lowerBoolMatchAST(v)
+	case *checker.IntMatch:
+		return e.lowerIntMatchAST(v)
+	case *checker.ConditionalMatch:
+		return e.lowerConditionalMatchAST(v)
+	case *checker.OptionMatch:
+		return e.lowerOptionMatchAST(v)
+	case *checker.ResultMatch:
+		return e.lowerResultMatchAST(v)
+	case *checker.EnumMatch:
+		return e.lowerEnumMatchAST(v)
 	case *checker.Panic:
 		return e.lowerPanicExprAST(v.Message, v.Type())
 	case checker.Panic:
