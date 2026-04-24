@@ -648,128 +648,11 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	if !entrypoint && module.Path() == "ard/async" {
 		return emitAsyncModuleSource(packageName)
 	}
-
-	e := &emitter{
-		module:        module,
-		packageName:   packageName,
-		projectName:   projectName,
-		entrypoint:    entrypoint,
-		imports:       collectModuleImports(module.Program().Statements, projectName),
-		functionNames: make(map[string]string),
-		emittedTypes:  make(map[string]struct{}),
-	}
-	if entrypoint {
-		e.imports[helperImportPath] = helperImportAlias
-	}
-	e.indexFunctions()
-
-	prelude, err := renderGoFilePrelude(lowerGoFileIR(packageName, e.imports))
+	fileIR, err := lowerModuleFileIR(module, packageName, entrypoint, projectName)
 	if err != nil {
 		return nil, err
 	}
-	_, _ = e.builder.Write(prelude)
-	e.line("")
-
-	for _, stmt := range module.Program().Statements {
-		if stmt.Stmt == nil {
-			continue
-		}
-		switch def := stmt.Stmt.(type) {
-		case *checker.StructDef:
-			if err := e.emitStructDef(def); err != nil {
-				return nil, err
-			}
-			e.line("")
-		case checker.StructDef:
-			defCopy := def
-			if err := e.emitStructDef(&defCopy); err != nil {
-				return nil, err
-			}
-			e.line("")
-		case *checker.Enum:
-			if err := e.emitEnumDef(def); err != nil {
-				return nil, err
-			}
-			e.line("")
-		case checker.Enum:
-			defCopy := def
-			if err := e.emitEnumDef(&defCopy); err != nil {
-				return nil, err
-			}
-			e.line("")
-		case *checker.VariableDef:
-			if entrypoint {
-				continue
-			}
-			if err := e.emitPackageVariable(def); err != nil {
-				return nil, err
-			}
-			e.line("")
-		case *checker.ExternType:
-			continue
-		default:
-			if !entrypoint {
-				return nil, fmt.Errorf("unsupported top-level statement in imported module: %T", stmt.Stmt)
-			}
-		}
-	}
-
-	for _, stmt := range module.Program().Statements {
-		if stmt.Expr == nil {
-			continue
-		}
-		switch def := stmt.Expr.(type) {
-		case *checker.FunctionDef:
-			if def.IsTest {
-				continue
-			}
-			if err := e.emitFunction(def); err != nil {
-				return nil, err
-			}
-			e.line("")
-		case *checker.ExternalFunctionDef:
-			if err := e.emitExternFunction(def); err != nil {
-				return nil, err
-			}
-			e.line("")
-		}
-	}
-
-	if entrypoint {
-		e.line("func main() {")
-		e.indent++
-		e.line(helperImportAlias + ".RegisterBuiltinExterns()")
-		if mainExpr := entrypointMainExpr(module.Program().Statements); mainExpr != nil {
-			mainName := e.functionNames["main"]
-			if mainName == "" {
-				mainName = "main"
-			}
-			switch typed := mainExpr.(type) {
-			case *checker.FunctionDef:
-				if effectiveFunctionReturnType(typed) == checker.Void {
-					e.line(mainName + "()")
-				} else {
-					e.line("_ = " + mainName + "()")
-				}
-			case *checker.ExternalFunctionDef:
-				if typed.ReturnType == checker.Void {
-					e.line(mainName + "()")
-				} else {
-					e.line("_ = " + mainName + "()")
-				}
-			}
-		} else {
-			if err := e.withFreshLocals(func() error {
-				return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
-			}); err != nil {
-				return nil, err
-			}
-		}
-		e.indent--
-		e.line("}")
-	}
-
-	return formatGeneratedGoSource(e.builder.String())
+	return renderGoFile(fileIR)
 }
 
 func emitAsyncModuleSource(packageName string) ([]byte, error) {
@@ -5054,6 +4937,21 @@ func (e *emitter) line(text string) {
 	e.builder.WriteString(strings.Repeat("\t", e.indent))
 	e.builder.WriteString(text)
 	e.builder.WriteString("\n")
+}
+
+func (e *emitter) captureOutput(fn func() error) (string, error) {
+	prevBuilder := e.builder
+	prevIndent := e.indent
+	e.builder = strings.Builder{}
+	e.indent = 0
+	defer func() {
+		e.builder = prevBuilder
+		e.indent = prevIndent
+	}()
+	if err := fn(); err != nil {
+		return "", err
+	}
+	return e.builder.String(), nil
 }
 
 func goName(name string, exported bool) string {

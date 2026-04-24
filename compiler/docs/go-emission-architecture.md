@@ -74,9 +74,9 @@ parse AST
 This repository is in the middle of that migration:
 
 - frontend loading/build orchestration is separated from emission details
-- Go file/package/import structure has a minimal IR scaffold
-- final formatting goes through `go/parser` + `go/format`
-- most expression and statement emission still uses the legacy direct emitter and will be migrated incrementally
+- module files now lower into a Go file IR that owns package/import/declaration ordering
+- rendered files flow through `go/ast` + `go/format`
+- most expression and statement lowering inside declarations still uses the legacy direct emitter and will be migrated incrementally
 
 ## Success criteria
 

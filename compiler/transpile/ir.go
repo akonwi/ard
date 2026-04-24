@@ -3,6 +3,11 @@ package transpile
 type goFileIR struct {
 	PackageName string
 	Imports     []goImportIR
+	Decls       []goDeclIR
+}
+
+type goDeclIR struct {
+	Source string
 }
 
 type goImportIR struct {
