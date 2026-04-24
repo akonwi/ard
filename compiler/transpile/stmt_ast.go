@@ -42,10 +42,27 @@ func (e *emitter) lowerStatementsBlockAST(stmts []checker.Statement, returnType 
 func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []checker.Statement, returnType checker.Type) ([]ast.Stmt, bool, error) {
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
-		if _, ok := s.Value.(*checker.TryOp); ok {
-			return nil, false, nil
-		}
 		name := e.bindLocal(s.Name)
+		if tryOp, ok := s.Value.(*checker.TryOp); ok {
+			stmts, ok, err := e.lowerTryOpAST(tryOp, returnType, func(successValue ast.Expr) ([]ast.Stmt, error) {
+				lhs := ast.NewIdent(name)
+				if typeNeedsExplicitVarAnnotation(s.Type()) {
+					typeExpr, err := e.lowerTypeExpr(s.Type())
+					if err != nil {
+						return nil, err
+					}
+					return []ast.Stmt{&ast.DeclStmt{Decl: astVarDecl(astValueSpec(name, typeExpr, successValue))}}, nil
+				}
+				return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{lhs}, Tok: token.DEFINE, Rhs: []ast.Expr{successValue}}}, nil
+			})
+			if err != nil || !ok {
+				return nil, ok, err
+			}
+			if !usesNameInStatements(remaining, s.Name) {
+				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(name)}})
+			}
+			return stmts, true, nil
+		}
 		value, ok, err := e.lowerExprAST(s.Value)
 		if err != nil || !ok {
 			return nil, ok, err
@@ -68,12 +85,14 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 		}
 		return stmts, true, nil
 	case *checker.Reassignment:
-		if _, ok := s.Value.(*checker.TryOp); ok {
-			return nil, false, nil
-		}
 		target, ok, err := e.lowerAssignmentTargetAST(s.Target)
 		if err != nil || !ok {
 			return nil, ok, err
+		}
+		if tryOp, ok := s.Value.(*checker.TryOp); ok {
+			return e.lowerTryOpAST(tryOp, returnType, func(successValue ast.Expr) ([]ast.Stmt, error) {
+				return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{successValue}}}, nil
+			})
 		}
 		value, ok, err := e.lowerExprAST(s.Value)
 		if err != nil || !ok {
@@ -205,6 +224,15 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 }
 
 func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnType checker.Type, isLast bool) ([]ast.Stmt, bool, error) {
+	if tryOp, ok := expr.(*checker.TryOp); ok {
+		var onSuccess func(ast.Expr) ([]ast.Stmt, error)
+		if isLast && returnType != nil && returnType != checker.Void {
+			onSuccess = func(successValue ast.Expr) ([]ast.Stmt, error) {
+				return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{successValue}}}, nil
+			}
+		}
+		return e.lowerTryOpAST(tryOp, returnType, onSuccess)
+	}
 	if panicExpr, ok := expr.(*checker.Panic); ok {
 		msg, ok2, err := e.lowerExprAST(panicExpr.Message)
 		if err != nil || !ok2 {
