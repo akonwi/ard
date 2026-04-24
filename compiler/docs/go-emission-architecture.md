@@ -75,6 +75,7 @@ This repository is in the middle of that migration:
 
 - frontend loading/build orchestration is separated from emission details
 - module files now lower into a Go file IR that owns package/import/declaration ordering
+- a Go IR optimization pass runs before rendering and is ready to host output simplification work
 - rendered files flow through `go/ast` + `go/format`
 - most expression and statement lowering inside declarations still uses the legacy direct emitter and will be migrated incrementally
 

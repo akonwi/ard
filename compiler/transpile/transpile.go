@@ -652,7 +652,7 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 	if err != nil {
 		return nil, err
 	}
-	return renderGoFile(fileIR)
+	return renderGoFile(optimizeGoFileIR(fileIR))
 }
 
 func emitAsyncModuleSource(packageName string) ([]byte, error) {
