@@ -205,6 +205,13 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 }
 
 func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnType checker.Type, isLast bool) ([]ast.Stmt, bool, error) {
+	if panicExpr, ok := expr.(*checker.Panic); ok {
+		msg, ok2, err := e.lowerExprAST(panicExpr.Message)
+		if err != nil || !ok2 {
+			return nil, ok2, err
+		}
+		return []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{msg}}}}, true, nil
+	}
 	if ifExpr, ok := expr.(*checker.If); ok {
 		stmt, ok, err := e.lowerIfStatementAST(ifExpr, returnType, isLast)
 		if err != nil || !ok {

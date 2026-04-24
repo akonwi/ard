@@ -403,6 +403,12 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(asyncAlias), goName("start", true)), Args: []ast.Expr{selectorExpr(ast.NewIdent(moduleAlias), goName(v.GetMainName(), true))}}, true, nil
 	case *checker.FunctionDef:
 		return e.lowerFunctionLiteralAST(v)
+	case *checker.If:
+		return e.lowerIfExprAST(v)
+	case *checker.Panic:
+		return e.lowerPanicExprAST(v.Message, v.Type())
+	case checker.Panic:
+		return e.lowerPanicExprAST(v.Message, v.Type())
 	default:
 		return nil, false, nil
 	}
