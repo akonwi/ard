@@ -99,9 +99,11 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				return goFileIR{}, err
 			}
 		case *checker.ExternalFunctionDef:
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitExternFunction(def) }); err != nil {
+			decl, err := e.lowerExternFunctionDeclNode(def)
+			if err != nil {
 				return goFileIR{}, err
 			}
+			appendASTDecl(&fileIR, decl)
 		}
 	}
 
