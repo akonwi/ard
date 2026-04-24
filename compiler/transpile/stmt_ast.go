@@ -43,6 +43,9 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 	switch s := stmt.(type) {
 	case *checker.VariableDef:
 		name := e.bindLocal(s.Name)
+		if stmts, ok, err := e.lowerVariableDefFromMatchAST(name, s, remaining); err != nil || ok {
+			return stmts, ok, err
+		}
 		if tryOp, ok := s.Value.(*checker.TryOp); ok {
 			stmts, ok, err := e.lowerTryOpAST(tryOp, returnType, func(successValue ast.Expr) ([]ast.Stmt, error) {
 				lhs := ast.NewIdent(name)
@@ -304,10 +307,18 @@ func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnTyp
 	}
 	if isLast && returnType != nil && returnType != checker.Void {
 		value, ok, err := e.lowerValueForTypeAST(expr, returnType)
-		if err != nil || !ok {
-			return nil, ok, err
+		if err == nil && ok {
+			return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{value}}}, true, nil
 		}
-		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{value}}}, true, nil
+		prelude, lowered, preludeOK, preludeErr := e.lowerExprWithPreludeAST(expr, returnType)
+		if preludeErr == nil && preludeOK {
+			lowered, preludeErr = e.wrapTraitValueAST(lowered, returnType)
+			if preludeErr != nil {
+				return nil, false, preludeErr
+			}
+			return append(prelude, &ast.ReturnStmt{Results: []ast.Expr{lowered}}), true, nil
+		}
+		return nil, ok, err
 	}
 	value, ok, err := e.lowerExprAST(expr)
 	if err != nil || !ok {
