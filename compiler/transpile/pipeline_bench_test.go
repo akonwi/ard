@@ -33,12 +33,15 @@ fn greet(person: Person) Str {
   "hi ${person.name}"
 }
 
-fn main() {
+fn main() Int {
   let person = Person{name: "Ada", age: 42}
   let result = score(person)
   let greeting = greet(person)
-  print(greeting)
-  print(result.to_str())
+  if greeting == "" {
+    0
+  } else {
+    result
+  }
 }
 `
 	if err := os.WriteFile(mainPath, []byte(source), 0o644); err != nil {
