@@ -9,8 +9,7 @@ type goFileIR struct {
 }
 
 type goDeclIR struct {
-	Source string
-	Decls  []ast.Decl
+	Decls []ast.Decl
 }
 
 type goImportIR struct {

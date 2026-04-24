@@ -148,6 +148,6 @@ func appendGoDeclIR(fileIR *goFileIR, packageName string, source string) error {
 	if err != nil {
 		return err
 	}
-	fileIR.Decls = append(fileIR.Decls, goDeclIR{Source: trimmed, Decls: decls})
+	fileIR.Decls = append(fileIR.Decls, goDeclIR{Decls: decls})
 	return nil
 }

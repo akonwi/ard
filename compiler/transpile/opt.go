@@ -1,7 +1,5 @@
 package transpile
 
-import "strings"
-
 func optimizeGoFileIR(fileIR goFileIR) goFileIR {
 	optimized := goFileIR{PackageName: fileIR.PackageName}
 	if len(fileIR.Imports) > 0 {
@@ -19,11 +17,10 @@ func optimizeGoFileIR(fileIR goFileIR) goFileIR {
 	if len(fileIR.Decls) > 0 {
 		optimized.Decls = make([]goDeclIR, 0, len(fileIR.Decls))
 		for _, decl := range fileIR.Decls {
-			trimmed := strings.TrimSpace(decl.Source)
-			if trimmed == "" {
+			if len(decl.Decls) == 0 {
 				continue
 			}
-			optimized.Decls = append(optimized.Decls, goDeclIR{Source: trimmed, Decls: decl.Decls})
+			optimized.Decls = append(optimized.Decls, goDeclIR{Decls: decl.Decls})
 		}
 	}
 	return optimized

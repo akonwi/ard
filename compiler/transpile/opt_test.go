@@ -3,17 +3,18 @@ package transpile
 import "testing"
 
 func TestOptimizeGoFileIR(t *testing.T) {
-	optimized := optimizeGoFileIR(goFileIR{
+	fileIR := goFileIR{
 		PackageName: "main",
 		Imports: []goImportIR{
 			{Alias: helperImportAlias, Path: helperImportPath},
 			{Alias: helperImportAlias, Path: helperImportPath},
 		},
-		Decls: []goDeclIR{
-			{Source: ""},
-			{Source: " type Person struct{}\n"},
-		},
-	})
+		Decls: []goDeclIR{{}},
+	}
+	if err := appendGoDeclIR(&fileIR, "main", " type Person struct{}\n"); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+	optimized := optimizeGoFileIR(fileIR)
 
 	if len(optimized.Imports) != 1 {
 		t.Fatalf("expected 1 import, got %d", len(optimized.Imports))
@@ -21,7 +22,7 @@ func TestOptimizeGoFileIR(t *testing.T) {
 	if len(optimized.Decls) != 1 {
 		t.Fatalf("expected 1 declaration, got %d", len(optimized.Decls))
 	}
-	if optimized.Decls[0].Source != "type Person struct{}" {
-		t.Fatalf("expected trimmed declaration, got %q", optimized.Decls[0].Source)
+	if len(optimized.Decls[0].Decls) != 1 {
+		t.Fatalf("expected 1 parsed declaration, got %d", len(optimized.Decls[0].Decls))
 	}
 }
