@@ -34,12 +34,23 @@ func (e *emitter) lowerMatchBranchAST(block *checker.Block, returnType checker.T
 	return &ast.BlockStmt{List: append(prefix, body.List...)}, true, nil
 }
 
+func matchExpectedType(expectedType checker.Type, fallback checker.Type) checker.Type {
+	if expectedType != nil {
+		return expectedType
+	}
+	return fallback
+}
+
 func (e *emitter) lowerBoolMatchAST(match *checker.BoolMatch) (ast.Expr, bool, error) {
+	return e.lowerBoolMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerBoolMatchWithExpectedAST(match *checker.BoolMatch, expectedType checker.Type) (ast.Expr, bool, error) {
 	subject, ok, err := e.lowerExprAST(match.Subject)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
-	returnType := match.Type()
+	returnType := matchExpectedType(expectedType, match.Type())
 	trueBody, ok, err := e.lowerMatchBranchAST(match.True, returnType, nil)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -53,11 +64,15 @@ func (e *emitter) lowerBoolMatchAST(match *checker.BoolMatch) (ast.Expr, bool, e
 }
 
 func (e *emitter) lowerIntMatchAST(match *checker.IntMatch) (ast.Expr, bool, error) {
+	return e.lowerIntMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerIntMatchWithExpectedAST(match *checker.IntMatch, expectedType checker.Type) (ast.Expr, bool, error) {
 	subject, ok, err := e.lowerExprAST(match.Subject)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
-	returnType := match.Type()
+	returnType := matchExpectedType(expectedType, match.Type())
 	switchStmt := &ast.SwitchStmt{}
 	for _, value := range sortedIntKeys(match.IntCases) {
 		body, ok, err := e.lowerMatchBranchAST(match.IntCases[value], returnType, nil)
@@ -88,7 +103,11 @@ func (e *emitter) lowerIntMatchAST(match *checker.IntMatch) (ast.Expr, bool, err
 }
 
 func (e *emitter) lowerConditionalMatchAST(match *checker.ConditionalMatch) (ast.Expr, bool, error) {
-	returnType := match.Type()
+	return e.lowerConditionalMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerConditionalMatchWithExpectedAST(match *checker.ConditionalMatch, expectedType checker.Type) (ast.Expr, bool, error) {
+	returnType := matchExpectedType(expectedType, match.Type())
 	if len(match.Cases) == 0 {
 		body := []ast.Stmt{}
 		if match.CatchAll != nil {
@@ -136,11 +155,15 @@ func (e *emitter) lowerConditionalMatchAST(match *checker.ConditionalMatch) (ast
 }
 
 func (e *emitter) lowerOptionMatchAST(match *checker.OptionMatch) (ast.Expr, bool, error) {
+	return e.lowerOptionMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerOptionMatchWithExpectedAST(match *checker.OptionMatch, expectedType checker.Type) (ast.Expr, bool, error) {
 	subject, ok, err := e.lowerExprAST(match.Subject)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
-	returnType := match.Type()
+	returnType := matchExpectedType(expectedType, match.Type())
 	if match.Some == nil || match.Some.Body == nil || match.None == nil {
 		return nil, false, errStructuredLoweringUnsupported
 	}
@@ -172,6 +195,10 @@ func (e *emitter) lowerOptionMatchAST(match *checker.OptionMatch) (ast.Expr, boo
 }
 
 func (e *emitter) lowerResultMatchAST(match *checker.ResultMatch) (ast.Expr, bool, error) {
+	return e.lowerResultMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerResultMatchWithExpectedAST(match *checker.ResultMatch, expectedType checker.Type) (ast.Expr, bool, error) {
 	subject, ok, err := e.lowerExprAST(match.Subject)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -179,7 +206,7 @@ func (e *emitter) lowerResultMatchAST(match *checker.ResultMatch) (ast.Expr, boo
 	if match.Ok == nil || match.Ok.Body == nil || match.Err == nil || match.Err.Body == nil {
 		return nil, false, errStructuredLoweringUnsupported
 	}
-	returnType := match.Type()
+	returnType := matchExpectedType(expectedType, match.Type())
 	resultName := e.nextTemp("Result")
 	okBody, ok, err := e.lowerMatchBranchAST(match.Ok.Body, returnType, func() ([]ast.Stmt, error) {
 		if match.Ok.Pattern == nil || match.Ok.Pattern.Name == "_" {
@@ -222,11 +249,15 @@ func (e *emitter) lowerResultMatchAST(match *checker.ResultMatch) (ast.Expr, boo
 }
 
 func (e *emitter) lowerEnumMatchAST(match *checker.EnumMatch) (ast.Expr, bool, error) {
+	return e.lowerEnumMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerEnumMatchWithExpectedAST(match *checker.EnumMatch, expectedType checker.Type) (ast.Expr, bool, error) {
 	subject, ok, err := e.lowerExprAST(match.Subject)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
-	returnType := match.Type()
+	returnType := matchExpectedType(expectedType, match.Type())
 	switchStmt := &ast.SwitchStmt{Tag: selectorExpr(subject, "Tag")}
 	discriminants := make([]int, 0, len(match.DiscriminantToIndex))
 	for discriminant := range match.DiscriminantToIndex {
@@ -258,11 +289,15 @@ func (e *emitter) lowerEnumMatchAST(match *checker.EnumMatch) (ast.Expr, bool, e
 }
 
 func (e *emitter) lowerUnionMatchAST(match *checker.UnionMatch) (ast.Expr, bool, error) {
+	return e.lowerUnionMatchWithExpectedAST(match, nil)
+}
+
+func (e *emitter) lowerUnionMatchWithExpectedAST(match *checker.UnionMatch, expectedType checker.Type) (ast.Expr, bool, error) {
 	subject, ok, err := e.lowerExprAST(match.Subject)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
-	returnType := match.Type()
+	returnType := matchExpectedType(expectedType, match.Type())
 	subjectName := e.nextTemp("Union")
 	typeSwitch := &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(subjectName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{subject}}}}}}
 	for _, caseName := range sortedStringKeys(match.TypeCases) {
