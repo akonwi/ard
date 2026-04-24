@@ -29,7 +29,7 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 		}
 	}
 
-	source, err := emitModuleSource(entrypoint, "main", true, project.ProjectName)
+	source, err := compileModuleSource(entrypoint, "main", true, project.ProjectName)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func writeImportedModule(generatedDir, projectName string, module checker.Module
 	}
 	written[module.Path()] = struct{}{}
 
-	source, err := emitPackageSource(module, projectName)
+	source, err := compilePackageSource(module, projectName)
 	if err != nil {
 		return err
 	}

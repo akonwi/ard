@@ -541,15 +541,15 @@ func (e *emitter) structTypeTemplate(def *checker.StructDef) *checker.StructDef 
 	return def
 }
 
-func EmitEntrypoint(module checker.Module) ([]byte, error) {
-	return emitModuleSource(module, "main", true, "")
+func CompileEntrypoint(module checker.Module) ([]byte, error) {
+	return compileModuleSource(module, "main", true, "")
 }
 
-func emitPackageSource(module checker.Module, projectName string) ([]byte, error) {
-	return emitModuleSource(module, packageNameForModulePath(module.Path()), false, projectName)
+func compilePackageSource(module checker.Module, projectName string) ([]byte, error) {
+	return compileModuleSource(module, packageNameForModulePath(module.Path()), false, projectName)
 }
 
-func emitModuleSource(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
+func compileModuleSource(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
 	if module == nil || module.Program() == nil {
 		return nil, fmt.Errorf("module has no program")
 	}

@@ -91,11 +91,11 @@ func BenchmarkRenderGoFile(b *testing.B) {
 	}
 }
 
-func BenchmarkEmitModuleSource(b *testing.B) {
+func BenchmarkCompileModuleSource(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := emitModuleSource(module, "main", true, "bench"); err != nil {
+		if _, err := compileModuleSource(module, "main", true, "bench"); err != nil {
 			b.Fatalf("did not expect error: %v", err)
 		}
 	}
