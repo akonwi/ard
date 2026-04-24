@@ -33,22 +33,42 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 		}
 		switch def := stmt.Stmt.(type) {
 		case *checker.StructDef:
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitStructDef(def) }); err != nil {
+			decl, err := e.lowerStructTypeDeclNode(def)
+			if err != nil {
 				return goFileIR{}, err
+			}
+			appendASTDecl(&fileIR, decl)
+			for _, methodName := range sortedStringKeys(def.Methods) {
+				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitStructMethod(def, def.Methods[methodName]) }); err != nil {
+					return goFileIR{}, err
+				}
 			}
 		case checker.StructDef:
 			defCopy := def
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitStructDef(&defCopy) }); err != nil {
+			decl, err := e.lowerStructTypeDeclNode(&defCopy)
+			if err != nil {
 				return goFileIR{}, err
 			}
+			appendASTDecl(&fileIR, decl)
+			for _, methodName := range sortedStringKeys(defCopy.Methods) {
+				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitStructMethod(&defCopy, defCopy.Methods[methodName]) }); err != nil {
+					return goFileIR{}, err
+				}
+			}
 		case *checker.Enum:
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitEnumDef(def) }); err != nil {
-				return goFileIR{}, err
+			appendASTDecl(&fileIR, e.lowerEnumTypeDeclNode(def))
+			for _, methodName := range sortedStringKeys(def.Methods) {
+				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitEnumMethod(def, def.Methods[methodName]) }); err != nil {
+					return goFileIR{}, err
+				}
 			}
 		case checker.Enum:
 			defCopy := def
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitEnumDef(&defCopy) }); err != nil {
-				return goFileIR{}, err
+			appendASTDecl(&fileIR, e.lowerEnumTypeDeclNode(&defCopy))
+			for _, methodName := range sortedStringKeys(defCopy.Methods) {
+				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitEnumMethod(&defCopy, defCopy.Methods[methodName]) }); err != nil {
+					return goFileIR{}, err
+				}
 			}
 		case *checker.VariableDef:
 			if entrypoint {
