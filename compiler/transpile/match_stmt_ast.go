@@ -3,6 +3,7 @@ package transpile
 import (
 	"go/ast"
 	"go/token"
+	"strconv"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -18,6 +19,8 @@ func (e *emitter) lowerVariableDefFromMatchAST(name string, def *checker.Variabl
 	switch match := def.Value.(type) {
 	case *checker.BoolMatch:
 		body, ok, err = e.lowerBoolMatchAssignAST(match, target, def.Type())
+	case *checker.OptionMatch:
+		body, ok, err = e.lowerOptionMatchAssignAST(match, target, def.Type())
 	case *checker.ResultMatch:
 		body, ok, err = e.lowerResultMatchAssignAST(match, target, def.Type())
 	case *checker.UnionMatch:
@@ -183,6 +186,74 @@ func (e *emitter) lowerBoolMatchStatementAST(match *checker.BoolMatch) ([]ast.St
 		return nil, ok, err
 	}
 	return []ast.Stmt{&ast.IfStmt{Cond: subject, Body: trueBody, Else: falseBody}}, true, nil
+}
+
+func (e *emitter) lowerOptionMatchAssignAST(match *checker.OptionMatch, target ast.Expr, targetType checker.Type) ([]ast.Stmt, bool, error) {
+	subject, ok, err := e.lowerExprAST(match.Subject)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if match.Some == nil || match.Some.Body == nil || match.None == nil {
+		return nil, false, errStructuredLoweringUnsupported
+	}
+	maybeName := e.nextTemp("Maybe")
+	someBody, ok, err := e.lowerMatchBranchIntoTargetAST(match.Some.Body, target, targetType, func() ([]ast.Stmt, error) {
+		if match.Some.Pattern == nil || match.Some.Pattern.Name == "_" {
+			return nil, nil
+		}
+		patternName := e.bindLocal(match.Some.Pattern.Name)
+		bound := &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(maybeName), "Expect"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unreachable none in maybe match")}}}
+		prefix := []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(patternName)}, Tok: token.DEFINE, Rhs: []ast.Expr{bound}}}
+		if !usesNameInStatements(match.Some.Body.Stmts, match.Some.Pattern.Name) {
+			prefix = append(prefix, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(patternName)}})
+		}
+		return prefix, nil
+	})
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	noneBody, ok, err := e.lowerMatchBranchIntoTargetAST(match.None, target, targetType, nil)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(maybeName)}, Tok: token.DEFINE, Rhs: []ast.Expr{subject}},
+		&ast.IfStmt{Cond: &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(maybeName), "IsSome")}, Body: someBody, Else: noneBody},
+	}, true, nil
+}
+
+func (e *emitter) lowerOptionMatchStatementAST(match *checker.OptionMatch) ([]ast.Stmt, bool, error) {
+	subject, ok, err := e.lowerExprAST(match.Subject)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if match.Some == nil || match.Some.Body == nil || match.None == nil {
+		return nil, false, errStructuredLoweringUnsupported
+	}
+	maybeName := e.nextTemp("Maybe")
+	someBody, ok, err := e.lowerMatchBranchAST(match.Some.Body, checker.Void, func() ([]ast.Stmt, error) {
+		if match.Some.Pattern == nil || match.Some.Pattern.Name == "_" {
+			return nil, nil
+		}
+		patternName := e.bindLocal(match.Some.Pattern.Name)
+		bound := &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(maybeName), "Expect"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unreachable none in maybe match")}}}
+		prefix := []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(patternName)}, Tok: token.DEFINE, Rhs: []ast.Expr{bound}}}
+		if !usesNameInStatements(match.Some.Body.Stmts, match.Some.Pattern.Name) {
+			prefix = append(prefix, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(patternName)}})
+		}
+		return prefix, nil
+	})
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	noneBody, ok, err := e.lowerMatchBranchAST(match.None, checker.Void, nil)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(maybeName)}, Tok: token.DEFINE, Rhs: []ast.Expr{subject}},
+		&ast.IfStmt{Cond: &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(maybeName), "IsSome")}, Body: someBody, Else: noneBody},
+	}, true, nil
 }
 
 func (e *emitter) lowerResultMatchAssignAST(match *checker.ResultMatch, target ast.Expr, targetType checker.Type) ([]ast.Stmt, bool, error) {

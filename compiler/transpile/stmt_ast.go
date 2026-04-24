@@ -264,18 +264,22 @@ func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnTyp
 		return []ast.Stmt{stmt}, true, nil
 	}
 	if !isLast || returnType == nil || returnType == checker.Void {
-		if exprContainsBreak(expr) {
-			return nil, false, nil
-		}
 		switch typed := expr.(type) {
 		case *checker.BoolMatch:
 			if stmts, ok, err := e.lowerBoolMatchStatementAST(typed); err != nil || ok {
+				return stmts, ok, err
+			}
+		case *checker.OptionMatch:
+			if stmts, ok, err := e.lowerOptionMatchStatementAST(typed); err != nil || ok {
 				return stmts, ok, err
 			}
 		case *checker.ResultMatch:
 			if stmts, ok, err := e.lowerResultMatchStatementAST(typed); err != nil || ok {
 				return stmts, ok, err
 			}
+		}
+		if exprContainsBreak(expr) {
+			return nil, false, nil
 		}
 		var (
 			value ast.Expr
@@ -320,6 +324,9 @@ func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnTyp
 		}
 		return nil, ok, err
 	}
+	if _, isVoidLiteral := expr.(*checker.VoidLiteral); isVoidLiteral {
+		return nil, true, nil
+	}
 	value, ok, err := e.lowerExprAST(expr)
 	if err != nil || !ok {
 		return nil, ok, err
@@ -338,13 +345,17 @@ func (e *emitter) lowerIfStatementAST(expr *checker.If, returnType checker.Type,
 	if err != nil || !ok {
 		return nil, ok, err
 	}
-	thenBody, ok, err := e.lowerStatementsBlockAST(expr.Body.Stmts, returnType)
+	branchReturnType := checker.Type(checker.Void)
+	if isLast && returnType != nil && returnType != checker.Void {
+		branchReturnType = returnType
+	}
+	thenBody, ok, err := e.lowerStatementsBlockAST(expr.Body.Stmts, branchReturnType)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
 	stmt := &ast.IfStmt{Cond: cond, Body: thenBody}
 	if expr.ElseIf != nil {
-		elseStmt, ok, err := e.lowerIfStatementAST(withElseFallback(expr.ElseIf, expr.Else), returnType, isLast)
+		elseStmt, ok, err := e.lowerIfStatementAST(withElseFallback(expr.ElseIf, expr.Else), branchReturnType, isLast)
 		if err != nil || !ok {
 			return nil, ok, err
 		}
@@ -352,12 +363,12 @@ func (e *emitter) lowerIfStatementAST(expr *checker.If, returnType checker.Type,
 		return stmt, true, nil
 	}
 	if expr.Else != nil {
-		elseBody, ok, err := e.lowerStatementsBlockAST(expr.Else.Stmts, returnType)
+		elseBody, ok, err := e.lowerStatementsBlockAST(expr.Else.Stmts, branchReturnType)
 		if err != nil || !ok {
 			return nil, ok, err
 		}
 		stmt.Else = elseBody
-	} else if isLast && returnType != nil && returnType != checker.Void {
+	} else if branchReturnType != checker.Void {
 		return nil, false, nil
 	}
 	return stmt, true, nil

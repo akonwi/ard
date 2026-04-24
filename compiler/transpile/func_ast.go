@@ -32,17 +32,7 @@ func (e *emitter) lowerFunctionBodyBlock(stmts []checker.Statement, returnType c
 	e.localNameCounts = prevCounts
 	e.tempCounter = prevTempCounter
 	e.fnReturnType = returnType
-	bodySource, err := e.captureOutput(func() error {
-		return e.emitStatements(stmts, returnType)
-	})
-	if err != nil {
-		return nil, err
-	}
-	list, err := parseGoBlockStatements(bodySource)
-	if err != nil {
-		return nil, err
-	}
-	return &ast.BlockStmt{List: list}, nil
+	return nil, errStructuredLoweringUnsupported
 }
 
 func (e *emitter) lowerFunctionDeclNode(def *checker.FunctionDef) (ast.Decl, error) {
