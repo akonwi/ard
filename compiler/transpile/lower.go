@@ -104,8 +104,14 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 			if entrypoint {
 				continue
 			}
-			if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitPackageVariable(def) }); err != nil {
+			if decl, ok, err := e.lowerPackageVariableDeclNode(def); err != nil {
 				return goFileIR{}, err
+			} else if ok {
+				appendASTDecl(&fileIR, decl)
+			} else {
+				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitPackageVariable(def) }); err != nil {
+					return goFileIR{}, err
+				}
 			}
 		case *checker.ExternType:
 			continue
