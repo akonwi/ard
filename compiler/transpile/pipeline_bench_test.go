@@ -1,0 +1,99 @@
+package transpile
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/akonwi/ard/checker"
+)
+
+func benchmarkGoBackendModule(b *testing.B) checker.Module {
+	b.Helper()
+	dir := b.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"bench\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		b.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	source := `
+struct Person {
+  name: Str,
+  age: Int,
+}
+
+fn score(person: Person) Int {
+  if person.age > 40 {
+    10
+  } else {
+    20
+  }
+}
+
+fn greet(person: Person) Str {
+  "hi ${person.name}"
+}
+
+fn main() {
+  let person = Person{name: "Ada", age: 42}
+  let result = score(person)
+  let greeting = greet(person)
+  print(greeting)
+  print(result.to_str())
+}
+`
+	if err := os.WriteFile(mainPath, []byte(source), 0o644); err != nil {
+		b.Fatalf("failed to write main.ard: %v", err)
+	}
+	module, _, err := loadModule(mainPath)
+	if err != nil {
+		b.Fatalf("failed to load module: %v", err)
+	}
+	return module
+}
+
+func BenchmarkLowerModuleFileIR(b *testing.B) {
+	module := benchmarkGoBackendModule(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := lowerModuleFileIR(module, "main", true, "bench"); err != nil {
+			b.Fatalf("did not expect error: %v", err)
+		}
+	}
+}
+
+func BenchmarkOptimizeGoFileIR(b *testing.B) {
+	module := benchmarkGoBackendModule(b)
+	fileIR, err := lowerModuleFileIR(module, "main", true, "bench")
+	if err != nil {
+		b.Fatalf("did not expect error: %v", err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = optimizeGoFileIR(fileIR)
+	}
+}
+
+func BenchmarkRenderGoFile(b *testing.B) {
+	module := benchmarkGoBackendModule(b)
+	fileIR, err := lowerModuleFileIR(module, "main", true, "bench")
+	if err != nil {
+		b.Fatalf("did not expect error: %v", err)
+	}
+	optimized := optimizeGoFileIR(fileIR)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := renderGoFile(optimized); err != nil {
+			b.Fatalf("did not expect error: %v", err)
+		}
+	}
+}
+
+func BenchmarkEmitModuleSource(b *testing.B) {
+	module := benchmarkGoBackendModule(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := emitModuleSource(module, "main", true, "bench"); err != nil {
+			b.Fatalf("did not expect error: %v", err)
+		}
+	}
+}
