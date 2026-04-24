@@ -7,7 +7,7 @@ import (
 )
 
 func (e *emitter) lowerPackageVariableDeclNode(def *checker.VariableDef) (ast.Decl, bool, error) {
-	value, ok, err := e.lowerExprAST(def.Value)
+	value, ok, err := e.lowerValueForTypeAST(def.Value, def.Type())
 	if err != nil || !ok {
 		return nil, ok, err
 	}

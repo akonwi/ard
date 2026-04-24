@@ -63,7 +63,7 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 			}
 			return stmts, true, nil
 		}
-		value, ok, err := e.lowerExprAST(s.Value)
+		value, ok, err := e.lowerValueForTypeAST(s.Value, s.Type())
 		if err != nil || !ok {
 			return nil, ok, err
 		}
@@ -94,7 +94,7 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 				return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{successValue}}}, nil
 			})
 		}
-		value, ok, err := e.lowerExprAST(s.Value)
+		value, ok, err := e.lowerValueForTypeAST(s.Value, s.Target.Type())
 		if err != nil || !ok {
 			return nil, ok, err
 		}
@@ -247,12 +247,48 @@ func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnTyp
 		}
 		return []ast.Stmt{stmt}, true, nil
 	}
+	if !isLast || returnType == nil || returnType == checker.Void {
+		if exprContainsBreak(expr) {
+			return nil, false, nil
+		}
+		var (
+			value ast.Expr
+			ok    bool
+			err   error
+		)
+		switch typed := expr.(type) {
+		case *checker.BoolMatch:
+			value, ok, err = e.lowerBoolMatchWithExpectedAST(typed, checker.Void)
+		case *checker.IntMatch:
+			value, ok, err = e.lowerIntMatchWithExpectedAST(typed, checker.Void)
+		case *checker.ConditionalMatch:
+			value, ok, err = e.lowerConditionalMatchWithExpectedAST(typed, checker.Void)
+		case *checker.OptionMatch:
+			value, ok, err = e.lowerOptionMatchWithExpectedAST(typed, checker.Void)
+		case *checker.ResultMatch:
+			value, ok, err = e.lowerResultMatchWithExpectedAST(typed, checker.Void)
+		case *checker.EnumMatch:
+			value, ok, err = e.lowerEnumMatchWithExpectedAST(typed, checker.Void)
+		case *checker.UnionMatch:
+			value, ok, err = e.lowerUnionMatchWithExpectedAST(typed, checker.Void)
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return []ast.Stmt{&ast.ExprStmt{X: value}}, true, nil
+		}
+	}
+	if isLast && returnType != nil && returnType != checker.Void {
+		value, ok, err := e.lowerValueForTypeAST(expr, returnType)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{value}}}, true, nil
+	}
 	value, ok, err := e.lowerExprAST(expr)
 	if err != nil || !ok {
 		return nil, ok, err
-	}
-	if isLast && returnType != nil && returnType != checker.Void {
-		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{value}}}, true, nil
 	}
 	if _, ok := value.(*ast.CallExpr); ok {
 		return []ast.Stmt{&ast.ExprStmt{X: value}}, true, nil

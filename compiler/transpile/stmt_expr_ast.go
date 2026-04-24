@@ -80,7 +80,16 @@ func (e *emitter) lowerCallArgsAST(call *checker.FunctionCall) ([]ast.Expr, bool
 		if hasParam && params[i].Mutable {
 			return nil, false, nil
 		}
-		emitted, ok, err := e.lowerExprAST(arg)
+		var (
+			emitted ast.Expr
+			ok      bool
+			err     error
+		)
+		if hasParam {
+			emitted, ok, err = e.lowerValueForTypeAST(arg, params[i].Type)
+		} else {
+			emitted, ok, err = e.lowerExprAST(arg)
+		}
 		if err != nil {
 			return nil, false, err
 		}
@@ -229,7 +238,7 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		}
 		elts := make([]ast.Expr, 0, len(v.Fields))
 		for _, fieldName := range sortedStringKeys(v.Fields) {
-			value, ok, err := e.lowerExprAST(v.Fields[fieldName])
+			value, ok, err := e.lowerValueForTypeAST(v.Fields[fieldName], v.FieldTypes[fieldName])
 			if err != nil || !ok {
 				return nil, ok, err
 			}
@@ -243,7 +252,7 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		}
 		elts := make([]ast.Expr, 0, len(v.Property.Fields))
 		for _, fieldName := range sortedStringKeys(v.Property.Fields) {
-			value, ok, err := e.lowerExprAST(v.Property.Fields[fieldName])
+			value, ok, err := e.lowerValueForTypeAST(v.Property.Fields[fieldName], v.FieldTypes[fieldName])
 			if err != nil || !ok {
 				return nil, ok, err
 			}
@@ -361,7 +370,11 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		case checker.FloatToStr:
 			return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent("strconv"), "FormatFloat"), Args: []ast.Expr{subject, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.BasicLit{Kind: token.INT, Value: "2"}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}, true, nil
 		case checker.FloatToInt:
-			return &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{subject}}, true, nil
+			out, err := e.inlineFuncCallAST(v.Type(), []ast.Stmt{
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("value")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("float64"), Args: []ast.Expr{subject}}}},
+				&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{ast.NewIdent("value")}}}},
+			})
+			return out, err == nil, err
 		default:
 			return nil, false, nil
 		}

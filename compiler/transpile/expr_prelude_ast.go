@@ -83,13 +83,13 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			maybeType, ok := call.Call.ReturnType.(*checker.Maybe)
-			if (!ok || maybeHasUnresolvedTypeVar(maybeType)) && expectedType != nil {
+			if expectedType != nil {
 				if expectedMaybe, expectedOK := expectedType.(*checker.Maybe); expectedOK {
 					maybeType = expectedMaybe
 					ok = true
 				}
 			}
-			if !ok {
+			if !ok || maybeHasUnresolvedTypeVar(maybeType) {
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			inner, err := e.lowerTypeArgExprWithOptions(maybeType.Of(), e.typeParams, nil)
@@ -99,13 +99,13 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 			return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{inner}, args), true, nil
 		case "none":
 			maybeType, ok := call.Call.ReturnType.(*checker.Maybe)
-			if (!ok || maybeHasUnresolvedTypeVar(maybeType)) && expectedType != nil {
+			if expectedType != nil {
 				if expectedMaybe, expectedOK := expectedType.(*checker.Maybe); expectedOK {
 					maybeType = expectedMaybe
 					ok = true
 				}
 			}
-			if !ok {
+			if !ok || maybeHasUnresolvedTypeVar(maybeType) {
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			inner, err := e.lowerTypeArgExprWithOptions(maybeType.Of(), e.typeParams, nil)
@@ -121,13 +121,13 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			resultType, ok := call.Call.ReturnType.(*checker.Result)
-			if (!ok || resultHasUnresolvedTypeVar(resultType)) && expectedType != nil {
+			if expectedType != nil {
 				if expectedResult, expectedOK := expectedType.(*checker.Result); expectedOK {
 					resultType = expectedResult
 					ok = true
 				}
 			}
-			if !ok {
+			if !ok || resultHasUnresolvedTypeVar(resultType) {
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			valType, err := e.lowerTypeArgExprWithOptions(resultType.Val(), e.typeParams, nil)

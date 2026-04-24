@@ -29,6 +29,45 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 	}
 	fileIR := lowerGoFileIR(packageName, e.imports)
 	e.indexFunctions()
+	emittedMethods := map[string]struct{}{}
+	methodDefs := map[*checker.FunctionDef]struct{}{}
+	methodBodies := map[*checker.Block]struct{}{}
+	methodNames := map[string]struct{}{}
+	for _, stmt := range module.Program().Statements {
+		if stmt.Stmt == nil {
+			continue
+		}
+		switch def := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			for _, methodName := range sortedStringKeys(def.Methods) {
+				method := def.Methods[methodName]
+				methodDefs[method] = struct{}{}
+				methodBodies[method.Body] = struct{}{}
+				methodNames[method.Name] = struct{}{}
+			}
+		case checker.StructDef:
+			for _, methodName := range sortedStringKeys(def.Methods) {
+				method := def.Methods[methodName]
+				methodDefs[method] = struct{}{}
+				methodBodies[method.Body] = struct{}{}
+				methodNames[method.Name] = struct{}{}
+			}
+		case *checker.Enum:
+			for _, methodName := range sortedStringKeys(def.Methods) {
+				method := def.Methods[methodName]
+				methodDefs[method] = struct{}{}
+				methodBodies[method.Body] = struct{}{}
+				methodNames[method.Name] = struct{}{}
+			}
+		case checker.Enum:
+			for _, methodName := range sortedStringKeys(def.Methods) {
+				method := def.Methods[methodName]
+				methodDefs[method] = struct{}{}
+				methodBodies[method.Body] = struct{}{}
+				methodNames[method.Name] = struct{}{}
+			}
+		}
+	}
 
 	for _, stmt := range module.Program().Statements {
 		if stmt.Stmt == nil {
@@ -51,6 +90,11 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				receiverType = indexExpr(receiverType, args)
 			}
 			for _, methodName := range sortedStringKeys(def.Methods) {
+				methodKey := "struct:" + def.Name + "." + methodName
+				if _, seen := emittedMethods[methodKey]; seen {
+					continue
+				}
+				emittedMethods[methodKey] = struct{}{}
 				decl, err := e.lowerReceiverMethodDeclNode(def.Name, receiverType, mapping, def.Methods[methodName])
 				if err != nil {
 					return goFileIR{}, err
@@ -74,6 +118,11 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				receiverType = indexExpr(receiverType, args)
 			}
 			for _, methodName := range sortedStringKeys(defCopy.Methods) {
+				methodKey := "struct:" + defCopy.Name + "." + methodName
+				if _, seen := emittedMethods[methodKey]; seen {
+					continue
+				}
+				emittedMethods[methodKey] = struct{}{}
 				decl, err := e.lowerReceiverMethodDeclNode(defCopy.Name, receiverType, mapping, defCopy.Methods[methodName])
 				if err != nil {
 					return goFileIR{}, err
@@ -84,6 +133,11 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 			appendASTDecl(&fileIR, e.lowerEnumTypeDeclNode(def))
 			receiverType := ast.Expr(ast.NewIdent(goName(def.Name, true)))
 			for _, methodName := range sortedStringKeys(def.Methods) {
+				methodKey := "enum:" + def.Name + "." + methodName
+				if _, seen := emittedMethods[methodKey]; seen {
+					continue
+				}
+				emittedMethods[methodKey] = struct{}{}
 				decl, err := e.lowerReceiverMethodDeclNode(def.Name, receiverType, nil, def.Methods[methodName])
 				if err != nil {
 					return goFileIR{}, err
@@ -95,6 +149,11 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 			appendASTDecl(&fileIR, e.lowerEnumTypeDeclNode(&defCopy))
 			receiverType := ast.Expr(ast.NewIdent(goName(defCopy.Name, true)))
 			for _, methodName := range sortedStringKeys(defCopy.Methods) {
+				methodKey := "enum:" + defCopy.Name + "." + methodName
+				if _, seen := emittedMethods[methodKey]; seen {
+					continue
+				}
+				emittedMethods[methodKey] = struct{}{}
 				decl, err := e.lowerReceiverMethodDeclNode(defCopy.Name, receiverType, nil, defCopy.Methods[methodName])
 				if err != nil {
 					return goFileIR{}, err
@@ -129,8 +188,16 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 		}
 		switch def := stmt.Expr.(type) {
 		case *checker.FunctionDef:
-			if def.IsTest {
+			if def.IsTest || def.Receiver != "" {
 				continue
+			}
+			if _, isMethod := methodDefs[def]; isMethod {
+				continue
+			}
+			if _, namedMethod := methodNames[def.Name]; namedMethod && def.Body != nil {
+				if _, sameBody := methodBodies[def.Body]; sameBody {
+					continue
+				}
 			}
 			decl, err := e.lowerFunctionDeclNode(def)
 			if err != nil {

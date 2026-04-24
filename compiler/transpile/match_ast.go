@@ -73,7 +73,7 @@ func (e *emitter) lowerIntMatchWithExpectedAST(match *checker.IntMatch, expected
 		return nil, ok, err
 	}
 	returnType := matchExpectedType(expectedType, match.Type())
-	switchStmt := &ast.SwitchStmt{}
+	switchStmt := &ast.SwitchStmt{Body: &ast.BlockStmt{}}
 	for _, value := range sortedIntKeys(match.IntCases) {
 		body, ok, err := e.lowerMatchBranchAST(match.IntCases[value], returnType, nil)
 		if err != nil || !ok {
@@ -258,7 +258,7 @@ func (e *emitter) lowerEnumMatchWithExpectedAST(match *checker.EnumMatch, expect
 		return nil, ok, err
 	}
 	returnType := matchExpectedType(expectedType, match.Type())
-	switchStmt := &ast.SwitchStmt{Tag: selectorExpr(subject, "Tag")}
+	switchStmt := &ast.SwitchStmt{Tag: selectorExpr(subject, "Tag"), Body: &ast.BlockStmt{}}
 	discriminants := make([]int, 0, len(match.DiscriminantToIndex))
 	for discriminant := range match.DiscriminantToIndex {
 		discriminants = append(discriminants, discriminant)
@@ -299,7 +299,7 @@ func (e *emitter) lowerUnionMatchWithExpectedAST(match *checker.UnionMatch, expe
 	}
 	returnType := matchExpectedType(expectedType, match.Type())
 	subjectName := e.nextTemp("Union")
-	typeSwitch := &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(subjectName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{subject}}}}}}
+	typeSwitch := &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(subjectName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{subject}}}}}, Body: &ast.BlockStmt{}}
 	for _, caseName := range sortedStringKeys(match.TypeCases) {
 		matchCase := match.TypeCases[caseName]
 		if matchCase == nil || matchCase.Body == nil {

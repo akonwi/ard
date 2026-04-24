@@ -1,6 +1,7 @@
 package transpile
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -20,7 +21,9 @@ func (e *emitter) lowerFunctionBodyBlock(stmts []checker.Statement, returnType c
 	}()
 	e.fnReturnType = returnType
 	if block, ok, err := e.lowerStatementsBlockAST(stmts, returnType); err != nil {
-		return nil, err
+		if !errors.Is(err, errStructuredLoweringUnsupported) {
+			return nil, err
+		}
 	} else if ok {
 		return block, nil
 	}

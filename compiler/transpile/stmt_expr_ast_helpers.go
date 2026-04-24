@@ -26,18 +26,28 @@ func (e *emitter) lowerSpecialModuleCallAST(call *checker.ModuleFunctionCall) (a
 }
 
 func (e *emitter) lowerMaybeModuleCallAST(call *checker.ModuleFunctionCall) (ast.Expr, bool, error) {
+	return e.lowerMaybeModuleCallWithExpectedAST(call, nil)
+}
+
+func (e *emitter) lowerMaybeModuleCallWithExpectedAST(call *checker.ModuleFunctionCall, expectedType checker.Type) (ast.Expr, bool, error) {
 	switch call.Call.Name {
 	case "some":
 		if len(call.Call.Args) != 1 {
 			return nil, false, errStructuredLoweringUnsupported
 		}
-		arg, ok, err := e.lowerExprAST(call.Call.Args[0])
+		resultType, ok := call.Call.ReturnType.(*checker.Maybe)
+		if expectedType != nil {
+			if expectedMaybe, expectedOK := expectedType.(*checker.Maybe); expectedOK {
+				resultType = expectedMaybe
+				ok = true
+			}
+		}
+		if !ok || maybeHasUnresolvedTypeVar(resultType) {
+			return nil, false, errStructuredLoweringUnsupported
+		}
+		arg, ok, err := e.lowerValueForTypeAST(call.Call.Args[0], resultType.Of())
 		if err != nil || !ok {
 			return nil, ok, err
-		}
-		resultType, ok2 := call.Call.ReturnType.(*checker.Maybe)
-		if !ok2 {
-			return nil, false, errStructuredLoweringUnsupported
 		}
 		inner, err := e.lowerTypeArgExprWithOptions(resultType.Of(), e.typeParams, nil)
 		if err != nil {
@@ -45,8 +55,14 @@ func (e *emitter) lowerMaybeModuleCallAST(call *checker.ModuleFunctionCall) (ast
 		}
 		return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{inner}, []ast.Expr{arg}), true, nil
 	case "none":
-		resultType, ok2 := call.Call.ReturnType.(*checker.Maybe)
-		if !ok2 {
+		resultType, ok := call.Call.ReturnType.(*checker.Maybe)
+		if expectedType != nil {
+			if expectedMaybe, expectedOK := expectedType.(*checker.Maybe); expectedOK {
+				resultType = expectedMaybe
+				ok = true
+			}
+		}
+		if !ok || maybeHasUnresolvedTypeVar(resultType) {
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		inner, err := e.lowerTypeArgExprWithOptions(resultType.Of(), e.typeParams, nil)
@@ -60,18 +76,28 @@ func (e *emitter) lowerMaybeModuleCallAST(call *checker.ModuleFunctionCall) (ast
 }
 
 func (e *emitter) lowerResultModuleCallAST(call *checker.ModuleFunctionCall) (ast.Expr, bool, error) {
+	return e.lowerResultModuleCallWithExpectedAST(call, nil)
+}
+
+func (e *emitter) lowerResultModuleCallWithExpectedAST(call *checker.ModuleFunctionCall, expectedType checker.Type) (ast.Expr, bool, error) {
 	switch call.Call.Name {
 	case "ok":
 		if len(call.Call.Args) != 1 {
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		resultType, ok := call.Call.ReturnType.(*checker.Result)
-		if !ok {
+		if expectedType != nil {
+			if expectedResult, expectedOK := expectedType.(*checker.Result); expectedOK {
+				resultType = expectedResult
+				ok = true
+			}
+		}
+		if !ok || resultHasUnresolvedTypeVar(resultType) {
 			return nil, false, errStructuredLoweringUnsupported
 		}
-		arg, ok2, err := e.lowerExprAST(call.Call.Args[0])
-		if err != nil || !ok2 {
-			return nil, ok2, err
+		arg, ok, err := e.lowerValueForTypeAST(call.Call.Args[0], resultType.Val())
+		if err != nil || !ok {
+			return nil, ok, err
 		}
 		valType, err := e.lowerTypeArgExprWithOptions(resultType.Val(), e.typeParams, nil)
 		if err != nil {
@@ -87,12 +113,18 @@ func (e *emitter) lowerResultModuleCallAST(call *checker.ModuleFunctionCall) (as
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		resultType, ok := call.Call.ReturnType.(*checker.Result)
-		if !ok {
+		if expectedType != nil {
+			if expectedResult, expectedOK := expectedType.(*checker.Result); expectedOK {
+				resultType = expectedResult
+				ok = true
+			}
+		}
+		if !ok || resultHasUnresolvedTypeVar(resultType) {
 			return nil, false, errStructuredLoweringUnsupported
 		}
-		arg, ok2, err := e.lowerExprAST(call.Call.Args[0])
-		if err != nil || !ok2 {
-			return nil, ok2, err
+		arg, ok, err := e.lowerValueForTypeAST(call.Call.Args[0], resultType.Err())
+		if err != nil || !ok {
+			return nil, ok, err
 		}
 		valType, err := e.lowerTypeArgExprWithOptions(resultType.Val(), e.typeParams, nil)
 		if err != nil {
@@ -234,7 +266,7 @@ func (e *emitter) lowerListMethodAST(method *checker.ListMethod) (ast.Expr, bool
 			if err != nil || !ok {
 				return nil, ok, err
 			}
-			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+			out, err := e.inlineFuncCallAST(method.Subject.Type(), []ast.Stmt{
 				&ast.AssignStmt{
 					Lhs: []ast.Expr{target},
 					Tok: token.ASSIGN,
@@ -252,7 +284,7 @@ func (e *emitter) lowerListMethodAST(method *checker.ListMethod) (ast.Expr, bool
 			if err != nil {
 				return nil, false, err
 			}
-			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+			out, err := e.inlineFuncCallAST(method.Subject.Type(), []ast.Stmt{
 				&ast.AssignStmt{
 					Lhs: []ast.Expr{target},
 					Tok: token.ASSIGN,
@@ -296,7 +328,7 @@ func (e *emitter) lowerListMethodAST(method *checker.ListMethod) (ast.Expr, bool
 			if err != nil || !ok {
 				return nil, ok, err
 			}
-			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+			out, err := e.inlineFuncCallAST(checker.Void, []ast.Stmt{
 				&ast.ExprStmt{X: &ast.CallExpr{Fun: selectorExpr(ast.NewIdent("sort"), "SliceStable"), Args: []ast.Expr{
 					target,
 					&ast.FuncLit{
@@ -318,7 +350,7 @@ func (e *emitter) lowerListMethodAST(method *checker.ListMethod) (ast.Expr, bool
 			if err != nil || !ok {
 				return nil, ok, err
 			}
-			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{
+			out, err := e.inlineFuncCallAST(checker.Void, []ast.Stmt{
 				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target, Index: left}, &ast.IndexExpr{X: target, Index: right}}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.IndexExpr{X: target, Index: right}, &ast.IndexExpr{X: target, Index: left}}},
 			})
 			return out, err == nil, err
@@ -397,7 +429,7 @@ func (e *emitter) lowerMapMethodAST(method *checker.MapMethod) (ast.Expr, bool, 
 			if err != nil || !ok {
 				return nil, ok, err
 			}
-			out, err := e.inlineFuncCallAST(method.Type(), []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target, key}}}})
+			out, err := e.inlineFuncCallAST(checker.Void, []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target, key}}}})
 			return out, err == nil, err
 		}
 	}
