@@ -1,23 +1,16 @@
 package transpile
 
 import (
-	"encoding/json"
 	"fmt"
-	gofmt "go/format"
-	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
-	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/frontend"
 )
 
 const (
@@ -669,22 +662,12 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 		e.imports[helperImportPath] = helperImportAlias
 	}
 	e.indexFunctions()
-	if entrypoint {
-		e.line("package main")
-	} else {
-		e.line("package " + packageName)
+
+	prelude, err := renderGoFilePrelude(lowerGoFileIR(packageName, e.imports))
+	if err != nil {
+		return nil, err
 	}
-	if len(e.imports) > 0 {
-		e.line("")
-		e.line("import (")
-		e.indent++
-		paths := sortedImportPaths(e.imports)
-		for _, path := range paths {
-			e.line(fmt.Sprintf("%s %q", e.imports[path], path))
-		}
-		e.indent--
-		e.line(")")
-	}
+	_, _ = e.builder.Write(prelude)
 	e.line("")
 
 	for _, stmt := range module.Program().Statements {
@@ -786,11 +769,7 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 		e.line("}")
 	}
 
-	formatted, err := gofmt.Source([]byte(e.builder.String()))
-	if err != nil {
-		return nil, fmt.Errorf("format generated go: %w\n%s", err, e.builder.String())
-	}
-	return formatted, nil
+	return formatGeneratedGoSource(e.builder.String())
 }
 
 func emitAsyncModuleSource(packageName string) ([]byte, error) {
@@ -899,182 +878,7 @@ func fiberGet[T any](handle any) T {
 	panic("unexpected async fiber handle")
 }
 `, packageName, helperImportAlias, helperImportPath, "sync", helperImportAlias)
-	formatted, err := gofmt.Source([]byte(source))
-	if err != nil {
-		return nil, fmt.Errorf("format generated go: %w\n%s", err, source)
-	}
-	return formatted, nil
-}
-
-func BuildBinary(inputPath, outputPath string) (string, error) {
-	module, project, err := loadModule(inputPath)
-	if err != nil {
-		return "", err
-	}
-
-	generatedDir := filepath.Join(project.RootPath, "generated")
-	if err := writeGeneratedProject(generatedDir, project, module); err != nil {
-		return "", err
-	}
-
-	resolvedOutputPath, err := filepath.Abs(outputPath)
-	if err != nil {
-		return "", err
-	}
-
-	cmd := exec.Command("go", "build", "-mod=mod", "-o", resolvedOutputPath, ".")
-	configureGoCommand(cmd)
-	cmd.Dir = generatedDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-
-	return outputPath, nil
-}
-
-func Run(inputPath string, args []string) error {
-	module, project, err := loadModule(inputPath)
-	if err != nil {
-		return err
-	}
-
-	generatedDir := filepath.Join(project.RootPath, "generated")
-	if err := writeGeneratedProject(generatedDir, project, module); err != nil {
-		return err
-	}
-
-	normalizedArgs, err := json.Marshal(normalizeCLIArgs(args))
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command("go", "run", "-mod=mod", ".")
-	configureGoCommand(cmd)
-	cmd.Dir = generatedDir
-	cmd.Env = append(cmd.Env, osArgsEnvVar+"="+string(normalizedArgs))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
-}
-
-func configureGoCommand(cmd *exec.Cmd) {
-	cmd.Env = append([]string{}, os.Environ()...)
-	const requiredFlag = "-tags=goexperiment.jsonv2"
-	goFlags := os.Getenv("GOFLAGS")
-	if strings.Contains(goFlags, requiredFlag) {
-		return
-	}
-	if strings.TrimSpace(goFlags) == "" {
-		cmd.Env = append(cmd.Env, "GOFLAGS="+requiredFlag)
-		return
-	}
-	cmd.Env = append(cmd.Env, "GOFLAGS="+goFlags+" "+requiredFlag)
-}
-
-func normalizeCLIArgs(args []string) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	normalized := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--target" {
-			i++
-			continue
-		}
-		normalized = append(normalized, args[i])
-	}
-	return normalized
-}
-
-func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, entrypoint checker.Module) error {
-	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
-		return err
-	}
-	moduleRoot, err := compilerModuleRoot()
-	if err != nil {
-		return err
-	}
-	goMod := fmt.Sprintf("module %s\n\ngo %s\n\nrequire %s v0.0.0\n\nreplace %s => %s\n", project.ProjectName, generatedGoVersion, ardModulePath, ardModulePath, filepath.Clean(moduleRoot))
-	if err := os.WriteFile(filepath.Join(generatedDir, "go.mod"), []byte(goMod), 0o644); err != nil {
-		return err
-	}
-	if goSum, err := os.ReadFile(filepath.Join(moduleRoot, "go.sum")); err == nil {
-		if err := os.WriteFile(filepath.Join(generatedDir, "go.sum"), goSum, 0o644); err != nil {
-			return err
-		}
-	}
-
-	source, err := emitModuleSource(entrypoint, "main", true, project.ProjectName)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(generatedDir, "main.go"), source, 0o644); err != nil {
-		return err
-	}
-
-	written := map[string]struct{}{}
-	for _, mod := range requiredImportedModules(entrypoint.Program(), project.ProjectName) {
-		if err := writeImportedModule(generatedDir, project.ProjectName, mod, written); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func requiredImportedModules(program *checker.Program, projectName string) []checker.Module {
-	if program == nil {
-		return nil
-	}
-	imports := collectModuleImports(program.Statements, projectName)
-	mods := make([]checker.Module, 0, len(program.Imports))
-	for _, mod := range sortedModules(program.Imports) {
-		if _, ok := imports[moduleImportPath(projectName, mod.Path())]; ok {
-			mods = append(mods, mod)
-		}
-	}
-	return mods
-}
-
-func writeImportedModule(generatedDir, projectName string, module checker.Module, written map[string]struct{}) error {
-	if module == nil {
-		return nil
-	}
-	if _, ok := written[module.Path()]; ok {
-		return nil
-	}
-	written[module.Path()] = struct{}{}
-
-	source, err := emitPackageSource(module, projectName)
-	if err != nil {
-		return err
-	}
-	outputPath, err := generatedPathForModule(generatedDir, projectName, module.Path())
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(outputPath, source, 0o644); err != nil {
-		return err
-	}
-	for _, mod := range requiredImportedModules(module.Program(), projectName) {
-		if err := writeImportedModule(generatedDir, projectName, mod, written); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func loadModule(inputPath string) (checker.Module, *checker.ProjectInfo, error) {
-	result, err := frontend.LoadModule(inputPath, backend.TargetGo)
-	if err != nil {
-		return nil, nil, err
-	}
-	return result.Module, result.ProjectInfo, nil
+	return formatGeneratedGoSource(source)
 }
 
 func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
@@ -5297,14 +5101,6 @@ func lowerFirst(value string) string {
 	runes := []rune(value)
 	runes[0] = unicode.ToLower(runes[0])
 	return string(runes)
-}
-
-func compilerModuleRoot() (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("failed to determine compiler module root")
-	}
-	return filepath.Dir(filepath.Dir(file)), nil
 }
 
 func isGoKeyword(value string) bool {
