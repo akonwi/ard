@@ -1469,25 +1469,6 @@ func (e *emitter) emitEnumDef(def *checker.Enum) error {
 	return nil
 }
 
-func (e *emitter) emitPackageVariable(def *checker.VariableDef) error {
-	value, err := e.emitValueForType(def.Value, def.Type())
-	if err != nil {
-		return err
-	}
-	name := goName(def.Name, !def.Mutable)
-	if !typeNeedsExplicitVarAnnotation(def.Type()) {
-		e.line(fmt.Sprintf("var %s = %s", name, value))
-		return nil
-	}
-	typeName, err := e.emitType(def.Type())
-	if err != nil || typeName == "" {
-		e.line(fmt.Sprintf("var %s = %s", name, value))
-		return nil
-	}
-	e.line(fmt.Sprintf("var %s %s = %s", name, typeName, value))
-	return nil
-}
-
 func isFunctionLiteralDef(def *checker.FunctionDef) bool {
 	if def == nil {
 		return false
@@ -4832,21 +4813,6 @@ func (e *emitter) line(text string) {
 	e.builder.WriteString(strings.Repeat("\t", e.indent))
 	e.builder.WriteString(text)
 	e.builder.WriteString("\n")
-}
-
-func (e *emitter) captureOutput(fn func() error) (string, error) {
-	prevBuilder := e.builder
-	prevIndent := e.indent
-	e.builder = strings.Builder{}
-	e.indent = 0
-	defer func() {
-		e.builder = prevBuilder
-		e.indent = prevIndent
-	}()
-	if err := fn(); err != nil {
-		return "", err
-	}
-	return e.builder.String(), nil
 }
 
 func goName(name string, exported bool) string {

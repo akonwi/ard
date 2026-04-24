@@ -1,7 +1,6 @@
 package transpile
 
 import (
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -164,15 +163,14 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 			if entrypoint {
 				continue
 			}
-			if decl, ok, err := e.lowerPackageVariableDeclNode(def); err != nil {
+			decl, ok, err := e.lowerPackageVariableDeclNode(def)
+			if err != nil {
 				return goFileIR{}, err
-			} else if ok {
-				appendASTDecl(&fileIR, decl)
-			} else {
-				if err := appendCapturedDecl(&fileIR, e, func() error { return e.emitPackageVariable(def) }); err != nil {
-					return goFileIR{}, err
-				}
 			}
+			if !ok {
+				return goFileIR{}, fmt.Errorf("unsupported package variable: %s", def.Name)
+			}
+			appendASTDecl(&fileIR, decl)
 		case *checker.ExternType:
 			continue
 		default:
@@ -259,49 +257,19 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 				}
 				return nil
 			})
-			if err != nil && !errors.Is(err, errStructuredLoweringUnsupported) {
+			if err != nil {
 				return goFileIR{}, err
 			}
-			if err == nil && ok {
-				body = append(body, block.List...)
-				appendASTDecl(&fileIR, &ast.FuncDecl{
-					Name: ast.NewIdent("main"),
-					Type: &ast.FuncType{Params: &ast.FieldList{}},
-					Body: &ast.BlockStmt{List: body},
-				})
-			} else {
-				mainDecl, err := e.captureOutput(func() error {
-					e.line("func main() {")
-					e.indent++
-					e.line(helperImportAlias + ".RegisterBuiltinExterns()")
-					if err := e.withFreshLocals(func() error {
-						return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
-					}); err != nil {
-						return err
-					}
-					e.indent--
-					e.line("}")
-					return nil
-				})
-				if err != nil {
-					return goFileIR{}, err
-				}
-				if err := appendGoDeclIR(&fileIR, packageName, mainDecl); err != nil {
-					return goFileIR{}, err
-				}
-			}
+			body = append(body, block.List...)
+			appendASTDecl(&fileIR, &ast.FuncDecl{
+				Name: ast.NewIdent("main"),
+				Type: &ast.FuncType{Params: &ast.FieldList{}},
+				Body: &ast.BlockStmt{List: body},
+			})
 		}
 	}
 
 	return fileIR, nil
-}
-
-func appendCapturedDecl(fileIR *goFileIR, e *emitter, emit func() error) error {
-	decl, err := e.captureOutput(emit)
-	if err != nil {
-		return err
-	}
-	return appendGoDeclIR(fileIR, e.packageName, decl)
 }
 
 func appendGoDeclIR(fileIR *goFileIR, packageName string, source string) error {
