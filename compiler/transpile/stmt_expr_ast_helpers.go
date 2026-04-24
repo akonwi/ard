@@ -42,7 +42,7 @@ func (e *emitter) lowerMaybeModuleCallWithExpectedAST(call *checker.ModuleFuncti
 				ok = true
 			}
 		}
-		if !ok || maybeHasUnresolvedTypeVar(resultType) {
+		if !ok {
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		arg, ok, err := e.lowerValueForTypeAST(call.Call.Args[0], resultType.Of())
@@ -62,7 +62,7 @@ func (e *emitter) lowerMaybeModuleCallWithExpectedAST(call *checker.ModuleFuncti
 				ok = true
 			}
 		}
-		if !ok || maybeHasUnresolvedTypeVar(resultType) {
+		if !ok {
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		inner, err := e.lowerTypeArgExprWithOptions(resultType.Of(), e.typeParams, nil)
@@ -92,7 +92,7 @@ func (e *emitter) lowerResultModuleCallWithExpectedAST(call *checker.ModuleFunct
 				ok = true
 			}
 		}
-		if !ok || resultHasUnresolvedTypeVar(resultType) {
+		if !ok {
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		arg, ok, err := e.lowerValueForTypeAST(call.Call.Args[0], resultType.Val())
@@ -119,7 +119,7 @@ func (e *emitter) lowerResultModuleCallWithExpectedAST(call *checker.ModuleFunct
 				ok = true
 			}
 		}
-		if !ok || resultHasUnresolvedTypeVar(resultType) {
+		if !ok {
 			return nil, false, errStructuredLoweringUnsupported
 		}
 		arg, ok, err := e.lowerValueForTypeAST(call.Call.Args[0], resultType.Err())

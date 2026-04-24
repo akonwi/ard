@@ -64,8 +64,21 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 			return stmts, true, nil
 		}
 		value, ok, err := e.lowerValueForTypeAST(s.Value, s.Type())
+		prelude := []ast.Stmt{}
 		if err != nil || !ok {
-			return nil, ok, err
+			flowType := e.fnReturnType
+			if flowType == nil {
+				flowType = returnType
+			}
+			var preludeErr error
+			prelude, value, ok, preludeErr = e.lowerExprWithPreludeAST(s.Value, flowType)
+			if preludeErr != nil || !ok {
+				return nil, ok, err
+			}
+			value, preludeErr = e.wrapTraitValueAST(value, s.Type())
+			if preludeErr != nil {
+				return nil, false, preludeErr
+			}
 		}
 		lhs := ast.NewIdent(name)
 		if typeNeedsExplicitVarAnnotation(s.Type()) {
@@ -73,13 +86,13 @@ func (e *emitter) lowerNonProducingAST(stmt checker.NonProducing, remaining []ch
 			if err != nil {
 				return nil, false, err
 			}
-			stmts := []ast.Stmt{&ast.DeclStmt{Decl: astVarDecl(astValueSpec(name, typeExpr, value))}}
+			stmts := append(prelude, &ast.DeclStmt{Decl: astVarDecl(astValueSpec(name, typeExpr, value))})
 			if !usesNameInStatements(remaining, s.Name) {
 				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{lhs}})
 			}
 			return stmts, true, nil
 		}
-		stmts := []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{lhs}, Tok: token.DEFINE, Rhs: []ast.Expr{value}}}
+		stmts := append(prelude, &ast.AssignStmt{Lhs: []ast.Expr{lhs}, Tok: token.DEFINE, Rhs: []ast.Expr{value}})
 		if !usesNameInStatements(remaining, s.Name) {
 			stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{lhs}})
 		}
@@ -250,6 +263,16 @@ func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnTyp
 	if !isLast || returnType == nil || returnType == checker.Void {
 		if exprContainsBreak(expr) {
 			return nil, false, nil
+		}
+		switch typed := expr.(type) {
+		case *checker.BoolMatch:
+			if stmts, ok, err := e.lowerBoolMatchStatementAST(typed); err != nil || ok {
+				return stmts, ok, err
+			}
+		case *checker.ResultMatch:
+			if stmts, ok, err := e.lowerResultMatchStatementAST(typed); err != nil || ok {
+				return stmts, ok, err
+			}
 		}
 		var (
 			value ast.Expr

@@ -26,10 +26,20 @@ func (e *emitter) lowerValueForTypeAST(expr checker.Expression, expectedType che
 	case *checker.ModuleFunctionCall:
 		switch v.Module {
 		case "ard/maybe":
+			if expectedType != nil {
+				if _, ok := expectedType.(*checker.Maybe); !ok {
+					return nil, false, errStructuredLoweringUnsupported
+				}
+			}
 			if value, ok, err := e.lowerMaybeModuleCallWithExpectedAST(v, expectedType); ok || err != nil {
 				return value, ok, err
 			}
 		case "ard/result":
+			if expectedType != nil {
+				if _, ok := expectedType.(*checker.Result); !ok {
+					return nil, false, errStructuredLoweringUnsupported
+				}
+			}
 			if value, ok, err := e.lowerResultModuleCallWithExpectedAST(v, expectedType); ok || err != nil {
 				return value, ok, err
 			}

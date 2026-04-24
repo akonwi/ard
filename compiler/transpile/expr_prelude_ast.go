@@ -1,6 +1,7 @@
 package transpile
 
 import (
+	"errors"
 	"go/ast"
 	"go/token"
 	"strconv"
@@ -13,6 +14,47 @@ func appendPrelude(dst []ast.Stmt, parts ...[]ast.Stmt) []ast.Stmt {
 		dst = append(dst, part...)
 	}
 	return dst
+}
+
+func specialModuleCallArgTypes(call *checker.ModuleFunctionCall, context checker.Type) []checker.Type {
+	if call == nil || call.Call == nil {
+		return nil
+	}
+	switch call.Module {
+	case "ard/maybe":
+		if call.Call.Name != "some" {
+			return nil
+		}
+		maybeType, ok := call.Call.ReturnType.(*checker.Maybe)
+		if context != nil {
+			if expectedMaybe, expectedOK := context.(*checker.Maybe); expectedOK {
+				maybeType = expectedMaybe
+				ok = true
+			}
+		}
+		if !ok || maybeHasUnresolvedTypeVar(maybeType) {
+			return nil
+		}
+		return []checker.Type{maybeType.Of()}
+	case "ard/result":
+		resultType, ok := call.Call.ReturnType.(*checker.Result)
+		if context != nil {
+			if expectedResult, expectedOK := context.(*checker.Result); expectedOK {
+				resultType = expectedResult
+				ok = true
+			}
+		}
+		if !ok || resultHasUnresolvedTypeVar(resultType) {
+			return nil
+		}
+		if call.Call.Name == "ok" {
+			return []checker.Type{resultType.Val()}
+		}
+		if call.Call.Name == "err" {
+			return []checker.Type{resultType.Err()}
+		}
+	}
+	return nil
 }
 
 func unresolvedContextOverride(exprType checker.Type, context checker.Type) checker.Type {
@@ -89,7 +131,7 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 					ok = true
 				}
 			}
-			if !ok || maybeHasUnresolvedTypeVar(maybeType) {
+			if !ok {
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			inner, err := e.lowerTypeArgExprWithOptions(maybeType.Of(), e.typeParams, nil)
@@ -105,7 +147,7 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 					ok = true
 				}
 			}
-			if !ok || maybeHasUnresolvedTypeVar(maybeType) {
+			if !ok {
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			inner, err := e.lowerTypeArgExprWithOptions(maybeType.Of(), e.typeParams, nil)
@@ -127,7 +169,7 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 					ok = true
 				}
 			}
-			if !ok || resultHasUnresolvedTypeVar(resultType) {
+			if !ok {
 				return nil, false, errStructuredLoweringUnsupported
 			}
 			valType, err := e.lowerTypeArgExprWithOptions(resultType.Val(), e.typeParams, nil)
@@ -159,6 +201,31 @@ func (e *emitter) lowerSpecialModuleCallWithArgsAST(call *checker.ModuleFunction
 		}
 	}
 	return nil, false, nil
+}
+
+func (e *emitter) lowerCallArgWithPreludeAST(arg checker.Expression, expectedType checker.Type, flowType checker.Type) ([]ast.Stmt, ast.Expr, bool, error) {
+	if expectedType != nil {
+		if _, isModuleCall := arg.(*checker.ModuleFunctionCall); isModuleCall {
+			lowered, ok, err := e.lowerValueForTypeAST(arg, expectedType)
+			if err == nil && ok {
+				return nil, lowered, true, nil
+			}
+			if err != nil && !errors.Is(err, errStructuredLoweringUnsupported) {
+				return nil, nil, ok, err
+			}
+		}
+	}
+	prelude, lowered, ok, err := e.lowerExprWithPreludeAST(arg, flowType)
+	if err != nil || !ok {
+		return nil, nil, ok, err
+	}
+	if expectedType != nil {
+		lowered, err = e.wrapTraitValueAST(lowered, expectedType)
+		if err != nil {
+			return nil, nil, false, err
+		}
+	}
+	return prelude, lowered, true, nil
 }
 
 func (e *emitter) lowerExprWithPreludeAST(expr checker.Expression, returnType checker.Type) ([]ast.Stmt, ast.Expr, bool, error) {
@@ -324,13 +391,18 @@ func (e *emitter) lowerExprWithPreludeAST(expr checker.Expression, returnType ch
 		}
 		for i, arg := range v.Args {
 			if i < len(params) && params[i].Mutable {
-				return nil, nil, false, nil
+				lowered, ok, err := e.lowerMutableCallArgAST(arg, params[i])
+				if err != nil || !ok {
+					return nil, nil, ok, err
+				}
+				args = append(args, lowered)
+				continue
 			}
-			argContext := returnType
+			var expectedType checker.Type
 			if i < len(params) {
-				argContext = params[i].Type
+				expectedType = params[i].Type
 			}
-			argPrelude, lowered, ok, err := e.lowerExprWithPreludeAST(arg, argContext)
+			argPrelude, lowered, ok, err := e.lowerCallArgWithPreludeAST(arg, expectedType, e.fnReturnType)
 			if err != nil || !ok {
 				return nil, nil, ok, err
 			}
@@ -349,8 +421,36 @@ func (e *emitter) lowerExprWithPreludeAST(expr checker.Expression, returnType ch
 	case *checker.ModuleFunctionCall:
 		prelude := []ast.Stmt{}
 		args := make([]ast.Expr, 0, len(v.Call.Args))
-		for _, arg := range v.Call.Args {
-			argPrelude, lowered, ok, err := e.lowerExprWithPreludeAST(arg, returnType)
+		var params []checker.Parameter
+		if def := v.Call.Definition(); def != nil {
+			params = def.Parameters
+		}
+		if len(params) == 0 {
+			if original := e.originalModuleFunctionDef(v.Module, v.Call); original != nil {
+				params = original.Parameters
+			}
+		}
+		specialArgTypes := specialModuleCallArgTypes(v, unresolvedContextOverride(v.Type(), returnType))
+		if len(specialArgTypes) == 0 {
+			specialArgTypes = specialModuleCallArgTypes(v, v.Type())
+		}
+		for i, arg := range v.Call.Args {
+			if i < len(params) && params[i].Mutable {
+				lowered, ok, err := e.lowerMutableCallArgAST(arg, params[i])
+				if err != nil || !ok {
+					return nil, nil, ok, err
+				}
+				args = append(args, lowered)
+				continue
+			}
+			var expectedType checker.Type
+			if i < len(params) {
+				expectedType = params[i].Type
+			}
+			if expectedType == nil && i < len(specialArgTypes) {
+				expectedType = specialArgTypes[i]
+			}
+			argPrelude, lowered, ok, err := e.lowerCallArgWithPreludeAST(arg, expectedType, e.fnReturnType)
 			if err != nil || !ok {
 				return nil, nil, ok, err
 			}
@@ -358,8 +458,12 @@ func (e *emitter) lowerExprWithPreludeAST(expr checker.Expression, returnType ch
 			args = append(args, lowered)
 		}
 		expectedOverride := unresolvedContextOverride(v.Type(), returnType)
-		if special, ok, err := e.lowerSpecialModuleCallWithArgsAST(v, args, expectedOverride); ok || err != nil {
-			return prelude, special, ok, err
+		if expectedOverride != nil {
+			if special, ok, err := e.lowerSpecialModuleCallWithArgsAST(v, args, expectedOverride); ok {
+				return prelude, special, ok, nil
+			} else if err != nil && !errors.Is(err, errStructuredLoweringUnsupported) {
+				return nil, nil, false, err
+			}
 		}
 		if special, ok, err := e.lowerSpecialModuleCallWithArgsAST(v, args, expr.Type()); ok || err != nil {
 			return prelude, special, ok, err

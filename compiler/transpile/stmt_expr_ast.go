@@ -69,23 +69,18 @@ func astCall(fun ast.Expr, typeArgs []ast.Expr, args []ast.Expr) ast.Expr {
 	return &ast.CallExpr{Fun: fun, Args: args}
 }
 
-func (e *emitter) lowerCallArgsAST(call *checker.FunctionCall) ([]ast.Expr, bool, error) {
+func (e *emitter) lowerCallArgsWithParamsAST(call *checker.FunctionCall, params []checker.Parameter) ([]ast.Expr, bool, error) {
 	args := make([]ast.Expr, 0, len(call.Args))
-	var params []checker.Parameter
-	if def := call.Definition(); def != nil {
-		params = def.Parameters
-	}
 	for i, arg := range call.Args {
 		hasParam := i < len(params)
-		if hasParam && params[i].Mutable {
-			return nil, false, nil
-		}
 		var (
 			emitted ast.Expr
 			ok      bool
 			err     error
 		)
-		if hasParam {
+		if hasParam && params[i].Mutable {
+			emitted, ok, err = e.lowerMutableCallArgAST(arg, params[i])
+		} else if hasParam {
 			emitted, ok, err = e.lowerValueForTypeAST(arg, params[i].Type)
 		} else {
 			emitted, ok, err = e.lowerExprAST(arg)
@@ -99,6 +94,27 @@ func (e *emitter) lowerCallArgsAST(call *checker.FunctionCall) ([]ast.Expr, bool
 		args = append(args, emitted)
 	}
 	return args, true, nil
+}
+
+func (e *emitter) lowerCallArgsAST(call *checker.FunctionCall) ([]ast.Expr, bool, error) {
+	var params []checker.Parameter
+	if def := call.Definition(); def != nil {
+		params = def.Parameters
+	}
+	return e.lowerCallArgsWithParamsAST(call, params)
+}
+
+func (e *emitter) lowerModuleCallArgsAST(modulePath string, call *checker.FunctionCall) ([]ast.Expr, bool, error) {
+	var params []checker.Parameter
+	if def := call.Definition(); def != nil {
+		params = def.Parameters
+	}
+	if len(params) == 0 {
+		if original := e.originalModuleFunctionDef(modulePath, call); original != nil {
+			params = original.Parameters
+		}
+	}
+	return e.lowerCallArgsWithParamsAST(call, params)
 }
 
 func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) {
@@ -303,7 +319,7 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		if expr, ok, err := e.lowerSpecialModuleCallAST(v); ok || err != nil {
 			return expr, ok, err
 		}
-		args, ok, err := e.lowerCallArgsAST(v.Call)
+		args, ok, err := e.lowerModuleCallArgsAST(v.Module, v.Call)
 		if err != nil || !ok {
 			return nil, ok, err
 		}
