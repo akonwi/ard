@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -270,17 +269,4 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 	}
 
 	return fileIR, nil
-}
-
-func appendGoDeclIR(fileIR *goFileIR, packageName string, source string) error {
-	trimmed := strings.TrimSpace(source)
-	if trimmed == "" {
-		return nil
-	}
-	decls, err := parseGoDecls(packageName, trimmed)
-	if err != nil {
-		return err
-	}
-	fileIR.Decls = append(fileIR.Decls, goDeclIR{Decls: decls})
-	return nil
 }

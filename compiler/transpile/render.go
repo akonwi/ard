@@ -1,9 +1,7 @@
 package transpile
 
 import (
-	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"strconv"
 )
@@ -51,13 +49,4 @@ func renderGoFile(fileIR goFileIR) ([]byte, error) {
 		file.Decls = append(file.Decls, decl.Decls...)
 	}
 	return formatGoFileAST(file)
-}
-
-func parseGoDecls(packageName string, source string) ([]ast.Decl, error) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "generated.go", "package "+packageName+"\n\n"+source, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("parse generated go declaration: %w\n%s", err, source)
-	}
-	return file.Decls, nil
 }

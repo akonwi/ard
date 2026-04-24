@@ -1,6 +1,10 @@
 package transpile
 
-import "testing"
+import (
+	"go/ast"
+	"go/token"
+	"testing"
+)
 
 func TestOptimizeGoFileIR(t *testing.T) {
 	fileIR := goFileIR{
@@ -11,9 +15,7 @@ func TestOptimizeGoFileIR(t *testing.T) {
 		},
 		Decls: []goDeclIR{{}},
 	}
-	if err := appendGoDeclIR(&fileIR, "main", " type Person struct{}\n"); err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
+	appendASTDecl(&fileIR, &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent("Person"), Type: &ast.StructType{Fields: &ast.FieldList{}}}}})
 	optimized := optimizeGoFileIR(fileIR)
 
 	if len(optimized.Imports) != 1 {
