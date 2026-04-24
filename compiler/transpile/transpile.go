@@ -646,7 +646,11 @@ func emitModuleSource(module checker.Module, packageName string, entrypoint bool
 		return nil, fmt.Errorf("module has no program")
 	}
 	if !entrypoint && module.Path() == "ard/async" {
-		return renderGoFile(optimizeGoFileIR(lowerAsyncModuleFileIR(packageName)))
+		fileIR, err := lowerAsyncModuleFileIR(packageName)
+		if err != nil {
+			return nil, err
+		}
+		return renderGoFile(optimizeGoFileIR(fileIR))
 	}
 	fileIR, err := lowerModuleFileIR(module, packageName, entrypoint, projectName)
 	if err != nil {

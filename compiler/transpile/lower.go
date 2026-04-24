@@ -123,7 +123,9 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 		if err != nil {
 			return goFileIR{}, err
 		}
-		appendGoDeclIR(&fileIR, mainDecl)
+		if err := appendGoDeclIR(&fileIR, packageName, mainDecl); err != nil {
+			return goFileIR{}, err
+		}
 	}
 
 	return fileIR, nil
@@ -134,14 +136,18 @@ func appendCapturedDecl(fileIR *goFileIR, e *emitter, emit func() error) error {
 	if err != nil {
 		return err
 	}
-	appendGoDeclIR(fileIR, decl)
-	return nil
+	return appendGoDeclIR(fileIR, e.packageName, decl)
 }
 
-func appendGoDeclIR(fileIR *goFileIR, source string) {
+func appendGoDeclIR(fileIR *goFileIR, packageName string, source string) error {
 	trimmed := strings.TrimSpace(source)
 	if trimmed == "" {
-		return
+		return nil
 	}
-	fileIR.Decls = append(fileIR.Decls, goDeclIR{Source: trimmed})
+	decls, err := parseGoDecls(packageName, trimmed)
+	if err != nil {
+		return err
+	}
+	fileIR.Decls = append(fileIR.Decls, goDeclIR{Source: trimmed, Decls: decls})
+	return nil
 }

@@ -1,5 +1,7 @@
 package transpile
 
+import "go/ast"
+
 type goFileIR struct {
 	PackageName string
 	Imports     []goImportIR
@@ -8,6 +10,7 @@ type goFileIR struct {
 
 type goDeclIR struct {
 	Source string
+	Decls  []ast.Decl
 }
 
 type goImportIR struct {

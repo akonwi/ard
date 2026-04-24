@@ -23,7 +23,7 @@ func optimizeGoFileIR(fileIR goFileIR) goFileIR {
 			if trimmed == "" {
 				continue
 			}
-			optimized.Decls = append(optimized.Decls, goDeclIR{Source: trimmed})
+			optimized.Decls = append(optimized.Decls, goDeclIR{Source: trimmed, Decls: decl.Decls})
 		}
 	}
 	return optimized
