@@ -2,6 +2,8 @@ package transpile
 
 import (
 	"fmt"
+	"go/ast"
+	"go/token"
 	"strings"
 
 	"github.com/akonwi/ard/checker"
@@ -108,45 +110,54 @@ func lowerModuleFileIR(module checker.Module, packageName string, entrypoint boo
 	}
 
 	if entrypoint {
-		mainDecl, err := e.captureOutput(func() error {
-			e.line("func main() {")
-			e.indent++
-			e.line(helperImportAlias + ".RegisterBuiltinExterns()")
-			if mainExpr := entrypointMainExpr(module.Program().Statements); mainExpr != nil {
-				mainName := e.functionNames["main"]
-				if mainName == "" {
-					mainName = "main"
+		if mainExpr := entrypointMainExpr(module.Program().Statements); mainExpr != nil {
+			body := []ast.Stmt{
+				&ast.ExprStmt{X: &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "RegisterBuiltinExterns")}},
+			}
+			mainName := e.functionNames["main"]
+			if mainName == "" {
+				mainName = "main"
+			}
+			call := &ast.CallExpr{Fun: ast.NewIdent(mainName)}
+			switch typed := mainExpr.(type) {
+			case *checker.FunctionDef:
+				if effectiveFunctionReturnType(typed) == checker.Void {
+					body = append(body, &ast.ExprStmt{X: call})
+				} else {
+					body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
 				}
-				switch typed := mainExpr.(type) {
-				case *checker.FunctionDef:
-					if effectiveFunctionReturnType(typed) == checker.Void {
-						e.line(mainName + "()")
-					} else {
-						e.line("_ = " + mainName + "()")
-					}
-				case *checker.ExternalFunctionDef:
-					if typed.ReturnType == checker.Void {
-						e.line(mainName + "()")
-					} else {
-						e.line("_ = " + mainName + "()")
-					}
+			case *checker.ExternalFunctionDef:
+				if typed.ReturnType == checker.Void {
+					body = append(body, &ast.ExprStmt{X: call})
+				} else {
+					body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
 				}
-			} else {
+			}
+			appendASTDecl(&fileIR, &ast.FuncDecl{
+				Name: ast.NewIdent("main"),
+				Type: &ast.FuncType{Params: &ast.FieldList{}},
+				Body: &ast.BlockStmt{List: body},
+			})
+		} else {
+			mainDecl, err := e.captureOutput(func() error {
+				e.line("func main() {")
+				e.indent++
+				e.line(helperImportAlias + ".RegisterBuiltinExterns()")
 				if err := e.withFreshLocals(func() error {
 					return e.emitStatements(topLevelExecutableStatements(module.Program().Statements), nil)
 				}); err != nil {
 					return err
 				}
+				e.indent--
+				e.line("}")
+				return nil
+			})
+			if err != nil {
+				return goFileIR{}, err
 			}
-			e.indent--
-			e.line("}")
-			return nil
-		})
-		if err != nil {
-			return goFileIR{}, err
-		}
-		if err := appendGoDeclIR(&fileIR, packageName, mainDecl); err != nil {
-			return goFileIR{}, err
+			if err := appendGoDeclIR(&fileIR, packageName, mainDecl); err != nil {
+				return goFileIR{}, err
+			}
 		}
 	}
 
