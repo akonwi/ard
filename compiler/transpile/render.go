@@ -48,15 +48,7 @@ func renderGoFile(fileIR goFileIR) ([]byte, error) {
 		file.Decls = append(file.Decls, &ast.GenDecl{Tok: token.IMPORT, Specs: specs})
 	}
 	for _, decl := range fileIR.Decls {
-		parsedDecls := decl.Decls
-		if len(parsedDecls) == 0 {
-			var err error
-			parsedDecls, err = parseGoDecls(fileIR.PackageName, decl.Source)
-			if err != nil {
-				return nil, err
-			}
-		}
-		file.Decls = append(file.Decls, parsedDecls...)
+		file.Decls = append(file.Decls, decl.Decls...)
 	}
 	return formatGoFileAST(file)
 }

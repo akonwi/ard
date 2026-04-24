@@ -19,10 +19,9 @@ func TestRenderGoFilePrelude(t *testing.T) {
 
 func TestRenderGoFile(t *testing.T) {
 	fileIR := lowerGoFileIR("main", map[string]string{helperImportPath: helperImportAlias})
-	fileIR.Decls = append(fileIR.Decls,
-		goDeclIR{Source: "type Person struct{}"},
-		goDeclIR{Source: "func greet() string { return \"hi\" }"},
-	)
+	if err := appendGoDeclIR(&fileIR, "main", "type Person struct{}\nfunc greet() string { return \"hi\" }"); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
 
 	got, err := renderGoFile(fileIR)
 	if err != nil {
