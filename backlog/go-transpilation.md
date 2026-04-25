@@ -345,7 +345,7 @@ Create `compiler/go/` package with:
 
 ### Phase 2: Minimal Transpiler
 
-Create `compiler/transpile/` package that handles:
+Create `compiler/go_backend/` package that handles:
 - Function definitions with parameters and return types
 - Primitive types (Int, Float, Str, Bool)
 - Basic expressions (arithmetic, comparisons)

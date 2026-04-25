@@ -16,9 +16,9 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
+	go_backend "github.com/akonwi/ard/go_backend"
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/runtime"
-	"github.com/akonwi/ard/transpile"
 	"github.com/akonwi/ard/version"
 )
 
@@ -87,7 +87,7 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetGo:
-				if err := transpile.Run(inputPath, os.Args); err != nil {
+				if err := go_backend.Run(inputPath, os.Args); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -118,7 +118,7 @@ func main() {
 			case backend.TargetBytecode:
 				builtPath, err = buildBytecodeBinary(inputPath, outputPath, target)
 			case backend.TargetGo:
-				builtPath, err = transpile.BuildBinary(inputPath, outputPath)
+				builtPath, err = go_backend.BuildBinary(inputPath, outputPath)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				builtPath, err = javascript.Build(inputPath, outputPath, target)
 			default:
