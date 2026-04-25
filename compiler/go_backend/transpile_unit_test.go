@@ -1,4 +1,4 @@
-package transpile
+package go_backend
 
 import (
 	"os"
@@ -40,7 +40,7 @@ func checkedModuleFromSource(t *testing.T, dir, fileName, source string) checker
 	return c.Module()
 }
 
-func TestEmitEntrypoint(t *testing.T) {
+func TestCompileEntrypoint(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -55,7 +55,7 @@ fn add(a: Int, b: Int) Int {
 let result = add(1, 2)
 `)
 
-	out, err := EmitEntrypoint(module)
+	out, err := CompileEntrypoint(module)
 	if err != nil {
 		t.Fatalf("did not expect error: %v", err)
 	}
@@ -64,7 +64,7 @@ let result = add(1, 2)
 	checks := []string{
 		"package main",
 		"func Add(a int, b int) int",
-		"sum := (a + b)",
+		"sum := a + b",
 		"return sum",
 		"func main()",
 		"result := Add(1, 2)",
@@ -80,7 +80,7 @@ let result = add(1, 2)
 	}
 }
 
-func TestEmitEntrypointUnusedLocalGetsDiscard(t *testing.T) {
+func TestCompileEntrypointUnusedLocalGetsDiscard(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -94,7 +94,7 @@ fn noop() {
 noop()
 `)
 
-	out, err := EmitEntrypoint(module)
+	out, err := CompileEntrypoint(module)
 	if err != nil {
 		t.Fatalf("did not expect error: %v", err)
 	}

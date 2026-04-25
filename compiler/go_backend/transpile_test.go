@@ -1,6 +1,6 @@
 //go:build integration
 
-package transpile
+package go_backend
 
 import (
 	"os"
@@ -1324,7 +1324,7 @@ let e = from_call()
 	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
-func TestEmitEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
+func TestCompileEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -1348,7 +1348,7 @@ fn maybe_fallback(n: Int) Int {
 let result = maybe_fallback(0)
 `)
 
-	out, err := EmitEntrypoint(module)
+	out, err := CompileEntrypoint(module)
 	if err != nil {
 		t.Fatalf("did not expect error: %v", err)
 	}
@@ -1356,7 +1356,7 @@ let result = maybe_fallback(0)
 	generated := string(out)
 	checks := []string{
 		"__ardTryValue",
-		"value := (__ardTryValue",
+		"value := __ardTryValue",
 	}
 	for _, check := range checks {
 		if !strings.Contains(generated, check) {

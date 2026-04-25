@@ -1,6 +1,6 @@
 //go:build integration
 
-package transpile
+package go_backend
 
 import (
 	"fmt"
