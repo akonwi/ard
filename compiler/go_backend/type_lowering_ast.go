@@ -1,3 +1,8 @@
+// type_lowering_ast.go centralizes lowering from checked Ard types and
+// function-signature metadata into Go AST type nodes. Declaration and body
+// lowering code uses these helpers to build type expressions, generic type
+// parameter lists, and parameter/result field lists without duplicating
+// Go-specific type construction logic.
 package go_backend
 
 import (
