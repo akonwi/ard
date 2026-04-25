@@ -818,9 +818,6 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("WaitFor", _ffi_WaitFor); err != nil {
 		return fmt.Errorf("failed to register WaitFor: %w", err)
 	}
-	if err := r.Register("Join", ffi.Join); err != nil {
-		return fmt.Errorf("failed to register Join: %w", err)
-	}
 	if err := r.Register("GetResult", ffi.GetResult); err != nil {
 		return fmt.Errorf("failed to register GetResult: %w", err)
 	}
