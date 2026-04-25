@@ -532,34 +532,6 @@ func (e *emitter) lowerStrMethodAST(v *checker.StrMethod) (ast.Expr, bool, error
 	}
 }
 
-func (e *emitter) lowerAsyncModuleCallAST(call *checker.ModuleFunctionCall) (ast.Expr, bool, error) {
-	if call == nil || call.Call == nil {
-		return nil, false, nil
-	}
-	switch call.Call.Name {
-	case "join":
-		if len(call.Call.Args) != 1 {
-			return nil, false, errStructuredLoweringUnsupported
-		}
-		list, ok := call.Call.Args[0].(*checker.ListLiteral)
-		if !ok {
-			return nil, false, nil
-		}
-		elements := make([]ast.Expr, 0, len(list.Elements))
-		for _, element := range list.Elements {
-			emitted, ok, err := e.lowerExprAST(element)
-			if err != nil || !ok {
-				return nil, ok, err
-			}
-			elements = append(elements, emitted)
-		}
-		alias := packageNameForModulePath("ard/async")
-		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(alias), "JoinAny"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: ast.NewIdent("any")}, Elts: elements}}}, true, nil
-	default:
-		return nil, false, nil
-	}
-}
-
 func (e *emitter) lowerAssignmentTargetAST(expr checker.Expression) (ast.Expr, bool, error) {
 	switch target := expr.(type) {
 	case *checker.Identifier:

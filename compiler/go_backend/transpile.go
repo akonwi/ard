@@ -226,6 +226,14 @@ func collectTypeParamNames(t checker.Type, out *[]string, seen map[string]struct
 		for _, member := range typed.Types {
 			collectTypeParamNames(member, out, seen)
 		}
+	case *checker.StructDef:
+		for _, fieldName := range sortedStringKeys(typed.Fields) {
+			collectTypeParamNames(typed.Fields[fieldName], out, seen)
+		}
+	case *checker.ExternType:
+		for _, typeArg := range typed.TypeArgs {
+			collectTypeParamNames(typeArg, out, seen)
+		}
 	case *checker.FunctionDef:
 		for _, param := range typed.Parameters {
 			collectTypeParamNames(param.Type, out, seen)
@@ -268,6 +276,14 @@ func collectTypeParamConstraints(t checker.Type, constraints map[string]string, 
 	case *checker.Union:
 		for _, member := range typed.Types {
 			collectTypeParamConstraints(member, constraints, false)
+		}
+	case *checker.StructDef:
+		for _, fieldName := range sortedStringKeys(typed.Fields) {
+			collectTypeParamConstraints(typed.Fields[fieldName], constraints, false)
+		}
+	case *checker.ExternType:
+		for _, typeArg := range typed.TypeArgs {
+			collectTypeParamConstraints(typeArg, constraints, false)
 		}
 	case *checker.FunctionDef:
 		for _, param := range typed.Parameters {
@@ -552,13 +568,6 @@ func compilePackageSource(module checker.Module, projectName string) ([]byte, er
 func compileModuleSource(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
 	if module == nil || module.Program() == nil {
 		return nil, fmt.Errorf("module has no program")
-	}
-	if !entrypoint && module.Path() == "ard/async" {
-		fileIR, err := lowerAsyncModuleFileIR(packageName)
-		if err != nil {
-			return nil, err
-		}
-		return renderGoFile(optimizeGoFileIR(fileIR))
 	}
 	fileIR, err := lowerModuleFileIR(module, packageName, entrypoint, projectName)
 	if err != nil {

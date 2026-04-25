@@ -89,8 +89,11 @@ func Sleep(ns int) {
 // fn (wg: Dynamic) Void
 // WaitFor waits for an opaque *sync.WaitGroup handle to complete.
 func WaitFor(handle any) {
-	wg := handle.(*sync.WaitGroup)
-	wg.Wait()
+	if waiter, ok := handle.(interface{ Wait() }); ok {
+		waiter.Wait()
+		return
+	}
+	panic(fmt.Errorf("wait handle does not implement Wait(): %T", handle))
 }
 
 // fn (fibers: [Fiber]) Void
@@ -102,8 +105,16 @@ func Join(args []*runtime.Object) *runtime.Object {
 	fibers := args[0].AsList()
 	for _, fiberObj := range fibers {
 		fiberFields := fiberObj.Raw().(map[string]*runtime.Object)
-		wg := fiberFields["wg"].Raw().(*sync.WaitGroup)
-		wg.Wait()
+		WaitFor(fiberFields["wg"].Raw())
 	}
 	return runtime.Void()
+}
+
+// fn (WaitGroup, $T) $T
+func GetResult(args []*runtime.Object) *runtime.Object {
+	if len(args) != 2 {
+		panic(fmt.Errorf("get_result expects 2 arguments, got %d", len(args)))
+	}
+	WaitFor(args[0].Raw())
+	return args[1]
 }

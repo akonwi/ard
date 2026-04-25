@@ -18,8 +18,6 @@ func (e *emitter) lowerSpecialModuleCallAST(call *checker.ModuleFunctionCall) (a
 		return e.lowerResultModuleCallAST(call)
 	case "ard/list":
 		return e.lowerListModuleCallAST(call)
-	case "ard/async":
-		return e.lowerAsyncModuleCallAST(call)
 	default:
 		return nil, false, nil
 	}

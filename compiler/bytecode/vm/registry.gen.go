@@ -821,6 +821,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("Join", ffi.Join); err != nil {
 		return fmt.Errorf("failed to register Join: %w", err)
 	}
+	if err := r.Register("GetResult", ffi.GetResult); err != nil {
+		return fmt.Errorf("failed to register GetResult: %w", err)
+	}
 	if err := r.Register("SqlCreateConnection", _ffi_SqlCreateConnection); err != nil {
 		return fmt.Errorf("failed to register SqlCreateConnection: %w", err)
 	}
