@@ -5,6 +5,43 @@ import (
 	"strings"
 )
 
+// markerFallbackArtifactNames lists the legacy try/match marker fallback
+// callee names that are no longer permitted in finalized backend IR for
+// migrated surfaces. Lowering must produce semantic IR shapes (TryExpr,
+// IfExpr, UnionMatchExpr, BlockExpr, PanicExpr, ...) for these surfaces;
+// any CallExpr whose callee identifier resolves to one of these names is a
+// marker-style fallback artifact and must be rejected by validation so the
+// build fails loudly instead of silently relying on emitter-side fallback.
+var markerFallbackArtifactNames = map[string]struct{}{
+	"try_op":            {},
+	"bool_match":        {},
+	"int_match":         {},
+	"conditional_match": {},
+	"option_match":      {},
+	"result_match":      {},
+	"enum_match":        {},
+	"union_match":       {},
+}
+
+// markerFallbackArtifactName returns the marker artifact name and true when
+// expr is a CallExpr whose callee is an IdentExpr naming a legacy marker
+// fallback artifact for migrated try/match surfaces.
+func markerFallbackArtifactName(expr Expr) (string, bool) {
+	call, ok := expr.(*CallExpr)
+	if !ok || call == nil {
+		return "", false
+	}
+	ident, ok := call.Callee.(*IdentExpr)
+	if !ok || ident == nil {
+		return "", false
+	}
+	name := strings.TrimSpace(ident.Name)
+	if _, isMarker := markerFallbackArtifactNames[name]; !isMarker {
+		return "", false
+	}
+	return name, true
+}
+
 func ValidateModule(module *Module) error {
 	if module == nil {
 		return fmt.Errorf("nil module")
@@ -464,6 +501,9 @@ func validateExpr(expr Expr) error {
 		}
 		if e.Callee == nil {
 			return fmt.Errorf("call callee is nil")
+		}
+		if name, isMarker := markerFallbackArtifactName(e); isMarker {
+			return fmt.Errorf("marker fallback artifact %q is not permitted in finalized backend IR", name)
 		}
 		if err := validateExpr(e.Callee); err != nil {
 			return fmt.Errorf("call callee: %w", err)

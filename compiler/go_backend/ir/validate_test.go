@@ -885,3 +885,179 @@ func TestValidateModuleInvalid(t *testing.T) {
 type unsupportedDecl struct{}
 
 func (unsupportedDecl) declNode() {}
+
+// TestValidateModuleRejectsMarkerFallbackArtifacts enforces the migration
+// hardening contract (VAL-CROSS-005): finalized backend IR must not contain
+// legacy try/match marker-style fallback CallExprs (`try_op`, `bool_match`,
+// `int_match`, `conditional_match`, `option_match`, `result_match`,
+// `enum_match`, `union_match`). The validator must fail loudly rather than
+// allow these to silently flow into emission.
+func TestValidateModuleRejectsMarkerFallbackArtifacts(t *testing.T) {
+	markerNames := []string{
+		"try_op",
+		"bool_match",
+		"int_match",
+		"conditional_match",
+		"option_match",
+		"result_match",
+		"enum_match",
+		"union_match",
+	}
+
+	moduleWithCall := func(call *CallExpr) *Module {
+		return &Module{
+			PackageName: "main",
+			Decls: []Decl{
+				&FuncDecl{
+					Name:   "main",
+					Return: Void,
+					Body: &Block{
+						Stmts: []Stmt{
+							&ExprStmt{Value: call},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("top-level marker call", func(t *testing.T) {
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := moduleWithCall(&CallExpr{
+					Callee: &IdentExpr{Name: name},
+					Args: []Expr{
+						&LiteralExpr{Kind: "nil", Value: "match"},
+					},
+				})
+				err := ValidateModule(module)
+				if err == nil {
+					t.Fatalf("expected validation to reject marker fallback artifact %q, got nil", name)
+				}
+				if !strings.Contains(err.Error(), "marker fallback artifact") {
+					t.Fatalf("expected marker fallback artifact rejection for %q, got %q", name, err.Error())
+				}
+				if !strings.Contains(err.Error(), name) {
+					t.Fatalf("expected error to mention marker name %q, got %q", name, err.Error())
+				}
+			})
+		}
+	})
+
+	t.Run("marker call nested inside another call rejected", func(t *testing.T) {
+		// Nested marker artifacts (e.g. as an argument of another call) must
+		// also be rejected so callers cannot smuggle them past validation by
+		// wrapping them in an outer expression.
+		module := moduleWithCall(&CallExpr{
+			Callee: &IdentExpr{Name: "print"},
+			Args: []Expr{
+				&CallExpr{
+					Callee: &IdentExpr{Name: "int_match"},
+					Args: []Expr{
+						&IdentExpr{Name: "value"},
+					},
+				},
+			},
+		})
+		err := ValidateModule(module)
+		if err == nil {
+			t.Fatalf("expected validation to reject nested marker fallback artifact, got nil")
+		}
+		if !strings.Contains(err.Error(), "marker fallback artifact") {
+			t.Fatalf("expected marker fallback artifact rejection, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "int_match") {
+			t.Fatalf("expected error to mention nested marker name, got %q", err.Error())
+		}
+	})
+
+	t.Run("marker call nested inside if expression branch rejected", func(t *testing.T) {
+		// Match lowering produces IfExpr trees; a marker artifact that ends
+		// up inside one of those branches must still be rejected to ensure
+		// migrated surfaces never depend on marker fallback for correctness.
+		module := moduleWithCall(&CallExpr{
+			Callee: &IdentExpr{Name: "print"},
+			Args: []Expr{
+				&IfExpr{
+					Cond: &LiteralExpr{Kind: "bool", Value: "true"},
+					Then: &Block{Stmts: []Stmt{
+						&ExprStmt{Value: &CallExpr{
+							Callee: &IdentExpr{Name: "result_match"},
+							Args: []Expr{
+								&IdentExpr{Name: "subject"},
+							},
+						}},
+					}},
+					Else: &Block{Stmts: []Stmt{
+						&ExprStmt{Value: &LiteralExpr{Kind: "int", Value: "0"}},
+					}},
+					Type: IntType,
+				},
+			},
+		})
+		err := ValidateModule(module)
+		if err == nil {
+			t.Fatalf("expected validation to reject marker artifact inside IfExpr, got nil")
+		}
+		if !strings.Contains(err.Error(), "marker fallback artifact") {
+			t.Fatalf("expected marker fallback artifact rejection, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "result_match") {
+			t.Fatalf("expected error to mention nested marker name, got %q", err.Error())
+		}
+	})
+
+	t.Run("marker call inside block expression setup rejected", func(t *testing.T) {
+		// Non-trivial match subjects are hoisted via BlockExpr.Setup. A
+		// marker fallback artifact must not be allowed to hide there.
+		module := moduleWithCall(&CallExpr{
+			Callee: &IdentExpr{Name: "print"},
+			Args: []Expr{
+				&BlockExpr{
+					Setup: []Stmt{
+						&ExprStmt{Value: &CallExpr{
+							Callee: &IdentExpr{Name: "union_match"},
+							Args: []Expr{
+								&IdentExpr{Name: "subject"},
+							},
+						}},
+					},
+					Value: &LiteralExpr{Kind: "int", Value: "0"},
+					Type:  IntType,
+				},
+			},
+		})
+		err := ValidateModule(module)
+		if err == nil {
+			t.Fatalf("expected validation to reject marker artifact in BlockExpr.Setup, got nil")
+		}
+		if !strings.Contains(err.Error(), "marker fallback artifact") {
+			t.Fatalf("expected marker fallback artifact rejection, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "union_match") {
+			t.Fatalf("expected error to mention marker name, got %q", err.Error())
+		}
+	})
+
+	t.Run("non-marker calls still accepted", func(t *testing.T) {
+		// Sanity check: the rejection must be precise. Calls whose callee
+		// names are similar but not in the marker list (e.g. user functions
+		// named `try`, helper calls like `eq`, `int_lt`) must continue to
+		// validate cleanly.
+		module := moduleWithCall(&CallExpr{
+			Callee: &IdentExpr{Name: "print"},
+			Args: []Expr{
+				&CallExpr{
+					Callee: &IdentExpr{Name: "int_lt"},
+					Args: []Expr{
+						&IdentExpr{Name: "lhs"},
+						&IdentExpr{Name: "rhs"},
+					},
+				},
+			},
+		})
+		if err := ValidateModule(module); err != nil {
+			t.Fatalf("expected non-marker call to validate cleanly, got error %q", err.Error())
+		}
+	})
+}
