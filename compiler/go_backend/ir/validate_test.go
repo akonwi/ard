@@ -658,6 +658,212 @@ func TestValidateModuleInvalid(t *testing.T) {
 			},
 			wantErr: "named type name is empty",
 		},
+		{
+			name: "struct decl missing name",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&StructDecl{Name: ""},
+				},
+			},
+			wantErr: "struct name is empty",
+		},
+		{
+			name: "struct decl duplicate field names",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&StructDecl{
+						Name: "Box",
+						Fields: []Field{
+							{Name: "value", Type: IntType},
+							{Name: "value", Type: StrType},
+						},
+					},
+				},
+			},
+			wantErr: "field[1] duplicate name",
+		},
+		{
+			name: "enum decl missing name",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&EnumDecl{Name: "  "},
+				},
+			},
+			wantErr: "enum name is empty",
+		},
+		{
+			name: "enum decl duplicate value names",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&EnumDecl{
+						Name: "Color",
+						Values: []EnumValue{
+							{Name: "Red", Value: 0},
+							{Name: "Red", Value: 1},
+						},
+					},
+				},
+			},
+			wantErr: "value[1] duplicate name",
+		},
+		{
+			name: "union decl missing name",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&UnionDecl{Name: "", Types: []Type{IntType, StrType}},
+				},
+			},
+			wantErr: "union name is empty",
+		},
+		{
+			name: "union decl with no types",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&UnionDecl{Name: "Value"},
+				},
+			},
+			wantErr: "union types are empty",
+		},
+		{
+			name: "extern type decl missing name",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&ExternTypeDecl{Name: ""},
+				},
+			},
+			wantErr: "extern type name is empty",
+		},
+		{
+			name: "extern type decl invalid type arg",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&ExternTypeDecl{
+						Name: "Handle",
+						Args: []Type{&NamedType{Name: ""}},
+					},
+				},
+			},
+			wantErr: "extern type arg[0]",
+		},
+		{
+			name: "function decl missing name",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&FuncDecl{Name: "", Return: Void, Body: &Block{}},
+				},
+			},
+			wantErr: "function name is empty",
+		},
+		{
+			name: "function decl duplicate parameter names",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&FuncDecl{
+						Name: "x",
+						Params: []Param{
+							{Name: "value", Type: IntType},
+							{Name: "value", Type: StrType},
+						},
+						Return: Void,
+						Body:   &Block{},
+					},
+				},
+			},
+			wantErr: "param[1] duplicate name",
+		},
+		{
+			name: "function decl missing return type",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&FuncDecl{
+						Name:   "x",
+						Params: []Param{},
+						Return: nil,
+						Body:   &Block{},
+					},
+				},
+			},
+			wantErr: "return type",
+		},
+		{
+			name: "extern function with body",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&FuncDecl{
+						Name:          "x",
+						Return:        IntType,
+						IsExtern:      true,
+						ExternBinding: "X",
+						Body:          &Block{},
+					},
+				},
+			},
+			wantErr: "extern function must not define body",
+		},
+		{
+			name: "var decl missing name",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&VarDecl{
+						Name:  "",
+						Type:  IntType,
+						Value: &LiteralExpr{Kind: "int", Value: "1"},
+					},
+				},
+			},
+			wantErr: "variable name is empty",
+		},
+		{
+			name: "var decl missing type",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&VarDecl{
+						Name:  "AppName",
+						Type:  nil,
+						Value: &LiteralExpr{Kind: "str", Value: "demo"},
+					},
+				},
+			},
+			wantErr: "variable type",
+		},
+		{
+			name: "var decl missing value",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					&VarDecl{
+						Name:  "AppName",
+						Type:  StrType,
+						Value: nil,
+					},
+				},
+			},
+			wantErr: "variable value is nil",
+		},
+		{
+			name: "unsupported declaration type",
+			module: &Module{
+				PackageName: "main",
+				Decls: []Decl{
+					unsupportedDecl{},
+				},
+			},
+			wantErr: "unsupported declaration type",
+		},
 	}
 
 	for _, test := range tests {
@@ -672,3 +878,10 @@ func TestValidateModuleInvalid(t *testing.T) {
 		})
 	}
 }
+
+// unsupportedDecl is a stand-in declaration type used by the validator
+// tests to exercise the unsupported-decl branch of ValidateModule
+// without polluting the IR model with a real declaration kind.
+type unsupportedDecl struct{}
+
+func (unsupportedDecl) declNode() {}
