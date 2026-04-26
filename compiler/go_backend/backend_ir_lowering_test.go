@@ -1401,6 +1401,75 @@ func TestLowerUnionAndExternTypeDeclToBackendIR(t *testing.T) {
 	}
 }
 
+func TestLowerModuleToBackendIR_CollectsOrphanUnionDecls(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	// Union type aliases (`type X = A | B`) are registered in scope by
+	// the checker but never surface as a Statement entry in the program.
+	// They are observable only through type metadata of signatures and
+	// variables that reference them. Backend IR lowering must still
+	// surface those orphan unions as IR `UnionDecl`s so the Go emitter
+	// can produce the corresponding interface declaration.
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Square { size: Int }
+struct Circle { radius: Int }
+
+type Shape = Square | Circle
+
+fn label(shape: Shape) Str {
+  match shape {
+    Square => "square",
+    Circle => "circle",
+  }
+}
+
+fn main() {
+  let s = Square{size: 1}
+  let kind = label(s)
+  let _ = kind
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend ir lowering to succeed, got error: %v", err)
+	}
+
+	var unionDecl *backendir.UnionDecl
+	for _, decl := range irModule.Decls {
+		if u, ok := decl.(*backendir.UnionDecl); ok && u.Name == "Shape" {
+			unionDecl = u
+			break
+		}
+	}
+	if unionDecl == nil {
+		t.Fatalf("expected backend IR module to contain UnionDecl for Shape, got decls: %#v", irModule.Decls)
+	}
+	if len(unionDecl.Types) != 2 {
+		t.Fatalf("expected Shape union decl to retain 2 member types, got %d: %#v", len(unionDecl.Types), unionDecl.Types)
+	}
+
+	// Ensure orphan collection is idempotent: a second invocation of the
+	// lowerer on the same module should still produce exactly one
+	// UnionDecl for Shape (no duplicates).
+	again, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected second backend ir lowering to succeed, got error: %v", err)
+	}
+	count := 0
+	for _, decl := range again.Decls {
+		if u, ok := decl.(*backendir.UnionDecl); ok && u.Name == "Shape" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one UnionDecl for Shape after orphan collection, got %d", count)
+	}
+}
+
 func TestLowerModuleToBackendIR_EmitsPackageVariableDecls(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

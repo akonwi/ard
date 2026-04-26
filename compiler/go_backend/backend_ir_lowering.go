@@ -103,15 +103,21 @@ func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoin
 		}
 	}
 
-	// The checker only emits a Statement for an enum decl when there is
-	// an associated `impl` block. Plain enum decls without methods are
-	// kept in scope but are absent from the program statement list. To
-	// support native backend IR emission of enum-typed signatures, we
-	// must still surface those orphan enums as IR EnumDecls so the Go
-	// emitter generates the corresponding `type X struct { Tag int }`
-	// declaration. Walk type references in the program and synthesize
-	// EnumDecls for any enum we have not already seen.
-	collectOrphanEnumDecls(module.Program(), out, seenDecls)
+	// The checker keeps certain type-declared identifiers in scope
+	// without emitting a Statement entry for them. Two cases matter:
+	//
+	//   1. Enum declarations without an associated `impl` block.
+	//   2. Union/type-alias declarations (`type X = A | B`), which the
+	//      checker registers in scope but never returns as a Statement.
+	//
+	// To support native backend IR emission of signatures that reference
+	// these types, we still need to surface them as IR declarations so
+	// the Go emitter generates the corresponding type definitions
+	// (`type X struct { Tag int }` for enums, `type X interface {}` for
+	// unions). Walk type references in the program and synthesize the
+	// missing declarations for any orphan enum or union we have not yet
+	// seen.
+	collectOrphanTypeDecls(module.Program(), out, seenDecls)
 
 	out.Entrypoint = lowerEntrypointStatementsToBackendIRBlock(topLevelExecutableStatements(module.Program().Statements))
 
@@ -121,13 +127,13 @@ func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoin
 	return out, nil
 }
 
-func collectOrphanEnumDecls(program *checker.Program, out *backendir.Module, seenDecls map[string]struct{}) {
+func collectOrphanTypeDecls(program *checker.Program, out *backendir.Module, seenDecls map[string]struct{}) {
 	if program == nil {
 		return
 	}
 	visited := make(map[checker.Type]struct{})
 	collect := func(t checker.Type) {
-		visitOrphanEnumsInType(t, out, seenDecls, visited)
+		visitOrphanTypeDeclsInType(t, out, seenDecls, visited)
 	}
 	for _, stmt := range program.Statements {
 		if stmt.Expr != nil {
@@ -178,7 +184,7 @@ func collectOrphanEnumDecls(program *checker.Program, out *backendir.Module, see
 	}
 }
 
-func visitOrphanEnumsInType(t checker.Type, out *backendir.Module, seenDecls map[string]struct{}, visited map[checker.Type]struct{}) {
+func visitOrphanTypeDeclsInType(t checker.Type, out *backendir.Module, seenDecls map[string]struct{}, visited map[checker.Type]struct{}) {
 	if t == nil {
 		return
 	}
@@ -197,41 +203,69 @@ func visitOrphanEnumsInType(t checker.Type, out *backendir.Module, seenDecls map
 		}
 		seenDecls[key] = struct{}{}
 		out.Decls = append(out.Decls, lowerEnumDeclToBackendIR(typed))
+	case *checker.Union:
+		if typed == nil {
+			return
+		}
+		name := strings.TrimSpace(typed.Name)
+		if name != "" {
+			key := "union:" + name
+			if _, exists := seenDecls[key]; !exists {
+				seenDecls[key] = struct{}{}
+				out.Decls = append(out.Decls, lowerUnionDeclToBackendIR(typed))
+			}
+		}
+		for _, memberType := range typed.Types {
+			visitOrphanTypeDeclsInType(memberType, out, seenDecls, visited)
+		}
+	case checker.Union:
+		name := strings.TrimSpace(typed.Name)
+		if name != "" {
+			key := "union:" + name
+			if _, exists := seenDecls[key]; !exists {
+				seenDecls[key] = struct{}{}
+				defCopy := typed
+				out.Decls = append(out.Decls, lowerUnionDeclToBackendIR(&defCopy))
+			}
+		}
+		for _, memberType := range typed.Types {
+			visitOrphanTypeDeclsInType(memberType, out, seenDecls, visited)
+		}
 	case *checker.TypeVar:
 		if typed != nil {
-			visitOrphanEnumsInType(typed.Actual(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Actual(), out, seenDecls, visited)
 		}
 	case *checker.List:
 		if typed != nil {
-			visitOrphanEnumsInType(typed.Of(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Of(), out, seenDecls, visited)
 		}
 	case *checker.Map:
 		if typed != nil {
-			visitOrphanEnumsInType(typed.Key(), out, seenDecls, visited)
-			visitOrphanEnumsInType(typed.Value(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Key(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Value(), out, seenDecls, visited)
 		}
 	case *checker.Maybe:
 		if typed != nil {
-			visitOrphanEnumsInType(typed.Of(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Of(), out, seenDecls, visited)
 		}
 	case *checker.Result:
 		if typed != nil {
-			visitOrphanEnumsInType(typed.Val(), out, seenDecls, visited)
-			visitOrphanEnumsInType(typed.Err(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Val(), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.Err(), out, seenDecls, visited)
 		}
 	case *checker.FunctionDef:
 		if typed != nil {
 			for _, param := range typed.Parameters {
-				visitOrphanEnumsInType(param.Type, out, seenDecls, visited)
+				visitOrphanTypeDeclsInType(param.Type, out, seenDecls, visited)
 			}
-			visitOrphanEnumsInType(effectiveFunctionReturnType(typed), out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(effectiveFunctionReturnType(typed), out, seenDecls, visited)
 		}
 	case *checker.ExternalFunctionDef:
 		if typed != nil {
 			for _, param := range typed.Parameters {
-				visitOrphanEnumsInType(param.Type, out, seenDecls, visited)
+				visitOrphanTypeDeclsInType(param.Type, out, seenDecls, visited)
 			}
-			visitOrphanEnumsInType(typed.ReturnType, out, seenDecls, visited)
+			visitOrphanTypeDeclsInType(typed.ReturnType, out, seenDecls, visited)
 		}
 	}
 }

@@ -275,6 +275,82 @@ func TestEmitGoFileFromBackendIR_UnionAndExternTypeDecls(t *testing.T) {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_UnionDeclFromOrphanTypeReference(t *testing.T) {
+	// Verify that a union type alias referenced through a function
+	// signature (rather than declared as an explicit Statement) is
+	// surfaced into backend IR module declarations and emitted as a
+	// native Go interface. This guarantees the orphan-union collection
+	// path drives declaration emission without depending on legacy
+	// declaration-fallback handling.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Square { size: Int }
+struct Circle { radius: Int }
+
+type Shape = Square | Circle
+
+fn label(shape: Shape) Str {
+  match shape {
+    Square => "square",
+    Circle => "circle",
+  }
+}
+
+fn main() {
+  let s = Square{size: 1}
+  let kind = label(s)
+  let _ = kind
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend ir lowering to succeed, got error: %v", err)
+	}
+
+	hasShapeUnion := false
+	for _, decl := range irModule.Decls {
+		if u, ok := decl.(*backendir.UnionDecl); ok && u.Name == "Shape" {
+			hasShapeUnion = true
+			break
+		}
+	}
+	if !hasShapeUnion {
+		t.Fatalf("expected backend IR module to include orphan UnionDecl for Shape, got decls: %#v", irModule.Decls)
+	}
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	for _, want := range []string{
+		"type Shape interface",
+		"type Square struct",
+		"type Circle struct",
+		"func main()",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+	for _, unwanted := range []string{
+		"union_decl_stmt",
+		"struct_decl_stmt",
+		"nonproducing_stmt",
+	} {
+		if strings.Contains(generated, unwanted) {
+			t.Fatalf("expected generated source to be free of %q marker\n%s", unwanted, generated)
+		}
+	}
+}
+
 func TestCompileModuleSourceViaBackendIR_FunctionCallBodyFallsBackToLegacy(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
