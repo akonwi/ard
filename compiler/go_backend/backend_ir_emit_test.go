@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/akonwi/ard/checker"
 	backendir "github.com/akonwi/ard/go_backend/ir"
 )
 
@@ -52,6 +53,126 @@ fn main() {
 	} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("expected backend IR output to contain %q\n%s", want, generated)
+		}
+	}
+}
+
+func TestCompileModuleSourceViaBackendIR_EntrypointSkipsDeclarationOnlyUnionExternTypeStatements(t *testing.T) {
+	// Synthetic statement-level filter verification: declaration-only forms
+	// (function, extern, struct, enum, union, extern-type) must be excluded
+	// from the executable entrypoint stream so the entrypoint block stays
+	// declaration-safe even when a future checker pass surfaces them.
+	syntheticDeclStatements := []checker.Statement{
+		{Expr: &checker.FunctionDef{Name: "fn_decl"}},
+		{Expr: &checker.ExternalFunctionDef{Name: "extern_fn"}},
+		{Stmt: &checker.StructDef{Name: "S"}},
+		{Stmt: &checker.Enum{Name: "E"}},
+		{Stmt: &checker.Union{Name: "U", Types: []checker.Type{checker.Int, checker.Str}}},
+		{Stmt: checker.Union{Name: "UVal", Types: []checker.Type{checker.Int, checker.Str}}},
+		{Stmt: &checker.ExternType{Name_: "Handle"}},
+	}
+	executableStatement := checker.Statement{
+		Stmt: &checker.VariableDef{Name: "x", Value: &checker.IntLiteral{Value: 1}},
+	}
+
+	allStatements := append([]checker.Statement{}, syntheticDeclStatements...)
+	allStatements = append(allStatements, executableStatement)
+
+	filtered := topLevelExecutableStatements(allStatements)
+	if len(filtered) != 1 {
+		t.Fatalf("expected only the executable variable statement to remain, got %d statements: %#v", len(filtered), filtered)
+	}
+	if vd, ok := filtered[0].Stmt.(*checker.VariableDef); !ok || vd.Name != "x" {
+		t.Fatalf("expected the executable VariableDef to remain after filtering, got %#v", filtered[0])
+	}
+
+	// Integration lowering: a module containing extern-type and other
+	// declaration forms must produce an entrypoint block that is free of
+	// any declaration-marker calls (`union_decl_stmt`,
+	// `extern_type_decl_stmt`, `struct_decl_stmt`, `enum_decl_stmt`,
+	// `nonproducing_stmt`).
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Square { size: Int }
+struct Circle { radius: Int }
+
+type Shape = Square | Circle
+
+extern type Handle
+
+fn label(shape: Shape) Str {
+  match shape {
+    Square => "square",
+    Circle => "circle",
+  }
+}
+
+let first = Square { size: 1 }
+let kind = label(first)
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend ir lowering to succeed, got error: %v", err)
+	}
+
+	if irModule.Entrypoint == nil {
+		t.Fatalf("expected entrypoint block to be lowered for entrypoint module")
+	}
+
+	declarationMarkers := []string{
+		"union_decl_stmt",
+		"extern_type_decl_stmt",
+		"struct_decl_stmt",
+		"enum_decl_stmt",
+		"nonproducing_stmt",
+	}
+	for _, marker := range declarationMarkers {
+		if containsCallNamedInBlock(irModule.Entrypoint, marker) {
+			t.Fatalf("expected entrypoint block to be free of %q marker call, got: %#v", marker, irModule.Entrypoint)
+		}
+	}
+
+	// Extern-type declaration form must still be preserved as a module-level
+	// decl even though it is excluded from the executable entrypoint stream.
+	hasExternTypeDecl := false
+	for _, decl := range irModule.Decls {
+		if d, ok := decl.(*backendir.ExternTypeDecl); ok && d.Name == "Handle" {
+			hasExternTypeDecl = true
+		}
+	}
+	if !hasExternTypeDecl {
+		t.Fatalf("expected backend IR module to retain extern-type decl Handle, got decls: %#v", irModule.Decls)
+	}
+
+	// The entrypoint should still preserve genuinely executable top-level
+	// statements (the let bindings).
+	if len(irModule.Entrypoint.Stmts) == 0 {
+		t.Fatalf("expected entrypoint block to retain executable statements, got empty block")
+	}
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	for _, unwanted := range declarationMarkers {
+		if strings.Contains(generated, unwanted) {
+			t.Fatalf("expected generated source to be free of marker %q\n%s", unwanted, generated)
+		}
+	}
+	for _, want := range []string{
+		"type Handle struct",
+		"func main()",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
 		}
 	}
 }

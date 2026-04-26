@@ -569,6 +569,12 @@ func compileModuleSource(module checker.Module, packageName string, entrypoint b
 	return compileModuleSourceViaBackendIR(module, packageName, entrypoint, projectName)
 }
 
+// topLevelExecutableStatements returns the subset of top-level checker
+// statements that participate in the executable entrypoint stream. All
+// declaration-only forms (function/extern function, struct/enum, union,
+// extern-type) are excluded so the entrypoint executable block only
+// contains genuinely executable semantics. Their declaration semantics
+// are preserved separately by the module-level declaration lowering.
 func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
 	filtered := make([]checker.Statement, 0, len(stmts))
 	for _, stmt := range stmts {
@@ -577,7 +583,10 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 			continue
 		}
 		switch stmt.Stmt.(type) {
-		case *checker.StructDef, checker.StructDef, *checker.Enum, checker.Enum:
+		case *checker.StructDef, checker.StructDef,
+			*checker.Enum, checker.Enum,
+			*checker.Union, checker.Union,
+			*checker.ExternType:
 			continue
 		}
 		filtered = append(filtered, stmt)
