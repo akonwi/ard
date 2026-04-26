@@ -275,6 +275,70 @@ func TestEmitGoFileFromBackendIR_UnionAndExternTypeDecls(t *testing.T) {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_UnionTypedFunctionSignatureNative(t *testing.T) {
+	// Union-typed function parameters and return types must emit native
+	// Go signatures referencing the concrete union interface name (e.g.
+	// `Shape`) instead of falling back to `any`. This relies on
+	// lowerCheckerTypeToBackendIR mapping union types to NamedType so
+	// the emitter can resolve them to the interface declared via
+	// UnionDecl emission.
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.UnionDecl{
+				Name:  "Shape",
+				Types: []backendir.Type{backendir.IntType, backendir.StrType},
+			},
+			&backendir.FuncDecl{
+				Name: "describe",
+				Params: []backendir.Param{{
+					Name: "shape",
+					Type: &backendir.NamedType{Name: "Shape"},
+				}},
+				Return: &backendir.NamedType{Name: "Shape"},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.IdentExpr{Name: "shape"}},
+				}},
+			},
+			&backendir.FuncDecl{
+				Name:   "main",
+				Return: backendir.Void,
+				Body:   &backendir.Block{},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	for _, want := range []string{
+		"type Shape interface",
+		"func Describe(shape Shape) Shape",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+	// The native union-typed signature must not erase the parameter or
+	// return type to `any`.
+	for _, unwanted := range []string{
+		"func Describe(shape any)",
+		"shape any) any",
+	} {
+		if strings.Contains(generated, unwanted) {
+			t.Fatalf("expected generated source to be free of erased signature %q\n%s", unwanted, generated)
+		}
+	}
+}
+
 func TestEmitGoFileFromBackendIR_UnionDeclFromOrphanTypeReference(t *testing.T) {
 	// Verify that a union type alias referenced through a function
 	// signature (rather than declared as an explicit Statement) is

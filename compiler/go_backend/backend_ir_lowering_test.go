@@ -1378,6 +1378,70 @@ func TestLowerNonProducingToBackendIR_ComprehensiveNodeCoverage(t *testing.T) {
 	}
 }
 
+func TestLowerCheckerTypeToBackendIR_LowersUnionToNamedType(t *testing.T) {
+	// Union types in signature/value positions must lower to backend IR
+	// NamedType so emitted Go signatures reference the concrete union
+	// interface name rather than any/Dynamic. This guarantees that
+	// union-typed parameters/returns/variables are emitted as `Shape`
+	// (the union interface) instead of being erased to `any`.
+	pointerUnion := &checker.Union{
+		Name:  "Shape",
+		Types: []checker.Type{checker.Int, checker.Str},
+	}
+	loweredPtr := lowerCheckerTypeToBackendIR(pointerUnion)
+	namedPtr, ok := loweredPtr.(*backendir.NamedType)
+	if !ok {
+		t.Fatalf("expected *checker.Union to lower to *backendir.NamedType, got %T (%+v)", loweredPtr, loweredPtr)
+	}
+	if namedPtr.Name != "Shape" {
+		t.Fatalf("expected pointer-union NamedType.Name to be %q, got %q", "Shape", namedPtr.Name)
+	}
+	if len(namedPtr.Args) != 0 {
+		t.Fatalf("expected union NamedType to have no type args, got %d", len(namedPtr.Args))
+	}
+
+	valueUnion := checker.Union{
+		Name:  "Value",
+		Types: []checker.Type{checker.Int, checker.Str},
+	}
+	loweredVal := lowerCheckerTypeToBackendIR(valueUnion)
+	namedVal, ok := loweredVal.(*backendir.NamedType)
+	if !ok {
+		t.Fatalf("expected checker.Union (value) to lower to *backendir.NamedType, got %T (%+v)", loweredVal, loweredVal)
+	}
+	if namedVal.Name != "Value" {
+		t.Fatalf("expected value-union NamedType.Name to be %q, got %q", "Value", namedVal.Name)
+	}
+
+	// Functions whose parameters or return types reference a union must
+	// surface the union as a NamedType in the lowered FuncType so the
+	// emitter can reach the concrete union interface instead of the
+	// Dynamic erasure.
+	funcType := &checker.FunctionDef{
+		Name: "label",
+		Parameters: []checker.Parameter{
+			{Name: "shape", Type: pointerUnion},
+		},
+		ReturnType: pointerUnion,
+	}
+	loweredFunc := lowerCheckerTypeToBackendIR(funcType)
+	fnType, ok := loweredFunc.(*backendir.FuncType)
+	if !ok {
+		t.Fatalf("expected function type to lower to *backendir.FuncType, got %T", loweredFunc)
+	}
+	if len(fnType.Params) != 1 {
+		t.Fatalf("expected lowered FuncType to have one param, got %d", len(fnType.Params))
+	}
+	paramNamed, ok := fnType.Params[0].(*backendir.NamedType)
+	if !ok || paramNamed.Name != "Shape" {
+		t.Fatalf("expected union-typed parameter to lower to NamedType{Name: %q}, got %T (%+v)", "Shape", fnType.Params[0], fnType.Params[0])
+	}
+	returnNamed, ok := fnType.Return.(*backendir.NamedType)
+	if !ok || returnNamed.Name != "Shape" {
+		t.Fatalf("expected union-typed return to lower to NamedType{Name: %q}, got %T (%+v)", "Shape", fnType.Return, fnType.Return)
+	}
+}
+
 func TestLowerUnionAndExternTypeDeclToBackendIR(t *testing.T) {
 	unionDecl := lowerUnionDeclToBackendIR(&checker.Union{
 		Name:  "Value",

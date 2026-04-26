@@ -2271,6 +2271,27 @@ func backendIRTypeName(t backendir.Type) string {
 	}
 }
 
+// lowerNestedCheckerTypeToBackendIR lowers checker types when they appear
+// nested inside other type constructors (list element, map key/value,
+// maybe inner, result val/err). Union types in such nested positions are
+// kept as Dynamic to preserve runtime FFI compatibility — the existing
+// extern bridge expects `[]any`/`map[string]any` payloads for
+// dynamically-typed extern arguments. Direct (non-nested) union types,
+// such as a function parameter or return type whose immediate type IS a
+// union, still lower to backend IR NamedType so signature emission can
+// reference the concrete union interface.
+func lowerNestedCheckerTypeToBackendIR(t checker.Type) backendir.Type {
+	switch typed := t.(type) {
+	case *checker.Union:
+		_ = typed
+		return backendir.Dynamic
+	case checker.Union:
+		_ = typed
+		return backendir.Dynamic
+	}
+	return lowerCheckerTypeToBackendIR(t)
+}
+
 func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 	if t == nil {
 		return backendir.UnknownType
@@ -2305,18 +2326,18 @@ func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 		}
 		return &backendir.TypeVarType{Name: name}
 	case *checker.List:
-		return &backendir.ListType{Elem: lowerCheckerTypeToBackendIR(typed.Of())}
+		return &backendir.ListType{Elem: lowerNestedCheckerTypeToBackendIR(typed.Of())}
 	case *checker.Map:
 		return &backendir.MapType{
-			Key:   lowerCheckerTypeToBackendIR(typed.Key()),
-			Value: lowerCheckerTypeToBackendIR(typed.Value()),
+			Key:   lowerNestedCheckerTypeToBackendIR(typed.Key()),
+			Value: lowerNestedCheckerTypeToBackendIR(typed.Value()),
 		}
 	case *checker.Maybe:
-		return &backendir.MaybeType{Of: lowerCheckerTypeToBackendIR(typed.Of())}
+		return &backendir.MaybeType{Of: lowerNestedCheckerTypeToBackendIR(typed.Of())}
 	case *checker.Result:
 		return &backendir.ResultType{
-			Val: lowerCheckerTypeToBackendIR(typed.Val()),
-			Err: lowerCheckerTypeToBackendIR(typed.Err()),
+			Val: lowerNestedCheckerTypeToBackendIR(typed.Val()),
+			Err: lowerNestedCheckerTypeToBackendIR(typed.Err()),
 		}
 	case *checker.FunctionDef:
 		params := make([]backendir.Type, 0, len(typed.Parameters))
@@ -2364,9 +2385,20 @@ func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 	case *checker.Enum:
 		return &backendir.NamedType{Name: typed.Name}
 	case checker.Union:
-		return backendir.Dynamic
+		name := strings.TrimSpace(typed.Name)
+		if name == "" {
+			return backendir.Dynamic
+		}
+		return &backendir.NamedType{Name: name}
 	case *checker.Union:
-		return backendir.Dynamic
+		if typed == nil {
+			return backendir.Dynamic
+		}
+		name := strings.TrimSpace(typed.Name)
+		if name == "" {
+			return backendir.Dynamic
+		}
+		return &backendir.NamedType{Name: name}
 	case *checker.ExternType:
 		args := make([]backendir.Type, 0, len(typed.TypeArgs))
 		for _, typeArg := range typed.TypeArgs {
