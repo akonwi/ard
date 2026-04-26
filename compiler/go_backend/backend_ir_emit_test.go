@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	backendir "github.com/akonwi/ard/go_backend/ir"
 )
@@ -1668,5 +1670,287 @@ func assertParsesAsGo(t *testing.T, source []byte) {
 	fset := token.NewFileSet()
 	if _, err := parser.ParseFile(fset, "generated.go", source, parser.AllErrors); err != nil {
 		t.Fatalf("generated source is not valid Go: %v\n%s", err, string(source))
+	}
+}
+
+// assertSyntheticMatchTempIsArdUnreachable verifies the synthetic match-subject
+// temp prefix is built from a leading character that Ard's lexer cannot accept
+// (anything outside ASCII `[A-Za-z_]`). This is the structural guarantee that
+// hoist temporary names cannot collide with any legal user-defined Ard
+// identifier — it is the contract proven by this regression suite.
+func assertSyntheticMatchTempIsArdUnreachable(t *testing.T, name string) {
+	t.Helper()
+	if name == "" {
+		t.Fatalf("synthetic match temp name is empty")
+	}
+	first := []rune(name)[0]
+	if first < 0x80 {
+		t.Fatalf("synthetic match temp %q must start with a non-ASCII rune so it cannot be lexed by Ard's identifier rules", name)
+	}
+	// Belt-and-suspenders: even if some non-ASCII letter were ever in Ard's
+	// identifier alphabet, the leading rune must not be an ASCII letter or
+	// underscore.
+	if (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_' {
+		t.Fatalf("synthetic match temp %q must not start with an Ard-legal identifier character", name)
+	}
+}
+
+// occurrencesOfWholeWord counts occurrences of `word` in `source` only when the
+// match is preceded and followed by a non-identifier rune (Go identifier
+// characters: letters, digits, underscore). This avoids spurious overlaps
+// where a user-named local like `ardmatchsubjectInt` would otherwise match
+// inside a synthetic temp like `αardmatchsubjectInt`.
+func occurrencesOfWholeWord(source, word string) int {
+	if word == "" {
+		return 0
+	}
+	count := 0
+	idx := 0
+	for {
+		hit := strings.Index(source[idx:], word)
+		if hit < 0 {
+			return count
+		}
+		start := idx + hit
+		end := start + len(word)
+		var prev, next rune
+		if start > 0 {
+			prev, _ = utf8.DecodeLastRuneInString(source[:start])
+		}
+		if end < len(source) {
+			next, _ = utf8.DecodeRuneInString(source[end:])
+		}
+		if !isGoIdentRune(prev) && !isGoIdentRune(next) {
+			count++
+		}
+		idx = end
+	}
+}
+
+func isGoIdentRune(r rune) bool {
+	if r == 0 {
+		return false
+	}
+	if r == '_' || (r >= '0' && r <= '9') {
+		return true
+	}
+	return unicode.IsLetter(r)
+}
+
+// assertUserLocalNotMutatedByMatchTemp verifies that a user-defined local
+// (matched by goLocal) is defined exactly once via `:=` and never reassigned
+// by a stray `=`. The whole-word matcher excludes incidental substring hits
+// inside the synthetic temp's name (which deliberately uses a leading non-ASCII
+// rune that contains the user-name as a suffix when string-searched).
+func assertUserLocalNotMutatedByMatchTemp(t *testing.T, generated, goLocal string) {
+	t.Helper()
+	defineLine := goLocal + " :="
+	defines := occurrencesOfWholeWord(generated, defineLine)
+	if defines != 1 {
+		t.Fatalf("expected user local %q to be defined exactly once via `:=`, got %d whole-word occurrences\n%s", goLocal, defines, generated)
+	}
+	reassignLine := goLocal + " ="
+	reassigns := occurrencesOfWholeWord(generated, reassignLine)
+	if reassigns != 0 {
+		t.Fatalf("expected user local %q never to be reassigned (no `=` mutation), got %d whole-word occurrences\n%s", goLocal, reassigns, generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_IntMatchUnsafeSubjectTempDoesNotCollideWithUserLocal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	// The user's local deliberately mirrors the prior synthetic match-subject
+	// temp name (`__ardMatchSubject_int`) to prove that the hoist step cannot
+	// reuse / shadow / mutate it.
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+fn next() Int { 1 }
+
+fn run() Int {
+  let __ardMatchSubject_int = 99
+  let outcome = match next() {
+    1 => 100,
+    _ => 200,
+  }
+  __ardMatchSubject_int + outcome
+}
+
+fn main() {
+  let _ = run()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+	generated := string(out)
+
+	syntheticTemp := matchSubjectTempName("int")
+	assertSyntheticMatchTempIsArdUnreachable(t, syntheticTemp)
+
+	userGoLocal := goName("__ardMatchSubject_int", false)
+	if userGoLocal == "" {
+		t.Fatalf("expected user local Go name to be non-empty")
+	}
+	if !strings.Contains(generated, userGoLocal+" := 99") {
+		t.Fatalf("expected user local %q to be defined with literal value 99\n%s", userGoLocal, generated)
+	}
+	assertUserLocalNotMutatedByMatchTemp(t, generated, userGoLocal)
+
+	syntheticGoTemp := goName(syntheticTemp, false)
+	if syntheticGoTemp == userGoLocal {
+		t.Fatalf("synthetic match temp Go name %q must not equal user local Go name %q", syntheticGoTemp, userGoLocal)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_OptionMatchUnsafeSubjectTempDoesNotCollideWithUserLocal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/maybe
+
+fn next() Int? { maybe::some(1) }
+
+fn run() Int {
+  let __ardMatchSubject_option = 99
+  let outcome = match next() {
+    n => n,
+    _ => 200,
+  }
+  __ardMatchSubject_option + outcome
+}
+
+fn main() {
+  let _ = run()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+	generated := string(out)
+
+	syntheticTemp := matchSubjectTempName("option")
+	assertSyntheticMatchTempIsArdUnreachable(t, syntheticTemp)
+
+	userGoLocal := goName("__ardMatchSubject_option", false)
+	if !strings.Contains(generated, userGoLocal+" := 99") {
+		t.Fatalf("expected user local %q to be defined with literal value 99\n%s", userGoLocal, generated)
+	}
+	assertUserLocalNotMutatedByMatchTemp(t, generated, userGoLocal)
+
+	syntheticGoTemp := goName(syntheticTemp, false)
+	if syntheticGoTemp == userGoLocal {
+		t.Fatalf("synthetic match temp Go name %q must not equal user local Go name %q", syntheticGoTemp, userGoLocal)
+	}
+	if !strings.Contains(generated, syntheticGoTemp) {
+		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q)\n%s", syntheticGoTemp, syntheticTemp, generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_ResultMatchUnsafeSubjectTempDoesNotCollideWithUserLocal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/result as Result
+
+fn next() Int!Str { Result::ok(1) }
+
+fn run() Int {
+  let __ardMatchSubject_result = 99
+  let outcome = match next() {
+    ok(value) => value,
+    err(_) => 200,
+  }
+  __ardMatchSubject_result + outcome
+}
+
+fn main() {
+  let _ = run()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+	generated := string(out)
+
+	syntheticTemp := matchSubjectTempName("result")
+	assertSyntheticMatchTempIsArdUnreachable(t, syntheticTemp)
+
+	userGoLocal := goName("__ardMatchSubject_result", false)
+	if !strings.Contains(generated, userGoLocal+" := 99") {
+		t.Fatalf("expected user local %q to be defined with literal value 99\n%s", userGoLocal, generated)
+	}
+	assertUserLocalNotMutatedByMatchTemp(t, generated, userGoLocal)
+
+	syntheticGoTemp := goName(syntheticTemp, false)
+	if syntheticGoTemp == userGoLocal {
+		t.Fatalf("synthetic match temp Go name %q must not equal user local Go name %q", syntheticGoTemp, userGoLocal)
+	}
+	if !strings.Contains(generated, syntheticGoTemp) {
+		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q)\n%s", syntheticGoTemp, syntheticTemp, generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_EnumMatchUnsafeSubjectTempDoesNotCollideWithUserLocal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+enum Light { red, yellow, green }
+
+fn next() Light { Light::green }
+
+fn run() Int {
+  let __ardMatchSubject_enum = 99
+  let outcome = match next() {
+    Light::red => 1,
+    Light::yellow => 2,
+    Light::green => 3,
+  }
+  __ardMatchSubject_enum + outcome
+}
+
+fn main() {
+  let _ = run()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+	generated := string(out)
+
+	syntheticTemp := matchSubjectTempName("enum")
+	assertSyntheticMatchTempIsArdUnreachable(t, syntheticTemp)
+
+	userGoLocal := goName("__ardMatchSubject_enum", false)
+	if !strings.Contains(generated, userGoLocal+" := 99") {
+		t.Fatalf("expected user local %q to be defined with literal value 99\n%s", userGoLocal, generated)
+	}
+	assertUserLocalNotMutatedByMatchTemp(t, generated, userGoLocal)
+
+	syntheticGoTemp := goName(syntheticTemp, false)
+	if syntheticGoTemp == userGoLocal {
+		t.Fatalf("synthetic match temp Go name %q must not equal user local Go name %q", syntheticGoTemp, userGoLocal)
 	}
 }

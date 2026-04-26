@@ -6,6 +6,8 @@ import (
 	"go/token"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/akonwi/ard/checker"
 	backendir "github.com/akonwi/ard/go_backend/ir"
@@ -1072,12 +1074,19 @@ func isSimpleLoweredName(name string) bool {
 	if name == "" {
 		return false
 	}
-	for i := 0; i < len(name); i++ {
-		char := name[i]
-		if char == '_' || (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') {
+	for i, r := range name {
+		if r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
 			continue
 		}
-		if i > 0 && char >= '0' && char <= '9' {
+		if i > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		// Allow non-ASCII Unicode letters. Go's identifier grammar accepts them
+		// and the backend IR uses them deliberately for compiler-synthesized
+		// temps (see matchSubjectTempPrefix) so that the temp names cannot
+		// collide with any legal user-defined Ard identifier — Ard's lexer
+		// only accepts ASCII `[A-Za-z_][A-Za-z_0-9]*`.
+		if r >= utf8.RuneSelf && unicode.IsLetter(r) {
 			continue
 		}
 		return false

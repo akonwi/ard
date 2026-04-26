@@ -1342,12 +1342,22 @@ func canSafelyDuplicateMatchSubject(subject checker.Expression) bool {
 	}
 }
 
-// matchSubjectTempName returns a synthetic Ard-level identifier used to bind a
+// matchSubjectTempPrefix is the leading marker for synthetic match-subject
+// hoist temporaries. Its first character is a non-ASCII Unicode letter (Greek
+// lowercase alpha, U+03B1) which Go accepts in identifiers but Ard's lexer
+// cannot produce — Ard restricts identifier starts to ASCII `[A-Za-z_]` (see
+// parse/lexer.go isAlpha). This guarantees that synthetic match temps cannot
+// collide with any legal user-defined Ard identifier reaching the Go backend,
+// so user locals are never silently shadowed or mutated by hoisting.
+const matchSubjectTempPrefix = "\u03b1ardMatchSubject_"
+
+// matchSubjectTempName returns a synthetic identifier used to bind a
 // non-trivial match subject so it is evaluated only once before branch
 // dispatch. The name is namespaced per match shape (int/option/result/enum)
-// for readability of generated Go code.
+// for readability of generated Go code, and is guaranteed to be unreachable
+// from user-written Ard source (see matchSubjectTempPrefix).
 func matchSubjectTempName(kind string) string {
-	return "__ardMatchSubject_" + strings.TrimSpace(kind)
+	return matchSubjectTempPrefix + strings.TrimSpace(kind)
 }
 
 // matchSubjectExpr returns an expression that should be used inside the
