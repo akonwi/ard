@@ -277,6 +277,10 @@ func (e *emitter) lowerExpressionStatementAST(expr checker.Expression, returnTyp
 			if stmts, ok, err := e.lowerResultMatchStatementAST(typed); err != nil || ok {
 				return stmts, ok, err
 			}
+		case *checker.UnionMatch:
+			if stmts, ok, err := e.lowerUnionMatchStatementAST(typed); err != nil || ok {
+				return stmts, ok, err
+			}
 		}
 		if exprContainsBreak(expr) {
 			return nil, false, nil

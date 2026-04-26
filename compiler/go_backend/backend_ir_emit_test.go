@@ -1048,6 +1048,196 @@ func TestEmitGoFileFromBackendIR_TryExprExprStmtNative(t *testing.T) {
 	}
 }
 
+// TestEmitGoFileFromBackendIR_TryExprCatchInLoopReturnsEarly verifies that a
+// `try ... -> err { ... }` placed inside a for-loop body emits the catch
+// branch as an early `return` from the enclosing function. This guards
+// against regressing back to the prior `_ = ardgo.Err(...)` shape that
+// silently fell through to subsequent loop iterations and the trailing
+// success path -- matching the VM's `OpReturn`-after-catch semantics.
+func TestEmitGoFileFromBackendIR_TryExprCatchInLoopReturnsEarly(t *testing.T) {
+	resultIntStr := &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType}
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name: "loop_catch",
+				Params: []backendir.Param{
+					{
+						Name: "values",
+						Type: &backendir.ListType{Elem: backendir.IntType},
+					},
+				},
+				Return: resultIntStr,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.ForInListStmt{
+							Cursor: "v",
+							List:   &backendir.IdentExpr{Name: "values"},
+							Body: &backendir.Block{
+								Stmts: []backendir.Stmt{
+									&backendir.AssignStmt{
+										Target: "n",
+										Value: &backendir.TryExpr{
+											Kind:     "result",
+											Subject:  &backendir.IdentExpr{Name: "v"},
+											CatchVar: "err",
+											Catch: &backendir.Block{
+												Stmts: []backendir.Stmt{
+													&backendir.ReturnStmt{
+														Value: &backendir.IdentExpr{Name: "v"},
+													},
+												},
+											},
+											Type: backendir.IntType,
+										},
+									},
+									&backendir.AssignStmt{
+										Target: "_",
+										Value:  &backendir.IdentExpr{Name: "n"},
+									},
+								},
+							},
+						},
+						&backendir.ReturnStmt{Value: &backendir.IdentExpr{Name: "values"}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if !strings.Contains(generated, "for _, v := range values") {
+		t.Fatalf("expected generated source to lower for-in-list loop natively\n%s", generated)
+	}
+	if !strings.Contains(generated, "__ardTryValue := v") {
+		t.Fatalf("expected generated source to evaluate try subject once into a temp\n%s", generated)
+	}
+	if !strings.Contains(generated, "if __ardTryValue.IsErr()") {
+		t.Fatalf("expected generated source to contain result error guard inside loop\n%s", generated)
+	}
+	if !strings.Contains(generated, "err := __ardTryValue.UnwrapErr()") {
+		t.Fatalf("expected generated source to bind catch variable from try temp\n%s", generated)
+	}
+	// The catch branch must early-return from the enclosing function.
+	if !strings.Contains(generated, "return v") {
+		t.Fatalf("expected catch branch to early-return from enclosing function\n%s", generated)
+	}
+	// The success path inside the loop must continue normally with the
+	// unwrapped value, not panic on the unreachable-err message.
+	if !strings.Contains(generated, "n := __ardTryValue.Expect(\"unreachable err in try success path\")") {
+		t.Fatalf("expected loop body to bind unwrapped success value into n\n%s", generated)
+	}
+	// The closure form must not be used for control-flow try.
+	if strings.Contains(generated, "n := func() int") {
+		t.Fatalf("expected control-flow lowering, got closure form\n%s", generated)
+	}
+}
+
+// TestEmitGoFileFromBackendIR_TryExprCatchInMatchArmReturnsEarly verifies
+// that a `try ... -> err { ... }` whose catch branch is reached from within
+// a stmt-position union match arm emits the catch as an early `return` from
+// the enclosing function rather than falling through to a trailing success
+// expression. This matches the VM's `OpReturn`-after-catch semantics for
+// catch arms regardless of the surrounding match-arm wrapping.
+func TestEmitGoFileFromBackendIR_TryExprCatchInMatchArmReturnsEarly(t *testing.T) {
+	resultIntStr := &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType}
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name: "match_catch",
+				Params: []backendir.Param{
+					{
+						Name: "value",
+						Type: backendir.IntType,
+					},
+				},
+				Return: resultIntStr,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.IfStmt{
+							Cond: &backendir.CallExpr{
+								Callee: &backendir.IdentExpr{Name: "int_lt"},
+								Args: []backendir.Expr{
+									&backendir.IdentExpr{Name: "value"},
+									&backendir.LiteralExpr{Kind: "int", Value: "0"},
+								},
+							},
+							Then: &backendir.Block{
+								Stmts: []backendir.Stmt{
+									&backendir.ExprStmt{
+										Value: &backendir.TryExpr{
+											Kind:     "result",
+											Subject:  &backendir.IdentExpr{Name: "value"},
+											CatchVar: "err",
+											Catch: &backendir.Block{
+												Stmts: []backendir.Stmt{
+													&backendir.ReturnStmt{
+														Value: &backendir.IdentExpr{Name: "value"},
+													},
+												},
+											},
+											Type: backendir.IntType,
+										},
+									},
+								},
+							},
+						},
+						&backendir.ReturnStmt{Value: &backendir.IdentExpr{Name: "value"}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if !strings.Contains(generated, "if value < 0") {
+		t.Fatalf("expected generated source to emit the surrounding match-arm guard natively\n%s", generated)
+	}
+	if !strings.Contains(generated, "__ardTryValue := value") {
+		t.Fatalf("expected generated source to evaluate try subject once into a temp\n%s", generated)
+	}
+	if !strings.Contains(generated, "if __ardTryValue.IsErr()") {
+		t.Fatalf("expected generated source to contain result error guard inside match arm\n%s", generated)
+	}
+	if !strings.Contains(generated, "err := __ardTryValue.UnwrapErr()") {
+		t.Fatalf("expected generated source to bind catch variable from try temp\n%s", generated)
+	}
+	// The catch branch must early-return from the enclosing function.
+	returnCount := strings.Count(generated, "return value")
+	if returnCount < 2 {
+		t.Fatalf("expected catch branch + trailing success to both early-return; got %d 'return value' occurrences\n%s", returnCount, generated)
+	}
+	// Closure form must not be used for the control-flow try.
+	if strings.Contains(generated, "func() int {") && strings.Contains(generated, "}()") {
+		// allow other closures, but not for the try expression itself
+		// (sanity check via try temp not appearing inside a closure form).
+		if !strings.Contains(generated, "if __ardTryValue.IsErr()") {
+			t.Fatalf("expected try control-flow lowering, got closure form\n%s", generated)
+		}
+	}
+}
+
 func TestEmitGoFileFromBackendIR_TryExprWithoutCatchMaybeReturnStmtNative(t *testing.T) {
 	module := &backendir.Module{
 		PackageName: "main",

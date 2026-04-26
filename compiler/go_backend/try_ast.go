@@ -34,7 +34,18 @@ func (e *emitter) lowerTryCatchBlockAST(op *checker.TryOp, returnType checker.Ty
 		}
 		return prefix, nil
 	}
-	return e.lowerMatchBranchAST(op.CatchBlock, returnType, setup)
+	// A catch block always early-returns from the enclosing function (see
+	// checker semantics for `try ... -> err { ... }`). When the surrounding
+	// statement context passes a Void return type (e.g. inside a for loop
+	// body or a stmt-position match arm), we still want the catch's last
+	// expression to lower as `return X` from the enclosing function, using
+	// the function's own return type so type-args on Result::err / Maybe
+	// constructors line up with the enclosing signature.
+	effectiveReturnType := returnType
+	if (effectiveReturnType == nil || effectiveReturnType == checker.Void) && e.fnReturnType != nil && e.fnReturnType != checker.Void {
+		effectiveReturnType = e.fnReturnType
+	}
+	return e.lowerMatchBranchAST(op.CatchBlock, effectiveReturnType, setup)
 }
 
 func (e *emitter) lowerTryDefaultFailureAST(op *checker.TryOp, tempName string) ([]ast.Stmt, error) {

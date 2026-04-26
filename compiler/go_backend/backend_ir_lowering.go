@@ -2,7 +2,6 @@ package go_backend
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1924,9 +1923,12 @@ func lowerTryOpExprToBackendIR(op *checker.TryOp) backendir.Expr {
 		}
 	}
 	catchBlock := lowerBlockToBackendIR(op.CatchBlock)
-	if catchBlockMatchesTryValueType(op, resultType) {
-		finalizeFunctionBodyForReturn(catchBlock, resultType)
-	}
+	// The catch block always early-returns from the enclosing function. Per the
+	// checker, the catch block's value type matches the function's return type
+	// (whether or not it equals the unwrapped success type). Finalize the catch
+	// block so its trailing expression becomes a return statement, mirroring the
+	// VM's `OpReturn` after the catch body.
+	finalizeFunctionBodyForReturn(catchBlock, lowerCheckerTypeToBackendIR(op.CatchBlock.Type()))
 	return &backendir.TryExpr{
 		Kind:     kind,
 		Subject:  lowerExpressionOrOpaque(op.Expr()),
@@ -1934,17 +1936,6 @@ func lowerTryOpExprToBackendIR(op *checker.TryOp) backendir.Expr {
 		Catch:    catchBlock,
 		Type:     resultType,
 	}
-}
-
-func catchBlockMatchesTryValueType(op *checker.TryOp, resultType backendir.Type) bool {
-	if op == nil || op.CatchBlock == nil {
-		return false
-	}
-	if op.CatchBlock.Type() == checker.Void {
-		return false
-	}
-	catchType := lowerCheckerTypeToBackendIR(op.CatchBlock.Type())
-	return reflect.DeepEqual(catchType, resultType)
 }
 
 func prependBindingAssign(block *backendir.Block, source *checker.Block, name string, value backendir.Expr) {

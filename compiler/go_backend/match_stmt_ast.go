@@ -401,3 +401,59 @@ func (e *emitter) lowerUnionMatchAssignAST(match *checker.UnionMatch, target ast
 	}
 	return []ast.Stmt{typeSwitch}, true, nil
 }
+
+// lowerUnionMatchStatementAST lowers a stmt-position union match into a
+// flat type-switch (no inline-func wrapping), so that any return statements
+// inside arm bodies (e.g. from a catch arm) propagate to the enclosing
+// function body instead of being trapped inside an IIFE returning Void.
+func (e *emitter) lowerUnionMatchStatementAST(match *checker.UnionMatch) ([]ast.Stmt, bool, error) {
+	subject, ok, err := e.lowerExprAST(match.Subject)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	subjectName := e.nextTemp("Union")
+	typeSwitch := &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(subjectName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{subject}}}}}, Body: &ast.BlockStmt{}}
+	for _, caseName := range sortedStringKeys(match.TypeCases) {
+		matchCase := match.TypeCases[caseName]
+		if matchCase == nil || matchCase.Body == nil {
+			continue
+		}
+		caseType := checker.Type(nil)
+		for t := range match.TypeCasesByType {
+			if t.String() == caseName {
+				caseType = t
+				break
+			}
+		}
+		if caseType == nil {
+			return nil, false, errStructuredLoweringUnsupported
+		}
+		typeExpr, err := e.lowerTypeArgExprWithOptions(caseType, e.typeParams, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		body, ok, err := e.lowerMatchBranchAST(matchCase.Body, checker.Void, func() ([]ast.Stmt, error) {
+			if matchCase.Pattern == nil || matchCase.Pattern.Name == "_" {
+				return nil, nil
+			}
+			boundName := e.bindLocal(matchCase.Pattern.Name)
+			prefix := []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(boundName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent(subjectName)}}}
+			if !usesNameInStatements(matchCase.Body.Stmts, matchCase.Pattern.Name) {
+				prefix = append(prefix, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(boundName)}})
+			}
+			return prefix, nil
+		})
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		typeSwitch.Body.List = append(typeSwitch.Body.List, &ast.CaseClause{List: []ast.Expr{typeExpr}, Body: body.List})
+	}
+	if match.CatchAll != nil {
+		body, ok, err := e.lowerMatchBranchAST(match.CatchAll, checker.Void, nil)
+		if err != nil || !ok {
+			return nil, ok, err
+		}
+		typeSwitch.Body.List = append(typeSwitch.Body.List, &ast.CaseClause{Body: body.List})
+	}
+	return []ast.Stmt{typeSwitch}, true, nil
+}

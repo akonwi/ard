@@ -375,3 +375,200 @@ fn main() {
 		})
 	}
 }
+
+// TestBuildBinaryTryLoopAndMatchRuntimeParityWithCatchArm asserts that
+// `try ... -> err { ... }` flows preserve VM semantics in statement contexts
+// (for-loop bodies and match-arm blocks). The catch arm is required to
+// early-return from the enclosing function so subsequent loop iterations or
+// trailing fall-through statements are skipped on failure -- matching the
+// VM's `OpReturn`-after-catch bytecode behavior.
+func TestBuildBinaryTryLoopAndMatchRuntimeParityWithCatchArm(t *testing.T) {
+	ardPath := requireIntegrationArdBinary(t)
+
+	cases := []cliSnippetCase{
+		{
+			name: "catch_arm_in_for_loop_returns_early",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
+fn loop_catch(values: [Int]) Int!Str {
+  for v in values {
+    let n = try divide(v, v - v) -> err {
+      Result::err("loop failed: {err}")
+    }
+    io::print("got: {n}")
+  }
+  Result::ok(0)
+}
+
+fn main() {
+  match loop_catch([1, 2]) {
+    ok(n) => io::print("ok: {n}"),
+    err(msg) => io::print(msg),
+  }
+}
+`,
+			},
+		},
+		{
+			name: "catch_arm_in_match_arm_returns_early",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn check(v: Int) Int!Str {
+  match v < 0 {
+    true => Result::err("negative: {v}"),
+    false => Result::ok(v),
+  }
+}
+
+fn handle(flag: Bool, value: Int) Int!Str {
+  match flag {
+    true => {
+      try check(value) -> err {
+        Result::err("arm caught: {err}")
+      }
+      io::print("checked: {value}")
+      Result::ok(value + 1)
+    },
+    false => Result::ok(0),
+  }
+}
+
+fn main() {
+  match handle(true, 4) {
+    ok(n) => io::print("ok: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+  match handle(true, -7) {
+    ok(n) => io::print("ok: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+  match handle(false, 0) {
+    ok(n) => io::print("ok: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+}
+`,
+			},
+		},
+		{
+			name: "catch_arm_in_for_loop_inside_match_arm",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn check(v: Int) Int!Str {
+  match v < 0 {
+    true => Result::err("negative: {v}"),
+    false => Result::ok(v),
+  }
+}
+
+fn process(active: Bool, values: [Int]) Int!Str {
+  match active {
+    true => {
+      for v in values {
+        try check(v) -> err {
+          Result::err("nested caught: {err}")
+        }
+        io::print("ok: {v}")
+      }
+      Result::ok(values.size())
+    },
+    false => Result::ok(-1),
+  }
+}
+
+fn main() {
+  match process(true, [1, 2]) {
+    ok(n) => io::print("count: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+  match process(true, [1, -2, 3]) {
+    ok(n) => io::print("count: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+  match process(false, [9, 8]) {
+    ok(n) => io::print("count: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+}
+`,
+			},
+		},
+		{
+			name: "catch_arm_value_binding_in_for_loop",
+			files: map[string]string{
+				"main.ard": `
+use ard/io
+
+fn double(v: Int) Int!Str {
+  match v < 0 {
+    true => Result::err("negative: {v}"),
+    false => Result::ok(v * 2),
+  }
+}
+
+fn run(values: [Int]) Int!Str {
+  mut total = 0
+  for v in values {
+    let d = try double(v) -> err {
+      Result::err("bound caught: {err}")
+    }
+    total = total + d
+    io::print("partial: {total}")
+  }
+  Result::ok(total)
+}
+
+fn main() {
+  match run([1, 2, 3]) {
+    ok(n) => io::print("total: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+  match run([1, -2, 3]) {
+    ok(n) => io::print("total: {n}"),
+    err(msg) => io::print("err: {msg}"),
+  }
+}
+`,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			projectRoot := writeSnippetProject(t, tc.files)
+
+			vmArgs := append([]string{"run", "main.ard"}, tc.args...)
+			vmResult := runArdCLI(t, ardPath, projectRoot, tc.env, tc.stdin, vmArgs...)
+			if vmResult.err != nil {
+				t.Fatalf("vm snippet run failed: %s", formatCLIRunFailure(vmResult))
+			}
+
+			goArgs := append([]string{"run", "--target", "go", "main.ard"}, tc.args...)
+			goResult := runArdCLI(t, ardPath, projectRoot, tc.env, tc.stdin, goArgs...)
+			if goResult.err != nil {
+				t.Fatalf("go snippet run failed: %s", formatCLIRunFailure(goResult))
+			}
+
+			if vmResult.exitCode != goResult.exitCode || vmResult.stdout != goResult.stdout || vmResult.stderr != goResult.stderr {
+				t.Fatalf("try catch-arm runtime parity mismatch\nvm: %s\ngo: %s", formatCLIRunFailure(vmResult), formatCLIRunFailure(goResult))
+			}
+
+			if vmResult.stdout == "" {
+				t.Fatalf("expected non-empty observable stdout for runtime parity scenario %q; got empty\nvm: %s", tc.name, formatCLIRunFailure(vmResult))
+			}
+		})
+	}
+}
