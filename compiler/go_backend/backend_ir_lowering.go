@@ -1377,7 +1377,7 @@ func lowerIfExprToBackendIR(expr *checker.If) backendir.Expr {
 
 func lowerBoolMatchExprToBackendIR(match *checker.BoolMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("bool_match", literalExpr("nil", "match"))
+		return invariantMatchFailureExpr(backendir.Void, "bool")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 	thenBlock := lowerBlockToBackendIR(match.True)
@@ -1394,14 +1394,20 @@ func lowerBoolMatchExprToBackendIR(match *checker.BoolMatch) backendir.Expr {
 
 func lowerIntMatchExprToBackendIR(match *checker.IntMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("int_match", literalExpr("nil", "match"))
+		return invariantMatchFailureExpr(backendir.Void, "int")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 
 	subject, setup := matchSubjectExpr(match.Subject, "int")
 	body, ok := buildIntMatchIfChain(match, subject, resultType)
 	if !ok {
-		return lowerIntMatchMarkerExpr(match)
+		// The checker should always produce an int match with at least
+		// one branch or a non-void result that gets a synthetic panic
+		// catch-all. This branch only fires for malformed checker output
+		// which would have previously emitted an `int_match` marker
+		// fallback. Marker artifacts are now rejected by validation, so
+		// instead we emit an explicit invariant-failure PanicExpr.
+		return invariantMatchFailureExpr(resultType, "int")
 	}
 	return wrapWithMatchSubjectSetup(body, setup, resultType)
 }
@@ -1483,31 +1489,6 @@ func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resul
 type intMatchBranch struct {
 	Cond backendir.Expr
 	Body *checker.Block
-}
-
-func lowerIntMatchMarkerExpr(match *checker.IntMatch) backendir.Expr {
-	if match == nil {
-		return callExpr("int_match", literalExpr("nil", "match"))
-	}
-	args := []backendir.Expr{
-		lowerExpressionOrOpaque(match.Subject),
-	}
-	for _, key := range sortedIntCaseKeys(match.IntCases) {
-		args = append(args,
-			literalExpr("int", strconv.Itoa(key)),
-			lowerBlockAsExpr(match.IntCases[key]),
-		)
-	}
-	for _, key := range sortedIntRangeCaseKeys(match.RangeCases) {
-		args = append(args,
-			literalExpr("int_range", fmt.Sprintf("%d..%d", key.Start, key.End)),
-			lowerBlockAsExpr(match.RangeCases[key]),
-		)
-	}
-	if match.CatchAll != nil {
-		args = append(args, lowerBlockAsExpr(match.CatchAll))
-	}
-	return callExpr("int_match", args...)
 }
 
 func canSafelyDuplicateMatchSubject(subject checker.Expression) bool {
@@ -1596,7 +1577,7 @@ func wrapExprAsIfElseBlock(expr backendir.Expr, resultType backendir.Type) *back
 
 func lowerConditionalMatchExprToBackendIR(match *checker.ConditionalMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("conditional_match", literalExpr("nil", "match"))
+		return invariantMatchFailureExpr(backendir.Void, "conditional")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 
@@ -1620,7 +1601,11 @@ func lowerConditionalMatchExprToBackendIR(match *checker.ConditionalMatch) backe
 		if nested != nil {
 			return nested
 		}
-		return lowerConditionalMatchMarkerExpr(match)
+		// Branches and catch-all both empty: previously fell back to a
+		// `conditional_match` marker which is now rejected by validation.
+		// Emit an explicit invariant-failure PanicExpr instead so misuse is
+		// surfaced as a clear runtime panic instead of a smuggled marker.
+		return invariantMatchFailureExpr(resultType, "conditional")
 	}
 
 	for i := len(branches) - 1; i >= 0; i-- {
@@ -1634,7 +1619,7 @@ func lowerConditionalMatchExprToBackendIR(match *checker.ConditionalMatch) backe
 		}
 	}
 	if nested == nil {
-		return lowerConditionalMatchMarkerExpr(match)
+		return invariantMatchFailureExpr(resultType, "conditional")
 	}
 	return nested
 }
@@ -1644,31 +1629,19 @@ type conditionalMatchBranch struct {
 	Body *checker.Block
 }
 
-func lowerConditionalMatchMarkerExpr(match *checker.ConditionalMatch) backendir.Expr {
-	if match == nil {
-		return callExpr("conditional_match", literalExpr("nil", "match"))
-	}
-	args := make([]backendir.Expr, 0, len(match.Cases)*2+1)
-	for _, matchCase := range match.Cases {
-		args = append(args,
-			lowerExpressionOrOpaque(matchCase.Condition),
-			lowerBlockAsExpr(matchCase.Body),
-		)
-	}
-	if match.CatchAll != nil {
-		args = append(args, lowerBlockAsExpr(match.CatchAll))
-	}
-	return callExpr("conditional_match", args...)
-}
-
 func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("option_match", literalExpr("nil", "match"))
-	}
-	if match.Some == nil || match.None == nil {
-		return lowerOptionMatchMarkerExpr(match)
+		return invariantMatchFailureExpr(backendir.Void, "option")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if match.Some == nil || match.None == nil {
+		// Structurally invalid checker output (an option match must always
+		// produce both Some and None branches). Previously emitted an
+		// `option_match` marker which is now rejected by validation; emit
+		// an explicit invariant-failure PanicExpr so misuse is observable
+		// at runtime rather than smuggled past validation.
+		return invariantMatchFailureExpr(resultType, "option")
+	}
 	subject, setup := matchSubjectExpr(match.Subject, "option")
 	thenBlock := lowerBlockToBackendIR(match.Some.Body)
 	prependBindingAssign(
@@ -1693,26 +1666,18 @@ func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr 
 	return wrapWithMatchSubjectSetup(body, setup, resultType)
 }
 
-func lowerOptionMatchMarkerExpr(match *checker.OptionMatch) backendir.Expr {
-	if match == nil {
-		return callExpr("option_match", literalExpr("nil", "match"))
-	}
-	return callExpr(
-		"option_match",
-		lowerExpressionOrOpaque(match.Subject),
-		lowerMatchAsExpr(match.Some),
-		lowerBlockAsExpr(match.None),
-	)
-}
-
 func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("result_match", literalExpr("nil", "match"))
-	}
-	if match.Ok == nil || match.Err == nil {
-		return lowerResultMatchMarkerExpr(match)
+		return invariantMatchFailureExpr(backendir.Void, "result")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if match.Ok == nil || match.Err == nil {
+		// Structurally invalid checker output (a result match must always
+		// produce both Ok and Err branches). Previously emitted a
+		// `result_match` marker which is now rejected by validation; emit
+		// an explicit invariant-failure PanicExpr instead.
+		return invariantMatchFailureExpr(resultType, "result")
+	}
 	subject, setup := matchSubjectExpr(match.Subject, "result")
 	thenBlock := lowerBlockToBackendIR(match.Ok.Body)
 	prependBindingAssign(
@@ -1749,21 +1714,9 @@ func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr 
 	return wrapWithMatchSubjectSetup(body, setup, resultType)
 }
 
-func lowerResultMatchMarkerExpr(match *checker.ResultMatch) backendir.Expr {
-	if match == nil {
-		return callExpr("result_match", literalExpr("nil", "match"))
-	}
-	return callExpr(
-		"result_match",
-		lowerExpressionOrOpaque(match.Subject),
-		lowerMatchAsExpr(match.Ok),
-		lowerMatchAsExpr(match.Err),
-	)
-}
-
 func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("enum_match", literalExpr("nil", "match"))
+		return invariantMatchFailureExpr(backendir.Void, "enum")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 
@@ -1810,34 +1763,17 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 		}
 	}
 	if nested == nil {
-		return lowerEnumMatchMarkerExpr(match)
+		// All cases were nil-bodied or empty, leaving no usable branches.
+		// Previously emitted an `enum_match` marker which is rejected by
+		// validation; emit an explicit invariant-failure PanicExpr.
+		return invariantMatchFailureExpr(resultType, "enum")
 	}
 	return wrapWithMatchSubjectSetup(nested, setup, resultType)
 }
 
-func lowerEnumMatchMarkerExpr(match *checker.EnumMatch) backendir.Expr {
-	if match == nil {
-		return callExpr("enum_match", literalExpr("nil", "match"))
-	}
-	args := []backendir.Expr{lowerExpressionOrOpaque(match.Subject)}
-	for index, block := range match.Cases {
-		if block == nil {
-			continue
-		}
-		args = append(args,
-			literalExpr("int", strconv.Itoa(index)),
-			lowerBlockAsExpr(block),
-		)
-	}
-	if match.CatchAll != nil {
-		args = append(args, lowerBlockAsExpr(match.CatchAll))
-	}
-	return callExpr("enum_match", args...)
-}
-
 func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
 	if match == nil {
-		return callExpr("union_match", literalExpr("nil", "match"))
+		return invariantMatchFailureExpr(backendir.Void, "union")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 
@@ -1849,7 +1785,11 @@ func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
 		}
 		caseType := unionMatchCaseTypeByName(match, caseName)
 		if caseType == nil {
-			return lowerUnionMatchMarkerExpr(match)
+			// Missing case type for a named union case is a structural
+			// invariant violation. Previously fell back to a `union_match`
+			// marker which is rejected by validation; emit an explicit
+			// invariant-failure PanicExpr instead.
+			return invariantMatchFailureExpr(resultType, "union")
 		}
 		body := lowerBlockToBackendIR(matchCase.Body)
 		finalizeFunctionBodyForReturn(body, resultType)
@@ -1860,7 +1800,9 @@ func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
 		})
 	}
 	if len(cases) == 0 {
-		return lowerUnionMatchMarkerExpr(match)
+		// No usable cases at all — previously emitted `union_match` marker;
+		// surface the invariant violation directly.
+		return invariantMatchFailureExpr(resultType, "union")
 	}
 
 	var catchAll *backendir.Block
@@ -1878,23 +1820,6 @@ func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
 	}
 }
 
-func lowerUnionMatchMarkerExpr(match *checker.UnionMatch) backendir.Expr {
-	if match == nil {
-		return callExpr("union_match", literalExpr("nil", "match"))
-	}
-	args := []backendir.Expr{lowerExpressionOrOpaque(match.Subject)}
-	for _, key := range sortedStringKeys(match.TypeCases) {
-		args = append(args,
-			literalExpr("type", key),
-			lowerMatchAsExpr(match.TypeCases[key]),
-		)
-	}
-	if match.CatchAll != nil {
-		args = append(args, lowerBlockAsExpr(match.CatchAll))
-	}
-	return callExpr("union_match", args...)
-}
-
 func unionMatchCaseTypeByName(match *checker.UnionMatch, caseName string) checker.Type {
 	if match == nil {
 		return nil
@@ -1905,6 +1830,27 @@ func unionMatchCaseTypeByName(match *checker.UnionMatch, caseName string) checke
 		}
 	}
 	return nil
+}
+
+// invariantMatchFailureExpr replaces the legacy `*_match` marker fallback
+// returns. It produces a typed PanicExpr that fails loudly if reached. These
+// fallbacks are only entered for structurally invalid checker output (for
+// example, an option/result match missing one of its branches, or a union
+// match with no usable cases). Previously the lowering would emit a marker
+// CallExpr (e.g. `int_match(...)`) that the legacy emitter could pick up;
+// marker artifacts are now rejected by the IR validator (VAL-CROSS-005), so
+// no successful compile path can produce them. Surfacing the violation as
+// an explicit PanicExpr keeps the lowering output validatable while still
+// terminating execution if the unreachable path is somehow reached.
+func invariantMatchFailureExpr(resultType backendir.Type, kind string) backendir.Expr {
+	if resultType == nil {
+		resultType = backendir.Void
+	}
+	message := fmt.Sprintf("invariant: %s match lowering reached unreachable fallback", strings.TrimSpace(kind))
+	return &backendir.PanicExpr{
+		Message: literalExpr("str", message),
+		Type:    resultType,
+	}
 }
 
 func nonExhaustiveMatchExpr(resultType backendir.Type, message string) backendir.Expr {
