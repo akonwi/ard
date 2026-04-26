@@ -917,18 +917,47 @@ func TestLowerExpressionToBackendIR_LowersIntMatchAsIfExpr(t *testing.T) {
 	}
 }
 
-func TestLowerExpressionToBackendIR_IntMatchFallsBackForUnsafeSubject(t *testing.T) {
+func TestLowerExpressionToBackendIR_LowersIntMatchWithUnsafeSubjectSemanticSingleEval(t *testing.T) {
+	subjectCall := &checker.FunctionCall{Name: "next", ReturnType: checker.Int}
 	intMatch := &checker.IntMatch{
-		Subject: &checker.FunctionCall{Name: "next", ReturnType: checker.Int},
+		Subject: subjectCall,
 		IntCases: map[int]*checker.Block{
 			1: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.IntLiteral{Value: 1}}}},
+		},
+		RangeCases: map[checker.IntRange]*checker.Block{
+			{Start: 2, End: 4}: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.IntLiteral{Value: 2}}}},
 		},
 		CatchAll: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.IntLiteral{Value: 0}}}},
 	}
 
 	lowered := lowerExpressionToBackendIR(intMatch)
-	if !containsCallNamed(lowered, "int_match") {
-		t.Fatalf("expected int match with unsafe subject to keep int_match marker fallback")
+	if containsCallNamed(lowered, "int_match") {
+		t.Fatalf("expected int match with unsafe subject to lower without int_match marker fallback")
+	}
+	block, ok := lowered.(*backendir.BlockExpr)
+	if !ok {
+		t.Fatalf("expected int match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
+	}
+	if len(block.Setup) != 1 {
+		t.Fatalf("expected int match BlockExpr to hoist subject in single setup statement, got %d statements", len(block.Setup))
+	}
+	assign, ok := block.Setup[0].(*backendir.AssignStmt)
+	if !ok {
+		t.Fatalf("expected int match subject hoist to be AssignStmt, got %T", block.Setup[0])
+	}
+	if strings.TrimSpace(assign.Target) == "" {
+		t.Fatalf("expected int match subject hoist target to be a synthetic temp name, got empty string")
+	}
+	if call, ok := assign.Value.(*backendir.CallExpr); !ok {
+		t.Fatalf("expected int match subject hoist value to be call expression, got %T", assign.Value)
+	} else if ident, ok := call.Callee.(*backendir.IdentExpr); !ok || ident.Name != "next" {
+		t.Fatalf("expected int match subject hoist value to invoke next(), got %#v", call.Callee)
+	}
+	if _, ok := block.Value.(*backendir.IfExpr); !ok {
+		t.Fatalf("expected int match BlockExpr value to be IfExpr chain, got %T", block.Value)
+	}
+	if countCallsNamed(block.Value, "next") != 0 {
+		t.Fatalf("expected int match unsafe subject to be evaluated once via temp; found %d duplicate evaluations of next() in body", countCallsNamed(block.Value, "next"))
 	}
 }
 
@@ -1025,7 +1054,7 @@ func TestLowerExpressionToBackendIR_LowersOptionMatchAsIfExpr(t *testing.T) {
 	}
 }
 
-func TestLowerExpressionToBackendIR_OptionMatchFallsBackForUnsafeSubject(t *testing.T) {
+func TestLowerExpressionToBackendIR_LowersOptionMatchWithUnsafeSubjectSemanticSingleEval(t *testing.T) {
 	optionMatch := &checker.OptionMatch{
 		Subject: &checker.FunctionCall{Name: "next", ReturnType: checker.MakeMaybe(checker.Int)},
 		Some: &checker.Match{
@@ -1036,8 +1065,24 @@ func TestLowerExpressionToBackendIR_OptionMatchFallsBackForUnsafeSubject(t *test
 	}
 
 	lowered := lowerExpressionToBackendIR(optionMatch)
-	if !containsCallNamed(lowered, "option_match") {
-		t.Fatalf("expected option match with unsafe subject to keep option_match marker fallback")
+	if containsCallNamed(lowered, "option_match") {
+		t.Fatalf("expected option match with unsafe subject to lower without option_match marker fallback")
+	}
+	block, ok := lowered.(*backendir.BlockExpr)
+	if !ok {
+		t.Fatalf("expected option match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
+	}
+	if len(block.Setup) != 1 {
+		t.Fatalf("expected option match BlockExpr to hoist subject in single setup statement, got %d statements", len(block.Setup))
+	}
+	if _, ok := block.Setup[0].(*backendir.AssignStmt); !ok {
+		t.Fatalf("expected option match subject hoist to be AssignStmt, got %T", block.Setup[0])
+	}
+	if _, ok := block.Value.(*backendir.IfExpr); !ok {
+		t.Fatalf("expected option match BlockExpr value to be IfExpr, got %T", block.Value)
+	}
+	if countCallsNamed(block.Value, "next") != 0 {
+		t.Fatalf("expected option match unsafe subject to be evaluated once via temp; found %d duplicate evaluations of next() in body", countCallsNamed(block.Value, "next"))
 	}
 }
 
@@ -1073,7 +1118,7 @@ func TestLowerExpressionToBackendIR_LowersResultMatchAsIfExpr(t *testing.T) {
 	}
 }
 
-func TestLowerExpressionToBackendIR_ResultMatchFallsBackForUnsafeSubject(t *testing.T) {
+func TestLowerExpressionToBackendIR_LowersResultMatchWithUnsafeSubjectSemanticSingleEval(t *testing.T) {
 	resultMatch := &checker.ResultMatch{
 		Subject: &checker.FunctionCall{Name: "next", ReturnType: checker.MakeResult(checker.Int, checker.Str)},
 		Ok: &checker.Match{
@@ -1087,8 +1132,24 @@ func TestLowerExpressionToBackendIR_ResultMatchFallsBackForUnsafeSubject(t *test
 	}
 
 	lowered := lowerExpressionToBackendIR(resultMatch)
-	if !containsCallNamed(lowered, "result_match") {
-		t.Fatalf("expected result match with unsafe subject to keep result_match marker fallback")
+	if containsCallNamed(lowered, "result_match") {
+		t.Fatalf("expected result match with unsafe subject to lower without result_match marker fallback")
+	}
+	block, ok := lowered.(*backendir.BlockExpr)
+	if !ok {
+		t.Fatalf("expected result match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
+	}
+	if len(block.Setup) != 1 {
+		t.Fatalf("expected result match BlockExpr to hoist subject in single setup statement, got %d statements", len(block.Setup))
+	}
+	if _, ok := block.Setup[0].(*backendir.AssignStmt); !ok {
+		t.Fatalf("expected result match subject hoist to be AssignStmt, got %T", block.Setup[0])
+	}
+	if _, ok := block.Value.(*backendir.IfExpr); !ok {
+		t.Fatalf("expected result match BlockExpr value to be IfExpr, got %T", block.Value)
+	}
+	if countCallsNamed(block.Value, "next") != 0 {
+		t.Fatalf("expected result match unsafe subject to be evaluated once via temp; found %d duplicate evaluations of next() in body", countCallsNamed(block.Value, "next"))
 	}
 }
 
@@ -1111,18 +1172,35 @@ func TestLowerExpressionToBackendIR_LowersEnumMatchAsIfExpr(t *testing.T) {
 	}
 }
 
-func TestLowerExpressionToBackendIR_EnumMatchFallsBackForUnsafeSubject(t *testing.T) {
+func TestLowerExpressionToBackendIR_LowersEnumMatchWithUnsafeSubjectSemanticSingleEval(t *testing.T) {
 	enumMatch := &checker.EnumMatch{
 		Subject: &checker.FunctionCall{Name: "next", ReturnType: &checker.Enum{Name: "Status"}},
 		Cases: []*checker.Block{
 			&checker.Block{Stmts: []checker.Statement{{Expr: &checker.IntLiteral{Value: 1}}}},
+			&checker.Block{Stmts: []checker.Statement{{Expr: &checker.IntLiteral{Value: 2}}}},
 		},
 		CatchAll: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.IntLiteral{Value: 0}}}},
 	}
 
 	lowered := lowerExpressionToBackendIR(enumMatch)
-	if !containsCallNamed(lowered, "enum_match") {
-		t.Fatalf("expected enum match with unsafe subject to keep enum_match marker fallback")
+	if containsCallNamed(lowered, "enum_match") {
+		t.Fatalf("expected enum match with unsafe subject to lower without enum_match marker fallback")
+	}
+	block, ok := lowered.(*backendir.BlockExpr)
+	if !ok {
+		t.Fatalf("expected enum match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
+	}
+	if len(block.Setup) != 1 {
+		t.Fatalf("expected enum match BlockExpr to hoist subject in single setup statement, got %d statements", len(block.Setup))
+	}
+	if _, ok := block.Setup[0].(*backendir.AssignStmt); !ok {
+		t.Fatalf("expected enum match subject hoist to be AssignStmt, got %T", block.Setup[0])
+	}
+	if _, ok := block.Value.(*backendir.IfExpr); !ok {
+		t.Fatalf("expected enum match BlockExpr value to be IfExpr, got %T", block.Value)
+	}
+	if countCallsNamed(block.Value, "next") != 0 {
+		t.Fatalf("expected enum match unsafe subject to be evaluated once via temp; found %d duplicate evaluations of next() in body", countCallsNamed(block.Value, "next"))
 	}
 }
 
@@ -1442,6 +1520,110 @@ func containsCallNamedInBlock(block *backendir.Block, name string) bool {
 	return false
 }
 
+func countCallsNamed(expr backendir.Expr, name string) int {
+	switch e := expr.(type) {
+	case nil:
+		return 0
+	case *backendir.CallExpr:
+		count := 0
+		if ident, ok := e.Callee.(*backendir.IdentExpr); ok && ident.Name == name {
+			count++
+		}
+		count += countCallsNamed(e.Callee, name)
+		for _, arg := range e.Args {
+			count += countCallsNamed(arg, name)
+		}
+		return count
+	case *backendir.SelectorExpr:
+		return countCallsNamed(e.Subject, name)
+	case *backendir.ListLiteralExpr:
+		count := 0
+		for _, element := range e.Elements {
+			count += countCallsNamed(element, name)
+		}
+		return count
+	case *backendir.MapLiteralExpr:
+		count := 0
+		for _, entry := range e.Entries {
+			count += countCallsNamed(entry.Key, name)
+			count += countCallsNamed(entry.Value, name)
+		}
+		return count
+	case *backendir.StructLiteralExpr:
+		count := 0
+		for _, field := range e.Fields {
+			count += countCallsNamed(field.Value, name)
+		}
+		return count
+	case *backendir.IfExpr:
+		return countCallsNamed(e.Cond, name) + countCallsNamedInBlock(e.Then, name) + countCallsNamedInBlock(e.Else, name)
+	case *backendir.UnionMatchExpr:
+		count := countCallsNamed(e.Subject, name) + countCallsNamedInBlock(e.CatchAll, name)
+		for _, matchCase := range e.Cases {
+			count += countCallsNamedInBlock(matchCase.Body, name)
+		}
+		return count
+	case *backendir.TryExpr:
+		return countCallsNamed(e.Subject, name) + countCallsNamedInBlock(e.Catch, name)
+	case *backendir.PanicExpr:
+		count := countCallsNamed(e.Message, name)
+		if name == "panic" {
+			count++
+		}
+		return count
+	case *backendir.CopyExpr:
+		return countCallsNamed(e.Value, name)
+	case *backendir.BlockExpr:
+		count := countCallsNamed(e.Value, name)
+		for _, stmt := range e.Setup {
+			count += countCallsNamedInStmt(stmt, name)
+		}
+		return count
+	default:
+		return 0
+	}
+}
+
+func countCallsNamedInBlock(block *backendir.Block, name string) int {
+	if block == nil {
+		return 0
+	}
+	count := 0
+	for _, stmt := range block.Stmts {
+		count += countCallsNamedInStmt(stmt, name)
+	}
+	return count
+}
+
+func countCallsNamedInStmt(stmt backendir.Stmt, name string) int {
+	switch s := stmt.(type) {
+	case *backendir.ExprStmt:
+		return countCallsNamed(s.Value, name)
+	case *backendir.AssignStmt:
+		return countCallsNamed(s.Value, name)
+	case *backendir.MemberAssignStmt:
+		return countCallsNamed(s.Subject, name) + countCallsNamed(s.Value, name)
+	case *backendir.ReturnStmt:
+		return countCallsNamed(s.Value, name)
+	case *backendir.IfStmt:
+		return countCallsNamed(s.Cond, name) + countCallsNamedInBlock(s.Then, name) + countCallsNamedInBlock(s.Else, name)
+	case *backendir.ForIntRangeStmt:
+		return countCallsNamed(s.Start, name) + countCallsNamed(s.End, name) + countCallsNamedInBlock(s.Body, name)
+	case *backendir.ForLoopStmt:
+		return countCallsNamed(s.InitValue, name) + countCallsNamed(s.Cond, name) + countCallsNamedInStmt(s.Update, name) + countCallsNamedInBlock(s.Body, name)
+	case *backendir.ForInStrStmt:
+		return countCallsNamed(s.Value, name) + countCallsNamedInBlock(s.Body, name)
+	case *backendir.ForInListStmt:
+		return countCallsNamed(s.List, name) + countCallsNamedInBlock(s.Body, name)
+	case *backendir.ForInMapStmt:
+		return countCallsNamed(s.Map, name) + countCallsNamedInBlock(s.Body, name)
+	case *backendir.WhileStmt:
+		return countCallsNamed(s.Cond, name) + countCallsNamedInBlock(s.Body, name)
+	default:
+		return 0
+	}
+}
+
 func containsCallNamed(expr backendir.Expr, name string) bool {
 	switch e := expr.(type) {
 	case nil:
@@ -1508,6 +1690,13 @@ func containsCallNamed(expr backendir.Expr, name string) bool {
 		return containsCallNamed(e.Message, name)
 	case *backendir.CopyExpr:
 		return containsCallNamed(e.Value, name)
+	case *backendir.BlockExpr:
+		for _, stmt := range e.Setup {
+			if containsCallNamedInStmt(stmt, name) {
+				return true
+			}
+		}
+		return containsCallNamed(e.Value, name)
 	default:
 		return false
 	}
@@ -1570,6 +1759,13 @@ func containsCallNamePrefix(expr backendir.Expr, prefix string) bool {
 	case *backendir.PanicExpr:
 		return strings.HasPrefix("panic", prefix) || containsCallNamePrefix(e.Message, prefix)
 	case *backendir.CopyExpr:
+		return containsCallNamePrefix(e.Value, prefix)
+	case *backendir.BlockExpr:
+		for _, stmt := range e.Setup {
+			if containsCallNamePrefixInStmt(stmt, prefix) {
+				return true
+			}
+		}
 		return containsCallNamePrefix(e.Value, prefix)
 	default:
 		return false

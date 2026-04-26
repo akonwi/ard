@@ -645,6 +645,19 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 			return false
 		}
 		return e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(v.Type)
+	case *backendir.BlockExpr:
+		if v == nil || v.Value == nil || v.Type == nil {
+			return false
+		}
+		if !e.canEmitTypeNatively(v.Type) {
+			return false
+		}
+		for _, stmt := range v.Setup {
+			if !e.canEmitStmtNatively(stmt) {
+				return false
+			}
+		}
+		return e.canEmitExprNatively(v.Value)
 	case *backendir.SelectorExpr:
 		return e.canEmitExprNatively(v.Subject)
 	case *backendir.CallExpr:
@@ -1884,6 +1897,8 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 		return e.emitTryExpr(v, locals)
 	case *backendir.PanicExpr:
 		return e.emitPanicExpr(v, locals)
+	case *backendir.BlockExpr:
+		return e.emitBlockExpr(v, locals)
 	case *backendir.CopyExpr:
 		value, err := e.emitExpr(v.Value, locals)
 		if err != nil {
@@ -2003,6 +2018,59 @@ func (e *backendIREmitter) emitIfExpr(expr *backendir.IfExpr, locals map[string]
 		Fun: &ast.FuncLit{
 			Type: funcType,
 			Body: &ast.BlockStmt{List: body},
+		},
+	}, nil
+}
+
+func (e *backendIREmitter) emitBlockExpr(expr *backendir.BlockExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil || expr.Value == nil || expr.Type == nil {
+		return nil, fmt.Errorf("invalid block expression")
+	}
+	returnTypeExpr, err := e.emitType(expr.Type)
+	if err != nil {
+		return nil, err
+	}
+	isVoidResult := isVoidIRType(expr.Type)
+	if !isVoidResult && returnTypeExpr == nil {
+		return nil, fmt.Errorf("block expression return type is nil")
+	}
+
+	bodyLocals := cloneStringMap(locals)
+	bodySeen := seenLocalNames(bodyLocals)
+	bodyStmts := make([]ast.Stmt, 0, len(expr.Setup)+1)
+	for _, stmt := range expr.Setup {
+		emitted, err := e.emitStmt(stmt, returnTypeExpr, bodyLocals, bodySeen)
+		if err != nil {
+			return nil, err
+		}
+		bodyStmts = append(bodyStmts, emitted...)
+	}
+	valueExpr, err := e.emitExpr(expr.Value, bodyLocals)
+	if err != nil {
+		return nil, err
+	}
+	if isVoidResult {
+		if call, ok := valueExpr.(*ast.CallExpr); ok {
+			bodyStmts = append(bodyStmts, &ast.ExprStmt{X: call})
+		} else {
+			bodyStmts = append(bodyStmts, &ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent("_")},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{valueExpr},
+			})
+		}
+	} else {
+		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{valueExpr}})
+	}
+
+	funcType := &ast.FuncType{}
+	if !isVoidResult {
+		funcType.Results = funcResults(returnTypeExpr)
+	}
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: funcType,
+			Body: &ast.BlockStmt{List: bodyStmts},
 		},
 	}, nil
 }

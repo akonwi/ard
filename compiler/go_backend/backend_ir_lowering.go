@@ -1238,12 +1238,17 @@ func lowerIntMatchExprToBackendIR(match *checker.IntMatch) backendir.Expr {
 	if match == nil {
 		return callExpr("int_match", literalExpr("nil", "match"))
 	}
-	if !canSafelyDuplicateMatchSubject(match.Subject) {
-		return lowerIntMatchMarkerExpr(match)
-	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 
-	subject := lowerExpressionOrOpaque(match.Subject)
+	subject, setup := matchSubjectExpr(match.Subject, "int")
+	body, ok := buildIntMatchIfChain(match, subject, resultType)
+	if !ok {
+		return lowerIntMatchMarkerExpr(match)
+	}
+	return wrapWithMatchSubjectSetup(body, setup, resultType)
+}
+
+func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resultType backendir.Type) (backendir.Expr, bool) {
 	branches := make([]intMatchBranch, 0, len(match.IntCases)+len(match.RangeCases))
 	for _, key := range sortedIntCaseKeys(match.IntCases) {
 		block := match.IntCases[key]
@@ -1277,9 +1282,9 @@ func lowerIntMatchExprToBackendIR(match *checker.IntMatch) backendir.Expr {
 	}
 	if len(branches) == 0 {
 		if nested != nil {
-			return nested
+			return nested, true
 		}
-		return lowerIntMatchMarkerExpr(match)
+		return nil, false
 	}
 
 	for i := len(branches) - 1; i >= 0; i-- {
@@ -1293,9 +1298,9 @@ func lowerIntMatchExprToBackendIR(match *checker.IntMatch) backendir.Expr {
 		}
 	}
 	if nested == nil {
-		return lowerIntMatchMarkerExpr(match)
+		return nil, false
 	}
-	return nested
+	return nested, true
 }
 
 type intMatchBranch struct {
@@ -1334,6 +1339,53 @@ func canSafelyDuplicateMatchSubject(subject checker.Expression) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// matchSubjectTempName returns a synthetic Ard-level identifier used to bind a
+// non-trivial match subject so it is evaluated only once before branch
+// dispatch. The name is namespaced per match shape (int/option/result/enum)
+// for readability of generated Go code.
+func matchSubjectTempName(kind string) string {
+	return "__ardMatchSubject_" + strings.TrimSpace(kind)
+}
+
+// matchSubjectExpr returns an expression that should be used inside the
+// match's lowered branches to refer to its subject, along with the optional
+// setup statement that hoists the subject's evaluation.
+//
+// For trivially duplicable subjects (identifiers/literals), the subject is
+// lowered directly with no setup. For non-trivial subjects (calls, complex
+// expressions), the subject is bound once to a synthetic temporary so that
+// reuse across multiple branch conditions does not duplicate side effects.
+func matchSubjectExpr(subject checker.Expression, kind string) (backendir.Expr, backendir.Stmt) {
+	if subject == nil {
+		return literalExpr("nil", "subject"), nil
+	}
+	if canSafelyDuplicateMatchSubject(subject) {
+		return lowerExpressionOrOpaque(subject), nil
+	}
+	temp := matchSubjectTempName(kind)
+	return &backendir.IdentExpr{Name: temp}, &backendir.AssignStmt{
+		Target: temp,
+		Value:  lowerExpressionOrOpaque(subject),
+	}
+}
+
+// wrapWithMatchSubjectSetup wraps a lowered match body in a BlockExpr when a
+// subject hoisting setup is required, preserving single-evaluation semantics
+// for non-trivial match subjects.
+func wrapWithMatchSubjectSetup(body backendir.Expr, setup backendir.Stmt, resultType backendir.Type) backendir.Expr {
+	if body == nil {
+		return body
+	}
+	if setup == nil {
+		return body
+	}
+	return &backendir.BlockExpr{
+		Setup: []backendir.Stmt{setup},
+		Value: body,
+		Type:  resultType,
 	}
 }
 
@@ -1429,11 +1481,8 @@ func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr 
 	if match.Some == nil || match.None == nil {
 		return lowerOptionMatchMarkerExpr(match)
 	}
-	if !canSafelyDuplicateMatchSubject(match.Subject) {
-		return lowerOptionMatchMarkerExpr(match)
-	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
-	subject := lowerExpressionOrOpaque(match.Subject)
+	subject, setup := matchSubjectExpr(match.Subject, "option")
 	thenBlock := lowerBlockToBackendIR(match.Some.Body)
 	prependBindingAssign(
 		thenBlock,
@@ -1448,12 +1497,13 @@ func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr 
 	finalizeFunctionBodyForReturn(thenBlock, resultType)
 	elseBlock := lowerBlockToBackendIR(match.None)
 	finalizeFunctionBodyForReturn(elseBlock, resultType)
-	return &backendir.IfExpr{
+	body := &backendir.IfExpr{
 		Cond: callExpr("maybe_is_some", subject),
 		Then: thenBlock,
 		Else: elseBlock,
 		Type: resultType,
 	}
+	return wrapWithMatchSubjectSetup(body, setup, resultType)
 }
 
 func lowerOptionMatchMarkerExpr(match *checker.OptionMatch) backendir.Expr {
@@ -1475,11 +1525,8 @@ func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr 
 	if match.Ok == nil || match.Err == nil {
 		return lowerResultMatchMarkerExpr(match)
 	}
-	if !canSafelyDuplicateMatchSubject(match.Subject) {
-		return lowerResultMatchMarkerExpr(match)
-	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
-	subject := lowerExpressionOrOpaque(match.Subject)
+	subject, setup := matchSubjectExpr(match.Subject, "result")
 	thenBlock := lowerBlockToBackendIR(match.Ok.Body)
 	prependBindingAssign(
 		thenBlock,
@@ -1506,12 +1553,13 @@ func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr 
 		},
 	)
 	finalizeFunctionBodyForReturn(elseBlock, resultType)
-	return &backendir.IfExpr{
+	body := &backendir.IfExpr{
 		Cond: callExpr("result_is_ok", subject),
 		Then: thenBlock,
 		Else: elseBlock,
 		Type: resultType,
 	}
+	return wrapWithMatchSubjectSetup(body, setup, resultType)
 }
 
 func lowerResultMatchMarkerExpr(match *checker.ResultMatch) backendir.Expr {
@@ -1530,12 +1578,9 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 	if match == nil {
 		return callExpr("enum_match", literalExpr("nil", "match"))
 	}
-	if !canSafelyDuplicateMatchSubject(match.Subject) {
-		return lowerEnumMatchMarkerExpr(match)
-	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
 
-	subject := lowerExpressionOrOpaque(match.Subject)
+	subject, setup := matchSubjectExpr(match.Subject, "enum")
 	subjectTag := &backendir.SelectorExpr{
 		Subject: subject,
 		Name:    "tag",
@@ -1563,7 +1608,7 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 	if nested == nil {
 		return lowerEnumMatchMarkerExpr(match)
 	}
-	return nested
+	return wrapWithMatchSubjectSetup(nested, setup, resultType)
 }
 
 func lowerEnumMatchMarkerExpr(match *checker.EnumMatch) backendir.Expr {

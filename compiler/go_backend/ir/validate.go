@@ -682,6 +682,31 @@ func validateExpr(expr Expr) error {
 			return fmt.Errorf("copy expression type: %w", err)
 		}
 		return nil
+	case *BlockExpr:
+		if e == nil {
+			return fmt.Errorf("nil block expression")
+		}
+		if e.Value == nil {
+			return fmt.Errorf("block expression value is nil")
+		}
+		if e.Type == nil {
+			return fmt.Errorf("block expression type is nil")
+		}
+		for i, stmt := range e.Setup {
+			if stmt == nil {
+				return fmt.Errorf("block expression setup[%d] is nil", i)
+			}
+			if err := validateStmt(stmt); err != nil {
+				return fmt.Errorf("block expression setup[%d]: %w", i, err)
+			}
+		}
+		if err := validateExpr(e.Value); err != nil {
+			return fmt.Errorf("block expression value: %w", err)
+		}
+		if err := validateType(e.Type); err != nil {
+			return fmt.Errorf("block expression type: %w", err)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported expression type %T", expr)
 	}

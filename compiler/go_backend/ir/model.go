@@ -295,6 +295,18 @@ type CopyExpr struct {
 
 func (*CopyExpr) exprNode() {}
 
+// BlockExpr evaluates Setup statements once for their side effects, then
+// returns the Value expression. It is used to express single-evaluation
+// semantics for expression-level constructs (such as match expressions with
+// non-trivial subjects) without resorting to marker fallback.
+type BlockExpr struct {
+	Setup []Stmt
+	Value Expr
+	Type  Type
+}
+
+func (*BlockExpr) exprNode() {}
+
 type Type interface {
 	typeNode()
 }
