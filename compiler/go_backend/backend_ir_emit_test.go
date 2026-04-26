@@ -1805,6 +1805,69 @@ fn main() {
 	if syntheticGoTemp == userGoLocal {
 		t.Fatalf("synthetic match temp Go name %q must not equal user local Go name %q", syntheticGoTemp, userGoLocal)
 	}
+	if !strings.Contains(generated, syntheticGoTemp) {
+		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q) — proves native single-eval emission\n%s", syntheticGoTemp, syntheticTemp, generated)
+	}
+}
+
+// TestEmitGoFileFromBackendIR_IntMatchUnsafeSubjectSingleEvaluationNative
+// verifies that an int match expression over a non-trivial subject (a
+// function call with side effects) emits through the native backend IR
+// path: the subject is bound to a synthetic temp and evaluated exactly
+// once, and the lowered output contains no legacy `int_match` or `block`
+// marker fallback artifacts. This is the structural guarantee that
+// single-evaluation semantics are preserved in emitted Go.
+func TestEmitGoFileFromBackendIR_IntMatchUnsafeSubjectSingleEvaluationNative(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+fn next() Int { 1 }
+
+fn run() Int {
+  match next() {
+    1 => 100,
+    _ => 200,
+  }
+}
+
+fn main() {
+  let _ = run()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+	generated := string(out)
+
+	syntheticTemp := matchSubjectTempName("int")
+	assertSyntheticMatchTempIsArdUnreachable(t, syntheticTemp)
+	syntheticGoTemp := goName(syntheticTemp, false)
+	if !strings.Contains(generated, syntheticGoTemp) {
+		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q) — proves native single-eval emission\n%s", syntheticGoTemp, syntheticTemp, generated)
+	}
+	if !strings.Contains(generated, syntheticGoTemp+" := Next()") {
+		t.Fatalf("expected synthetic match temp to be assigned exactly once from subject call Next()\n%s", generated)
+	}
+	// Subject call Next() should appear exactly twice in the source: once
+	// in the `func Next() int` declaration and once at the hoist call site
+	// `αardmatchsubjectInt := Next()`. Any extra occurrence indicates the
+	// subject is being re-evaluated and single-evaluation is broken.
+	if got := occurrencesOfWholeWord(generated, "Next()"); got != 2 {
+		t.Fatalf("expected subject call Next() to be evaluated exactly once (1 decl + 1 hoist call), got %d total occurrences\n%s", got, generated)
+	}
+
+	if strings.Contains(generated, "int_match(") {
+		t.Fatalf("expected emission to avoid int_match marker fallback\n%s", generated)
+	}
+	if strings.Contains(generated, "block(") {
+		t.Fatalf("expected emission to avoid legacy block(...) marker fallback in IfExpr else branches\n%s", generated)
+	}
 }
 
 func TestEmitGoFileFromBackendIR_OptionMatchUnsafeSubjectTempDoesNotCollideWithUserLocal(t *testing.T) {
@@ -1952,5 +2015,71 @@ fn main() {
 	syntheticGoTemp := goName(syntheticTemp, false)
 	if syntheticGoTemp == userGoLocal {
 		t.Fatalf("synthetic match temp Go name %q must not equal user local Go name %q", syntheticGoTemp, userGoLocal)
+	}
+	if !strings.Contains(generated, syntheticGoTemp) {
+		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q) — proves native single-eval emission\n%s", syntheticGoTemp, syntheticTemp, generated)
+	}
+}
+
+// TestEmitGoFileFromBackendIR_EnumMatchUnsafeSubjectSingleEvaluationNative
+// verifies the same single-evaluation native emission contract for an
+// enum match over a non-trivial subject. The synthetic match-subject
+// temp must be present in the emitted Go (proving native emission) and
+// the unsafe subject call must be evaluated exactly once. No legacy
+// `enum_match` or `block` marker fallback artifacts may appear.
+func TestEmitGoFileFromBackendIR_EnumMatchUnsafeSubjectSingleEvaluationNative(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+enum Light { red, yellow, green }
+
+fn next() Light { Light::green }
+
+fn run() Int {
+  match next() {
+    Light::red => 1,
+    Light::yellow => 2,
+    Light::green => 3,
+  }
+}
+
+fn main() {
+  let _ = run()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+	generated := string(out)
+
+	syntheticTemp := matchSubjectTempName("enum")
+	assertSyntheticMatchTempIsArdUnreachable(t, syntheticTemp)
+	syntheticGoTemp := goName(syntheticTemp, false)
+	if !strings.Contains(generated, syntheticGoTemp) {
+		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q) — proves native single-eval emission\n%s", syntheticGoTemp, syntheticTemp, generated)
+	}
+	if !strings.Contains(generated, syntheticGoTemp+" := Next()") {
+		t.Fatalf("expected synthetic match temp to be assigned exactly once from subject call Next()\n%s", generated)
+	}
+	// Subject call Next() should appear exactly twice in the source: once
+	// in the `func Next() ... { ... }` declaration and once at the hoist
+	// call site `αardmatchsubjectEnum := Next()`. Any extra occurrence
+	// indicates the subject is being re-evaluated and single-evaluation
+	// is broken.
+	if got := occurrencesOfWholeWord(generated, "Next()"); got != 2 {
+		t.Fatalf("expected subject call Next() to be evaluated exactly once (1 decl + 1 hoist call), got %d total occurrences\n%s", got, generated)
+	}
+
+	if strings.Contains(generated, "enum_match(") {
+		t.Fatalf("expected emission to avoid enum_match marker fallback\n%s", generated)
+	}
+	if strings.Contains(generated, "block(") {
+		t.Fatalf("expected emission to avoid legacy block(...) marker fallback in IfExpr else branches\n%s", generated)
 	}
 }

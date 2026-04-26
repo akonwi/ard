@@ -104,12 +104,137 @@ func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoin
 		}
 	}
 
+	// The checker only emits a Statement for an enum decl when there is
+	// an associated `impl` block. Plain enum decls without methods are
+	// kept in scope but are absent from the program statement list. To
+	// support native backend IR emission of enum-typed signatures, we
+	// must still surface those orphan enums as IR EnumDecls so the Go
+	// emitter generates the corresponding `type X struct { Tag int }`
+	// declaration. Walk type references in the program and synthesize
+	// EnumDecls for any enum we have not already seen.
+	collectOrphanEnumDecls(module.Program(), out, seenDecls)
+
 	out.Entrypoint = lowerEntrypointStatementsToBackendIRBlock(topLevelExecutableStatements(module.Program().Statements))
 
 	if err := backendir.ValidateModule(out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func collectOrphanEnumDecls(program *checker.Program, out *backendir.Module, seenDecls map[string]struct{}) {
+	if program == nil {
+		return
+	}
+	visited := make(map[checker.Type]struct{})
+	collect := func(t checker.Type) {
+		visitOrphanEnumsInType(t, out, seenDecls, visited)
+	}
+	for _, stmt := range program.Statements {
+		if stmt.Expr != nil {
+			collect(stmt.Expr.Type())
+			switch def := stmt.Expr.(type) {
+			case *checker.FunctionDef:
+				for _, param := range def.Parameters {
+					collect(param.Type)
+				}
+				collect(effectiveFunctionReturnType(def))
+			case *checker.ExternalFunctionDef:
+				for _, param := range def.Parameters {
+					collect(param.Type)
+				}
+				collect(def.ReturnType)
+			}
+		}
+		if stmt.Stmt != nil {
+			switch def := stmt.Stmt.(type) {
+			case *checker.VariableDef:
+				if def != nil {
+					collect(def.Type())
+				}
+			case *checker.StructDef:
+				if def != nil {
+					for _, fieldType := range def.Fields {
+						collect(fieldType)
+					}
+					for _, method := range def.Methods {
+						for _, param := range method.Parameters {
+							collect(param.Type)
+						}
+						collect(effectiveFunctionReturnType(method))
+					}
+				}
+			case checker.StructDef:
+				for _, fieldType := range def.Fields {
+					collect(fieldType)
+				}
+				for _, method := range def.Methods {
+					for _, param := range method.Parameters {
+						collect(param.Type)
+					}
+					collect(effectiveFunctionReturnType(method))
+				}
+			}
+		}
+	}
+}
+
+func visitOrphanEnumsInType(t checker.Type, out *backendir.Module, seenDecls map[string]struct{}, visited map[checker.Type]struct{}) {
+	if t == nil {
+		return
+	}
+	if _, seen := visited[t]; seen {
+		return
+	}
+	visited[t] = struct{}{}
+	switch typed := t.(type) {
+	case *checker.Enum:
+		if typed == nil {
+			return
+		}
+		key := "enum:" + typed.Name
+		if _, exists := seenDecls[key]; exists {
+			return
+		}
+		seenDecls[key] = struct{}{}
+		out.Decls = append(out.Decls, lowerEnumDeclToBackendIR(typed))
+	case *checker.TypeVar:
+		if typed != nil {
+			visitOrphanEnumsInType(typed.Actual(), out, seenDecls, visited)
+		}
+	case *checker.List:
+		if typed != nil {
+			visitOrphanEnumsInType(typed.Of(), out, seenDecls, visited)
+		}
+	case *checker.Map:
+		if typed != nil {
+			visitOrphanEnumsInType(typed.Key(), out, seenDecls, visited)
+			visitOrphanEnumsInType(typed.Value(), out, seenDecls, visited)
+		}
+	case *checker.Maybe:
+		if typed != nil {
+			visitOrphanEnumsInType(typed.Of(), out, seenDecls, visited)
+		}
+	case *checker.Result:
+		if typed != nil {
+			visitOrphanEnumsInType(typed.Val(), out, seenDecls, visited)
+			visitOrphanEnumsInType(typed.Err(), out, seenDecls, visited)
+		}
+	case *checker.FunctionDef:
+		if typed != nil {
+			for _, param := range typed.Parameters {
+				visitOrphanEnumsInType(param.Type, out, seenDecls, visited)
+			}
+			visitOrphanEnumsInType(effectiveFunctionReturnType(typed), out, seenDecls, visited)
+		}
+	case *checker.ExternalFunctionDef:
+		if typed != nil {
+			for _, param := range typed.Parameters {
+				visitOrphanEnumsInType(param.Type, out, seenDecls, visited)
+			}
+			visitOrphanEnumsInType(typed.ReturnType, out, seenDecls, visited)
+		}
+	}
 }
 
 func lowerStatementsToBackendIRBlock(stmts []checker.Statement) *backendir.Block {
@@ -1274,26 +1399,45 @@ func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resul
 			Body: block,
 		})
 	}
-	var nested backendir.Expr
+	// Lower the deepest else as a semantic backend IR Block (for catch-all)
+	// or as a panic-bearing expression (for non-exhaustive non-void matches).
+	// Avoid the legacy `block(...)` marker so emission can stay native and
+	// preserve single-evaluation semantics for unsafe-subject matches.
+	var deepestElseBlock *backendir.Block
+	var deepestElseExpr backendir.Expr
 	if match.CatchAll != nil {
-		nested = lowerBlockAsExpr(match.CatchAll)
+		deepestElseBlock = lowerBlockToBackendIR(match.CatchAll)
+		finalizeFunctionBodyForReturn(deepestElseBlock, resultType)
 	} else if !isVoidIRType(resultType) {
-		nested = nonExhaustiveMatchExpr(resultType, "non-exhaustive int match")
+		deepestElseExpr = nonExhaustiveMatchExpr(resultType, "non-exhaustive int match")
 	}
 	if len(branches) == 0 {
-		if nested != nil {
-			return nested, true
+		if deepestElseBlock != nil {
+			return lowerBlockAsExpr(match.CatchAll), true
+		}
+		if deepestElseExpr != nil {
+			return deepestElseExpr, true
 		}
 		return nil, false
 	}
 
+	var nested *backendir.IfExpr
 	for i := len(branches) - 1; i >= 0; i-- {
 		thenBlock := lowerBlockToBackendIR(branches[i].Body)
 		finalizeFunctionBodyForReturn(thenBlock, resultType)
+		var elseBlock *backendir.Block
+		switch {
+		case nested != nil:
+			elseBlock = wrapExprAsIfElseBlock(nested, resultType)
+		case deepestElseBlock != nil:
+			elseBlock = deepestElseBlock
+		case deepestElseExpr != nil:
+			elseBlock = wrapExprAsIfElseBlock(deepestElseExpr, resultType)
+		}
 		nested = &backendir.IfExpr{
 			Cond: branches[i].Cond,
 			Then: thenBlock,
-			Else: wrapExprAsIfElseBlock(nested, resultType),
+			Else: elseBlock,
 			Type: resultType,
 		}
 	}
@@ -1595,12 +1739,20 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 		Subject: subject,
 		Name:    "tag",
 	}
-	var nested backendir.Expr
+	// Lower the deepest else as a semantic backend IR Block (for catch-all)
+	// or as a panic-bearing expression (for non-exhaustive non-void matches).
+	// Avoid the legacy `block(...)` marker so emission can stay native and
+	// preserve single-evaluation semantics for unsafe-subject matches.
+	var deepestElseBlock *backendir.Block
+	var deepestElseExpr backendir.Expr
 	if match.CatchAll != nil {
-		nested = lowerBlockAsExpr(match.CatchAll)
+		deepestElseBlock = lowerBlockToBackendIR(match.CatchAll)
+		finalizeFunctionBodyForReturn(deepestElseBlock, resultType)
 	} else if !isVoidIRType(resultType) {
-		nested = nonExhaustiveMatchExpr(resultType, "non-exhaustive enum match")
+		deepestElseExpr = nonExhaustiveMatchExpr(resultType, "non-exhaustive enum match")
 	}
+
+	var nested *backendir.IfExpr
 	for index := len(match.Cases) - 1; index >= 0; index-- {
 		block := match.Cases[index]
 		if block == nil {
@@ -1608,10 +1760,19 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 		}
 		thenBlock := lowerBlockToBackendIR(block)
 		finalizeFunctionBodyForReturn(thenBlock, resultType)
+		var elseBlock *backendir.Block
+		switch {
+		case nested != nil:
+			elseBlock = wrapExprAsIfElseBlock(nested, resultType)
+		case deepestElseBlock != nil:
+			elseBlock = deepestElseBlock
+		case deepestElseExpr != nil:
+			elseBlock = wrapExprAsIfElseBlock(deepestElseExpr, resultType)
+		}
 		nested = &backendir.IfExpr{
 			Cond: callExpr("eq", subjectTag, literalExpr("int", strconv.Itoa(index))),
 			Then: thenBlock,
-			Else: wrapExprAsIfElseBlock(nested, resultType),
+			Else: elseBlock,
 			Type: resultType,
 		}
 	}
@@ -1714,10 +1875,15 @@ func unionMatchCaseTypeByName(match *checker.UnionMatch, caseName string) checke
 }
 
 func nonExhaustiveMatchExpr(resultType backendir.Type, message string) backendir.Expr {
-	return &backendir.IfExpr{
-		Cond: literalExpr("bool", "true"),
-		Then: nonExhaustiveMatchBlock(message),
-		Type: resultType,
+	// Emit the non-exhaustive panic directly as a typed PanicExpr so the
+	// surrounding else branch of the lowered match IfExpr-chain can be
+	// emitted natively (PanicExpr is natively emittable, whereas an
+	// IfExpr-with-no-else of non-void type cannot be). The PanicExpr is
+	// expression-positioned and never falls through, so its return type
+	// is satisfied by the panic itself.
+	return &backendir.PanicExpr{
+		Message: literalExpr("str", strings.TrimSpace(message)),
+		Type:    resultType,
 	}
 }
 

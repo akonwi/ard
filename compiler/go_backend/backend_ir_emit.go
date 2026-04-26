@@ -148,6 +148,16 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 				}
 			}
 		}
+		// Enums declared without an `impl` block do not appear as
+		// `Statement.Stmt` entries in the checked program (the checker
+		// only emits a Statement for enum decls when they have an
+		// associated impl). Scan all referenced types in function
+		// signatures, extern signatures, variable types, and statement
+		// bodies to discover those enums so the BackendIR emitter can
+		// know about them (e.g. emit type names natively, look up
+		// methods, etc.). Without this, native emission of enum-typed
+		// signatures produces references to undeclared Go types.
+		collectReferencedEnums(sourceModule.Program(), sourceEnums)
 	}
 
 	legacy := &emitter{
@@ -174,6 +184,131 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 		externTypeNames: externTypeNames,
 		emittedMethods:  make(map[string]struct{}),
 		legacy:          legacy,
+	}
+}
+
+// collectReferencedEnums walks the checker program and adds every
+// *checker.Enum it can reach (via function signatures, variable types,
+// expression types, and statement types) into the provided map. This
+// enables the BackendIR emitter to recognize enum types that the
+// checker keeps in scope without emitting a Statement entry (i.e.,
+// enums without an `impl` block).
+func collectReferencedEnums(program *checker.Program, sourceEnums map[string]*checker.Enum) {
+	if program == nil {
+		return
+	}
+	visited := make(map[checker.Type]struct{})
+	add := func(t checker.Type) {
+		collectEnumsFromType(t, sourceEnums, visited)
+	}
+	for _, stmt := range program.Statements {
+		if stmt.Expr != nil {
+			add(stmt.Expr.Type())
+			switch def := stmt.Expr.(type) {
+			case *checker.FunctionDef:
+				for _, param := range def.Parameters {
+					add(param.Type)
+				}
+				add(effectiveFunctionReturnType(def))
+			case *checker.ExternalFunctionDef:
+				for _, param := range def.Parameters {
+					add(param.Type)
+				}
+				add(def.ReturnType)
+			}
+		}
+		if stmt.Stmt != nil {
+			switch def := stmt.Stmt.(type) {
+			case *checker.VariableDef:
+				if def != nil {
+					add(def.Type())
+				}
+			case *checker.StructDef:
+				if def != nil {
+					for _, fieldType := range def.Fields {
+						add(fieldType)
+					}
+					for _, method := range def.Methods {
+						for _, param := range method.Parameters {
+							add(param.Type)
+						}
+						add(effectiveFunctionReturnType(method))
+					}
+				}
+			case checker.StructDef:
+				for _, fieldType := range def.Fields {
+					add(fieldType)
+				}
+				for _, method := range def.Methods {
+					for _, param := range method.Parameters {
+						add(param.Type)
+					}
+					add(effectiveFunctionReturnType(method))
+				}
+			case *checker.Enum:
+				if def != nil {
+					sourceEnums[def.Name] = def
+				}
+			case checker.Enum:
+				defCopy := def
+				sourceEnums[def.Name] = &defCopy
+			}
+		}
+	}
+}
+
+// collectEnumsFromType recursively walks a checker.Type, recording any
+// *checker.Enum it encounters in sourceEnums. The visited set short-
+// circuits cyclic graphs.
+func collectEnumsFromType(t checker.Type, sourceEnums map[string]*checker.Enum, visited map[checker.Type]struct{}) {
+	if t == nil {
+		return
+	}
+	if _, seen := visited[t]; seen {
+		return
+	}
+	visited[t] = struct{}{}
+	switch typed := t.(type) {
+	case *checker.Enum:
+		if typed != nil {
+			sourceEnums[typed.Name] = typed
+		}
+	case *checker.TypeVar:
+		if typed != nil {
+			collectEnumsFromType(typed.Actual(), sourceEnums, visited)
+		}
+	case *checker.List:
+		if typed != nil {
+			collectEnumsFromType(typed.Of(), sourceEnums, visited)
+		}
+	case *checker.Map:
+		if typed != nil {
+			collectEnumsFromType(typed.Key(), sourceEnums, visited)
+			collectEnumsFromType(typed.Value(), sourceEnums, visited)
+		}
+	case *checker.Maybe:
+		if typed != nil {
+			collectEnumsFromType(typed.Of(), sourceEnums, visited)
+		}
+	case *checker.Result:
+		if typed != nil {
+			collectEnumsFromType(typed.Val(), sourceEnums, visited)
+			collectEnumsFromType(typed.Err(), sourceEnums, visited)
+		}
+	case *checker.FunctionDef:
+		if typed != nil {
+			for _, param := range typed.Parameters {
+				collectEnumsFromType(param.Type, sourceEnums, visited)
+			}
+			collectEnumsFromType(effectiveFunctionReturnType(typed), sourceEnums, visited)
+		}
+	case *checker.ExternalFunctionDef:
+		if typed != nil {
+			for _, param := range typed.Parameters {
+				collectEnumsFromType(param.Type, sourceEnums, visited)
+			}
+			collectEnumsFromType(typed.ReturnType, sourceEnums, visited)
+		}
 	}
 }
 
