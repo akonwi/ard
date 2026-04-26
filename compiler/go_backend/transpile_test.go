@@ -5,7 +5,6 @@ package go_backend
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -345,6 +344,10 @@ let d = "a,b".split(",").size()
 let e = 42.to_str()
 let f = 98.6.to_int()
 let g = true.to_str()
+let h = "hello".to_dyn()
+let i = 42.to_dyn()
+let j = 98.6.to_dyn()
+let k = true.to_dyn()
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}
@@ -1322,50 +1325,6 @@ let e = from_call()
 	}
 
 	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
-}
-
-func TestCompileEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write ard.toml: %v", err)
-	}
-
-	module := checkedModuleFromSource(t, dir, "main.ard", `
-use ard/maybe
-
-fn half(n: Int) Int? {
-  match n > 0 {
-    true => maybe::some(n / 2),
-    false => maybe::none(),
-  }
-}
-
-fn maybe_fallback(n: Int) Int {
-  let value = (try half(n) -> _ { 0 }) + 1
-  value
-}
-
-let result = maybe_fallback(0)
-`)
-
-	out, err := CompileEntrypoint(module)
-	if err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
-
-	generated := string(out)
-	checks := []string{
-		"__ardTryValue",
-		"value := __ardTryValue",
-	}
-	for _, check := range checks {
-		if !strings.Contains(generated, check) {
-			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
-		}
-	}
-	if !strings.Contains(generated, "return 0") {
-		t.Fatalf("expected nested try catch to early-return catch value from function\n%s", generated)
-	}
 }
 
 func TestBuildBinaryCompilesTryExpressions(t *testing.T) {

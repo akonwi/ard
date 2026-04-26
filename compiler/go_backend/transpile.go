@@ -566,14 +566,7 @@ func compilePackageSource(module checker.Module, projectName string) ([]byte, er
 }
 
 func compileModuleSource(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
-	if module == nil || module.Program() == nil {
-		return nil, fmt.Errorf("module has no program")
-	}
-	fileIR, err := lowerModuleFileIR(module, packageName, entrypoint, projectName)
-	if err != nil {
-		return nil, err
-	}
-	return renderGoFile(optimizeGoFileIR(fileIR))
+	return compileModuleSourceViaBackendIR(module, packageName, entrypoint, projectName)
 }
 
 func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
