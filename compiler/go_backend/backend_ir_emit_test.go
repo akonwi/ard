@@ -925,6 +925,184 @@ func TestEmitGoFileFromBackendIR_TryExprWithoutCatchMaybeNative(t *testing.T) {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_TryExprReturnStmtNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name: "unwrapOrZero",
+				Params: []backendir.Param{
+					{
+						Name: "res",
+						Type: &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType},
+					},
+				},
+				Return: backendir.IntType,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.ReturnStmt{Value: &backendir.TryExpr{
+							Kind:     "result",
+							Subject:  &backendir.IdentExpr{Name: "res"},
+							CatchVar: "err",
+							Catch: &backendir.Block{
+								Stmts: []backendir.Stmt{
+									&backendir.ReturnStmt{Value: &backendir.LiteralExpr{Kind: "int", Value: "0"}},
+								},
+							},
+							Type: backendir.IntType,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if strings.Contains(generated, "func() int") && strings.Contains(generated, "return func()") {
+		t.Fatalf("expected generated source to lower try expression as control-flow statements, got closure form\n%s", generated)
+	}
+	if !strings.Contains(generated, "__ardTryValue := res") {
+		t.Fatalf("expected generated source to evaluate try subject once into a temp\n%s", generated)
+	}
+	if !strings.Contains(generated, "if __ardTryValue.IsErr()") {
+		t.Fatalf("expected generated source to contain result error guard\n%s", generated)
+	}
+	if !strings.Contains(generated, "err := __ardTryValue.UnwrapErr()") {
+		t.Fatalf("expected generated source to bind result err catch variable\n%s", generated)
+	}
+	if !strings.Contains(generated, "return __ardTryValue.Expect(\"unreachable err in try success path\")") {
+		t.Fatalf("expected generated source to return success path via Expect on temp\n%s", generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_TryExprExprStmtNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name: "process",
+				Params: []backendir.Param{
+					{
+						Name: "res",
+						Type: &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType},
+					},
+				},
+				Return: backendir.Void,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.ExprStmt{Value: &backendir.TryExpr{
+							Kind:     "result",
+							Subject:  &backendir.IdentExpr{Name: "res"},
+							CatchVar: "err",
+							Catch: &backendir.Block{
+								Stmts: []backendir.Stmt{
+									&backendir.ReturnStmt{Value: nil},
+								},
+							},
+							Type: backendir.IntType,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if strings.Contains(generated, "func() int") {
+		t.Fatalf("expected generated source to lower try expression as control-flow statements, got closure form\n%s", generated)
+	}
+	if !strings.Contains(generated, "__ardTryValue := res") {
+		t.Fatalf("expected generated source to evaluate try subject once into a temp\n%s", generated)
+	}
+	if !strings.Contains(generated, "if __ardTryValue.IsErr()") {
+		t.Fatalf("expected generated source to contain result error guard\n%s", generated)
+	}
+	if !strings.Contains(generated, "err := __ardTryValue.UnwrapErr()") {
+		t.Fatalf("expected generated source to bind result err catch variable\n%s", generated)
+	}
+	if !strings.Contains(generated, "_ = err") {
+		t.Fatalf("expected generated source to discard possibly-unused catch variable binding\n%s", generated)
+	}
+	if !strings.Contains(generated, "__ardTryValue.Expect(\"unreachable err in try success path\")") {
+		t.Fatalf("expected generated source to contain result success unwrap\n%s", generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_TryExprWithoutCatchMaybeReturnStmtNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name: "unwrap",
+				Params: []backendir.Param{
+					{
+						Name: "opt",
+						Type: &backendir.MaybeType{Of: backendir.IntType},
+					},
+				},
+				Return: &backendir.MaybeType{Of: backendir.IntType},
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.ReturnStmt{Value: &backendir.TryExpr{
+							Kind:    "maybe",
+							Subject: &backendir.IdentExpr{Name: "opt"},
+							Catch:   nil,
+							Type:    backendir.IntType,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if strings.Contains(generated, "func() Maybe[int]") {
+		t.Fatalf("expected generated source to lower try expression as control-flow statements, got closure form\n%s", generated)
+	}
+	if !strings.Contains(generated, "__ardTryValue := opt") {
+		t.Fatalf("expected generated source to evaluate try subject once into a temp\n%s", generated)
+	}
+	if !strings.Contains(generated, "if __ardTryValue.IsNone()") {
+		t.Fatalf("expected generated source to contain maybe none guard\n%s", generated)
+	}
+	if !strings.Contains(generated, "return ardgo.None[int]()") {
+		t.Fatalf("expected generated source to contain typed none propagation\n%s", generated)
+	}
+	if !strings.Contains(generated, "return __ardTryValue.Expect(\"unreachable none in try success path\")") {
+		t.Fatalf("expected generated source to return success path via Expect on temp\n%s", generated)
+	}
+}
+
 func TestEmitGoFileFromBackendIR_UnionMatchExprNative(t *testing.T) {
 	module := &backendir.Module{
 		PackageName: "main",
