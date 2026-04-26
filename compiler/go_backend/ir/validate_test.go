@@ -1061,3 +1061,246 @@ func TestValidateModuleRejectsMarkerFallbackArtifacts(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateModuleAllowsUserDefinedMarkerNamedFunctions guards against the
+// marker-artifact rejection's false-positive failure mode: rejecting a
+// CallExpr purely because its callee identifier shares a name with a legacy
+// marker helper, even when the surrounding module declares a real
+// user-defined function with that exact name. The marker-rejection must
+// only fire for genuine marker fallback artifacts (calls whose callee names
+// are NOT user-declared in the module), so legitimate user-defined
+// functions whose names happen to collide with marker helper names continue
+// to validate cleanly.
+//
+// This test enumerates every name in markerFallbackArtifactNames, declares a
+// user `FuncDecl` for it, and exercises three call positions that the
+// recursive validator descends through (top-level statement, nested call
+// argument, and IfExpr branch / BlockExpr.Setup) so the user-declaration
+// allowance is wired through every traversal context the validator uses.
+func TestValidateModuleAllowsUserDefinedMarkerNamedFunctions(t *testing.T) {
+	markerNames := []string{
+		"try_op",
+		"bool_match",
+		"int_match",
+		"conditional_match",
+		"option_match",
+		"result_match",
+		"enum_match",
+		"union_match",
+	}
+
+	// userFuncDecl returns a minimal valid FuncDecl named for a marker-like
+	// identifier so the validator's user-declaration allowance can take
+	// effect for that name.
+	userFuncDecl := func(name string) *FuncDecl {
+		return &FuncDecl{
+			Name:   name,
+			Params: []Param{{Name: "value", Type: IntType}},
+			Return: IntType,
+			Body: &Block{
+				Stmts: []Stmt{
+					&ReturnStmt{Value: &IdentExpr{Name: "value"}},
+				},
+			},
+		}
+	}
+
+	moduleWithUserFuncAndCall := func(name string, call Expr) *Module {
+		return &Module{
+			PackageName: "main",
+			Decls: []Decl{
+				userFuncDecl(name),
+				&FuncDecl{
+					Name:   "main",
+					Return: Void,
+					Body: &Block{
+						Stmts: []Stmt{
+							&ExprStmt{Value: call},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("top-level call to user-declared marker-named function is accepted", func(t *testing.T) {
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := moduleWithUserFuncAndCall(name, &CallExpr{
+					Callee: &IdentExpr{Name: name},
+					Args: []Expr{
+						&LiteralExpr{Kind: "int", Value: "0"},
+					},
+				})
+				if err := ValidateModule(module); err != nil {
+					t.Fatalf("expected user-declared marker-named call %q to validate cleanly, got error: %v", name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("nested call argument to user-declared marker-named function is accepted", func(t *testing.T) {
+		// The marker validator descends into call arguments. A user-defined
+		// function used as an argument to another call must not be rejected
+		// by name even though its name collides with a marker helper.
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := moduleWithUserFuncAndCall(name, &CallExpr{
+					Callee: &IdentExpr{Name: "print"},
+					Args: []Expr{
+						&CallExpr{
+							Callee: &IdentExpr{Name: name},
+							Args: []Expr{
+								&LiteralExpr{Kind: "int", Value: "0"},
+							},
+						},
+					},
+				})
+				if err := ValidateModule(module); err != nil {
+					t.Fatalf("expected nested user-declared marker-named call %q to validate cleanly, got error: %v", name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("user-declared marker-named call inside IfExpr branch is accepted", func(t *testing.T) {
+		// Match lowering produces IfExpr trees and BlockExpr.Setup hoists.
+		// User-declared marker-named callees must remain accepted in those
+		// nested traversal contexts as well.
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := moduleWithUserFuncAndCall(name, &CallExpr{
+					Callee: &IdentExpr{Name: "print"},
+					Args: []Expr{
+						&IfExpr{
+							Cond: &LiteralExpr{Kind: "bool", Value: "true"},
+							Then: &Block{Stmts: []Stmt{
+								&ExprStmt{Value: &CallExpr{
+									Callee: &IdentExpr{Name: name},
+									Args: []Expr{
+										&LiteralExpr{Kind: "int", Value: "0"},
+									},
+								}},
+							}},
+							Else: &Block{Stmts: []Stmt{
+								&ExprStmt{Value: &LiteralExpr{Kind: "int", Value: "0"}},
+							}},
+							Type: IntType,
+						},
+					},
+				})
+				if err := ValidateModule(module); err != nil {
+					t.Fatalf("expected IfExpr-nested user-declared marker-named call %q to validate cleanly, got error: %v", name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("user-declared marker-named call inside BlockExpr.Setup is accepted", func(t *testing.T) {
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := moduleWithUserFuncAndCall(name, &CallExpr{
+					Callee: &IdentExpr{Name: "print"},
+					Args: []Expr{
+						&BlockExpr{
+							Setup: []Stmt{
+								&ExprStmt{Value: &CallExpr{
+									Callee: &IdentExpr{Name: name},
+									Args: []Expr{
+										&LiteralExpr{Kind: "int", Value: "0"},
+									},
+								}},
+							},
+							Value: &LiteralExpr{Kind: "int", Value: "0"},
+							Type:  IntType,
+						},
+					},
+				})
+				if err := ValidateModule(module); err != nil {
+					t.Fatalf("expected BlockExpr.Setup-nested user-declared marker-named call %q to validate cleanly, got error: %v", name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("user-declared marker-named function with extern flag is accepted", func(t *testing.T) {
+		// Even extern function declarations (e.g. stdlib bindings) with
+		// marker-like names must shield calls to them from the marker
+		// rejection. The user-declaration allowance keys off the FuncDecl
+		// name irrespective of IsExtern.
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := &Module{
+					PackageName: "main",
+					Decls: []Decl{
+						&FuncDecl{
+							Name:          name,
+							Params:        []Param{{Name: "value", Type: IntType}},
+							Return:        IntType,
+							IsExtern:      true,
+							ExternBinding: "X",
+						},
+						&FuncDecl{
+							Name:   "main",
+							Return: Void,
+							Body: &Block{
+								Stmts: []Stmt{
+									&ExprStmt{Value: &CallExpr{
+										Callee: &IdentExpr{Name: name},
+										Args: []Expr{
+											&LiteralExpr{Kind: "int", Value: "0"},
+										},
+									}},
+								},
+							},
+						},
+					},
+				}
+				if err := ValidateModule(module); err != nil {
+					t.Fatalf("expected extern user-declared marker-named call %q to validate cleanly, got error: %v", name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("real marker artifact is still rejected when no user declaration exists", func(t *testing.T) {
+		// Negative regression: if there is NO user FuncDecl with the marker
+		// name, the validator must continue to reject the call as a marker
+		// fallback artifact. This pins the allow/reject boundary the fix
+		// is supposed to enforce: name-collision safe but not name-only
+		// blind.
+		for _, name := range markerNames {
+			t.Run(name, func(t *testing.T) {
+				module := &Module{
+					PackageName: "main",
+					Decls: []Decl{
+						&FuncDecl{
+							Name:   "main",
+							Return: Void,
+							Body: &Block{
+								Stmts: []Stmt{
+									&ExprStmt{Value: &CallExpr{
+										Callee: &IdentExpr{Name: name},
+										Args: []Expr{
+											&IdentExpr{Name: "value"},
+										},
+									}},
+								},
+							},
+						},
+					},
+				}
+				err := ValidateModule(module)
+				if err == nil {
+					t.Fatalf("expected marker artifact %q to be rejected when no user declaration exists", name)
+				}
+				if !strings.Contains(err.Error(), "marker fallback artifact") {
+					t.Fatalf("expected marker fallback artifact rejection for %q, got %q", name, err.Error())
+				}
+				if !strings.Contains(err.Error(), name) {
+					t.Fatalf("expected error to mention marker name %q, got %q", name, err.Error())
+				}
+			})
+		}
+	})
+}

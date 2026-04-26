@@ -26,6 +26,12 @@ var markerFallbackArtifactNames = map[string]struct{}{
 // markerFallbackArtifactName returns the marker artifact name and true when
 // expr is a CallExpr whose callee is an IdentExpr naming a legacy marker
 // fallback artifact for migrated try/match surfaces.
+//
+// This is a name-only check and does not consider whether the surrounding
+// module declares a user-defined function sharing that name. Callers that
+// need name-collision-safe behavior (i.e. allow user-declared functions
+// that happen to share a marker-like name while still rejecting genuine
+// marker fallback artifacts) should use moduleValidator.markerFallbackArtifactName.
 func markerFallbackArtifactName(expr Expr) (string, bool) {
 	call, ok := expr.(*CallExpr)
 	if !ok || call == nil {
@@ -42,12 +48,68 @@ func markerFallbackArtifactName(expr Expr) (string, bool) {
 	return name, true
 }
 
+// moduleValidator carries the per-module context needed during recursive
+// validation. It threads the set of user-declared function names through
+// expression validation so the marker-artifact rejection can distinguish
+// between legitimate user-defined functions whose names happen to collide
+// with legacy marker callee names (e.g. a user function `try_op`/`int_match`)
+// and actual marker fallback artifacts that lowering must never produce on
+// migrated surfaces.
+type moduleValidator struct {
+	// userFuncNames is the set of FuncDecl names declared in the module
+	// being validated. Calls to identifiers in this set are not treated as
+	// marker fallback artifacts even if the name matches a marker entry.
+	userFuncNames map[string]struct{}
+}
+
+// markerFallbackArtifactName mirrors the package-level helper but suppresses
+// the marker classification when the call's callee identifier resolves to a
+// user-declared function in the module currently being validated.
+func (v *moduleValidator) markerFallbackArtifactName(expr Expr) (string, bool) {
+	name, isMarker := markerFallbackArtifactName(expr)
+	if !isMarker {
+		return "", false
+	}
+	if v != nil {
+		if _, isUserDeclared := v.userFuncNames[name]; isUserDeclared {
+			return "", false
+		}
+	}
+	return name, true
+}
+
+// collectUserFuncNames returns the set of FuncDecl names declared on the
+// module so the validator can distinguish user-defined callees from real
+// marker fallback artifacts during recursive expression validation.
+func collectUserFuncNames(module *Module) map[string]struct{} {
+	names := map[string]struct{}{}
+	if module == nil {
+		return names
+	}
+	for _, decl := range module.Decls {
+		fn, ok := decl.(*FuncDecl)
+		if !ok || fn == nil {
+			continue
+		}
+		name := strings.TrimSpace(fn.Name)
+		if name == "" {
+			continue
+		}
+		names[name] = struct{}{}
+	}
+	return names
+}
+
 func ValidateModule(module *Module) error {
 	if module == nil {
 		return fmt.Errorf("nil module")
 	}
 	if strings.TrimSpace(module.PackageName) == "" {
 		return fmt.Errorf("module package name is empty")
+	}
+
+	v := &moduleValidator{
+		userFuncNames: collectUserFuncNames(module),
 	}
 
 	seenDeclNames := map[string]struct{}{}
@@ -59,12 +121,12 @@ func ValidateModule(module *Module) error {
 			}
 			seenDeclNames[name] = struct{}{}
 		}
-		if err := validateDecl(decl); err != nil {
+		if err := v.validateDecl(decl); err != nil {
 			return fmt.Errorf("decl[%d]: %w", i, err)
 		}
 	}
 	if module.Entrypoint != nil {
-		if err := validateBlock(module.Entrypoint); err != nil {
+		if err := v.validateBlock(module.Entrypoint); err != nil {
 			return fmt.Errorf("entrypoint: %w", err)
 		}
 	}
@@ -91,7 +153,7 @@ func declName(decl Decl) string {
 	}
 }
 
-func validateDecl(decl Decl) error {
+func (v *moduleValidator) validateDecl(decl Decl) error {
 	switch d := decl.(type) {
 	case *StructDecl:
 		return validateStructDecl(d)
@@ -102,9 +164,9 @@ func validateDecl(decl Decl) error {
 	case *ExternTypeDecl:
 		return validateExternTypeDecl(d)
 	case *FuncDecl:
-		return validateFuncDecl(d)
+		return v.validateFuncDecl(d)
 	case *VarDecl:
-		return validateVarDecl(d)
+		return v.validateVarDecl(d)
 	default:
 		return fmt.Errorf("unsupported declaration type %T", decl)
 	}
@@ -188,7 +250,7 @@ func validateExternTypeDecl(decl *ExternTypeDecl) error {
 	return nil
 }
 
-func validateFuncDecl(decl *FuncDecl) error {
+func (v *moduleValidator) validateFuncDecl(decl *FuncDecl) error {
 	if decl == nil {
 		return fmt.Errorf("nil function declaration")
 	}
@@ -226,10 +288,10 @@ func validateFuncDecl(decl *FuncDecl) error {
 	if decl.Body == nil {
 		return fmt.Errorf("non-extern function body is nil")
 	}
-	return validateBlock(decl.Body)
+	return v.validateBlock(decl.Body)
 }
 
-func validateVarDecl(decl *VarDecl) error {
+func (v *moduleValidator) validateVarDecl(decl *VarDecl) error {
 	if decl == nil {
 		return fmt.Errorf("nil variable declaration")
 	}
@@ -242,25 +304,25 @@ func validateVarDecl(decl *VarDecl) error {
 	if decl.Value == nil {
 		return fmt.Errorf("variable value is nil")
 	}
-	if err := validateExpr(decl.Value); err != nil {
+	if err := v.validateExpr(decl.Value); err != nil {
 		return fmt.Errorf("variable value: %w", err)
 	}
 	return nil
 }
 
-func validateBlock(block *Block) error {
+func (v *moduleValidator) validateBlock(block *Block) error {
 	if block == nil {
 		return fmt.Errorf("nil block")
 	}
 	for i, stmt := range block.Stmts {
-		if err := validateStmt(stmt); err != nil {
+		if err := v.validateStmt(stmt); err != nil {
 			return fmt.Errorf("stmt[%d]: %w", i, err)
 		}
 	}
 	return nil
 }
 
-func validateStmt(stmt Stmt) error {
+func (v *moduleValidator) validateStmt(stmt Stmt) error {
 	switch s := stmt.(type) {
 	case *ReturnStmt:
 		if s == nil {
@@ -269,12 +331,12 @@ func validateStmt(stmt Stmt) error {
 		if s.Value == nil {
 			return nil
 		}
-		return validateExpr(s.Value)
+		return v.validateExpr(s.Value)
 	case *ExprStmt:
 		if s == nil || s.Value == nil {
 			return fmt.Errorf("expr statement value is nil")
 		}
-		return validateExpr(s.Value)
+		return v.validateExpr(s.Value)
 	case *BreakStmt:
 		if s == nil {
 			return fmt.Errorf("nil break statement")
@@ -290,7 +352,7 @@ func validateStmt(stmt Stmt) error {
 		if s.Value == nil {
 			return fmt.Errorf("assign value is nil")
 		}
-		return validateExpr(s.Value)
+		return v.validateExpr(s.Value)
 	case *MemberAssignStmt:
 		if s == nil {
 			return fmt.Errorf("nil member assign statement")
@@ -304,10 +366,10 @@ func validateStmt(stmt Stmt) error {
 		if s.Value == nil {
 			return fmt.Errorf("member assign value is nil")
 		}
-		if err := validateExpr(s.Subject); err != nil {
+		if err := v.validateExpr(s.Subject); err != nil {
 			return fmt.Errorf("member assign subject: %w", err)
 		}
-		return validateExpr(s.Value)
+		return v.validateExpr(s.Value)
 	case *ForIntRangeStmt:
 		if s == nil {
 			return fmt.Errorf("nil for-int-range statement")
@@ -327,13 +389,13 @@ func validateStmt(stmt Stmt) error {
 		if s.Body == nil {
 			return fmt.Errorf("for-int-range body is nil")
 		}
-		if err := validateExpr(s.Start); err != nil {
+		if err := v.validateExpr(s.Start); err != nil {
 			return fmt.Errorf("for-int-range start: %w", err)
 		}
-		if err := validateExpr(s.End); err != nil {
+		if err := v.validateExpr(s.End); err != nil {
 			return fmt.Errorf("for-int-range end: %w", err)
 		}
-		return validateBlock(s.Body)
+		return v.validateBlock(s.Body)
 	case *ForLoopStmt:
 		if s == nil {
 			return fmt.Errorf("nil for-loop statement")
@@ -358,16 +420,16 @@ func validateStmt(stmt Stmt) error {
 		if s.Body == nil {
 			return fmt.Errorf("for-loop body is nil")
 		}
-		if err := validateExpr(s.InitValue); err != nil {
+		if err := v.validateExpr(s.InitValue); err != nil {
 			return fmt.Errorf("for-loop init value: %w", err)
 		}
-		if err := validateExpr(s.Cond); err != nil {
+		if err := v.validateExpr(s.Cond); err != nil {
 			return fmt.Errorf("for-loop condition: %w", err)
 		}
-		if err := validateStmt(s.Update); err != nil {
+		if err := v.validateStmt(s.Update); err != nil {
 			return fmt.Errorf("for-loop update: %w", err)
 		}
-		return validateBlock(s.Body)
+		return v.validateBlock(s.Body)
 	case *ForInStrStmt:
 		if s == nil {
 			return fmt.Errorf("nil for-in-str statement")
@@ -384,10 +446,10 @@ func validateStmt(stmt Stmt) error {
 		if s.Body == nil {
 			return fmt.Errorf("for-in-str body is nil")
 		}
-		if err := validateExpr(s.Value); err != nil {
+		if err := v.validateExpr(s.Value); err != nil {
 			return fmt.Errorf("for-in-str value: %w", err)
 		}
-		return validateBlock(s.Body)
+		return v.validateBlock(s.Body)
 	case *ForInListStmt:
 		if s == nil {
 			return fmt.Errorf("nil for-in-list statement")
@@ -404,10 +466,10 @@ func validateStmt(stmt Stmt) error {
 		if s.Body == nil {
 			return fmt.Errorf("for-in-list body is nil")
 		}
-		if err := validateExpr(s.List); err != nil {
+		if err := v.validateExpr(s.List); err != nil {
 			return fmt.Errorf("for-in-list list: %w", err)
 		}
-		return validateBlock(s.Body)
+		return v.validateBlock(s.Body)
 	case *ForInMapStmt:
 		if s == nil {
 			return fmt.Errorf("nil for-in-map statement")
@@ -424,10 +486,10 @@ func validateStmt(stmt Stmt) error {
 		if s.Body == nil {
 			return fmt.Errorf("for-in-map body is nil")
 		}
-		if err := validateExpr(s.Map); err != nil {
+		if err := v.validateExpr(s.Map); err != nil {
 			return fmt.Errorf("for-in-map map: %w", err)
 		}
-		return validateBlock(s.Body)
+		return v.validateBlock(s.Body)
 	case *WhileStmt:
 		if s == nil {
 			return fmt.Errorf("nil while statement")
@@ -438,10 +500,10 @@ func validateStmt(stmt Stmt) error {
 		if s.Body == nil {
 			return fmt.Errorf("while body is nil")
 		}
-		if err := validateExpr(s.Cond); err != nil {
+		if err := v.validateExpr(s.Cond); err != nil {
 			return fmt.Errorf("while condition: %w", err)
 		}
-		return validateBlock(s.Body)
+		return v.validateBlock(s.Body)
 	case *IfStmt:
 		if s == nil {
 			return fmt.Errorf("nil if statement")
@@ -452,14 +514,14 @@ func validateStmt(stmt Stmt) error {
 		if s.Then == nil {
 			return fmt.Errorf("if then block is nil")
 		}
-		if err := validateExpr(s.Cond); err != nil {
+		if err := v.validateExpr(s.Cond); err != nil {
 			return fmt.Errorf("if condition: %w", err)
 		}
-		if err := validateBlock(s.Then); err != nil {
+		if err := v.validateBlock(s.Then); err != nil {
 			return fmt.Errorf("if then: %w", err)
 		}
 		if s.Else != nil {
-			if err := validateBlock(s.Else); err != nil {
+			if err := v.validateBlock(s.Else); err != nil {
 				return fmt.Errorf("if else: %w", err)
 			}
 		}
@@ -469,7 +531,7 @@ func validateStmt(stmt Stmt) error {
 	}
 }
 
-func validateExpr(expr Expr) error {
+func (v *moduleValidator) validateExpr(expr Expr) error {
 	switch e := expr.(type) {
 	case *IdentExpr:
 		if e == nil || strings.TrimSpace(e.Name) == "" {
@@ -494,7 +556,7 @@ func validateExpr(expr Expr) error {
 		if strings.TrimSpace(e.Name) == "" {
 			return fmt.Errorf("selector name is empty")
 		}
-		return validateExpr(e.Subject)
+		return v.validateExpr(e.Subject)
 	case *CallExpr:
 		if e == nil {
 			return fmt.Errorf("nil call expression")
@@ -502,17 +564,17 @@ func validateExpr(expr Expr) error {
 		if e.Callee == nil {
 			return fmt.Errorf("call callee is nil")
 		}
-		if name, isMarker := markerFallbackArtifactName(e); isMarker {
+		if name, isMarker := v.markerFallbackArtifactName(e); isMarker {
 			return fmt.Errorf("marker fallback artifact %q is not permitted in finalized backend IR", name)
 		}
-		if err := validateExpr(e.Callee); err != nil {
+		if err := v.validateExpr(e.Callee); err != nil {
 			return fmt.Errorf("call callee: %w", err)
 		}
 		for i, arg := range e.Args {
 			if arg == nil {
 				return fmt.Errorf("call arg[%d] is nil", i)
 			}
-			if err := validateExpr(arg); err != nil {
+			if err := v.validateExpr(arg); err != nil {
 				return fmt.Errorf("call arg[%d]: %w", i, err)
 			}
 		}
@@ -532,7 +594,7 @@ func validateExpr(expr Expr) error {
 			if element == nil {
 				return fmt.Errorf("list literal elem[%d] is nil", i)
 			}
-			if err := validateExpr(element); err != nil {
+			if err := v.validateExpr(element); err != nil {
 				return fmt.Errorf("list literal elem[%d]: %w", i, err)
 			}
 		}
@@ -555,10 +617,10 @@ func validateExpr(expr Expr) error {
 			if entry.Value == nil {
 				return fmt.Errorf("map literal entry[%d] value is nil", i)
 			}
-			if err := validateExpr(entry.Key); err != nil {
+			if err := v.validateExpr(entry.Key); err != nil {
 				return fmt.Errorf("map literal entry[%d] key: %w", i, err)
 			}
-			if err := validateExpr(entry.Value); err != nil {
+			if err := v.validateExpr(entry.Value); err != nil {
 				return fmt.Errorf("map literal entry[%d] value: %w", i, err)
 			}
 		}
@@ -583,7 +645,7 @@ func validateExpr(expr Expr) error {
 			if field.Value == nil {
 				return fmt.Errorf("struct literal field[%d] value is nil", i)
 			}
-			if err := validateExpr(field.Value); err != nil {
+			if err := v.validateExpr(field.Value); err != nil {
 				return fmt.Errorf("struct literal field[%d] value: %w", i, err)
 			}
 		}
@@ -609,14 +671,14 @@ func validateExpr(expr Expr) error {
 		if e.Type == nil {
 			return fmt.Errorf("if expression type is nil")
 		}
-		if err := validateExpr(e.Cond); err != nil {
+		if err := v.validateExpr(e.Cond); err != nil {
 			return fmt.Errorf("if expression condition: %w", err)
 		}
-		if err := validateBlock(e.Then); err != nil {
+		if err := v.validateBlock(e.Then); err != nil {
 			return fmt.Errorf("if expression then: %w", err)
 		}
 		if e.Else != nil {
-			if err := validateBlock(e.Else); err != nil {
+			if err := v.validateBlock(e.Else); err != nil {
 				return fmt.Errorf("if expression else: %w", err)
 			}
 		}
@@ -637,7 +699,7 @@ func validateExpr(expr Expr) error {
 		if e.Type == nil {
 			return fmt.Errorf("union match type is nil")
 		}
-		if err := validateExpr(e.Subject); err != nil {
+		if err := v.validateExpr(e.Subject); err != nil {
 			return fmt.Errorf("union match subject: %w", err)
 		}
 		for i, matchCase := range e.Cases {
@@ -647,12 +709,12 @@ func validateExpr(expr Expr) error {
 			if matchCase.Body == nil {
 				return fmt.Errorf("union match case[%d] body is nil", i)
 			}
-			if err := validateBlock(matchCase.Body); err != nil {
+			if err := v.validateBlock(matchCase.Body); err != nil {
 				return fmt.Errorf("union match case[%d] body: %w", i, err)
 			}
 		}
 		if e.CatchAll != nil {
-			if err := validateBlock(e.CatchAll); err != nil {
+			if err := v.validateBlock(e.CatchAll); err != nil {
 				return fmt.Errorf("union match catch-all: %w", err)
 			}
 		}
@@ -673,11 +735,11 @@ func validateExpr(expr Expr) error {
 		if e.Type == nil {
 			return fmt.Errorf("try expression type is nil")
 		}
-		if err := validateExpr(e.Subject); err != nil {
+		if err := v.validateExpr(e.Subject); err != nil {
 			return fmt.Errorf("try expression subject: %w", err)
 		}
 		if e.Catch != nil {
-			if err := validateBlock(e.Catch); err != nil {
+			if err := v.validateBlock(e.Catch); err != nil {
 				return fmt.Errorf("try expression catch: %w", err)
 			}
 		} else if strings.TrimSpace(e.CatchVar) != "" {
@@ -697,7 +759,7 @@ func validateExpr(expr Expr) error {
 		if e.Type == nil {
 			return fmt.Errorf("panic expression type is nil")
 		}
-		if err := validateExpr(e.Message); err != nil {
+		if err := v.validateExpr(e.Message); err != nil {
 			return fmt.Errorf("panic expression message: %w", err)
 		}
 		if err := validateType(e.Type); err != nil {
@@ -715,7 +777,7 @@ func validateExpr(expr Expr) error {
 		if !ok || listType == nil {
 			return fmt.Errorf("copy expression type must be list type")
 		}
-		if err := validateExpr(e.Value); err != nil {
+		if err := v.validateExpr(e.Value); err != nil {
 			return fmt.Errorf("copy expression value: %w", err)
 		}
 		if err := validateType(e.Type); err != nil {
@@ -736,11 +798,11 @@ func validateExpr(expr Expr) error {
 			if stmt == nil {
 				return fmt.Errorf("block expression setup[%d] is nil", i)
 			}
-			if err := validateStmt(stmt); err != nil {
+			if err := v.validateStmt(stmt); err != nil {
 				return fmt.Errorf("block expression setup[%d]: %w", i, err)
 			}
 		}
-		if err := validateExpr(e.Value); err != nil {
+		if err := v.validateExpr(e.Value); err != nil {
 			return fmt.Errorf("block expression value: %w", err)
 		}
 		if err := validateType(e.Type); err != nil {
