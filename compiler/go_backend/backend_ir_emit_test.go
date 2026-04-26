@@ -696,6 +696,47 @@ func TestEmitGoFileFromBackendIR_PanicExprNative(t *testing.T) {
 	if !strings.Contains(generated, "panic(\"boom\")") {
 		t.Fatalf("expected generated source to contain panic call\n%s", generated)
 	}
+	if strings.Contains(generated, "callExpr(\"panic_expr\"") || strings.Contains(generated, "panic_expr(") {
+		t.Fatalf("expected generated source to avoid panic_expr marker fallback\n%s", generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_PanicExprNative_StrReturn(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name:   "describe",
+				Return: backendir.StrType,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.ReturnStmt{Value: &backendir.PanicExpr{
+							Message: &backendir.LiteralExpr{Kind: "str", Value: "no description"},
+							Type:    backendir.StrType,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if !strings.Contains(generated, "func() string") {
+		t.Fatalf("expected typed panic closure to preserve string return type\n%s", generated)
+	}
+	if !strings.Contains(generated, "panic(\"no description\")") {
+		t.Fatalf("expected panic call with quoted message\n%s", generated)
+	}
 }
 
 func TestEmitGoFileFromBackendIR_TryExprNative(t *testing.T) {
@@ -950,6 +991,18 @@ func TestEmitGoFileFromBackendIR_UnionMatchExprNative(t *testing.T) {
 	}
 	if !strings.Contains(generated, "case int:") || !strings.Contains(generated, "case string:") {
 		t.Fatalf("expected generated source to contain native union-match type cases\n%s", generated)
+	}
+	if !strings.Contains(generated, "num := unionValue") {
+		t.Fatalf("expected case-local pattern binding for int case\n%s", generated)
+	}
+	if !strings.Contains(generated, "text := unionValue") {
+		t.Fatalf("expected case-local pattern binding for string case\n%s", generated)
+	}
+	if !strings.Contains(generated, "return num") {
+		t.Fatalf("expected case body to return bound pattern value\n%s", generated)
+	}
+	if strings.Contains(generated, "union_match(") {
+		t.Fatalf("expected union-match emission to avoid union_match marker fallback\n%s", generated)
 	}
 }
 
