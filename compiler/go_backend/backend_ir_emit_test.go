@@ -2849,3 +2849,112 @@ fn main() {
 		t.Fatalf("expected enum method Light.Rank to be emitted exactly once, got %d\n%s", got, generated)
 	}
 }
+
+// TestCompileModuleSourceViaBackendIR_UnionTypedFunctionFallbackPreservesSignature
+// verifies that when a free function's emission falls back to legacy
+// lowering (its signature contains a union type, which forces fallback
+// per requiresLegacyFunctionLowering), the generated Go signature still
+// references the concrete union interface name (e.g. `Shape`) instead
+// of erasing parameters or return types to `any`. This guarantees that
+// the fallback path stays signature-faithful for declared unions and
+// matches the behavior of the native union-typed signature emitter.
+func TestCompileModuleSourceViaBackendIR_UnionTypedFunctionFallbackPreservesSignature(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Square { size: Int }
+struct Circle { radius: Int }
+
+type Shape = Square | Circle
+
+fn pick(shape: Shape) Shape {
+  shape
+}
+
+fn main() {
+  let s = Square{size: 1}
+  let _ = pick(s)
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	if !strings.Contains(generated, "type Shape interface") {
+		t.Fatalf("expected union interface declaration `type Shape interface` in generated Go\n%s", generated)
+	}
+	if !strings.Contains(generated, "func Pick(shape Shape) Shape") {
+		t.Fatalf("expected union-typed function fallback to preserve signature `func Pick(shape Shape) Shape`\n%s", generated)
+	}
+	for _, unwanted := range []string{
+		"Pick(shape any)",
+		"shape any) any",
+	} {
+		if strings.Contains(generated, unwanted) {
+			t.Fatalf("expected union-typed function fallback to NOT erase signature %q\n%s", unwanted, generated)
+		}
+	}
+}
+
+// TestCompileModuleSourceViaBackendIR_UnionTypedMethodFallbackPreservesSignature
+// verifies that struct method emission, when forced into legacy fallback
+// because the method signature contains a union type, still preserves
+// the union interface name in both the parameter type and return type
+// of the emitted Go signature. This ensures method receivers receive
+// the same signature-faithful treatment as free functions.
+func TestCompileModuleSourceViaBackendIR_UnionTypedMethodFallbackPreservesSignature(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Square { size: Int }
+struct Circle { radius: Int }
+
+type Shape = Square | Circle
+
+struct Picker {}
+
+impl Picker {
+  fn choose(shape: Shape) Shape {
+    shape
+  }
+}
+
+fn main() {
+  let p = Picker{}
+  let s = Square{size: 1}
+  let _ = p.choose(s)
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	if !strings.Contains(generated, "type Shape interface") {
+		t.Fatalf("expected union interface declaration `type Shape interface` in generated Go\n%s", generated)
+	}
+	if !strings.Contains(generated, "func (self Picker) Choose(shape Shape) Shape") {
+		t.Fatalf("expected union-typed method fallback to preserve signature `func (self Picker) Choose(shape Shape) Shape`\n%s", generated)
+	}
+	for _, unwanted := range []string{
+		"Choose(shape any)",
+		"shape any) any",
+	} {
+		if strings.Contains(generated, unwanted) {
+			t.Fatalf("expected union-typed method fallback to NOT erase signature %q\n%s", unwanted, generated)
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -140,6 +141,17 @@ func (e *emitter) lowerTraitTypeExpr(trait *checker.Trait, typeParams map[string
 }
 
 func (e *emitter) lowerTypeArgExprWithOptions(t checker.Type, typeParams map[string]string, namedTypeRef func(string, checker.Type) ast.Expr) (ast.Expr, error) {
+	// Type arguments live in nested generic positions (e.g. list element,
+	// map key/value, maybe inner, result val/err, struct generic args).
+	// Union types in such nested positions are kept erased to `any` to
+	// preserve runtime FFI compatibility — the existing extern bridge
+	// relies on `[]any`/`map[string]any` payloads for dynamically-typed
+	// extern arguments. Direct (non-nested) union signature lowering is
+	// handled by lowerTypeExprWithOptions, which references the union's
+	// declared interface name.
+	if isCheckerUnionType(t) {
+		return ast.NewIdent("any"), nil
+	}
 	typeExpr, err := e.lowerTypeExprWithOptions(t, typeParams, namedTypeRef)
 	if err != nil {
 		return nil, err
@@ -148,6 +160,32 @@ func (e *emitter) lowerTypeArgExprWithOptions(t checker.Type, typeParams map[str
 		return &ast.StructType{Fields: &ast.FieldList{}}, nil
 	}
 	return typeExpr, nil
+}
+
+// lowerNestedTypeExprWithOptions lowers a checker type that appears in
+// a nested type-constructor position (list element, map key/value).
+// Union types in nested positions are kept erased to `any` to preserve
+// runtime FFI compatibility for dynamically-typed extern arguments.
+func (e *emitter) lowerNestedTypeExprWithOptions(t checker.Type, typeParams map[string]string, namedTypeRef func(string, checker.Type) ast.Expr) (ast.Expr, error) {
+	if isCheckerUnionType(t) {
+		return ast.NewIdent("any"), nil
+	}
+	return e.lowerTypeExprWithOptions(t, typeParams, namedTypeRef)
+}
+
+// isCheckerUnionType reports whether t is a *checker.Union or
+// checker.Union value. It is used to detect union-typed positions in
+// nested type lowering paths so they can be erased to `any` while
+// direct signature positions still resolve to the declared union
+// interface name.
+func isCheckerUnionType(t checker.Type) bool {
+	switch t.(type) {
+	case *checker.Union:
+		return true
+	case checker.Union:
+		return true
+	}
+	return false
 }
 
 func (e *emitter) lowerFunctionParamFieldsWithOptions(params []checker.Parameter, includeNames bool, typeParams map[string]string, namedTypeRef func(string, checker.Type) ast.Expr) ([]*ast.Field, error) {
@@ -274,17 +312,17 @@ func (e *emitter) lowerTypeExprWithOptions(t checker.Type, typeParams map[string
 		}
 		return indexExpr(selectorExpr(ast.NewIdent(helperImportAlias), "Maybe"), []ast.Expr{innerType}), nil
 	case *checker.List:
-		elementType, err := e.lowerTypeExprWithOptions(typed.Of(), typeParams, namedTypeRef)
+		elementType, err := e.lowerNestedTypeExprWithOptions(typed.Of(), typeParams, namedTypeRef)
 		if err != nil {
 			return nil, err
 		}
 		return &ast.ArrayType{Elt: elementType}, nil
 	case *checker.Map:
-		keyType, err := e.lowerTypeExprWithOptions(typed.Key(), typeParams, namedTypeRef)
+		keyType, err := e.lowerNestedTypeExprWithOptions(typed.Key(), typeParams, namedTypeRef)
 		if err != nil {
 			return nil, err
 		}
-		valueType, err := e.lowerTypeExprWithOptions(typed.Value(), typeParams, namedTypeRef)
+		valueType, err := e.lowerNestedTypeExprWithOptions(typed.Value(), typeParams, namedTypeRef)
 		if err != nil {
 			return nil, err
 		}
@@ -330,7 +368,31 @@ func (e *emitter) lowerTypeExprWithOptions(t checker.Type, typeParams map[string
 		return e.lowerFuncTypeExprWithOptions(typed, typeParams, namedTypeRef)
 	case *checker.Trait:
 		return e.lowerTraitTypeExpr(typed, typeParams, namedTypeRef)
-	case *checker.ExternType, *checker.Union:
+	case *checker.Union:
+		// Direct (non-nested) union signature positions resolve to the
+		// declared union interface name so emitted Go signatures
+		// reference the concrete interface (e.g. `Shape`) instead of
+		// erasing the type to `any`. Nested union usages (inside
+		// list/map/maybe/result generics) still erase to `any` via
+		// lowerNestedTypeExprWithOptions / lowerTypeArgExprWithOptions.
+		if typed != nil {
+			if name := strings.TrimSpace(typed.Name); name != "" {
+				if namedTypeRef != nil {
+					return namedTypeRef(name, typed), nil
+				}
+				return ast.NewIdent(goName(name, true)), nil
+			}
+		}
+		return ast.NewIdent("any"), nil
+	case checker.Union:
+		if name := strings.TrimSpace(typed.Name); name != "" {
+			if namedTypeRef != nil {
+				return namedTypeRef(name, typed), nil
+			}
+			return ast.NewIdent(goName(name, true)), nil
+		}
+		return ast.NewIdent("any"), nil
+	case *checker.ExternType:
 		return ast.NewIdent("any"), nil
 	default:
 		return nil, fmt.Errorf("unsupported type: %s", t.String())
