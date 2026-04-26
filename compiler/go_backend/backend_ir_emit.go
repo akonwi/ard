@@ -551,7 +551,7 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 	if !ok {
 		return nil, fmt.Errorf("failed to lower receiver method %s.%s", typeName, method.Name)
 	}
-	if !e.canEmitFuncDeclNatively(methodIR) {
+	if !e.canEmitFuncDeclNatively(methodIR) || requiresLegacyFunctionLowering(method) {
 		return e.legacy.lowerReceiverMethodDeclNode(typeName, receiverType, typeParams, method)
 	}
 

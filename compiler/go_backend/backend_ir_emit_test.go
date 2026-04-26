@@ -2712,3 +2712,140 @@ fn main() {
 		t.Fatalf("expected emission to avoid legacy block(...) marker fallback in IfExpr else branches\n%s", generated)
 	}
 }
+
+// TestCompileModuleSourceViaBackendIR_MethodDeclarationFallback verifies
+// that struct methods whose signatures cannot be expressed natively in
+// the backend IR (for example, methods that take or return trait/union
+// values) fall back to the legacy method declaration lowering. The
+// legacy path is the only one that surfaces concrete trait identifiers
+// like `ardgo.ToString` in generated Go; the native path would erase
+// trait params to `any` and break trait dispatch downstream.
+func TestCompileModuleSourceViaBackendIR_MethodDeclarationFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/string as Str
+
+struct Logger {
+  prefix: Str,
+}
+
+impl Logger {
+  fn show(item: Str::ToString) Str {
+    self.prefix
+  }
+}
+
+fn main() {
+  let logger = Logger{prefix: "log:"}
+  let _ = logger.show("hi")
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	if !strings.Contains(generated, "func (self Logger) Show(item ardgo.ToString) string") {
+		t.Fatalf("expected trait-typed method to fall back to legacy lowering with ardgo.ToString signature\n%s", generated)
+	}
+	if strings.Contains(generated, "Show(item any)") {
+		t.Fatalf("expected trait-typed method to NOT erase its trait param to `any`\n%s", generated)
+	}
+}
+
+// TestEmitGoFileFromBackendIR_MethodDeclDeduplication verifies that the
+// backend IR emitter deduplicates struct/enum method declarations using
+// the per-emitter owner+method key, so methods are written exactly once
+// even when the same owner declaration is encountered more than once
+// during emission.
+func TestEmitGoFileFromBackendIR_MethodDeclDeduplication(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Box {
+  value: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.value
+  }
+}
+
+enum Light { red, green }
+
+impl Light {
+  fn rank() Int {
+    match self {
+      Light::red => 0,
+      Light::green => 1,
+    }
+  }
+}
+
+fn main() {
+  let box = Box{value: 1}
+  let _ = box.get()
+  let light = Light::green
+  let _ = light.rank()
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("backend IR lowering failed: %v", err)
+	}
+
+	// Inject duplicate StructDecl/EnumDecl entries for Box/Light to
+	// simulate scenarios where the same owner declaration could be
+	// surfaced more than once during emission. The dedupe key in the
+	// backend IR emitter must keep method emission to a single copy
+	// per owner+method pair.
+	var boxDecl, lightDecl backendir.Decl
+	for _, decl := range irModule.Decls {
+		switch typed := decl.(type) {
+		case *backendir.StructDecl:
+			if typed.Name == "Box" {
+				boxDecl = decl
+			}
+		case *backendir.EnumDecl:
+			if typed.Name == "Light" {
+				lightDecl = decl
+			}
+		}
+	}
+	if boxDecl == nil {
+		t.Fatalf("expected Box StructDecl in lowered IR module")
+	}
+	if lightDecl == nil {
+		t.Fatalf("expected Light EnumDecl in lowered IR module")
+	}
+	irModule.Decls = append(irModule.Decls, boxDecl, lightDecl)
+
+	fileIR, err := emitGoFileFromBackendIR(irModule, module, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("backend IR emitter failed: %v", err)
+	}
+	rendered, err := renderGoFile(fileIR)
+	if err != nil {
+		t.Fatalf("renderGoFile failed: %v", err)
+	}
+	generated := string(rendered)
+
+	if got := strings.Count(generated, "func (self Box) Get()"); got != 1 {
+		t.Fatalf("expected struct method Box.Get to be emitted exactly once, got %d\n%s", got, generated)
+	}
+	if got := strings.Count(generated, "func (self Light) Rank()"); got != 1 {
+		t.Fatalf("expected enum method Light.Rank to be emitted exactly once, got %d\n%s", got, generated)
+	}
+}
