@@ -34,7 +34,13 @@ func compileModuleSourceViaBackendIR(module checker.Module, packageName string, 
 	if err != nil {
 		return nil, err
 	}
+	return compileLoweredModuleSourceViaBackendIR(irModule, entrypoint)
+}
 
+func compileLoweredModuleSourceViaBackendIR(irModule *backendir.Module, entrypoint bool) ([]byte, error) {
+	if irModule == nil {
+		return nil, fmt.Errorf("nil backend ir module")
+	}
 	fileIR, err := emitGoFileFromBackendIR(irModule, entrypoint)
 	if err != nil {
 		return nil, err

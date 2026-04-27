@@ -23,10 +23,6 @@ func CompileEntrypoint(module checker.Module) ([]byte, error) {
 	return compileModuleSource(module, "main", true, "")
 }
 
-func compilePackageSource(module checker.Module, projectName string) ([]byte, error) {
-	return compileModuleSource(module, packageNameForModulePath(module.Path()), false, projectName)
-}
-
 func compileModuleSource(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
 	return compileModuleSourceViaBackendIR(module, packageName, entrypoint, projectName)
 }
