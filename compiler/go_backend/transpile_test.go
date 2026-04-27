@@ -1857,22 +1857,6 @@ let c = classify(2)
 		t.Fatalf("expected nil-source-module emission to parse as Go, got error: %v\n%s", err, string(rendered))
 	}
 
-	// The generated source must not contain marker artifacts.
-	for _, marker := range []string{
-		"try_op",
-		"bool_match",
-		"int_match",
-		"conditional_match",
-		"option_match",
-		"result_match",
-		"enum_match",
-		"union_match",
-	} {
-		if strings.Contains(string(rendered), marker) {
-			t.Fatalf("expected nil-source-module emission to be free of marker %q\n%s", marker, string(rendered))
-		}
-	}
-
 	// Sanity check: migrated try/match should still emit recognizable
 	// native Go control flow shapes.
 	for _, want := range []string{

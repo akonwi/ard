@@ -1632,9 +1632,6 @@ func TestEmitGoFileFromBackendIR_UnionMatchExprNative(t *testing.T) {
 	if !strings.Contains(generated, "return num") {
 		t.Fatalf("expected case body to return bound pattern value\n%s", generated)
 	}
-	if strings.Contains(generated, "union_match(") {
-		t.Fatalf("expected union-match emission to avoid union_match marker fallback\n%s", generated)
-	}
 }
 
 func TestEmitGoFileFromBackendIR_ScalarMethodOpsNative(t *testing.T) {
@@ -2441,10 +2438,8 @@ fn main() {
 
 // TestEmitGoFileFromBackendIR_IntMatchUnsafeSubjectSingleEvaluationNative
 // verifies that an int match expression over a non-trivial subject (a
-// function call with side effects) emits through the native backend IR
-// path: the subject is bound to a synthetic temp and evaluated exactly
-// once, and the lowered output contains no legacy `int_match` or `block`
-// marker fallback artifacts. This is the structural guarantee that
+// function call with side effects) binds the subject to a synthetic temp
+// and evaluates it exactly once. This is the structural guarantee that
 // single-evaluation semantics are preserved in emitted Go.
 func TestEmitGoFileFromBackendIR_IntMatchUnsafeSubjectSingleEvaluationNative(t *testing.T) {
 	dir := t.TempDir()
@@ -2491,12 +2486,6 @@ fn main() {
 		t.Fatalf("expected subject call Next() to be evaluated exactly once (1 decl + 1 hoist call), got %d total occurrences\n%s", got, generated)
 	}
 
-	if strings.Contains(generated, "int_match(") {
-		t.Fatalf("expected emission to avoid int_match marker fallback\n%s", generated)
-	}
-	if strings.Contains(generated, "block(") {
-		t.Fatalf("expected emission to avoid legacy block(...) marker fallback in IfExpr else branches\n%s", generated)
-	}
 }
 
 func TestEmitGoFileFromBackendIR_OptionMatchUnsafeSubjectTempDoesNotCollideWithUserLocal(t *testing.T) {
@@ -2651,11 +2640,10 @@ fn main() {
 }
 
 // TestEmitGoFileFromBackendIR_EnumMatchUnsafeSubjectSingleEvaluationNative
-// verifies the same single-evaluation native emission contract for an
-// enum match over a non-trivial subject. The synthetic match-subject
-// temp must be present in the emitted Go (proving native emission) and
-// the unsafe subject call must be evaluated exactly once. No legacy
-// `enum_match` or `block` marker fallback artifacts may appear.
+// verifies the same single-evaluation emission contract for an enum
+// match over a non-trivial subject. The synthetic match-subject temp
+// must be present in the emitted Go and the unsafe subject call must be
+// evaluated exactly once.
 func TestEmitGoFileFromBackendIR_EnumMatchUnsafeSubjectSingleEvaluationNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -2705,12 +2693,6 @@ fn main() {
 		t.Fatalf("expected subject call Next() to be evaluated exactly once (1 decl + 1 hoist call), got %d total occurrences\n%s", got, generated)
 	}
 
-	if strings.Contains(generated, "enum_match(") {
-		t.Fatalf("expected emission to avoid enum_match marker fallback\n%s", generated)
-	}
-	if strings.Contains(generated, "block(") {
-		t.Fatalf("expected emission to avoid legacy block(...) marker fallback in IfExpr else branches\n%s", generated)
-	}
 }
 
 // TestCompileModuleSourceViaBackendIR_MethodDeclarationFallback verifies

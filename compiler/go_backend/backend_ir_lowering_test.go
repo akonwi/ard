@@ -513,9 +513,6 @@ fn compute(n: Int) Int {
 			if !ok {
 				t.Fatalf("expected try value catch to lower as TryExpr, got %T", assign.Value)
 			}
-			if containsCallNamed(assign.Value, "try_op") {
-				t.Fatalf("expected value-catch try lowering without try_op marker")
-			}
 			if strings.TrimSpace(tryExpr.CatchVar) != "err" {
 				t.Fatalf("expected lowered try expression to preserve catch var, got %q", tryExpr.CatchVar)
 			}
@@ -580,9 +577,6 @@ fn compute(n: Int) Int!Str {
 			if strings.TrimSpace(tryExpr.Kind) != "result" {
 				t.Fatalf("expected try without catch to preserve result kind, got %q", tryExpr.Kind)
 			}
-			if containsCallNamed(assign.Value, "try_op") {
-				t.Fatalf("expected try without catch to lower without try_op marker fallback")
-			}
 			return
 		}
 		t.Fatalf("expected compute body to include value assignment from try expression")
@@ -638,9 +632,6 @@ fn compute(n: Int) Int? {
 			if strings.TrimSpace(tryExpr.Kind) != "maybe" {
 				t.Fatalf("expected maybe try without catch to preserve maybe kind, got %q", tryExpr.Kind)
 			}
-			if containsCallNamed(assign.Value, "try_op") {
-				t.Fatalf("expected maybe try without catch to lower without try_op marker fallback")
-			}
 			return
 		}
 		t.Fatalf("expected compute body to include value assignment from try expression")
@@ -690,9 +681,6 @@ fn compute(n: Int) Int {
 			}
 			if _, ok := assign.Value.(*backendir.TryExpr); !ok {
 				t.Fatalf("expected try with unsafe subject to lower as TryExpr, got %T", assign.Value)
-			}
-			if containsCallNamed(assign.Value, "try_op") {
-				t.Fatalf("expected try with unsafe subject to lower without try_op marker fallback")
 			}
 			return
 		}
@@ -891,9 +879,6 @@ func TestLowerExpressionToBackendIR_LowersBoolMatchAsIfExpr(t *testing.T) {
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected bool match to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "bool_match") {
-		t.Fatalf("expected bool match lowering without bool_match marker call")
-	}
 }
 
 func TestLowerExpressionToBackendIR_LowersIntMatchAsIfExpr(t *testing.T) {
@@ -912,9 +897,6 @@ func TestLowerExpressionToBackendIR_LowersIntMatchAsIfExpr(t *testing.T) {
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected int match to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "int_match") {
-		t.Fatalf("expected int match lowering without int_match marker call")
-	}
 }
 
 func TestLowerExpressionToBackendIR_LowersIntMatchWithUnsafeSubjectSemanticSingleEval(t *testing.T) {
@@ -931,9 +913,6 @@ func TestLowerExpressionToBackendIR_LowersIntMatchWithUnsafeSubjectSemanticSingl
 	}
 
 	lowered := lowerExpressionToBackendIR(intMatch)
-	if containsCallNamed(lowered, "int_match") {
-		t.Fatalf("expected int match with unsafe subject to lower without int_match marker fallback")
-	}
 	block, ok := lowered.(*backendir.BlockExpr)
 	if !ok {
 		t.Fatalf("expected int match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
@@ -973,9 +952,6 @@ func TestLowerExpressionToBackendIR_LowersIntMatchWithoutCatchAllWithNonExhausti
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected int match without catch-all to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "int_match") {
-		t.Fatalf("expected int match without catch-all to lower without int_match marker fallback")
-	}
 	if !containsCallNamed(lowered, "panic") {
 		t.Fatalf("expected int match without catch-all to include non-exhaustive panic path")
 	}
@@ -1000,9 +976,6 @@ func TestLowerExpressionToBackendIR_LowersConditionalMatchAsIfExpr(t *testing.T)
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected conditional match to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "conditional_match") {
-		t.Fatalf("expected conditional match lowering without conditional_match marker call")
-	}
 }
 
 func TestLowerExpressionToBackendIR_LowersConditionalMatchWithoutCatchAllWithNonExhaustivePanic(t *testing.T) {
@@ -1018,9 +991,6 @@ func TestLowerExpressionToBackendIR_LowersConditionalMatchWithoutCatchAllWithNon
 	lowered := lowerExpressionToBackendIR(conditional)
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected conditional match without catch-all to lower as backend IfExpr, got %T", lowered)
-	}
-	if containsCallNamed(lowered, "conditional_match") {
-		t.Fatalf("expected conditional match without catch-all to lower without conditional_match marker fallback")
 	}
 	if !containsCallNamed(lowered, "panic") {
 		t.Fatalf("expected conditional match without catch-all to include non-exhaustive panic path")
@@ -1042,9 +1012,6 @@ func TestLowerExpressionToBackendIR_LowersOptionMatchAsIfExpr(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected option match to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "option_match") {
-		t.Fatalf("expected option match lowering without option_match marker call")
-	}
 	if len(ifExpr.Then.Stmts) == 0 {
 		t.Fatalf("expected option match then block to include pattern binding")
 	}
@@ -1065,9 +1032,6 @@ func TestLowerExpressionToBackendIR_LowersOptionMatchWithUnsafeSubjectSemanticSi
 	}
 
 	lowered := lowerExpressionToBackendIR(optionMatch)
-	if containsCallNamed(lowered, "option_match") {
-		t.Fatalf("expected option match with unsafe subject to lower without option_match marker fallback")
-	}
 	block, ok := lowered.(*backendir.BlockExpr)
 	if !ok {
 		t.Fatalf("expected option match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
@@ -1104,9 +1068,6 @@ func TestLowerExpressionToBackendIR_LowersResultMatchAsIfExpr(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected result match to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "result_match") {
-		t.Fatalf("expected result match lowering without result_match marker call")
-	}
 	if len(ifExpr.Then.Stmts) == 0 || len(ifExpr.Else.Stmts) == 0 {
 		t.Fatalf("expected result match branches to include pattern bindings")
 	}
@@ -1132,9 +1093,6 @@ func TestLowerExpressionToBackendIR_LowersResultMatchWithUnsafeSubjectSemanticSi
 	}
 
 	lowered := lowerExpressionToBackendIR(resultMatch)
-	if containsCallNamed(lowered, "result_match") {
-		t.Fatalf("expected result match with unsafe subject to lower without result_match marker fallback")
-	}
 	block, ok := lowered.(*backendir.BlockExpr)
 	if !ok {
 		t.Fatalf("expected result match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
@@ -1167,9 +1125,6 @@ func TestLowerExpressionToBackendIR_LowersEnumMatchAsIfExpr(t *testing.T) {
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected enum match to lower as backend IfExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "enum_match") {
-		t.Fatalf("expected enum match lowering without enum_match marker call")
-	}
 }
 
 func TestLowerExpressionToBackendIR_LowersEnumMatchWithUnsafeSubjectSemanticSingleEval(t *testing.T) {
@@ -1183,9 +1138,6 @@ func TestLowerExpressionToBackendIR_LowersEnumMatchWithUnsafeSubjectSemanticSing
 	}
 
 	lowered := lowerExpressionToBackendIR(enumMatch)
-	if containsCallNamed(lowered, "enum_match") {
-		t.Fatalf("expected enum match with unsafe subject to lower without enum_match marker fallback")
-	}
 	block, ok := lowered.(*backendir.BlockExpr)
 	if !ok {
 		t.Fatalf("expected enum match with unsafe subject to lower as backend BlockExpr, got %T", lowered)
@@ -1215,9 +1167,6 @@ func TestLowerExpressionToBackendIR_LowersEnumMatchWithoutCatchAllWithNonExhaust
 	lowered := lowerExpressionToBackendIR(enumMatch)
 	if _, ok := lowered.(*backendir.IfExpr); !ok {
 		t.Fatalf("expected enum match without catch-all to lower as backend IfExpr, got %T", lowered)
-	}
-	if containsCallNamed(lowered, "enum_match") {
-		t.Fatalf("expected enum match without catch-all to lower without enum_match marker fallback")
 	}
 	if !containsCallNamed(lowered, "panic") {
 		t.Fatalf("expected enum match without catch-all to include non-exhaustive panic path")
@@ -1251,9 +1200,6 @@ func TestLowerExpressionToBackendIR_LowersUnionMatchSemantic(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected union match to lower as backend UnionMatchExpr, got %T", lowered)
 	}
-	if containsCallNamed(lowered, "union_match") {
-		t.Fatalf("expected union match lowering without union_match marker call")
-	}
 	if len(unionExpr.Cases) != 2 {
 		t.Fatalf("expected union match lowering with 2 cases, got %d", len(unionExpr.Cases))
 	}
@@ -1278,9 +1224,6 @@ func TestLowerExpressionToBackendIR_LowersUnionMatchWithoutCatchAllWithNonExhaus
 	unionExpr, ok := lowered.(*backendir.UnionMatchExpr)
 	if !ok {
 		t.Fatalf("expected union match without catch-all to lower as backend UnionMatchExpr, got %T", lowered)
-	}
-	if containsCallNamed(lowered, "union_match") {
-		t.Fatalf("expected union match without catch-all to lower without union_match marker fallback")
 	}
 	if unionExpr.CatchAll == nil {
 		t.Fatalf("expected union match without catch-all to synthesize non-exhaustive panic catch-all block")
@@ -1610,73 +1553,12 @@ fn update() Int {
 	t.Fatalf("expected member reassignment to lower as MemberAssignStmt")
 }
 
-// markerFallbackArtifactNames lists the legacy try/match marker call names
-// that lowering must never emit on a successful path. The tests in this file
-// assert their absence directly so the no-marker invariant stays covered at
-// the lowering layer.
-var markerFallbackArtifactNames = []string{
-	"try_op",
-	"bool_match",
-	"int_match",
-	"conditional_match",
-	"option_match",
-	"result_match",
-	"enum_match",
-	"union_match",
-}
-
-// containsMarkerArtifactInModule walks the entire backend IR module
-// (declarations + entrypoint block) and reports the first marker fallback
-// callee name it observes, or "" if the module is marker-free.
-func containsMarkerArtifactInModule(module *backendir.Module) string {
-	if module == nil {
-		return ""
-	}
-	for _, decl := range module.Decls {
-		if name := containsMarkerArtifactInDecl(decl); name != "" {
-			return name
-		}
-	}
-	for _, name := range markerFallbackArtifactNames {
-		if containsCallNamedInBlock(module.Entrypoint, name) {
-			return name
-		}
-	}
-	return ""
-}
-
-func containsMarkerArtifactInDecl(decl backendir.Decl) string {
-	switch d := decl.(type) {
-	case *backendir.FuncDecl:
-		if d == nil || d.Body == nil {
-			return ""
-		}
-		for _, name := range markerFallbackArtifactNames {
-			if containsCallNamedInBlock(d.Body, name) {
-				return name
-			}
-		}
-	case *backendir.VarDecl:
-		if d == nil {
-			return ""
-		}
-		for _, name := range markerFallbackArtifactNames {
-			if containsCallNamed(d.Value, name) {
-				return name
-			}
-		}
-	}
-	return ""
-}
-
 // TestLowerModuleToBackendIR_ComprehensiveNodeCoverage exercises module
 // lowering with a checker module that spans the full range of declaration
 // and expression node kinds covered by the migration: struct/enum/union/
 // extern-type declarations, package-level variables, regular and extern
 // functions, and the migrated try/match expression families. It asserts
-// that the lowered backend IR module does not contain any legacy marker
-// fallback artifacts (`try_op`, `*_match`) and that the resulting module
-// remains structurally valid.
+// that the resulting module remains structurally valid.
 func TestLowerModuleToBackendIR_ComprehensiveNodeCoverage(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1784,10 +1666,6 @@ let h = now()
 		t.Fatalf("expected non-nil backend ir module")
 	}
 
-	if got := containsMarkerArtifactInModule(irModule); got != "" {
-		t.Fatalf("expected lowered module to be free of marker fallback artifacts; found %q", got)
-	}
-
 	if err := backendir.ValidateModule(irModule); err != nil {
 		t.Fatalf("expected lowered module to validate cleanly, got error: %v", err)
 	}
@@ -1831,14 +1709,11 @@ let h = now()
 	}
 
 	// Re-lower with entrypoint=false to cover the package-variable
-	// declaration path. The same module shape must still be marker-free
-	// and pass validation in that mode.
+	// declaration path. The same module shape must still pass validation
+	// in that mode.
 	nonEntrypointIR, err := lowerModuleToBackendIR(module, "demo_pkg", false)
 	if err != nil {
 		t.Fatalf("expected non-entrypoint backend ir lowering to succeed, got error: %v", err)
-	}
-	if got := containsMarkerArtifactInModule(nonEntrypointIR); got != "" {
-		t.Fatalf("expected non-entrypoint lowering to be marker-free; found %q", got)
 	}
 	if err := backendir.ValidateModule(nonEntrypointIR); err != nil {
 		t.Fatalf("expected non-entrypoint module to validate cleanly, got error: %v", err)
