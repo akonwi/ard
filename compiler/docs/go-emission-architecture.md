@@ -51,16 +51,16 @@ It models:
 
 `compiler/go_backend/lowering` is responsible for lowering checked modules into this IR.
 
-### 3. Go file IR
+### 3. Go file assembly
 
-`goFileIR` is a lightweight file-assembly stage used after backend IR emission.
+`goFileIR` is a lightweight file-assembly stage that organizes lowered backend IR output into target Go files.
 
 It is responsible for:
 - package clause
 - import block assembly
-- ordered decl grouping
+- ordered top-level declaration grouping
 
-This stage is intentionally small. Semantic decisions should already be made by backend IR lowering and backend IR emission.
+It is not a second semantic IR. Semantic decisions should already be made by backend IR lowering and backend IR emission; this stage only organizes emitted Go declarations into final file structure.
 
 ### 4. Go AST emission
 
