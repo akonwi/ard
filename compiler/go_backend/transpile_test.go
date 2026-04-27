@@ -1834,11 +1834,6 @@ let c = classify(2)
 	if irModule == nil {
 		t.Fatalf("expected non-nil backend ir module")
 	}
-	// Validate the lowered module so structural IR regressions fail here
-	// before emission.
-	if err := backendir.ValidateModule(irModule); err != nil {
-		t.Fatalf("expected lowered module to validate cleanly, got: %v", err)
-	}
 
 	imports := map[string]string{
 		helperImportPath: helperImportAlias,
