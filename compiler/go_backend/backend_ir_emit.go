@@ -606,6 +606,30 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		return e.canEmitExprNatively(v.Value)
 	case *backendir.TraitCoerceExpr:
 		return v != nil && v.Value != nil && v.Type != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(v.Type)
+	case *backendir.MaybeSomeExpr:
+		if v == nil || v.Value == nil {
+			return false
+		}
+		maybeType, ok := v.Type.(*backendir.MaybeType)
+		return ok && maybeType != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(maybeType.Of)
+	case *backendir.MaybeNoneExpr:
+		if v == nil {
+			return false
+		}
+		maybeType, ok := v.Type.(*backendir.MaybeType)
+		return ok && maybeType != nil && e.canEmitTypeNatively(maybeType.Of)
+	case *backendir.ResultOkExpr:
+		if v == nil || v.Value == nil {
+			return false
+		}
+		resultType, ok := v.Type.(*backendir.ResultType)
+		return ok && resultType != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(resultType.Val) && e.canEmitTypeNatively(resultType.Err)
+	case *backendir.ResultErrExpr:
+		if v == nil || v.Value == nil {
+			return false
+		}
+		resultType, ok := v.Type.(*backendir.ResultType)
+		return ok && resultType != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(resultType.Val) && e.canEmitTypeNatively(resultType.Err)
 	case *backendir.AddressOfExpr:
 		return v != nil && v.Value != nil && isAddressableIRExpr(v.Value)
 	case *backendir.SelectorExpr:
@@ -1789,6 +1813,14 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 		return e.emitCallExpr(v, locals)
 	case *backendir.TraitCoerceExpr:
 		return e.emitTraitCoerceExpr(v, locals)
+	case *backendir.MaybeSomeExpr:
+		return e.emitMaybeSomeExpr(v, locals)
+	case *backendir.MaybeNoneExpr:
+		return e.emitMaybeNoneExpr(v)
+	case *backendir.ResultOkExpr:
+		return e.emitResultOkExpr(v, locals)
+	case *backendir.ResultErrExpr:
+		return e.emitResultErrExpr(v, locals)
 	case *backendir.AddressOfExpr:
 		return e.emitAddressOfExpr(v, locals)
 	default:
@@ -2419,6 +2451,86 @@ func (e *backendIREmitter) emitTraitCoerceExpr(expr *backendir.TraitCoerceExpr, 
 	default:
 		return value, nil
 	}
+}
+
+func (e *backendIREmitter) emitMaybeSomeExpr(expr *backendir.MaybeSomeExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, fmt.Errorf("invalid maybe some expression")
+	}
+	maybeType, ok := expr.Type.(*backendir.MaybeType)
+	if !ok || maybeType == nil {
+		return nil, fmt.Errorf("maybe some expression type is %T", expr.Type)
+	}
+	innerType, err := e.emitType(maybeType.Of)
+	if err != nil {
+		return nil, err
+	}
+	value, err := e.emitExpr(expr.Value, locals)
+	if err != nil {
+		return nil, err
+	}
+	return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{innerType}, []ast.Expr{value}), nil
+}
+
+func (e *backendIREmitter) emitMaybeNoneExpr(expr *backendir.MaybeNoneExpr) (ast.Expr, error) {
+	if expr == nil {
+		return nil, fmt.Errorf("invalid maybe none expression")
+	}
+	maybeType, ok := expr.Type.(*backendir.MaybeType)
+	if !ok || maybeType == nil {
+		return nil, fmt.Errorf("maybe none expression type is %T", expr.Type)
+	}
+	innerType, err := e.emitType(maybeType.Of)
+	if err != nil {
+		return nil, err
+	}
+	return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "None"), []ast.Expr{innerType}, nil), nil
+}
+
+func (e *backendIREmitter) emitResultOkExpr(expr *backendir.ResultOkExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, fmt.Errorf("invalid result ok expression")
+	}
+	resultType, ok := expr.Type.(*backendir.ResultType)
+	if !ok || resultType == nil {
+		return nil, fmt.Errorf("result ok expression type is %T", expr.Type)
+	}
+	valType, err := e.emitType(resultType.Val)
+	if err != nil {
+		return nil, err
+	}
+	errType, err := e.emitType(resultType.Err)
+	if err != nil {
+		return nil, err
+	}
+	value, err := e.emitExpr(expr.Value, locals)
+	if err != nil {
+		return nil, err
+	}
+	return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Ok"), []ast.Expr{valType, errType}, []ast.Expr{value}), nil
+}
+
+func (e *backendIREmitter) emitResultErrExpr(expr *backendir.ResultErrExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, fmt.Errorf("invalid result err expression")
+	}
+	resultType, ok := expr.Type.(*backendir.ResultType)
+	if !ok || resultType == nil {
+		return nil, fmt.Errorf("result err expression type is %T", expr.Type)
+	}
+	valType, err := e.emitType(resultType.Val)
+	if err != nil {
+		return nil, err
+	}
+	errType, err := e.emitType(resultType.Err)
+	if err != nil {
+		return nil, err
+	}
+	value, err := e.emitExpr(expr.Value, locals)
+	if err != nil {
+		return nil, err
+	}
+	return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Err"), []ast.Expr{valType, errType}, []ast.Expr{value}), nil
 }
 
 func (e *backendIREmitter) emitAddressOfExpr(expr *backendir.AddressOfExpr, locals map[string]string) (ast.Expr, error) {

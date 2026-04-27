@@ -224,6 +224,33 @@ type TraitCoerceExpr struct {
 
 func (*TraitCoerceExpr) exprNode() {}
 
+type MaybeSomeExpr struct {
+	Value Expr
+	Type  Type
+}
+
+func (*MaybeSomeExpr) exprNode() {}
+
+type MaybeNoneExpr struct {
+	Type Type
+}
+
+func (*MaybeNoneExpr) exprNode() {}
+
+type ResultOkExpr struct {
+	Value Expr
+	Type  Type
+}
+
+func (*ResultOkExpr) exprNode() {}
+
+type ResultErrExpr struct {
+	Value Expr
+	Type  Type
+}
+
+func (*ResultErrExpr) exprNode() {}
+
 type AddressOfExpr struct {
 	Value Expr
 }

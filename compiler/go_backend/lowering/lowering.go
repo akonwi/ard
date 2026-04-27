@@ -963,7 +963,7 @@ func lowerVariableDeclToBackendIR(def *checker.VariableDef) backendir.Decl {
 	return &backendir.VarDecl{
 		Name:    def.Name,
 		Type:    lowerCheckerTypeToBackendIR(def.Type()),
-		Value:   lowerExpressionOrOpaque(def.Value),
+		Value:   lowerExpressionOrOpaqueExpected(def.Value, def.Type()),
 		Mutable: def.Mutable,
 	}
 }
@@ -980,7 +980,7 @@ func lowerFunctionDeclToBackendIR(def *checker.FunctionDef) backendir.Decl {
 	}
 
 	returnType := lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(def))
-	body := lowerBlockToBackendIR(def.Body)
+	body := lowerBlockToBackendIRWithReturnType(def.Body, effectiveFunctionReturnType(def))
 	finalizeFunctionBodyForReturn(body, returnType)
 
 	return &backendir.FuncDecl{
@@ -1043,12 +1043,20 @@ func lowerExternFunctionDeclToBackendIR(def *checker.ExternalFunctionDef) backen
 }
 
 func lowerBlockToBackendIR(block *checker.Block) *backendir.Block {
+	return lowerBlockToBackendIRWithReturnType(block, nil)
+}
+
+func lowerBlockToBackendIRWithReturnType(block *checker.Block, returnType checker.Type) *backendir.Block {
 	out := &backendir.Block{Stmts: []backendir.Stmt{}}
 	if block == nil {
 		return out
 	}
 	for i, stmt := range block.Stmts {
-		out.Stmts = append(out.Stmts, lowerStatementToBackendIR(stmt)...)
+		var expected checker.Type
+		if i == len(block.Stmts)-1 {
+			expected = returnType
+		}
+		out.Stmts = append(out.Stmts, lowerStatementToBackendIRWithExpected(stmt, expected)...)
 		variableDef, ok := stmt.Stmt.(*checker.VariableDef)
 		if !ok || variableDef == nil {
 			continue
@@ -1068,6 +1076,10 @@ func lowerBlockToBackendIR(block *checker.Block) *backendir.Block {
 }
 
 func lowerStatementToBackendIR(stmt checker.Statement) []backendir.Stmt {
+	return lowerStatementToBackendIRWithExpected(stmt, nil)
+}
+
+func lowerStatementToBackendIRWithExpected(stmt checker.Statement, expected checker.Type) []backendir.Stmt {
 	out := make([]backendir.Stmt, 0, 2)
 
 	if stmt.Break {
@@ -1083,7 +1095,7 @@ func lowerStatementToBackendIR(stmt checker.Statement) []backendir.Stmt {
 			out = append(out, lowerIfChainToBackendIR(ifExpr))
 		} else {
 			out = append(out, &backendir.ExprStmt{
-				Value: lowerExpressionToBackendIR(stmt.Expr),
+				Value: lowerExpressionToBackendIRWithExpected(stmt.Expr, expected),
 			})
 		}
 	}
@@ -1097,7 +1109,7 @@ func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
 		return []backendir.Stmt{
 			&backendir.AssignStmt{
 				Target: n.Name,
-				Value:  lowerExpressionOrOpaque(n.Value),
+				Value:  lowerExpressionOrOpaqueExpected(n.Value, n.Type()),
 			},
 		}
 	case *checker.Reassignment:
@@ -1411,6 +1423,28 @@ func lowerExpressionOrOpaque(expr checker.Expression) backendir.Expr {
 	return lowerExpressionToBackendIR(expr)
 }
 
+func lowerExpressionOrOpaqueExpected(expr checker.Expression, expected checker.Type) backendir.Expr {
+	if expr == nil {
+		return literalExpr("nil_expr", "")
+	}
+	return lowerExpressionToBackendIRWithExpected(expr, expected)
+}
+
+func lowerExpressionToBackendIRWithExpected(expr checker.Expression, expected checker.Type) backendir.Expr {
+	if moduleCall, ok := expr.(*checker.ModuleFunctionCall); ok {
+		if special := lowerSpecialModuleConstructorToBackendIR(moduleCall, expected); special != nil {
+			return special
+		}
+	}
+	if boolMatch, ok := expr.(*checker.BoolMatch); ok && expected != nil {
+		return lowerBoolMatchExprToBackendIRWithExpected(boolMatch, expected)
+	}
+	if tryOp, ok := expr.(*checker.TryOp); ok && expected != nil {
+		return lowerTryOpExprToBackendIRWithExpected(tryOp, expected)
+	}
+	return lowerExpressionToBackendIR(expr)
+}
+
 func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 	switch v := expr.(type) {
 	case *checker.Identifier:
@@ -1676,7 +1710,7 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 		for _, field := range sortedStringKeys(v.Fields) {
 			fields = append(fields, backendir.StructFieldValue{
 				Name:  field,
-				Value: lowerExpressionOrOpaque(v.Fields[field]),
+				Value: lowerExpressionOrOpaqueExpected(v.Fields[field], v.FieldTypes[field]),
 			})
 		}
 		return &backendir.StructLiteralExpr{
@@ -1695,7 +1729,7 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 		for _, field := range sortedStringKeys(v.Property.Fields) {
 			fields = append(fields, backendir.StructFieldValue{
 				Name:  field,
-				Value: lowerExpressionOrOpaque(v.Property.Fields[field]),
+				Value: lowerExpressionOrOpaqueExpected(v.Property.Fields[field], v.FieldTypes[field]),
 			})
 		}
 		return &backendir.StructLiteralExpr{
@@ -1880,7 +1914,7 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 }
 
 func lowerCallArgToBackendIR(arg checker.Expression, param checker.Parameter) backendir.Expr {
-	value := lowerExpressionOrOpaque(arg)
+	value := lowerExpressionOrOpaqueExpected(arg, param.Type)
 	if param.Mutable && mutableParamNeedsPointer(param.Type) {
 		value = &backendir.AddressOfExpr{Value: value}
 	}
@@ -1925,6 +1959,9 @@ func lowerModuleFunctionCallToBackendIR(call *checker.ModuleFunctionCall) backen
 	if call == nil || call.Call == nil {
 		return callExpr("module_call", literalExpr("nil", "call"))
 	}
+	if special := lowerSpecialModuleConstructorToBackendIR(call, nil); special != nil {
+		return special
+	}
 	args := lowerCallArgsToBackendIR(call.Call.Args, call.Call.Definition())
 	moduleName := strings.TrimSpace(call.Module)
 	if moduleName == "" {
@@ -1941,6 +1978,101 @@ func lowerModuleFunctionCallToBackendIR(call *checker.ModuleFunctionCall) backen
 		},
 		Args: args,
 	}
+}
+
+func lowerSpecialModuleConstructorToBackendIR(call *checker.ModuleFunctionCall, expected checker.Type) backendir.Expr {
+	moduleName := strings.TrimSpace(call.Module)
+	funcName := strings.TrimSpace(call.Call.Name)
+	switch moduleName {
+	case "ard/maybe":
+		maybeType, ok := lowerMaybeConstructorType(call.Call.ReturnType, expected)
+		if !ok {
+			return nil
+		}
+		switch funcName {
+		case "some":
+			if len(call.Call.Args) != 1 {
+				return nil
+			}
+			return &backendir.MaybeSomeExpr{Value: lowerExpressionOrOpaque(call.Call.Args[0]), Type: maybeType}
+		case "none":
+			return &backendir.MaybeNoneExpr{Type: maybeType}
+		}
+	case "ard/result":
+		resultType, ok := lowerResultConstructorType(call.Call.ReturnType, expected)
+		if !ok {
+			return nil
+		}
+		switch funcName {
+		case "ok":
+			if len(call.Call.Args) != 1 {
+				return nil
+			}
+			return &backendir.ResultOkExpr{Value: lowerExpressionOrOpaque(call.Call.Args[0]), Type: resultType}
+		case "err":
+			if len(call.Call.Args) != 1 {
+				return nil
+			}
+			return &backendir.ResultErrExpr{Value: lowerExpressionOrOpaque(call.Call.Args[0]), Type: resultType}
+		}
+	}
+	return nil
+}
+
+func lowerMaybeConstructorType(t checker.Type, expected checker.Type) (backendir.Type, bool) {
+	if expectedMaybe, ok := derefMaybeType(expected); ok {
+		return &backendir.MaybeType{Of: lowerNestedCheckerTypeToBackendIR(expectedMaybe.Of())}, true
+	}
+	return lowerMaybeCallReturnType(t)
+}
+
+func lowerMaybeCallReturnType(t checker.Type) (backendir.Type, bool) {
+	maybe, ok := derefMaybeType(t)
+	if !ok || maybe == nil {
+		return nil, false
+	}
+	return &backendir.MaybeType{Of: lowerNestedCheckerTypeToBackendIR(maybe.Of())}, true
+}
+
+func lowerResultConstructorType(t checker.Type, expected checker.Type) (backendir.Type, bool) {
+	if expectedResult, ok := derefResultType(expected); ok {
+		return &backendir.ResultType{
+			Val: lowerNestedCheckerTypeToBackendIR(expectedResult.Val()),
+			Err: lowerNestedCheckerTypeToBackendIR(expectedResult.Err()),
+		}, true
+	}
+	return lowerResultCallReturnType(t)
+}
+
+func lowerResultCallReturnType(t checker.Type) (backendir.Type, bool) {
+	result, ok := derefResultType(t)
+	if !ok || result == nil {
+		return nil, false
+	}
+	return &backendir.ResultType{
+		Val: lowerNestedCheckerTypeToBackendIR(result.Val()),
+		Err: lowerNestedCheckerTypeToBackendIR(result.Err()),
+	}, true
+}
+
+func derefMaybeType(t checker.Type) (*checker.Maybe, bool) {
+	if tv, ok := t.(*checker.TypeVar); ok {
+		if actual := tv.Actual(); actual != nil {
+			return derefMaybeType(actual)
+		}
+	}
+	maybe, ok := t.(*checker.Maybe)
+	return maybe, ok && maybe != nil
+}
+
+func derefResultType(t checker.Type) (*checker.Result, bool) {
+	if tv, ok := t.(*checker.TypeVar); ok {
+		if actual := tv.Actual(); actual != nil {
+			return derefResultType(actual)
+		}
+	}
+	result, ok := t.(*checker.Result)
+	return result, ok && result != nil
 }
 
 func lowerBinaryExprToBackendIR(name string, left checker.Expression, right checker.Expression) backendir.Expr {
@@ -1991,13 +2123,20 @@ func lowerIfExprToBackendIR(expr *checker.If) backendir.Expr {
 }
 
 func lowerBoolMatchExprToBackendIR(match *checker.BoolMatch) backendir.Expr {
+	return lowerBoolMatchExprToBackendIRWithExpected(match, nil)
+}
+
+func lowerBoolMatchExprToBackendIRWithExpected(match *checker.BoolMatch, expected checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "bool")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
-	thenBlock := lowerBlockToBackendIR(match.True)
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
+	thenBlock := lowerBlockToBackendIRWithReturnType(match.True, expected)
 	finalizeFunctionBodyForReturn(thenBlock, resultType)
-	elseBlock := lowerBlockToBackendIR(match.False)
+	elseBlock := lowerBlockToBackendIRWithReturnType(match.False, expected)
 	finalizeFunctionBodyForReturn(elseBlock, resultType)
 	return &backendir.IfExpr{
 		Cond: lowerExpressionOrOpaque(match.Subject),
@@ -2480,6 +2619,10 @@ func nonExhaustiveMatchBlock(message string) *backendir.Block {
 }
 
 func lowerTryOpExprToBackendIR(op *checker.TryOp) backendir.Expr {
+	return lowerTryOpExprToBackendIRWithExpected(op, nil)
+}
+
+func lowerTryOpExprToBackendIRWithExpected(op *checker.TryOp, expected checker.Type) backendir.Expr {
 	if op == nil {
 		return &backendir.PanicExpr{
 			Message: literalExpr("str", "invalid try expression"),
@@ -2502,13 +2645,17 @@ func lowerTryOpExprToBackendIR(op *checker.TryOp) backendir.Expr {
 			Type:    resultType,
 		}
 	}
-	catchBlock := lowerBlockToBackendIR(op.CatchBlock)
+	catchExpected := op.CatchBlock.Type()
+	if expected != nil {
+		catchExpected = expected
+	}
+	catchBlock := lowerBlockToBackendIRWithReturnType(op.CatchBlock, catchExpected)
 	// The catch block always early-returns from the enclosing function. Per the
 	// checker, the catch block's value type matches the function's return type
 	// (whether or not it equals the unwrapped success type). Finalize the catch
 	// block so its trailing expression becomes a return statement, mirroring the
 	// VM's `OpReturn` after the catch body.
-	finalizeFunctionBodyForReturn(catchBlock, lowerCheckerTypeToBackendIR(op.CatchBlock.Type()))
+	finalizeFunctionBodyForReturn(catchBlock, lowerCheckerTypeToBackendIR(catchExpected))
 	return &backendir.TryExpr{
 		Kind:     kind,
 		Subject:  lowerExpressionOrOpaque(op.Expr()),

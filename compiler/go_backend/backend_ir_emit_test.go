@@ -2233,6 +2233,74 @@ func TestEmitGoFileFromBackendIR_FiberOpsNative(t *testing.T) {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_MaybeResultConstructorsNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Imports:     map[string]string{helperImportPath: helperImportAlias},
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name:   "someInt",
+				Return: &backendir.MaybeType{Of: backendir.IntType},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.MaybeSomeExpr{
+						Value: &backendir.LiteralExpr{Kind: "int", Value: "10"},
+						Type:  &backendir.MaybeType{Of: backendir.IntType},
+					}},
+				}},
+			},
+			&backendir.FuncDecl{
+				Name:   "noneInt",
+				Return: &backendir.MaybeType{Of: backendir.IntType},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.MaybeNoneExpr{Type: &backendir.MaybeType{Of: backendir.IntType}}},
+				}},
+			},
+			&backendir.FuncDecl{
+				Name:   "okInt",
+				Return: &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.ResultOkExpr{
+						Value: &backendir.LiteralExpr{Kind: "int", Value: "1"},
+						Type:  &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType},
+					}},
+				}},
+			},
+			&backendir.FuncDecl{
+				Name:   "errStr",
+				Return: &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.ResultErrExpr{
+						Value: &backendir.LiteralExpr{Kind: "str", Value: "bad"},
+						Type:  &backendir.ResultType{Val: backendir.IntType, Err: backendir.StrType},
+					}},
+				}},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, false)
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	for _, want := range []string{
+		"ardgo.Some[int](10)",
+		"ardgo.None[int]()",
+		"ardgo.Ok[int, string](1)",
+		"ardgo.Err[int, string](\"bad\")",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+}
+
 func TestEmitGoFileFromBackendIR_MaybeResultMethodOpsNative(t *testing.T) {
 	module := &backendir.Module{
 		PackageName: "main",

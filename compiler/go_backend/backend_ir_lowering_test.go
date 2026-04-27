@@ -795,6 +795,55 @@ func TestLowerExpressionToBackendIR_LowersListMapReadMethodsWithoutMarkerCalls(t
 	}
 }
 
+func TestLowerExpressionToBackendIR_LowersMaybeResultConstructorsExplicitly(t *testing.T) {
+	maybeSome := lowerExpressionToBackendIR(&checker.ModuleFunctionCall{
+		Module: "ard/maybe",
+		Call: &checker.FunctionCall{
+			Name:       "some",
+			Args:       []checker.Expression{&checker.IntLiteral{Value: 10}},
+			ReturnType: checker.MakeMaybe(checker.Int),
+		},
+	})
+	if _, ok := maybeSome.(*backendir.MaybeSomeExpr); !ok {
+		t.Fatalf("expected maybe::some to lower to MaybeSomeExpr, got %T", maybeSome)
+	}
+
+	maybeNone := lowerExpressionToBackendIR(&checker.ModuleFunctionCall{
+		Module: "ard/maybe",
+		Call: &checker.FunctionCall{
+			Name:       "none",
+			ReturnType: checker.MakeMaybe(checker.Int),
+		},
+	})
+	if _, ok := maybeNone.(*backendir.MaybeNoneExpr); !ok {
+		t.Fatalf("expected maybe::none to lower to MaybeNoneExpr, got %T", maybeNone)
+	}
+
+	resultOk := lowerExpressionToBackendIR(&checker.ModuleFunctionCall{
+		Module: "ard/result",
+		Call: &checker.FunctionCall{
+			Name:       "ok",
+			Args:       []checker.Expression{&checker.IntLiteral{Value: 1}},
+			ReturnType: checker.MakeResult(checker.Int, checker.Str),
+		},
+	})
+	if _, ok := resultOk.(*backendir.ResultOkExpr); !ok {
+		t.Fatalf("expected result::ok to lower to ResultOkExpr, got %T", resultOk)
+	}
+
+	resultErr := lowerExpressionToBackendIR(&checker.ModuleFunctionCall{
+		Module: "ard/result",
+		Call: &checker.FunctionCall{
+			Name:       "err",
+			Args:       []checker.Expression{&checker.StrLiteral{Value: "bad"}},
+			ReturnType: checker.MakeResult(checker.Int, checker.Str),
+		},
+	})
+	if _, ok := resultErr.(*backendir.ResultErrExpr); !ok {
+		t.Fatalf("expected result::err to lower to ResultErrExpr, got %T", resultErr)
+	}
+}
+
 func TestLowerExpressionToBackendIR_LowersMaybeResultMethodsWithoutMarkerCalls(t *testing.T) {
 	expressions := []checker.Expression{
 		&checker.MaybeMethod{Subject: &checker.Identifier{Name: "maybeVal"}, Kind: checker.MaybeIsSome},
