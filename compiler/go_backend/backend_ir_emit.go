@@ -1420,57 +1420,6 @@ func requiresLegacyCheckerTypeLowering(t checker.Type) bool {
 	}
 }
 
-func isBackendIRMarkerCall(name string) bool {
-	if strings.Contains(name, ":") {
-		return true
-	}
-	switch name {
-	case "list_literal",
-		"map_literal",
-		"struct_literal",
-		"enum_variant",
-		"if_expr",
-		"bool_match",
-		"int_match",
-		"conditional_match",
-		"option_match",
-		"result_match",
-		"enum_match",
-		"union_match",
-		"try_op",
-		"copy_expr",
-		"fn_literal",
-		"params",
-		"param",
-		"block",
-		"block_ir",
-		"block_expr",
-		"expr_stmt",
-		"assign_stmt",
-		"return_stmt",
-		"stmt_group",
-		"for_int_range",
-		"for_in_str",
-		"for_in_list",
-		"for_in_map",
-		"for_loop",
-		"while_loop",
-		"var_def",
-		"reassign",
-		"struct_decl_stmt",
-		"enum_decl_stmt",
-		"union_decl_stmt",
-		"extern_type_decl_stmt",
-		"nonproducing_stmt",
-		"unknown_expr",
-		"match_case",
-		"module_struct_literal":
-		return true
-	default:
-		return false
-	}
-}
-
 func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType ast.Expr, locals map[string]string) ([]ast.Stmt, error) {
 	args := make([]ast.Expr, 0, len(decl.Params)+1)
 	args = append(args, &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(decl.ExternBinding)})

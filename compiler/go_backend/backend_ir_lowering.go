@@ -270,14 +270,6 @@ func visitOrphanTypeDeclsInType(t checker.Type, out *backendir.Module, seenDecls
 	}
 }
 
-func lowerStatementsToBackendIRBlock(stmts []checker.Statement) *backendir.Block {
-	block := &backendir.Block{Stmts: []backendir.Stmt{}}
-	for _, stmt := range stmts {
-		block.Stmts = append(block.Stmts, lowerStatementToBackendIR(stmt)...)
-	}
-	return block
-}
-
 func lowerEntrypointStatementsToBackendIRBlock(stmts []checker.Statement) *backendir.Block {
 	block := &backendir.Block{Stmts: []backendir.Stmt{}}
 	for i, stmt := range stmts {
@@ -766,25 +758,6 @@ func lowerIRBlockAsExpr(block *backendir.Block) backendir.Expr {
 		args = append(args, lowerIRStmtAsExpr(stmt))
 	}
 	return callExpr("block_ir", args...)
-}
-
-func lowerVariableDefAsExpr(def *checker.VariableDef) backendir.Expr {
-	if def == nil {
-		return literalExpr("var_def", "nil")
-	}
-	return callExpr(
-		"var_def",
-		literalExpr("ident", def.Name),
-		typeExpr(lowerCheckerTypeToBackendIR(def.Type())),
-		lowerExpressionOrOpaque(def.Value),
-	)
-}
-
-func lowerReassignmentAsExpr(stmt *checker.Reassignment) backendir.Expr {
-	if stmt == nil {
-		return literalExpr("reassign", "nil")
-	}
-	return lowerIRStmtAsExpr(lowerReassignmentToBackendIRStmt(stmt))
 }
 
 func lowerReassignmentToBackendIRStmt(stmt *checker.Reassignment) backendir.Stmt {
@@ -1989,21 +1962,6 @@ func literalExpr(kind, value string) backendir.Expr {
 
 func typeExpr(t backendir.Type) backendir.Expr {
 	return literalExpr("type", backendIRTypeName(t))
-}
-
-func lowerMatchAsExpr(match *checker.Match) backendir.Expr {
-	if match == nil {
-		return literalExpr("match", "nil")
-	}
-	pattern := ""
-	if match.Pattern != nil {
-		pattern = match.Pattern.Name
-	}
-	return callExpr(
-		"match_case",
-		literalExpr("ident", pattern),
-		lowerBlockAsExpr(match.Body),
-	)
 }
 
 func sortedIntCaseKeys(values map[int]*checker.Block) []int {

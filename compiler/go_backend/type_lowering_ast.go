@@ -14,10 +14,6 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-func identExpr(name string) ast.Expr {
-	return ast.NewIdent(name)
-}
-
 func selectorExpr(x ast.Expr, sel string) ast.Expr {
 	return &ast.SelectorExpr{X: x, Sel: ast.NewIdent(sel)}
 }
@@ -56,25 +52,6 @@ func typeParamFieldList(order []string, mapping map[string]string, constraints m
 		return nil
 	}
 	return &ast.FieldList{List: fields}
-}
-
-func (e *emitter) lowerFunctionParamFields(params []checker.Parameter, includeNames bool) ([]*ast.Field, error) {
-	fields := make([]*ast.Field, 0, len(params))
-	for _, param := range params {
-		typeExpr, err := e.lowerTypeExpr(param.Type)
-		if err != nil {
-			return nil, err
-		}
-		if param.Mutable && mutableParamNeedsPointer(param.Type) {
-			typeExpr = &ast.StarExpr{X: typeExpr}
-		}
-		field := &ast.Field{Type: typeExpr}
-		if includeNames {
-			field.Names = []*ast.Ident{ast.NewIdent(goName(param.Name, false))}
-		}
-		fields = append(fields, field)
-	}
-	return fields, nil
 }
 
 func (e *emitter) lowerBoundFunctionParamFields(params []checker.Parameter) ([]*ast.Field, error) {

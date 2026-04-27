@@ -468,10 +468,6 @@ func (e *emitter) specializedModuleFunctionDef(modulePath string, call *checker.
 	return original
 }
 
-func specializeFunctionDefFromArgs(original *checker.FunctionDef, args []checker.Expression) *checker.FunctionDef {
-	return specializeFunctionDefForCall(original, args, nil)
-}
-
 func specializeFunctionDefForCall(original *checker.FunctionDef, args []checker.Expression, expectedReturn checker.Type) *checker.FunctionDef {
 	if original == nil {
 		return nil

@@ -457,46 +457,6 @@ func inferStructBoundTypeArgs(def *checker.StructDef, order []string, existing m
 	return bindings
 }
 
-func formatTypeParamDecls(order []string, mapping map[string]string, constraints map[string]string) string {
-	if len(order) == 0 || len(mapping) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(order))
-	for _, name := range order {
-		emitted := mapping[name]
-		if emitted == "" {
-			continue
-		}
-		constraint := constraints[name]
-		if constraint == "" {
-			constraint = "any"
-		}
-		parts = append(parts, emitted+" "+constraint)
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
-}
-
-func formatTypeParamUses(order []string, mapping map[string]string) string {
-	if len(order) == 0 || len(mapping) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(order))
-	for _, name := range order {
-		emitted := mapping[name]
-		if emitted == "" {
-			continue
-		}
-		parts = append(parts, emitted)
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
-}
-
 func sameImportedType(target checker.Type, sym checker.Type) bool {
 	if target == nil || sym == nil {
 		return false
