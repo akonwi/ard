@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	backendir "github.com/akonwi/ard/go_backend/ir"
 )
 
 func TestBuildBinaryCompilesUserModuleImport(t *testing.T) {

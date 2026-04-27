@@ -88,7 +88,6 @@ The backend now has these properties:
 - the old checker→AST emitter path has been deleted
 - imports and generated-project dependency discovery are produced during lowering and carried on backend IR module metadata
 - declaration emission, body emission, and synthesized entrypoint emission are all native backend IR render paths
-- unsupported cases fail explicitly instead of falling back to legacy lowering
 
 ## Generated project writing
 
@@ -122,4 +121,3 @@ checked Ard tree
 → formatted Go source
 ```
 
-New backend features should extend this pipeline rather than reintroduce checker-backed or source-first emission paths.
