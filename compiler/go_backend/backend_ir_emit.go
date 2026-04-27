@@ -39,19 +39,19 @@ func compileModuleSourceViaBackendIR(module checker.Module, packageName string, 
 		imports[helperImportPath] = helperImportAlias
 	}
 
-	fileIR, err := emitGoFileFromBackendIR(irModule, module, imports, entrypoint, projectName)
+	fileIR, err := emitGoFileFromBackendIR(irModule, imports, entrypoint)
 	if err != nil {
 		return nil, err
 	}
 	return renderGoFile(optimizeGoFileIR(fileIR))
 }
 
-func emitGoFileFromBackendIR(module *backendir.Module, sourceModule checker.Module, imports map[string]string, entrypoint bool, projectName string) (goFileIR, error) {
+func emitGoFileFromBackendIR(module *backendir.Module, imports map[string]string, entrypoint bool) (goFileIR, error) {
 	if module == nil {
 		return goFileIR{}, fmt.Errorf("nil backend ir module")
 	}
 
-	emitter := newBackendIREmitter(module, sourceModule, projectName, imports, entrypoint)
+	emitter := newBackendIREmitter(module)
 	fileIR := lowerGoFileIR(module.PackageName, imports)
 
 	for i, decl := range module.Decls {
@@ -75,7 +75,7 @@ func emitGoFileFromBackendIR(module *backendir.Module, sourceModule checker.Modu
 	return fileIR, nil
 }
 
-func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, projectName string, imports map[string]string, entrypoint bool) *backendIREmitter {
+func newBackendIREmitter(module *backendir.Module) *backendIREmitter {
 	used := make(map[string]struct{})
 	functionNames := make(map[string]string)
 	functionReturns := make(map[string]backendir.Type)

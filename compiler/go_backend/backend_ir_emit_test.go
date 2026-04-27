@@ -266,7 +266,7 @@ func TestEmitGoFileFromBackendIR_TraitSignatureAndCoercionWithoutSourceModule(t 
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestEmitGoFileFromBackendIR_UnionAndExternTypeDecls(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestEmitGoFileFromBackendIR_UnionTypedFunctionSignatureNative(t *testing.T)
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -577,7 +577,7 @@ func TestEmitGoFileFromBackendIR_EntrypointBlockNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -624,7 +624,7 @@ func TestEmitGoFileFromBackendIR_MemberAssignStmtNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestEmitGoFileFromBackendIR_LoopStatementsNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -843,7 +843,7 @@ func TestEmitGoFileFromBackendIR_ListAndMapLiteralsNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -908,7 +908,7 @@ func TestEmitGoFileFromBackendIR_StructAndEnumLiteralsNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -956,7 +956,7 @@ func TestEmitGoFileFromBackendIR_IfExprNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -995,7 +995,7 @@ func TestEmitGoFileFromBackendIR_PanicExprNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1036,7 +1036,7 @@ func TestEmitGoFileFromBackendIR_PanicExprNative_StrReturn(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1104,7 +1104,7 @@ func TestEmitGoFileFromBackendIR_TryExprNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1165,7 +1165,7 @@ func TestEmitGoFileFromBackendIR_TryExprWithoutCatchNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1217,7 +1217,7 @@ func TestEmitGoFileFromBackendIR_TryExprWithoutCatchMaybeNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1271,7 +1271,7 @@ func TestEmitGoFileFromBackendIR_TryExprReturnStmtNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1331,7 +1331,7 @@ func TestEmitGoFileFromBackendIR_TryExprExprStmtNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1419,7 +1419,7 @@ func TestEmitGoFileFromBackendIR_TryExprCatchInLoopReturnsEarly(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1514,7 +1514,7 @@ func TestEmitGoFileFromBackendIR_TryExprCatchInMatchArmReturnsEarly(t *testing.T
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1579,7 +1579,7 @@ func TestEmitGoFileFromBackendIR_TryExprWithoutCatchMaybeReturnStmtNative(t *tes
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1656,7 +1656,7 @@ func TestEmitGoFileFromBackendIR_UnionMatchExprNative(t *testing.T) {
 		},
 	}
 
-	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	out, err := emitGoFileFromBackendIR(module, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1778,7 +1778,7 @@ func TestEmitGoFileFromBackendIR_ScalarMethodOpsNative(t *testing.T) {
 		"strconv":        "strconv",
 		"strings":        "strings",
 	}
-	out, err := emitGoFileFromBackendIR(module, nil, imports, true, "")
+	out, err := emitGoFileFromBackendIR(module, imports, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -1986,7 +1986,7 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 		helperImportPath: helperImportAlias,
 		"sort":           "sort",
 	}
-	out, err := emitGoFileFromBackendIR(module, nil, imports, true, "")
+	out, err := emitGoFileFromBackendIR(module, imports, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -2074,7 +2074,7 @@ func TestEmitGoFileFromBackendIR_ListCopyExprNative(t *testing.T) {
 	imports := map[string]string{
 		helperImportPath: helperImportAlias,
 	}
-	out, err := emitGoFileFromBackendIR(module, nil, imports, true, "")
+	out, err := emitGoFileFromBackendIR(module, imports, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -2146,7 +2146,7 @@ func TestEmitGoFileFromBackendIR_FiberOpsNative(t *testing.T) {
 		moduleImportPath("demo", "ard/async"):   packageNameForModulePath("ard/async"),
 		moduleImportPath("demo", "demo/worker"): packageNameForModulePath("demo/worker"),
 	}
-	out, err := emitGoFileFromBackendIR(module, nil, imports, true, "demo")
+	out, err := emitGoFileFromBackendIR(module, imports, true)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -2208,7 +2208,7 @@ func TestEmitGoFileFromBackendIR_MaybeResultMethodOpsNative(t *testing.T) {
 	imports := map[string]string{
 		helperImportPath: helperImportAlias,
 	}
-	out, err := emitGoFileFromBackendIR(module, nil, imports, false, "")
+	out, err := emitGoFileFromBackendIR(module, imports, false)
 	if err != nil {
 		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
 	}
@@ -2837,7 +2837,7 @@ fn main() {
 		t.Fatalf("backend IR lowering failed: %v", err)
 	}
 
-	fileIR, err := emitGoFileFromBackendIR(irModule, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	fileIR, err := emitGoFileFromBackendIR(irModule, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("backend IR emitter failed without source module: %v", err)
 	}
@@ -2925,7 +2925,7 @@ fn main() {
 	}
 	irModule.Decls = append(irModule.Decls, boxDecl, lightDecl)
 
-	fileIR, err := emitGoFileFromBackendIR(irModule, module, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	fileIR, err := emitGoFileFromBackendIR(irModule, map[string]string{helperImportPath: helperImportAlias}, true)
 	if err != nil {
 		t.Fatalf("backend IR emitter failed: %v", err)
 	}

@@ -1748,20 +1748,19 @@ let result = add(1, 2)
 // TestCompileModuleSourceViaBackendIR_MigratedPathsWithoutLegacySourceModule
 // pins the migration-hardening contract that migrated try/match flows must
 // be emittable through the backend IR pipeline without a hidden dependency
-// on the legacy source-module emitter. It does this by:
+// on checker-backed emitter state. It does this by:
 //
 //  1. Compiling a try/match-heavy module via the standard backend-IR-first
 //     compile path (`compileModuleSourceViaBackendIR`) and asserting the
 //     output parses as Go.
 //  2. Lowering the same module to backend IR and then emitting the Go file
-//     through `emitGoFileFromBackendIR(irModule, nil, ...)` — explicitly
-//     passing a `nil` checker.Module so any latent legacy fallback would
-//     fail loudly. The emit step must succeed, the result must parse as
-//     Go, and the generated source must contain only the native try/match
-//     control-flow shapes (no legacy marker artifacts smuggled in).
+//     directly from IR via `emitGoFileFromBackendIR(irModule, ...)`. The
+//     emit step must succeed, the result must parse as Go, and the generated
+//     source must contain only the native try/match control-flow shapes
+//     (no legacy marker artifacts smuggled in).
 //
 // Together these checks prove that for migrated try/match shapes the
-// emission step does not need to reach back into the legacy AST lowerers.
+// emission step does not need to reach back into legacy/checker lowering.
 func TestCompileModuleSourceViaBackendIR_MigratedPathsWithoutLegacySourceModule(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1824,9 +1823,9 @@ let c = classify(2)
 	}
 	assertParsesAsGo(t, standardOut)
 
-	// Step 2: emit through the backend IR with a nil checker.Module to
-	// prove migrated try/match flows do not require the legacy
-	// source-module fallback for correctness.
+	// Step 2: emit directly through backend IR to prove migrated
+	// try/match flows do not require hidden checker-backed emitter state
+	// for correctness.
 	irModule, err := lowerModuleToBackendIR(module, "main", true)
 	if err != nil {
 		t.Fatalf("lowerModuleToBackendIR failed: %v", err)
@@ -1838,9 +1837,9 @@ let c = classify(2)
 	imports := map[string]string{
 		helperImportPath: helperImportAlias,
 	}
-	fileIR, err := emitGoFileFromBackendIR(irModule, nil, imports, true, "")
+	fileIR, err := emitGoFileFromBackendIR(irModule, imports, true)
 	if err != nil {
-		t.Fatalf("emitGoFileFromBackendIR with nil source module failed: %v", err)
+		t.Fatalf("emitGoFileFromBackendIR failed: %v", err)
 	}
 	rendered, err := renderGoFile(optimizeGoFileIR(fileIR))
 	if err != nil {
