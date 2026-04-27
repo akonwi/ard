@@ -1835,14 +1835,35 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 	}
 }
 
+func lowerCallArgToBackendIR(arg checker.Expression, param checker.Parameter) backendir.Expr {
+	value := lowerExpressionOrOpaque(arg)
+	if trait, ok := param.Type.(*checker.Trait); ok {
+		return &backendir.TraitCoerceExpr{Value: value, Type: lowerTraitTypeToBackendIR(trait)}
+	}
+	if trait, ok := param.Type.(checker.Trait); ok {
+		traitCopy := trait
+		return &backendir.TraitCoerceExpr{Value: value, Type: lowerTraitTypeToBackendIR(&traitCopy)}
+	}
+	return value
+}
+
+func lowerCallArgsToBackendIR(args []checker.Expression, def *checker.FunctionDef) []backendir.Expr {
+	out := make([]backendir.Expr, 0, len(args))
+	for i, arg := range args {
+		if def != nil && i < len(def.Parameters) {
+			out = append(out, lowerCallArgToBackendIR(arg, def.Parameters[i]))
+			continue
+		}
+		out = append(out, lowerExpressionOrOpaque(arg))
+	}
+	return out
+}
+
 func lowerFunctionCallToBackendIR(call *checker.FunctionCall) backendir.Expr {
 	if call == nil {
 		return callExpr("call", literalExpr("nil", "call"))
 	}
-	args := make([]backendir.Expr, 0, len(call.Args))
-	for _, arg := range call.Args {
-		args = append(args, lowerExpressionOrOpaque(arg))
-	}
+	args := lowerCallArgsToBackendIR(call.Args, call.Definition())
 	name := strings.TrimSpace(call.Name)
 	if name == "" {
 		name = "anonymous_fn"
@@ -1857,10 +1878,7 @@ func lowerModuleFunctionCallToBackendIR(call *checker.ModuleFunctionCall) backen
 	if call == nil || call.Call == nil {
 		return callExpr("module_call", literalExpr("nil", "call"))
 	}
-	args := make([]backendir.Expr, 0, len(call.Call.Args))
-	for _, arg := range call.Call.Args {
-		args = append(args, lowerExpressionOrOpaque(arg))
-	}
+	args := lowerCallArgsToBackendIR(call.Call.Args, call.Call.Definition())
 	moduleName := strings.TrimSpace(call.Module)
 	if moduleName == "" {
 		moduleName = "module"
@@ -2758,6 +2776,28 @@ func lowerNestedCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 	return lowerCheckerTypeToBackendIR(t)
 }
 
+func lowerTraitTypeToBackendIR(trait *checker.Trait) backendir.Type {
+	if trait == nil {
+		return backendir.Dynamic
+	}
+	methods := trait.GetMethods()
+	irMethods := make([]backendir.TraitMethod, 0, len(methods))
+	for _, method := range methods {
+		params := make([]backendir.Type, 0, len(method.Parameters))
+		for _, param := range method.Parameters {
+			params = append(params, lowerCheckerTypeToBackendIR(param.Type))
+		}
+		irMethods = append(irMethods, backendir.TraitMethod{
+			Name: method.Name,
+			Type: &backendir.FuncType{
+				Params: params,
+				Return: lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(&method)),
+			},
+		})
+	}
+	return &backendir.TraitType{Name: strings.TrimSpace(trait.Name), Methods: irMethods}
+}
+
 func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 	if t == nil {
 		return backendir.UnknownType
@@ -2824,7 +2864,7 @@ func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 			Return: lowerCheckerTypeToBackendIR(typed.ReturnType),
 		}
 	case *checker.Trait:
-		return backendir.Dynamic
+		return lowerTraitTypeToBackendIR(typed)
 	case *checker.StructDef:
 		order := structTypeParamOrder(typed)
 		if len(order) == 0 {

@@ -209,6 +209,13 @@ type CallExpr struct {
 
 func (*CallExpr) exprNode() {}
 
+type TraitCoerceExpr struct {
+	Value Expr
+	Type  Type
+}
+
+func (*TraitCoerceExpr) exprNode() {}
+
 type ListLiteralExpr struct {
 	Type     Type
 	Elements []Expr
@@ -370,6 +377,18 @@ type FuncType struct {
 }
 
 func (*FuncType) typeNode() {}
+
+type TraitMethod struct {
+	Name string
+	Type *FuncType
+}
+
+type TraitType struct {
+	Name    string
+	Methods []TraitMethod
+}
+
+func (*TraitType) typeNode() {}
 
 var (
 	IntType     Type = &PrimitiveType{Name: "Int"}

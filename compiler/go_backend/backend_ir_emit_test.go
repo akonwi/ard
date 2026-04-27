@@ -234,6 +234,59 @@ fn main() {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_TraitSignatureAndCoercionWithoutSourceModule(t *testing.T) {
+	traitType := &backendir.TraitType{Name: "ToString"}
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name: "show",
+				Params: []backendir.Param{{
+					Name: "value",
+					Type: traitType,
+				}},
+				Return: backendir.Void,
+				Body:   &backendir.Block{},
+			},
+			&backendir.FuncDecl{
+				Name:   "main",
+				Return: backendir.Void,
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ExprStmt{Value: &backendir.CallExpr{
+						Callee: &backendir.IdentExpr{Name: "show"},
+						Args: []backendir.Expr{
+							&backendir.TraitCoerceExpr{
+								Value: &backendir.LiteralExpr{Kind: "str", Value: "ok"},
+								Type:  traitType,
+							},
+						},
+					}},
+				}},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	for _, want := range []string{
+		"func Show(value ardgo.ToString)",
+		"Show(ardgo.AsToString(\"ok\"))",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+}
+
 func TestEmitGoFileFromBackendIR_UnionAndExternTypeDecls(t *testing.T) {
 	module := &backendir.Module{
 		PackageName: "main",

@@ -18,12 +18,8 @@ type backendIREmitter struct {
 	functionNames    map[string]string
 	functionReturns  map[string]backendir.Type
 	entrypointBlock  *backendir.Block
-	sourceModule     checker.Module
-	sourceFunctions  map[string]*checker.FunctionDef
-	sourceExterns    map[string]*checker.ExternalFunctionDef
 	sourceStructs    map[string]*checker.StructDef
 	sourceEnums      map[string]*checker.Enum
-	sourceVars       map[string]*checker.VariableDef
 	localStructNames map[string]struct{}
 	localEnumNames   map[string]struct{}
 	externTypeNames  map[string]struct{}
@@ -85,11 +81,8 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 	used := make(map[string]struct{})
 	functionNames := make(map[string]string)
 	functionReturns := make(map[string]backendir.Type)
-	sourceFunctions := make(map[string]*checker.FunctionDef)
-	sourceExterns := make(map[string]*checker.ExternalFunctionDef)
 	sourceStructs := make(map[string]*checker.StructDef)
 	sourceEnums := make(map[string]*checker.Enum)
-	sourceVars := make(map[string]*checker.VariableDef)
 	localStructNames := make(map[string]struct{})
 	localEnumNames := make(map[string]struct{})
 	externTypeNames := make(map[string]struct{})
@@ -126,16 +119,6 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 
 	if sourceModule != nil && sourceModule.Program() != nil {
 		for _, stmt := range sourceModule.Program().Statements {
-			if stmt.Expr != nil {
-				switch def := stmt.Expr.(type) {
-				case *checker.FunctionDef:
-					if def.Receiver == "" {
-						sourceFunctions[def.Name] = def
-					}
-				case *checker.ExternalFunctionDef:
-					sourceExterns[def.Name] = def
-				}
-			}
 			if stmt.Stmt != nil {
 				switch def := stmt.Stmt.(type) {
 				case *checker.StructDef:
@@ -148,8 +131,6 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 				case checker.Enum:
 					defCopy := def
 					sourceEnums[def.Name] = &defCopy
-				case *checker.VariableDef:
-					sourceVars[def.Name] = def
 				}
 			}
 		}
@@ -170,12 +151,8 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 		functionNames:    functionNames,
 		functionReturns:  functionReturns,
 		entrypointBlock:  module.Entrypoint,
-		sourceModule:     sourceModule,
-		sourceFunctions:  sourceFunctions,
-		sourceExterns:    sourceExterns,
 		sourceStructs:    sourceStructs,
 		sourceEnums:      sourceEnums,
-		sourceVars:       sourceVars,
 		localStructNames: localStructNames,
 		localEnumNames:   localEnumNames,
 		externTypeNames:  externTypeNames,
@@ -461,220 +438,6 @@ func (e *backendIREmitter) emitExternTypeDecl(decl *backendir.ExternTypeDecl) as
 	}}}
 }
 
-func (e *backendIREmitter) emitSourceTraitType(trait *checker.Trait, typeParams map[string]string) (ast.Expr, error) {
-	if trait == nil {
-		return nil, fmt.Errorf("nil trait")
-	}
-	switch trait.Name {
-	case "ToString":
-		return selectorExpr(ast.NewIdent(helperImportAlias), "ToString"), nil
-	case "Encodable":
-		return selectorExpr(ast.NewIdent(helperImportAlias), "Encodable"), nil
-	}
-	methods := trait.GetMethods()
-	fields := make([]*ast.Field, 0, len(methods))
-	for _, method := range methods {
-		params := make([]*ast.Field, 0, len(method.Parameters))
-		for _, param := range method.Parameters {
-			paramType, err := e.emitSourceTypeWithTypeParams(param.Type, typeParams)
-			if err != nil {
-				return nil, err
-			}
-			if param.Mutable && mutableParamNeedsPointer(param.Type) {
-				paramType = &ast.StarExpr{X: paramType}
-			}
-			params = append(params, &ast.Field{Type: paramType})
-		}
-		var results *ast.FieldList
-		if method.ReturnType != checker.Void {
-			resultType, err := e.emitSourceTypeWithTypeParams(method.ReturnType, typeParams)
-			if err != nil {
-				return nil, err
-			}
-			results = funcResults(resultType)
-		}
-		fields = append(fields, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(goName(method.Name, true))},
-			Type:  &ast.FuncType{Params: &ast.FieldList{List: params}, Results: results},
-		})
-	}
-	return &ast.InterfaceType{Methods: &ast.FieldList{List: fields}}, nil
-}
-
-func (e *backendIREmitter) emitSourceTypeArgWithTypeParams(t checker.Type, typeParams map[string]string) (ast.Expr, error) {
-	if isCheckerUnionType(t) {
-		return ast.NewIdent("any"), nil
-	}
-	return e.emitSourceTypeWithTypeParams(t, typeParams)
-}
-
-func (e *backendIREmitter) emitSourceNestedTypeWithTypeParams(t checker.Type, typeParams map[string]string) (ast.Expr, error) {
-	if isCheckerUnionType(t) {
-		return ast.NewIdent("any"), nil
-	}
-	return e.emitSourceTypeWithTypeParams(t, typeParams)
-}
-
-func (e *backendIREmitter) emitSourceFuncTypeWithTypeParams(def *checker.FunctionDef, typeParams map[string]string) (ast.Expr, error) {
-	params := make([]*ast.Field, 0, len(def.Parameters))
-	for _, param := range def.Parameters {
-		paramType, err := e.emitSourceTypeWithTypeParams(param.Type, typeParams)
-		if err != nil {
-			return nil, err
-		}
-		if param.Mutable && mutableParamNeedsPointer(param.Type) {
-			paramType = &ast.StarExpr{X: paramType}
-		}
-		params = append(params, &ast.Field{Type: paramType})
-	}
-	var results *ast.FieldList
-	returnType := effectiveFunctionReturnType(def)
-	if returnType != checker.Void {
-		resultType, err := e.emitSourceTypeWithTypeParams(returnType, typeParams)
-		if err != nil {
-			return nil, err
-		}
-		results = funcResults(resultType)
-	}
-	return &ast.FuncType{Params: &ast.FieldList{List: params}, Results: results}, nil
-}
-
-func (e *backendIREmitter) emitSourceTypeWithTypeParams(t checker.Type, typeParams map[string]string) (ast.Expr, error) {
-	switch t {
-	case checker.Int:
-		return ast.NewIdent("int"), nil
-	case checker.Float:
-		return ast.NewIdent("float64"), nil
-	case checker.Str:
-		return ast.NewIdent("string"), nil
-	case checker.Bool:
-		return ast.NewIdent("bool"), nil
-	case checker.Void:
-		return nil, nil
-	case checker.Dynamic:
-		return ast.NewIdent("any"), nil
-	}
-
-	switch typed := t.(type) {
-	case checker.Trait:
-		trait := typed
-		return e.emitSourceTraitType(&trait, typeParams)
-	case *checker.TypeVar:
-		if actual := typed.Actual(); actual != nil {
-			return e.emitSourceTypeWithTypeParams(actual, typeParams)
-		}
-		if typeParams != nil {
-			if resolved := typeParams[typeVarName(typed)]; resolved != "" {
-				return ast.NewIdent(resolved), nil
-			}
-		}
-		return ast.NewIdent("any"), nil
-	case *checker.Result:
-		valueType, err := e.emitSourceTypeArgWithTypeParams(typed.Val(), typeParams)
-		if err != nil {
-			return nil, err
-		}
-		errType, err := e.emitSourceTypeArgWithTypeParams(typed.Err(), typeParams)
-		if err != nil {
-			return nil, err
-		}
-		return indexExpr(selectorExpr(ast.NewIdent(helperImportAlias), "Result"), []ast.Expr{valueType, errType}), nil
-	case *checker.Enum:
-		return ast.NewIdent(goName(typed.Name, true)), nil
-	case *checker.Maybe:
-		innerType, err := e.emitSourceTypeArgWithTypeParams(typed.Of(), typeParams)
-		if err != nil {
-			return nil, err
-		}
-		return indexExpr(selectorExpr(ast.NewIdent(helperImportAlias), "Maybe"), []ast.Expr{innerType}), nil
-	case *checker.List:
-		elementType, err := e.emitSourceNestedTypeWithTypeParams(typed.Of(), typeParams)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.ArrayType{Elt: elementType}, nil
-	case *checker.Map:
-		keyType, err := e.emitSourceNestedTypeWithTypeParams(typed.Key(), typeParams)
-		if err != nil {
-			return nil, err
-		}
-		valueType, err := e.emitSourceNestedTypeWithTypeParams(typed.Value(), typeParams)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.MapType{Key: keyType, Value: valueType}, nil
-	case *checker.StructDef:
-		return e.emitTypeWithTypeParams(lowerCheckerTypeToBackendIR(typed), typeParams)
-	case *checker.FunctionDef:
-		return e.emitSourceFuncTypeWithTypeParams(typed, typeParams)
-	case *checker.Trait:
-		return e.emitSourceTraitType(typed, typeParams)
-	case *checker.Union:
-		if typed != nil && strings.TrimSpace(typed.Name) != "" {
-			return ast.NewIdent(goName(typed.Name, true)), nil
-		}
-		return ast.NewIdent("any"), nil
-	case checker.Union:
-		if strings.TrimSpace(typed.Name) != "" {
-			return ast.NewIdent(goName(typed.Name, true)), nil
-		}
-		return ast.NewIdent("any"), nil
-	case *checker.ExternType:
-		return ast.NewIdent("any"), nil
-	case *checker.ExternalFunctionDef:
-		params := make([]*ast.Field, 0, len(typed.Parameters))
-		for _, param := range typed.Parameters {
-			paramType, err := e.emitSourceTypeWithTypeParams(param.Type, typeParams)
-			if err != nil {
-				return nil, err
-			}
-			if param.Mutable && mutableParamNeedsPointer(param.Type) {
-				paramType = &ast.StarExpr{X: paramType}
-			}
-			params = append(params, &ast.Field{Type: paramType})
-		}
-		var results *ast.FieldList
-		if typed.ReturnType != checker.Void {
-			resultType, err := e.emitSourceTypeWithTypeParams(typed.ReturnType, typeParams)
-			if err != nil {
-				return nil, err
-			}
-			results = funcResults(resultType)
-		}
-		return &ast.FuncType{Params: &ast.FieldList{List: params}, Results: results}, nil
-	default:
-		return e.emitTypeWithTypeParams(lowerCheckerTypeToBackendIR(t), typeParams)
-	}
-}
-
-func (e *backendIREmitter) emitFuncDeclParamType(param backendir.Param, sourceParam *checker.Parameter, typeParams map[string]string) (ast.Expr, error) {
-	if sourceParam != nil {
-		paramType, err := e.emitSourceTypeWithTypeParams(sourceParam.Type, typeParams)
-		if err != nil {
-			return nil, err
-		}
-		if sourceParam.Mutable && mutableParamNeedsPointer(sourceParam.Type) {
-			paramType = &ast.StarExpr{X: paramType}
-		}
-		return paramType, nil
-	}
-	paramType, err := e.emitTypeWithTypeParams(param.Type, typeParams)
-	if err != nil {
-		return nil, err
-	}
-	if param.Mutable {
-		return nil, fmt.Errorf("mutable parameter %s requires source signature metadata", param.Name)
-	}
-	return paramType, nil
-}
-
-func (e *backendIREmitter) emitFuncDeclReturnType(irType backendir.Type, sourceType checker.Type, typeParams map[string]string) (ast.Expr, error) {
-	if sourceType != nil {
-		return e.emitSourceTypeWithTypeParams(sourceType, typeParams)
-	}
-	return e.emitTypeWithTypeParams(irType, typeParams)
-}
-
 func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, error) {
 	if decl.IsExtern {
 		if !e.canEmitExternDeclNatively(decl) {
@@ -689,29 +452,11 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 		typeParamConstraints[name] = "any"
 	}
 
-	var (
-		sourceParams     []checker.Parameter
-		sourceReturnType checker.Type
-	)
-	if decl.IsExtern {
-		if source := e.sourceExterns[decl.Name]; source != nil {
-			sourceParams = source.Parameters
-			sourceReturnType = source.ReturnType
-		}
-	} else if source := e.sourceFunctions[decl.Name]; source != nil {
-		sourceParams = source.Parameters
-		sourceReturnType = effectiveFunctionReturnType(source)
-	}
-
 	params := make([]*ast.Field, 0, len(decl.Params))
 	localNameByOriginal := make(map[string]string)
 	seenLocals := make(map[string]struct{})
-	for i, param := range decl.Params {
-		var sourceParam *checker.Parameter
-		if i < len(sourceParams) {
-			sourceParam = &sourceParams[i]
-		}
-		paramType, err := e.emitFuncDeclParamType(param, sourceParam, typeParamMapping)
+	for _, param := range decl.Params {
+		paramType, err := e.emitTypeWithTypeParams(param.Type, typeParamMapping)
 		if err != nil {
 			return nil, fmt.Errorf("param %s type: %w", param.Name, err)
 		}
@@ -720,7 +465,7 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(localName)}, Type: paramType})
 	}
 
-	returnType, err := e.emitFuncDeclReturnType(decl.Return, sourceReturnType, typeParamMapping)
+	returnType, err := e.emitTypeWithTypeParams(decl.Return, typeParamMapping)
 	if err != nil {
 		return nil, fmt.Errorf("return type: %w", err)
 	}
@@ -778,8 +523,8 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 	receiverLocalName := uniqueLocalName(goName(receiverName, false), seenLocals)
 	locals[receiverName] = receiverLocalName
 
-	for i, param := range methodIR.Params {
-		paramType, err := e.emitFuncDeclParamType(param, &method.Parameters[i], typeParams)
+	for _, param := range methodIR.Params {
+		paramType, err := e.emitTypeWithTypeParams(param.Type, typeParams)
 		if err != nil {
 			return nil, fmt.Errorf("method %s.%s param %s: %w", typeName, method.Name, param.Name, err)
 		}
@@ -788,7 +533,7 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(localName)}, Type: paramType})
 	}
 
-	returnType, err := e.emitFuncDeclReturnType(methodIR.Return, effectiveFunctionReturnType(method), typeParams)
+	returnType, err := e.emitTypeWithTypeParams(methodIR.Return, typeParams)
 	if err != nil {
 		return nil, fmt.Errorf("method %s.%s return type: %w", typeName, method.Name, err)
 	}
@@ -975,6 +720,8 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 			}
 		}
 		return e.canEmitExprNatively(v.Value)
+	case *backendir.TraitCoerceExpr:
+		return v != nil && v.Value != nil && v.Type != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(v.Type)
 	case *backendir.SelectorExpr:
 		return e.canEmitExprNatively(v.Subject)
 	case *backendir.CallExpr:
@@ -1047,11 +794,6 @@ func (e *backendIREmitter) canEmitNamedCallNatively(name string) bool {
 	}
 	if _, ok := e.functionNames[name]; !ok {
 		return false
-	}
-	if source := e.sourceFunctions[name]; source != nil {
-		if typeParamOrder, _, _ := functionTypeParams(source); len(typeParamOrder) > 0 {
-			return false
-		}
 	}
 	return true
 }
@@ -1404,6 +1146,13 @@ func (e *backendIREmitter) canEmitTypeNatively(t backendir.Type) bool {
 		return true
 	case *backendir.PrimitiveType, *backendir.DynamicType, *backendir.VoidType, *backendir.TypeVarType:
 		return true
+	case *backendir.TraitType:
+		for _, method := range typed.Methods {
+			if !e.canEmitTypeNatively(method.Type) {
+				return false
+			}
+		}
+		return true
 	case *backendir.NamedType:
 		for _, arg := range typed.Args {
 			if !e.canEmitTypeNatively(arg) {
@@ -1437,6 +1186,13 @@ func containsDynamicIRType(t backendir.Type) bool {
 		return false
 	case *backendir.DynamicType:
 		return true
+	case *backendir.TraitType:
+		for _, method := range typed.Methods {
+			if containsDynamicIRType(method.Type) {
+				return true
+			}
+		}
+		return false
 	case *backendir.NamedType:
 		for _, arg := range typed.Args {
 			if containsDynamicIRType(arg) {
@@ -1470,6 +1226,13 @@ func containsTypeVarIRType(t backendir.Type) bool {
 		return false
 	case *backendir.TypeVarType:
 		return true
+	case *backendir.TraitType:
+		for _, method := range typed.Methods {
+			if containsTypeVarIRType(method.Type) {
+				return true
+			}
+		}
+		return false
 	case *backendir.NamedType:
 		for _, arg := range typed.Args {
 			if containsTypeVarIRType(arg) {
@@ -2137,6 +1900,8 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 		return selectorExpr(subject, goName(v.Name, true)), nil
 	case *backendir.CallExpr:
 		return e.emitCallExpr(v, locals)
+	case *backendir.TraitCoerceExpr:
+		return e.emitTraitCoerceExpr(v, locals)
 	default:
 		return nil, fmt.Errorf("unsupported expr %T", expr)
 	}
@@ -2740,53 +2505,26 @@ func emitLiteralExpr(lit *backendir.LiteralExpr) ast.Expr {
 	}
 }
 
-func (e *backendIREmitter) sourceFunctionDefForCall(call *backendir.CallExpr) *checker.FunctionDef {
-	if e == nil || e.sourceModule == nil || e.sourceModule.Program() == nil || call == nil {
-		return nil
+func (e *backendIREmitter) emitTraitCoerceExpr(expr *backendir.TraitCoerceExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil || expr.Value == nil || expr.Type == nil {
+		return nil, fmt.Errorf("invalid trait coercion")
 	}
-	switch callee := call.Callee.(type) {
-	case *backendir.IdentExpr:
-		if def := e.sourceFunctions[callee.Name]; def != nil {
-			return def
-		}
-		if def := e.sourceExterns[callee.Name]; def != nil {
-			return functionDefFromType(def)
-		}
-	case *backendir.SelectorExpr:
-		subjectIdent, ok := callee.Subject.(*backendir.IdentExpr)
-		if !ok || !strings.Contains(strings.TrimSpace(subjectIdent.Name), "/") {
-			return nil
-		}
-		mod := e.sourceModule.Program().Imports[subjectIdent.Name]
-		if mod == nil {
-			return nil
-		}
-		sym := mod.Get(callee.Name)
-		if sym.IsZero() {
-			return nil
-		}
-		return functionDefFromType(sym.Type)
+	value, err := e.emitExpr(expr.Value, locals)
+	if err != nil {
+		return nil, err
 	}
-	return nil
-}
-
-func (e *backendIREmitter) emitCallArgsForSignature(args []backendir.Expr, params []checker.Parameter, locals map[string]string) ([]ast.Expr, error) {
-	out := make([]ast.Expr, 0, len(args))
-	for i, arg := range args {
-		value, err := e.emitExpr(arg, locals)
-		if err != nil {
-			return nil, err
-		}
-		if i < len(params) {
-			if wrapped, err := (&emitter{}).wrapTraitValueAST(value, params[i].Type); err != nil {
-				return nil, err
-			} else {
-				value = wrapped
-			}
-		}
-		out = append(out, value)
+	traitType, ok := expr.Type.(*backendir.TraitType)
+	if !ok || traitType == nil {
+		return value, nil
 	}
-	return out, nil
+	switch strings.TrimSpace(traitType.Name) {
+	case "ToString":
+		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "AsToString"), Args: []ast.Expr{value}}, nil
+	case "Encodable":
+		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "AsEncodable"), Args: []ast.Expr{value}}, nil
+	default:
+		return value, nil
+	}
 }
 
 func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
@@ -3136,12 +2874,7 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 	if err != nil {
 		return nil, err
 	}
-	var args []ast.Expr
-	if def := e.sourceFunctionDefForCall(call); def != nil {
-		args, err = e.emitCallArgsForSignature(call.Args, def.Parameters, locals)
-	} else {
-		args, err = e.emitArgs(call.Args, locals)
-	}
+	args, err := e.emitArgs(call.Args, locals)
 	if err != nil {
 		return nil, err
 	}
@@ -3332,6 +3065,10 @@ func collectBackendIRTypeVars(t backendir.Type, out *[]string, seen map[string]s
 			collectBackendIRTypeVars(param, out, seen)
 		}
 		collectBackendIRTypeVars(typed.Return, out, seen)
+	case *backendir.TraitType:
+		for _, method := range typed.Methods {
+			collectBackendIRTypeVars(method.Type, out, seen)
+		}
 	}
 }
 
@@ -3367,6 +3104,25 @@ func (e *backendIREmitter) emitTypeWithTypeParams(t backendir.Type, typeParams m
 			}
 		}
 		return ast.NewIdent("any"), nil
+	case *backendir.TraitType:
+		switch strings.TrimSpace(typed.Name) {
+		case "ToString":
+			return selectorExpr(ast.NewIdent(helperImportAlias), "ToString"), nil
+		case "Encodable":
+			return selectorExpr(ast.NewIdent(helperImportAlias), "Encodable"), nil
+		}
+		fields := make([]*ast.Field, 0, len(typed.Methods))
+		for _, method := range typed.Methods {
+			methodType, err := e.emitTypeWithTypeParams(method.Type, typeParams)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(goName(method.Name, true))},
+				Type:  methodType,
+			})
+		}
+		return &ast.InterfaceType{Methods: &ast.FieldList{List: fields}}, nil
 	case *backendir.NamedType:
 		if strings.TrimSpace(typed.Name) == "" {
 			return ast.NewIdent("any"), nil

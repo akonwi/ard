@@ -1385,6 +1385,70 @@ func TestLowerCheckerTypeToBackendIR_LowersUnionToNamedType(t *testing.T) {
 	}
 }
 
+func TestLowerCheckerTypeToBackendIR_LowersTraitToTraitType(t *testing.T) {
+	trait := &checker.Trait{Name: "ToString"}
+	lowered := lowerCheckerTypeToBackendIR(trait)
+	traitType, ok := lowered.(*backendir.TraitType)
+	if !ok {
+		t.Fatalf("expected trait to lower to *backendir.TraitType, got %T (%+v)", lowered, lowered)
+	}
+	if traitType.Name != "ToString" {
+		t.Fatalf("expected lowered trait name %q, got %q", "ToString", traitType.Name)
+	}
+}
+
+func TestLowerModuleToBackendIR_LowersTraitCallArgsExplicitly(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/io
+
+fn main() {
+  io::print("ok")
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend IR lowering to succeed, got error: %v", err)
+	}
+	var mainDecl *backendir.FuncDecl
+	for _, decl := range irModule.Decls {
+		if fn, ok := decl.(*backendir.FuncDecl); ok && fn.Name == "main" {
+			mainDecl = fn
+			break
+		}
+	}
+	if mainDecl == nil || mainDecl.Body == nil || len(mainDecl.Body.Stmts) == 0 {
+		t.Fatalf("expected lowered main func body with statements")
+	}
+	exprStmt, ok := mainDecl.Body.Stmts[0].(*backendir.ExprStmt)
+	if !ok {
+		t.Fatalf("expected first main-body stmt to be *backendir.ExprStmt, got %T", mainDecl.Body.Stmts[0])
+	}
+	call, ok := exprStmt.Value.(*backendir.CallExpr)
+	if !ok {
+		t.Fatalf("expected entrypoint expr to lower to *backendir.CallExpr, got %T", exprStmt.Value)
+	}
+	if len(call.Args) != 1 {
+		t.Fatalf("expected one call arg, got %d", len(call.Args))
+	}
+	coerce, ok := call.Args[0].(*backendir.TraitCoerceExpr)
+	if !ok {
+		t.Fatalf("expected trait-typed call arg to lower to *backendir.TraitCoerceExpr, got %T", call.Args[0])
+	}
+	traitType, ok := coerce.Type.(*backendir.TraitType)
+	if !ok {
+		t.Fatalf("expected coercion type to be *backendir.TraitType, got %T", coerce.Type)
+	}
+	if traitType.Name != "ToString" {
+		t.Fatalf("expected coercion trait name %q, got %q", "ToString", traitType.Name)
+	}
+}
+
 func TestLowerUnionAndExternTypeDeclToBackendIR(t *testing.T) {
 	unionDecl := lowerUnionDeclToBackendIR(&checker.Union{
 		Name:  "Value",
