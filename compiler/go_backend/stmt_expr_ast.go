@@ -106,13 +106,8 @@ func (e *emitter) lowerCallArgsAST(call *checker.FunctionCall) ([]ast.Expr, bool
 
 func (e *emitter) lowerModuleCallArgsAST(modulePath string, call *checker.FunctionCall) ([]ast.Expr, bool, error) {
 	var params []checker.Parameter
-	if def := call.Definition(); def != nil {
-		params = def.Parameters
-	}
-	if len(params) == 0 {
-		if original := e.originalModuleFunctionDef(modulePath, call); original != nil {
-			params = original.Parameters
-		}
+	if specialized := e.specializedModuleFunctionDef(modulePath, call); specialized != nil {
+		params = specialized.Parameters
 	}
 	return e.lowerCallArgsWithParamsAST(call, params)
 }
@@ -323,7 +318,9 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		if err != nil || !ok {
 			return nil, ok, err
 		}
-		typeArgs, err := e.lowerFunctionCallTypeArgsAST(e.originalModuleFunctionDef(v.Module, v.Call), v.Call.Definition())
+		original := e.originalModuleFunctionDef(v.Module, v.Call)
+		specialized := e.specializedModuleFunctionDef(v.Module, v.Call)
+		typeArgs, err := e.lowerFunctionCallTypeArgsAST(original, specialized)
 		if err != nil {
 			return nil, false, err
 		}
@@ -454,6 +451,142 @@ func (e *emitter) lowerExprAST(expr checker.Expression) (ast.Expr, bool, error) 
 		return e.lowerPanicExprAST(v.Message, v.Type())
 	default:
 		return nil, false, nil
+	}
+}
+
+func (e *emitter) specializedModuleFunctionDef(modulePath string, call *checker.FunctionCall) *checker.FunctionDef {
+	if call == nil {
+		return nil
+	}
+	original := e.originalModuleFunctionDef(modulePath, call)
+	if specialized := specializeFunctionDefForCall(original, call.Args, nil); specialized != nil {
+		return specialized
+	}
+	if def := call.Definition(); def != nil {
+		return def
+	}
+	return original
+}
+
+func specializeFunctionDefFromArgs(original *checker.FunctionDef, args []checker.Expression) *checker.FunctionDef {
+	return specializeFunctionDefForCall(original, args, nil)
+}
+
+func specializeFunctionDefForCall(original *checker.FunctionDef, args []checker.Expression, expectedReturn checker.Type) *checker.FunctionDef {
+	if original == nil {
+		return nil
+	}
+	bindings := make(map[string]checker.Type)
+	for i := 0; i < len(original.Parameters) && i < len(args); i++ {
+		inferBindingsFromArgExpr(original.Parameters[i].Type, args[i], bindings)
+	}
+	if expectedReturn != nil {
+		inferGenericTypeBindings(effectiveFunctionReturnType(original), expectedReturn, bindings)
+	}
+	if len(bindings) == 0 {
+		return original
+	}
+	params := make([]checker.Parameter, len(original.Parameters))
+	for i := range original.Parameters {
+		params[i] = checker.Parameter{
+			Name:    original.Parameters[i].Name,
+			Type:    applyTypeBindings(original.Parameters[i].Type, bindings),
+			Mutable: original.Parameters[i].Mutable,
+		}
+	}
+	return &checker.FunctionDef{
+		Name:       original.Name,
+		Parameters: params,
+		ReturnType: applyTypeBindings(effectiveFunctionReturnType(original), bindings),
+		Mutates:    original.Mutates,
+		Private:    original.Private,
+	}
+}
+
+func inferBindingsFromArgExpr(expected checker.Type, arg checker.Expression, bindings map[string]checker.Type) {
+	if expected == nil || arg == nil {
+		return
+	}
+	inferGenericTypeBindings(expected, arg.Type(), bindings)
+
+	switch expectedTyped := expected.(type) {
+	case *checker.List:
+		if listLiteral, ok := arg.(*checker.ListLiteral); ok {
+			for _, element := range listLiteral.Elements {
+				inferBindingsFromArgExpr(expectedTyped.Of(), element, bindings)
+			}
+		}
+	case *checker.Map:
+		if mapLiteral, ok := arg.(*checker.MapLiteral); ok {
+			for _, key := range mapLiteral.Keys {
+				inferBindingsFromArgExpr(expectedTyped.Key(), key, bindings)
+			}
+			for _, value := range mapLiteral.Values {
+				inferBindingsFromArgExpr(expectedTyped.Value(), value, bindings)
+			}
+		}
+	}
+}
+
+func applyTypeBindings(t checker.Type, bindings map[string]checker.Type) checker.Type {
+	if t == nil {
+		return nil
+	}
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			return applyTypeBindings(actual, bindings)
+		}
+		if bound, ok := bindings[typed.Name()]; ok {
+			return bound
+		}
+		return typed
+	case *checker.List:
+		return checker.MakeList(applyTypeBindings(typed.Of(), bindings))
+	case *checker.Map:
+		return checker.MakeMap(
+			applyTypeBindings(typed.Key(), bindings),
+			applyTypeBindings(typed.Value(), bindings),
+		)
+	case *checker.Maybe:
+		return checker.MakeMaybe(applyTypeBindings(typed.Of(), bindings))
+	case *checker.Result:
+		return checker.MakeResult(
+			applyTypeBindings(typed.Val(), bindings),
+			applyTypeBindings(typed.Err(), bindings),
+		)
+	case *checker.FunctionDef:
+		params := make([]checker.Parameter, len(typed.Parameters))
+		for i := range typed.Parameters {
+			params[i] = checker.Parameter{
+				Name:    typed.Parameters[i].Name,
+				Type:    applyTypeBindings(typed.Parameters[i].Type, bindings),
+				Mutable: typed.Parameters[i].Mutable,
+			}
+		}
+		return &checker.FunctionDef{
+			Name:                    typed.Name,
+			Receiver:                typed.Receiver,
+			Parameters:              params,
+			ReturnType:              applyTypeBindings(effectiveFunctionReturnType(typed), bindings),
+			InferReturnTypeFromBody: typed.InferReturnTypeFromBody,
+			Mutates:                 typed.Mutates,
+			IsTest:                  typed.IsTest,
+			Body:                    typed.Body,
+			Private:                 typed.Private,
+		}
+	case *checker.ExternType:
+		args := make([]checker.Type, 0, len(typed.TypeArgs))
+		for _, typeArg := range typed.TypeArgs {
+			args = append(args, applyTypeBindings(typeArg, bindings))
+		}
+		return &checker.ExternType{
+			Name_:         typed.Name_,
+			GenericParams: append([]string(nil), typed.GenericParams...),
+			TypeArgs:      args,
+		}
+	default:
+		return t
 	}
 }
 
