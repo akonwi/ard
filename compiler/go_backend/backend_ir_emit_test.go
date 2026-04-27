@@ -2796,6 +2796,68 @@ fn main() {
 // the per-emitter owner+method key, so methods are written exactly once
 // even when the same owner declaration is encountered more than once
 // during emission.
+func TestEmitGoFileFromBackendIR_MethodsWithoutSourceModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Box {
+  value: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.value
+  }
+}
+
+enum Light { red, green }
+
+impl Light {
+  fn rank() Int {
+    match self {
+      Light::red => 0,
+      Light::green => 1,
+    }
+  }
+}
+
+fn main() {
+  let box = Box{value: 1}
+  let _ = box.get()
+  let light = Light::green
+  let _ = light.rank()
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("backend IR lowering failed: %v", err)
+	}
+
+	fileIR, err := emitGoFileFromBackendIR(irModule, nil, map[string]string{helperImportPath: helperImportAlias}, true, "")
+	if err != nil {
+		t.Fatalf("backend IR emitter failed without source module: %v", err)
+	}
+	rendered, err := renderGoFile(fileIR)
+	if err != nil {
+		t.Fatalf("renderGoFile failed: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	for _, want := range []string{
+		"func (self Box) Get() int",
+		"func (self Light) Rank() int",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+}
+
 func TestEmitGoFileFromBackendIR_MethodDeclDeduplication(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

@@ -1472,6 +1472,76 @@ func TestLowerUnionAndExternTypeDeclToBackendIR(t *testing.T) {
 	}
 }
 
+func TestLowerModuleToBackendIR_CarriesStructAndEnumMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Box { value: Int }
+
+impl Box {
+  fn get() Int {
+    self.value
+  }
+}
+
+enum Light { red, green }
+
+impl Light {
+  fn rank() Int {
+    match self {
+      Light::red => 0,
+      Light::green => 1,
+    }
+  }
+}
+
+fn main() {
+  let box = Box{value: 1}
+  let _ = box.get()
+  let light = Light::green
+  let _ = light.rank()
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend IR lowering to succeed, got error: %v", err)
+	}
+
+	var boxDecl *backendir.StructDecl
+	var lightDecl *backendir.EnumDecl
+	for _, decl := range irModule.Decls {
+		switch typed := decl.(type) {
+		case *backendir.StructDecl:
+			if typed.Name == "Box" {
+				boxDecl = typed
+			}
+		case *backendir.EnumDecl:
+			if typed.Name == "Light" {
+				lightDecl = typed
+			}
+		}
+	}
+	if boxDecl == nil {
+		t.Fatalf("expected lowered IR to include Box struct decl")
+	}
+	if lightDecl == nil {
+		t.Fatalf("expected lowered IR to include Light enum decl")
+	}
+	if len(boxDecl.Methods) != 1 || boxDecl.Methods[0] == nil || boxDecl.Methods[0].Name != "get" {
+		t.Fatalf("expected Box struct decl to carry get method, got %#v", boxDecl.Methods)
+	}
+	if got := strings.TrimSpace(boxDecl.Methods[0].ReceiverName); got != "self" {
+		t.Fatalf("expected Box.get receiver name %q, got %q", "self", got)
+	}
+	if len(lightDecl.Methods) != 1 || lightDecl.Methods[0] == nil || lightDecl.Methods[0].Name != "rank" {
+		t.Fatalf("expected Light enum decl to carry rank method, got %#v", lightDecl.Methods)
+	}
+}
+
 func TestLowerModuleToBackendIR_CollectsOrphanUnionDecls(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

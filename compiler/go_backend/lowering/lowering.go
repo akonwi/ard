@@ -877,9 +877,19 @@ func lowerStructDeclToBackendIR(def *checker.StructDef) backendir.Decl {
 			Type: lowerCheckerTypeToBackendIR(def.Fields[fieldName]),
 		})
 	}
+	methods := make([]*backendir.FuncDecl, 0, len(def.Methods))
+	for _, methodName := range sortedStringKeys(def.Methods) {
+		methodDecl, ok := lowerFunctionDeclToBackendIR(def.Methods[methodName]).(*backendir.FuncDecl)
+		if !ok || methodDecl == nil {
+			continue
+		}
+		methods = append(methods, methodDecl)
+	}
 	return &backendir.StructDecl{
-		Name:   def.Name,
-		Fields: fields,
+		Name:       def.Name,
+		TypeParams: structTypeParamOrder(def),
+		Fields:     fields,
+		Methods:    methods,
 	}
 }
 
@@ -891,9 +901,18 @@ func lowerEnumDeclToBackendIR(def *checker.Enum) backendir.Decl {
 			Value: value.Value,
 		})
 	}
+	methods := make([]*backendir.FuncDecl, 0, len(def.Methods))
+	for _, methodName := range sortedStringKeys(def.Methods) {
+		methodDecl, ok := lowerFunctionDeclToBackendIR(def.Methods[methodName]).(*backendir.FuncDecl)
+		if !ok || methodDecl == nil {
+			continue
+		}
+		methods = append(methods, methodDecl)
+	}
 	return &backendir.EnumDecl{
-		Name:   def.Name,
-		Values: values,
+		Name:    def.Name,
+		Values:  values,
+		Methods: methods,
 	}
 }
 
@@ -943,13 +962,15 @@ func lowerFunctionDeclToBackendIR(def *checker.FunctionDef) backendir.Decl {
 	finalizeFunctionBodyForReturn(body, returnType)
 
 	return &backendir.FuncDecl{
-		Name:      def.Name,
-		Params:    params,
-		Return:    returnType,
-		Body:      body,
-		IsExtern:  false,
-		IsPrivate: def.Private,
-		IsTest:    def.IsTest,
+		Name:            def.Name,
+		Params:          params,
+		Return:          returnType,
+		Body:            body,
+		ReceiverName:    strings.TrimSpace(def.Receiver),
+		ReceiverMutates: def.Mutates,
+		IsExtern:        false,
+		IsPrivate:       def.Private,
+		IsTest:          def.IsTest,
 	}
 }
 

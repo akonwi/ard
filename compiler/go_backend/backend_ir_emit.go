@@ -18,8 +18,6 @@ type backendIREmitter struct {
 	functionNames    map[string]string
 	functionReturns  map[string]backendir.Type
 	entrypointBlock  *backendir.Block
-	sourceStructs    map[string]*checker.StructDef
-	sourceEnums      map[string]*checker.Enum
 	localStructNames map[string]struct{}
 	localEnumNames   map[string]struct{}
 	externTypeNames  map[string]struct{}
@@ -81,8 +79,6 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 	used := make(map[string]struct{})
 	functionNames := make(map[string]string)
 	functionReturns := make(map[string]backendir.Type)
-	sourceStructs := make(map[string]*checker.StructDef)
-	sourceEnums := make(map[string]*checker.Enum)
 	localStructNames := make(map[string]struct{})
 	localEnumNames := make(map[string]struct{})
 	externTypeNames := make(map[string]struct{})
@@ -117,171 +113,15 @@ func newBackendIREmitter(module *backendir.Module, sourceModule checker.Module, 
 		functionReturns[fn.Name] = fn.Return
 	}
 
-	if sourceModule != nil && sourceModule.Program() != nil {
-		for _, stmt := range sourceModule.Program().Statements {
-			if stmt.Stmt != nil {
-				switch def := stmt.Stmt.(type) {
-				case *checker.StructDef:
-					sourceStructs[def.Name] = def
-				case checker.StructDef:
-					defCopy := def
-					sourceStructs[def.Name] = &defCopy
-				case *checker.Enum:
-					sourceEnums[def.Name] = def
-				case checker.Enum:
-					defCopy := def
-					sourceEnums[def.Name] = &defCopy
-				}
-			}
-		}
-		// Enums declared without an `impl` block do not appear as
-		// `Statement.Stmt` entries in the checked program (the checker
-		// only emits a Statement for enum decls when they have an
-		// associated impl). Scan all referenced types in function
-		// signatures, extern signatures, variable types, and statement
-		// bodies to discover those enums so the BackendIR emitter can
-		// know about them (e.g. emit type names natively, look up
-		// methods, etc.). Without this, native emission of enum-typed
-		// signatures produces references to undeclared Go types.
-		collectReferencedEnums(sourceModule.Program(), sourceEnums)
-	}
-
 	return &backendIREmitter{
 		packageName:      module.PackageName,
 		functionNames:    functionNames,
 		functionReturns:  functionReturns,
 		entrypointBlock:  module.Entrypoint,
-		sourceStructs:    sourceStructs,
-		sourceEnums:      sourceEnums,
 		localStructNames: localStructNames,
 		localEnumNames:   localEnumNames,
 		externTypeNames:  externTypeNames,
 		emittedMethods:   make(map[string]struct{}),
-	}
-}
-
-// collectReferencedEnums walks the checker program and adds every
-// *checker.Enum it can reach (via function signatures, variable types,
-// expression types, and statement types) into the provided map. This
-// enables the BackendIR emitter to recognize enum types that the
-// checker keeps in scope without emitting a Statement entry (i.e.,
-// enums without an `impl` block).
-func collectReferencedEnums(program *checker.Program, sourceEnums map[string]*checker.Enum) {
-	if program == nil {
-		return
-	}
-	visited := make(map[checker.Type]struct{})
-	add := func(t checker.Type) {
-		collectEnumsFromType(t, sourceEnums, visited)
-	}
-	for _, stmt := range program.Statements {
-		if stmt.Expr != nil {
-			add(stmt.Expr.Type())
-			switch def := stmt.Expr.(type) {
-			case *checker.FunctionDef:
-				for _, param := range def.Parameters {
-					add(param.Type)
-				}
-				add(effectiveFunctionReturnType(def))
-			case *checker.ExternalFunctionDef:
-				for _, param := range def.Parameters {
-					add(param.Type)
-				}
-				add(def.ReturnType)
-			}
-		}
-		if stmt.Stmt != nil {
-			switch def := stmt.Stmt.(type) {
-			case *checker.VariableDef:
-				if def != nil {
-					add(def.Type())
-				}
-			case *checker.StructDef:
-				if def != nil {
-					for _, fieldType := range def.Fields {
-						add(fieldType)
-					}
-					for _, method := range def.Methods {
-						for _, param := range method.Parameters {
-							add(param.Type)
-						}
-						add(effectiveFunctionReturnType(method))
-					}
-				}
-			case checker.StructDef:
-				for _, fieldType := range def.Fields {
-					add(fieldType)
-				}
-				for _, method := range def.Methods {
-					for _, param := range method.Parameters {
-						add(param.Type)
-					}
-					add(effectiveFunctionReturnType(method))
-				}
-			case *checker.Enum:
-				if def != nil {
-					sourceEnums[def.Name] = def
-				}
-			case checker.Enum:
-				defCopy := def
-				sourceEnums[def.Name] = &defCopy
-			}
-		}
-	}
-}
-
-// collectEnumsFromType recursively walks a checker.Type, recording any
-// *checker.Enum it encounters in sourceEnums. The visited set short-
-// circuits cyclic graphs.
-func collectEnumsFromType(t checker.Type, sourceEnums map[string]*checker.Enum, visited map[checker.Type]struct{}) {
-	if t == nil {
-		return
-	}
-	if _, seen := visited[t]; seen {
-		return
-	}
-	visited[t] = struct{}{}
-	switch typed := t.(type) {
-	case *checker.Enum:
-		if typed != nil {
-			sourceEnums[typed.Name] = typed
-		}
-	case *checker.TypeVar:
-		if typed != nil {
-			collectEnumsFromType(typed.Actual(), sourceEnums, visited)
-		}
-	case *checker.List:
-		if typed != nil {
-			collectEnumsFromType(typed.Of(), sourceEnums, visited)
-		}
-	case *checker.Map:
-		if typed != nil {
-			collectEnumsFromType(typed.Key(), sourceEnums, visited)
-			collectEnumsFromType(typed.Value(), sourceEnums, visited)
-		}
-	case *checker.Maybe:
-		if typed != nil {
-			collectEnumsFromType(typed.Of(), sourceEnums, visited)
-		}
-	case *checker.Result:
-		if typed != nil {
-			collectEnumsFromType(typed.Val(), sourceEnums, visited)
-			collectEnumsFromType(typed.Err(), sourceEnums, visited)
-		}
-	case *checker.FunctionDef:
-		if typed != nil {
-			for _, param := range typed.Parameters {
-				collectEnumsFromType(param.Type, sourceEnums, visited)
-			}
-			collectEnumsFromType(effectiveFunctionReturnType(typed), sourceEnums, visited)
-		}
-	case *checker.ExternalFunctionDef:
-		if typed != nil {
-			for _, param := range typed.Parameters {
-				collectEnumsFromType(param.Type, sourceEnums, visited)
-			}
-			collectEnumsFromType(typed.ReturnType, sourceEnums, visited)
-		}
 	}
 }
 
@@ -293,23 +133,19 @@ func (e *backendIREmitter) emitDecls(decl backendir.Decl) ([]ast.Decl, error) {
 			return nil, err
 		}
 		decls := []ast.Decl{typeDecl}
-		if source := e.sourceStructs[d.Name]; source != nil {
-			methodDecls, err := e.emitStructMethodDecls(source)
-			if err != nil {
-				return nil, err
-			}
-			decls = append(decls, methodDecls...)
+		methodDecls, err := e.emitStructMethodDecls(d)
+		if err != nil {
+			return nil, err
 		}
+		decls = append(decls, methodDecls...)
 		return decls, nil
 	case *backendir.EnumDecl:
 		decls := []ast.Decl{e.emitEnumDecl(d)}
-		if source := e.sourceEnums[d.Name]; source != nil {
-			methodDecls, err := e.emitEnumMethodDecls(source)
-			if err != nil {
-				return nil, err
-			}
-			decls = append(decls, methodDecls...)
+		methodDecls, err := e.emitEnumMethodDecls(d)
+		if err != nil {
+			return nil, err
 		}
+		decls = append(decls, methodDecls...)
 		return decls, nil
 	case *backendir.UnionDecl:
 		return []ast.Decl{e.emitUnionDecl(d)}, nil
@@ -332,9 +168,40 @@ func (e *backendIREmitter) emitDecls(decl backendir.Decl) ([]ast.Decl, error) {
 	}
 }
 
-func (e *backendIREmitter) emitStructMethodDecls(def *checker.StructDef) ([]ast.Decl, error) {
-	order, mapping, _ := structTypeParams(def)
-	receiverType := ast.Expr(ast.NewIdent(goName(def.Name, true)))
+func structDeclTypeParamsFromIR(decl *backendir.StructDecl) ([]string, map[string]string, map[string]string) {
+	if decl == nil {
+		return nil, nil, nil
+	}
+	order := append([]string(nil), decl.TypeParams...)
+	if len(order) == 0 {
+		seen := make(map[string]struct{})
+		for _, field := range decl.Fields {
+			collectBackendIRTypeVars(field.Type, &order, seen)
+		}
+		for _, method := range decl.Methods {
+			collectBackendIRTypeVars(method.Return, &order, seen)
+			for _, param := range method.Params {
+				collectBackendIRTypeVars(param.Type, &order, seen)
+			}
+		}
+	}
+	if len(order) == 0 {
+		return nil, nil, nil
+	}
+	mapping := buildTypeParamMapping(order)
+	constraints := make(map[string]string, len(order))
+	for _, name := range order {
+		constraints[name] = "any"
+	}
+	return order, mapping, constraints
+}
+
+func (e *backendIREmitter) emitStructMethodDecls(decl *backendir.StructDecl) ([]ast.Decl, error) {
+	if decl == nil {
+		return nil, nil
+	}
+	order, mapping, _ := structDeclTypeParamsFromIR(decl)
+	receiverType := ast.Expr(ast.NewIdent(goName(decl.Name, true)))
 	if len(order) > 0 {
 		args := make([]ast.Expr, 0, len(order))
 		for _, name := range order {
@@ -342,14 +209,17 @@ func (e *backendIREmitter) emitStructMethodDecls(def *checker.StructDef) ([]ast.
 		}
 		receiverType = indexExpr(receiverType, args)
 	}
-	out := make([]ast.Decl, 0, len(def.Methods))
-	for _, methodName := range sortedStringKeys(def.Methods) {
-		methodKey := "struct:" + def.Name + "." + methodName
+	out := make([]ast.Decl, 0, len(decl.Methods))
+	for _, method := range decl.Methods {
+		if method == nil {
+			continue
+		}
+		methodKey := "struct:" + decl.Name + "." + method.Name
 		if _, seen := e.emittedMethods[methodKey]; seen {
 			continue
 		}
 		e.emittedMethods[methodKey] = struct{}{}
-		methodDecl, err := e.emitReceiverMethodDecl(def.Name, receiverType, mapping, def.Methods[methodName])
+		methodDecl, err := e.emitReceiverMethodDecl(decl.Name, receiverType, mapping, method)
 		if err != nil {
 			return nil, err
 		}
@@ -358,16 +228,22 @@ func (e *backendIREmitter) emitStructMethodDecls(def *checker.StructDef) ([]ast.
 	return out, nil
 }
 
-func (e *backendIREmitter) emitEnumMethodDecls(def *checker.Enum) ([]ast.Decl, error) {
-	receiverType := ast.Expr(ast.NewIdent(goName(def.Name, true)))
-	out := make([]ast.Decl, 0, len(def.Methods))
-	for _, methodName := range sortedStringKeys(def.Methods) {
-		methodKey := "enum:" + def.Name + "." + methodName
+func (e *backendIREmitter) emitEnumMethodDecls(decl *backendir.EnumDecl) ([]ast.Decl, error) {
+	if decl == nil {
+		return nil, nil
+	}
+	receiverType := ast.Expr(ast.NewIdent(goName(decl.Name, true)))
+	out := make([]ast.Decl, 0, len(decl.Methods))
+	for _, method := range decl.Methods {
+		if method == nil {
+			continue
+		}
+		methodKey := "enum:" + decl.Name + "." + method.Name
 		if _, seen := e.emittedMethods[methodKey]; seen {
 			continue
 		}
 		e.emittedMethods[methodKey] = struct{}{}
-		methodDecl, err := e.emitReceiverMethodDecl(def.Name, receiverType, nil, def.Methods[methodName])
+		methodDecl, err := e.emitReceiverMethodDecl(decl.Name, receiverType, nil, method)
 		if err != nil {
 			return nil, err
 		}
@@ -377,16 +253,7 @@ func (e *backendIREmitter) emitEnumMethodDecls(def *checker.Enum) ([]ast.Decl, e
 }
 
 func (e *backendIREmitter) emitStructDecl(decl *backendir.StructDecl) (ast.Decl, error) {
-	typeParamOrder := make([]string, 0, 2)
-	typeParamSeen := make(map[string]struct{})
-	for _, field := range decl.Fields {
-		collectBackendIRTypeVars(field.Type, &typeParamOrder, typeParamSeen)
-	}
-	typeParamMapping := buildTypeParamMapping(typeParamOrder)
-	typeParamConstraints := make(map[string]string, len(typeParamOrder))
-	for _, name := range typeParamOrder {
-		typeParamConstraints[name] = "any"
-	}
+	typeParamOrder, typeParamMapping, typeParamConstraints := structDeclTypeParamsFromIR(decl)
 
 	fields := make([]*ast.Field, 0, len(decl.Fields))
 	for _, field := range decl.Fields {
@@ -499,31 +366,26 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 	return &ast.FuncDecl{Name: ast.NewIdent(name), Type: funcType, Body: &ast.BlockStmt{List: bodyStmts}}, nil
 }
 
-func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType ast.Expr, typeParams map[string]string, method *checker.FunctionDef) (ast.Decl, error) {
+func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType ast.Expr, typeParams map[string]string, method *backendir.FuncDecl) (ast.Decl, error) {
 	if method == nil {
 		return nil, fmt.Errorf("nil receiver method")
 	}
-
-	methodIR, ok := lowerFunctionDeclToBackendIR(method).(*backendir.FuncDecl)
-	if !ok {
-		return nil, fmt.Errorf("failed to lower receiver method %s.%s", typeName, method.Name)
-	}
-	if !e.canEmitFuncDeclNatively(methodIR) {
+	if !e.canEmitFuncDeclNatively(method) {
 		return nil, fmt.Errorf("unsupported method declaration: %s.%s", typeName, method.Name)
 	}
 
-	params := make([]*ast.Field, 0, len(methodIR.Params))
-	locals := make(map[string]string, len(methodIR.Params)+1)
-	seenLocals := make(map[string]struct{}, len(methodIR.Params)+1)
+	params := make([]*ast.Field, 0, len(method.Params))
+	locals := make(map[string]string, len(method.Params)+1)
+	seenLocals := make(map[string]struct{}, len(method.Params)+1)
 
-	receiverName := strings.TrimSpace(method.Receiver)
+	receiverName := strings.TrimSpace(method.ReceiverName)
 	if receiverName == "" {
 		receiverName = "self"
 	}
 	receiverLocalName := uniqueLocalName(goName(receiverName, false), seenLocals)
 	locals[receiverName] = receiverLocalName
 
-	for _, param := range methodIR.Params {
+	for _, param := range method.Params {
 		paramType, err := e.emitTypeWithTypeParams(param.Type, typeParams)
 		if err != nil {
 			return nil, fmt.Errorf("method %s.%s param %s: %w", typeName, method.Name, param.Name, err)
@@ -533,32 +395,32 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(localName)}, Type: paramType})
 	}
 
-	returnType, err := e.emitTypeWithTypeParams(methodIR.Return, typeParams)
+	returnType, err := e.emitTypeWithTypeParams(method.Return, typeParams)
 	if err != nil {
 		return nil, fmt.Errorf("method %s.%s return type: %w", typeName, method.Name, err)
 	}
 
 	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	if !isVoidIRType(methodIR.Return) {
+	if !isVoidIRType(method.Return) {
 		funcType.Results = funcResults(returnType)
 	}
 
-	bodyStmts, err := e.emitBlock(methodIR.Body, returnType, locals, seenLocals)
+	bodyStmts, err := e.emitBlock(method.Body, returnType, locals, seenLocals)
 	if err != nil {
 		return nil, fmt.Errorf("method %s.%s body: %w", typeName, method.Name, err)
 	}
-	if !isVoidIRType(methodIR.Return) && !blockEndsInReturn(bodyStmts) {
+	if !isVoidIRType(method.Return) && !blockEndsInReturn(bodyStmts) {
 		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{zeroValueExpr(returnType)}})
 	}
 
 	recvType := receiverType
-	if method.Mutates {
+	if method.ReceiverMutates {
 		recvType = &ast.StarExpr{X: recvType}
 	}
 
 	return &ast.FuncDecl{
 		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(receiverLocalName)}, Type: recvType}}},
-		Name: ast.NewIdent(goName(method.Name, !method.Private)),
+		Name: ast.NewIdent(goName(method.Name, !method.IsPrivate)),
 		Type: funcType,
 		Body: &ast.BlockStmt{List: bodyStmts},
 	}, nil
@@ -1273,9 +1135,6 @@ func (e *backendIREmitter) canEmitLocalStructLiteralType(t backendir.Type) bool 
 	if name == "" {
 		return false
 	}
-	if _, ok := e.sourceStructs[name]; ok {
-		return true
-	}
 	_, ok := e.localStructNames[name]
 	return ok
 }
@@ -1284,9 +1143,6 @@ func (e *backendIREmitter) canEmitLocalEnumVariantType(t backendir.Type) bool {
 	name := irNamedTypeName(t)
 	if name == "" {
 		return false
-	}
-	if _, ok := e.sourceEnums[name]; ok {
-		return true
 	}
 	_, ok := e.localEnumNames[name]
 	return ok

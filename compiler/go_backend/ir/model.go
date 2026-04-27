@@ -23,8 +23,10 @@ type Param struct {
 }
 
 type StructDecl struct {
-	Name   string
-	Fields []Field
+	Name       string
+	TypeParams []string
+	Fields     []Field
+	Methods    []*FuncDecl
 }
 
 func (*StructDecl) declNode() {}
@@ -35,8 +37,9 @@ type EnumValue struct {
 }
 
 type EnumDecl struct {
-	Name   string
-	Values []EnumValue
+	Name    string
+	Values  []EnumValue
+	Methods []*FuncDecl
 }
 
 func (*EnumDecl) declNode() {}
@@ -56,14 +59,16 @@ type ExternTypeDecl struct {
 func (*ExternTypeDecl) declNode() {}
 
 type FuncDecl struct {
-	Name          string
-	Params        []Param
-	Return        Type
-	Body          *Block
-	ExternBinding string
-	IsExtern      bool
-	IsPrivate     bool
-	IsTest        bool
+	Name            string
+	Params          []Param
+	Return          Type
+	Body            *Block
+	ExternBinding   string
+	ReceiverName    string
+	ReceiverMutates bool
+	IsExtern        bool
+	IsPrivate       bool
+	IsTest          bool
 }
 
 func (*FuncDecl) declNode() {}
