@@ -1834,10 +1834,7 @@ let c = classify(2)
 		t.Fatalf("expected non-nil backend ir module")
 	}
 
-	imports := map[string]string{
-		helperImportPath: helperImportAlias,
-	}
-	fileIR, err := emitGoFileFromBackendIR(irModule, imports, true)
+	fileIR, err := emitGoFileFromBackendIR(irModule, true)
 	if err != nil {
 		t.Fatalf("emitGoFileFromBackendIR failed: %v", err)
 	}

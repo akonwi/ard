@@ -71,10 +71,9 @@ func BenchmarkEmitGoFileFromBackendIR(b *testing.B) {
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
-	imports := irModule.Imports
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := emitGoFileFromBackendIR(irModule, imports, true); err != nil {
+		if _, err := emitGoFileFromBackendIR(irModule, true); err != nil {
 			b.Fatalf("did not expect error: %v", err)
 		}
 	}
@@ -86,8 +85,7 @@ func BenchmarkOptimizeGoFileIR(b *testing.B) {
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
-	imports := irModule.Imports
-	fileIR, err := emitGoFileFromBackendIR(irModule, imports, true)
+	fileIR, err := emitGoFileFromBackendIR(irModule, true)
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
@@ -103,8 +101,7 @@ func BenchmarkRenderGoFile(b *testing.B) {
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
-	imports := irModule.Imports
-	fileIR, err := emitGoFileFromBackendIR(irModule, imports, true)
+	fileIR, err := emitGoFileFromBackendIR(irModule, true)
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}

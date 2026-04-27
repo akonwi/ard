@@ -35,20 +35,20 @@ func compileModuleSourceViaBackendIR(module checker.Module, packageName string, 
 		return nil, err
 	}
 
-	fileIR, err := emitGoFileFromBackendIR(irModule, irModule.Imports, entrypoint)
+	fileIR, err := emitGoFileFromBackendIR(irModule, entrypoint)
 	if err != nil {
 		return nil, err
 	}
 	return renderGoFile(optimizeGoFileIR(fileIR))
 }
 
-func emitGoFileFromBackendIR(module *backendir.Module, imports map[string]string, entrypoint bool) (goFileIR, error) {
+func emitGoFileFromBackendIR(module *backendir.Module, entrypoint bool) (goFileIR, error) {
 	if module == nil {
 		return goFileIR{}, fmt.Errorf("nil backend ir module")
 	}
 
 	emitter := newBackendIREmitter(module)
-	fileIR := lowerGoFileIR(module.PackageName, imports)
+	fileIR := lowerGoFileIR(module.PackageName, module.Imports)
 
 	for i, decl := range module.Decls {
 		astDecls, err := emitter.emitDecls(decl)
