@@ -1,10 +1,12 @@
 package ir
 
 type Module struct {
-	Path        string
-	PackageName string
-	Decls       []Decl
-	Entrypoint  *Block
+	Path                string
+	PackageName         string
+	Imports             map[string]string
+	ImportedModulePaths []string
+	Decls               []Decl
+	Entrypoint          *Block
 }
 
 type Decl interface {

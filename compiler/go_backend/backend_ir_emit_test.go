@@ -31,16 +31,16 @@ fn main() {
 }
 `)
 
-	legacy, err := compileModuleSource(module, "main", true, "")
+	standardOut, err := compileModuleSource(module, "main", true, "")
 	if err != nil {
-		t.Fatalf("legacy compile failed: %v", err)
+		t.Fatalf("compile failed: %v", err)
 	}
 	irOut, err := compileModuleSourceViaBackendIR(module, "main", true, "")
 	if err != nil {
 		t.Fatalf("backend IR compile failed: %v", err)
 	}
 
-	assertParsesAsGo(t, legacy)
+	assertParsesAsGo(t, standardOut)
 	assertParsesAsGo(t, irOut)
 
 	generated := string(irOut)

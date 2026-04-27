@@ -1,169 +1,125 @@
 # Go Emission Architecture
 
-This document describes the current architecture of Ard's Go backend.
+This document describes Ard's current Go backend architecture.
 
-The Go backend now uses a fully structured compilation pipeline for production transpilation. Generated Go code is no longer built through the legacy line-oriented source emitter, and production lowering no longer relies on captured Go source snippets that are parsed back into AST.
+The Go backend is now IR-first end to end for production transpilation. The old checker-backed Go AST emitter has been removed. Production code generation lowers checked Ard modules into backend IR, renders that IR into Go AST, and formats the result with Go's standard tooling.
 
-## Goals
-
-- Separate semantic lowering from final source formatting.
-- Keep the backend deterministic and easy to test.
-- Use Go's structured syntax tooling (`go/ast`, `go/token`, `go/format`) instead of custom whole-file string emission.
-- Preserve a clear pipeline shape with explicit lowering, optimization, and rendering stages.
-- Leave room for future optimization and profiling work without reintroducing source-first emission.
-
-## Current pipeline
+## Pipeline
 
 ```text
 parse AST
 → checker checked tree
+→ backend IR
 → Go file IR
-→ Go file IR optimization passes
 → go/ast
-→ format.Node / gofmt-style output
+→ go/format
 → generated .go files
 ```
 
-For production Go-target transpilation, the main wrapper path is:
+For production Go-target transpilation, the main path is:
 
 ```text
 CompileEntrypoint / compilePackageSource / compileModuleSource
-→ lowerModuleFileIR / lowerAsyncModuleFileIR
-→ optimizeGoFileIR
-→ renderGoFile
-→ formatGoFileAST
+→ lowering.LowerModuleToBackendIR(...)
+→ emitGoFileFromBackendIR(...)
+→ optimizeGoFileIR(...)
+→ renderGoFile(...)
 ```
 
 ## Stage responsibilities
 
 ### 1. Checker checked tree
 
-- The checker remains the semantic source of truth.
-- Target-specific rules and extern resolution are completed before Go lowering begins.
-- The Go backend consumes checked modules, checked statements, and checked expression/type metadata.
+The checker remains the semantic source of truth.
 
-### 2. Go file IR
+It is responsible for:
+- name resolution
+- type checking
+- target-aware semantic shaping before backend lowering
 
-The current IR is intentionally lightweight and file-oriented:
+### 2. Backend IR
 
-- package name
-- imports
-- ordered declaration groups
+`compiler/go_backend/ir` is the backend-owned semantic boundary.
 
-This stage provides a stable place to:
+It models:
+- module/package identity
+- Go import metadata needed by emission
+- required imported Ard module paths for generated-project writing
+- declarations: structs, enums, unions, extern types, functions, vars
+- statement/expression structure for function bodies and entrypoint execution
+- backend-specific metadata such as trait types/coercions, method ownership, and by-ref mutable params
 
-- establish file/package structure
-- collect and order imports
-- preserve declaration ordering
-- keep lowering and rendering separated by an explicit backend boundary
+`compiler/go_backend/lowering` is responsible for lowering checked modules into this IR.
 
-Today, most semantic lowering for declarations, statements, and expressions happens while constructing structured Go AST nodes that are then stored inside the file IR.
+### 3. Go file IR
 
-That means the current backend is best understood as:
+`goFileIR` is a lightweight file-assembly stage used after backend IR emission.
 
-- a lightweight file IR for module structure
-- plus direct structured AST lowering for declaration and body contents
+It is responsible for:
+- package clause
+- import block assembly
+- ordered decl grouping
 
-rather than a large standalone statement/expression IR.
+This stage is intentionally small. Semantic decisions should already be made by backend IR lowering and backend IR emission.
 
-### 3. Go file IR optimization passes
+### 4. Go AST emission
 
-A lightweight optimization pass runs before rendering.
+`compiler/go_backend/backend_ir_emit.go` renders backend IR directly into `go/ast` nodes.
 
-Current responsibilities include:
+This stage is responsible for:
+- type declaration emission
+- function/method emission
+- entrypoint `main` synthesis
+- native lowering of backend IR statements/expressions into Go syntax
 
-- import deduplication
-- dropping empty declaration groups
-
-This stage exists primarily as a pipeline slot for future cleanup and simplification work. It can grow to host additional optimizations without changing the overall backend shape.
-
-### 4. `go/ast`
-
-- Backend lowering produces structured Go syntax trees.
-- Production transpilation lowers declarations and bodies directly to `ast.Decl`, `ast.Stmt`, and `ast.Expr` forms.
-- `renderGoFile(...)` assembles those declarations into an `ast.File` with structured import specs.
-- Go-specific surface syntax is handled through AST construction rather than reparsing generated source strings.
+There is no production fallback to a separate checker-backed emitter.
 
 ### 5. Formatting
 
-- `formatGoFileAST(...)` uses `format.Node(...)` as the final rendering step.
-- The formatted bytes are written as generated `.go` files.
-- Final formatting is the only source-rendering step in production Go emission.
+`renderGoFile(...)` and `format.Node(...)` perform final Go source rendering.
 
-## Current state of the backend
+Formatting is the only source-text emission step.
 
-The structured pipeline is now the production architecture, not an in-progress side path.
+## Current state
 
-On this branch:
+The backend now has these properties:
 
-- every generated Go module lowers through `goFileIR`
-- all production Go files render through `go/ast` + `go/format`
-- user functions and methods lower directly to AST declarations
-- package variables lower through the structured pipeline
-- synthesized entrypoint `main` lowering is structured
-- async support module generation lowers directly to AST
-- the legacy builder/source emitter has been deleted
-- production parse-back helpers for generated Go declarations/blocks have been removed
-- function-body fallback emission has been removed
-- package-var fallback emission has been removed
-- synthesized top-level `main` fallback emission has been removed
+- production transpilation is backend-IR-first
+- the old checker→AST emitter path has been deleted
+- imports and generated-project dependency discovery are produced during lowering and carried on backend IR module metadata
+- declaration emission, body emission, and synthesized entrypoint emission are all native backend IR render paths
+- unsupported cases fail explicitly instead of falling back to legacy lowering
 
-In other words, production Go transpilation no longer depends on:
+## Generated project writing
 
-- `line(...)`
-- builder-managed source indentation/output capture
-- declaration-source capture followed by parse-back
-- block-source capture followed by parse-back
+When the Go backend writes a generated Go project, it:
 
-Metadata strings such as package names, import paths, and generated symbol names still exist, but generated Go syntax is no longer emitted as raw source snippets and reparsed as part of production lowering.
+1. lowers the checked Ard module to backend IR
+2. compiles the entrypoint module from backend IR
+3. uses backend IR module metadata to determine which imported Ard modules must also be written
+4. recursively compiles those imported modules through the same IR-first path
 
-## Architectural shape
+This keeps project emission aligned with the same backend boundary used by direct module compilation.
 
-The Go backend now matches the intended structured backend shape much more closely:
+## Design goals
+
+This architecture is intended to keep the Go backend:
+- deterministic
+- structurally testable
+- easy to profile by stage
+- explicit about unsupported cases
+- free of source-snippet parse-back or hidden legacy fallback behavior
+
+## Success criteria
+
+The intended long-term shape is:
 
 ```text
 checked Ard tree
-→ Go file IR
-→ optimized file IR
+→ backend IR lowering
+→ native backend IR emission
 → go/ast
 → formatted Go source
 ```
 
-This gives the backend:
-
-- a clear lowering boundary
-- a distinct optimization stage
-- structured rendering through Go-native tooling
-- stage-level test and benchmark targets
-
-## Future evolution
-
-The current design still leaves room for further refinement.
-
-Likely future directions include:
-
-- expanding optimization passes beyond import/decl cleanup
-- introducing richer backend-local IR where it proves useful for analysis or optimization
-- improving compile-time characteristics of generated Go for large modules/programs
-- adding more stage-specific profiling and benchmark coverage
-
-If a richer IR is introduced later, it should extend the structured pipeline rather than reintroduce source-first emission.
-
-## Success criteria
-
-The backend should remain organized around this structured model:
-
-```text
-checked Ard tree
-→ backend lowering
-→ structured Go AST
-→ formatted Go source
-```
-
-That architecture makes it easier to:
-
-- profile transpilation stages
-- optimize generated output
-- reduce Go compile times
-- test lowering independently from formatting
-- evolve backend behavior without depending on string-based emit/parse cycles
+New backend features should extend this pipeline rather than reintroduce checker-backed or source-first emission paths.

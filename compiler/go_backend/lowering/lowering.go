@@ -10,8 +10,8 @@ import (
 	backendir "github.com/akonwi/ard/go_backend/ir"
 )
 
-func LowerModuleToBackendIR(module checker.Module, packageName string, entrypoint bool) (*backendir.Module, error) {
-	return lowerModuleToBackendIR(module, packageName, entrypoint)
+func LowerModuleToBackendIR(module checker.Module, packageName string, entrypoint bool, projectName string) (*backendir.Module, error) {
+	return lowerModuleToBackendIR(module, packageName, entrypoint, projectName)
 }
 
 func LowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
@@ -591,15 +591,20 @@ func usesNameInExpr(expr checker.Expression, name string) bool {
 	}
 }
 
-func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoint bool) (*backendir.Module, error) {
+func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoint bool, projectName string) (*backendir.Module, error) {
 	if module == nil || module.Program() == nil {
 		return nil, fmt.Errorf("module has no program")
 	}
 
 	out := &backendir.Module{
-		Path:        module.Path(),
-		PackageName: packageName,
-		Decls:       make([]backendir.Decl, 0, len(module.Program().Statements)),
+		Path:                module.Path(),
+		PackageName:         packageName,
+		Imports:             collectModuleImports(module, projectName),
+		ImportedModulePaths: requiredImportedModulePaths(module, projectName),
+		Decls:               make([]backendir.Decl, 0, len(module.Program().Statements)),
+	}
+	if entrypoint {
+		out.Imports[helperImportPath] = helperImportAlias
 	}
 	seenDecls := make(map[string]struct{})
 

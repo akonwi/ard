@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/go_backend/lowering"
 )
 
 func benchmarkGoBackendModule(b *testing.B) checker.Module {
@@ -58,7 +59,7 @@ func BenchmarkLowerModuleToBackendIR(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := lowerModuleToBackendIR(module, "main", true); err != nil {
+		if _, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench"); err != nil {
 			b.Fatalf("did not expect error: %v", err)
 		}
 	}
@@ -66,12 +67,11 @@ func BenchmarkLowerModuleToBackendIR(b *testing.B) {
 
 func BenchmarkEmitGoFileFromBackendIR(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
-	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	irModule, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench")
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
-	imports := collectModuleImports(module.Program().Statements, "bench")
-	imports[helperImportPath] = helperImportAlias
+	imports := irModule.Imports
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := emitGoFileFromBackendIR(irModule, imports, true); err != nil {
@@ -82,12 +82,11 @@ func BenchmarkEmitGoFileFromBackendIR(b *testing.B) {
 
 func BenchmarkOptimizeGoFileIR(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
-	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	irModule, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench")
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
-	imports := collectModuleImports(module.Program().Statements, "bench")
-	imports[helperImportPath] = helperImportAlias
+	imports := irModule.Imports
 	fileIR, err := emitGoFileFromBackendIR(irModule, imports, true)
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
@@ -100,12 +99,11 @@ func BenchmarkOptimizeGoFileIR(b *testing.B) {
 
 func BenchmarkRenderGoFile(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
-	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	irModule, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench")
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
-	imports := collectModuleImports(module.Program().Statements, "bench")
-	imports[helperImportPath] = helperImportAlias
+	imports := irModule.Imports
 	fileIR, err := emitGoFileFromBackendIR(irModule, imports, true)
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)

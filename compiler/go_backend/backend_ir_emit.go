@@ -11,6 +11,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	backendir "github.com/akonwi/ard/go_backend/ir"
+	"github.com/akonwi/ard/go_backend/lowering"
 )
 
 type backendIREmitter struct {
@@ -29,17 +30,12 @@ func compileModuleSourceViaBackendIR(module checker.Module, packageName string, 
 		return nil, fmt.Errorf("module has no program")
 	}
 
-	irModule, err := lowerModuleToBackendIR(module, packageName, entrypoint)
+	irModule, err := lowering.LowerModuleToBackendIR(module, packageName, entrypoint, projectName)
 	if err != nil {
 		return nil, err
 	}
 
-	imports := collectModuleImports(module.Program().Statements, projectName)
-	if entrypoint {
-		imports[helperImportPath] = helperImportAlias
-	}
-
-	fileIR, err := emitGoFileFromBackendIR(irModule, imports, entrypoint)
+	fileIR, err := emitGoFileFromBackendIR(irModule, irModule.Imports, entrypoint)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +353,7 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 	}
 
 	funcType := &ast.FuncType{TypeParams: typeParamFieldList(typeParamOrder, typeParamMapping, typeParamConstraints), Params: &ast.FieldList{List: params}}
-	if !isVoidIRType(decl.Return) {
+	if !lowering.IsVoidIRType(decl.Return) {
 		funcType.Results = funcResults(returnType)
 	}
 
@@ -372,7 +368,7 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 		if err != nil {
 			return nil, err
 		}
-		if !isVoidIRType(decl.Return) && !blockEndsInReturn(bodyStmts) {
+		if !lowering.IsVoidIRType(decl.Return) && !blockEndsInReturn(bodyStmts) {
 			bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{zeroValueExpr(returnType)}})
 		}
 	}
@@ -423,7 +419,7 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 	}
 
 	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	if !isVoidIRType(method.Return) {
+	if !lowering.IsVoidIRType(method.Return) {
 		funcType.Results = funcResults(returnType)
 	}
 
@@ -431,7 +427,7 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 	if err != nil {
 		return nil, fmt.Errorf("method %s.%s body: %w", typeName, method.Name, err)
 	}
-	if !isVoidIRType(method.Return) && !blockEndsInReturn(bodyStmts) {
+	if !lowering.IsVoidIRType(method.Return) && !blockEndsInReturn(bodyStmts) {
 		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{zeroValueExpr(returnType)}})
 	}
 
@@ -548,7 +544,7 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		if !e.canEmitExprNatively(v.Cond) || !e.canEmitBlockNatively(v.Then) || !e.canEmitTypeNatively(v.Type) {
 			return false
 		}
-		if !isVoidIRType(v.Type) && v.Else == nil {
+		if !lowering.IsVoidIRType(v.Type) && v.Else == nil {
 			return false
 		}
 		if v.Else != nil && !e.canEmitBlockNatively(v.Else) {
@@ -562,7 +558,7 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		if !e.canEmitExprNatively(v.Subject) || !e.canEmitTypeNatively(v.Type) {
 			return false
 		}
-		if !isVoidIRType(v.Type) && v.CatchAll == nil {
+		if !lowering.IsVoidIRType(v.Type) && v.CatchAll == nil {
 			return false
 		}
 		for _, matchCase := range v.Cases {
@@ -1183,7 +1179,7 @@ func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType a
 	}
 
 	resultName := ast.NewIdent("result")
-	if isVoidIRType(decl.Return) {
+	if lowering.IsVoidIRType(decl.Return) {
 		resultName = ast.NewIdent("_")
 	}
 	stmts := []ast.Stmt{
@@ -1204,7 +1200,7 @@ func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType a
 		},
 	}
 
-	if !isVoidIRType(decl.Return) {
+	if !lowering.IsVoidIRType(decl.Return) {
 		coerce := indexExpr(selectorExpr(ast.NewIdent(helperImportAlias), "CoerceExtern"), []ast.Expr{returnType})
 		stmts = append(stmts, &ast.ReturnStmt{
 			Results: []ast.Expr{
@@ -1832,7 +1828,7 @@ func (e *backendIREmitter) emitIfExpr(expr *backendir.IfExpr, locals map[string]
 	if err != nil {
 		return nil, err
 	}
-	isVoidResult := isVoidIRType(expr.Type)
+	isVoidResult := lowering.IsVoidIRType(expr.Type)
 	if !isVoidResult && returnTypeExpr == nil {
 		return nil, fmt.Errorf("if expression return type is nil")
 	}
@@ -1889,7 +1885,7 @@ func (e *backendIREmitter) emitBlockExpr(expr *backendir.BlockExpr, locals map[s
 	if err != nil {
 		return nil, err
 	}
-	isVoidResult := isVoidIRType(expr.Type)
+	isVoidResult := lowering.IsVoidIRType(expr.Type)
 	if !isVoidResult && returnTypeExpr == nil {
 		return nil, fmt.Errorf("block expression return type is nil")
 	}
@@ -1943,7 +1939,7 @@ func (e *backendIREmitter) emitUnionMatchExpr(expr *backendir.UnionMatchExpr, lo
 	if err != nil {
 		return nil, err
 	}
-	isVoidResult := isVoidIRType(expr.Type)
+	isVoidResult := lowering.IsVoidIRType(expr.Type)
 	if !isVoidResult && returnTypeExpr == nil {
 		return nil, fmt.Errorf("union match return type is nil")
 	}
@@ -2241,7 +2237,7 @@ func (e *backendIREmitter) emitTryExpr(expr *backendir.TryExpr, locals map[strin
 	if err != nil {
 		return nil, err
 	}
-	isVoidResult := isVoidIRType(expr.Type)
+	isVoidResult := lowering.IsVoidIRType(expr.Type)
 	if !isVoidResult && returnTypeExpr == nil {
 		return nil, fmt.Errorf("try expression return type is nil")
 	}
@@ -2345,7 +2341,7 @@ func (e *backendIREmitter) emitPanicExprWithExpectedType(expr *backendir.PanicEx
 	if err != nil {
 		return nil, err
 	}
-	if isVoidIRType(expr.Type) && expectedType == nil {
+	if lowering.IsVoidIRType(expr.Type) && expectedType == nil {
 		return &ast.CallExpr{
 			Fun:  ast.NewIdent("panic"),
 			Args: []ast.Expr{message},
@@ -3140,7 +3136,7 @@ func (e *backendIREmitter) emitTypeWithTypeParams(t backendir.Type, typeParams m
 			params = append(params, &ast.Field{Type: paramType})
 		}
 		var results *ast.FieldList
-		if !isVoidIRType(typed.Return) {
+		if !lowering.IsVoidIRType(typed.Return) {
 			returnType, err := e.emitTypeWithTypeParams(typed.Return, typeParams)
 			if err != nil {
 				return nil, err
@@ -3164,7 +3160,7 @@ func (e *backendIREmitter) emitEntrypointMainDecl() (ast.Decl, error) {
 	mainName := e.functionNames["main"]
 	body := []ast.Stmt{callRegister}
 	if mainName != "" {
-		if isVoidIRType(e.functionReturns["main"]) {
+		if lowering.IsVoidIRType(e.functionReturns["main"]) {
 			body = append(body, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(mainName)}})
 		} else {
 			body = append(body, &ast.AssignStmt{

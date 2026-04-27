@@ -7,7 +7,7 @@ import (
 )
 
 func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoint bool) (*backendir.Module, error) {
-	return lowering.LowerModuleToBackendIR(module, packageName, entrypoint)
+	return lowering.LowerModuleToBackendIR(module, packageName, entrypoint, "")
 }
 
 func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
@@ -34,10 +34,25 @@ func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
 	return lowering.LowerNonProducingToBackendIR(node)
 }
 
-func isVoidIRType(t backendir.Type) bool {
-	return lowering.IsVoidIRType(t)
-}
-
 func matchSubjectTempName(kind string) string {
 	return lowering.MatchSubjectTempName(kind)
+}
+
+func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
+	filtered := make([]checker.Statement, 0, len(stmts))
+	for _, stmt := range stmts {
+		switch stmt.Expr.(type) {
+		case *checker.FunctionDef, *checker.ExternalFunctionDef:
+			continue
+		}
+		switch stmt.Stmt.(type) {
+		case *checker.StructDef, checker.StructDef,
+			*checker.Enum, checker.Enum,
+			*checker.Union, checker.Union,
+			*checker.ExternType:
+			continue
+		}
+		filtered = append(filtered, stmt)
+	}
+	return filtered
 }
