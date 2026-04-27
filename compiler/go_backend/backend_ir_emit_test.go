@@ -206,7 +206,7 @@ fn main() {
 	}
 }
 
-func TestCompileModuleSourceViaBackendIR_ExternTraitParamFallsBackToLegacy(t *testing.T) {
+func TestCompileModuleSourceViaBackendIR_ExternTraitParamSignatureNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -230,7 +230,7 @@ fn main() {
 
 	generated := string(out)
 	if !strings.Contains(generated, "func Show(value ardgo.ToString)") {
-		t.Fatalf("expected trait-typed extern signature to use legacy fallback lowering\n%s", generated)
+		t.Fatalf("expected trait-typed extern signature to stay concrete in native emission\n%s", generated)
 	}
 }
 
@@ -344,8 +344,8 @@ func TestEmitGoFileFromBackendIR_UnionDeclFromOrphanTypeReference(t *testing.T) 
 	// signature (rather than declared as an explicit Statement) is
 	// surfaced into backend IR module declarations and emitted as a
 	// native Go interface. This guarantees the orphan-union collection
-	// path drives declaration emission without depending on legacy
-	// declaration-fallback handling.
+	// path drives declaration emission without depending on special-case
+	// declaration handling.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -415,7 +415,7 @@ fn main() {
 	}
 }
 
-func TestCompileModuleSourceViaBackendIR_FunctionCallBodyFallsBackToLegacy(t *testing.T) {
+func TestCompileModuleSourceViaBackendIR_FunctionCallBodyTraitWrappingNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -441,11 +441,11 @@ fn main() {
 
 	generated := string(out)
 	if !strings.Contains(generated, "io.Print(ardgo.AsToString") {
-		t.Fatalf("expected legacy fallback trait wrapping for io::print call\n%s", generated)
+		t.Fatalf("expected native backend IR emission to preserve trait wrapping for io::print call\n%s", generated)
 	}
 }
 
-func TestCompileModuleSourceViaBackendIR_EntrypointFallsBackToLegacyForModuleCalls(t *testing.T) {
+func TestCompileModuleSourceViaBackendIR_EntrypointModuleCallsNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -465,7 +465,7 @@ io::print("ok")
 
 	generated := string(out)
 	if !strings.Contains(generated, "io.Print(ardgo.AsToString(\"ok\"))") {
-		t.Fatalf("expected entrypoint fallback trait wrapping for io::print call\n%s", generated)
+		t.Fatalf("expected native entrypoint emission to preserve trait wrapping for io::print call\n%s", generated)
 	}
 }
 
@@ -960,7 +960,7 @@ func TestEmitGoFileFromBackendIR_PanicExprNative(t *testing.T) {
 		t.Fatalf("expected generated source to contain panic call\n%s", generated)
 	}
 	if strings.Contains(generated, "callExpr(\"panic_expr\"") || strings.Contains(generated, "panic_expr(") {
-		t.Fatalf("expected generated source to avoid panic_expr marker fallback\n%s", generated)
+		t.Fatalf("expected generated source to avoid panic_expr markers\n%s", generated)
 	}
 }
 
@@ -2241,12 +2241,12 @@ func TestCanEmitExprNatively_SelectorCalls(t *testing.T) {
 			&backendir.LiteralExpr{Kind: "str", Value: "ok"},
 		},
 	}
-	if emitter.canEmitExprNatively(moduleCall) {
-		t.Fatalf("expected module selector call to stay on fallback path")
+	if !emitter.canEmitExprNatively(moduleCall) {
+		t.Fatalf("expected module selector call to be natively emittable")
 	}
 }
 
-func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesFallback(t *testing.T) {
+func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesUnsupported(t *testing.T) {
 	emitter := &backendIREmitter{}
 
 	listDynamic := &backendir.ListLiteralExpr{
@@ -2256,7 +2256,7 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesFallback(t *testi
 		},
 	}
 	if emitter.canEmitExprNatively(listDynamic) {
-		t.Fatalf("expected list literal with dynamic element type to stay on fallback path")
+		t.Fatalf("expected list literal with dynamic element type to remain unsupported for native emission")
 	}
 
 	mapDynamic := &backendir.MapLiteralExpr{
@@ -2266,7 +2266,7 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesFallback(t *testi
 		},
 	}
 	if emitter.canEmitExprNatively(mapDynamic) {
-		t.Fatalf("expected map literal with dynamic value type to stay on fallback path")
+		t.Fatalf("expected map literal with dynamic value type to remain unsupported for native emission")
 	}
 
 	listTypeVar := &backendir.ListLiteralExpr{
@@ -2276,7 +2276,7 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesFallback(t *testi
 		},
 	}
 	if emitter.canEmitExprNatively(listTypeVar) {
-		t.Fatalf("expected list literal with type-var element type to stay on fallback path")
+		t.Fatalf("expected list literal with type-var element type to remain unsupported for native emission")
 	}
 
 	ifExprNoElse := &backendir.IfExpr{
@@ -2287,7 +2287,7 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesFallback(t *testi
 		Type: backendir.IntType,
 	}
 	if emitter.canEmitExprNatively(ifExprNoElse) {
-		t.Fatalf("expected if expression without else for non-void type to stay on fallback path")
+		t.Fatalf("expected if expression without else for non-void type to remain unsupported for native emission")
 	}
 }
 
@@ -2695,14 +2695,10 @@ fn main() {
 
 }
 
-// TestCompileModuleSourceViaBackendIR_MethodDeclarationFallback verifies
-// that struct methods whose signatures cannot be expressed natively in
-// the backend IR (for example, methods that take or return trait/union
-// values) fall back to the legacy method declaration lowering. The
-// legacy path is the only one that surfaces concrete trait identifiers
-// like `ardgo.ToString` in generated Go; the native path would erase
-// trait params to `any` and break trait dispatch downstream.
-func TestCompileModuleSourceViaBackendIR_MethodDeclarationFallback(t *testing.T) {
+// TestCompileModuleSourceViaBackendIR_MethodDeclarationTraitSignatureNative verifies
+// that trait-typed method signatures remain concrete under native backend
+// IR emission instead of erasing trait params to `any`.
+func TestCompileModuleSourceViaBackendIR_MethodDeclarationTraitSignatureNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -2735,7 +2731,7 @@ fn main() {
 
 	generated := string(out)
 	if !strings.Contains(generated, "func (self Logger) Show(item ardgo.ToString) string") {
-		t.Fatalf("expected trait-typed method to fall back to legacy lowering with ardgo.ToString signature\n%s", generated)
+		t.Fatalf("expected trait-typed method to keep ardgo.ToString in native emission\n%s", generated)
 	}
 	if strings.Contains(generated, "Show(item any)") {
 		t.Fatalf("expected trait-typed method to NOT erase its trait param to `any`\n%s", generated)
@@ -2832,15 +2828,11 @@ fn main() {
 	}
 }
 
-// TestCompileModuleSourceViaBackendIR_UnionTypedFunctionFallbackPreservesSignature
-// verifies that when a free function's emission falls back to legacy
-// lowering (its signature contains a union type, which forces fallback
-// per requiresLegacyFunctionLowering), the generated Go signature still
-// references the concrete union interface name (e.g. `Shape`) instead
-// of erasing parameters or return types to `any`. This guarantees that
-// the fallback path stays signature-faithful for declared unions and
-// matches the behavior of the native union-typed signature emitter.
-func TestCompileModuleSourceViaBackendIR_UnionTypedFunctionFallbackPreservesSignature(t *testing.T) {
+// TestCompileModuleSourceViaBackendIR_UnionTypedFunctionSignatureNative
+// verifies that native backend IR emission preserves concrete union
+// interface names (e.g. `Shape`) in free-function signatures instead of
+// erasing parameters or returns to `any`.
+func TestCompileModuleSourceViaBackendIR_UnionTypedFunctionSignatureNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -2873,25 +2865,22 @@ fn main() {
 		t.Fatalf("expected union interface declaration `type Shape interface` in generated Go\n%s", generated)
 	}
 	if !strings.Contains(generated, "func Pick(shape Shape) Shape") {
-		t.Fatalf("expected union-typed function fallback to preserve signature `func Pick(shape Shape) Shape`\n%s", generated)
+		t.Fatalf("expected native union-typed function signature `func Pick(shape Shape) Shape`\n%s", generated)
 	}
 	for _, unwanted := range []string{
 		"Pick(shape any)",
 		"shape any) any",
 	} {
 		if strings.Contains(generated, unwanted) {
-			t.Fatalf("expected union-typed function fallback to NOT erase signature %q\n%s", unwanted, generated)
+			t.Fatalf("expected native union-typed function signature to avoid erased form %q\n%s", unwanted, generated)
 		}
 	}
 }
 
-// TestCompileModuleSourceViaBackendIR_UnionTypedMethodFallbackPreservesSignature
-// verifies that struct method emission, when forced into legacy fallback
-// because the method signature contains a union type, still preserves
-// the union interface name in both the parameter type and return type
-// of the emitted Go signature. This ensures method receivers receive
-// the same signature-faithful treatment as free functions.
-func TestCompileModuleSourceViaBackendIR_UnionTypedMethodFallbackPreservesSignature(t *testing.T) {
+// TestCompileModuleSourceViaBackendIR_UnionTypedMethodSignatureNative
+// verifies that native backend IR method emission preserves concrete
+// union interface names in both parameter and return positions.
+func TestCompileModuleSourceViaBackendIR_UnionTypedMethodSignatureNative(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -2929,14 +2918,14 @@ fn main() {
 		t.Fatalf("expected union interface declaration `type Shape interface` in generated Go\n%s", generated)
 	}
 	if !strings.Contains(generated, "func (self Picker) Choose(shape Shape) Shape") {
-		t.Fatalf("expected union-typed method fallback to preserve signature `func (self Picker) Choose(shape Shape) Shape`\n%s", generated)
+		t.Fatalf("expected native union-typed method signature `func (self Picker) Choose(shape Shape) Shape`\n%s", generated)
 	}
 	for _, unwanted := range []string{
 		"Choose(shape any)",
 		"shape any) any",
 	} {
 		if strings.Contains(generated, unwanted) {
-			t.Fatalf("expected union-typed method fallback to NOT erase signature %q\n%s", unwanted, generated)
+			t.Fatalf("expected native union-typed method signature to avoid erased form %q\n%s", unwanted, generated)
 		}
 	}
 }
