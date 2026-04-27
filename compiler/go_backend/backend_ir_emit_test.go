@@ -522,6 +522,71 @@ io::print("ok")
 	}
 }
 
+func TestCompileModuleSourceViaBackendIR_MutableFunctionParamsNative(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/io
+
+struct Box {
+  value: Int,
+}
+
+fn set_box(mut box: Box) {
+  box.value = 2
+}
+
+fn bump(mut value: Int) {
+  value = value + 1
+}
+
+fn append_one(mut values: [Int]) {
+  values.push(1)
+}
+
+fn main() {
+  mut box = Box{value: 1}
+  set_box(box)
+  io::print(box.value)
+
+  mut value = 1
+  bump(value)
+  io::print(value)
+
+  mut values = [1]
+  append_one(values)
+  io::print(values.size())
+  io::print(values.at(1))
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	for _, want := range []string{
+		"func SetBox(box *Box)",
+		"func AppendOne(values *[]int)",
+		"func Bump(value int)",
+		"SetBox(&box)",
+		"AppendOne(&values)",
+		"Bump(value)",
+		"(*box).Value = 2",
+		"value = value + 1",
+		"ardgo.ListPush(values, 1)",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+}
+
 func TestCompileModuleSourceViaBackendIR_MutatingMethodAssignment(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -555,7 +620,7 @@ fn main() {
 	if !strings.Contains(generated, "func (self *Box) Set(value int)") {
 		t.Fatalf("expected mutating receiver method to compile with pointer receiver\n%s", generated)
 	}
-	if !strings.Contains(generated, "self.Value = value") {
+	if !strings.Contains(generated, "(*self).Value = value") {
 		t.Fatalf("expected mutating receiver method assignment to compile natively\n%s", generated)
 	}
 }
@@ -2085,7 +2150,7 @@ func TestEmitGoFileFromBackendIR_ListCopyExprNative(t *testing.T) {
 	assertParsesAsGo(t, rendered)
 
 	generated := string(rendered)
-	if !strings.Contains(generated, "append(numbers[0:0:0], numbers...)") {
+	if !strings.Contains(generated, "append([]int(nil), numbers...)") {
 		t.Fatalf("expected generated source to contain native list copy emission\n%s", generated)
 	}
 }

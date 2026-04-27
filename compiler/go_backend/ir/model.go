@@ -20,6 +20,7 @@ type Param struct {
 	Name    string
 	Type    Type
 	Mutable bool
+	ByRef   bool
 }
 
 type StructDecl struct {
@@ -220,6 +221,12 @@ type TraitCoerceExpr struct {
 }
 
 func (*TraitCoerceExpr) exprNode() {}
+
+type AddressOfExpr struct {
+	Value Expr
+}
+
+func (*AddressOfExpr) exprNode() {}
 
 type ListLiteralExpr struct {
 	Type     Type

@@ -1472,6 +1472,101 @@ func TestLowerUnionAndExternTypeDeclToBackendIR(t *testing.T) {
 	}
 }
 
+func TestLowerModuleToBackendIR_EncodesMutableParamReferenceSemantics(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Box { value: Int }
+
+fn set_box(mut box: Box) {
+  box.value = 2
+}
+
+fn bump(mut value: Int) {
+  value = value + 1
+}
+
+fn append_one(mut values: [Int]) {
+  values.push(1)
+}
+
+fn main() {
+  mut box = Box{value: 1}
+  set_box(box)
+
+  mut value = 1
+  bump(value)
+
+  mut values = [1]
+  append_one(values)
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend IR lowering to succeed, got error: %v", err)
+	}
+
+	funcs := map[string]*backendir.FuncDecl{}
+	for _, decl := range irModule.Decls {
+		if fn, ok := decl.(*backendir.FuncDecl); ok {
+			funcs[fn.Name] = fn
+		}
+	}
+	setBox := funcs["set_box"]
+	if setBox == nil || len(setBox.Params) != 1 || !setBox.Params[0].ByRef {
+		t.Fatalf("expected set_box param to lower as by-ref, got %#v", setBox)
+	}
+	bump := funcs["bump"]
+	if bump == nil || len(bump.Params) != 1 || bump.Params[0].ByRef {
+		t.Fatalf("expected bump param to remain by-value, got %#v", bump)
+	}
+	appendOne := funcs["append_one"]
+	if appendOne == nil || len(appendOne.Params) != 1 || !appendOne.Params[0].ByRef {
+		t.Fatalf("expected append_one param to lower as by-ref, got %#v", appendOne)
+	}
+	mainDecl := funcs["main"]
+	if mainDecl == nil || mainDecl.Body == nil {
+		t.Fatalf("expected lowered main func body")
+	}
+	var callArgs []backendir.Expr
+	for _, stmt := range mainDecl.Body.Stmts {
+		exprStmt, ok := stmt.(*backendir.ExprStmt)
+		if !ok {
+			continue
+		}
+		call, ok := exprStmt.Value.(*backendir.CallExpr)
+		if !ok {
+			continue
+		}
+		callee, ok := call.Callee.(*backendir.IdentExpr)
+		if !ok {
+			continue
+		}
+		if callee.Name == "set_box" || callee.Name == "append_one" {
+			if len(call.Args) != 1 {
+				t.Fatalf("expected one arg for %s", callee.Name)
+			}
+			if _, ok := call.Args[0].(*backendir.AddressOfExpr); !ok {
+				t.Fatalf("expected %s arg to lower to AddressOfExpr, got %T", callee.Name, call.Args[0])
+			}
+		}
+		if callee.Name == "bump" {
+			if len(call.Args) != 1 {
+				t.Fatalf("expected one arg for bump")
+			}
+			if _, ok := call.Args[0].(*backendir.AddressOfExpr); ok {
+				t.Fatalf("expected bump arg to remain by-value, got %T", call.Args[0])
+			}
+		}
+		callArgs = call.Args
+	}
+	_ = callArgs
+}
+
 func TestLowerModuleToBackendIR_CarriesStructAndEnumMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

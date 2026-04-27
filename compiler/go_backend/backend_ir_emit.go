@@ -305,6 +305,22 @@ func (e *backendIREmitter) emitExternTypeDecl(decl *backendir.ExternTypeDecl) as
 	}}}
 }
 
+const byRefLocalMarker = "*"
+
+func bindLocalRef(name string, byRef bool) string {
+	if !byRef || strings.HasPrefix(name, byRefLocalMarker) {
+		return name
+	}
+	return byRefLocalMarker + name
+}
+
+func unwrapLocalRef(name string) (string, bool) {
+	if strings.HasPrefix(name, byRefLocalMarker) {
+		return strings.TrimPrefix(name, byRefLocalMarker), true
+	}
+	return name, false
+}
+
 func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, error) {
 	if decl.IsExtern {
 		if !e.canEmitExternDeclNatively(decl) {
@@ -327,8 +343,11 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 		if err != nil {
 			return nil, fmt.Errorf("param %s type: %w", param.Name, err)
 		}
+		if param.ByRef {
+			paramType = &ast.StarExpr{X: paramType}
+		}
 		localName := uniqueLocalName(goName(param.Name, false), seenLocals)
-		localNameByOriginal[param.Name] = localName
+		localNameByOriginal[param.Name] = bindLocalRef(localName, param.ByRef)
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(localName)}, Type: paramType})
 	}
 
@@ -383,15 +402,18 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 		receiverName = "self"
 	}
 	receiverLocalName := uniqueLocalName(goName(receiverName, false), seenLocals)
-	locals[receiverName] = receiverLocalName
+	locals[receiverName] = bindLocalRef(receiverLocalName, method.ReceiverMutates)
 
 	for _, param := range method.Params {
 		paramType, err := e.emitTypeWithTypeParams(param.Type, typeParams)
 		if err != nil {
 			return nil, fmt.Errorf("method %s.%s param %s: %w", typeName, method.Name, param.Name, err)
 		}
+		if param.ByRef {
+			paramType = &ast.StarExpr{X: paramType}
+		}
 		localName := uniqueLocalName(goName(param.Name, false), seenLocals)
-		locals[param.Name] = localName
+		locals[param.Name] = bindLocalRef(localName, param.ByRef)
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(localName)}, Type: paramType})
 	}
 
@@ -418,8 +440,9 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 		recvType = &ast.StarExpr{X: recvType}
 	}
 
+	recvName, _ := unwrapLocalRef(locals[receiverName])
 	return &ast.FuncDecl{
-		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(receiverLocalName)}, Type: recvType}}},
+		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(recvName)}, Type: recvType}}},
 		Name: ast.NewIdent(goName(method.Name, !method.IsPrivate)),
 		Type: funcType,
 		Body: &ast.BlockStmt{List: bodyStmts},
@@ -565,9 +588,6 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		if _, ok := v.Type.(*backendir.ListType); !ok {
 			return false
 		}
-		if !isAddressableIRExpr(v.Value) {
-			return false
-		}
 		return e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(v.Type)
 	case *backendir.BlockExpr:
 		if v == nil || v.Value == nil || v.Type == nil {
@@ -584,6 +604,8 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		return e.canEmitExprNatively(v.Value)
 	case *backendir.TraitCoerceExpr:
 		return v != nil && v.Value != nil && v.Type != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(v.Type)
+	case *backendir.AddressOfExpr:
+		return v != nil && v.Value != nil && isAddressableIRExpr(v.Value)
 	case *backendir.SelectorExpr:
 		return e.canEmitExprNatively(v.Subject)
 	case *backendir.CallExpr:
@@ -743,7 +765,7 @@ func (e *backendIREmitter) canEmitFuncDeclNatively(decl *backendir.FuncDecl) boo
 		return false
 	}
 	for _, param := range decl.Params {
-		if param.Mutable || !e.canEmitTypeNatively(param.Type) {
+		if !e.canEmitTypeNatively(param.Type) {
 			return false
 		}
 	}
@@ -758,7 +780,7 @@ func (e *backendIREmitter) canEmitExternDeclNatively(decl *backendir.FuncDecl) b
 		return false
 	}
 	for _, param := range decl.Params {
-		if param.Mutable || !e.canEmitTypeNatively(param.Type) {
+		if param.Mutable || param.ByRef || !e.canEmitTypeNatively(param.Type) {
 			return false
 		}
 	}
@@ -1602,10 +1624,15 @@ func (e *backendIREmitter) emitForLoopUpdateTargetExpr(target string, locals map
 		if strings.TrimSpace(baseName) == "" {
 			baseName = goName(base, false)
 		}
-		return selectorExpr(ast.NewIdent(baseName), goName(field, true)), nil
+		binding, _ := unwrapLocalRef(baseName)
+		return selectorExpr(ast.NewIdent(binding), goName(field, true)), nil
 	}
 	if localName := locals[targetName]; strings.TrimSpace(localName) != "" {
-		return ast.NewIdent(localName), nil
+		binding, byRef := unwrapLocalRef(localName)
+		if byRef {
+			return &ast.StarExpr{X: ast.NewIdent(binding)}, nil
+		}
+		return ast.NewIdent(binding), nil
 	}
 	return ast.NewIdent(goName(targetName, false)), nil
 }
@@ -1618,7 +1645,11 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 			return ast.NewIdent("_"), nil
 		}
 		if local := locals[name]; local != "" {
-			return ast.NewIdent(local), nil
+			binding, byRef := unwrapLocalRef(local)
+			if byRef {
+				return &ast.StarExpr{X: ast.NewIdent(binding)}, nil
+			}
+			return ast.NewIdent(binding), nil
 		}
 		if fn := e.functionNames[name]; fn != "" {
 			return ast.NewIdent(fn), nil
@@ -1725,19 +1756,17 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 		if err != nil {
 			return nil, err
 		}
-		if !isAddressableASTExpr(value) {
-			return nil, fmt.Errorf("copy expression value is not assignable")
+		typeExpr, err := e.emitType(v.Type)
+		if err != nil {
+			return nil, err
+		}
+		if typeExpr == nil {
+			return nil, fmt.Errorf("copy expression type is nil")
 		}
 		return &ast.CallExpr{
 			Fun: ast.NewIdent("append"),
 			Args: []ast.Expr{
-				&ast.SliceExpr{
-					X:      value,
-					Low:    &ast.BasicLit{Kind: token.INT, Value: "0"},
-					High:   &ast.BasicLit{Kind: token.INT, Value: "0"},
-					Max:    &ast.BasicLit{Kind: token.INT, Value: "0"},
-					Slice3: true,
-				},
+				&ast.CallExpr{Fun: typeExpr, Args: []ast.Expr{ast.NewIdent("nil")}},
 				value,
 			},
 			Ellipsis: token.Pos(1),
@@ -1758,6 +1787,8 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 		return e.emitCallExpr(v, locals)
 	case *backendir.TraitCoerceExpr:
 		return e.emitTraitCoerceExpr(v, locals)
+	case *backendir.AddressOfExpr:
+		return e.emitAddressOfExpr(v, locals)
 	default:
 		return nil, fmt.Errorf("unsupported expr %T", expr)
 	}
@@ -1776,7 +1807,8 @@ func (e *backendIREmitter) emitAssignTargetExpr(target string, locals map[string
 		if strings.TrimSpace(baseName) == "" {
 			baseName = goName(base, false)
 		}
-		return selectorExpr(ast.NewIdent(baseName), goName(field, true)), token.ASSIGN, nil
+		binding, _ := unwrapLocalRef(baseName)
+		return selectorExpr(ast.NewIdent(binding), goName(field, true)), token.ASSIGN, nil
 	}
 	localName := locals[targetName]
 	if localName == "" {
@@ -1784,7 +1816,11 @@ func (e *backendIREmitter) emitAssignTargetExpr(target string, locals map[string
 		locals[targetName] = localName
 		return ast.NewIdent(localName), token.DEFINE, nil
 	}
-	return ast.NewIdent(localName), token.ASSIGN, nil
+	binding, byRef := unwrapLocalRef(localName)
+	if byRef {
+		return &ast.StarExpr{X: ast.NewIdent(binding)}, token.ASSIGN, nil
+	}
+	return ast.NewIdent(binding), token.ASSIGN, nil
 }
 
 func (e *backendIREmitter) emitIfExpr(expr *backendir.IfExpr, locals map[string]string) (ast.Expr, error) {
@@ -2383,6 +2419,29 @@ func (e *backendIREmitter) emitTraitCoerceExpr(expr *backendir.TraitCoerceExpr, 
 	}
 }
 
+func (e *backendIREmitter) emitAddressOfExpr(expr *backendir.AddressOfExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, fmt.Errorf("invalid address-of expression")
+	}
+	if ident, ok := expr.Value.(*backendir.IdentExpr); ok {
+		if local := locals[strings.TrimSpace(ident.Name)]; local != "" {
+			binding, byRef := unwrapLocalRef(local)
+			if byRef {
+				return ast.NewIdent(binding), nil
+			}
+			return &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(binding)}, nil
+		}
+	}
+	value, err := e.emitExpr(expr.Value, locals)
+	if err != nil {
+		return nil, err
+	}
+	if !isAddressableASTExpr(value) {
+		return nil, fmt.Errorf("address-of expression value is not assignable")
+	}
+	return &ast.UnaryExpr{Op: token.AND, X: value}, nil
+}
+
 func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
 	if ident, ok := call.Callee.(*backendir.IdentExpr); ok {
 		switch ident.Name {
@@ -2785,19 +2844,31 @@ func emitCallToSelectorWithAddressedFirstArg(call *backendir.CallExpr, e *backen
 	if arity < 1 {
 		return nil, fmt.Errorf("%s expects at least 1 arg", strings.ToLower(name))
 	}
-	first, err := e.emitExpr(call.Args[0], locals)
-	if err != nil {
-		return nil, err
+	var first ast.Expr
+	if ident, ok := call.Args[0].(*backendir.IdentExpr); ok {
+		if local := locals[strings.TrimSpace(ident.Name)]; local != "" {
+			binding, byRef := unwrapLocalRef(local)
+			if byRef {
+				first = ast.NewIdent(binding)
+			}
+		}
 	}
-	if !isAddressableASTExpr(first) {
-		return nil, fmt.Errorf("%s first arg is not assignable", strings.ToLower(name))
+	if first == nil {
+		emitted, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, err
+		}
+		if !isAddressableASTExpr(emitted) {
+			return nil, fmt.Errorf("%s first arg is not assignable", strings.ToLower(name))
+		}
+		first = &ast.UnaryExpr{Op: token.AND, X: emitted}
 	}
 	rest, err := e.emitArgs(call.Args[1:], locals)
 	if err != nil {
 		return nil, err
 	}
 	args := make([]ast.Expr, 0, len(rest)+1)
-	args = append(args, &ast.UnaryExpr{Op: token.AND, X: first})
+	args = append(args, first)
 	args = append(args, rest...)
 	return &ast.CallExpr{
 		Fun:  selectorExpr(ast.NewIdent(pkg), name),

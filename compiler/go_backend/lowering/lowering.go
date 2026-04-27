@@ -938,6 +938,22 @@ func lowerExternTypeDeclToBackendIR(def *checker.ExternType) backendir.Decl {
 	}
 }
 
+func mutableParamNeedsPointer(t checker.Type) bool {
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if actual := typed.Actual(); actual != nil {
+			return mutableParamNeedsPointer(actual)
+		}
+		return false
+	case *checker.StructDef:
+		return true
+	case *checker.List:
+		return true
+	default:
+		return false
+	}
+}
+
 func lowerVariableDeclToBackendIR(def *checker.VariableDef) backendir.Decl {
 	return &backendir.VarDecl{
 		Name:    def.Name,
@@ -954,6 +970,7 @@ func lowerFunctionDeclToBackendIR(def *checker.FunctionDef) backendir.Decl {
 			Name:    param.Name,
 			Type:    lowerCheckerTypeToBackendIR(param.Type),
 			Mutable: param.Mutable,
+			ByRef:   param.Mutable && mutableParamNeedsPointer(param.Type),
 		})
 	}
 
@@ -1000,6 +1017,7 @@ func lowerExternFunctionDeclToBackendIR(def *checker.ExternalFunctionDef) backen
 			Name:    param.Name,
 			Type:    lowerCheckerTypeToBackendIR(param.Type),
 			Mutable: param.Mutable,
+			ByRef:   param.Mutable && mutableParamNeedsPointer(param.Type),
 		})
 	}
 
@@ -1858,6 +1876,9 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 
 func lowerCallArgToBackendIR(arg checker.Expression, param checker.Parameter) backendir.Expr {
 	value := lowerExpressionOrOpaque(arg)
+	if param.Mutable && mutableParamNeedsPointer(param.Type) {
+		value = &backendir.AddressOfExpr{Value: value}
+	}
 	if trait, ok := param.Type.(*checker.Trait); ok {
 		return &backendir.TraitCoerceExpr{Value: value, Type: lowerTraitTypeToBackendIR(trait)}
 	}
