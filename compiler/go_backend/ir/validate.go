@@ -5,100 +5,10 @@ import (
 	"strings"
 )
 
-// markerFallbackArtifactNames lists the legacy try/match marker fallback
-// callee names that are no longer permitted in finalized backend IR for
-// migrated surfaces. Lowering must produce semantic IR shapes (TryExpr,
-// IfExpr, UnionMatchExpr, BlockExpr, PanicExpr, ...) for these surfaces;
-// any CallExpr whose callee identifier resolves to one of these names is a
-// marker-style fallback artifact and must be rejected by validation so the
-// build fails loudly instead of silently relying on emitter-side fallback.
-var markerFallbackArtifactNames = map[string]struct{}{
-	"try_op":            {},
-	"bool_match":        {},
-	"int_match":         {},
-	"conditional_match": {},
-	"option_match":      {},
-	"result_match":      {},
-	"enum_match":        {},
-	"union_match":       {},
-}
-
-// markerFallbackArtifactName returns the marker artifact name and true when
-// expr is a CallExpr whose callee is an IdentExpr naming a legacy marker
-// fallback artifact for migrated try/match surfaces.
-//
-// This is a name-only check and does not consider whether the surrounding
-// module declares a user-defined function sharing that name. Callers that
-// need name-collision-safe behavior (i.e. allow user-declared functions
-// that happen to share a marker-like name while still rejecting genuine
-// marker fallback artifacts) should use moduleValidator.markerFallbackArtifactName.
-func markerFallbackArtifactName(expr Expr) (string, bool) {
-	call, ok := expr.(*CallExpr)
-	if !ok || call == nil {
-		return "", false
-	}
-	ident, ok := call.Callee.(*IdentExpr)
-	if !ok || ident == nil {
-		return "", false
-	}
-	name := strings.TrimSpace(ident.Name)
-	if _, isMarker := markerFallbackArtifactNames[name]; !isMarker {
-		return "", false
-	}
-	return name, true
-}
-
-// moduleValidator carries the per-module context needed during recursive
-// validation. It threads the set of user-declared function names through
-// expression validation so the marker-artifact rejection can distinguish
-// between legitimate user-defined functions whose names happen to collide
-// with legacy marker callee names (e.g. a user function `try_op`/`int_match`)
-// and actual marker fallback artifacts that lowering must never produce on
-// migrated surfaces.
-type moduleValidator struct {
-	// userFuncNames is the set of FuncDecl names declared in the module
-	// being validated. Calls to identifiers in this set are not treated as
-	// marker fallback artifacts even if the name matches a marker entry.
-	userFuncNames map[string]struct{}
-}
-
-// markerFallbackArtifactName mirrors the package-level helper but suppresses
-// the marker classification when the call's callee identifier resolves to a
-// user-declared function in the module currently being validated.
-func (v *moduleValidator) markerFallbackArtifactName(expr Expr) (string, bool) {
-	name, isMarker := markerFallbackArtifactName(expr)
-	if !isMarker {
-		return "", false
-	}
-	if v != nil {
-		if _, isUserDeclared := v.userFuncNames[name]; isUserDeclared {
-			return "", false
-		}
-	}
-	return name, true
-}
-
-// collectUserFuncNames returns the set of FuncDecl names declared on the
-// module so the validator can distinguish user-defined callees from real
-// marker fallback artifacts during recursive expression validation.
-func collectUserFuncNames(module *Module) map[string]struct{} {
-	names := map[string]struct{}{}
-	if module == nil {
-		return names
-	}
-	for _, decl := range module.Decls {
-		fn, ok := decl.(*FuncDecl)
-		if !ok || fn == nil {
-			continue
-		}
-		name := strings.TrimSpace(fn.Name)
-		if name == "" {
-			continue
-		}
-		names[name] = struct{}{}
-	}
-	return names
-}
+// moduleValidator performs recursive structural validation over backend IR
+// modules. It checks declaration, statement, expression, and type shapes so
+// malformed IR fails early with targeted errors before emission.
+type moduleValidator struct{}
 
 func ValidateModule(module *Module) error {
 	if module == nil {
@@ -108,9 +18,7 @@ func ValidateModule(module *Module) error {
 		return fmt.Errorf("module package name is empty")
 	}
 
-	v := &moduleValidator{
-		userFuncNames: collectUserFuncNames(module),
-	}
+	v := &moduleValidator{}
 
 	seenDeclNames := map[string]struct{}{}
 	for i, decl := range module.Decls {
@@ -563,9 +471,6 @@ func (v *moduleValidator) validateExpr(expr Expr) error {
 		}
 		if e.Callee == nil {
 			return fmt.Errorf("call callee is nil")
-		}
-		if name, isMarker := v.markerFallbackArtifactName(e); isMarker {
-			return fmt.Errorf("marker fallback artifact %q is not permitted in finalized backend IR", name)
 		}
 		if err := v.validateExpr(e.Callee); err != nil {
 			return fmt.Errorf("call callee: %w", err)

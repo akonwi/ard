@@ -1611,10 +1611,9 @@ fn update() Int {
 }
 
 // markerFallbackArtifactNames lists the legacy try/match marker call names
-// that lowering must never emit on a successful path. The IR validator
-// hardening (VAL-CROSS-005) rejects these; the lowering tests in this file
-// also assert their absence to keep the no-marker invariant covered at the
-// lowering layer rather than only at validation time.
+// that lowering must never emit on a successful path. The tests in this file
+// assert their absence directly so the no-marker invariant stays covered at
+// the lowering layer.
 var markerFallbackArtifactNames = []string{
 	"try_op",
 	"bool_match",
@@ -1677,7 +1676,7 @@ func containsMarkerArtifactInDecl(decl backendir.Decl) string {
 // functions, and the migrated try/match expression families. It asserts
 // that the lowered backend IR module does not contain any legacy marker
 // fallback artifacts (`try_op`, `*_match`) and that the resulting module
-// passes IR validation cleanly.
+// remains structurally valid.
 func TestLowerModuleToBackendIR_ComprehensiveNodeCoverage(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1855,120 +1854,6 @@ let h = now()
 	}
 	if !hasVar {
 		t.Fatalf("expected non-entrypoint lowering to surface package variable decls")
-	}
-}
-
-// TestValidateModuleRejectsMarkerFallbackArtifacts is the go_backend-package
-// counterpart to the IR-package marker-rejection test. It exercises the
-// lowering -> validation pipeline end-to-end (rather than constructing a
-// synthetic IR module directly) to make sure that:
-//   - Lowering of representative migrated try/match flows produces a module
-//     that validates cleanly (no smuggled markers).
-//   - When marker artifacts are injected into a module post-lowering, the
-//     validator rejects them with a "marker fallback artifact" error.
-//
-// The first half pins the migrated-path invariant; the second half pins the
-// validator's hardening behavior at the package boundary used by
-// compileModuleSourceViaBackendIR.
-func TestValidateModuleRejectsMarkerFallbackArtifacts(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write ard.toml: %v", err)
-	}
-
-	module := checkedModuleFromSource(t, dir, "main.ard", `
-fn divide(a: Int, b: Int) Int!Str {
-  match b == 0 {
-    true => Result::err("division by zero"),
-    false => Result::ok(a / b),
-  }
-}
-
-fn render(a: Int, b: Int) Str!Str {
-  let value = try divide(a, b)
-  Result::ok(value.to_str())
-}
-
-let result = render(1, 0)
-`)
-
-	irModule, err := lowerModuleToBackendIR(module, "main", true)
-	if err != nil {
-		t.Fatalf("expected backend ir lowering to succeed, got error: %v", err)
-	}
-
-	if got := containsMarkerArtifactInModule(irModule); got != "" {
-		t.Fatalf("expected migrated try/match module to lower without marker fallback artifacts; found %q", got)
-	}
-
-	if err := backendir.ValidateModule(irModule); err != nil {
-		t.Fatalf("expected migrated try/match module to validate cleanly, got error: %v", err)
-	}
-
-	// Now inject each marker name into the lowered module and confirm the
-	// validator rejects them. This mirrors the IR-package test's coverage
-	// but anchors it inside the go_backend package so the verification
-	// command "go test ./go_backend -run TestValidateModuleRejectsMarkerFallbackArtifacts"
-	// finds it.
-	for _, name := range markerFallbackArtifactNames {
-		t.Run(name, func(t *testing.T) {
-			var renderDecl *backendir.FuncDecl
-			for _, decl := range irModule.Decls {
-				fn, ok := decl.(*backendir.FuncDecl)
-				if !ok {
-					continue
-				}
-				if fn.Name == "render" {
-					renderDecl = fn
-					break
-				}
-			}
-			if renderDecl == nil || renderDecl.Body == nil {
-				t.Fatalf("expected to find render function in lowered module")
-			}
-
-			// Inject a marker call as a fresh statement in the function body.
-			injected := &backendir.Module{
-				Path:        irModule.Path,
-				PackageName: irModule.PackageName,
-				Decls:       append([]backendir.Decl{}, irModule.Decls...),
-				Entrypoint:  irModule.Entrypoint,
-			}
-			// Replace render decl in injected.Decls with a copy that has the
-			// injected marker call, leaving the original irModule intact for
-			// other subtests.
-			for i, decl := range injected.Decls {
-				fn, ok := decl.(*backendir.FuncDecl)
-				if !ok || fn.Name != "render" {
-					continue
-				}
-				bodyCopy := &backendir.Block{
-					Stmts: append([]backendir.Stmt{
-						&backendir.ExprStmt{Value: &backendir.CallExpr{
-							Callee: &backendir.IdentExpr{Name: name},
-							Args: []backendir.Expr{
-								&backendir.IdentExpr{Name: "subject"},
-							},
-						}},
-					}, fn.Body.Stmts...),
-				}
-				fnCopy := *fn
-				fnCopy.Body = bodyCopy
-				injected.Decls[i] = &fnCopy
-				break
-			}
-
-			err := backendir.ValidateModule(injected)
-			if err == nil {
-				t.Fatalf("expected validation to reject injected marker artifact %q, got nil", name)
-			}
-			if !strings.Contains(err.Error(), "marker fallback artifact") {
-				t.Fatalf("expected marker fallback artifact rejection for %q, got %q", name, err.Error())
-			}
-			if !strings.Contains(err.Error(), name) {
-				t.Fatalf("expected validation error to mention marker name %q, got %q", name, err.Error())
-			}
-		})
 	}
 }
 
