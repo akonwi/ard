@@ -317,41 +317,41 @@ func DecodeIntExtern[E any](data any) Result[int, E] {
 
 func DecodeStringErrorsExtern[E any](data any) Result[string, []E] {
 	if value, ok := data.(string); ok {
-		return Ok[string, []E](value)
+		return Result[string, []E]{value: value, ok: true}
 	}
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[string, []E]([]E{CoerceExtern[E](makeBuiltinDecodeError("Str", "null"))})
+		return Result[string, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Str", "null"))}}
 	}
 	if value, ok := data.(string); ok {
-		return Ok[string, []E](value)
+		return Result[string, []E]{value: value, ok: true}
 	}
-	return Err[string, []E]([]E{CoerceExtern[E](makeBuiltinDecodeError("Str", formatBuiltinRawValueForError(data)))})
+	return Result[string, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Str", formatBuiltinRawValueForError(data)))}}
 }
 
 func DecodeIntErrorsExtern[E any](data any) Result[int, []E] {
 	if value, ok := data.(float64); ok {
 		intValue := int(value)
 		if value == float64(intValue) {
-			return Ok[int, []E](intValue)
+			return Result[int, []E]{value: intValue, ok: true}
 		}
 	}
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[int, []E]([]E{CoerceExtern[E](makeBuiltinDecodeError("Int", "null"))})
+		return Result[int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Int", "null"))}}
 	}
 	switch value := data.(type) {
 	case float64:
 		intValue := int(value)
 		if value == float64(intValue) {
-			return Ok[int, []E](intValue)
+			return Result[int, []E]{value: intValue, ok: true}
 		}
 	case int:
-		return Ok[int, []E](value)
+		return Result[int, []E]{value: value, ok: true}
 	case int64:
-		return Ok[int, []E](int(value))
+		return Result[int, []E]{value: int(value), ok: true}
 	}
-	return Err[int, []E]([]E{CoerceExtern[E](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))})
+	return Result[int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))}}
 }
 
 func DecodeFloatExtern[E any](data any) Result[float64, E] {
