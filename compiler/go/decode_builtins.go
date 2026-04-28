@@ -484,7 +484,7 @@ func DynamicToMapExtern(data any) Result[map[any]any, string] {
 
 func DynamicToStringMapExtern(data any) Result[map[string]any, string] {
 	if items, ok := data.(map[string]any); ok {
-		return Ok[map[string]any, string](items)
+		return Result[map[string]any, string]{value: items, ok: true}
 	}
 	return builtinDynamicToStringMap(data)
 }
