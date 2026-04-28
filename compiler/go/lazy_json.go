@@ -1,0 +1,320 @@
+package ardgo
+
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+	"unsafe"
+)
+
+type jsonDynamic string
+
+func validateLazyJSON(s string) bool {
+	return json.Valid(unsafeStringBytes(s)) && !hasDuplicateJSONNames(s)
+}
+
+func unsafeStringBytes(value string) []byte {
+	if len(value) == 0 {
+		return nil
+	}
+	return unsafe.Slice(unsafe.StringData(value), len(value))
+}
+
+func skipJSONSpaces(s string, idx int) int {
+	for idx < len(s) {
+		switch s[idx] {
+		case ' ', '\n', '\r', '\t':
+			idx++
+		default:
+			return idx
+		}
+	}
+	return idx
+}
+
+func skipJSONString(s string, idx int) int {
+	if idx >= len(s) || s[idx] != '"' {
+		return -1
+	}
+	idx++
+	for idx < len(s) {
+		switch s[idx] {
+		case '\\':
+			idx += 2
+		case '"':
+			return idx + 1
+		default:
+			idx++
+		}
+	}
+	return -1
+}
+
+func skipJSONValue(s string, idx int) int {
+	idx = skipJSONSpaces(s, idx)
+	if idx >= len(s) {
+		return -1
+	}
+	if s[idx] == '"' {
+		return skipJSONString(s, idx)
+	}
+	if s[idx] == '{' || s[idx] == '[' {
+		open, close := s[idx], byte('}')
+		if open == '[' {
+			close = ']'
+		}
+		depth := 1
+		idx++
+		for idx < len(s) {
+			switch s[idx] {
+			case '"':
+				idx = skipJSONString(s, idx)
+				if idx < 0 {
+					return -1
+				}
+				continue
+			case open:
+				depth++
+			case close:
+				depth--
+				if depth == 0 {
+					return idx + 1
+				}
+			}
+			idx++
+		}
+		return -1
+	}
+	for idx < len(s) {
+		switch s[idx] {
+		case ',', '}', ']', ' ', '\n', '\r', '\t':
+			return idx
+		default:
+			idx++
+		}
+	}
+	return idx
+}
+
+func extractLazyJSONField(s, name string) (string, bool, bool) {
+	idx := skipJSONSpaces(s, 0)
+	if idx >= len(s) || s[idx] != '{' {
+		return "", false, false
+	}
+	idx++
+	for {
+		idx = skipJSONSpaces(s, idx)
+		if idx >= len(s) {
+			return "", false, false
+		}
+		if s[idx] == '}' {
+			return "", false, true
+		}
+		keyStart := idx
+		keyEnd := skipJSONString(s, idx)
+		if keyEnd < 0 {
+			return "", false, false
+		}
+		key, err := strconv.Unquote(s[keyStart:keyEnd])
+		if err != nil {
+			return "", false, false
+		}
+		idx = skipJSONSpaces(s, keyEnd)
+		if idx >= len(s) || s[idx] != ':' {
+			return "", false, false
+		}
+		valueStart := skipJSONSpaces(s, idx+1)
+		valueEnd := skipJSONValue(s, valueStart)
+		if valueEnd < 0 {
+			return "", false, false
+		}
+		if key == name {
+			return s[valueStart:valueEnd], true, true
+		}
+		idx = skipJSONSpaces(s, valueEnd)
+		if idx < len(s) && s[idx] == ',' {
+			idx++
+		}
+	}
+}
+
+func decodeLazyJSONIntList(s string) ([]int, bool) {
+	idx := skipJSONSpaces(s, 0)
+	if idx >= len(s) || s[idx] != '[' {
+		return nil, false
+	}
+	idx++
+	out := make([]int, 0, 8)
+	for {
+		idx = skipJSONSpaces(s, idx)
+		if idx >= len(s) {
+			return nil, false
+		}
+		if s[idx] == ']' {
+			return out, true
+		}
+		end := skipJSONValue(s, idx)
+		if end < 0 {
+			return nil, false
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(s[idx:end]), 64)
+		if err != nil {
+			return nil, false
+		}
+		intValue := int(value)
+		if value != float64(intValue) {
+			return nil, false
+		}
+		out = append(out, intValue)
+		idx = skipJSONSpaces(s, end)
+		if idx < len(s) && s[idx] == ',' {
+			idx++
+		}
+	}
+}
+
+func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
+	idx := skipJSONSpaces(s, 0)
+	if idx >= len(s) || s[idx] != '{' {
+		return nil, false
+	}
+	idx++
+	out := make(map[string]int)
+	for {
+		idx = skipJSONSpaces(s, idx)
+		if idx >= len(s) {
+			return nil, false
+		}
+		if s[idx] == '}' {
+			return out, true
+		}
+		keyStart := idx
+		keyEnd := skipJSONString(s, idx)
+		if keyEnd < 0 {
+			return nil, false
+		}
+		key, err := strconv.Unquote(s[keyStart:keyEnd])
+		if err != nil {
+			return nil, false
+		}
+		idx = skipJSONSpaces(s, keyEnd)
+		if idx >= len(s) || s[idx] != ':' {
+			return nil, false
+		}
+		valueStart := skipJSONSpaces(s, idx+1)
+		valueEnd := skipJSONValue(s, valueStart)
+		if valueEnd < 0 {
+			return nil, false
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(s[valueStart:valueEnd]), 64)
+		if err != nil {
+			return nil, false
+		}
+		intValue := int(value)
+		if value != float64(intValue) {
+			return nil, false
+		}
+		out[key] = intValue
+		idx = skipJSONSpaces(s, valueEnd)
+		if idx < len(s) && s[idx] == ',' {
+			idx++
+		}
+	}
+}
+
+func hasDuplicateJSONNames(s string) bool {
+	idx := skipJSONSpaces(s, 0)
+	if !scanJSONValueNames(s, &idx) {
+		return true
+	}
+	idx = skipJSONSpaces(s, idx)
+	return idx != len(s)
+}
+
+func scanJSONValueNames(s string, idx *int) bool {
+	*idx = skipJSONSpaces(s, *idx)
+	if *idx >= len(s) {
+		return false
+	}
+	switch s[*idx] {
+	case '{':
+		return scanJSONObjectNames(s, idx)
+	case '[':
+		return scanJSONArrayNames(s, idx)
+	case '"':
+		end := skipJSONString(s, *idx)
+		if end < 0 {
+			return false
+		}
+		*idx = end
+		return true
+	default:
+		end := skipJSONValue(s, *idx)
+		if end < 0 {
+			return false
+		}
+		*idx = end
+		return true
+	}
+}
+
+func scanJSONObjectNames(s string, idx *int) bool {
+	seen := map[string]struct{}{}
+	*idx = *idx + 1
+	for {
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx >= len(s) {
+			return false
+		}
+		if s[*idx] == '}' {
+			*idx = *idx + 1
+			return true
+		}
+		keyStart := *idx
+		keyEnd := skipJSONString(s, keyStart)
+		if keyEnd < 0 {
+			return false
+		}
+		key, err := strconv.Unquote(s[keyStart:keyEnd])
+		if err != nil {
+			return false
+		}
+		if _, ok := seen[key]; ok {
+			return false
+		}
+		seen[key] = struct{}{}
+		*idx = skipJSONSpaces(s, keyEnd)
+		if *idx >= len(s) || s[*idx] != ':' {
+			return false
+		}
+		*idx = *idx + 1
+		if !scanJSONValueNames(s, idx) {
+			return false
+		}
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx < len(s) && s[*idx] == ',' {
+			*idx = *idx + 1
+		}
+	}
+}
+
+func scanJSONArrayNames(s string, idx *int) bool {
+	*idx = *idx + 1
+	for {
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx >= len(s) {
+			return false
+		}
+		if s[*idx] == ']' {
+			*idx = *idx + 1
+			return true
+		}
+		if !scanJSONValueNames(s, idx) {
+			return false
+		}
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx < len(s) && s[*idx] == ',' {
+			*idx = *idx + 1
+		}
+	}
+}

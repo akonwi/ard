@@ -196,6 +196,14 @@ func builtinDynamicToStringMap(data any) Result[map[string]any, string] {
 }
 
 func builtinExtractField(data any, name string) Result[any, string] {
+	if raw, ok := data.(jsonDynamic); ok {
+		if value, found, ok := extractLazyJSONField(string(raw), name); ok {
+			if !found {
+				return Ok[any, string](nil)
+			}
+			return Ok[any, string](jsonDynamic(value))
+		}
+	}
 	if mapped, ok := data.(map[string]any); ok {
 		value, ok := mapped[name]
 		if !ok {
@@ -371,6 +379,11 @@ func decodeIntErrorsSlow[E any](data any) Result[int, []E] {
 }
 
 func DecodeStringIntMapErrorsExtern[E any](data any) Result[map[string]int, []E] {
+	if raw, ok := data.(jsonDynamic); ok {
+		if out, ok := decodeLazyJSONStringIntMap(string(raw)); ok {
+			return Result[map[string]int, []E]{value: out, ok: true}
+		}
+	}
 	mapResult := DynamicToStringMapExtern(data)
 	if !mapResult.ok {
 		return Result[map[string]int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Map", mapResult.err))}}
@@ -412,6 +425,11 @@ func appendDecodeErrorPath[E any](err E, segment string) E {
 }
 
 func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
+	if raw, ok := data.(jsonDynamic); ok {
+		if out, ok := decodeLazyJSONIntList(string(raw)); ok {
+			return Result[[]int, []E]{value: out, ok: true}
+		}
+	}
 	if typed, ok := data.([]int); ok {
 		return Result[[]int, []E]{value: typed, ok: true}
 	}
@@ -498,6 +516,9 @@ func JsonToDynamicExtern(jsonString string) Result[any, string] {
 }
 
 func builtinJsonToDynamic(jsonString string) Result[any, string] {
+	if validateLazyJSON(jsonString) {
+		return Ok[any, string](jsonDynamic(jsonString))
+	}
 	value, err := ffi.JsonToDynamic(jsonString)
 	if err != nil {
 		return Err[any, string](err.Error())
