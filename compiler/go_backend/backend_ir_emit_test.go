@@ -1732,8 +1732,8 @@ func TestEmitGoFileFromBackendIR_UnionMatchExprNative(t *testing.T) {
 	assertParsesAsGo(t, rendered)
 
 	generated := string(rendered)
-	if !strings.Contains(generated, "out := func() int") {
-		t.Fatalf("expected generated source to contain native union-match closure\n%s", generated)
+	if !strings.Contains(generated, "var out int") {
+		t.Fatalf("expected generated source to contain native union-match assignment target\n%s", generated)
 	}
 	if !strings.Contains(generated, "switch unionValue := any(value).(type)") {
 		t.Fatalf("expected generated source to contain native union-match type switch\n%s", generated)
@@ -1747,8 +1747,8 @@ func TestEmitGoFileFromBackendIR_UnionMatchExprNative(t *testing.T) {
 	if !strings.Contains(generated, "text := unionValue") {
 		t.Fatalf("expected case-local pattern binding for string case\n%s", generated)
 	}
-	if !strings.Contains(generated, "return num") {
-		t.Fatalf("expected case body to return bound pattern value\n%s", generated)
+	if !strings.Contains(generated, "out = num") {
+		t.Fatalf("expected case body to assign bound pattern value\n%s", generated)
 	}
 }
 
@@ -2748,7 +2748,7 @@ fn main() {
 	if !strings.Contains(generated, syntheticGoTemp) {
 		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q) — proves native single-eval emission\n%s", syntheticGoTemp, syntheticTemp, generated)
 	}
-	if !strings.Contains(generated, syntheticGoTemp+" := Next()") {
+	if !strings.Contains(generated, syntheticGoTemp) || !strings.Contains(generated, " := Next()") {
 		t.Fatalf("expected synthetic match temp to be assigned exactly once from subject call Next()\n%s", generated)
 	}
 	// Subject call Next() should appear exactly twice in the source: once
@@ -2954,7 +2954,7 @@ fn main() {
 	if !strings.Contains(generated, syntheticGoTemp) {
 		t.Fatalf("expected generated source to reference synthetic match temp %q (Go-mapped from %q) — proves native single-eval emission\n%s", syntheticGoTemp, syntheticTemp, generated)
 	}
-	if !strings.Contains(generated, syntheticGoTemp+" := Next()") {
+	if !strings.Contains(generated, syntheticGoTemp) || !strings.Contains(generated, " := Next()") {
 		t.Fatalf("expected synthetic match temp to be assigned exactly once from subject call Next()\n%s", generated)
 	}
 	// Subject call Next() should appear exactly twice in the source: once

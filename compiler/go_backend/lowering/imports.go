@@ -375,7 +375,7 @@ func collectImportsFromExpr(expr checker.Expression, imports map[string]string, 
 	case *checker.ModuleFunctionCall:
 		if v.Module == "ard/maybe" || v.Module == "ard/result" {
 			imports[helperImportPath] = helperImportAlias
-		} else if !(v.Module == "ard/list" && v.Call != nil && v.Call.Name == "concat") {
+		} else {
 			imports[moduleImportPath(projectName, v.Module)] = packageNameForModulePath(v.Module)
 		}
 		if def := v.Call.Definition(); def != nil {

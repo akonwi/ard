@@ -339,10 +339,7 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 		return nil, fmt.Errorf("unsupported function declaration: %s", decl.Name)
 	}
 	typeParamOrder, typeParamMapping := functionTypeParamsFromBackendIR(decl)
-	typeParamConstraints := make(map[string]string, len(typeParamOrder))
-	for _, name := range typeParamOrder {
-		typeParamConstraints[name] = "any"
-	}
+	typeParamConstraints := functionTypeParamConstraints(decl, typeParamOrder)
 
 	params := make([]*ast.Field, 0, len(decl.Params))
 	localNameByOriginal := make(map[string]string)
@@ -439,7 +436,10 @@ func (e *backendIREmitter) emitReceiverMethodDecl(typeName string, receiverType 
 		funcType.Results = funcResults(returnType)
 	}
 
+	previousTypeParams := e.typeParamMapping
+	e.typeParamMapping = typeParams
 	bodyStmts, err := e.emitBlock(method.Body, returnType, locals, seenLocals)
+	e.typeParamMapping = previousTypeParams
 	if err != nil {
 		return nil, fmt.Errorf("method %s.%s body: %w", typeName, method.Name, err)
 	}
@@ -728,10 +728,11 @@ func (e *backendIREmitter) canEmitNamedCallNatively(name string) bool {
 	if _, ok := e.functionNames[name]; ok {
 		return true
 	}
-	if _, ok := e.scopedCallableNames[strings.TrimSpace(name)]; ok {
+	trimmed := strings.TrimSpace(name)
+	if _, ok := e.scopedCallableNames[trimmed]; ok {
 		return true
 	}
-	return false
+	return isSimpleLoweredName(trimmed)
 }
 
 func scopedCallableNamesForParams(params []backendir.Param) map[string]struct{} {
@@ -979,6 +980,11 @@ func (e *backendIREmitter) canEmitStmtNatively(stmt backendir.Stmt) bool {
 		if s.List == nil || s.Body == nil {
 			return false
 		}
+		previousCallables := e.scopedCallableNames
+		if _, ok := s.CursorType.(*backendir.FuncType); ok {
+			e.scopedCallableNames = mergeScopedCallableNames(previousCallables, map[string]struct{}{strings.TrimSpace(s.Cursor): {}})
+		}
+		defer func() { e.scopedCallableNames = previousCallables }()
 		return e.canEmitExprNatively(s.List) && e.canEmitBlockNatively(s.Body)
 	case *backendir.ForInMapStmt:
 		if s == nil {
@@ -1353,6 +1359,9 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		}
 		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{value}}}, nil
 	case *backendir.ExprStmt:
+		if literal, ok := s.Value.(*backendir.LiteralExpr); ok && strings.TrimSpace(literal.Kind) == "void" {
+			return nil, nil
+		}
 		if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
 			return e.emitTryExprControlStmts(tryExpr, returnType, locals, seenLocals, func(success ast.Expr) ([]ast.Stmt, error) {
 				if _, ok := success.(*ast.CallExpr); ok {
@@ -1365,6 +1374,9 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		}
 		if ifExpr, ok := s.Value.(*backendir.IfExpr); ok && lowering.IsVoidIRType(ifExpr.Type) {
 			return e.emitIfExprStmt(ifExpr, returnType, locals, seenLocals)
+		}
+		if unionMatch, ok := s.Value.(*backendir.UnionMatchExpr); ok && lowering.IsVoidIRType(unionMatch.Type) {
+			return e.emitUnionMatchStmt(unionMatch, returnType, locals, seenLocals)
 		}
 		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && lowering.IsVoidIRType(blockExpr.Type) {
 			return e.emitBlockExprStmt(blockExpr, returnType, locals, seenLocals)
@@ -1383,15 +1395,19 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		return []ast.Stmt{&ast.BranchStmt{Tok: token.BREAK}}, nil
 	case *backendir.AssignStmt:
 		if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
+			catchBaseLocals := cloneStringMap(locals)
 			target, tok, err := e.emitAssignTargetExpr(s.Target, locals, seenLocals)
 			if err != nil {
 				return nil, err
 			}
-			return e.emitTryExprControlStmts(tryExpr, returnType, locals, seenLocals, func(success ast.Expr) ([]ast.Stmt, error) {
+			return e.emitTryExprControlStmtsWithCatchLocals(tryExpr, returnType, locals, seenLocals, catchBaseLocals, func(success ast.Expr) ([]ast.Stmt, error) {
 				return []ast.Stmt{
 					&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: tok, Rhs: []ast.Expr{success}},
 				}, nil
 			})
+		}
+		if unionMatch, ok := s.Value.(*backendir.UnionMatchExpr); ok {
+			return e.emitUnionMatchAssignStmts(s.Target, unionMatch, returnType, locals, seenLocals)
 		}
 		value, err := e.emitExpr(s.Value, locals)
 		if err != nil {
@@ -2131,6 +2147,194 @@ func (e *backendIREmitter) emitBlockExpr(expr *backendir.BlockExpr, locals map[s
 	}, nil
 }
 
+func (e *backendIREmitter) emitUnionMatchStmt(expr *backendir.UnionMatchExpr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
+	if expr == nil || expr.Subject == nil {
+		return nil, fmt.Errorf("invalid union match statement")
+	}
+	subject, err := e.emitExpr(expr.Subject, locals)
+	if err != nil {
+		return nil, err
+	}
+	seen := cloneSet(seenLocals)
+	matchValueName := uniqueLocalName("unionValue", seen)
+	clauses := make([]ast.Stmt, 0, len(expr.Cases)+1)
+	for _, matchCase := range expr.Cases {
+		caseType, err := e.emitType(matchCase.Type)
+		if err != nil {
+			return nil, err
+		}
+		caseLocals := cloneStringMap(locals)
+		caseSeen := seenLocalNames(caseLocals)
+		prefix := []ast.Stmt{}
+		if pattern := strings.TrimSpace(matchCase.Pattern); pattern != "" && pattern != "_" {
+			localPattern := uniqueLocalName(goName(pattern, false), caseSeen)
+			caseLocals[pattern] = localPattern
+			prefix = append(prefix,
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(localPattern)}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent(matchValueName)}},
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(localPattern)}},
+			)
+		}
+		body, err := e.emitBlock(matchCase.Body, returnType, caseLocals, caseSeen)
+		if err != nil {
+			return nil, err
+		}
+		clauses = append(clauses, &ast.CaseClause{List: []ast.Expr{caseType}, Body: append(prefix, body...)})
+	}
+	if expr.CatchAll != nil {
+		catchLocals := cloneStringMap(locals)
+		catchSeen := seenLocalNames(catchLocals)
+		catchBody, err := e.emitBlock(expr.CatchAll, returnType, catchLocals, catchSeen)
+		if err != nil {
+			return nil, err
+		}
+		clauses = append(clauses, &ast.CaseClause{Body: catchBody})
+	}
+	return []ast.Stmt{&ast.TypeSwitchStmt{
+		Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(matchValueName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{subject}}}}},
+		Body:   &ast.BlockStmt{List: clauses},
+	}}, nil
+}
+
+func (e *backendIREmitter) emitUnionMatchAssignStmts(targetName string, expr *backendir.UnionMatchExpr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
+	if expr == nil || expr.Subject == nil || expr.Type == nil {
+		return nil, fmt.Errorf("invalid union match assignment")
+	}
+	target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+	if err != nil {
+		return nil, err
+	}
+	typeExpr, err := e.emitType(expr.Type)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ast.Stmt, 0, 2)
+	if tok == token.DEFINE && targetName != "_" {
+		out = append(out, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{target.(*ast.Ident)}, Type: typeExpr}}}})
+	} else if tok == token.DEFINE {
+		out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.DEFINE, Rhs: []ast.Expr{zeroValueExpr(typeExpr)}})
+	}
+
+	subject, err := e.emitExpr(expr.Subject, locals)
+	if err != nil {
+		return nil, err
+	}
+	seen := cloneSet(seenLocals)
+	matchValueName := uniqueLocalName("unionValue", seen)
+	clauses := make([]ast.Stmt, 0, len(expr.Cases)+1)
+	for _, matchCase := range expr.Cases {
+		caseType, err := e.emitType(matchCase.Type)
+		if err != nil {
+			return nil, err
+		}
+		caseLocals := cloneStringMap(locals)
+		caseSeen := seenLocalNames(caseLocals)
+		prefix := []ast.Stmt{}
+		if pattern := strings.TrimSpace(matchCase.Pattern); pattern != "" && pattern != "_" {
+			localPattern := uniqueLocalName(goName(pattern, false), caseSeen)
+			caseLocals[pattern] = localPattern
+			prefix = append(prefix,
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(localPattern)}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent(matchValueName)}},
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(localPattern)}},
+			)
+		}
+		body, err := e.emitBlockAssigningReturns(matchCase.Body, expr.Type, target, returnType, caseLocals, caseSeen)
+		if err != nil {
+			return nil, err
+		}
+		clauses = append(clauses, &ast.CaseClause{List: []ast.Expr{caseType}, Body: append(prefix, body...)})
+	}
+	if expr.CatchAll != nil {
+		catchLocals := cloneStringMap(locals)
+		catchSeen := seenLocalNames(catchLocals)
+		catchBody, err := e.emitBlockAssigningReturns(expr.CatchAll, expr.Type, target, returnType, catchLocals, catchSeen)
+		if err != nil {
+			return nil, err
+		}
+		clauses = append(clauses, &ast.CaseClause{Body: catchBody})
+	}
+	out = append(out, &ast.TypeSwitchStmt{
+		Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(matchValueName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{subject}}}}},
+		Body:   &ast.BlockStmt{List: clauses},
+	})
+	return out, nil
+}
+
+func (e *backendIREmitter) emitBlockAssigningReturns(block *backendir.Block, assignType backendir.Type, target ast.Expr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
+	if block == nil {
+		return nil, nil
+	}
+	out := make([]ast.Stmt, 0, len(block.Stmts))
+	for _, stmt := range block.Stmts {
+		ret, ok := stmt.(*backendir.ReturnStmt)
+		if !ok || shouldReturnFromOuter(ret.Value, assignType) {
+			emitted, err := e.emitStmt(stmt, returnType, locals, seenLocals)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, emitted...)
+			continue
+		}
+		value, err := e.emitExpr(ret.Value, locals)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}})
+	}
+	return out, nil
+}
+
+func shouldReturnFromOuter(value backendir.Expr, assignType backendir.Type) bool {
+	switch v := value.(type) {
+	case *backendir.ResultOkExpr:
+		return !sameBackendIRType(v.Type, assignType)
+	case *backendir.ResultErrExpr:
+		return !sameBackendIRType(v.Type, assignType)
+	default:
+		return false
+	}
+}
+
+func sameBackendIRType(a backendir.Type, b backendir.Type) bool {
+	return backendIRTypeKey(a) == backendIRTypeKey(b)
+}
+
+func backendIRTypeKey(t backendir.Type) string {
+	switch typed := t.(type) {
+	case nil:
+		return ""
+	case *backendir.PrimitiveType:
+		return "prim:" + typed.Name
+	case *backendir.DynamicType:
+		return "dynamic"
+	case *backendir.VoidType:
+		return "void"
+	case *backendir.TypeVarType:
+		return "var:" + typed.Name
+	case *backendir.NamedType:
+		parts := make([]string, 0, len(typed.Args))
+		for _, arg := range typed.Args {
+			parts = append(parts, backendIRTypeKey(arg))
+		}
+		return "named:" + typed.Module + ":" + typed.Name + "[" + strings.Join(parts, ",") + "]"
+	case *backendir.ListType:
+		return "list:" + backendIRTypeKey(typed.Elem)
+	case *backendir.MapType:
+		return "map:" + backendIRTypeKey(typed.Key) + ":" + backendIRTypeKey(typed.Value)
+	case *backendir.MaybeType:
+		return "maybe:" + backendIRTypeKey(typed.Of)
+	case *backendir.ResultType:
+		return "result:" + backendIRTypeKey(typed.Val) + ":" + backendIRTypeKey(typed.Err)
+	case *backendir.FuncType:
+		parts := make([]string, 0, len(typed.Params))
+		for _, param := range typed.Params {
+			parts = append(parts, backendIRTypeKey(param))
+		}
+		return "fn:(" + strings.Join(parts, ",") + ")->" + backendIRTypeKey(typed.Return)
+	default:
+		return fmt.Sprintf("%T", t)
+	}
+}
+
 func (e *backendIREmitter) emitUnionMatchExpr(expr *backendir.UnionMatchExpr, locals map[string]string) (ast.Expr, error) {
 	subject, err := e.emitExpr(expr.Subject, locals)
 	if err != nil {
@@ -2231,6 +2435,17 @@ func (e *backendIREmitter) emitTryExprControlStmts(
 	seenLocals map[string]struct{},
 	onSuccess func(ast.Expr) ([]ast.Stmt, error),
 ) ([]ast.Stmt, error) {
+	return e.emitTryExprControlStmtsWithCatchLocals(expr, returnType, locals, seenLocals, nil, onSuccess)
+}
+
+func (e *backendIREmitter) emitTryExprControlStmtsWithCatchLocals(
+	expr *backendir.TryExpr,
+	returnType ast.Expr,
+	locals map[string]string,
+	seenLocals map[string]struct{},
+	catchBaseLocals map[string]string,
+	onSuccess func(ast.Expr) ([]ast.Stmt, error),
+) ([]ast.Stmt, error) {
 	if expr == nil || expr.Subject == nil || expr.Type == nil {
 		return nil, fmt.Errorf("invalid try expression")
 	}
@@ -2274,6 +2489,9 @@ func (e *backendIREmitter) emitTryExprControlStmts(
 	failureBody := []ast.Stmt{}
 	if expr.Catch != nil {
 		catchLocals := cloneStringMap(locals)
+		if catchBaseLocals != nil {
+			catchLocals = cloneStringMap(catchBaseLocals)
+		}
 		catchSeen := cloneSet(seenLocals)
 		catchPrefix := []ast.Stmt{}
 		catchVar := strings.TrimSpace(expr.CatchVar)
@@ -3094,6 +3312,9 @@ func (e *backendIREmitter) shouldEmitCallTypeArgs(call *backendir.CallExpr) bool
 	if ident, ok := call.Callee.(*backendir.IdentExpr); ok {
 		return e.functionTypeParams[strings.TrimSpace(ident.Name)] > 0
 	}
+	if _, ok := call.Callee.(*backendir.SelectorExpr); ok {
+		return true
+	}
 	return false
 }
 
@@ -3231,6 +3452,82 @@ func functionTypeParamsFromBackendIR(decl *backendir.FuncDecl) ([]string, map[st
 		return nil, nil
 	}
 	return order, buildTypeParamMapping(order)
+}
+
+func functionTypeParamConstraints(decl *backendir.FuncDecl, order []string) map[string]string {
+	constraints := make(map[string]string, len(order))
+	for _, name := range order {
+		constraints[name] = "any"
+	}
+	if decl == nil || len(order) == 0 {
+		return constraints
+	}
+	comparableVars := make(map[string]struct{})
+	for _, param := range decl.Params {
+		collectComparableBackendIRTypeVars(param.Type, comparableVars)
+	}
+	collectComparableBackendIRTypeVars(decl.Return, comparableVars)
+	for name := range comparableVars {
+		if _, ok := constraints[name]; ok {
+			constraints[name] = "comparable"
+		}
+	}
+	return constraints
+}
+
+func collectComparableBackendIRTypeVars(t backendir.Type, out map[string]struct{}) {
+	switch typed := t.(type) {
+	case nil:
+		return
+	case *backendir.MapType:
+		collectBackendIRTypeVarsIntoSet(typed.Key, out)
+		collectComparableBackendIRTypeVars(typed.Value, out)
+	case *backendir.ListType:
+		collectComparableBackendIRTypeVars(typed.Elem, out)
+	case *backendir.MaybeType:
+		collectComparableBackendIRTypeVars(typed.Of, out)
+	case *backendir.ResultType:
+		collectComparableBackendIRTypeVars(typed.Val, out)
+		collectComparableBackendIRTypeVars(typed.Err, out)
+	case *backendir.FuncType:
+		for _, param := range typed.Params {
+			collectComparableBackendIRTypeVars(param, out)
+		}
+		collectComparableBackendIRTypeVars(typed.Return, out)
+	case *backendir.NamedType:
+		for _, arg := range typed.Args {
+			collectComparableBackendIRTypeVars(arg, out)
+		}
+	}
+}
+
+func collectBackendIRTypeVarsIntoSet(t backendir.Type, out map[string]struct{}) {
+	switch typed := t.(type) {
+	case *backendir.TypeVarType:
+		name := strings.TrimSpace(typed.Name)
+		if name != "" {
+			out[name] = struct{}{}
+		}
+	case *backendir.NamedType:
+		for _, arg := range typed.Args {
+			collectBackendIRTypeVarsIntoSet(arg, out)
+		}
+	case *backendir.ListType:
+		collectBackendIRTypeVarsIntoSet(typed.Elem, out)
+	case *backendir.MapType:
+		collectBackendIRTypeVarsIntoSet(typed.Key, out)
+		collectBackendIRTypeVarsIntoSet(typed.Value, out)
+	case *backendir.MaybeType:
+		collectBackendIRTypeVarsIntoSet(typed.Of, out)
+	case *backendir.ResultType:
+		collectBackendIRTypeVarsIntoSet(typed.Val, out)
+		collectBackendIRTypeVarsIntoSet(typed.Err, out)
+	case *backendir.FuncType:
+		for _, param := range typed.Params {
+			collectBackendIRTypeVarsIntoSet(param, out)
+		}
+		collectBackendIRTypeVarsIntoSet(typed.Return, out)
+	}
 }
 
 func buildTypeParamMapping(order []string) map[string]string {

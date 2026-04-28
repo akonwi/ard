@@ -154,10 +154,11 @@ type ForInStrStmt struct {
 func (*ForInStrStmt) stmtNode() {}
 
 type ForInListStmt struct {
-	Cursor string
-	Index  string
-	List   Expr
-	Body   *Block
+	Cursor     string
+	Index      string
+	CursorType Type
+	List       Expr
+	Body       *Block
 }
 
 func (*ForInListStmt) stmtNode() {}

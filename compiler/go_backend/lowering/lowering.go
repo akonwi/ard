@@ -96,6 +96,54 @@ func typeVarName(tv *checker.TypeVar) string {
 	return tv.Name()
 }
 
+func collectUnboundTypeParamNames(t checker.Type, out *[]string, seen map[string]struct{}) {
+	if t == nil {
+		return
+	}
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		if typed.Actual() != nil {
+			return
+		}
+		name := typeVarName(typed)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		*out = append(*out, name)
+	case *checker.List:
+		collectUnboundTypeParamNames(typed.Of(), out, seen)
+	case *checker.Map:
+		collectUnboundTypeParamNames(typed.Key(), out, seen)
+		collectUnboundTypeParamNames(typed.Value(), out, seen)
+	case *checker.Maybe:
+		collectUnboundTypeParamNames(typed.Of(), out, seen)
+	case *checker.Result:
+		collectUnboundTypeParamNames(typed.Val(), out, seen)
+		collectUnboundTypeParamNames(typed.Err(), out, seen)
+	case *checker.Union:
+		for _, member := range typed.Types {
+			collectUnboundTypeParamNames(member, out, seen)
+		}
+	case *checker.StructDef:
+		for _, fieldName := range sortedStringKeys(typed.Fields) {
+			collectUnboundTypeParamNames(typed.Fields[fieldName], out, seen)
+		}
+	case *checker.ExternType:
+		for _, typeArg := range typed.TypeArgs {
+			collectUnboundTypeParamNames(typeArg, out, seen)
+		}
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectUnboundTypeParamNames(param.Type, out, seen)
+		}
+		collectUnboundTypeParamNames(effectiveFunctionReturnType(typed), out, seen)
+	}
+}
+
 func collectTypeParamNames(t checker.Type, out *[]string, seen map[string]struct{}) {
 	if t == nil {
 		return
@@ -835,6 +883,7 @@ func qualifyImportedNamedTypesInStmt(stmt backendir.Stmt, owners map[string]stri
 		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
 		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
 	case *backendir.ForInListStmt:
+		s.CursorType = qualifyImportedNamedType(s.CursorType, owners, local)
 		qualifyImportedNamedTypesInExpr(s.List, owners, local)
 		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
 	case *backendir.ForInMapStmt:
@@ -1400,6 +1449,14 @@ func lowerBlockToBackendIR(block *checker.Block) *backendir.Block {
 }
 
 func lowerBlockToBackendIRWithReturnType(block *checker.Block, returnType checker.Type) *backendir.Block {
+	return lowerBlockToBackendIRWithContext(block, returnType, returnType)
+}
+
+func lowerBlockToBackendIRWithControlReturnType(block *checker.Block, returnType checker.Type) *backendir.Block {
+	return lowerBlockToBackendIRWithContext(block, nil, returnType)
+}
+
+func lowerBlockToBackendIRWithContext(block *checker.Block, finalExpected checker.Type, returnType checker.Type) *backendir.Block {
 	out := &backendir.Block{Stmts: []backendir.Stmt{}}
 	if block == nil {
 		return out
@@ -1407,7 +1464,7 @@ func lowerBlockToBackendIRWithReturnType(block *checker.Block, returnType checke
 	for i, stmt := range block.Stmts {
 		var exprExpected checker.Type
 		if i == len(block.Stmts)-1 {
-			exprExpected = returnType
+			exprExpected = finalExpected
 		}
 		out.Stmts = append(out.Stmts, lowerStatementToBackendIRWithContext(stmt, exprExpected, returnType)...)
 		variableDef, ok := stmt.Stmt.(*checker.VariableDef)
@@ -1452,12 +1509,24 @@ func lowerStatementToBackendIRWithContext(stmt checker.Statement, exprExpected c
 			out = append(out, lowerIfChainToBackendIRWithReturnType(ifExpr, returnType))
 		} else {
 			out = append(out, &backendir.ExprStmt{
-				Value: lowerExpressionToBackendIRWithContext(stmt.Expr, exprExpected, returnType),
+				Value: lowerExpressionToBackendIRWithContext(stmt.Expr, expectedForStatementExpr(stmt.Expr, exprExpected), returnType),
 			})
 		}
 	}
 
 	return out
+}
+
+func expectedForStatementExpr(expr checker.Expression, expected checker.Type) checker.Type {
+	if expected != nil {
+		return expected
+	}
+	switch expr.(type) {
+	case *checker.If, *checker.BoolMatch, *checker.IntMatch, *checker.OptionMatch, *checker.ResultMatch, *checker.ConditionalMatch, *checker.EnumMatch, *checker.UnionMatch:
+		return checker.Void
+	default:
+		return nil
+	}
 }
 
 func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
@@ -1474,7 +1543,7 @@ func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, retur
 			},
 		}
 	case *checker.Reassignment:
-		return []backendir.Stmt{lowerReassignmentToBackendIRStmt(n)}
+		return []backendir.Stmt{lowerReassignmentToBackendIRStmtWithReturnType(n, returnType)}
 	case checker.ForIntRange:
 		loop := n
 		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
@@ -1485,7 +1554,7 @@ func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, retur
 				Index:  n.Index,
 				Start:  lowerExpressionOrOpaque(n.Start),
 				End:    lowerExpressionOrOpaque(n.End),
-				Body:   lowerBlockToBackendIRWithReturnType(n.Body, returnType),
+				Body:   lowerBlockToBackendIRWithControlReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForInStr:
@@ -1497,19 +1566,24 @@ func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, retur
 				Cursor: n.Cursor,
 				Index:  n.Index,
 				Value:  lowerExpressionOrOpaque(n.Value),
-				Body:   lowerBlockToBackendIRWithReturnType(n.Body, returnType),
+				Body:   lowerBlockToBackendIRWithControlReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForInList:
 		loop := n
 		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.ForInList:
+		var cursorType backendir.Type
+		if listType, ok := n.List.Type().(*checker.List); ok && listType != nil {
+			cursorType = lowerCheckerTypeToBackendIR(listType.Of())
+		}
 		return []backendir.Stmt{
 			&backendir.ForInListStmt{
-				Cursor: n.Cursor,
-				Index:  n.Index,
-				List:   lowerExpressionOrOpaque(n.List),
-				Body:   lowerBlockToBackendIRWithReturnType(n.Body, returnType),
+				Cursor:     n.Cursor,
+				Index:      n.Index,
+				CursorType: cursorType,
+				List:       lowerExpressionOrOpaque(n.List),
+				Body:       lowerBlockToBackendIRWithControlReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForInMap:
@@ -1521,7 +1595,7 @@ func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, retur
 				Key:   n.Key,
 				Value: n.Val,
 				Map:   lowerExpressionOrOpaque(n.Map),
-				Body:  lowerBlockToBackendIRWithReturnType(n.Body, returnType),
+				Body:  lowerBlockToBackendIRWithControlReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForLoop:
@@ -1547,7 +1621,7 @@ func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, retur
 				InitValue: initValue,
 				Cond:      cond,
 				Update:    update,
-				Body:      lowerBlockToBackendIRWithReturnType(n.Body, returnType),
+				Body:      lowerBlockToBackendIRWithControlReturnType(n.Body, returnType),
 			},
 		}
 	case checker.WhileLoop:
@@ -1557,7 +1631,7 @@ func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, retur
 		return []backendir.Stmt{
 			&backendir.WhileStmt{
 				Cond: lowerExpressionOrOpaque(n.Condition),
-				Body: lowerBlockToBackendIRWithReturnType(n.Body, returnType),
+				Body: lowerBlockToBackendIRWithControlReturnType(n.Body, returnType),
 			},
 		}
 	case checker.StructDef:
@@ -1759,6 +1833,10 @@ func lowerIRBlockAsExpr(block *backendir.Block) backendir.Expr {
 }
 
 func lowerReassignmentToBackendIRStmt(stmt *checker.Reassignment) backendir.Stmt {
+	return lowerReassignmentToBackendIRStmtWithReturnType(stmt, nil)
+}
+
+func lowerReassignmentToBackendIRStmtWithReturnType(stmt *checker.Reassignment, returnType checker.Type) backendir.Stmt {
 	if stmt == nil {
 		return &backendir.AssignStmt{
 			Target: "<target:nil>",
@@ -1771,12 +1849,12 @@ func lowerReassignmentToBackendIRStmt(stmt *checker.Reassignment) backendir.Stmt
 		return &backendir.MemberAssignStmt{
 			Subject: lowerExpressionOrOpaque(target.Subject),
 			Field:   target.Property,
-			Value:   lowerExpressionOrOpaque(stmt.Value),
+			Value:   lowerExpressionToBackendIRWithContext(stmt.Value, target.Type(), returnType),
 		}
 	default:
 		return &backendir.AssignStmt{
 			Target: lowerAssignmentTargetName(stmt.Target),
-			Value:  lowerExpressionOrOpaque(stmt.Value),
+			Value:  lowerExpressionToBackendIRWithContext(stmt.Value, stmt.Target.Type(), returnType),
 		}
 	}
 }
@@ -1806,7 +1884,25 @@ func lowerExpressionToBackendIRWithContext(expr checker.Expression, expected che
 		}
 	}
 	if boolMatch, ok := expr.(*checker.BoolMatch); ok && expected != nil {
-		return lowerBoolMatchExprToBackendIRWithExpected(boolMatch, expected)
+		return lowerBoolMatchExprToBackendIRWithContext(boolMatch, expected, returnType)
+	}
+	if intMatch, ok := expr.(*checker.IntMatch); ok && expected != nil {
+		return lowerIntMatchExprToBackendIRWithContext(intMatch, expected, returnType)
+	}
+	if conditionalMatch, ok := expr.(*checker.ConditionalMatch); ok && expected != nil {
+		return lowerConditionalMatchExprToBackendIRWithContext(conditionalMatch, expected, returnType)
+	}
+	if optionMatch, ok := expr.(*checker.OptionMatch); ok && expected != nil {
+		return lowerOptionMatchExprToBackendIRWithContext(optionMatch, expected, returnType)
+	}
+	if resultMatch, ok := expr.(*checker.ResultMatch); ok && expected != nil {
+		return lowerResultMatchExprToBackendIRWithContext(resultMatch, expected, returnType)
+	}
+	if unionMatch, ok := expr.(*checker.UnionMatch); ok && expected != nil {
+		return lowerUnionMatchExprToBackendIRWithContext(unionMatch, expected, returnType)
+	}
+	if enumMatch, ok := expr.(*checker.EnumMatch); ok && expected != nil {
+		return lowerEnumMatchExprToBackendIRWithContext(enumMatch, expected, returnType)
 	}
 	if tryOp, ok := expr.(*checker.TryOp); ok && (expected != nil || returnType != nil) {
 		return lowerTryOpExprToBackendIRWithContext(tryOp, expected, returnType)
@@ -2332,12 +2428,9 @@ func inferGenericCallTypeArgs(def *checker.FunctionDef, actualReturn checker.Typ
 	order := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, param := range def.Parameters {
-		collectTypeParamNames(param.Type, &order, seen)
+		collectUnboundTypeParamNames(param.Type, &order, seen)
 	}
-	collectTypeParamNames(effectiveFunctionReturnType(def), &order, seen)
-	if len(order) == 0 {
-		collectTypeParamNamesInBlock(def.Body, &order, seen)
-	}
+	collectUnboundTypeParamNames(effectiveFunctionReturnType(def), &order, seen)
 	if len(order) == 0 {
 		return nil
 	}
@@ -2374,6 +2467,14 @@ func collectTypeParamNamesInBlock(block *checker.Block, out *[]string, seen map[
 	}
 }
 
+func inferZeroArgGenericCallTypeArgs(actualReturn checker.Type) []backendir.Type {
+	arg := singleGenericCallTypeArg(actualReturn)
+	if arg == nil {
+		return nil
+	}
+	return []backendir.Type{lowerCheckerTypeToBackendIR(arg)}
+}
+
 func singleGenericCallTypeArg(t checker.Type) checker.Type {
 	if t == nil {
 		return nil
@@ -2384,7 +2485,13 @@ func singleGenericCallTypeArg(t checker.Type) checker.Type {
 	if maybe, ok := t.(*checker.Maybe); ok {
 		return maybe.Of()
 	}
-	return t
+	if result, ok := t.(*checker.Result); ok {
+		return result.Val()
+	}
+	if mapType, ok := t.(*checker.Map); ok {
+		return mapType.Value()
+	}
+	return nil
 }
 
 func bindGenericTypeArgs(pattern checker.Type, actual checker.Type, bindings map[string]checker.Type) {
@@ -2441,10 +2548,14 @@ func lowerFunctionCallToBackendIRWithExpected(call *checker.FunctionCall, expect
 	if expected != nil {
 		actualReturn = expected
 	}
+	typeArgs := inferGenericCallTypeArgs(call.Definition(), actualReturn)
+	if len(typeArgs) == 0 && len(args) == 0 {
+		typeArgs = inferZeroArgGenericCallTypeArgs(actualReturn)
+	}
 	return &backendir.CallExpr{
 		Callee:   &backendir.IdentExpr{Name: name},
 		Args:     args,
-		TypeArgs: inferGenericCallTypeArgs(call.Definition(), actualReturn),
+		TypeArgs: typeArgs,
 	}
 }
 
@@ -2472,13 +2583,17 @@ func lowerModuleFunctionCallToBackendIRWithExpected(call *checker.ModuleFunction
 	if expected != nil {
 		actualReturn = expected
 	}
+	typeArgs := inferGenericCallTypeArgs(call.Call.Definition(), actualReturn)
+	if len(typeArgs) == 0 && len(args) == 0 {
+		typeArgs = inferZeroArgGenericCallTypeArgs(actualReturn)
+	}
 	return &backendir.CallExpr{
 		Callee: &backendir.SelectorExpr{
 			Subject: &backendir.IdentExpr{Name: moduleName},
 			Name:    funcName,
 		},
 		Args:     args,
-		TypeArgs: inferGenericCallTypeArgs(call.Call.Definition(), actualReturn),
+		TypeArgs: typeArgs,
 	}
 }
 
@@ -2629,6 +2744,10 @@ func lowerBoolMatchExprToBackendIR(match *checker.BoolMatch) backendir.Expr {
 }
 
 func lowerBoolMatchExprToBackendIRWithExpected(match *checker.BoolMatch, expected checker.Type) backendir.Expr {
+	return lowerBoolMatchExprToBackendIRWithContext(match, expected, expected)
+}
+
+func lowerBoolMatchExprToBackendIRWithContext(match *checker.BoolMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "bool")
 	}
@@ -2636,9 +2755,9 @@ func lowerBoolMatchExprToBackendIRWithExpected(match *checker.BoolMatch, expecte
 	if expected != nil {
 		resultType = lowerCheckerTypeToBackendIR(expected)
 	}
-	thenBlock := lowerBlockToBackendIRWithReturnType(match.True, expected)
+	thenBlock := lowerBlockToBackendIRWithContext(match.True, expected, returnType)
 	finalizeFunctionBodyForReturn(thenBlock, resultType)
-	elseBlock := lowerBlockToBackendIRWithReturnType(match.False, expected)
+	elseBlock := lowerBlockToBackendIRWithContext(match.False, expected, returnType)
 	finalizeFunctionBodyForReturn(elseBlock, resultType)
 	return &backendir.IfExpr{
 		Cond: lowerExpressionOrOpaque(match.Subject),
@@ -2649,13 +2768,20 @@ func lowerBoolMatchExprToBackendIRWithExpected(match *checker.BoolMatch, expecte
 }
 
 func lowerIntMatchExprToBackendIR(match *checker.IntMatch) backendir.Expr {
+	return lowerIntMatchExprToBackendIRWithContext(match, nil, nil)
+}
+
+func lowerIntMatchExprToBackendIRWithContext(match *checker.IntMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "int")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
 
 	subject, setup := matchSubjectExpr(match.Subject, "int")
-	body, ok := buildIntMatchIfChain(match, subject, resultType)
+	body, ok := buildIntMatchIfChain(match, subject, resultType, expected, returnType)
 	if !ok {
 		// The checker should always produce an int match with at least
 		// one branch or a non-void result that gets a synthetic panic
@@ -2666,7 +2792,7 @@ func lowerIntMatchExprToBackendIR(match *checker.IntMatch) backendir.Expr {
 	return wrapWithMatchSubjectSetup(body, setup, resultType)
 }
 
-func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resultType backendir.Type) (backendir.Expr, bool) {
+func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resultType backendir.Type, expected checker.Type, returnType checker.Type) (backendir.Expr, bool) {
 	branches := make([]intMatchBranch, 0, len(match.IntCases)+len(match.RangeCases))
 	for _, key := range sortedIntCaseKeys(match.IntCases) {
 		block := match.IntCases[key]
@@ -2698,7 +2824,7 @@ func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resul
 	var deepestElseBlock *backendir.Block
 	var deepestElseExpr backendir.Expr
 	if match.CatchAll != nil {
-		deepestElseBlock = lowerBlockToBackendIR(match.CatchAll)
+		deepestElseBlock = lowerBlockToBackendIRWithContext(match.CatchAll, expected, returnType)
 		finalizeFunctionBodyForReturn(deepestElseBlock, resultType)
 	} else if !isVoidIRType(resultType) {
 		deepestElseExpr = nonExhaustiveMatchExpr(resultType, "non-exhaustive int match")
@@ -2715,7 +2841,7 @@ func buildIntMatchIfChain(match *checker.IntMatch, subject backendir.Expr, resul
 
 	var nested *backendir.IfExpr
 	for i := len(branches) - 1; i >= 0; i-- {
-		thenBlock := lowerBlockToBackendIR(branches[i].Body)
+		thenBlock := lowerBlockToBackendIRWithContext(branches[i].Body, expected, returnType)
 		finalizeFunctionBodyForReturn(thenBlock, resultType)
 		var elseBlock *backendir.Block
 		switch {
@@ -2786,7 +2912,7 @@ func matchSubjectExpr(subject checker.Expression, kind string) (backendir.Expr, 
 	if canSafelyDuplicateMatchSubject(subject) {
 		return lowerExpressionOrOpaque(subject), nil
 	}
-	temp := matchSubjectTempName(kind)
+	temp := matchSubjectTempName(kind) + "_" + strings.TrimPrefix(fmt.Sprintf("%p", subject), "0x")
 	return &backendir.IdentExpr{Name: temp}, &backendir.AssignStmt{
 		Target: temp,
 		Value:  lowerExpressionOrOpaque(subject),
@@ -2828,11 +2954,58 @@ func wrapExprAsIfElseBlock(expr backendir.Expr, resultType backendir.Type) *back
 	}
 }
 
+func lowerBlockToExpr(block *checker.Block, resultType backendir.Type) backendir.Expr {
+	return lowerBlockToExprWithContext(block, resultType, nil, nil)
+}
+
+func lowerBlockToExprWithContext(block *checker.Block, resultType backendir.Type, expected checker.Type, returnType checker.Type) backendir.Expr {
+	lowered := lowerBlockToBackendIRWithContext(block, expected, returnType)
+	finalizeFunctionBodyForReturn(lowered, resultType)
+	if lowered == nil || len(lowered.Stmts) == 0 {
+		if isVoidIRType(resultType) {
+			return literalExpr("void", "()")
+		}
+		return zeroValueExprForIRType(resultType)
+	}
+	lastIndex := len(lowered.Stmts) - 1
+	if ret, ok := lowered.Stmts[lastIndex].(*backendir.ReturnStmt); ok {
+		if len(lowered.Stmts) == 1 {
+			return ret.Value
+		}
+		return &backendir.BlockExpr{Setup: lowered.Stmts[:lastIndex], Value: ret.Value, Type: resultType}
+	}
+	return &backendir.BlockExpr{Setup: lowered.Stmts, Value: literalExpr("void", "()"), Type: backendir.Void}
+}
+
+func zeroValueExprForIRType(t backendir.Type) backendir.Expr {
+	switch t.(type) {
+	case *backendir.PrimitiveType:
+		if t == backendir.BoolType {
+			return literalExpr("bool", "false")
+		}
+		if t == backendir.StrType {
+			return literalExpr("str", "")
+		}
+		return literalExpr("int", "0")
+	case *backendir.VoidType:
+		return literalExpr("void", "()")
+	default:
+		return &backendir.PanicExpr{Message: literalExpr("str", "missing conditional match value"), Type: t}
+	}
+}
+
 func lowerConditionalMatchExprToBackendIR(match *checker.ConditionalMatch) backendir.Expr {
+	return lowerConditionalMatchExprToBackendIRWithContext(match, nil, nil)
+}
+
+func lowerConditionalMatchExprToBackendIRWithContext(match *checker.ConditionalMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "conditional")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
 
 	branches := make([]conditionalMatchBranch, 0, len(match.Cases))
 	for _, matchCase := range match.Cases {
@@ -2846,7 +3019,7 @@ func lowerConditionalMatchExprToBackendIR(match *checker.ConditionalMatch) backe
 	}
 	var nested backendir.Expr
 	if match.CatchAll != nil {
-		nested = lowerBlockAsExpr(match.CatchAll)
+		nested = lowerBlockToExprWithContext(match.CatchAll, resultType, expected, returnType)
 	} else if !isVoidIRType(resultType) {
 		nested = nonExhaustiveMatchExpr(resultType, "non-exhaustive conditional match")
 	}
@@ -2861,7 +3034,7 @@ func lowerConditionalMatchExprToBackendIR(match *checker.ConditionalMatch) backe
 	}
 
 	for i := len(branches) - 1; i >= 0; i-- {
-		thenBlock := lowerBlockToBackendIR(branches[i].Body)
+		thenBlock := lowerBlockToBackendIRWithContext(branches[i].Body, expected, returnType)
 		finalizeFunctionBodyForReturn(thenBlock, resultType)
 		nested = &backendir.IfExpr{
 			Cond: branches[i].Cond,
@@ -2882,10 +3055,17 @@ type conditionalMatchBranch struct {
 }
 
 func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr {
+	return lowerOptionMatchExprToBackendIRWithContext(match, nil, nil)
+}
+
+func lowerOptionMatchExprToBackendIRWithContext(match *checker.OptionMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "option")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
 	if match.Some == nil || match.None == nil {
 		// Structurally invalid checker output (an option match must always
 		// produce both Some and None branches). Emit an explicit
@@ -2893,7 +3073,7 @@ func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr 
 		return invariantMatchFailureExpr(resultType, "option")
 	}
 	subject, setup := matchSubjectExpr(match.Subject, "option")
-	thenBlock := lowerBlockToBackendIR(match.Some.Body)
+	thenBlock := lowerBlockToBackendIRWithContext(match.Some.Body, expected, returnType)
 	prependBindingAssign(
 		thenBlock,
 		match.Some.Body,
@@ -2905,7 +3085,7 @@ func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr 
 		),
 	)
 	finalizeFunctionBodyForReturn(thenBlock, resultType)
-	elseBlock := lowerBlockToBackendIR(match.None)
+	elseBlock := lowerBlockToBackendIRWithContext(match.None, expected, returnType)
 	finalizeFunctionBodyForReturn(elseBlock, resultType)
 	body := &backendir.IfExpr{
 		Cond: callExpr("maybe_is_some", subject),
@@ -2917,10 +3097,17 @@ func lowerOptionMatchExprToBackendIR(match *checker.OptionMatch) backendir.Expr 
 }
 
 func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr {
+	return lowerResultMatchExprToBackendIRWithContext(match, nil, nil)
+}
+
+func lowerResultMatchExprToBackendIRWithContext(match *checker.ResultMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "result")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
 	if match.Ok == nil || match.Err == nil {
 		// Structurally invalid checker output (a result match must always
 		// produce both Ok and Err branches). Emit an explicit
@@ -2928,7 +3115,7 @@ func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr 
 		return invariantMatchFailureExpr(resultType, "result")
 	}
 	subject, setup := matchSubjectExpr(match.Subject, "result")
-	thenBlock := lowerBlockToBackendIR(match.Ok.Body)
+	thenBlock := lowerBlockToBackendIRWithContext(match.Ok.Body, expected, returnType)
 	prependBindingAssign(
 		thenBlock,
 		match.Ok.Body,
@@ -2940,7 +3127,7 @@ func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr 
 		),
 	)
 	finalizeFunctionBodyForReturn(thenBlock, resultType)
-	elseBlock := lowerBlockToBackendIR(match.Err.Body)
+	elseBlock := lowerBlockToBackendIRWithContext(match.Err.Body, expected, returnType)
 	prependBindingAssign(
 		elseBlock,
 		match.Err.Body,
@@ -2964,10 +3151,17 @@ func lowerResultMatchExprToBackendIR(match *checker.ResultMatch) backendir.Expr 
 }
 
 func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
+	return lowerEnumMatchExprToBackendIRWithContext(match, nil, nil)
+}
+
+func lowerEnumMatchExprToBackendIRWithContext(match *checker.EnumMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "enum")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
 
 	subject, setup := matchSubjectExpr(match.Subject, "enum")
 	subjectTag := &backendir.SelectorExpr{
@@ -2980,7 +3174,7 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 	var deepestElseBlock *backendir.Block
 	var deepestElseExpr backendir.Expr
 	if match.CatchAll != nil {
-		deepestElseBlock = lowerBlockToBackendIR(match.CatchAll)
+		deepestElseBlock = lowerBlockToBackendIRWithContext(match.CatchAll, expected, returnType)
 		finalizeFunctionBodyForReturn(deepestElseBlock, resultType)
 	} else if !isVoidIRType(resultType) {
 		deepestElseExpr = nonExhaustiveMatchExpr(resultType, "non-exhaustive enum match")
@@ -2992,7 +3186,7 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 		if block == nil {
 			continue
 		}
-		thenBlock := lowerBlockToBackendIR(block)
+		thenBlock := lowerBlockToBackendIRWithContext(block, expected, returnType)
 		finalizeFunctionBodyForReturn(thenBlock, resultType)
 		var elseBlock *backendir.Block
 		switch {
@@ -3019,10 +3213,17 @@ func lowerEnumMatchExprToBackendIR(match *checker.EnumMatch) backendir.Expr {
 }
 
 func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
+	return lowerUnionMatchExprToBackendIRWithContext(match, nil, nil)
+}
+
+func lowerUnionMatchExprToBackendIRWithContext(match *checker.UnionMatch, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if match == nil {
 		return invariantMatchFailureExpr(backendir.Void, "union")
 	}
 	resultType := lowerCheckerTypeToBackendIR(match.Type())
+	if expected != nil {
+		resultType = lowerCheckerTypeToBackendIR(expected)
+	}
 
 	cases := make([]backendir.UnionMatchCase, 0, len(match.TypeCases))
 	for _, caseName := range sortedStringKeys(match.TypeCases) {
@@ -3037,7 +3238,7 @@ func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
 			// PanicExpr instead.
 			return invariantMatchFailureExpr(resultType, "union")
 		}
-		body := lowerBlockToBackendIR(matchCase.Body)
+		body := lowerBlockToBackendIRWithContext(matchCase.Body, expected, returnType)
 		finalizeFunctionBodyForReturn(body, resultType)
 		cases = append(cases, backendir.UnionMatchCase{
 			Type:    lowerCheckerTypeToBackendIR(caseType),
@@ -3052,7 +3253,7 @@ func lowerUnionMatchExprToBackendIR(match *checker.UnionMatch) backendir.Expr {
 
 	var catchAll *backendir.Block
 	if match.CatchAll != nil {
-		catchAll = lowerBlockToBackendIR(match.CatchAll)
+		catchAll = lowerBlockToBackendIRWithContext(match.CatchAll, expected, returnType)
 		finalizeFunctionBodyForReturn(catchAll, resultType)
 	} else if !isVoidIRType(resultType) {
 		catchAll = nonExhaustiveMatchBlock("non-exhaustive union match")
