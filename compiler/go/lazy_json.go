@@ -8,6 +8,13 @@ import (
 
 type jsonDynamic string
 
+type jsonObjectDynamic struct {
+	raw    jsonDynamic
+	keys   [8]string
+	values [8]jsonDynamic
+	count  int
+}
+
 func validateLazyJSON(s string) bool {
 	return json.Valid(unsafeStringBytes(s)) && !hasDuplicateJSONNames(s)
 }
@@ -93,6 +100,52 @@ func skipJSONValue(s string, idx int) int {
 		}
 	}
 	return idx
+}
+
+func parseLazyJSONObjectSmall(s string) (jsonObjectDynamic, bool) {
+	idx := skipJSONSpaces(s, 0)
+	if idx >= len(s) || s[idx] != '{' {
+		return jsonObjectDynamic{}, false
+	}
+	idx++
+	out := jsonObjectDynamic{raw: jsonDynamic(s)}
+	for {
+		idx = skipJSONSpaces(s, idx)
+		if idx >= len(s) {
+			return jsonObjectDynamic{}, false
+		}
+		if s[idx] == '}' {
+			return out, true
+		}
+		if out.count >= len(out.keys) {
+			return jsonObjectDynamic{}, false
+		}
+		keyStart := idx
+		keyEnd := skipJSONString(s, idx)
+		if keyEnd < 0 {
+			return jsonObjectDynamic{}, false
+		}
+		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		if !ok {
+			return jsonObjectDynamic{}, false
+		}
+		idx = skipJSONSpaces(s, keyEnd)
+		if idx >= len(s) || s[idx] != ':' {
+			return jsonObjectDynamic{}, false
+		}
+		valueStart := skipJSONSpaces(s, idx+1)
+		valueEnd := skipJSONValue(s, valueStart)
+		if valueEnd < 0 {
+			return jsonObjectDynamic{}, false
+		}
+		out.keys[out.count] = key
+		out.values[out.count] = jsonDynamic(s[valueStart:valueEnd])
+		out.count++
+		idx = skipJSONSpaces(s, valueEnd)
+		if idx < len(s) && s[idx] == ',' {
+			idx++
+		}
+	}
 }
 
 func extractLazyJSONField(s, name string) (string, bool, bool) {

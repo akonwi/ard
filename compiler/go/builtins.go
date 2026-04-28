@@ -58,6 +58,12 @@ func builtinDynamicValue(value any) any {
 			return parsed
 		}
 		return string(v)
+	case jsonObjectDynamic:
+		parsed, err := ffi.JsonToDynamic(string(v.raw))
+		if err == nil {
+			return parsed
+		}
+		return string(v.raw)
 	}
 	if encodable, ok := value.(Encodable); ok {
 		return encodable.ToDyn()
