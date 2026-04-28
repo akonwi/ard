@@ -2541,17 +2541,18 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 		for _, arg := range v.Args {
 			args = append(args, lowerExpressionOrOpaque(arg))
 		}
+		listValueTypeArgs := unionListMethodTypeArgs(v.ElementType)
 		switch v.Kind {
 		case checker.ListSize:
 			return callExpr("list_size", args...)
 		case checker.ListAt:
 			return callExpr("list_at", args...)
 		case checker.ListPush:
-			return callExpr("list_push", args...)
+			return callExprWithTypeArgs("list_push", listValueTypeArgs, args...)
 		case checker.ListPrepend:
-			return callExpr("list_prepend", args...)
+			return callExprWithTypeArgs("list_prepend", listValueTypeArgs, args...)
 		case checker.ListSet:
-			return callExpr("list_set", args...)
+			return callExprWithTypeArgs("list_set", listValueTypeArgs, args...)
 		case checker.ListSort:
 			return callExpr("list_sort", args...)
 		case checker.ListSwap:
@@ -4143,9 +4144,32 @@ func expressionDebugName(expr checker.Expression) string {
 }
 
 func callExpr(name string, args ...backendir.Expr) backendir.Expr {
+	return callExprWithTypeArgs(name, nil, args...)
+}
+
+func callExprWithTypeArgs(name string, typeArgs []backendir.Type, args ...backendir.Expr) backendir.Expr {
 	return &backendir.CallExpr{
-		Callee: &backendir.IdentExpr{Name: name},
-		Args:   args,
+		Callee:   &backendir.IdentExpr{Name: name},
+		Args:     args,
+		TypeArgs: typeArgs,
+	}
+}
+
+func unionListMethodTypeArgs(elementType checker.Type) []backendir.Type {
+	if !isNamedUnionType(elementType) {
+		return nil
+	}
+	return []backendir.Type{lowerCheckerTypeToBackendIR(elementType)}
+}
+
+func isNamedUnionType(t checker.Type) bool {
+	switch typed := t.(type) {
+	case *checker.Union:
+		return typed != nil && strings.TrimSpace(typed.Name) != ""
+	case checker.Union:
+		return strings.TrimSpace(typed.Name) != ""
+	default:
+		return false
 	}
 }
 

@@ -1479,6 +1479,38 @@ let b = sum_from_result_match(Result::ok(4))
 	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
+func TestBuildBinaryCompilesUnionListPushConcreteMembers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Square {
+  size: Int,
+}
+struct Circle {
+  radius: Int,
+}
+
+type Shape = Square | Circle
+
+fn build() [Shape] {
+  mut shapes: [Shape] = []
+  shapes.push(Square{size: 4})
+  shapes.push(Circle{radius: 2})
+  shapes.set(0, Circle{radius: 3})
+  shapes
+}
+
+let result = build()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
+}
+
 func TestBuildBinaryCompilesAnonymousFunctions(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

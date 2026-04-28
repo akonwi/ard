@@ -3456,10 +3456,33 @@ func emitCallToSelector(call *backendir.CallExpr, e *backendIREmitter, locals ma
 	if err != nil {
 		return nil, err
 	}
+	fun, err := e.emitSelectorFuncWithTypeArgs(pkg, name, call.TypeArgs)
+	if err != nil {
+		return nil, err
+	}
 	return &ast.CallExpr{
-		Fun:  selectorExpr(ast.NewIdent(pkg), name),
+		Fun:  fun,
 		Args: args,
 	}, nil
+}
+
+func (e *backendIREmitter) emitSelectorFuncWithTypeArgs(pkg string, name string, typeArgs []backendir.Type) (ast.Expr, error) {
+	base := ast.Expr(selectorExpr(ast.NewIdent(pkg), name))
+	if len(typeArgs) == 0 {
+		return base, nil
+	}
+	args := make([]ast.Expr, 0, len(typeArgs))
+	for _, typeArg := range typeArgs {
+		emitted, err := e.emitType(typeArg)
+		if err != nil {
+			return nil, err
+		}
+		if emitted == nil {
+			emitted = ast.NewIdent("any")
+		}
+		args = append(args, emitted)
+	}
+	return indexExpr(base, args), nil
 }
 
 func emitCallToSelectorWithAddressedFirstArg(call *backendir.CallExpr, e *backendIREmitter, locals map[string]string, pkg string, name string, arity int) (ast.Expr, error) {
@@ -3495,8 +3518,12 @@ func emitCallToSelectorWithAddressedFirstArg(call *backendir.CallExpr, e *backen
 	args := make([]ast.Expr, 0, len(rest)+1)
 	args = append(args, first)
 	args = append(args, rest...)
+	fun, err := e.emitSelectorFuncWithTypeArgs(pkg, name, call.TypeArgs)
+	if err != nil {
+		return nil, err
+	}
 	return &ast.CallExpr{
-		Fun:  selectorExpr(ast.NewIdent(pkg), name),
+		Fun:  fun,
 		Args: args,
 	}, nil
 }
