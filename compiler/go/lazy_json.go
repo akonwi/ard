@@ -3,7 +3,6 @@ package ardgo
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 	"unsafe"
 )
 
@@ -215,7 +214,6 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 }
 
 func parseLazyJSONIntNumber(raw string) (int, bool) {
-	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, false
 	}
