@@ -419,7 +419,3 @@ func captureServerSampleSnapshot(t *testing.T, baseURL string) string {
 func normalizeOutput(value string) string {
 	return strings.ReplaceAll(value, "\r\n", "\n")
 }
-
-func formatSampleFailure(sample string, vmResult, goResult sampleRunResult) string {
-	return fmt.Sprintf("sample %s mismatch\nvm stdout:\n%s\nvm stderr:\n%s\ngo stdout:\n%s\ngo stderr:\n%s", sample, vmResult.stdout, vmResult.stderr, goResult.stdout, goResult.stderr)
-}

@@ -80,6 +80,51 @@ let result = add(1, 2)
 	}
 }
 
+func TestCompileEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/maybe
+
+fn half(n: Int) Int? {
+  match n > 0 {
+    true => maybe::some(n / 2),
+    false => maybe::none(),
+  }
+}
+
+fn maybe_fallback(n: Int) Int {
+  let value = (try half(n) -> _ { 0 }) + 1
+  value
+}
+
+let result = maybe_fallback(0)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"__ardTryValue",
+		"ardtryunwrap0 := __ardTryValue.Expect",
+		"value := ardtryunwrap0 + 1",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if !strings.Contains(generated, "return 0") {
+		t.Fatalf("expected nested try catch to early-return catch value from function\n%s", generated)
+	}
+}
+
 func TestCompileEntrypointUnusedLocalGetsDiscard(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

@@ -44,4 +44,4 @@ jobs:
 
       - name: Run Go backend integration tests
         working-directory: compiler
-        run: go test -tags='goexperiment.jsonv2 integration' ./transpile -count=1
+        run: go test -tags='goexperiment.jsonv2 integration' ./go_backend -count=1

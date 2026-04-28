@@ -53,11 +53,3 @@ func assertGoTargetRunSucceeds(t *testing.T, dir, entrypoint string) cliRunResul
 	}
 	return result
 }
-
-func assertGoTargetRunOutput(t *testing.T, dir, entrypoint, expected string) {
-	t.Helper()
-	result := assertGoTargetRunSucceeds(t, dir, entrypoint)
-	if result.stdout != expected {
-		t.Fatalf("unexpected stdout\nexpected:\n%s\nactual:\n%s\nstderr:\n%s", expected, result.stdout, result.stderr)
-	}
-}

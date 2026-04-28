@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/go_backend/lowering"
 )
 
 func benchmarkGoBackendModule(b *testing.B) checker.Module {
@@ -54,11 +55,25 @@ fn main() Int {
 	return module
 }
 
-func BenchmarkLowerModuleFileIR(b *testing.B) {
+func BenchmarkLowerModuleToBackendIR(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := lowerModuleFileIR(module, "main", true, "bench"); err != nil {
+		if _, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench"); err != nil {
+			b.Fatalf("did not expect error: %v", err)
+		}
+	}
+}
+
+func BenchmarkEmitGoFileFromBackendIR(b *testing.B) {
+	module := benchmarkGoBackendModule(b)
+	irModule, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench")
+	if err != nil {
+		b.Fatalf("did not expect error: %v", err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := emitGoFileFromBackendIR(irModule, true); err != nil {
 			b.Fatalf("did not expect error: %v", err)
 		}
 	}
@@ -66,7 +81,11 @@ func BenchmarkLowerModuleFileIR(b *testing.B) {
 
 func BenchmarkOptimizeGoFileIR(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
-	fileIR, err := lowerModuleFileIR(module, "main", true, "bench")
+	irModule, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench")
+	if err != nil {
+		b.Fatalf("did not expect error: %v", err)
+	}
+	fileIR, err := emitGoFileFromBackendIR(irModule, true)
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}
@@ -78,7 +97,11 @@ func BenchmarkOptimizeGoFileIR(b *testing.B) {
 
 func BenchmarkRenderGoFile(b *testing.B) {
 	module := benchmarkGoBackendModule(b)
-	fileIR, err := lowerModuleFileIR(module, "main", true, "bench")
+	irModule, err := lowering.LowerModuleToBackendIR(module, "main", true, "bench")
+	if err != nil {
+		b.Fatalf("did not expect error: %v", err)
+	}
+	fileIR, err := emitGoFileFromBackendIR(irModule, true)
 	if err != nil {
 		b.Fatalf("did not expect error: %v", err)
 	}

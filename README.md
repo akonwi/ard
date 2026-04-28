@@ -438,6 +438,12 @@ Tests can be co-located in the same file as the code they test, or placed under 
 
 The `ard/testing` module provides helpers: `pass()`, `fail(message)`, and `assert(condition, message)`.
 
+#### Compiler backend parity checks
+For Go backend IR work, these are the core parity/hardening regression gates (run from `/compiler`):
+- `go test -tags integration ./go_backend`
+- `go test ./go_backend ./checker ./bytecode/vm`
+- `go test ./...`
+
 ### Modules
 See the docs in [modules](./modules)
 

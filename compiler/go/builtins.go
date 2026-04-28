@@ -107,6 +107,19 @@ func RegisterBuiltinExterns() {
 			ffi.Sleep(args[0].(int))
 			return nil, nil
 		})
+		RegisterExtern("WaitFor", func(args ...any) (any, error) {
+			asyncWaitFor(args[0])
+			return nil, nil
+		})
+		RegisterExtern("AsyncStart", func(args ...any) (any, error) {
+			return asyncStartFiber(args[0]), nil
+		})
+		RegisterExtern("AsyncEval", func(args ...any) (any, error) {
+			return asyncEvalFiber(args[0]), nil
+		})
+		RegisterExtern("GetResult", func(args ...any) (any, error) {
+			return asyncGetResult(args[0], args[1]), nil
+		})
 		RegisterExtern("HexEncode", func(args ...any) (any, error) {
 			return ffi.HexEncode(args[0].(string)), nil
 		})

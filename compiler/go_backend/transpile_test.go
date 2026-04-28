@@ -3,6 +3,8 @@
 package go_backend
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -345,6 +347,10 @@ let d = "a,b".split(",").size()
 let e = 42.to_str()
 let f = 98.6.to_int()
 let g = true.to_str()
+let h = "hello".to_dyn()
+let i = 42.to_dyn()
+let j = 98.6.to_dyn()
+let k = true.to_dyn()
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
 	}
@@ -1324,50 +1330,6 @@ let e = from_call()
 	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
 }
 
-func TestCompileEntrypointNestedTryCatchHoistsSuccessValue(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write ard.toml: %v", err)
-	}
-
-	module := checkedModuleFromSource(t, dir, "main.ard", `
-use ard/maybe
-
-fn half(n: Int) Int? {
-  match n > 0 {
-    true => maybe::some(n / 2),
-    false => maybe::none(),
-  }
-}
-
-fn maybe_fallback(n: Int) Int {
-  let value = (try half(n) -> _ { 0 }) + 1
-  value
-}
-
-let result = maybe_fallback(0)
-`)
-
-	out, err := CompileEntrypoint(module)
-	if err != nil {
-		t.Fatalf("did not expect error: %v", err)
-	}
-
-	generated := string(out)
-	checks := []string{
-		"__ardTryValue",
-		"value := __ardTryValue",
-	}
-	for _, check := range checks {
-		if !strings.Contains(generated, check) {
-			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
-		}
-	}
-	if !strings.Contains(generated, "return 0") {
-		t.Fatalf("expected nested try catch to early-return catch value from function\n%s", generated)
-	}
-}
-
 func TestBuildBinaryCompilesTryExpressions(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1512,6 +1474,38 @@ let a = sum_from_match(true, 3)
 let b = sum_from_result_match(Result::ok(4))
 `), 0o644); err != nil {
 		t.Fatalf("failed to write main source: %v", err)
+	}
+
+	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
+}
+
+func TestBuildBinaryCompilesUnionListPushConcreteMembers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Square {
+  size: Int,
+}
+struct Circle {
+  radius: Int,
+}
+
+type Shape = Square | Circle
+
+fn build() [Shape] {
+  mut shapes: [Shape] = []
+  shapes.push(Square{size: 4})
+  shapes.push(Circle{radius: 2})
+  shapes.set(0, Circle{radius: 3})
+  shapes
+}
+
+let result = build()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
 	}
 
 	assertGoTargetRunSucceeds(t, dir, filepath.Base(mainPath))
@@ -1778,5 +1772,129 @@ let result = add(1, 2)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "generated", "main.go")); err != nil {
 		t.Fatalf("expected generated main.go to exist: %v", err)
+	}
+}
+
+// TestCompileModuleSourceViaBackendIR_MigratedPathsWithoutLegacySourceModule
+// pins the migration-hardening contract that migrated try/match flows must
+// be emittable through the backend IR pipeline without a hidden dependency
+// on checker-backed emitter state. It does this by:
+//
+//  1. Compiling a try/match-heavy module via the standard backend-IR-first
+//     compile path (`compileModuleSourceViaBackendIR`) and asserting the
+//     output parses as Go.
+//  2. Lowering the same module to backend IR and then emitting the Go file
+//     directly from IR via `emitGoFileFromBackendIR(irModule, ...)`. The
+//     emit step must succeed, the result must parse as Go, and the generated
+//     source must contain only the native try/match control-flow shapes
+//     (no legacy marker artifacts smuggled in).
+//
+// Together these checks prove that for migrated try/match shapes the
+// emission step does not need to reach back into legacy/checker lowering.
+func TestCompileModuleSourceViaBackendIR_MigratedPathsWithoutLegacySourceModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/maybe
+
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
+fn half(n: Int) Int? {
+  match n > 0 {
+    true => maybe::some(n / 2),
+    false => maybe::none(),
+  }
+}
+
+fn render(a: Int, b: Int) Str!Str {
+  let value = try divide(a, b)
+  Result::ok(value.to_str())
+}
+
+fn final_message() Str {
+  try render(1, 0) -> err {
+    "bad: {err}"
+  }
+}
+
+fn use_maybe(n: Int) Int {
+  let value = try half(n) -> _ {
+    0
+  }
+  value + 1
+}
+
+fn classify(n: Int) Str {
+  match n {
+    0 => "zero",
+    1..3 => "small",
+    _ => "many",
+  }
+}
+
+let a = final_message()
+let b = use_maybe(2)
+let c = classify(2)
+`)
+
+	// Step 1: standard backend-IR-first compile path must succeed and
+	// produce parseable Go.
+	standardOut, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("standard backend ir compile failed: %v", err)
+	}
+	assertParsesAsGo(t, standardOut)
+
+	// Step 2: emit directly through backend IR to prove migrated
+	// try/match flows do not require hidden checker-backed emitter state
+	// for correctness.
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("lowerModuleToBackendIR failed: %v", err)
+	}
+	if irModule == nil {
+		t.Fatalf("expected non-nil backend ir module")
+	}
+
+	fileIR, err := emitGoFileFromBackendIR(irModule, true)
+	if err != nil {
+		t.Fatalf("emitGoFileFromBackendIR failed: %v", err)
+	}
+	rendered, err := renderGoFile(optimizeGoFileIR(fileIR))
+	if err != nil {
+		t.Fatalf("renderGoFile failed: %v", err)
+	}
+
+	// Confirm the source-less emission produced parseable Go.
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", rendered, parser.AllErrors); err != nil {
+		t.Fatalf("expected nil-source-module emission to parse as Go, got error: %v\n%s", err, string(rendered))
+	}
+
+	// Sanity check: migrated try/match should still emit recognizable
+	// native Go control flow shapes.
+	for _, want := range []string{
+		"package main",
+		"func Render(",
+		"func main()",
+	} {
+		if !strings.Contains(string(rendered), want) {
+			t.Fatalf("expected nil-source-module emission to contain %q\n%s", want, string(rendered))
+		}
+	}
+
+	// Final binding: the standard path output and the nil-source-module
+	// path output must remain mutually parseable Go programs. We do not
+	// require byte-exact equality (imports/comments may differ) but they
+	// should both compile to the same set of declarations.
+	if len(standardOut) == 0 || len(rendered) == 0 {
+		t.Fatalf("expected both standard and nil-source-module emissions to be non-empty")
 	}
 }

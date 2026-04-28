@@ -72,6 +72,30 @@ func TestExternType(t *testing.T) {
 			}, "\n"),
 		},
 		{
+			name: "extern type is not assignable to Dynamic",
+			input: strings.Join([]string{
+				`extern type ConnectionPtr`,
+				`extern fn connect() ConnectionPtr = "SqlConnect"`,
+				`fn consume(data: Dynamic) {}`,
+				`consume(connect())`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Dynamic, got ConnectionPtr"},
+			},
+		},
+		{
+			name: "Dynamic is not assignable to extern type",
+			input: strings.Join([]string{
+				`extern type ConnectionPtr`,
+				`extern fn close(db: ConnectionPtr) Void = "SqlClose"`,
+				`extern fn load() Dynamic = "Load"`,
+				`close(load())`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected ConnectionPtr, got Dynamic"},
+			},
+		},
+		{
 			name: "extern type cannot be compared with ==",
 			input: strings.Join([]string{
 				`extern type ConnectionPtr`,

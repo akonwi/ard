@@ -9,6 +9,8 @@ import (
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
+	backendir "github.com/akonwi/ard/go_backend/ir"
+	"github.com/akonwi/ard/go_backend/lowering"
 )
 
 func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, entrypoint checker.Module) error {
@@ -29,7 +31,11 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 		}
 	}
 
-	source, err := compileModuleSource(entrypoint, "main", true, project.ProjectName)
+	irModule, err := lowering.LowerModuleToBackendIR(entrypoint, "main", true, project.ProjectName)
+	if err != nil {
+		return err
+	}
+	source, err := compileLoweredModuleSourceViaBackendIR(irModule, true)
 	if err != nil {
 		return err
 	}
@@ -38,7 +44,7 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 	}
 
 	written := map[string]struct{}{}
-	for _, mod := range requiredImportedModules(entrypoint.Program(), project.ProjectName) {
+	for _, mod := range importedModulesForBackendIR(entrypoint, irModule) {
 		if err := writeImportedModule(generatedDir, project.ProjectName, mod, written); err != nil {
 			return err
 		}
@@ -46,16 +52,17 @@ func writeGeneratedProject(generatedDir string, project *checker.ProjectInfo, en
 	return nil
 }
 
-func requiredImportedModules(program *checker.Program, projectName string) []checker.Module {
-	if program == nil {
+func importedModulesForBackendIR(module checker.Module, irModule *backendir.Module) []checker.Module {
+	if module == nil || module.Program() == nil || irModule == nil {
 		return nil
 	}
-	imports := collectModuleImports(program.Statements, projectName)
-	mods := make([]checker.Module, 0, len(program.Imports))
-	for _, mod := range sortedModules(program.Imports) {
-		if _, ok := imports[moduleImportPath(projectName, mod.Path())]; ok {
-			mods = append(mods, mod)
+	mods := make([]checker.Module, 0, len(irModule.ImportedModulePaths))
+	for _, path := range irModule.ImportedModulePaths {
+		mod, ok := module.Program().Imports[path]
+		if !ok {
+			continue
 		}
+		mods = append(mods, mod)
 	}
 	return mods
 }
@@ -69,7 +76,11 @@ func writeImportedModule(generatedDir, projectName string, module checker.Module
 	}
 	written[module.Path()] = struct{}{}
 
-	source, err := compilePackageSource(module, projectName)
+	irModule, err := lowering.LowerModuleToBackendIR(module, packageNameForModulePath(module.Path()), false, projectName)
+	if err != nil {
+		return err
+	}
+	source, err := compileLoweredModuleSourceViaBackendIR(irModule, false)
 	if err != nil {
 		return err
 	}
@@ -83,7 +94,7 @@ func writeImportedModule(generatedDir, projectName string, module checker.Module
 	if err := os.WriteFile(outputPath, source, 0o644); err != nil {
 		return err
 	}
-	for _, mod := range requiredImportedModules(module.Program(), projectName) {
+	for _, mod := range importedModulesForBackendIR(module, irModule) {
 		if err := writeImportedModule(generatedDir, projectName, mod, written); err != nil {
 			return err
 		}

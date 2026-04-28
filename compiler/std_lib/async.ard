@@ -4,6 +4,7 @@ extern fn sleep(ms: Int) Void = "Sleep"
 private extern type WaitGroup
 
 private extern fn wait_for(wg: WaitGroup) Void = "WaitFor"
+private extern fn get_result(wg: WaitGroup, fallback: $T) $T = "GetResult"
 
 struct Fiber {
   wg: WaitGroup,
@@ -18,16 +19,15 @@ impl Fiber {
 
   fn get() $T {
     self.join()
-    self.result
+    get_result(self.wg, self.result)
   }
 }
 
-fn start(do: fn() Void) Fiber {
-  panic("Unreachable: async::start() is part of the compiler.")
-}
+extern fn start(do: fn() Void) Fiber<Void> = "AsyncStart"
+extern fn eval(do: fn() $T) Fiber<$T> = "AsyncEval"
 
-fn eval(do: fn() $T) Fiber {
-  panic("Unreachable: async::eval() is part of the compiler.")
+fn join(fibers: [Fiber<$T>]) {
+  for fiber in fibers {
+    fiber.join()
+  }
 }
-
-extern fn join(fibers: [Fiber]) Void = "Join"
