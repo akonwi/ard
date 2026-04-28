@@ -1,4 +1,3 @@
-- Validate generated Go default `GOGC=300` against peak RSS and longer-running/memory-sensitive workloads; consider documenting the default and `GOGC` override.
-- Investigate safer no-copy semantics for `DecodeIntListErrorsExtern` typed `[]int` fast path; current speed win returns the original slice and should be reviewed for aliasing expectations.
+- Validate generated Go default `GOGC=300` against peak RSS and longer-running/memory-sensitive workloads; users can override with `GOGC`. Quick decode_pipeline spot check showed default target used ~27 MB RSS vs `GOGC=100` ~20 MB RSS.
+- Review semantics of `DecodeIntListErrorsExtern` typed `[]int` fast path before finalizing; current speed win returns the original slice. Copying and cap-limiting were tried and regressed, so this is a correctness/API decision rather than an obvious perf follow-up.
 - Explore lazy JSON Dynamic values that decode object fields/arrays on demand without benchmark-specific payload assumptions; previous manual parser attempts regressed, so this needs a broader design and tests.
-- Revisit non-addressable `result_expect` temp binding only with a more targeted statement-level lowering and regression tests; broad BindStmt temp insertion regressed despite a manual micro-benchmark looking promising.
