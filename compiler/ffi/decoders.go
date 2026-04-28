@@ -180,6 +180,26 @@ func DynamicToMap(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
 }
 
+// fn (Dynamic) [Str:Dynamic]!Str
+func DynamicToStringMap(args []*runtime.Object) *runtime.Object {
+	arg := args[0]
+	data := arg.Raw()
+
+	if data == nil {
+		return runtime.MakeErr(runtime.MakeStr("null"))
+	}
+
+	if dataMap, ok := data.(map[string]any); ok {
+		_map := runtime.MakeMap(checker.Str, checker.Dynamic)
+		for key, item := range dataMap {
+			_map.Map_Set(runtime.MakeStr(key), runtime.MakeDynamic(item))
+		}
+		return runtime.MakeOk(_map)
+	}
+
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
+}
+
 // fn (Dynamic, Str) Dynamic!Str
 func ExtractField(args []*runtime.Object) *runtime.Object {
 	arg := args[0]

@@ -148,6 +148,53 @@ func builtinDynamicToMap(data any) Result[map[any]any, string] {
 	return Ok[map[any]any, string](out)
 }
 
+func builtinDynamicToStringMap(data any) Result[map[string]any, string] {
+	data = builtinDynamicValue(data)
+	if data == nil {
+		return Err[map[string]any, string]("null")
+	}
+	if items, ok := data.(map[string]any); ok {
+		return Ok[map[string]any, string](items)
+	}
+	if items, ok := data.(map[any]any); ok {
+		out := make(map[string]any, len(items))
+		for key, value := range items {
+			stringKey, ok := key.(string)
+			if !ok {
+				return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+			}
+			out[stringKey] = value
+		}
+		return Ok[map[string]any, string](out)
+	}
+	value := reflect.ValueOf(data)
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return Err[map[string]any, string]("null")
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Map {
+		return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+	}
+	out := make(map[string]any, value.Len())
+	iter := value.MapRange()
+	for iter.Next() {
+		keyValue := iter.Key()
+		for keyValue.Kind() == reflect.Interface {
+			if keyValue.IsNil() {
+				return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+			}
+			keyValue = keyValue.Elem()
+		}
+		if keyValue.Kind() != reflect.String {
+			return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+		}
+		out[keyValue.String()] = builtinDynamicValue(iter.Value().Interface())
+	}
+	return Ok[map[string]any, string](out)
+}
+
 func builtinExtractField(data any, name string) Result[any, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
@@ -290,6 +337,10 @@ func DynamicToListExtern(data any) Result[[]any, string] {
 
 func DynamicToMapExtern(data any) Result[map[any]any, string] {
 	return builtinDynamicToMap(data)
+}
+
+func DynamicToStringMapExtern(data any) Result[map[string]any, string] {
+	return builtinDynamicToStringMap(data)
 }
 
 func ExtractFieldExtern(data any, name string) Result[any, string] {

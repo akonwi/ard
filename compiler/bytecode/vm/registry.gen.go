@@ -692,6 +692,9 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("DynamicToMap", ffi.DynamicToMap); err != nil {
 		return fmt.Errorf("failed to register DynamicToMap: %w", err)
 	}
+	if err := r.Register("DynamicToStringMap", ffi.DynamicToStringMap); err != nil {
+		return fmt.Errorf("failed to register DynamicToStringMap: %w", err)
+	}
 	if err := r.Register("ExtractField", ffi.ExtractField); err != nil {
 		return fmt.Errorf("failed to register ExtractField: %w", err)
 	}

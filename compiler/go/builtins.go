@@ -206,6 +206,9 @@ func RegisterBuiltinExterns() {
 		RegisterExtern("DynamicToMap", func(args ...any) (any, error) {
 			return builtinDynamicToMap(args[0]), nil
 		})
+		RegisterExtern("DynamicToStringMap", func(args ...any) (any, error) {
+			return builtinDynamicToStringMap(args[0]), nil
+		})
 		RegisterExtern("ExtractField", func(args ...any) (any, error) {
 			return builtinExtractField(args[0], args[1].(string)), nil
 		})

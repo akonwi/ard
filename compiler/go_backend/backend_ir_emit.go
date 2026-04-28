@@ -1387,13 +1387,16 @@ func (e *backendIREmitter) emitBuiltinExternBody(decl *backendir.FuncDecl, local
 			return nil, true, err
 		}
 		return returnCall("DynamicToListExtern", data), true, nil
-	case "DynamicToMap":
+	case "DynamicToMap", "DynamicToStringMap":
 		if len(decl.Params) != 1 {
-			return nil, true, fmt.Errorf("extern DynamicToMap expects 1 arg, got %d", len(decl.Params))
+			return nil, true, fmt.Errorf("extern %s expects 1 arg, got %d", decl.ExternBinding, len(decl.Params))
 		}
 		data, err := arg(0)
 		if err != nil {
 			return nil, true, err
+		}
+		if decl.ExternBinding == "DynamicToStringMap" {
+			return returnCall("DynamicToStringMapExtern", data), true, nil
 		}
 		return returnCall("DynamicToMapExtern", data), true, nil
 	case "ExtractField":

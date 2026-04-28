@@ -292,6 +292,18 @@ export function DynamicToMap(data) {
   return { err: formatDynamicForError(data) };
 }
 
+export function DynamicToStringMap(data) {
+  if (data === null || data === undefined) return { err: "null" };
+  if (data instanceof Map) {
+    for (const key of data.keys()) {
+      if (typeof key !== "string") return { err: formatDynamicForError(data) };
+    }
+    return { ok: new Map(data) };
+  }
+  if (isPlainObject(data)) return { ok: new Map(Object.entries(data)) };
+  return { err: formatDynamicForError(data) };
+}
+
 export function ExtractField(data, name) {
   if (data === null || data === undefined) return { err: "null" };
   if (data instanceof Map) return { ok: data.has(name) ? data.get(name) : null };

@@ -1,3 +1,4 @@
+use ard/dynamic as Dyn
 use ard/list as List
 use ard/maybe
 use ard/string as Str
@@ -190,14 +191,14 @@ fn at(index: Int, with: Decoder<$T>) fn(Dynamic) $T![Error] {
   }
 }
 
-extern fn to_map(data: Dynamic) [Dynamic: Dynamic]!Str = {
-  go = "DynamicToMap"
-  js = "DynamicToMap"
+extern fn to_string_map(data: Dynamic) [Str: Dynamic]!Str = {
+  go = "DynamicToStringMap"
+  js = "DynamicToStringMap"
 }
 
 fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
   fn(data: Dynamic) [$Key: $Value]![Error] {
-    let raw = try to_map(data) -> found {
+    let raw = try to_string_map(data) -> found {
       let decode_err = Error{
         expected: "Map",
         found: found,
@@ -210,7 +211,7 @@ fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
     mut out: [$Key: $Value] = [:]
 
     for k, v in raw {
-      match key(k) {
+      match key(Dyn::from_str(k)) {
         ok(decoded_key) => {
           match value(v) {
             ok(decoded_val) => out.set(decoded_key, decoded_val),
