@@ -2354,30 +2354,68 @@ func (e *backendIREmitter) emitBlockAssigningReturns(block *backendir.Block, ass
 	}
 	out := make([]ast.Stmt, 0, len(block.Stmts))
 	for _, stmt := range block.Stmts {
-		ret, ok := stmt.(*backendir.ReturnStmt)
-		if !ok || shouldReturnFromOuter(ret.Value, assignType) {
+		switch s := stmt.(type) {
+		case *backendir.ReturnStmt:
+			if shouldReturnFromOuter(s.Value, assignType) {
+				emitted, err := e.emitStmt(stmt, returnType, locals, seenLocals)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, emitted...)
+				continue
+			}
+			if panicExpr, ok := s.Value.(*backendir.PanicExpr); ok {
+				message, err := e.emitExpr(panicExpr.Message, locals)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{message}}})
+				continue
+			}
+			if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
+				emitted, err := e.emitTryExprControlStmts(tryExpr, returnType, locals, seenLocals, func(success ast.Expr) ([]ast.Stmt, error) {
+					return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{success}}}, nil
+				})
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, emitted...)
+				continue
+			}
+			value, err := e.emitExpr(s.Value, locals)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}})
+		case *backendir.IfStmt:
+			cond, err := e.emitExpr(s.Cond, locals)
+			if err != nil {
+				return nil, err
+			}
+			thenLocals := cloneStringMap(locals)
+			thenSeen := cloneSet(seenLocals)
+			thenStmts, err := e.emitBlockAssigningReturns(s.Then, assignType, target, returnType, thenLocals, thenSeen)
+			if err != nil {
+				return nil, err
+			}
+			ifStmt := &ast.IfStmt{Cond: cond, Body: &ast.BlockStmt{List: thenStmts}}
+			if s.Else != nil {
+				elseLocals := cloneStringMap(locals)
+				elseSeen := cloneSet(seenLocals)
+				elseStmts, err := e.emitBlockAssigningReturns(s.Else, assignType, target, returnType, elseLocals, elseSeen)
+				if err != nil {
+					return nil, err
+				}
+				ifStmt.Else = &ast.BlockStmt{List: elseStmts}
+			}
+			out = append(out, ifStmt)
+		default:
 			emitted, err := e.emitStmt(stmt, returnType, locals, seenLocals)
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, emitted...)
-			continue
 		}
-		if tryExpr, ok := ret.Value.(*backendir.TryExpr); ok {
-			emitted, err := e.emitTryExprControlStmts(tryExpr, returnType, locals, seenLocals, func(success ast.Expr) ([]ast.Stmt, error) {
-				return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{success}}}, nil
-			})
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, emitted...)
-			continue
-		}
-		value, err := e.emitExpr(ret.Value, locals)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}})
 	}
 	return out, nil
 }

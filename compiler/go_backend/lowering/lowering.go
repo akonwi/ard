@@ -1645,6 +1645,8 @@ func lowerFunctionDeclToBackendIR(def *checker.FunctionDef) backendir.Decl {
 	body := lowerBlockToBackendIRWithReturnType(def.Body, effectiveFunctionReturnType(def))
 	finalizeFunctionBodyForReturn(body, returnType)
 	hoistNestedTryExprsInBlock(body)
+	normalizeRichExprStatementsInBlock(body)
+	hoistRichExprsFromNestedExprPositionsInBlock(body)
 
 	return &backendir.FuncDecl{
 		Name:            def.Name,
@@ -1679,6 +1681,416 @@ func finalizeCatchBlockForReturn(body *backendir.Block, returnType backendir.Typ
 		return
 	}
 	body.Stmts = append(body.Stmts, &backendir.ReturnStmt{})
+}
+
+const normalizeTempPrefix = "\u03b1ardNormalize_"
+
+func normalizeRichExprStatementsInBlock(block *backendir.Block) {
+	counter := 0
+	normalizeRichExprStatementsInBlockWithCounter(block, &counter)
+}
+
+func normalizeRichExprStatementsInBlockWithCounter(block *backendir.Block, counter *int) {
+	if block == nil {
+		return
+	}
+	out := make([]backendir.Stmt, 0, len(block.Stmts))
+	for _, stmt := range block.Stmts {
+		out = append(out, normalizeRichExprStmt(stmt, counter)...)
+	}
+	block.Stmts = out
+}
+
+func nextNormalizeTemp(counter *int, prefix string) string {
+	name := normalizeTempPrefix + strings.TrimSpace(prefix) + strconv.Itoa(*counter)
+	*counter = *counter + 1
+	return name
+}
+
+func normalizeRichExprStmt(stmt backendir.Stmt, counter *int) []backendir.Stmt {
+	if stmt == nil {
+		return nil
+	}
+	switch s := stmt.(type) {
+	case *backendir.ReturnStmt:
+		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && blockExpr != nil {
+			out := make([]backendir.Stmt, 0, len(blockExpr.Setup)+1)
+			for _, setup := range blockExpr.Setup {
+				out = append(out, normalizeRichExprStmt(setup, counter)...)
+			}
+			out = append(out, normalizeRichExprStmt(&backendir.ReturnStmt{Value: blockExpr.Value}, counter)...)
+			return out
+		}
+		if ifExpr, ok := s.Value.(*backendir.IfExpr); ok && ifExpr != nil {
+			normalizeRichExprStatementsInBlockWithCounter(ifExpr.Then, counter)
+			normalizeRichExprStatementsInBlockWithCounter(ifExpr.Else, counter)
+			if ifExpr.Else == nil && !isVoidIRType(ifExpr.Type) {
+				ifExpr.Else = &backendir.Block{Stmts: []backendir.Stmt{&backendir.ReturnStmt{Value: zeroValueExprForIRType(ifExpr.Type)}}}
+			}
+			return []backendir.Stmt{&backendir.IfStmt{Cond: ifExpr.Cond, Then: ifExpr.Then, Else: ifExpr.Else}}
+		}
+		if unionMatch, ok := s.Value.(*backendir.UnionMatchExpr); ok && unionMatch != nil && unionMatch.Type != nil && !isVoidIRType(unionMatch.Type) {
+			temp := nextNormalizeTemp(counter, "unionMatch")
+			return []backendir.Stmt{
+				&backendir.AssignStmt{Target: temp, Value: unionMatch},
+				&backendir.ReturnStmt{Value: &backendir.IdentExpr{Name: temp}},
+			}
+		}
+		normalizeRichExprInExpr(s.Value, counter)
+		return []backendir.Stmt{s}
+	case *backendir.AssignStmt:
+		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && blockExpr != nil {
+			out := make([]backendir.Stmt, 0, len(blockExpr.Setup)+1)
+			for _, setup := range blockExpr.Setup {
+				out = append(out, normalizeRichExprStmt(setup, counter)...)
+			}
+			out = append(out, normalizeRichExprStmt(&backendir.AssignStmt{Target: s.Target, Value: blockExpr.Value}, counter)...)
+			return out
+		}
+		normalizeRichExprInExpr(s.Value, counter)
+		return []backendir.Stmt{s}
+	case *backendir.BindStmt:
+		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && blockExpr != nil {
+			out := make([]backendir.Stmt, 0, len(blockExpr.Setup)+1)
+			for _, setup := range blockExpr.Setup {
+				out = append(out, normalizeRichExprStmt(setup, counter)...)
+			}
+			out = append(out, normalizeRichExprStmt(&backendir.BindStmt{Name: s.Name, Value: blockExpr.Value}, counter)...)
+			return out
+		}
+		normalizeRichExprInExpr(s.Value, counter)
+		return []backendir.Stmt{s}
+	case *backendir.ExprStmt:
+		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && blockExpr != nil {
+			out := make([]backendir.Stmt, 0, len(blockExpr.Setup)+1)
+			for _, setup := range blockExpr.Setup {
+				out = append(out, normalizeRichExprStmt(setup, counter)...)
+			}
+			out = append(out, normalizeRichExprStmt(&backendir.ExprStmt{Value: blockExpr.Value}, counter)...)
+			return out
+		}
+		normalizeRichExprInExpr(s.Value, counter)
+		return []backendir.Stmt{s}
+	case *backendir.MemberAssignStmt:
+		normalizeRichExprInExpr(s.Subject, counter)
+		normalizeRichExprInExpr(s.Value, counter)
+		return []backendir.Stmt{s}
+	case *backendir.ForIntRangeStmt:
+		normalizeRichExprInExpr(s.Start, counter)
+		normalizeRichExprInExpr(s.End, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Body, counter)
+		return []backendir.Stmt{s}
+	case *backendir.ForLoopStmt:
+		normalizeRichExprInExpr(s.InitValue, counter)
+		normalizeRichExprInExpr(s.Cond, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Body, counter)
+		return []backendir.Stmt{s}
+	case *backendir.ForInStrStmt:
+		normalizeRichExprInExpr(s.Value, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Body, counter)
+		return []backendir.Stmt{s}
+	case *backendir.ForInListStmt:
+		normalizeRichExprInExpr(s.List, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Body, counter)
+		return []backendir.Stmt{s}
+	case *backendir.ForInMapStmt:
+		normalizeRichExprInExpr(s.Map, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Body, counter)
+		return []backendir.Stmt{s}
+	case *backendir.WhileStmt:
+		normalizeRichExprInExpr(s.Cond, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Body, counter)
+		return []backendir.Stmt{s}
+	case *backendir.IfStmt:
+		normalizeRichExprInExpr(s.Cond, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Then, counter)
+		normalizeRichExprStatementsInBlockWithCounter(s.Else, counter)
+		return []backendir.Stmt{s}
+	default:
+		return []backendir.Stmt{stmt}
+	}
+}
+
+func normalizeRichExprInExpr(expr backendir.Expr, counter *int) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *backendir.IfExpr:
+		normalizeRichExprStatementsInBlockWithCounter(e.Then, counter)
+		normalizeRichExprStatementsInBlockWithCounter(e.Else, counter)
+		normalizeRichExprInExpr(e.Cond, counter)
+	case *backendir.UnionMatchExpr:
+		normalizeRichExprInExpr(e.Subject, counter)
+		for i := range e.Cases {
+			normalizeRichExprStatementsInBlockWithCounter(e.Cases[i].Body, counter)
+		}
+		normalizeRichExprStatementsInBlockWithCounter(e.CatchAll, counter)
+	case *backendir.BlockExpr:
+		for _, setup := range e.Setup {
+			normalizeRichExprStmt(setup, counter)
+		}
+		normalizeRichExprInExpr(e.Value, counter)
+	case *backendir.CallExpr:
+		normalizeRichExprInExpr(e.Callee, counter)
+		for _, arg := range e.Args {
+			normalizeRichExprInExpr(arg, counter)
+		}
+	case *backendir.SelectorExpr:
+		normalizeRichExprInExpr(e.Subject, counter)
+	case *backendir.TraitCoerceExpr:
+		normalizeRichExprInExpr(e.Value, counter)
+	case *backendir.MaybeSomeExpr:
+		normalizeRichExprInExpr(e.Value, counter)
+	case *backendir.ResultOkExpr:
+		normalizeRichExprInExpr(e.Value, counter)
+	case *backendir.ResultErrExpr:
+		normalizeRichExprInExpr(e.Value, counter)
+	case *backendir.AddressOfExpr:
+		normalizeRichExprInExpr(e.Value, counter)
+	case *backendir.FuncLiteralExpr:
+		normalizeRichExprStatementsInBlockWithCounter(e.Body, counter)
+	case *backendir.ListLiteralExpr:
+		for _, elem := range e.Elements {
+			normalizeRichExprInExpr(elem, counter)
+		}
+	case *backendir.MapLiteralExpr:
+		for _, entry := range e.Entries {
+			normalizeRichExprInExpr(entry.Key, counter)
+			normalizeRichExprInExpr(entry.Value, counter)
+		}
+	case *backendir.StructLiteralExpr:
+		for _, field := range e.Fields {
+			normalizeRichExprInExpr(field.Value, counter)
+		}
+	case *backendir.TryExpr:
+		normalizeRichExprInExpr(e.Subject, counter)
+		normalizeRichExprStatementsInBlockWithCounter(e.Catch, counter)
+	case *backendir.PanicExpr:
+		normalizeRichExprInExpr(e.Message, counter)
+	case *backendir.CopyExpr:
+		normalizeRichExprInExpr(e.Value, counter)
+	}
+}
+
+func hoistRichExprsFromNestedExprPositionsInBlock(block *backendir.Block) {
+	counter := 0
+	hoistRichExprsFromNestedExprPositionsInBlockWithCounter(block, &counter)
+}
+
+func hoistRichExprsFromNestedExprPositionsInBlockWithCounter(block *backendir.Block, counter *int) {
+	if block == nil {
+		return
+	}
+	out := make([]backendir.Stmt, 0, len(block.Stmts))
+	for _, stmt := range block.Stmts {
+		switch s := stmt.(type) {
+		case *backendir.AssignStmt:
+			setup, value := hoistRichExprsInExpr(s.Value, counter)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.BindStmt:
+			setup, value := hoistRichExprsInExpr(s.Value, counter)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.ReturnStmt:
+			setup, value := hoistRichExprsInExpr(s.Value, counter)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.ExprStmt:
+			setup, value := hoistRichExprsInExpr(s.Value, counter)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.MemberAssignStmt:
+			setupSubject, subject := hoistRichExprsInExpr(s.Subject, counter)
+			setupValue, value := hoistRichExprsInExpr(s.Value, counter)
+			out = append(out, setupSubject...)
+			out = append(out, setupValue...)
+			s.Subject = subject
+			s.Value = value
+			out = append(out, s)
+		case *backendir.ForIntRangeStmt:
+			setupStart, start := hoistRichExprsInExpr(s.Start, counter)
+			setupEnd, end := hoistRichExprsInExpr(s.End, counter)
+			out = append(out, setupStart...)
+			out = append(out, setupEnd...)
+			s.Start = start
+			s.End = end
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForLoopStmt:
+			setupInit, initValue := hoistRichExprsInExpr(s.InitValue, counter)
+			setupCond, cond := hoistRichExprsInExpr(s.Cond, counter)
+			out = append(out, setupInit...)
+			out = append(out, setupCond...)
+			s.InitValue = initValue
+			s.Cond = cond
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForInStrStmt:
+			setup, value := hoistRichExprsInExpr(s.Value, counter)
+			out = append(out, setup...)
+			s.Value = value
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForInListStmt:
+			setup, list := hoistRichExprsInExpr(s.List, counter)
+			out = append(out, setup...)
+			s.List = list
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForInMapStmt:
+			setup, mapExpr := hoistRichExprsInExpr(s.Map, counter)
+			out = append(out, setup...)
+			s.Map = mapExpr
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.WhileStmt:
+			setup, cond := hoistRichExprsInExpr(s.Cond, counter)
+			out = append(out, setup...)
+			s.Cond = cond
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.IfStmt:
+			setup, cond := hoistRichExprsInExpr(s.Cond, counter)
+			out = append(out, setup...)
+			s.Cond = cond
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Then, counter)
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(s.Else, counter)
+			out = append(out, s)
+		default:
+			out = append(out, stmt)
+		}
+	}
+	block.Stmts = out
+}
+
+func hoistRichExprsInExpr(expr backendir.Expr, counter *int) ([]backendir.Stmt, backendir.Expr) {
+	if expr == nil {
+		return nil, nil
+	}
+	switch e := expr.(type) {
+	case *backendir.BlockExpr:
+		setup := make([]backendir.Stmt, 0, len(e.Setup)+1)
+		for _, stmt := range e.Setup {
+			setup = append(setup, normalizeRichExprStmt(stmt, counter)...)
+		}
+		valueSetup, value := hoistRichExprsInExpr(e.Value, counter)
+		setup = append(setup, valueSetup...)
+		return setup, value
+	case *backendir.IfExpr:
+		normalizeRichExprStatementsInBlockWithCounter(e.Then, counter)
+		normalizeRichExprStatementsInBlockWithCounter(e.Else, counter)
+		hoistRichExprsFromNestedExprPositionsInBlockWithCounter(e.Then, counter)
+		hoistRichExprsFromNestedExprPositionsInBlockWithCounter(e.Else, counter)
+		condSetup, cond := hoistRichExprsInExpr(e.Cond, counter)
+		e.Cond = cond
+		temp := nextNormalizeTemp(counter, "expr")
+		setup := append([]backendir.Stmt{}, condSetup...)
+		setup = append(setup, &backendir.AssignStmt{Target: temp, Value: e})
+		return setup, &backendir.IdentExpr{Name: temp}
+	case *backendir.UnionMatchExpr:
+		subjectSetup, subject := hoistRichExprsInExpr(e.Subject, counter)
+		e.Subject = subject
+		for i := range e.Cases {
+			normalizeRichExprStatementsInBlockWithCounter(e.Cases[i].Body, counter)
+			hoistRichExprsFromNestedExprPositionsInBlockWithCounter(e.Cases[i].Body, counter)
+		}
+		normalizeRichExprStatementsInBlockWithCounter(e.CatchAll, counter)
+		hoistRichExprsFromNestedExprPositionsInBlockWithCounter(e.CatchAll, counter)
+		temp := nextNormalizeTemp(counter, "expr")
+		setup := append([]backendir.Stmt{}, subjectSetup...)
+		setup = append(setup, &backendir.AssignStmt{Target: temp, Value: e})
+		return setup, &backendir.IdentExpr{Name: temp}
+	case *backendir.CallExpr:
+		setup := make([]backendir.Stmt, 0)
+		calleeSetup, callee := hoistRichExprsInExpr(e.Callee, counter)
+		setup = append(setup, calleeSetup...)
+		e.Callee = callee
+		for i, arg := range e.Args {
+			argSetup, loweredArg := hoistRichExprsInExpr(arg, counter)
+			setup = append(setup, argSetup...)
+			e.Args[i] = loweredArg
+		}
+		return setup, e
+	case *backendir.SelectorExpr:
+		setup, subject := hoistRichExprsInExpr(e.Subject, counter)
+		e.Subject = subject
+		return setup, e
+	case *backendir.TraitCoerceExpr:
+		setup, value := hoistRichExprsInExpr(e.Value, counter)
+		e.Value = value
+		return setup, e
+	case *backendir.MaybeSomeExpr:
+		setup, value := hoistRichExprsInExpr(e.Value, counter)
+		e.Value = value
+		return setup, e
+	case *backendir.ResultOkExpr:
+		setup, value := hoistRichExprsInExpr(e.Value, counter)
+		e.Value = value
+		return setup, e
+	case *backendir.ResultErrExpr:
+		setup, value := hoistRichExprsInExpr(e.Value, counter)
+		e.Value = value
+		return setup, e
+	case *backendir.AddressOfExpr:
+		setup, value := hoistRichExprsInExpr(e.Value, counter)
+		e.Value = value
+		return setup, e
+	case *backendir.FuncLiteralExpr:
+		normalizeRichExprStatementsInBlockWithCounter(e.Body, counter)
+		hoistRichExprsFromNestedExprPositionsInBlockWithCounter(e.Body, counter)
+		return nil, e
+	case *backendir.ListLiteralExpr:
+		setup := make([]backendir.Stmt, 0)
+		for i, elem := range e.Elements {
+			elemSetup, loweredElem := hoistRichExprsInExpr(elem, counter)
+			setup = append(setup, elemSetup...)
+			e.Elements[i] = loweredElem
+		}
+		return setup, e
+	case *backendir.MapLiteralExpr:
+		setup := make([]backendir.Stmt, 0)
+		for i, entry := range e.Entries {
+			keySetup, loweredKey := hoistRichExprsInExpr(entry.Key, counter)
+			valueSetup, loweredValue := hoistRichExprsInExpr(entry.Value, counter)
+			setup = append(setup, keySetup...)
+			setup = append(setup, valueSetup...)
+			e.Entries[i].Key = loweredKey
+			e.Entries[i].Value = loweredValue
+		}
+		return setup, e
+	case *backendir.StructLiteralExpr:
+		setup := make([]backendir.Stmt, 0)
+		for i, field := range e.Fields {
+			fieldSetup, loweredValue := hoistRichExprsInExpr(field.Value, counter)
+			setup = append(setup, fieldSetup...)
+			e.Fields[i].Value = loweredValue
+		}
+		return setup, e
+	case *backendir.TryExpr:
+		setup := make([]backendir.Stmt, 0)
+		subjectSetup, subject := hoistRichExprsInExpr(e.Subject, counter)
+		setup = append(setup, subjectSetup...)
+		e.Subject = subject
+		normalizeRichExprStatementsInBlockWithCounter(e.Catch, counter)
+		hoistRichExprsFromNestedExprPositionsInBlockWithCounter(e.Catch, counter)
+		return setup, e
+	case *backendir.PanicExpr:
+		setup, message := hoistRichExprsInExpr(e.Message, counter)
+		e.Message = message
+		return setup, e
+	case *backendir.CopyExpr:
+		setup, value := hoistRichExprsInExpr(e.Value, counter)
+		e.Value = value
+		return setup, e
+	default:
+		return nil, expr
+	}
 }
 
 func hoistNestedTryExprsInBlock(block *backendir.Block) {

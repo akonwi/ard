@@ -149,3 +149,211 @@ noop()
 		t.Fatalf("expected generated source to contain discard for unused local\n%s", generated)
 	}
 }
+
+func TestCompileEntrypointNormalizesIfAndMatchWithoutExprClosures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+fn choose(flag: Bool) Int {
+  match flag {
+    true => 1,
+    false => 2,
+  }
+}
+
+fn weight(flag: Bool) Int {
+  let value = match flag {
+    true => 3,
+    false => 4,
+  }
+  value
+}
+
+let result = choose(true) + weight(true)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func Choose(flag bool) int",
+		"if flag {",
+		"return 1",
+		"return 2",
+		"func Weight(flag bool) int",
+		"var αardnormalizeExpr0 int",
+		"if flag {",
+		"αardnormalizeExpr0 = 3",
+		"αardnormalizeExpr0 = 4",
+		"value := αardnormalizeExpr0",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() int") {
+		t.Fatalf("did not expect generated source to use expression closures for normalized if/match\n%s", generated)
+	}
+}
+
+func TestCompileEntrypointNormalizesUnionMatchReturnWithoutExprClosures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+struct Square { size: Int }
+struct Circle { radius: Int }
+
+type Shape = Square | Circle
+
+fn name(shape: Shape) Str {
+  match shape {
+    Square => "Square",
+    Circle => "Circle"
+  }
+}
+
+let result = name(Square{size: 1})
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func Name(shape Shape) string",
+		"var αardnormalizeExpr0 string",
+		"switch unionValue := any(shape).(type) {",
+		"αardnormalizeExpr0 = \"Square\"",
+		"αardnormalizeExpr0 = \"Circle\"",
+		"return αardnormalizeUnionmatch0",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() string") {
+		t.Fatalf("did not expect generated source to use expression closures for normalized union match return\n%s", generated)
+	}
+}
+
+func TestCompileEntrypointHoistsNestedMatchInCallArgs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+fn id(n: Int) Int {
+  n
+}
+
+fn choose(flag: Bool) Int {
+  id(
+    match flag {
+      true => 1,
+      false => 2,
+    },
+  )
+}
+
+let result = choose(true)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func Choose(flag bool) int",
+		"var αardnormalizeExpr0 int",
+		"if flag {",
+		"αardnormalizeExpr0 = 1",
+		"αardnormalizeExpr0 = 2",
+		"return Id(αardnormalizeExpr0)",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() int") {
+		t.Fatalf("did not expect generated source to use expression closures for nested match call arg\n%s", generated)
+	}
+}
+
+func TestCompileEntrypointNormalizesEnumAndIntMatchAssignmentsWithoutExprClosures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+enum Region {
+  North,
+  South,
+}
+
+fn enum_weight(region: Region) Int {
+  let value = match region {
+    Region::North => 3,
+    Region::South => 4,
+  }
+  value
+}
+
+fn int_label(n: Int) Str {
+  let value = match n {
+    0 => "zero",
+    1..5 => "small",
+    _ => "big",
+  }
+  value
+}
+
+let result = enum_weight(Region::North).to_str() + int_label(3)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func EnumWeight(region Region) int",
+		"var αardnormalizeExpr0 int",
+		"if region.Tag == 0 {",
+		"αardnormalizeExpr0 = 3",
+		"αardnormalizeExpr0 = 4",
+		"panic(\"non-exhaustive enum match\")",
+		"func IntLabel(n int) string",
+		"var αardnormalizeExpr0 string",
+		"if n == 0 {",
+		"αardnormalizeExpr0 = \"zero\"",
+		"αardnormalizeExpr0 = \"small\"",
+		"αardnormalizeExpr0 = \"big\"",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() int") || strings.Contains(generated, "func() string") {
+		t.Fatalf("did not expect generated source to use expression closures for enum/int match assignments\n%s", generated)
+	}
+}
