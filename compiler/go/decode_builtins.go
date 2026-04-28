@@ -526,7 +526,7 @@ func JsonToDynamicExtern(jsonString string) Result[any, string] {
 func builtinJsonToDynamic(jsonString string) Result[any, string] {
 	if validateLazyJSON(jsonString) {
 		if object, ok := parseLazyJSONObjectSmall(jsonString); ok {
-			return Ok[any, string](&object)
+			return Ok[any, string](object)
 		}
 		return Ok[any, string](jsonDynamic(jsonString))
 	}
