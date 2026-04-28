@@ -16,7 +16,27 @@ type jsonObjectDynamic struct {
 }
 
 func validateLazyJSON(s string) bool {
-	return !hasDuplicateJSONNames(s) && json.Valid(unsafeStringBytes(s))
+	_, ok := validateLazyJSONWithObject(s)
+	return ok
+}
+
+func validateLazyJSONWithObject(s string) (*jsonObjectDynamic, bool) {
+	idx := skipJSONSpaces(s, 0)
+	var object *jsonObjectDynamic
+	var ok bool
+	if idx < len(s) && s[idx] == '{' {
+		object, ok = scanJSONObjectNamesWithCache(s, &idx)
+	} else {
+		ok = scanJSONValueNames(s, &idx)
+	}
+	if !ok {
+		return nil, false
+	}
+	idx = skipJSONSpaces(s, idx)
+	if idx != len(s) || !json.Valid(unsafeStringBytes(s)) {
+		return nil, false
+	}
+	return object, true
 }
 
 func unsafeStringBytes(value string) []byte {
@@ -411,6 +431,81 @@ func scanJSONValueNames(s string, idx *int) bool {
 		}
 		*idx = end
 		return true
+	}
+}
+
+func scanJSONObjectNamesWithCache(s string, idx *int) (*jsonObjectDynamic, bool) {
+	var seenSmall [16]string
+	seenCount := 0
+	var seenMap map[string]struct{}
+	object := &jsonObjectDynamic{raw: jsonDynamic(s)}
+	cacheable := true
+	*idx = *idx + 1
+	for {
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx >= len(s) {
+			return nil, false
+		}
+		if s[*idx] == '}' {
+			*idx = *idx + 1
+			if cacheable {
+				return object, true
+			}
+			return nil, true
+		}
+		keyStart := *idx
+		keyEnd := skipJSONString(s, keyStart)
+		if keyEnd < 0 {
+			return nil, false
+		}
+		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		if !ok {
+			return nil, false
+		}
+		if seenMap != nil {
+			if _, ok := seenMap[key]; ok {
+				return nil, false
+			}
+			seenMap[key] = struct{}{}
+		} else {
+			for i := 0; i < seenCount; i++ {
+				if seenSmall[i] == key {
+					return nil, false
+				}
+			}
+			if seenCount < len(seenSmall) {
+				seenSmall[seenCount] = key
+				seenCount++
+			} else {
+				seenMap = make(map[string]struct{}, len(seenSmall)*2)
+				for _, existing := range seenSmall {
+					seenMap[existing] = struct{}{}
+				}
+				seenMap[key] = struct{}{}
+			}
+		}
+		*idx = skipJSONSpaces(s, keyEnd)
+		if *idx >= len(s) || s[*idx] != ':' {
+			return nil, false
+		}
+		valueStart := skipJSONSpaces(s, *idx+1)
+		*idx = valueStart
+		if !scanJSONValueNames(s, idx) {
+			return nil, false
+		}
+		if cacheable {
+			if object.count < len(object.keys) {
+				object.keys[object.count] = key
+				object.values[object.count] = jsonDynamic(s[valueStart:*idx])
+				object.count++
+			} else {
+				cacheable = false
+			}
+		}
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx < len(s) && s[*idx] == ',' {
+			*idx = *idx + 1
+		}
 	}
 }
 
