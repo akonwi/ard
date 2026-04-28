@@ -31,7 +31,8 @@ if [[ "$output" != "$EXPECTED" ]]; then
   exit 1
 fi
 
-mapfile -t samples < <(python3 - "$GO_BIN" "$RUNS" <<'PY'
+samples_file="$TMP_DIR/samples.txt"
+python3 - "$GO_BIN" "$RUNS" > "$samples_file" <<'PY'
 import subprocess, sys, time
 bin_path = sys.argv[1]
 runs = int(sys.argv[2])
@@ -43,11 +44,11 @@ for _ in range(runs):
         raise SystemExit(f"bad output: {out!r}")
     print((end - start) / 1_000_000)
 PY
-)
 
-median_ms=$(python3 - "${samples[@]}" <<'PY'
+median_ms=$(python3 - "$samples_file" <<'PY'
 import statistics, sys
-vals = [float(x) for x in sys.argv[1:]]
+with open(sys.argv[1]) as f:
+    vals = [float(line) for line in f if line.strip()]
 print(f"{statistics.median(vals):.6f}")
 PY
 )
@@ -63,4 +64,5 @@ echo "METRIC build_ms=$build_ms"
 echo "METRIC vm_output=$EXPECTED"
 echo "METRIC go_output=$output"
 echo "METRIC binary_size_bytes=$binary_size"
-printf 'samples_ms=%s\n' "${samples[*]}"
+printf 'samples_ms='
+paste -sd ' ' "$samples_file"
