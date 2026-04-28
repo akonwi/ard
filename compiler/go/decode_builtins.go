@@ -86,9 +86,7 @@ func builtinDynamicToList(data any) Result[[]any, string] {
 		return Err[[]any, string]("null")
 	}
 	if items, ok := data.([]any); ok {
-		out := make([]any, len(items))
-		copy(out, items)
-		return Ok[[]any, string](out)
+		return Ok[[]any, string](items)
 	}
 	value := reflect.ValueOf(data)
 	for value.Kind() == reflect.Interface {
@@ -113,11 +111,7 @@ func builtinDynamicToMap(data any) Result[map[string]any, string] {
 		return Err[map[string]any, string]("null")
 	}
 	if items, ok := data.(map[string]any); ok {
-		out := make(map[string]any, len(items))
-		for key, value := range items {
-			out[key] = value
-		}
-		return Ok[map[string]any, string](out)
+		return Ok[map[string]any, string](items)
 	}
 	value := reflect.ValueOf(data)
 	for value.Kind() == reflect.Interface {
