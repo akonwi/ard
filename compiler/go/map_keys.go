@@ -6,6 +6,28 @@ import (
 )
 
 func MapKeys[K comparable, V any](m map[K]V) []K {
+	if len(m) == 0 {
+		return nil
+	}
+	stringKeys := make([]string, 0, len(m))
+	allStringKeys := true
+	for key := range m {
+		stringKey, ok := any(key).(string)
+		if !ok {
+			allStringKeys = false
+			break
+		}
+		stringKeys = append(stringKeys, stringKey)
+	}
+	if allStringKeys {
+		sort.Strings(stringKeys)
+		keys := make([]K, len(stringKeys))
+		for i, key := range stringKeys {
+			keys[i] = any(key).(K)
+		}
+		return keys
+	}
+
 	keys := make([]K, 0, len(m))
 	for key := range m {
 		keys = append(keys, key)
