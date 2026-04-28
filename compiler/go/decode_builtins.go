@@ -408,11 +408,14 @@ func appendDecodeErrorPath[E any](err E, segment string) E {
 }
 
 func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
-	listResult := builtinDynamicToList(data)
-	if !listResult.ok {
-		return Result[[]int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("List", listResult.err))}}
+	raw, ok := data.([]any)
+	if !ok {
+		listResult := builtinDynamicToList(data)
+		if !listResult.ok {
+			return Result[[]int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("List", listResult.err))}}
+		}
+		raw = listResult.value
 	}
-	raw := listResult.value
 	out := make([]int, len(raw))
 	var errors []E
 	for idx, item := range raw {
