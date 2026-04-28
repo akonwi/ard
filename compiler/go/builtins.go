@@ -3,6 +3,7 @@ package ardgo
 import (
 	"encoding/json"
 	"os"
+	"runtime/debug"
 	"sync"
 
 	"github.com/akonwi/ard/ffi"
@@ -60,6 +61,7 @@ func builtinDynamicValue(value any) any {
 
 func RegisterBuiltinExterns() {
 	registerBuiltinExternsOnce.Do(func() {
+		debug.SetGCPercent(200)
 		RegisterExtern("Print", func(args ...any) (any, error) {
 			ffi.Print(args[0].(string))
 			return nil, nil
