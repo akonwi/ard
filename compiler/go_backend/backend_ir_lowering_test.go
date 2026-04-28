@@ -1180,9 +1180,9 @@ func TestLowerExpressionToBackendIR_LowersOptionMatchAsIfExpr(t *testing.T) {
 	if len(ifExpr.Then.Stmts) == 0 {
 		t.Fatalf("expected option match then block to include pattern binding")
 	}
-	assign, ok := ifExpr.Then.Stmts[0].(*backendir.AssignStmt)
-	if !ok || assign.Target != "num" {
-		t.Fatalf("expected option match then block to start with binding assign to num, got %T", ifExpr.Then.Stmts[0])
+	bind, ok := ifExpr.Then.Stmts[0].(*backendir.BindStmt)
+	if !ok || bind.Name != "num" {
+		t.Fatalf("expected option match then block to start with binding to num, got %T", ifExpr.Then.Stmts[0])
 	}
 }
 
@@ -1236,11 +1236,11 @@ func TestLowerExpressionToBackendIR_LowersResultMatchAsIfExpr(t *testing.T) {
 	if len(ifExpr.Then.Stmts) == 0 || len(ifExpr.Else.Stmts) == 0 {
 		t.Fatalf("expected result match branches to include pattern bindings")
 	}
-	if assign, ok := ifExpr.Then.Stmts[0].(*backendir.AssignStmt); !ok || assign.Target != "ok" {
-		t.Fatalf("expected result match ok branch to start with binding assign to ok, got %T", ifExpr.Then.Stmts[0])
+	if bind, ok := ifExpr.Then.Stmts[0].(*backendir.BindStmt); !ok || bind.Name != "ok" {
+		t.Fatalf("expected result match ok branch to start with binding to ok, got %T", ifExpr.Then.Stmts[0])
 	}
-	if assign, ok := ifExpr.Else.Stmts[0].(*backendir.AssignStmt); !ok || assign.Target != "err" {
-		t.Fatalf("expected result match err branch to start with binding assign to err, got %T", ifExpr.Else.Stmts[0])
+	if bind, ok := ifExpr.Else.Stmts[0].(*backendir.BindStmt); !ok || bind.Name != "err" {
+		t.Fatalf("expected result match err branch to start with binding to err, got %T", ifExpr.Else.Stmts[0])
 	}
 }
 

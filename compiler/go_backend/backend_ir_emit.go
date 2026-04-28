@@ -913,6 +913,8 @@ func (e *backendIREmitter) canEmitStmtNatively(stmt backendir.Stmt) bool {
 		return e.canEmitExprNatively(s.Value)
 	case *backendir.BreakStmt:
 		return s != nil
+	case *backendir.BindStmt:
+		return s != nil && strings.TrimSpace(s.Name) != "" && s.Value != nil && e.canEmitExprNatively(s.Value)
 	case *backendir.AssignStmt:
 		if s == nil || s.Value == nil {
 			return false
@@ -1414,6 +1416,21 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		}, nil
 	case *backendir.BreakStmt:
 		return []ast.Stmt{&ast.BranchStmt{Tok: token.BREAK}}, nil
+	case *backendir.BindStmt:
+		value, err := e.emitExpr(s.Value, locals)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(s.Name)
+		if name == "" || name == "_" {
+			return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}}}, nil
+		}
+		localName := uniqueLocalName(goName(name, false), seenLocals)
+		locals[name] = localName
+		return []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(localName)}, Tok: token.DEFINE, Rhs: []ast.Expr{value}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(localName)}},
+		}, nil
 	case *backendir.AssignStmt:
 		if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
 			catchBaseLocals := cloneStringMap(locals)

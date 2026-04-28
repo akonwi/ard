@@ -116,6 +116,13 @@ type AssignStmt struct {
 
 func (*AssignStmt) stmtNode() {}
 
+type BindStmt struct {
+	Name  string
+	Value Expr
+}
+
+func (*BindStmt) stmtNode() {}
+
 type MemberAssignStmt struct {
 	Subject Expr
 	Field   string

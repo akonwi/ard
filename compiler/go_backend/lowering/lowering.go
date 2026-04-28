@@ -3706,9 +3706,9 @@ func prependBindingAssign(block *backendir.Block, source *checker.Block, name st
 		return
 	}
 	prefix := []backendir.Stmt{
-		&backendir.AssignStmt{
-			Target: name,
-			Value:  value,
+		&backendir.BindStmt{
+			Name:  name,
+			Value: value,
 		},
 	}
 	if source == nil || !usesNameInStatements(source.Stmts, name) {
