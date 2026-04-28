@@ -2,6 +2,7 @@ package lowering
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -706,14 +707,277 @@ func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoin
 	collectOrphanTypeDecls(module.Program(), out, seenDecls)
 
 	out.Entrypoint = lowerEntrypointStatementsToBackendIRBlock(topLevelExecutableStatements(module.Program().Statements))
+	qualifyImportedNamedTypes(out, module)
 	return out, nil
+}
+
+func qualifyImportedNamedTypes(module *backendir.Module, source checker.Module) {
+	if module == nil || source == nil || source.Program() == nil {
+		return
+	}
+	owners := importedTypeOwners(source)
+	if len(owners) == 0 {
+		return
+	}
+	local := make(map[string]struct{})
+	for _, decl := range module.Decls {
+		switch d := decl.(type) {
+		case *backendir.StructDecl:
+			local[d.Name] = struct{}{}
+		case *backendir.EnumDecl:
+			local[d.Name] = struct{}{}
+		case *backendir.UnionDecl:
+			local[d.Name] = struct{}{}
+		case *backendir.ExternTypeDecl:
+			local[d.Name] = struct{}{}
+		}
+	}
+	for _, decl := range module.Decls {
+		qualifyImportedNamedTypesInDecl(decl, owners, local)
+	}
+	qualifyImportedNamedTypesInBlock(module.Entrypoint, owners, local)
+}
+
+func importedTypeOwners(module checker.Module) map[string]string {
+	owners := make(map[string]string)
+	if module == nil || module.Program() == nil {
+		return owners
+	}
+	for _, imported := range module.Program().Imports {
+		if imported == nil || imported.Program() == nil {
+			continue
+		}
+		path := strings.TrimSpace(imported.Path())
+		for _, stmt := range imported.Program().Statements {
+			if stmt.Stmt == nil {
+				continue
+			}
+			switch def := stmt.Stmt.(type) {
+			case *checker.StructDef:
+				owners[def.Name] = path
+			case checker.StructDef:
+				owners[def.Name] = path
+			case *checker.Union:
+				owners[def.Name] = path
+			case checker.Union:
+				owners[def.Name] = path
+			case *checker.ExternType:
+				owners[def.Name_] = path
+			}
+		}
+	}
+	return owners
+}
+
+func qualifyImportedNamedTypesInDecl(decl backendir.Decl, owners map[string]string, local map[string]struct{}) {
+	switch d := decl.(type) {
+	case *backendir.StructDecl:
+		for i := range d.Fields {
+			d.Fields[i].Type = qualifyImportedNamedType(d.Fields[i].Type, owners, local)
+		}
+		for _, method := range d.Methods {
+			qualifyImportedNamedTypesInDecl(method, owners, local)
+		}
+	case *backendir.EnumDecl:
+		for _, method := range d.Methods {
+			qualifyImportedNamedTypesInDecl(method, owners, local)
+		}
+	case *backendir.UnionDecl:
+		for i := range d.Types {
+			d.Types[i] = qualifyImportedNamedType(d.Types[i], owners, local)
+		}
+	case *backendir.ExternTypeDecl:
+		for i := range d.Args {
+			d.Args[i] = qualifyImportedNamedType(d.Args[i], owners, local)
+		}
+	case *backendir.FuncDecl:
+		for i := range d.Params {
+			d.Params[i].Type = qualifyImportedNamedType(d.Params[i].Type, owners, local)
+		}
+		d.Return = qualifyImportedNamedType(d.Return, owners, local)
+		qualifyImportedNamedTypesInBlock(d.Body, owners, local)
+	case *backendir.VarDecl:
+		d.Type = qualifyImportedNamedType(d.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(d.Value, owners, local)
+	}
+}
+
+func qualifyImportedNamedTypesInBlock(block *backendir.Block, owners map[string]string, local map[string]struct{}) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		qualifyImportedNamedTypesInStmt(stmt, owners, local)
+	}
+}
+
+func qualifyImportedNamedTypesInStmt(stmt backendir.Stmt, owners map[string]string, local map[string]struct{}) {
+	switch s := stmt.(type) {
+	case *backendir.ReturnStmt:
+		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
+	case *backendir.ExprStmt:
+		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
+	case *backendir.AssignStmt:
+		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
+	case *backendir.MemberAssignStmt:
+		qualifyImportedNamedTypesInExpr(s.Subject, owners, local)
+		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
+	case *backendir.ForIntRangeStmt:
+		qualifyImportedNamedTypesInExpr(s.Start, owners, local)
+		qualifyImportedNamedTypesInExpr(s.End, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
+	case *backendir.ForLoopStmt:
+		qualifyImportedNamedTypesInExpr(s.InitValue, owners, local)
+		qualifyImportedNamedTypesInExpr(s.Cond, owners, local)
+		qualifyImportedNamedTypesInStmt(s.Update, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
+	case *backendir.ForInStrStmt:
+		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
+	case *backendir.ForInListStmt:
+		qualifyImportedNamedTypesInExpr(s.List, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
+	case *backendir.ForInMapStmt:
+		qualifyImportedNamedTypesInExpr(s.Map, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
+	case *backendir.WhileStmt:
+		qualifyImportedNamedTypesInExpr(s.Cond, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Body, owners, local)
+	case *backendir.IfStmt:
+		qualifyImportedNamedTypesInExpr(s.Cond, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Then, owners, local)
+		qualifyImportedNamedTypesInBlock(s.Else, owners, local)
+	}
+}
+
+func qualifyImportedNamedTypesInExpr(expr backendir.Expr, owners map[string]string, local map[string]struct{}) {
+	switch e := expr.(type) {
+	case *backendir.SelectorExpr:
+		qualifyImportedNamedTypesInExpr(e.Subject, owners, local)
+	case *backendir.CallExpr:
+		qualifyImportedNamedTypesInExpr(e.Callee, owners, local)
+		for i := range e.TypeArgs {
+			e.TypeArgs[i] = qualifyImportedNamedType(e.TypeArgs[i], owners, local)
+		}
+		for _, arg := range e.Args {
+			qualifyImportedNamedTypesInExpr(arg, owners, local)
+		}
+	case *backendir.TraitCoerceExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	case *backendir.MaybeSomeExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	case *backendir.MaybeNoneExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+	case *backendir.ResultOkExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	case *backendir.ResultErrExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	case *backendir.AddressOfExpr:
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	case *backendir.FuncLiteralExpr:
+		for i := range e.Params {
+			e.Params[i].Type = qualifyImportedNamedType(e.Params[i].Type, owners, local)
+		}
+		e.Return = qualifyImportedNamedType(e.Return, owners, local)
+		qualifyImportedNamedTypesInBlock(e.Body, owners, local)
+	case *backendir.ListLiteralExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		for _, element := range e.Elements {
+			qualifyImportedNamedTypesInExpr(element, owners, local)
+		}
+	case *backendir.MapLiteralExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		for _, entry := range e.Entries {
+			qualifyImportedNamedTypesInExpr(entry.Key, owners, local)
+			qualifyImportedNamedTypesInExpr(entry.Value, owners, local)
+		}
+	case *backendir.StructLiteralExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		for _, field := range e.Fields {
+			qualifyImportedNamedTypesInExpr(field.Value, owners, local)
+		}
+	case *backendir.EnumVariantExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+	case *backendir.IfExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Cond, owners, local)
+		qualifyImportedNamedTypesInBlock(e.Then, owners, local)
+		qualifyImportedNamedTypesInBlock(e.Else, owners, local)
+	case *backendir.UnionMatchExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Subject, owners, local)
+		for i := range e.Cases {
+			e.Cases[i].Type = qualifyImportedNamedType(e.Cases[i].Type, owners, local)
+			qualifyImportedNamedTypesInBlock(e.Cases[i].Body, owners, local)
+		}
+		qualifyImportedNamedTypesInBlock(e.CatchAll, owners, local)
+	case *backendir.TryExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Subject, owners, local)
+		qualifyImportedNamedTypesInBlock(e.Catch, owners, local)
+	case *backendir.PanicExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Message, owners, local)
+	case *backendir.CopyExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	case *backendir.BlockExpr:
+		e.Type = qualifyImportedNamedType(e.Type, owners, local)
+		for _, setup := range e.Setup {
+			qualifyImportedNamedTypesInStmt(setup, owners, local)
+		}
+		qualifyImportedNamedTypesInExpr(e.Value, owners, local)
+	}
+}
+
+func qualifyImportedNamedType(t backendir.Type, owners map[string]string, local map[string]struct{}) backendir.Type {
+	switch typed := t.(type) {
+	case *backendir.NamedType:
+		if strings.TrimSpace(typed.Module) == "" {
+			name := strings.TrimSpace(typed.Name)
+			if _, isLocal := local[name]; !isLocal {
+				if owner := strings.TrimSpace(owners[name]); owner != "" {
+					typed.Module = owner
+				}
+			}
+		}
+		for i := range typed.Args {
+			typed.Args[i] = qualifyImportedNamedType(typed.Args[i], owners, local)
+		}
+	case *backendir.ListType:
+		typed.Elem = qualifyImportedNamedType(typed.Elem, owners, local)
+	case *backendir.MapType:
+		typed.Key = qualifyImportedNamedType(typed.Key, owners, local)
+		typed.Value = qualifyImportedNamedType(typed.Value, owners, local)
+	case *backendir.MaybeType:
+		typed.Of = qualifyImportedNamedType(typed.Of, owners, local)
+	case *backendir.ResultType:
+		typed.Val = qualifyImportedNamedType(typed.Val, owners, local)
+		typed.Err = qualifyImportedNamedType(typed.Err, owners, local)
+	case *backendir.FuncType:
+		for i := range typed.Params {
+			typed.Params[i] = qualifyImportedNamedType(typed.Params[i], owners, local)
+		}
+		typed.Return = qualifyImportedNamedType(typed.Return, owners, local)
+	case *backendir.TraitType:
+		for i := range typed.Methods {
+			if methodType, ok := qualifyImportedNamedType(typed.Methods[i].Type, owners, local).(*backendir.FuncType); ok {
+				typed.Methods[i].Type = methodType
+			}
+		}
+	}
+	return t
 }
 
 func collectOrphanTypeDecls(program *checker.Program, out *backendir.Module, seenDecls map[string]struct{}) {
 	if program == nil {
 		return
 	}
-	visited := make(map[checker.Type]struct{})
+	visited := make(map[string]struct{})
 	collect := func(t checker.Type) {
 		visitOrphanTypeDeclsInType(t, out, seenDecls, visited)
 	}
@@ -738,6 +1002,7 @@ func collectOrphanTypeDecls(program *checker.Program, out *backendir.Module, see
 			case *checker.VariableDef:
 				if def != nil {
 					collect(def.Type())
+					collectTypeDeclsInExpr(def.Value, collect)
 				}
 			case *checker.StructDef:
 				if def != nil {
@@ -766,15 +1031,113 @@ func collectOrphanTypeDecls(program *checker.Program, out *backendir.Module, see
 	}
 }
 
-func visitOrphanTypeDeclsInType(t checker.Type, out *backendir.Module, seenDecls map[string]struct{}, visited map[checker.Type]struct{}) {
+func collectTypeDeclsInExpr(expr checker.Expression, collect func(checker.Type)) {
+	if expr == nil {
+		return
+	}
+	value := reflect.ValueOf(expr)
+	if value.IsValid() && value.Kind() == reflect.Pointer && value.IsNil() {
+		return
+	}
+	collect(expr.Type())
+	collectTypeDeclsInValue(value, collect, make(map[uintptr]struct{}))
+}
+
+func collectTypeDeclsInBlock(block *checker.Block, collect func(checker.Type)) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		if stmt.Expr != nil {
+			collectTypeDeclsInExpr(stmt.Expr, collect)
+		}
+		if variableDef, ok := stmt.Stmt.(*checker.VariableDef); ok && variableDef != nil {
+			collect(variableDef.Type())
+			collectTypeDeclsInExpr(variableDef.Value, collect)
+		}
+	}
+}
+
+func collectTypeDeclsInValue(value reflect.Value, collect func(checker.Type), seen map[uintptr]struct{}) {
+	if !value.IsValid() {
+		return
+	}
+	if value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return
+		}
+		value = value.Elem()
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return
+		}
+		ptr := value.Pointer()
+		if _, ok := seen[ptr]; ok {
+			return
+		}
+		seen[ptr] = struct{}{}
+		if expr, ok := value.Interface().(checker.Expression); ok && expr != nil {
+			collect(expr.Type())
+		}
+		if block, ok := value.Interface().(*checker.Block); ok {
+			collectTypeDeclsInBlock(block, collect)
+			return
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		if value.Kind() == reflect.Slice {
+			for i := 0; i < value.Len(); i++ {
+				collectTypeDeclsInValue(value.Index(i), collect, seen)
+			}
+		}
+		return
+	}
+	for i := 0; i < value.NumField(); i++ {
+		fieldInfo := value.Type().Field(i)
+		if fieldInfo.PkgPath != "" {
+			continue
+		}
+		field := value.Field(i)
+		if field.CanInterface() {
+			if expr, ok := field.Interface().(checker.Expression); ok && expr != nil {
+				collectTypeDeclsInExpr(expr, collect)
+				continue
+			}
+			if block, ok := field.Interface().(*checker.Block); ok {
+				collectTypeDeclsInBlock(block, collect)
+				continue
+			}
+		}
+		collectTypeDeclsInValue(field, collect, seen)
+	}
+}
+
+func orphanTypeVisitKey(t checker.Type) string {
+	if t == nil {
+		return "<nil>"
+	}
+	value := reflect.ValueOf(t)
+	if value.IsValid() && value.Kind() == reflect.Pointer && !value.IsNil() {
+		return fmt.Sprintf("%T:%x", t, value.Pointer())
+	}
+	return fmt.Sprintf("%T:%s", t, t.String())
+}
+
+func visitOrphanTypeDeclsInType(t checker.Type, out *backendir.Module, seenDecls map[string]struct{}, visited map[string]struct{}) {
 	if t == nil {
 		return
 	}
-	if _, seen := visited[t]; seen {
+	visitKey := orphanTypeVisitKey(t)
+	if _, seen := visited[visitKey]; seen {
 		return
 	}
-	visited[t] = struct{}{}
+	visited[visitKey] = struct{}{}
 	switch typed := t.(type) {
+	case checker.Enum:
+		typedCopy := typed
+		visitOrphanTypeDeclsInType(&typedCopy, out, seenDecls, visited)
 	case *checker.Enum:
 		if typed == nil {
 			return
@@ -785,6 +1148,9 @@ func visitOrphanTypeDeclsInType(t checker.Type, out *backendir.Module, seenDecls
 		}
 		seenDecls[key] = struct{}{}
 		out.Decls = append(out.Decls, lowerEnumDeclToBackendIR(typed))
+	case checker.Union:
+		typedCopy := typed
+		visitOrphanTypeDeclsInType(&typedCopy, out, seenDecls, visited)
 	case *checker.Union:
 		if typed == nil {
 			return
@@ -795,19 +1161,6 @@ func visitOrphanTypeDeclsInType(t checker.Type, out *backendir.Module, seenDecls
 			if _, exists := seenDecls[key]; !exists {
 				seenDecls[key] = struct{}{}
 				out.Decls = append(out.Decls, lowerUnionDeclToBackendIR(typed))
-			}
-		}
-		for _, memberType := range typed.Types {
-			visitOrphanTypeDeclsInType(memberType, out, seenDecls, visited)
-		}
-	case checker.Union:
-		name := strings.TrimSpace(typed.Name)
-		if name != "" {
-			key := "union:" + name
-			if _, exists := seenDecls[key]; !exists {
-				seenDecls[key] = struct{}{}
-				defCopy := typed
-				out.Decls = append(out.Decls, lowerUnionDeclToBackendIR(&defCopy))
 			}
 		}
 		for _, memberType := range typed.Types {
@@ -1052,11 +1405,11 @@ func lowerBlockToBackendIRWithReturnType(block *checker.Block, returnType checke
 		return out
 	}
 	for i, stmt := range block.Stmts {
-		var expected checker.Type
+		var exprExpected checker.Type
 		if i == len(block.Stmts)-1 {
-			expected = returnType
+			exprExpected = returnType
 		}
-		out.Stmts = append(out.Stmts, lowerStatementToBackendIRWithExpected(stmt, expected)...)
+		out.Stmts = append(out.Stmts, lowerStatementToBackendIRWithContext(stmt, exprExpected, returnType)...)
 		variableDef, ok := stmt.Stmt.(*checker.VariableDef)
 		if !ok || variableDef == nil {
 			continue
@@ -1080,6 +1433,10 @@ func lowerStatementToBackendIR(stmt checker.Statement) []backendir.Stmt {
 }
 
 func lowerStatementToBackendIRWithExpected(stmt checker.Statement, expected checker.Type) []backendir.Stmt {
+	return lowerStatementToBackendIRWithContext(stmt, expected, expected)
+}
+
+func lowerStatementToBackendIRWithContext(stmt checker.Statement, exprExpected checker.Type, returnType checker.Type) []backendir.Stmt {
 	out := make([]backendir.Stmt, 0, 2)
 
 	if stmt.Break {
@@ -1087,15 +1444,15 @@ func lowerStatementToBackendIRWithExpected(stmt checker.Statement, expected chec
 	}
 
 	if stmt.Stmt != nil {
-		out = append(out, lowerNonProducingToBackendIR(stmt.Stmt)...)
+		out = append(out, lowerNonProducingToBackendIRWithReturnType(stmt.Stmt, returnType)...)
 	}
 
 	if stmt.Expr != nil {
 		if ifExpr, ok := stmt.Expr.(*checker.If); ok {
-			out = append(out, lowerIfChainToBackendIR(ifExpr))
+			out = append(out, lowerIfChainToBackendIRWithReturnType(ifExpr, returnType))
 		} else {
 			out = append(out, &backendir.ExprStmt{
-				Value: lowerExpressionToBackendIRWithExpected(stmt.Expr, expected),
+				Value: lowerExpressionToBackendIRWithContext(stmt.Expr, exprExpected, returnType),
 			})
 		}
 	}
@@ -1104,19 +1461,23 @@ func lowerStatementToBackendIRWithExpected(stmt checker.Statement, expected chec
 }
 
 func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
+	return lowerNonProducingToBackendIRWithReturnType(node, nil)
+}
+
+func lowerNonProducingToBackendIRWithReturnType(node checker.NonProducing, returnType checker.Type) []backendir.Stmt {
 	switch n := node.(type) {
 	case *checker.VariableDef:
 		return []backendir.Stmt{
 			&backendir.AssignStmt{
 				Target: n.Name,
-				Value:  lowerExpressionOrOpaqueExpected(n.Value, n.Type()),
+				Value:  lowerExpressionToBackendIRWithContext(n.Value, n.Type(), returnType),
 			},
 		}
 	case *checker.Reassignment:
 		return []backendir.Stmt{lowerReassignmentToBackendIRStmt(n)}
 	case checker.ForIntRange:
 		loop := n
-		return lowerNonProducingToBackendIR(&loop)
+		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.ForIntRange:
 		return []backendir.Stmt{
 			&backendir.ForIntRangeStmt{
@@ -1124,48 +1485,48 @@ func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
 				Index:  n.Index,
 				Start:  lowerExpressionOrOpaque(n.Start),
 				End:    lowerExpressionOrOpaque(n.End),
-				Body:   lowerBlockToBackendIR(n.Body),
+				Body:   lowerBlockToBackendIRWithReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForInStr:
 		loop := n
-		return lowerNonProducingToBackendIR(&loop)
+		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.ForInStr:
 		return []backendir.Stmt{
 			&backendir.ForInStrStmt{
 				Cursor: n.Cursor,
 				Index:  n.Index,
 				Value:  lowerExpressionOrOpaque(n.Value),
-				Body:   lowerBlockToBackendIR(n.Body),
+				Body:   lowerBlockToBackendIRWithReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForInList:
 		loop := n
-		return lowerNonProducingToBackendIR(&loop)
+		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.ForInList:
 		return []backendir.Stmt{
 			&backendir.ForInListStmt{
 				Cursor: n.Cursor,
 				Index:  n.Index,
 				List:   lowerExpressionOrOpaque(n.List),
-				Body:   lowerBlockToBackendIR(n.Body),
+				Body:   lowerBlockToBackendIRWithReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForInMap:
 		loop := n
-		return lowerNonProducingToBackendIR(&loop)
+		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.ForInMap:
 		return []backendir.Stmt{
 			&backendir.ForInMapStmt{
 				Key:   n.Key,
 				Value: n.Val,
 				Map:   lowerExpressionOrOpaque(n.Map),
-				Body:  lowerBlockToBackendIR(n.Body),
+				Body:  lowerBlockToBackendIRWithReturnType(n.Body, returnType),
 			},
 		}
 	case checker.ForLoop:
 		loop := n
-		return lowerNonProducingToBackendIR(&loop)
+		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.ForLoop:
 		update := lowerReassignmentToBackendIRStmt(n.Update)
 		cond := lowerExpressionOrOpaque(n.Condition)
@@ -1186,17 +1547,17 @@ func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
 				InitValue: initValue,
 				Cond:      cond,
 				Update:    update,
-				Body:      lowerBlockToBackendIR(n.Body),
+				Body:      lowerBlockToBackendIRWithReturnType(n.Body, returnType),
 			},
 		}
 	case checker.WhileLoop:
 		loop := n
-		return lowerNonProducingToBackendIR(&loop)
+		return lowerNonProducingToBackendIRWithReturnType(&loop, returnType)
 	case *checker.WhileLoop:
 		return []backendir.Stmt{
 			&backendir.WhileStmt{
 				Cond: lowerExpressionOrOpaque(n.Condition),
-				Body: lowerBlockToBackendIR(n.Body),
+				Body: lowerBlockToBackendIRWithReturnType(n.Body, returnType),
 			},
 		}
 	case checker.StructDef:
@@ -1255,23 +1616,27 @@ func lowerNonProducingToBackendIR(node checker.NonProducing) []backendir.Stmt {
 }
 
 func lowerIfChainToBackendIR(node *checker.If) backendir.Stmt {
+	return lowerIfChainToBackendIRWithReturnType(node, nil)
+}
+
+func lowerIfChainToBackendIRWithReturnType(node *checker.If, returnType checker.Type) backendir.Stmt {
 	if node == nil {
 		return &backendir.ExprStmt{Value: literalExpr("if_stmt", "nil")}
 	}
 
 	out := &backendir.IfStmt{
 		Cond: lowerExpressionOrOpaque(node.Condition),
-		Then: lowerBlockToBackendIR(node.Body),
+		Then: lowerBlockToBackendIRWithReturnType(node.Body, returnType),
 	}
 
 	if node.ElseIf != nil {
 		out.Else = &backendir.Block{
 			Stmts: []backendir.Stmt{
-				lowerIfChainToBackendIR(node.ElseIf),
+				lowerIfChainToBackendIRWithReturnType(withElseFallback(node.ElseIf, node.Else), returnType),
 			},
 		}
 	} else if node.Else != nil {
-		out.Else = lowerBlockToBackendIR(node.Else)
+		out.Else = lowerBlockToBackendIRWithReturnType(node.Else, returnType)
 	}
 
 	return out
@@ -1431,6 +1796,10 @@ func lowerExpressionOrOpaqueExpected(expr checker.Expression, expected checker.T
 }
 
 func lowerExpressionToBackendIRWithExpected(expr checker.Expression, expected checker.Type) backendir.Expr {
+	return lowerExpressionToBackendIRWithContext(expr, expected, nil)
+}
+
+func lowerExpressionToBackendIRWithContext(expr checker.Expression, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if moduleCall, ok := expr.(*checker.ModuleFunctionCall); ok {
 		if special := lowerSpecialModuleConstructorToBackendIR(moduleCall, expected); special != nil {
 			return special
@@ -1439,8 +1808,14 @@ func lowerExpressionToBackendIRWithExpected(expr checker.Expression, expected ch
 	if boolMatch, ok := expr.(*checker.BoolMatch); ok && expected != nil {
 		return lowerBoolMatchExprToBackendIRWithExpected(boolMatch, expected)
 	}
-	if tryOp, ok := expr.(*checker.TryOp); ok && expected != nil {
-		return lowerTryOpExprToBackendIRWithExpected(tryOp, expected)
+	if tryOp, ok := expr.(*checker.TryOp); ok && (expected != nil || returnType != nil) {
+		return lowerTryOpExprToBackendIRWithContext(tryOp, expected, returnType)
+	}
+	if functionCall, ok := expr.(*checker.FunctionCall); ok && expected != nil {
+		return lowerFunctionCallToBackendIRWithExpected(functionCall, expected)
+	}
+	if moduleFunctionCall, ok := expr.(*checker.ModuleFunctionCall); ok && expected != nil {
+		return lowerModuleFunctionCallToBackendIRWithExpected(moduleFunctionCall, expected)
 	}
 	return lowerExpressionToBackendIR(expr)
 }
@@ -1722,14 +2097,22 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 			return callExpr("module_struct_literal", literalExpr("nil", "property"))
 		}
 		structType := lowerCheckerTypeToBackendIR(v.StructType)
-		if _, ok := structType.(*backendir.NamedType); !ok {
-			structType = &backendir.NamedType{Name: v.Property.Name}
+		if named, ok := structType.(*backendir.NamedType); ok {
+			named.Module = strings.TrimSpace(v.Module)
+		} else {
+			structType = &backendir.NamedType{Module: strings.TrimSpace(v.Module), Name: v.Property.Name}
 		}
 		fields := make([]backendir.StructFieldValue, 0, len(v.Property.Fields))
 		for _, field := range sortedStringKeys(v.Property.Fields) {
+			value := lowerExpressionOrOpaqueExpected(v.Property.Fields[field], v.FieldTypes[field])
+			if enumVariant, ok := value.(*backendir.EnumVariantExpr); ok {
+				if named, ok := enumVariant.Type.(*backendir.NamedType); ok && strings.TrimSpace(named.Module) == "" {
+					named.Module = strings.TrimSpace(v.Module)
+				}
+			}
 			fields = append(fields, backendir.StructFieldValue{
 				Name:  field,
-				Value: lowerExpressionOrOpaqueExpected(v.Property.Fields[field], v.FieldTypes[field]),
+				Value: value,
 			})
 		}
 		return &backendir.StructLiteralExpr{
@@ -1862,22 +2245,24 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 			literalExpr("str", mainName),
 		)
 	case *checker.FunctionDef:
-		params := make([]backendir.Expr, 0, len(v.Parameters))
+		params := make([]backendir.Param, 0, len(v.Parameters))
 		for _, param := range v.Parameters {
-			params = append(params, callExpr(
-				"param",
-				literalExpr("ident", param.Name),
-				typeExpr(lowerCheckerTypeToBackendIR(param.Type)),
-				literalExpr("bool", strconv.FormatBool(param.Mutable)),
-			))
+			params = append(params, backendir.Param{
+				Name:    param.Name,
+				Type:    lowerCheckerTypeToBackendIR(param.Type),
+				Mutable: param.Mutable,
+				ByRef:   param.Mutable && mutableParamNeedsPointer(param.Type),
+			})
 		}
-		return callExpr(
-			"fn_literal",
-			literalExpr("ident", v.Name),
-			typeExpr(lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(v))),
-			callExpr("params", params...),
-			lowerBlockAsExpr(v.Body),
-		)
+		returnType := effectiveFunctionReturnType(v)
+		body := lowerBlockToBackendIRWithReturnType(v.Body, returnType)
+		irReturnType := lowerCheckerTypeToBackendIR(returnType)
+		finalizeFunctionBodyForReturn(body, irReturnType)
+		return &backendir.FuncLiteralExpr{
+			Params: params,
+			Return: irReturnType,
+			Body:   body,
+		}
 	case *checker.ExternalFunctionDef:
 		params := make([]backendir.Expr, 0, len(v.Parameters))
 		for _, param := range v.Parameters {
@@ -1940,7 +2325,110 @@ func lowerCallArgsToBackendIR(args []checker.Expression, def *checker.FunctionDe
 	return out
 }
 
+func inferGenericCallTypeArgs(def *checker.FunctionDef, actualReturn checker.Type) []backendir.Type {
+	if def == nil || actualReturn == nil {
+		return nil
+	}
+	order := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, param := range def.Parameters {
+		collectTypeParamNames(param.Type, &order, seen)
+	}
+	collectTypeParamNames(effectiveFunctionReturnType(def), &order, seen)
+	if len(order) == 0 {
+		collectTypeParamNamesInBlock(def.Body, &order, seen)
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	bindings := make(map[string]checker.Type)
+	bindGenericTypeArgs(effectiveFunctionReturnType(def), actualReturn, bindings)
+	if len(order) == 1 && bindings[order[0]] == nil {
+		bindings[order[0]] = singleGenericCallTypeArg(actualReturn)
+	}
+	args := make([]backendir.Type, 0, len(order))
+	for _, name := range order {
+		bound := bindings[name]
+		if bound == nil {
+			return nil
+		}
+		args = append(args, lowerCheckerTypeToBackendIR(bound))
+	}
+	return args
+}
+
+func collectTypeParamNamesInBlock(block *checker.Block, out *[]string, seen map[string]struct{}) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		if stmt.Expr != nil {
+			collectTypeParamNames(stmt.Expr.Type(), out, seen)
+		}
+		if variableDef, ok := stmt.Stmt.(*checker.VariableDef); ok && variableDef != nil {
+			collectTypeParamNames(variableDef.Type(), out, seen)
+			if variableDef.Value != nil {
+				collectTypeParamNames(variableDef.Value.Type(), out, seen)
+			}
+		}
+	}
+}
+
+func singleGenericCallTypeArg(t checker.Type) checker.Type {
+	if t == nil {
+		return nil
+	}
+	if list, ok := t.(*checker.List); ok {
+		return list.Of()
+	}
+	if maybe, ok := t.(*checker.Maybe); ok {
+		return maybe.Of()
+	}
+	return t
+}
+
+func bindGenericTypeArgs(pattern checker.Type, actual checker.Type, bindings map[string]checker.Type) {
+	if pattern == nil || actual == nil {
+		return
+	}
+	switch p := pattern.(type) {
+	case *checker.TypeVar:
+		bindings[typeVarName(p)] = actual
+	case *checker.List:
+		if a, ok := actual.(*checker.List); ok {
+			bindGenericTypeArgs(p.Of(), a.Of(), bindings)
+		}
+	case *checker.Map:
+		if a, ok := actual.(*checker.Map); ok {
+			bindGenericTypeArgs(p.Key(), a.Key(), bindings)
+			bindGenericTypeArgs(p.Value(), a.Value(), bindings)
+		}
+	case *checker.Maybe:
+		if a, ok := actual.(*checker.Maybe); ok {
+			bindGenericTypeArgs(p.Of(), a.Of(), bindings)
+		}
+	case *checker.Result:
+		if a, ok := actual.(*checker.Result); ok {
+			bindGenericTypeArgs(p.Val(), a.Val(), bindings)
+			bindGenericTypeArgs(p.Err(), a.Err(), bindings)
+		}
+	case *checker.FunctionDef:
+		if a, ok := actual.(*checker.FunctionDef); ok {
+			for i := range p.Parameters {
+				if i < len(a.Parameters) {
+					bindGenericTypeArgs(p.Parameters[i].Type, a.Parameters[i].Type, bindings)
+				}
+			}
+			bindGenericTypeArgs(p.ReturnType, a.ReturnType, bindings)
+		}
+	}
+}
+
 func lowerFunctionCallToBackendIR(call *checker.FunctionCall) backendir.Expr {
+	return lowerFunctionCallToBackendIRWithExpected(call, nil)
+}
+
+func lowerFunctionCallToBackendIRWithExpected(call *checker.FunctionCall, expected checker.Type) backendir.Expr {
 	if call == nil {
 		return callExpr("call", literalExpr("nil", "call"))
 	}
@@ -1949,13 +2437,22 @@ func lowerFunctionCallToBackendIR(call *checker.FunctionCall) backendir.Expr {
 	if name == "" {
 		name = "anonymous_fn"
 	}
+	actualReturn := call.ReturnType
+	if expected != nil {
+		actualReturn = expected
+	}
 	return &backendir.CallExpr{
-		Callee: &backendir.IdentExpr{Name: name},
-		Args:   args,
+		Callee:   &backendir.IdentExpr{Name: name},
+		Args:     args,
+		TypeArgs: inferGenericCallTypeArgs(call.Definition(), actualReturn),
 	}
 }
 
 func lowerModuleFunctionCallToBackendIR(call *checker.ModuleFunctionCall) backendir.Expr {
+	return lowerModuleFunctionCallToBackendIRWithExpected(call, nil)
+}
+
+func lowerModuleFunctionCallToBackendIRWithExpected(call *checker.ModuleFunctionCall, expected checker.Type) backendir.Expr {
 	if call == nil || call.Call == nil {
 		return callExpr("module_call", literalExpr("nil", "call"))
 	}
@@ -1971,12 +2468,17 @@ func lowerModuleFunctionCallToBackendIR(call *checker.ModuleFunctionCall) backen
 	if funcName == "" {
 		funcName = "fn"
 	}
+	actualReturn := call.Call.ReturnType
+	if expected != nil {
+		actualReturn = expected
+	}
 	return &backendir.CallExpr{
 		Callee: &backendir.SelectorExpr{
 			Subject: &backendir.IdentExpr{Name: moduleName},
 			Name:    funcName,
 		},
-		Args: args,
+		Args:     args,
+		TypeArgs: inferGenericCallTypeArgs(call.Call.Definition(), actualReturn),
 	}
 }
 
@@ -2619,10 +3121,14 @@ func nonExhaustiveMatchBlock(message string) *backendir.Block {
 }
 
 func lowerTryOpExprToBackendIR(op *checker.TryOp) backendir.Expr {
-	return lowerTryOpExprToBackendIRWithExpected(op, nil)
+	return lowerTryOpExprToBackendIRWithContext(op, nil, nil)
 }
 
 func lowerTryOpExprToBackendIRWithExpected(op *checker.TryOp, expected checker.Type) backendir.Expr {
+	return lowerTryOpExprToBackendIRWithContext(op, expected, nil)
+}
+
+func lowerTryOpExprToBackendIRWithContext(op *checker.TryOp, expected checker.Type, returnType checker.Type) backendir.Expr {
 	if op == nil {
 		return &backendir.PanicExpr{
 			Message: literalExpr("str", "invalid try expression"),
@@ -2646,7 +3152,9 @@ func lowerTryOpExprToBackendIRWithExpected(op *checker.TryOp, expected checker.T
 		}
 	}
 	catchExpected := op.CatchBlock.Type()
-	if expected != nil {
+	if returnType != nil {
+		catchExpected = returnType
+	} else if expected != nil {
 		catchExpected = expected
 	}
 	catchBlock := lowerBlockToBackendIRWithReturnType(op.CatchBlock, catchExpected)

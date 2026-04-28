@@ -211,8 +211,9 @@ type SelectorExpr struct {
 func (*SelectorExpr) exprNode() {}
 
 type CallExpr struct {
-	Callee Expr
-	Args   []Expr
+	Callee   Expr
+	Args     []Expr
+	TypeArgs []Type
 }
 
 func (*CallExpr) exprNode() {}
@@ -256,6 +257,14 @@ type AddressOfExpr struct {
 }
 
 func (*AddressOfExpr) exprNode() {}
+
+type FuncLiteralExpr struct {
+	Params []Param
+	Return Type
+	Body   *Block
+}
+
+func (*FuncLiteralExpr) exprNode() {}
 
 type ListLiteralExpr struct {
 	Type     Type
@@ -380,8 +389,9 @@ type TypeVarType struct {
 func (*TypeVarType) typeNode() {}
 
 type NamedType struct {
-	Name string
-	Args []Type
+	Module string
+	Name   string
+	Args   []Type
 }
 
 func (*NamedType) typeNode() {}

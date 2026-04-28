@@ -2233,6 +2233,93 @@ func TestEmitGoFileFromBackendIR_FiberOpsNative(t *testing.T) {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_FunctionLiteralAndCallableParamNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name:   "apply",
+				Params: []backendir.Param{{Name: "of", Type: &backendir.FuncType{Params: []backendir.Type{backendir.IntType}, Return: backendir.IntType}}},
+				Return: backendir.IntType,
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.CallExpr{Callee: &backendir.IdentExpr{Name: "of"}, Args: []backendir.Expr{&backendir.LiteralExpr{Kind: "int", Value: "1"}}}},
+				}},
+			},
+			&backendir.FuncDecl{
+				Name:   "makeAdder",
+				Return: &backendir.FuncType{Params: []backendir.Type{backendir.IntType}, Return: backendir.IntType},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.FuncLiteralExpr{
+						Params: []backendir.Param{{Name: "value", Type: backendir.IntType}},
+						Return: backendir.IntType,
+						Body: &backendir.Block{Stmts: []backendir.Stmt{
+							&backendir.ReturnStmt{Value: &backendir.CallExpr{Callee: &backendir.IdentExpr{Name: "int_add"}, Args: []backendir.Expr{&backendir.IdentExpr{Name: "value"}, &backendir.LiteralExpr{Kind: "int", Value: "1"}}}},
+						}},
+					}},
+				}},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, false)
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	for _, want := range []string{"func Apply(of func(int) int) int", "return of(1)", "func(value int) int"} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+}
+
+func TestEmitGoFileFromBackendIR_ModuleStructLiteralNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Imports: map[string]string{
+			moduleImportPath("demo", "ard/http"): packageNameForModulePath("ard/http"),
+		},
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name:   "buildRequest",
+				Return: &backendir.NamedType{Module: "ard/http", Name: "Request"},
+				Body: &backendir.Block{Stmts: []backendir.Stmt{
+					&backendir.ReturnStmt{Value: &backendir.StructLiteralExpr{
+						Type: &backendir.NamedType{Module: "ard/http", Name: "Request"},
+						Fields: []backendir.StructFieldValue{
+							{Name: "method", Value: &backendir.EnumVariantExpr{Type: &backendir.NamedType{Module: "ard/http", Name: "Method"}, Discriminant: 1}},
+							{Name: "url", Value: &backendir.LiteralExpr{Kind: "str", Value: "http://example.com"}},
+						},
+					}},
+				}},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIR(module, false)
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	for _, want := range []string{"http.Request", "http.Method"} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
+		}
+	}
+}
+
 func TestEmitGoFileFromBackendIR_MaybeResultConstructorsNative(t *testing.T) {
 	module := &backendir.Module{
 		PackageName: "main",
@@ -2432,7 +2519,7 @@ func TestCanEmitExprNatively_SelectorCalls(t *testing.T) {
 	}
 }
 
-func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesUnsupported(t *testing.T) {
+func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesSupported(t *testing.T) {
 	emitter := &backendIREmitter{}
 
 	listDynamic := &backendir.ListLiteralExpr{
@@ -2441,8 +2528,8 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesUnsupported(t *te
 			&backendir.LiteralExpr{Kind: "int", Value: "1"},
 		},
 	}
-	if emitter.canEmitExprNatively(listDynamic) {
-		t.Fatalf("expected list literal with dynamic element type to remain unsupported for native emission")
+	if !emitter.canEmitExprNatively(listDynamic) {
+		t.Fatalf("expected list literal with dynamic element type to be supported for native emission")
 	}
 
 	mapDynamic := &backendir.MapLiteralExpr{
@@ -2451,8 +2538,8 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesUnsupported(t *te
 			{Key: &backendir.LiteralExpr{Kind: "str", Value: "a"}, Value: &backendir.LiteralExpr{Kind: "int", Value: "1"}},
 		},
 	}
-	if emitter.canEmitExprNatively(mapDynamic) {
-		t.Fatalf("expected map literal with dynamic value type to remain unsupported for native emission")
+	if !emitter.canEmitExprNatively(mapDynamic) {
+		t.Fatalf("expected map literal with dynamic value type to be supported for native emission")
 	}
 
 	listTypeVar := &backendir.ListLiteralExpr{
@@ -2461,8 +2548,8 @@ func TestCanEmitExprNatively_ListAndMapLiteralsWithDynamicTypesUnsupported(t *te
 			&backendir.LiteralExpr{Kind: "int", Value: "1"},
 		},
 	}
-	if emitter.canEmitExprNatively(listTypeVar) {
-		t.Fatalf("expected list literal with type-var element type to remain unsupported for native emission")
+	if !emitter.canEmitExprNatively(listTypeVar) {
+		t.Fatalf("expected list literal with type-var element type to be supported for native emission")
 	}
 
 	ifExprNoElse := &backendir.IfExpr{

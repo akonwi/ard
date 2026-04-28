@@ -15,14 +15,17 @@ import (
 )
 
 type backendIREmitter struct {
-	packageName      string
-	functionNames    map[string]string
-	functionReturns  map[string]backendir.Type
-	entrypointBlock  *backendir.Block
-	localStructNames map[string]struct{}
-	localEnumNames   map[string]struct{}
-	externTypeNames  map[string]struct{}
-	emittedMethods   map[string]struct{}
+	packageName         string
+	functionNames       map[string]string
+	functionReturns     map[string]backendir.Type
+	functionTypeParams  map[string]int
+	entrypointBlock     *backendir.Block
+	localStructNames    map[string]struct{}
+	localEnumNames      map[string]struct{}
+	externTypeNames     map[string]struct{}
+	emittedMethods      map[string]struct{}
+	scopedCallableNames map[string]struct{}
+	typeParamMapping    map[string]string
 }
 
 func compileModuleSourceViaBackendIR(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
@@ -81,6 +84,7 @@ func newBackendIREmitter(module *backendir.Module) *backendIREmitter {
 	used := make(map[string]struct{})
 	functionNames := make(map[string]string)
 	functionReturns := make(map[string]backendir.Type)
+	functionTypeParams := make(map[string]int)
 	localStructNames := make(map[string]struct{})
 	localEnumNames := make(map[string]struct{})
 	externTypeNames := make(map[string]struct{})
@@ -113,17 +117,20 @@ func newBackendIREmitter(module *backendir.Module) *backendIREmitter {
 		resolved := uniquePackageName(name, used)
 		functionNames[fn.Name] = resolved
 		functionReturns[fn.Name] = fn.Return
+		typeParamOrder, _ := functionTypeParamsFromBackendIR(fn)
+		functionTypeParams[fn.Name] = len(typeParamOrder)
 	}
 
 	return &backendIREmitter{
-		packageName:      module.PackageName,
-		functionNames:    functionNames,
-		functionReturns:  functionReturns,
-		entrypointBlock:  module.Entrypoint,
-		localStructNames: localStructNames,
-		localEnumNames:   localEnumNames,
-		externTypeNames:  externTypeNames,
-		emittedMethods:   make(map[string]struct{}),
+		packageName:        module.PackageName,
+		functionNames:      functionNames,
+		functionReturns:    functionReturns,
+		functionTypeParams: functionTypeParams,
+		entrypointBlock:    module.Entrypoint,
+		localStructNames:   localStructNames,
+		localEnumNames:     localEnumNames,
+		externTypeNames:    externTypeNames,
+		emittedMethods:     make(map[string]struct{}),
 	}
 }
 
@@ -370,7 +377,10 @@ func (e *backendIREmitter) emitFuncDecl(decl *backendir.FuncDecl) (ast.Decl, err
 			return nil, err
 		}
 	} else {
+		previousTypeParams := e.typeParamMapping
+		e.typeParamMapping = typeParamMapping
 		bodyStmts, err = e.emitBlock(decl.Body, returnType, localNameByOriginal, seenLocals)
+		e.typeParamMapping = previousTypeParams
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +500,7 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		return isNativeLiteralKind(v.Kind)
 	case *backendir.ListLiteralExpr:
 		listType, ok := v.Type.(*backendir.ListType)
-		if !ok || listType == nil || !e.canEmitTypeNatively(v.Type) || containsDynamicIRType(v.Type) || containsTypeVarIRType(v.Type) {
+		if !ok || listType == nil || !e.canEmitTypeNatively(v.Type) {
 			return false
 		}
 		for _, element := range v.Elements {
@@ -501,7 +511,7 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		return true
 	case *backendir.MapLiteralExpr:
 		mapType, ok := v.Type.(*backendir.MapType)
-		if !ok || mapType == nil || !e.canEmitTypeNatively(v.Type) || containsDynamicIRType(v.Type) || containsTypeVarIRType(v.Type) {
+		if !ok || mapType == nil || !e.canEmitTypeNatively(v.Type) {
 			return false
 		}
 		for _, entry := range v.Entries {
@@ -632,6 +642,19 @@ func (e *backendIREmitter) canEmitExprNatively(expr backendir.Expr) bool {
 		return ok && resultType != nil && e.canEmitExprNatively(v.Value) && e.canEmitTypeNatively(resultType.Val) && e.canEmitTypeNatively(resultType.Err)
 	case *backendir.AddressOfExpr:
 		return v != nil && v.Value != nil && isAddressableIRExpr(v.Value)
+	case *backendir.FuncLiteralExpr:
+		if v == nil || v.Body == nil || !e.canEmitTypeNatively(v.Return) {
+			return false
+		}
+		previousCallables := e.scopedCallableNames
+		e.scopedCallableNames = mergeScopedCallableNames(previousCallables, scopedCallableNamesForParams(v.Params))
+		defer func() { e.scopedCallableNames = previousCallables }()
+		for _, param := range v.Params {
+			if !e.canEmitTypeNatively(param.Type) {
+				return false
+			}
+		}
+		return e.canEmitBlockNatively(v.Body)
 	case *backendir.SelectorExpr:
 		return e.canEmitExprNatively(v.Subject)
 	case *backendir.CallExpr:
@@ -702,10 +725,41 @@ func (e *backendIREmitter) canEmitNamedCallNatively(name string) bool {
 	if strings.TrimSpace(name) == "" {
 		return false
 	}
-	if _, ok := e.functionNames[name]; !ok {
-		return false
+	if _, ok := e.functionNames[name]; ok {
+		return true
 	}
-	return true
+	if _, ok := e.scopedCallableNames[strings.TrimSpace(name)]; ok {
+		return true
+	}
+	return false
+}
+
+func scopedCallableNamesForParams(params []backendir.Param) map[string]struct{} {
+	callables := make(map[string]struct{})
+	for _, param := range params {
+		name := strings.TrimSpace(param.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := param.Type.(*backendir.FuncType); ok {
+			callables[name] = struct{}{}
+		}
+	}
+	return callables
+}
+
+func mergeScopedCallableNames(base, overlay map[string]struct{}) map[string]struct{} {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+	merged := make(map[string]struct{}, len(base)+len(overlay))
+	for name := range base {
+		merged[name] = struct{}{}
+	}
+	for name := range overlay {
+		merged[name] = struct{}{}
+	}
+	return merged
 }
 
 func canEmitNativeOpCall(name string) bool {
@@ -790,6 +844,9 @@ func (e *backendIREmitter) canEmitFuncDeclNatively(decl *backendir.FuncDecl) boo
 	if decl == nil || decl.IsExtern || decl.Body == nil {
 		return false
 	}
+	previousCallables := e.scopedCallableNames
+	e.scopedCallableNames = scopedCallableNamesForParams(decl.Params)
+	defer func() { e.scopedCallableNames = previousCallables }()
 	for _, param := range decl.Params {
 		if !e.canEmitTypeNatively(param.Type) {
 			return false
@@ -841,6 +898,12 @@ func (e *backendIREmitter) canEmitStmtNatively(stmt backendir.Stmt) bool {
 		}
 		if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
 			return e.canEmitTryExprStmtNatively(tryExpr)
+		}
+		if ifExpr, ok := s.Value.(*backendir.IfExpr); ok && lowering.IsVoidIRType(ifExpr.Type) {
+			return e.canEmitExprNatively(ifExpr)
+		}
+		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && lowering.IsVoidIRType(blockExpr.Type) {
+			return e.canEmitExprNatively(blockExpr)
 		}
 		return e.canEmitExprNatively(s.Value)
 	case *backendir.BreakStmt:
@@ -1183,6 +1246,9 @@ func (e *backendIREmitter) canEmitLocalStructLiteralType(t backendir.Type) bool 
 	if name == "" {
 		return false
 	}
+	if named, ok := t.(*backendir.NamedType); ok && strings.TrimSpace(named.Module) != "" {
+		return true
+	}
 	_, ok := e.localStructNames[name]
 	return ok
 }
@@ -1191,6 +1257,9 @@ func (e *backendIREmitter) canEmitLocalEnumVariantType(t backendir.Type) bool {
 	name := irNamedTypeName(t)
 	if name == "" {
 		return false
+	}
+	if named, ok := t.(*backendir.NamedType); ok && strings.TrimSpace(named.Module) != "" {
+		return true
 	}
 	_, ok := e.localEnumNames[name]
 	return ok
@@ -1293,6 +1362,12 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 					&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{success}},
 				}, nil
 			})
+		}
+		if ifExpr, ok := s.Value.(*backendir.IfExpr); ok && lowering.IsVoidIRType(ifExpr.Type) {
+			return e.emitIfExprStmt(ifExpr, returnType, locals, seenLocals)
+		}
+		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && lowering.IsVoidIRType(blockExpr.Type) {
+			return e.emitBlockExprStmt(blockExpr, returnType, locals, seenLocals)
 		}
 		value, err := e.emitExpr(s.Value, locals)
 		if err != nil {
@@ -1514,9 +1589,9 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		if err != nil {
 			return nil, err
 		}
+		mapLocal := uniqueLocalName("ardMap", seenLocals)
 		loopLocals := cloneStringMap(locals)
 		loopSeen := cloneSet(seenLocals)
-		mapLocal := uniqueLocalName("ardMap", loopSeen)
 		keyName := strings.TrimSpace(s.Key)
 		keyLocal := uniqueLocalName(goName(keyName, false), loopSeen)
 		loopLocals[keyName] = keyLocal
@@ -1823,9 +1898,50 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 		return e.emitResultErrExpr(v, locals)
 	case *backendir.AddressOfExpr:
 		return e.emitAddressOfExpr(v, locals)
+	case *backendir.FuncLiteralExpr:
+		return e.emitFuncLiteralExpr(v, locals)
 	default:
 		return nil, fmt.Errorf("unsupported expr %T", expr)
 	}
+}
+
+func (e *backendIREmitter) emitFuncLiteralExpr(expr *backendir.FuncLiteralExpr, locals map[string]string) (ast.Expr, error) {
+	if expr == nil {
+		return ast.NewIdent("nil"), nil
+	}
+	params := make([]*ast.Field, 0, len(expr.Params))
+	bodyLocals := cloneStringMap(locals)
+	bodySeen := seenLocalNames(bodyLocals)
+	for _, param := range expr.Params {
+		paramType, err := e.emitType(param.Type)
+		if err != nil {
+			return nil, fmt.Errorf("function literal param %s type: %w", param.Name, err)
+		}
+		if param.ByRef {
+			paramType = &ast.StarExpr{X: paramType}
+		}
+		localName := uniqueLocalName(goName(param.Name, false), bodySeen)
+		bodyLocals[param.Name] = bindLocalRef(localName, param.ByRef)
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(localName)}, Type: paramType})
+	}
+
+	returnType, err := e.emitType(expr.Return)
+	if err != nil {
+		return nil, fmt.Errorf("function literal return type: %w", err)
+	}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	if !lowering.IsVoidIRType(expr.Return) {
+		funcType.Results = funcResults(returnType)
+	}
+
+	bodyStmts, err := e.emitBlock(expr.Body, returnType, bodyLocals, bodySeen)
+	if err != nil {
+		return nil, err
+	}
+	if !lowering.IsVoidIRType(expr.Return) && !blockEndsInReturn(bodyStmts) {
+		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{zeroValueExpr(returnType)}})
+	}
+	return &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: bodyStmts}}, nil
 }
 
 func (e *backendIREmitter) emitAssignTargetExpr(target string, locals map[string]string, seenLocals map[string]struct{}) (ast.Expr, token.Token, error) {
@@ -1913,6 +2029,53 @@ func (e *backendIREmitter) emitIfExpr(expr *backendir.IfExpr, locals map[string]
 			Body: &ast.BlockStmt{List: body},
 		},
 	}, nil
+}
+
+func (e *backendIREmitter) emitIfExprStmt(expr *backendir.IfExpr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
+	if expr == nil || expr.Cond == nil || expr.Then == nil {
+		return nil, fmt.Errorf("invalid if expression statement")
+	}
+	cond, err := e.emitExpr(expr.Cond, locals)
+	if err != nil {
+		return nil, err
+	}
+	thenLocals := cloneStringMap(locals)
+	thenSeen := cloneSet(seenLocals)
+	thenStmts, err := e.emitBlock(expr.Then, returnType, thenLocals, thenSeen)
+	if err != nil {
+		return nil, err
+	}
+	ifStmt := &ast.IfStmt{Cond: cond, Body: &ast.BlockStmt{List: thenStmts}}
+	if expr.Else != nil {
+		elseLocals := cloneStringMap(locals)
+		elseSeen := cloneSet(seenLocals)
+		elseStmts, err := e.emitBlock(expr.Else, returnType, elseLocals, elseSeen)
+		if err != nil {
+			return nil, err
+		}
+		ifStmt.Else = &ast.BlockStmt{List: elseStmts}
+	}
+	return []ast.Stmt{ifStmt}, nil
+}
+
+func (e *backendIREmitter) emitBlockExprStmt(expr *backendir.BlockExpr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, fmt.Errorf("invalid block expression statement")
+	}
+	stmts := make([]ast.Stmt, 0, len(expr.Setup)+1)
+	for _, setup := range expr.Setup {
+		emitted, err := e.emitStmt(setup, returnType, locals, seenLocals)
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, emitted...)
+	}
+	emittedValue, err := e.emitStmt(&backendir.ExprStmt{Value: expr.Value}, returnType, locals, seenLocals)
+	if err != nil {
+		return nil, err
+	}
+	stmts = append(stmts, emittedValue...)
+	return stmts, nil
 }
 
 func (e *backendIREmitter) emitBlockExpr(expr *backendir.BlockExpr, locals map[string]string) (ast.Expr, error) {
@@ -2907,7 +3070,31 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 	if err != nil {
 		return nil, err
 	}
+	if len(call.TypeArgs) > 0 && e.shouldEmitCallTypeArgs(call) {
+		typeArgs := make([]ast.Expr, 0, len(call.TypeArgs))
+		for _, arg := range call.TypeArgs {
+			typeArg, err := e.emitType(arg)
+			if err != nil {
+				return nil, err
+			}
+			if typeArg == nil {
+				typeArg = ast.NewIdent("any")
+			}
+			typeArgs = append(typeArgs, typeArg)
+		}
+		callee = indexExpr(callee, typeArgs)
+	}
 	return &ast.CallExpr{Fun: callee, Args: args}, nil
+}
+
+func (e *backendIREmitter) shouldEmitCallTypeArgs(call *backendir.CallExpr) bool {
+	if call == nil || len(call.TypeArgs) == 0 {
+		return false
+	}
+	if ident, ok := call.Callee.(*backendir.IdentExpr); ok {
+		return e.functionTypeParams[strings.TrimSpace(ident.Name)] > 0
+	}
+	return false
 }
 
 func emitBinaryCall(call *backendir.CallExpr, op token.Token, e *backendIREmitter, locals map[string]string) (ast.Expr, error) {
@@ -3114,7 +3301,7 @@ func collectBackendIRTypeVars(t backendir.Type, out *[]string, seen map[string]s
 }
 
 func (e *backendIREmitter) emitType(t backendir.Type) (ast.Expr, error) {
-	return e.emitTypeWithTypeParams(t, nil)
+	return e.emitTypeWithTypeParams(t, e.typeParamMapping)
 }
 
 func (e *backendIREmitter) emitTypeWithTypeParams(t backendir.Type, typeParams map[string]string) (ast.Expr, error) {
@@ -3169,13 +3356,16 @@ func (e *backendIREmitter) emitTypeWithTypeParams(t backendir.Type, typeParams m
 			return ast.NewIdent("any"), nil
 		}
 		name := typed.Name
-		if _, isExternType := e.externTypeNames[name]; isExternType {
+		if _, isExternType := e.externTypeNames[name]; isExternType && strings.TrimSpace(typed.Module) == "" {
 			return ast.NewIdent("any"), nil
 		}
 		if strings.Contains(name, "/") {
 			return ast.NewIdent("any"), nil
 		}
 		base := ast.Expr(ast.NewIdent(goName(name, true)))
+		if module := strings.TrimSpace(typed.Module); module != "" {
+			base = selectorExpr(ast.NewIdent(packageNameForModulePath(module)), goName(name, true))
+		}
 		if len(typed.Args) == 0 {
 			return base, nil
 		}

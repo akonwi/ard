@@ -795,6 +795,122 @@ func TestLowerExpressionToBackendIR_LowersListMapReadMethodsWithoutMarkerCalls(t
 	}
 }
 
+func TestLowerModuleToBackendIR_LowersFunctionLiteralExplicitly(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+fn make_adder() fn(Int) Int {
+  fn(value: Int) Int {
+    value + 1
+  }
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend IR lowering to succeed, got error: %v", err)
+	}
+
+	var makeAdder *backendir.FuncDecl
+	for _, decl := range irModule.Decls {
+		if fn, ok := decl.(*backendir.FuncDecl); ok && fn.Name == "make_adder" {
+			makeAdder = fn
+			break
+		}
+	}
+	if makeAdder == nil || makeAdder.Body == nil || len(makeAdder.Body.Stmts) == 0 {
+		t.Fatalf("expected lowered make_adder body")
+	}
+	ret, ok := makeAdder.Body.Stmts[len(makeAdder.Body.Stmts)-1].(*backendir.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected final stmt to be ReturnStmt, got %T", makeAdder.Body.Stmts[len(makeAdder.Body.Stmts)-1])
+	}
+	literal, ok := ret.Value.(*backendir.FuncLiteralExpr)
+	if !ok {
+		t.Fatalf("expected return value to be FuncLiteralExpr, got %T", ret.Value)
+	}
+	if len(literal.Params) != 1 || literal.Params[0].Name != "value" {
+		t.Fatalf("expected function literal parameter value, got %#v", literal.Params)
+	}
+	if _, ok := literal.Return.(*backendir.PrimitiveType); !ok {
+		t.Fatalf("expected function literal primitive return type, got %T", literal.Return)
+	}
+}
+
+func TestLowerModuleToBackendIR_PreservesModuleStructLiteralTypeOwner(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/http
+use ard/maybe
+
+fn main() {
+  let req = http::Request{
+    method: http::Method::Post,
+    url: "http://example.com",
+    headers: ["content-type": "text/plain"],
+    body: maybe::some("raw text"),
+  }
+  let _ = req
+}
+`)
+
+	irModule, err := lowerModuleToBackendIR(module, "main", true)
+	if err != nil {
+		t.Fatalf("expected backend IR lowering to succeed, got error: %v", err)
+	}
+
+	var mainDecl *backendir.FuncDecl
+	for _, decl := range irModule.Decls {
+		if fn, ok := decl.(*backendir.FuncDecl); ok && fn.Name == "main" {
+			mainDecl = fn
+			break
+		}
+	}
+	if mainDecl == nil || mainDecl.Body == nil || len(mainDecl.Body.Stmts) == 0 {
+		t.Fatalf("expected lowered main body")
+	}
+	assign, ok := mainDecl.Body.Stmts[0].(*backendir.AssignStmt)
+	if !ok {
+		t.Fatalf("expected first stmt to assign request, got %T", mainDecl.Body.Stmts[0])
+	}
+	literal, ok := assign.Value.(*backendir.StructLiteralExpr)
+	if !ok {
+		t.Fatalf("expected request value to be StructLiteralExpr, got %T", assign.Value)
+	}
+	named, ok := literal.Type.(*backendir.NamedType)
+	if !ok {
+		t.Fatalf("expected request literal type to be NamedType, got %T", literal.Type)
+	}
+	if named.Name != "Request" || named.Module != "ard/http" {
+		t.Fatalf("expected module-owned Request type, got module=%q name=%q", named.Module, named.Name)
+	}
+	var methodField backendir.Expr
+	for _, field := range literal.Fields {
+		if field.Name == "method" {
+			methodField = field.Value
+			break
+		}
+	}
+	methodVariant, ok := methodField.(*backendir.EnumVariantExpr)
+	if !ok {
+		t.Fatalf("expected method field to lower to EnumVariantExpr, got %T", methodField)
+	}
+	methodType, ok := methodVariant.Type.(*backendir.NamedType)
+	if !ok {
+		t.Fatalf("expected method enum type to be NamedType, got %T", methodVariant.Type)
+	}
+	if methodType.Name != "Method" || methodType.Module != "ard/http" {
+		t.Fatalf("expected module-owned Method type, got module=%q name=%q", methodType.Module, methodType.Name)
+	}
+}
+
 func TestLowerExpressionToBackendIR_LowersMaybeResultConstructorsExplicitly(t *testing.T) {
 	maybeSome := lowerExpressionToBackendIR(&checker.ModuleFunctionCall{
 		Module: "ard/maybe",
