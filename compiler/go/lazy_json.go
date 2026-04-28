@@ -1,10 +1,6 @@
 package ardgo
 
-import (
-	"encoding/json"
-	"strconv"
-	"unsafe"
-)
+import "strconv"
 
 type jsonDynamic string
 
@@ -33,17 +29,10 @@ func validateLazyJSONWithObject(s string) (*jsonObjectDynamic, bool) {
 		return nil, false
 	}
 	idx = skipJSONSpaces(s, idx)
-	if idx != len(s) || !json.Valid(unsafeStringBytes(s)) {
+	if idx != len(s) {
 		return nil, false
 	}
 	return object, true
-}
-
-func unsafeStringBytes(value string) []byte {
-	if len(value) == 0 {
-		return nil
-	}
-	return unsafe.Slice(unsafe.StringData(value), len(value))
 }
 
 func skipJSONSpaces(s string, idx int) int {
@@ -66,14 +55,40 @@ func skipJSONString(s string, idx int) int {
 	for idx < len(s) {
 		switch s[idx] {
 		case '\\':
-			idx += 2
+			idx++
+			if idx >= len(s) {
+				return -1
+			}
+			switch s[idx] {
+			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+				idx++
+			case 'u':
+				if idx+4 >= len(s) {
+					return -1
+				}
+				for i := idx + 1; i <= idx+4; i++ {
+					if !isJSONHex(s[i]) {
+						return -1
+					}
+				}
+				idx += 5
+			default:
+				return -1
+			}
 		case '"':
 			return idx + 1
 		default:
+			if s[idx] < 0x20 {
+				return -1
+			}
 			idx++
 		}
 	}
 	return -1
+}
+
+func isJSONHex(ch byte) bool {
+	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
 func skipJSONValue(s string, idx int) int {
@@ -361,6 +376,67 @@ func hasDuplicateJSONNames(s string) bool {
 	return idx != len(s)
 }
 
+func skipJSONAtom(s string, idx int) int {
+	if idx >= len(s) {
+		return -1
+	}
+	switch s[idx] {
+	case 't':
+		if idx+4 <= len(s) && s[idx:idx+4] == "true" {
+			return idx + 4
+		}
+		return -1
+	case 'f':
+		if idx+5 <= len(s) && s[idx:idx+5] == "false" {
+			return idx + 5
+		}
+		return -1
+	case 'n':
+		if idx+4 <= len(s) && s[idx:idx+4] == "null" {
+			return idx + 4
+		}
+		return -1
+	}
+	if s[idx] == '-' {
+		idx++
+		if idx >= len(s) {
+			return -1
+		}
+	}
+	if s[idx] == '0' {
+		idx++
+	} else if s[idx] >= '1' && s[idx] <= '9' {
+		idx++
+		for idx < len(s) && s[idx] >= '0' && s[idx] <= '9' {
+			idx++
+		}
+	} else {
+		return -1
+	}
+	if idx < len(s) && s[idx] == '.' {
+		idx++
+		if idx >= len(s) || s[idx] < '0' || s[idx] > '9' {
+			return -1
+		}
+		for idx < len(s) && s[idx] >= '0' && s[idx] <= '9' {
+			idx++
+		}
+	}
+	if idx < len(s) && (s[idx] == 'e' || s[idx] == 'E') {
+		idx++
+		if idx < len(s) && (s[idx] == '+' || s[idx] == '-') {
+			idx++
+		}
+		if idx >= len(s) || s[idx] < '0' || s[idx] > '9' {
+			return -1
+		}
+		for idx < len(s) && s[idx] >= '0' && s[idx] <= '9' {
+			idx++
+		}
+	}
+	return idx
+}
+
 func scanJSONValueNames(s string, idx *int) bool {
 	*idx = skipJSONSpaces(s, *idx)
 	if *idx >= len(s) {
@@ -379,7 +455,7 @@ func scanJSONValueNames(s string, idx *int) bool {
 		*idx = end
 		return true
 	default:
-		end := skipJSONValue(s, *idx)
+		end := skipJSONAtom(s, *idx)
 		if end < 0 {
 			return false
 		}
@@ -457,8 +533,18 @@ func scanJSONObjectNamesWithCache(s string, idx *int) (*jsonObjectDynamic, bool)
 			}
 		}
 		*idx = skipJSONSpaces(s, *idx)
-		if *idx < len(s) && s[*idx] == ',' {
-			*idx = *idx + 1
+		if *idx >= len(s) {
+			return nil, false
+		}
+		if s[*idx] == ',' {
+			*idx = skipJSONSpaces(s, *idx+1)
+			if *idx >= len(s) || s[*idx] == '}' {
+				return nil, false
+			}
+			continue
+		}
+		if s[*idx] != '}' {
+			return nil, false
 		}
 	}
 }
@@ -517,8 +603,18 @@ func scanJSONObjectNames(s string, idx *int) bool {
 			return false
 		}
 		*idx = skipJSONSpaces(s, *idx)
-		if *idx < len(s) && s[*idx] == ',' {
-			*idx = *idx + 1
+		if *idx >= len(s) {
+			return false
+		}
+		if s[*idx] == ',' {
+			*idx = skipJSONSpaces(s, *idx+1)
+			if *idx >= len(s) || s[*idx] == '}' {
+				return false
+			}
+			continue
+		}
+		if s[*idx] != '}' {
+			return false
 		}
 	}
 }
@@ -538,8 +634,18 @@ func scanJSONArrayNames(s string, idx *int) bool {
 			return false
 		}
 		*idx = skipJSONSpaces(s, *idx)
-		if *idx < len(s) && s[*idx] == ',' {
-			*idx = *idx + 1
+		if *idx >= len(s) {
+			return false
+		}
+		if s[*idx] == ',' {
+			*idx = skipJSONSpaces(s, *idx+1)
+			if *idx >= len(s) || s[*idx] == ']' {
+				return false
+			}
+			continue
+		}
+		if s[*idx] != ']' {
+			return false
 		}
 	}
 }

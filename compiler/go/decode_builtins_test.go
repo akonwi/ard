@@ -2,6 +2,22 @@ package ardgo
 
 import "testing"
 
+func TestLazyJSONRejectsInvalidSyntax(t *testing.T) {
+	tests := []string{
+		`{"a":1,}`,
+		`[1 2]`,
+		`{"a":01}`,
+		`{"a":"\x"}`,
+		"{\"a\":\"\n\"}",
+		`{"a":tru}`,
+	}
+	for _, input := range tests {
+		if result := JsonToDynamicExtern(input); result.ok {
+			t.Fatalf("JsonToDynamicExtern(%s) unexpectedly succeeded", input)
+		}
+	}
+}
+
 func TestLazyJSONRejectsDuplicateNames(t *testing.T) {
 	tests := []string{
 		`{"a":1,"a":2}`,
