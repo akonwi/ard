@@ -122,52 +122,6 @@ func skipJSONValue(s string, idx int) int {
 	return idx
 }
 
-func parseLazyJSONObjectSmall(s string) (*jsonObjectDynamic, bool) {
-	idx := skipJSONSpaces(s, 0)
-	if idx >= len(s) || s[idx] != '{' {
-		return nil, false
-	}
-	idx++
-	out := &jsonObjectDynamic{raw: jsonDynamic(s)}
-	for {
-		idx = skipJSONSpaces(s, idx)
-		if idx >= len(s) {
-			return nil, false
-		}
-		if s[idx] == '}' {
-			return out, true
-		}
-		if out.count >= len(out.keys) {
-			return nil, false
-		}
-		keyStart := idx
-		keyEnd := skipJSONString(s, idx)
-		if keyEnd < 0 {
-			return nil, false
-		}
-		key, ok := jsonStringContent(s[keyStart:keyEnd])
-		if !ok {
-			return nil, false
-		}
-		idx = skipJSONSpaces(s, keyEnd)
-		if idx >= len(s) || s[idx] != ':' {
-			return nil, false
-		}
-		valueStart := skipJSONSpaces(s, idx+1)
-		valueEnd := skipJSONValue(s, valueStart)
-		if valueEnd < 0 {
-			return nil, false
-		}
-		out.keys[out.count] = key
-		out.values[out.count] = jsonDynamic(s[valueStart:valueEnd])
-		out.count++
-		idx = skipJSONSpaces(s, valueEnd)
-		if idx < len(s) && s[idx] == ',' {
-			idx++
-		}
-	}
-}
-
 func extractLazyJSONField(s, name string) (string, bool, bool) {
 	idx := skipJSONSpaces(s, 0)
 	if idx >= len(s) || s[idx] != '{' {
