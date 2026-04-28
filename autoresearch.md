@@ -40,3 +40,11 @@ Optimize the runtime speed of Ard's generated Go backend on `compiler/benchmarks
 - Kept: `builtinDynamicToMap` now returns `Result[map[any]any, string]`, matching generated `[Dynamic:Dynamic]` and avoiding reflective map coercion (~231 ms).
 - Kept: `MapKeys` detects all-string keys and uses `sort.Strings` before converting back to `[]K` (~230 ms).
 - Discarded: broad generic `value.(T)` fast path at the start of `CoerceExtern`; it regressed slightly (~230.5 ms), likely because the extra assertion overhead did not pay off.
+- Kept: `CoerceExtern` Result fast path now uses fixed field indexes instead of `FieldByName`, improving to ~189 ms. This assumes `Result` field order remains `value, err, ok`.
+- Kept: Go backend emits direct typed helper calls for built-in decode extern wrappers (`DecodeString/Int/Float/Bool`, `DynamicToList/Map`, `ExtractField`, `JsonToDynamic`) instead of `CallExtern` + `CoerceExtern`, improving to ~45.7 ms. Then removed now-obsolete decode switch fast paths from `CallExtern` (~45.3 ms).
+- Kept: empty list/map copy expressions now emit direct empty literals instead of `append([]T(nil), []T{}...)` (~45.0 ms).
+- Kept: union type switches move `Dynamic`/`any` cases after concrete cases, fixing `Str | Dynamic` matching and improving `from_json` (~44.2 ms). This is also a semantic correctness improvement.
+- Kept: decode extern helpers for string/int use direct Result literals and raw string/float64 fast paths before `builtinDynamicValue`, improving to ~41.3 ms.
+- Discarded: restoring read lock in `ExternRegistry.Call` worsened the metric and increased binary size; keep the no-lock call path on this branch, but safety may need later design.
+- Discarded: broad direct `Ok` literal rewrites inside decode builtins, direct `UnwrapOk` try success emission, raw fast paths for `DynamicToListExtern`/`DynamicToMapExtern`, and one-slice `MapKeys` sorting all regressed.
+- Crashed: rewriting `std_lib/decode.ard` `match errors.size()` as if/else caused generated decode_pipeline nil dereference; do not retry without a focused compiler bug/regression test.
