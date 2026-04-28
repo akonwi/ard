@@ -230,19 +230,33 @@ func formatBuiltinRawValueForError(v any) string {
 }
 
 func DecodeStringExtern[E any](data any) Result[string, E] {
-	result := builtinDecodeString(data)
-	if result.ok {
-		return Result[string, E]{value: result.value, ok: true}
+	data = builtinDynamicValue(data)
+	if data == nil {
+		return Result[string, E]{err: CoerceExtern[E](makeBuiltinDecodeError("Str", "null"))}
 	}
-	return Result[string, E]{err: CoerceExtern[E](result.err)}
+	if value, ok := data.(string); ok {
+		return Result[string, E]{value: value, ok: true}
+	}
+	return Result[string, E]{err: CoerceExtern[E](makeBuiltinDecodeError("Str", formatBuiltinRawValueForError(data)))}
 }
 
 func DecodeIntExtern[E any](data any) Result[int, E] {
-	result := builtinDecodeInt(data)
-	if result.ok {
-		return Result[int, E]{value: result.value, ok: true}
+	data = builtinDynamicValue(data)
+	if data == nil {
+		return Result[int, E]{err: CoerceExtern[E](makeBuiltinDecodeError("Int", "null"))}
 	}
-	return Result[int, E]{err: CoerceExtern[E](result.err)}
+	switch value := data.(type) {
+	case float64:
+		intValue := int(value)
+		if value == float64(intValue) {
+			return Result[int, E]{value: intValue, ok: true}
+		}
+	case int:
+		return Result[int, E]{value: value, ok: true}
+	case int64:
+		return Result[int, E]{value: int(value), ok: true}
+	}
+	return Result[int, E]{err: CoerceExtern[E](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))}
 }
 
 func DecodeFloatExtern[E any](data any) Result[float64, E] {
