@@ -2467,6 +2467,94 @@ func collectTypeParamNamesInBlock(block *checker.Block, out *[]string, seen map[
 	}
 }
 
+func shouldInferZeroArgGenericCallTypeArgs(def *checker.FunctionDef, moduleName string, funcName string) bool {
+	if functionDefHasDeclaredTypeParams(def) {
+		return true
+	}
+	switch strings.TrimSpace(moduleName) + "::" + strings.TrimSpace(funcName) {
+	case "ard/list::new", "ard/map::new":
+		return true
+	default:
+		return false
+	}
+}
+
+func functionDefHasDeclaredTypeParams(def *checker.FunctionDef) bool {
+	if def == nil {
+		return false
+	}
+	order := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, param := range def.Parameters {
+		collectDeclaredTypeParamNames(param.Type, &order, seen)
+	}
+	collectDeclaredTypeParamNames(effectiveFunctionReturnType(def), &order, seen)
+	collectDeclaredTypeParamNamesInBlock(def.Body, &order, seen)
+	return len(order) > 0
+}
+
+func collectDeclaredTypeParamNamesInBlock(block *checker.Block, out *[]string, seen map[string]struct{}) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		if stmt.Expr != nil {
+			collectDeclaredTypeParamNames(stmt.Expr.Type(), out, seen)
+		}
+		if variableDef, ok := stmt.Stmt.(*checker.VariableDef); ok && variableDef != nil {
+			collectDeclaredTypeParamNames(variableDef.Type(), out, seen)
+			if variableDef.Value != nil {
+				collectDeclaredTypeParamNames(variableDef.Value.Type(), out, seen)
+			}
+		}
+	}
+}
+
+func collectDeclaredTypeParamNames(t checker.Type, out *[]string, seen map[string]struct{}) {
+	if t == nil {
+		return
+	}
+	switch typed := t.(type) {
+	case *checker.TypeVar:
+		name := typeVarName(typed)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		*out = append(*out, name)
+	case *checker.List:
+		collectDeclaredTypeParamNames(typed.Of(), out, seen)
+	case *checker.Map:
+		collectDeclaredTypeParamNames(typed.Key(), out, seen)
+		collectDeclaredTypeParamNames(typed.Value(), out, seen)
+	case *checker.Maybe:
+		collectDeclaredTypeParamNames(typed.Of(), out, seen)
+	case *checker.Result:
+		collectDeclaredTypeParamNames(typed.Val(), out, seen)
+		collectDeclaredTypeParamNames(typed.Err(), out, seen)
+	case *checker.Union:
+		for _, member := range typed.Types {
+			collectDeclaredTypeParamNames(member, out, seen)
+		}
+	case *checker.StructDef:
+		for _, fieldName := range sortedStringKeys(typed.Fields) {
+			collectDeclaredTypeParamNames(typed.Fields[fieldName], out, seen)
+		}
+	case *checker.ExternType:
+		for _, typeArg := range typed.TypeArgs {
+			collectDeclaredTypeParamNames(typeArg, out, seen)
+		}
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectDeclaredTypeParamNames(param.Type, out, seen)
+		}
+		collectDeclaredTypeParamNames(effectiveFunctionReturnType(typed), out, seen)
+	}
+}
+
 func inferZeroArgGenericCallTypeArgs(actualReturn checker.Type) []backendir.Type {
 	arg := singleGenericCallTypeArg(actualReturn)
 	if arg == nil {
@@ -2549,7 +2637,7 @@ func lowerFunctionCallToBackendIRWithExpected(call *checker.FunctionCall, expect
 		actualReturn = expected
 	}
 	typeArgs := inferGenericCallTypeArgs(call.Definition(), actualReturn)
-	if len(typeArgs) == 0 && len(args) == 0 {
+	if len(typeArgs) == 0 && len(args) == 0 && shouldInferZeroArgGenericCallTypeArgs(call.Definition(), "", name) {
 		typeArgs = inferZeroArgGenericCallTypeArgs(actualReturn)
 	}
 	return &backendir.CallExpr{
@@ -2584,7 +2672,7 @@ func lowerModuleFunctionCallToBackendIRWithExpected(call *checker.ModuleFunction
 		actualReturn = expected
 	}
 	typeArgs := inferGenericCallTypeArgs(call.Call.Definition(), actualReturn)
-	if len(typeArgs) == 0 && len(args) == 0 {
+	if len(typeArgs) == 0 && len(args) == 0 && shouldInferZeroArgGenericCallTypeArgs(call.Call.Definition(), moduleName, funcName) {
 		typeArgs = inferZeroArgGenericCallTypeArgs(actualReturn)
 	}
 	return &backendir.CallExpr{
