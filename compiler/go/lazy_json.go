@@ -16,7 +16,7 @@ type jsonObjectDynamic struct {
 }
 
 func validateLazyJSON(s string) bool {
-	return json.Valid(unsafeStringBytes(s)) && !hasDuplicateJSONNames(s)
+	return !hasDuplicateJSONNames(s) && json.Valid(unsafeStringBytes(s))
 }
 
 func unsafeStringBytes(value string) []byte {
