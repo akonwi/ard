@@ -390,7 +390,7 @@ func DecodeStringIntMapErrorsExtern[E any](data any) Result[map[string]int, []E]
 			out[key] = value
 			continue
 		}
-		itemResult := DecodeIntErrorsExtern[E](item)
+		itemResult := decodeIntErrorsSlow[E](item)
 		if itemResult.ok {
 			out[key] = itemResult.value
 			continue
@@ -434,7 +434,7 @@ func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
 			out[idx] = value
 			continue
 		}
-		itemResult := DecodeIntErrorsExtern[E](item)
+		itemResult := decodeIntErrorsSlow[E](item)
 		if itemResult.ok {
 			out[idx] = itemResult.value
 			continue
