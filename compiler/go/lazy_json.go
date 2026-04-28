@@ -550,7 +550,7 @@ func scanJSONObjectNamesWithCache(s string, idx *int) (*jsonObjectDynamic, bool)
 }
 
 func scanJSONObjectNames(s string, idx *int) bool {
-	var seenSmall [16]string
+	var seenSmall [8]string
 	seenCount := 0
 	var seenMap map[string]struct{}
 	*idx = *idx + 1
