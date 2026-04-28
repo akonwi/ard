@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unsafe"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
@@ -49,11 +50,18 @@ func MapToDynamic(m map[string]any) any {
 // JsonToDynamic parses a JSON string into a Dynamic value.
 func JsonToDynamic(jsonString string) (any, error) {
 	var raw any
-	err := json.Unmarshal([]byte(jsonString), &raw)
+	err := json.Unmarshal(unsafeStringBytes(jsonString), &raw)
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing JSON: %s", err.Error())
 	}
 	return raw, nil
+}
+
+func unsafeStringBytes(value string) []byte {
+	if len(value) == 0 {
+		return nil
+	}
+	return unsafe.Slice(unsafe.StringData(value), len(value))
 }
 
 // fn (Dynamic) Str!Error
