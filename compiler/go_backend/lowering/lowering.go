@@ -2826,6 +2826,7 @@ func substituteBackendIRTypeVars(t backendir.Type, bindings map[string]backendir
 		for _, param := range typed.Params {
 			copy.Params = append(copy.Params, substituteBackendIRTypeVars(param, bindings))
 		}
+		copy.ParamByRef = append([]bool(nil), typed.ParamByRef...)
 		copy.Return = substituteBackendIRTypeVars(typed.Return, bindings)
 		return &copy
 	default:
@@ -3990,19 +3991,27 @@ func lowerTraitTypeToBackendIR(trait *checker.Trait) backendir.Type {
 	methods := trait.GetMethods()
 	irMethods := make([]backendir.TraitMethod, 0, len(methods))
 	for _, method := range methods {
-		params := make([]backendir.Type, 0, len(method.Parameters))
-		for _, param := range method.Parameters {
-			params = append(params, lowerCheckerTypeToBackendIR(param.Type))
-		}
+		params, paramByRef := lowerFunctionTypeParamsToBackendIR(method.Parameters)
 		irMethods = append(irMethods, backendir.TraitMethod{
 			Name: method.Name,
 			Type: &backendir.FuncType{
-				Params: params,
-				Return: lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(&method)),
+				Params:     params,
+				ParamByRef: paramByRef,
+				Return:     lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(&method)),
 			},
 		})
 	}
 	return &backendir.TraitType{Name: strings.TrimSpace(trait.Name), Methods: irMethods}
+}
+
+func lowerFunctionTypeParamsToBackendIR(params []checker.Parameter) ([]backendir.Type, []bool) {
+	out := make([]backendir.Type, 0, len(params))
+	byRef := make([]bool, 0, len(params))
+	for _, param := range params {
+		out = append(out, lowerCheckerTypeToBackendIR(param.Type))
+		byRef = append(byRef, param.Mutable && mutableParamNeedsPointer(param.Type))
+	}
+	return out, byRef
 }
 
 func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
@@ -4053,22 +4062,18 @@ func lowerCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 			Err: lowerNestedCheckerTypeToBackendIR(typed.Err()),
 		}
 	case *checker.FunctionDef:
-		params := make([]backendir.Type, 0, len(typed.Parameters))
-		for _, param := range typed.Parameters {
-			params = append(params, lowerCheckerTypeToBackendIR(param.Type))
-		}
+		params, paramByRef := lowerFunctionTypeParamsToBackendIR(typed.Parameters)
 		return &backendir.FuncType{
-			Params: params,
-			Return: lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(typed)),
+			Params:     params,
+			ParamByRef: paramByRef,
+			Return:     lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(typed)),
 		}
 	case *checker.ExternalFunctionDef:
-		params := make([]backendir.Type, 0, len(typed.Parameters))
-		for _, param := range typed.Parameters {
-			params = append(params, lowerCheckerTypeToBackendIR(param.Type))
-		}
+		params, paramByRef := lowerFunctionTypeParamsToBackendIR(typed.Parameters)
 		return &backendir.FuncType{
-			Params: params,
-			Return: lowerCheckerTypeToBackendIR(typed.ReturnType),
+			Params:     params,
+			ParamByRef: paramByRef,
+			Return:     lowerCheckerTypeToBackendIR(typed.ReturnType),
 		}
 	case *checker.Trait:
 		return lowerTraitTypeToBackendIR(typed)

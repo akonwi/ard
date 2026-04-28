@@ -2347,8 +2347,12 @@ func backendIRTypeKey(t backendir.Type) string {
 		return "result:" + backendIRTypeKey(typed.Val) + ":" + backendIRTypeKey(typed.Err)
 	case *backendir.FuncType:
 		parts := make([]string, 0, len(typed.Params))
-		for _, param := range typed.Params {
-			parts = append(parts, backendIRTypeKey(param))
+		for i, param := range typed.Params {
+			key := backendIRTypeKey(param)
+			if i < len(typed.ParamByRef) && typed.ParamByRef[i] {
+				key = "*" + key
+			}
+			parts = append(parts, key)
 		}
 		return "fn:(" + strings.Join(parts, ",") + ")->" + backendIRTypeKey(typed.Return)
 	default:
@@ -3751,13 +3755,16 @@ func (e *backendIREmitter) emitTypeWithTypeParams(t backendir.Type, typeParams m
 		return indexExpr(selectorExpr(ast.NewIdent(helperImportAlias), "Result"), []ast.Expr{valType, errType}), nil
 	case *backendir.FuncType:
 		params := make([]*ast.Field, 0, len(typed.Params))
-		for _, param := range typed.Params {
+		for i, param := range typed.Params {
 			paramType, err := e.emitTypeWithTypeParams(param, typeParams)
 			if err != nil {
 				return nil, err
 			}
 			if paramType == nil {
 				paramType = ast.NewIdent("any")
+			}
+			if i < len(typed.ParamByRef) && typed.ParamByRef[i] {
+				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
 		}

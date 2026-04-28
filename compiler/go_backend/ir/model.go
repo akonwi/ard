@@ -424,8 +424,9 @@ type ResultType struct {
 func (*ResultType) typeNode() {}
 
 type FuncType struct {
-	Params []Type
-	Return Type
+	Params     []Type
+	ParamByRef []bool
+	Return     Type
 }
 
 func (*FuncType) typeNode() {}
