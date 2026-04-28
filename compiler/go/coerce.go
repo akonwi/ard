@@ -205,24 +205,24 @@ func coerceResultValue(source reflect.Value, targetType reflect.Type) (reflect.V
 			addressable.Set(source)
 			source = addressable
 		}
-		isOk := source.FieldByName("ok").Bool()
+		isOk := source.Field(2).Bool()
 		out := reflect.New(targetType).Elem()
-		setUnexportedField(out.FieldByName("ok"), reflect.ValueOf(isOk))
+		setUnexportedField(out.Field(2), reflect.ValueOf(isOk))
 		if isOk {
-			okValue := getUnexportedField(source.FieldByName("value"))
+			okValue := getUnexportedField(source.Field(0))
 			coerced, err := coerceExternValue(okValue, targetType.Field(0).Type)
 			if err != nil {
 				return reflect.Value{}, err
 			}
-			setUnexportedField(out.FieldByName("value"), coerced)
+			setUnexportedField(out.Field(0), coerced)
 			return out, nil
 		}
-		errValue := getUnexportedField(source.FieldByName("err"))
+		errValue := getUnexportedField(source.Field(1))
 		coerced, err := coerceExternValue(errValue, targetType.Field(1).Type)
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		setUnexportedField(out.FieldByName("err"), coerced)
+		setUnexportedField(out.Field(1), coerced)
 		return out, nil
 	}
 
