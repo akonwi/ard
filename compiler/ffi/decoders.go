@@ -97,6 +97,26 @@ func DecodeInt(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue()), errType))
 }
 
+// fn (Dynamic) Str![Error]
+func DecodeStringErrors(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
+	result := DecodeString(args)
+	if result.IsOk() {
+		return result
+	}
+	return runtime.MakeErr(runtime.MakeList(errType, result.UnwrapResult()))
+}
+
+// fn (Dynamic) Int![Error]
+func DecodeIntErrors(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
+	result := DecodeInt(args)
+	if result.IsOk() {
+		return result
+	}
+	return runtime.MakeErr(runtime.MakeList(errType, result.UnwrapResult()))
+}
+
 // fn (Dynamic) Float!Error
 func DecodeFloat(args []*runtime.Object) *runtime.Object {
 	errType := getDecodeErrorType()

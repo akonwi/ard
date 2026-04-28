@@ -263,6 +263,18 @@ export function DecodeInt(data) {
   return { err: makeDecodeError("Int", formatDynamicForError(data)) };
 }
 
+export function DecodeStringErrors(data) {
+  const result = DecodeString(data);
+  if (Object.prototype.hasOwnProperty.call(result, "ok")) return result;
+  return { err: [result.err] };
+}
+
+export function DecodeIntErrors(data) {
+  const result = DecodeInt(data);
+  if (Object.prototype.hasOwnProperty.call(result, "ok")) return result;
+  return { err: [result.err] };
+}
+
 export function DecodeFloat(data) {
   if (data === null || data === undefined) return { err: makeDecodeError("Float", "null") };
   if (typeof data === "number") return { ok: data };

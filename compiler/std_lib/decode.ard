@@ -55,6 +55,14 @@ private extern fn _decode_bool(data: Dynamic) Bool!Error = {
   go = "DecodeBool"
   js = "DecodeBool"
 }
+private extern fn _decode_string_errors(data: Dynamic) Str![Error] = {
+  go = "DecodeStringErrors"
+  js = "DecodeStringErrors"
+}
+private extern fn _decode_int_errors(data: Dynamic) Int![Error] = {
+  go = "DecodeIntErrors"
+  js = "DecodeIntErrors"
+}
 extern fn is_void(data: Dynamic) Bool = {
   go = "IsNil"
   js = "IsNil"
@@ -81,13 +89,11 @@ fn from_json(input: JsonInput) Dynamic!Str {
 type Decoder = fn(Dynamic) $Out![Error]
 
 fn string(data: Dynamic) Str![Error] {
-  let val = try _decode_string(data) -> err { Result::err([err]) }
-  Result::ok(val)
+  _decode_string_errors(data)
 }
 
 fn int(data: Dynamic) Int![Error] {
-  let val = try _decode_int(data) -> err { Result::err([err]) }
-  Result::ok(val)
+  _decode_int_errors(data)
 }
 
 fn float(data: Dynamic) Float![Error] {

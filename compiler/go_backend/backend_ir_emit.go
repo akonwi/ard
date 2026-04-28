@@ -1391,6 +1391,23 @@ func (e *backendIREmitter) emitBuiltinExternBody(decl *backendir.FuncDecl, local
 			return nil, true, err
 		}
 		return returnGenericCall(decl.ExternBinding+"Extern", errType, data), true, nil
+	case "DecodeStringErrors", "DecodeIntErrors":
+		if len(decl.Params) != 1 {
+			return nil, true, fmt.Errorf("extern %s expects 1 arg, got %d", decl.ExternBinding, len(decl.Params))
+		}
+		errList, ok := resultType.Err.(*backendir.ListType)
+		if !ok {
+			return nil, true, fmt.Errorf("extern %s expects list error type", decl.ExternBinding)
+		}
+		errType, err := e.emitType(errList.Elem)
+		if err != nil {
+			return nil, true, err
+		}
+		data, err := arg(0)
+		if err != nil {
+			return nil, true, err
+		}
+		return returnGenericCall(decl.ExternBinding+"Extern", errType, data), true, nil
 	case "DynamicToList":
 		if len(decl.Params) != 1 {
 			return nil, true, fmt.Errorf("extern DynamicToList expects 1 arg, got %d", len(decl.Params))

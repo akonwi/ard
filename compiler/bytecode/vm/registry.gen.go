@@ -677,6 +677,12 @@ func (r *RuntimeFFIRegistry) RegisterGeneratedFFIFunctions() error {
 	if err := r.Register("DecodeInt", ffi.DecodeInt); err != nil {
 		return fmt.Errorf("failed to register DecodeInt: %w", err)
 	}
+	if err := r.Register("DecodeStringErrors", ffi.DecodeStringErrors); err != nil {
+		return fmt.Errorf("failed to register DecodeStringErrors: %w", err)
+	}
+	if err := r.Register("DecodeIntErrors", ffi.DecodeIntErrors); err != nil {
+		return fmt.Errorf("failed to register DecodeIntErrors: %w", err)
+	}
 	if err := r.Register("DecodeFloat", ffi.DecodeFloat); err != nil {
 		return fmt.Errorf("failed to register DecodeFloat: %w", err)
 	}
