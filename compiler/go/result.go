@@ -36,6 +36,13 @@ func (r Result[T, E]) Expect(message string) T {
 	return r.value
 }
 
+func (r *Result[T, E]) ExpectRef(message string) T {
+	if !r.ok {
+		panic(message)
+	}
+	return r.value
+}
+
 func (r Result[T, E]) UnwrapOk() T {
 	return r.value
 }

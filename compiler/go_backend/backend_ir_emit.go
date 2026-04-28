@@ -2724,7 +2724,7 @@ func (e *backendIREmitter) emitTryExprControlStmtsWithCatchLocals(
 	case "result":
 		cond = &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(tryValueName), "IsErr")}
 		success = &ast.CallExpr{
-			Fun: selectorExpr(ast.NewIdent(tryValueName), "Expect"),
+			Fun: selectorExpr(&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tryValueName)}, "ExpectRef"),
 			Args: []ast.Expr{
 				&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unreachable err in try success path")},
 			},
@@ -2937,7 +2937,7 @@ func (e *backendIREmitter) emitTryExpr(expr *backendir.TryExpr, locals map[strin
 	case "result":
 		cond = &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(tryValueName), "IsErr")}
 		success = &ast.CallExpr{
-			Fun: selectorExpr(ast.NewIdent(tryValueName), "Expect"),
+			Fun: selectorExpr(&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tryValueName)}, "ExpectRef"),
 			Args: []ast.Expr{
 				&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unreachable err in try success path")},
 			},
