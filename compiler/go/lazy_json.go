@@ -157,12 +157,8 @@ func decodeLazyJSONIntList(s string) ([]int, bool) {
 		if end < 0 {
 			return nil, false
 		}
-		value, err := strconv.ParseFloat(strings.TrimSpace(s[idx:end]), 64)
-		if err != nil {
-			return nil, false
-		}
-		intValue := int(value)
-		if value != float64(intValue) {
+		intValue, ok := parseLazyJSONIntNumber(s[idx:end])
+		if !ok {
 			return nil, false
 		}
 		out = append(out, intValue)
@@ -206,12 +202,8 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 		if valueEnd < 0 {
 			return nil, false
 		}
-		value, err := strconv.ParseFloat(strings.TrimSpace(s[valueStart:valueEnd]), 64)
-		if err != nil {
-			return nil, false
-		}
-		intValue := int(value)
-		if value != float64(intValue) {
+		intValue, ok := parseLazyJSONIntNumber(s[valueStart:valueEnd])
+		if !ok {
 			return nil, false
 		}
 		out[key] = intValue
@@ -220,6 +212,36 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 			idx++
 		}
 	}
+}
+
+func parseLazyJSONIntNumber(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	sign := 1
+	idx := 0
+	if raw[0] == '-' {
+		sign = -1
+		idx = 1
+		if idx == len(raw) {
+			return 0, false
+		}
+	}
+	value := 0
+	for ; idx < len(raw); idx++ {
+		ch := raw[idx]
+		if ch < '0' || ch > '9' {
+			floatValue, err := strconv.ParseFloat(raw, 64)
+			if err != nil {
+				return 0, false
+			}
+			intValue := int(floatValue)
+			return intValue, floatValue == float64(intValue)
+		}
+		value = value*10 + int(ch-'0')
+	}
+	return sign * value, true
 }
 
 func hasDuplicateJSONNames(s string) bool {
