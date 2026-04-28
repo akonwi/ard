@@ -439,13 +439,13 @@ func appendDecodeErrorPath[E any](err E, segment string) E {
 }
 
 func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
+	if typed, ok := data.([]int); ok {
+		return Result[[]int, []E]{value: typed, ok: true}
+	}
 	if raw, ok := data.(jsonDynamic); ok {
 		if out, ok := decodeLazyJSONIntList(string(raw)); ok {
 			return Result[[]int, []E]{value: out, ok: true}
 		}
-	}
-	if typed, ok := data.([]int); ok {
-		return Result[[]int, []E]{value: typed, ok: true}
 	}
 	raw, ok := data.([]any)
 	if !ok {
