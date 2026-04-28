@@ -229,6 +229,54 @@ func formatBuiltinRawValueForError(v any) string {
 	}
 }
 
+func DecodeStringExtern[E any](data any) Result[string, E] {
+	result := builtinDecodeString(data)
+	if result.ok {
+		return Ok[string, E](result.value)
+	}
+	return Err[string, E](CoerceExtern[E](result.err))
+}
+
+func DecodeIntExtern[E any](data any) Result[int, E] {
+	result := builtinDecodeInt(data)
+	if result.ok {
+		return Ok[int, E](result.value)
+	}
+	return Err[int, E](CoerceExtern[E](result.err))
+}
+
+func DecodeFloatExtern[E any](data any) Result[float64, E] {
+	result := builtinDecodeFloat(data)
+	if result.ok {
+		return Ok[float64, E](result.value)
+	}
+	return Err[float64, E](CoerceExtern[E](result.err))
+}
+
+func DecodeBoolExtern[E any](data any) Result[bool, E] {
+	result := builtinDecodeBool(data)
+	if result.ok {
+		return Ok[bool, E](result.value)
+	}
+	return Err[bool, E](CoerceExtern[E](result.err))
+}
+
+func DynamicToListExtern(data any) Result[[]any, string] {
+	return builtinDynamicToList(data)
+}
+
+func DynamicToMapExtern(data any) Result[map[any]any, string] {
+	return builtinDynamicToMap(data)
+}
+
+func ExtractFieldExtern(data any, name string) Result[any, string] {
+	return builtinExtractField(data, name)
+}
+
+func JsonToDynamicExtern(jsonString string) Result[any, string] {
+	return builtinJsonToDynamic(jsonString)
+}
+
 func builtinJsonToDynamic(jsonString string) Result[any, string] {
 	value, err := ffi.JsonToDynamic(jsonString)
 	if err != nil {

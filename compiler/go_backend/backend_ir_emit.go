@@ -1291,6 +1291,10 @@ func (e *backendIREmitter) externArgNeedsAnySlice(t backendir.Type) bool {
 }
 
 func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType ast.Expr, locals map[string]string) ([]ast.Stmt, error) {
+	if stmts, ok, err := e.emitBuiltinExternBody(decl, locals); ok || err != nil {
+		return stmts, err
+	}
+
 	args := make([]ast.Expr, 0, len(decl.Params)+1)
 	args = append(args, &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(decl.ExternBinding)})
 	for _, param := range decl.Params {
@@ -1338,6 +1342,85 @@ func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType a
 	}
 
 	return stmts, nil
+}
+
+func (e *backendIREmitter) emitBuiltinExternBody(decl *backendir.FuncDecl, locals map[string]string) ([]ast.Stmt, bool, error) {
+	resultType, ok := decl.Return.(*backendir.ResultType)
+	if !ok {
+		return nil, false, nil
+	}
+
+	helper := ast.NewIdent(helperImportAlias)
+	arg := func(index int) (ast.Expr, error) {
+		if index < 0 || index >= len(decl.Params) {
+			return nil, fmt.Errorf("extern %s expects arg %d", decl.ExternBinding, index)
+		}
+		return ast.NewIdent(locals[decl.Params[index].Name]), nil
+	}
+	returnCall := func(function string, args ...ast.Expr) []ast.Stmt {
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: selectorExpr(helper, function), Args: args}}}}
+	}
+	returnGenericCall := func(function string, typeArg ast.Expr, args ...ast.Expr) []ast.Stmt {
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: indexExpr(selectorExpr(helper, function), []ast.Expr{typeArg}), Args: args}}}}
+	}
+
+	switch decl.ExternBinding {
+	case "DecodeString", "DecodeInt", "DecodeFloat", "DecodeBool":
+		if len(decl.Params) != 1 {
+			return nil, true, fmt.Errorf("extern %s expects 1 arg, got %d", decl.ExternBinding, len(decl.Params))
+		}
+		errType, err := e.emitType(resultType.Err)
+		if err != nil {
+			return nil, true, err
+		}
+		data, err := arg(0)
+		if err != nil {
+			return nil, true, err
+		}
+		return returnGenericCall(decl.ExternBinding+"Extern", errType, data), true, nil
+	case "DynamicToList":
+		if len(decl.Params) != 1 {
+			return nil, true, fmt.Errorf("extern DynamicToList expects 1 arg, got %d", len(decl.Params))
+		}
+		data, err := arg(0)
+		if err != nil {
+			return nil, true, err
+		}
+		return returnCall("DynamicToListExtern", data), true, nil
+	case "DynamicToMap":
+		if len(decl.Params) != 1 {
+			return nil, true, fmt.Errorf("extern DynamicToMap expects 1 arg, got %d", len(decl.Params))
+		}
+		data, err := arg(0)
+		if err != nil {
+			return nil, true, err
+		}
+		return returnCall("DynamicToMapExtern", data), true, nil
+	case "ExtractField":
+		if len(decl.Params) != 2 {
+			return nil, true, fmt.Errorf("extern ExtractField expects 2 args, got %d", len(decl.Params))
+		}
+		data, err := arg(0)
+		if err != nil {
+			return nil, true, err
+		}
+		name, err := arg(1)
+		if err != nil {
+			return nil, true, err
+		}
+		return returnCall("ExtractFieldExtern", data, name), true, nil
+	case "JsonToDynamic":
+		if len(decl.Params) != 1 {
+			return nil, true, fmt.Errorf("extern JsonToDynamic expects 1 arg, got %d", len(decl.Params))
+		}
+		data, err := arg(0)
+		if err != nil {
+			return nil, true, err
+		}
+		return returnCall("JsonToDynamicExtern", data), true, nil
+	}
+
+	return nil, false, nil
 }
 
 func (e *backendIREmitter) emitBlock(block *backendir.Block, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
