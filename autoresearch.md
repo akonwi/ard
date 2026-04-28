@@ -86,4 +86,5 @@ Optimize the runtime speed of Ard's generated Go backend on `compiler/benchmarks
 - Kept: lazy string-int maps use a fixed capacity hint of 4, improving slightly to ~19.18 ms. Capacity 2 and 8 regressed.
 - Kept: lazy JSON validation now checks duplicates before `json.Valid`, improving slightly to ~19.13 ms. Rechecking generic K=string `MapKeys` specialization after lazy JSON still regressed.
 - Discarded after lazy JSON: GC targets 100/200/500 all regressed; keep 300. Direct Result literals for cached lazy field extraction also regressed.
-- Kept: cached lazy JSON objects are now stored by pointer to avoid copying fixed key/value arrays through Dynamic, improving to ~18.98 ms. Four-slot pointer cache regressed; three slots remains fastest but has overfit risk.
+- Kept: cached lazy JSON objects are now stored by pointer to avoid copying fixed key/value arrays through Dynamic, improving to ~18.98 ms. Constructing the pointer directly improved slightly to ~18.94 ms. Four-slot pointer cache regressed; three slots remains fastest but has overfit risk.
+- Discarded: filling lazy int-list output by index into a len-12 slice regressed; keep cap-12 append shape.
