@@ -1,4 +1,4 @@
 - Validate generated Go default `GOGC=300` against peak RSS and longer-running/memory-sensitive workloads; users can override with `GOGC`. Quick decode_pipeline spot check showed default target used ~27 MB RSS vs `GOGC=100` ~20 MB RSS.
 - Review semantics of `DecodeIntListErrorsExtern` typed `[]int` fast path before finalizing; current speed win returns the original slice. Copying and cap-limiting were tried and regressed, so this is a correctness/API decision rather than an obvious perf follow-up.
 - Expand lazy JSON tests before final review: duplicate keys in arrays, escaped duplicate names, invalid/trailing JSON, decimals/exponents, negatives, overflow-sized integers, and fallback for unsupported nested shapes.
-- Explore integrating duplicate-name validation with lazy field extraction to avoid scanning the whole JSON once up front and then rescanning requested fields. Eager top-level object field maps were tried and regressed due allocation/code size.
+- Validate lazy JSON object cache thresholds on broader JSON workloads. Three cached fields is fastest for decode_pipeline but may be too narrow; four/eight-slot variants are more general but slower here.
