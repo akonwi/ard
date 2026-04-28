@@ -1404,6 +1404,50 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		if blockExpr, ok := s.Value.(*backendir.BlockExpr); ok && lowering.IsVoidIRType(blockExpr.Type) {
 			return e.emitBlockExprStmt(blockExpr, returnType, locals, seenLocals)
 		}
+		if call, ok := s.Value.(*backendir.CallExpr); ok {
+			if ident, ok := call.Callee.(*backendir.IdentExpr); ok {
+				switch ident.Name {
+				case "list_push":
+					if len(call.Args) != 2 {
+						return nil, fmt.Errorf("list_push expects 2 args, got %d", len(call.Args))
+					}
+					subject, err := e.emitExpr(call.Args[0], locals)
+					if err != nil {
+						return nil, err
+					}
+					value, err := e.emitExpr(call.Args[1], locals)
+					if err != nil {
+						return nil, err
+					}
+					return []ast.Stmt{&ast.AssignStmt{
+						Lhs: []ast.Expr{subject},
+						Tok: token.ASSIGN,
+						Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{subject, value}}},
+					}}, nil
+				case "map_set":
+					if len(call.Args) != 3 {
+						return nil, fmt.Errorf("map_set expects 3 args, got %d", len(call.Args))
+					}
+					subject, err := e.emitExpr(call.Args[0], locals)
+					if err != nil {
+						return nil, err
+					}
+					key, err := e.emitExpr(call.Args[1], locals)
+					if err != nil {
+						return nil, err
+					}
+					value, err := e.emitExpr(call.Args[2], locals)
+					if err != nil {
+						return nil, err
+					}
+					return []ast.Stmt{&ast.AssignStmt{
+						Lhs: []ast.Expr{&ast.IndexExpr{X: subject, Index: key}},
+						Tok: token.ASSIGN,
+						Rhs: []ast.Expr{value},
+					}}, nil
+				}
+			}
+		}
 		value, err := e.emitExpr(s.Value, locals)
 		if err != nil {
 			return nil, err

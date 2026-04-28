@@ -579,7 +579,7 @@ fn main() {
 		"Bump(value)",
 		"(*box).Value = 2",
 		"value = value + 1",
-		"ardgo.ListPush(values, 1)",
+		"*values = append(*values, 1)",
 	} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
@@ -2071,8 +2071,8 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "ardgo.ListSet(numbers, 1, 9)") {
 		t.Fatalf("expected generated source to contain native list_set emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.ListPush(&numbers, 3)") {
-		t.Fatalf("expected generated source to contain native list_push emission\n%s", generated)
+	if !strings.Contains(generated, "numbers = append(numbers, 3)") {
+		t.Fatalf("expected generated source to contain native list_push statement emission\n%s", generated)
 	}
 	if !strings.Contains(generated, "ardgo.ListPrepend(&numbers, 0)") {
 		t.Fatalf("expected generated source to contain native list_prepend emission\n%s", generated)
