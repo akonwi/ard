@@ -223,7 +223,7 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 		return nil, false
 	}
 	idx++
-	out := make(map[string]int)
+	out := make(map[string]int, 4)
 	for {
 		idx = skipJSONSpaces(s, idx)
 		if idx >= len(s) {
