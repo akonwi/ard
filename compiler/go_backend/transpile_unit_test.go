@@ -112,7 +112,8 @@ let result = maybe_fallback(0)
 	generated := string(out)
 	checks := []string{
 		"__ardTryValue",
-		"return __ardTryValue.Expect",
+		"ardtryunwrap0 := __ardTryValue.Expect",
+		"value := ardtryunwrap0 + 1",
 	}
 	for _, check := range checks {
 		if !strings.Contains(generated, check) {

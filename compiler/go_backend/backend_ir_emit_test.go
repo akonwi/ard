@@ -1032,8 +1032,8 @@ func TestEmitGoFileFromBackendIR_IfExprNative(t *testing.T) {
 	assertParsesAsGo(t, rendered)
 
 	generated := string(rendered)
-	if !strings.Contains(generated, "value := func() int") {
-		t.Fatalf("expected generated source to contain native if-expression closure\n%s", generated)
+	if !strings.Contains(generated, "var value int") || !strings.Contains(generated, "if true") {
+		t.Fatalf("expected generated source to contain native if-expression statement assignment\n%s", generated)
 	}
 }
 

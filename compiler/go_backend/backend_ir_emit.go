@@ -1444,6 +1444,9 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 				}, nil
 			})
 		}
+		if ifExpr, ok := s.Value.(*backendir.IfExpr); ok && !lowering.IsVoidIRType(ifExpr.Type) {
+			return e.emitIfExprAssignStmts(s.Target, ifExpr, returnType, locals, seenLocals)
+		}
 		if unionMatch, ok := s.Value.(*backendir.UnionMatchExpr); ok {
 			return e.emitUnionMatchAssignStmts(s.Target, unionMatch, returnType, locals, seenLocals)
 		}
@@ -2112,6 +2115,54 @@ func (e *backendIREmitter) emitIfExprStmt(expr *backendir.IfExpr, returnType ast
 	return []ast.Stmt{ifStmt}, nil
 }
 
+func (e *backendIREmitter) emitIfExprAssignStmts(targetName string, expr *backendir.IfExpr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
+	if expr == nil || expr.Cond == nil || expr.Then == nil || expr.Type == nil {
+		return nil, fmt.Errorf("invalid if expression assignment")
+	}
+	target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+	if err != nil {
+		return nil, err
+	}
+	typeExpr, err := e.emitType(expr.Type)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ast.Stmt, 0, 2)
+	if tok == token.DEFINE && targetName != "_" {
+		ident, ok := target.(*ast.Ident)
+		if !ok {
+			return nil, fmt.Errorf("if assignment target must be identifier")
+		}
+		out = append(out, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ident}, Type: typeExpr}}}})
+	} else if tok == token.DEFINE {
+		out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.DEFINE, Rhs: []ast.Expr{zeroValueExpr(typeExpr)}})
+	}
+	cond, err := e.emitExpr(expr.Cond, locals)
+	if err != nil {
+		return nil, err
+	}
+	thenLocals := cloneStringMap(locals)
+	thenSeen := cloneSet(seenLocals)
+	thenStmts, err := e.emitBlockAssigningReturns(expr.Then, expr.Type, target, returnType, thenLocals, thenSeen)
+	if err != nil {
+		return nil, err
+	}
+	ifStmt := &ast.IfStmt{Cond: cond, Body: &ast.BlockStmt{List: thenStmts}}
+	if expr.Else != nil {
+		elseLocals := cloneStringMap(locals)
+		elseSeen := cloneSet(seenLocals)
+		elseStmts, err := e.emitBlockAssigningReturns(expr.Else, expr.Type, target, returnType, elseLocals, elseSeen)
+		if err != nil {
+			return nil, err
+		}
+		ifStmt.Else = &ast.BlockStmt{List: elseStmts}
+	} else {
+		ifStmt.Else = &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{zeroValueExpr(typeExpr)}}}}
+	}
+	out = append(out, ifStmt)
+	return out, nil
+}
+
 func (e *backendIREmitter) emitBlockExprStmt(expr *backendir.BlockExpr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
 	if expr == nil || expr.Value == nil {
 		return nil, fmt.Errorf("invalid block expression statement")
@@ -2306,6 +2357,16 @@ func (e *backendIREmitter) emitBlockAssigningReturns(block *backendir.Block, ass
 		ret, ok := stmt.(*backendir.ReturnStmt)
 		if !ok || shouldReturnFromOuter(ret.Value, assignType) {
 			emitted, err := e.emitStmt(stmt, returnType, locals, seenLocals)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, emitted...)
+			continue
+		}
+		if tryExpr, ok := ret.Value.(*backendir.TryExpr); ok {
+			emitted, err := e.emitTryExprControlStmts(tryExpr, returnType, locals, seenLocals, func(success ast.Expr) ([]ast.Stmt, error) {
+				return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{success}}}, nil
+			})
 			if err != nil {
 				return nil, err
 			}

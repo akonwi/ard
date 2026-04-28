@@ -1463,6 +1463,7 @@ func lowerFunctionDeclToBackendIR(def *checker.FunctionDef) backendir.Decl {
 	returnType := lowerCheckerTypeToBackendIR(effectiveFunctionReturnType(def))
 	body := lowerBlockToBackendIRWithReturnType(def.Body, effectiveFunctionReturnType(def))
 	finalizeFunctionBodyForReturn(body, returnType)
+	hoistNestedTryExprsInBlock(body)
 
 	return &backendir.FuncDecl{
 		Name:            def.Name,
@@ -1497,6 +1498,210 @@ func finalizeCatchBlockForReturn(body *backendir.Block, returnType backendir.Typ
 		return
 	}
 	body.Stmts = append(body.Stmts, &backendir.ReturnStmt{})
+}
+
+func hoistNestedTryExprsInBlock(block *backendir.Block) {
+	counter := 0
+	hoistNestedTryExprsInBlockWithCounter(block, &counter)
+}
+
+func hoistNestedTryExprsInBlockWithCounter(block *backendir.Block, counter *int) {
+	if block == nil {
+		return
+	}
+	out := make([]backendir.Stmt, 0, len(block.Stmts))
+	for _, stmt := range block.Stmts {
+		switch s := stmt.(type) {
+		case *backendir.AssignStmt:
+			setup, value := hoistNestedTryExprsInExpr(s.Value, counter, true)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.ReturnStmt:
+			setup, value := hoistNestedTryExprsInExpr(s.Value, counter, true)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.ExprStmt:
+			setup, value := hoistNestedTryExprsInExpr(s.Value, counter, true)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.BindStmt:
+			setup, value := hoistNestedTryExprsInExpr(s.Value, counter, true)
+			out = append(out, setup...)
+			s.Value = value
+			out = append(out, s)
+		case *backendir.MemberAssignStmt:
+			setupSubject, subject := hoistNestedTryExprsInExpr(s.Subject, counter, true)
+			setupValue, value := hoistNestedTryExprsInExpr(s.Value, counter, true)
+			out = append(out, setupSubject...)
+			out = append(out, setupValue...)
+			s.Subject = subject
+			s.Value = value
+			out = append(out, s)
+		case *backendir.IfStmt:
+			setup, cond := hoistNestedTryExprsInExpr(s.Cond, counter, true)
+			out = append(out, setup...)
+			s.Cond = cond
+			hoistNestedTryExprsInBlockWithCounter(s.Then, counter)
+			hoistNestedTryExprsInBlockWithCounter(s.Else, counter)
+			out = append(out, s)
+		case *backendir.ForIntRangeStmt:
+			setupStart, start := hoistNestedTryExprsInExpr(s.Start, counter, true)
+			setupEnd, end := hoistNestedTryExprsInExpr(s.End, counter, true)
+			out = append(out, setupStart...)
+			out = append(out, setupEnd...)
+			s.Start = start
+			s.End = end
+			hoistNestedTryExprsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForLoopStmt:
+			setupInit, init := hoistNestedTryExprsInExpr(s.InitValue, counter, true)
+			setupCond, cond := hoistNestedTryExprsInExpr(s.Cond, counter, true)
+			out = append(out, setupInit...)
+			out = append(out, setupCond...)
+			s.InitValue = init
+			s.Cond = cond
+			hoistNestedTryExprsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForInStrStmt:
+			setup, value := hoistNestedTryExprsInExpr(s.Value, counter, true)
+			out = append(out, setup...)
+			s.Value = value
+			hoistNestedTryExprsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForInListStmt:
+			setup, list := hoistNestedTryExprsInExpr(s.List, counter, true)
+			out = append(out, setup...)
+			s.List = list
+			hoistNestedTryExprsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.ForInMapStmt:
+			setup, value := hoistNestedTryExprsInExpr(s.Map, counter, true)
+			out = append(out, setup...)
+			s.Map = value
+			hoistNestedTryExprsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		case *backendir.WhileStmt:
+			setup, cond := hoistNestedTryExprsInExpr(s.Cond, counter, true)
+			out = append(out, setup...)
+			s.Cond = cond
+			hoistNestedTryExprsInBlockWithCounter(s.Body, counter)
+			out = append(out, s)
+		default:
+			out = append(out, stmt)
+		}
+	}
+	block.Stmts = out
+}
+
+func hoistNestedTryExprsInExpr(expr backendir.Expr, counter *int, allowTopLevelTry bool) ([]backendir.Stmt, backendir.Expr) {
+	if expr == nil {
+		return nil, expr
+	}
+	if tryExpr, ok := expr.(*backendir.TryExpr); ok {
+		hoistNestedTryExprsInBlockWithCounter(tryExpr.Catch, counter)
+		if allowTopLevelTry {
+			return nil, expr
+		}
+		name := fmt.Sprintf("__ardTryUnwrap%d", *counter)
+		*counter++
+		return []backendir.Stmt{&backendir.AssignStmt{Target: name, Value: tryExpr}}, &backendir.IdentExpr{Name: name}
+	}
+	switch v := expr.(type) {
+	case *backendir.CallExpr:
+		setup := make([]backendir.Stmt, 0)
+		calleeSetup, callee := hoistNestedTryExprsInExpr(v.Callee, counter, false)
+		setup = append(setup, calleeSetup...)
+		v.Callee = callee
+		for i, arg := range v.Args {
+			argSetup, lowered := hoistNestedTryExprsInExpr(arg, counter, false)
+			setup = append(setup, argSetup...)
+			v.Args[i] = lowered
+		}
+		return setup, v
+	case *backendir.SelectorExpr:
+		setup, subject := hoistNestedTryExprsInExpr(v.Subject, counter, false)
+		v.Subject = subject
+		return setup, v
+	case *backendir.ListLiteralExpr:
+		setup := make([]backendir.Stmt, 0)
+		for i, element := range v.Elements {
+			elementSetup, lowered := hoistNestedTryExprsInExpr(element, counter, false)
+			setup = append(setup, elementSetup...)
+			v.Elements[i] = lowered
+		}
+		return setup, v
+	case *backendir.MapLiteralExpr:
+		setup := make([]backendir.Stmt, 0)
+		for i := range v.Entries {
+			keySetup, key := hoistNestedTryExprsInExpr(v.Entries[i].Key, counter, false)
+			valueSetup, value := hoistNestedTryExprsInExpr(v.Entries[i].Value, counter, false)
+			setup = append(setup, keySetup...)
+			setup = append(setup, valueSetup...)
+			v.Entries[i].Key = key
+			v.Entries[i].Value = value
+		}
+		return setup, v
+	case *backendir.StructLiteralExpr:
+		setup := make([]backendir.Stmt, 0)
+		for i := range v.Fields {
+			fieldSetup, value := hoistNestedTryExprsInExpr(v.Fields[i].Value, counter, false)
+			setup = append(setup, fieldSetup...)
+			v.Fields[i].Value = value
+		}
+		return setup, v
+	case *backendir.MaybeSomeExpr:
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Value = value
+		return setup, v
+	case *backendir.ResultOkExpr:
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Value = value
+		return setup, v
+	case *backendir.ResultErrExpr:
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Value = value
+		return setup, v
+	case *backendir.AddressOfExpr:
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Value = value
+		return setup, v
+	case *backendir.CopyExpr:
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Value = value
+		return setup, v
+	case *backendir.TraitCoerceExpr:
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Value = value
+		return setup, v
+	case *backendir.IfExpr:
+		setup, cond := hoistNestedTryExprsInExpr(v.Cond, counter, false)
+		v.Cond = cond
+		hoistNestedTryExprsInBlockWithCounter(v.Then, counter)
+		hoistNestedTryExprsInBlockWithCounter(v.Else, counter)
+		return setup, v
+	case *backendir.UnionMatchExpr:
+		setup, subject := hoistNestedTryExprsInExpr(v.Subject, counter, false)
+		v.Subject = subject
+		for _, matchCase := range v.Cases {
+			hoistNestedTryExprsInBlockWithCounter(matchCase.Body, counter)
+		}
+		hoistNestedTryExprsInBlockWithCounter(v.CatchAll, counter)
+		return setup, v
+	case *backendir.BlockExpr:
+		hoistNestedTryExprsInBlockWithCounter(&backendir.Block{Stmts: v.Setup}, counter)
+		setup, value := hoistNestedTryExprsInExpr(v.Value, counter, false)
+		v.Setup = append(v.Setup, setup...)
+		v.Value = value
+		return nil, v
+	case *backendir.FuncLiteralExpr:
+		hoistNestedTryExprsInBlockWithCounter(v.Body, counter)
+		return nil, v
+	default:
+		return nil, expr
+	}
 }
 
 func blockEndsInIRReturn(stmts []backendir.Stmt) bool {
@@ -2455,6 +2660,7 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 		body := lowerBlockToBackendIRWithReturnType(v.Body, returnType)
 		irReturnType := lowerCheckerTypeToBackendIR(returnType)
 		finalizeFunctionBodyForReturn(body, irReturnType)
+		hoistNestedTryExprsInBlock(body)
 		return &backendir.FuncLiteralExpr{
 			Params: params,
 			Return: irReturnType,
