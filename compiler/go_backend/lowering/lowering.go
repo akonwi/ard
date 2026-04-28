@@ -797,24 +797,103 @@ func importedTypeOwners(module checker.Module) map[string]string {
 		}
 		path := strings.TrimSpace(imported.Path())
 		for _, stmt := range imported.Program().Statements {
-			if stmt.Stmt == nil {
-				continue
+			if stmt.Stmt != nil {
+				collectImportedTypeOwnersFromNonProducing(stmt.Stmt, path, owners)
 			}
-			switch def := stmt.Stmt.(type) {
-			case *checker.StructDef:
-				owners[def.Name] = path
-			case checker.StructDef:
-				owners[def.Name] = path
-			case *checker.Union:
-				owners[def.Name] = path
-			case checker.Union:
-				owners[def.Name] = path
-			case *checker.ExternType:
-				owners[def.Name_] = path
+			if stmt.Expr != nil {
+				collectImportedTypeOwnersFromExpr(stmt.Expr, path, owners)
 			}
 		}
 	}
 	return owners
+}
+
+func collectImportedTypeOwnersFromNonProducing(stmt checker.NonProducing, modulePath string, owners map[string]string) {
+	switch def := stmt.(type) {
+	case *checker.StructDef:
+		owners[def.Name] = modulePath
+		for _, typ := range def.Fields {
+			collectImportedTypeOwnersFromType(typ, modulePath, owners)
+		}
+	case checker.StructDef:
+		owners[def.Name] = modulePath
+		for _, typ := range def.Fields {
+			collectImportedTypeOwnersFromType(typ, modulePath, owners)
+		}
+	case *checker.Union:
+		owners[def.Name] = modulePath
+		for _, typ := range def.Types {
+			collectImportedTypeOwnersFromType(typ, modulePath, owners)
+		}
+	case checker.Union:
+		owners[def.Name] = modulePath
+		for _, typ := range def.Types {
+			collectImportedTypeOwnersFromType(typ, modulePath, owners)
+		}
+	case *checker.ExternType:
+		owners[def.Name_] = modulePath
+	case *checker.VariableDef:
+		collectImportedTypeOwnersFromType(def.Type(), modulePath, owners)
+	}
+}
+
+func collectImportedTypeOwnersFromExpr(expr checker.Expression, modulePath string, owners map[string]string) {
+	switch def := expr.(type) {
+	case *checker.FunctionDef:
+		for _, param := range def.Parameters {
+			collectImportedTypeOwnersFromType(param.Type, modulePath, owners)
+		}
+		collectImportedTypeOwnersFromType(effectiveFunctionReturnType(def), modulePath, owners)
+	case *checker.ExternalFunctionDef:
+		for _, param := range def.Parameters {
+			collectImportedTypeOwnersFromType(param.Type, modulePath, owners)
+		}
+		collectImportedTypeOwnersFromType(def.ReturnType, modulePath, owners)
+	default:
+		collectImportedTypeOwnersFromType(expr.Type(), modulePath, owners)
+	}
+}
+
+func collectImportedTypeOwnersFromType(t checker.Type, modulePath string, owners map[string]string) {
+	switch typed := t.(type) {
+	case *checker.StructDef:
+		owners[typed.Name] = modulePath
+		for _, fieldType := range typed.Fields {
+			collectImportedTypeOwnersFromType(fieldType, modulePath, owners)
+		}
+	case *checker.Enum:
+		owners[typed.Name] = modulePath
+	case *checker.Union:
+		owners[typed.Name] = modulePath
+		for _, member := range typed.Types {
+			collectImportedTypeOwnersFromType(member, modulePath, owners)
+		}
+	case checker.Union:
+		owners[typed.Name] = modulePath
+		for _, member := range typed.Types {
+			collectImportedTypeOwnersFromType(member, modulePath, owners)
+		}
+	case *checker.ExternType:
+		owners[typed.Name_] = modulePath
+		for _, typeArg := range typed.TypeArgs {
+			collectImportedTypeOwnersFromType(typeArg, modulePath, owners)
+		}
+	case *checker.List:
+		collectImportedTypeOwnersFromType(typed.Of(), modulePath, owners)
+	case *checker.Map:
+		collectImportedTypeOwnersFromType(typed.Key(), modulePath, owners)
+		collectImportedTypeOwnersFromType(typed.Value(), modulePath, owners)
+	case *checker.Maybe:
+		collectImportedTypeOwnersFromType(typed.Of(), modulePath, owners)
+	case *checker.Result:
+		collectImportedTypeOwnersFromType(typed.Val(), modulePath, owners)
+		collectImportedTypeOwnersFromType(typed.Err(), modulePath, owners)
+	case *checker.FunctionDef:
+		for _, param := range typed.Parameters {
+			collectImportedTypeOwnersFromType(param.Type, modulePath, owners)
+		}
+		collectImportedTypeOwnersFromType(effectiveFunctionReturnType(typed), modulePath, owners)
+	}
 }
 
 func qualifyImportedNamedTypesInDecl(decl backendir.Decl, owners map[string]string, local map[string]struct{}) {
@@ -3758,11 +3837,13 @@ func backendIRTypeName(t backendir.Type) string {
 func lowerNestedCheckerTypeToBackendIR(t checker.Type) backendir.Type {
 	switch typed := t.(type) {
 	case *checker.Union:
-		_ = typed
-		return backendir.Dynamic
+		if typed == nil || strings.TrimSpace(typed.Name) == "" {
+			return backendir.Dynamic
+		}
 	case checker.Union:
-		_ = typed
-		return backendir.Dynamic
+		if strings.TrimSpace(typed.Name) == "" {
+			return backendir.Dynamic
+		}
 	}
 	return lowerCheckerTypeToBackendIR(t)
 }

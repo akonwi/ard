@@ -2,6 +2,14 @@ package ardgo
 
 import "sort"
 
+func AnySlice[T any](list []T) []any {
+	out := make([]any, len(list))
+	for i, value := range list {
+		out[i] = value
+	}
+	return out
+}
+
 func ListPush[T any](list *[]T, value T) []T {
 	*list = append(*list, value)
 	return *list

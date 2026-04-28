@@ -22,6 +22,7 @@ type backendIREmitter struct {
 	entrypointBlock     *backendir.Block
 	localStructNames    map[string]struct{}
 	localEnumNames      map[string]struct{}
+	localUnionNames     map[string]struct{}
 	externTypeNames     map[string]struct{}
 	emittedMethods      map[string]struct{}
 	scopedCallableNames map[string]struct{}
@@ -87,6 +88,7 @@ func newBackendIREmitter(module *backendir.Module) *backendIREmitter {
 	functionTypeParams := make(map[string]int)
 	localStructNames := make(map[string]struct{})
 	localEnumNames := make(map[string]struct{})
+	localUnionNames := make(map[string]struct{})
 	externTypeNames := make(map[string]struct{})
 
 	for _, decl := range module.Decls {
@@ -99,6 +101,7 @@ func newBackendIREmitter(module *backendir.Module) *backendIREmitter {
 			localEnumNames[d.Name] = struct{}{}
 		case *backendir.UnionDecl:
 			used[goName(d.Name, true)] = struct{}{}
+			localUnionNames[d.Name] = struct{}{}
 		case *backendir.ExternTypeDecl:
 			used[goName(d.Name, true)] = struct{}{}
 			externTypeNames[d.Name] = struct{}{}
@@ -129,6 +132,7 @@ func newBackendIREmitter(module *backendir.Module) *backendIREmitter {
 		entrypointBlock:    module.Entrypoint,
 		localStructNames:   localStructNames,
 		localEnumNames:     localEnumNames,
+		localUnionNames:    localUnionNames,
 		externTypeNames:    externTypeNames,
 		emittedMethods:     make(map[string]struct{}),
 	}
@@ -1271,11 +1275,28 @@ func (e *backendIREmitter) canEmitLocalEnumVariantType(t backendir.Type) bool {
 	return ok
 }
 
+func (e *backendIREmitter) externArgNeedsAnySlice(t backendir.Type) bool {
+	listType, ok := t.(*backendir.ListType)
+	if !ok || listType == nil {
+		return false
+	}
+	named, ok := listType.Elem.(*backendir.NamedType)
+	if !ok || named == nil || strings.TrimSpace(named.Module) != "" {
+		return false
+	}
+	_, ok = e.localUnionNames[strings.TrimSpace(named.Name)]
+	return ok
+}
+
 func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType ast.Expr, locals map[string]string) ([]ast.Stmt, error) {
 	args := make([]ast.Expr, 0, len(decl.Params)+1)
 	args = append(args, &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(decl.ExternBinding)})
 	for _, param := range decl.Params {
-		args = append(args, ast.NewIdent(locals[param.Name]))
+		arg := ast.Expr(ast.NewIdent(locals[param.Name]))
+		if e.externArgNeedsAnySlice(param.Type) {
+			arg = &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "AnySlice"), Args: []ast.Expr{arg}}
+		}
+		args = append(args, arg)
 	}
 
 	call := &ast.CallExpr{
