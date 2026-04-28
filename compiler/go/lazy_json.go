@@ -115,8 +115,8 @@ func extractLazyJSONField(s, name string) (string, bool, bool) {
 		if keyEnd < 0 {
 			return "", false, false
 		}
-		key, err := strconv.Unquote(s[keyStart:keyEnd])
-		if err != nil {
+		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		if !ok {
 			return "", false, false
 		}
 		idx = skipJSONSpaces(s, keyEnd)
@@ -189,8 +189,8 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 		if keyEnd < 0 {
 			return nil, false
 		}
-		key, err := strconv.Unquote(s[keyStart:keyEnd])
-		if err != nil {
+		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		if !ok {
 			return nil, false
 		}
 		idx = skipJSONSpaces(s, keyEnd)
@@ -242,6 +242,19 @@ func parseLazyJSONIntNumber(raw string) (int, bool) {
 		value = value*10 + int(ch-'0')
 	}
 	return sign * value, true
+}
+
+func jsonStringContent(raw string) (string, bool) {
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return "", false
+	}
+	for idx := 1; idx < len(raw)-1; idx++ {
+		if raw[idx] == '\\' {
+			value, err := strconv.Unquote(raw)
+			return value, err == nil
+		}
+	}
+	return raw[1 : len(raw)-1], true
 }
 
 func hasDuplicateJSONNames(s string) bool {
@@ -297,8 +310,8 @@ func scanJSONObjectNames(s string, idx *int) bool {
 		if keyEnd < 0 {
 			return false
 		}
-		key, err := strconv.Unquote(s[keyStart:keyEnd])
-		if err != nil {
+		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		if !ok {
 			return false
 		}
 		if _, ok := seen[key]; ok {
