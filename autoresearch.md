@@ -75,3 +75,4 @@ Optimize the runtime speed of Ard's generated Go backend on `compiler/benchmarks
 - Kept: direct integer collection decoders call `decodeIntErrorsSlow` for fallback after owning their float64/int fast paths, avoiding redundant scalar fast-path code and improving to ~31.08 ms. Removing the raw int branches or splitting the fallback helper regressed.
 - Kept: `DecodeIntListErrorsExtern` now fast-paths already-typed `[]int` inputs before JSON `[]any`, improving to ~31.01 ms. Checking `[]any` first, copying the `[]int`, or adding a `[]float64` fast path regressed. Risk: the kept typed-list path returns the original slice, so aliasing should be reviewed.
 - Discarded: rechecking GC target 200 after the decoder changes still regressed; keep the default target at 300.
+- Discarded: rechecking `slices.Sort`, using a top-level type switch for direct int-list inputs, and binding non-addressable `result_expect` calls to temporary variables all regressed.
