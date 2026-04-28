@@ -37,5 +37,25 @@ func RegisterExtern(name string, fn ExternFunc) {
 }
 
 func CallExtern(name string, args ...any) (any, error) {
+	switch name {
+	case "DecodeString":
+		return builtinDecodeString(args[0]), nil
+	case "DecodeInt":
+		return builtinDecodeInt(args[0]), nil
+	case "DecodeFloat":
+		return builtinDecodeFloat(args[0]), nil
+	case "DecodeBool":
+		return builtinDecodeBool(args[0]), nil
+	case "IsNil":
+		return builtinDynamicValue(args[0]) == nil, nil
+	case "JsonToDynamic":
+		return builtinJsonToDynamic(args[0].(string)), nil
+	case "DynamicToList":
+		return builtinDynamicToList(args[0]), nil
+	case "DynamicToMap":
+		return builtinDynamicToMap(args[0]), nil
+	case "ExtractField":
+		return builtinExtractField(args[0], args[1].(string)), nil
+	}
 	return defaultExternRegistry.Call(name, args...)
 }
