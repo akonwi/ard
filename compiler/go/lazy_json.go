@@ -396,10 +396,12 @@ func parseLazyJSONIntAt(s string, idx int) (int, int, bool) {
 		for idx < len(s) {
 			ch := s[idx]
 			if ch < '0' || ch > '9' {
-				if isJSONValueEnd(ch) {
+				switch ch {
+				case ',', '}', ']', ' ', '\n', '\r', '\t':
 					return value, idx, true
+				default:
+					return parseLazyJSONIntSlow(s, start, idx)
 				}
-				return parseLazyJSONIntSlow(s, start, idx)
 			}
 			value = value*10 + int(ch-'0')
 			idx++
