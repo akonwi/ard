@@ -61,7 +61,9 @@ func builtinDynamicValue(value any) any {
 
 func RegisterBuiltinExterns() {
 	registerBuiltinExternsOnce.Do(func() {
-		debug.SetGCPercent(300)
+		if _, ok := os.LookupEnv("GOGC"); !ok {
+			debug.SetGCPercent(300)
+		}
 		RegisterExtern("Print", func(args ...any) (any, error) {
 			ffi.Print(args[0].(string))
 			return nil, nil
