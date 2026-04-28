@@ -16,7 +16,7 @@ RUNS=9
 
 start_ns() { python3 - <<'PY'
 import time
-print(time.perf_counter_ns())
+print(time.time_ns())
 PY
 }
 
