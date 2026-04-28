@@ -14,11 +14,11 @@ func Err[T, E any](err E) Result[T, E] {
 	return Result[T, E]{err: err}
 }
 
-func (r Result[T, E]) IsOk() bool {
+func (r *Result[T, E]) IsOk() bool {
 	return r.ok
 }
 
-func (r Result[T, E]) IsErr() bool {
+func (r *Result[T, E]) IsErr() bool {
 	return !r.ok
 }
 
