@@ -357,3 +357,165 @@ let result = enum_weight(Region::North).to_str() + int_label(3)
 		t.Fatalf("did not expect generated source to use expression closures for enum/int match assignments\n%s", generated)
 	}
 }
+
+func TestCompileEntrypointNormalizesOptionAndResultMatchAssignmentsWithoutExprClosures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/maybe
+
+fn maybe_label(flag: Bool) Str {
+  let value: Int? = match flag {
+    true => maybe::some(1),
+    false => maybe::none(),
+  }
+  match value {
+    n => "some {n}",
+    _ => "none",
+  }
+}
+
+fn result_label(flag: Bool) Str {
+  let value: Int!Str = match flag {
+    true => Result::ok(1),
+    false => Result::err("bad"),
+  }
+  match value {
+    ok(n) => "ok {n}",
+    err(msg) => msg,
+  }
+}
+
+let result = maybe_label(true) + result_label(false)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func MaybeLabel(flag bool) string",
+		"func ResultLabel(flag bool) string",
+		"var αardnormalizeExpr0 ardgo.Maybe[int]",
+		"var αardnormalizeExpr0 ardgo.Result[int, string]",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() string") {
+		t.Fatalf("did not expect generated source to use expression closures for option/result match assignments\n%s", generated)
+	}
+}
+
+func TestCompileEntrypointHoistsNestedOptionAndResultMatchesInCallArgs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+use ard/maybe
+
+fn label(value: Str) Str {
+  value
+}
+
+fn maybe_label(flag: Bool) Str {
+  let value: Int? = match flag {
+    true => maybe::some(1),
+    false => maybe::none(),
+  }
+  label(
+    match value {
+      n => "some {n}",
+      _ => "none",
+    },
+  )
+}
+
+fn result_label(flag: Bool) Str {
+  let value: Int!Str = match flag {
+    true => Result::ok(1),
+    false => Result::err("bad"),
+  }
+  label(
+    match value {
+      ok(n) => "ok {n}",
+      err(msg) => msg,
+    },
+  )
+}
+
+let result = maybe_label(true) + result_label(false)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func MaybeLabel(flag bool) string",
+		"func ResultLabel(flag bool) string",
+		"return Label(αardnormalizeExpr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() string") {
+		t.Fatalf("did not expect generated source to use expression closures for nested option/result matches\n%s", generated)
+	}
+}
+
+func TestCompileEntrypointNormalizesConditionalMatchAssignmentsWithoutExprClosures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+fn classify(n: Int) Str {
+  let value = match {
+    n == 0 => "zero",
+    n > 0 => "positive",
+    _ => "negative",
+  }
+  value
+}
+
+let result = classify(1)
+`)
+
+	out, err := CompileEntrypoint(module)
+	if err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+
+	generated := string(out)
+	checks := []string{
+		"func Classify(n int) string",
+		"var αardnormalizeExpr0 string",
+		"if n == 0 {",
+		"αardnormalizeExpr0 = \"zero\"",
+		"αardnormalizeExpr0 = \"positive\"",
+		"αardnormalizeExpr0 = \"negative\"",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "func() string") {
+		t.Fatalf("did not expect generated source to use expression closures for conditional match assignments\n%s", generated)
+	}
+}
