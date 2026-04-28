@@ -294,7 +294,7 @@ func scanJSONValueNames(s string, idx *int) bool {
 }
 
 func scanJSONObjectNames(s string, idx *int) bool {
-	var seenSmall [8]string
+	var seenSmall [16]string
 	seenCount := 0
 	var seenMap map[string]struct{}
 	*idx = *idx + 1
