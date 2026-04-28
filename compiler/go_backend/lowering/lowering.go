@@ -3293,6 +3293,14 @@ func lowerModuleFunctionCallToBackendIRWithExpected(call *checker.ModuleFunction
 	}
 	if moduleName == "ard/decode" && funcName == "map" && len(call.Call.Args) == 2 {
 		if keyDecoder, ok := call.Call.Args[0].(*checker.ModuleSymbol); ok && keyDecoder.Module == "ard/decode" && keyDecoder.Symbol.Name == "string" {
+			if valueDecoder, ok := call.Call.Args[1].(*checker.ModuleSymbol); ok && valueDecoder.Module == "ard/decode" && valueDecoder.Symbol.Name == "int" {
+				return &backendir.CallExpr{
+					Callee: &backendir.SelectorExpr{
+						Subject: &backendir.IdentExpr{Name: moduleName},
+						Name:    "string_int_map",
+					},
+				}
+			}
 			return &backendir.CallExpr{
 				Callee: &backendir.SelectorExpr{
 					Subject: &backendir.IdentExpr{Name: moduleName},
