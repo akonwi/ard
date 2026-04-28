@@ -21,7 +21,7 @@ func TestLazyJSONDecodesRequestedFields(t *testing.T) {
 		t.Fatalf("JsonToDynamicExtern failed: %s", rawResult.err)
 	}
 	switch rawResult.value.(type) {
-	case jsonDynamic, jsonObjectDynamic:
+	case jsonDynamic, *jsonObjectDynamic:
 	default:
 		t.Fatalf("expected lazy JSON dynamic, got %T", rawResult.value)
 	}

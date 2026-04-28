@@ -196,7 +196,7 @@ func builtinDynamicToStringMap(data any) Result[map[string]any, string] {
 }
 
 func builtinExtractField(data any, name string) Result[any, string] {
-	if object, ok := data.(jsonObjectDynamic); ok {
+	if object, ok := data.(*jsonObjectDynamic); ok {
 		for idx := 0; idx < object.count; idx++ {
 			if object.keys[idx] == name {
 				return Ok[any, string](object.values[idx])
@@ -526,7 +526,7 @@ func JsonToDynamicExtern(jsonString string) Result[any, string] {
 func builtinJsonToDynamic(jsonString string) Result[any, string] {
 	if validateLazyJSON(jsonString) {
 		if object, ok := parseLazyJSONObjectSmall(jsonString); ok {
-			return Ok[any, string](object)
+			return Ok[any, string](&object)
 		}
 		return Ok[any, string](jsonDynamic(jsonString))
 	}
