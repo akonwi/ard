@@ -426,6 +426,10 @@ func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
 				continue
 			}
 		}
+		if value, ok := item.(int); ok {
+			out[idx] = value
+			continue
+		}
 		itemResult := DecodeIntErrorsExtern[E](item)
 		if itemResult.ok {
 			out[idx] = itemResult.value
