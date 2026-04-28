@@ -84,3 +84,4 @@ Optimize the runtime speed of Ard's generated Go backend on `compiler/benchmarks
 - Kept: lazy JSON integer parsing now parses directly from the original JSON string and returns the end offset, avoiding a separate number-boundary scan and improving to ~20.80 ms. Removing the now-unused older helper regressed slightly/noisily.
 - Kept: small top-level lazy JSON objects are cached in a fixed field array so repeated field extraction avoids rescans, improving to ~20.15 ms with 8 slots and ~19.22 ms with 3 slots. Two slots regressed; 3 slots is fast but high overfit risk for broader objects.
 - Kept: lazy string-int maps use a fixed capacity hint of 4, improving slightly to ~19.18 ms. Capacity 2 and 8 regressed.
+- Kept: lazy JSON validation now checks duplicates before `json.Valid`, improving slightly to ~19.13 ms. Rechecking generic K=string `MapKeys` specialization after lazy JSON still regressed.
