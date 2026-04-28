@@ -2454,7 +2454,7 @@ func TestEmitGoFileFromBackendIR_MaybeResultMethodOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "resultval.IsOk()") {
 		t.Fatalf("expected generated source to contain native result_is_ok emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "resultval.Expect(\"bad\")") {
+	if !strings.Contains(generated, "(&resultval).ExpectRef(\"bad\")") {
 		t.Fatalf("expected generated source to contain native result_expect emission\n%s", generated)
 	}
 	if !strings.Contains(generated, "ardgo.ResultMap(resultval, resultmap)") {

@@ -3480,7 +3480,21 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 		case "maybe_and_then":
 			return emitCallToSelector(call, e, locals, helperImportAlias, "MaybeAndThen", 2)
 		case "result_expect":
-			return emitCallToMethod(call, e, locals, "Expect", 2)
+			if len(call.Args) != 2 {
+				return nil, fmt.Errorf("result_expect expects 2 args, got %d", len(call.Args))
+			}
+			subject, err := e.emitExpr(call.Args[0], locals)
+			if err != nil {
+				return nil, err
+			}
+			message, err := e.emitExpr(call.Args[1], locals)
+			if err != nil {
+				return nil, err
+			}
+			if isAddressableASTExpr(subject) {
+				return &ast.CallExpr{Fun: selectorExpr(&ast.UnaryExpr{Op: token.AND, X: subject}, "ExpectRef"), Args: []ast.Expr{message}}, nil
+			}
+			return &ast.CallExpr{Fun: selectorExpr(subject, "Expect"), Args: []ast.Expr{message}}, nil
 		case "result_or":
 			return emitCallToMethod(call, e, locals, "Or", 2)
 		case "result_is_ok":
