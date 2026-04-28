@@ -48,6 +48,10 @@ func maybeStringPointer(value Maybe[string]) *string {
 }
 
 func builtinDynamicValue(value any) any {
+	switch value.(type) {
+	case nil, string, int, int64, float64, bool, []any, map[string]any, map[any]any:
+		return value
+	}
 	if encodable, ok := value.(Encodable); ok {
 		return encodable.ToDyn()
 	}
