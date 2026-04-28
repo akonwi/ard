@@ -9,15 +9,17 @@ func MapKeys[K comparable, V any](m map[K]V) []K {
 	if len(m) == 0 {
 		return nil
 	}
-	stringKeys := make([]string, 0, len(m))
+	stringKeys := make([]string, len(m))
 	allStringKeys := true
+	idx := 0
 	for key := range m {
 		stringKey, ok := any(key).(string)
 		if !ok {
 			allStringKeys = false
 			break
 		}
-		stringKeys = append(stringKeys, stringKey)
+		stringKeys[idx] = stringKey
+		idx++
 	}
 	if allStringKeys {
 		sort.Strings(stringKeys)
