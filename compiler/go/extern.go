@@ -23,9 +23,7 @@ func (r *ExternRegistry) Register(name string, fn ExternFunc) {
 }
 
 func (r *ExternRegistry) Call(name string, args ...any) (any, error) {
-	r.mu.RLock()
 	fn, ok := r.functions[name]
-	r.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("extern function not found: %s", name)
 	}
