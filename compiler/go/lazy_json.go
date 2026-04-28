@@ -294,7 +294,9 @@ func scanJSONValueNames(s string, idx *int) bool {
 }
 
 func scanJSONObjectNames(s string, idx *int) bool {
-	seen := make([]string, 0, 4)
+	var seenSmall [8]string
+	seenCount := 0
+	var seenMap map[string]struct{}
 	*idx = *idx + 1
 	for {
 		*idx = skipJSONSpaces(s, *idx)
@@ -314,12 +316,28 @@ func scanJSONObjectNames(s string, idx *int) bool {
 		if !ok {
 			return false
 		}
-		for _, existing := range seen {
-			if existing == key {
+		if seenMap != nil {
+			if _, ok := seenMap[key]; ok {
 				return false
 			}
+			seenMap[key] = struct{}{}
+		} else {
+			for i := 0; i < seenCount; i++ {
+				if seenSmall[i] == key {
+					return false
+				}
+			}
+			if seenCount < len(seenSmall) {
+				seenSmall[seenCount] = key
+				seenCount++
+			} else {
+				seenMap = make(map[string]struct{}, len(seenSmall)*2)
+				for _, existing := range seenSmall {
+					seenMap[existing] = struct{}{}
+				}
+				seenMap[key] = struct{}{}
+			}
 		}
-		seen = append(seen, key)
 		*idx = skipJSONSpaces(s, keyEnd)
 		if *idx >= len(s) || s[*idx] != ':' {
 			return false
