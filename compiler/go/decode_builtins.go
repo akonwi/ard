@@ -105,40 +105,47 @@ func builtinDynamicToList(data any) Result[[]any, string] {
 	return Ok[[]any, string](out)
 }
 
-func builtinDynamicToMap(data any) Result[map[string]any, string] {
+func builtinDynamicToMap(data any) Result[map[any]any, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[map[string]any, string]("null")
+		return Err[map[any]any, string]("null")
 	}
 	if items, ok := data.(map[string]any); ok {
-		return Ok[map[string]any, string](items)
+		out := make(map[any]any, len(items))
+		for key, value := range items {
+			out[key] = value
+		}
+		return Ok[map[any]any, string](out)
+	}
+	if items, ok := data.(map[any]any); ok {
+		return Ok[map[any]any, string](items)
 	}
 	value := reflect.ValueOf(data)
 	for value.Kind() == reflect.Interface {
 		if value.IsNil() {
-			return Err[map[string]any, string]("null")
+			return Err[map[any]any, string]("null")
 		}
 		value = value.Elem()
 	}
 	if value.Kind() != reflect.Map {
-		return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+		return Err[map[any]any, string](formatBuiltinRawValueForError(data))
 	}
-	out := make(map[string]any, value.Len())
+	out := make(map[any]any, value.Len())
 	iter := value.MapRange()
 	for iter.Next() {
 		keyValue := iter.Key()
 		for keyValue.Kind() == reflect.Interface {
 			if keyValue.IsNil() {
-				return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+				return Err[map[any]any, string](formatBuiltinRawValueForError(data))
 			}
 			keyValue = keyValue.Elem()
 		}
 		if keyValue.Kind() != reflect.String {
-			return Err[map[string]any, string](formatBuiltinRawValueForError(data))
+			return Err[map[any]any, string](formatBuiltinRawValueForError(data))
 		}
 		out[keyValue.String()] = builtinDynamicValue(iter.Value().Interface())
 	}
-	return Ok[map[string]any, string](out)
+	return Ok[map[any]any, string](out)
 }
 
 func builtinExtractField(data any, name string) Result[any, string] {
