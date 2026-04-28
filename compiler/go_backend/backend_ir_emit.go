@@ -2037,6 +2037,16 @@ func (e *backendIREmitter) emitExpr(expr backendir.Expr, locals map[string]strin
 	case *backendir.BlockExpr:
 		return e.emitBlockExpr(v, locals)
 	case *backendir.CopyExpr:
+		switch literal := v.Value.(type) {
+		case *backendir.ListLiteralExpr:
+			if len(literal.Elements) == 0 {
+				return e.emitExpr(literal, locals)
+			}
+		case *backendir.MapLiteralExpr:
+			if len(literal.Entries) == 0 {
+				return e.emitExpr(literal, locals)
+			}
+		}
 		value, err := e.emitExpr(v.Value, locals)
 		if err != nil {
 			return nil, err
