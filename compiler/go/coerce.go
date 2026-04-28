@@ -199,6 +199,33 @@ func coerceMapValue(source reflect.Value, targetType reflect.Type) (reflect.Valu
 }
 
 func coerceResultValue(source reflect.Value, targetType reflect.Type) (reflect.Value, error) {
+	if isResultType(source.Type()) {
+		if !source.CanAddr() {
+			addressable := reflect.New(source.Type()).Elem()
+			addressable.Set(source)
+			source = addressable
+		}
+		isOk := source.FieldByName("ok").Bool()
+		out := reflect.New(targetType).Elem()
+		setUnexportedField(out.FieldByName("ok"), reflect.ValueOf(isOk))
+		if isOk {
+			okValue := getUnexportedField(source.FieldByName("value"))
+			coerced, err := coerceExternValue(okValue, targetType.Field(0).Type)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			setUnexportedField(out.FieldByName("value"), coerced)
+			return out, nil
+		}
+		errValue := getUnexportedField(source.FieldByName("err"))
+		coerced, err := coerceExternValue(errValue, targetType.Field(1).Type)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		setUnexportedField(out.FieldByName("err"), coerced)
+		return out, nil
+	}
+
 	isOk, err := callBoolMethod(source, "IsOk")
 	if err != nil {
 		return reflect.Value{}, err
@@ -274,8 +301,12 @@ func callValueMethod(source reflect.Value, name string, args ...reflect.Value) (
 	return results[0], nil
 }
 
+func getUnexportedField(field reflect.Value) reflect.Value {
+	return reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem()
+}
+
 func setUnexportedField(field reflect.Value, value reflect.Value) {
-	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(value)
+	getUnexportedField(field).Set(value)
 }
 
 func isResultType(t reflect.Type) bool {
