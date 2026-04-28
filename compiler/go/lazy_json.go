@@ -217,29 +217,41 @@ func parseLazyJSONIntNumber(raw string) (int, bool) {
 	if raw == "" {
 		return 0, false
 	}
-	sign := 1
-	idx := 0
+	if raw[0] >= '0' && raw[0] <= '9' {
+		value := 0
+		for idx := 0; idx < len(raw); idx++ {
+			ch := raw[idx]
+			if ch < '0' || ch > '9' {
+				return parseLazyJSONFloatInt(raw)
+			}
+			value = value*10 + int(ch-'0')
+		}
+		return value, true
+	}
 	if raw[0] == '-' {
-		sign = -1
-		idx = 1
-		if idx == len(raw) {
+		if len(raw) == 1 {
 			return 0, false
 		}
-	}
-	value := 0
-	for ; idx < len(raw); idx++ {
-		ch := raw[idx]
-		if ch < '0' || ch > '9' {
-			floatValue, err := strconv.ParseFloat(raw, 64)
-			if err != nil {
-				return 0, false
+		value := 0
+		for idx := 1; idx < len(raw); idx++ {
+			ch := raw[idx]
+			if ch < '0' || ch > '9' {
+				return parseLazyJSONFloatInt(raw)
 			}
-			intValue := int(floatValue)
-			return intValue, floatValue == float64(intValue)
+			value = value*10 + int(ch-'0')
 		}
-		value = value*10 + int(ch-'0')
+		return -value, true
 	}
-	return sign * value, true
+	return parseLazyJSONFloatInt(raw)
+}
+
+func parseLazyJSONFloatInt(raw string) (int, bool) {
+	floatValue, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	intValue := int(floatValue)
+	return intValue, floatValue == float64(intValue)
 }
 
 func jsonStringContent(raw string) (string, bool) {
