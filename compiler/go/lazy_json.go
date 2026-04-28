@@ -281,9 +281,11 @@ func scanJSONIntArray(s string, idx *int) ([]int, bool) {
 			}
 			continue
 		}
-		if s[*idx] != ']' {
-			return nil, false
+		if s[*idx] == ']' {
+			*idx = *idx + 1
+			return out, true
 		}
+		return nil, false
 	}
 }
 
@@ -353,9 +355,11 @@ func scanJSONStringIntMap(s string, idx *int) (map[string]int, bool) {
 			}
 			continue
 		}
-		if s[*idx] != '}' {
-			return nil, false
+		if s[*idx] == '}' {
+			*idx = *idx + 1
+			return out, true
 		}
+		return nil, false
 	}
 }
 
