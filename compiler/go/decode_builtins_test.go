@@ -9,6 +9,8 @@ func TestLazyJSONRejectsInvalidSyntax(t *testing.T) {
 		`{"a":01}`,
 		`{"units":[01]}`,
 		`{"counts":{"a":01}}`,
+		`{"units":[-]}`,
+		`{"counts":{"a":-}}`,
 		`{"a":"\x"}`,
 		"{\"a\":\"\n\"}",
 		`{"a":tru}`,
