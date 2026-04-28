@@ -1491,6 +1491,28 @@ func finalizeFunctionBodyForReturn(body *backendir.Block, returnType backendir.T
 	}
 }
 
+func finalizeCatchBlockForReturn(body *backendir.Block, returnType backendir.Type) {
+	finalizeFunctionBodyForReturn(body, returnType)
+	if body == nil || !isVoidIRType(returnType) || blockEndsInIRReturn(body.Stmts) {
+		return
+	}
+	body.Stmts = append(body.Stmts, &backendir.ReturnStmt{})
+}
+
+func blockEndsInIRReturn(stmts []backendir.Stmt) bool {
+	if len(stmts) == 0 {
+		return false
+	}
+	switch last := stmts[len(stmts)-1].(type) {
+	case *backendir.ReturnStmt:
+		return true
+	case *backendir.IfStmt:
+		return last.Then != nil && last.Else != nil && blockEndsInIRReturn(last.Then.Stmts) && blockEndsInIRReturn(last.Else.Stmts)
+	default:
+		return false
+	}
+}
+
 func isVoidIRType(t backendir.Type) bool {
 	_, ok := t.(*backendir.VoidType)
 	return ok
@@ -3666,8 +3688,9 @@ func lowerTryOpExprToBackendIRWithContext(op *checker.TryOp, expected checker.Ty
 	// checker, the catch block's value type matches the function's return type
 	// (whether or not it equals the unwrapped success type). Finalize the catch
 	// block so its trailing expression becomes a return statement, mirroring the
-	// VM's `OpReturn` after the catch body.
-	finalizeFunctionBodyForReturn(catchBlock, lowerCheckerTypeToBackendIR(catchExpected))
+	// VM's `OpReturn` after the catch body. Void catch blocks still need an
+	// explicit return so execution does not continue into the success unwrap.
+	finalizeCatchBlockForReturn(catchBlock, lowerCheckerTypeToBackendIR(catchExpected))
 	return &backendir.TryExpr{
 		Kind:     kind,
 		Subject:  lowerExpressionOrOpaque(op.Expr()),
