@@ -1345,6 +1345,19 @@ func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType a
 }
 
 func (e *backendIREmitter) emitBuiltinExternBody(decl *backendir.FuncDecl, locals map[string]string) ([]ast.Stmt, bool, error) {
+	switch decl.ExternBinding {
+	case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
+		if len(decl.Params) != 1 {
+			return nil, true, fmt.Errorf("extern %s expects 1 arg, got %d", decl.ExternBinding, len(decl.Params))
+		}
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent(locals[decl.Params[0].Name])}}}, true, nil
+	case "VoidToDynamic":
+		if len(decl.Params) != 0 {
+			return nil, true, fmt.Errorf("extern VoidToDynamic expects 0 args, got %d", len(decl.Params))
+		}
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("nil")}}}, true, nil
+	}
+
 	resultType, ok := decl.Return.(*backendir.ResultType)
 	if !ok {
 		return nil, false, nil
