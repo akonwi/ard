@@ -2384,7 +2384,7 @@ func (e *backendIREmitter) emitUnionMatchStmt(expr *backendir.UnionMatchExpr, re
 	seen := cloneSet(seenLocals)
 	matchValueName := uniqueLocalName("unionValue", seen)
 	clauses := make([]ast.Stmt, 0, len(expr.Cases)+1)
-	for _, matchCase := range expr.Cases {
+	for _, matchCase := range orderedUnionMatchCases(expr.Cases) {
 		caseType, err := e.emitType(matchCase.Type)
 		if err != nil {
 			return nil, err
@@ -2447,7 +2447,7 @@ func (e *backendIREmitter) emitUnionMatchAssignStmts(targetName string, expr *ba
 	seen := cloneSet(seenLocals)
 	matchValueName := uniqueLocalName("unionValue", seen)
 	clauses := make([]ast.Stmt, 0, len(expr.Cases)+1)
-	for _, matchCase := range expr.Cases {
+	for _, matchCase := range orderedUnionMatchCases(expr.Cases) {
 		caseType, err := e.emitType(matchCase.Type)
 		if err != nil {
 			return nil, err
@@ -2575,6 +2575,22 @@ func backendIRTypeKey(t backendir.Type) string {
 	}
 }
 
+func orderedUnionMatchCases(cases []backendir.UnionMatchCase) []backendir.UnionMatchCase {
+	if len(cases) < 2 {
+		return cases
+	}
+	out := make([]backendir.UnionMatchCase, 0, len(cases))
+	dynamicCases := make([]backendir.UnionMatchCase, 0, 1)
+	for _, matchCase := range cases {
+		if _, ok := matchCase.Type.(*backendir.DynamicType); ok {
+			dynamicCases = append(dynamicCases, matchCase)
+			continue
+		}
+		out = append(out, matchCase)
+	}
+	return append(out, dynamicCases...)
+}
+
 func (e *backendIREmitter) emitUnionMatchExpr(expr *backendir.UnionMatchExpr, locals map[string]string) (ast.Expr, error) {
 	subject, err := e.emitExpr(expr.Subject, locals)
 	if err != nil {
@@ -2598,7 +2614,7 @@ func (e *backendIREmitter) emitUnionMatchExpr(expr *backendir.UnionMatchExpr, lo
 	seen := seenLocalNames(locals)
 	matchValueName := uniqueLocalName("unionValue", seen)
 	clauses := make([]ast.Stmt, 0, len(expr.Cases)+1)
-	for _, matchCase := range expr.Cases {
+	for _, matchCase := range orderedUnionMatchCases(expr.Cases) {
 		caseType, err := e.emitType(matchCase.Type)
 		if err != nil {
 			return nil, err
