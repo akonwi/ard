@@ -85,6 +85,11 @@ func builtinDynamicToList(data any) Result[[]any, string] {
 	if data == nil {
 		return Err[[]any, string]("null")
 	}
+	if items, ok := data.([]any); ok {
+		out := make([]any, len(items))
+		copy(out, items)
+		return Ok[[]any, string](out)
+	}
 	value := reflect.ValueOf(data)
 	for value.Kind() == reflect.Interface {
 		if value.IsNil() {
@@ -106,6 +111,13 @@ func builtinDynamicToMap(data any) Result[map[string]any, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
 		return Err[map[string]any, string]("null")
+	}
+	if items, ok := data.(map[string]any); ok {
+		out := make(map[string]any, len(items))
+		for key, value := range items {
+			out[key] = value
+		}
+		return Ok[map[string]any, string](out)
 	}
 	value := reflect.ValueOf(data)
 	for value.Kind() == reflect.Interface {
@@ -136,6 +148,17 @@ func builtinDynamicToMap(data any) Result[map[string]any, string] {
 }
 
 func builtinExtractField(data any, name string) Result[any, string] {
+	data = builtinDynamicValue(data)
+	if data == nil {
+		return Err[any, string]("null")
+	}
+	if mapped, ok := data.(map[string]any); ok {
+		value, ok := mapped[name]
+		if !ok {
+			return Ok[any, string](nil)
+		}
+		return Ok[any, string](value)
+	}
 	mapped := builtinDynamicToMap(data)
 	if mapped.IsErr() {
 		return Err[any, string](mapped.UnwrapErr())
