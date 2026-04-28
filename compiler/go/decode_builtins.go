@@ -341,7 +341,8 @@ func decodeStringErrorsSlow[E any](data any) Result[string, []E] {
 }
 
 func DecodeIntErrorsExtern[E any](data any) Result[int, []E] {
-	if value, ok := data.(float64); ok {
+	switch value := data.(type) {
+	case float64:
 		intValue := int(value)
 		if value == float64(intValue) {
 			return Result[int, []E]{value: intValue, ok: true}
