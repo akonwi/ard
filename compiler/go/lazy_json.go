@@ -392,6 +392,9 @@ func parseLazyJSONIntAt(s string, idx int) (int, int, bool) {
 	}
 	start := idx
 	if s[idx] >= '0' && s[idx] <= '9' {
+		if s[idx] == '0' && idx+1 < len(s) && s[idx+1] >= '0' && s[idx+1] <= '9' {
+			return 0, idx, false
+		}
 		value := 0
 		for idx < len(s) {
 			ch := s[idx]
@@ -414,6 +417,9 @@ func parseLazyJSONIntAt(s string, idx int) (int, int, bool) {
 	if s[idx] == '-' {
 		idx++
 		if idx >= len(s) {
+			return 0, idx, false
+		}
+		if s[idx] == '0' && idx+1 < len(s) && s[idx+1] >= '0' && s[idx+1] <= '9' {
 			return 0, idx, false
 		}
 		value := 0
