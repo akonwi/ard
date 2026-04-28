@@ -7,8 +7,7 @@ type jsonDynamic string
 type jsonObjectDynamic struct {
 	raw    jsonDynamic
 	keys   [3]string
-	values [3]jsonDynamic
-	cached [3]any
+	values [3]any
 	count  int
 }
 
@@ -689,8 +688,11 @@ func scanJSONObjectNamesWithCache(s string, idx *int) (*jsonObjectDynamic, bool)
 		if cacheable {
 			if object.count < len(object.keys) {
 				object.keys[object.count] = key
-				object.values[object.count] = jsonDynamic(s[valueStart:*idx])
-				object.cached[object.count] = cached
+				if cached != nil {
+					object.values[object.count] = cached
+				} else {
+					object.values[object.count] = jsonDynamic(s[valueStart:*idx])
+				}
 				object.count++
 			} else {
 				cacheable = false
