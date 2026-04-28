@@ -21,6 +21,9 @@ func MapKeys[K comparable, V any](m map[K]V) []K {
 	}
 	if allStringKeys {
 		sort.Strings(stringKeys)
+		if keys, ok := any(stringKeys).([]K); ok {
+			return keys
+		}
 		keys := make([]K, len(stringKeys))
 		for i, key := range stringKeys {
 			keys[i] = any(key).(K)
