@@ -264,6 +264,46 @@ extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = {
   js = "ExtractField"
 }
 
+fn string_map(value: Decoder<$Value>) Decoder<[Str: $Value]> {
+  fn(data: Dynamic) [Str: $Value]![Error] {
+    let raw = try to_string_map(data) -> found {
+      let decode_err = Error{
+        expected: "Map",
+        found: found,
+        path: [],
+      }
+      Result::err([decode_err])
+    }
+
+    mut errors: [Error] = []
+    mut out: [Str: $Value] = [:]
+
+    for k, v in raw {
+      match value(v) {
+        ok(decoded_val) => out.set(k, decoded_val),
+        err(errs) => {
+          for e in errs {
+            mut path = e.path
+            path.push("values")
+            errors.push(
+              Error{
+                expected: e.expected,
+                found: e.found,
+                path: path,
+              },
+            )
+          }
+        },
+      }
+    }
+
+    match errors.size() {
+      0 => Result::ok(out),
+      _ => Result::err(errors),
+    }
+  }
+}
+
 fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
   fn(data: Dynamic) $T![Error] {
     let raw = try extract_field(data, name) -> found {
