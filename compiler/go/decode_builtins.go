@@ -40,15 +40,15 @@ func builtinDecodeInt(data any) Result[int, builtinDecodeError] {
 		return Err[int, builtinDecodeError](makeBuiltinDecodeError("Int", "null"))
 	}
 	switch value := data.(type) {
-	case int:
-		return Ok[int, builtinDecodeError](value)
-	case int64:
-		return Ok[int, builtinDecodeError](int(value))
 	case float64:
 		intValue := int(value)
 		if value == float64(intValue) {
 			return Ok[int, builtinDecodeError](intValue)
 		}
+	case int:
+		return Ok[int, builtinDecodeError](value)
+	case int64:
+		return Ok[int, builtinDecodeError](int(value))
 	}
 	return Err[int, builtinDecodeError](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))
 }
