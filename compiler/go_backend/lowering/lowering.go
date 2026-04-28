@@ -2474,7 +2474,16 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 }
 
 func lowerCallArgToBackendIR(arg checker.Expression, param checker.Parameter) backendir.Expr {
+	return lowerCallArgToBackendIRWithBindings(arg, param, nil)
+}
+
+func lowerCallArgToBackendIRWithBindings(arg checker.Expression, param checker.Parameter, bindings map[string]checker.Type) backendir.Expr {
 	value := lowerExpressionOrOpaqueExpected(arg, param.Type)
+	if _, isListLiteral := arg.(*checker.ListLiteral); isListLiteral && len(bindings) > 0 {
+		if expected := substituteBackendIRTypeVars(lowerCheckerTypeToBackendIR(param.Type), backendIRTypeBindings(bindings)); expected != nil {
+			value = lowerExpressionOrOpaqueExpectedBackendIR(arg, expected)
+		}
+	}
 	if param.Mutable && mutableParamNeedsPointer(param.Type) {
 		value = &backendir.AddressOfExpr{Value: value}
 	}
@@ -2488,11 +2497,31 @@ func lowerCallArgToBackendIR(arg checker.Expression, param checker.Parameter) ba
 	return value
 }
 
+func lowerExpressionOrOpaqueExpectedBackendIR(expr checker.Expression, expected backendir.Type) backendir.Expr {
+	if expr == nil {
+		return literalExpr("nil_expr", "")
+	}
+	if listLiteral, ok := expr.(*checker.ListLiteral); ok {
+		elements := make([]backendir.Expr, 0, len(listLiteral.Elements))
+		for _, element := range listLiteral.Elements {
+			elements = append(elements, lowerExpressionOrOpaque(element))
+		}
+		if _, ok := expected.(*backendir.ListType); ok {
+			return &backendir.ListLiteralExpr{Type: expected, Elements: elements}
+		}
+	}
+	return lowerExpressionOrOpaqueExpected(expr, nil)
+}
+
 func lowerCallArgsToBackendIR(args []checker.Expression, def *checker.FunctionDef) []backendir.Expr {
+	return lowerCallArgsToBackendIRWithBindings(args, def, nil)
+}
+
+func lowerCallArgsToBackendIRWithBindings(args []checker.Expression, def *checker.FunctionDef, bindings map[string]checker.Type) []backendir.Expr {
 	out := make([]backendir.Expr, 0, len(args))
 	for i, arg := range args {
 		if def != nil && i < len(def.Parameters) {
-			out = append(out, lowerCallArgToBackendIR(arg, def.Parameters[i]))
+			out = append(out, lowerCallArgToBackendIRWithBindings(arg, def.Parameters[i], bindings))
 			continue
 		}
 		out = append(out, lowerExpressionOrOpaque(arg))
@@ -2501,8 +2530,13 @@ func lowerCallArgsToBackendIR(args []checker.Expression, def *checker.FunctionDe
 }
 
 func inferGenericCallTypeArgs(def *checker.FunctionDef, actualReturn checker.Type) []backendir.Type {
+	_, args := inferGenericCallTypeArgBindings(def, nil, actualReturn)
+	return args
+}
+
+func inferGenericCallTypeArgBindings(def *checker.FunctionDef, callArgs []checker.Expression, actualReturn checker.Type) (map[string]checker.Type, []backendir.Type) {
 	if def == nil || actualReturn == nil {
-		return nil
+		return nil, nil
 	}
 	order := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -2511,16 +2545,33 @@ func inferGenericCallTypeArgs(def *checker.FunctionDef, actualReturn checker.Typ
 	}
 	collectUnboundTypeParamNames(effectiveFunctionReturnType(def), &order, seen)
 	if len(order) == 0 {
-		return nil
+		return nil, nil
 	}
 	bindings := make(map[string]checker.Type)
 	bindGenericTypeArgs(effectiveFunctionReturnType(def), actualReturn, bindings)
+	for i, arg := range callArgs {
+		if i >= len(def.Parameters) {
+			break
+		}
+		bindGenericTypeArgsFromExpr(def.Parameters[i].Type, arg, bindings)
+	}
 	if len(order) == 1 && bindings[order[0]] == nil {
 		bindings[order[0]] = singleGenericCallTypeArg(actualReturn)
 	}
+	args := backendIRTypeArgsFromBindings(order, bindings)
+	if len(args) == 0 {
+		return bindings, nil
+	}
+	return bindings, args
+}
+
+func backendIRTypeArgsFromBindings(order []string, bindings map[string]checker.Type) []backendir.Type {
 	args := make([]backendir.Type, 0, len(order))
 	for _, name := range order {
 		bound := bindings[name]
+		if tv, ok := bound.(*checker.TypeVar); ok && tv.Actual() != nil {
+			bound = tv.Actual()
+		}
 		if bound == nil {
 			return nil
 		}
@@ -2665,6 +2716,9 @@ func bindGenericTypeArgs(pattern checker.Type, actual checker.Type, bindings map
 	if pattern == nil || actual == nil {
 		return
 	}
+	if actualTypeVar, ok := actual.(*checker.TypeVar); ok && actualTypeVar.Actual() != nil {
+		actual = actualTypeVar.Actual()
+	}
 	switch p := pattern.(type) {
 	case *checker.TypeVar:
 		bindings[typeVarName(p)] = actual
@@ -2686,6 +2740,20 @@ func bindGenericTypeArgs(pattern checker.Type, actual checker.Type, bindings map
 			bindGenericTypeArgs(p.Val(), a.Val(), bindings)
 			bindGenericTypeArgs(p.Err(), a.Err(), bindings)
 		}
+	case *checker.StructDef:
+		if a, ok := actual.(*checker.StructDef); ok && p.Name == a.Name {
+			for _, fieldName := range sortedStringKeys(p.Fields) {
+				bindGenericTypeArgs(p.Fields[fieldName], a.Fields[fieldName], bindings)
+			}
+		}
+	case *checker.ExternType:
+		if a, ok := actual.(*checker.ExternType); ok && p.Name_ == a.Name_ {
+			for i, patternArg := range p.TypeArgs {
+				if i < len(a.TypeArgs) {
+					bindGenericTypeArgs(patternArg, a.TypeArgs[i], bindings)
+				}
+			}
+		}
 	case *checker.FunctionDef:
 		if a, ok := actual.(*checker.FunctionDef); ok {
 			for i := range p.Parameters {
@@ -2698,6 +2766,73 @@ func bindGenericTypeArgs(pattern checker.Type, actual checker.Type, bindings map
 	}
 }
 
+func bindGenericTypeArgsFromExpr(pattern checker.Type, expr checker.Expression, bindings map[string]checker.Type) {
+	if pattern == nil || expr == nil {
+		return
+	}
+	if patternList, ok := pattern.(*checker.List); ok {
+		if listLiteral, ok := expr.(*checker.ListLiteral); ok {
+			for _, element := range listLiteral.Elements {
+				bindGenericTypeArgs(patternList.Of(), element.Type(), bindings)
+			}
+			return
+		}
+	}
+	bindGenericTypeArgs(pattern, expr.Type(), bindings)
+}
+
+func backendIRTypeBindings(bindings map[string]checker.Type) map[string]backendir.Type {
+	if len(bindings) == 0 {
+		return nil
+	}
+	out := make(map[string]backendir.Type, len(bindings))
+	for name, typ := range bindings {
+		if strings.TrimSpace(name) == "" || typ == nil {
+			continue
+		}
+		out[name] = lowerCheckerTypeToBackendIR(typ)
+	}
+	return out
+}
+
+func substituteBackendIRTypeVars(t backendir.Type, bindings map[string]backendir.Type) backendir.Type {
+	if t == nil || len(bindings) == 0 {
+		return t
+	}
+	switch typed := t.(type) {
+	case *backendir.TypeVarType:
+		if bound := bindings[typed.Name]; bound != nil {
+			return bound
+		}
+		return typed
+	case *backendir.NamedType:
+		copy := *typed
+		copy.Args = make([]backendir.Type, 0, len(typed.Args))
+		for _, arg := range typed.Args {
+			copy.Args = append(copy.Args, substituteBackendIRTypeVars(arg, bindings))
+		}
+		return &copy
+	case *backendir.ListType:
+		return &backendir.ListType{Elem: substituteBackendIRTypeVars(typed.Elem, bindings)}
+	case *backendir.MapType:
+		return &backendir.MapType{Key: substituteBackendIRTypeVars(typed.Key, bindings), Value: substituteBackendIRTypeVars(typed.Value, bindings)}
+	case *backendir.MaybeType:
+		return &backendir.MaybeType{Of: substituteBackendIRTypeVars(typed.Of, bindings)}
+	case *backendir.ResultType:
+		return &backendir.ResultType{Val: substituteBackendIRTypeVars(typed.Val, bindings), Err: substituteBackendIRTypeVars(typed.Err, bindings)}
+	case *backendir.FuncType:
+		copy := *typed
+		copy.Params = make([]backendir.Type, 0, len(typed.Params))
+		for _, param := range typed.Params {
+			copy.Params = append(copy.Params, substituteBackendIRTypeVars(param, bindings))
+		}
+		copy.Return = substituteBackendIRTypeVars(typed.Return, bindings)
+		return &copy
+	default:
+		return typed
+	}
+}
+
 func lowerFunctionCallToBackendIR(call *checker.FunctionCall) backendir.Expr {
 	return lowerFunctionCallToBackendIRWithExpected(call, nil)
 }
@@ -2706,7 +2841,6 @@ func lowerFunctionCallToBackendIRWithExpected(call *checker.FunctionCall, expect
 	if call == nil {
 		return callExpr("call", literalExpr("nil", "call"))
 	}
-	args := lowerCallArgsToBackendIR(call.Args, call.Definition())
 	name := strings.TrimSpace(call.Name)
 	if name == "" {
 		name = "anonymous_fn"
@@ -2715,7 +2849,8 @@ func lowerFunctionCallToBackendIRWithExpected(call *checker.FunctionCall, expect
 	if expected != nil {
 		actualReturn = expected
 	}
-	typeArgs := inferGenericCallTypeArgs(call.Definition(), actualReturn)
+	bindings, typeArgs := inferGenericCallTypeArgBindings(call.Definition(), call.Args, actualReturn)
+	args := lowerCallArgsToBackendIRWithBindings(call.Args, call.Definition(), bindings)
 	if len(typeArgs) == 0 && len(args) == 0 && shouldInferZeroArgGenericCallTypeArgs(call.Definition(), "", name) {
 		typeArgs = inferZeroArgGenericCallTypeArgs(actualReturn)
 	}
@@ -2737,7 +2872,6 @@ func lowerModuleFunctionCallToBackendIRWithExpected(call *checker.ModuleFunction
 	if special := lowerSpecialModuleConstructorToBackendIR(call, nil); special != nil {
 		return special
 	}
-	args := lowerCallArgsToBackendIR(call.Call.Args, call.Call.Definition())
 	moduleName := strings.TrimSpace(call.Module)
 	if moduleName == "" {
 		moduleName = "module"
@@ -2750,7 +2884,8 @@ func lowerModuleFunctionCallToBackendIRWithExpected(call *checker.ModuleFunction
 	if expected != nil {
 		actualReturn = expected
 	}
-	typeArgs := inferGenericCallTypeArgs(call.Call.Definition(), actualReturn)
+	bindings, typeArgs := inferGenericCallTypeArgBindings(call.Call.Definition(), call.Call.Args, actualReturn)
+	args := lowerCallArgsToBackendIRWithBindings(call.Call.Args, call.Call.Definition(), bindings)
 	if len(typeArgs) == 0 && len(args) == 0 && shouldInferZeroArgGenericCallTypeArgs(call.Call.Definition(), moduleName, funcName) {
 		typeArgs = inferZeroArgGenericCallTypeArgs(actualReturn)
 	}
