@@ -755,8 +755,187 @@ func lowerModuleToBackendIR(module checker.Module, packageName string, entrypoin
 	collectOrphanTypeDecls(module.Program(), out, seenDecls)
 
 	out.Entrypoint = lowerEntrypointStatementsToBackendIRBlock(topLevelExecutableStatements(module.Program().Statements))
+	rewriteImportedAnonFunctionCalls(out, module)
 	qualifyImportedNamedTypes(out, module)
 	return out, nil
+}
+
+func rewriteImportedAnonFunctionCalls(module *backendir.Module, source checker.Module) {
+	if module == nil || source == nil || source.Program() == nil {
+		return
+	}
+	bindings := importedAnonFunctionBindings(source)
+	if len(bindings) == 0 {
+		return
+	}
+	for _, decl := range module.Decls {
+		rewriteImportedAnonFunctionCallsInDecl(decl, bindings)
+	}
+	rewriteImportedAnonFunctionCallsInBlock(module.Entrypoint, bindings)
+}
+
+func importedAnonFunctionBindings(source checker.Module) map[string]map[string]string {
+	bindings := make(map[string]map[string]string)
+	if source == nil || source.Program() == nil {
+		return bindings
+	}
+	for _, imported := range source.Program().Imports {
+		if imported == nil || imported.Program() == nil {
+			continue
+		}
+		path := strings.TrimSpace(imported.Path())
+		if path == "" {
+			continue
+		}
+		for _, stmt := range imported.Program().Statements {
+			variableDef, ok := stmt.Stmt.(*checker.VariableDef)
+			if !ok || variableDef == nil || variableDef.Value == nil {
+				continue
+			}
+			functionDef, ok := variableDef.Value.(*checker.FunctionDef)
+			if !ok || functionDef == nil || strings.TrimSpace(functionDef.Name) == "" {
+				continue
+			}
+			if bindings[path] == nil {
+				bindings[path] = make(map[string]string)
+			}
+			bindings[path][functionDef.Name] = variableDef.Name
+		}
+	}
+	return bindings
+}
+
+func rewriteImportedAnonFunctionCallsInDecl(decl backendir.Decl, bindings map[string]map[string]string) {
+	switch d := decl.(type) {
+	case *backendir.FuncDecl:
+		rewriteImportedAnonFunctionCallsInBlock(d.Body, bindings)
+	case *backendir.VarDecl:
+		rewriteImportedAnonFunctionCallsInExpr(d.Value, bindings)
+	case *backendir.StructDecl:
+		for _, method := range d.Methods {
+			rewriteImportedAnonFunctionCallsInBlock(method.Body, bindings)
+		}
+	case *backendir.EnumDecl:
+		for _, method := range d.Methods {
+			rewriteImportedAnonFunctionCallsInBlock(method.Body, bindings)
+		}
+	}
+}
+
+func rewriteImportedAnonFunctionCallsInBlock(block *backendir.Block, bindings map[string]map[string]string) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		rewriteImportedAnonFunctionCallsInStmt(stmt, bindings)
+	}
+}
+
+func rewriteImportedAnonFunctionCallsInStmt(stmt backendir.Stmt, bindings map[string]map[string]string) {
+	switch s := stmt.(type) {
+	case *backendir.ReturnStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Value, bindings)
+	case *backendir.ExprStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Value, bindings)
+	case *backendir.AssignStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Value, bindings)
+	case *backendir.BindStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Value, bindings)
+	case *backendir.MemberAssignStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Subject, bindings)
+		rewriteImportedAnonFunctionCallsInExpr(s.Value, bindings)
+	case *backendir.ForIntRangeStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Start, bindings)
+		rewriteImportedAnonFunctionCallsInExpr(s.End, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Body, bindings)
+	case *backendir.ForLoopStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.InitValue, bindings)
+		rewriteImportedAnonFunctionCallsInExpr(s.Cond, bindings)
+		rewriteImportedAnonFunctionCallsInStmt(s.Update, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Body, bindings)
+	case *backendir.ForInStrStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Value, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Body, bindings)
+	case *backendir.ForInListStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.List, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Body, bindings)
+	case *backendir.ForInMapStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Map, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Body, bindings)
+	case *backendir.WhileStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Cond, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Body, bindings)
+	case *backendir.IfStmt:
+		rewriteImportedAnonFunctionCallsInExpr(s.Cond, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Then, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(s.Else, bindings)
+	}
+}
+
+func rewriteImportedAnonFunctionCallsInExpr(expr backendir.Expr, bindings map[string]map[string]string) {
+	switch e := expr.(type) {
+	case *backendir.SelectorExpr:
+		if subject, ok := e.Subject.(*backendir.IdentExpr); ok {
+			if moduleBindings := bindings[strings.TrimSpace(subject.Name)]; len(moduleBindings) > 0 {
+				if name := strings.TrimSpace(moduleBindings[strings.TrimSpace(e.Name)]); name != "" {
+					e.Name = name
+				}
+			}
+		}
+		rewriteImportedAnonFunctionCallsInExpr(e.Subject, bindings)
+	case *backendir.CallExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Callee, bindings)
+		for _, arg := range e.Args {
+			rewriteImportedAnonFunctionCallsInExpr(arg, bindings)
+		}
+	case *backendir.TraitCoerceExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	case *backendir.MaybeSomeExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	case *backendir.ResultOkExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	case *backendir.ResultErrExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	case *backendir.AddressOfExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	case *backendir.FuncLiteralExpr:
+		rewriteImportedAnonFunctionCallsInBlock(e.Body, bindings)
+	case *backendir.ListLiteralExpr:
+		for _, element := range e.Elements {
+			rewriteImportedAnonFunctionCallsInExpr(element, bindings)
+		}
+	case *backendir.MapLiteralExpr:
+		for _, entry := range e.Entries {
+			rewriteImportedAnonFunctionCallsInExpr(entry.Key, bindings)
+			rewriteImportedAnonFunctionCallsInExpr(entry.Value, bindings)
+		}
+	case *backendir.StructLiteralExpr:
+		for _, field := range e.Fields {
+			rewriteImportedAnonFunctionCallsInExpr(field.Value, bindings)
+		}
+	case *backendir.IfExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Cond, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(e.Then, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(e.Else, bindings)
+	case *backendir.UnionMatchExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Subject, bindings)
+		for i := range e.Cases {
+			rewriteImportedAnonFunctionCallsInBlock(e.Cases[i].Body, bindings)
+		}
+		rewriteImportedAnonFunctionCallsInBlock(e.CatchAll, bindings)
+	case *backendir.TryExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Subject, bindings)
+		rewriteImportedAnonFunctionCallsInBlock(e.Catch, bindings)
+	case *backendir.PanicExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Message, bindings)
+	case *backendir.CopyExpr:
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	case *backendir.BlockExpr:
+		for _, setup := range e.Setup {
+			rewriteImportedAnonFunctionCallsInStmt(setup, bindings)
+		}
+		rewriteImportedAnonFunctionCallsInExpr(e.Value, bindings)
+	}
 }
 
 func qualifyImportedNamedTypes(module *backendir.Module, source checker.Module) {
@@ -945,6 +1124,8 @@ func qualifyImportedNamedTypesInStmt(stmt backendir.Stmt, owners map[string]stri
 	case *backendir.ExprStmt:
 		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
 	case *backendir.AssignStmt:
+		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
+	case *backendir.BindStmt:
 		qualifyImportedNamedTypesInExpr(s.Value, owners, local)
 	case *backendir.MemberAssignStmt:
 		qualifyImportedNamedTypesInExpr(s.Subject, owners, local)
