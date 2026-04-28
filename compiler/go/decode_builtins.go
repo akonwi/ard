@@ -386,6 +386,10 @@ func DecodeStringIntMapErrorsExtern[E any](data any) Result[map[string]int, []E]
 				continue
 			}
 		}
+		if value, ok := item.(int); ok {
+			out[key] = value
+			continue
+		}
 		itemResult := DecodeIntErrorsExtern[E](item)
 		if itemResult.ok {
 			out[key] = itemResult.value
