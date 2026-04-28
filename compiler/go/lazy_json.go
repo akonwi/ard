@@ -10,8 +10,8 @@ type jsonDynamic string
 
 type jsonObjectDynamic struct {
 	raw    jsonDynamic
-	keys   [8]string
-	values [8]jsonDynamic
+	keys   [4]string
+	values [4]jsonDynamic
 	count  int
 }
 
