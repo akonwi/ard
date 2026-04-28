@@ -370,6 +370,43 @@ func decodeIntErrorsSlow[E any](data any) Result[int, []E] {
 	return Result[int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))}}
 }
 
+func DecodeStringIntMapErrorsExtern[E any](data any) Result[map[string]int, []E] {
+	mapResult := DynamicToStringMapExtern(data)
+	if !mapResult.ok {
+		return Result[map[string]int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Map", mapResult.err))}}
+	}
+	raw := mapResult.value
+	out := make(map[string]int, len(raw))
+	var errors []E
+	for key, item := range raw {
+		if value, ok := item.(float64); ok {
+			intValue := int(value)
+			if value == float64(intValue) {
+				out[key] = intValue
+				continue
+			}
+		}
+		itemResult := DecodeIntErrorsExtern[E](item)
+		if itemResult.ok {
+			out[key] = itemResult.value
+			continue
+		}
+		for _, err := range itemResult.err {
+			errors = append(errors, appendDecodeErrorPath(err, "values"))
+		}
+	}
+	if len(errors) == 0 {
+		return Result[map[string]int, []E]{value: out, ok: true}
+	}
+	return Result[map[string]int, []E]{err: errors}
+}
+
+func appendDecodeErrorPath[E any](err E, segment string) E {
+	decodeErr := CoerceExtern[builtinDecodeError](err)
+	decodeErr.Path = append(decodeErr.Path, segment)
+	return CoerceExtern[E](decodeErr)
+}
+
 func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
 	listResult := builtinDynamicToList(data)
 	if !listResult.ok {

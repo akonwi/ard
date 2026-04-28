@@ -125,6 +125,50 @@ func DecodeIntErrors(args []*runtime.Object) *runtime.Object {
 	return runtime.MakeErr(runtime.MakeList(errType, result.UnwrapResult()))
 }
 
+// fn (Dynamic) [Str:Int]![Error]
+func DecodeStringIntMapErrors(args []*runtime.Object) *runtime.Object {
+	errType := getDecodeErrorType()
+	arg := args[0]
+	data := arg.Raw()
+	if data == nil {
+		return runtime.MakeErr(runtime.MakeList(errType, makeError("Map", "null", errType)))
+	}
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		return runtime.MakeErr(runtime.MakeList(errType, makeError("Map", formatRawValueForError(arg.GoValue()), errType)))
+	}
+	out := runtime.MakeMap(checker.Str, checker.Int)
+	errors := make([]*runtime.Object, 0)
+	for key, item := range dataMap {
+		result := DecodeInt([]*runtime.Object{runtime.MakeDynamic(item)})
+		if result.IsOk() {
+			out.Map_Set(runtime.MakeStr(key), result.UnwrapResult())
+			continue
+		}
+		err := result.UnwrapResult()
+		path := runtime.MakeList(checker.Str)
+		if err.IsStruct() {
+			if existing := err.Struct_Get("path"); existing != nil {
+				for _, step := range existing.AsList() {
+					path.List_Push(step)
+				}
+			}
+			path.List_Push(runtime.MakeStr("values"))
+			errors = append(errors, runtime.MakeStruct(errType, map[string]*runtime.Object{
+				"expected": err.Struct_Get("expected"),
+				"found":    err.Struct_Get("found"),
+				"path":     path,
+			}))
+		} else {
+			errors = append(errors, makeError("Int", formatRawValueForError(item), errType))
+		}
+	}
+	if len(errors) > 0 {
+		return runtime.MakeErr(runtime.MakeList(errType, errors...))
+	}
+	return runtime.MakeOk(out)
+}
+
 // fn (Dynamic) [Int]![Error]
 func DecodeIntListErrors(args []*runtime.Object) *runtime.Object {
 	errType := getDecodeErrorType()

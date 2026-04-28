@@ -67,6 +67,10 @@ private extern fn _decode_int_list_errors(data: Dynamic) [Int]![Error] = {
   go = "DecodeIntListErrors"
   js = "DecodeIntListErrors"
 }
+private extern fn _decode_string_int_map_errors(data: Dynamic) [Str: Int]![Error] = {
+  go = "DecodeStringIntMapErrors"
+  js = "DecodeStringIntMapErrors"
+}
 extern fn is_void(data: Dynamic) Bool = {
   go = "IsNil"
   js = "IsNil"
@@ -276,41 +280,7 @@ extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = {
 
 fn string_int_map() Decoder<[Str: Int]> {
   fn(data: Dynamic) [Str: Int]![Error] {
-    let raw = try to_string_map(data) -> found {
-      let decode_err = Error{
-        expected: "Map",
-        found: found,
-        path: [],
-      }
-      Result::err([decode_err])
-    }
-
-    mut errors: [Error] = []
-    mut out: [Str: Int] = [:]
-
-    for k, v in raw {
-      match _decode_int_errors(v) {
-        ok(decoded_val) => out.set(k, decoded_val),
-        err(errs) => {
-          for e in errs {
-            mut path = e.path
-            path.push("values")
-            errors.push(
-              Error{
-                expected: e.expected,
-                found: e.found,
-                path: path,
-              },
-            )
-          }
-        },
-      }
-    }
-
-    match errors.size() {
-      0 => Result::ok(out),
-      _ => Result::err(errors),
-    }
+    _decode_string_int_map_errors(data)
   }
 }
 

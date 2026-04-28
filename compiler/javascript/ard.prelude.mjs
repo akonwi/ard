@@ -295,6 +295,26 @@ export function DecodeIntListErrors(data) {
   return errors.length === 0 ? { ok: out } : { err: errors };
 }
 
+export function DecodeStringIntMapErrors(data) {
+  const map = DynamicToStringMap(data);
+  if (Object.prototype.hasOwnProperty.call(map, "err")) {
+    return { err: [makeDecodeError("Map", map.err)] };
+  }
+  const out = new Map();
+  const errors = [];
+  for (const [key, item] of map.ok) {
+    const result = DecodeIntErrors(item);
+    if (Object.prototype.hasOwnProperty.call(result, "ok")) {
+      out.set(key, result.ok);
+    } else {
+      for (const error of result.err) {
+        errors.push({ ...error, path: [...(error.path ?? []), "values"] });
+      }
+    }
+  }
+  return errors.length === 0 ? { ok: out } : { err: errors };
+}
+
 export function DecodeFloat(data) {
   if (data === null || data === undefined) return { err: makeDecodeError("Float", "null") };
   if (typeof data === "number") return { ok: data };
