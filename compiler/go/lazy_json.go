@@ -428,10 +428,10 @@ func parseLazyJSONIntSlow(s string, start, idx int) (int, int, bool) {
 		return parsed, end, ok
 	}
 	if s[idx] == '-' {
-		idx++
-		if idx >= len(s) || s[idx] < '0' || s[idx] > '9' {
+		if idx+1 >= len(s) || s[idx+1] < '0' || s[idx+1] > '9' {
 			return 0, idx, false
 		}
+		idx++
 		if s[idx] == '0' && idx+1 < len(s) && s[idx+1] >= '0' && s[idx+1] <= '9' {
 			return 0, idx, false
 		}
