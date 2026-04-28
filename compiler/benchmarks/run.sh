@@ -25,6 +25,8 @@ Usage: benchmarks/run.sh [options] [benchmark-name ...]
 
 Options:
   --mode runtime|cli   Benchmark built binaries or `ard run` commands (default: runtime)
+                       Runtime mode also compares prebuilt idiomatic Go binaries;
+                       CLI mode compares `go run` for the idiomatic Go variants.
   --runs N             Hyperfine run count (default: 10)
   --warmup N           Hyperfine warmup runs (default: 2)
   --export-dir PATH    Export per-benchmark hyperfine JSON into PATH
@@ -78,6 +80,41 @@ supports_js_server() {
   esac
 }
 
+native_go_program() {
+  printf './benchmarks/go/%s\n' "$1"
+}
+
+cleanup_generated_program_dir() {
+  local program_dir="${1%/*}"
+  rm -rf "$ROOT_DIR/$program_dir/generated"
+}
+
+assert_same_output() {
+  local benchmark="$1"
+  local expected_name="$2"
+  local expected="$3"
+  local actual_name="$4"
+  local actual="$5"
+
+  if [[ "$actual" != "$expected" ]]; then
+    echo "error: output mismatch for $benchmark: $actual_name differs from $expected_name" >&2
+    echo "  $expected_name: $expected" >&2
+    echo "  $actual_name: $actual" >&2
+    exit 1
+  fi
+}
+
+assert_printed_output() {
+  local benchmark="$1"
+  local command_name="$2"
+  local output="$3"
+
+  if [[ -z "$output" ]]; then
+    echo "error: $command_name:$benchmark produced no output" >&2
+    exit 1
+  fi
+}
+
 selected_benchmarks() {
   if [[ "$#" -eq 0 ]]; then
     for entry in "${BENCHMARKS[@]}"; do
@@ -104,10 +141,17 @@ run_runtime_benchmark() {
   local go_bin="$tmp_dir/${name}-go"
   local js_out="$tmp_dir/${name}.mjs"
   local js_runner="$tmp_dir/${name}-runner.mjs"
+  local native_go_src
+  native_go_src="$(native_go_program "$name")"
+  local native_go_bin="$tmp_dir/${name}-native-go"
+
+  cleanup_generated_program_dir "$rel_path"
 
   echo "==> building runtime binaries for $name"
   (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --out "$vm_bin")
   (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --target go --out "$go_bin")
+  cleanup_generated_program_dir "$rel_path"
+  (cd "$ROOT_DIR" && go build -o "$native_go_bin" "$native_go_src")
 
   local export_args=()
   if [[ -n "$EXPORT_DIR" ]]; then
@@ -118,6 +162,7 @@ run_runtime_benchmark() {
   local commands=(
     --command-name "vm:$name" "$vm_bin"
     --command-name "go:$name" "$go_bin"
+    --command-name "native-go:$name" "$native_go_bin"
   )
 
   if supports_js_server "$name"; then
@@ -131,11 +176,25 @@ EOF
     echo "==> skipping js-server for $name (unsupported target/module set)"
   fi
 
+  echo "==> verifying outputs for $name"
+  local expected actual
+  expected="$($vm_bin)"
+  actual="$($go_bin)"
+  assert_same_output "$name" "vm" "$expected" "go" "$actual"
+  actual="$($native_go_bin)"
+  assert_printed_output "$name" "native-go" "$actual"
+  if supports_js_server "$name"; then
+    actual="$(node "$js_runner")"
+    assert_same_output "$name" "vm" "$expected" "js" "$actual"
+  fi
+
   hyperfine \
     --warmup "$WARMUP" \
     --runs "$RUNS" \
     "${commands[@]}" \
     "${export_args[@]}"
+
+  cleanup_generated_program_dir "$rel_path"
 }
 
 run_cli_benchmark() {
@@ -148,9 +207,29 @@ run_cli_benchmark() {
     export_args+=(--export-json "$EXPORT_DIR/${name}.cli.json")
   fi
 
+  local native_go_src
+  native_go_src="$(native_go_program "$name")"
+
+  cleanup_generated_program_dir "$rel_path"
+
+  echo "==> verifying outputs for $name"
+  local expected actual
+  expected="$(cd "$ROOT_DIR" && "$ARD_BIN" run "$rel_path")"
+  actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target go "$rel_path")"
+  assert_same_output "$name" "vm" "$expected" "go" "$actual"
+  cleanup_generated_program_dir "$rel_path"
+  actual="$(cd "$ROOT_DIR" && go run "$native_go_src")"
+  assert_printed_output "$name" "native-go" "$actual"
+  if supports_js_server "$name"; then
+    actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target js-server "$rel_path")"
+    assert_same_output "$name" "vm" "$expected" "js" "$actual"
+    cleanup_generated_program_dir "$rel_path"
+  fi
+
   local commands=(
     --command-name "vm:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
     --command-name "go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target go '$rel_path'"
+    --command-name "native-go:$name" "cd '$ROOT_DIR' && go run '$native_go_src'"
   )
 
   if supports_js_server "$name"; then
@@ -164,6 +243,8 @@ run_cli_benchmark() {
     --runs "$RUNS" \
     "${commands[@]}" \
     "${export_args[@]}"
+
+  cleanup_generated_program_dir "$rel_path"
 }
 
 main() {
