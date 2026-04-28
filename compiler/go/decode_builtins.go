@@ -200,7 +200,7 @@ func builtinExtractField(data any, name string) Result[any, string] {
 		for idx := 0; idx < object.count; idx++ {
 			if object.keys[idx] == name {
 				if object.cached[idx] != nil {
-					return Ok[any, string](object.cached[idx])
+					return Result[any, string]{value: object.cached[idx], ok: true}
 				}
 				return Ok[any, string](object.values[idx])
 			}
