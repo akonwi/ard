@@ -144,7 +144,7 @@ func decodeLazyJSONIntList(s string) ([]int, bool) {
 		return nil, false
 	}
 	idx++
-	out := make([]int, 0, 8)
+	out := make([]int, 0, 16)
 	for {
 		idx = skipJSONSpaces(s, idx)
 		if idx >= len(s) {
