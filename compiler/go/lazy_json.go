@@ -399,18 +399,17 @@ func parseLazyJSONIntAt(s string, idx int) (int, int, bool) {
 				if isJSONValueEnd(ch) {
 					return value, idx, true
 				}
-				end := skipJSONValue(s, start)
-				if end < 0 {
-					return 0, idx, false
-				}
-				parsed, ok := parseLazyJSONFloatInt(s[start:end])
-				return parsed, end, ok
+				return parseLazyJSONIntSlow(s, start, idx)
 			}
 			value = value*10 + int(ch-'0')
 			idx++
 		}
 		return value, idx, true
 	}
+	return parseLazyJSONIntSlow(s, start, idx)
+}
+
+func parseLazyJSONIntSlow(s string, start, idx int) (int, int, bool) {
 	if s[idx] == '0' {
 		idx++
 		if idx < len(s) && s[idx] >= '0' && s[idx] <= '9' {
