@@ -319,6 +319,10 @@ func DecodeStringErrorsExtern[E any](data any) Result[string, []E] {
 	if value, ok := data.(string); ok {
 		return Result[string, []E]{value: value, ok: true}
 	}
+	return decodeStringErrorsSlow[E](data)
+}
+
+func decodeStringErrorsSlow[E any](data any) Result[string, []E] {
 	data = builtinDynamicValue(data)
 	if data == nil {
 		return Result[string, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Str", "null"))}}
@@ -336,6 +340,10 @@ func DecodeIntErrorsExtern[E any](data any) Result[int, []E] {
 			return Result[int, []E]{value: intValue, ok: true}
 		}
 	}
+	return decodeIntErrorsSlow[E](data)
+}
+
+func decodeIntErrorsSlow[E any](data any) Result[int, []E] {
 	data = builtinDynamicValue(data)
 	if data == nil {
 		return Result[int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Int", "null"))}}
