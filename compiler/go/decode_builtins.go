@@ -232,33 +232,33 @@ func formatBuiltinRawValueForError(v any) string {
 func DecodeStringExtern[E any](data any) Result[string, E] {
 	result := builtinDecodeString(data)
 	if result.ok {
-		return Ok[string, E](result.value)
+		return Result[string, E]{value: result.value, ok: true}
 	}
-	return Err[string, E](CoerceExtern[E](result.err))
+	return Result[string, E]{err: CoerceExtern[E](result.err)}
 }
 
 func DecodeIntExtern[E any](data any) Result[int, E] {
 	result := builtinDecodeInt(data)
 	if result.ok {
-		return Ok[int, E](result.value)
+		return Result[int, E]{value: result.value, ok: true}
 	}
-	return Err[int, E](CoerceExtern[E](result.err))
+	return Result[int, E]{err: CoerceExtern[E](result.err)}
 }
 
 func DecodeFloatExtern[E any](data any) Result[float64, E] {
 	result := builtinDecodeFloat(data)
 	if result.ok {
-		return Ok[float64, E](result.value)
+		return Result[float64, E]{value: result.value, ok: true}
 	}
-	return Err[float64, E](CoerceExtern[E](result.err))
+	return Result[float64, E]{err: CoerceExtern[E](result.err)}
 }
 
 func DecodeBoolExtern[E any](data any) Result[bool, E] {
 	result := builtinDecodeBool(data)
 	if result.ok {
-		return Ok[bool, E](result.value)
+		return Result[bool, E]{value: result.value, ok: true}
 	}
-	return Err[bool, E](CoerceExtern[E](result.err))
+	return Result[bool, E]{err: CoerceExtern[E](result.err)}
 }
 
 func DynamicToListExtern(data any) Result[[]any, string] {
