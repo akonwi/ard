@@ -91,6 +91,54 @@ func isJSONHex(ch byte) bool {
 	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
+func scanJSONStringContent(s string, idx int) (string, int, bool) {
+	if idx >= len(s) || s[idx] != '"' {
+		return "", idx, false
+	}
+	start := idx
+	hasEscape := false
+	idx++
+	for idx < len(s) {
+		switch s[idx] {
+		case '\\':
+			hasEscape = true
+			idx++
+			if idx >= len(s) {
+				return "", idx, false
+			}
+			switch s[idx] {
+			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+				idx++
+			case 'u':
+				if idx+4 >= len(s) {
+					return "", idx, false
+				}
+				for i := idx + 1; i <= idx+4; i++ {
+					if !isJSONHex(s[i]) {
+						return "", idx, false
+					}
+				}
+				idx += 5
+			default:
+				return "", idx, false
+			}
+		case '"':
+			end := idx + 1
+			if hasEscape {
+				value, err := strconv.Unquote(s[start:end])
+				return value, end, err == nil
+			}
+			return s[start+1 : idx], end, true
+		default:
+			if s[idx] < 0x20 {
+				return "", idx, false
+			}
+			idx++
+		}
+	}
+	return "", idx, false
+}
+
 func skipJSONValue(s string, idx int) int {
 	idx = skipJSONSpaces(s, idx)
 	if idx >= len(s) {
@@ -151,12 +199,7 @@ func extractLazyJSONField(s, name string) (string, bool, bool) {
 		if s[idx] == '}' {
 			return "", false, true
 		}
-		keyStart := idx
-		keyEnd := skipJSONString(s, idx)
-		if keyEnd < 0 {
-			return "", false, false
-		}
-		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		key, keyEnd, ok := scanJSONStringContent(s, idx)
 		if !ok {
 			return "", false, false
 		}
@@ -221,12 +264,7 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 		if s[idx] == '}' {
 			return out, true
 		}
-		keyStart := idx
-		keyEnd := skipJSONString(s, idx)
-		if keyEnd < 0 {
-			return nil, false
-		}
-		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		key, keyEnd, ok := scanJSONStringContent(s, idx)
 		if !ok {
 			return nil, false
 		}
@@ -483,12 +521,7 @@ func scanJSONObjectNamesWithCache(s string, idx *int) (*jsonObjectDynamic, bool)
 			}
 			return nil, true
 		}
-		keyStart := *idx
-		keyEnd := skipJSONString(s, keyStart)
-		if keyEnd < 0 {
-			return nil, false
-		}
-		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		key, keyEnd, ok := scanJSONStringContent(s, *idx)
 		if !ok {
 			return nil, false
 		}
@@ -563,12 +596,7 @@ func scanJSONObjectNames(s string, idx *int) bool {
 			*idx = *idx + 1
 			return true
 		}
-		keyStart := *idx
-		keyEnd := skipJSONString(s, keyStart)
-		if keyEnd < 0 {
-			return false
-		}
-		key, ok := jsonStringContent(s[keyStart:keyEnd])
+		key, keyEnd, ok := scanJSONStringContent(s, *idx)
 		if !ok {
 			return false
 		}
