@@ -296,7 +296,6 @@ func scanJSONStringIntMap(s string, idx *int) (map[string]int, bool) {
 	}
 	var seenSmall [8]string
 	seenCount := 0
-	var seenMap map[string]struct{}
 	*idx = *idx + 1
 	out := make(map[string]int, 4)
 	for {
@@ -312,28 +311,16 @@ func scanJSONStringIntMap(s string, idx *int) (map[string]int, bool) {
 		if !ok {
 			return nil, false
 		}
-		if seenMap != nil {
-			if _, ok := seenMap[key]; ok {
+		for i := 0; i < seenCount; i++ {
+			if seenSmall[i] == key {
 				return nil, false
 			}
-			seenMap[key] = struct{}{}
-		} else {
-			for i := 0; i < seenCount; i++ {
-				if seenSmall[i] == key {
-					return nil, false
-				}
-			}
-			if seenCount < len(seenSmall) {
-				seenSmall[seenCount] = key
-				seenCount++
-			} else {
-				seenMap = make(map[string]struct{}, len(seenSmall)*2)
-				for _, existing := range seenSmall {
-					seenMap[existing] = struct{}{}
-				}
-				seenMap[key] = struct{}{}
-			}
 		}
+		if seenCount >= len(seenSmall) {
+			return nil, false
+		}
+		seenSmall[seenCount] = key
+		seenCount++
 		*idx = skipJSONSpaces(s, keyEnd)
 		if *idx >= len(s) || s[*idx] != ':' {
 			return nil, false
