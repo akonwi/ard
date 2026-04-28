@@ -196,6 +196,13 @@ func builtinDynamicToStringMap(data any) Result[map[string]any, string] {
 }
 
 func builtinExtractField(data any, name string) Result[any, string] {
+	if mapped, ok := data.(map[string]any); ok {
+		value, ok := mapped[name]
+		if !ok {
+			return Ok[any, string](nil)
+		}
+		return Ok[any, string](value)
+	}
 	data = builtinDynamicValue(data)
 	if data == nil {
 		return Err[any, string]("null")
