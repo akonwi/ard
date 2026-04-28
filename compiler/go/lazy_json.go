@@ -152,11 +152,7 @@ func decodeLazyJSONIntList(s string) ([]int, bool) {
 		if s[idx] == ']' {
 			return out, true
 		}
-		end := skipJSONValue(s, idx)
-		if end < 0 {
-			return nil, false
-		}
-		intValue, ok := parseLazyJSONIntNumber(s[idx:end])
+		intValue, end, ok := parseLazyJSONIntAt(s, idx)
 		if !ok {
 			return nil, false
 		}
@@ -197,11 +193,7 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 			return nil, false
 		}
 		valueStart := skipJSONSpaces(s, idx+1)
-		valueEnd := skipJSONValue(s, valueStart)
-		if valueEnd < 0 {
-			return nil, false
-		}
-		intValue, ok := parseLazyJSONIntNumber(s[valueStart:valueEnd])
+		intValue, valueEnd, ok := parseLazyJSONIntAt(s, valueStart)
 		if !ok {
 			return nil, false
 		}
@@ -210,6 +202,72 @@ func decodeLazyJSONStringIntMap(s string) (map[string]int, bool) {
 		if idx < len(s) && s[idx] == ',' {
 			idx++
 		}
+	}
+}
+
+func parseLazyJSONIntAt(s string, idx int) (int, int, bool) {
+	if idx >= len(s) {
+		return 0, idx, false
+	}
+	start := idx
+	if s[idx] >= '0' && s[idx] <= '9' {
+		value := 0
+		for idx < len(s) {
+			ch := s[idx]
+			if ch < '0' || ch > '9' {
+				if isJSONValueEnd(ch) {
+					return value, idx, true
+				}
+				end := skipJSONValue(s, start)
+				if end < 0 {
+					return 0, idx, false
+				}
+				parsed, ok := parseLazyJSONFloatInt(s[start:end])
+				return parsed, end, ok
+			}
+			value = value*10 + int(ch-'0')
+			idx++
+		}
+		return value, idx, true
+	}
+	if s[idx] == '-' {
+		idx++
+		if idx >= len(s) {
+			return 0, idx, false
+		}
+		value := 0
+		for idx < len(s) {
+			ch := s[idx]
+			if ch < '0' || ch > '9' {
+				if isJSONValueEnd(ch) {
+					return -value, idx, true
+				}
+				end := skipJSONValue(s, start)
+				if end < 0 {
+					return 0, idx, false
+				}
+				parsed, ok := parseLazyJSONFloatInt(s[start:end])
+				return parsed, end, ok
+			}
+			value = value*10 + int(ch-'0')
+			idx++
+		}
+		return -value, idx, true
+	}
+	end := skipJSONValue(s, start)
+	if end < 0 {
+		return 0, idx, false
+	}
+	parsed, ok := parseLazyJSONFloatInt(s[start:end])
+	return parsed, end, ok
+}
+
+func isJSONValueEnd(ch byte) bool {
+	switch ch {
+	case ',', '}', ']', ' ', '\n', '\r', '\t':
+		return true
+	default:
+		return false
 	}
 }
 
