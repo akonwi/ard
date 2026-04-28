@@ -1195,7 +1195,7 @@ func TestEmitGoFileFromBackendIR_TryExprNative(t *testing.T) {
 	if !strings.Contains(generated, "_ = err") {
 		t.Fatalf("expected generated source to discard possibly-unused catch variable binding\n%s", generated)
 	}
-	if !strings.Contains(generated, "(&__ardTryValue).ExpectRef(\"unreachable err in try success path\")") {
+	if !strings.Contains(generated, "__ardTryValue.ExpectRef(\"unreachable err in try success path\")") {
 		t.Fatalf("expected generated source to contain result success unwrap\n%s", generated)
 	}
 }
@@ -1247,7 +1247,7 @@ func TestEmitGoFileFromBackendIR_TryExprWithoutCatchNative(t *testing.T) {
 	if !strings.Contains(generated, "return ardgo.Err[int, string](__ardTryValue.UnwrapErr())") {
 		t.Fatalf("expected generated source to contain default result failure propagation\n%s", generated)
 	}
-	if !strings.Contains(generated, "(&__ardTryValue).ExpectRef(\"unreachable err in try success path\")") {
+	if !strings.Contains(generated, "__ardTryValue.ExpectRef(\"unreachable err in try success path\")") {
 		t.Fatalf("expected generated source to contain result success unwrap\n%s", generated)
 	}
 }
@@ -1359,7 +1359,7 @@ func TestEmitGoFileFromBackendIR_TryExprReturnStmtNative(t *testing.T) {
 	if !strings.Contains(generated, "err := __ardTryValue.UnwrapErr()") {
 		t.Fatalf("expected generated source to bind result err catch variable\n%s", generated)
 	}
-	if !strings.Contains(generated, "return (&__ardTryValue).ExpectRef(\"unreachable err in try success path\")") {
+	if !strings.Contains(generated, "return __ardTryValue.ExpectRef(\"unreachable err in try success path\")") {
 		t.Fatalf("expected generated source to return success path via Expect on temp\n%s", generated)
 	}
 }
@@ -1422,7 +1422,7 @@ func TestEmitGoFileFromBackendIR_TryExprExprStmtNative(t *testing.T) {
 	if !strings.Contains(generated, "_ = err") {
 		t.Fatalf("expected generated source to discard possibly-unused catch variable binding\n%s", generated)
 	}
-	if !strings.Contains(generated, "(&__ardTryValue).ExpectRef(\"unreachable err in try success path\")") {
+	if !strings.Contains(generated, "__ardTryValue.ExpectRef(\"unreachable err in try success path\")") {
 		t.Fatalf("expected generated source to contain result success unwrap\n%s", generated)
 	}
 }
@@ -1513,7 +1513,7 @@ func TestEmitGoFileFromBackendIR_TryExprCatchInLoopReturnsEarly(t *testing.T) {
 	}
 	// The success path inside the loop must continue normally with the
 	// unwrapped value, not panic on the unreachable-err message.
-	if !strings.Contains(generated, "n := (&__ardTryValue).ExpectRef(\"unreachable err in try success path\")") {
+	if !strings.Contains(generated, "n := __ardTryValue.ExpectRef(\"unreachable err in try success path\")") {
 		t.Fatalf("expected loop body to bind unwrapped success value into n\n%s", generated)
 	}
 	// The closure form must not be used for control-flow try.
@@ -2454,7 +2454,7 @@ func TestEmitGoFileFromBackendIR_MaybeResultMethodOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "resultval.IsOk()") {
 		t.Fatalf("expected generated source to contain native result_is_ok emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "(&resultval).ExpectRef(\"bad\")") {
+	if !strings.Contains(generated, "resultval.ExpectRef(\"bad\")") {
 		t.Fatalf("expected generated source to contain native result_expect emission\n%s", generated)
 	}
 	if !strings.Contains(generated, "ardgo.ResultMap(resultval, resultmap)") {

@@ -2724,7 +2724,7 @@ func (e *backendIREmitter) emitTryExprControlStmtsWithCatchLocals(
 	case "result":
 		cond = &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(tryValueName), "IsErr")}
 		success = &ast.CallExpr{
-			Fun: selectorExpr(&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tryValueName)}, "ExpectRef"),
+			Fun: selectorExpr(ast.NewIdent(tryValueName), "ExpectRef"),
 			Args: []ast.Expr{
 				&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unreachable err in try success path")},
 			},
@@ -2937,7 +2937,7 @@ func (e *backendIREmitter) emitTryExpr(expr *backendir.TryExpr, locals map[strin
 	case "result":
 		cond = &ast.CallExpr{Fun: selectorExpr(ast.NewIdent(tryValueName), "IsErr")}
 		success = &ast.CallExpr{
-			Fun: selectorExpr(&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tryValueName)}, "ExpectRef"),
+			Fun: selectorExpr(ast.NewIdent(tryValueName), "ExpectRef"),
 			Args: []ast.Expr{
 				&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unreachable err in try success path")},
 			},
@@ -3492,7 +3492,7 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 				return nil, err
 			}
 			if isAddressableASTExpr(subject) {
-				return &ast.CallExpr{Fun: selectorExpr(&ast.UnaryExpr{Op: token.AND, X: subject}, "ExpectRef"), Args: []ast.Expr{message}}, nil
+				return &ast.CallExpr{Fun: selectorExpr(subject, "ExpectRef"), Args: []ast.Expr{message}}, nil
 			}
 			return &ast.CallExpr{Fun: selectorExpr(subject, "Expect"), Args: []ast.Expr{message}}, nil
 		case "result_or":
