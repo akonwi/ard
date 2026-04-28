@@ -199,6 +199,9 @@ func builtinExtractField(data any, name string) Result[any, string] {
 	if object, ok := data.(*jsonObjectDynamic); ok {
 		for idx := 0; idx < object.count; idx++ {
 			if object.keys[idx] == name {
+				if object.cached[idx] != nil {
+					return Ok[any, string](object.cached[idx])
+				}
 				return Ok[any, string](object.values[idx])
 			}
 		}
@@ -387,6 +390,9 @@ func decodeIntErrorsSlow[E any](data any) Result[int, []E] {
 }
 
 func DecodeStringIntMapErrorsExtern[E any](data any) Result[map[string]int, []E] {
+	if typed, ok := data.(map[string]int); ok {
+		return Result[map[string]int, []E]{value: typed, ok: true}
+	}
 	if raw, ok := data.(jsonDynamic); ok {
 		if out, ok := decodeLazyJSONStringIntMap(string(raw)); ok {
 			return Result[map[string]int, []E]{value: out, ok: true}

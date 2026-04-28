@@ -8,6 +8,7 @@ type jsonObjectDynamic struct {
 	raw    jsonDynamic
 	keys   [3]string
 	values [3]jsonDynamic
+	cached [3]any
 	count  int
 }
 
@@ -245,6 +246,116 @@ func decodeLazyJSONIntList(s string) ([]int, bool) {
 		idx = skipJSONSpaces(s, end)
 		if idx < len(s) && s[idx] == ',' {
 			idx++
+		}
+	}
+}
+
+func scanJSONIntArray(s string, idx *int) ([]int, bool) {
+	*idx = skipJSONSpaces(s, *idx)
+	if *idx >= len(s) || s[*idx] != '[' {
+		return nil, false
+	}
+	*idx = *idx + 1
+	out := make([]int, 0, 12)
+	for {
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx >= len(s) {
+			return nil, false
+		}
+		if s[*idx] == ']' {
+			*idx = *idx + 1
+			return out, true
+		}
+		intValue, end, ok := parseLazyJSONIntAt(s, *idx)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, intValue)
+		*idx = skipJSONSpaces(s, end)
+		if *idx >= len(s) {
+			return nil, false
+		}
+		if s[*idx] == ',' {
+			*idx = skipJSONSpaces(s, *idx+1)
+			if *idx >= len(s) || s[*idx] == ']' {
+				return nil, false
+			}
+			continue
+		}
+		if s[*idx] != ']' {
+			return nil, false
+		}
+	}
+}
+
+func scanJSONStringIntMap(s string, idx *int) (map[string]int, bool) {
+	*idx = skipJSONSpaces(s, *idx)
+	if *idx >= len(s) || s[*idx] != '{' {
+		return nil, false
+	}
+	var seenSmall [8]string
+	seenCount := 0
+	var seenMap map[string]struct{}
+	*idx = *idx + 1
+	out := make(map[string]int, 4)
+	for {
+		*idx = skipJSONSpaces(s, *idx)
+		if *idx >= len(s) {
+			return nil, false
+		}
+		if s[*idx] == '}' {
+			*idx = *idx + 1
+			return out, true
+		}
+		key, keyEnd, ok := scanJSONStringContent(s, *idx)
+		if !ok {
+			return nil, false
+		}
+		if seenMap != nil {
+			if _, ok := seenMap[key]; ok {
+				return nil, false
+			}
+			seenMap[key] = struct{}{}
+		} else {
+			for i := 0; i < seenCount; i++ {
+				if seenSmall[i] == key {
+					return nil, false
+				}
+			}
+			if seenCount < len(seenSmall) {
+				seenSmall[seenCount] = key
+				seenCount++
+			} else {
+				seenMap = make(map[string]struct{}, len(seenSmall)*2)
+				for _, existing := range seenSmall {
+					seenMap[existing] = struct{}{}
+				}
+				seenMap[key] = struct{}{}
+			}
+		}
+		*idx = skipJSONSpaces(s, keyEnd)
+		if *idx >= len(s) || s[*idx] != ':' {
+			return nil, false
+		}
+		*idx = skipJSONSpaces(s, *idx+1)
+		intValue, valueEnd, ok := parseLazyJSONIntAt(s, *idx)
+		if !ok {
+			return nil, false
+		}
+		out[key] = intValue
+		*idx = skipJSONSpaces(s, valueEnd)
+		if *idx >= len(s) {
+			return nil, false
+		}
+		if s[*idx] == ',' {
+			*idx = skipJSONSpaces(s, *idx+1)
+			if *idx >= len(s) || s[*idx] == '}' {
+				return nil, false
+			}
+			continue
+		}
+		if s[*idx] != '}' {
+			return nil, false
 		}
 	}
 }
@@ -553,13 +664,33 @@ func scanJSONObjectNamesWithCache(s string, idx *int) (*jsonObjectDynamic, bool)
 		}
 		valueStart := skipJSONSpaces(s, *idx+1)
 		*idx = valueStart
-		if !scanJSONValueNames(s, idx) {
-			return nil, false
+		var cached any
+		if cacheable {
+			switch s[valueStart] {
+			case '[':
+				if value, ok := scanJSONIntArray(s, idx); ok {
+					cached = value
+				} else {
+					*idx = valueStart
+				}
+			case '{':
+				if value, ok := scanJSONStringIntMap(s, idx); ok {
+					cached = value
+				} else {
+					*idx = valueStart
+				}
+			}
+		}
+		if cached == nil {
+			if !scanJSONValueNames(s, idx) {
+				return nil, false
+			}
 		}
 		if cacheable {
 			if object.count < len(object.keys) {
 				object.keys[object.count] = key
 				object.values[object.count] = jsonDynamic(s[valueStart:*idx])
+				object.cached[object.count] = cached
 				object.count++
 			} else {
 				cacheable = false
