@@ -370,6 +370,43 @@ func decodeIntErrorsSlow[E any](data any) Result[int, []E] {
 	return Result[int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))}}
 }
 
+func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
+	listResult := builtinDynamicToList(data)
+	if !listResult.ok {
+		return Result[[]int, []E]{err: []E{CoerceExtern[E](makeBuiltinDecodeError("List", listResult.err))}}
+	}
+	raw := listResult.value
+	out := make([]int, len(raw))
+	var errors []E
+	for idx, item := range raw {
+		if value, ok := item.(float64); ok {
+			intValue := int(value)
+			if value == float64(intValue) {
+				out[idx] = intValue
+				continue
+			}
+		}
+		itemResult := DecodeIntErrorsExtern[E](item)
+		if itemResult.ok {
+			out[idx] = itemResult.value
+			continue
+		}
+		for _, err := range itemResult.err {
+			errors = append(errors, prependDecodeErrorPath(err, "["+strconv.Itoa(idx)+"]"))
+		}
+	}
+	if len(errors) == 0 {
+		return Result[[]int, []E]{value: out, ok: true}
+	}
+	return Result[[]int, []E]{err: errors}
+}
+
+func prependDecodeErrorPath[E any](err E, segment string) E {
+	decodeErr := CoerceExtern[builtinDecodeError](err)
+	decodeErr.Path = append([]string{segment}, decodeErr.Path...)
+	return CoerceExtern[E](decodeErr)
+}
+
 func DecodeFloatExtern[E any](data any) Result[float64, E] {
 	result := builtinDecodeFloat(data)
 	if result.ok {

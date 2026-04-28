@@ -275,6 +275,26 @@ export function DecodeIntErrors(data) {
   return { err: [result.err] };
 }
 
+export function DecodeIntListErrors(data) {
+  const list = DynamicToList(data);
+  if (Object.prototype.hasOwnProperty.call(list, "err")) {
+    return { err: [makeDecodeError("List", list.err)] };
+  }
+  const out = new Array(list.ok.length);
+  const errors = [];
+  for (let i = 0; i < list.ok.length; i++) {
+    const result = DecodeIntErrors(list.ok[i]);
+    if (Object.prototype.hasOwnProperty.call(result, "ok")) {
+      out[i] = result.ok;
+    } else {
+      for (const error of result.err) {
+        errors.push({ ...error, path: [`[${i}]`, ...(error.path ?? [])] });
+      }
+    }
+  }
+  return errors.length === 0 ? { ok: out } : { err: errors };
+}
+
 export function DecodeFloat(data) {
   if (data === null || data === undefined) return { err: makeDecodeError("Float", "null") };
   if (typeof data === "number") return { ok: data };

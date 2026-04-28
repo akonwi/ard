@@ -63,6 +63,10 @@ private extern fn _decode_int_errors(data: Dynamic) Int![Error] = {
   go = "DecodeIntErrors"
   js = "DecodeIntErrors"
 }
+private extern fn _decode_int_list_errors(data: Dynamic) [Int]![Error] = {
+  go = "DecodeIntListErrors"
+  js = "DecodeIntListErrors"
+}
 extern fn is_void(data: Dynamic) Bool = {
   go = "IsNil"
   js = "IsNil"
@@ -168,40 +172,7 @@ fn list(decoder: Decoder<$T>) fn(Dynamic) [$T]![Error] {
 
 fn int_list() fn(Dynamic) [Int]![Error] {
   fn(data: Dynamic) [Int]![Error] {
-    let raw = try to_list(data) -> found {
-      let decode_err = Error{
-        expected: "List",
-        found: found,
-        path: [],
-      }
-      Result::err([decode_err])
-    }
-
-    mut out: [Int] = []
-    mut errors: [Error] = []
-    for item, idx in raw {
-      match _decode_int_errors(item) {
-        ok => out.push(ok),
-        err(errs) => {
-          for e in errs {
-            mut path = e.path
-            path.prepend("[{idx}]")
-            errors.push(
-              Error{
-                expected: e.expected,
-                found: e.found,
-                path: path,
-              },
-            )
-          }
-        },
-      }
-    }
-
-    match errors.size() {
-      0 => Result::ok(out),
-      _ => Result::err(errors),
-    }
+    _decode_int_list_errors(data)
   }
 }
 
