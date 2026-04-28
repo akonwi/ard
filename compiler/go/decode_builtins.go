@@ -412,6 +412,9 @@ func appendDecodeErrorPath[E any](err E, segment string) E {
 }
 
 func DecodeIntListErrorsExtern[E any](data any) Result[[]int, []E] {
+	if typed, ok := data.([]int); ok {
+		return Result[[]int, []E]{value: typed, ok: true}
+	}
 	raw, ok := data.([]any)
 	if !ok {
 		listResult := builtinDynamicToList(data)
