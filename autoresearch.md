@@ -30,5 +30,13 @@ Optimize the runtime speed of Ard's generated Go backend on `compiler/benchmarks
 - Prefer small, explainable changes over large rewrites.
 
 ## What's Been Tried
-- Baseline setup: generated Go decode_pipeline was previously around 402 ms under hyperfine. This harness measures direct generated binary runtime median in ms and should be used for apples-to-apples iteration.
-- Source reading: generated decode code repeatedly calls `ardgo.CallExtern` for `DecodeInt`, `DynamicToList`, `DynamicToMap`, `ExtractField`, and `JsonToDynamic`; `CallExtern` uses an RWMutex-protected map lookup. Decode builtins also use reflection in `builtinDynamicToList`/`builtinDynamicToMap`, even though JSON values are usually `[]any` and `map[string]any`.
+- Baseline setup: generated Go decode_pipeline measured about 404 ms median with this harness (9 direct binary executions). Earlier hyperfine result was around 402 ms.
+- Source reading: generated decode code repeatedly calls `ardgo.CallExtern` for `DecodeInt`, `DynamicToList`, `DynamicToMap`, `ExtractField`, and `JsonToDynamic`; `CallExtern` used an RWMutex-protected map lookup. Decode builtins also used reflection in `builtinDynamicToList`/`builtinDynamicToMap`, even though JSON values are usually `[]any` and `map[string]any`.
+- Kept: removed the `ExternRegistry.Call` read lock for a tiny win (~401 ms). Risk: calls are no longer safe if registration races with execution; normal generated programs register before `Main`.
+- Kept: fast-pathed `[]any`/`map[string]any` in Go decode builtins and avoided full map copy in `ExtractField` (~390 ms), then avoided copying dynamic lists/maps on the fast path (~383 ms). Risk: decoded list/map aliasing with underlying Dynamic values.
+- Kept: direct switch fast paths for built-in decode extern names in `CallExtern` (~382 ms) and checking `float64` first in `builtinDecodeInt` (~381 ms). Both are small wins.
+- Kept: Go backend emits direct `append` assignment / `map[key] = value` for ignored list push/map set results (~381 ms). Only statement calls are rewritten; expressions using return values still call helpers.
+- Major kept win: `CoerceExtern` now avoids reflective `MethodByName`/`Method.Call` for source values whose type is `ardgo.Result[...]`, reading fields directly via the existing unsafe field-access pattern (~240 ms). This is the biggest improvement so far.
+- Kept: `builtinDynamicToMap` now returns `Result[map[any]any, string]`, matching generated `[Dynamic:Dynamic]` and avoiding reflective map coercion (~231 ms).
+- Kept: `MapKeys` detects all-string keys and uses `sort.Strings` before converting back to `[]K` (~230 ms).
+- Discarded: broad generic `value.(T)` fast path at the start of `CoerceExtern`; it regressed slightly (~230.5 ms), likely because the extra assertion overhead did not pay off.
