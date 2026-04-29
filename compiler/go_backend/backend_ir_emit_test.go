@@ -927,6 +927,56 @@ func TestEmitGoFileFromBackendIR_ListAndMapLiteralsNative(t *testing.T) {
 	}
 }
 
+func TestEmitGoFileFromBackendIR_EmptyListAndMapLiteralsNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name:   "main",
+				Return: backendir.Void,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.AssignStmt{
+							Target: "values",
+							Value: &backendir.ListLiteralExpr{
+								Type:     &backendir.ListType{Elem: backendir.IntType},
+								Elements: nil,
+							},
+						},
+						&backendir.AssignStmt{
+							Target: "items",
+							Value: &backendir.MapLiteralExpr{
+								Type:    &backendir.MapType{Key: backendir.StrType, Value: backendir.IntType},
+								Entries: nil,
+							},
+						},
+						&backendir.AssignStmt{Target: "_", Value: &backendir.IdentExpr{Name: "values"}},
+						&backendir.AssignStmt{Target: "_", Value: &backendir.IdentExpr{Name: "items"}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIRWithImports(module, map[string]string{helperImportPath: helperImportAlias}, true)
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	if !strings.Contains(generated, "values := []int{}") {
+		t.Fatalf("expected generated source to contain native empty list literal\n%s", generated)
+	}
+	if !strings.Contains(generated, "items := map[string]int{}") {
+		t.Fatalf("expected generated source to contain native empty map literal\n%s", generated)
+	}
+}
+
 func TestEmitGoFileFromBackendIR_StructAndEnumLiteralsNative(t *testing.T) {
 	module := &backendir.Module{
 		PackageName: "main",

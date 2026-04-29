@@ -157,38 +157,58 @@ These are the current high-priority improvement themes for the Go target.
 
 ### 1. Simpler lowering for `if`/`match` expressions
 
-The current backend often lowers expression-shaped control flow into nested immediately-invoked function literals. This preserves semantics, but it produces noisy Go and likely leaves optimization opportunities on the table.
+Status: substantially complete.
 
-Current direction:
+The backend now normalizes the main expression-shaped `if`/`match` paths into more statement-oriented backend IR before emission.
+
+Implemented direction:
 
 - prefer statement-oriented lowering where possible
 - synthesize temps plus straight-line assignment/control flow instead of nested closures
 - keep single-evaluation semantics for subjects/conditions explicit in backend IR
 - use generated code shape closer to what a human Go programmer would write
 
-Questions to work through:
+Completed work in this area:
 
-- which expression forms still genuinely require closure-like shaping to preserve Ard semantics?
-- should this be solved primarily in backend IR lowering, emission, or a normalization pass between them?
-- what parity tests should gate this refactor, especially around `try`, loops, and nested matches?
+- normalization pass for rich expression statements
+- hoisting of rich nested expressions out of deeper expression positions
+- `return if ...` lowering into explicit `if` statements
+- value-producing `match` lowering into synthesized temps plus assignment/return flow
+- cleaner assignment rewriting for nested `if` branches and panic paths
+- regression coverage for bool, enum, int/range, conditional, union, option, and result `match` shapes, including nested expression-position cases
+
+Remaining follow-up is smaller in scope and should be treated as cleanup rather than a primary design task:
+
+- identify any remaining exotic expression forms that still need closure-like shaping
+- reduce redundant synthesized temps where output can be simplified further
+- add more parity coverage as new corner cases are discovered
 
 ### 2. Reduce helper-backed codegen when plain Go is sufficient
 
-A number of operations currently flow through `ardgo` helpers even though the Go target can express them directly.
+Status: substantially complete for the straightforward list/map cases originally targeted here.
 
-Examples worth targeting:
+A number of operations that previously flowed through `ardgo` helpers now emit directly as ordinary Go syntax or small local helper shapes.
 
-- list append/prepend/set patterns
-- direct map set/drop/read patterns when Ard semantics already align with Go
-- simpler empty literal emission for lists/maps
-- removing helper calls that only exist because earlier codegen paths emitted everything uniformly
+Completed work in this area:
 
-Goals:
+- list append/prepend/set/swap patterns now emit directly
+- direct map set/drop/read/has patterns now emit directly
+- `map_keys` no longer depends on the runtime package helper and instead uses a generated local helper
+- empty list/map literals emit directly as native Go composite literals
+- dead runtime helper files for list/map mutation and map get paths were removed once backend emission no longer referenced them
+
+Goals realized so far:
 
 - cleaner generated Go
 - less helper/runtime surface area
 - better downstream Go compiler optimization opportunities
 - fewer allocations and less call overhead in tight loops
+
+Remaining work should be treated as follow-up cleanup rather than the main body of this item:
+
+- reduce helper-backed codegen for `Maybe`/`Result` combinators where direct Go is practical
+- shrink trait/coercion helper usage where plain typed Go is sufficient
+- continue removing fallback helper paths when direct native emission can preserve semantics cleanly
 
 ### 3. Improve how Ard stdlib transpiles to Go
 
