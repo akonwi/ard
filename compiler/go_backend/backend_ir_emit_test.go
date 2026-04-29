@@ -864,7 +864,7 @@ func TestEmitGoFileFromBackendIR_LoopStatementsNative(t *testing.T) {
 	if !strings.Contains(generated, "for charindex, __ardRune := range []rune(text)") {
 		t.Fatalf("expected generated source to contain native for-in-str statement\n%s", generated)
 	}
-	if !strings.Contains(generated, "for _, key := range ardgo.MapKeys(") {
+	if !strings.Contains(generated, "for _, key := range αardMapKeys(ardMap)") {
 		t.Fatalf("expected generated source to contain native for-in-map iteration\n%s", generated)
 	}
 }
@@ -2068,8 +2068,17 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "len(numbers)") {
 		t.Fatalf("expected generated source to contain native list_size emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.ListSet(numbers, 1, 9)") {
-		t.Fatalf("expected generated source to contain native list_set emission\n%s", generated)
+	if !strings.Contains(generated, "setok := false") {
+		t.Fatalf("expected generated source to seed native list_set result\n%s", generated)
+	}
+	if !strings.Contains(generated, "if 1 >= 0 && 1 < len(numbers) {") {
+		t.Fatalf("expected generated source to contain native list_set bounds check\n%s", generated)
+	}
+	if !strings.Contains(generated, "numbers[1] = 9") {
+		t.Fatalf("expected generated source to contain native list_set mutation\n%s", generated)
+	}
+	if !strings.Contains(generated, "setok = true") {
+		t.Fatalf("expected generated source to contain native list_set success result\n%s", generated)
 	}
 	if !strings.Contains(generated, "ardgo.ListPush(&numbers, 3)") {
 		t.Fatalf("expected generated source to contain native list_push emission\n%s", generated)
@@ -2080,13 +2089,16 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "sort.SliceStable(numbers") {
 		t.Fatalf("expected generated source to contain native list_sort emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.ListSwap(numbers, 0, 1)") {
+	if !strings.Contains(generated, "numbers[0], numbers[1] = numbers[1], numbers[0]") {
 		t.Fatalf("expected generated source to contain native list_swap emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.MapKeys(mapping)") {
+	if !strings.Contains(generated, "keys := αardMapKeys(mapping)") {
 		t.Fatalf("expected generated source to contain native map_keys emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "_, ok := mapping[\"a\"]") {
+	if !strings.Contains(generated, "func αardMapKeys[K comparable, V any](m map[K]V) []K") {
+		t.Fatalf("expected generated source to contain local map_keys helper\n%s", generated)
+	}
+	if !strings.Contains(generated, "_, hasa := mapping[\"a\"]") {
 		t.Fatalf("expected generated source to contain native map_has emission\n%s", generated)
 	}
 	if !strings.Contains(generated, "len(mapping)") {
@@ -2095,10 +2107,13 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "ardgo.MapGet(mapping, \"a\")") {
 		t.Fatalf("expected generated source to contain native map_get emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.MapSet(mapping, \"b\", 2)") {
+	if !strings.Contains(generated, "mapping[\"b\"] = 2") {
 		t.Fatalf("expected generated source to contain native map_set emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.MapDrop(mapping, \"a\")") {
+	if !strings.Contains(generated, "mapsetok := true") {
+		t.Fatalf("expected generated source to capture native map_set result as true\n%s", generated)
+	}
+	if !strings.Contains(generated, "delete(mapping, \"a\")") {
 		t.Fatalf("expected generated source to contain native map_drop emission\n%s", generated)
 	}
 }

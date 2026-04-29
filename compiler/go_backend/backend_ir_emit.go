@@ -3,6 +3,7 @@ package go_backend
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ type backendIREmitter struct {
 	emittedMethods      map[string]struct{}
 	scopedCallableNames map[string]struct{}
 	typeParamMapping    map[string]string
+	needsMapKeysHelper  bool
 }
 
 func compileModuleSourceViaBackendIR(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
@@ -67,6 +69,18 @@ func emitGoFileFromBackendIR(module *backendir.Module, entrypoint bool) (goFileI
 		}
 		for _, astDecl := range astDecls {
 			appendASTDecl(&fileIR, astDecl)
+		}
+	}
+
+	if emitter.needsMapKeysHelper {
+		ensureGoFileImport(&fileIR, "fmt", "")
+		ensureGoFileImport(&fileIR, "sort", "")
+		helperDecls, err := emitMapKeysHelperDecls()
+		if err != nil {
+			return goFileIR{}, err
+		}
+		for _, decl := range helperDecls {
+			appendASTDecl(&fileIR, decl)
 		}
 	}
 
@@ -1385,6 +1399,11 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 		if literal, ok := s.Value.(*backendir.LiteralExpr); ok && strings.TrimSpace(literal.Kind) == "void" {
 			return nil, nil
 		}
+		if stmts, ok, err := e.emitNativeMutationStmt(s.Value, locals); err != nil {
+			return nil, err
+		} else if ok {
+			return stmts, nil
+		}
 		if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
 			return e.emitTryExprControlStmts(tryExpr, returnType, locals, seenLocals, func(success ast.Expr) ([]ast.Stmt, error) {
 				if _, ok := success.(*ast.CallExpr); ok {
@@ -1432,6 +1451,11 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(localName)}},
 		}, nil
 	case *backendir.AssignStmt:
+		if stmts, ok, err := e.emitNativeMutationAssignStmt(s.Target, s.Value, locals, seenLocals); err != nil {
+			return nil, err
+		} else if ok {
+			return stmts, nil
+		}
 		if tryExpr, ok := s.Value.(*backendir.TryExpr); ok {
 			catchBaseLocals := cloneStringMap(locals)
 			target, tok, err := e.emitAssignTargetExpr(s.Target, locals, seenLocals)
@@ -1642,6 +1666,7 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 			},
 		}, nil
 	case *backendir.ForInMapStmt:
+		e.needsMapKeysHelper = true
 		mapExpr, err := e.emitExpr(s.Map, locals)
 		if err != nil {
 			return nil, err
@@ -1682,7 +1707,7 @@ func (e *backendIREmitter) emitStmt(stmt backendir.Stmt, returnType ast.Expr, lo
 				Value: ast.NewIdent(keyLocal),
 				Tok:   token.DEFINE,
 				X: &ast.CallExpr{
-					Fun: selectorExpr(ast.NewIdent(helperImportAlias), "MapKeys"),
+					Fun: ast.NewIdent("αardMapKeys"),
 					Args: []ast.Expr{
 						ast.NewIdent(mapLocal),
 					},
@@ -2346,6 +2371,192 @@ func (e *backendIREmitter) emitUnionMatchAssignStmts(targetName string, expr *ba
 		Body:   &ast.BlockStmt{List: clauses},
 	})
 	return out, nil
+}
+
+func (e *backendIREmitter) emitNativeMutationStmt(value backendir.Expr, locals map[string]string) ([]ast.Stmt, bool, error) {
+	call, ok := value.(*backendir.CallExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	callee, ok := call.Callee.(*backendir.IdentExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	switch strings.TrimSpace(callee.Name) {
+	case "list_set":
+		if len(call.Args) != 3 {
+			return nil, false, fmt.Errorf("list_set expects 3 args, got %d", len(call.Args))
+		}
+		listExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		indexExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		valueExpr, err := e.emitExpr(call.Args[2], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{&ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X: &ast.BinaryExpr{X: indexExpr, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+				Op: token.LAND,
+				Y: &ast.BinaryExpr{X: indexExpr, Op: token.LSS, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{listExpr}}},
+			},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: listExpr, Index: indexExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}},
+			}},
+		}}, true, nil
+	case "list_swap":
+		if len(call.Args) != 3 {
+			return nil, false, fmt.Errorf("list_swap expects 3 args, got %d", len(call.Args))
+		}
+		listExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		leftExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		rightExpr, err := e.emitExpr(call.Args[2], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		leftIndex := &ast.IndexExpr{X: listExpr, Index: leftExpr}
+		rightIndex := &ast.IndexExpr{X: listExpr, Index: rightExpr}
+		return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{leftIndex, rightIndex}, Tok: token.ASSIGN, Rhs: []ast.Expr{rightIndex, leftIndex}}}, true, nil
+	case "map_drop":
+		if len(call.Args) != 2 {
+			return nil, false, fmt.Errorf("map_drop expects 2 args, got %d", len(call.Args))
+		}
+		mapExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		keyExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{mapExpr, keyExpr}}}}, true, nil
+	case "map_set":
+		if len(call.Args) != 3 {
+			return nil, false, fmt.Errorf("map_set expects 3 args, got %d", len(call.Args))
+		}
+		mapExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		keyExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		valueExpr, err := e.emitExpr(call.Args[2], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: mapExpr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}}}, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
+func (e *backendIREmitter) emitNativeMutationAssignStmt(targetName string, value backendir.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, bool, error) {
+	call, ok := value.(*backendir.CallExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	callee, ok := call.Callee.(*backendir.IdentExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	switch strings.TrimSpace(callee.Name) {
+	case "list_set":
+		if len(call.Args) != 3 {
+			return nil, false, fmt.Errorf("list_set expects 3 args, got %d", len(call.Args))
+		}
+		listExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		indexExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		valueExpr, err := e.emitExpr(call.Args[2], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+		if err != nil {
+			return nil, false, err
+		}
+		out := make([]ast.Stmt, 0, 2)
+		if tok == token.DEFINE {
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent("false")}})
+		} else {
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("false")}})
+		}
+		out = append(out, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X: &ast.BinaryExpr{X: indexExpr, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+				Op: token.LAND,
+				Y: &ast.BinaryExpr{X: indexExpr, Op: token.LSS, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{listExpr}}},
+			},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: listExpr, Index: indexExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}},
+				&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("true")}},
+			}},
+		})
+		return out, true, nil
+	case "map_set":
+		if len(call.Args) != 3 {
+			return nil, false, fmt.Errorf("map_set expects 3 args, got %d", len(call.Args))
+		}
+		mapExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		keyExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		valueExpr, err := e.emitExpr(call.Args[2], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: mapExpr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}},
+			&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: tok, Rhs: []ast.Expr{ast.NewIdent("true")}},
+		}, true, nil
+	case "map_has":
+		if len(call.Args) != 2 {
+			return nil, false, fmt.Errorf("map_has expects 2 args, got %d", len(call.Args))
+		}
+		mapExpr, err := e.emitExpr(call.Args[0], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		keyExpr, err := e.emitExpr(call.Args[1], locals)
+		if err != nil {
+			return nil, false, err
+		}
+		target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_"), target}, Tok: tok, Rhs: []ast.Expr{&ast.IndexExpr{X: mapExpr, Index: keyExpr}}},
+		}, true, nil
+	default:
+		return nil, false, nil
+	}
 }
 
 func (e *backendIREmitter) emitBlockAssigningReturns(block *backendir.Block, assignType backendir.Type, target ast.Expr, returnType ast.Expr, locals map[string]string, seenLocals map[string]struct{}) ([]ast.Stmt, error) {
@@ -3316,7 +3527,15 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 			}
 			return &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{subject}}, nil
 		case "map_keys":
-			return emitCallToSelector(call, e, locals, helperImportAlias, "MapKeys", 1)
+			if len(call.Args) != 1 {
+				return nil, fmt.Errorf("map_keys expects 1 arg, got %d", len(call.Args))
+			}
+			e.needsMapKeysHelper = true
+			args, err := e.emitArgs(call.Args, locals)
+			if err != nil {
+				return nil, err
+			}
+			return &ast.CallExpr{Fun: ast.NewIdent("αardMapKeys"), Args: args}, nil
 		case "map_has":
 			if len(call.Args) != 2 {
 				return nil, fmt.Errorf("map_has expects 2 args, got %d", len(call.Args))
@@ -4041,4 +4260,47 @@ func cloneSet(input map[string]struct{}) map[string]struct{} {
 		out[key] = struct{}{}
 	}
 	return out
+}
+
+func ensureGoFileImport(fileIR *goFileIR, path string, alias string) {
+	for _, imp := range fileIR.Imports {
+		if imp.Path == path {
+			return
+		}
+	}
+	fileIR.Imports = append(fileIR.Imports, goImportIR{Path: path, Alias: alias})
+}
+
+func emitMapKeysHelperDecls() ([]ast.Decl, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), "mapkeys_helper.go", `package main
+func αardMapKeys[K comparable, V any](m map[K]V) []K {
+	keys := make([]K, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return αardMapKeyLess(keys[i], keys[j])
+	})
+	return keys
+}
+func αardMapKeyLess[K comparable](left, right K) bool {
+	switch l := any(left).(type) {
+	case string:
+		return l < any(right).(string)
+	case int:
+		return l < any(right).(int)
+	case bool:
+		r := any(right).(bool)
+		return !l && r
+	case float64:
+		return l < any(right).(float64)
+	default:
+		return fmt.Sprint(left) < fmt.Sprint(right)
+	}
+}
+`, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("parse map keys helper decls: %w", err)
+	}
+	return file.Decls, nil
 }
