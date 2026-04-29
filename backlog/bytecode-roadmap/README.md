@@ -5,6 +5,7 @@ This folder tracks outstanding bytecode-related backlog items.
 Active backlog docs:
 - `lowering.md`: remaining AST lowering work to decouple backends
 - `go-backend.md`: optional Go codegen notes and pitfalls
+- `performance.md`: VM/FFI profiling and runtime optimization backlog
 
 Historical/reference docs moved to `compiler/docs`:
 - `compiler/docs/bytecode-roadmap-overview.md`
