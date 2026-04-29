@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
@@ -76,10 +77,10 @@ func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
 }
 
 type VM struct {
-	Program     bytecode.Program
-	Frames      []*Frame
-	freeFrames  []*Frame
-	typeCache   map[bytecode.TypeID]checker.Type
+	Program           bytecode.Program
+	Frames            []*Frame
+	freeFrames        []*Frame
+	typeCache         map[bytecode.TypeID]checker.Type
 	modules           *ModuleRegistry
 	methodIndex       map[string]map[string]int
 	functionLookup    map[string]int
@@ -87,11 +88,19 @@ type VM struct {
 	moduleArgsScratch []*runtime.Object
 	externArgsScratch []*runtime.Object
 	ffi               *RuntimeFFIRegistry
+	profile           *executionProfile
 }
 
 func New(program bytecode.Program) *VM {
-	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), ffi: defaultFFIRegistry()}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), ffi: defaultFFIRegistry(), profile: newExecutionProfile()}
 	return vm
+}
+
+func (vm *VM) ProfileReport() string {
+	if vm == nil || vm.profile == nil {
+		return ""
+	}
+	return vm.profile.Report()
 }
 
 func (vm *VM) Run(functionName string) (*runtime.Object, error) {
@@ -284,6 +293,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(vm.Frames[len(vm.Frames)-1], val)
 		case bytecode.OpCall:
+			vm.profile.RecordDirectCall()
 			fnDef := &vm.Program.Functions[inst.A]
 			argc := inst.B
 			retType, _ := vm.typeFor(bytecode.TypeID(inst.C))
@@ -293,6 +303,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpMakeClosure:
+			vm.profile.RecordClosureCreation(inst.B)
 			fnIndex := inst.A
 			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
 				return nil, fmt.Errorf("function index out of range")
@@ -321,6 +332,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			vm.push(curr, runtime.Make(closure, fnType))
 		case bytecode.OpCallClosure:
 			argc := inst.B
+			vm.profile.RecordClosureCall(argc)
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
 				args[i] = vm.popUnsafe(curr)
@@ -771,6 +783,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			frame.Locals[0] = vm.popUnsafe(curr)
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpCallModule:
+			vm.profile.RecordModuleCall()
 			modConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
@@ -815,7 +828,14 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
+			start := time.Time{}
+			if vm.profile != nil {
+				start = time.Now()
+			}
 			res, err := vm.ffi.Call(bindingConst.Str, args, retType)
+			if vm.profile != nil {
+				vm.profile.RecordExternCall(bindingConst.Str, argc, time.Since(start))
+			}
 			if err != nil {
 				return nil, err
 			}

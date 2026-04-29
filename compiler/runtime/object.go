@@ -195,6 +195,8 @@ func deepCopy(data any) any {
 
 // deep copies an object
 func (o *Object) Copy() *Object {
+	recordObjectConstructor(&objectProfile.copyCalls)
+	recordObjectAllocation()
 	copy := &Object{
 		raw:    o.raw,
 		_type:  o._type,
@@ -401,6 +403,8 @@ func (o *Object) EnumType() *checker.Enum {
 }
 
 func MakeStr(s string) *Object {
+	recordObjectConstructor(&objectProfile.makeStrCalls)
+	recordObjectAllocation()
 	return &Object{
 		_type: checker.Str,
 		kind:  KindStr,
@@ -410,9 +414,14 @@ func MakeStr(s string) *Object {
 }
 
 func MakeInt(i int) *Object {
+	profiling := recordObjectConstructor(&objectProfile.makeIntCalls)
 	if i >= smallIntCacheMin && i <= smallIntCacheMax {
+		if profiling {
+			objectProfile.intCacheHits.Add(1)
+		}
 		return smallInts[i-smallIntCacheMin]
 	}
+	recordObjectAllocation()
 	return &Object{
 		_type: checker.Int,
 		kind:  KindInt,
@@ -422,6 +431,8 @@ func MakeInt(i int) *Object {
 }
 
 func MakeFloat(f float64) *Object {
+	recordObjectConstructor(&objectProfile.makeFloatCalls)
+	recordObjectAllocation()
 	return &Object{
 		_type: checker.Float,
 		kind:  KindFloat,
@@ -431,6 +442,10 @@ func MakeFloat(f float64) *Object {
 }
 
 func MakeBool(b bool) *Object {
+	profiling := recordObjectConstructor(&objectProfile.makeBoolCalls)
+	if profiling {
+		objectProfile.boolCacheHits.Add(1)
+	}
 	if b {
 		return trueObj
 	}
@@ -438,6 +453,8 @@ func MakeBool(b bool) *Object {
 }
 
 func MakeNone(of checker.Type) *Object {
+	recordObjectConstructor(&objectProfile.makeNoneCalls)
+	recordObjectAllocation()
 	maybeType := maybeTypeFor(of)
 	return &Object{
 		_type:  maybeType,
@@ -491,6 +508,8 @@ func (o *Object) IsNone() bool {
 }
 
 func MakeList(of checker.Type, items ...*Object) *Object {
+	recordObjectConstructor(&objectProfile.makeListCalls)
+	recordObjectAllocation()
 	listType := checker.MakeList(of)
 	return &Object{
 		_type: listType,
@@ -506,6 +525,8 @@ func (o *Object) List_Push(item *Object) {
 }
 
 func MakeMap(keyType, valueType checker.Type) *Object {
+	recordObjectConstructor(&objectProfile.makeMapCalls)
+	recordObjectAllocation()
 	mapType := checker.MakeMap(keyType, valueType)
 	return &Object{
 		_type: mapType,
@@ -655,6 +676,8 @@ func (o *Object) UnwrapMaybeInPlace(of checker.Type) *Object {
 }
 
 func MakeStruct(of checker.Type, fields map[string]*Object) *Object {
+	recordObjectConstructor(&objectProfile.makeStructCalls)
+	recordObjectAllocation()
 	return &Object{
 		raw:   fields,
 		_type: of,
@@ -681,6 +704,8 @@ func (o *Object) Struct_Get(key string) *Object {
 }
 
 func MakeDynamic(val any) *Object {
+	recordObjectConstructor(&objectProfile.makeDynamicCalls)
+	recordObjectAllocation()
 	return &Object{
 		raw:   val,
 		_type: checker.Dynamic,
@@ -690,6 +715,7 @@ func MakeDynamic(val any) *Object {
 }
 
 func Make(val any, of checker.Type) *Object {
+	profiling := recordObjectConstructor(&objectProfile.makeGenericCalls)
 	if val != nil {
 		if of == checker.Int {
 			if i, ok := val.(int); ok {
@@ -715,6 +741,10 @@ func Make(val any, of checker.Type) *Object {
 			return MakeDynamic(val)
 		}
 	}
+	if profiling {
+		objectProfile.genericAllocations.Add(1)
+	}
+	recordObjectAllocation()
 	return &Object{
 		raw:   val,
 		_type: of,
@@ -752,6 +782,10 @@ var (
 )
 
 func Void() *Object {
+	profiling := recordObjectConstructor(&objectProfile.voidCalls)
+	if profiling {
+		objectProfile.voidCacheHits.Add(1)
+	}
 	return void
 }
 
