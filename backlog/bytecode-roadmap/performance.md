@@ -334,6 +334,49 @@ Success criteria for phase 1:
 - lower total time attributed to extern calls
 - no semantic change in existing test coverage
 
+### Status update: pre-resolved extern table implemented
+
+This phase has now been implemented.
+
+What changed:
+
+- bytecode programs now carry a deduplicated extern table
+- `OpCallExtern` now references an extern ID instead of a string constant index
+- the VM resolves extern bindings once at VM construction time
+- steady-state extern execution now calls the pre-resolved function pointer directly
+- pseudo-externs like `NewList`, `AsyncStart`, and `AsyncEval` remain lowered to VM ops instead of going through the FFI registry
+
+### Observed impact on `decode_pipeline`
+
+Profile comparison on a profiled VM run:
+
+- extern total before: `58.755 ms`
+- extern total after: `50.188 ms`
+- improvement in measured extern section: about `8.6 ms` (~15%)
+
+Selected per-binding improvements:
+
+- `DecodeInt`: `12.366 ms` -> `9.334 ms`
+- `DynamicToList`: `9.356 ms` -> `7.906 ms`
+- `DynamicToMap`: `5.101 ms` -> `4.591 ms`
+- `ExtractField`: `2.346 ms` -> `1.632 ms`
+
+Other observations:
+
+- total call counts and object-allocation counts stayed effectively the same
+- runtime benchmark improvement was small and within normal benchmark noise
+- this matches the profile: the extern dispatch section got cheaper, but `runtime.Object` churn and closure-heavy decode composition still dominate a large part of total execution time
+
+### Updated takeaway
+
+The pre-resolved extern table is still a good change because it removes avoidable dispatch work and simplifies future optimization.
+
+But the profile now makes it clearer that the next higher-leverage work is:
+
+1. reducing `runtime.Object` boxing/materialization across the extern boundary
+2. reducing eager Dynamic list/map construction
+3. reducing closure-call overhead in decode-heavy code
+
 ## Non-goals for now
 
 - Do not introduce a fused decoder compiler path yet.
