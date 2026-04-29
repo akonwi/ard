@@ -579,7 +579,7 @@ fn main() {
 		"Bump(value)",
 		"(*box).Value = 2",
 		"value = value + 1",
-		"ardgo.ListPush(values, 1)",
+		"*values = append(*values, 1)",
 	} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("expected generated source to contain %q\n%s", want, generated)
@@ -1928,7 +1928,8 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 						},
 						&backendir.ExprStmt{
 							Value: &backendir.CallExpr{
-								Callee: &backendir.IdentExpr{Name: "list_push"},
+								Callee:   &backendir.IdentExpr{Name: "list_push"},
+								TypeArgs: []backendir.Type{backendir.IntType},
 								Args: []backendir.Expr{
 									&backendir.IdentExpr{Name: "numbers"},
 									&backendir.LiteralExpr{Kind: "int", Value: "3"},
@@ -1937,7 +1938,8 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 						},
 						&backendir.ExprStmt{
 							Value: &backendir.CallExpr{
-								Callee: &backendir.IdentExpr{Name: "list_prepend"},
+								Callee:   &backendir.IdentExpr{Name: "list_prepend"},
+								TypeArgs: []backendir.Type{backendir.IntType},
 								Args: []backendir.Expr{
 									&backendir.IdentExpr{Name: "numbers"},
 									&backendir.LiteralExpr{Kind: "int", Value: "0"},
@@ -2080,10 +2082,10 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "setok = true") {
 		t.Fatalf("expected generated source to contain native list_set success result\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.ListPush(&numbers, 3)") {
+	if !strings.Contains(generated, "numbers = append(numbers, 3)") {
 		t.Fatalf("expected generated source to contain native list_push emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.ListPrepend(&numbers, 0)") {
+	if !strings.Contains(generated, "numbers = append([]int{0}, numbers...)") {
 		t.Fatalf("expected generated source to contain native list_prepend emission\n%s", generated)
 	}
 	if !strings.Contains(generated, "sort.SliceStable(numbers") {
@@ -2115,6 +2117,83 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	}
 	if !strings.Contains(generated, "delete(mapping, \"a\")") {
 		t.Fatalf("expected generated source to contain native map_drop emission\n%s", generated)
+	}
+}
+
+func TestEmitGoFileFromBackendIR_ListPushAndPrependAssignmentsNative(t *testing.T) {
+	module := &backendir.Module{
+		PackageName: "main",
+		Decls: []backendir.Decl{
+			&backendir.FuncDecl{
+				Name:   "main",
+				Return: backendir.Void,
+				Body: &backendir.Block{
+					Stmts: []backendir.Stmt{
+						&backendir.AssignStmt{
+							Target: "numbers",
+							Value: &backendir.ListLiteralExpr{
+								Type: &backendir.ListType{Elem: backendir.IntType},
+								Elements: []backendir.Expr{
+									&backendir.LiteralExpr{Kind: "int", Value: "1"},
+									&backendir.LiteralExpr{Kind: "int", Value: "2"},
+								},
+							},
+						},
+						&backendir.AssignStmt{
+							Target: "pushed",
+							Value: &backendir.CallExpr{
+								Callee:   &backendir.IdentExpr{Name: "list_push"},
+								TypeArgs: []backendir.Type{backendir.IntType},
+								Args: []backendir.Expr{
+									&backendir.IdentExpr{Name: "numbers"},
+									&backendir.LiteralExpr{Kind: "int", Value: "3"},
+								},
+							},
+						},
+						&backendir.AssignStmt{
+							Target: "prepended",
+							Value: &backendir.CallExpr{
+								Callee:   &backendir.IdentExpr{Name: "list_prepend"},
+								TypeArgs: []backendir.Type{backendir.IntType},
+								Args: []backendir.Expr{
+									&backendir.IdentExpr{Name: "numbers"},
+									&backendir.LiteralExpr{Kind: "int", Value: "0"},
+								},
+							},
+						},
+						&backendir.AssignStmt{Target: "_", Value: &backendir.IdentExpr{Name: "numbers"}},
+						&backendir.AssignStmt{Target: "_", Value: &backendir.IdentExpr{Name: "pushed"}},
+						&backendir.AssignStmt{Target: "_", Value: &backendir.IdentExpr{Name: "prepended"}},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emitGoFileFromBackendIRWithImports(module, map[string]string{helperImportPath: helperImportAlias}, true)
+	if err != nil {
+		t.Fatalf("expected backend IR emitter to succeed, got error: %v", err)
+	}
+	rendered, err := renderGoFile(out)
+	if err != nil {
+		t.Fatalf("expected backend IR rendering to succeed, got error: %v", err)
+	}
+	assertParsesAsGo(t, rendered)
+
+	generated := string(rendered)
+	checks := []string{
+		"numbers = append(numbers, 3)",
+		"pushed := numbers",
+		"numbers = append([]int{0}, numbers...)",
+		"prepended := numbers",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected generated source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "ardgo.ListPush") || strings.Contains(generated, "ardgo.ListPrepend") {
+		t.Fatalf("did not expect generated source to use list push/prepend helpers\n%s", generated)
 	}
 }
 

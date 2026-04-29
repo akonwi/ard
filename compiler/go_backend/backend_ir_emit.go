@@ -2373,6 +2373,97 @@ func (e *backendIREmitter) emitUnionMatchAssignStmts(targetName string, expr *ba
 	return out, nil
 }
 
+func (e *backendIREmitter) emitListAppendMutationParts(call *backendir.CallExpr, locals map[string]string) (ast.Expr, ast.Expr, error) {
+	if call == nil || len(call.Args) != 2 {
+		return nil, nil, fmt.Errorf("list_push expects 2 args, got %d", len(call.Args))
+	}
+	subject, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, nil, err
+	}
+	valueExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, nil, err
+	}
+	return subject, valueExpr, nil
+}
+
+func (e *backendIREmitter) emitListPrependMutationParts(call *backendir.CallExpr, locals map[string]string) (ast.Expr, ast.Expr, error) {
+	if call == nil || len(call.Args) != 2 {
+		return nil, nil, fmt.Errorf("list_prepend expects 2 args, got %d", len(call.Args))
+	}
+	subject, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, nil, err
+	}
+	valueExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(call.TypeArgs) != 1 {
+		return nil, nil, fmt.Errorf("list_prepend expects 1 type arg, got %d", len(call.TypeArgs))
+	}
+	elemType, err := e.emitType(call.TypeArgs[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	if elemType == nil {
+		elemType = ast.NewIdent("any")
+	}
+	return subject, &ast.CallExpr{
+		Fun: ast.NewIdent("append"),
+		Args: []ast.Expr{
+			&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{valueExpr}},
+			subject,
+		},
+		Ellipsis: token.Pos(1),
+	}, nil
+}
+
+func (e *backendIREmitter) emitListPushExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	subject, valueExpr, err := e.emitListAppendMutationParts(call, locals)
+	if err != nil {
+		return nil, err
+	}
+	if len(call.TypeArgs) != 1 {
+		return nil, fmt.Errorf("list_push expects 1 type arg, got %d", len(call.TypeArgs))
+	}
+	elemType, err := e.emitType(call.TypeArgs[0])
+	if err != nil {
+		return nil, err
+	}
+	if elemType == nil {
+		elemType = ast.NewIdent("any")
+	}
+	resultType := &ast.ArrayType{Elt: elemType}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(resultType)}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{subject}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{subject, valueExpr}}}},
+		&ast.ReturnStmt{Results: []ast.Expr{subject}},
+	}}}}, nil
+}
+
+func (e *backendIREmitter) emitListPrependExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	subject, rhs, err := e.emitListPrependMutationParts(call, locals)
+	if err != nil {
+		return nil, err
+	}
+	if len(call.TypeArgs) != 1 {
+		return nil, fmt.Errorf("list_prepend expects 1 type arg, got %d", len(call.TypeArgs))
+	}
+	elemType, err := e.emitType(call.TypeArgs[0])
+	if err != nil {
+		return nil, err
+	}
+	if elemType == nil {
+		elemType = ast.NewIdent("any")
+	}
+	resultType := &ast.ArrayType{Elt: elemType}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(resultType)}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{subject}, Tok: token.ASSIGN, Rhs: []ast.Expr{rhs}},
+		&ast.ReturnStmt{Results: []ast.Expr{subject}},
+	}}}}, nil
+}
+
 func (e *backendIREmitter) emitNativeMutationStmt(value backendir.Expr, locals map[string]string) ([]ast.Stmt, bool, error) {
 	call, ok := value.(*backendir.CallExpr)
 	if !ok {
@@ -2383,6 +2474,18 @@ func (e *backendIREmitter) emitNativeMutationStmt(value backendir.Expr, locals m
 		return nil, false, nil
 	}
 	switch strings.TrimSpace(callee.Name) {
+	case "list_push":
+		subject, valueExpr, err := e.emitListAppendMutationParts(call, locals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{subject}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{subject, valueExpr}}}}}, true, nil
+	case "list_prepend":
+		subject, rhs, err := e.emitListPrependMutationParts(call, locals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{subject}, Tok: token.ASSIGN, Rhs: []ast.Expr{rhs}}}, true, nil
 	case "list_set":
 		if len(call.Args) != 3 {
 			return nil, false, fmt.Errorf("list_set expects 3 args, got %d", len(call.Args))
@@ -2473,6 +2576,32 @@ func (e *backendIREmitter) emitNativeMutationAssignStmt(targetName string, value
 		return nil, false, nil
 	}
 	switch strings.TrimSpace(callee.Name) {
+	case "list_push":
+		subject, valueExpr, err := e.emitListAppendMutationParts(call, locals)
+		if err != nil {
+			return nil, false, err
+		}
+		target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{subject}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{subject, valueExpr}}}},
+			&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: tok, Rhs: []ast.Expr{subject}},
+		}, true, nil
+	case "list_prepend":
+		subject, rhs, err := e.emitListPrependMutationParts(call, locals)
+		if err != nil {
+			return nil, false, err
+		}
+		target, tok, err := e.emitAssignTargetExpr(targetName, locals, seenLocals)
+		if err != nil {
+			return nil, false, err
+		}
+		return []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{subject}, Tok: token.ASSIGN, Rhs: []ast.Expr{rhs}},
+			&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: tok, Rhs: []ast.Expr{subject}},
+		}, true, nil
 	case "list_set":
 		if len(call.Args) != 3 {
 			return nil, false, fmt.Errorf("list_set expects 3 args, got %d", len(call.Args))
@@ -3472,9 +3601,9 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 			}
 			return &ast.IndexExpr{X: subject, Index: index}, nil
 		case "list_push":
-			return emitCallToSelectorWithAddressedFirstArg(call, e, locals, helperImportAlias, "ListPush", 2)
+			return e.emitListPushExpr(call, locals)
 		case "list_prepend":
-			return emitCallToSelectorWithAddressedFirstArg(call, e, locals, helperImportAlias, "ListPrepend", 2)
+			return e.emitListPrependExpr(call, locals)
 		case "list_set":
 			return emitCallToSelector(call, e, locals, helperImportAlias, "ListSet", 3)
 		case "list_sort":
