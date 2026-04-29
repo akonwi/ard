@@ -2986,7 +2986,7 @@ func lowerExpressionToBackendIR(expr checker.Expression) backendir.Expr {
 		case checker.MapHas:
 			return callExpr("map_has", args...)
 		case checker.MapGet:
-			return callExpr("map_get", args...)
+			return callExprWithTypeArgs("map_get", []backendir.Type{lowerNestedCheckerTypeToBackendIR(v.ValueType)}, args...)
 		case checker.MapSet:
 			return callExpr("map_set", args...)
 		case checker.MapDrop:

@@ -2008,7 +2008,8 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 						&backendir.AssignStmt{
 							Target: "item",
 							Value: &backendir.CallExpr{
-								Callee: &backendir.IdentExpr{Name: "map_get"},
+								Callee:   &backendir.IdentExpr{Name: "map_get"},
+								TypeArgs: []backendir.Type{backendir.IntType},
 								Args: []backendir.Expr{
 									&backendir.IdentExpr{Name: "mapping"},
 									&backendir.LiteralExpr{Kind: "str", Value: "a"},
@@ -2106,7 +2107,7 @@ func TestEmitGoFileFromBackendIR_ListMapReadOpsNative(t *testing.T) {
 	if !strings.Contains(generated, "len(mapping)") {
 		t.Fatalf("expected generated source to contain native map_size emission\n%s", generated)
 	}
-	if !strings.Contains(generated, "ardgo.MapGet(mapping, \"a\")") {
+	if !strings.Contains(generated, "item := func() ardgo.Maybe[int] {") || !strings.Contains(generated, "value, ok := mapping[\"a\"]") {
 		t.Fatalf("expected generated source to contain native map_get emission\n%s", generated)
 	}
 	if !strings.Contains(generated, "mapping[\"b\"] = 2") {

@@ -2420,6 +2420,38 @@ func (e *backendIREmitter) emitListPrependMutationParts(call *backendir.CallExpr
 	}, nil
 }
 
+func (e *backendIREmitter) emitMapGetExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	if call == nil || len(call.Args) != 2 {
+		return nil, fmt.Errorf("map_get expects 2 args, got %d", len(call.Args))
+	}
+	if len(call.TypeArgs) != 1 {
+		return nil, fmt.Errorf("map_get expects 1 type arg, got %d", len(call.TypeArgs))
+	}
+	mapExpr, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, err
+	}
+	keyExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, err
+	}
+	valueType, err := e.emitType(call.TypeArgs[0])
+	if err != nil {
+		return nil, err
+	}
+	if valueType == nil {
+		valueType = ast.NewIdent("any")
+	}
+	maybeType := indexExpr(selectorExpr(ast.NewIdent(helperImportAlias), "Maybe"), []ast.Expr{valueType})
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(maybeType)}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("value"), ast.NewIdent("ok")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.IndexExpr{X: mapExpr, Index: keyExpr}}},
+		&ast.IfStmt{Cond: ast.NewIdent("ok"), Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.ReturnStmt{Results: []ast.Expr{astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{valueType}, []ast.Expr{ast.NewIdent("value")})}},
+		}}},
+		&ast.ReturnStmt{Results: []ast.Expr{astCall(selectorExpr(ast.NewIdent(helperImportAlias), "None"), []ast.Expr{valueType}, nil)}},
+	}}}}, nil
+}
+
 func (e *backendIREmitter) emitListPushExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
 	subject, valueExpr, err := e.emitListAppendMutationParts(call, locals)
 	if err != nil {
@@ -3695,7 +3727,7 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 				},
 			}, nil
 		case "map_get":
-			return emitCallToSelector(call, e, locals, helperImportAlias, "MapGet", 2)
+			return e.emitMapGetExpr(call, locals)
 		case "map_set":
 			return emitCallToSelector(call, e, locals, helperImportAlias, "MapSet", 3)
 		case "map_drop":
