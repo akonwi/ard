@@ -177,7 +177,7 @@ let kind = label(first)
 	}
 }
 
-func TestCompileModuleSourceViaBackendIR_ExternWrapper(t *testing.T) {
+func TestCompileModuleSourceViaBackendIR_KnownExternWrapperDirectCall(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ard.toml: %v", err)
@@ -185,9 +185,13 @@ func TestCompileModuleSourceViaBackendIR_ExternWrapper(t *testing.T) {
 
 	module := checkedModuleFromSource(t, dir, "main.ard", `
 extern fn now() Int = "Now"
+extern fn env_get(key: Str) Str? = "EnvGet"
+extern fn sleep(ms: Int) Void = "Sleep"
 
 fn main() {
   now()
+  env_get("HOME")
+  sleep(1)
 }
 `)
 
@@ -198,11 +202,49 @@ fn main() {
 	assertParsesAsGo(t, out)
 
 	generated := string(out)
-	if !strings.Contains(generated, "CallExtern(\"Now\"") {
-		t.Fatalf("expected extern wrapper to call CallExtern\n%s", generated)
+	checks := []string{
+		"return ffi.Now()",
+		"value := ffi.EnvGet(key)",
+		"return ardgo.None[string]()",
+		"return ardgo.Some[string](*value)",
+		"ffi.Sleep(ms)",
+	}
+	for _, check := range checks {
+		if !strings.Contains(generated, check) {
+			t.Fatalf("expected direct extern wrapper source to contain %q\n%s", check, generated)
+		}
+	}
+	if strings.Contains(generated, "CallExtern(") || strings.Contains(generated, "CoerceExtern[") {
+		t.Fatalf("did not expect known builtin extern wrappers to use registry/coercion path\n%s", generated)
+	}
+}
+
+func TestCompileModuleSourceViaBackendIR_UnknownExternWrapperFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+
+	module := checkedModuleFromSource(t, dir, "main.ard", `
+extern fn meaning() Int = "Meaning"
+
+fn main() {
+  meaning()
+}
+`)
+
+	out, err := compileModuleSourceViaBackendIR(module, "main", true, "")
+	if err != nil {
+		t.Fatalf("backend IR compile failed: %v", err)
+	}
+	assertParsesAsGo(t, out)
+
+	generated := string(out)
+	if !strings.Contains(generated, "CallExtern(\"Meaning\"") {
+		t.Fatalf("expected unknown extern wrapper to call CallExtern\n%s", generated)
 	}
 	if !strings.Contains(generated, "CoerceExtern[int](result)") {
-		t.Fatalf("expected extern wrapper to coerce result\n%s", generated)
+		t.Fatalf("expected unknown extern wrapper to coerce result\n%s", generated)
 	}
 }
 

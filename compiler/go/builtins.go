@@ -23,6 +23,10 @@ func builtinOSArgs() []string {
 	return ffi.OsArgs()
 }
 
+func BuiltinOSArgs() []string {
+	return builtinOSArgs()
+}
+
 func maybeBoolPointer(value Maybe[bool]) *bool {
 	if value.IsNone() {
 		return nil

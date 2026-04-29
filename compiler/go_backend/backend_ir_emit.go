@@ -29,6 +29,7 @@ type backendIREmitter struct {
 	scopedCallableNames map[string]struct{}
 	typeParamMapping    map[string]string
 	needsMapKeysHelper  bool
+	needsFFIImport      bool
 }
 
 func compileModuleSourceViaBackendIR(module checker.Module, packageName string, entrypoint bool, projectName string) ([]byte, error) {
@@ -70,6 +71,10 @@ func emitGoFileFromBackendIR(module *backendir.Module, entrypoint bool) (goFileI
 		for _, astDecl := range astDecls {
 			appendASTDecl(&fileIR, astDecl)
 		}
+	}
+
+	if emitter.needsFFIImport {
+		ensureGoFileImport(&fileIR, "github.com/akonwi/ard/ffi", "ffi")
 	}
 
 	if emitter.needsMapKeysHelper {
@@ -1304,7 +1309,69 @@ func (e *backendIREmitter) externArgNeedsAnySlice(t backendir.Type) bool {
 	return ok
 }
 
+func (e *backendIREmitter) emitDirectExternBody(decl *backendir.FuncDecl, locals map[string]string) ([]ast.Stmt, bool, error) {
+	if decl == nil {
+		return nil, false, nil
+	}
+	paramIdent := func(name string) ast.Expr {
+		return ast.NewIdent(locals[name])
+	}
+	ffiCall := func(name string, args ...ast.Expr) ast.Expr {
+		e.needsFFIImport = true
+		return &ast.CallExpr{Fun: selectorExpr(ast.NewIdent("ffi"), name), Args: args}
+	}
+	someCall := func(t ast.Expr, value ast.Expr) ast.Expr {
+		return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{t}, []ast.Expr{value})
+	}
+	noneCall := func(t ast.Expr) ast.Expr {
+		return astCall(selectorExpr(ast.NewIdent(helperImportAlias), "None"), []ast.Expr{t}, nil)
+	}
+	switch strings.TrimSpace(decl.ExternBinding) {
+	case "Now":
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ffiCall("Now")}}}, true, nil
+	case "GetTodayString":
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ffiCall("GetTodayString")}}}, true, nil
+	case "Sleep":
+		return []ast.Stmt{&ast.ExprStmt{X: ffiCall("Sleep", paramIdent(decl.Params[0].Name))}}, true, nil
+	case "FloatFromInt":
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ffiCall("FloatFromInt", paramIdent(decl.Params[0].Name))}}}, true, nil
+	case "FloatFloor":
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ffiCall("FloatFloor", paramIdent(decl.Params[0].Name))}}}, true, nil
+	case "OsArgs":
+		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: selectorExpr(ast.NewIdent(helperImportAlias), "BuiltinOSArgs")}}}}, true, nil
+	case "EnvGet", "IntFromStr", "FloatFromStr":
+		if len(decl.Params) != 1 {
+			return nil, false, fmt.Errorf("%s expects 1 param", decl.ExternBinding)
+		}
+		maybeType, ok := decl.Return.(*backendir.MaybeType)
+		if !ok || maybeType == nil {
+			return nil, false, fmt.Errorf("%s expected maybe return type", decl.ExternBinding)
+		}
+		innerType, err := e.emitType(maybeType.Of)
+		if err != nil {
+			return nil, false, err
+		}
+		callName := map[string]string{"EnvGet": "EnvGet", "IntFromStr": "IntFromStr", "FloatFromStr": "FloatFromStr"}[strings.TrimSpace(decl.ExternBinding)]
+		callExpr := ffiCall(callName, paramIdent(decl.Params[0].Name))
+		return []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("value")}, Tok: token.DEFINE, Rhs: []ast.Expr{callExpr}},
+			&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent("value"), Op: token.EQL, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.ReturnStmt{Results: []ast.Expr{noneCall(innerType)}},
+			}}},
+			&ast.ReturnStmt{Results: []ast.Expr{someCall(innerType, &ast.StarExpr{X: ast.NewIdent("value")})}},
+		}, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
 func (e *backendIREmitter) emitExternBody(decl *backendir.FuncDecl, returnType ast.Expr, locals map[string]string) ([]ast.Stmt, error) {
+	if stmts, ok, err := e.emitDirectExternBody(decl, locals); err != nil {
+		return nil, err
+	} else if ok {
+		return stmts, nil
+	}
+
 	args := make([]ast.Expr, 0, len(decl.Params)+1)
 	args = append(args, &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(decl.ExternBinding)})
 	for _, param := range decl.Params {
