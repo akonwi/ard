@@ -2420,6 +2420,58 @@ func (e *backendIREmitter) emitListPrependMutationParts(call *backendir.CallExpr
 	}, nil
 }
 
+func (e *backendIREmitter) emitListSetExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	if call == nil || len(call.Args) != 3 {
+		return nil, fmt.Errorf("list_set expects 3 args, got %d", len(call.Args))
+	}
+	listExpr, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, err
+	}
+	indexExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, err
+	}
+	valueExpr, err := e.emitExpr(call.Args[2], locals)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(ast.NewIdent("bool"))}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.IfStmt{Cond: &ast.BinaryExpr{
+			X: &ast.BinaryExpr{X: indexExpr, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+			Op: token.LAND,
+			Y: &ast.BinaryExpr{X: indexExpr, Op: token.LSS, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{listExpr}}},
+		}, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: listExpr, Index: indexExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}},
+			&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("true")}},
+		}}},
+		&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("false")}},
+	}}}}, nil
+}
+
+func (e *backendIREmitter) emitListSwapExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	if call == nil || len(call.Args) != 3 {
+		return nil, fmt.Errorf("list_swap expects 3 args, got %d", len(call.Args))
+	}
+	listExpr, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, err
+	}
+	leftExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, err
+	}
+	rightExpr, err := e.emitExpr(call.Args[2], locals)
+	if err != nil {
+		return nil, err
+	}
+	leftIndex := &ast.IndexExpr{X: listExpr, Index: leftExpr}
+	rightIndex := &ast.IndexExpr{X: listExpr, Index: rightExpr}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{leftIndex, rightIndex}, Tok: token.ASSIGN, Rhs: []ast.Expr{rightIndex, leftIndex}},
+	}}}}, nil
+}
+
 func (e *backendIREmitter) emitMapGetExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
 	if call == nil || len(call.Args) != 2 {
 		return nil, fmt.Errorf("map_get expects 2 args, got %d", len(call.Args))
@@ -2449,6 +2501,45 @@ func (e *backendIREmitter) emitMapGetExpr(call *backendir.CallExpr, locals map[s
 			&ast.ReturnStmt{Results: []ast.Expr{astCall(selectorExpr(ast.NewIdent(helperImportAlias), "Some"), []ast.Expr{valueType}, []ast.Expr{ast.NewIdent("value")})}},
 		}}},
 		&ast.ReturnStmt{Results: []ast.Expr{astCall(selectorExpr(ast.NewIdent(helperImportAlias), "None"), []ast.Expr{valueType}, nil)}},
+	}}}}, nil
+}
+
+func (e *backendIREmitter) emitMapSetExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	if call == nil || len(call.Args) != 3 {
+		return nil, fmt.Errorf("map_set expects 3 args, got %d", len(call.Args))
+	}
+	mapExpr, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, err
+	}
+	keyExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, err
+	}
+	valueExpr, err := e.emitExpr(call.Args[2], locals)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: funcResults(ast.NewIdent("bool"))}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: mapExpr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}},
+		&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("true")}},
+	}}}}, nil
+}
+
+func (e *backendIREmitter) emitMapDropExpr(call *backendir.CallExpr, locals map[string]string) (ast.Expr, error) {
+	if call == nil || len(call.Args) != 2 {
+		return nil, fmt.Errorf("map_drop expects 2 args, got %d", len(call.Args))
+	}
+	mapExpr, err := e.emitExpr(call.Args[0], locals)
+	if err != nil {
+		return nil, err
+	}
+	keyExpr, err := e.emitExpr(call.Args[1], locals)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{}, Body: &ast.BlockStmt{List: []ast.Stmt{
+		&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{mapExpr, keyExpr}}},
 	}}}}, nil
 }
 
@@ -3637,7 +3728,7 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 		case "list_prepend":
 			return e.emitListPrependExpr(call, locals)
 		case "list_set":
-			return emitCallToSelector(call, e, locals, helperImportAlias, "ListSet", 3)
+			return e.emitListSetExpr(call, locals)
 		case "list_sort":
 			if len(call.Args) != 2 {
 				return nil, fmt.Errorf("list_sort expects 2 args, got %d", len(call.Args))
@@ -3677,7 +3768,7 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 				},
 			}, nil
 		case "list_swap":
-			return emitCallToSelector(call, e, locals, helperImportAlias, "ListSwap", 3)
+			return e.emitListSwapExpr(call, locals)
 		case "map_size":
 			if len(call.Args) != 1 {
 				return nil, fmt.Errorf("map_size expects 1 arg, got %d", len(call.Args))
@@ -3729,9 +3820,9 @@ func (e *backendIREmitter) emitCallExpr(call *backendir.CallExpr, locals map[str
 		case "map_get":
 			return e.emitMapGetExpr(call, locals)
 		case "map_set":
-			return emitCallToSelector(call, e, locals, helperImportAlias, "MapSet", 3)
+			return e.emitMapSetExpr(call, locals)
 		case "map_drop":
-			return emitCallToSelector(call, e, locals, helperImportAlias, "MapDrop", 2)
+			return e.emitMapDropExpr(call, locals)
 		case "maybe_expect":
 			return emitCallToMethod(call, e, locals, "Expect", 2)
 		case "maybe_is_none":
