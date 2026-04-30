@@ -93,6 +93,15 @@ func vmFFIGetTodayString(args []any) any {
 	return ffi.GetTodayString()
 }
 
+func vmFFIOsArgs(args []any) any {
+	raw := ffi.OsArgs()
+	values := make(runtime.ListValue, len(raw))
+	for i, value := range raw {
+		values[i] = value
+	}
+	return values
+}
+
 func vmFFIHexEncode(args []any) any {
 	return ffi.HexEncode(args[0].(string))
 }

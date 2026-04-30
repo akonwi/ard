@@ -1,4 +1,5 @@
 use ard/list as List
+use ard/testing
 
 extern fn os_args() [Str] = "OsArgs"
 
@@ -16,5 +17,23 @@ fn load() Argv {
     },
     args.size() >= 1 => Argv{program: args.at(0), arguments: List::drop(from: args, till: 1)},
     _ => Argv{program: "", arguments: []},
+  }
+}
+
+test fn test_os_args_returns_process_arguments() Void!Str {
+  let args = os_args()
+  try testing::assert(args.size() >= 1, "Expected os_args() to include the process path")
+  testing::assert(args.at(0).size() > 0, "Expected first os_args() entry to be non-empty")
+}
+
+test fn test_load_uses_first_arg_outside_run_mode() Void!Str {
+  let args = os_args()
+  let parsed = load()
+
+  match args.size() >= 1 {
+    true => {
+      testing::assert(parsed.program == args.at(0), "Expected load() to use argv[0] outside run mode")
+    },
+    false => testing::assert(parsed.program == "", "Expected empty program when no args exist"),
   }
 }

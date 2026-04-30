@@ -161,6 +161,9 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("GetTodayString", vmFFIGetTodayString); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("OsArgs", vmFFIOsArgs); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("Base64Encode", vmFFIBase64Encode); err != nil {
 		return err
 	}
