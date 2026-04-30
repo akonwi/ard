@@ -223,6 +223,20 @@ func vmFFIDecodeBool(args []any) any {
 	return runtime.OkValue(value)
 }
 
+func vmFFIJsonEncode(args []any) any {
+	value := args[0]
+	if obj, ok := value.(*runtime.Object); ok {
+		value = obj.Raw()
+	} else {
+		value = vmToDynamicValue(value)
+	}
+	encoded, err := ffi.JsonEncode(value)
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(encoded)
+}
+
 func vmFFIJsonToDynamic(args []any) any {
 	value, err := ffi.JsonToDynamic(args[0].(string))
 	if err != nil {

@@ -1102,6 +1102,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if resolved.ABI == ExternABIValue {
 				rawArgs := make([]any, argc)
 				for i := range args {
+					if resolved.Binding == "JsonEncode" {
+						rawArgs[i] = args[i]
+						continue
+					}
 					rawArgs[i] = runtime.ObjectToValue(args[i], nil)
 				}
 				res, err := callValueFFI(resolved.Binding, resolved.ValueFunc, rawArgs, retType)

@@ -185,6 +185,9 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("DecodeBool", vmFFIDecodeBool); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("JsonEncode", vmFFIJsonEncode); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("JsonToDynamic", vmFFIJsonToDynamic); err != nil {
 		return err
 	}
