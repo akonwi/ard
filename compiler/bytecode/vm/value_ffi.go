@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"reflect"
+
 	"github.com/akonwi/ard/ffi"
 	"github.com/akonwi/ard/runtime"
 )
@@ -149,6 +151,38 @@ func vmFFIJsonToDynamic(args []any) any {
 		return runtime.ErrValue(err.Error())
 	}
 	return runtime.OkValue(value)
+}
+
+func vmFFIDynamicToList(args []any) any {
+	data := args[0]
+	if data == nil {
+		return runtime.ErrValue("null")
+	}
+	switch values := data.(type) {
+	case runtime.ListValue:
+		out := make(runtime.ListValue, len(values))
+		copy(out, values)
+		return runtime.OkValue(out)
+	case []any:
+		out := make(runtime.ListValue, len(values))
+		copy(out, values)
+		return runtime.OkValue(out)
+	}
+	value := reflect.ValueOf(data)
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return runtime.ErrValue("null")
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Slice && value.Kind() != reflect.Array {
+		return runtime.ErrValue(ffi.FormatRawValueForError(data))
+	}
+	out := make(runtime.ListValue, value.Len())
+	for i := 0; i < value.Len(); i++ {
+		out[i] = value.Index(i).Interface()
+	}
+	return runtime.OkValue(out)
 }
 
 func vmFFIBase64Encode(args []any) any {
