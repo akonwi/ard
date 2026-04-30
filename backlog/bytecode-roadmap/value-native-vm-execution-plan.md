@@ -319,20 +319,20 @@ Once stack/locals are `[]any`, the VM has crossed the most important boundary aw
 
 ## Stage 5: migrate the easiest opcode families first
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [x] in progress / [ ] done
 
 Do not convert every opcode at once. Migrate the ones with the best effort-to-payoff ratio.
 
 ### Checklist
 
-- [ ] migrate scalar constants
-- [ ] migrate arithmetic/comparison ops
-- [ ] migrate boolean ops
+- [x] migrate scalar constants
+- [x] migrate arithmetic/comparison ops
+- [x] migrate boolean ops
 - [ ] migrate string/int/float/bool method ops
 - [ ] migrate maybe/result creation and unwrap ops
 - [ ] migrate `try` ops
 - [ ] add targeted tests for `MaybeValue` / `ResultValue` behavior under value-native execution
-- [ ] verify `cd compiler && go test ./...`
+- [x] verify `cd compiler && go test ./...`
 
 ### First targets
 

@@ -162,7 +162,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpNoop:
 			continue
 		case bytecode.OpConstInt:
-			vm.push(curr, runtime.MakeInt(inst.Imm))
+			vm.push(curr, inst.Imm)
 		case bytecode.OpConstFloat:
 			c, err := vm.constAt(inst.A)
 			if err != nil {
@@ -171,7 +171,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if c.Kind != bytecode.ConstFloat {
 				return nil, fmt.Errorf("expected float constant, got %d", c.Kind)
 			}
-			vm.push(curr, runtime.MakeFloat(c.Float))
+			vm.push(curr, c.Float)
 		case bytecode.OpConstStr:
 			c, err := vm.constAt(inst.A)
 			if err != nil {
@@ -180,21 +180,21 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if c.Kind != bytecode.ConstStr {
 				return nil, fmt.Errorf("expected string constant, got %d", c.Kind)
 			}
-			vm.push(curr, runtime.MakeStr(c.Str))
+			vm.push(curr, c.Str)
 		case bytecode.OpConstBool:
-			vm.push(curr, runtime.MakeBool(inst.Imm != 0))
+			vm.push(curr, inst.Imm != 0)
 		case bytecode.OpConstVoid:
-			vm.push(curr, runtime.Void())
+			vm.push(curr, runtime.NativeVoid)
 		case bytecode.OpConst:
 			c, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
 			}
-			obj, err := vm.objectFromConst(c)
+			val, err := vm.valueFromConst(c)
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, obj)
+			vm.push(curr, val)
 		case bytecode.OpLoadLocal:
 			if inst.A < 0 || inst.A >= len(curr.Locals) {
 				return nil, fmt.Errorf("local index out of range")
@@ -219,69 +219,77 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpCopy:
 			vm.push(curr, vm.popUnsafe(curr).Copy())
 		case bytecode.OpPanic:
-			return nil, fmt.Errorf("panic: %s", vm.popUnsafe(curr).AsString())
+			msgVal := vm.popValueUnsafe(curr)
+			msgObj := runtime.ValueToObject(msgVal, checker.Str)
+			return nil, fmt.Errorf("panic: %s", msgObj.AsString())
 		case bytecode.OpAdd, bytecode.OpSub, bytecode.OpMul, bytecode.OpDiv, bytecode.OpMod:
-			b := vm.popUnsafe(curr)
-			a := vm.popUnsafe(curr)
-			if a.Kind() == runtime.KindInt && b.Kind() == runtime.KindInt {
-				left, right := a.AsInt(), b.AsInt()
-				switch inst.Op {
-				case bytecode.OpAdd:
-					vm.push(curr, runtime.MakeInt(left+right))
-				case bytecode.OpSub:
-					vm.push(curr, runtime.MakeInt(left-right))
-				case bytecode.OpMul:
-					vm.push(curr, runtime.MakeInt(left*right))
-				case bytecode.OpDiv:
-					vm.push(curr, runtime.MakeInt(left/right))
-				case bytecode.OpMod:
-					vm.push(curr, runtime.MakeInt(left%right))
+			right := vm.popValueUnsafe(curr)
+			left := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalBinaryValue(inst.Op, left, right); handled {
+				if err != nil {
+					return nil, err
 				}
+				vm.push(curr, res)
 				continue
 			}
-			res, err := vm.evalBinary(inst.Op, a, b)
+			rightObj := runtime.ValueToObject(right, nil)
+			leftObj := runtime.ValueToObject(left, nil)
+			res, err := vm.evalBinary(inst.Op, leftObj, rightObj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpAnd, bytecode.OpOr:
-			b := vm.popUnsafe(curr)
-			a := vm.popUnsafe(curr)
-			res, err := vm.evalBinary(inst.Op, a, b)
+			right := vm.popValueUnsafe(curr)
+			left := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalBinaryValue(inst.Op, left, right); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			rightObj := runtime.ValueToObject(right, nil)
+			leftObj := runtime.ValueToObject(left, nil)
+			res, err := vm.evalBinary(inst.Op, leftObj, rightObj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpNeg:
-			res, err := vm.evalUnary(inst.Op, vm.popUnsafe(curr))
+			val := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalUnaryValue(inst.Op, val); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			res, err := vm.evalUnary(inst.Op, runtime.ValueToObject(val, nil))
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpNot:
-			vm.push(curr, runtime.MakeBool(!vm.popUnsafe(curr).AsBool()))
-		case bytecode.OpEq, bytecode.OpNeq, bytecode.OpLt, bytecode.OpLte, bytecode.OpGt, bytecode.OpGte:
-			b := vm.popUnsafe(curr)
-			a := vm.popUnsafe(curr)
-			if a.Kind() == runtime.KindInt && b.Kind() == runtime.KindInt {
-				left, right := a.AsInt(), b.AsInt()
-				switch inst.Op {
-				case bytecode.OpEq:
-					vm.push(curr, runtime.MakeBool(left == right))
-				case bytecode.OpNeq:
-					vm.push(curr, runtime.MakeBool(left != right))
-				case bytecode.OpLt:
-					vm.push(curr, runtime.MakeBool(left < right))
-				case bytecode.OpLte:
-					vm.push(curr, runtime.MakeBool(left <= right))
-				case bytecode.OpGt:
-					vm.push(curr, runtime.MakeBool(left > right))
-				case bytecode.OpGte:
-					vm.push(curr, runtime.MakeBool(left >= right))
-				}
+			val := vm.popValueUnsafe(curr)
+			if boolVal, ok := val.(bool); ok {
+				vm.push(curr, !boolVal)
 				continue
 			}
-			res, err := vm.evalCompare(inst.Op, a, b)
+			vm.push(curr, runtime.MakeBool(!runtime.ValueToObject(val, checker.Bool).AsBool()))
+		case bytecode.OpEq, bytecode.OpNeq, bytecode.OpLt, bytecode.OpLte, bytecode.OpGt, bytecode.OpGte:
+			right := vm.popValueUnsafe(curr)
+			left := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalCompareValue(inst.Op, left, right); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			rightObj := runtime.ValueToObject(right, nil)
+			leftObj := runtime.ValueToObject(left, nil)
+			res, err := vm.evalCompare(inst.Op, leftObj, rightObj)
 			if err != nil {
 				return nil, err
 			}
@@ -289,11 +297,25 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpJump:
 			curr.IP = inst.A
 		case bytecode.OpJumpIfFalse:
-			if !vm.popUnsafe(curr).AsBool() {
+			cond := vm.popValueUnsafe(curr)
+			if boolVal, ok := cond.(bool); ok {
+				if !boolVal {
+					curr.IP = inst.A
+				}
+				continue
+			}
+			if !runtime.ValueToObject(cond, checker.Bool).AsBool() {
 				curr.IP = inst.A
 			}
 		case bytecode.OpJumpIfTrue:
-			if vm.popUnsafe(curr).AsBool() {
+			cond := vm.popValueUnsafe(curr)
+			if boolVal, ok := cond.(bool); ok {
+				if boolVal {
+					curr.IP = inst.A
+				}
+				continue
+			}
+			if runtime.ValueToObject(cond, checker.Bool).AsBool() {
 				curr.IP = inst.A
 			}
 		case bytecode.OpReturn:
@@ -1067,26 +1089,36 @@ func (vm *VM) pop(frame *Frame) (*runtime.Object, error) {
 	return vm.popUnsafe(frame), nil
 }
 
-func (vm *VM) popUnsafe(frame *Frame) *runtime.Object {
+func (vm *VM) popValue(frame *Frame) (any, error) {
+	if frame.StackTop == 0 {
+		return nil, fmt.Errorf("stack underflow")
+	}
+	return vm.popValueUnsafe(frame), nil
+}
+
+func (vm *VM) popValueUnsafe(frame *Frame) any {
 	frame.StackTop--
 	val := frame.Stack[frame.StackTop]
 	frame.Stack[frame.StackTop] = nil
-	obj, ok := val.(*runtime.Object)
-	if !ok {
-		panic(fmt.Errorf("expected *runtime.Object on VM stack, got %T", val))
-	}
-	return obj
+	return val
+}
+
+func (vm *VM) popUnsafe(frame *Frame) *runtime.Object {
+	return vm.objectFromValue(vm.popValueUnsafe(frame))
 }
 
 func (vm *VM) stackObjectAt(frame *Frame, index int) (*runtime.Object, error) {
 	if index < 0 || index >= frame.StackTop {
 		return nil, fmt.Errorf("stack index out of range")
 	}
-	obj, ok := frame.Stack[index].(*runtime.Object)
-	if !ok {
-		return nil, fmt.Errorf("expected *runtime.Object on VM stack, got %T", frame.Stack[index])
+	return vm.objectFromValue(frame.Stack[index]), nil
+}
+
+func (vm *VM) objectFromValue(val any) *runtime.Object {
+	if obj, ok := val.(*runtime.Object); ok {
+		return obj
 	}
-	return obj, nil
+	return runtime.ValueToObject(val, nil)
 }
 
 func (vm *VM) constAt(index int) (bytecode.Constant, error) {
@@ -1096,19 +1128,127 @@ func (vm *VM) constAt(index int) (bytecode.Constant, error) {
 	return vm.Program.Constants[index], nil
 }
 
-func (vm *VM) objectFromConst(c bytecode.Constant) (*runtime.Object, error) {
+func (vm *VM) valueFromConst(c bytecode.Constant) (any, error) {
 	switch c.Kind {
 	case bytecode.ConstInt:
-		return runtime.MakeInt(c.Int), nil
+		return c.Int, nil
 	case bytecode.ConstFloat:
-		return runtime.MakeFloat(c.Float), nil
+		return c.Float, nil
 	case bytecode.ConstStr:
-		return runtime.MakeStr(c.Str), nil
+		return c.Str, nil
 	case bytecode.ConstBool:
-		return runtime.MakeBool(c.Bool), nil
+		return c.Bool, nil
 	default:
 		return nil, fmt.Errorf("unknown constant kind: %d", c.Kind)
 	}
+}
+
+func (vm *VM) evalBinaryValue(op bytecode.Opcode, left, right any) (any, bool, error) {
+	switch a := left.(type) {
+	case int:
+		b, ok := right.(int)
+		if !ok {
+			return nil, false, nil
+		}
+		switch op {
+		case bytecode.OpAdd:
+			return a + b, true, nil
+		case bytecode.OpSub:
+			return a - b, true, nil
+		case bytecode.OpMul:
+			return a * b, true, nil
+		case bytecode.OpDiv:
+			return a / b, true, nil
+		case bytecode.OpMod:
+			return a % b, true, nil
+		case bytecode.OpEq:
+			return a == b, true, nil
+		case bytecode.OpNeq:
+			return a != b, true, nil
+		case bytecode.OpLt:
+			return a < b, true, nil
+		case bytecode.OpLte:
+			return a <= b, true, nil
+		case bytecode.OpGt:
+			return a > b, true, nil
+		case bytecode.OpGte:
+			return a >= b, true, nil
+		}
+	case float64:
+		b, ok := right.(float64)
+		if !ok {
+			return nil, false, nil
+		}
+		switch op {
+		case bytecode.OpAdd:
+			return a + b, true, nil
+		case bytecode.OpSub:
+			return a - b, true, nil
+		case bytecode.OpMul:
+			return a * b, true, nil
+		case bytecode.OpDiv:
+			return a / b, true, nil
+		case bytecode.OpEq:
+			return a == b, true, nil
+		case bytecode.OpNeq:
+			return a != b, true, nil
+		case bytecode.OpLt:
+			return a < b, true, nil
+		case bytecode.OpLte:
+			return a <= b, true, nil
+		case bytecode.OpGt:
+			return a > b, true, nil
+		case bytecode.OpGte:
+			return a >= b, true, nil
+		}
+	case string:
+		b, ok := right.(string)
+		if !ok {
+			return nil, false, nil
+		}
+		switch op {
+		case bytecode.OpAdd:
+			return a + b, true, nil
+		case bytecode.OpEq:
+			return a == b, true, nil
+		case bytecode.OpNeq:
+			return a != b, true, nil
+		}
+	case bool:
+		b, ok := right.(bool)
+		if !ok {
+			return nil, false, nil
+		}
+		switch op {
+		case bytecode.OpAnd:
+			return a && b, true, nil
+		case bytecode.OpOr:
+			return a || b, true, nil
+		case bytecode.OpEq:
+			return a == b, true, nil
+		case bytecode.OpNeq:
+			return a != b, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (vm *VM) evalUnaryValue(op bytecode.Opcode, val any) (any, bool, error) {
+	switch value := val.(type) {
+	case int:
+		if op == bytecode.OpNeg {
+			return -value, true, nil
+		}
+	case float64:
+		if op == bytecode.OpNeg {
+			return -value, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (vm *VM) evalCompareValue(op bytecode.Opcode, left, right any) (any, bool, error) {
+	return vm.evalBinaryValue(op, left, right)
 }
 
 func (vm *VM) evalBinary(op bytecode.Opcode, left, right *runtime.Object) (*runtime.Object, error) {

@@ -15,6 +15,8 @@ func ValueToObject(v any, t checker.Type) *Object {
 		switch value := v.(type) {
 		case nil:
 			return MakeDynamic(nil)
+		case VoidValue:
+			return Void()
 		case string:
 			return MakeStr(value)
 		case int:
@@ -23,6 +25,16 @@ func ValueToObject(v any, t checker.Type) *Object {
 			return MakeFloat(value)
 		case bool:
 			return MakeBool(value)
+		case MaybeValue:
+			if value.None {
+				return MakeNone(checker.Dynamic)
+			}
+			return MakeNone(checker.Dynamic).ToSome(ValueToObject(value.Value, nil).Raw())
+		case ResultValue:
+			if value.IsErr {
+				return MakeErr(ValueToObject(value.Err, nil))
+			}
+			return MakeOk(ValueToObject(value.Ok, nil))
 		default:
 			return MakeDynamic(value)
 		}
