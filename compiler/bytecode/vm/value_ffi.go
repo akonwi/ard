@@ -450,6 +450,121 @@ func vmFFIGetResult(args []any) any {
 	return resolveAsyncHandle(args[0]).GetResult()
 }
 
+func httpStringArg(value any) string {
+	if obj, ok := value.(*runtime.Object); ok {
+		return obj.AsString()
+	}
+	return value.(string)
+}
+
+func httpHandleArg(value any) any {
+	if obj, ok := value.(*runtime.Object); ok {
+		return obj.Raw()
+	}
+	return value
+}
+
+func httpHeadersArg(value any) map[string]string {
+	if obj, ok := value.(*runtime.Object); ok {
+		mapped := obj.AsMap()
+		headers := make(map[string]string, len(mapped))
+		for key, item := range mapped {
+			headers[key] = item.AsString()
+		}
+		return headers
+	}
+	switch mapped := value.(type) {
+	case runtime.MapValue:
+		headers := make(map[string]string, len(mapped.Storage.Keys()))
+		for _, key := range mapped.Storage.Keys() {
+			entry, _ := mapped.Storage.GetAny(key)
+			headers[key.(string)] = entry.(string)
+		}
+		return headers
+	case map[string]string:
+		return mapped
+	case map[string]any:
+		headers := make(map[string]string, len(mapped))
+		for key, item := range mapped {
+			headers[key] = item.(string)
+		}
+		return headers
+	default:
+		panic(fmt.Errorf("expected http headers map, got %T", value))
+	}
+}
+
+func httpMaybeTimeoutArg(value any) *int {
+	if obj, ok := value.(*runtime.Object); ok {
+		if obj.IsNone() {
+			return nil
+		}
+		resolved := obj.AsInt()
+		return &resolved
+	}
+	return maybeIntArg(value)
+}
+
+func vmFFIGetReqPath(args []any) any {
+	return ffi.GetReqPath(httpHandleArg(args[0]))
+}
+
+func vmFFIGetPathValue(args []any) any {
+	return ffi.GetPathValue(httpHandleArg(args[0]), httpStringArg(args[1]))
+}
+
+func vmFFIGetQueryParam(args []any) any {
+	return ffi.GetQueryParam(httpHandleArg(args[0]), httpStringArg(args[1]))
+}
+
+func vmFFIHTTPDo(args []any) any {
+	value, err := ffi.HTTP_Do(
+		httpStringArg(args[0]),
+		httpStringArg(args[1]),
+		vmToDynamicValue(httpHandleArg(args[2])),
+		httpHeadersArg(args[3]),
+		httpMaybeTimeoutArg(args[4]),
+	)
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIHTTPResponseStatus(args []any) any {
+	return ffi.HTTP_ResponseStatus(httpHandleArg(args[0]))
+}
+
+func vmFFIHTTPResponseHeader(args []any) any {
+	value := ffi.HTTP_ResponseHeader(httpHandleArg(args[0]), httpStringArg(args[1]))
+	if value == nil {
+		return runtime.NoneValue()
+	}
+	return runtime.SomeValue(*value)
+}
+
+func vmFFIHTTPResponseHeaders(args []any) any {
+	value := ffi.HTTP_ResponseHeaders(httpHandleArg(args[0]))
+	storage := runtime.NewMap[string]()
+	for key, item := range value {
+		storage.Entries[key] = item
+	}
+	return runtime.MapValue{Storage: storage}
+}
+
+func vmFFIHTTPResponseBody(args []any) any {
+	value, err := ffi.HTTP_ResponseBody(httpHandleArg(args[0]))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIHTTPResponseClose(args []any) any {
+	ffi.HTTP_ResponseClose(httpHandleArg(args[0]))
+	return runtime.NativeVoid
+}
+
 func sqlStringArg(value any) string {
 	if obj, ok := value.(*runtime.Object); ok {
 		return obj.AsString()

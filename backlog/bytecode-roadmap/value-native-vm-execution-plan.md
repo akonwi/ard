@@ -426,10 +426,11 @@ Completed straightforward module batches now cover:
 - `ard/async` ordinary externs (`Sleep`, `WaitFor`, `GetResult`)
 - `ard/async` handle-based wrapper redesign that quarantines `AsyncStart` / `AsyncEval` to the closure argument and opaque handle return
 - `ard/sql` migrated to value-native VM externs while preserving opaque `Db` / `Tx` handles and returning native row collections/maps to decode
+- `ard/http` client/request-helper externs migrated to value-native VM bindings while preserving opaque `RawRequest` / `RawResponse` handles
 
 Remaining major FFI migration work is now concentrated in:
 
-- `ard/http`
+- `ard/http` server callback bridge (`HTTP_Serve`), intentionally left on the object ABI as the final Go `net/http` interop holdout
 
 ### First migration targets
 

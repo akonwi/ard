@@ -200,6 +200,33 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("ExtractField", vmFFIExtractField); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("GetReqPath", vmFFIGetReqPath); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("GetPathValue", vmFFIGetPathValue); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("GetQueryParam", vmFFIGetQueryParam); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("HTTP_Do", vmFFIHTTPDo); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("HTTP_ResponseStatus", vmFFIHTTPResponseStatus); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("HTTP_ResponseHeader", vmFFIHTTPResponseHeader); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("HTTP_ResponseHeaders", vmFFIHTTPResponseHeaders); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("HTTP_ResponseBody", vmFFIHTTPResponseBody); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("HTTP_ResponseClose", vmFFIHTTPResponseClose); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("Now", vmFFINow); err != nil {
 		return err
 	}

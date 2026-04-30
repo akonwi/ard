@@ -1098,6 +1098,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 				for i := range args {
 					switch resolved.Binding {
 					case "JsonEncode", "WaitFor", "GetResult",
+						"GetReqPath", "GetPathValue", "GetQueryParam",
 						"SqlCreateConnection", "SqlClose", "SqlExtractParams", "SqlQuery", "SqlExecute", "SqlBeginTx", "SqlCommit", "SqlRollback":
 						rawArgs[i] = args[i]
 						continue
