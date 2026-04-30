@@ -1,1 +1,10 @@
+use ard/testing
+
 extern fn get_today() Str = "GetTodayString"
+
+test fn test_get_today_returns_iso_like_date() Void!Str {
+  let today = get_today()
+  let parts = today.split("-")
+  try testing::assert(today.size() == 10, "Expected YYYY-MM-DD date length")
+  testing::assert(parts.size() == 3, "Expected get_today() to return three dash-separated parts")
+}

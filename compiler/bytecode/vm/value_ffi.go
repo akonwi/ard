@@ -89,6 +89,10 @@ func vmFFINow(args []any) any {
 	return ffi.Now()
 }
 
+func vmFFIGetTodayString(args []any) any {
+	return ffi.GetTodayString()
+}
+
 func vmFFIHexEncode(args []any) any {
 	return ffi.HexEncode(args[0].(string))
 }
