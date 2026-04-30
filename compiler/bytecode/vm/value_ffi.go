@@ -185,6 +185,56 @@ func vmFFIDynamicToList(args []any) any {
 	return runtime.OkValue(out)
 }
 
+func vmFFIDynamicToMap(args []any) any {
+	data := args[0]
+	if data == nil {
+		return runtime.ErrValue("null")
+	}
+	if mapped, ok := data.(runtime.MapValue); ok {
+		return runtime.OkValue(runtime.MapValue{Storage: mapped.Storage.Copy()})
+	}
+	if mapped, ok := data.(map[string]any); ok {
+		storage := runtime.NewMap[string]()
+		for key, value := range mapped {
+			storage.Entries[key] = value
+		}
+		return runtime.OkValue(runtime.MapValue{Storage: storage})
+	}
+	if mapped, ok := data.(map[string]*runtime.Object); ok {
+		storage := runtime.NewMap[string]()
+		for key, value := range mapped {
+			storage.Entries[key] = runtime.ObjectToValue(value, value.Type())
+		}
+		return runtime.OkValue(runtime.MapValue{Storage: storage})
+	}
+	value := reflect.ValueOf(data)
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return runtime.ErrValue("null")
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Map {
+		return runtime.ErrValue(ffi.FormatRawValueForError(data))
+	}
+	storage := runtime.NewMap[string]()
+	iter := value.MapRange()
+	for iter.Next() {
+		keyValue := iter.Key()
+		for keyValue.Kind() == reflect.Interface {
+			if keyValue.IsNil() {
+				return runtime.ErrValue(ffi.FormatRawValueForError(data))
+			}
+			keyValue = keyValue.Elem()
+		}
+		if keyValue.Kind() != reflect.String {
+			return runtime.ErrValue(ffi.FormatRawValueForError(data))
+		}
+		storage.Entries[keyValue.String()] = iter.Value().Interface()
+	}
+	return runtime.OkValue(runtime.MapValue{Storage: storage})
+}
+
 func vmFFIExtractField(args []any) any {
 	data := args[0]
 	name := args[1].(string)
