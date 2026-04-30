@@ -1,1 +1,14 @@
+use ard/testing
+
 extern fn from_str(str: Str) Int? = "IntFromStr"
+
+test fn test_from_str_parses_valid_integer() Void!Str {
+  testing::assert(from_str("42").or(0) == 42, "Expected from_str to parse decimal integers")
+}
+
+test fn test_from_str_returns_none_for_invalid_input() Void!Str {
+  testing::assert(
+    from_str("forty-two").is_none(),
+    "Expected from_str to return none for invalid integers",
+  )
+}
