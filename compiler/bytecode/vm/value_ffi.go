@@ -77,6 +77,25 @@ func maybeStringArg(value any) *string {
 	return &stringValue
 }
 
+func decodeErrorResult(expected string, found any) any {
+	if found == nil {
+		return runtime.ErrValue(ffi.MakeDecodeError(expected, "null"))
+	}
+	return runtime.ErrValue(ffi.MakeDecodeError(expected, ffi.FormatRawValueForError(found)))
+}
+
+func vmFFIDecodeString(args []any) any {
+	data := args[0]
+	if data == nil {
+		return decodeErrorResult("Str", nil)
+	}
+	value, ok := data.(string)
+	if !ok {
+		return decodeErrorResult("Str", data)
+	}
+	return runtime.OkValue(value)
+}
+
 func vmFFIJsonToDynamic(args []any) any {
 	value, err := ffi.JsonToDynamic(args[0].(string))
 	if err != nil {

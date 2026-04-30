@@ -214,6 +214,14 @@ func makeError(expected, found string, _type checker.Type) *runtime.Object {
 	)
 }
 
+func MakeDecodeError(expected, found string) *runtime.Object {
+	return makeError(expected, found, getDecodeErrorType())
+}
+
+func FormatRawValueForError(v any) string {
+	return formatRawValueForError(v)
+}
+
 // Helper function to format raw values with smart truncation and previews
 func formatRawValueForError(v any) string {
 	switch val := v.(type) {
