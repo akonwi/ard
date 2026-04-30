@@ -154,14 +154,6 @@ export function formatDynamicForError(value) {
   return String(value);
 }
 
-export function makeDecodeError(expected, found) {
-  return {
-    expected,
-    found,
-    path: [],
-  };
-}
-
 export function toDynamicMap(value) {
   if (value instanceof Map) {
     const out = {};
@@ -252,27 +244,27 @@ export function JsonToDynamic(jsonString) {
 }
 
 export function DecodeString(data) {
-  if (data === null || data === undefined) return { err: makeDecodeError("Str", "null") };
+  if (data === null || data === undefined) return { err: "null" };
   if (typeof data === "string") return { ok: data };
-  return { err: makeDecodeError("Str", formatDynamicForError(data)) };
+  return { err: formatDynamicForError(data) };
 }
 
 export function DecodeInt(data) {
-  if (data === null || data === undefined) return { err: makeDecodeError("Int", "null") };
+  if (data === null || data === undefined) return { err: "null" };
   if (typeof data === "number" && Number.isInteger(data)) return { ok: data };
-  return { err: makeDecodeError("Int", formatDynamicForError(data)) };
+  return { err: formatDynamicForError(data) };
 }
 
 export function DecodeFloat(data) {
-  if (data === null || data === undefined) return { err: makeDecodeError("Float", "null") };
+  if (data === null || data === undefined) return { err: "null" };
   if (typeof data === "number") return { ok: data };
-  return { err: makeDecodeError("Float", formatDynamicForError(data)) };
+  return { err: formatDynamicForError(data) };
 }
 
 export function DecodeBool(data) {
-  if (data === null || data === undefined) return { err: makeDecodeError("Bool", "null") };
+  if (data === null || data === undefined) return { err: "null" };
   if (typeof data === "boolean") return { ok: data };
-  return { err: makeDecodeError("Bool", formatDynamicForError(data)) };
+  return { err: formatDynamicForError(data) };
 }
 
 export function IsNil(data) {

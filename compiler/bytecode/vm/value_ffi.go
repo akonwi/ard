@@ -77,21 +77,68 @@ func maybeStringArg(value any) *string {
 	return &stringValue
 }
 
-func decodeErrorResult(expected string, found any) any {
+func decodeFoundResult(found any) any {
 	if found == nil {
-		return runtime.ErrValue(ffi.MakeDecodeError(expected, "null"))
+		return runtime.ErrValue("null")
 	}
-	return runtime.ErrValue(ffi.MakeDecodeError(expected, ffi.FormatRawValueForError(found)))
+	return runtime.ErrValue(ffi.FormatRawValueForError(found))
 }
 
 func vmFFIDecodeString(args []any) any {
 	data := args[0]
 	if data == nil {
-		return decodeErrorResult("Str", nil)
+		return decodeFoundResult(nil)
 	}
 	value, ok := data.(string)
 	if !ok {
-		return decodeErrorResult("Str", data)
+		return decodeFoundResult(data)
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIDecodeInt(args []any) any {
+	data := args[0]
+	if data == nil {
+		return decodeFoundResult(nil)
+	}
+	switch value := data.(type) {
+	case int:
+		return runtime.OkValue(value)
+	case int64:
+		return runtime.OkValue(int(value))
+	case float64:
+		intValue := int(value)
+		if value == float64(intValue) {
+			return runtime.OkValue(intValue)
+		}
+	}
+	return decodeFoundResult(data)
+}
+
+func vmFFIDecodeFloat(args []any) any {
+	data := args[0]
+	if data == nil {
+		return decodeFoundResult(nil)
+	}
+	switch value := data.(type) {
+	case float64:
+		return runtime.OkValue(value)
+	case int:
+		return runtime.OkValue(float64(value))
+	case int64:
+		return runtime.OkValue(float64(value))
+	}
+	return decodeFoundResult(data)
+}
+
+func vmFFIDecodeBool(args []any) any {
+	data := args[0]
+	if data == nil {
+		return decodeFoundResult(nil)
+	}
+	value, ok := data.(bool)
+	if !ok {
+		return decodeFoundResult(data)
 	}
 	return runtime.OkValue(value)
 }

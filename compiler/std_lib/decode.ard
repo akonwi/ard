@@ -38,19 +38,19 @@ impl Str::ToString for Error {
 
 type JsonInput = Str | Dynamic
 
-private extern fn _decode_string(data: Dynamic) Str!Error = {
+private extern fn _decode_string(data: Dynamic) Str!Str = {
   go = "DecodeString"
   js = "DecodeString"
 }
-private extern fn _decode_int(data: Dynamic) Int!Error = {
+private extern fn _decode_int(data: Dynamic) Int!Str = {
   go = "DecodeInt"
   js = "DecodeInt"
 }
-private extern fn _decode_float(data: Dynamic) Float!Error = {
+private extern fn _decode_float(data: Dynamic) Float!Str = {
   go = "DecodeFloat"
   js = "DecodeFloat"
 }
-private extern fn _decode_bool(data: Dynamic) Bool!Error = {
+private extern fn _decode_bool(data: Dynamic) Bool!Str = {
   go = "DecodeBool"
   js = "DecodeBool"
 }
@@ -69,7 +69,7 @@ fn from_json(input: JsonInput) Dynamic!Str {
   let json = match input {
     Str(text) => text,
     Dynamic(raw) => {
-      let text = try _decode_string(raw) -> err { Result::err("Expected a JSON string, got {err.found}") }
+      let text = try _decode_string(raw) -> found { Result::err("Expected a JSON string, got {found}") }
       text
     },
   }
@@ -80,22 +80,62 @@ fn from_json(input: JsonInput) Dynamic!Str {
 type Decoder = fn(Dynamic) $Out![Error]
 
 fn string(data: Dynamic) Str![Error] {
-  let val = try _decode_string(data) -> err { Result::err([err]) }
+  let val = try _decode_string(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Str",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn int(data: Dynamic) Int![Error] {
-  let val = try _decode_int(data) -> err { Result::err([err]) }
+  let val = try _decode_int(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Int",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn float(data: Dynamic) Float![Error] {
-  let val = try _decode_float(data) -> err { Result::err([err]) }
+  let val = try _decode_float(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Float",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn bool(data: Dynamic) Bool![Error] {
-  let val = try _decode_bool(data) -> err { Result::err([err]) }
+  let val = try _decode_bool(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Bool",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 

@@ -5,31 +5,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/runtime"
 )
-
-var (
-	decodeErrorType     checker.Type
-	decodeErrorTypeOnce sync.Once
-)
-
-func getDecodeErrorType() checker.Type {
-	decodeErrorTypeOnce.Do(func() {
-		mod, ok := checker.FindEmbeddedModule("ard/decode")
-		if !ok {
-			panic("failed to load ard/decode embedded module")
-		}
-		sym := mod.Get("Error")
-		if sym.Type == nil {
-			panic("Error type not found in ard/decode module")
-		}
-		decodeErrorType = sym.Type
-	})
-	return decodeErrorType
-}
 
 func ListToDynamic(items []any) any {
 	raw := make([]any, len(items))
@@ -56,28 +35,26 @@ func JsonToDynamic(jsonString string) (any, error) {
 	return raw, nil
 }
 
-// fn (Dynamic) Str!Error
+// fn (Dynamic) Str!Str
 func DecodeString(args []*runtime.Object) *runtime.Object {
-	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Str", "null", errType))
+		return runtime.MakeErr(runtime.MakeStr("null"))
 	}
 	if str, ok := data.(string); ok {
 		return runtime.MakeOk(runtime.MakeStr(str))
 	}
 
-	return runtime.MakeErr(makeError("Str", formatRawValueForError(arg.GoValue()), errType))
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
 }
 
-// fn (Dynamic) Int!Error
+// fn (Dynamic) Int!Str
 func DecodeInt(args []*runtime.Object) *runtime.Object {
-	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Int", "null", errType))
+		return runtime.MakeErr(runtime.MakeStr("null"))
 	}
 	if int, ok := data.(int); ok {
 		return runtime.MakeOk(runtime.MakeInt(int))
@@ -94,16 +71,15 @@ func DecodeInt(args []*runtime.Object) *runtime.Object {
 		}
 	}
 
-	return runtime.MakeErr(makeError("Int", formatRawValueForError(arg.GoValue()), errType))
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
 }
 
-// fn (Dynamic) Float!Error
+// fn (Dynamic) Float!Str
 func DecodeFloat(args []*runtime.Object) *runtime.Object {
-	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Float", "null", errType))
+		return runtime.MakeErr(runtime.MakeStr("null"))
 	}
 	if float, ok := data.(float64); ok {
 		return runtime.MakeOk(runtime.MakeFloat(float))
@@ -116,22 +92,21 @@ func DecodeFloat(args []*runtime.Object) *runtime.Object {
 		return runtime.MakeOk(runtime.MakeFloat(float64(intVal)))
 	}
 
-	return runtime.MakeErr(makeError("Float", formatRawValueForError(arg.GoValue()), errType))
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
 }
 
-// fn (Dynamic) Bool!Error
+// fn (Dynamic) Bool!Str
 func DecodeBool(args []*runtime.Object) *runtime.Object {
-	errType := getDecodeErrorType()
 	arg := args[0]
 	data := arg.Raw()
 	if data == nil {
-		return runtime.MakeErr(makeError("Bool", "null", errType))
+		return runtime.MakeErr(runtime.MakeStr("null"))
 	}
 	if val, ok := data.(bool); ok {
 		return runtime.MakeOk(runtime.MakeBool(val))
 	}
 
-	return runtime.MakeErr(makeError("Bool", formatRawValueForError(arg.GoValue()), errType))
+	return runtime.MakeErr(runtime.MakeStr(formatRawValueForError(arg.GoValue())))
 }
 
 // fn (Dynamic) Bool
@@ -202,20 +177,6 @@ func ExtractField(args []*runtime.Object) *runtime.Object {
 	}
 
 	return runtime.MakeOk(found)
-}
-
-func makeError(expected, found string, _type checker.Type) *runtime.Object {
-	return runtime.MakeStruct(_type,
-		map[string]*runtime.Object{
-			"expected": runtime.MakeStr(expected),
-			"found":    runtime.MakeStr(found),
-			"path":     runtime.MakeList(checker.Str),
-		},
-	)
-}
-
-func MakeDecodeError(expected, found string) *runtime.Object {
-	return makeError(expected, found, getDecodeErrorType())
 }
 
 func FormatRawValueForError(v any) string {

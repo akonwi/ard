@@ -9,75 +9,61 @@ import (
 	"github.com/akonwi/ard/ffi"
 )
 
-type builtinDecodeError struct {
-	Expected string
-	Found    string
-	Path     []string
-}
-
-func makeBuiltinDecodeError(expected, found string) builtinDecodeError {
-	return builtinDecodeError{
-		Expected: expected,
-		Found:    found,
-		Path:     []string{},
-	}
-}
-
-func builtinDecodeString(data any) Result[string, builtinDecodeError] {
+func builtinDecodeString(data any) Result[string, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[string, builtinDecodeError](makeBuiltinDecodeError("Str", "null"))
+		return Err[string, string]("null")
 	}
 	if value, ok := data.(string); ok {
-		return Ok[string, builtinDecodeError](value)
+		return Ok[string, string](value)
 	}
-	return Err[string, builtinDecodeError](makeBuiltinDecodeError("Str", formatBuiltinRawValueForError(data)))
+	return Err[string, string](formatBuiltinRawValueForError(data))
 }
 
-func builtinDecodeInt(data any) Result[int, builtinDecodeError] {
+func builtinDecodeInt(data any) Result[int, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[int, builtinDecodeError](makeBuiltinDecodeError("Int", "null"))
+		return Err[int, string]("null")
 	}
 	switch value := data.(type) {
 	case int:
-		return Ok[int, builtinDecodeError](value)
+		return Ok[int, string](value)
 	case int64:
-		return Ok[int, builtinDecodeError](int(value))
+		return Ok[int, string](int(value))
 	case float64:
 		intValue := int(value)
 		if value == float64(intValue) {
-			return Ok[int, builtinDecodeError](intValue)
+			return Ok[int, string](intValue)
 		}
 	}
-	return Err[int, builtinDecodeError](makeBuiltinDecodeError("Int", formatBuiltinRawValueForError(data)))
+	return Err[int, string](formatBuiltinRawValueForError(data))
 }
 
-func builtinDecodeFloat(data any) Result[float64, builtinDecodeError] {
+func builtinDecodeFloat(data any) Result[float64, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[float64, builtinDecodeError](makeBuiltinDecodeError("Float", "null"))
+		return Err[float64, string]("null")
 	}
 	switch value := data.(type) {
 	case float64:
-		return Ok[float64, builtinDecodeError](value)
+		return Ok[float64, string](value)
 	case int:
-		return Ok[float64, builtinDecodeError](float64(value))
+		return Ok[float64, string](float64(value))
 	case int64:
-		return Ok[float64, builtinDecodeError](float64(value))
+		return Ok[float64, string](float64(value))
 	}
-	return Err[float64, builtinDecodeError](makeBuiltinDecodeError("Float", formatBuiltinRawValueForError(data)))
+	return Err[float64, string](formatBuiltinRawValueForError(data))
 }
 
-func builtinDecodeBool(data any) Result[bool, builtinDecodeError] {
+func builtinDecodeBool(data any) Result[bool, string] {
 	data = builtinDynamicValue(data)
 	if data == nil {
-		return Err[bool, builtinDecodeError](makeBuiltinDecodeError("Bool", "null"))
+		return Err[bool, string]("null")
 	}
 	if value, ok := data.(bool); ok {
-		return Ok[bool, builtinDecodeError](value)
+		return Ok[bool, string](value)
 	}
-	return Err[bool, builtinDecodeError](makeBuiltinDecodeError("Bool", formatBuiltinRawValueForError(data)))
+	return Err[bool, string](formatBuiltinRawValueForError(data))
 }
 
 func builtinDynamicToList(data any) Result[[]any, string] {
