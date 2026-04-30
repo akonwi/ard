@@ -61,7 +61,7 @@ The following decisions are already made in the design doc and should be treated
 
 Use this section as the source-of-truth status tracker for the migration.
 
-- [ ] Stage 1: introduce value-native runtime types
+- [x] Stage 1: introduce value-native runtime types
 - [ ] Stage 2: add compatibility adapters
 - [ ] Stage 3: add bytecode/type metadata for field-indexed structs
 - [ ] Stage 4: migrate frame storage to `[]any`
@@ -75,23 +75,23 @@ Use this section as the source-of-truth status tracker for the migration.
 
 ## Stage 1: introduce value-native runtime types
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [ ] in progress / [x] done
 
 Create the new runtime types without changing the VM stack representation yet.
 
 ### Checklist
 
-- [ ] add `VoidValue`
-- [ ] add `MaybeValue`
-- [ ] add `ResultValue`
-- [ ] add `ScalarKey`
-- [ ] add `VMMap`
-- [ ] add `Map[K]`
-- [ ] add `MapValue`
-- [ ] add `StructValue`
-- [ ] add `EnumValue`
-- [ ] add focused unit tests for runtime value helpers
-- [ ] verify `cd compiler && go test ./...`
+- [x] add `VoidValue`
+- [x] add `MaybeValue`
+- [x] add `ResultValue`
+- [x] add `ScalarKey`
+- [x] add `VMMap`
+- [x] add `Map[K]`
+- [x] add `MapValue`
+- [x] add `StructValue`
+- [x] add `EnumValue`
+- [x] add focused unit tests for runtime value helpers
+- [x] verify `cd compiler && go test ./...`
 
 ### Deliverables
 
@@ -572,8 +572,8 @@ The migration is on track if:
 
 Current recommended starting checklist:
 
-- [ ] define the new runtime value types
+- [x] define the new runtime value types
 - [ ] add object/value adapters
-- [ ] add focused tests
+- [x] add focused tests
 
 That is the smallest slice that makes the long-term migration real without overcommitting the first implementation PR.
