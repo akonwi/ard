@@ -610,7 +610,8 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, runtime.MakeNone(resolved))
+			_ = resolved
+			vm.push(curr, runtime.NoneValue())
 		case bytecode.OpStrMethod:
 			args := make([]any, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
@@ -702,7 +703,15 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpMaybeUnwrap:
-			subj := vm.popUnsafe(curr)
+			subjVal := vm.popValueUnsafe(curr)
+			if maybe, ok := subjVal.(runtime.MaybeValue); ok {
+				if maybe.None {
+					return nil, fmt.Errorf("cannot unwrap none")
+				}
+				vm.push(curr, maybe.Value)
+				continue
+			}
+			subj := runtime.ValueToObject(subjVal, nil)
 			if subj.IsNone() {
 				return nil, fmt.Errorf("cannot unwrap none")
 			}
@@ -712,7 +721,16 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, subj.UnwrapMaybeInPlace(resolved))
 		case bytecode.OpResultUnwrap:
-			subj := vm.popUnsafe(curr)
+			subjVal := vm.popValueUnsafe(curr)
+			if result, ok := subjVal.(runtime.ResultValue); ok {
+				if result.IsErr {
+					vm.push(curr, result.Err)
+				} else {
+					vm.push(curr, result.Ok)
+				}
+				continue
+			}
+			subj := runtime.ValueToObject(subjVal, nil)
 			unwrapped := subj.UnwrapResultInPlace()
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
@@ -732,7 +750,28 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, runtime.MakeList(checker.Str, chars...))
 		case bytecode.OpTryResult:
-			subj := vm.popUnsafe(curr)
+			subjVal := vm.popValueUnsafe(curr)
+			if result, ok := subjVal.(runtime.ResultValue); ok {
+				if result.IsErr {
+					if inst.A >= 0 {
+						if inst.B >= 0 && inst.B < len(curr.Locals) {
+							curr.Locals[inst.B] = result.Err
+						}
+						curr.StackTop = 0
+						curr.IP = inst.A
+						continue
+					}
+					vm.Frames = vm.Frames[:len(vm.Frames)-1]
+					if len(vm.Frames) == 0 {
+						return runtime.ValueToObject(result, nil), nil
+					}
+					vm.push(vm.Frames[len(vm.Frames)-1], result)
+					continue
+				}
+				vm.push(curr, result.Ok)
+				continue
+			}
+			subj := runtime.ValueToObject(subjVal, nil)
 			if subj.IsErr() {
 				if inst.A >= 0 {
 					if inst.B >= 0 {
@@ -765,7 +804,25 @@ func (vm *VM) run() (*runtime.Object, error) {
 			unwrapped.SetRefinedType(okType)
 			vm.push(curr, unwrapped)
 		case bytecode.OpTryMaybe:
-			subj := vm.popUnsafe(curr)
+			subjVal := vm.popValueUnsafe(curr)
+			if maybe, ok := subjVal.(runtime.MaybeValue); ok {
+				if maybe.None {
+					if inst.A >= 0 {
+						curr.StackTop = 0
+						curr.IP = inst.A
+						continue
+					}
+					vm.Frames = vm.Frames[:len(vm.Frames)-1]
+					if len(vm.Frames) == 0 {
+						return runtime.ValueToObject(maybe, nil), nil
+					}
+					vm.push(vm.Frames[len(vm.Frames)-1], maybe)
+					continue
+				}
+				vm.push(curr, maybe.Value)
+				continue
+			}
+			subj := runtime.ValueToObject(subjVal, nil)
 			if subj.IsNone() {
 				if inst.A >= 0 {
 					curr.StackTop = 0

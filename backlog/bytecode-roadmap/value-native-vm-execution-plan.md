@@ -65,7 +65,7 @@ Use this section as the source-of-truth status tracker for the migration.
 - [x] Stage 2: add compatibility adapters
 - [x] Stage 3: add bytecode/type metadata for field-indexed structs
 - [x] Stage 4: migrate frame storage to `[]any`
-- [ ] Stage 5: migrate the easiest opcode families first
+- [x] Stage 5: migrate the easiest opcode families first
 - [ ] Stage 6: keep legacy FFI working through the unsafe adapter path
 - [ ] Stage 7: migrate hot/default FFI bindings to value-native interop
 - [ ] Stage 8: migrate containers and structs more deeply
@@ -319,7 +319,7 @@ Once stack/locals are `[]any`, the VM has crossed the most important boundary aw
 
 ## Stage 5: migrate the easiest opcode families first
 
-Status: [ ] not started / [x] in progress / [ ] done
+Status: [ ] not started / [ ] in progress / [x] done
 
 Do not convert every opcode at once. Migrate the ones with the best effort-to-payoff ratio.
 
@@ -329,9 +329,9 @@ Do not convert every opcode at once. Migrate the ones with the best effort-to-pa
 - [x] migrate arithmetic/comparison ops
 - [x] migrate boolean ops
 - [x] migrate string/int/float/bool method ops
-- [ ] migrate maybe/result creation and unwrap ops
-- [ ] migrate `try` ops
-- [ ] add targeted tests for `MaybeValue` / `ResultValue` behavior under value-native execution
+- [x] migrate maybe/result creation and unwrap ops
+- [x] migrate `try` ops
+- [x] add targeted tests for `MaybeValue` / `ResultValue` behavior under value-native execution
 - [x] verify `cd compiler && go test ./...`
 
 ### First targets
