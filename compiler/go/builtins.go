@@ -118,7 +118,7 @@ func RegisterBuiltinExterns() {
 			return asyncEvalFiber(args[0]), nil
 		})
 		RegisterExtern("GetResult", func(args ...any) (any, error) {
-			return asyncGetResult(args[0], args[1]), nil
+			return asyncGetResult(args[0]), nil
 		})
 		RegisterExtern("HexEncode", func(args ...any) (any, error) {
 			return ffi.HexEncode(args[0].(string)), nil

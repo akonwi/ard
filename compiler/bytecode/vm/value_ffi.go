@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/akonwi/ard/ffi"
@@ -406,6 +407,30 @@ func vmFFIOsArgs(args []any) any {
 	return values
 }
 
+func resolveAsyncHandle(value any) *ffi.AsyncHandle {
+	switch typed := value.(type) {
+	case *ffi.AsyncHandle:
+		return typed
+	case runtime.StructValue:
+		if len(typed.Fields) == 0 {
+			panic("async fiber handle struct is missing handle field")
+		}
+		return resolveAsyncHandle(typed.Fields[0])
+	case *runtime.Object:
+		if raw, ok := typed.Raw().(*ffi.AsyncHandle); ok {
+			return raw
+		}
+		if typed.IsStruct() {
+			if field := typed.Struct_Get("handle"); field != nil {
+				return resolveAsyncHandle(field)
+			}
+		}
+		return resolveAsyncHandle(runtime.ObjectToValue(typed, typed.Type()))
+	default:
+		panic(fmt.Errorf("expected async handle, got %T", value))
+	}
+}
+
 func vmFFIPrint(args []any) any {
 	ffi.Print(args[0].(string))
 	return runtime.NativeVoid
@@ -417,13 +442,12 @@ func vmFFISleep(args []any) any {
 }
 
 func vmFFIWaitFor(args []any) any {
-	ffi.WaitFor(args[0])
+	ffi.WaitFor(resolveAsyncHandle(args[0]))
 	return runtime.NativeVoid
 }
 
 func vmFFIGetResult(args []any) any {
-	ffi.WaitFor(args[0])
-	return args[1]
+	return resolveAsyncHandle(args[0]).GetResult()
 }
 
 func vmFFIFSExists(args []any) any {

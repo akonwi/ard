@@ -9,6 +9,7 @@ import (
 
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/ffi"
 	"github.com/akonwi/ard/runtime"
 )
 
@@ -410,55 +411,48 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
 			}
-			fiberType, err := vm.structTypeFor(bytecode.TypeID(inst.C))
+			handleType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
 			}
-			wg := &sync.WaitGroup{}
-			wg.Go(func() {
+			handle := ffi.NewAsyncHandle()
+			go func() {
+				defer handle.Done()
 				defer func() {
 					if r := recover(); r != nil {
+						handle.SetPanic(r)
 						fmt.Println(fmt.Errorf("panic in fiber: %v", r))
 					}
 				}()
 				child := vm.spawn()
 				_, _ = child.runClosure(closure, nil)
-			})
-			fields := map[string]*runtime.Object{
-				"wg":     runtime.MakeDynamic(wg),
-				"result": runtime.Void(),
-			}
-			vm.push(curr, runtime.MakeStruct(fiberType, fields))
+			}()
+			vm.push(curr, runtime.Make(handle, handleType))
 		case bytecode.OpAsyncEval:
 			closureObj := vm.popUnsafe(curr)
 			closure, ok := closureObj.Raw().(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
 			}
-			fiberType, err := vm.structTypeFor(bytecode.TypeID(inst.C))
+			handleType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
 			}
-			wg := &sync.WaitGroup{}
-			wg.Add(1)
-			resultContainer := &runtime.Object{}
+			handle := ffi.NewAsyncHandle()
 			go func() {
-				defer wg.Done()
+				defer handle.Done()
 				defer func() {
 					if r := recover(); r != nil {
+						handle.SetPanic(r)
 						fmt.Println(fmt.Errorf("panic in eval fiber: %v", r))
 					}
 				}()
 				child := vm.spawn()
 				if res, err := child.runClosure(closure, nil); err == nil && res != nil {
-					*resultContainer = *res
+					handle.SetResult(res)
 				}
 			}()
-			fields := map[string]*runtime.Object{
-				"wg":     runtime.MakeDynamic(wg),
-				"result": resultContainer,
-			}
-			vm.push(curr, runtime.MakeStruct(fiberType, fields))
+			vm.push(curr, runtime.Make(handle, handleType))
 		case bytecode.OpMakeList:
 			typeID := bytecode.TypeID(inst.A)
 			listType, err := vm.typeFor(typeID)
@@ -1102,7 +1096,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if resolved.ABI == ExternABIValue {
 				rawArgs := make([]any, argc)
 				for i := range args {
-					if resolved.Binding == "JsonEncode" {
+					if resolved.Binding == "JsonEncode" || resolved.Binding == "WaitFor" || resolved.Binding == "GetResult" {
 						rawArgs[i] = args[i]
 						continue
 					}

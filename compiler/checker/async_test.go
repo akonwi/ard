@@ -55,7 +55,7 @@ func TestFibers(t *testing.T) {
 				let fiber: async::Fiber<Int> = async::start(fn() { 2 })
 			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Fiber<Int>, got Fiber<Void>"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Fiber, got Fiber"},
 			},
 		},
 	})

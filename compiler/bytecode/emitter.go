@@ -1429,6 +1429,25 @@ func (f *funcEmitter) ensureReturn() {
 func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 	argc := len(call.Args)
 	if call.ExternalBinding != "" {
+		// Emit async intrinsics directly instead of going through FFI.
+		switch call.ExternalBinding {
+		case "AsyncStart":
+			if err := f.emitExpr(call.Args[0]); err != nil {
+				return err
+			}
+			retID := f.emitter.addType(call.ReturnType)
+			f.emit(Instruction{Op: OpAsyncStart, C: int(retID)})
+			f.adjustStack(1, 1)
+			return nil
+		case "AsyncEval":
+			if err := f.emitExpr(call.Args[0]); err != nil {
+				return err
+			}
+			retID := f.emitter.addType(call.ReturnType)
+			f.emit(Instruction{Op: OpAsyncEval, C: int(retID)})
+			f.adjustStack(1, 1)
+			return nil
+		}
 		// Emit scalar-to-Dynamic conversions as OpToDynamic instead of FFI calls
 		switch call.ExternalBinding {
 		case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
@@ -1489,6 +1508,25 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) error {
 	argc := len(call.Call.Args)
 	if call.Call.ExternalBinding != "" {
+		// Emit async intrinsics directly instead of going through FFI.
+		switch call.Call.ExternalBinding {
+		case "AsyncStart":
+			if err := f.emitExpr(call.Call.Args[0]); err != nil {
+				return err
+			}
+			retID := f.emitter.addType(call.Call.ReturnType)
+			f.emit(Instruction{Op: OpAsyncStart, C: int(retID)})
+			f.adjustStack(1, 1)
+			return nil
+		case "AsyncEval":
+			if err := f.emitExpr(call.Call.Args[0]); err != nil {
+				return err
+			}
+			retID := f.emitter.addType(call.Call.ReturnType)
+			f.emit(Instruction{Op: OpAsyncEval, C: int(retID)})
+			f.adjustStack(1, 1)
+			return nil
+		}
 		// Emit list::new() as OpMakeList with 0 elements instead of an FFI call
 		if call.Call.ExternalBinding == "NewList" {
 			listType, ok := call.Call.ReturnType.(*checker.List)
@@ -2243,8 +2281,15 @@ func (f *funcEmitter) emitFiberExecution(exec *checker.FiberExecution) error {
 	}
 	fnTypeID := f.emitter.addType(copy.Type())
 	f.emit(Instruction{Op: OpMakeClosure, A: fnIndex, B: 0, C: int(fnTypeID)})
-	fiberTypeID := f.emitter.addType(exec.FiberType)
-	f.emit(Instruction{Op: OpAsyncStart, C: int(fiberTypeID)})
+	handleType, err := fiberHandleType(exec.FiberType)
+	if err != nil {
+		return err
+	}
+	handleTypeID := f.emitter.addType(handleType)
+	f.emit(Instruction{Op: OpAsyncStart, C: int(handleTypeID)})
+	if err := f.emitFiberStructFromHandle(exec.FiberType); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2255,17 +2300,47 @@ func (f *funcEmitter) emitFiberStart(start *checker.FiberStart) error {
 	if err := f.emitExpr(start.GetFn()); err != nil {
 		return err
 	}
-	fiberTypeID := f.emitter.addType(start.FiberType)
-	f.emit(Instruction{Op: OpAsyncStart, C: int(fiberTypeID)})
-	return nil
+	handleType, err := fiberHandleType(start.FiberType)
+	if err != nil {
+		return err
+	}
+	handleTypeID := f.emitter.addType(handleType)
+	f.emit(Instruction{Op: OpAsyncStart, C: int(handleTypeID)})
+	return f.emitFiberStructFromHandle(start.FiberType)
 }
 
 func (f *funcEmitter) emitFiberEval(eval *checker.FiberEval) error {
 	if err := f.emitExpr(eval.GetFn()); err != nil {
 		return err
 	}
-	fiberTypeID := f.emitter.addType(eval.FiberType)
-	f.emit(Instruction{Op: OpAsyncEval, C: int(fiberTypeID)})
+	handleType, err := fiberHandleType(eval.FiberType)
+	if err != nil {
+		return err
+	}
+	handleTypeID := f.emitter.addType(handleType)
+	f.emit(Instruction{Op: OpAsyncEval, C: int(handleTypeID)})
+	return f.emitFiberStructFromHandle(eval.FiberType)
+}
+
+func fiberHandleType(fiberType checker.Type) (checker.Type, error) {
+	structType, ok := fiberType.(*checker.StructDef)
+	if !ok {
+		return nil, fmt.Errorf("expected Fiber struct type, got %T", fiberType)
+	}
+	handleType, ok := structType.Fields["handle"]
+	if !ok {
+		return nil, fmt.Errorf("Fiber struct missing handle field")
+	}
+	return handleType, nil
+}
+
+func (f *funcEmitter) emitFiberStructFromHandle(fiberType checker.Type) error {
+	nameIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: "handle"})
+	f.emit(Instruction{Op: OpConst, A: nameIdx})
+	f.emit(Instruction{Op: OpSwap})
+	structTypeID := f.emitter.addType(fiberType)
+	f.emit(Instruction{Op: OpMakeStruct, A: int(structTypeID), B: 1})
+	f.adjustStack(2, 1)
 	return nil
 }
 

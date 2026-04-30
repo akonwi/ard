@@ -1,30 +1,33 @@
 extern fn sleep(ns: Int) Void = "Sleep"
 
-// Opaque pointer to Go's *sync.WaitGroup
-private extern type WaitGroup
+private extern type FiberHandle<$T>
 
-private extern fn wait_for(wg: WaitGroup) Void = "WaitFor"
-private extern fn get_result(wg: WaitGroup, fallback: $T) $T = "GetResult"
+private extern fn _start(do: fn() Void) FiberHandle<Void> = "AsyncStart"
+private extern fn _eval(do: fn() $T) FiberHandle<$T> = "AsyncEval"
+private extern fn wait_for(handle: FiberHandle<$T>) Void = "WaitFor"
+private extern fn get_result(handle: FiberHandle<$T>) $T = "GetResult"
 
 struct Fiber {
-  wg: WaitGroup,
-  // stores the return value of the function run concurrently
-  result: $T,
+  handle: FiberHandle<$T>,
 }
 
 impl Fiber {
   fn join() {
-    wait_for(self.wg)
+    wait_for(self.handle)
   }
 
   fn get() $T {
-    self.join()
-    get_result(self.wg, self.result)
+    get_result(self.handle)
   }
 }
 
-extern fn start(do: fn() Void) Fiber<Void> = "AsyncStart"
-extern fn eval(do: fn() $T) Fiber<$T> = "AsyncEval"
+fn start(do: fn() Void) Fiber<Void> {
+  Fiber{handle: _start(do)}
+}
+
+fn eval(do: fn() $T) Fiber<$T> {
+  Fiber{handle: _eval(do)}
+}
 
 fn join(fibers: [Fiber<$T>]) {
   for fiber in fibers {
