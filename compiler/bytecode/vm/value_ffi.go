@@ -41,8 +41,44 @@ func vmFFIIsNil(args []any) any {
 	return args[0] == nil
 }
 
+func maybeBoolArg(value any) *bool {
+	maybe, ok := value.(runtime.MaybeValue)
+	if !ok {
+		panic("expected Bool? argument")
+	}
+	if maybe.None {
+		return nil
+	}
+	boolValue := maybe.Value.(bool)
+	return &boolValue
+}
+
 func vmFFIJsonToDynamic(args []any) any {
 	value, err := ffi.JsonToDynamic(args[0].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIBase64Encode(args []any) any {
+	return ffi.Base64Encode(args[0].(string), maybeBoolArg(args[1]))
+}
+
+func vmFFIBase64Decode(args []any) any {
+	value, err := ffi.Base64Decode(args[0].(string), maybeBoolArg(args[1]))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIBase64EncodeURL(args []any) any {
+	return ffi.Base64EncodeURL(args[0].(string), maybeBoolArg(args[1]))
+}
+
+func vmFFIBase64DecodeURL(args []any) any {
+	value, err := ffi.Base64DecodeURL(args[0].(string), maybeBoolArg(args[1]))
 	if err != nil {
 		return runtime.ErrValue(err.Error())
 	}
