@@ -423,10 +423,11 @@ Completed straightforward module batches now cover:
 - `ard/json` / `ard/encode`
 - `ard/decode` helper externs
 - `ard/fs`
+- ordinary `ard/async` externs (`Sleep`, `WaitFor`, `GetResult`)
 
-Remaining major FFI migration work is concentrated in the more stateful modules:
+Remaining major FFI migration work is concentrated in the more stateful modules and unsafe async runtime construction paths:
 
-- `ard/async`
+- `ard/async` closure/fiber construction paths (`AsyncStart`, `AsyncEval`)
 - `ard/http`
 - `ard/sql`
 

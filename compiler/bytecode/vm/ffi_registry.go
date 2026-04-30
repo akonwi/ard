@@ -212,6 +212,15 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("Print", vmFFIPrint); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("Sleep", vmFFISleep); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("WaitFor", vmFFIWaitFor); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("GetResult", vmFFIGetResult); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("FS_Exists", vmFFIFSExists); err != nil {
 		return err
 	}

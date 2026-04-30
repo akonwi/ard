@@ -411,6 +411,21 @@ func vmFFIPrint(args []any) any {
 	return runtime.NativeVoid
 }
 
+func vmFFISleep(args []any) any {
+	ffi.Sleep(args[0].(int))
+	return runtime.NativeVoid
+}
+
+func vmFFIWaitFor(args []any) any {
+	ffi.WaitFor(args[0])
+	return runtime.NativeVoid
+}
+
+func vmFFIGetResult(args []any) any {
+	ffi.WaitFor(args[0])
+	return args[1]
+}
+
 func vmFFIFSExists(args []any) any {
 	return ffi.FS_Exists(args[0].(string))
 }
