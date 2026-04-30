@@ -400,19 +400,19 @@ This path exists to preserve compatibility, not to define the new runtime model.
 
 ## Stage 7: migrate hot/default FFI bindings to value-native interop
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [x] in progress / [ ] done
 
 Once the core VM is running value-native, start moving bindings off the unsafe object path.
 
 ### Checklist
 
-- [ ] migrate first simple/hot value-native bindings
-- [ ] prioritize env/string/scalar helpers
-- [ ] migrate dynamic/json helpers
+- [x] migrate first simple/hot value-native bindings
+- [x] prioritize env/string/scalar helpers
+- [x] migrate dynamic/json helpers
 - [ ] migrate decode helpers where return shapes are manageable
 - [ ] avoid early migration of closure-aware or VM-sensitive bindings
 - [ ] re-run benchmarks and profiling after each meaningful migration batch
-- [ ] verify `cd compiler && go test ./...`
+- [x] verify `cd compiler && go test ./...`
 
 ### First migration targets
 

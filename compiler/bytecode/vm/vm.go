@@ -1008,6 +1008,21 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if vm.profile != nil {
 				start = time.Now()
 			}
+			if resolved.ABI == ExternABIValue {
+				rawArgs := make([]any, argc)
+				for i := range args {
+					rawArgs[i] = runtime.ObjectToValue(args[i], nil)
+				}
+				res, err := callValueFFI(resolved.Binding, resolved.ValueFunc, rawArgs, retType)
+				if vm.profile != nil {
+					vm.profile.RecordExternCall(resolved.Binding, argc, time.Since(start))
+				}
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
 			res, err := callFFI(resolved.Binding, resolved.Func, args, retType)
 			if vm.profile != nil {
 				vm.profile.RecordExternCall(resolved.Binding, argc, time.Since(start))
