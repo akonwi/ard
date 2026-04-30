@@ -7,6 +7,21 @@ extern fn from_str(string: Str) Float? = "FloatFromStr"
 extern fn from_int(int: Int) Float = "FloatFromInt"
 extern fn floor(float: Float) Float = "FloatFloor"
 
+test fn test_from_str_parses_valid_float() Void!Str {
+  testing::assert(from_str("3.5").or(0.0) == 3.5, "Expected from_str to parse decimal floats")
+}
+
+test fn test_from_str_returns_none_for_invalid_input() Void!Str {
+  testing::assert(
+    from_str("not-a-float").is_none(),
+    "Expected from_str to return none for invalid floats",
+  )
+}
+
+test fn test_from_int_converts_integer_to_float() Void!Str {
+  testing::assert(from_int(7) == 7.0, "Expected from_int to preserve numeric value")
+}
+
 test fn test_floor_rounds_toward_negative_infinity() Void!Str {
   testing::assert(floor(3.75) == 3.0, "Expected floor(3.75) to be 3.0")
 }
