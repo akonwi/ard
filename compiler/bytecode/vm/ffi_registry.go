@@ -12,6 +12,11 @@ import (
 
 type FFIFunc func(args []*runtime.Object) *runtime.Object
 
+type resolvedExtern struct {
+	Binding string
+	Func    FFIFunc
+}
+
 type RuntimeFFIRegistry struct {
 	functions map[string]FFIFunc
 	mutex     sync.RWMutex
@@ -35,12 +40,7 @@ func (r *RuntimeFFIRegistry) Get(binding string) (FFIFunc, bool) {
 	return fn, exists
 }
 
-func (r *RuntimeFFIRegistry) Call(binding string, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
-	fn, exists := r.Get(binding)
-	if !exists {
-		return nil, fmt.Errorf("External function not found: %s", binding)
-	}
-
+func callFFI(binding string, fn FFIFunc, args []*runtime.Object, returnType checker.Type) (result *runtime.Object, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			panicMsg := fmt.Sprintf("panic in FFI function '%s': %v", binding, recovered)
@@ -55,6 +55,22 @@ func (r *RuntimeFFIRegistry) Call(binding string, args []*runtime.Object, return
 
 	result = fn(args)
 	return result, nil
+}
+
+func (r *RuntimeFFIRegistry) Resolve(binding string) (resolvedExtern, error) {
+	fn, exists := r.Get(binding)
+	if !exists {
+		return resolvedExtern{}, fmt.Errorf("External function not found: %s", binding)
+	}
+	return resolvedExtern{Binding: binding, Func: fn}, nil
+}
+
+func (r *RuntimeFFIRegistry) Call(binding string, args []*runtime.Object, returnType checker.Type) (*runtime.Object, error) {
+	resolved, err := r.Resolve(binding)
+	if err != nil {
+		return nil, err
+	}
+	return callFFI(resolved.Binding, resolved.Func, args, returnType)
 }
 
 func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {

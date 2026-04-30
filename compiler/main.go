@@ -79,10 +79,7 @@ func main() {
 					fmt.Println(err)
 					os.Exit(1)
 				}
-				runtime.SetOSArgs(os.Args)
-				_, runErr := bytecodevm.New(program).Run("main")
-				runtime.SetOSArgs(nil)
-				if runErr != nil {
+				if runErr := runBytecodeProgram(program, os.Args); runErr != nil {
 					fmt.Println(runErr)
 					os.Exit(1)
 				}
@@ -699,14 +696,37 @@ func maybeRunEmbedded() bool {
 		fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
 		os.Exit(1)
 	}
-	runtime.SetOSArgs(argsForEmbeddedProgram(os.Args))
-	_, runErr := bytecodevm.New(program).Run("main")
-	runtime.SetOSArgs(nil)
-	if runErr != nil {
+	if runErr := runBytecodeProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
 		fmt.Fprintln(os.Stderr, runErr)
 		os.Exit(1)
 	}
 	return true
+}
+
+func runBytecodeProgram(program bytecode.Program, args []string) error {
+	profiling := bytecodevm.ProfilingEnabled()
+	if profiling {
+		runtime.EnableObjectProfiling(true)
+		runtime.ResetObjectProfile()
+	} else {
+		runtime.EnableObjectProfiling(false)
+	}
+	defer runtime.EnableObjectProfiling(false)
+
+	runtime.SetOSArgs(args)
+	defer runtime.SetOSArgs(nil)
+
+	vm := bytecodevm.New(program)
+	_, runErr := vm.Run("main")
+	if profiling {
+		if report := vm.ProfileReport(); report != "" {
+			fmt.Fprintln(os.Stderr, report)
+		}
+		if report := runtime.ObjectProfileReport(); report != "" {
+			fmt.Fprintln(os.Stderr, report)
+		}
+	}
+	return runErr
 }
 
 func writeEmbeddedBinary(srcPath string, dstPath string, data []byte) error {

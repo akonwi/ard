@@ -24,6 +24,11 @@ type TypeEntry struct {
 	Name string
 }
 
+type ExternEntry struct {
+	ID      int
+	Binding string
+}
+
 type Function struct {
 	Name     string
 	Arity    int
@@ -36,5 +41,6 @@ type Function struct {
 type Program struct {
 	Constants []Constant
 	Types     []TypeEntry
+	Externs   []ExternEntry
 	Functions []Function
 }

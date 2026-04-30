@@ -10,6 +10,7 @@ import (
 type Emitter struct {
 	program      Program
 	typeIndex    map[string]TypeID
+	externIndex  map[string]int
 	funcIndex    map[string]int
 	funcTypes    map[string]checker.Type
 	anonCount    int
@@ -40,9 +41,11 @@ func NewEmitter() *Emitter {
 		program: Program{
 			Constants: []Constant{},
 			Types:     []TypeEntry{},
+			Externs:   []ExternEntry{},
 			Functions: []Function{},
 		},
 		typeIndex:   map[string]TypeID{},
+		externIndex: map[string]int{},
 		funcIndex:   map[string]int{},
 		funcTypes:   map[string]checker.Type{},
 		visitedMods: map[string]struct{}{},
@@ -144,6 +147,16 @@ func (e *Emitter) addConst(c Constant) int {
 	index := len(e.program.Constants)
 	e.program.Constants = append(e.program.Constants, c)
 	return index
+}
+
+func (e *Emitter) addExtern(binding string) int {
+	if idx, ok := e.externIndex[binding]; ok {
+		return idx
+	}
+	idx := len(e.program.Externs)
+	e.externIndex[binding] = idx
+	e.program.Externs = append(e.program.Externs, ExternEntry{ID: idx, Binding: binding})
+	return idx
 }
 
 func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
@@ -488,8 +501,26 @@ func (e *Emitter) emitExternWrapper(name string, def *checker.ExternalFunctionDe
 		fnEmitter.defineLocal(param.Name)
 	}
 
-	// Emit scalar-to-Dynamic conversions as OpToDynamic instead of FFI calls
+	// Emit lowered intrinsics for pseudo-externs instead of going through FFI.
 	switch def.ExternalBinding {
+	case "NewList":
+		listType, ok := def.ReturnType.(*checker.List)
+		if !ok {
+			return 0, fmt.Errorf("NewList return type is not a list: %T", def.ReturnType)
+		}
+		typeID := e.addType(listType)
+		fnEmitter.emit(Instruction{Op: OpMakeList, A: int(typeID), B: 0})
+		fnEmitter.adjustStack(0, 1)
+	case "AsyncStart":
+		fiberTypeID := e.addType(def.ReturnType)
+		fnEmitter.emit(Instruction{Op: OpLoadLocal, A: 0})
+		fnEmitter.emit(Instruction{Op: OpAsyncStart, C: int(fiberTypeID)})
+		fnEmitter.adjustStack(0, 1)
+	case "AsyncEval":
+		fiberTypeID := e.addType(def.ReturnType)
+		fnEmitter.emit(Instruction{Op: OpLoadLocal, A: 0})
+		fnEmitter.emit(Instruction{Op: OpAsyncEval, C: int(fiberTypeID)})
+		fnEmitter.adjustStack(0, 1)
 	case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
 		fnEmitter.emit(Instruction{Op: OpLoadLocal, A: 0})
 		fnEmitter.emit(Instruction{Op: OpToDynamic})
@@ -502,9 +533,9 @@ func (e *Emitter) emitExternWrapper(name string, def *checker.ExternalFunctionDe
 		for i := range def.Parameters {
 			fnEmitter.emit(Instruction{Op: OpLoadLocal, A: i})
 		}
-		bindingIdx := e.addConst(Constant{Kind: ConstStr, Str: def.ExternalBinding})
+		externID := e.addExtern(def.ExternalBinding)
 		retID := e.addType(def.ReturnType)
-		fnEmitter.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: len(def.Parameters), C: int(retID)})
+		fnEmitter.emit(Instruction{Op: OpCallExtern, A: externID, Imm: len(def.Parameters), C: int(retID)})
 		fnEmitter.adjustStack(len(def.Parameters), 1)
 	}
 	fnEmitter.ensureReturn()
@@ -1388,9 +1419,9 @@ func (f *funcEmitter) emitFunctionCall(call *checker.FunctionCall) error {
 				return err
 			}
 		}
-		bindingIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.ExternalBinding})
+		externID := f.emitter.addExtern(call.ExternalBinding)
 		retID := f.emitter.addType(call.ReturnType)
-		f.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: argc, C: int(retID)})
+		f.emit(Instruction{Op: OpCallExtern, A: externID, Imm: argc, C: int(retID)})
 		f.adjustStack(argc, 1)
 		return nil
 	}
@@ -1461,9 +1492,9 @@ func (f *funcEmitter) emitModuleFunctionCall(call *checker.ModuleFunctionCall) e
 				return err
 			}
 		}
-		bindingIdx := f.emitter.addConst(Constant{Kind: ConstStr, Str: call.Call.ExternalBinding})
+		externID := f.emitter.addExtern(call.Call.ExternalBinding)
 		retID := f.emitter.addType(call.Call.ReturnType)
-		f.emit(Instruction{Op: OpCallExtern, A: bindingIdx, Imm: argc, C: int(retID)})
+		f.emit(Instruction{Op: OpCallExtern, A: externID, Imm: argc, C: int(retID)})
 		f.adjustStack(argc, 1)
 		return nil
 	}

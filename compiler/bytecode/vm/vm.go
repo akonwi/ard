@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/akonwi/ard/bytecode"
 	"github.com/akonwi/ard/checker"
@@ -76,10 +77,10 @@ func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
 }
 
 type VM struct {
-	Program     bytecode.Program
-	Frames      []*Frame
-	freeFrames  []*Frame
-	typeCache   map[bytecode.TypeID]checker.Type
+	Program           bytecode.Program
+	Frames            []*Frame
+	freeFrames        []*Frame
+	typeCache         map[bytecode.TypeID]checker.Type
 	modules           *ModuleRegistry
 	methodIndex       map[string]map[string]int
 	functionLookup    map[string]int
@@ -87,14 +88,49 @@ type VM struct {
 	moduleArgsScratch []*runtime.Object
 	externArgsScratch []*runtime.Object
 	ffi               *RuntimeFFIRegistry
+	resolvedExterns   []resolvedExtern
+	initErr           error
+	profile           *executionProfile
 }
 
 func New(program bytecode.Program) *VM {
-	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), ffi: defaultFFIRegistry()}
+	vm := &VM{Program: program, Frames: make([]*Frame, 0, 8), freeFrames: make([]*Frame, 0, 8), modules: defaultModuleRegistry(), ffi: defaultFFIRegistry(), profile: newExecutionProfile()}
+	vm.resolveExterns()
 	return vm
 }
 
+func (vm *VM) ProfileReport() string {
+	if vm == nil || vm.profile == nil {
+		return ""
+	}
+	return vm.profile.Report()
+}
+
+func (vm *VM) resolveExterns() {
+	if vm.initErr != nil {
+		return
+	}
+	if len(vm.Program.Externs) == 0 {
+		vm.resolvedExterns = nil
+		return
+	}
+	vm.resolvedExterns = make([]resolvedExtern, len(vm.Program.Externs))
+	for i := range vm.Program.Externs {
+		entry := vm.Program.Externs[i]
+		resolved, err := vm.ffi.Resolve(entry.Binding)
+		if err != nil {
+			vm.initErr = err
+			vm.resolvedExterns = nil
+			return
+		}
+		vm.resolvedExterns[i] = resolved
+	}
+}
+
 func (vm *VM) Run(functionName string) (*runtime.Object, error) {
+	if vm.initErr != nil {
+		return nil, vm.initErr
+	}
 	fn, ok := vm.lookupFunction(functionName)
 	if !ok {
 		return nil, fmt.Errorf("function not found: %s", functionName)
@@ -284,6 +320,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(vm.Frames[len(vm.Frames)-1], val)
 		case bytecode.OpCall:
+			vm.profile.RecordDirectCall()
 			fnDef := &vm.Program.Functions[inst.A]
 			argc := inst.B
 			retType, _ := vm.typeFor(bytecode.TypeID(inst.C))
@@ -293,6 +330,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpMakeClosure:
+			vm.profile.RecordClosureCreation(inst.B)
 			fnIndex := inst.A
 			if fnIndex < 0 || fnIndex >= len(vm.Program.Functions) {
 				return nil, fmt.Errorf("function index out of range")
@@ -321,6 +359,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			vm.push(curr, runtime.Make(closure, fnType))
 		case bytecode.OpCallClosure:
 			argc := inst.B
+			vm.profile.RecordClosureCall(argc)
 			args := make([]*runtime.Object, argc)
 			for i := argc - 1; i >= 0; i-- {
 				args[i] = vm.popUnsafe(curr)
@@ -771,6 +810,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			frame.Locals[0] = vm.popUnsafe(curr)
 			vm.Frames = append(vm.Frames, frame)
 		case bytecode.OpCallModule:
+			vm.profile.RecordModuleCall()
 			modConst, err := vm.constAt(inst.A)
 			if err != nil {
 				return nil, err
@@ -799,10 +839,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpCallExtern:
-			bindingConst, err := vm.constAt(inst.A)
-			if err != nil {
-				return nil, err
+			if inst.A < 0 || inst.A >= len(vm.resolvedExterns) {
+				return nil, fmt.Errorf("extern target out of range")
 			}
+			resolved := vm.resolvedExterns[inst.A]
 			argc := inst.Imm
 			if cap(vm.externArgsScratch) < argc {
 				vm.externArgsScratch = make([]*runtime.Object, argc)
@@ -815,7 +855,14 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			res, err := vm.ffi.Call(bindingConst.Str, args, retType)
+			start := time.Time{}
+			if vm.profile != nil {
+				start = time.Now()
+			}
+			res, err := callFFI(resolved.Binding, resolved.Func, args, retType)
+			if vm.profile != nil {
+				vm.profile.RecordExternCall(resolved.Binding, argc, time.Since(start))
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -860,6 +907,9 @@ func (vm *VM) spawn() *VM {
 	child.modules = vm.modules
 	child.methodIndex = vm.methodIndex
 	child.functionLookup = vm.functionLookup
+	child.ffi = vm.ffi
+	child.resolvedExterns = vm.resolvedExterns
+	child.initErr = vm.initErr
 	return child
 }
 

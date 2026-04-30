@@ -47,6 +47,10 @@ func verifyFunction(program Program, fn Function) error {
 			if target.Arity != inst.B {
 				return fmt.Errorf("%s ip=%d: arity mismatch for %s", fn.Name, ip, target.Name)
 			}
+		case OpCallExtern:
+			if inst.A < 0 || inst.A >= len(program.Externs) {
+				return fmt.Errorf("%s ip=%d: extern target out of range", fn.Name, ip)
+			}
 		case OpMakeClosure:
 			if inst.A < 0 || inst.A >= len(program.Functions) {
 				return fmt.Errorf("%s ip=%d: closure target out of range", fn.Name, ip)
