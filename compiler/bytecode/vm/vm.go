@@ -1096,7 +1096,9 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if resolved.ABI == ExternABIValue {
 				rawArgs := make([]any, argc)
 				for i := range args {
-					if resolved.Binding == "JsonEncode" || resolved.Binding == "WaitFor" || resolved.Binding == "GetResult" {
+					switch resolved.Binding {
+					case "JsonEncode", "WaitFor", "GetResult",
+						"SqlCreateConnection", "SqlClose", "SqlExtractParams", "SqlQuery", "SqlExecute", "SqlBeginTx", "SqlCommit", "SqlRollback":
 						rawArgs[i] = args[i]
 						continue
 					}

@@ -425,11 +425,11 @@ Completed straightforward module batches now cover:
 - `ard/fs`
 - `ard/async` ordinary externs (`Sleep`, `WaitFor`, `GetResult`)
 - `ard/async` handle-based wrapper redesign that quarantines `AsyncStart` / `AsyncEval` to the closure argument and opaque handle return
+- `ard/sql` migrated to value-native VM externs while preserving opaque `Db` / `Tx` handles and returning native row collections/maps to decode
 
-Remaining major FFI migration work is now concentrated in the more stateful modules:
+Remaining major FFI migration work is now concentrated in:
 
 - `ard/http`
-- `ard/sql`
 
 ### First migration targets
 

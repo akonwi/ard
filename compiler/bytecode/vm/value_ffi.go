@@ -450,6 +450,129 @@ func vmFFIGetResult(args []any) any {
 	return resolveAsyncHandle(args[0]).GetResult()
 }
 
+func sqlStringArg(value any) string {
+	if obj, ok := value.(*runtime.Object); ok {
+		return obj.AsString()
+	}
+	return value.(string)
+}
+
+func sqlHandleArg(value any) any {
+	if obj, ok := value.(*runtime.Object); ok {
+		return obj.Raw()
+	}
+	return value
+}
+
+func sqlValueArg(value any) any {
+	if obj, ok := value.(*runtime.Object); ok {
+		return vmToDynamicValue(obj.Raw())
+	}
+	return vmToDynamicValue(value)
+}
+
+func vmFFISqlCreateConnection(args []any) any {
+	value, err := ffi.SqlCreateConnection(sqlStringArg(args[0]))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFISqlClose(args []any) any {
+	if err := ffi.SqlClose(sqlHandleArg(args[0])); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFISqlExtractParams(args []any) any {
+	params := ffi.SqlExtractParams(sqlStringArg(args[0]))
+	items := make(runtime.ListValue, len(params))
+	for i := range params {
+		items[i] = params[i]
+	}
+	return items
+}
+
+func sqlArgValues(value any) []any {
+	if obj, ok := value.(*runtime.Object); ok {
+		items := obj.AsList()
+		out := make([]any, len(items))
+		for i := range items {
+			out[i] = sqlValueArg(items[i])
+		}
+		return out
+	}
+	var items []any
+	switch typed := value.(type) {
+	case runtime.ListValue:
+		items = []any(typed)
+	case []any:
+		items = typed
+	default:
+		panic(fmt.Errorf("expected list of sql values, got %T", value))
+	}
+	out := make([]any, len(items))
+	for i := range items {
+		out[i] = sqlValueArg(items[i])
+	}
+	return out
+}
+
+func sqlRowValue(row any) any {
+	mapped, ok := row.(map[string]any)
+	if !ok {
+		return vmToDynamicValue(row)
+	}
+	storage := runtime.NewMap[string]()
+	for key, value := range mapped {
+		storage.Entries[key] = vmToDynamicValue(value)
+	}
+	return runtime.MapValue{Storage: storage}
+}
+
+func vmFFISqlQuery(args []any) any {
+	rows, err := ffi.SqlQuery(sqlHandleArg(args[0]), sqlStringArg(args[1]), sqlArgValues(args[2]))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	items := make(runtime.ListValue, len(rows))
+	for i := range rows {
+		items[i] = sqlRowValue(rows[i])
+	}
+	return runtime.OkValue(items)
+}
+
+func vmFFISqlExecute(args []any) any {
+	if err := ffi.SqlExecute(sqlHandleArg(args[0]), sqlStringArg(args[1]), sqlArgValues(args[2])); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFISqlBeginTx(args []any) any {
+	value, err := ffi.SqlBeginTx(sqlHandleArg(args[0]))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFISqlCommit(args []any) any {
+	if err := ffi.SqlCommit(sqlHandleArg(args[0])); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFISqlRollback(args []any) any {
+	if err := ffi.SqlRollback(sqlHandleArg(args[0])); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
 func vmFFIFSExists(args []any) any {
 	return ffi.FS_Exists(args[0].(string))
 }

@@ -374,6 +374,13 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 	}
 }
 
+func resultMethodStringArg(value any) string {
+	if obj, ok := value.(*runtime.Object); ok {
+		return obj.AsString()
+	}
+	return value.(string)
+}
+
 func (vm *VM) evalResultMethodValue(kind checker.ResultMethodKind, subj any, args []any) (any, bool, error) {
 	result, ok := subj.(runtime.ResultValue)
 	if !ok {
@@ -382,7 +389,7 @@ func (vm *VM) evalResultMethodValue(kind checker.ResultMethodKind, subj any, arg
 	switch kind {
 	case checker.ResultExpect:
 		if result.IsErr {
-			return nil, true, fmt.Errorf("%s: %v", args[0].(string), result.Err)
+			return nil, true, fmt.Errorf("%s: %v", resultMethodStringArg(args[0]), result.Err)
 		}
 		return result.Ok, true, nil
 	case checker.ResultOr:

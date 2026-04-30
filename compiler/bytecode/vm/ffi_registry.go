@@ -221,6 +221,30 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("GetResult", vmFFIGetResult); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("SqlCreateConnection", vmFFISqlCreateConnection); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlClose", vmFFISqlClose); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlExtractParams", vmFFISqlExtractParams); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlQuery", vmFFISqlQuery); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlExecute", vmFFISqlExecute); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlBeginTx", vmFFISqlBeginTx); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlCommit", vmFFISqlCommit); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("SqlRollback", vmFFISqlRollback); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("FS_Exists", vmFFIFSExists); err != nil {
 		return err
 	}
