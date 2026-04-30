@@ -48,3 +48,15 @@ func vmFFIJsonToDynamic(args []any) any {
 	}
 	return runtime.OkValue(value)
 }
+
+func vmFFIHexEncode(args []any) any {
+	return ffi.HexEncode(args[0].(string))
+}
+
+func vmFFIHexDecode(args []any) any {
+	value, err := ffi.HexDecode(args[0].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
