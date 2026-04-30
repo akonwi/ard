@@ -155,6 +155,9 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("JsonToDynamic", vmFFIJsonToDynamic); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("Now", vmFFINow); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("Base64Encode", vmFFIBase64Encode); err != nil {
 		return err
 	}

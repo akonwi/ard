@@ -1,2 +1,11 @@
+use ard/testing
+
 // Get current Unix timestamp in seconds since 1970-01-01 UTC
 extern fn now() Int = "Now"
+
+test fn test_now_returns_positive_unix_timestamp() Void!Str {
+  let first = now()
+  let second = now()
+  try testing::assert(first > 0, "Expected now() to return a positive Unix timestamp")
+  testing::assert(second >= first, "Expected later now() call to be monotonic within the test")
+}

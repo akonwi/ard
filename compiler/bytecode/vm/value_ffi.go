@@ -85,6 +85,10 @@ func vmFFIBase64DecodeURL(args []any) any {
 	return runtime.OkValue(value)
 }
 
+func vmFFINow(args []any) any {
+	return ffi.Now()
+}
+
 func vmFFIHexEncode(args []any) any {
 	return ffi.HexEncode(args[0].(string))
 }
