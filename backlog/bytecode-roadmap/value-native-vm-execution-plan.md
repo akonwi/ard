@@ -432,6 +432,12 @@ Remaining major FFI migration work is now concentrated in:
 
 - `ard/http` server callback bridge (`HTTP_Serve`), intentionally left on the object ABI as the final Go `net/http` interop holdout
 
+Performance follow-up now takes priority over further FFI surface work:
+
+- eliminate default `runtime.Object` materialization in hot VM value-ABI extern call paths
+- only construct `runtime.Object` when the callee is explicitly object-ABI / legacy-only
+- use benchmark deltas against `main` to validate that value-native execution is actually reducing VM overhead instead of paying hybrid adapter tax
+
 ### First migration targets
 
 Prefer simple, hot, Go-native bindings first:

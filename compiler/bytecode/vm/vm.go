@@ -93,6 +93,7 @@ type VM struct {
 	moduleCallScratch checker.FunctionCall
 	moduleArgsScratch []*runtime.Object
 	externArgsScratch []*runtime.Object
+	valueExternArgs   []any
 	ffi               *RuntimeFFIRegistry
 	resolvedExterns   []resolvedExtern
 	initErr           error
@@ -1078,13 +1079,6 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			resolved := vm.resolvedExterns[inst.A]
 			argc := inst.Imm
-			if cap(vm.externArgsScratch) < argc {
-				vm.externArgsScratch = make([]*runtime.Object, argc)
-			}
-			args := vm.externArgsScratch[:argc]
-			for i := argc - 1; i >= 0; i-- {
-				args[i] = runtime.ValueToObject(vm.popValueUnsafe(curr), nil)
-			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
 				return nil, err
@@ -1094,16 +1088,12 @@ func (vm *VM) run() (*runtime.Object, error) {
 				start = time.Now()
 			}
 			if resolved.ABI == ExternABIValue {
-				rawArgs := make([]any, argc)
-				for i := range args {
-					switch resolved.Binding {
-					case "JsonEncode", "WaitFor", "GetResult",
-						"GetReqPath", "GetPathValue", "GetQueryParam",
-						"SqlCreateConnection", "SqlClose", "SqlExtractParams", "SqlQuery", "SqlExecute", "SqlBeginTx", "SqlCommit", "SqlRollback":
-						rawArgs[i] = args[i]
-						continue
-					}
-					rawArgs[i] = runtime.ObjectToValue(args[i], nil)
+				if cap(vm.valueExternArgs) < argc {
+					vm.valueExternArgs = make([]any, argc)
+				}
+				rawArgs := vm.valueExternArgs[:argc]
+				for i := argc - 1; i >= 0; i-- {
+					rawArgs[i] = vm.valueFFIArg(resolved.Binding, vm.popValueUnsafe(curr))
 				}
 				res, err := callValueFFI(resolved.Binding, resolved.ValueFunc, rawArgs, retType)
 				if vm.profile != nil {
@@ -1114,6 +1104,13 @@ func (vm *VM) run() (*runtime.Object, error) {
 				}
 				vm.push(curr, res)
 				continue
+			}
+			if cap(vm.externArgsScratch) < argc {
+				vm.externArgsScratch = make([]*runtime.Object, argc)
+			}
+			args := vm.externArgsScratch[:argc]
+			for i := argc - 1; i >= 0; i-- {
+				args[i] = runtime.ValueToObject(vm.popValueUnsafe(curr), nil)
 			}
 			res, err := callFFI(resolved.Binding, resolved.Func, args, retType)
 			if vm.profile != nil {
@@ -1350,6 +1347,20 @@ func (vm *VM) objectFromValue(val any) *runtime.Object {
 		return obj
 	}
 	return runtime.ValueToObject(val, nil)
+}
+
+func (vm *VM) valueFFIArg(binding string, val any) any {
+	switch binding {
+	case "JsonEncode", "WaitFor", "GetResult",
+		"GetReqPath", "GetPathValue", "GetQueryParam",
+		"HTTP_Do", "HTTP_ResponseStatus", "HTTP_ResponseHeader", "HTTP_ResponseHeaders", "HTTP_ResponseBody", "HTTP_ResponseClose",
+		"SqlCreateConnection", "SqlClose", "SqlExtractParams", "SqlQuery", "SqlExecute", "SqlBeginTx", "SqlCommit", "SqlRollback":
+		return val
+	}
+	if obj, ok := val.(*runtime.Object); ok {
+		return runtime.ObjectToValue(obj, nil)
+	}
+	return val
 }
 
 func (vm *VM) legacyMapObject(val any) (*runtime.Object, bool) {
