@@ -53,6 +53,30 @@ func maybeBoolArg(value any) *bool {
 	return &boolValue
 }
 
+func maybeIntArg(value any) *int {
+	maybe, ok := value.(runtime.MaybeValue)
+	if !ok {
+		panic("expected Int? argument")
+	}
+	if maybe.None {
+		return nil
+	}
+	intValue := maybe.Value.(int)
+	return &intValue
+}
+
+func maybeStringArg(value any) *string {
+	maybe, ok := value.(runtime.MaybeValue)
+	if !ok {
+		panic("expected Str? argument")
+	}
+	if maybe.None {
+		return nil
+	}
+	stringValue := maybe.Value.(string)
+	return &stringValue
+}
+
 func vmFFIJsonToDynamic(args []any) any {
 	value, err := ffi.JsonToDynamic(args[0].(string))
 	if err != nil {
@@ -113,6 +137,68 @@ func vmFFIReadLine(args []any) any {
 		return runtime.ErrValue(err.Error())
 	}
 	return runtime.OkValue(value)
+}
+
+func vmFFICryptoMd5(args []any) any {
+	return ffi.CryptoMd5(args[0].(string))
+}
+
+func vmFFICryptoSha256(args []any) any {
+	return ffi.CryptoSha256(args[0].(string))
+}
+
+func vmFFICryptoSha512(args []any) any {
+	return ffi.CryptoSha512(args[0].(string))
+}
+
+func vmFFICryptoHashPassword(args []any) any {
+	value, err := ffi.CryptoHashPassword(args[0].(string), maybeIntArg(args[1]))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFICryptoVerifyPassword(args []any) any {
+	value, err := ffi.CryptoVerifyPassword(args[0].(string), args[1].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFICryptoScryptHash(args []any) any {
+	value, err := ffi.CryptoScryptHash(
+		args[0].(string),
+		maybeStringArg(args[1]),
+		maybeIntArg(args[2]),
+		maybeIntArg(args[3]),
+		maybeIntArg(args[4]),
+		maybeIntArg(args[5]),
+	)
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFICryptoScryptVerify(args []any) any {
+	value, err := ffi.CryptoScryptVerify(
+		args[0].(string),
+		args[1].(string),
+		maybeIntArg(args[2]),
+		maybeIntArg(args[3]),
+		maybeIntArg(args[4]),
+		maybeIntArg(args[5]),
+	)
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFICryptoUUID(args []any) any {
+	return ffi.CryptoUUID()
 }
 
 func vmFFIHexEncode(args []any) any {

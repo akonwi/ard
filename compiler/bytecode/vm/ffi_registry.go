@@ -173,6 +173,30 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("Base64Encode", vmFFIBase64Encode); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("CryptoMd5", vmFFICryptoMd5); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoSha256", vmFFICryptoSha256); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoSha512", vmFFICryptoSha512); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoHashPassword", vmFFICryptoHashPassword); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoVerifyPassword", vmFFICryptoVerifyPassword); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoScryptHash", vmFFICryptoScryptHash); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoScryptVerify", vmFFICryptoScryptVerify); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("CryptoUUID", vmFFICryptoUUID); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("Base64Decode", vmFFIBase64Decode); err != nil {
 		return err
 	}
