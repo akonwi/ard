@@ -409,10 +409,26 @@ Once the core VM is running value-native, start moving bindings off the unsafe o
 - [x] migrate first simple/hot value-native bindings
 - [x] prioritize env/string/scalar helpers
 - [x] migrate dynamic/json helpers
-- [ ] migrate decode helpers where return shapes are manageable
+- [x] migrate decode helpers where return shapes are manageable
 - [ ] avoid early migration of closure-aware or VM-sensitive bindings
 - [ ] re-run benchmarks and profiling after each meaningful migration batch
 - [x] verify `cd compiler && go test ./...`
+
+### Current stage-7 status note
+
+Completed straightforward module batches now cover:
+
+- scalar/env/date/argv/io helpers
+- `ard/dynamic`
+- `ard/json` / `ard/encode`
+- `ard/decode` helper externs
+- `ard/fs`
+
+Remaining major FFI migration work is concentrated in the more stateful modules:
+
+- `ard/async`
+- `ard/http`
+- `ard/sql`
 
 ### First migration targets
 
