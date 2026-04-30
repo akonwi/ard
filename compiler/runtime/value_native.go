@@ -37,6 +37,8 @@ func ErrValue(err any) ResultValue {
 	return ResultValue{Err: err, IsErr: true}
 }
 
+type ListValue []any
+
 type ScalarKey interface {
 	~string | ~int | ~float64 | ~bool
 }

@@ -62,7 +62,7 @@ The following decisions are already made in the design doc and should be treated
 Use this section as the source-of-truth status tracker for the migration.
 
 - [x] Stage 1: introduce value-native runtime types
-- [ ] Stage 2: add compatibility adapters
+- [x] Stage 2: add compatibility adapters
 - [ ] Stage 3: add bytecode/type metadata for field-indexed structs
 - [ ] Stage 4: migrate frame storage to `[]any`
 - [ ] Stage 5: migrate the easiest opcode families first
@@ -160,23 +160,23 @@ type EnumValue struct {
 
 ## Stage 2: add compatibility adapters
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [ ] in progress / [x] done
 
 Add explicit conversion helpers between the legacy object model and the new value-native model.
 
 ### Checklist
 
-- [ ] add `ValueToObject(v any, t checker.Type) *runtime.Object`
-- [ ] add `ObjectToValue(obj *runtime.Object, t checker.Type) any`
-- [ ] support scalar conversion
-- [ ] support `MaybeValue`
-- [ ] support `ResultValue`
-- [ ] support `MapValue`
-- [ ] support `StructValue`
-- [ ] support `EnumValue`
-- [ ] add round-trip tests: value -> object -> value
-- [ ] add targeted maybe/result/list/map/struct conversion tests
-- [ ] verify `cd compiler && go test ./...`
+- [x] add `ValueToObject(v any, t checker.Type) *runtime.Object`
+- [x] add `ObjectToValue(obj *runtime.Object, t checker.Type) any`
+- [x] support scalar conversion
+- [x] support `MaybeValue`
+- [x] support `ResultValue`
+- [x] support `MapValue`
+- [x] support `StructValue`
+- [x] support `EnumValue`
+- [x] add round-trip tests: value -> object -> value
+- [x] add targeted maybe/result/list/map/struct conversion tests
+- [x] verify `cd compiler && go test ./...`
 
 ### Deliverables
 
@@ -573,7 +573,7 @@ The migration is on track if:
 Current recommended starting checklist:
 
 - [x] define the new runtime value types
-- [ ] add object/value adapters
+- [x] add object/value adapters
 - [x] add focused tests
 
 That is the smallest slice that makes the long-term migration real without overcommitting the first implementation PR.
