@@ -163,3 +163,50 @@ func TestBytecodeFS_CwdAndAbs(t *testing.T) {
 		`), want: cwd},
 	})
 }
+
+func TestBytecodeFS_ListDir(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ard_bytecode_fs_listdir_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := os.WriteFile(filepath.Join(tmpDir, "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(tmpDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runBytecodeTests(t, []vmTestCase{
+		{name: "fs::list_dir returns entries", input: fmt.Sprintf(`
+			use ard/fs
+			let entries = fs::list_dir(%q).expect("list dir failed")
+			mut saw_note = false
+			mut saw_nested = false
+			for entry in entries {
+				if entry.name == "note.txt" {
+					saw_note = true
+				}
+				if entry.name == "nested" {
+					saw_nested = true
+				}
+			}
+			saw_note and saw_nested
+		`, tmpDir), want: true},
+		{name: "fs::list_dir preserves file flag", input: fmt.Sprintf(`
+			use ard/fs
+			let entries = fs::list_dir(%q).expect("list dir failed")
+			mut note_is_file = false
+			mut nested_is_file = true
+			for entry in entries {
+				if entry.name == "note.txt" {
+					note_is_file = entry.is_file
+				}
+				if entry.name == "nested" {
+					nested_is_file = entry.is_file
+				}
+			}
+			note_is_file and not nested_is_file
+		`, tmpDir), want: true},
+	})
+}

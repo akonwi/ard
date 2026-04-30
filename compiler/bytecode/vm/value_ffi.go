@@ -411,6 +411,111 @@ func vmFFIPrint(args []any) any {
 	return runtime.NativeVoid
 }
 
+func vmFFIFSExists(args []any) any {
+	return ffi.FS_Exists(args[0].(string))
+}
+
+func vmFFIFSCreateFile(args []any) any {
+	value, err := ffi.FS_CreateFile(args[0].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIFSWriteFile(args []any) any {
+	if err := ffi.FS_WriteFile(args[0].(string), args[1].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSAppendFile(args []any) any {
+	if err := ffi.FS_AppendFile(args[0].(string), args[1].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSReadFile(args []any) any {
+	value, err := ffi.FS_ReadFile(args[0].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIFSDeleteFile(args []any) any {
+	if err := ffi.FS_DeleteFile(args[0].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSIsFile(args []any) any {
+	return ffi.FS_IsFile(args[0].(string))
+}
+
+func vmFFIFSIsDir(args []any) any {
+	return ffi.FS_IsDir(args[0].(string))
+}
+
+func vmFFIFSCopy(args []any) any {
+	if err := ffi.FS_Copy(args[0].(string), args[1].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSRename(args []any) any {
+	if err := ffi.FS_Rename(args[0].(string), args[1].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSCwd(args []any) any {
+	value, err := ffi.FS_Cwd()
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIFSAbs(args []any) any {
+	value, err := ffi.FS_Abs(args[0].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
+func vmFFIFSCreateDir(args []any) any {
+	if err := ffi.FS_CreateDir(args[0].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSDeleteDir(args []any) any {
+	if err := ffi.FS_DeleteDir(args[0].(string)); err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(runtime.NativeVoid)
+}
+
+func vmFFIFSListDir(args []any) any {
+	value, err := ffi.FS_ListDir(args[0].(string))
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	storage := runtime.NewMap[string]()
+	for key, item := range value {
+		storage.Entries[key] = item
+	}
+	return runtime.OkValue(runtime.MapValue{Storage: storage})
+}
+
 func vmFFIReadLine(args []any) any {
 	value, err := ffi.ReadLine()
 	if err != nil {

@@ -212,6 +212,51 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("Print", vmFFIPrint); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("FS_Exists", vmFFIFSExists); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_CreateFile", vmFFIFSCreateFile); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_WriteFile", vmFFIFSWriteFile); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_AppendFile", vmFFIFSAppendFile); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_ReadFile", vmFFIFSReadFile); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_DeleteFile", vmFFIFSDeleteFile); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_IsFile", vmFFIFSIsFile); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_IsDir", vmFFIFSIsDir); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_Copy", vmFFIFSCopy); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_Rename", vmFFIFSRename); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_Cwd", vmFFIFSCwd); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_Abs", vmFFIFSAbs); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_CreateDir", vmFFIFSCreateDir); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_DeleteDir", vmFFIFSDeleteDir); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FS_ListDir", vmFFIFSListDir); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("ReadLine", vmFFIReadLine); err != nil {
 		return err
 	}
