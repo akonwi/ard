@@ -164,6 +164,12 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("OsArgs", vmFFIOsArgs); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("Print", vmFFIPrint); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("ReadLine", vmFFIReadLine); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("Base64Encode", vmFFIBase64Encode); err != nil {
 		return err
 	}

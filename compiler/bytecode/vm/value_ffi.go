@@ -102,6 +102,19 @@ func vmFFIOsArgs(args []any) any {
 	return values
 }
 
+func vmFFIPrint(args []any) any {
+	ffi.Print(args[0].(string))
+	return runtime.NativeVoid
+}
+
+func vmFFIReadLine(args []any) any {
+	value, err := ffi.ReadLine()
+	if err != nil {
+		return runtime.ErrValue(err.Error())
+	}
+	return runtime.OkValue(value)
+}
+
 func vmFFIHexEncode(args []any) any {
 	return ffi.HexEncode(args[0].(string))
 }
