@@ -66,7 +66,7 @@ Use this section as the source-of-truth status tracker for the migration.
 - [x] Stage 3: add bytecode/type metadata for field-indexed structs
 - [x] Stage 4: migrate frame storage to `[]any`
 - [x] Stage 5: migrate the easiest opcode families first
-- [ ] Stage 6: keep legacy FFI working through the unsafe adapter path
+- [x] Stage 6: keep legacy FFI working through the unsafe adapter path
 - [ ] Stage 7: migrate hot/default FFI bindings to value-native interop
 - [ ] Stage 8: migrate containers and structs more deeply
 - [ ] Stage 9: shrink and quarantine `runtime.Object`
@@ -368,18 +368,18 @@ VM ops should operate directly on:
 
 ## Stage 6: keep legacy FFI working through the unsafe adapter path
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [ ] in progress / [x] done
 
 At this point the VM core may already be value-native while old FFI still exists.
 
 ### Checklist
 
-- [ ] convert `[]any` args to `[]*runtime.Object` for legacy FFI
-- [ ] call legacy `runtime.Object`-based bindings through the adapter path
-- [ ] convert returned objects back into value-native runtime values
-- [ ] add explicit round-trip tests for value-native VM -> legacy FFI -> value-native VM
-- [ ] verify existing raw-FFI tests still pass
-- [ ] verify `cd compiler && go test ./...`
+- [x] convert `[]any` args to `[]*runtime.Object` for legacy FFI
+- [x] call legacy `runtime.Object`-based bindings through the adapter path
+- [x] convert returned objects back into value-native runtime values
+- [x] add explicit round-trip tests for value-native VM -> legacy FFI -> value-native VM
+- [x] verify existing raw-FFI tests still pass
+- [x] verify `cd compiler && go test ./...`
 
 ### Deliverables
 

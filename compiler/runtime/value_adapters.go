@@ -168,12 +168,33 @@ func ObjectToValue(obj *Object, t checker.Type) any {
 
 	switch typed := t.(type) {
 	case *checker.Maybe:
+		if rawMaybe, ok := obj.Raw().(MaybeValue); ok {
+			if rawMaybe.None {
+				return NoneValue()
+			}
+			if innerObj, ok := rawMaybe.Value.(*Object); ok {
+				return SomeValue(ObjectToValue(innerObj, typed.Of()))
+			}
+			return SomeValue(rawMaybe.Value)
+		}
 		if obj.IsNone() {
 			return NoneValue()
 		}
 		innerObj := objectFromLegacyStorage(obj.Raw(), typed.Of())
 		return SomeValue(ObjectToValue(innerObj, typed.Of()))
 	case *checker.Result:
+		if rawResult, ok := obj.Raw().(ResultValue); ok {
+			if rawResult.IsErr {
+				if errObj, ok := rawResult.Err.(*Object); ok {
+					return ErrValue(ObjectToValue(errObj, typed.Err()))
+				}
+				return ErrValue(rawResult.Err)
+			}
+			if okObj, ok := rawResult.Ok.(*Object); ok {
+				return OkValue(ObjectToValue(okObj, typed.Val()))
+			}
+			return OkValue(rawResult.Ok)
+		}
 		innerObj := obj.UnwrapResult()
 		if obj.IsErr() {
 			return ErrValue(ObjectToValue(innerObj, typed.Err()))

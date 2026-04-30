@@ -319,30 +319,25 @@ func (vm *VM) run() (*runtime.Object, error) {
 				curr.IP = inst.A
 			}
 		case bytecode.OpReturn:
+			returnType := curr.ReturnType
 			if curr.StackTop == 0 {
-				val := runtime.Void()
-				if curr.ReturnType != nil {
-					val.SetRefinedType(curr.ReturnType)
-				}
+				val := any(runtime.NativeVoid)
 				vm.Frames = vm.Frames[:len(vm.Frames)-1]
 				vm.recycleFrame(curr)
 				if len(vm.Frames) == 0 {
-					return val, nil
+					return runtime.ValueToObject(val, returnType), nil
 				}
 				vm.push(vm.Frames[len(vm.Frames)-1], val)
 				continue
 			}
-			val, err := vm.pop(curr)
+			val, err := vm.popValue(curr)
 			if err != nil {
 				return nil, err
-			}
-			if curr.ReturnType != nil {
-				val.SetRefinedType(curr.ReturnType)
 			}
 			vm.Frames = vm.Frames[:len(vm.Frames)-1]
 			vm.recycleFrame(curr)
 			if len(vm.Frames) == 0 {
-				return val, nil
+				return runtime.ValueToObject(val, returnType), nil
 			}
 			vm.push(vm.Frames[len(vm.Frames)-1], val)
 		case bytecode.OpCall:
@@ -681,23 +676,51 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpMaybeMethod:
-			args := make([]*runtime.Object, inst.B)
+			args := make([]any, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
+				args[i] = vm.popValueUnsafe(curr)
 			}
-			subj := vm.popUnsafe(curr)
-			res, err := vm.evalMaybeMethod(bytecodeToMaybeKind(inst.A), subj, args, bytecode.TypeID(inst.Imm))
+			subj := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalMaybeMethodValue(bytecodeToMaybeKind(inst.A), subj, args, bytecode.TypeID(inst.Imm)); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			objArgs := make([]*runtime.Object, len(args))
+			for i := range args {
+				objArgs[i] = runtime.ValueToObject(args[i], nil)
+			}
+			objSubj := runtime.ValueToObject(subj, nil)
+			res, err := vm.evalMaybeMethod(bytecodeToMaybeKind(inst.A), objSubj, objArgs, bytecode.TypeID(inst.Imm))
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, res)
-		case bytecode.OpResultMethod:
-			args := make([]*runtime.Object, inst.B)
-			for i := inst.B - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
+			if retType, err := vm.typeFor(bytecode.TypeID(inst.Imm)); err == nil && vm.shouldUseValueAdapter(retType) {
+				vm.push(curr, runtime.ObjectToValue(res, retType))
+			} else {
+				vm.push(curr, res)
 			}
-			subj := vm.popUnsafe(curr)
-			res, err := vm.evalResultMethod(bytecodeToResultKind(inst.A), subj, args)
+		case bytecode.OpResultMethod:
+			args := make([]any, inst.B)
+			for i := inst.B - 1; i >= 0; i-- {
+				args[i] = vm.popValueUnsafe(curr)
+			}
+			subj := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalResultMethodValue(bytecodeToResultKind(inst.A), subj, args); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			objArgs := make([]*runtime.Object, len(args))
+			for i := range args {
+				objArgs[i] = runtime.ValueToObject(args[i], nil)
+			}
+			objSubj := runtime.ValueToObject(subj, nil)
+			res, err := vm.evalResultMethod(bytecodeToResultKind(inst.A), objSubj, objArgs)
 			if err != nil {
 				return nil, err
 			}
@@ -947,7 +970,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			args := vm.moduleArgsScratch[:argc]
 			for i := argc - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
+				args[i] = runtime.ValueToObject(vm.popValueUnsafe(curr), nil)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -959,7 +982,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, res)
+			if vm.shouldUseValueAdapter(retType) {
+				vm.push(curr, runtime.ObjectToValue(res, retType))
+			} else {
+				vm.push(curr, res)
+			}
 		case bytecode.OpCallExtern:
 			if inst.A < 0 || inst.A >= len(vm.resolvedExterns) {
 				return nil, fmt.Errorf("extern target out of range")
@@ -971,7 +998,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			args := vm.externArgsScratch[:argc]
 			for i := argc - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
+				args[i] = runtime.ValueToObject(vm.popValueUnsafe(curr), nil)
 			}
 			retType, err := vm.typeFor(bytecode.TypeID(inst.C))
 			if err != nil {
@@ -988,7 +1015,11 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			vm.push(curr, res)
+			if vm.shouldUseValueAdapter(retType) {
+				vm.push(curr, runtime.ObjectToValue(res, retType))
+			} else {
+				vm.push(curr, res)
+			}
 		case bytecode.OpToDynamic:
 			val, err := vm.pop(curr)
 			if err != nil {
@@ -1212,6 +1243,36 @@ func (vm *VM) objectFromValue(val any) *runtime.Object {
 		return obj
 	}
 	return runtime.ValueToObject(val, nil)
+}
+
+func (vm *VM) shouldUseValueAdapter(t checker.Type) bool {
+	if t == nil {
+		return false
+	}
+	if typeVar, ok := t.(*checker.TypeVar); ok {
+		if actual := typeVar.Actual(); actual != nil {
+			return vm.shouldUseValueAdapter(actual)
+		}
+		return false
+	}
+	switch typed := t.(type) {
+	case *checker.Maybe:
+		return vm.shouldUseValueAdapter(typed.Of())
+	case *checker.Result:
+		return vm.shouldUseValueAdapter(typed.Val()) && vm.shouldUseValueAdapter(typed.Err())
+	case *checker.List:
+		return vm.shouldUseValueAdapter(typed.Of())
+	case *checker.Map:
+		return vm.shouldUseValueAdapter(typed.Key()) && vm.shouldUseValueAdapter(typed.Value())
+	case *checker.StructDef, *checker.Enum, *checker.FunctionDef, *checker.ExternType:
+		return false
+	}
+	switch t {
+	case checker.Void, checker.Str, checker.Int, checker.Float, checker.Bool, checker.Dynamic:
+		return true
+	default:
+		return false
+	}
 }
 
 func (vm *VM) constAt(index int) (bytecode.Constant, error) {

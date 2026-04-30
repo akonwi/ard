@@ -39,6 +39,28 @@ func bytecodeToListKind(kind int) checker.ListMethodKind {
 	return checker.ListMethodKind(kind)
 }
 
+func (vm *VM) closureFromValue(value any) (*Closure, error) {
+	switch v := value.(type) {
+	case *Closure:
+		return v, nil
+	case *runtime.Object:
+		closure, ok := v.Raw().(*Closure)
+		if !ok {
+			return nil, fmt.Errorf("expected closure, got %T", v.Raw())
+		}
+		return closure, nil
+	default:
+		return nil, fmt.Errorf("expected closure, got %T", value)
+	}
+}
+
+func (vm *VM) adaptClosureResult(result *runtime.Object, returnType checker.Type) any {
+	if vm.shouldUseValueAdapter(returnType) {
+		return runtime.ObjectToValue(result, returnType)
+	}
+	return result
+}
+
 func (vm *VM) evalStrMethodValue(kind checker.StrMethodKind, subj any, args []any) (any, bool, error) {
 	raw, ok := subj.(string)
 	if !ok {
@@ -201,6 +223,78 @@ func (vm *VM) evalBoolMethod(kind checker.BoolMethodKind, subj *runtime.Object) 
 	}
 }
 
+func (vm *VM) evalMaybeMethodValue(kind checker.MaybeMethodKind, subj any, args []any, returnType bytecode.TypeID) (any, bool, error) {
+	maybe, ok := subj.(runtime.MaybeValue)
+	if !ok {
+		return nil, false, nil
+	}
+	switch kind {
+	case checker.MaybeExpect:
+		if maybe.None {
+			return nil, true, fmt.Errorf("%s", args[0].(string))
+		}
+		return maybe.Value, true, nil
+	case checker.MaybeIsNone:
+		return maybe.None, true, nil
+	case checker.MaybeIsSome:
+		return !maybe.None, true, nil
+	case checker.MaybeOr:
+		if maybe.None {
+			return args[0], true, nil
+		}
+		return maybe.Value, true, nil
+	case checker.MaybeMap:
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, true, err
+		}
+		mappedMaybe, ok := resolved.(*checker.Maybe)
+		if !ok {
+			return nil, true, fmt.Errorf("expected Maybe return type for map, got %s", resolved)
+		}
+		if maybe.None {
+			return runtime.NoneValue(), true, nil
+		}
+		closure, err := vm.closureFromValue(args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		mapped, err := vm.runClosure(closure, []any{maybe.Value})
+		if err != nil {
+			return nil, true, err
+		}
+		if vm.shouldUseValueAdapter(mappedMaybe.Of()) {
+			return runtime.SomeValue(runtime.ObjectToValue(mapped, mappedMaybe.Of())), true, nil
+		}
+		return runtime.SomeValue(mapped), true, nil
+	case checker.MaybeAndThen:
+		resolved, err := vm.typeFor(returnType)
+		if err != nil {
+			return nil, true, err
+		}
+		if _, ok := resolved.(*checker.Maybe); !ok {
+			return nil, true, fmt.Errorf("expected Maybe return type for and_then, got %s", resolved)
+		}
+		if maybe.None {
+			return runtime.NoneValue(), true, nil
+		}
+		closure, err := vm.closureFromValue(args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		mapped, err := vm.runClosure(closure, []any{maybe.Value})
+		if err != nil {
+			return nil, true, err
+		}
+		if vm.shouldUseValueAdapter(resolved) {
+			return runtime.ObjectToValue(mapped, resolved), true, nil
+		}
+		return mapped, true, nil
+	default:
+		return nil, false, fmt.Errorf("Unknown MaybeMethodKind: %d", kind)
+	}
+}
+
 func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object, args []*runtime.Object, returnType bytecode.TypeID) (*runtime.Object, error) {
 	switch kind {
 	case checker.MaybeExpect:
@@ -277,6 +371,70 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		return mapped, nil
 	default:
 		return nil, fmt.Errorf("Unknown MaybeMethodKind: %d", kind)
+	}
+}
+
+func (vm *VM) evalResultMethodValue(kind checker.ResultMethodKind, subj any, args []any) (any, bool, error) {
+	result, ok := subj.(runtime.ResultValue)
+	if !ok {
+		return nil, false, nil
+	}
+	switch kind {
+	case checker.ResultExpect:
+		if result.IsErr {
+			return nil, true, fmt.Errorf("%s: %v", args[0].(string), result.Err)
+		}
+		return result.Ok, true, nil
+	case checker.ResultOr:
+		if result.IsErr {
+			return args[0], true, nil
+		}
+		return result.Ok, true, nil
+	case checker.ResultIsOk:
+		return !result.IsErr, true, nil
+	case checker.ResultIsErr:
+		return result.IsErr, true, nil
+	case checker.ResultMap:
+		if result.IsErr {
+			return result, true, nil
+		}
+		closure, err := vm.closureFromValue(args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		mapped, err := vm.runClosure(closure, []any{result.Ok})
+		if err != nil {
+			return nil, true, err
+		}
+		return runtime.OkValue(vm.adaptClosureResult(mapped, closure.ReturnType)), true, nil
+	case checker.ResultMapErr:
+		if !result.IsErr {
+			return result, true, nil
+		}
+		closure, err := vm.closureFromValue(args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		mapped, err := vm.runClosure(closure, []any{result.Err})
+		if err != nil {
+			return nil, true, err
+		}
+		return runtime.ErrValue(vm.adaptClosureResult(mapped, closure.ReturnType)), true, nil
+	case checker.ResultAndThen:
+		if result.IsErr {
+			return result, true, nil
+		}
+		closure, err := vm.closureFromValue(args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		mapped, err := vm.runClosure(closure, []any{result.Ok})
+		if err != nil {
+			return nil, true, err
+		}
+		return vm.adaptClosureResult(mapped, closure.ReturnType), true, nil
+	default:
+		return nil, false, fmt.Errorf("Unknown ResultMethodKind: %d", kind)
 	}
 }
 
