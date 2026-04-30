@@ -64,7 +64,7 @@ Use this section as the source-of-truth status tracker for the migration.
 - [x] Stage 1: introduce value-native runtime types
 - [x] Stage 2: add compatibility adapters
 - [x] Stage 3: add bytecode/type metadata for field-indexed structs
-- [ ] Stage 4: migrate frame storage to `[]any`
+- [x] Stage 4: migrate frame storage to `[]any`
 - [ ] Stage 5: migrate the easiest opcode families first
 - [ ] Stage 6: keep legacy FFI working through the unsafe adapter path
 - [ ] Stage 7: migrate hot/default FFI bindings to value-native interop
@@ -267,22 +267,22 @@ This is shared metadata work, not instance-layout work. It should be stable befo
 
 ## Stage 4: migrate frame storage to `[]any`
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [ ] in progress / [x] done
 
 This is the first truly structural VM change.
 
 ### Checklist
 
-- [ ] change `Frame.Locals` to `[]any`
-- [ ] change `Frame.Stack` to `[]any`
-- [ ] update push/pop helpers
-- [ ] update frame allocation/reuse
-- [ ] update closure capture storage
-- [ ] update argument passing between frames
-- [ ] use adapters only where still necessary at boundaries
-- [ ] add focused tests for call/return/closure/local behavior
-- [ ] verify profiling still works
-- [ ] verify `cd compiler && go test ./...`
+- [x] change `Frame.Locals` to `[]any`
+- [x] change `Frame.Stack` to `[]any`
+- [x] update push/pop helpers
+- [x] update frame allocation/reuse
+- [x] update closure capture storage
+- [x] update argument passing between frames
+- [x] use adapters only where still necessary at boundaries
+- [x] add focused tests for call/return/closure/local behavior
+- [x] verify profiling still works
+- [x] verify `cd compiler && go test ./...`
 
 ### Deliverables
 

@@ -159,7 +159,7 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		if !ok {
 			return nil, fmt.Errorf("expected Maybe subject for map, got %s", subj.Type())
 		}
-		mapped, err := vm.runClosure(closure, []*runtime.Object{runtime.Make(subj.Raw(), subjType.Of())})
+		mapped, err := vm.runClosure(closure, []any{runtime.Make(subj.Raw(), subjType.Of())})
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +184,7 @@ func (vm *VM) evalMaybeMethod(kind checker.MaybeMethodKind, subj *runtime.Object
 		if !ok {
 			return nil, fmt.Errorf("expected Maybe subject for and_then, got %s", subj.Type())
 		}
-		mapped, err := vm.runClosure(closure, []*runtime.Object{runtime.Make(subj.Raw(), subjType.Of())})
+		mapped, err := vm.runClosure(closure, []any{runtime.Make(subj.Raw(), subjType.Of())})
 		if err != nil {
 			return nil, err
 		}
@@ -272,7 +272,7 @@ func (vm *VM) evalListMethod(kind checker.ListMethodKind, subj *runtime.Object, 
 			return nil, fmt.Errorf("expected closure, got %T", closureObj.Raw())
 		}
 		slices.SortFunc(raw, func(a, b *runtime.Object) int {
-			res, err := vm.runClosure(closure, []*runtime.Object{a, b})
+			res, err := vm.runClosure(closure, []any{a, b})
 			if err != nil {
 				return 0
 			}

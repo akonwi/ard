@@ -37,8 +37,8 @@ func defaultFFIRegistry() *RuntimeFFIRegistry {
 type Frame struct {
 	Fn         *bytecode.Function
 	IP         int
-	Locals     []*runtime.Object
-	Stack      []*runtime.Object
+	Locals     []any
+	Stack      []any
 	StackTop   int
 	MaxStack   int
 	ReturnType checker.Type
@@ -46,7 +46,7 @@ type Frame struct {
 
 type Closure struct {
 	FnIndex    int
-	Captures   []*runtime.Object
+	Captures   []any
 	Program    *bytecode.Program
 	Params     []checker.Parameter
 	ReturnType checker.Type
@@ -73,7 +73,11 @@ func (c *Closure) eval(args ...*runtime.Object) (*runtime.Object, error) {
 		return nil, fmt.Errorf("closure missing program")
 	}
 	vm := New(*c.Program)
-	return vm.runClosure(c, args)
+	values := make([]any, len(args))
+	for i := range args {
+		values[i] = args[i]
+	}
+	return vm.runClosure(c, values)
 }
 
 type VM struct {
@@ -339,7 +343,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if captureCount < 0 {
 				return nil, fmt.Errorf("invalid capture count")
 			}
-			captures := make([]*runtime.Object, captureCount)
+			captures := make([]any, captureCount)
 			for i := captureCount - 1; i >= 0; i-- {
 				captures[i] = vm.popUnsafe(curr)
 			}
@@ -360,7 +364,7 @@ func (vm *VM) run() (*runtime.Object, error) {
 		case bytecode.OpCallClosure:
 			argc := inst.B
 			vm.profile.RecordClosureCall(argc)
-			args := make([]*runtime.Object, argc)
+			args := make([]any, argc)
 			for i := argc - 1; i >= 0; i-- {
 				args[i] = vm.popUnsafe(curr)
 			}
@@ -776,7 +780,10 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if subjIndex < 0 {
 				return nil, fmt.Errorf("stack underflow")
 			}
-			subj := curr.Stack[subjIndex]
+			subj, err := vm.stackObjectAt(curr, subjIndex)
+			if err != nil {
+				return nil, err
+			}
 			receiverType := subj.TypeName()
 			fnIndex, ok := vm.methodFunctionIndex(receiverType, methodConst.Str)
 			if !ok {
@@ -940,7 +947,7 @@ func (vm *VM) methodFunctionIndex(receiverType, methodName string) (int, bool) {
 	return fnIndex, ok
 }
 
-func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []any, returnType checker.Type) (*Frame, error) {
 	captureLen := len(captures)
 	if captures == nil {
 		captureLen = 0
@@ -962,13 +969,13 @@ func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object,
 	frame.MaxStack = fnDef.MaxStack
 	frame.ReturnType = returnType
 	if cap(frame.Locals) < fnDef.Locals {
-		frame.Locals = make([]*runtime.Object, fnDef.Locals)
+		frame.Locals = make([]any, fnDef.Locals)
 	} else {
 		frame.Locals = frame.Locals[:fnDef.Locals]
 		clear(frame.Locals)
 	}
 	if len(frame.Stack) < fnDef.MaxStack {
-		frame.Stack = make([]*runtime.Object, fnDef.MaxStack)
+		frame.Stack = make([]any, fnDef.MaxStack)
 	} else {
 		clear(frame.Stack[:frame.StackTop])
 	}
@@ -983,7 +990,7 @@ func (vm *VM) newFrameBase(fnDef *bytecode.Function, captures []*runtime.Object,
 	return frame, nil
 }
 
-func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+func (vm *VM) newFrame(fnDef *bytecode.Function, args []any, captures []any, returnType checker.Type) (*Frame, error) {
 	if len(args) != fnDef.Arity {
 		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, len(args))
 	}
@@ -997,14 +1004,14 @@ func (vm *VM) newFrame(fnDef *bytecode.Function, args []*runtime.Object, capture
 	return frame, nil
 }
 
-func (vm *VM) newFrameFromStack(caller *Frame, fnDef *bytecode.Function, argc int, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+func (vm *VM) newFrameFromStack(caller *Frame, fnDef *bytecode.Function, argc int, captures []any, returnType checker.Type) (*Frame, error) {
 	if argc != fnDef.Arity {
 		return nil, fmt.Errorf("arity mismatch: expected %d, got %d", fnDef.Arity, argc)
 	}
 	return vm.newFrameFromStackUnchecked(caller, fnDef, argc, captures, returnType)
 }
 
-func (vm *VM) newFrameFromStackUnchecked(caller *Frame, fnDef *bytecode.Function, argc int, captures []*runtime.Object, returnType checker.Type) (*Frame, error) {
+func (vm *VM) newFrameFromStackUnchecked(caller *Frame, fnDef *bytecode.Function, argc int, captures []any, returnType checker.Type) (*Frame, error) {
 	frame, err := vm.newFrameBase(fnDef, captures, returnType)
 	if err != nil {
 		return nil, err
@@ -1015,7 +1022,7 @@ func (vm *VM) newFrameFromStackUnchecked(caller *Frame, fnDef *bytecode.Function
 	return frame, nil
 }
 
-func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Object, error) {
+func (vm *VM) runClosure(closure *Closure, args []any) (*runtime.Object, error) {
 	if closure.FnIndex < 0 || closure.FnIndex >= len(vm.Program.Functions) {
 		return nil, fmt.Errorf("function index out of range")
 	}
@@ -1030,7 +1037,7 @@ func (vm *VM) runClosure(closure *Closure, args []*runtime.Object) (*runtime.Obj
 }
 
 func (vm *VM) runClosure1(closure *Closure, arg *runtime.Object) (*runtime.Object, error) {
-	args := [1]*runtime.Object{arg}
+	args := [1]any{arg}
 	return vm.runClosure(closure, args[:])
 }
 
@@ -1043,13 +1050,13 @@ func (vm *VM) recycleFrame(frame *Frame) {
 	vm.freeFrames = append(vm.freeFrames, frame)
 }
 
-func (vm *VM) push(frame *Frame, obj *runtime.Object) {
+func (vm *VM) push(frame *Frame, val any) {
 	if frame.StackTop >= len(frame.Stack) {
-		frame.Stack = append(frame.Stack, obj)
+		frame.Stack = append(frame.Stack, val)
 		frame.StackTop++
 		return
 	}
-	frame.Stack[frame.StackTop] = obj
+	frame.Stack[frame.StackTop] = val
 	frame.StackTop++
 }
 
@@ -1064,7 +1071,22 @@ func (vm *VM) popUnsafe(frame *Frame) *runtime.Object {
 	frame.StackTop--
 	val := frame.Stack[frame.StackTop]
 	frame.Stack[frame.StackTop] = nil
-	return val
+	obj, ok := val.(*runtime.Object)
+	if !ok {
+		panic(fmt.Errorf("expected *runtime.Object on VM stack, got %T", val))
+	}
+	return obj
+}
+
+func (vm *VM) stackObjectAt(frame *Frame, index int) (*runtime.Object, error) {
+	if index < 0 || index >= frame.StackTop {
+		return nil, fmt.Errorf("stack index out of range")
+	}
+	obj, ok := frame.Stack[index].(*runtime.Object)
+	if !ok {
+		return nil, fmt.Errorf("expected *runtime.Object on VM stack, got %T", frame.Stack[index])
+	}
+	return obj, nil
 }
 
 func (vm *VM) constAt(index int) (bytecode.Constant, error) {
