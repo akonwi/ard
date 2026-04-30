@@ -34,6 +34,11 @@ func (vm *VM) typeFor(id bytecode.TypeID) (checker.Type, error) {
 		return nil, err
 	}
 	vm.typeCache[id] = parsed
+	if strct, ok := parsed.(*checker.StructDef); ok {
+		if err := vm.hydrateStructType(id, strct); err != nil {
+			return nil, err
+		}
+	}
 	return parsed, nil
 }
 
@@ -49,12 +54,48 @@ func (vm *VM) typeNameFor(id bytecode.TypeID) (string, error) {
 	return "", fmt.Errorf("unknown type id: %d", id)
 }
 
+func (vm *VM) structLayoutFor(id bytecode.TypeID) (*bytecode.StructTypeEntry, error) {
+	for i := range vm.Program.Structs {
+		if vm.Program.Structs[i].TypeID == id {
+			return &vm.Program.Structs[i], nil
+		}
+	}
+	return nil, fmt.Errorf("unknown struct layout for type id: %d", id)
+}
+
+func (vm *VM) hydrateStructType(id bytecode.TypeID, strct *checker.StructDef) error {
+	layout, err := vm.structLayoutFor(id)
+	if err != nil {
+		return nil
+	}
+	if strct.Fields == nil {
+		strct.Fields = map[string]checker.Type{}
+	}
+	if strct.Methods == nil {
+		strct.Methods = map[string]*checker.FunctionDef{}
+	}
+	for _, field := range layout.Fields {
+		if _, exists := strct.Fields[field.Name]; exists {
+			continue
+		}
+		fieldType, err := vm.typeFor(field.TypeID)
+		if err != nil {
+			return err
+		}
+		strct.Fields[field.Name] = fieldType
+	}
+	return nil
+}
+
 func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
 	if vm.typeCache == nil {
 		vm.typeCache = map[bytecode.TypeID]checker.Type{}
 	}
 	if t, ok := vm.typeCache[id]; ok {
 		if s, ok := t.(*checker.StructDef); ok {
+			if err := vm.hydrateStructType(id, s); err != nil {
+				return nil, err
+			}
 			return s, nil
 		}
 	}
@@ -64,6 +105,9 @@ func (vm *VM) structTypeFor(id bytecode.TypeID) (*checker.StructDef, error) {
 	}
 	strct := &checker.StructDef{Name: name, Fields: map[string]checker.Type{}, Methods: map[string]*checker.FunctionDef{}}
 	vm.typeCache[id] = strct
+	if err := vm.hydrateStructType(id, strct); err != nil {
+		return nil, err
+	}
 	return strct, nil
 }
 

@@ -63,7 +63,7 @@ Use this section as the source-of-truth status tracker for the migration.
 
 - [x] Stage 1: introduce value-native runtime types
 - [x] Stage 2: add compatibility adapters
-- [ ] Stage 3: add bytecode/type metadata for field-indexed structs
+- [x] Stage 3: add bytecode/type metadata for field-indexed structs
 - [ ] Stage 4: migrate frame storage to `[]any`
 - [ ] Stage 5: migrate the easiest opcode families first
 - [ ] Stage 6: keep legacy FFI working through the unsafe adapter path
@@ -213,21 +213,21 @@ This adapter layer is what lets us move the VM core first while preserving old F
 
 ## Stage 3: add bytecode/type metadata for field-indexed structs
 
-Status: [ ] not started / [ ] in progress / [ ] done
+Status: [ ] not started / [ ] in progress / [x] done
 
 Before struct execution can become value-native, the program needs explicit shared struct-layout metadata.
 
 ### Checklist
 
-- [ ] add first-class struct layout metadata to bytecode program definitions
-- [ ] update emitter to populate struct layout metadata
-- [ ] update serializer/deserializer
-- [ ] update verifier where relevant
-- [ ] add VM type/layout resolution helpers
-- [ ] add serialization tests
-- [ ] add layout lookup tests
-- [ ] verify existing struct-related VM tests still pass
-- [ ] verify `cd compiler && go test ./...`
+- [x] add first-class struct layout metadata to bytecode program definitions
+- [x] update emitter to populate struct layout metadata
+- [x] update serializer/deserializer
+- [x] update verifier where relevant
+- [x] add VM type/layout resolution helpers
+- [x] add serialization tests
+- [x] add layout lookup tests
+- [x] verify existing struct-related VM tests still pass
+- [x] verify `cd compiler && go test ./...`
 
 ### Deliverables
 

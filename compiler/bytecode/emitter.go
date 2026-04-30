@@ -10,6 +10,7 @@ import (
 type Emitter struct {
 	program      Program
 	typeIndex    map[string]TypeID
+	structIndex  map[string]int
 	externIndex  map[string]int
 	funcIndex    map[string]int
 	funcTypes    map[string]checker.Type
@@ -42,9 +43,11 @@ func NewEmitter() *Emitter {
 			Constants: []Constant{},
 			Types:     []TypeEntry{},
 			Externs:   []ExternEntry{},
+			Structs:   []StructTypeEntry{},
 			Functions: []Function{},
 		},
 		typeIndex:   map[string]TypeID{},
+		structIndex: map[string]int{},
 		externIndex: map[string]int{},
 		funcIndex:   map[string]int{},
 		funcTypes:   map[string]checker.Type{},
@@ -135,7 +138,33 @@ func (e *Emitter) addType(t checker.Type) TypeID {
 	id := TypeID(len(e.program.Types) + 1)
 	e.program.Types = append(e.program.Types, TypeEntry{ID: id, Name: name})
 	e.typeIndex[name] = id
+	if strct, ok := t.(*checker.StructDef); ok {
+		e.addStructType(id, strct)
+	}
 	return id
+}
+
+func (e *Emitter) addStructType(id TypeID, strct *checker.StructDef) {
+	if strct == nil {
+		return
+	}
+	if _, exists := e.structIndex[strct.Name]; exists {
+		return
+	}
+	fieldNames := make([]string, 0, len(strct.Fields))
+	for name := range strct.Fields {
+		fieldNames = append(fieldNames, name)
+	}
+	if len(fieldNames) > 1 {
+		slices.Sort(fieldNames)
+	}
+	fields := make([]StructFieldEntry, 0, len(fieldNames))
+	for _, name := range fieldNames {
+		fields = append(fields, StructFieldEntry{Name: name, TypeID: e.addType(strct.Fields[name])})
+	}
+	entry := StructTypeEntry{TypeID: id, Name: strct.Name, Fields: fields}
+	e.structIndex[strct.Name] = len(e.program.Structs)
+	e.program.Structs = append(e.program.Structs, entry)
 }
 
 func (e *Emitter) addConst(c Constant) int {
