@@ -39,6 +39,34 @@ func vmFFIEnvGet(args []any) any {
 	return runtime.SomeValue(*value)
 }
 
+func vmFFIStrToDynamic(args []any) any {
+	return args[0].(string)
+}
+
+func vmFFIIntToDynamic(args []any) any {
+	return args[0].(int)
+}
+
+func vmFFIFloatToDynamic(args []any) any {
+	return args[0].(float64)
+}
+
+func vmFFIBoolToDynamic(args []any) any {
+	return args[0].(bool)
+}
+
+func vmFFIVoidToDynamic(args []any) any {
+	return nil
+}
+
+func vmFFIListToDynamic(args []any) any {
+	return vmToDynamicValue(args[0])
+}
+
+func vmFFIMapToDynamic(args []any) any {
+	return vmToDynamicValue(args[0])
+}
+
 func vmFFIIsNil(args []any) any {
 	return args[0] == nil
 }
@@ -77,6 +105,56 @@ func maybeStringArg(value any) *string {
 	}
 	stringValue := maybe.Value.(string)
 	return &stringValue
+}
+
+func vmToDynamicValue(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case runtime.VoidValue:
+		return nil
+	case string, int, float64, bool:
+		return typed
+	case runtime.ListValue:
+		out := make([]any, len(typed))
+		for i := range typed {
+			out[i] = vmToDynamicValue(typed[i])
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i := range typed {
+			out[i] = vmToDynamicValue(typed[i])
+		}
+		return out
+	case runtime.MapValue:
+		out := make(map[string]any)
+		for _, key := range typed.Storage.Keys() {
+			out[key.(string)] = vmToDynamicValue(mustGetMapValue(typed.Storage, key))
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = vmToDynamicValue(item)
+		}
+		return out
+	case map[string]*runtime.Object:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = vmToDynamicValue(item)
+		}
+		return out
+	case *runtime.Object:
+		return vmToDynamicValue(runtime.ObjectToValue(typed, typed.Type()))
+	default:
+		return typed
+	}
+}
+
+func mustGetMapValue(storage runtime.VMMap, key any) any {
+	value, _ := storage.GetAny(key)
+	return value
 }
 
 func decodeFoundResult(found any) any {

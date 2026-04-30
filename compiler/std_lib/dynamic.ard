@@ -1,3 +1,6 @@
+use ard/decode
+use ard/testing
+
 // functions to create Dynamic values
 extern fn from_str(val: Str) Dynamic = {
   go = "StrToDynamic"
@@ -46,4 +49,48 @@ fn list(from: [$T], of: fn($T) Dynamic) Dynamic {
     array.push(of(f))
   }
   from_list(array)
+}
+
+test fn test_primitive_dynamic_values_roundtrip_through_decode() Void!Str {
+  try testing::assert(
+    decode::string(from_str("hello")).expect("decode str") == "hello",
+    "Expected Dynamic::from_str to roundtrip",
+  )
+
+  try testing::assert(
+    decode::int(from_int(42)).expect("decode int") == 42,
+    "Expected Dynamic::from_int to roundtrip",
+  )
+
+  try testing::assert(
+    decode::float(from_float(3.5)).expect("decode float") == 3.5,
+    "Expected Dynamic::from_float to roundtrip",
+  )
+
+  try testing::assert(
+    decode::bool(from_bool(true)).expect("decode bool"),
+    "Expected Dynamic::from_bool to roundtrip",
+  )
+
+  testing::assert(decode::is_void(from_void()), "Expected Dynamic::from_void to produce null")
+}
+
+test fn test_list_builder_creates_dynamic_list() Void!Str {
+  let data = list(
+    [1, 2, 3],
+    fn(value: Int) Dynamic {
+      from_int(value)
+    },
+  )
+  let values = decode::run(data, decode::list(decode::int)).expect("decode list")
+  try testing::assert(values.size() == 3, "Expected dynamic list to preserve length")
+  testing::assert(values.at(2) == 3, "Expected dynamic list to preserve element order")
+}
+
+test fn test_object_creates_dynamic_map() Void!Str {
+  let data = object(["foo": from_int(7), "bar": from_bool(false)])
+  let foo = decode::run(data, decode::field("foo", decode::int)).expect("decode foo")
+  let bar = decode::run(data, decode::field("bar", decode::bool)).expect("decode bar")
+  try testing::assert(foo == 7, "Expected dynamic object to preserve integer field")
+  testing::assert(not bar, "Expected dynamic object to preserve bool field")
 }

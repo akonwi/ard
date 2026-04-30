@@ -149,6 +149,27 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("EnvGet", vmFFIEnvGet); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("StrToDynamic", vmFFIStrToDynamic); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("IntToDynamic", vmFFIIntToDynamic); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("FloatToDynamic", vmFFIFloatToDynamic); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("BoolToDynamic", vmFFIBoolToDynamic); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("VoidToDynamic", vmFFIVoidToDynamic); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("ListToDynamic", vmFFIListToDynamic); err != nil {
+		return err
+	}
+	if err := r.RegisterValue("MapToDynamic", vmFFIMapToDynamic); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("IsNil", vmFFIIsNil); err != nil {
 		return err
 	}
