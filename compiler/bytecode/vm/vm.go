@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -540,16 +541,40 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, res)
 		case bytecode.OpMapKeys:
-			mapObj := vm.popUnsafe(curr)
-			mapType := mapObj.MapType()
-			if mapType == nil {
+			mapVal := vm.popValueUnsafe(curr)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				if mapType := mapObj.MapType(); mapType != nil {
+					keys := runtime.SortedMapKeys(mapObj)
+					vm.push(curr, runtime.MakeList(mapType.Key(), keys...))
+					continue
+				}
+				raw := mapObj.AsMap()
+				keys := make([]string, 0, len(raw))
+				for key := range raw {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				items := make([]*runtime.Object, len(keys))
+				for i := range keys {
+					items[i] = runtime.MakeStr(keys[i])
+				}
+				vm.push(curr, runtime.MakeList(checker.Str, items...))
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
 				return nil, fmt.Errorf("map keys on non-map")
 			}
-			keys := runtime.SortedMapKeys(mapObj)
-			vm.push(curr, runtime.MakeList(mapType.Key(), keys...))
+			keyType := vm.mapKeyTypeForValue(mapped)
+			keys := mapped.Storage.Keys()
+			items := make([]*runtime.Object, len(keys))
+			for i := range keys {
+				items[i] = runtime.ValueToObject(keys[i], keyType)
+			}
+			vm.push(curr, runtime.MakeList(keyType, items...))
 		case bytecode.OpMapGet:
-			keyObj := vm.popUnsafe(curr)
-			mapObj := vm.popUnsafe(curr)
+			keyVal := vm.popValueUnsafe(curr)
+			mapVal := vm.popValueUnsafe(curr)
 			mapType, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
 				return nil, err
@@ -558,48 +583,114 @@ func (vm *VM) run() (*runtime.Object, error) {
 			if !ok {
 				return nil, fmt.Errorf("expected map type for id %d", inst.A)
 			}
-			m := mapObj.AsMap()
-			keyStr := runtime.ToMapKey(keyObj)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				keyObj := runtime.ValueToObject(keyVal, mapDef.Key())
+				m := mapObj.AsMap()
+				keyStr := runtime.ToMapKey(keyObj)
+				out := runtime.MakeNone(mapDef.Value())
+				if val, ok := m[keyStr]; ok {
+					out = out.ToSome(val.Raw())
+				}
+				vm.push(curr, out)
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
+				return nil, fmt.Errorf("map get on non-map")
+			}
 			out := runtime.MakeNone(mapDef.Value())
-			if val, ok := m[keyStr]; ok {
-				out = out.ToSome(val.Raw())
+			if val, ok := mapped.Storage.GetAny(vm.nativeMapKeyValue(keyVal, mapDef.Key())); ok {
+				out = out.ToSome(runtime.ValueToObject(val, mapDef.Value()).Raw())
 			}
 			vm.push(curr, out)
 		case bytecode.OpMapGetValue:
-			keyObj := vm.popUnsafe(curr)
-			mapObj := vm.popUnsafe(curr)
-			m := mapObj.AsMap()
-			keyStr := runtime.ToMapKey(keyObj)
-			val, ok := m[keyStr]
+			keyVal := vm.popValueUnsafe(curr)
+			mapVal := vm.popValueUnsafe(curr)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				keyObj := runtime.ValueToObject(keyVal, vm.mapKeyTypeForValue(mapObj))
+				m := mapObj.AsMap()
+				keyStr := runtime.ToMapKey(keyObj)
+				val, ok := m[keyStr]
+				if !ok {
+					return nil, fmt.Errorf("map key not found")
+				}
+				vm.push(curr, val)
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
+				return nil, fmt.Errorf("map get on non-map")
+			}
+			val, ok := mapped.Storage.GetAny(vm.nativeMapKeyValue(keyVal, vm.mapKeyTypeForValue(mapped)))
 			if !ok {
 				return nil, fmt.Errorf("map key not found")
 			}
 			vm.push(curr, val)
 		case bytecode.OpMapSet:
-			val := vm.popUnsafe(curr)
-			keyObj := vm.popUnsafe(curr)
-			mapObj := vm.popUnsafe(curr)
-			m := mapObj.AsMap()
-			keyStr := runtime.ToMapKey(keyObj)
-			m[keyStr] = val
+			val := vm.popValueUnsafe(curr)
+			keyVal := vm.popValueUnsafe(curr)
+			mapVal := vm.popValueUnsafe(curr)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				boxedVal := runtime.ValueToObject(val, nil)
+				keyObj := runtime.ValueToObject(keyVal, vm.mapKeyTypeForValue(mapObj))
+				m := mapObj.AsMap()
+				keyStr := runtime.ToMapKey(keyObj)
+				m[keyStr] = boxedVal
+				vm.push(curr, runtime.MakeBool(true))
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
+				return nil, fmt.Errorf("map set on non-map")
+			}
+			if !mapped.Storage.SetAny(vm.nativeMapKeyValue(keyVal, vm.mapKeyTypeForValue(mapped)), vm.nativeMapEntryValue(val)) {
+				return nil, fmt.Errorf("map set key type mismatch")
+			}
 			vm.push(curr, runtime.MakeBool(true))
 		case bytecode.OpMapDrop:
-			keyObj := vm.popUnsafe(curr)
-			mapObj := vm.popUnsafe(curr)
-			m := mapObj.AsMap()
-			keyStr := runtime.ToMapKey(keyObj)
-			delete(m, keyStr)
+			keyVal := vm.popValueUnsafe(curr)
+			mapVal := vm.popValueUnsafe(curr)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				keyObj := runtime.ValueToObject(keyVal, vm.mapKeyTypeForValue(mapObj))
+				m := mapObj.AsMap()
+				keyStr := runtime.ToMapKey(keyObj)
+				delete(m, keyStr)
+				vm.push(curr, runtime.Void())
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
+				return nil, fmt.Errorf("map drop on non-map")
+			}
+			mapped.Storage.DropAny(vm.nativeMapKeyValue(keyVal, vm.mapKeyTypeForValue(mapped)))
 			vm.push(curr, runtime.Void())
 		case bytecode.OpMapHas:
-			keyObj := vm.popUnsafe(curr)
-			mapObj := vm.popUnsafe(curr)
-			m := mapObj.AsMap()
-			keyStr := runtime.ToMapKey(keyObj)
-			_, ok := m[keyStr]
-			vm.push(curr, runtime.MakeBool(ok))
+			keyVal := vm.popValueUnsafe(curr)
+			mapVal := vm.popValueUnsafe(curr)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				keyObj := runtime.ValueToObject(keyVal, vm.mapKeyTypeForValue(mapObj))
+				m := mapObj.AsMap()
+				keyStr := runtime.ToMapKey(keyObj)
+				_, ok := m[keyStr]
+				vm.push(curr, runtime.MakeBool(ok))
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
+				return nil, fmt.Errorf("map has on non-map")
+			}
+			vm.push(curr, runtime.MakeBool(mapped.Storage.HasAny(vm.nativeMapKeyValue(keyVal, vm.mapKeyTypeForValue(mapped)))))
 		case bytecode.OpMapSize:
-			mapObj := vm.popUnsafe(curr)
-			vm.push(curr, runtime.MakeInt(len(mapObj.AsMap())))
+			mapVal := vm.popValueUnsafe(curr)
+			if mapObj, ok := vm.legacyMapObject(mapVal); ok {
+				vm.push(curr, runtime.MakeInt(len(mapObj.AsMap())))
+				continue
+			}
+			mapped, ok := mapVal.(runtime.MapValue)
+			if !ok {
+				return nil, fmt.Errorf("map size on non-map")
+			}
+			vm.push(curr, runtime.MakeInt(mapped.Storage.Len()))
 		case bytecode.OpMakeNone:
 			resolved, err := vm.typeFor(bytecode.TypeID(inst.A))
 			if err != nil {
@@ -1258,6 +1349,61 @@ func (vm *VM) objectFromValue(val any) *runtime.Object {
 		return obj
 	}
 	return runtime.ValueToObject(val, nil)
+}
+
+func (vm *VM) legacyMapObject(val any) (*runtime.Object, bool) {
+	obj, ok := val.(*runtime.Object)
+	if !ok {
+		return nil, false
+	}
+	if obj.MapType() != nil {
+		return obj, true
+	}
+	if _, ok := obj.Raw().(map[string]*runtime.Object); ok {
+		return obj, true
+	}
+	return nil, false
+}
+
+func (vm *VM) mapKeyTypeForValue(val any) checker.Type {
+	switch mapped := val.(type) {
+	case *runtime.Object:
+		if mapType := mapped.MapType(); mapType != nil {
+			return mapType.Key()
+		}
+		if _, ok := mapped.Raw().(map[string]*runtime.Object); ok {
+			return checker.Str
+		}
+	case runtime.MapValue:
+		switch mapped.Storage.(type) {
+		case *runtime.Map[string]:
+			return checker.Str
+		case *runtime.Map[int]:
+			return checker.Int
+		case *runtime.Map[float64]:
+			return checker.Float
+		case *runtime.Map[bool]:
+			return checker.Bool
+		}
+	}
+	return checker.Dynamic
+}
+
+func (vm *VM) nativeMapKeyValue(val any, keyType checker.Type) any {
+	if obj, ok := val.(*runtime.Object); ok {
+		if keyType == nil {
+			keyType = obj.Type()
+		}
+		return runtime.ObjectToValue(obj, keyType)
+	}
+	return val
+}
+
+func (vm *VM) nativeMapEntryValue(val any) any {
+	if obj, ok := val.(*runtime.Object); ok {
+		return runtime.ObjectToValue(obj, obj.Type())
+	}
+	return val
 }
 
 func (vm *VM) shouldUseValueAdapter(t checker.Type) bool {

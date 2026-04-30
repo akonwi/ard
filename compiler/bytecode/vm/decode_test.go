@@ -292,6 +292,21 @@ func TestBytecodeDecodeMap(t *testing.T) {
 			`,
 			want: true,
 		},
+		{
+			name: "decoded map can be iterated after value-native result flow",
+			input: `
+				use ard/decode
+				let payload = "\{\"counts\":\{\"alpha\":3,\"beta\":5,\"gamma\":8\}\}"
+				let raw = decode::from_json(payload).expect("parse")
+				let counts = decode::run(raw, decode::field("counts", decode::map(decode::string, decode::int))).expect("counts")
+				mut total = 0
+				for _, count in counts {
+					total =+ count
+				}
+				total
+			`,
+			want: 16,
+		},
 	})
 }
 
