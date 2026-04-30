@@ -170,6 +170,9 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("DynamicToList", vmFFIDynamicToList); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("ExtractField", vmFFIExtractField); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("Now", vmFFINow); err != nil {
 		return err
 	}

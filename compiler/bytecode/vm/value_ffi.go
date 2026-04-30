@@ -185,6 +185,44 @@ func vmFFIDynamicToList(args []any) any {
 	return runtime.OkValue(out)
 }
 
+func vmFFIExtractField(args []any) any {
+	data := args[0]
+	name := args[1].(string)
+	if data == nil {
+		return runtime.ErrValue("null")
+	}
+	if mapped, ok := data.(runtime.MapValue); ok {
+		value, _ := mapped.Storage.GetAny(name)
+		return runtime.OkValue(value)
+	}
+	if mapped, ok := data.(map[string]any); ok {
+		value, _ := mapped[name]
+		return runtime.OkValue(value)
+	}
+	if mapped, ok := data.(map[string]*runtime.Object); ok {
+		if value, ok := mapped[name]; ok {
+			return runtime.OkValue(runtime.ObjectToValue(value, value.Type()))
+		}
+		return runtime.OkValue(nil)
+	}
+	value := reflect.ValueOf(data)
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return runtime.ErrValue("null")
+		}
+		value = value.Elem()
+	}
+	if value.Kind() == reflect.Map && value.Type().Key().Kind() == reflect.String {
+		key := reflect.ValueOf(name)
+		entry := value.MapIndex(key)
+		if !entry.IsValid() {
+			return runtime.OkValue(nil)
+		}
+		return runtime.OkValue(entry.Interface())
+	}
+	return runtime.ErrValue(ffi.FormatRawValueForError(data))
+}
+
 func vmFFIBase64Encode(args []any) any {
 	return ffi.Base64Encode(args[0].(string), maybeBoolArg(args[1]))
 }
