@@ -143,6 +143,9 @@ func (r *RuntimeFFIRegistry) RegisterBuiltinFFIFunctions() error {
 	if err := r.RegisterValue("FloatFromStr", vmFFIFloatFromStr); err != nil {
 		return err
 	}
+	if err := r.RegisterValue("FloatFloor", vmFFIFloatFloor); err != nil {
+		return err
+	}
 	if err := r.RegisterValue("EnvGet", vmFFIEnvGet); err != nil {
 		return err
 	}

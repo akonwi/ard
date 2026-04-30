@@ -25,6 +25,10 @@ func vmFFIFloatFromStr(args []any) any {
 	return runtime.SomeValue(*value)
 }
 
+func vmFFIFloatFloor(args []any) any {
+	return ffi.FloatFloor(args[0].(float64))
+}
+
 func vmFFIEnvGet(args []any) any {
 	value := ffi.EnvGet(args[0].(string))
 	if value == nil {
