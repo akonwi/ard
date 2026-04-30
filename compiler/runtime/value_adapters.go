@@ -35,6 +35,27 @@ func ValueToObject(v any, t checker.Type) *Object {
 				return MakeErr(ValueToObject(value.Err, nil))
 			}
 			return MakeOk(ValueToObject(value.Ok, nil))
+		case ListValue:
+			elemType := inferLegacyElementType([]any(value))
+			items := make([]*Object, len(value))
+			for i := range value {
+				items[i] = ValueToObject(value[i], elemType)
+			}
+			return MakeList(elemType, items...)
+		case MapValue:
+			keyType, valueType := inferLegacyMapTypes(value)
+			obj := MakeMap(keyType, valueType)
+			if value.Storage != nil {
+				for _, key := range value.Storage.Keys() {
+					entry, _ := value.Storage.GetAny(key)
+					obj.Map_Set(ValueToObject(key, keyType), ValueToObject(entry, valueType))
+				}
+			}
+			return obj
+		case StructValue:
+			return MakeDynamic(value)
+		case EnumValue:
+			return MakeDynamic(value)
 		default:
 			return MakeDynamic(value)
 		}
@@ -248,6 +269,66 @@ func objectFromLegacyStorage(raw any, t checker.Type) *Object {
 		return Void()
 	}
 	return Make(raw, t)
+}
+
+func inferLegacyElementType(values []any) checker.Type {
+	if len(values) == 0 {
+		return checker.Dynamic
+	}
+	first := inferLegacyType(values[0])
+	for i := 1; i < len(values); i++ {
+		if inferLegacyType(values[i]) != first {
+			return checker.Dynamic
+		}
+	}
+	return first
+}
+
+func inferLegacyMapTypes(value MapValue) (checker.Type, checker.Type) {
+	var keyType checker.Type = checker.Dynamic
+	switch value.Storage.(type) {
+	case *Map[string]:
+		keyType = checker.Str
+	case *Map[int]:
+		keyType = checker.Int
+	case *Map[float64]:
+		keyType = checker.Float
+	case *Map[bool]:
+		keyType = checker.Bool
+	}
+	var valueType checker.Type = checker.Dynamic
+	if value.Storage != nil {
+		keys := value.Storage.Keys()
+		if len(keys) > 0 {
+			entry, _ := value.Storage.GetAny(keys[0])
+			valueType = inferLegacyType(entry)
+			for _, key := range keys[1:] {
+				entry, _ := value.Storage.GetAny(key)
+				if inferLegacyType(entry) != valueType {
+					valueType = checker.Dynamic
+					break
+				}
+			}
+		}
+	}
+	return keyType, valueType
+}
+
+func inferLegacyType(value any) checker.Type {
+	switch value.(type) {
+	case VoidValue:
+		return checker.Void
+	case string:
+		return checker.Str
+	case int:
+		return checker.Int
+	case float64:
+		return checker.Float
+	case bool:
+		return checker.Bool
+	default:
+		return checker.Dynamic
+	}
 }
 
 func newVMMapForKeyType(t checker.Type) VMMap {

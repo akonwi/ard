@@ -328,7 +328,7 @@ Do not convert every opcode at once. Migrate the ones with the best effort-to-pa
 - [x] migrate scalar constants
 - [x] migrate arithmetic/comparison ops
 - [x] migrate boolean ops
-- [ ] migrate string/int/float/bool method ops
+- [x] migrate string/int/float/bool method ops
 - [ ] migrate maybe/result creation and unwrap ops
 - [ ] migrate `try` ops
 - [ ] add targeted tests for `MaybeValue` / `ResultValue` behavior under value-native execution

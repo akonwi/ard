@@ -612,32 +612,68 @@ func (vm *VM) run() (*runtime.Object, error) {
 			}
 			vm.push(curr, runtime.MakeNone(resolved))
 		case bytecode.OpStrMethod:
-			args := make([]*runtime.Object, inst.B)
+			args := make([]any, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
-				args[i] = vm.popUnsafe(curr)
+				args[i] = vm.popValueUnsafe(curr)
 			}
-			obj := vm.popUnsafe(curr)
-			res, err := vm.evalStrMethod(bytecodeToStrKind(inst.A), obj, args)
+			subj := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalStrMethodValue(bytecodeToStrKind(inst.A), subj, args); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			obj := runtime.ValueToObject(subj, checker.Str)
+			objArgs := make([]*runtime.Object, len(args))
+			for i := range args {
+				objArgs[i] = runtime.ValueToObject(args[i], nil)
+			}
+			res, err := vm.evalStrMethod(bytecodeToStrKind(inst.A), obj, objArgs)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpIntMethod:
-			obj := vm.popUnsafe(curr)
+			subj := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalIntMethodValue(bytecodeToIntKind(inst.A), subj); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			obj := runtime.ValueToObject(subj, checker.Int)
 			res, err := vm.evalIntMethod(bytecodeToIntKind(inst.A), obj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpFloatMethod:
-			obj := vm.popUnsafe(curr)
+			subj := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalFloatMethodValue(bytecodeToFloatKind(inst.A), subj); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			obj := runtime.ValueToObject(subj, checker.Float)
 			res, err := vm.evalFloatMethod(bytecodeToFloatKind(inst.A), obj)
 			if err != nil {
 				return nil, err
 			}
 			vm.push(curr, res)
 		case bytecode.OpBoolMethod:
-			obj := vm.popUnsafe(curr)
+			subj := vm.popValueUnsafe(curr)
+			if res, handled, err := vm.evalBoolMethodValue(bytecodeToBoolKind(inst.A), subj); handled {
+				if err != nil {
+					return nil, err
+				}
+				vm.push(curr, res)
+				continue
+			}
+			obj := runtime.ValueToObject(subj, checker.Bool)
 			res, err := vm.evalBoolMethod(bytecodeToBoolKind(inst.A), obj)
 			if err != nil {
 				return nil, err

@@ -39,6 +39,45 @@ func bytecodeToListKind(kind int) checker.ListMethodKind {
 	return checker.ListMethodKind(kind)
 }
 
+func (vm *VM) evalStrMethodValue(kind checker.StrMethodKind, subj any, args []any) (any, bool, error) {
+	raw, ok := subj.(string)
+	if !ok {
+		return nil, false, nil
+	}
+	argString := func(index int) string {
+		return args[index].(string)
+	}
+	switch kind {
+	case checker.StrSize:
+		return len(raw), true, nil
+	case checker.StrIsEmpty:
+		return len(raw) == 0, true, nil
+	case checker.StrContains:
+		return strings.Contains(raw, argString(0)), true, nil
+	case checker.StrReplace:
+		return strings.Replace(raw, argString(0), argString(1), 1), true, nil
+	case checker.StrReplaceAll:
+		return strings.ReplaceAll(raw, argString(0), argString(1)), true, nil
+	case checker.StrSplit:
+		split := strings.Split(raw, argString(0))
+		values := make(runtime.ListValue, len(split))
+		for i, str := range split {
+			values[i] = str
+		}
+		return values, true, nil
+	case checker.StrStartsWith:
+		return strings.HasPrefix(raw, argString(0)), true, nil
+	case checker.StrToStr:
+		return raw, true, nil
+	case checker.StrToDyn:
+		return raw, true, nil
+	case checker.StrTrim:
+		return strings.Trim(raw, " "), true, nil
+	default:
+		return nil, false, fmt.Errorf("Unknown StrMethodKind: %d", kind)
+	}
+}
+
 func (vm *VM) evalStrMethod(kind checker.StrMethodKind, subj *runtime.Object, args []*runtime.Object) (*runtime.Object, error) {
 	raw := subj.AsString()
 	switch kind {
@@ -78,6 +117,21 @@ func (vm *VM) evalStrMethod(kind checker.StrMethodKind, subj *runtime.Object, ar
 	}
 }
 
+func (vm *VM) evalIntMethodValue(kind checker.IntMethodKind, subj any) (any, bool, error) {
+	raw, ok := subj.(int)
+	if !ok {
+		return nil, false, nil
+	}
+	switch kind {
+	case checker.IntToStr:
+		return strconv.Itoa(raw), true, nil
+	case checker.IntToDyn:
+		return raw, true, nil
+	default:
+		return nil, false, fmt.Errorf("Unknown IntMethodKind: %d", kind)
+	}
+}
+
 func (vm *VM) evalIntMethod(kind checker.IntMethodKind, subj *runtime.Object) (*runtime.Object, error) {
 	switch kind {
 	case checker.IntToStr:
@@ -86,6 +140,23 @@ func (vm *VM) evalIntMethod(kind checker.IntMethodKind, subj *runtime.Object) (*
 		return runtime.MakeDynamic(subj.AsInt()), nil
 	default:
 		return nil, fmt.Errorf("Unknown IntMethodKind: %d", kind)
+	}
+}
+
+func (vm *VM) evalFloatMethodValue(kind checker.FloatMethodKind, subj any) (any, bool, error) {
+	raw, ok := subj.(float64)
+	if !ok {
+		return nil, false, nil
+	}
+	switch kind {
+	case checker.FloatToStr:
+		return strconv.FormatFloat(raw, 'f', 2, 64), true, nil
+	case checker.FloatToInt:
+		return int(raw), true, nil
+	case checker.FloatToDyn:
+		return raw, true, nil
+	default:
+		return nil, false, fmt.Errorf("Unknown FloatMethodKind: %d", kind)
 	}
 }
 
@@ -101,6 +172,21 @@ func (vm *VM) evalFloatMethod(kind checker.FloatMethodKind, subj *runtime.Object
 		return runtime.MakeDynamic(subj.AsFloat()), nil
 	default:
 		return nil, fmt.Errorf("Unknown FloatMethodKind: %d", kind)
+	}
+}
+
+func (vm *VM) evalBoolMethodValue(kind checker.BoolMethodKind, subj any) (any, bool, error) {
+	raw, ok := subj.(bool)
+	if !ok {
+		return nil, false, nil
+	}
+	switch kind {
+	case checker.BoolToStr:
+		return strconv.FormatBool(raw), true, nil
+	case checker.BoolToDyn:
+		return raw, true, nil
+	default:
+		return nil, false, fmt.Errorf("Unknown BoolMethodKind: %d", kind)
 	}
 }
 
