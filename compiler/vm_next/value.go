@@ -18,6 +18,7 @@ const (
 	ValueMaybe
 	ValueStruct
 	ValueResult
+	ValueExtern
 )
 
 type Value struct {
@@ -46,6 +47,11 @@ type MaybeValue struct {
 	Type  air.TypeID
 	Some  bool
 	Value Value
+}
+
+type ExternValue struct {
+	Type   air.TypeID
+	Handle any
 }
 
 func Void(typeID air.TypeID) Value {
@@ -84,6 +90,10 @@ func Result(typeID air.TypeID, ok bool, value Value) Value {
 	return Value{Kind: ValueResult, Type: typeID, Ref: &ResultValue{Type: typeID, Ok: ok, Value: value}}
 }
 
+func Extern(typeID air.TypeID, handle any) Value {
+	return Value{Kind: ValueExtern, Type: typeID, Ref: &ExternValue{Type: typeID, Handle: handle}}
+}
+
 func (v Value) GoValue() any {
 	switch v.Kind {
 	case ValueVoid:
@@ -120,6 +130,12 @@ func (v Value) GoValue() any {
 			return nil
 		}
 		return resultValue.Value.GoValue()
+	case ValueExtern:
+		externValue, ok := v.Ref.(*ExternValue)
+		if !ok {
+			return nil
+		}
+		return externValue.Handle
 	default:
 		return nil
 	}
@@ -163,4 +179,15 @@ func (v Value) resultValue() (*ResultValue, error) {
 		return nil, fmt.Errorf("result value has invalid payload %T", v.Ref)
 	}
 	return resultValue, nil
+}
+
+func (v Value) externValue() (*ExternValue, error) {
+	if v.Kind != ValueExtern {
+		return nil, fmt.Errorf("expected extern value, got kind %d", v.Kind)
+	}
+	externValue, ok := v.Ref.(*ExternValue)
+	if !ok || externValue == nil {
+		return nil, fmt.Errorf("extern value has invalid payload %T", v.Ref)
+	}
+	return externValue, nil
 }

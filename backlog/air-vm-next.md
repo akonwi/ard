@@ -765,6 +765,10 @@ Status: In progress
   generate `compiler/std_lib/ffi/ard.gen.go` from Ard extern declarations.
 - [x] Execute scalar, generated `Maybe[T]`, and error-backed `Result` externs
   in `vm_next` through the generated stdlib host registry.
+- [x] Convert AIR structs to and from native Go structs for `vm_next` extern
+  calls.
+- [x] Carry opaque extern handles across `vm_next` extern calls without exposing
+  them as `Dynamic` or boxed runtime objects.
 - [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
   root `go.mod`.
 - [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.

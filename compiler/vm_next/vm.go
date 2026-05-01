@@ -804,6 +804,8 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		return Struct(typeID, fields)
 	case air.TypeResult:
 		return Result(typeID, true, vm.zeroValue(typeInfo.Value))
+	case air.TypeExtern:
+		return Extern(typeID, nil)
 	default:
 		return Value{Type: typeID}
 	}

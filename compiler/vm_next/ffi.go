@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unicode"
 
 	"github.com/akonwi/ard/air"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
@@ -91,6 +92,9 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		out.FieldByName("Some").SetBool(true)
 		return out, nil
 	}
+	if value.Kind == ValueExtern {
+		return vm.externToHost(value, target)
+	}
 	if target.Kind() == reflect.Pointer {
 		if value.Kind == ValueMaybe {
 			maybeValue, err := value.maybeValue()
@@ -134,6 +138,9 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	case reflect.Struct:
 		if value.Kind == ValueVoid && target.NumField() == 0 {
 			return reflect.Zero(target), nil
+		}
+		if value.Kind == ValueStruct {
+			return vm.structToHost(value, target)
 		}
 	}
 	if target.Kind() == reflect.Interface && target.NumMethod() == 0 {
@@ -254,9 +261,140 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 			return Value{}, err
 		}
 		return Maybe(typeID, true, inner), nil
+	case air.TypeStruct:
+		return vm.hostStructToValue(typeInfo, value)
+	case air.TypeExtern:
+		return vm.hostExternToValue(typeInfo.ID, value)
 	default:
 		return Value{}, fmt.Errorf("unsupported host return AIR type %s", typeInfo.Name)
 	}
+}
+
+func (vm *VM) externToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	externValue, err := value.externValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if externValue.Handle == nil {
+		return reflect.Zero(target), nil
+	}
+	handle := reflect.ValueOf(externValue.Handle)
+	if handle.Type().AssignableTo(target) {
+		return handle, nil
+	}
+	if handle.Type().ConvertibleTo(target) {
+		return handle.Convert(target), nil
+	}
+	if target.Kind() == reflect.Interface && target.NumMethod() == 0 {
+		return handle, nil
+	}
+	if target.Kind() == reflect.Struct {
+		out := reflect.New(target).Elem()
+		handleField := out.FieldByName("Handle")
+		if !handleField.IsValid() {
+			return reflect.Value{}, fmt.Errorf("host extern struct %s missing Handle field", target)
+		}
+		if !handleField.CanSet() {
+			return reflect.Value{}, fmt.Errorf("host extern struct %s Handle field cannot be set", target)
+		}
+		if handle.Type().AssignableTo(handleField.Type()) {
+			handleField.Set(handle)
+			return out, nil
+		}
+		if handle.Type().ConvertibleTo(handleField.Type()) {
+			handleField.Set(handle.Convert(handleField.Type()))
+			return out, nil
+		}
+		if handleField.Type().Kind() == reflect.Interface && handleField.Type().NumMethod() == 0 {
+			handleField.Set(handle)
+			return out, nil
+		}
+		return reflect.Value{}, fmt.Errorf("cannot assign extern handle %s to %s.Handle", handle.Type(), target)
+	}
+	return reflect.Value{}, fmt.Errorf("cannot pass extern handle as %s", target)
+}
+
+func (vm *VM) hostExternToValue(typeID air.TypeID, value reflect.Value) (Value, error) {
+	if !value.IsValid() {
+		return Extern(typeID, nil), nil
+	}
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return Extern(typeID, nil), nil
+		}
+		value = value.Elem()
+	}
+	if value.Kind() == reflect.Pointer && value.IsNil() {
+		return Extern(typeID, nil), nil
+	}
+	if value.Kind() == reflect.Struct {
+		handle := value.FieldByName("Handle")
+		if handle.IsValid() && handle.CanInterface() {
+			return Extern(typeID, handle.Interface()), nil
+		}
+	}
+	if value.CanInterface() {
+		return Extern(typeID, value.Interface()), nil
+	}
+	return Value{}, fmt.Errorf("cannot capture host extern value %s", value.Type())
+}
+
+func (vm *VM) structToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	typeInfo, err := vm.typeInfo(value.Type)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if typeInfo.Kind != air.TypeStruct {
+		return reflect.Value{}, fmt.Errorf("cannot pass AIR type %s as Go struct", typeInfo.Name)
+	}
+	structValue, err := value.structValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	out := reflect.New(target).Elem()
+	for _, field := range typeInfo.Fields {
+		if field.Index < 0 || field.Index >= len(structValue.Fields) {
+			return reflect.Value{}, fmt.Errorf("invalid field index %d on %s", field.Index, typeInfo.Name)
+		}
+		hostField := out.FieldByName(goExportedName(field.Name))
+		if !hostField.IsValid() {
+			return reflect.Value{}, fmt.Errorf("host struct %s missing field %s", target, goExportedName(field.Name))
+		}
+		if !hostField.CanSet() {
+			return reflect.Value{}, fmt.Errorf("host struct field %s cannot be set", goExportedName(field.Name))
+		}
+		hostValue, err := vm.valueToHost(structValue.Fields[field.Index], hostField.Type())
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("field %s: %w", field.Name, err)
+		}
+		hostField.Set(hostValue)
+	}
+	return out, nil
+}
+
+func (vm *VM) hostStructToValue(typeInfo air.TypeInfo, value reflect.Value) (Value, error) {
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return vm.zeroValue(typeInfo.ID), nil
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return Value{}, fmt.Errorf("cannot convert %s to struct %s", value.Type(), typeInfo.Name)
+	}
+	fields := make([]Value, len(typeInfo.Fields))
+	for _, field := range typeInfo.Fields {
+		hostField := value.FieldByName(goExportedName(field.Name))
+		if !hostField.IsValid() {
+			return Value{}, fmt.Errorf("host struct %s missing field %s", value.Type(), goExportedName(field.Name))
+		}
+		fieldValue, err := vm.hostValueToValue(field.Type, hostField)
+		if err != nil {
+			return Value{}, fmt.Errorf("field %s: %w", field.Name, err)
+		}
+		fields[field.Index] = fieldValue
+	}
+	return Struct(typeInfo.ID, fields), nil
 }
 
 func isErrorValue(value reflect.Value) bool {
@@ -267,4 +405,46 @@ func isHostMaybeType(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Struct &&
 		typ.PkgPath() == hostMaybeType.PkgPath() &&
 		strings.HasPrefix(typ.Name(), "Maybe[")
+}
+
+func goExportedName(name string) string {
+	if !strings.ContainsAny(name, "_- :") {
+		return goUpperFirst(name)
+	}
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '-' || r == ' ' || r == ':'
+	})
+	if len(parts) == 0 {
+		return "Value"
+	}
+	for i := range parts {
+		if containsUpper(parts[i]) {
+			parts[i] = goUpperFirst(parts[i])
+		} else {
+			parts[i] = goUpperFirst(strings.ToLower(parts[i]))
+		}
+	}
+	result := strings.Join(parts, "")
+	if result == "" {
+		return "Value"
+	}
+	return result
+}
+
+func goUpperFirst(value string) string {
+	if value == "" {
+		return value
+	}
+	runes := []rune(value)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+func containsUpper(value string) bool {
+	for _, r := range value {
+		if unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
 }

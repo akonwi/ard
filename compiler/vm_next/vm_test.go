@@ -111,6 +111,88 @@ func TestRunEntryEvaluatesResultExtern(t *testing.T) {
 	}
 }
 
+func TestRunEntryPassesStructExtern(t *testing.T) {
+	type HostUser struct {
+		Name string
+		Age  int
+	}
+
+	got := runSourceWithExterns(t, `
+		struct User {
+			name: Str,
+			age: Int,
+		}
+
+		extern fn describe(user: User) Str = "DescribeUser"
+
+		describe(User{name: "Ada", age: 42})
+	`, HostFunctionRegistry{
+		"DescribeUser": func(user HostUser) string {
+			if user.Name == "Ada" && user.Age == 42 {
+				return "ok"
+			}
+			return "bad"
+		},
+	})
+
+	if got.Kind != ValueStr || got.Str != "ok" {
+		t.Fatalf("got %#v, want ok", got)
+	}
+}
+
+func TestRunEntryReturnsStructExtern(t *testing.T) {
+	type HostUser struct {
+		Name string
+		Age  int
+	}
+
+	got := runSourceWithExterns(t, `
+		struct User {
+			name: Str,
+			age: Int,
+		}
+
+		extern fn load_user() User = "LoadUser"
+
+		load_user().age
+	`, HostFunctionRegistry{
+		"LoadUser": func() HostUser {
+			return HostUser{Name: "Ada", Age: 42}
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPassesExternHandleBetweenExterns(t *testing.T) {
+	type HostBox struct {
+		Handle any
+	}
+
+	got := runSourceWithExterns(t, `
+		extern type Box
+
+		extern fn open_box() Box = "OpenBox"
+		extern fn read_box(box: Box) Int = "ReadBox"
+
+		read_box(open_box())
+	`, HostFunctionRegistry{
+		"OpenBox": func() HostBox {
+			return HostBox{Handle: 42}
+		},
+		"ReadBox": func(box HostBox) int {
+			value, _ := box.Handle.(int)
+			return value
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryEvaluatesIfExpressions(t *testing.T) {
 	got := runSource(t, `
 		fn choose(value: Int) Int {
@@ -510,7 +592,17 @@ func TestRunTestsEvaluatesResultOutcomes(t *testing.T) {
 
 func runSource(t *testing.T, input string) Value {
 	t.Helper()
-	vm := newVMFromSource(t, input)
+	vm := newVMFromSourceWithExterns(t, input, nil)
+	got, err := vm.RunEntry()
+	if err != nil {
+		t.Fatalf("run entry: %v", err)
+	}
+	return got
+}
+
+func runSourceWithExterns(t *testing.T, input string, externs HostFunctionRegistry) Value {
+	t.Helper()
+	vm := newVMFromSourceWithExterns(t, input, externs)
 	got, err := vm.RunEntry()
 	if err != nil {
 		t.Fatalf("run entry: %v", err)
@@ -519,6 +611,11 @@ func runSource(t *testing.T, input string) Value {
 }
 
 func newVMFromSource(t *testing.T, input string) *VM {
+	t.Helper()
+	return newVMFromSourceWithExterns(t, input, nil)
+}
+
+func newVMFromSourceWithExterns(t *testing.T, input string, externs HostFunctionRegistry) *VM {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
@@ -533,7 +630,7 @@ func newVMFromSource(t *testing.T, input string) *VM {
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
-	vm, err := New(program)
+	vm, err := NewWithExterns(program, externs)
 	if err != nil {
 		t.Fatalf("new vm: %v", err)
 	}
