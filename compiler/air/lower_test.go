@@ -132,6 +132,31 @@ func TestLowerBoolMatch(t *testing.T) {
 	}
 }
 
+func TestLowerWhileLoop(t *testing.T) {
+	program := lowerSource(t, `
+		mut count = 0
+		while count < 3 {
+			count = count + 1
+		}
+		count
+	`)
+
+	main := program.Functions[program.Entry]
+	if len(main.Body.Stmts) != 2 {
+		t.Fatalf("main stmt count = %d, want let and while", len(main.Body.Stmts))
+	}
+	loop := main.Body.Stmts[1]
+	if loop.Kind != StmtWhile {
+		t.Fatalf("second stmt = %#v, want StmtWhile", loop)
+	}
+	if loop.Condition == nil || loop.Condition.Kind != ExprLt {
+		t.Fatalf("while condition = %#v, want ExprLt", loop.Condition)
+	}
+	if len(loop.Body.Stmts) != 1 || loop.Body.Stmts[0].Kind != StmtAssign {
+		t.Fatalf("while body = %#v, want assignment", loop.Body)
+	}
+}
+
 func TestLowerEnums(t *testing.T) {
 	program := lowerSource(t, `
 		enum Direction {
@@ -340,6 +365,31 @@ func TestLowerTryOps(t *testing.T) {
 	maybeLet := maybeValue.Body.Stmts[0]
 	if maybeLet.Value == nil || maybeLet.Value.Kind != ExprTryMaybe {
 		t.Fatalf("maybe try = %#v, want ExprTryMaybe", maybeLet.Value)
+	}
+}
+
+func TestLowerImportedModuleFunctionCall(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/testing
+
+		fn check() Void!Str {
+			let result = testing::assert(true, "should pass")
+			result
+		}
+	`)
+
+	assert := findFunction(t, program, "assert")
+	check := findFunction(t, program, "check")
+	if len(check.Body.Stmts) != 1 || check.Body.Stmts[0].Value == nil || check.Body.Stmts[0].Value.Kind != ExprCall {
+		t.Fatalf("check function = %#v, want let ExprCall", check)
+	}
+	if check.Body.Stmts[0].Value.Function != assert.ID {
+		t.Fatalf("check calls function %d, want assert %d", check.Body.Stmts[0].Value.Function, assert.ID)
+	}
+	for _, test := range program.Tests {
+		if test.Function == assert.ID || test.Name == "test_assert_true_passes" {
+			t.Fatalf("imported module tests should not be added to root manifest: %#v", program.Tests)
+		}
 	}
 }
 

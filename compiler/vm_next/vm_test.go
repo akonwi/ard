@@ -108,6 +108,43 @@ func TestRunEntryEvaluatesBoolMatch(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesWhileAndBreak(t *testing.T) {
+	got := runSource(t, `
+		mut count = 5
+		while count > 0 {
+			count = count - 1
+			if count == 3 {
+				break
+			}
+		}
+		count
+	`)
+
+	if got.Kind != ValueInt || got.Int != 3 {
+		t.Fatalf("got %#v, want int 3", got)
+	}
+}
+
+func TestRunEntryEvaluatesImportedTestingAssert(t *testing.T) {
+	got := runSource(t, `
+		use ard/testing
+
+		fn check() Void!Str {
+			try testing::assert(true, "should pass")
+			testing::pass()
+		}
+
+		match check() {
+			ok => "pass",
+			err(message) => message,
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "pass" {
+		t.Fatalf("got %#v, want pass", got)
+	}
+}
+
 func TestRunEntryEvaluatesEnums(t *testing.T) {
 	got := runSource(t, `
 		enum Direction {
@@ -368,6 +405,33 @@ func TestRunEntryPropagatesTryThroughMatchArm(t *testing.T) {
 		}
 
 		compute(Status::Active).or(42)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPropagatesTryThroughWhileLoop(t *testing.T) {
+	got := runSource(t, `
+		fn fail() Int!Str {
+			Result::err("boom")
+		}
+
+		fn compute() Int!Str {
+			mut index = 0
+			while index < 4 {
+				if index == 2 {
+					let value = try fail()
+					index = value
+				} else {
+					index = index + 1
+				}
+			}
+			Result::ok(index)
+		}
+
+		compute().or(42)
 	`)
 
 	if got.Kind != ValueInt || got.Int != 42 {

@@ -113,6 +113,12 @@ func (e earlyReturn) Error() string {
 	return "early return"
 }
 
+type loopBreak struct{}
+
+func (l loopBreak) Error() string {
+	return "break"
+}
+
 func (f *frame) evalBlock(block air.Block) (Value, error) {
 	return f.evalBlockWithDefault(block, f.fn.Signature.Return)
 }
@@ -153,8 +159,33 @@ func (f *frame) evalStmt(stmt air.Stmt) (Value, error) {
 		return value, nil
 	case air.StmtExpr:
 		return f.evalExprPtr(stmt.Expr)
+	case air.StmtWhile:
+		return f.evalWhile(stmt)
+	case air.StmtBreak:
+		return Value{}, loopBreak{}
 	default:
 		return Value{}, fmt.Errorf("unsupported stmt kind %d", stmt.Kind)
+	}
+}
+
+func (f *frame) evalWhile(stmt air.Stmt) (Value, error) {
+	for {
+		condition, err := f.evalExprPtr(stmt.Condition)
+		if err != nil {
+			return Value{}, err
+		}
+		if condition.Kind != ValueBool {
+			return Value{}, fmt.Errorf("while condition must be bool, got kind %d", condition.Kind)
+		}
+		if !condition.Bool {
+			return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid)), nil
+		}
+		if _, err := f.evalBlockWithDefault(stmt.Body, f.vm.mustTypeID(air.TypeVoid)); err != nil {
+			if _, ok := err.(loopBreak); ok {
+				return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid)), nil
+			}
+			return Value{}, err
+		}
 	}
 }
 

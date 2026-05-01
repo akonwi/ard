@@ -9,7 +9,7 @@ import (
 
 func Lower(module checker.Module) (*Program, error) {
 	l := newLowerer()
-	if err := l.lowerModule(module); err != nil {
+	if err := l.lowerModule(module, true); err != nil {
 		return nil, err
 	}
 	if err := Validate(&l.program); err != nil {
@@ -22,9 +22,13 @@ type lowerer struct {
 	program Program
 
 	moduleByPath map[string]ModuleID
+	moduleByName map[string]checker.Module
 	typeByName   map[string]TypeID
 	functions    map[string]FunctionID
 	externs      map[string]ExternID
+
+	loweringModules map[string]bool
+	loweredModules  map[string]bool
 }
 
 type functionLowerer struct {
@@ -39,9 +43,13 @@ func newLowerer() *lowerer {
 			Entry: NoFunction,
 		},
 		moduleByPath: map[string]ModuleID{},
+		moduleByName: map[string]checker.Module{},
 		typeByName:   map[string]TypeID{},
 		functions:    map[string]FunctionID{},
 		externs:      map[string]ExternID{},
+
+		loweringModules: map[string]bool{},
+		loweredModules:  map[string]bool{},
 	}
 	l.mustIntern(checker.Void)
 	l.mustIntern(checker.Int)
@@ -60,18 +68,31 @@ func (l *lowerer) mustIntern(t checker.Type) TypeID {
 	return id
 }
 
-func (l *lowerer) lowerModule(module checker.Module) error {
+func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 	if module == nil {
 		return fmt.Errorf("cannot lower nil module")
 	}
-	modID := l.internModule(module.Path())
+	path := module.Path()
+	if l.loweredModules[path] {
+		return nil
+	}
+	if l.loweringModules[path] {
+		return nil
+	}
+	l.moduleByName[path] = module
+	l.loweringModules[path] = true
+	defer delete(l.loweringModules, path)
+
+	modID := l.internModule(path)
 	mod := &l.program.Modules[modID]
 	prog := module.Program()
 	if prog == nil {
+		l.loweredModules[path] = true
 		return nil
 	}
 
 	for _, imported := range prog.Imports {
+		l.moduleByName[imported.Path()] = imported
 		importID := l.internModule(imported.Path())
 		mod.Imports = append(mod.Imports, importID)
 	}
@@ -101,7 +122,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
-			if _, err := l.declareFunction(modID, expr); err != nil {
+			if _, err := l.declareFunction(modID, expr, includeTests); err != nil {
 				return err
 			}
 		case *checker.ExternalFunctionDef:
@@ -126,17 +147,19 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		if err != nil {
 			return err
 		}
-		fn := &l.program.Functions[mainID]
-		fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: fn}
+		fn := l.program.Functions[mainID]
+		fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
 		body, err := fl.lowerBlock(topLevel)
 		if err != nil {
 			return err
 		}
 		fn.Body = body
+		l.program.Functions[mainID] = fn
 		l.program.Entry = mainID
 		mod.Functions = appendUniqueFunction(mod.Functions, mainID)
 	}
 
+	l.loweredModules[path] = true
 	return nil
 }
 
@@ -153,7 +176,7 @@ func (l *lowerer) internModule(path string) ModuleID {
 	return id
 }
 
-func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
+func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef, includeTests bool) (FunctionID, error) {
 	key := functionKey(module, def.Name)
 	if id, ok := l.functions[key]; ok {
 		return id, nil
@@ -183,7 +206,7 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 		IsTest: def.IsTest,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
-	if def.IsTest {
+	if includeTests && def.IsTest {
 		l.program.Tests = append(l.program.Tests, Test{Name: def.Name, Function: id})
 	}
 	return id, nil
@@ -217,8 +240,8 @@ func (l *lowerer) lowerFunction(module ModuleID, def *checker.FunctionDef) error
 		return fmt.Errorf("function was not declared before lowering: %s", def.Name)
 	}
 
-	fn := &l.program.Functions[id]
-	fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: fn}
+	fn := l.program.Functions[id]
+	fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
 	for _, param := range fn.Signature.Params {
 		fl.defineLocal(param.Name, param.Type, param.Mutable)
 	}
@@ -230,6 +253,7 @@ func (l *lowerer) lowerFunction(module ModuleID, def *checker.FunctionDef) error
 		return fmt.Errorf("lower function %s: %w", def.Name, err)
 	}
 	fn.Body = body
+	l.program.Functions[id] = fn
 	return nil
 }
 
@@ -449,11 +473,11 @@ func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) 
 func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defaultType TypeID) (Block, error) {
 	var block Block
 	last := len(stmts) - 1
-	for last >= 0 && stmts[last].Expr == nil && stmts[last].Stmt == nil {
+	for last >= 0 && stmts[last].Expr == nil && stmts[last].Stmt == nil && !stmts[last].Break {
 		last--
 	}
 	for i, stmt := range stmts {
-		if stmt.Expr == nil && stmt.Stmt == nil {
+		if stmt.Expr == nil && stmt.Stmt == nil && !stmt.Break {
 			continue
 		}
 		if i == last && stmt.Expr != nil {
@@ -494,6 +518,9 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 }
 
 func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
+	if stmt.Break {
+		return &Stmt{Kind: StmtBreak}, nil
+	}
 	if stmt.Expr != nil {
 		expr, err := fl.lowerExpr(stmt.Expr)
 		if err != nil {
@@ -527,9 +554,27 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return nil, err
 		}
 		return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
+	case *checker.WhileLoop:
+		return fl.lowerWhileLoop(s)
 	default:
 		return nil, fmt.Errorf("unsupported AIR statement %T", stmt.Stmt)
 	}
+}
+
+func (fl *functionLowerer) lowerWhileLoop(loop *checker.WhileLoop) (*Stmt, error) {
+	condition, err := fl.lowerExpr(loop.Condition)
+	if err != nil {
+		return nil, err
+	}
+	voidType, err := fl.l.internType(checker.Void)
+	if err != nil {
+		return nil, err
+	}
+	body, err := fl.lowerBlockWithDefault(loop.Body.Stmts, voidType)
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: StmtWhile, Condition: condition, Body: body}, nil
 }
 
 func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
@@ -576,6 +621,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		if kind, ok := maybeConstructorKind(e); ok {
 			return fl.lowerMaybeConstructor(kind, typeID, e)
+		}
+		if id, ok, err := fl.l.resolveModuleFunction(e.Module, e.Call.Name); err != nil {
+			return nil, err
+		} else if ok {
+			args, err := fl.lowerArgs(e.Call.Args)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, nil
 		}
 		args, err := fl.lowerArgs(e.Call.Args)
 		if err != nil {
@@ -1094,6 +1148,34 @@ func (l *lowerer) lookupFunction(name string) (FunctionID, bool) {
 		}
 	}
 	return NoFunction, false
+}
+
+func (l *lowerer) lookupFunctionInModule(modulePath, name string) (FunctionID, bool) {
+	moduleID, ok := l.moduleByPath[modulePath]
+	if !ok {
+		return NoFunction, false
+	}
+	id, ok := l.functions[functionKey(moduleID, name)]
+	return id, ok
+}
+
+func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bool, error) {
+	if id, ok := l.lookupFunctionInModule(modulePath, name); ok {
+		return id, true, nil
+	}
+
+	mod, ok := l.moduleByName[modulePath]
+	if !ok {
+		return NoFunction, false, nil
+	}
+	if mod.Program() == nil {
+		return NoFunction, false, nil
+	}
+	if err := l.lowerModule(mod, false); err != nil {
+		return NoFunction, false, err
+	}
+	id, ok := l.lookupFunctionInModule(modulePath, name)
+	return id, ok, nil
 }
 
 func (l *lowerer) lookupExtern(name string) (ExternID, bool) {

@@ -11,6 +11,8 @@ const (
 	StmtLet StmtKind = iota
 	StmtAssign
 	StmtExpr
+	StmtWhile
+	StmtBreak
 )
 
 type Stmt struct {
@@ -21,6 +23,9 @@ type Stmt struct {
 	Mutable bool
 	Value   *Expr
 	Expr    *Expr
+
+	Condition *Expr
+	Body      Block
 }
 
 type ExprKind uint8

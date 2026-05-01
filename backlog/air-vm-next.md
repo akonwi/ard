@@ -638,7 +638,7 @@ Status: Done
 
 ### Milestone 4: try and control flow
 
-Status: In progress
+Status: Done
 
 - [x] Lower `try` explicitly in AIR instead of treating it as a backend-local
   trick.
@@ -646,10 +646,10 @@ Status: In progress
   propagation through expression blocks.
 - [x] Add bool-match lowering and execution needed by self-hosted helpers like
   `ard/testing::assert`.
-- [ ] Run the built-in testing helpers through `vm_next` without depending on the
+- [x] Run the built-in testing helpers through `vm_next` without depending on the
   current VM once self-hosted stdlib module lowering is available.
-- [ ] Validate that `try` preserves Ard's expression-return semantics in nested
-  blocks, loops, and match arms.
+- [x] Validate that `try` preserves Ard's expression-return semantics in nested
+  blocks, while loops, and match arms.
 
 ### Milestone 5: FFI adapters
 

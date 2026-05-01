@@ -131,6 +131,19 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Condition != nil {
+			if err := validateExpr(program, fn, *stmt.Condition); err != nil {
+				return err
+			}
+		}
+		if stmt.Kind == StmtWhile {
+			if stmt.Condition == nil {
+				return fmt.Errorf("while statement missing condition")
+			}
+			if err := validateBlock(program, fn, stmt.Body); err != nil {
+				return err
+			}
+		}
 	}
 	if block.Result != nil {
 		if err := validateExpr(program, fn, *block.Result); err != nil {
