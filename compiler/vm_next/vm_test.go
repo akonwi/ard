@@ -83,6 +83,31 @@ func TestRunEntryEvaluatesIfExpressions(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesBoolMatch(t *testing.T) {
+	got := runSource(t, `
+		fn assert(condition: Bool, message: Str) Void!Str {
+			match condition {
+				true => Result::ok(()),
+				false => Result::err(message),
+			}
+		}
+
+		fn check() Void!Str {
+			try assert(true, "should pass")
+			Result::ok(())
+		}
+
+		match check() {
+			ok => "pass",
+			err(message) => message,
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "pass" {
+		t.Fatalf("got %#v, want pass", got)
+	}
+}
+
 func TestRunEntryEvaluatesEnums(t *testing.T) {
 	got := runSource(t, `
 		enum Direction {

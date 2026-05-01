@@ -644,8 +644,10 @@ Status: In progress
   trick.
 - [x] Execute `try` for `Maybe` and `Result`, including catch handlers and
   propagation through expression blocks.
-- [ ] Add enough matching support for `Maybe` and `Result` to run the built-in
-  testing helpers without depending on the current VM.
+- [x] Add bool-match lowering and execution needed by self-hosted helpers like
+  `ard/testing::assert`.
+- [ ] Run the built-in testing helpers through `vm_next` without depending on the
+  current VM once self-hosted stdlib module lowering is available.
 - [ ] Validate that `try` preserves Ard's expression-return semantics in nested
   blocks, loops, and match arms.
 

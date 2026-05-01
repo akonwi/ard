@@ -107,6 +107,31 @@ func TestLowerIfExpression(t *testing.T) {
 	}
 }
 
+func TestLowerBoolMatch(t *testing.T) {
+	program := lowerSource(t, `
+		fn choose(flag: Bool) Int {
+			match flag {
+				true => 1,
+				false => 2,
+			}
+		}
+	`)
+
+	choose := findFunction(t, program, "choose")
+	if choose.Body.Result == nil || choose.Body.Result.Kind != ExprIf {
+		t.Fatalf("choose result = %#v, want ExprIf", choose.Body.Result)
+	}
+	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
+		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
+	}
+	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != 1 {
+		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
+	}
+	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != 2 {
+		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
+	}
+}
+
 func TestLowerEnums(t *testing.T) {
 	program := lowerSource(t, `
 		enum Direction {

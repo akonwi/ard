@@ -443,6 +443,10 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 }
 
 func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) {
+	return fl.lowerBlockWithDefault(stmts, fl.fn.Signature.Return)
+}
+
+func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defaultType TypeID) (Block, error) {
 	var block Block
 	last := len(stmts) - 1
 	for last >= 0 && stmts[last].Expr == nil && stmts[last].Stmt == nil {
@@ -453,7 +457,7 @@ func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) 
 			continue
 		}
 		if i == last && stmt.Expr != nil {
-			expr, err := fl.lowerExprWithExpected(stmt.Expr, fl.fn.Signature.Return)
+			expr, err := fl.lowerExprWithExpected(stmt.Expr, defaultType)
 			if err != nil {
 				return block, err
 			}
@@ -479,6 +483,12 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 		if kind, ok := maybeConstructorKind(call); ok {
 			return fl.lowerMaybeConstructor(kind, expected, call)
 		}
+	}
+	if match, ok := expr.(*checker.BoolMatch); ok {
+		return fl.lowerBoolMatch(expected, match)
+	}
+	if ifExpr, ok := expr.(*checker.If); ok {
+		return fl.lowerIf(expected, ifExpr)
 	}
 	return fl.lowerExpr(expr)
 }
@@ -582,6 +592,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerInstanceProperty(typeID, e)
 	case *checker.EnumVariant:
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
+	case *checker.BoolMatch:
+		return fl.lowerBoolMatch(typeID, e)
 	case *checker.EnumMatch:
 		return fl.lowerEnumMatch(typeID, e)
 	case *checker.MaybeMethod:
@@ -649,39 +661,39 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: ExprNeg, Type: typeID, Target: value}, nil
 	case *checker.If:
-		condition, err := fl.lowerExpr(e.Condition)
-		if err != nil {
-			return nil, err
-		}
-		thenBlock, err := fl.lowerBlock(e.Body.Stmts)
-		if err != nil {
-			return nil, err
-		}
-		elseBlock, err := fl.lowerElse(e)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: thenBlock, Else: elseBlock}, nil
+		return fl.lowerIf(typeID, e)
 	default:
 		return nil, fmt.Errorf("unsupported AIR expression %T", expr)
 	}
 }
 
-func (fl *functionLowerer) lowerElse(expr *checker.If) (Block, error) {
+func (fl *functionLowerer) lowerIf(typeID TypeID, expr *checker.If) (*Expr, error) {
+	condition, err := fl.lowerExpr(expr.Condition)
+	if err != nil {
+		return nil, err
+	}
+	thenBlock, err := fl.lowerBlockWithDefault(expr.Body.Stmts, typeID)
+	if err != nil {
+		return nil, err
+	}
+	elseBlock, err := fl.lowerElse(expr, typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: thenBlock, Else: elseBlock}, nil
+}
+
+func (fl *functionLowerer) lowerElse(expr *checker.If, defaultType TypeID) (Block, error) {
 	if expr.ElseIf != nil {
-		typeID, err := fl.l.internType(expr.ElseIf.Type())
+		nested, err := fl.lowerExprWithExpected(expr.ElseIf, defaultType)
 		if err != nil {
 			return Block{}, err
 		}
-		nested, err := fl.lowerExpr(expr.ElseIf)
-		if err != nil {
-			return Block{}, err
-		}
-		nested.Type = typeID
+		nested.Type = defaultType
 		return Block{Result: nested}, nil
 	}
 	if expr.Else != nil {
-		return fl.lowerBlock(expr.Else.Stmts)
+		return fl.lowerBlockWithDefault(expr.Else.Stmts, defaultType)
 	}
 	return Block{}, nil
 }
@@ -720,6 +732,25 @@ func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, c
 	}
 }
 
+func (fl *functionLowerer) lowerBoolMatch(typeID TypeID, match *checker.BoolMatch) (*Expr, error) {
+	condition, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	if match.True == nil || match.False == nil {
+		return nil, fmt.Errorf("Bool match missing branch")
+	}
+	trueBlock, err := fl.lowerBlockWithDefault(match.True.Stmts, typeID)
+	if err != nil {
+		return nil, err
+	}
+	falseBlock, err := fl.lowerBlockWithDefault(match.False.Stmts, typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: trueBlock, Else: falseBlock}, nil
+}
+
 func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatch) (*Expr, error) {
 	subject, err := fl.lowerExpr(match.Subject)
 	if err != nil {
@@ -738,7 +769,7 @@ func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatc
 		if variant < 0 || variant >= len(enumType.Variants) {
 			return nil, fmt.Errorf("enum match case index %d out of range for %s", variant, enumType.Name)
 		}
-		lowered, err := fl.lowerBlock(block.Stmts)
+		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
 		if err != nil {
 			return nil, err
 		}
@@ -751,7 +782,7 @@ func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatc
 
 	var catchAll Block
 	if match.CatchAll != nil {
-		catchAll, err = fl.lowerBlock(match.CatchAll.Stmts)
+		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
 		if err != nil {
 			return nil, err
 		}
@@ -785,7 +816,7 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 	pattern := match.Some.Pattern.Name
 	oldLocal, hadOldLocal := fl.locals[pattern]
 	someLocal := fl.defineLocal(pattern, maybeType.Elem, false)
-	someBlock, err := fl.lowerBlock(match.Some.Body.Stmts)
+	someBlock, err := fl.lowerBlockWithDefault(match.Some.Body.Stmts, typeID)
 	if hadOldLocal {
 		fl.locals[pattern] = oldLocal
 	} else {
@@ -794,7 +825,7 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 	if err != nil {
 		return nil, err
 	}
-	noneBlock, err := fl.lowerBlock(match.None.Stmts)
+	noneBlock, err := fl.lowerBlockWithDefault(match.None.Stmts, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -853,11 +884,11 @@ func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.Result
 		return nil, fmt.Errorf("Result match missing err case")
 	}
 
-	okLocal, okBlock, err := fl.lowerBoundBlock(match.Ok.Pattern.Name, resultType.Value, match.Ok.Body.Stmts)
+	okLocal, okBlock, err := fl.lowerBoundBlockWithDefault(match.Ok.Pattern.Name, resultType.Value, match.Ok.Body.Stmts, typeID)
 	if err != nil {
 		return nil, err
 	}
-	errLocal, errBlock, err := fl.lowerBoundBlock(match.Err.Pattern.Name, resultType.Error, match.Err.Body.Stmts)
+	errLocal, errBlock, err := fl.lowerBoundBlockWithDefault(match.Err.Pattern.Name, resultType.Error, match.Err.Body.Stmts, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -945,9 +976,13 @@ func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, 
 }
 
 func (fl *functionLowerer) lowerBoundBlock(name string, typeID TypeID, stmts []checker.Statement) (LocalID, Block, error) {
+	return fl.lowerBoundBlockWithDefault(name, typeID, stmts, fl.fn.Signature.Return)
+}
+
+func (fl *functionLowerer) lowerBoundBlockWithDefault(name string, typeID TypeID, stmts []checker.Statement, defaultType TypeID) (LocalID, Block, error) {
 	oldLocal, hadOldLocal := fl.locals[name]
 	local := fl.defineLocal(name, typeID, false)
-	block, err := fl.lowerBlock(stmts)
+	block, err := fl.lowerBlockWithDefault(stmts, defaultType)
 	if hadOldLocal {
 		fl.locals[name] = oldLocal
 	} else {
