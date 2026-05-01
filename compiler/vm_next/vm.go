@@ -265,6 +265,10 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalFiberGet(expr)
 	case air.ExprFiberJoin:
 		return f.evalFiberJoin(expr)
+	case air.ExprUnionWrap:
+		return f.evalUnionWrap(expr)
+	case air.ExprMatchUnion:
+		return f.evalUnionMatch(expr)
 	case air.ExprCallExtern:
 		args, err := f.evalArgs(expr.Args)
 		if err != nil {
@@ -489,6 +493,14 @@ func (f *frame) evalMakeStruct(expr air.Expr) (Value, error) {
 	return Struct(expr.Type, fields), nil
 }
 
+func (f *frame) evalUnionWrap(expr air.Expr) (Value, error) {
+	value, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	return Union(expr.Type, expr.Tag, value), nil
+}
+
 func (f *frame) evalMakeList(expr air.Expr) (Value, error) {
 	items := make([]Value, len(expr.Args))
 	for i, item := range expr.Args {
@@ -542,6 +554,30 @@ func (f *frame) evalEnumMatch(expr air.Expr) (Value, error) {
 	}
 	for _, matchCase := range expr.EnumCases {
 		if subject.Int == matchCase.Discriminant {
+			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
+		}
+	}
+	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
+		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
+	}
+	return f.vm.zeroValue(expr.Type), nil
+}
+
+func (f *frame) evalUnionMatch(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	unionValue, err := subject.unionValue()
+	if err != nil {
+		return Value{}, err
+	}
+	for _, matchCase := range expr.UnionCases {
+		if unionValue.Tag == matchCase.Tag {
+			if int(matchCase.Local) < 0 || int(matchCase.Local) >= len(f.locals) {
+				return Value{}, fmt.Errorf("invalid union match local id %d", matchCase.Local)
+			}
+			f.locals[matchCase.Local] = unionValue.Value
 			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
 		}
 	}
@@ -1057,6 +1093,12 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		return Struct(typeID, fields)
 	case air.TypeResult:
 		return Result(typeID, true, vm.zeroValue(typeInfo.Value))
+	case air.TypeUnion:
+		if len(typeInfo.Members) == 0 {
+			return Value{Type: typeID}
+		}
+		member := typeInfo.Members[0]
+		return Union(typeID, member.Tag, vm.zeroValue(member.Type))
 	case air.TypeExtern:
 		return Extern(typeID, nil)
 	default:

@@ -578,6 +578,69 @@ func TestRunEntryEvaluatesEnumCatchAllWithCustomDiscriminants(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesUnionMatch(t *testing.T) {
+	got := runSource(t, `
+		type Printable = Int | Str | Bool
+		let value: Printable = "ard"
+
+		match value {
+			Int(i) => "number",
+			Str(s) => s,
+			_ => "other",
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "ard" {
+		t.Fatalf("got %#v, want ard", got)
+	}
+}
+
+func TestRunEntryWrapsUnionFunctionArguments(t *testing.T) {
+	got := runSource(t, `
+		type Printable = Int | Str
+
+		fn render(value: Printable) Str {
+			match value {
+				Int(i) => "number",
+				Str(s) => s,
+			}
+		}
+
+		render("ard")
+	`)
+
+	if got.Kind != ValueStr || got.Str != "ard" {
+		t.Fatalf("got %#v, want ard", got)
+	}
+}
+
+func TestRunEntryWrapsUnionResultValues(t *testing.T) {
+	got := runSource(t, `
+		struct InvalidField {
+			name: Str,
+			message: Str,
+		}
+
+		type Error = InvalidField | Str
+
+		fn validate() Bool!Error {
+			Result::err(InvalidField{name: "age", message: "bad"})
+		}
+
+		match validate() {
+			ok(value) => "ok",
+			err(error) => match error {
+				InvalidField(field) => field.name + ": " + field.message,
+				Str(message) => message,
+			},
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "age: bad" {
+		t.Fatalf("got %#v, want age: bad", got)
+	}
+}
+
 func TestRunEntryEvaluatesMaybes(t *testing.T) {
 	got := runSource(t, `
 		use ard/maybe

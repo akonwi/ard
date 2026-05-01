@@ -800,9 +800,9 @@ Status: Complete
 
 ### Milestone 7: complicated types
 
-Status: Pending
+Status: In progress
 
-- [ ] Add user unions as tagged sums.
+- [x] Add user unions as tagged sums.
 - [ ] Add trait and impl tables.
 - [ ] Add trait objects with explicit upcast and method dispatch.
 

@@ -20,6 +20,7 @@ const (
 	ValueList
 	ValueMap
 	ValueResult
+	ValueUnion
 	ValueExtern
 	ValueDynamic
 	ValueClosure
@@ -60,6 +61,12 @@ type MapEntryValue struct {
 type ResultValue struct {
 	Type  air.TypeID
 	Ok    bool
+	Value Value
+}
+
+type UnionValue struct {
+	Type  air.TypeID
+	Tag   uint32
 	Value Value
 }
 
@@ -136,6 +143,10 @@ func Result(typeID air.TypeID, ok bool, value Value) Value {
 	return Value{Kind: ValueResult, Type: typeID, Ref: &ResultValue{Type: typeID, Ok: ok, Value: value}}
 }
 
+func Union(typeID air.TypeID, tag uint32, value Value) Value {
+	return Value{Kind: ValueUnion, Type: typeID, Ref: &UnionValue{Type: typeID, Tag: tag, Value: value}}
+}
+
 func Extern(typeID air.TypeID, handle any) Value {
 	return Value{Kind: ValueExtern, Type: typeID, Ref: &ExternValue{Type: typeID, Handle: handle}}
 }
@@ -208,6 +219,12 @@ func (v Value) GoValue() any {
 			return nil
 		}
 		return resultValue.Value.GoValue()
+	case ValueUnion:
+		unionValue, ok := v.Ref.(*UnionValue)
+		if !ok {
+			return nil
+		}
+		return unionValue.Value.GoValue()
 	case ValueExtern:
 		externValue, ok := v.Ref.(*ExternValue)
 		if !ok {
@@ -289,6 +306,17 @@ func (v Value) resultValue() (*ResultValue, error) {
 		return nil, fmt.Errorf("result value has invalid payload %T", v.Ref)
 	}
 	return resultValue, nil
+}
+
+func (v Value) unionValue() (*UnionValue, error) {
+	if v.Kind != ValueUnion {
+		return nil, fmt.Errorf("expected union value, got kind %d", v.Kind)
+	}
+	unionValue, ok := v.Ref.(*UnionValue)
+	if !ok || unionValue == nil {
+		return nil, fmt.Errorf("union value has invalid payload %T", v.Ref)
+	}
+	return unionValue, nil
 }
 
 func (v Value) externValue() (*ExternValue, error) {

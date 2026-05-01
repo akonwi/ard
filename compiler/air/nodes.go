@@ -44,6 +44,8 @@ const (
 	ExprSpawnFiber
 	ExprFiberGet
 	ExprFiberJoin
+	ExprUnionWrap
+	ExprMatchUnion
 	ExprMakeList
 	ExprMakeMap
 	ExprMakeStruct
@@ -105,6 +107,7 @@ type Expr struct {
 
 	Variant      int
 	Discriminant int
+	Tag          uint32
 
 	Local LocalID
 
@@ -125,8 +128,9 @@ type Expr struct {
 	Then      Block
 	Else      Block
 
-	EnumCases []EnumMatchCase
-	CatchAll  Block
+	EnumCases  []EnumMatchCase
+	UnionCases []UnionMatchCase
+	CatchAll   Block
 
 	SomeLocal LocalID
 	Some      Block
@@ -157,4 +161,10 @@ type EnumMatchCase struct {
 	Variant      int
 	Discriminant int
 	Body         Block
+}
+
+type UnionMatchCase struct {
+	Tag   uint32
+	Local LocalID
+	Body  Block
 }

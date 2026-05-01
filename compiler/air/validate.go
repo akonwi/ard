@@ -207,6 +207,25 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprCallExtern && (expr.Extern < 0 || int(expr.Extern) >= len(program.Externs)) {
 		return fmt.Errorf("expression calls invalid extern %d", expr.Extern)
 	}
+	if expr.Kind == ExprUnionWrap {
+		if expr.Target == nil {
+			return fmt.Errorf("union wrap missing target")
+		}
+		unionType, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		if unionType.Kind != TypeUnion {
+			return fmt.Errorf("union wrap target type has kind %d", unionType.Kind)
+		}
+		member, ok := unionMemberByTag(unionType, expr.Tag)
+		if !ok {
+			return fmt.Errorf("union wrap has invalid tag %d for %s", expr.Tag, unionType.Name)
+		}
+		if member.Type != expr.Target.Type {
+			return fmt.Errorf("union wrap member %s expects type %d, got %d", member.Name, member.Type, expr.Target.Type)
+		}
+	}
 	for _, local := range expr.CaptureLocals {
 		if local < 0 || int(local) >= len(fn.Locals) {
 			return fmt.Errorf("expression captures invalid local %d", local)
@@ -242,6 +261,36 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	}
 	if expr.Kind == ExprMatchEnum {
 		for _, matchCase := range expr.EnumCases {
+			if err := validateBlock(program, fn, matchCase.Body); err != nil {
+				return err
+			}
+		}
+		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+			return err
+		}
+	}
+	if expr.Kind == ExprMatchUnion {
+		if expr.Target == nil {
+			return fmt.Errorf("union match missing target")
+		}
+		unionType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if unionType.Kind != TypeUnion {
+			return fmt.Errorf("union match target has type kind %d", unionType.Kind)
+		}
+		for _, matchCase := range expr.UnionCases {
+			member, ok := unionMemberByTag(unionType, matchCase.Tag)
+			if !ok {
+				return fmt.Errorf("union match has invalid tag %d for %s", matchCase.Tag, unionType.Name)
+			}
+			if matchCase.Local < 0 || int(matchCase.Local) >= len(fn.Locals) {
+				return fmt.Errorf("union match binds invalid local %d", matchCase.Local)
+			}
+			if fn.Locals[matchCase.Local].Type != member.Type {
+				return fmt.Errorf("union match member %s local type %d does not match member type %d", member.Name, fn.Locals[matchCase.Local].Type, member.Type)
+			}
 			if err := validateBlock(program, fn, matchCase.Body); err != nil {
 				return err
 			}
@@ -344,4 +393,13 @@ func typeInfo(program *Program, id TypeID) (TypeInfo, error) {
 		return TypeInfo{}, fmt.Errorf("invalid type id %d", id)
 	}
 	return program.Types[id-1], nil
+}
+
+func unionMemberByTag(unionType TypeInfo, tag uint32) (UnionMember, bool) {
+	for _, member := range unionType.Members {
+		if member.Tag == tag {
+			return member, true
+		}
+	}
+	return UnionMember{}, false
 }

@@ -390,7 +390,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	l.typeByName[name] = id
 	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: name})
 	idx := len(l.program.Types) - 1
-	info := &l.program.Types[idx]
+	info := TypeInfo{ID: id, Name: name}
 
 	switch typ := t.(type) {
 	case *checker.List:
@@ -522,6 +522,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	}
 
+	l.program.Types[idx] = info
 	return id, nil
 }
 
@@ -568,6 +569,19 @@ func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defa
 }
 
 func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expected TypeID) (*Expr, error) {
+	if wrapped, ok, err := fl.lowerUnionWrapIfNeeded(expr, expected); ok || err != nil {
+		return wrapped, err
+	}
+	if list, ok := expr.(*checker.ListLiteral); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeList {
+			return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
+		}
+	}
+	if m, ok := expr.(*checker.MapLiteral); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeMap {
+			return fl.lowerMapLiteral(expected, m, expectedInfo.Key, expectedInfo.Value)
+		}
+	}
 	if call, ok := expr.(*checker.ModuleFunctionCall); ok {
 		if kind, ok := resultConstructorKind(call); ok {
 			return fl.lowerResultConstructor(kind, expected, call)
@@ -583,6 +597,30 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 		return fl.lowerIf(expected, ifExpr)
 	}
 	return fl.lowerExpr(expr)
+}
+
+func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
+	expectedInfo, ok := fl.l.typeInfo(expected)
+	if !ok || expectedInfo.Kind != TypeUnion {
+		return nil, false, nil
+	}
+	actual, err := fl.l.internType(expr.Type())
+	if err != nil {
+		return nil, false, err
+	}
+	if actual == expected {
+		return nil, false, nil
+	}
+	for _, member := range expectedInfo.Members {
+		if member.Type == actual {
+			value, err := fl.lowerExpr(expr)
+			if err != nil {
+				return nil, true, err
+			}
+			return &Expr{Kind: ExprUnionWrap, Type: expected, Target: value, Tag: member.Tag}, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
@@ -679,20 +717,28 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.FiberExecution:
 		return fl.lowerFiberExecution(typeID, e)
 	case *checker.FunctionCall:
-		args, err := fl.lowerArgs(e.Args)
-		if err != nil {
-			return nil, err
-		}
 		if local, ok := fl.locals[e.Name]; ok && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-			return &Expr{Kind: ExprCallClosure, Type: typeID, Target: target, Args: args}, nil
+			args, err := fl.lowerArgsForFunctionType(e.Args, target.Type)
+			if err != nil {
+				return nil, err
+			}
+			returnType := typeID
+			if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction {
+				returnType = typeInfo.Return
+			}
+			return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args}, nil
 		}
 		if e.ExternalBinding != "" {
 			id, err := fl.l.declareFunctionCallExtern(fl.fn.Module, e)
 			if err != nil {
 				return nil, err
 			}
-			return &Expr{Kind: ExprCallExtern, Type: typeID, Extern: id, Args: args}, nil
+			args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Externs[id].Signature)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
 		}
 		if def := e.Definition(); def != nil {
 			id, ok := fl.l.lookupFunction(def.Name)
@@ -703,14 +749,30 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				}
 				if hasLocal && fl.localKind(local) == TypeFunction {
 					target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-					return &Expr{Kind: ExprCallClosure, Type: typeID, Target: target, Args: args}, nil
+					args, err := fl.lowerArgsForFunctionType(e.Args, target.Type)
+					if err != nil {
+						return nil, err
+					}
+					returnType := typeID
+					if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction {
+						returnType = typeInfo.Return
+					}
+					return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args}, nil
 				}
 				return nil, fmt.Errorf("unknown function call target %s", def.Name)
 			}
-			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, nil
+			args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Functions[id].Signature)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
 		}
 		if id, ok := fl.l.lookupExtern(e.Name); ok {
-			return &Expr{Kind: ExprCallExtern, Type: typeID, Extern: id, Args: args}, nil
+			args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Externs[id].Signature)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
 		}
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ModuleFunctionCall:
@@ -723,45 +785,25 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if id, ok, err := fl.l.resolveModuleFunction(e.Module, e.Call.Name); err != nil {
 			return nil, err
 		} else if ok {
-			args, err := fl.lowerArgs(e.Call.Args)
+			args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Functions[id].Signature)
 			if err != nil {
 				return nil, err
 			}
-			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, nil
-		}
-		args, err := fl.lowerArgs(e.Call.Args)
-		if err != nil {
-			return nil, err
+			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
 		}
 		extern, err := fl.l.declareModuleCallExtern(e)
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprCallExtern, Type: typeID, Extern: extern, Args: args}, nil
+		args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Externs[extern].Signature)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[extern].Signature.Return, Extern: extern, Args: args}, nil
 	case *checker.ListLiteral:
-		args := make([]Expr, len(e.Elements))
-		for i, elem := range e.Elements {
-			lowered, err := fl.lowerExpr(elem)
-			if err != nil {
-				return nil, err
-			}
-			args[i] = *lowered
-		}
-		return &Expr{Kind: ExprMakeList, Type: typeID, Args: args}, nil
+		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:
-		entries := make([]MapEntry, len(e.Keys))
-		for i := range e.Keys {
-			key, err := fl.lowerExpr(e.Keys[i])
-			if err != nil {
-				return nil, err
-			}
-			value, err := fl.lowerExpr(e.Values[i])
-			if err != nil {
-				return nil, err
-			}
-			entries[i] = MapEntry{Key: *key, Value: *value}
-		}
-		return &Expr{Kind: ExprMakeMap, Type: typeID, Entries: entries}, nil
+		return fl.lowerMapLiteral(typeID, e, NoType, NoType)
 	case *checker.StructInstance:
 		return fl.lowerStructInstance(typeID, e)
 	case *checker.InstanceProperty:
@@ -774,6 +816,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerBoolMatch(typeID, e)
 	case *checker.EnumMatch:
 		return fl.lowerEnumMatch(typeID, e)
+	case *checker.UnionMatch:
+		return fl.lowerUnionMatch(typeID, e)
 	case *checker.MaybeMethod:
 		return fl.lowerMaybeMethod(typeID, e)
 	case *checker.OptionMatch:
@@ -877,29 +921,50 @@ func (fl *functionLowerer) lowerElse(expr *checker.If, defaultType TypeID) (Bloc
 }
 
 func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
-	args, err := fl.lowerArgs(call.Call.Args)
+	if len(call.Call.Args) != 1 {
+		return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
+	}
+	valueType := NoType
+	if resultInfo, ok := fl.l.typeInfo(typeID); ok && resultInfo.Kind == TypeResult {
+		valueType = resultInfo.Value
+		if kind == ExprMakeResultErr {
+			valueType = resultInfo.Error
+		}
+	}
+	var value *Expr
+	var err error
+	if valueType != NoType {
+		value, err = fl.lowerExprWithExpected(call.Call.Args[0], valueType)
+	} else {
+		value, err = fl.lowerExpr(call.Call.Args[0])
+	}
 	if err != nil {
 		return nil, err
 	}
-	if len(args) != 1 {
-		return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
-	}
-	value := args[0]
-	return &Expr{Kind: kind, Type: typeID, Target: &value}, nil
+	return &Expr{Kind: kind, Type: typeID, Target: value}, nil
 }
 
 func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
 	switch kind {
 	case ExprMakeMaybeSome:
-		args, err := fl.lowerArgs(call.Call.Args)
+		if len(call.Call.Args) != 1 {
+			return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
+		}
+		valueType := NoType
+		if maybeInfo, ok := fl.l.typeInfo(typeID); ok && maybeInfo.Kind == TypeMaybe {
+			valueType = maybeInfo.Elem
+		}
+		var value *Expr
+		var err error
+		if valueType != NoType {
+			value, err = fl.lowerExprWithExpected(call.Call.Args[0], valueType)
+		} else {
+			value, err = fl.lowerExpr(call.Call.Args[0])
+		}
 		if err != nil {
 			return nil, err
 		}
-		if len(args) != 1 {
-			return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
-		}
-		value := args[0]
-		return &Expr{Kind: kind, Type: typeID, Target: &value}, nil
+		return &Expr{Kind: kind, Type: typeID, Target: value}, nil
 	case ExprMakeMaybeNone:
 		if len(call.Call.Args) != 0 {
 			return nil, fmt.Errorf("%s::%s expects no arguments", call.Module, call.Call.Name)
@@ -927,6 +992,51 @@ func (fl *functionLowerer) lowerBoolMatch(typeID TypeID, match *checker.BoolMatc
 		return nil, err
 	}
 	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: trueBlock, Else: falseBlock}, nil
+}
+
+func (fl *functionLowerer) lowerListLiteral(typeID TypeID, list *checker.ListLiteral, elem TypeID) (*Expr, error) {
+	args := make([]Expr, len(list.Elements))
+	for i, item := range list.Elements {
+		var lowered *Expr
+		var err error
+		if elem != NoType {
+			lowered, err = fl.lowerExprWithExpected(item, elem)
+		} else {
+			lowered, err = fl.lowerExpr(item)
+		}
+		if err != nil {
+			return nil, err
+		}
+		args[i] = *lowered
+	}
+	return &Expr{Kind: ExprMakeList, Type: typeID, Args: args}, nil
+}
+
+func (fl *functionLowerer) lowerMapLiteral(typeID TypeID, m *checker.MapLiteral, keyType, valueType TypeID) (*Expr, error) {
+	entries := make([]MapEntry, len(m.Keys))
+	for i := range m.Keys {
+		var key *Expr
+		var value *Expr
+		var err error
+		if keyType != NoType {
+			key, err = fl.lowerExprWithExpected(m.Keys[i], keyType)
+		} else {
+			key, err = fl.lowerExpr(m.Keys[i])
+		}
+		if err != nil {
+			return nil, err
+		}
+		if valueType != NoType {
+			value, err = fl.lowerExprWithExpected(m.Values[i], valueType)
+		} else {
+			value, err = fl.lowerExpr(m.Values[i])
+		}
+		if err != nil {
+			return nil, err
+		}
+		entries[i] = MapEntry{Key: *key, Value: *value}
+	}
+	return &Expr{Kind: ExprMakeMap, Type: typeID, Entries: entries}, nil
 }
 
 func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatch) (*Expr, error) {
@@ -972,6 +1082,46 @@ func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatc
 		Target:    subject,
 		EnumCases: cases,
 		CatchAll:  catchAll,
+	}, nil
+}
+
+func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	unionType, ok := fl.l.typeInfo(subject.Type)
+	if !ok || unionType.Kind != TypeUnion {
+		return nil, fmt.Errorf("union match lowered with non-union subject %s", match.Subject.Type().String())
+	}
+
+	cases := make([]UnionMatchCase, 0, len(match.TypeCases))
+	for _, member := range unionType.Members {
+		matchCase := match.TypeCases[member.Name]
+		if matchCase == nil {
+			continue
+		}
+		local, body, err := fl.lowerBoundBlockWithDefault(matchCase.Pattern.Name, member.Type, matchCase.Body.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+		cases = append(cases, UnionMatchCase{Tag: member.Tag, Local: local, Body: body})
+	}
+
+	var catchAll Block
+	if match.CatchAll != nil {
+		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Expr{
+		Kind:       ExprMatchUnion,
+		Type:       typeID,
+		Target:     subject,
+		UnionCases: cases,
+		CatchAll:   catchAll,
 	}, nil
 }
 
@@ -1204,9 +1354,35 @@ func maybeConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 }
 
 func (fl *functionLowerer) lowerArgs(args []checker.Expression) ([]Expr, error) {
+	return fl.lowerArgsWithTypeIDs(args, nil)
+}
+
+func (fl *functionLowerer) lowerArgsWithSignature(args []checker.Expression, sig Signature) ([]Expr, error) {
+	expected := make([]TypeID, len(sig.Params))
+	for i, param := range sig.Params {
+		expected[i] = param.Type
+	}
+	return fl.lowerArgsWithTypeIDs(args, expected)
+}
+
+func (fl *functionLowerer) lowerArgsForFunctionType(args []checker.Expression, typeID TypeID) ([]Expr, error) {
+	typeInfo, ok := fl.l.typeInfo(typeID)
+	if !ok || typeInfo.Kind != TypeFunction {
+		return fl.lowerArgs(args)
+	}
+	return fl.lowerArgsWithTypeIDs(args, typeInfo.Params)
+}
+
+func (fl *functionLowerer) lowerArgsWithTypeIDs(args []checker.Expression, expected []TypeID) ([]Expr, error) {
 	out := make([]Expr, len(args))
 	for i, arg := range args {
-		lowered, err := fl.lowerExpr(arg)
+		var lowered *Expr
+		var err error
+		if i < len(expected) && expected[i] != NoType {
+			lowered, err = fl.lowerExprWithExpected(arg, expected[i])
+		} else {
+			lowered, err = fl.lowerExpr(arg)
+		}
 		if err != nil {
 			return nil, err
 		}
