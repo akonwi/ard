@@ -62,8 +62,9 @@ type Local struct {
 }
 
 type Capture struct {
-	Name string
-	Type TypeID
+	Name  string
+	Type  TypeID
+	Local LocalID
 }
 
 type Test struct {

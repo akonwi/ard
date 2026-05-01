@@ -274,6 +274,85 @@ func TestRunEntryReturnsMapExtern(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesClosureCallWithCapture(t *testing.T) {
+	got := runSource(t, `
+		let offset = 2
+		let add_offset = fn(value: Int) Int {
+			value + offset
+		}
+
+		add_offset(40)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesMaybeMapClosure(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		let offset = 1
+		let value = maybe::some(41)
+		value.map(fn(v) { v + offset }).or(0)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesMaybeAndThenClosure(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		let value = maybe::some(40)
+		value.and_then(fn(v) { maybe::some(v + 2) }).or(0)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesResultMapClosure(t *testing.T) {
+	got := runSource(t, `
+		let offset = 1
+		let result: Int!Str = Result::ok(41)
+		result.map(fn(v) { v + offset }).or(0)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesResultMapErrClosure(t *testing.T) {
+	got := runSource(t, `
+		let result: Int!Str = Result::err("boom")
+		match result.map_err(fn(err) { err + "!" }) {
+			ok(value) => "bad",
+			err(message) => message,
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "boom!" {
+		t.Fatalf("got %#v, want boom!", got)
+	}
+}
+
+func TestRunEntryEvaluatesResultAndThenClosure(t *testing.T) {
+	got := runSource(t, `
+		let result: Int!Str = Result::ok(40)
+		result.and_then(fn(v) { Result::ok(v + 2) }).or(0)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryPassesDynamicExternAsExplicitAny(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		extern fn load_dynamic() Dynamic = "LoadDynamic"

@@ -97,6 +97,42 @@ func (vm *VM) call(id air.FunctionID, args []Value) (Value, error) {
 	return value, err
 }
 
+func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
+	closure, err := value.closureValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if closure.Function < 0 || int(closure.Function) >= len(vm.program.Functions) {
+		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+	}
+	fn := vm.program.Functions[closure.Function]
+	if len(args) != len(fn.Signature.Params) {
+		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, len(fn.Signature.Params), len(args))
+	}
+	if len(closure.Captures) != len(fn.Captures) {
+		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	}
+	frame := &frame{
+		vm:     vm,
+		fn:     fn,
+		locals: make([]Value, len(fn.Locals)),
+	}
+	for i, arg := range args {
+		frame.locals[i] = arg
+	}
+	for i, capture := range fn.Captures {
+		if int(capture.Local) < 0 || int(capture.Local) >= len(frame.locals) {
+			return Value{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
+		}
+		frame.locals[capture.Local] = closure.Captures[i]
+	}
+	result, err := frame.evalBlock(fn.Body)
+	if ret, ok := err.(earlyReturn); ok {
+		return ret.value, nil
+	}
+	return result, err
+}
+
 type frame struct {
 	vm     *VM
 	fn     air.Function
@@ -219,6 +255,10 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 			return Value{}, err
 		}
 		return f.vm.call(expr.Function, args)
+	case air.ExprMakeClosure:
+		return f.evalMakeClosure(expr)
+	case air.ExprCallClosure:
+		return f.evalCallClosure(expr)
 	case air.ExprCallExtern:
 		args, err := f.evalArgs(expr.Args)
 		if err != nil {
@@ -304,6 +344,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalMaybePredicate(expr)
 	case air.ExprMaybeOr:
 		return f.evalMaybeOr(expr)
+	case air.ExprMaybeMap, air.ExprMaybeAndThen:
+		return f.evalMaybeMap(expr)
 	case air.ExprMatchResult:
 		return f.evalResultMatch(expr)
 	case air.ExprResultExpect:
@@ -312,6 +354,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalResultOr(expr)
 	case air.ExprResultIsOk, air.ExprResultIsErr:
 		return f.evalResultPredicate(expr)
+	case air.ExprResultMap, air.ExprResultMapErr, air.ExprResultAndThen:
+		return f.evalResultMap(expr)
 	case air.ExprTryResult:
 		return f.evalTryResult(expr)
 	case air.ExprTryMaybe:
@@ -331,6 +375,29 @@ func (f *frame) evalArgs(args []air.Expr) ([]Value, error) {
 		out[i] = value
 	}
 	return out, nil
+}
+
+func (f *frame) evalMakeClosure(expr air.Expr) (Value, error) {
+	captures := make([]Value, len(expr.CaptureLocals))
+	for i, local := range expr.CaptureLocals {
+		if int(local) < 0 || int(local) >= len(f.locals) {
+			return Value{}, fmt.Errorf("invalid closure capture local id %d", local)
+		}
+		captures[i] = f.locals[local]
+	}
+	return Closure(expr.Type, expr.Function, captures), nil
+}
+
+func (f *frame) evalCallClosure(expr air.Expr) (Value, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	args, err := f.evalArgs(expr.Args)
+	if err != nil {
+		return Value{}, err
+	}
+	return f.vm.callClosure(target, args)
 }
 
 func (f *frame) evalMakeStruct(expr air.Expr) (Value, error) {
@@ -492,6 +559,35 @@ func (f *frame) evalMaybeOr(expr air.Expr) (Value, error) {
 	return f.evalExpr(expr.Args[0])
 }
 
+func (f *frame) evalMaybeMap(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := subject.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if len(expr.Args) != 1 {
+		return Value{}, fmt.Errorf("Maybe closure method expects one function argument, got %d", len(expr.Args))
+	}
+	if !maybeValue.Some {
+		return Maybe(expr.Type, false, f.vm.zeroValue(f.mustMaybeElem(expr.Type))), nil
+	}
+	closure, err := f.evalExpr(expr.Args[0])
+	if err != nil {
+		return Value{}, err
+	}
+	mapped, err := f.vm.callClosure(closure, []Value{maybeValue.Value})
+	if err != nil {
+		return Value{}, err
+	}
+	if expr.Kind == air.ExprMaybeAndThen {
+		return mapped, nil
+	}
+	return Maybe(expr.Type, true, mapped), nil
+}
+
 func (f *frame) evalResultMatch(expr air.Expr) (Value, error) {
 	subject, err := f.evalExprPtr(expr.Target)
 	if err != nil {
@@ -566,6 +662,59 @@ func (f *frame) evalResultPredicate(expr air.Expr) (Value, error) {
 		return Value{}, err
 	}
 	return Bool(expr.Type, expr.Kind == air.ExprResultIsOk && resultValue.Ok || expr.Kind == air.ExprResultIsErr && !resultValue.Ok), nil
+}
+
+func (f *frame) evalResultMap(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := subject.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if len(expr.Args) != 1 {
+		return Value{}, fmt.Errorf("Result closure method expects one function argument, got %d", len(expr.Args))
+	}
+	switch expr.Kind {
+	case air.ExprResultMap:
+		if !resultValue.Ok {
+			return Result(expr.Type, false, resultValue.Value), nil
+		}
+		closure, err := f.evalExpr(expr.Args[0])
+		if err != nil {
+			return Value{}, err
+		}
+		mapped, err := f.vm.callClosure(closure, []Value{resultValue.Value})
+		if err != nil {
+			return Value{}, err
+		}
+		return Result(expr.Type, true, mapped), nil
+	case air.ExprResultMapErr:
+		if resultValue.Ok {
+			return Result(expr.Type, true, resultValue.Value), nil
+		}
+		closure, err := f.evalExpr(expr.Args[0])
+		if err != nil {
+			return Value{}, err
+		}
+		mapped, err := f.vm.callClosure(closure, []Value{resultValue.Value})
+		if err != nil {
+			return Value{}, err
+		}
+		return Result(expr.Type, false, mapped), nil
+	case air.ExprResultAndThen:
+		if !resultValue.Ok {
+			return Result(expr.Type, false, resultValue.Value), nil
+		}
+		closure, err := f.evalExpr(expr.Args[0])
+		if err != nil {
+			return Value{}, err
+		}
+		return f.vm.callClosure(closure, []Value{resultValue.Value})
+	default:
+		return Value{}, fmt.Errorf("unsupported Result closure method %d", expr.Kind)
+	}
 }
 
 func (f *frame) evalTryResult(expr air.Expr) (Value, error) {

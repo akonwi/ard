@@ -98,6 +98,17 @@ func validateFunction(program *Program, fn Function) error {
 			return fmt.Errorf("function %s local %s has invalid type %d", fn.Name, local.Name, local.Type)
 		}
 	}
+	for _, capture := range fn.Captures {
+		if !validTypeID(program, capture.Type) {
+			return fmt.Errorf("function %s capture %s has invalid type %d", fn.Name, capture.Name, capture.Type)
+		}
+		if capture.Local < 0 || int(capture.Local) >= len(fn.Locals) {
+			return fmt.Errorf("function %s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
+		}
+		if fn.Locals[capture.Local].Type != capture.Type {
+			return fmt.Errorf("function %s capture %s local type %d does not match capture type %d", fn.Name, capture.Name, fn.Locals[capture.Local].Type, capture.Type)
+		}
+	}
 	if err := validateBlock(program, fn, fn.Body); err != nil {
 		return fmt.Errorf("function %s: %w", fn.Name, err)
 	}
@@ -163,8 +174,30 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression calls invalid function %d", expr.Function)
 	}
+	if expr.Kind == ExprMakeClosure && !validFunctionID(program, expr.Function) {
+		return fmt.Errorf("expression creates invalid closure function %d", expr.Function)
+	}
+	if expr.Kind == ExprMakeClosure && validFunctionID(program, expr.Function) {
+		closureFn := program.Functions[expr.Function]
+		if len(expr.CaptureLocals) != len(closureFn.Captures) {
+			return fmt.Errorf("closure %s expects %d captures, got %d", closureFn.Name, len(closureFn.Captures), len(expr.CaptureLocals))
+		}
+		for i, local := range expr.CaptureLocals {
+			if local < 0 || int(local) >= len(fn.Locals) {
+				return fmt.Errorf("expression captures invalid local %d", local)
+			}
+			if fn.Locals[local].Type != closureFn.Captures[i].Type {
+				return fmt.Errorf("closure %s capture %s type %d does not match source local type %d", closureFn.Name, closureFn.Captures[i].Name, closureFn.Captures[i].Type, fn.Locals[local].Type)
+			}
+		}
+	}
 	if expr.Kind == ExprCallExtern && (expr.Extern < 0 || int(expr.Extern) >= len(program.Externs)) {
 		return fmt.Errorf("expression calls invalid extern %d", expr.Extern)
+	}
+	for _, local := range expr.CaptureLocals {
+		if local < 0 || int(local) >= len(fn.Locals) {
+			return fmt.Errorf("expression captures invalid local %d", local)
+		}
 	}
 	if expr.Target != nil {
 		if err := validateExpr(program, fn, *expr.Target); err != nil {

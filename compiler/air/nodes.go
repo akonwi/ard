@@ -39,6 +39,8 @@ const (
 	ExprLoadLocal
 	ExprCall
 	ExprCallExtern
+	ExprMakeClosure
+	ExprCallClosure
 	ExprMakeList
 	ExprMakeMap
 	ExprMakeStruct
@@ -75,11 +77,16 @@ const (
 	ExprMaybeIsNone
 	ExprMaybeIsSome
 	ExprMaybeOr
+	ExprMaybeMap
+	ExprMaybeAndThen
 	ExprMatchResult
 	ExprResultExpect
 	ExprResultOr
 	ExprResultIsOk
 	ExprResultIsErr
+	ExprResultMap
+	ExprResultMapErr
+	ExprResultAndThen
 	ExprTryResult
 	ExprTryMaybe
 )
@@ -98,10 +105,11 @@ type Expr struct {
 
 	Local LocalID
 
-	Function FunctionID
-	Extern   ExternID
-	Args     []Expr
-	Entries  []MapEntry
+	Function      FunctionID
+	Extern        ExternID
+	Args          []Expr
+	Entries       []MapEntry
+	CaptureLocals []LocalID
 
 	Fields []StructFieldValue
 	Target *Expr

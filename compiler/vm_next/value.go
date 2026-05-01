@@ -22,6 +22,7 @@ const (
 	ValueResult
 	ValueExtern
 	ValueDynamic
+	ValueClosure
 )
 
 type Value struct {
@@ -77,6 +78,12 @@ type DynamicValue struct {
 	Raw  any
 }
 
+type ClosureValue struct {
+	Type     air.TypeID
+	Function air.FunctionID
+	Captures []Value
+}
+
 func Void(typeID air.TypeID) Value {
 	return Value{Kind: ValueVoid, Type: typeID}
 }
@@ -127,6 +134,10 @@ func Extern(typeID air.TypeID, handle any) Value {
 
 func Dynamic(typeID air.TypeID, raw any) Value {
 	return Value{Kind: ValueDynamic, Type: typeID, Ref: &DynamicValue{Type: typeID, Raw: raw}}
+}
+
+func Closure(typeID air.TypeID, function air.FunctionID, captures []Value) Value {
+	return Value{Kind: ValueClosure, Type: typeID, Ref: &ClosureValue{Type: typeID, Function: function, Captures: captures}}
 }
 
 func (v Value) GoValue() any {
@@ -197,6 +208,8 @@ func (v Value) GoValue() any {
 			return nil
 		}
 		return dynamicValue.Raw
+	case ValueClosure:
+		return v.Ref
 	default:
 		return nil
 	}
@@ -284,4 +297,15 @@ func (v Value) dynamicValue() (*DynamicValue, error) {
 		return nil, fmt.Errorf("Dynamic value has invalid payload %T", v.Ref)
 	}
 	return dynamicValue, nil
+}
+
+func (v Value) closureValue() (*ClosureValue, error) {
+	if v.Kind != ValueClosure {
+		return nil, fmt.Errorf("expected closure value, got kind %d", v.Kind)
+	}
+	closureValue, ok := v.Ref.(*ClosureValue)
+	if !ok || closureValue == nil {
+		return nil, fmt.Errorf("closure value has invalid payload %T", v.Ref)
+	}
+	return closureValue, nil
 }

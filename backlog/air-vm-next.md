@@ -790,11 +790,11 @@ Status: Complete
 
 ### Milestone 6: closures and async
 
-Status: Pending
+Status: In progress
 
-- [ ] Add closure values and capture layout.
-- [ ] Execute closure-based `Maybe` helpers such as `map` and `and_then`.
-- [ ] Execute closure-based `Result` helpers such as `map`, `map_err`, and
+- [x] Add closure values and capture layout.
+- [x] Execute closure-based `Maybe` helpers such as `map` and `and_then`.
+- [x] Execute closure-based `Result` helpers such as `map`, `map_err`, and
   `and_then`.
 - [ ] Add fiber spawn/get/wait as AIR intrinsics.
 - [ ] Enforce async capture isolation.

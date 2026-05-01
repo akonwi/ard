@@ -32,9 +32,12 @@ type lowerer struct {
 }
 
 type functionLowerer struct {
-	l      *lowerer
-	locals map[string]LocalID
-	fn     *Function
+	l             *lowerer
+	locals        map[string]LocalID
+	fn            *Function
+	parent        *functionLowerer
+	captureByName map[string]LocalID
+	captureLocals []LocalID
 }
 
 func newLowerer() *lowerer {
@@ -637,15 +640,24 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
 	case *checker.Variable:
-		local, ok := fl.locals[e.Name()]
+		local, ok, err := fl.resolveLocal(e.Name())
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			return nil, fmt.Errorf("unknown local %s", e.Name())
 		}
 		return &Expr{Kind: ExprLoadLocal, Type: typeID, Local: local}, nil
+	case *checker.FunctionDef:
+		return fl.lowerClosure(typeID, e)
 	case *checker.FunctionCall:
 		args, err := fl.lowerArgs(e.Args)
 		if err != nil {
 			return nil, err
+		}
+		if local, ok := fl.locals[e.Name]; ok && fl.localKind(local) == TypeFunction {
+			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+			return &Expr{Kind: ExprCallClosure, Type: typeID, Target: target, Args: args}, nil
 		}
 		if e.ExternalBinding != "" {
 			id, err := fl.l.declareFunctionCallExtern(fl.fn.Module, e)
@@ -657,6 +669,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if def := e.Definition(); def != nil {
 			id, ok := fl.l.lookupFunction(def.Name)
 			if !ok {
+				local, hasLocal, err := fl.resolveLocal(e.Name)
+				if err != nil {
+					return nil, err
+				}
+				if hasLocal && fl.localKind(local) == TypeFunction {
+					target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+					return &Expr{Kind: ExprCallClosure, Type: typeID, Target: target, Args: args}, nil
+				}
 				return nil, fmt.Errorf("unknown function call target %s", def.Name)
 			}
 			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, nil
@@ -988,8 +1008,10 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 		kind = ExprMaybeIsSome
 	case checker.MaybeOr:
 		kind = ExprMaybeOr
-	case checker.MaybeMap, checker.MaybeAndThen:
-		return nil, fmt.Errorf("unsupported AIR Maybe method requiring closures: %d", method.Kind)
+	case checker.MaybeMap:
+		kind = ExprMaybeMap
+	case checker.MaybeAndThen:
+		kind = ExprMaybeAndThen
 	default:
 		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
 	}
@@ -1052,8 +1074,12 @@ func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.Resu
 		kind = ExprResultIsOk
 	case checker.ResultIsErr:
 		kind = ExprResultIsErr
-	case checker.ResultMap, checker.ResultMapErr, checker.ResultAndThen:
-		return nil, fmt.Errorf("unsupported AIR Result method requiring closures: %d", method.Kind)
+	case checker.ResultMap:
+		kind = ExprResultMap
+	case checker.ResultMapErr:
+		kind = ExprResultMapErr
+	case checker.ResultAndThen:
+		kind = ExprResultAndThen
 	default:
 		return nil, fmt.Errorf("unsupported AIR Result method %d", method.Kind)
 	}
@@ -1208,11 +1234,91 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
 }
 
+func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {
+	id, err := fl.l.declareFunction(fl.fn.Module, def, false)
+	if err != nil {
+		return nil, err
+	}
+	fn := fl.l.program.Functions[id]
+	child := &functionLowerer{
+		l:             fl.l,
+		locals:        map[string]LocalID{},
+		fn:            &fn,
+		parent:        fl,
+		captureByName: map[string]LocalID{},
+	}
+	for _, param := range fn.Signature.Params {
+		child.defineLocal(param.Name, param.Type, param.Mutable)
+	}
+	if def.Body != nil {
+		body, err := child.lowerBlock(def.Body.Stmts)
+		if err != nil {
+			return nil, fmt.Errorf("lower closure %s: %w", def.Name, err)
+		}
+		fn.Body = body
+	}
+	fn.Captures = child.fn.Captures
+	fn.Locals = child.fn.Locals
+	fl.l.program.Functions[id] = fn
+
+	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id, CaptureLocals: child.captureLocals}, nil
+}
+
 func (fl *functionLowerer) defineLocal(name string, typeID TypeID, mutable bool) LocalID {
 	id := LocalID(len(fl.fn.Locals))
 	fl.fn.Locals = append(fl.fn.Locals, Local{ID: id, Name: name, Type: typeID, Mutable: mutable})
 	fl.locals[name] = id
 	return id
+}
+
+func (fl *functionLowerer) resolveLocal(name string) (LocalID, bool, error) {
+	if local, ok := fl.locals[name]; ok {
+		return local, true, nil
+	}
+	if fl.parent == nil {
+		return 0, false, nil
+	}
+	local, _, ok, err := fl.captureLocal(name)
+	return local, ok, err
+}
+
+func (fl *functionLowerer) ensureLocalForNestedCapture(name string) (LocalID, TypeID, bool, error) {
+	if local, ok := fl.locals[name]; ok {
+		return local, fl.fn.Locals[local].Type, true, nil
+	}
+	if fl.parent == nil {
+		return 0, NoType, false, nil
+	}
+	return fl.captureLocal(name)
+}
+
+func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, error) {
+	if fl.captureByName == nil {
+		fl.captureByName = map[string]LocalID{}
+	}
+	if local, ok := fl.captureByName[name]; ok {
+		return local, fl.fn.Locals[local].Type, true, nil
+	}
+	sourceLocal, typeID, ok, err := fl.parent.ensureLocalForNestedCapture(name)
+	if err != nil || !ok {
+		return 0, NoType, ok, err
+	}
+	local := fl.defineLocal(name, typeID, false)
+	fl.captureByName[name] = local
+	fl.captureLocals = append(fl.captureLocals, sourceLocal)
+	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local})
+	return local, typeID, true, nil
+}
+
+func (fl *functionLowerer) localKind(local LocalID) TypeKind {
+	if int(local) < 0 || int(local) >= len(fl.fn.Locals) {
+		return TypeVoid
+	}
+	info, ok := fl.l.typeInfo(fl.fn.Locals[local].Type)
+	if !ok {
+		return TypeVoid
+	}
+	return info.Kind
 }
 
 func (l *lowerer) lookupFunction(name string) (FunctionID, bool) {
