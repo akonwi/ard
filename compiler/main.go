@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/bytecode"
 	bytecodevm "github.com/akonwi/ard/bytecode/vm"
@@ -20,6 +21,7 @@ import (
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
+	vm_next "github.com/akonwi/ard/vm_next"
 )
 
 const bytecodeFooterMarker = "ARDBYTECODEv1"
@@ -81,6 +83,20 @@ func main() {
 				}
 				if runErr := runBytecodeProgram(program, os.Args); runErr != nil {
 					fmt.Println(runErr)
+					os.Exit(1)
+				}
+			case backend.TargetVMNext:
+				module, err := loadModule(inputPath, target)
+				if err != nil {
+					os.Exit(1)
+				}
+				program, err := air.Lower(module)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if err := runVMNextProgram(program, os.Args); err != nil {
+					fmt.Println(err)
 					os.Exit(1)
 				}
 			case backend.TargetGo:
@@ -727,6 +743,18 @@ func runBytecodeProgram(program bytecode.Program, args []string) error {
 		}
 	}
 	return runErr
+}
+
+func runVMNextProgram(program *air.Program, args []string) error {
+	runtime.SetOSArgs(args)
+	defer runtime.SetOSArgs(nil)
+
+	vm, err := vm_next.New(program)
+	if err != nil {
+		return err
+	}
+	_, err = vm.RunEntry()
+	return err
 }
 
 func writeEmbeddedBinary(srcPath string, dstPath string, data []byte) error {

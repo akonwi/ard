@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/backend"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -57,6 +60,12 @@ func TestParseRunArgs(t *testing.T) {
 			target: "go",
 		},
 		{
+			name:   "vm_next target",
+			args:   []string{"--target", "vm_next", "samples/main.ard"},
+			path:   "samples/main.ard",
+			target: "vm_next",
+		},
+		{
 			name:       "missing target value",
 			args:       []string{"--target"},
 			expectErr:  true,
@@ -99,6 +108,31 @@ func TestParseRunArgs(t *testing.T) {
 				t.Fatalf("expected target %q, got %q", tt.target, target)
 			}
 		})
+	}
+}
+
+func TestRunVMNextProgram(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.ard")
+	source := `
+		mut count = 40
+		count = count + 2
+		count
+	`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	module, err := loadModule(sourcePath, backend.TargetVMNext)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := runVMNextProgram(program, []string{"ard", "run", "--target", "vm_next", sourcePath}); err != nil {
+		t.Fatalf("run vm_next: %v", err)
 	}
 }
 

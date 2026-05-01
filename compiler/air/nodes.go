@@ -56,6 +56,9 @@ const (
 	ExprOr
 	ExprNot
 	ExprNeg
+	ExprIf
+	ExprMakeResultOk
+	ExprMakeResultErr
 )
 
 type Expr struct {
@@ -79,6 +82,10 @@ type Expr struct {
 
 	Left  *Expr
 	Right *Expr
+
+	Condition *Expr
+	Then      Block
+	Else      Block
 }
 
 type StructFieldValue struct {

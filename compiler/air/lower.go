@@ -449,8 +449,11 @@ func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) 
 		last--
 	}
 	for i, stmt := range stmts {
+		if stmt.Expr == nil && stmt.Stmt == nil {
+			continue
+		}
 		if i == last && stmt.Expr != nil {
-			expr, err := fl.lowerExpr(stmt.Expr)
+			expr, err := fl.lowerExprWithExpected(stmt.Expr, fl.fn.Signature.Return)
 			if err != nil {
 				return block, err
 			}
@@ -466,6 +469,15 @@ func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) 
 		}
 	}
 	return block, nil
+}
+
+func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expected TypeID) (*Expr, error) {
+	if call, ok := expr.(*checker.ModuleFunctionCall); ok {
+		if kind, ok := resultConstructorKind(call); ok {
+			return fl.lowerResultConstructor(kind, expected, call)
+		}
+	}
+	return fl.lowerExpr(expr)
 }
 
 func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
@@ -550,6 +562,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
+		if kind, ok := resultConstructorKind(e); ok {
+			return fl.lowerResultConstructor(kind, typeID, e)
+		}
 		extern, err := fl.l.declareModuleCallExtern(e)
 		if err != nil {
 			return nil, err
@@ -613,8 +628,67 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprNeg, Type: typeID, Target: value}, nil
+	case *checker.If:
+		condition, err := fl.lowerExpr(e.Condition)
+		if err != nil {
+			return nil, err
+		}
+		thenBlock, err := fl.lowerBlock(e.Body.Stmts)
+		if err != nil {
+			return nil, err
+		}
+		elseBlock, err := fl.lowerElse(e)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: thenBlock, Else: elseBlock}, nil
 	default:
 		return nil, fmt.Errorf("unsupported AIR expression %T", expr)
+	}
+}
+
+func (fl *functionLowerer) lowerElse(expr *checker.If) (Block, error) {
+	if expr.ElseIf != nil {
+		typeID, err := fl.l.internType(expr.ElseIf.Type())
+		if err != nil {
+			return Block{}, err
+		}
+		nested, err := fl.lowerExpr(expr.ElseIf)
+		if err != nil {
+			return Block{}, err
+		}
+		nested.Type = typeID
+		return Block{Result: nested}, nil
+	}
+	if expr.Else != nil {
+		return fl.lowerBlock(expr.Else.Stmts)
+	}
+	return Block{}, nil
+}
+
+func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
+	args, err := fl.lowerArgs(call.Call.Args)
+	if err != nil {
+		return nil, err
+	}
+	if len(args) != 1 {
+		return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
+	}
+	value := args[0]
+	return &Expr{Kind: kind, Type: typeID, Target: &value}, nil
+}
+
+func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
+	if call.Module != "ard/result" {
+		return 0, false
+	}
+	switch call.Call.Name {
+	case "ok":
+		return ExprMakeResultOk, true
+	case "err":
+		return ExprMakeResultErr, true
+	default:
+		return 0, false
 	}
 }
 

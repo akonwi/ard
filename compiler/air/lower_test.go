@@ -81,6 +81,63 @@ func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 	}
 }
 
+func TestLowerIfExpression(t *testing.T) {
+	program := lowerSource(t, `
+		fn choose(flag: Bool) Int {
+			if flag {
+				1
+			} else {
+				2
+			}
+		}
+	`)
+
+	choose := findFunction(t, program, "choose")
+	if choose.Body.Result == nil || choose.Body.Result.Kind != ExprIf {
+		t.Fatalf("choose result = %#v, want ExprIf", choose.Body.Result)
+	}
+	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
+		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
+	}
+	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != 1 {
+		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
+	}
+	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != 2 {
+		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
+	}
+}
+
+func TestLowerResultConstructors(t *testing.T) {
+	program := lowerSource(t, `
+		fn pass() Void!Str {
+			Result::ok(())
+		}
+
+		fn fail() Void!Str {
+			Result::err("boom")
+		}
+	`)
+
+	pass := findFunction(t, program, "pass")
+	if pass.Body.Result == nil || pass.Body.Result.Kind != ExprMakeResultOk {
+		t.Fatalf("pass result = %#v, want ExprMakeResultOk", pass.Body.Result)
+	}
+	if pass.Body.Result.Target == nil || pass.Body.Result.Target.Kind != ExprConstVoid {
+		t.Fatalf("pass value = %#v, want void", pass.Body.Result.Target)
+	}
+
+	fail := findFunction(t, program, "fail")
+	if fail.Body.Result == nil || fail.Body.Result.Kind != ExprMakeResultErr {
+		t.Fatalf("fail result = %#v, want ExprMakeResultErr", fail.Body.Result)
+	}
+	if fail.Body.Result.Target == nil || fail.Body.Result.Target.Str != "boom" {
+		t.Fatalf("fail value = %#v, want boom", fail.Body.Result.Target)
+	}
+	if len(program.Externs) != 0 {
+		t.Fatalf("extern count = %d, want result constructors as AIR built-ins", len(program.Externs))
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing

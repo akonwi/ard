@@ -4,6 +4,7 @@ import "fmt"
 
 const (
 	TargetBytecode  = "bytecode"
+	TargetVMNext    = "vm_next"
 	TargetGo        = "go"
 	TargetJSBrowser = "js-browser"
 	TargetJSServer  = "js-server"
@@ -14,6 +15,8 @@ func ParseTarget(raw string) (string, error) {
 	switch raw {
 	case "", DefaultTarget:
 		return DefaultTarget, nil
+	case TargetVMNext:
+		return TargetVMNext, nil
 	case TargetGo:
 		return TargetGo, nil
 	case TargetJSBrowser:

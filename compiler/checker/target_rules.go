@@ -45,6 +45,7 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 
 var targetDisplayOrder = []string{
 	backend.TargetBytecode,
+	backend.TargetVMNext,
 	backend.TargetGo,
 	backend.TargetJSBrowser,
 	backend.TargetJSServer,

@@ -168,6 +168,19 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Condition != nil {
+		if err := validateExpr(program, fn, *expr.Condition); err != nil {
+			return err
+		}
+	}
+	if expr.Kind == ExprIf {
+		if err := validateBlock(program, fn, expr.Then); err != nil {
+			return err
+		}
+		if err := validateBlock(program, fn, expr.Else); err != nil {
+			return err
+		}
+	}
 	for _, arg := range expr.Args {
 		if err := validateExpr(program, fn, arg); err != nil {
 			return err
