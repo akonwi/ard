@@ -383,9 +383,9 @@ func render(c contract) ([]byte, error) {
 	out.WriteString("type Maybe[T any] struct {\n\tValue T\n\tSome  bool\n}\n\n")
 	out.WriteString("func Some[T any](value T) Maybe[T] {\n\treturn Maybe[T]{Value: value, Some: true}\n}\n\n")
 	out.WriteString("func None[T any]() Maybe[T] {\n\treturn Maybe[T]{}\n}\n\n")
-	out.WriteString("type Callback0[R any] struct{}\n")
-	out.WriteString("type Callback1[A, R any] struct{}\n")
-	out.WriteString("type Callback2[A, B, R any] struct{}\n\n")
+	out.WriteString("type Callback0[R any] struct {\n\tCall func() (R, error)\n}\n")
+	out.WriteString("type Callback1[A, R any] struct {\n\tCall func(A) (R, error)\n}\n")
+	out.WriteString("type Callback2[A, B, R any] struct {\n\tCall func(A, B) (R, error)\n}\n\n")
 
 	for _, typ := range c.ExternTypes {
 		fmt.Fprintf(&out, "type %s struct {\n\tHandle any\n}\n\n", typ.Name)

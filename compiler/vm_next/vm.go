@@ -259,6 +259,12 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalMakeClosure(expr)
 	case air.ExprCallClosure:
 		return f.evalCallClosure(expr)
+	case air.ExprSpawnFiber:
+		return f.evalSpawnFiber(expr)
+	case air.ExprFiberGet:
+		return f.evalFiberGet(expr)
+	case air.ExprFiberJoin:
+		return f.evalFiberJoin(expr)
 	case air.ExprCallExtern:
 		args, err := f.evalArgs(expr.Args)
 		if err != nil {
@@ -398,6 +404,64 @@ func (f *frame) evalCallClosure(expr air.Expr) (Value, error) {
 		return Value{}, err
 	}
 	return f.vm.callClosure(target, args)
+}
+
+func (f *frame) evalSpawnFiber(expr air.Expr) (Value, error) {
+	fiber := &FiberValue{
+		Type: expr.Type,
+		Done: make(chan struct{}),
+	}
+	if expr.Target != nil {
+		target, err := f.evalExprPtr(expr.Target)
+		if err != nil {
+			return Value{}, err
+		}
+		go func() {
+			defer close(fiber.Done)
+			fiber.Result, fiber.Err = f.vm.callClosure(target, nil)
+		}()
+		return Fiber(expr.Type, fiber), nil
+	}
+	if expr.Function < 0 {
+		return Value{}, fmt.Errorf("fiber spawn missing target")
+	}
+	go func() {
+		defer close(fiber.Done)
+		fiber.Result, fiber.Err = f.vm.call(expr.Function, nil)
+	}()
+	return Fiber(expr.Type, fiber), nil
+}
+
+func (f *frame) evalFiberGet(expr air.Expr) (Value, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	fiber, err := target.fiberValue()
+	if err != nil {
+		return Value{}, err
+	}
+	<-fiber.Done
+	if fiber.Err != nil {
+		return Value{}, fiber.Err
+	}
+	return fiber.Result, nil
+}
+
+func (f *frame) evalFiberJoin(expr air.Expr) (Value, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	fiber, err := target.fiberValue()
+	if err != nil {
+		return Value{}, err
+	}
+	<-fiber.Done
+	if fiber.Err != nil {
+		return Value{}, fiber.Err
+	}
+	return f.vm.zeroValue(expr.Type), nil
 }
 
 func (f *frame) evalMakeStruct(expr air.Expr) (Value, error) {
@@ -976,6 +1040,8 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		return Map(typeID, nil)
 	case air.TypeDynamic:
 		return Dynamic(typeID, nil)
+	case air.TypeFiber:
+		return Fiber(typeID, &FiberValue{Type: typeID, Done: closedFiberDone()})
 	case air.TypeEnum:
 		if len(typeInfo.Variants) == 0 {
 			return Enum(typeID, 0)
@@ -996,6 +1062,12 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 	default:
 		return Value{Type: typeID}
 	}
+}
+
+func closedFiberDone() chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
 }
 
 func (f *frame) mustMaybeElem(typeID air.TypeID) air.TypeID {

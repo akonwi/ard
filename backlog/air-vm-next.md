@@ -492,10 +492,8 @@ Conceptual host-facing shape:
 
 ```go
 type Callback2[A, B any] struct {
-    // runtime-owned callback handle
+    Call func(A, B) (struct{}, error)
 }
-
-func (cb Callback2[A, B]) Call(a A, b B) error
 ```
 
 The callback adapter owns:
@@ -790,15 +788,15 @@ Status: Complete
 
 ### Milestone 6: closures and async
 
-Status: In progress
+Status: Complete
 
 - [x] Add closure values and capture layout.
 - [x] Execute closure-based `Maybe` helpers such as `map` and `and_then`.
 - [x] Execute closure-based `Result` helpers such as `map`, `map_err`, and
   `and_then`.
-- [ ] Add fiber spawn/get/wait as AIR intrinsics.
-- [ ] Enforce async capture isolation.
-- [ ] Add typed callback handles for VM-to-host callback APIs.
+- [x] Add fiber spawn/get/wait as AIR intrinsics.
+- [x] Enforce async capture isolation.
+- [x] Add typed callback handles for VM-to-host callback APIs.
 
 ### Milestone 7: complicated types
 

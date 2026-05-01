@@ -237,6 +237,8 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 		return vm.validateHostStructType(typeInfo, target, param)
 	case air.TypeExtern:
 		return vm.validateHostExternType(typeInfo, target)
+	case air.TypeFunction:
+		return vm.validateHostFunctionType(typeInfo, target, param)
 	}
 	return fmt.Errorf("AIR type %s cannot be represented as host %s", typeInfo.Name, target)
 }
@@ -291,6 +293,34 @@ func (vm *VM) validateHostExternType(typeInfo air.TypeInfo, target reflect.Type)
 	return fmt.Errorf("extern type %s must use host extern struct or any handle, got %s", typeInfo.Name, target)
 }
 
+func (vm *VM) validateHostFunctionType(typeInfo air.TypeInfo, target reflect.Type, param bool) error {
+	if !isHostCallbackType(target) {
+		return fmt.Errorf("function type %s must use host callback handle, got %s", typeInfo.Name, target)
+	}
+	callType, err := callbackCallType(target)
+	if err != nil {
+		return err
+	}
+	if callType.NumIn() != len(typeInfo.Params) {
+		return fmt.Errorf("callback %s expects %d args, got %d", target, len(typeInfo.Params), callType.NumIn())
+	}
+	for i, paramType := range typeInfo.Params {
+		if err := vm.validateHostType(paramType, callType.In(i), param); err != nil {
+			return fmt.Errorf("callback arg %d: %w", i, err)
+		}
+	}
+	if callType.NumOut() != 2 {
+		return fmt.Errorf("callback %s Call must return (value, error), got %d returns", target, callType.NumOut())
+	}
+	if !callType.Out(1).Implements(errorInterface) {
+		return fmt.Errorf("callback %s second return must be error, got %s", target, callType.Out(1))
+	}
+	if err := vm.validateHostType(typeInfo.Return, callType.Out(0), false); err != nil {
+		return fmt.Errorf("callback return: %w", err)
+	}
+	return nil
+}
+
 func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, error) {
 	if isHostMaybeType(target) {
 		maybeValue, err := value.maybeValue()
@@ -312,6 +342,9 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	}
 	if value.Kind == ValueExtern {
 		return vm.externToHost(value, target)
+	}
+	if value.Kind == ValueClosure && isHostCallbackType(target) {
+		return vm.closureToHostCallback(value, target)
 	}
 	if value.Kind == ValueList && target.Kind() == reflect.Slice {
 		return vm.listToHost(value, target)
@@ -590,6 +623,48 @@ func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, er
 	return reflect.Value{}, fmt.Errorf("cannot pass Dynamic payload %s as %s", raw.Type(), target)
 }
 
+func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.Value, error) {
+	closure, err := value.closureValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if closure.Function < 0 || int(closure.Function) >= len(vm.program.Functions) {
+		return reflect.Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+	}
+	fn := vm.program.Functions[closure.Function]
+	callType, err := callbackCallType(target)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if callType.NumIn() != len(fn.Signature.Params) {
+		return reflect.Value{}, fmt.Errorf("callback %s expects %d args, closure accepts %d", target, callType.NumIn(), len(fn.Signature.Params))
+	}
+	callback := reflect.MakeFunc(callType, func(inputs []reflect.Value) []reflect.Value {
+		zero := reflect.Zero(callType.Out(0))
+		errorValue := reflect.Zero(errorInterface)
+		args := make([]Value, len(inputs))
+		for i, input := range inputs {
+			arg, err := vm.hostValueToValue(fn.Signature.Params[i].Type, input)
+			if err != nil {
+				return []reflect.Value{zero, reflect.ValueOf(err)}
+			}
+			args[i] = arg
+		}
+		result, err := vm.callClosure(value, args)
+		if err != nil {
+			return []reflect.Value{zero, reflect.ValueOf(err)}
+		}
+		hostResult, err := vm.valueToHost(result, callType.Out(0))
+		if err != nil {
+			return []reflect.Value{zero, reflect.ValueOf(err)}
+		}
+		return []reflect.Value{hostResult, errorValue}
+	})
+	out := reflect.New(target).Elem()
+	out.FieldByName("Call").Set(callback)
+	return out, nil
+}
+
 func (vm *VM) listToHost(value Value, target reflect.Type) (reflect.Value, error) {
 	listValue, err := value.listValue()
 	if err != nil {
@@ -739,6 +814,26 @@ func isHostMaybeType(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Struct &&
 		typ.PkgPath() == hostMaybeType.PkgPath() &&
 		strings.HasPrefix(typ.Name(), "Maybe[")
+}
+
+func isHostCallbackType(typ reflect.Type) bool {
+	return typ.Kind() == reflect.Struct &&
+		typ.PkgPath() == hostMaybeType.PkgPath() &&
+		strings.HasPrefix(typ.Name(), "Callback")
+}
+
+func callbackCallType(typ reflect.Type) (reflect.Type, error) {
+	field, ok := typ.FieldByName("Call")
+	if !ok {
+		return nil, fmt.Errorf("host callback %s missing Call field", typ)
+	}
+	if field.PkgPath != "" {
+		return nil, fmt.Errorf("host callback %s Call field is not exported", typ)
+	}
+	if field.Type.Kind() != reflect.Func {
+		return nil, fmt.Errorf("host callback %s Call field must be func, got %s", typ, field.Type)
+	}
+	return field.Type, nil
 }
 
 func goExportedName(name string) string {

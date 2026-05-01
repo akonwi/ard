@@ -381,7 +381,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
 		return l.internType(tv.Actual())
 	}
-	name := t.String()
+	name := airTypeName(t)
 	if id, ok := l.typeByName[name]; ok {
 		return id, nil
 	}
@@ -432,6 +432,19 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.Value = value
 		info.Error = errType
 	case *checker.StructDef:
+		if typ.Name == "Fiber" {
+			elemType, ok := typ.Fields["result"]
+			if !ok {
+				return NoType, fmt.Errorf("Fiber type missing result field")
+			}
+			elem, err := l.internType(elemType)
+			if err != nil {
+				return NoType, err
+			}
+			info.Kind = TypeFiber
+			info.Elem = elem
+			break
+		}
 		info.Kind = TypeStruct
 		fields := sortedFieldNames(typ.Fields)
 		info.Fields = make([]FieldInfo, len(fields))
@@ -510,6 +523,15 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	}
 
 	return id, nil
+}
+
+func airTypeName(t checker.Type) string {
+	if typ, ok := t.(*checker.StructDef); ok && typ.Name == "Fiber" {
+		if elem, ok := typ.Fields["result"]; ok {
+			return "Fiber<" + elem.String() + ">"
+		}
+	}
+	return t.String()
 }
 
 func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) {
@@ -650,6 +672,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprLoadLocal, Type: typeID, Local: local}, nil
 	case *checker.FunctionDef:
 		return fl.lowerClosure(typeID, e)
+	case *checker.FiberStart:
+		return fl.lowerFiberSpawn(typeID, e.GetFn())
+	case *checker.FiberEval:
+		return fl.lowerFiberSpawn(typeID, e.GetFn())
+	case *checker.FiberExecution:
+		return fl.lowerFiberExecution(typeID, e)
 	case *checker.FunctionCall:
 		args, err := fl.lowerArgs(e.Args)
 		if err != nil {
@@ -738,6 +766,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerStructInstance(typeID, e)
 	case *checker.InstanceProperty:
 		return fl.lowerInstanceProperty(typeID, e)
+	case *checker.InstanceMethod:
+		return fl.lowerInstanceMethod(typeID, e)
 	case *checker.EnumVariant:
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
 	case *checker.BoolMatch:
@@ -1262,6 +1292,44 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	fl.l.program.Functions[id] = fn
 
 	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id, CaptureLocals: child.captureLocals}, nil
+}
+
+func (fl *functionLowerer) lowerFiberSpawn(typeID TypeID, fn checker.Expression) (*Expr, error) {
+	target, err := fl.lowerExpr(fn)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprSpawnFiber, Type: typeID, Target: target}, nil
+}
+
+func (fl *functionLowerer) lowerFiberExecution(typeID TypeID, exec *checker.FiberExecution) (*Expr, error) {
+	id, ok, err := fl.l.resolveModuleFunction(exec.GetModule().Path(), exec.GetMainName())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("unknown fiber execution target %s::%s", exec.GetModule().Path(), exec.GetMainName())
+	}
+	return &Expr{Kind: ExprSpawnFiber, Type: typeID, Function: id}, nil
+}
+
+func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.InstanceMethod) (*Expr, error) {
+	target, err := fl.lowerExpr(method.Subject)
+	if err != nil {
+		return nil, err
+	}
+	typeInfo, ok := fl.l.typeInfo(target.Type)
+	if !ok || typeInfo.Kind != TypeFiber {
+		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
+	}
+	switch method.Method.Name {
+	case "get":
+		return &Expr{Kind: ExprFiberGet, Type: typeID, Target: target}, nil
+	case "join":
+		return &Expr{Kind: ExprFiberJoin, Type: typeID, Target: target}, nil
+	default:
+		return nil, fmt.Errorf("unsupported AIR Fiber method %s", method.Method.Name)
+	}
 }
 
 func (fl *functionLowerer) defineLocal(name string, typeID TypeID, mutable bool) LocalID {

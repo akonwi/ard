@@ -15,9 +15,15 @@ func None[T any]() Maybe[T] {
 	return Maybe[T]{}
 }
 
-type Callback0[R any] struct{}
-type Callback1[A, R any] struct{}
-type Callback2[A, B, R any] struct{}
+type Callback0[R any] struct {
+	Call func() (R, error)
+}
+type Callback1[A, R any] struct {
+	Call func(A) (R, error)
+}
+type Callback2[A, B, R any] struct {
+	Call func(A, B) (R, error)
+}
 
 type Db struct {
 	Handle any

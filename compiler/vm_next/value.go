@@ -23,6 +23,7 @@ const (
 	ValueExtern
 	ValueDynamic
 	ValueClosure
+	ValueFiber
 )
 
 type Value struct {
@@ -84,6 +85,13 @@ type ClosureValue struct {
 	Captures []Value
 }
 
+type FiberValue struct {
+	Type   air.TypeID
+	Done   chan struct{}
+	Result Value
+	Err    error
+}
+
 func Void(typeID air.TypeID) Value {
 	return Value{Kind: ValueVoid, Type: typeID}
 }
@@ -138,6 +146,10 @@ func Dynamic(typeID air.TypeID, raw any) Value {
 
 func Closure(typeID air.TypeID, function air.FunctionID, captures []Value) Value {
 	return Value{Kind: ValueClosure, Type: typeID, Ref: &ClosureValue{Type: typeID, Function: function, Captures: captures}}
+}
+
+func Fiber(typeID air.TypeID, fiber *FiberValue) Value {
+	return Value{Kind: ValueFiber, Type: typeID, Ref: fiber}
 }
 
 func (v Value) GoValue() any {
@@ -209,6 +221,8 @@ func (v Value) GoValue() any {
 		}
 		return dynamicValue.Raw
 	case ValueClosure:
+		return v.Ref
+	case ValueFiber:
 		return v.Ref
 	default:
 		return nil
@@ -308,4 +322,15 @@ func (v Value) closureValue() (*ClosureValue, error) {
 		return nil, fmt.Errorf("closure value has invalid payload %T", v.Ref)
 	}
 	return closureValue, nil
+}
+
+func (v Value) fiberValue() (*FiberValue, error) {
+	if v.Kind != ValueFiber {
+		return nil, fmt.Errorf("expected fiber value, got kind %d", v.Kind)
+	}
+	fiberValue, ok := v.Ref.(*FiberValue)
+	if !ok || fiberValue == nil {
+		return nil, fmt.Errorf("fiber value has invalid payload %T", v.Ref)
+	}
+	return fiberValue, nil
 }

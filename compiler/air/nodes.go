@@ -41,6 +41,9 @@ const (
 	ExprCallExtern
 	ExprMakeClosure
 	ExprCallClosure
+	ExprSpawnFiber
+	ExprFiberGet
+	ExprFiberJoin
 	ExprMakeList
 	ExprMakeMap
 	ExprMakeStruct

@@ -174,6 +174,19 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression calls invalid function %d", expr.Function)
 	}
+	if expr.Kind == ExprSpawnFiber && expr.Target == nil && !validFunctionID(program, expr.Function) {
+		return fmt.Errorf("expression spawns invalid fiber function %d", expr.Function)
+	}
+	if expr.Kind == ExprSpawnFiber && expr.Target != nil && expr.Target.Kind == ExprMakeClosure {
+		for _, local := range expr.Target.CaptureLocals {
+			if local < 0 || int(local) >= len(fn.Locals) {
+				return fmt.Errorf("fiber spawn captures invalid local %d", local)
+			}
+			if fn.Locals[local].Mutable {
+				return fmt.Errorf("fiber spawn closure cannot capture mutable local %s", fn.Locals[local].Name)
+			}
+		}
+	}
 	if expr.Kind == ExprMakeClosure && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression creates invalid closure function %d", expr.Function)
 	}

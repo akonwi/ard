@@ -7,6 +7,7 @@ import (
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
+	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
 func TestRunEntryEvaluatesFunctionCallsAndArithmetic(t *testing.T) {
@@ -347,6 +348,55 @@ func TestRunEntryEvaluatesResultAndThenClosure(t *testing.T) {
 		let result: Int!Str = Result::ok(40)
 		result.and_then(fn(v) { Result::ok(v + 2) }).or(0)
 	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesAsyncEvalFiberGet(t *testing.T) {
+	got := runSource(t, `
+		use ard/async
+
+		let offset = 2
+		let fiber = async::eval(fn() Int { 40 + offset })
+		fiber.get()
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesAsyncStartFiberJoin(t *testing.T) {
+	got := runSource(t, `
+		use ard/async
+
+		let fiber = async::start(fn() {})
+		fiber.join()
+		42
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPassesClosureExternAsCallbackHandle(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		extern fn call_with(value: Int, callback: fn(Int) Int) Int = "CallWith"
+
+		let offset = 2
+		call_with(40, fn(value) { value + offset })
+	`, HostFunctionRegistry{
+		"CallWith": func(value int, callback stdlibffi.Callback1[int, int]) int {
+			result, err := callback.Call(value)
+			if err != nil {
+				return 0
+			}
+			return result
+		},
+	})
 
 	if got.Kind != ValueInt || got.Int != 42 {
 		t.Fatalf("got %#v, want int 42", got)
