@@ -344,6 +344,44 @@ If Go FFI generation is requested and the project root has no `go.mod`, the CLI
 should fail with a clear setup error rather than silently creating module
 structure. A later init command can create the root `go.mod` and `ffi/` scaffold.
 
+### Go FFI CLI workflow
+
+The CLI should expose a small FFI workflow:
+
+```text
+ard ffi init
+ard ffi
+ard ffi check
+```
+
+`ard ffi init` creates the Go FFI scaffold for the current Ard project:
+
+- create root `go.mod` if it does not exist
+- create `ffi/` if it does not exist
+- generate the initial `ffi/ard.gen.go`
+- never overwrite user-written files
+
+Useful options:
+
+```text
+ard ffi init --module github.com/user/project
+ard ffi init --force
+```
+
+`ard ffi` regenerates bindings only. It should read checked Ard extern
+declarations, write deterministic generated code to `ffi/ard.gen.go`, and run
+`gofmt` on the generated file. It should not create a `go.mod` or scaffold the
+project; that belongs to `ard ffi init`.
+
+`ard ffi check` validates the boundary for CI and local development. It should
+verify that generated bindings are current, type-check or build the Go `ffi`
+package, and report missing host functions, signature mismatches, unsupported
+Ard types, and stale generated files.
+
+`ard run` and `ard build` should integrate with generated FFI bindings. They can
+regenerate automatically or fail when `ffi/ard.gen.go` is stale, but they should
+not silently create FFI project structure.
+
 ### Generated structs
 
 Public Ard structs used across extern boundaries should generate target
@@ -692,6 +730,7 @@ Status: Pending
 - [ ] Generate VM FFI adapters from Ard signatures.
 - [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
   root `go.mod`.
+- [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.
 - [ ] Support scalar parameters/returns, generated structs, `Maybe`/`Result`,
   extern handles, and maps/lists of representable values.
 - [ ] Keep raw escape hatches out of the default path.
