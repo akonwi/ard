@@ -186,6 +186,57 @@ func TestLowerResultConstructors(t *testing.T) {
 	}
 }
 
+func TestLowerMaybes(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn some() Int? {
+			maybe::some(42)
+		}
+
+		fn none() Int? {
+			maybe::none()
+		}
+
+		fn fallback(value: Int?) Int {
+			value.or(42)
+		}
+
+		fn pick(value: Int?) Int {
+			match value {
+				v => v,
+				_ => 0,
+			}
+		}
+	`)
+
+	some := findFunction(t, program, "some")
+	if some.Body.Result == nil || some.Body.Result.Kind != ExprMakeMaybeSome {
+		t.Fatalf("some result = %#v, want ExprMakeMaybeSome", some.Body.Result)
+	}
+	if some.Body.Result.Target == nil || some.Body.Result.Target.Int != 42 {
+		t.Fatalf("some target = %#v, want 42", some.Body.Result.Target)
+	}
+
+	none := findFunction(t, program, "none")
+	if none.Body.Result == nil || none.Body.Result.Kind != ExprMakeMaybeNone {
+		t.Fatalf("none result = %#v, want ExprMakeMaybeNone", none.Body.Result)
+	}
+
+	fallback := findFunction(t, program, "fallback")
+	if fallback.Body.Result == nil || fallback.Body.Result.Kind != ExprMaybeOr {
+		t.Fatalf("fallback result = %#v, want ExprMaybeOr", fallback.Body.Result)
+	}
+
+	pick := findFunction(t, program, "pick")
+	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatchMaybe {
+		t.Fatalf("pick result = %#v, want ExprMatchMaybe", pick.Body.Result)
+	}
+	if pick.Body.Result.SomeLocal < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("some local = %d, want local after params", pick.Body.Result.SomeLocal)
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing

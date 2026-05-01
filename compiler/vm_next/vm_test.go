@@ -134,6 +134,50 @@ func TestRunEntryEvaluatesEnumCatchAllWithCustomDiscriminants(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesMaybes(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		fn pick(value: Int?) Int {
+			match value {
+				v => v,
+				_ => 0,
+			}
+		}
+
+		let some = maybe::some(41)
+		let none: Int? = maybe::none()
+		if some.is_some() and none.is_none() {
+			pick(some) + none.or(1)
+		} else {
+			0
+		}
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesMaybeEqualityAndExpect(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		let left = maybe::some("ard")
+		let right = maybe::some("ard")
+		let empty: Str? = maybe::none()
+		if (left == right) and (not (left == empty)) {
+			left.expect("missing")
+		} else {
+			"bad"
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "ard" {
+		t.Fatalf("got %#v, want ard", got)
+	}
+}
+
 func TestRunTestsEvaluatesResultOutcomes(t *testing.T) {
 	vm := newVMFromSource(t, `
 		test fn passes() Void!Str {

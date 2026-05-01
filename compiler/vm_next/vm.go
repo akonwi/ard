@@ -237,6 +237,22 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return Result(expr.Type, expr.Kind == air.ExprMakeResultOk, value), nil
 	case air.ExprMatchEnum:
 		return f.evalEnumMatch(expr)
+	case air.ExprMakeMaybeSome:
+		value, err := f.evalExprPtr(expr.Target)
+		if err != nil {
+			return Value{}, err
+		}
+		return Maybe(expr.Type, true, value), nil
+	case air.ExprMakeMaybeNone:
+		return Maybe(expr.Type, false, f.vm.zeroValue(f.mustMaybeElem(expr.Type))), nil
+	case air.ExprMatchMaybe:
+		return f.evalMaybeMatch(expr)
+	case air.ExprMaybeExpect:
+		return f.evalMaybeExpect(expr)
+	case air.ExprMaybeIsNone, air.ExprMaybeIsSome:
+		return f.evalMaybePredicate(expr)
+	case air.ExprMaybeOr:
+		return f.evalMaybeOr(expr)
 	default:
 		return Value{}, fmt.Errorf("unsupported expr kind %d", expr.Kind)
 	}
@@ -313,6 +329,78 @@ func (f *frame) evalEnumMatch(expr air.Expr) (Value, error) {
 	return f.vm.zeroValue(expr.Type), nil
 }
 
+func (f *frame) evalMaybeMatch(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := subject.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if maybeValue.Some {
+		if int(expr.SomeLocal) < 0 || int(expr.SomeLocal) >= len(f.locals) {
+			return Value{}, fmt.Errorf("invalid Maybe match local id %d", expr.SomeLocal)
+		}
+		f.locals[expr.SomeLocal] = maybeValue.Value
+		return f.evalBlockWithDefault(expr.Some, expr.Type)
+	}
+	return f.evalBlockWithDefault(expr.None, expr.Type)
+}
+
+func (f *frame) evalMaybeExpect(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := subject.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if maybeValue.Some {
+		return maybeValue.Value, nil
+	}
+	message := "expected Maybe to contain a value"
+	if len(expr.Args) > 0 {
+		arg, err := f.evalExpr(expr.Args[0])
+		if err != nil {
+			return Value{}, err
+		}
+		message = arg.GoValueString()
+	}
+	return Value{}, fmt.Errorf("%s", message)
+}
+
+func (f *frame) evalMaybePredicate(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := subject.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	return Bool(expr.Type, expr.Kind == air.ExprMaybeIsSome && maybeValue.Some || expr.Kind == air.ExprMaybeIsNone && !maybeValue.Some), nil
+}
+
+func (f *frame) evalMaybeOr(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := subject.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if maybeValue.Some {
+		return maybeValue.Value, nil
+	}
+	if len(expr.Args) != 1 {
+		return Value{}, fmt.Errorf("Maybe.or expects one fallback argument, got %d", len(expr.Args))
+	}
+	return f.evalExpr(expr.Args[0])
+}
+
 func (f *frame) evalIntBinary(expr air.Expr) (Value, error) {
 	left, right, err := f.evalBinaryOperands(expr)
 	if err != nil {
@@ -358,11 +446,67 @@ func (f *frame) evalEquality(expr air.Expr) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	equal := left.GoValue() == right.GoValue()
+	equal := valuesEqual(left, right)
 	if expr.Kind == air.ExprNotEq {
 		equal = !equal
 	}
 	return Bool(expr.Type, equal), nil
+}
+
+func valuesEqual(left, right Value) bool {
+	if left.Kind == ValueMaybe && right.Kind == ValueMaybe {
+		leftMaybe, leftOK := left.Ref.(*MaybeValue)
+		rightMaybe, rightOK := right.Ref.(*MaybeValue)
+		if !leftOK || !rightOK {
+			return false
+		}
+		if leftMaybe.Some != rightMaybe.Some {
+			return false
+		}
+		if !leftMaybe.Some {
+			return true
+		}
+		return valuesEqual(leftMaybe.Value, rightMaybe.Value)
+	}
+	if left.Kind != right.Kind {
+		if (left.Kind == ValueInt || left.Kind == ValueEnum) && (right.Kind == ValueInt || right.Kind == ValueEnum) {
+			return left.Int == right.Int
+		}
+		return false
+	}
+	switch left.Kind {
+	case ValueVoid:
+		return true
+	case ValueInt, ValueEnum:
+		return left.Int == right.Int
+	case ValueFloat:
+		return left.Float == right.Float
+	case ValueBool:
+		return left.Bool == right.Bool
+	case ValueStr:
+		return left.Str == right.Str
+	case ValueStruct:
+		leftStruct, leftOK := left.Ref.(*StructValue)
+		rightStruct, rightOK := right.Ref.(*StructValue)
+		if !leftOK || !rightOK || len(leftStruct.Fields) != len(rightStruct.Fields) {
+			return false
+		}
+		for i := range leftStruct.Fields {
+			if !valuesEqual(leftStruct.Fields[i], rightStruct.Fields[i]) {
+				return false
+			}
+		}
+		return true
+	case ValueResult:
+		leftResult, leftOK := left.Ref.(*ResultValue)
+		rightResult, rightOK := right.Ref.(*ResultValue)
+		if !leftOK || !rightOK || leftResult.Ok != rightResult.Ok {
+			return false
+		}
+		return valuesEqual(leftResult.Value, rightResult.Value)
+	default:
+		return left.GoValue() == right.GoValue()
+	}
 }
 
 func (f *frame) evalComparison(expr air.Expr) (Value, error) {
@@ -467,6 +611,8 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 			return Enum(typeID, 0)
 		}
 		return Enum(typeID, typeInfo.Variants[0].Discriminant)
+	case air.TypeMaybe:
+		return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem))
 	case air.TypeStruct:
 		fields := make([]Value, len(typeInfo.Fields))
 		for _, field := range typeInfo.Fields {
@@ -478,4 +624,12 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 	default:
 		return Value{Type: typeID}
 	}
+}
+
+func (f *frame) mustMaybeElem(typeID air.TypeID) air.TypeID {
+	typeInfo, err := f.vm.typeInfo(typeID)
+	if err != nil || typeInfo.Kind != air.TypeMaybe {
+		return f.vm.mustTypeID(air.TypeVoid)
+	}
+	return typeInfo.Elem
 }

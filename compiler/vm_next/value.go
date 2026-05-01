@@ -15,6 +15,7 @@ const (
 	ValueBool
 	ValueStr
 	ValueEnum
+	ValueMaybe
 	ValueStruct
 	ValueResult
 )
@@ -38,6 +39,12 @@ type StructValue struct {
 type ResultValue struct {
 	Type  air.TypeID
 	Ok    bool
+	Value Value
+}
+
+type MaybeValue struct {
+	Type  air.TypeID
+	Some  bool
 	Value Value
 }
 
@@ -65,6 +72,10 @@ func Enum(typeID air.TypeID, discriminant int) Value {
 	return Value{Kind: ValueEnum, Type: typeID, Int: discriminant}
 }
 
+func Maybe(typeID air.TypeID, some bool, value Value) Value {
+	return Value{Kind: ValueMaybe, Type: typeID, Ref: &MaybeValue{Type: typeID, Some: some, Value: value}}
+}
+
 func Struct(typeID air.TypeID, fields []Value) Value {
 	return Value{Kind: ValueStruct, Type: typeID, Ref: &StructValue{Type: typeID, Fields: fields}}
 }
@@ -87,6 +98,12 @@ func (v Value) GoValue() any {
 		return v.Str
 	case ValueEnum:
 		return v.Int
+	case ValueMaybe:
+		maybeValue, ok := v.Ref.(*MaybeValue)
+		if !ok || !maybeValue.Some {
+			return nil
+		}
+		return maybeValue.Value.GoValue()
 	case ValueStruct:
 		structValue, ok := v.Ref.(*StructValue)
 		if !ok {
@@ -124,6 +141,17 @@ func (v Value) structValue() (*StructValue, error) {
 		return nil, fmt.Errorf("struct value has invalid payload %T", v.Ref)
 	}
 	return structValue, nil
+}
+
+func (v Value) maybeValue() (*MaybeValue, error) {
+	if v.Kind != ValueMaybe {
+		return nil, fmt.Errorf("expected Maybe value, got kind %d", v.Kind)
+	}
+	maybeValue, ok := v.Ref.(*MaybeValue)
+	if !ok || maybeValue == nil {
+		return nil, fmt.Errorf("Maybe value has invalid payload %T", v.Ref)
+	}
+	return maybeValue, nil
 }
 
 func (v Value) resultValue() (*ResultValue, error) {

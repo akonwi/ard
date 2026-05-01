@@ -476,6 +476,9 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 		if kind, ok := resultConstructorKind(call); ok {
 			return fl.lowerResultConstructor(kind, expected, call)
 		}
+		if kind, ok := maybeConstructorKind(call); ok {
+			return fl.lowerMaybeConstructor(kind, expected, call)
+		}
 	}
 	return fl.lowerExpr(expr)
 }
@@ -495,7 +498,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return nil, err
 		}
 		local := fl.defineLocal(s.Name, typeID, s.Mutable)
-		value, err := fl.lowerExpr(s.Value)
+		value, err := fl.lowerExprWithExpected(s.Value, typeID)
 		if err != nil {
 			return nil, err
 		}
@@ -509,7 +512,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 		if !ok {
 			return nil, fmt.Errorf("assignment to unknown local %s", target.Name())
 		}
-		value, err := fl.lowerExpr(s.Value)
+		value, err := fl.lowerExprWithExpected(s.Value, fl.fn.Locals[local].Type)
 		if err != nil {
 			return nil, err
 		}
@@ -558,12 +561,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ModuleFunctionCall:
+		if kind, ok := resultConstructorKind(e); ok {
+			return fl.lowerResultConstructor(kind, typeID, e)
+		}
+		if kind, ok := maybeConstructorKind(e); ok {
+			return fl.lowerMaybeConstructor(kind, typeID, e)
+		}
 		args, err := fl.lowerArgs(e.Call.Args)
 		if err != nil {
 			return nil, err
-		}
-		if kind, ok := resultConstructorKind(e); ok {
-			return fl.lowerResultConstructor(kind, typeID, e)
 		}
 		extern, err := fl.l.declareModuleCallExtern(e)
 		if err != nil {
@@ -578,6 +584,10 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
 	case *checker.EnumMatch:
 		return fl.lowerEnumMatch(typeID, e)
+	case *checker.MaybeMethod:
+		return fl.lowerMaybeMethod(typeID, e)
+	case *checker.OptionMatch:
+		return fl.lowerOptionMatch(typeID, e)
 	case *checker.IntAddition:
 		return fl.lowerBinary(ExprIntAdd, typeID, e.Left, e.Right)
 	case *checker.IntSubtraction:
@@ -682,6 +692,28 @@ func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, 
 	return &Expr{Kind: kind, Type: typeID, Target: &value}, nil
 }
 
+func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
+	switch kind {
+	case ExprMakeMaybeSome:
+		args, err := fl.lowerArgs(call.Call.Args)
+		if err != nil {
+			return nil, err
+		}
+		if len(args) != 1 {
+			return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
+		}
+		value := args[0]
+		return &Expr{Kind: kind, Type: typeID, Target: &value}, nil
+	case ExprMakeMaybeNone:
+		if len(call.Call.Args) != 0 {
+			return nil, fmt.Errorf("%s::%s expects no arguments", call.Module, call.Call.Name)
+		}
+		return &Expr{Kind: kind, Type: typeID}, nil
+	default:
+		return nil, fmt.Errorf("invalid Maybe constructor kind %d", kind)
+	}
+}
+
 func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatch) (*Expr, error) {
 	subject, err := fl.lowerExpr(match.Subject)
 	if err != nil {
@@ -728,6 +760,77 @@ func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatc
 	}, nil
 }
 
+func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.OptionMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	maybeType, ok := fl.l.typeInfo(subject.Type)
+	if !ok || maybeType.Kind != TypeMaybe {
+		return nil, fmt.Errorf("Maybe match lowered with non-Maybe subject %s", match.Subject.Type().String())
+	}
+	if match.Some == nil || match.Some.Pattern == nil || match.Some.Body == nil {
+		return nil, fmt.Errorf("Maybe match missing binding case")
+	}
+	if match.None == nil {
+		return nil, fmt.Errorf("Maybe match missing none case")
+	}
+
+	pattern := match.Some.Pattern.Name
+	oldLocal, hadOldLocal := fl.locals[pattern]
+	someLocal := fl.defineLocal(pattern, maybeType.Elem, false)
+	someBlock, err := fl.lowerBlock(match.Some.Body.Stmts)
+	if hadOldLocal {
+		fl.locals[pattern] = oldLocal
+	} else {
+		delete(fl.locals, pattern)
+	}
+	if err != nil {
+		return nil, err
+	}
+	noneBlock, err := fl.lowerBlock(match.None.Stmts)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Expr{
+		Kind:      ExprMatchMaybe,
+		Type:      typeID,
+		Target:    subject,
+		SomeLocal: someLocal,
+		Some:      someBlock,
+		None:      noneBlock,
+	}, nil
+}
+
+func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.MaybeMethod) (*Expr, error) {
+	target, err := fl.lowerExpr(method.Subject)
+	if err != nil {
+		return nil, err
+	}
+	args, err := fl.lowerArgs(method.Args)
+	if err != nil {
+		return nil, err
+	}
+
+	var kind ExprKind
+	switch method.Kind {
+	case checker.MaybeExpect:
+		kind = ExprMaybeExpect
+	case checker.MaybeIsNone:
+		kind = ExprMaybeIsNone
+	case checker.MaybeIsSome:
+		kind = ExprMaybeIsSome
+	case checker.MaybeOr:
+		kind = ExprMaybeOr
+	case checker.MaybeMap, checker.MaybeAndThen:
+		return nil, fmt.Errorf("unsupported AIR Maybe method requiring closures: %d", method.Kind)
+	default:
+		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
 func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 	if call.Module != "ard/result" {
 		return 0, false
@@ -737,6 +840,20 @@ func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 		return ExprMakeResultOk, true
 	case "err":
 		return ExprMakeResultErr, true
+	default:
+		return 0, false
+	}
+}
+
+func maybeConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
+	if call.Module != "ard/maybe" {
+		return 0, false
+	}
+	switch call.Call.Name {
+	case "some":
+		return ExprMakeMaybeSome, true
+	case "none":
+		return ExprMakeMaybeNone, true
 	default:
 		return 0, false
 	}
@@ -777,7 +894,7 @@ func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.Stru
 		if !ok {
 			continue
 		}
-		value, err := fl.lowerExpr(fieldExpr)
+		value, err := fl.lowerExprWithExpected(fieldExpr, field.Type)
 		if err != nil {
 			return nil, err
 		}

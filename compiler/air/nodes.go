@@ -61,6 +61,13 @@ const (
 	ExprMakeResultErr
 	ExprEnumVariant
 	ExprMatchEnum
+	ExprMakeMaybeSome
+	ExprMakeMaybeNone
+	ExprMatchMaybe
+	ExprMaybeExpect
+	ExprMaybeIsNone
+	ExprMaybeIsSome
+	ExprMaybeOr
 )
 
 type Expr struct {
@@ -94,6 +101,10 @@ type Expr struct {
 
 	EnumCases []EnumMatchCase
 	CatchAll  Block
+
+	SomeLocal LocalID
+	Some      Block
+	None      Block
 }
 
 type StructFieldValue struct {

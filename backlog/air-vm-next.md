@@ -629,7 +629,10 @@ Status: In progress
 - [x] Add struct layout metadata.
 - [x] Execute struct construction and field get/set by index.
 - [x] Execute enum construction, equality, and matching.
-- [ ] Execute `Maybe` values and helper operations.
+- [x] Execute `Maybe` constructors, equality, matching, and non-closure helper
+  operations.
+- [ ] Execute closure-based `Maybe` helpers such as `map` and `and_then` once
+  closure values exist.
 - [ ] Execute `Result` values and helper operations beyond `ok`/`err`
   constructors.
 - [ ] Add generated Go representation for Ard structs used by test FFI

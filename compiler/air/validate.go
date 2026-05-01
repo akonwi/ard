@@ -191,6 +191,17 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprMatchMaybe {
+		if expr.SomeLocal < 0 || int(expr.SomeLocal) >= len(fn.Locals) {
+			return fmt.Errorf("Maybe match binds invalid local %d", expr.SomeLocal)
+		}
+		if err := validateBlock(program, fn, expr.Some); err != nil {
+			return err
+		}
+		if err := validateBlock(program, fn, expr.None); err != nil {
+			return err
+		}
+	}
 	for _, arg := range expr.Args {
 		if err := validateExpr(program, fn, arg); err != nil {
 			return err
