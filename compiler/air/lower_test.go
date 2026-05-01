@@ -157,6 +157,22 @@ func TestLowerBoolMatch(t *testing.T) {
 	}
 }
 
+func TestLowerTemplateString(t *testing.T) {
+	program := lowerSource(t, `
+		let name = "Ada"
+		let age = 42
+		"{name} is {age}"
+	`)
+
+	script := program.Functions[program.Script]
+	if script.Body.Result == nil || script.Body.Result.Kind != ExprStrConcat {
+		t.Fatalf("script result = %#v, want ExprStrConcat", script.Body.Result)
+	}
+	if !containsExprKind(script.Body.Result, ExprToStr) {
+		t.Fatalf("script result = %#v, want ExprToStr inside concat tree", script.Body.Result)
+	}
+}
+
 func TestLowerWhileLoop(t *testing.T) {
 	program := lowerSource(t, `
 		mut count = 0
@@ -588,6 +604,21 @@ func findFunction(t *testing.T, program *Program, name string) Function {
 	}
 	t.Fatalf("function %s not found", name)
 	return Function{}
+}
+
+func containsExprKind(expr *Expr, kind ExprKind) bool {
+	if expr == nil {
+		return false
+	}
+	if expr.Kind == kind {
+		return true
+	}
+	return containsExprKind(expr.Target, kind) ||
+		containsExprKind(expr.Left, kind) ||
+		containsExprKind(expr.Right, kind) ||
+		containsExprKind(expr.Condition, kind) ||
+		containsExprKind(expr.Then.Result, kind) ||
+		containsExprKind(expr.Else.Result, kind)
 }
 
 func findType(t *testing.T, program *Program, name string) TypeInfo {

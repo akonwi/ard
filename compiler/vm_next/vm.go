@@ -2,7 +2,9 @@ package vm_next
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/akonwi/ard/air"
 )
@@ -281,6 +283,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalTraitUpcast(expr)
 	case air.ExprCallTrait:
 		return f.evalTraitCall(expr)
+	case air.ExprCopy:
+		return f.evalCopy(expr)
 	case air.ExprCallExtern:
 		args, err := f.evalArgs(expr.Args)
 		if err != nil {
@@ -289,8 +293,36 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.vm.callExtern(expr.Extern, args)
 	case air.ExprMakeList:
 		return f.evalMakeList(expr)
+	case air.ExprListAt:
+		return f.evalListAt(expr)
+	case air.ExprListPrepend, air.ExprListPush:
+		return f.evalListAppend(expr)
+	case air.ExprListSet:
+		return f.evalListSet(expr)
+	case air.ExprListSize:
+		return f.evalListSize(expr)
+	case air.ExprListSort:
+		return f.evalListSort(expr)
+	case air.ExprListSwap:
+		return f.evalListSwap(expr)
 	case air.ExprMakeMap:
 		return f.evalMakeMap(expr)
+	case air.ExprMapKeys:
+		return f.evalMapKeys(expr)
+	case air.ExprMapSize:
+		return f.evalMapSize(expr)
+	case air.ExprMapGet:
+		return f.evalMapGet(expr)
+	case air.ExprMapSet:
+		return f.evalMapSet(expr)
+	case air.ExprMapDrop:
+		return f.evalMapDrop(expr)
+	case air.ExprMapHas:
+		return f.evalMapHas(expr)
+	case air.ExprMapKeyAt:
+		return f.evalMapEntryAt(expr, true)
+	case air.ExprMapValueAt:
+		return f.evalMapEntryAt(expr, false)
 	case air.ExprMakeStruct:
 		return f.evalMakeStruct(expr)
 	case air.ExprGetField:
@@ -307,6 +339,10 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return Str(expr.Type, left.Str+right.Str), nil
 	case air.ExprToStr:
 		return f.evalToStr(expr)
+	case air.ExprToDynamic:
+		return f.evalToDynamic(expr)
+	case air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
+		return f.evalStrMethod(expr)
 	case air.ExprEq, air.ExprNotEq:
 		return f.evalEquality(expr)
 	case air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte:
@@ -422,6 +458,69 @@ func (f *frame) evalCallClosure(expr air.Expr) (Value, error) {
 		return Value{}, err
 	}
 	return f.vm.callClosure(target, args)
+}
+
+func (f *frame) evalCopy(expr air.Expr) (Value, error) {
+	value, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	return copyValue(value), nil
+}
+
+func copyValue(value Value) Value {
+	switch value.Kind {
+	case ValueStruct:
+		structValue, ok := value.Ref.(*StructValue)
+		if !ok || structValue == nil {
+			return value
+		}
+		fields := make([]Value, len(structValue.Fields))
+		for i, field := range structValue.Fields {
+			fields[i] = copyValue(field)
+		}
+		return Struct(value.Type, fields)
+	case ValueList:
+		listValue, ok := value.Ref.(*ListValue)
+		if !ok || listValue == nil {
+			return value
+		}
+		items := make([]Value, len(listValue.Items))
+		for i, item := range listValue.Items {
+			items[i] = copyValue(item)
+		}
+		return List(value.Type, items)
+	case ValueMap:
+		mapValue, ok := value.Ref.(*MapValue)
+		if !ok || mapValue == nil {
+			return value
+		}
+		entries := make([]MapEntryValue, len(mapValue.Entries))
+		for i, entry := range mapValue.Entries {
+			entries[i] = MapEntryValue{Key: copyValue(entry.Key), Value: copyValue(entry.Value)}
+		}
+		return Map(value.Type, entries)
+	case ValueMaybe:
+		maybeValue, ok := value.Ref.(*MaybeValue)
+		if !ok || maybeValue == nil {
+			return value
+		}
+		return Maybe(value.Type, maybeValue.Some, copyValue(maybeValue.Value))
+	case ValueResult:
+		resultValue, ok := value.Ref.(*ResultValue)
+		if !ok || resultValue == nil {
+			return value
+		}
+		return Result(value.Type, resultValue.Ok, copyValue(resultValue.Value))
+	case ValueUnion:
+		unionValue, ok := value.Ref.(*UnionValue)
+		if !ok || unionValue == nil {
+			return value
+		}
+		return Union(value.Type, unionValue.Tag, copyValue(unionValue.Value))
+	default:
+		return value
+	}
 }
 
 func (f *frame) evalSpawnFiber(expr air.Expr) (Value, error) {
@@ -542,6 +641,69 @@ func (f *frame) evalToStr(expr air.Expr) (Value, error) {
 	}
 }
 
+func (f *frame) evalToDynamic(expr air.Expr) (Value, error) {
+	value, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	return Dynamic(expr.Type, value.GoValue()), nil
+}
+
+func (f *frame) evalStrMethod(expr air.Expr) (Value, error) {
+	target, args, err := f.evalStrMethodArgs(expr)
+	if err != nil {
+		return Value{}, err
+	}
+	switch expr.Kind {
+	case air.ExprStrSize:
+		return Int(expr.Type, len(target)), nil
+	case air.ExprStrIsEmpty:
+		return Bool(expr.Type, target == ""), nil
+	case air.ExprStrContains:
+		return Bool(expr.Type, strings.Contains(target, args[0])), nil
+	case air.ExprStrReplace:
+		return Str(expr.Type, strings.Replace(target, args[0], args[1], 1)), nil
+	case air.ExprStrReplaceAll:
+		return Str(expr.Type, strings.ReplaceAll(target, args[0], args[1])), nil
+	case air.ExprStrSplit:
+		parts := strings.Split(target, args[0])
+		items := make([]Value, len(parts))
+		strType := f.vm.mustTypeID(air.TypeStr)
+		for i, part := range parts {
+			items[i] = Str(strType, part)
+		}
+		return List(expr.Type, items), nil
+	case air.ExprStrStartsWith:
+		return Bool(expr.Type, strings.HasPrefix(target, args[0])), nil
+	case air.ExprStrTrim:
+		return Str(expr.Type, strings.Trim(target, " ")), nil
+	default:
+		return Value{}, fmt.Errorf("unsupported string method expr %d", expr.Kind)
+	}
+}
+
+func (f *frame) evalStrMethodArgs(expr air.Expr) (string, []string, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return "", nil, err
+	}
+	if target.Kind != ValueStr {
+		return "", nil, fmt.Errorf("string method target must be Str, got kind %d", target.Kind)
+	}
+	args := make([]string, len(expr.Args))
+	for i, arg := range expr.Args {
+		value, err := f.evalExpr(arg)
+		if err != nil {
+			return "", nil, err
+		}
+		if value.Kind != ValueStr {
+			return "", nil, fmt.Errorf("string method arg %d must be Str, got kind %d", i, value.Kind)
+		}
+		args[i] = value.Str
+	}
+	return target.Str, args, nil
+}
+
 func (f *frame) evalMakeList(expr air.Expr) (Value, error) {
 	items := make([]Value, len(expr.Args))
 	for i, item := range expr.Args {
@@ -552,6 +714,120 @@ func (f *frame) evalMakeList(expr air.Expr) (Value, error) {
 		items[i] = value
 	}
 	return List(expr.Type, items), nil
+}
+
+func (f *frame) evalListAt(expr air.Expr) (Value, error) {
+	listValue, args, err := f.evalListMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	if args[0].Kind != ValueInt {
+		return Value{}, fmt.Errorf("list index must be Int, got kind %d", args[0].Kind)
+	}
+	index := args[0].Int
+	if index < 0 || index >= len(listValue.Items) {
+		return Value{}, fmt.Errorf("list index out of range")
+	}
+	return listValue.Items[index], nil
+}
+
+func (f *frame) evalListAppend(expr air.Expr) (Value, error) {
+	listValue, args, err := f.evalListMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	if expr.Kind == air.ExprListPrepend {
+		listValue.Items = append([]Value{args[0]}, listValue.Items...)
+	} else {
+		listValue.Items = append(listValue.Items, args[0])
+	}
+	return Int(expr.Type, len(listValue.Items)), nil
+}
+
+func (f *frame) evalListSet(expr air.Expr) (Value, error) {
+	listValue, args, err := f.evalListMethodArgs(expr, 2)
+	if err != nil {
+		return Value{}, err
+	}
+	if args[0].Kind != ValueInt {
+		return Value{}, fmt.Errorf("list index must be Int, got kind %d", args[0].Kind)
+	}
+	index := args[0].Int
+	if index < 0 || index >= len(listValue.Items) {
+		return Bool(expr.Type, false), nil
+	}
+	listValue.Items[index] = args[1]
+	return Bool(expr.Type, true), nil
+}
+
+func (f *frame) evalListSize(expr air.Expr) (Value, error) {
+	listValue, _, err := f.evalListMethodArgs(expr, 0)
+	if err != nil {
+		return Value{}, err
+	}
+	return Int(expr.Type, len(listValue.Items)), nil
+}
+
+func (f *frame) evalListSort(expr air.Expr) (Value, error) {
+	listValue, args, err := f.evalListMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	var sortErr error
+	sort.SliceStable(listValue.Items, func(i, j int) bool {
+		if sortErr != nil {
+			return false
+		}
+		value, err := f.vm.callClosure(args[0], []Value{listValue.Items[i], listValue.Items[j]})
+		if err != nil {
+			sortErr = err
+			return false
+		}
+		if value.Kind != ValueBool {
+			sortErr = fmt.Errorf("list sort comparator must return Bool, got kind %d", value.Kind)
+			return false
+		}
+		return value.Bool
+	})
+	if sortErr != nil {
+		return Value{}, sortErr
+	}
+	return f.vm.zeroValue(expr.Type), nil
+}
+
+func (f *frame) evalListSwap(expr air.Expr) (Value, error) {
+	listValue, args, err := f.evalListMethodArgs(expr, 2)
+	if err != nil {
+		return Value{}, err
+	}
+	if args[0].Kind != ValueInt || args[1].Kind != ValueInt {
+		return Value{}, fmt.Errorf("list swap indexes must be Int")
+	}
+	left, right := args[0].Int, args[1].Int
+	if left < 0 || left >= len(listValue.Items) || right < 0 || right >= len(listValue.Items) {
+		return Value{}, fmt.Errorf("list index out of range")
+	}
+	listValue.Items[left], listValue.Items[right] = listValue.Items[right], listValue.Items[left]
+	return f.vm.zeroValue(expr.Type), nil
+}
+
+func (f *frame) evalListMethodArgs(expr air.Expr, wantArgs int) (*ListValue, []Value, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return nil, nil, err
+	}
+	listValue, err := target.listValue()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(expr.Args) != wantArgs {
+		return nil, nil, fmt.Errorf("list method expects %d args, got %d", wantArgs, len(expr.Args))
+	}
+	args, err := f.evalArgs(expr.Args)
+	if err != nil {
+		return nil, nil, err
+	}
+	return listValue, args, nil
 }
 
 func (f *frame) evalMakeMap(expr air.Expr) (Value, error) {
@@ -568,6 +844,118 @@ func (f *frame) evalMakeMap(expr air.Expr) (Value, error) {
 		entries[i] = MapEntryValue{Key: key, Value: value}
 	}
 	return Map(expr.Type, entries), nil
+}
+
+func (f *frame) evalMapKeys(expr air.Expr) (Value, error) {
+	mapValue, _, err := f.evalMapMethodArgs(expr, 0)
+	if err != nil {
+		return Value{}, err
+	}
+	keys := make([]Value, len(mapValue.Entries))
+	for i, entry := range mapValue.Entries {
+		keys[i] = entry.Key
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return valuesLess(keys[i], keys[j])
+	})
+	return List(expr.Type, keys), nil
+}
+
+func (f *frame) evalMapSize(expr air.Expr) (Value, error) {
+	mapValue, _, err := f.evalMapMethodArgs(expr, 0)
+	if err != nil {
+		return Value{}, err
+	}
+	return Int(expr.Type, len(mapValue.Entries)), nil
+}
+
+func (f *frame) evalMapGet(expr air.Expr) (Value, error) {
+	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
+		return Maybe(expr.Type, true, mapValue.Entries[index].Value), nil
+	}
+	return Maybe(expr.Type, false, f.vm.zeroValue(f.mustMaybeElem(expr.Type))), nil
+}
+
+func (f *frame) evalMapSet(expr air.Expr) (Value, error) {
+	mapValue, args, err := f.evalMapMethodArgs(expr, 2)
+	if err != nil {
+		return Value{}, err
+	}
+	if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
+		mapValue.Entries[index].Value = args[1]
+	} else {
+		mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: args[0], Value: args[1]})
+	}
+	return Bool(expr.Type, true), nil
+}
+
+func (f *frame) evalMapDrop(expr air.Expr) (Value, error) {
+	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
+		mapValue.Entries = append(mapValue.Entries[:index], mapValue.Entries[index+1:]...)
+	}
+	return f.vm.zeroValue(expr.Type), nil
+}
+
+func (f *frame) evalMapHas(expr air.Expr) (Value, error) {
+	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	return Bool(expr.Type, mapEntryIndex(mapValue, args[0]) >= 0), nil
+}
+
+func (f *frame) evalMapEntryAt(expr air.Expr, key bool) (Value, error) {
+	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
+	if err != nil {
+		return Value{}, err
+	}
+	if args[0].Kind != ValueInt {
+		return Value{}, fmt.Errorf("map entry index must be Int, got kind %d", args[0].Kind)
+	}
+	index := args[0].Int
+	if index < 0 || index >= len(mapValue.Entries) {
+		return Value{}, fmt.Errorf("map entry index out of range")
+	}
+	if key {
+		return mapValue.Entries[index].Key, nil
+	}
+	return mapValue.Entries[index].Value, nil
+}
+
+func (f *frame) evalMapMethodArgs(expr air.Expr, wantArgs int) (*MapValue, []Value, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return nil, nil, err
+	}
+	mapValue, err := target.mapValue()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(expr.Args) != wantArgs {
+		return nil, nil, fmt.Errorf("map method expects %d args, got %d", wantArgs, len(expr.Args))
+	}
+	args, err := f.evalArgs(expr.Args)
+	if err != nil {
+		return nil, nil, err
+	}
+	return mapValue, args, nil
+}
+
+func mapEntryIndex(mapValue *MapValue, key Value) int {
+	for i, entry := range mapValue.Entries {
+		if valuesEqual(entry.Key, key) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (f *frame) evalGetField(expr air.Expr) (Value, error) {
@@ -1041,6 +1429,24 @@ func valuesEqual(left, right Value) bool {
 		return valuesEqual(leftResult.Value, rightResult.Value)
 	default:
 		return left.GoValue() == right.GoValue()
+	}
+}
+
+func valuesLess(left, right Value) bool {
+	if left.Kind != right.Kind {
+		return left.Kind < right.Kind
+	}
+	switch left.Kind {
+	case ValueInt, ValueEnum:
+		return left.Int < right.Int
+	case ValueFloat:
+		return left.Float < right.Float
+	case ValueBool:
+		return !left.Bool && right.Bool
+	case ValueStr:
+		return left.Str < right.Str
+	default:
+		return fmt.Sprint(left.GoValue()) < fmt.Sprint(right.GoValue())
 	}
 }
 

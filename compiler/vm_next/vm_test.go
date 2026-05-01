@@ -93,6 +93,29 @@ func TestRunEntryEvaluatesPrimitiveToStr(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesTemplateString(t *testing.T) {
+	got := runSource(t, `
+		let name = "Ada"
+		let age = 42
+		"{name} is {age}"
+	`)
+
+	if got.Kind != ValueStr || got.Str != "Ada is 42" {
+		t.Fatalf("got %#v, want Ada is 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesStringMethods(t *testing.T) {
+	got := runSource(t, `
+		let parts = "  ard lang  ".trim().split(" ")
+		parts.size() + parts.at(0).size() + parts.at(1).size()
+	`)
+
+	if got.Kind != ValueInt || got.Int != 9 {
+		t.Fatalf("got %#v, want int 9", got)
+	}
+}
+
 func TestRunEntryEvaluatesStdlibPrint(t *testing.T) {
 	var printed []string
 	got := runSourceWithExterns(t, `
@@ -153,6 +176,18 @@ func TestRunEntryEvaluatesScalarExtern(t *testing.T) {
 		extern fn floor(value: Float) Float = "FloatFloor"
 
 		floor(42.9)
+	`)
+
+	if got.Kind != ValueFloat || got.Float != 42 {
+		t.Fatalf("got %#v, want float 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesImportedModuleExtern(t *testing.T) {
+	got := runSource(t, `
+		use ard/float as Float
+
+		Float::from_int(42)
 	`)
 
 	if got.Kind != ValueFloat || got.Float != 42 {
@@ -599,6 +634,39 @@ func TestRunEntryEvaluatesIntRangeLoop(t *testing.T) {
 
 	if got.Kind != ValueInt || got.Int != 10 {
 		t.Fatalf("got %#v, want int 10", got)
+	}
+}
+
+func TestRunEntryEvaluatesListMethodsAndIteration(t *testing.T) {
+	got := runSource(t, `
+		mut numbers: [Int] = []
+		numbers.push(1)
+		numbers.push(2)
+		numbers.prepend(3)
+		numbers.set(1, 4)
+
+		mut total = numbers.size()
+		for number in numbers {
+			total = total + number
+		}
+		total + numbers.at(1)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 16 {
+		t.Fatalf("got %#v, want int 16", got)
+	}
+}
+
+func TestRunEntryCopiesMutableListInitializers(t *testing.T) {
+	got := runSource(t, `
+		let original = [1]
+		mut copied = original
+		copied.push(2)
+		original.size() + copied.size()
+	`)
+
+	if got.Kind != ValueInt || got.Int != 3 {
+		t.Fatalf("got %#v, want int 3", got)
 	}
 }
 

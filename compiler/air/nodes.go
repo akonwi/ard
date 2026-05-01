@@ -48,8 +48,24 @@ const (
 	ExprMatchUnion
 	ExprTraitUpcast
 	ExprCallTrait
+	ExprCopy
 	ExprMakeList
+	ExprListAt
+	ExprListPrepend
+	ExprListPush
+	ExprListSet
+	ExprListSize
+	ExprListSort
+	ExprListSwap
 	ExprMakeMap
+	ExprMapKeys
+	ExprMapSize
+	ExprMapGet
+	ExprMapSet
+	ExprMapDrop
+	ExprMapHas
+	ExprMapKeyAt
+	ExprMapValueAt
 	ExprMakeStruct
 	ExprGetField
 	ExprIntAdd
@@ -63,6 +79,15 @@ const (
 	ExprFloatDiv
 	ExprStrConcat
 	ExprToStr
+	ExprStrSize
+	ExprStrIsEmpty
+	ExprStrContains
+	ExprStrReplace
+	ExprStrReplaceAll
+	ExprStrSplit
+	ExprStrStartsWith
+	ExprToDynamic
+	ExprStrTrim
 	ExprEq
 	ExprNotEq
 	ExprLt

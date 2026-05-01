@@ -992,6 +992,12 @@ func (fl *functionLowerer) lowerStmts(stmt checker.Statement) ([]Stmt, error) {
 	if loop, ok := stmt.Stmt.(*checker.ForIntRange); ok {
 		return fl.lowerForIntRange(loop)
 	}
+	if loop, ok := stmt.Stmt.(*checker.ForInList); ok {
+		return fl.lowerForInList(loop)
+	}
+	if loop, ok := stmt.Stmt.(*checker.ForInMap); ok {
+		return fl.lowerForInMap(loop)
+	}
 	lowered, err := fl.lowerStmt(stmt)
 	if err != nil || lowered == nil {
 		return nil, err
@@ -1055,6 +1061,124 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 	return stmts, nil
 }
 
+func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, error) {
+	intType, err := fl.l.internType(checker.Int)
+	if err != nil {
+		return nil, err
+	}
+	boolType, err := fl.l.internType(checker.Bool)
+	if err != nil {
+		return nil, err
+	}
+	list, err := fl.lowerExpr(loop.List)
+	if err != nil {
+		return nil, err
+	}
+	listType, ok := fl.l.typeInfo(list.Type)
+	if !ok || listType.Kind != TypeList {
+		return nil, fmt.Errorf("for-in list lowered with non-list subject %s", loop.List.Type().String())
+	}
+
+	listLocal := fl.defineLocal(loop.Cursor+"$list", list.Type, false)
+	indexName := loop.Index
+	if indexName == "" {
+		indexName = loop.Cursor + "$index"
+	}
+	index := fl.defineLocal(indexName, intType, true)
+	cursor := fl.defineLocal(loop.Cursor, listType.Elem, false)
+
+	stmts := []Stmt{
+		{Kind: StmtLet, Local: listLocal, Name: loop.Cursor + "$list", Type: list.Type, Value: list},
+		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
+	}
+
+	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	body.Stmts = append([]Stmt{{
+		Kind:  StmtLet,
+		Local: cursor,
+		Name:  loop.Cursor,
+		Type:  listType.Elem,
+		Value: &Expr{Kind: ExprListAt, Type: listType.Elem, Target: loadLocal(list.Type, listLocal), Args: []Expr{*loadLocal(intType, index)}},
+	}}, body.Stmts...)
+	body.Stmts = append(body.Stmts, Stmt{
+		Kind:  StmtAssign,
+		Local: index,
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+	})
+
+	stmts = append(stmts, Stmt{
+		Kind:      StmtWhile,
+		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprListSize, Type: intType, Target: loadLocal(list.Type, listLocal)}},
+		Body:      body,
+	})
+	return stmts, nil
+}
+
+func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error) {
+	intType, err := fl.l.internType(checker.Int)
+	if err != nil {
+		return nil, err
+	}
+	boolType, err := fl.l.internType(checker.Bool)
+	if err != nil {
+		return nil, err
+	}
+	m, err := fl.lowerExpr(loop.Map)
+	if err != nil {
+		return nil, err
+	}
+	mapType, ok := fl.l.typeInfo(m.Type)
+	if !ok || mapType.Kind != TypeMap {
+		return nil, fmt.Errorf("for-in map lowered with non-map subject %s", loop.Map.Type().String())
+	}
+
+	mapLocal := fl.defineLocal(loop.Key+"$map", m.Type, false)
+	index := fl.defineLocal(loop.Key+"$index", intType, true)
+	key := fl.defineLocal(loop.Key, mapType.Key, false)
+	value := fl.defineLocal(loop.Val, mapType.Value, false)
+
+	stmts := []Stmt{
+		{Kind: StmtLet, Local: mapLocal, Name: loop.Key + "$map", Type: m.Type, Value: m},
+		{Kind: StmtLet, Local: index, Name: loop.Key + "$index", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
+	}
+
+	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	body.Stmts = append([]Stmt{
+		{
+			Kind:  StmtLet,
+			Local: key,
+			Name:  loop.Key,
+			Type:  mapType.Key,
+			Value: &Expr{Kind: ExprMapKeyAt, Type: mapType.Key, Target: loadLocal(m.Type, mapLocal), Args: []Expr{*loadLocal(intType, index)}},
+		},
+		{
+			Kind:  StmtLet,
+			Local: value,
+			Name:  loop.Val,
+			Type:  mapType.Value,
+			Value: &Expr{Kind: ExprMapValueAt, Type: mapType.Value, Target: loadLocal(m.Type, mapLocal), Args: []Expr{*loadLocal(intType, index)}},
+		},
+	}, body.Stmts...)
+	body.Stmts = append(body.Stmts, Stmt{
+		Kind:  StmtAssign,
+		Local: index,
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+	})
+
+	stmts = append(stmts, Stmt{
+		Kind:      StmtWhile,
+		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprMapSize, Type: intType, Target: loadLocal(m.Type, mapLocal)}},
+		Body:      body,
+	})
+	return stmts, nil
+}
+
 func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Block, error) {
 	var block Block
 	for _, stmt := range stmts {
@@ -1083,6 +1207,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstBool, Type: typeID, Bool: e.Value}, nil
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
+	case *checker.TemplateStr:
+		return fl.lowerTemplateStr(typeID, e)
+	case *checker.CopyExpression:
+		value, err := fl.lowerExprWithExpected(e.Expr, typeID)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprCopy, Type: typeID, Target: value}, nil
 	case *checker.Variable:
 		local, ok, err := fl.resolveLocal(e.Name())
 		if err != nil {
@@ -1175,6 +1307,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
 		}
+		if id, ok, err := fl.l.resolveModuleExtern(e.Module, e.Call.Name); err != nil {
+			return nil, err
+		} else if ok {
+			args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Externs[id].Signature)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
+		}
 		extern, err := fl.l.declareModuleCallExtern(e)
 		if err != nil {
 			return nil, err
@@ -1195,25 +1336,35 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.InstanceMethod:
 		return fl.lowerInstanceMethod(typeID, e)
 	case *checker.StrMethod:
-		if e.Kind == checker.StrToStr {
-			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
-		}
-		return nil, fmt.Errorf("unsupported AIR Str method %d", e.Kind)
+		return fl.lowerStrMethod(typeID, e)
 	case *checker.IntMethod:
 		if e.Kind == checker.IntToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		if e.Kind == checker.IntToDyn {
+			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
 		}
 		return nil, fmt.Errorf("unsupported AIR Int method %d", e.Kind)
 	case *checker.FloatMethod:
 		if e.Kind == checker.FloatToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
+		if e.Kind == checker.FloatToDyn {
+			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
+		}
 		return nil, fmt.Errorf("unsupported AIR Float method %d", e.Kind)
 	case *checker.BoolMethod:
 		if e.Kind == checker.BoolToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
+		if e.Kind == checker.BoolToDyn {
+			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
+		}
 		return nil, fmt.Errorf("unsupported AIR Bool method %d", e.Kind)
+	case *checker.ListMethod:
+		return fl.lowerListMethod(typeID, e)
+	case *checker.MapMethod:
+		return fl.lowerMapMethod(typeID, e)
 	case *checker.EnumVariant:
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
 	case *checker.BoolMatch:
@@ -1621,6 +1772,143 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
 }
 
+func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMethod) (*Expr, error) {
+	strType, err := fl.l.internType(checker.Str)
+	if err != nil {
+		return nil, err
+	}
+
+	var kind ExprKind
+	var expected []TypeID
+	switch method.Kind {
+	case checker.StrSize:
+		kind = ExprStrSize
+	case checker.StrIsEmpty:
+		kind = ExprStrIsEmpty
+	case checker.StrContains:
+		kind = ExprStrContains
+		expected = []TypeID{strType}
+	case checker.StrReplace:
+		kind = ExprStrReplace
+		expected = []TypeID{strType, strType}
+	case checker.StrReplaceAll:
+		kind = ExprStrReplaceAll
+		expected = []TypeID{strType, strType}
+	case checker.StrSplit:
+		kind = ExprStrSplit
+		expected = []TypeID{strType}
+	case checker.StrStartsWith:
+		kind = ExprStrStartsWith
+		expected = []TypeID{strType}
+	case checker.StrToStr:
+		kind = ExprToStr
+	case checker.StrToDyn:
+		kind = ExprToDynamic
+	case checker.StrTrim:
+		kind = ExprStrTrim
+	default:
+		return nil, fmt.Errorf("unsupported AIR Str method %d", method.Kind)
+	}
+
+	target, err := fl.lowerExpr(method.Subject)
+	if err != nil {
+		return nil, err
+	}
+	args, err := fl.lowerArgsWithTypeIDs(method.Args, expected)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
+func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMethod) (*Expr, error) {
+	target, err := fl.lowerExpr(method.Subject)
+	if err != nil {
+		return nil, err
+	}
+	listType, ok := fl.l.typeInfo(target.Type)
+	if !ok || listType.Kind != TypeList {
+		return nil, fmt.Errorf("List method lowered with non-list subject %s", method.Subject.Type().String())
+	}
+
+	intType, err := fl.l.internType(checker.Int)
+	if err != nil {
+		return nil, err
+	}
+
+	var kind ExprKind
+	var expected []TypeID
+	switch method.Kind {
+	case checker.ListAt:
+		kind = ExprListAt
+		expected = []TypeID{intType}
+	case checker.ListPrepend:
+		kind = ExprListPrepend
+		expected = []TypeID{listType.Elem}
+	case checker.ListPush:
+		kind = ExprListPush
+		expected = []TypeID{listType.Elem}
+	case checker.ListSet:
+		kind = ExprListSet
+		expected = []TypeID{intType, listType.Elem}
+	case checker.ListSize:
+		kind = ExprListSize
+	case checker.ListSort:
+		kind = ExprListSort
+	case checker.ListSwap:
+		kind = ExprListSwap
+		expected = []TypeID{intType, intType}
+	default:
+		return nil, fmt.Errorf("unsupported AIR List method %d", method.Kind)
+	}
+
+	args, err := fl.lowerArgsWithTypeIDs(method.Args, expected)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
+func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMethod) (*Expr, error) {
+	target, err := fl.lowerExpr(method.Subject)
+	if err != nil {
+		return nil, err
+	}
+	mapType, ok := fl.l.typeInfo(target.Type)
+	if !ok || mapType.Kind != TypeMap {
+		return nil, fmt.Errorf("Map method lowered with non-map subject %s", method.Subject.Type().String())
+	}
+
+	var kind ExprKind
+	var expected []TypeID
+	switch method.Kind {
+	case checker.MapKeys:
+		kind = ExprMapKeys
+	case checker.MapSize:
+		kind = ExprMapSize
+	case checker.MapGet:
+		kind = ExprMapGet
+		expected = []TypeID{mapType.Key}
+	case checker.MapSet:
+		kind = ExprMapSet
+		expected = []TypeID{mapType.Key, mapType.Value}
+	case checker.MapDrop:
+		kind = ExprMapDrop
+		expected = []TypeID{mapType.Key}
+	case checker.MapHas:
+		kind = ExprMapHas
+		expected = []TypeID{mapType.Key}
+	default:
+		return nil, fmt.Errorf("unsupported AIR Map method %d", method.Kind)
+	}
+
+	args, err := fl.lowerArgsWithTypeIDs(method.Args, expected)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
 func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.ResultMatch) (*Expr, error) {
 	subject, err := fl.lowerExpr(match.Subject)
 	if err != nil {
@@ -1834,6 +2122,25 @@ func (fl *functionLowerer) lowerUnary(kind ExprKind, typeID TypeID, valueExpr ch
 	return &Expr{Kind: kind, Type: typeID, Target: value}, nil
 }
 
+func (fl *functionLowerer) lowerTemplateStr(typeID TypeID, template *checker.TemplateStr) (*Expr, error) {
+	if len(template.Chunks) == 0 {
+		return &Expr{Kind: ExprConstStr, Type: typeID}, nil
+	}
+
+	current, err := fl.lowerExprWithExpected(template.Chunks[0], typeID)
+	if err != nil {
+		return nil, err
+	}
+	for i := 1; i < len(template.Chunks); i++ {
+		next, err := fl.lowerExprWithExpected(template.Chunks[i], typeID)
+		if err != nil {
+			return nil, err
+		}
+		current = &Expr{Kind: ExprStrConcat, Type: typeID, Left: current, Right: next}
+	}
+	return current, nil
+}
+
 func loadLocal(typeID TypeID, local LocalID) *Expr {
 	return &Expr{Kind: ExprLoadLocal, Type: typeID, Local: local}
 }
@@ -2045,6 +2352,15 @@ func (l *lowerer) lookupFunctionInModule(modulePath, name string) (FunctionID, b
 	return id, ok
 }
 
+func (l *lowerer) lookupExternInModule(modulePath, name string) (ExternID, bool) {
+	moduleID, ok := l.moduleByPath[modulePath]
+	if !ok {
+		return 0, false
+	}
+	id, ok := l.externs[functionKey(moduleID, name)]
+	return id, ok
+}
+
 func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bool, error) {
 	if id, ok := l.lookupFunctionInModule(modulePath, name); ok {
 		return id, true, nil
@@ -2061,6 +2377,25 @@ func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bo
 		return NoFunction, false, err
 	}
 	id, ok := l.lookupFunctionInModule(modulePath, name)
+	return id, ok, nil
+}
+
+func (l *lowerer) resolveModuleExtern(modulePath, name string) (ExternID, bool, error) {
+	if id, ok := l.lookupExternInModule(modulePath, name); ok {
+		return id, true, nil
+	}
+
+	mod, ok := l.moduleByName[modulePath]
+	if !ok {
+		return 0, false, nil
+	}
+	if mod.Program() == nil {
+		return 0, false, nil
+	}
+	if err := l.lowerModule(mod, false); err != nil {
+		return 0, false, err
+	}
+	id, ok := l.lookupExternInModule(modulePath, name)
 	return id, ok, nil
 }
 
