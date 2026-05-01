@@ -1,0 +1,654 @@
+# AIR and vm_next Architecture
+
+This document captures the proposed direction for moving Ard toward a stand-alone,
+multi-target typed language without making Go the semantic center.
+
+The goal is not to refactor the current bytecode VM in place. The current VM is
+deeply shaped around `runtime.Object`, checker-backed runtime metadata, and
+object-oriented FFI wrappers. Instead, this direction introduces a shared Ard IR
+and a new VM implementation that can prove the model before a new Go target is
+built from scratch around it.
+
+## Goals
+
+- Define a target-neutral Ard IR that becomes the shared source for future
+  backends.
+- Build `vm_next` from scratch against that IR without `runtime.Object`.
+- Preserve Ard's syntax, testing model, multi-target support, and single-file
+  executable story.
+- Make FFI signature-driven and target-native by default.
+- Allow the standard library to be self-hosted in Ard wherever possible.
+- Leave room for a later `go_next` backend that consumes the same IR and emits
+  idiomatic Go without preserving the current Go targeting code.
+
+## Non-goals
+
+- Do not make the VM representation the language ABI.
+- Do not expose a universal boxed Ard value.
+- Do not treat `Dynamic` as a castable boxed value.
+- Do not force Ard closures to masquerade as native host closures in the VM.
+- Do not attempt full current-VM parity before the IR shape is proven by small
+  vertical slices.
+
+## High-level plan
+
+```text
+parse AST
+  -> checker validates Ard semantics
+  -> AIR lowering produces typed, target-neutral IR
+  -> AIR validator checks backend-facing invariants
+  -> vm_next executes AIR/lowered AIR bytecode
+  -> go_next later emits Go from the same AIR
+```
+
+The order of work should be:
+
+1. Build AIR.
+2. Use AIR to build `vm_next`.
+   - Generate target adapters for FFI from Ard signatures.
+   - Get to behavioral parity with the current VM.
+3. Use AIR to build `go_next` from scratch.
+   - Coalesce Ard stdlib FFI bindings into idiomatic generated Go where possible.
+   - Keep host-specific capabilities behind explicit externs and generated
+     adapters.
+
+## AIR
+
+AIR is a typed, target-neutral, runtime-independent representation of Ard after
+checking. It is not parse AST, checker AST, bytecode, Go IR, or a VM object
+model.
+
+AIR should be structured enough for source-oriented diagnostics and simple
+backend lowering, but lowered enough that backends do not rediscover semantic
+facts through `checker.Type` assertions.
+
+### Program model
+
+Illustrative shape:
+
+```go
+type Program struct {
+    Modules []Module
+    Types   TypeTable
+    Traits  []Trait
+    Impls   []Impl
+    Externs []Extern
+    Tests   []Test
+    Entry   FunctionID
+}
+
+type Module struct {
+    ID        ModuleID
+    Path      string
+    Imports   []ModuleID
+    Types     []TypeID
+    Functions []FunctionID
+}
+
+type Function struct {
+    ID        FunctionID
+    Module    ModuleID
+    Name      string
+    Signature Signature
+    Captures  []Capture
+    Body      Block
+    IsTest    bool
+}
+
+type Signature struct {
+    Params []Param
+    Return TypeID
+}
+```
+
+All executable AIR should use concrete `TypeID`s. Generic source declarations can
+remain checker/lowering concerns, but runtime AIR should operate on specialized
+signatures and concrete type layouts.
+
+### Type table
+
+AIR owns compact type metadata for backends:
+
+```go
+type TypeKind uint8
+
+const (
+    TypeVoid TypeKind = iota
+    TypeInt
+    TypeFloat
+    TypeBool
+    TypeStr
+    TypeList
+    TypeMap
+    TypeStruct
+    TypeEnum
+    TypeOption
+    TypeResult
+    TypeUnion
+    TypeDynamic
+    TypeExtern
+    TypeFunction
+    TypeFiber
+    TypeTraitObject
+)
+
+type TypeInfo struct {
+    ID   TypeID
+    Kind TypeKind
+    Name string
+
+    Elem  TypeID // list, option, fiber
+    Key   TypeID // map
+    Value TypeID // map value or result ok
+    Error TypeID // result err
+
+    Fields   []FieldInfo
+    Variants []VariantInfo
+    Members  []UnionMember
+
+    Params []TypeID
+    Return TypeID
+    Trait  TraitID
+}
+```
+
+Struct layout must be index-based:
+
+```go
+type FieldInfo struct {
+    Name  string
+    Type  TypeID
+    Index int
+}
+```
+
+Backends should see `Request.body` as a field index, not as a runtime map lookup.
+Debugging and diagnostics can resolve field names through shared metadata.
+
+### Statements and expressions
+
+AIR v1 should use structured statements and expressions, not SSA.
+
+Every expression carries its `TypeID` and source span:
+
+```go
+type Expr struct {
+    Kind ExprKind
+    Type TypeID
+    Loc  SourceSpan
+}
+```
+
+Representative operations:
+
+- constants and local loads
+- `let`, assignment, return, break
+- `if`, `while`, range and collection loops
+- direct calls, extern calls, closure calls
+- closure construction with explicit capture layout
+- struct construction, field get/set by index
+- list and map construction and operations
+- enum construction and matching
+- option/result construction, matching, and `try`
+- union wrapping and matching
+- trait upcast and trait method call
+- fiber spawn/get/wait intrinsics
+
+The AIR validator should reject unresolved IDs, bad field indexes, call
+signature mismatches, illegal assignments, invalid extern signatures, and async
+captures that violate the language's isolation/send rules.
+
+## Runtime value model
+
+`vm_next` should not import or recreate `runtime.Object`. It may have an
+execution `Value`, but that value is an implementation detail of the VM, not a
+language object or FFI ABI.
+
+Illustrative VM value shape:
+
+```go
+type Value struct {
+    kind Kind
+    bits uint64
+    ref  uint32
+}
+```
+
+Heap/runtime shapes are explicit:
+
+```go
+type StructValue struct {
+    Type   TypeID
+    Fields []Value
+}
+
+type ListValue struct {
+    Elem  TypeID
+    Items []Value
+}
+
+type MapValue struct {
+    Key     TypeID
+    Value   TypeID
+    Storage VMMap
+}
+
+type OptionValue struct {
+    Some  bool
+    Value Value
+}
+
+type ResultValue struct {
+    Ok    bool
+    Value Value
+}
+
+type UnionValue struct {
+    Union TypeID
+    Tag   uint32
+    Value Value
+}
+
+type ExternValue struct {
+    Type   TypeID
+    Handle any
+}
+
+type DynamicValue struct {
+    Raw any
+}
+```
+
+Runtime values do not carry `checker.Type`. Generic refinement is a compile-time
+or AIR-lowering concern, not a runtime mutation.
+
+## Dynamic
+
+`Dynamic` is not a boxed Ard value. It is opaque external or serialized data,
+closer to TypeScript `unknown` or Go `any`, but without general casting.
+
+Normal Ard code should not inspect the raw value. It should go through
+self-hosted decoders and small host-provided primitives:
+
+```ard
+json::parse(Str) Dynamic!Str
+decode::string(Dynamic) Str![decode::Error]
+decode::int(Dynamic) Int![decode::Error]
+decode::list(Dynamic, decode::Decoder<$T>) [$T]![decode::Error]
+```
+
+There should be no general `Dynamic as T` path.
+
+## FFI
+
+FFI should be signature-driven. Ard types map to target-native representations,
+and generated adapters perform the boundary conversion.
+
+For Go, the intended mapping is:
+
+```text
+Int          -> int
+Float        -> float64
+Bool         -> bool
+Str          -> string
+[T]          -> []T
+[K:V]        -> map[K]V for Ard-keyable K
+struct       -> generated Go struct
+enum         -> generated named integer type
+T?           -> ardrt.Maybe[T] by default
+T!E          -> ardrt.Result[T,E] or `(T, error)` where the binding says so
+Dynamic      -> opaque dynamic representation / any behind decode APIs
+extern type  -> host resource handle
+fn(...) ...  -> native function only in generated Go backend; callback handle in VM
+```
+
+The old shape:
+
+```go
+func(args []*runtime.Object) *runtime.Object
+```
+
+should not exist in the new architecture.
+
+### Generated structs
+
+Public Ard structs used across extern boundaries should generate target
+representations.
+
+```ard
+struct User {
+  id: Int,
+  name: Str,
+  email: Str?,
+}
+```
+
+Go target representation:
+
+```go
+type User struct {
+    Id    int
+    Name  string
+    Email ardrt.Maybe[string]
+}
+```
+
+Host bindings should accept generated Ard target structs by default. Host-native
+structs can be supported later through explicit adapters, not implicit structural
+matching.
+
+### Opaque externs
+
+Host values that do not fit Ard's type system should use `extern type`.
+
+Examples:
+
+```ard
+extern type TcpListener
+extern type TcpConn
+extern type RawRequest
+extern type DB
+```
+
+Opaque values are not serializable by default and can only be passed to externs
+or Ard functions that explicitly accept that extern type.
+
+## Closures and callbacks
+
+Closures need different target representations:
+
+```text
+VM backend:
+  Closure { fnID, captures, signature }
+
+Go backend:
+  generated native Go closure
+
+JS backend:
+  native JS function or async function
+```
+
+For the VM, arbitrary host FFI should not receive native Go closures. It should
+receive typed callback handles.
+
+Conceptual host-facing shape:
+
+```go
+type Callback2[A, B any] struct {
+    // runtime-owned callback handle
+}
+
+func (cb Callback2[A, B]) Call(a A, b B) error
+```
+
+The callback adapter owns:
+
+- conversion between host values and VM values
+- isolated or scheduled VM invocation
+- panic/error handling
+- callback lifetime
+- concurrency policy
+
+When Ard is compiled to Go, the same AIR closure can lower to a real Go closure.
+That distinction keeps the VM from pretending Ard closures are Go functions.
+
+## Async
+
+Async should be an Ard runtime/backend primitive, not ordinary FFI.
+
+The public stdlib can keep ergonomic functions like:
+
+```ard
+extern type Fiber<$T>
+
+fn start(do: fn() Void) Fiber<Void>
+fn eval(do: fn() $T) Fiber<$T>
+fn join(fiber: Fiber<$T>) Void
+fn get(fiber: Fiber<$T>) $T
+```
+
+But AIR should lower `start`/`eval` to a fiber spawn operation rather than a
+normal extern call:
+
+```text
+MakeClosure
+SpawnFiber
+```
+
+Backends then implement spawn naturally:
+
+- VM: child VM fiber or scheduler fiber
+- Go: goroutine plus fiber/result handle
+- JS: Promise/fiber runtime
+
+Async capture rules should preserve the current useful restriction: spawned
+closures cannot capture mutable outer state. Longer term, this should become a
+`Send`-like rule:
+
+- immutable captures are allowed
+- mutable captures are rejected unless represented through safe concurrency
+  primitives
+- extern handles are not capturable unless the extern type is marked fiber-safe
+
+## HTTP and self-hosted stdlib
+
+The current `ard/http` public interface is a good target shape, but the internals
+should move toward self-hosted Ard where possible.
+
+Current interface:
+
+```ard
+struct Request { ... }
+struct Response { ... }
+type HandlerFn = fn(Request, mut Response)
+extern fn serve(port: Int, handlers: [Str: HandlerFn]) Void!Str
+```
+
+Challenges under the new model:
+
+- `serve` accepts closures, so in the VM it needs callback handles rather than
+  normal scalar/container FFI.
+- `mut Response` requires by-reference callback parameters in AIR and backend
+  adapters.
+- `RawRequest` and `RawResponse` should remain opaque target handles.
+- `Dynamic?` request bodies blur transport bytes with unknown decoded data; a
+  future `Bytes` type would make pure Ard HTTP more realistic.
+
+Longer term, Ard can implement most of a Go `net/http`-style stack in Ard:
+
+```ard
+fn serve(port: Int, handlers: [Str: HandlerFn]) Void!Str {
+  let listener = try tcp::listen(port)
+  while true {
+    let conn = try listener.accept()
+    async::start(fn() {
+      handle_connection(conn, handlers)
+    })
+  }
+}
+```
+
+The host layer would provide low-level opaque resources:
+
+```ard
+extern type TcpListener
+extern type TcpConn
+
+extern fn listen(port: Int) TcpListener!Str
+extern fn accept(listener: TcpListener) TcpConn!Str
+extern fn read(conn: TcpConn, max: Int) Bytes!Str
+extern fn write(conn: TcpConn, data: Bytes) Void!Str
+extern fn close(conn: TcpConn) Void
+```
+
+Pure Ard code would own HTTP parsing, routing, headers, request/response structs,
+middleware, decoders, response serialization, and test helpers. TLS and HTTP/2 can
+remain host-provided until the lower-level pieces are mature.
+
+## Unions
+
+User type unions should be first-class tagged sums in AIR.
+
+```ard
+type Printable = Str | Int
+```
+
+AIR type metadata:
+
+```go
+type UnionMember struct {
+    Type TypeID
+    Tag  uint32
+    Name string
+}
+```
+
+AIR operations:
+
+```text
+UnionWrap union=Printable member=Str value=...
+MatchUnion subject=... cases=[...]
+```
+
+Runtime representation:
+
+```go
+type UnionValue struct {
+    Union TypeID
+    Tag   uint32
+    Value Value
+}
+```
+
+Backends should emit generated tagged representations, not `any`, for unions
+that cross backend or FFI boundaries. This keeps unions portable and avoids
+target runtime ambiguity.
+
+`Maybe` and `Result` remain explicit built-ins rather than ordinary unions so
+backends can optimize `try`, matching, and common method operations directly.
+
+## Traits
+
+Traits also need explicit AIR representation. Split the concepts:
+
+- trait object: runtime value of some type implementing a trait
+- trait bound: compile-time generic constraint, later optimized through static
+  dispatch or monomorphization
+
+AIR tables:
+
+```go
+type Trait struct {
+    ID      TraitID
+    Name    string
+    Methods []TraitMethod
+}
+
+type Impl struct {
+    ID      ImplID
+    Trait   TraitID
+    ForType TypeID
+    Methods []FunctionID
+}
+```
+
+AIR operations:
+
+```text
+TraitUpcast value=book trait=ToString impl=BookToStringImpl
+CallTrait receiver=item trait=ToString method=0
+```
+
+VM representation:
+
+```go
+type TraitObject struct {
+    Trait TraitID
+    Impl  ImplID
+    Value Value
+}
+```
+
+Concrete method calls should remain direct when the receiver type is statically
+known. Dynamic dispatch should only be paid at trait-typed boundaries.
+
+Trait objects should not cross FFI initially. If a host type should implement an
+Ard trait, model it as an `extern type` plus an Ard trait impl whose methods are
+extern-backed.
+
+## Standard library model
+
+The stdlib should be split by capability:
+
+- self-hosted Ard modules for data structures, decoders, result/maybe helpers,
+  routing, tests, and pure protocol logic
+- small target externs for privileged host capabilities like clock, filesystem,
+  network, process/env, crypto primitives, JSON parse/stringify to `Dynamic`,
+  and low-level server/socket hooks
+
+Rule of thumb:
+
+> If it can be expressed in Ard without privileged host access, it belongs in Ard.
+
+The `go_next` backend can then coalesce Ard stdlib and extern bindings into
+idiomatic generated Go. For example, pure Ard modules become generated Go from
+AIR, while low-level externs become direct Go calls or generated adapters.
+
+## Milestones
+
+### Milestone 1: AIR skeleton
+
+- Define AIR program, type, function, statement, and expression data structures.
+- Lower a tiny checked program to AIR.
+- Add an AIR validator.
+- Ensure AIR does not import `runtime.Object` or expose `checker.Type` to
+  backend execution.
+
+### Milestone 2: vm_next scalar execution
+
+- Execute constants, locals, arithmetic, direct function calls, conditionals, and
+  returns.
+- Add minimal test harness integration for AIR programs.
+
+### Milestone 3: layouts and generated data
+
+- Add struct layout metadata.
+- Execute struct construction, field get/set by index, enums, options, and
+  results.
+- Add generated Go representation for Ard structs used by test FFI examples.
+
+### Milestone 4: FFI adapters
+
+- Generate VM FFI adapters from Ard signatures.
+- Support scalar parameters/returns, generated structs, options/results, extern
+  handles, and maps/lists of representable values.
+- Keep raw escape hatches out of the default path.
+
+### Milestone 5: closures and async
+
+- Add closure values and capture layout.
+- Add fiber spawn/get/wait as AIR intrinsics.
+- Enforce async capture isolation.
+- Add typed callback handles for VM-to-host callback APIs.
+
+### Milestone 6: complicated types
+
+- Add user unions as tagged sums.
+- Add trait and impl tables.
+- Add trait objects with explicit upcast and method dispatch.
+
+### Milestone 7: vm_next parity
+
+- Run current VM behavioral tests against `vm_next`.
+- Support `ard run --target vm_next` for all sample programs.
+- Add `vm_next` to the benchmark suite.
+- Add conformance tests that can run against current VM, `vm_next`, and later
+  `go_next`.
+
+### Milestone 8: go_next from AIR
+
+- Build the Go target from scratch against AIR.
+- Do not preserve or adapt the current Go targeting implementation unless a
+  small piece is independently useful.
+- Generate native Go structs, tagged unions, fiber/runtime helpers, and
+  idiomatic host FFI adapters.

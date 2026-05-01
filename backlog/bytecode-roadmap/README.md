@@ -7,6 +7,7 @@ Active backlog docs:
 - `go-backend.md`: optional Go codegen notes and pitfalls
 - `performance.md`: VM/FFI profiling and runtime optimization backlog
 - `value-native-vm.md`: sketch for eliminating `runtime.Object` and moving to a Go-native VM value model
+- `../air-vm-next.md`: AIR plus `vm_next` architecture for a clean runtime/FFI redesign and later Go target rewrite
 
 Historical/reference docs moved to `compiler/docs`:
 - `compiler/docs/bytecode-roadmap-overview.md`
