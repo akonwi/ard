@@ -269,6 +269,14 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	for _, entry := range expr.Entries {
+		if err := validateExpr(program, fn, entry.Key); err != nil {
+			return err
+		}
+		if err := validateExpr(program, fn, entry.Value); err != nil {
+			return err
+		}
+	}
 	for _, field := range expr.Fields {
 		if err := validateExpr(program, fn, field.Value); err != nil {
 			return err

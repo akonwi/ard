@@ -17,8 +17,11 @@ const (
 	ValueEnum
 	ValueMaybe
 	ValueStruct
+	ValueList
+	ValueMap
 	ValueResult
 	ValueExtern
+	ValueDynamic
 )
 
 type Value struct {
@@ -37,6 +40,21 @@ type StructValue struct {
 	Fields []Value
 }
 
+type ListValue struct {
+	Type  air.TypeID
+	Items []Value
+}
+
+type MapValue struct {
+	Type    air.TypeID
+	Entries []MapEntryValue
+}
+
+type MapEntryValue struct {
+	Key   Value
+	Value Value
+}
+
 type ResultValue struct {
 	Type  air.TypeID
 	Ok    bool
@@ -52,6 +70,11 @@ type MaybeValue struct {
 type ExternValue struct {
 	Type   air.TypeID
 	Handle any
+}
+
+type DynamicValue struct {
+	Type air.TypeID
+	Raw  any
 }
 
 func Void(typeID air.TypeID) Value {
@@ -86,12 +109,24 @@ func Struct(typeID air.TypeID, fields []Value) Value {
 	return Value{Kind: ValueStruct, Type: typeID, Ref: &StructValue{Type: typeID, Fields: fields}}
 }
 
+func List(typeID air.TypeID, items []Value) Value {
+	return Value{Kind: ValueList, Type: typeID, Ref: &ListValue{Type: typeID, Items: items}}
+}
+
+func Map(typeID air.TypeID, entries []MapEntryValue) Value {
+	return Value{Kind: ValueMap, Type: typeID, Ref: &MapValue{Type: typeID, Entries: entries}}
+}
+
 func Result(typeID air.TypeID, ok bool, value Value) Value {
 	return Value{Kind: ValueResult, Type: typeID, Ref: &ResultValue{Type: typeID, Ok: ok, Value: value}}
 }
 
 func Extern(typeID air.TypeID, handle any) Value {
 	return Value{Kind: ValueExtern, Type: typeID, Ref: &ExternValue{Type: typeID, Handle: handle}}
+}
+
+func Dynamic(typeID air.TypeID, raw any) Value {
+	return Value{Kind: ValueDynamic, Type: typeID, Ref: &DynamicValue{Type: typeID, Raw: raw}}
 }
 
 func (v Value) GoValue() any {
@@ -124,6 +159,26 @@ func (v Value) GoValue() any {
 			out[i] = field.GoValue()
 		}
 		return out
+	case ValueList:
+		listValue, ok := v.Ref.(*ListValue)
+		if !ok {
+			return nil
+		}
+		out := make([]any, len(listValue.Items))
+		for i, item := range listValue.Items {
+			out[i] = item.GoValue()
+		}
+		return out
+	case ValueMap:
+		mapValue, ok := v.Ref.(*MapValue)
+		if !ok {
+			return nil
+		}
+		out := make(map[any]any, len(mapValue.Entries))
+		for _, entry := range mapValue.Entries {
+			out[entry.Key.GoValue()] = entry.Value.GoValue()
+		}
+		return out
 	case ValueResult:
 		resultValue, ok := v.Ref.(*ResultValue)
 		if !ok {
@@ -136,6 +191,12 @@ func (v Value) GoValue() any {
 			return nil
 		}
 		return externValue.Handle
+	case ValueDynamic:
+		dynamicValue, ok := v.Ref.(*DynamicValue)
+		if !ok {
+			return nil
+		}
+		return dynamicValue.Raw
 	default:
 		return nil
 	}
@@ -157,6 +218,28 @@ func (v Value) structValue() (*StructValue, error) {
 		return nil, fmt.Errorf("struct value has invalid payload %T", v.Ref)
 	}
 	return structValue, nil
+}
+
+func (v Value) listValue() (*ListValue, error) {
+	if v.Kind != ValueList {
+		return nil, fmt.Errorf("expected list value, got kind %d", v.Kind)
+	}
+	listValue, ok := v.Ref.(*ListValue)
+	if !ok || listValue == nil {
+		return nil, fmt.Errorf("list value has invalid payload %T", v.Ref)
+	}
+	return listValue, nil
+}
+
+func (v Value) mapValue() (*MapValue, error) {
+	if v.Kind != ValueMap {
+		return nil, fmt.Errorf("expected map value, got kind %d", v.Kind)
+	}
+	mapValue, ok := v.Ref.(*MapValue)
+	if !ok || mapValue == nil {
+		return nil, fmt.Errorf("map value has invalid payload %T", v.Ref)
+	}
+	return mapValue, nil
 }
 
 func (v Value) maybeValue() (*MaybeValue, error) {
@@ -190,4 +273,15 @@ func (v Value) externValue() (*ExternValue, error) {
 		return nil, fmt.Errorf("extern value has invalid payload %T", v.Ref)
 	}
 	return externValue, nil
+}
+
+func (v Value) dynamicValue() (*DynamicValue, error) {
+	if v.Kind != ValueDynamic {
+		return nil, fmt.Errorf("expected Dynamic value, got kind %d", v.Kind)
+	}
+	dynamicValue, ok := v.Ref.(*DynamicValue)
+	if !ok || dynamicValue == nil {
+		return nil, fmt.Errorf("Dynamic value has invalid payload %T", v.Ref)
+	}
+	return dynamicValue, nil
 }

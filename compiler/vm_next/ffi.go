@@ -95,6 +95,22 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	if value.Kind == ValueExtern {
 		return vm.externToHost(value, target)
 	}
+	if value.Kind == ValueList && target.Kind() == reflect.Slice {
+		return vm.listToHost(value, target)
+	}
+	if value.Kind == ValueMap && target.Kind() == reflect.Map {
+		return vm.mapToHost(value, target)
+	}
+	if target.Kind() == reflect.Interface && target.NumMethod() == 0 {
+		if value.Kind == ValueDynamic {
+			return vm.dynamicToHost(value, target)
+		}
+		typeInfo, err := vm.typeInfo(value.Type)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic extern values, got %s", typeInfo.Name)
+	}
 	if target.Kind() == reflect.Pointer {
 		if value.Kind == ValueMaybe {
 			maybeValue, err := value.maybeValue()
@@ -142,13 +158,6 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		if value.Kind == ValueStruct {
 			return vm.structToHost(value, target)
 		}
-	}
-	if target.Kind() == reflect.Interface && target.NumMethod() == 0 {
-		goValue := value.GoValue()
-		if goValue == nil {
-			return reflect.Zero(target), nil
-		}
-		return reflect.ValueOf(goValue), nil
 	}
 	return reflect.Value{}, fmt.Errorf("unsupported host parameter type %s", target)
 }
@@ -249,6 +258,15 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 			return Value{}, fmt.Errorf("cannot convert %s to Str", value.Type())
 		}
 		return Str(typeID, value.String()), nil
+	case air.TypeDynamic:
+		if !value.CanInterface() {
+			return Value{}, fmt.Errorf("cannot capture Dynamic value %s", value.Type())
+		}
+		return Dynamic(typeID, value.Interface()), nil
+	case air.TypeList:
+		return vm.hostListToValue(typeInfo, value)
+	case air.TypeMap:
+		return vm.hostMapToValue(typeInfo, value)
 	case air.TypeMaybe:
 		if value.Kind() == reflect.Pointer {
 			if value.IsNil() {
@@ -337,6 +355,104 @@ func (vm *VM) hostExternToValue(typeID air.TypeID, value reflect.Value) (Value, 
 		return Extern(typeID, value.Interface()), nil
 	}
 	return Value{}, fmt.Errorf("cannot capture host extern value %s", value.Type())
+}
+
+func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	dynamicValue, err := value.dynamicValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if dynamicValue.Raw == nil {
+		return reflect.Zero(target), nil
+	}
+	raw := reflect.ValueOf(dynamicValue.Raw)
+	if raw.Type().AssignableTo(target) {
+		return raw, nil
+	}
+	return reflect.Value{}, fmt.Errorf("cannot pass Dynamic payload %s as %s", raw.Type(), target)
+}
+
+func (vm *VM) listToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	listValue, err := value.listValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	out := reflect.MakeSlice(target, len(listValue.Items), len(listValue.Items))
+	for i, item := range listValue.Items {
+		hostItem, err := vm.valueToHost(item, target.Elem())
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("list item %d: %w", i, err)
+		}
+		out.Index(i).Set(hostItem)
+	}
+	return out, nil
+}
+
+func (vm *VM) hostListToValue(typeInfo air.TypeInfo, value reflect.Value) (Value, error) {
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return List(typeInfo.ID, nil), nil
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Slice && value.Kind() != reflect.Array {
+		return Value{}, fmt.Errorf("cannot convert %s to list %s", value.Type(), typeInfo.Name)
+	}
+	items := make([]Value, value.Len())
+	for i := 0; i < value.Len(); i++ {
+		item, err := vm.hostValueToValue(typeInfo.Elem, value.Index(i))
+		if err != nil {
+			return Value{}, fmt.Errorf("list item %d: %w", i, err)
+		}
+		items[i] = item
+	}
+	return List(typeInfo.ID, items), nil
+}
+
+func (vm *VM) mapToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	mapValue, err := value.mapValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	out := reflect.MakeMapWithSize(target, len(mapValue.Entries))
+	for i, entry := range mapValue.Entries {
+		hostKey, err := vm.valueToHost(entry.Key, target.Key())
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("map key %d: %w", i, err)
+		}
+		hostValue, err := vm.valueToHost(entry.Value, target.Elem())
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("map value %d: %w", i, err)
+		}
+		out.SetMapIndex(hostKey, hostValue)
+	}
+	return out, nil
+}
+
+func (vm *VM) hostMapToValue(typeInfo air.TypeInfo, value reflect.Value) (Value, error) {
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return Map(typeInfo.ID, nil), nil
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Map {
+		return Value{}, fmt.Errorf("cannot convert %s to map %s", value.Type(), typeInfo.Name)
+	}
+	keys := value.MapKeys()
+	entries := make([]MapEntryValue, 0, len(keys))
+	for i, key := range keys {
+		mapKey, err := vm.hostValueToValue(typeInfo.Key, key)
+		if err != nil {
+			return Value{}, fmt.Errorf("map key %d: %w", i, err)
+		}
+		mapValue, err := vm.hostValueToValue(typeInfo.Value, value.MapIndex(key))
+		if err != nil {
+			return Value{}, fmt.Errorf("map value %d: %w", i, err)
+		}
+		entries = append(entries, MapEntryValue{Key: mapKey, Value: mapValue})
+	}
+	return Map(typeInfo.ID, entries), nil
 }
 
 func (vm *VM) structToHost(value Value, target reflect.Type) (reflect.Value, error) {

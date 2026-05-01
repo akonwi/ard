@@ -39,6 +39,8 @@ const (
 	ExprLoadLocal
 	ExprCall
 	ExprCallExtern
+	ExprMakeList
+	ExprMakeMap
 	ExprMakeStruct
 	ExprGetField
 	ExprIntAdd
@@ -99,6 +101,7 @@ type Expr struct {
 	Function FunctionID
 	Extern   ExternID
 	Args     []Expr
+	Entries  []MapEntry
 
 	Fields []StructFieldValue
 	Target *Expr
@@ -131,6 +134,11 @@ type Expr struct {
 type StructFieldValue struct {
 	Index int
 	Name  string
+	Value Expr
+}
+
+type MapEntry struct {
+	Key   Expr
 	Value Expr
 }
 

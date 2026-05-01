@@ -279,6 +279,11 @@ decode::list(Dynamic, decode::Decoder<$T>) [$T]![decode::Error]
 
 There should be no general `Dynamic as T` path.
 
+On the Go host boundary, `any` is only the representation of explicit
+`Dynamic`. It is not a fallback parameter type for ordinary Ard values. Host
+functions that need arbitrary serialized data should declare `Dynamic`; host
+resources that should not be decoded should use `extern type`.
+
 ## FFI
 
 FFI should be signature-driven. Ard types map to target-native representations,
@@ -769,12 +774,12 @@ Status: In progress
   calls.
 - [x] Carry opaque extern handles across `vm_next` extern calls without exposing
   them as `Dynamic` or boxed runtime objects.
-- [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
-  root `go.mod`.
-- [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.
-- [ ] Support scalar parameters/returns, generated structs, `Maybe`/`Result`,
-  extern handles, and maps/lists of representable values.
-- [ ] Keep raw escape hatches out of the default path.
+- [x] Support scalar parameters and returns.
+- [x] Support generated structs across the VM FFI boundary.
+- [x] Support generated `Maybe[T]` and error-backed `Result` values.
+- [x] Support opaque extern handles.
+- [x] Support maps/lists of representable values.
+- [x] Keep raw escape hatches out of the default path.
 
 ### Milestone 6: closures and async
 
@@ -805,6 +810,14 @@ Status: Pending
 - [ ] Add `vm_next` to the benchmark suite.
 - [ ] Add conformance tests that can run against current VM, `vm_next`, and later
   `go_next`.
+
+### Post-Milestone 8: userland FFI workflow
+
+Status: Pending
+
+- [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
+  root `go.mod`.
+- [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.
 
 ### Milestone 9: go_next from AIR
 

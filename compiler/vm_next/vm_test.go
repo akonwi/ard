@@ -1,6 +1,7 @@
 package vm_next
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/air"
@@ -190,6 +191,130 @@ func TestRunEntryPassesExternHandleBetweenExterns(t *testing.T) {
 
 	if got.Kind != ValueInt || got.Int != 42 {
 		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPassesListExtern(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		extern fn sum(values: [Int]) Int = "SumValues"
+
+		sum([10, 20, 12])
+	`, HostFunctionRegistry{
+		"SumValues": func(values []int) int {
+			total := 0
+			for _, value := range values {
+				total += value
+			}
+			return total
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryReturnsListExtern(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		extern fn numbers() [Int] = "Numbers"
+		extern fn sum(values: [Int]) Int = "SumValues"
+
+		sum(numbers())
+	`, HostFunctionRegistry{
+		"Numbers": func() []int {
+			return []int{10, 20, 12}
+		},
+		"SumValues": func(values []int) int {
+			total := 0
+			for _, value := range values {
+				total += value
+			}
+			return total
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPassesMapExtern(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		extern fn lookup(values: [Str: Int]) Int = "Lookup"
+
+		lookup(["Ada": 42])
+	`, HostFunctionRegistry{
+		"Lookup": func(values map[string]int) int {
+			return values["Ada"]
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryReturnsMapExtern(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		extern fn ages() [Str: Int] = "Ages"
+		extern fn lookup(values: [Str: Int]) Int = "Lookup"
+
+		lookup(ages())
+	`, HostFunctionRegistry{
+		"Ages": func() map[string]int {
+			return map[string]int{"Ada": 42}
+		},
+		"Lookup": func(values map[string]int) int {
+			return values["Ada"]
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPassesDynamicExternAsExplicitAny(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		extern fn load_dynamic() Dynamic = "LoadDynamic"
+		extern fn describe_dynamic(data: Dynamic) Str = "DescribeDynamic"
+
+		describe_dynamic(load_dynamic())
+	`, HostFunctionRegistry{
+		"LoadDynamic": func() any {
+			return map[string]any{"name": "Ada"}
+		},
+		"DescribeDynamic": func(data any) string {
+			values, ok := data.(map[string]any)
+			if ok && values["name"] == "Ada" {
+				return "ok"
+			}
+			return "bad"
+		},
+	})
+
+	if got.Kind != ValueStr || got.Str != "ok" {
+		t.Fatalf("got %#v, want ok", got)
+	}
+}
+
+func TestRunEntryRejectsAnyParameterForNonDynamicExtern(t *testing.T) {
+	vm := newVMFromSourceWithExterns(t, `
+		extern fn capture(value: Int) Int = "CaptureAny"
+
+		capture(42)
+	`, HostFunctionRegistry{
+		"CaptureAny": func(value any) int {
+			return 0
+		},
+	})
+
+	_, err := vm.RunEntry()
+	if err == nil {
+		t.Fatal("RunEntry succeeded, want unsupported host parameter error")
+	}
+	if !strings.Contains(err.Error(), "empty interface parameters are only supported for Dynamic extern values") {
+		t.Fatalf("RunEntry error = %v", err)
 	}
 }
 

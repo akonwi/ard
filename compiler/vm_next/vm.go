@@ -225,6 +225,10 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 			return Value{}, err
 		}
 		return f.vm.callExtern(expr.Extern, args)
+	case air.ExprMakeList:
+		return f.evalMakeList(expr)
+	case air.ExprMakeMap:
+		return f.evalMakeMap(expr)
 	case air.ExprMakeStruct:
 		return f.evalMakeStruct(expr)
 	case air.ExprGetField:
@@ -352,6 +356,34 @@ func (f *frame) evalMakeStruct(expr air.Expr) (Value, error) {
 		fields[field.Index] = value
 	}
 	return Struct(expr.Type, fields), nil
+}
+
+func (f *frame) evalMakeList(expr air.Expr) (Value, error) {
+	items := make([]Value, len(expr.Args))
+	for i, item := range expr.Args {
+		value, err := f.evalExpr(item)
+		if err != nil {
+			return Value{}, err
+		}
+		items[i] = value
+	}
+	return List(expr.Type, items), nil
+}
+
+func (f *frame) evalMakeMap(expr air.Expr) (Value, error) {
+	entries := make([]MapEntryValue, len(expr.Entries))
+	for i, entry := range expr.Entries {
+		key, err := f.evalExpr(entry.Key)
+		if err != nil {
+			return Value{}, err
+		}
+		value, err := f.evalExpr(entry.Value)
+		if err != nil {
+			return Value{}, err
+		}
+		entries[i] = MapEntryValue{Key: key, Value: value}
+	}
+	return Map(expr.Type, entries), nil
 }
 
 func (f *frame) evalGetField(expr air.Expr) (Value, error) {
@@ -789,6 +821,12 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		return Bool(typeID, false)
 	case air.TypeStr:
 		return Str(typeID, "")
+	case air.TypeList:
+		return List(typeID, nil)
+	case air.TypeMap:
+		return Map(typeID, nil)
+	case air.TypeDynamic:
+		return Dynamic(typeID, nil)
 	case air.TypeEnum:
 		if len(typeInfo.Variants) == 0 {
 			return Enum(typeID, 0)

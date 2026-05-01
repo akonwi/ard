@@ -690,6 +690,30 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprCallExtern, Type: typeID, Extern: extern, Args: args}, nil
+	case *checker.ListLiteral:
+		args := make([]Expr, len(e.Elements))
+		for i, elem := range e.Elements {
+			lowered, err := fl.lowerExpr(elem)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = *lowered
+		}
+		return &Expr{Kind: ExprMakeList, Type: typeID, Args: args}, nil
+	case *checker.MapLiteral:
+		entries := make([]MapEntry, len(e.Keys))
+		for i := range e.Keys {
+			key, err := fl.lowerExpr(e.Keys[i])
+			if err != nil {
+				return nil, err
+			}
+			value, err := fl.lowerExpr(e.Values[i])
+			if err != nil {
+				return nil, err
+			}
+			entries[i] = MapEntry{Key: *key, Value: *value}
+		}
+		return &Expr{Kind: ExprMakeMap, Type: typeID, Entries: entries}, nil
 	case *checker.StructInstance:
 		return fl.lowerStructInstance(typeID, e)
 	case *checker.InstanceProperty:
