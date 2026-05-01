@@ -24,6 +24,8 @@ type lowerer struct {
 	moduleByPath map[string]ModuleID
 	moduleByName map[string]checker.Module
 	typeByName   map[string]TypeID
+	traits       map[string]TraitID
+	impls        map[string]ImplID
 	functions    map[string]FunctionID
 	externs      map[string]ExternID
 
@@ -48,6 +50,8 @@ func newLowerer() *lowerer {
 		moduleByPath: map[string]ModuleID{},
 		moduleByName: map[string]checker.Module{},
 		typeByName:   map[string]TypeID{},
+		traits:       map[string]TraitID{},
+		impls:        map[string]ImplID{},
 		functions:    map[string]FunctionID{},
 		externs:      map[string]ExternID{},
 
@@ -139,6 +143,20 @@ func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 		stmt := prog.Statements[i]
 		if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
 			if err := l.lowerFunction(modID, def); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		switch node := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+		case *checker.Enum:
+			if err := l.declareTraitImplsForType(modID, node); err != nil {
 				return err
 			}
 		}
@@ -256,6 +274,140 @@ func (l *lowerer) lowerFunction(module ModuleID, def *checker.FunctionDef) error
 		return fmt.Errorf("lower function %s: %w", def.Name, err)
 	}
 	fn.Body = body
+	l.program.Functions[id] = fn
+	return nil
+}
+
+func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) error {
+	forType, err := l.internType(typ)
+	if err != nil {
+		return err
+	}
+
+	var traits []*checker.Trait
+	var methods map[string]*checker.FunctionDef
+	switch typed := typ.(type) {
+	case *checker.StructDef:
+		traits = typed.Traits
+		methods = typed.Methods
+	case *checker.Enum:
+		traits = typed.Traits
+		methods = typed.Methods
+	default:
+		return nil
+	}
+
+	for _, trait := range traits {
+		if trait == nil {
+			continue
+		}
+		if _, err := l.declareImpl(module, trait, typ, forType, methods); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) declareImpl(module ModuleID, trait *checker.Trait, owner checker.Type, ownerType TypeID, methods map[string]*checker.FunctionDef) (ImplID, error) {
+	key := implKey(module, trait.Name, owner.String())
+	if id, ok := l.impls[key]; ok {
+		return id, nil
+	}
+
+	traitID, err := l.internTrait(trait)
+	if err != nil {
+		return 0, err
+	}
+
+	traitMethods := trait.GetMethods()
+	methodIDs := make([]FunctionID, len(traitMethods))
+	methodDefs := make([]*checker.FunctionDef, len(traitMethods))
+	for i, traitMethod := range traitMethods {
+		methodDef := methods[traitMethod.Name]
+		if methodDef == nil {
+			return 0, fmt.Errorf("missing method %s for impl %s on %s", traitMethod.Name, trait.Name, owner.String())
+		}
+		methodID, err := l.declareMethodFunction(module, owner, trait.Name, ownerType, methodDef)
+		if err != nil {
+			return 0, err
+		}
+		methodIDs[i] = methodID
+		methodDefs[i] = methodDef
+	}
+
+	id := ImplID(len(l.program.Impls))
+	l.impls[key] = id
+	l.program.Impls = append(l.program.Impls, Impl{
+		ID:      id,
+		Trait:   traitID,
+		ForType: ownerType,
+		Methods: methodIDs,
+	})
+
+	for i, methodID := range methodIDs {
+		if err := l.lowerMethodFunction(methodID, methodDefs[i]); err != nil {
+			return 0, err
+		}
+	}
+
+	return id, nil
+}
+
+func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, traitName string, ownerType TypeID, def *checker.FunctionDef) (FunctionID, error) {
+	key := methodFunctionKey(module, owner.String(), traitName, def.Name)
+	if id, ok := l.functions[key]; ok {
+		return id, nil
+	}
+
+	receiver := def.Receiver
+	if receiver == "" {
+		receiver = "self"
+	}
+	params := make([]Param, 0, len(def.Parameters)+1)
+	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
+	for _, param := range def.Parameters {
+		typeID, err := l.internType(param.Type)
+		if err != nil {
+			return NoFunction, err
+		}
+		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+	}
+	returnType, err := l.internType(def.ReturnType)
+	if err != nil {
+		return NoFunction, err
+	}
+
+	id := FunctionID(len(l.program.Functions))
+	l.functions[key] = id
+	l.program.Functions = append(l.program.Functions, Function{
+		ID:     id,
+		Module: module,
+		Name:   owner.String() + "." + traitName + "." + def.Name,
+		Signature: Signature{
+			Params: params,
+			Return: returnType,
+		},
+	})
+	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
+	return id, nil
+}
+
+func (l *lowerer) lowerMethodFunction(id FunctionID, def *checker.FunctionDef) error {
+	if !validFunctionID(&l.program, id) {
+		return fmt.Errorf("method function has invalid id %d", id)
+	}
+	fn := l.program.Functions[id]
+	fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
+	for _, param := range fn.Signature.Params {
+		fl.defineLocal(param.Name, param.Type, param.Mutable)
+	}
+	if def.Body != nil {
+		body, err := fl.lowerBlock(def.Body.Stmts)
+		if err != nil {
+			return fmt.Errorf("lower method %s: %w", def.Name, err)
+		}
+		fn.Body = body
+	}
 	l.program.Functions[id] = fn
 	return nil
 }
@@ -502,7 +654,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 		info.Return = returnType
 	case *checker.Trait:
+		traitID, err := l.internTrait(typ)
+		if err != nil {
+			return NoType, err
+		}
 		info.Kind = TypeTraitObject
+		info.Trait = traitID
 	default:
 		switch t {
 		case checker.Void:
@@ -524,6 +681,49 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 
 	l.program.Types[idx] = info
 	return id, nil
+}
+
+func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
+	if trait == nil {
+		return 0, fmt.Errorf("cannot intern nil trait")
+	}
+	if id, ok := l.traits[trait.Name]; ok {
+		return id, nil
+	}
+	id := TraitID(len(l.program.Traits))
+	l.traits[trait.Name] = id
+
+	methods := trait.GetMethods()
+	loweredMethods := make([]TraitMethod, len(methods))
+	for i, method := range methods {
+		sig, err := l.signatureForFunction(method.Parameters, method.ReturnType)
+		if err != nil {
+			return 0, err
+		}
+		loweredMethods[i] = TraitMethod{Name: method.Name, Signature: sig}
+	}
+	l.program.Traits = append(l.program.Traits, Trait{
+		ID:      id,
+		Name:    trait.Name,
+		Methods: loweredMethods,
+	})
+	return id, nil
+}
+
+func (l *lowerer) signatureForFunction(params []checker.Parameter, returnType checker.Type) (Signature, error) {
+	loweredParams := make([]Param, len(params))
+	for i, param := range params {
+		typeID, err := l.internType(param.Type)
+		if err != nil {
+			return Signature{}, err
+		}
+		loweredParams[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+	}
+	returnID, err := l.internType(returnType)
+	if err != nil {
+		return Signature{}, err
+	}
+	return Signature{Params: loweredParams, Return: returnID}, nil
 }
 
 func airTypeName(t checker.Type) string {
@@ -1665,6 +1865,14 @@ func appendUniqueFunction(items []FunctionID, id FunctionID) []FunctionID {
 
 func functionKey(module ModuleID, name string) string {
 	return fmt.Sprintf("%d:%s", module, name)
+}
+
+func implKey(module ModuleID, traitName, typeName string) string {
+	return fmt.Sprintf("%d:%s:%s", module, traitName, typeName)
+}
+
+func methodFunctionKey(module ModuleID, typeName, traitName, methodName string) string {
+	return functionKey(module, fmt.Sprintf("method/%s/%s/%s", typeName, traitName, methodName))
 }
 
 func keyHasFunctionName(key, name string) bool {

@@ -14,11 +14,27 @@ func Validate(program *Program) error {
 			return err
 		}
 	}
+	for i, trait := range program.Traits {
+		if trait.ID != TraitID(i) {
+			return fmt.Errorf("trait table entry %d has id %d", i, trait.ID)
+		}
+		if err := validateTrait(program, trait); err != nil {
+			return err
+		}
+	}
 	for i, fn := range program.Functions {
 		if fn.ID != FunctionID(i) {
 			return fmt.Errorf("function table entry %d has id %d", i, fn.ID)
 		}
 		if err := validateFunction(program, fn); err != nil {
+			return err
+		}
+	}
+	for i, impl := range program.Impls {
+		if impl.ID != ImplID(i) {
+			return fmt.Errorf("impl table entry %d has id %d", i, impl.ID)
+		}
+		if err := validateImpl(program, impl); err != nil {
 			return err
 		}
 	}
@@ -81,6 +97,55 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 		}
 		if !validTypeID(program, typ.Return) {
 			return fmt.Errorf("type %s has invalid function return type %d", typ.Name, typ.Return)
+		}
+	case TypeTraitObject:
+		if !validTraitID(program, typ.Trait) {
+			return fmt.Errorf("type %s has invalid trait id %d", typ.Name, typ.Trait)
+		}
+	}
+	return nil
+}
+
+func validateTrait(program *Program, trait Trait) error {
+	for _, method := range trait.Methods {
+		if err := validateSignature(program, method.Signature); err != nil {
+			return fmt.Errorf("trait %s method %s: %w", trait.Name, method.Name, err)
+		}
+	}
+	return nil
+}
+
+func validateImpl(program *Program, impl Impl) error {
+	if !validTraitID(program, impl.Trait) {
+		return fmt.Errorf("impl %d has invalid trait id %d", impl.ID, impl.Trait)
+	}
+	if !validTypeID(program, impl.ForType) {
+		return fmt.Errorf("impl %d has invalid type id %d", impl.ID, impl.ForType)
+	}
+	trait := program.Traits[impl.Trait]
+	if len(impl.Methods) != len(trait.Methods) {
+		return fmt.Errorf("impl %d has %d methods, trait %s requires %d", impl.ID, len(impl.Methods), trait.Name, len(trait.Methods))
+	}
+	for i, methodID := range impl.Methods {
+		if !validFunctionID(program, methodID) {
+			return fmt.Errorf("impl %d method %d has invalid function id %d", impl.ID, i, methodID)
+		}
+		method := program.Functions[methodID]
+		traitMethod := trait.Methods[i]
+		if len(method.Signature.Params) != len(traitMethod.Signature.Params)+1 {
+			return fmt.Errorf("impl %d method %s has %d params, want receiver plus %d trait params", impl.ID, method.Name, len(method.Signature.Params), len(traitMethod.Signature.Params))
+		}
+		if method.Signature.Params[0].Type != impl.ForType {
+			return fmt.Errorf("impl %d method %s receiver type %d does not match impl type %d", impl.ID, method.Name, method.Signature.Params[0].Type, impl.ForType)
+		}
+		for paramIndex, traitParam := range traitMethod.Signature.Params {
+			methodParam := method.Signature.Params[paramIndex+1]
+			if methodParam.Type != traitParam.Type {
+				return fmt.Errorf("impl %d method %s param %d type %d does not match trait type %d", impl.ID, method.Name, paramIndex, methodParam.Type, traitParam.Type)
+			}
+		}
+		if method.Signature.Return != traitMethod.Signature.Return {
+			return fmt.Errorf("impl %d method %s return type %d does not match trait return type %d", impl.ID, method.Name, method.Signature.Return, traitMethod.Signature.Return)
 		}
 	}
 	return nil
@@ -386,6 +451,10 @@ func validTypeID(program *Program, id TypeID) bool {
 
 func validFunctionID(program *Program, id FunctionID) bool {
 	return id >= 0 && int(id) < len(program.Functions)
+}
+
+func validTraitID(program *Program, id TraitID) bool {
+	return id >= 0 && int(id) < len(program.Traits)
 }
 
 func typeInfo(program *Program, id TypeID) (TypeInfo, error) {

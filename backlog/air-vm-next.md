@@ -803,7 +803,7 @@ Status: Complete
 Status: In progress
 
 - [x] Add user unions as tagged sums.
-- [ ] Add trait and impl tables.
+- [x] Add trait and impl tables.
 - [ ] Add trait objects with explicit upcast and method dispatch.
 
 ### Milestone 8: vm_next parity

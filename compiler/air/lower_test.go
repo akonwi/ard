@@ -318,6 +318,78 @@ func TestLowerResults(t *testing.T) {
 	}
 }
 
+func TestLowerTraitAndImplTables(t *testing.T) {
+	program := lowerSource(t, `
+		trait Speaks {
+			fn speak() Str
+		}
+
+		struct Dog {
+			name: Str,
+		}
+
+		impl Speaks for Dog {
+			fn speak() Str {
+				self.name + " says hi"
+			}
+		}
+
+		fn describe(speaker: Speaks) Str {
+			"speaker"
+		}
+	`)
+
+	if len(program.Traits) != 1 {
+		t.Fatalf("trait count = %d, want 1", len(program.Traits))
+	}
+	trait := program.Traits[0]
+	if trait.Name != "Speaks" {
+		t.Fatalf("trait name = %q, want Speaks", trait.Name)
+	}
+	if len(trait.Methods) != 1 || trait.Methods[0].Name != "speak" {
+		t.Fatalf("trait methods = %#v, want speak", trait.Methods)
+	}
+	if kind := typeKind(t, program, trait.Methods[0].Signature.Return); kind != TypeStr {
+		t.Fatalf("trait method return kind = %v, want TypeStr", kind)
+	}
+
+	traitObject := findType(t, program, "Speaks")
+	if traitObject.Kind != TypeTraitObject {
+		t.Fatalf("Speaks type kind = %v, want TypeTraitObject", traitObject.Kind)
+	}
+	if traitObject.Trait != trait.ID {
+		t.Fatalf("Speaks trait id = %d, want %d", traitObject.Trait, trait.ID)
+	}
+
+	dogType := findType(t, program, "Dog")
+	if len(program.Impls) != 1 {
+		t.Fatalf("impl count = %d, want 1", len(program.Impls))
+	}
+	impl := program.Impls[0]
+	if impl.Trait != trait.ID || impl.ForType != dogType.ID {
+		t.Fatalf("impl = %#v, want trait %d for Dog type %d", impl, trait.ID, dogType.ID)
+	}
+	if len(impl.Methods) != 1 {
+		t.Fatalf("impl method count = %d, want 1", len(impl.Methods))
+	}
+	method := program.Functions[impl.Methods[0]]
+	if method.Name != "Dog.Speaks.speak" {
+		t.Fatalf("method name = %q, want Dog.Speaks.speak", method.Name)
+	}
+	if len(method.Signature.Params) != 1 {
+		t.Fatalf("method param count = %d, want receiver only", len(method.Signature.Params))
+	}
+	if method.Signature.Params[0].Name != "self" || method.Signature.Params[0].Type != dogType.ID {
+		t.Fatalf("method receiver = %#v, want self Dog", method.Signature.Params[0])
+	}
+	if method.Body.Result == nil || method.Body.Result.Kind != ExprStrConcat {
+		t.Fatalf("method result = %#v, want ExprStrConcat", method.Body.Result)
+	}
+	if method.Body.Result.Left == nil || method.Body.Result.Left.Kind != ExprGetField {
+		t.Fatalf("method left = %#v, want field access", method.Body.Result.Left)
+	}
+}
+
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
