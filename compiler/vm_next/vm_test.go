@@ -498,6 +498,35 @@ func TestRunEntryEvaluatesAsyncStartFiberJoin(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesAsyncJoinFiberList(t *testing.T) {
+	got := runSource(t, `
+		use ard/async
+
+		let a = async::eval(fn() Int { 40 })
+		let b = async::eval(fn() Int { 2 })
+		async::join([a, b])
+		a.get() + b.get()
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesGenericFunctionSpecialization(t *testing.T) {
+	got := runSource(t, `
+		fn id(value: $T) $T {
+			value
+		}
+
+		id(40) + id(2)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryPassesClosureExternAsCallbackHandle(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		extern fn call_with(value: Int, callback: fn(Int) Int) Int = "CallWith"

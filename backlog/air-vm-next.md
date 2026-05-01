@@ -825,11 +825,12 @@ Status: In progress
 - [ ] Support `ard run --target vm_next` for all sample programs.
   - Current progress: core non-network samples now cover template strings,
     list/map methods, list/map iteration, imported module externs, string
-    helpers, and EOF-driven stdin.
-  - Known remaining blockers: generic stdlib function specialization for
-    `ard/async::join`, a targetable test CLI path, controlled stdin harnessing
-    for interactive samples, and host capability coverage for HTTP/network
-    samples.
+    helpers, EOF-driven stdin, and generic stdlib function specialization for
+    `ard/async::join`.
+  - Known remaining blockers: a targetable test CLI path, controlled stdin
+    harnessing for interactive samples, the mutable loop-cursor capture in
+    `samples/concurrent_stress.ard`, and host capability coverage for
+    HTTP/network samples.
 - [ ] Add `vm_next` to the benchmark suite.
 - [ ] Add conformance tests that can run against current VM, `vm_next`, and later
   `go_next`.

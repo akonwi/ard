@@ -549,6 +549,29 @@ func TestLowerImportedModuleFunctionCall(t *testing.T) {
 	}
 }
 
+func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/async
+
+		let a = async::eval(fn() Int { 1 })
+		let b = async::eval(fn() Int { 2 })
+		async::join([a, b])
+	`)
+
+	join := findFunction(t, program, "join")
+	if len(join.Signature.Params) != 1 {
+		t.Fatalf("join param count = %d, want 1", len(join.Signature.Params))
+	}
+	paramType := testTypeInfo(t, program, join.Signature.Params[0].Type)
+	if paramType.Kind != TypeList {
+		t.Fatalf("join param kind = %v, want TypeList", paramType.Kind)
+	}
+	elemType := testTypeInfo(t, program, paramType.Elem)
+	if elemType.Kind != TypeFiber || typeKind(t, program, elemType.Elem) != TypeInt {
+		t.Fatalf("join param elem = %#v, want Fiber<Int>", elemType)
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing
@@ -634,11 +657,16 @@ func findType(t *testing.T, program *Program, name string) TypeInfo {
 
 func typeKind(t *testing.T, program *Program, id TypeID) TypeKind {
 	t.Helper()
+	return testTypeInfo(t, program, id).Kind
+}
+
+func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
+	t.Helper()
 	for _, typ := range program.Types {
 		if typ.ID == id {
-			return typ.Kind
+			return typ
 		}
 	}
 	t.Fatalf("type id %d not found", id)
-	return 0
+	return TypeInfo{}
 }
