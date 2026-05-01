@@ -390,6 +390,49 @@ func TestLowerTraitAndImplTables(t *testing.T) {
 	}
 }
 
+func TestLowerTraitObjectDispatch(t *testing.T) {
+	program := lowerSource(t, `
+		trait Speaks {
+			fn speak() Str
+		}
+
+		struct Dog {
+			name: Str,
+		}
+
+		impl Speaks for Dog {
+			fn speak() Str {
+				self.name + " says hi"
+			}
+		}
+
+		fn describe(speaker: Speaks) Str {
+			speaker.speak()
+		}
+
+		describe(Dog{name: "Ada"})
+	`)
+
+	describe := findFunction(t, program, "describe")
+	if describe.Body.Result == nil || describe.Body.Result.Kind != ExprCallTrait {
+		t.Fatalf("describe result = %#v, want ExprCallTrait", describe.Body.Result)
+	}
+	if describe.Body.Result.Method != 0 {
+		t.Fatalf("trait method index = %d, want 0", describe.Body.Result.Method)
+	}
+
+	main := program.Functions[program.Entry]
+	if main.Body.Result == nil || main.Body.Result.Kind != ExprCall {
+		t.Fatalf("main result = %#v, want ExprCall", main.Body.Result)
+	}
+	if len(main.Body.Result.Args) != 1 || main.Body.Result.Args[0].Kind != ExprTraitUpcast {
+		t.Fatalf("main arg = %#v, want ExprTraitUpcast", main.Body.Result.Args)
+	}
+	if main.Body.Result.Args[0].Impl != program.Impls[0].ID {
+		t.Fatalf("upcast impl = %d, want %d", main.Body.Result.Args[0].Impl, program.Impls[0].ID)
+	}
+}
+
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe

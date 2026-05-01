@@ -21,6 +21,7 @@ const (
 	ValueMap
 	ValueResult
 	ValueUnion
+	ValueTraitObject
 	ValueExtern
 	ValueDynamic
 	ValueClosure
@@ -67,6 +68,13 @@ type ResultValue struct {
 type UnionValue struct {
 	Type  air.TypeID
 	Tag   uint32
+	Value Value
+}
+
+type TraitObjectValue struct {
+	Type  air.TypeID
+	Trait air.TraitID
+	Impl  air.ImplID
 	Value Value
 }
 
@@ -147,6 +155,10 @@ func Union(typeID air.TypeID, tag uint32, value Value) Value {
 	return Value{Kind: ValueUnion, Type: typeID, Ref: &UnionValue{Type: typeID, Tag: tag, Value: value}}
 }
 
+func TraitObject(typeID air.TypeID, trait air.TraitID, impl air.ImplID, value Value) Value {
+	return Value{Kind: ValueTraitObject, Type: typeID, Ref: &TraitObjectValue{Type: typeID, Trait: trait, Impl: impl, Value: value}}
+}
+
 func Extern(typeID air.TypeID, handle any) Value {
 	return Value{Kind: ValueExtern, Type: typeID, Ref: &ExternValue{Type: typeID, Handle: handle}}
 }
@@ -225,6 +237,12 @@ func (v Value) GoValue() any {
 			return nil
 		}
 		return unionValue.Value.GoValue()
+	case ValueTraitObject:
+		traitObjectValue, ok := v.Ref.(*TraitObjectValue)
+		if !ok {
+			return nil
+		}
+		return traitObjectValue.Value.GoValue()
 	case ValueExtern:
 		externValue, ok := v.Ref.(*ExternValue)
 		if !ok {
@@ -317,6 +335,17 @@ func (v Value) unionValue() (*UnionValue, error) {
 		return nil, fmt.Errorf("union value has invalid payload %T", v.Ref)
 	}
 	return unionValue, nil
+}
+
+func (v Value) traitObjectValue() (*TraitObjectValue, error) {
+	if v.Kind != ValueTraitObject {
+		return nil, fmt.Errorf("expected trait object value, got kind %d", v.Kind)
+	}
+	traitObjectValue, ok := v.Ref.(*TraitObjectValue)
+	if !ok || traitObjectValue == nil {
+		return nil, fmt.Errorf("trait object value has invalid payload %T", v.Ref)
+	}
+	return traitObjectValue, nil
 }
 
 func (v Value) externValue() (*ExternValue, error) {

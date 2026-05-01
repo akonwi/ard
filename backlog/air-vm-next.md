@@ -800,11 +800,11 @@ Status: Complete
 
 ### Milestone 7: complicated types
 
-Status: In progress
+Status: Complete
 
 - [x] Add user unions as tagged sums.
 - [x] Add trait and impl tables.
-- [ ] Add trait objects with explicit upcast and method dispatch.
+- [x] Add trait objects with explicit upcast and method dispatch.
 
 ### Milestone 8: vm_next parity
 

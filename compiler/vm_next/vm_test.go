@@ -641,6 +641,34 @@ func TestRunEntryWrapsUnionResultValues(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesTraitObjectDispatch(t *testing.T) {
+	got := runSource(t, `
+		trait Speaks {
+			fn speak() Str
+		}
+
+		struct Dog {
+			name: Str,
+		}
+
+		impl Speaks for Dog {
+			fn speak() Str {
+				self.name + " says hi"
+			}
+		}
+
+		fn describe(speaker: Speaks) Str {
+			speaker.speak()
+		}
+
+		describe(Dog{name: "Ada"})
+	`)
+
+	if got.Kind != ValueStr || got.Str != "Ada says hi" {
+		t.Fatalf("got %#v, want Ada says hi", got)
+	}
+}
+
 func TestRunEntryEvaluatesMaybes(t *testing.T) {
 	got := runSource(t, `
 		use ard/maybe

@@ -269,6 +269,10 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalUnionWrap(expr)
 	case air.ExprMatchUnion:
 		return f.evalUnionMatch(expr)
+	case air.ExprTraitUpcast:
+		return f.evalTraitUpcast(expr)
+	case air.ExprCallTrait:
+		return f.evalTraitCall(expr)
 	case air.ExprCallExtern:
 		args, err := f.evalArgs(expr.Args)
 		if err != nil {
@@ -501,6 +505,14 @@ func (f *frame) evalUnionWrap(expr air.Expr) (Value, error) {
 	return Union(expr.Type, expr.Tag, value), nil
 }
 
+func (f *frame) evalTraitUpcast(expr air.Expr) (Value, error) {
+	value, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	return TraitObject(expr.Type, expr.Trait, expr.Impl, value), nil
+}
+
 func (f *frame) evalMakeList(expr air.Expr) (Value, error) {
 	items := make([]Value, len(expr.Args))
 	for i, item := range expr.Args {
@@ -585,6 +597,36 @@ func (f *frame) evalUnionMatch(expr air.Expr) (Value, error) {
 		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
 	}
 	return f.vm.zeroValue(expr.Type), nil
+}
+
+func (f *frame) evalTraitCall(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	traitObject, err := subject.traitObjectValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if traitObject.Trait != expr.Trait {
+		return Value{}, fmt.Errorf("trait object has trait %d, call expects %d", traitObject.Trait, expr.Trait)
+	}
+	if traitObject.Impl < 0 || int(traitObject.Impl) >= len(f.vm.program.Impls) {
+		return Value{}, fmt.Errorf("invalid trait object impl %d", traitObject.Impl)
+	}
+	impl := f.vm.program.Impls[traitObject.Impl]
+	if impl.Trait != expr.Trait {
+		return Value{}, fmt.Errorf("impl %d has trait %d, call expects %d", traitObject.Impl, impl.Trait, expr.Trait)
+	}
+	if expr.Method < 0 || expr.Method >= len(impl.Methods) {
+		return Value{}, fmt.Errorf("invalid trait method index %d for impl %d", expr.Method, traitObject.Impl)
+	}
+	args, err := f.evalArgs(expr.Args)
+	if err != nil {
+		return Value{}, err
+	}
+	args = append([]Value{traitObject.Value}, args...)
+	return f.vm.call(impl.Methods[expr.Method], args)
 }
 
 func (f *frame) evalMaybeMatch(expr air.Expr) (Value, error) {
@@ -1099,6 +1141,8 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		}
 		member := typeInfo.Members[0]
 		return Union(typeID, member.Tag, vm.zeroValue(member.Type))
+	case air.TypeTraitObject:
+		return Value{Type: typeID, Kind: ValueTraitObject}
 	case air.TypeExtern:
 		return Extern(typeID, nil)
 	default:

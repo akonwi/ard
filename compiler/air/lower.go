@@ -141,15 +141,6 @@ func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 
 	for i := range prog.Statements {
 		stmt := prog.Statements[i]
-		if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
-			if err := l.lowerFunction(modID, def); err != nil {
-				return err
-			}
-		}
-	}
-
-	for i := range prog.Statements {
-		stmt := prog.Statements[i]
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
@@ -157,6 +148,15 @@ func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 			}
 		case *checker.Enum:
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
+			if err := l.lowerFunction(modID, def); err != nil {
 				return err
 			}
 		}
@@ -772,6 +772,9 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 	if wrapped, ok, err := fl.lowerUnionWrapIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
+	if wrapped, ok, err := fl.lowerTraitUpcastIfNeeded(expr, expected); ok || err != nil {
+		return wrapped, err
+	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeList {
 			return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
@@ -821,6 +824,29 @@ func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expec
 		}
 	}
 	return nil, false, nil
+}
+
+func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
+	expectedInfo, ok := fl.l.typeInfo(expected)
+	if !ok || expectedInfo.Kind != TypeTraitObject {
+		return nil, false, nil
+	}
+	actual, err := fl.l.internType(expr.Type())
+	if err != nil {
+		return nil, false, err
+	}
+	if actual == expected {
+		return nil, false, nil
+	}
+	impl, ok := fl.l.lookupImpl(expectedInfo.Trait, actual)
+	if !ok {
+		return nil, false, nil
+	}
+	value, err := fl.lowerExpr(expr)
+	if err != nil {
+		return nil, true, err
+	}
+	return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Impl: impl, Trait: expectedInfo.Trait}, true, nil
 }
 
 func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
@@ -1695,7 +1721,34 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		return nil, err
 	}
 	typeInfo, ok := fl.l.typeInfo(target.Type)
-	if !ok || typeInfo.Kind != TypeFiber {
+	if !ok {
+		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
+	}
+	if typeInfo.Kind == TypeTraitObject {
+		if !validTraitID(&fl.l.program, typeInfo.Trait) {
+			return nil, fmt.Errorf("trait object %s references invalid trait %d", typeInfo.Name, typeInfo.Trait)
+		}
+		trait := fl.l.program.Traits[typeInfo.Trait]
+		for i, traitMethod := range trait.Methods {
+			if traitMethod.Name != method.Method.Name {
+				continue
+			}
+			args, err := fl.lowerArgsWithSignature(method.Method.Args, traitMethod.Signature)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{
+				Kind:   ExprCallTrait,
+				Type:   typeID,
+				Target: target,
+				Trait:  typeInfo.Trait,
+				Method: i,
+				Args:   args,
+			}, nil
+		}
+		return nil, fmt.Errorf("trait %s has no method %s", trait.Name, method.Method.Name)
+	}
+	if typeInfo.Kind != TypeFiber {
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
 	switch method.Method.Name {
@@ -1816,6 +1869,15 @@ func (l *lowerer) typeInfo(id TypeID) (TypeInfo, bool) {
 		return TypeInfo{}, false
 	}
 	return l.program.Types[id-1], true
+}
+
+func (l *lowerer) lookupImpl(trait TraitID, forType TypeID) (ImplID, bool) {
+	for _, impl := range l.program.Impls {
+		if impl.Trait == trait && impl.ForType == forType {
+			return impl.ID, true
+		}
+	}
+	return 0, false
 }
 
 func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {

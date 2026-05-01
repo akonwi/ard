@@ -46,6 +46,8 @@ const (
 	ExprFiberJoin
 	ExprUnionWrap
 	ExprMatchUnion
+	ExprTraitUpcast
+	ExprCallTrait
 	ExprMakeList
 	ExprMakeMap
 	ExprMakeStruct
@@ -113,6 +115,9 @@ type Expr struct {
 
 	Function      FunctionID
 	Extern        ExternID
+	Impl          ImplID
+	Trait         TraitID
+	Method        int
 	Args          []Expr
 	Entries       []MapEntry
 	CaptureLocals []LocalID

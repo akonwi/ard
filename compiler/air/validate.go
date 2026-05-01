@@ -291,6 +291,31 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("union wrap member %s expects type %d, got %d", member.Name, member.Type, expr.Target.Type)
 		}
 	}
+	if expr.Kind == ExprTraitUpcast {
+		if expr.Target == nil {
+			return fmt.Errorf("trait upcast missing target")
+		}
+		traitType, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		if traitType.Kind != TypeTraitObject {
+			return fmt.Errorf("trait upcast target type has kind %d", traitType.Kind)
+		}
+		if traitType.Trait != expr.Trait {
+			return fmt.Errorf("trait upcast expression trait %d does not match type trait %d", expr.Trait, traitType.Trait)
+		}
+		if !validImplID(program, expr.Impl) {
+			return fmt.Errorf("trait upcast has invalid impl id %d", expr.Impl)
+		}
+		impl := program.Impls[expr.Impl]
+		if impl.Trait != expr.Trait {
+			return fmt.Errorf("trait upcast impl %d has trait %d, want %d", expr.Impl, impl.Trait, expr.Trait)
+		}
+		if impl.ForType != expr.Target.Type {
+			return fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", expr.Impl, impl.ForType, expr.Target.Type)
+		}
+	}
 	for _, local := range expr.CaptureLocals {
 		if local < 0 || int(local) >= len(fn.Locals) {
 			return fmt.Errorf("expression captures invalid local %d", local)
@@ -362,6 +387,32 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
 			return err
+		}
+	}
+	if expr.Kind == ExprCallTrait {
+		if expr.Target == nil {
+			return fmt.Errorf("trait call missing target")
+		}
+		targetType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if targetType.Kind != TypeTraitObject {
+			return fmt.Errorf("trait call target has type kind %d", targetType.Kind)
+		}
+		if targetType.Trait != expr.Trait {
+			return fmt.Errorf("trait call expression trait %d does not match target type trait %d", expr.Trait, targetType.Trait)
+		}
+		if !validTraitID(program, expr.Trait) {
+			return fmt.Errorf("trait call has invalid trait id %d", expr.Trait)
+		}
+		trait := program.Traits[expr.Trait]
+		if expr.Method < 0 || expr.Method >= len(trait.Methods) {
+			return fmt.Errorf("trait call has invalid method index %d for trait %s", expr.Method, trait.Name)
+		}
+		method := trait.Methods[expr.Method]
+		if len(expr.Args) != len(method.Signature.Params) {
+			return fmt.Errorf("trait call method %s expects %d args, got %d", method.Name, len(method.Signature.Params), len(expr.Args))
 		}
 	}
 	if expr.Kind == ExprMatchMaybe {
@@ -455,6 +506,10 @@ func validFunctionID(program *Program, id FunctionID) bool {
 
 func validTraitID(program *Program, id TraitID) bool {
 	return id >= 0 && int(id) < len(program.Traits)
+}
+
+func validImplID(program *Program, id ImplID) bool {
+	return id >= 0 && int(id) < len(program.Impls)
 }
 
 func typeInfo(program *Program, id TypeID) (TypeInfo, error) {
