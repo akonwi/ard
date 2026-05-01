@@ -344,6 +344,31 @@ If Go FFI generation is requested and the project root has no `go.mod`, the CLI
 should fail with a clear setup error rather than silently creating module
 structure. A later init command can create the root `go.mod` and `ffi/` scaffold.
 
+### Internal stdlib FFI package
+
+The first version of this should be proven inside the compiler. Treat
+`compiler/std_lib` as Ard's internal Ard project, with its Go host package at:
+
+```text
+compiler/std_lib/
+  *.ard
+  ffi/
+    ard.gen.go
+```
+
+This package should use the existing compiler module at `compiler/go.mod`, not a
+nested `compiler/std_lib/go.mod`. Its Go import path is:
+
+```text
+github.com/akonwi/ard/std_lib/ffi
+```
+
+That keeps the stdlib layout equivalent to a userland project while avoiding a
+second Go module inside the compiler. The generated stdlib adapters should live
+at `compiler/std_lib/ffi/ard.gen.go`, and handwritten stdlib host functions can
+live in the same package. The current `compiler/ffi` package can migrate behind
+or into this package incrementally while the existing bytecode VM keeps working.
+
 ### Go FFI CLI workflow
 
 The CLI should expose a small FFI workflow:
@@ -728,6 +753,8 @@ Status: Done
 Status: Pending
 
 - [ ] Generate VM FFI adapters from Ard signatures.
+- [ ] Establish `compiler/std_lib/ffi` as the internal stdlib Go FFI package and
+  generate `compiler/std_lib/ffi/ard.gen.go`.
 - [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
   root `go.mod`.
 - [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.
