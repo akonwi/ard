@@ -182,7 +182,7 @@ type Expr struct {
 Representative operations:
 
 - constants and local loads
-- `let`, assignment, return, break
+- `let`, assignment, block-result evaluation, break
 - `if`, `while`, range and collection loops
 - direct calls, extern calls, closure calls
 - closure construction with explicit capture layout
@@ -596,59 +596,100 @@ AIR, while low-level externs become direct Go calls or generated adapters.
 
 ## Milestones
 
+Status markers:
+
+- `Done`: the milestone's checklist is complete.
+- `In progress`: at least one item is complete, but the milestone is not done.
+- `Pending`: no committed implementation work yet.
+
 ### Milestone 1: AIR skeleton
 
-- Define AIR program, type, function, statement, and expression data structures.
-- Lower a tiny checked program to AIR.
-- Add an AIR validator.
-- Ensure AIR does not import `runtime.Object` or expose `checker.Type` to
+Status: Done
+
+- [x] Define AIR program, type, function, statement, and expression data
+  structures.
+- [x] Lower a tiny checked program to AIR.
+- [x] Add an AIR validator.
+- [x] Ensure AIR does not import `runtime.Object` or expose `checker.Type` to
   backend execution.
 
 ### Milestone 2: vm_next scalar execution
 
-- Execute constants, locals, arithmetic, direct function calls, conditionals, and
-  returns.
-- Add minimal test harness integration for AIR programs.
+Status: Done
+
+- [x] Execute constants, locals, arithmetic, direct function calls,
+  conditionals, and block-result evaluation.
+- [x] Add minimal test harness integration for AIR programs.
+- [x] Support `ard run --target vm_next` for the scalar subset.
 
 ### Milestone 3: layouts and generated data
 
-- Add struct layout metadata.
-- Execute struct construction, field get/set by index, enums, options, and
-  results.
-- Add generated Go representation for Ard structs used by test FFI examples.
+Status: In progress
 
-### Milestone 4: FFI adapters
+- [x] Add struct layout metadata.
+- [x] Execute struct construction and field get/set by index.
+- [ ] Execute enum construction, equality, and matching.
+- [ ] Execute `Maybe` values and helper operations.
+- [ ] Execute `Result` values and helper operations beyond `ok`/`err`
+  constructors.
+- [ ] Add generated Go representation for Ard structs used by test FFI
+  examples.
 
-- Generate VM FFI adapters from Ard signatures.
-- Support scalar parameters/returns, generated structs, options/results, extern
-  handles, and maps/lists of representable values.
-- Keep raw escape hatches out of the default path.
+### Milestone 4: try and control flow
 
-### Milestone 5: closures and async
+Status: Pending
 
-- Add closure values and capture layout.
-- Add fiber spawn/get/wait as AIR intrinsics.
-- Enforce async capture isolation.
-- Add typed callback handles for VM-to-host callback APIs.
+- [ ] Lower `try` explicitly in AIR instead of treating it as a backend-local
+  trick.
+- [ ] Execute `try` for `Maybe` and `Result`, including catch handlers and
+  propagation through expression blocks.
+- [ ] Add enough matching support for `Maybe` and `Result` to run the built-in
+  testing helpers without depending on the current VM.
+- [ ] Validate that `try` preserves Ard's expression-return semantics in nested
+  blocks, loops, and match arms.
 
-### Milestone 6: complicated types
+### Milestone 5: FFI adapters
 
-- Add user unions as tagged sums.
-- Add trait and impl tables.
-- Add trait objects with explicit upcast and method dispatch.
+Status: Pending
 
-### Milestone 7: vm_next parity
+- [ ] Generate VM FFI adapters from Ard signatures.
+- [ ] Support scalar parameters/returns, generated structs, `Maybe`/`Result`,
+  extern handles, and maps/lists of representable values.
+- [ ] Keep raw escape hatches out of the default path.
 
-- Run current VM behavioral tests against `vm_next`.
-- Support `ard run --target vm_next` for all sample programs.
-- Add `vm_next` to the benchmark suite.
-- Add conformance tests that can run against current VM, `vm_next`, and later
+### Milestone 6: closures and async
+
+Status: Pending
+
+- [ ] Add closure values and capture layout.
+- [ ] Add fiber spawn/get/wait as AIR intrinsics.
+- [ ] Enforce async capture isolation.
+- [ ] Add typed callback handles for VM-to-host callback APIs.
+
+### Milestone 7: complicated types
+
+Status: Pending
+
+- [ ] Add user unions as tagged sums.
+- [ ] Add trait and impl tables.
+- [ ] Add trait objects with explicit upcast and method dispatch.
+
+### Milestone 8: vm_next parity
+
+Status: Pending
+
+- [ ] Run current VM behavioral tests against `vm_next`.
+- [ ] Support `ard run --target vm_next` for all sample programs.
+- [ ] Add `vm_next` to the benchmark suite.
+- [ ] Add conformance tests that can run against current VM, `vm_next`, and later
   `go_next`.
 
-### Milestone 8: go_next from AIR
+### Milestone 9: go_next from AIR
 
-- Build the Go target from scratch against AIR.
-- Do not preserve or adapt the current Go targeting implementation unless a
+Status: Pending
+
+- [ ] Build the Go target from scratch against AIR.
+- [ ] Do not preserve or adapt the current Go targeting implementation unless a
   small piece is independently useful.
-- Generate native Go structs, tagged unions, fiber/runtime helpers, and
+- [ ] Generate native Go structs, tagged unions, fiber/runtime helpers, and
   idiomatic host FFI adapters.
