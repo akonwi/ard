@@ -315,6 +315,13 @@ func(args []*runtime.Object) *runtime.Object
 
 should not exist in the new architecture.
 
+For `vm_next`, the first adapter generation step is in-memory rather than a
+userland generated file. VM construction resolves each registered AIR extern into
+a reusable adapter keyed by `ExternID`, validates the host function shape against
+the Ard signature, and stores the conversion plan for calls. Missing bindings can
+still fail lazily when called so partially implemented stdlib modules can be
+loaded during the migration.
+
 ### Go FFI project layout
 
 Go FFI should use a user-owned Go package at the Ard project root:
@@ -763,9 +770,9 @@ Status: Done
 
 ### Milestone 5: FFI adapters
 
-Status: In progress
+Status: Complete
 
-- [ ] Generate VM FFI adapters from Ard signatures.
+- [x] Generate VM FFI adapters from Ard signatures.
 - [x] Establish `compiler/std_lib/ffi` as the internal stdlib Go FFI package and
   generate `compiler/std_lib/ffi/ard.gen.go` from Ard extern declarations.
 - [x] Execute scalar, generated `Maybe[T]`, and error-backed `Result` externs

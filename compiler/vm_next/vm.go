@@ -8,7 +8,7 @@ import (
 
 type VM struct {
 	program *air.Program
-	externs HostFunctionRegistry
+	externs hostExternAdapters
 }
 
 type TestStatus string
