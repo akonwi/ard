@@ -328,6 +328,49 @@ func (l *lowerer) declareModuleCallExtern(call *checker.ModuleFunctionCall) (Ext
 	return id, nil
 }
 
+func (l *lowerer) declareFunctionCallExtern(module ModuleID, call *checker.FunctionCall) (ExternID, error) {
+	key := functionKey(module, call.Name)
+	if id, ok := l.externs[key]; ok {
+		return id, nil
+	}
+	params := make([]Param, len(call.Args))
+	if def := call.Definition(); def != nil {
+		params = make([]Param, len(def.Parameters))
+		for i, param := range def.Parameters {
+			typeID, err := l.internType(param.Type)
+			if err != nil {
+				return 0, err
+			}
+			params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+		}
+	} else {
+		for i, arg := range call.Args {
+			typeID, err := l.internType(arg.Type())
+			if err != nil {
+				return 0, err
+			}
+			params[i] = Param{Name: fmt.Sprintf("arg%d", i), Type: typeID}
+		}
+	}
+	returnType, err := l.internType(call.Type())
+	if err != nil {
+		return 0, err
+	}
+	id := ExternID(len(l.program.Externs))
+	l.externs[key] = id
+	l.program.Externs = append(l.program.Externs, Extern{
+		ID:     id,
+		Module: module,
+		Name:   call.Name,
+		Signature: Signature{
+			Params: params,
+			Return: returnType,
+		},
+		Bindings: map[string]string{"go": call.ExternalBinding},
+	})
+	return id, nil
+}
+
 func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	if t == nil {
 		return NoType, fmt.Errorf("cannot intern nil type")
@@ -603,6 +646,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		args, err := fl.lowerArgs(e.Args)
 		if err != nil {
 			return nil, err
+		}
+		if e.ExternalBinding != "" {
+			id, err := fl.l.declareFunctionCallExtern(fl.fn.Module, e)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprCallExtern, Type: typeID, Extern: id, Args: args}, nil
 		}
 		if def := e.Definition(); def != nil {
 			id, ok := fl.l.lookupFunction(def.Name)

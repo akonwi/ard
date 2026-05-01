@@ -8,6 +8,7 @@ import (
 
 type VM struct {
 	program *air.Program
+	externs HostFunctionRegistry
 }
 
 type TestStatus string
@@ -25,10 +26,7 @@ type TestOutcome struct {
 }
 
 func New(program *air.Program) (*VM, error) {
-	if err := air.Validate(program); err != nil {
-		return nil, err
-	}
-	return &VM{program: program}, nil
+	return NewWithExterns(program, nil)
 }
 
 func (vm *VM) RunEntry() (Value, error) {
@@ -221,6 +219,12 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 			return Value{}, err
 		}
 		return f.vm.call(expr.Function, args)
+	case air.ExprCallExtern:
+		args, err := f.evalArgs(expr.Args)
+		if err != nil {
+			return Value{}, err
+		}
+		return f.vm.callExtern(expr.Extern, args)
 	case air.ExprMakeStruct:
 		return f.evalMakeStruct(expr)
 	case air.ExprGetField:

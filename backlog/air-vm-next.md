@@ -366,8 +366,16 @@ github.com/akonwi/ard/std_lib/ffi
 That keeps the stdlib layout equivalent to a userland project while avoiding a
 second Go module inside the compiler. The generated stdlib adapters should live
 at `compiler/std_lib/ffi/ard.gen.go`, and handwritten stdlib host functions can
-live in the same package. The current `compiler/ffi` package can migrate behind
-or into this package incrementally while the existing bytecode VM keeps working.
+live in the same package. The current bytecode VM can keep using `compiler/ffi`
+while `vm_next` starts over in `compiler/std_lib/ffi`.
+
+As an initial migration step, `compiler/std_lib/ffi/ard.gen.go` is generated from
+the Ard declarations in `compiler/std_lib/*.ard`. It should generate the
+target-side contract from Ard signatures: generated structs, opaque extern handle
+types, callback handle types, host function slots, and a binding registry. The
+handwritten Go implementations live in the same package and fill in the host
+function slots that are ready. This keeps the new path independent from the
+current `compiler/ffi` package, which is part of the architecture being replaced.
 
 ### Go FFI CLI workflow
 
@@ -750,11 +758,13 @@ Status: Done
 
 ### Milestone 5: FFI adapters
 
-Status: Pending
+Status: In progress
 
 - [ ] Generate VM FFI adapters from Ard signatures.
-- [ ] Establish `compiler/std_lib/ffi` as the internal stdlib Go FFI package and
-  generate `compiler/std_lib/ffi/ard.gen.go`.
+- [x] Establish `compiler/std_lib/ffi` as the internal stdlib Go FFI package and
+  generate `compiler/std_lib/ffi/ard.gen.go` from Ard extern declarations.
+- [x] Execute scalar, generated `Maybe[T]`, and error-backed `Result` externs
+  in `vm_next` through the generated stdlib host registry.
 - [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
   root `go.mod`.
 - [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.

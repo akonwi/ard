@@ -65,6 +65,52 @@ func TestRunEntryEvaluatesStringAndBoolExpressions(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesScalarExtern(t *testing.T) {
+	got := runSource(t, `
+		extern fn floor(value: Float) Float = "FloatFloor"
+
+		floor(42.9)
+	`)
+
+	if got.Kind != ValueFloat || got.Float != 42 {
+		t.Fatalf("got %#v, want float 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesMaybeExtern(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		extern fn parse_int(value: Str) Int? = "IntFromStr"
+
+		match parse_int("42") {
+			value => value,
+			_ => 0,
+		}
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesResultExtern(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		extern fn decode(input: Str, no_pad: Bool?) Str!Str = "Base64Decode"
+
+		match decode("YQ", maybe::some(true)) {
+			ok(value) => value,
+			err(message) => message,
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "a" {
+		t.Fatalf("got %#v, want a", got)
+	}
+}
+
 func TestRunEntryEvaluatesIfExpressions(t *testing.T) {
 	got := runSource(t, `
 		fn choose(value: Int) Int {
