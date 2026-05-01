@@ -92,13 +92,25 @@ func (vm *VM) call(id air.FunctionID, args []Value) (Value, error) {
 	for i, arg := range args {
 		frame.locals[i] = arg
 	}
-	return frame.evalBlock(fn.Body)
+	value, err := frame.evalBlock(fn.Body)
+	if ret, ok := err.(earlyReturn); ok {
+		return ret.value, nil
+	}
+	return value, err
 }
 
 type frame struct {
 	vm     *VM
 	fn     air.Function
 	locals []Value
+}
+
+type earlyReturn struct {
+	value Value
+}
+
+func (e earlyReturn) Error() string {
+	return "early return"
 }
 
 func (f *frame) evalBlock(block air.Block) (Value, error) {
@@ -261,6 +273,10 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalResultOr(expr)
 	case air.ExprResultIsOk, air.ExprResultIsErr:
 		return f.evalResultPredicate(expr)
+	case air.ExprTryResult:
+		return f.evalTryResult(expr)
+	case air.ExprTryMaybe:
+		return f.evalTryMaybe(expr)
 	default:
 		return Value{}, fmt.Errorf("unsupported expr kind %d", expr.Kind)
 	}
@@ -483,6 +499,54 @@ func (f *frame) evalResultPredicate(expr air.Expr) (Value, error) {
 		return Value{}, err
 	}
 	return Bool(expr.Type, expr.Kind == air.ExprResultIsOk && resultValue.Ok || expr.Kind == air.ExprResultIsErr && !resultValue.Ok), nil
+}
+
+func (f *frame) evalTryResult(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := subject.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if resultValue.Ok {
+		return resultValue.Value, nil
+	}
+	if expr.HasCatch {
+		if int(expr.CatchLocal) < 0 || int(expr.CatchLocal) >= len(f.locals) {
+			return Value{}, fmt.Errorf("invalid Result try catch local id %d", expr.CatchLocal)
+		}
+		f.locals[expr.CatchLocal] = resultValue.Value
+		value, err := f.evalBlockWithDefault(expr.Catch, f.fn.Signature.Return)
+		if err != nil {
+			return Value{}, err
+		}
+		return Value{}, earlyReturn{value: value}
+	}
+	return Value{}, earlyReturn{value: Result(f.fn.Signature.Return, false, resultValue.Value)}
+}
+
+func (f *frame) evalTryMaybe(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := subject.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if maybeValue.Some {
+		return maybeValue.Value, nil
+	}
+	if expr.HasCatch {
+		value, err := f.evalBlockWithDefault(expr.Catch, f.fn.Signature.Return)
+		if err != nil {
+			return Value{}, err
+		}
+		return Value{}, earlyReturn{value: value}
+	}
+	return Value{}, earlyReturn{value: Maybe(f.fn.Signature.Return, false, f.zeroMaybeForFunctionReturn())}
 }
 
 func (f *frame) evalIntBinary(expr air.Expr) (Value, error) {
@@ -716,4 +780,12 @@ func (f *frame) mustMaybeElem(typeID air.TypeID) air.TypeID {
 		return f.vm.mustTypeID(air.TypeVoid)
 	}
 	return typeInfo.Elem
+}
+
+func (f *frame) zeroMaybeForFunctionReturn() Value {
+	typeInfo, err := f.vm.typeInfo(f.fn.Signature.Return)
+	if err != nil || typeInfo.Kind != air.TypeMaybe {
+		return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid))
+	}
+	return f.vm.zeroValue(typeInfo.Elem)
 }

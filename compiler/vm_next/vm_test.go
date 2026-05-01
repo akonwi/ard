@@ -212,6 +212,144 @@ func TestRunEntryEvaluatesResultExpect(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesTryResult(t *testing.T) {
+	got := runSource(t, `
+		fn answer() Int!Str {
+			Result::ok(42)
+		}
+
+		fn compute() Int!Str {
+			let value = try answer()
+			Result::ok(value)
+		}
+
+		compute().expect("missing")
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryPropagatesTryResultFailure(t *testing.T) {
+	got := runSource(t, `
+		fn fail() Int!Str {
+			Result::err("boom")
+		}
+
+		fn compute() Int!Str {
+			let value = try fail()
+			Result::ok(value + 1)
+		}
+
+		compute().or(42)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesTryCatchAsEarlyReturn(t *testing.T) {
+	got := runSource(t, `
+		fn fail() Int!Str {
+			Result::err("boom")
+		}
+
+		fn compute() Str {
+			let value = try fail() -> err {
+				"caught: " + err
+			}
+			"success"
+		}
+
+		compute()
+	`)
+
+	if got.Kind != ValueStr || got.Str != "caught: boom" {
+		t.Fatalf("got %#v, want caught: boom", got)
+	}
+}
+
+func TestRunEntryEvaluatesTryCatchFunctionHandler(t *testing.T) {
+	got := runSource(t, `
+		fn format(err: Str) Str {
+			"caught: " + err
+		}
+
+		fn fail() Int!Str {
+			Result::err("boom")
+		}
+
+		fn compute() Str {
+			let value = try fail() -> format
+			"success"
+		}
+
+		compute()
+	`)
+
+	if got.Kind != ValueStr || got.Str != "caught: boom" {
+		t.Fatalf("got %#v, want caught: boom", got)
+	}
+}
+
+func TestRunEntryPropagatesTryMaybeFailure(t *testing.T) {
+	got := runSource(t, `
+		use ard/maybe
+
+		fn missing() Int? {
+			maybe::none()
+		}
+
+		fn compute() Str? {
+			let value = try missing()
+			maybe::some("present")
+		}
+
+		match compute() {
+			value => value,
+			_ => "none",
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "none" {
+		t.Fatalf("got %#v, want none", got)
+	}
+}
+
+func TestRunEntryPropagatesTryThroughMatchArm(t *testing.T) {
+	got := runSource(t, `
+		enum Status {
+			Active, Inactive
+		}
+
+		fn fail() Int!Str {
+			Result::err("boom")
+		}
+
+		fn compute(status: Status) Int!Str {
+			match status {
+				Status::Active => {
+					let value = try fail()
+					let result: Int!Str = Result::ok(value + 1)
+					result
+				}
+				Status::Inactive => {
+					let result: Int!Str = Result::ok(0)
+					result
+				}
+			}
+		}
+
+		compute(Status::Active).or(42)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunTestsEvaluatesResultOutcomes(t *testing.T) {
 	vm := newVMFromSource(t, `
 		test fn passes() Void!Str {

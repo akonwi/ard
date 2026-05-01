@@ -268,6 +268,56 @@ func TestLowerResults(t *testing.T) {
 	}
 }
 
+func TestLowerTryOps(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn result_value(result: Int!Str) Int!Str {
+			let value = try result
+			Result::ok(value + 1)
+		}
+
+		fn catch_result(result: Int!Str) Int {
+			let value = try result -> err {
+				0
+			}
+			value + 1
+		}
+
+		fn maybe_value(value: Int?) Int? {
+			let inner = try value
+			maybe::some(inner + 1)
+		}
+	`)
+
+	resultValue := findFunction(t, program, "result_value")
+	firstLet := resultValue.Body.Stmts[0]
+	if firstLet.Value == nil || firstLet.Value.Kind != ExprTryResult {
+		t.Fatalf("result try = %#v, want ExprTryResult", firstLet.Value)
+	}
+	if firstLet.Value.HasCatch {
+		t.Fatalf("result try HasCatch = true, want false")
+	}
+
+	catchResult := findFunction(t, program, "catch_result")
+	catchLet := catchResult.Body.Stmts[0]
+	if catchLet.Value == nil || catchLet.Value.Kind != ExprTryResult {
+		t.Fatalf("catch try = %#v, want ExprTryResult", catchLet.Value)
+	}
+	if !catchLet.Value.HasCatch {
+		t.Fatalf("catch try HasCatch = false, want true")
+	}
+	if catchLet.Value.CatchLocal < LocalID(len(catchResult.Signature.Params)) {
+		t.Fatalf("catch local = %d, want local after params", catchLet.Value.CatchLocal)
+	}
+
+	maybeValue := findFunction(t, program, "maybe_value")
+	maybeLet := maybeValue.Body.Stmts[0]
+	if maybeLet.Value == nil || maybeLet.Value.Kind != ExprTryMaybe {
+		t.Fatalf("maybe try = %#v, want ExprTryMaybe", maybeLet.Value)
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing

@@ -73,6 +73,8 @@ const (
 	ExprResultOr
 	ExprResultIsOk
 	ExprResultIsErr
+	ExprTryResult
+	ExprTryMaybe
 )
 
 type Expr struct {
@@ -115,6 +117,10 @@ type Expr struct {
 	ErrLocal LocalID
 	Ok       Block
 	Err      Block
+
+	HasCatch   bool
+	CatchLocal LocalID
+	Catch      Block
 }
 
 type StructFieldValue struct {

@@ -592,6 +592,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerResultMethod(typeID, e)
 	case *checker.ResultMatch:
 		return fl.lowerResultMatch(typeID, e)
+	case *checker.TryOp:
+		return fl.lowerTryOp(typeID, e)
 	case *checker.IntAddition:
 		return fl.lowerBinary(ExprIntAdd, typeID, e.Left, e.Right)
 	case *checker.IntSubtraction:
@@ -897,6 +899,49 @@ func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.Resu
 		return nil, fmt.Errorf("unsupported AIR Result method %d", method.Kind)
 	}
 	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
+func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, error) {
+	target, err := fl.lowerExpr(op.Expr())
+	if err != nil {
+		return nil, err
+	}
+
+	kind := ExprTryResult
+	if op.Kind == checker.TryMaybe {
+		kind = ExprTryMaybe
+	}
+	expr := &Expr{
+		Kind:       kind,
+		Type:       typeID,
+		Target:     target,
+		CatchLocal: -1,
+	}
+	if op.CatchBlock == nil {
+		return expr, nil
+	}
+
+	expr.HasCatch = true
+	if op.Kind == checker.TryResult {
+		errType, err := fl.l.internType(op.ErrType)
+		if err != nil {
+			return nil, err
+		}
+		catchLocal, catchBlock, err := fl.lowerBoundBlock(op.CatchVar, errType, op.CatchBlock.Stmts)
+		if err != nil {
+			return nil, err
+		}
+		expr.CatchLocal = catchLocal
+		expr.Catch = catchBlock
+		return expr, nil
+	}
+
+	catchBlock, err := fl.lowerBlock(op.CatchBlock.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	expr.Catch = catchBlock
+	return expr, nil
 }
 
 func (fl *functionLowerer) lowerBoundBlock(name string, typeID TypeID, stmts []checker.Statement) (LocalID, Block, error) {

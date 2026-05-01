@@ -638,11 +638,11 @@ Status: Done
 
 ### Milestone 4: try and control flow
 
-Status: Pending
+Status: In progress
 
-- [ ] Lower `try` explicitly in AIR instead of treating it as a backend-local
+- [x] Lower `try` explicitly in AIR instead of treating it as a backend-local
   trick.
-- [ ] Execute `try` for `Maybe` and `Result`, including catch handlers and
+- [x] Execute `try` for `Maybe` and `Result`, including catch handlers and
   propagation through expression blocks.
 - [ ] Add enough matching support for `Maybe` and `Result` to run the built-in
   testing helpers without depending on the current VM.

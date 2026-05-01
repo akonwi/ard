@@ -216,6 +216,41 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprTryResult || expr.Kind == ExprTryMaybe {
+		if expr.Target == nil {
+			return fmt.Errorf("try expression missing target")
+		}
+		targetType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if expr.Kind == ExprTryResult && targetType.Kind != TypeResult {
+			return fmt.Errorf("Result try target has type kind %d", targetType.Kind)
+		}
+		if expr.Kind == ExprTryMaybe && targetType.Kind != TypeMaybe {
+			return fmt.Errorf("Maybe try target has type kind %d", targetType.Kind)
+		}
+		if !expr.HasCatch {
+			returnType, err := typeInfo(program, fn.Signature.Return)
+			if err != nil {
+				return err
+			}
+			if expr.Kind == ExprTryResult && returnType.Kind != TypeResult {
+				return fmt.Errorf("Result try without catch in non-Result function %s", fn.Name)
+			}
+			if expr.Kind == ExprTryMaybe && returnType.Kind != TypeMaybe {
+				return fmt.Errorf("Maybe try without catch in non-Maybe function %s", fn.Name)
+			}
+		}
+		if expr.HasCatch {
+			if expr.Kind == ExprTryResult && (expr.CatchLocal < 0 || int(expr.CatchLocal) >= len(fn.Locals)) {
+				return fmt.Errorf("Result try catch binds invalid local %d", expr.CatchLocal)
+			}
+			if err := validateBlock(program, fn, expr.Catch); err != nil {
+				return err
+			}
+		}
+	}
 	for _, arg := range expr.Args {
 		if err := validateExpr(program, fn, arg); err != nil {
 			return err
@@ -235,4 +270,11 @@ func validTypeID(program *Program, id TypeID) bool {
 
 func validFunctionID(program *Program, id FunctionID) bool {
 	return id >= 0 && int(id) < len(program.Functions)
+}
+
+func typeInfo(program *Program, id TypeID) (TypeInfo, error) {
+	if !validTypeID(program, id) {
+		return TypeInfo{}, fmt.Errorf("invalid type id %d", id)
+	}
+	return program.Types[id-1], nil
 }
