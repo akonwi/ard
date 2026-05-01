@@ -253,6 +253,14 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalMaybePredicate(expr)
 	case air.ExprMaybeOr:
 		return f.evalMaybeOr(expr)
+	case air.ExprMatchResult:
+		return f.evalResultMatch(expr)
+	case air.ExprResultExpect:
+		return f.evalResultExpect(expr)
+	case air.ExprResultOr:
+		return f.evalResultOr(expr)
+	case air.ExprResultIsOk, air.ExprResultIsErr:
+		return f.evalResultPredicate(expr)
 	default:
 		return Value{}, fmt.Errorf("unsupported expr kind %d", expr.Kind)
 	}
@@ -399,6 +407,82 @@ func (f *frame) evalMaybeOr(expr air.Expr) (Value, error) {
 		return Value{}, fmt.Errorf("Maybe.or expects one fallback argument, got %d", len(expr.Args))
 	}
 	return f.evalExpr(expr.Args[0])
+}
+
+func (f *frame) evalResultMatch(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := subject.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if resultValue.Ok {
+		if int(expr.OkLocal) < 0 || int(expr.OkLocal) >= len(f.locals) {
+			return Value{}, fmt.Errorf("invalid Result match ok local id %d", expr.OkLocal)
+		}
+		f.locals[expr.OkLocal] = resultValue.Value
+		return f.evalBlockWithDefault(expr.Ok, expr.Type)
+	}
+	if int(expr.ErrLocal) < 0 || int(expr.ErrLocal) >= len(f.locals) {
+		return Value{}, fmt.Errorf("invalid Result match err local id %d", expr.ErrLocal)
+	}
+	f.locals[expr.ErrLocal] = resultValue.Value
+	return f.evalBlockWithDefault(expr.Err, expr.Type)
+}
+
+func (f *frame) evalResultExpect(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := subject.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if resultValue.Ok {
+		return resultValue.Value, nil
+	}
+	message := "expected Result to be ok"
+	if len(expr.Args) > 0 {
+		arg, err := f.evalExpr(expr.Args[0])
+		if err != nil {
+			return Value{}, err
+		}
+		message = arg.GoValueString()
+	}
+	return Value{}, fmt.Errorf("%s", message)
+}
+
+func (f *frame) evalResultOr(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := subject.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if resultValue.Ok {
+		return resultValue.Value, nil
+	}
+	if len(expr.Args) != 1 {
+		return Value{}, fmt.Errorf("Result.or expects one fallback argument, got %d", len(expr.Args))
+	}
+	return f.evalExpr(expr.Args[0])
+}
+
+func (f *frame) evalResultPredicate(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := subject.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	return Bool(expr.Type, expr.Kind == air.ExprResultIsOk && resultValue.Ok || expr.Kind == air.ExprResultIsErr && !resultValue.Ok), nil
 }
 
 func (f *frame) evalIntBinary(expr air.Expr) (Value, error) {

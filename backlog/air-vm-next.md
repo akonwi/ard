@@ -633,8 +633,10 @@ Status: In progress
   operations.
 - [ ] Execute closure-based `Maybe` helpers such as `map` and `and_then` once
   closure values exist.
-- [ ] Execute `Result` values and helper operations beyond `ok`/`err`
-  constructors.
+- [x] Execute `Result` matching and non-closure helper operations beyond
+  `ok`/`err` constructors.
+- [ ] Execute closure-based `Result` helpers such as `map`, `map_err`, and
+  `and_then` once closure values exist.
 - [ ] Add generated Go representation for Ard structs used by test FFI
   examples.
 

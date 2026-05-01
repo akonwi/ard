@@ -588,6 +588,10 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerMaybeMethod(typeID, e)
 	case *checker.OptionMatch:
 		return fl.lowerOptionMatch(typeID, e)
+	case *checker.ResultMethod:
+		return fl.lowerResultMethod(typeID, e)
+	case *checker.ResultMatch:
+		return fl.lowerResultMatch(typeID, e)
 	case *checker.IntAddition:
 		return fl.lowerBinary(ExprIntAdd, typeID, e.Left, e.Right)
 	case *checker.IntSubtraction:
@@ -829,6 +833,82 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
 	}
 	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
+func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.ResultMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	resultType, ok := fl.l.typeInfo(subject.Type)
+	if !ok || resultType.Kind != TypeResult {
+		return nil, fmt.Errorf("Result match lowered with non-Result subject %s", match.Subject.Type().String())
+	}
+	if match.Ok == nil || match.Ok.Pattern == nil || match.Ok.Body == nil {
+		return nil, fmt.Errorf("Result match missing ok case")
+	}
+	if match.Err == nil || match.Err.Pattern == nil || match.Err.Body == nil {
+		return nil, fmt.Errorf("Result match missing err case")
+	}
+
+	okLocal, okBlock, err := fl.lowerBoundBlock(match.Ok.Pattern.Name, resultType.Value, match.Ok.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	errLocal, errBlock, err := fl.lowerBoundBlock(match.Err.Pattern.Name, resultType.Error, match.Err.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Expr{
+		Kind:     ExprMatchResult,
+		Type:     typeID,
+		Target:   subject,
+		OkLocal:  okLocal,
+		ErrLocal: errLocal,
+		Ok:       okBlock,
+		Err:      errBlock,
+	}, nil
+}
+
+func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.ResultMethod) (*Expr, error) {
+	target, err := fl.lowerExpr(method.Subject)
+	if err != nil {
+		return nil, err
+	}
+	args, err := fl.lowerArgs(method.Args)
+	if err != nil {
+		return nil, err
+	}
+
+	var kind ExprKind
+	switch method.Kind {
+	case checker.ResultExpect:
+		kind = ExprResultExpect
+	case checker.ResultOr:
+		kind = ExprResultOr
+	case checker.ResultIsOk:
+		kind = ExprResultIsOk
+	case checker.ResultIsErr:
+		kind = ExprResultIsErr
+	case checker.ResultMap, checker.ResultMapErr, checker.ResultAndThen:
+		return nil, fmt.Errorf("unsupported AIR Result method requiring closures: %d", method.Kind)
+	default:
+		return nil, fmt.Errorf("unsupported AIR Result method %d", method.Kind)
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+}
+
+func (fl *functionLowerer) lowerBoundBlock(name string, typeID TypeID, stmts []checker.Statement) (LocalID, Block, error) {
+	oldLocal, hadOldLocal := fl.locals[name]
+	local := fl.defineLocal(name, typeID, false)
+	block, err := fl.lowerBlock(stmts)
+	if hadOldLocal {
+		fl.locals[name] = oldLocal
+	} else {
+		delete(fl.locals, name)
+	}
+	return local, block, err
 }
 
 func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {

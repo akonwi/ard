@@ -68,6 +68,11 @@ const (
 	ExprMaybeIsNone
 	ExprMaybeIsSome
 	ExprMaybeOr
+	ExprMatchResult
+	ExprResultExpect
+	ExprResultOr
+	ExprResultIsOk
+	ExprResultIsErr
 )
 
 type Expr struct {
@@ -105,6 +110,11 @@ type Expr struct {
 	SomeLocal LocalID
 	Some      Block
 	None      Block
+
+	OkLocal  LocalID
+	ErrLocal LocalID
+	Ok       Block
+	Err      Block
 }
 
 type StructFieldValue struct {

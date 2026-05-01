@@ -178,6 +178,40 @@ func TestRunEntryEvaluatesMaybeEqualityAndExpect(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesResults(t *testing.T) {
+	got := runSource(t, `
+		fn pick(result: Int!Str) Int {
+			match result {
+				ok(value) => value,
+				err(msg) => 0,
+			}
+		}
+
+		let ok: Int!Str = Result::ok(41)
+		let err: Int!Str = Result::err("bad")
+		if ok.is_ok() and err.is_err() {
+			pick(ok) + err.or(1)
+		} else {
+			0
+		}
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesResultExpect(t *testing.T) {
+	got := runSource(t, `
+		let result: Str!Str = Result::ok("ard")
+		result.expect("missing")
+	`)
+
+	if got.Kind != ValueStr || got.Str != "ard" {
+		t.Fatalf("got %#v, want ard", got)
+	}
+}
+
 func TestRunTestsEvaluatesResultOutcomes(t *testing.T) {
 	vm := newVMFromSource(t, `
 		test fn passes() Void!Str {

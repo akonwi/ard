@@ -237,6 +237,37 @@ func TestLowerMaybes(t *testing.T) {
 	}
 }
 
+func TestLowerResults(t *testing.T) {
+	program := lowerSource(t, `
+		fn value(result: Int!Str) Int {
+			result.or(42)
+		}
+
+		fn pick(result: Int!Str) Int {
+			match result {
+				ok(value) => value,
+				err(msg) => 0,
+			}
+		}
+	`)
+
+	value := findFunction(t, program, "value")
+	if value.Body.Result == nil || value.Body.Result.Kind != ExprResultOr {
+		t.Fatalf("value result = %#v, want ExprResultOr", value.Body.Result)
+	}
+
+	pick := findFunction(t, program, "pick")
+	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatchResult {
+		t.Fatalf("pick result = %#v, want ExprMatchResult", pick.Body.Result)
+	}
+	if pick.Body.Result.OkLocal < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("ok local = %d, want local after params", pick.Body.Result.OkLocal)
+	}
+	if pick.Body.Result.ErrLocal < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("err local = %d, want local after params", pick.Body.Result.ErrLocal)
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing

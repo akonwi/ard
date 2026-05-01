@@ -202,6 +202,20 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprMatchResult {
+		if expr.OkLocal < 0 || int(expr.OkLocal) >= len(fn.Locals) {
+			return fmt.Errorf("Result match binds invalid ok local %d", expr.OkLocal)
+		}
+		if expr.ErrLocal < 0 || int(expr.ErrLocal) >= len(fn.Locals) {
+			return fmt.Errorf("Result match binds invalid err local %d", expr.ErrLocal)
+		}
+		if err := validateBlock(program, fn, expr.Ok); err != nil {
+			return err
+		}
+		if err := validateBlock(program, fn, expr.Err); err != nil {
+			return err
+		}
+	}
 	for _, arg := range expr.Args {
 		if err := validateExpr(program, fn, arg); err != nil {
 			return err
