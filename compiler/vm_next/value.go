@@ -14,6 +14,7 @@ const (
 	ValueFloat
 	ValueBool
 	ValueStr
+	ValueEnum
 	ValueStruct
 	ValueResult
 )
@@ -60,6 +61,10 @@ func Str(typeID air.TypeID, value string) Value {
 	return Value{Kind: ValueStr, Type: typeID, Str: value}
 }
 
+func Enum(typeID air.TypeID, discriminant int) Value {
+	return Value{Kind: ValueEnum, Type: typeID, Int: discriminant}
+}
+
 func Struct(typeID air.TypeID, fields []Value) Value {
 	return Value{Kind: ValueStruct, Type: typeID, Ref: &StructValue{Type: typeID, Fields: fields}}
 }
@@ -80,6 +85,8 @@ func (v Value) GoValue() any {
 		return v.Bool
 	case ValueStr:
 		return v.Str
+	case ValueEnum:
+		return v.Int
 	case ValueStruct:
 		structValue, ok := v.Ref.(*StructValue)
 		if !ok {

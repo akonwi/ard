@@ -107,6 +107,54 @@ func TestLowerIfExpression(t *testing.T) {
 	}
 }
 
+func TestLowerEnums(t *testing.T) {
+	program := lowerSource(t, `
+		enum Direction {
+			Up, Down, Left, Right
+		}
+
+		fn right() Direction {
+			Direction::Right
+		}
+
+		fn name(direction: Direction) Str {
+			match direction {
+				Direction::Up => "North",
+				Direction::Down => "South",
+				Direction::Left => "West",
+				Direction::Right => "East",
+			}
+		}
+	`)
+
+	directionType := findType(t, program, "Direction")
+	if directionType.Kind != TypeEnum {
+		t.Fatalf("Direction kind = %v, want TypeEnum", directionType.Kind)
+	}
+	if len(directionType.Variants) != 4 {
+		t.Fatalf("Direction variant count = %d, want 4", len(directionType.Variants))
+	}
+
+	right := findFunction(t, program, "right")
+	if right.Body.Result == nil || right.Body.Result.Kind != ExprEnumVariant {
+		t.Fatalf("right result = %#v, want ExprEnumVariant", right.Body.Result)
+	}
+	if right.Body.Result.Variant != 3 || right.Body.Result.Discriminant != 3 {
+		t.Fatalf("right variant = %#v, want index/discriminant 3", right.Body.Result)
+	}
+
+	name := findFunction(t, program, "name")
+	if name.Body.Result == nil || name.Body.Result.Kind != ExprMatchEnum {
+		t.Fatalf("name result = %#v, want ExprMatchEnum", name.Body.Result)
+	}
+	if len(name.Body.Result.EnumCases) != 4 {
+		t.Fatalf("enum case count = %d, want 4", len(name.Body.Result.EnumCases))
+	}
+	if name.Body.Result.EnumCases[3].Discriminant != 3 {
+		t.Fatalf("right case = %#v, want discriminant 3", name.Body.Result.EnumCases[3])
+	}
+}
+
 func TestLowerResultConstructors(t *testing.T) {
 	program := lowerSource(t, `
 		fn pass() Void!Str {

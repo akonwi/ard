@@ -59,6 +59,8 @@ const (
 	ExprIf
 	ExprMakeResultOk
 	ExprMakeResultErr
+	ExprEnumVariant
+	ExprMatchEnum
 )
 
 type Expr struct {
@@ -69,6 +71,9 @@ type Expr struct {
 	Float float64
 	Bool  bool
 	Str   string
+
+	Variant      int
+	Discriminant int
 
 	Local LocalID
 
@@ -86,10 +91,19 @@ type Expr struct {
 	Condition *Expr
 	Then      Block
 	Else      Block
+
+	EnumCases []EnumMatchCase
+	CatchAll  Block
 }
 
 type StructFieldValue struct {
 	Index int
 	Name  string
 	Value Expr
+}
+
+type EnumMatchCase struct {
+	Variant      int
+	Discriminant int
+	Body         Block
 }

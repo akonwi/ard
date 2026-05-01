@@ -181,6 +181,16 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprMatchEnum {
+		for _, matchCase := range expr.EnumCases {
+			if err := validateBlock(program, fn, matchCase.Body); err != nil {
+				return err
+			}
+		}
+		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+			return err
+		}
+	}
 	for _, arg := range expr.Args {
 		if err := validateExpr(program, fn, arg); err != nil {
 			return err

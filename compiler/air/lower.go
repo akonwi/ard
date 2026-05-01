@@ -574,6 +574,10 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerStructInstance(typeID, e)
 	case *checker.InstanceProperty:
 		return fl.lowerInstanceProperty(typeID, e)
+	case *checker.EnumVariant:
+		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
+	case *checker.EnumMatch:
+		return fl.lowerEnumMatch(typeID, e)
 	case *checker.IntAddition:
 		return fl.lowerBinary(ExprIntAdd, typeID, e.Left, e.Right)
 	case *checker.IntSubtraction:
@@ -676,6 +680,52 @@ func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, 
 	}
 	value := args[0]
 	return &Expr{Kind: kind, Type: typeID, Target: &value}, nil
+}
+
+func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	enumType, ok := fl.l.typeInfo(subject.Type)
+	if !ok || enumType.Kind != TypeEnum {
+		return nil, fmt.Errorf("enum match lowered with non-enum subject %s", match.Subject.Type().String())
+	}
+
+	cases := make([]EnumMatchCase, 0, len(match.Cases))
+	for variant, block := range match.Cases {
+		if block == nil {
+			continue
+		}
+		if variant < 0 || variant >= len(enumType.Variants) {
+			return nil, fmt.Errorf("enum match case index %d out of range for %s", variant, enumType.Name)
+		}
+		lowered, err := fl.lowerBlock(block.Stmts)
+		if err != nil {
+			return nil, err
+		}
+		cases = append(cases, EnumMatchCase{
+			Variant:      variant,
+			Discriminant: enumType.Variants[variant].Discriminant,
+			Body:         lowered,
+		})
+	}
+
+	var catchAll Block
+	if match.CatchAll != nil {
+		catchAll, err = fl.lowerBlock(match.CatchAll.Stmts)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Expr{
+		Kind:      ExprMatchEnum,
+		Type:      typeID,
+		Target:    subject,
+		EnumCases: cases,
+		CatchAll:  catchAll,
+	}, nil
 }
 
 func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {

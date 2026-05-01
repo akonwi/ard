@@ -83,6 +83,57 @@ func TestRunEntryEvaluatesIfExpressions(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesEnums(t *testing.T) {
+	got := runSource(t, `
+		enum Direction {
+			Up, Down, Left, Right
+		}
+
+		fn name(direction: Direction) Str {
+			match direction {
+				Direction::Up => "North",
+				Direction::Down => "South",
+				Direction::Left => "West",
+				Direction::Right => "East",
+			}
+		}
+
+		let dir = Direction::Right
+		let is_right = dir == Direction::Right
+		if is_right {
+			name(dir)
+		} else {
+			"bad"
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "East" {
+		t.Fatalf("got %#v, want East", got)
+	}
+}
+
+func TestRunEntryEvaluatesEnumCatchAllWithCustomDiscriminants(t *testing.T) {
+	got := runSource(t, `
+		enum HttpStatus {
+			Ok = 200,
+			Created = 201,
+			NotFound = 404,
+			ServerError = 500,
+		}
+
+		let status = HttpStatus::NotFound
+		match status {
+			HttpStatus::Ok => "ok",
+			HttpStatus::Created => "created",
+			_ => "other",
+		}
+	`)
+
+	if got.Kind != ValueStr || got.Str != "other" {
+		t.Fatalf("got %#v, want other", got)
+	}
+}
+
 func TestRunTestsEvaluatesResultOutcomes(t *testing.T) {
 	vm := newVMFromSource(t, `
 		test fn passes() Void!Str {

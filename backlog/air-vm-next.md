@@ -628,7 +628,7 @@ Status: In progress
 
 - [x] Add struct layout metadata.
 - [x] Execute struct construction and field get/set by index.
-- [ ] Execute enum construction, equality, and matching.
+- [x] Execute enum construction, equality, and matching.
 - [ ] Execute `Maybe` values and helper operations.
 - [ ] Execute `Result` values and helper operations beyond `ok`/`err`
   constructors.

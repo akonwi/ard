@@ -102,13 +102,17 @@ type frame struct {
 }
 
 func (f *frame) evalBlock(block air.Block) (Value, error) {
+	return f.evalBlockWithDefault(block, f.fn.Signature.Return)
+}
+
+func (f *frame) evalBlockWithDefault(block air.Block, defaultType air.TypeID) (Value, error) {
 	for _, stmt := range block.Stmts {
 		if _, err := f.evalStmt(stmt); err != nil {
 			return Value{}, err
 		}
 	}
 	if block.Result == nil {
-		return f.vm.zeroValue(f.fn.Signature.Return), nil
+		return f.vm.zeroValue(defaultType), nil
 	}
 	return f.evalExpr(*block.Result)
 }
@@ -161,6 +165,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return Bool(expr.Type, expr.Bool), nil
 	case air.ExprConstStr:
 		return Str(expr.Type, expr.Str), nil
+	case air.ExprEnumVariant:
+		return Enum(expr.Type, expr.Discriminant), nil
 	case air.ExprLoadLocal:
 		if int(expr.Local) < 0 || int(expr.Local) >= len(f.locals) {
 			return Value{}, fmt.Errorf("invalid local id %d", expr.Local)
@@ -220,15 +226,17 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 			return Value{}, fmt.Errorf("if condition must be bool, got kind %d", condition.Kind)
 		}
 		if condition.Bool {
-			return f.evalBlock(expr.Then)
+			return f.evalBlockWithDefault(expr.Then, expr.Type)
 		}
-		return f.evalBlock(expr.Else)
+		return f.evalBlockWithDefault(expr.Else, expr.Type)
 	case air.ExprMakeResultOk, air.ExprMakeResultErr:
 		value, err := f.evalExprPtr(expr.Target)
 		if err != nil {
 			return Value{}, err
 		}
 		return Result(expr.Type, expr.Kind == air.ExprMakeResultOk, value), nil
+	case air.ExprMatchEnum:
+		return f.evalEnumMatch(expr)
 	default:
 		return Value{}, fmt.Errorf("unsupported expr kind %d", expr.Kind)
 	}
@@ -284,6 +292,25 @@ func (f *frame) evalGetField(expr air.Expr) (Value, error) {
 		return Value{}, fmt.Errorf("invalid field index %d", expr.Field)
 	}
 	return structValue.Fields[expr.Field], nil
+}
+
+func (f *frame) evalEnumMatch(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	if subject.Kind != ValueEnum {
+		return Value{}, fmt.Errorf("enum match subject must be enum, got kind %d", subject.Kind)
+	}
+	for _, matchCase := range expr.EnumCases {
+		if subject.Int == matchCase.Discriminant {
+			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
+		}
+	}
+	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
+		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
+	}
+	return f.vm.zeroValue(expr.Type), nil
 }
 
 func (f *frame) evalIntBinary(expr air.Expr) (Value, error) {
@@ -345,7 +372,7 @@ func (f *frame) evalComparison(expr air.Expr) (Value, error) {
 	}
 	var result bool
 	switch left.Kind {
-	case ValueInt:
+	case ValueInt, ValueEnum:
 		switch expr.Kind {
 		case air.ExprLt:
 			result = left.Int < right.Int
@@ -435,6 +462,11 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		return Bool(typeID, false)
 	case air.TypeStr:
 		return Str(typeID, "")
+	case air.TypeEnum:
+		if len(typeInfo.Variants) == 0 {
+			return Enum(typeID, 0)
+		}
+		return Enum(typeID, typeInfo.Variants[0].Discriminant)
 	case air.TypeStruct:
 		fields := make([]Value, len(typeInfo.Fields))
 		for _, field := range typeInfo.Fields {
