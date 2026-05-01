@@ -624,20 +624,16 @@ Status: Done
 
 ### Milestone 3: layouts and generated data
 
-Status: In progress
+Status: Done
 
 - [x] Add struct layout metadata.
 - [x] Execute struct construction and field get/set by index.
 - [x] Execute enum construction, equality, and matching.
 - [x] Execute `Maybe` constructors, equality, matching, and non-closure helper
   operations.
-- [ ] Execute closure-based `Maybe` helpers such as `map` and `and_then` once
-  closure values exist.
 - [x] Execute `Result` matching and non-closure helper operations beyond
   `ok`/`err` constructors.
-- [ ] Execute closure-based `Result` helpers such as `map`, `map_err`, and
-  `and_then` once closure values exist.
-- [ ] Add generated Go representation for Ard structs used by test FFI
+- [x] Add generated Go representation for Ard structs used by test FFI
   examples.
 
 ### Milestone 4: try and control flow
@@ -667,6 +663,9 @@ Status: Pending
 Status: Pending
 
 - [ ] Add closure values and capture layout.
+- [ ] Execute closure-based `Maybe` helpers such as `map` and `and_then`.
+- [ ] Execute closure-based `Result` helpers such as `map`, `map_err`, and
+  `and_then`.
 - [ ] Add fiber spawn/get/wait as AIR intrinsics.
 - [ ] Enforce async capture isolation.
 - [ ] Add typed callback handles for VM-to-host callback APIs.
