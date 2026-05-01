@@ -45,7 +45,8 @@ type functionLowerer struct {
 func newLowerer() *lowerer {
 	l := &lowerer{
 		program: Program{
-			Entry: NoFunction,
+			Entry:  NoFunction,
+			Script: NoFunction,
 		},
 		moduleByPath: map[string]ModuleID{},
 		moduleByName: map[string]checker.Module{},
@@ -164,20 +165,20 @@ func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 
 	topLevel := topLevelExecutableStatements(prog.Statements)
 	if len(topLevel) > 0 {
-		mainID, err := l.declareSyntheticMain(modID)
+		scriptID, err := l.declareScriptFunction(modID)
 		if err != nil {
 			return err
 		}
-		fn := l.program.Functions[mainID]
+		fn := l.program.Functions[scriptID]
 		fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
 		body, err := fl.lowerBlock(topLevel)
 		if err != nil {
 			return err
 		}
 		fn.Body = body
-		l.program.Functions[mainID] = fn
-		l.program.Entry = mainID
-		mod.Functions = appendUniqueFunction(mod.Functions, mainID)
+		l.program.Functions[scriptID] = fn
+		l.program.Script = scriptID
+		mod.Functions = appendUniqueFunction(mod.Functions, scriptID)
 	}
 
 	l.loweredModules[path] = true
@@ -227,14 +228,17 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef, inc
 		IsTest: def.IsTest,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
+	if includeTests && def.Name == "main" {
+		l.program.Entry = id
+	}
 	if includeTests && def.IsTest {
 		l.program.Tests = append(l.program.Tests, Test{Name: def.Name, Function: id})
 	}
 	return id, nil
 }
 
-func (l *lowerer) declareSyntheticMain(module ModuleID) (FunctionID, error) {
-	key := functionKey(module, "main")
+func (l *lowerer) declareScriptFunction(module ModuleID) (FunctionID, error) {
+	key := functionKey(module, "<script>")
 	if id, ok := l.functions[key]; ok {
 		return id, nil
 	}
@@ -245,9 +249,10 @@ func (l *lowerer) declareSyntheticMain(module ModuleID) (FunctionID, error) {
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   "main",
+		ID:       id,
+		Module:   module,
+		Name:     "<script>",
+		IsScript: true,
 		Signature: Signature{
 			Return: returnType,
 		},
@@ -350,6 +355,72 @@ func (l *lowerer) declareImpl(module ModuleID, trait *checker.Trait, owner check
 		}
 	}
 
+	return id, nil
+}
+
+func (l *lowerer) declareBuiltinTraitImpl(module ModuleID, traitID TraitID, ownerType TypeID) (ImplID, bool, error) {
+	if !validTraitID(&l.program, traitID) {
+		return 0, false, fmt.Errorf("invalid trait id %d", traitID)
+	}
+	trait := l.program.Traits[traitID]
+	if trait.Name != "ToString" || len(trait.Methods) != 1 || trait.Methods[0].Name != "to_str" {
+		return 0, false, nil
+	}
+	ownerInfo, ok := l.typeInfo(ownerType)
+	if !ok {
+		return 0, false, fmt.Errorf("invalid builtin trait owner type %d", ownerType)
+	}
+	switch ownerInfo.Kind {
+	case TypeStr, TypeInt, TypeFloat, TypeBool:
+	default:
+		return 0, false, nil
+	}
+	if id, ok := l.lookupImpl(traitID, ownerType); ok {
+		return id, true, nil
+	}
+
+	methodID, err := l.declareBuiltinToStringMethod(module, ownerInfo)
+	if err != nil {
+		return 0, false, err
+	}
+	id := ImplID(len(l.program.Impls))
+	l.program.Impls = append(l.program.Impls, Impl{
+		ID:      id,
+		Trait:   traitID,
+		ForType: ownerType,
+		Methods: []FunctionID{methodID},
+	})
+	return id, true, nil
+}
+
+func (l *lowerer) declareBuiltinToStringMethod(module ModuleID, ownerInfo TypeInfo) (FunctionID, error) {
+	key := methodFunctionKey(module, ownerInfo.Name, "ToString", "to_str")
+	if id, ok := l.functions[key]; ok {
+		return id, nil
+	}
+	strType, err := l.internType(checker.Str)
+	if err != nil {
+		return NoFunction, err
+	}
+	id := FunctionID(len(l.program.Functions))
+	l.functions[key] = id
+	receiver := Param{Name: "self", Type: ownerInfo.ID}
+	l.program.Functions = append(l.program.Functions, Function{
+		ID:     id,
+		Module: module,
+		Name:   ownerInfo.Name + ".ToString.to_str",
+		Signature: Signature{
+			Params: []Param{receiver},
+			Return: strType,
+		},
+		Locals: []Local{{ID: 0, Name: "self", Type: ownerInfo.ID}},
+		Body: Block{Result: &Expr{
+			Kind:   ExprToStr,
+			Type:   strType,
+			Target: &Expr{Kind: ExprLoadLocal, Type: ownerInfo.ID, Local: 0},
+		}},
+	})
+	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
 }
 
@@ -757,13 +828,11 @@ func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defa
 			block.Result = expr
 			continue
 		}
-		lowered, err := fl.lowerStmt(stmt)
+		lowered, err := fl.lowerStmts(stmt)
 		if err != nil {
 			return block, err
 		}
-		if lowered != nil {
-			block.Stmts = append(block.Stmts, *lowered)
-		}
+		block.Stmts = append(block.Stmts, lowered...)
 	}
 	return block, nil
 }
@@ -840,6 +909,13 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 	}
 	impl, ok := fl.l.lookupImpl(expectedInfo.Trait, actual)
 	if !ok {
+		var err error
+		impl, ok, err = fl.l.declareBuiltinTraitImpl(fl.fn.Module, expectedInfo.Trait, actual)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if !ok {
 		return nil, false, nil
 	}
 	value, err := fl.lowerExpr(expr)
@@ -907,6 +983,88 @@ func (fl *functionLowerer) lowerWhileLoop(loop *checker.WhileLoop) (*Stmt, error
 		return nil, err
 	}
 	return &Stmt{Kind: StmtWhile, Condition: condition, Body: body}, nil
+}
+
+func (fl *functionLowerer) lowerStmts(stmt checker.Statement) ([]Stmt, error) {
+	if stmt.Expr == nil && stmt.Stmt == nil && !stmt.Break {
+		return nil, nil
+	}
+	if loop, ok := stmt.Stmt.(*checker.ForIntRange); ok {
+		return fl.lowerForIntRange(loop)
+	}
+	lowered, err := fl.lowerStmt(stmt)
+	if err != nil || lowered == nil {
+		return nil, err
+	}
+	return []Stmt{*lowered}, nil
+}
+
+func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, error) {
+	intType, err := fl.l.internType(checker.Int)
+	if err != nil {
+		return nil, err
+	}
+	boolType, err := fl.l.internType(checker.Bool)
+	if err != nil {
+		return nil, err
+	}
+	start, err := fl.lowerExprWithExpected(loop.Start, intType)
+	if err != nil {
+		return nil, err
+	}
+	end, err := fl.lowerExprWithExpected(loop.End, intType)
+	if err != nil {
+		return nil, err
+	}
+
+	cursor := fl.defineLocal(loop.Cursor, intType, true)
+	endLocal := fl.defineLocal(loop.Cursor+"$end", intType, false)
+	stmts := []Stmt{
+		{Kind: StmtLet, Local: cursor, Name: loop.Cursor, Type: intType, Mutable: true, Value: start},
+		{Kind: StmtLet, Local: endLocal, Name: loop.Cursor + "$end", Type: intType, Value: end},
+	}
+
+	var index LocalID
+	if loop.Index != "" {
+		index = fl.defineLocal(loop.Index, intType, true)
+		stmts = append(stmts, Stmt{Kind: StmtLet, Local: index, Name: loop.Index, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}})
+	}
+
+	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	body.Stmts = append(body.Stmts, Stmt{
+		Kind:  StmtAssign,
+		Local: cursor,
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, cursor), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+	})
+	if loop.Index != "" {
+		body.Stmts = append(body.Stmts, Stmt{
+			Kind:  StmtAssign,
+			Local: index,
+			Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+		})
+	}
+
+	stmts = append(stmts, Stmt{
+		Kind:      StmtWhile,
+		Condition: &Expr{Kind: ExprLte, Type: boolType, Left: loadLocal(intType, cursor), Right: loadLocal(intType, endLocal)},
+		Body:      body,
+	})
+	return stmts, nil
+}
+
+func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Block, error) {
+	var block Block
+	for _, stmt := range stmts {
+		lowered, err := fl.lowerStmts(stmt)
+		if err != nil {
+			return block, err
+		}
+		block.Stmts = append(block.Stmts, lowered...)
+	}
+	return block, nil
 }
 
 func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
@@ -1036,6 +1194,26 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerInstanceProperty(typeID, e)
 	case *checker.InstanceMethod:
 		return fl.lowerInstanceMethod(typeID, e)
+	case *checker.StrMethod:
+		if e.Kind == checker.StrToStr {
+			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		return nil, fmt.Errorf("unsupported AIR Str method %d", e.Kind)
+	case *checker.IntMethod:
+		if e.Kind == checker.IntToStr {
+			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		return nil, fmt.Errorf("unsupported AIR Int method %d", e.Kind)
+	case *checker.FloatMethod:
+		if e.Kind == checker.FloatToStr {
+			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		return nil, fmt.Errorf("unsupported AIR Float method %d", e.Kind)
+	case *checker.BoolMethod:
+		if e.Kind == checker.BoolToStr {
+			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		return nil, fmt.Errorf("unsupported AIR Bool method %d", e.Kind)
 	case *checker.EnumVariant:
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
 	case *checker.BoolMatch:
@@ -1133,12 +1311,31 @@ func (fl *functionLowerer) lowerIf(typeID TypeID, expr *checker.If) (*Expr, erro
 
 func (fl *functionLowerer) lowerElse(expr *checker.If, defaultType TypeID) (Block, error) {
 	if expr.ElseIf != nil {
-		nested, err := fl.lowerExprWithExpected(expr.ElseIf, defaultType)
+		condition, err := fl.lowerExpr(expr.ElseIf.Condition)
 		if err != nil {
 			return Block{}, err
 		}
-		nested.Type = defaultType
-		return Block{Result: nested}, nil
+		thenBlock, err := fl.lowerBlockWithDefault(expr.ElseIf.Body.Stmts, defaultType)
+		if err != nil {
+			return Block{}, err
+		}
+		elseBlock, err := fl.lowerElse(expr.ElseIf, defaultType)
+		if err != nil {
+			return Block{}, err
+		}
+		if expr.Else != nil {
+			elseBlock, err = fl.lowerBlockWithDefault(expr.Else.Stmts, defaultType)
+			if err != nil {
+				return Block{}, err
+			}
+		}
+		return Block{Result: &Expr{
+			Kind:      ExprIf,
+			Type:      defaultType,
+			Condition: condition,
+			Then:      thenBlock,
+			Else:      elseBlock,
+		}}, nil
 	}
 	if expr.Else != nil {
 		return fl.lowerBlockWithDefault(expr.Else.Stmts, defaultType)
@@ -1627,6 +1824,18 @@ func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, r
 		return nil, err
 	}
 	return &Expr{Kind: kind, Type: typeID, Left: left, Right: right}, nil
+}
+
+func (fl *functionLowerer) lowerUnary(kind ExprKind, typeID TypeID, valueExpr checker.Expression) (*Expr, error) {
+	value, err := fl.lowerExpr(valueExpr)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: value}, nil
+}
+
+func loadLocal(typeID TypeID, local LocalID) *Expr {
+	return &Expr{Kind: ExprLoadLocal, Type: typeID, Local: local}
 }
 
 func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.StructInstance) (*Expr, error) {

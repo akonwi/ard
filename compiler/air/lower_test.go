@@ -33,15 +33,40 @@ func TestLowerTinyProgram(t *testing.T) {
 		t.Fatalf("add right = %#v, want local 1", add.Body.Result.Right)
 	}
 
-	main := program.Functions[program.Entry]
-	if main.Body.Result == nil || main.Body.Result.Kind != ExprCall {
-		t.Fatalf("main result = %#v, want ExprCall", main.Body.Result)
+	if program.Entry != NoFunction {
+		t.Fatalf("entry = %d, want no entry for script-only program", program.Entry)
 	}
-	if main.Body.Result.Function != add.ID {
-		t.Fatalf("main calls function %d, want add %d", main.Body.Result.Function, add.ID)
+	if program.Script == NoFunction {
+		t.Fatal("script = NoFunction, want generated script function")
 	}
-	if got := len(main.Body.Result.Args); got != 2 {
-		t.Fatalf("main call arg count = %d, want 2", got)
+	script := program.Functions[program.Script]
+	if script.Body.Result == nil || script.Body.Result.Kind != ExprCall {
+		t.Fatalf("script result = %#v, want ExprCall", script.Body.Result)
+	}
+	if script.Body.Result.Function != add.ID {
+		t.Fatalf("script calls function %d, want add %d", script.Body.Result.Function, add.ID)
+	}
+	if got := len(script.Body.Result.Args); got != 2 {
+		t.Fatalf("script call arg count = %d, want 2", got)
+	}
+}
+
+func TestLowerMainEntrypoint(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() Int {
+			42
+		}
+	`)
+
+	if program.Entry == NoFunction {
+		t.Fatal("entry = NoFunction, want main function")
+	}
+	if program.Script != NoFunction {
+		t.Fatalf("script = %d, want no generated script function", program.Script)
+	}
+	entry := program.Functions[program.Entry]
+	if entry.Name != "main" {
+		t.Fatalf("entry name = %q, want main", entry.Name)
 	}
 }
 
@@ -141,11 +166,11 @@ func TestLowerWhileLoop(t *testing.T) {
 		count
 	`)
 
-	main := program.Functions[program.Entry]
-	if len(main.Body.Stmts) != 2 {
-		t.Fatalf("main stmt count = %d, want let and while", len(main.Body.Stmts))
+	script := program.Functions[program.Script]
+	if len(script.Body.Stmts) != 2 {
+		t.Fatalf("script stmt count = %d, want let and while", len(script.Body.Stmts))
 	}
-	loop := main.Body.Stmts[1]
+	loop := script.Body.Stmts[1]
 	if loop.Kind != StmtWhile {
 		t.Fatalf("second stmt = %#v, want StmtWhile", loop)
 	}
@@ -421,15 +446,15 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("trait method index = %d, want 0", describe.Body.Result.Method)
 	}
 
-	main := program.Functions[program.Entry]
-	if main.Body.Result == nil || main.Body.Result.Kind != ExprCall {
-		t.Fatalf("main result = %#v, want ExprCall", main.Body.Result)
+	script := program.Functions[program.Script]
+	if script.Body.Result == nil || script.Body.Result.Kind != ExprCall {
+		t.Fatalf("script result = %#v, want ExprCall", script.Body.Result)
 	}
-	if len(main.Body.Result.Args) != 1 || main.Body.Result.Args[0].Kind != ExprTraitUpcast {
-		t.Fatalf("main arg = %#v, want ExprTraitUpcast", main.Body.Result.Args)
+	if len(script.Body.Result.Args) != 1 || script.Body.Result.Args[0].Kind != ExprTraitUpcast {
+		t.Fatalf("script arg = %#v, want ExprTraitUpcast", script.Body.Result.Args)
 	}
-	if main.Body.Result.Args[0].Impl != program.Impls[0].ID {
-		t.Fatalf("upcast impl = %d, want %d", main.Body.Result.Args[0].Impl, program.Impls[0].ID)
+	if script.Body.Result.Args[0].Impl != program.Impls[0].ID {
+		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].Impl, program.Impls[0].ID)
 	}
 }
 
@@ -527,8 +552,9 @@ func TestLowerTestsManifest(t *testing.T) {
 
 func TestValidateRejectsBadTypeReference(t *testing.T) {
 	program := &Program{
-		Types: []TypeInfo{{ID: 1, Kind: TypeList, Name: "[Missing]", Elem: 99}},
-		Entry: NoFunction,
+		Types:  []TypeInfo{{ID: 1, Kind: TypeList, Name: "[Missing]", Elem: 99}},
+		Entry:  NoFunction,
+		Script: NoFunction,
 	}
 	if err := Validate(program); err == nil {
 		t.Fatalf("Validate succeeded, want invalid type error")

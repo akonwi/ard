@@ -46,6 +46,9 @@ func Validate(program *Program) error {
 	if program.Entry != NoFunction && !validFunctionID(program, program.Entry) {
 		return fmt.Errorf("invalid entry function id %d", program.Entry)
 	}
+	if program.Script != NoFunction && !validFunctionID(program, program.Script) {
+		return fmt.Errorf("invalid script function id %d", program.Script)
+	}
 	for _, test := range program.Tests {
 		if !validFunctionID(program, test.Function) {
 			return fmt.Errorf("test %s references invalid function %d", test.Name, test.Function)
@@ -290,6 +293,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if member.Type != expr.Target.Type {
 			return fmt.Errorf("union wrap member %s expects type %d, got %d", member.Name, member.Type, expr.Target.Type)
 		}
+	}
+	if expr.Kind == ExprToStr && expr.Target == nil {
+		return fmt.Errorf("to_str expression missing target")
 	}
 	if expr.Kind == ExprTraitUpcast {
 		if expr.Target == nil {

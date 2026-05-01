@@ -753,7 +753,11 @@ func runVMNextProgram(program *air.Program, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = vm.RunEntry()
+	if program.Entry != air.NoFunction {
+		_, err = vm.RunEntry()
+		return err
+	}
+	_, err = vm.RunScript()
 	return err
 }
 

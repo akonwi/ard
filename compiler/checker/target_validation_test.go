@@ -55,7 +55,7 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			name:        "io blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/io\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: bytecode, go, js-server",
+			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: bytecode, vm_next, go, js-server",
 		},
 		{
 			name:   "js promise allowed on js-server",

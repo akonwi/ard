@@ -1,10 +1,18 @@
 package ffi
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"math"
+	"os"
 	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/akonwi/ard/runtime"
 )
 
 var HostFunctions = Host{
@@ -18,7 +26,43 @@ var HostFunctions = Host{
 	HexDecode:       HexDecode,
 	HexEncode:       HexEncode,
 	IntFromStr:      IntFromStr,
+	OsArgs:          OsArgs,
+	Print:           Print,
+	ReadLine:        ReadLine,
 }.Functions()
+
+func OsArgs() []string {
+	return runtime.CurrentOSArgs()
+}
+
+func Print(str string) {
+	fmt.Println(str)
+}
+
+var (
+	stdinReaderMu sync.Mutex
+	stdinReader   *bufio.Reader
+	stdinSource   *os.File
+)
+
+func ReadLine() (string, error) {
+	stdinReaderMu.Lock()
+	defer stdinReaderMu.Unlock()
+
+	if stdinReader == nil || stdinSource != os.Stdin {
+		stdinSource = os.Stdin
+		stdinReader = bufio.NewReader(os.Stdin)
+	}
+
+	line, err := stdinReader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
+			return strings.TrimRight(line, "\r\n"), nil
+		}
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
 
 func Base64Encode(input string, noPad Maybe[bool]) string {
 	if noPad.Some && noPad.Value {

@@ -62,6 +62,7 @@ const (
 	ExprFloatMul
 	ExprFloatDiv
 	ExprStrConcat
+	ExprToStr
 	ExprEq
 	ExprNotEq
 	ExprLt

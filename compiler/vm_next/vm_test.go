@@ -24,6 +24,22 @@ func TestRunEntryEvaluatesFunctionCallsAndArithmetic(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesMainFunction(t *testing.T) {
+	vm := newVMFromSource(t, `
+		fn main() Int {
+			42
+		}
+	`)
+	got, err := vm.RunEntry()
+	if err != nil {
+		t.Fatalf("run entry: %v", err)
+	}
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryEvaluatesLocalsAndAssignment(t *testing.T) {
 	got := runSource(t, `
 		mut count = 40
@@ -64,6 +80,71 @@ func TestRunEntryEvaluatesStringAndBoolExpressions(t *testing.T) {
 
 	if got.Kind != ValueBool || !got.Bool {
 		t.Fatalf("got %#v, want true", got)
+	}
+}
+
+func TestRunEntryEvaluatesPrimitiveToStr(t *testing.T) {
+	got := runSource(t, `
+		40.to_str() + " " + true.to_str()
+	`)
+
+	if got.Kind != ValueStr || got.Str != "40 true" {
+		t.Fatalf("got %#v, want 40 true", got)
+	}
+}
+
+func TestRunEntryEvaluatesStdlibPrint(t *testing.T) {
+	var printed []string
+	got := runSourceWithExterns(t, `
+		use ard/io
+
+		io::print(42)
+	`, HostFunctionRegistry{
+		"Print": func(value string) {
+			printed = append(printed, value)
+		},
+	})
+
+	if got.Kind != ValueVoid {
+		t.Fatalf("got %#v, want void", got)
+	}
+	if len(printed) != 1 || printed[0] != "42" {
+		t.Fatalf("printed = %#v, want [42]", printed)
+	}
+}
+
+func TestRunEntryEvaluatesFizzBuzzSampleShape(t *testing.T) {
+	var printed []string
+	vm := newVMFromSourceWithExterns(t, `
+		use ard/io
+
+		fn main() {
+			for num in 1..10 {
+				if num % 3 == 0 {
+					io::print("Fizz")
+				} else if num % 5 == 0 {
+					io::print("Buzz")
+				} else {
+					io::print(num)
+				}
+			}
+		}
+	`, HostFunctionRegistry{
+		"Print": func(value string) {
+			printed = append(printed, value)
+		},
+	})
+	got, err := vm.RunEntry()
+	if err != nil {
+		t.Fatalf("run entry: %v", err)
+	}
+	if got.Kind != ValueVoid {
+		t.Fatalf("got %#v, want void", got)
+	}
+
+	want := []string{"1", "2", "Fizz", "4", "Buzz", "Fizz", "7", "8", "Fizz", "Buzz"}
+	if strings.Join(printed, ",") != strings.Join(want, ",") {
+		t.Fatalf("printed = %#v, want %#v", printed, want)
 	}
 }
 
@@ -438,12 +519,12 @@ func TestRunEntryRejectsAnyParameterForNonDynamicExtern(t *testing.T) {
 		},
 	})
 
-	_, err := vm.RunEntry()
+	_, err := vm.RunScript()
 	if err == nil {
-		t.Fatal("RunEntry succeeded, want unsupported host parameter error")
+		t.Fatal("RunScript succeeded, want unsupported host parameter error")
 	}
 	if !strings.Contains(err.Error(), "empty interface parameters are only supported for Dynamic extern values") {
-		t.Fatalf("RunEntry error = %v", err)
+		t.Fatalf("RunScript error = %v", err)
 	}
 }
 
@@ -504,6 +585,20 @@ func TestRunEntryEvaluatesWhileAndBreak(t *testing.T) {
 
 	if got.Kind != ValueInt || got.Int != 3 {
 		t.Fatalf("got %#v, want int 3", got)
+	}
+}
+
+func TestRunEntryEvaluatesIntRangeLoop(t *testing.T) {
+	got := runSource(t, `
+		mut total = 0
+		for num in 1..4 {
+			total = total + num
+		}
+		total
+	`)
+
+	if got.Kind != ValueInt || got.Int != 10 {
+		t.Fatalf("got %#v, want int 10", got)
 	}
 }
 
@@ -938,9 +1033,9 @@ func TestRunTestsEvaluatesResultOutcomes(t *testing.T) {
 func runSource(t *testing.T, input string) Value {
 	t.Helper()
 	vm := newVMFromSourceWithExterns(t, input, nil)
-	got, err := vm.RunEntry()
+	got, err := vm.RunScript()
 	if err != nil {
-		t.Fatalf("run entry: %v", err)
+		t.Fatalf("run script: %v", err)
 	}
 	return got
 }
@@ -948,9 +1043,9 @@ func runSource(t *testing.T, input string) Value {
 func runSourceWithExterns(t *testing.T, input string, externs HostFunctionRegistry) Value {
 	t.Helper()
 	vm := newVMFromSourceWithExterns(t, input, externs)
-	got, err := vm.RunEntry()
+	got, err := vm.RunScript()
 	if err != nil {
-		t.Fatalf("run entry: %v", err)
+		t.Fatalf("run script: %v", err)
 	}
 	return got
 }

@@ -75,6 +75,7 @@ type Program struct {
     Externs []Extern
     Tests   []Test
     Entry   FunctionID
+    Script  FunctionID
 }
 
 type Module struct {
@@ -93,6 +94,7 @@ type Function struct {
     Captures  []Capture
     Body      Block
     IsTest    bool
+    IsScript  bool
 }
 
 type Signature struct {
@@ -104,6 +106,13 @@ type Signature struct {
 All executable AIR should use concrete `TypeID`s. Generic source declarations can
 remain checker/lowering concerns, but runtime AIR should operate on specialized
 signatures and concrete type layouts.
+
+`Entry` and `Script` are separate execution roots. `Entry` points at the normal
+program entrypoint, currently explicit `fn main()`, and is what `vm_next.RunEntry`
+executes. `Script` points at the synthetic function generated for top-level
+executable statements, and is what `vm_next.RunScript` executes for tests,
+samples, and script-style programs. `RunEntry` should not fall back to a function
+named `main`; entry selection belongs in AIR lowering.
 
 ### Type table
 
@@ -768,7 +777,7 @@ Status: Done
 
 ### Milestone 5: FFI adapters
 
-Status: Complete
+Status: Done
 
 - [x] Generate VM FFI adapters from Ard signatures.
 - [x] Establish `compiler/std_lib/ffi` as the internal stdlib Go FFI package and
@@ -788,7 +797,7 @@ Status: Complete
 
 ### Milestone 6: closures and async
 
-Status: Complete
+Status: Done
 
 - [x] Add closure values and capture layout.
 - [x] Execute closure-based `Maybe` helpers such as `map` and `and_then`.
@@ -800,7 +809,7 @@ Status: Complete
 
 ### Milestone 7: complicated types
 
-Status: Complete
+Status: Done
 
 - [x] Add user unions as tagged sums.
 - [x] Add trait and impl tables.
@@ -808,8 +817,10 @@ Status: Complete
 
 ### Milestone 8: vm_next parity
 
-Status: Pending
+Status: In progress
 
+- [x] Separate program entry execution from script execution with
+  `vm_next.RunEntry` and `vm_next.RunScript`.
 - [ ] Run current VM behavioral tests against `vm_next`.
 - [ ] Support `ard run --target vm_next` for all sample programs.
 - [ ] Add `vm_next` to the benchmark suite.

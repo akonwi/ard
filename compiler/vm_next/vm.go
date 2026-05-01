@@ -2,6 +2,7 @@ package vm_next
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/akonwi/ard/air"
 )
@@ -34,6 +35,13 @@ func (vm *VM) RunEntry() (Value, error) {
 		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
 	}
 	return vm.call(vm.program.Entry, nil)
+}
+
+func (vm *VM) RunScript() (Value, error) {
+	if vm.program.Script == air.NoFunction {
+		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
+	}
+	return vm.call(vm.program.Script, nil)
 }
 
 func (vm *VM) Call(name string, args ...Value) (Value, error) {
@@ -297,6 +305,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 			return Value{}, err
 		}
 		return Str(expr.Type, left.Str+right.Str), nil
+	case air.ExprToStr:
+		return f.evalToStr(expr)
 	case air.ExprEq, air.ExprNotEq:
 		return f.evalEquality(expr)
 	case air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte:
@@ -511,6 +521,25 @@ func (f *frame) evalTraitUpcast(expr air.Expr) (Value, error) {
 		return Value{}, err
 	}
 	return TraitObject(expr.Type, expr.Trait, expr.Impl, value), nil
+}
+
+func (f *frame) evalToStr(expr air.Expr) (Value, error) {
+	value, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	switch value.Kind {
+	case ValueStr:
+		return Str(expr.Type, value.Str), nil
+	case ValueInt:
+		return Str(expr.Type, strconv.Itoa(value.Int)), nil
+	case ValueFloat:
+		return Str(expr.Type, strconv.FormatFloat(value.Float, 'f', -1, 64)), nil
+	case ValueBool:
+		return Str(expr.Type, strconv.FormatBool(value.Bool)), nil
+	default:
+		return Value{}, fmt.Errorf("cannot convert value kind %d to Str", value.Kind)
+	}
 }
 
 func (f *frame) evalMakeList(expr air.Expr) (Value, error) {

@@ -25,11 +25,13 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 	},
 	"ard/io": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
 	"ard/argv": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
