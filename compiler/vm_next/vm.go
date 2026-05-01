@@ -201,6 +201,24 @@ func (f *frame) evalStmt(stmt air.Stmt) (Value, error) {
 		}
 		f.locals[stmt.Local] = value
 		return value, nil
+	case air.StmtSetField:
+		target, err := f.evalExprPtr(stmt.Target)
+		if err != nil {
+			return Value{}, err
+		}
+		structValue, err := target.structValue()
+		if err != nil {
+			return Value{}, err
+		}
+		if stmt.Field < 0 || stmt.Field >= len(structValue.Fields) {
+			return Value{}, fmt.Errorf("invalid field index %d", stmt.Field)
+		}
+		value, err := f.evalExprPtr(stmt.Value)
+		if err != nil {
+			return Value{}, err
+		}
+		structValue.Fields[stmt.Field] = value
+		return value, nil
 	case air.StmtExpr:
 		return f.evalExprPtr(stmt.Expr)
 	case air.StmtWhile:
@@ -388,6 +406,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return Result(expr.Type, expr.Kind == air.ExprMakeResultOk, value), nil
 	case air.ExprMatchEnum:
 		return f.evalEnumMatch(expr)
+	case air.ExprMatchInt:
+		return f.evalIntMatch(expr)
 	case air.ExprMakeMaybeSome:
 		value, err := f.evalExprPtr(expr.Target)
 		if err != nil {
@@ -983,6 +1003,30 @@ func (f *frame) evalEnumMatch(expr air.Expr) (Value, error) {
 	}
 	for _, matchCase := range expr.EnumCases {
 		if subject.Int == matchCase.Discriminant {
+			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
+		}
+	}
+	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
+		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
+	}
+	return f.vm.zeroValue(expr.Type), nil
+}
+
+func (f *frame) evalIntMatch(expr air.Expr) (Value, error) {
+	subject, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	if subject.Kind != ValueInt {
+		return Value{}, fmt.Errorf("int match subject must be int, got kind %d", subject.Kind)
+	}
+	for _, matchCase := range expr.IntCases {
+		if subject.Int == matchCase.Value {
+			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
+		}
+	}
+	for _, matchCase := range expr.RangeCases {
+		if subject.Int >= matchCase.Start && subject.Int <= matchCase.End {
 			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
 		}
 	}

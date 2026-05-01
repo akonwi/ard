@@ -15,6 +15,20 @@ func None[T any]() Maybe[T] {
 	return Maybe[T]{}
 }
 
+type Result[T, E any] struct {
+	Value T
+	Error E
+	Ok    bool
+}
+
+func Ok[T, E any](value T) Result[T, E] {
+	return Result[T, E]{Value: value, Ok: true}
+}
+
+func Err[T, E any](err E) Result[T, E] {
+	return Result[T, E]{Error: err}
+}
+
 type Callback0[R any] struct {
 	Call func() (R, error)
 }
@@ -137,6 +151,10 @@ type Host struct {
 	CryptoSha512         func(input string) string
 	CryptoUUID           func() string
 	CryptoVerifyPassword func(password string, hashed string) (bool, error)
+	DecodeBool           func(data any) Result[bool, Error]
+	DecodeFloat          func(data any) Result[float64, Error]
+	DecodeInt            func(data any) Result[int, Error]
+	DecodeString         func(data any) Result[string, Error]
 	DynamicToList        func(data any) ([]any, error)
 	DynamicToMap         func(data any) (map[any]any, error)
 	EnvGet               func(key string) Maybe[string]
@@ -240,6 +258,18 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.CryptoVerifyPassword != nil {
 		functions["CryptoVerifyPassword"] = h.CryptoVerifyPassword
+	}
+	if h.DecodeBool != nil {
+		functions["DecodeBool"] = h.DecodeBool
+	}
+	if h.DecodeFloat != nil {
+		functions["DecodeFloat"] = h.DecodeFloat
+	}
+	if h.DecodeInt != nil {
+		functions["DecodeInt"] = h.DecodeInt
+	}
+	if h.DecodeString != nil {
+		functions["DecodeString"] = h.DecodeString
 	}
 	if h.DynamicToList != nil {
 		functions["DynamicToList"] = h.DynamicToList
@@ -419,10 +449,6 @@ func (h Host) Functions() map[string]any {
 }
 
 // Skipped extern AsyncEval: generic parameters are not generated yet.
-// Skipped extern DecodeBool: Result error type Error is not generated yet.
-// Skipped extern DecodeFloat: Result error type Error is not generated yet.
-// Skipped extern DecodeInt: Result error type Error is not generated yet.
-// Skipped extern DecodeString: Result error type Error is not generated yet.
 // Skipped extern GetResult: generic parameters are not generated yet.
 // Skipped extern JsonEncode: generic parameters are not generated yet.
 // Skipped extern NewList: generic returns are not generated yet.

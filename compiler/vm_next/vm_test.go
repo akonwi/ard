@@ -72,6 +72,67 @@ func TestRunEntryEvaluatesStructLayoutAndFieldAccess(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesStructInstanceMethod(t *testing.T) {
+	got := runSource(t, `
+		struct Todo {
+			title: Str,
+			completed: Bool,
+		}
+
+		impl Todo {
+			fn label() Str {
+				if self.completed {
+					"[x] {self.title}"
+				} else {
+					"[ ] {self.title}"
+				}
+			}
+		}
+
+		let todo = Todo{ title: "Buy milk", completed: true }
+		todo.label()
+	`)
+
+	if got.Kind != ValueStr || got.Str != "[x] Buy milk" {
+		t.Fatalf("got %#v, want todo label", got)
+	}
+}
+
+func TestRunEntryAssignsStructField(t *testing.T) {
+	got := runSource(t, `
+		struct Response {
+			status: Int,
+			body: Str,
+		}
+
+		mut response = Response{status: 200, body: ""}
+		response.status = 201
+		response.body = "created"
+		response.status.to_str() + " " + response.body
+	`)
+
+	if got.Kind != ValueStr || got.Str != "201 created" {
+		t.Fatalf("got %#v, want 201 created", got)
+	}
+}
+
+func TestRunEntryEvaluatesModuleStructInstance(t *testing.T) {
+	got := runSource(t, `
+		use ard/http
+
+		let req = http::Request{
+			method: http::Method::Get,
+			url: "https://example.com",
+			headers: [:],
+		}
+		req.url
+	`)
+
+	if got.Kind != ValueStr || got.Str != "https://example.com" {
+		t.Fatalf("got %#v, want request url", got)
+	}
+}
+
 func TestRunEntryEvaluatesStringAndBoolExpressions(t *testing.T) {
 	got := runSource(t, `
 		let label = "ard" + "lang"
@@ -355,6 +416,30 @@ func TestRunEntryReturnsListExtern(t *testing.T) {
 	}
 }
 
+func TestRunEntryReturnsEnumExtern(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		enum Status {
+			Ok = 200,
+			Created = 201,
+		}
+
+		extern fn status() Status = "Status"
+
+		match status() {
+			Status::Ok => "ok",
+			Status::Created => "created",
+		}
+	`, HostFunctionRegistry{
+		"Status": func() int {
+			return 201
+		},
+	})
+
+	if got.Kind != ValueStr || got.Str != "created" {
+		t.Fatalf("got %#v, want created", got)
+	}
+}
+
 func TestRunEntryPassesMapExtern(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		extern fn lookup(values: [Str: Int]) Int = "Lookup"
@@ -587,6 +672,53 @@ func TestRunEntryEvaluatesGenericFunctionSpecialization(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesGenericFunctionTypedLocalCall(t *testing.T) {
+	got := runSource(t, `
+		fn apply(value: Int, f: fn(Int) $T) $T {
+			f(value)
+		}
+
+		apply(40, fn(value) { value + 2 })
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesGenericFunctionReturningClosure(t *testing.T) {
+	got := runSource(t, `
+		fn constant(value: $T) fn(Int) $T {
+			fn(input: Int) $T {
+				value
+			}
+		}
+
+		let answer = constant(42)
+		answer(0)
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryEvaluatesModuleFunctionReference(t *testing.T) {
+	got := runSource(t, `
+		use ard/testing
+
+		let pass = testing::pass
+		match pass() {
+			ok => 42,
+			err(message) => 0,
+		}
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryPassesClosureExternAsCallbackHandle(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		extern fn call_with(value: Int, callback: fn(Int) Int) Int = "CallWith"
@@ -608,6 +740,34 @@ func TestRunEntryPassesClosureExternAsCallbackHandle(t *testing.T) {
 	}
 }
 
+func TestRunEntryPropagatesMutableCallbackStruct(t *testing.T) {
+	type HostBox struct {
+		Value int
+	}
+
+	got := runSourceWithExterns(t, `
+		struct Box {
+			value: Int,
+		}
+
+		extern fn mutate(callback: fn(mut Box) Void) Box = "Mutate"
+
+		mutate(fn(mut box: Box) {
+			box.value = 42
+		}).value
+	`, HostFunctionRegistry{
+		"Mutate": func(callback stdlibffi.Callback1[*HostBox, struct{}]) HostBox {
+			box := HostBox{Value: 1}
+			_, _ = callback.Call(&box)
+			return box
+		},
+	})
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryPassesDynamicExternAsExplicitAny(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		extern fn load_dynamic() Dynamic = "LoadDynamic"
@@ -621,6 +781,35 @@ func TestRunEntryPassesDynamicExternAsExplicitAny(t *testing.T) {
 		"DescribeDynamic": func(data any) string {
 			values, ok := data.(map[string]any)
 			if ok && values["name"] == "Ada" {
+				return "ok"
+			}
+			return "bad"
+		},
+	})
+
+	if got.Kind != ValueStr || got.Str != "ok" {
+		t.Fatalf("got %#v, want ok", got)
+	}
+}
+
+func TestRunEntryWrapsExpectedDynamic(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		use ard/maybe
+
+		extern fn describe_dynamic(data: Dynamic) Str = "DescribeDynamic"
+
+		struct Request {
+			body: Dynamic?,
+		}
+
+		let request = Request{body: maybe::some("raw text")}
+		match request.body {
+			value => describe_dynamic(value),
+			_ => "missing",
+		}
+	`, HostFunctionRegistry{
+		"DescribeDynamic": func(data any) string {
+			if data == "raw text" {
 				return "ok"
 			}
 			return "bad"
@@ -692,6 +881,24 @@ func TestRunEntryEvaluatesBoolMatch(t *testing.T) {
 
 	if got.Kind != ValueStr || got.Str != "pass" {
 		t.Fatalf("got %#v, want pass", got)
+	}
+}
+
+func TestRunEntryEvaluatesIntMatch(t *testing.T) {
+	got := runSource(t, `
+		fn describe(value: Int) Str {
+			match value {
+				0 => "zero",
+				1..9 => "small",
+				_ => "large",
+			}
+		}
+
+		describe(7)
+	`)
+
+	if got.Kind != ValueStr || got.Str != "small" {
+		t.Fatalf("got %#v, want small", got)
 	}
 }
 

@@ -822,15 +822,20 @@ Status: In progress
 - [x] Separate program entry execution from script execution with
   `vm_next.RunEntry` and `vm_next.RunScript`.
 - [ ] Run current VM behavioral tests against `vm_next`.
-- [ ] Support `ard run --target vm_next` for all sample programs.
-  - Current progress: core non-network samples now cover template strings,
-    list/map methods, list/map iteration, imported module externs, string
-    helpers, EOF-driven stdin, and generic stdlib function specialization for
-    `ard/async::join`. `samples/concurrent_stress.ard` now runs under
-    `vm_next`, including range-loop async captures and `async::sleep`.
-  - Known remaining blockers: a targetable test CLI path, controlled stdin
-    harnessing for interactive samples, and host capability coverage for
-    HTTP/network samples.
+- [x] Support `ard run --target vm_next` for all `vm_next`-targetable sample
+  programs.
+  - Core samples cover template strings, list/map methods, list/map iteration,
+    imported module externs, string helpers, EOF-driven stdin, and generic
+    stdlib function specialization for `ard/async::join`.
+  - Interactive samples run with controlled stdin.
+  - `samples/pokemon.ard` runs through HTTP client FFI, `Dynamic` JSON parsing,
+    generated `Result[T,E]` decode primitives, module function references, and
+    generic decoder specialization.
+  - `samples/server.ard` starts under `vm_next`; verified routes exercise
+    VM-to-host callback handles, mutable response parameters, inbound request
+    opaques, and JSON request decoding.
+  - `samples/pokemon_js.ard` remains intentionally target-gated to JS modules
+    and is not a `vm_next` sample.
 - [ ] Add `vm_next` to the benchmark suite.
 - [ ] Add conformance tests that can run against current VM, `vm_next`, and later
   `go_next`.

@@ -25,6 +25,7 @@ type hostExternAdapter struct {
 var (
 	errorInterface = reflect.TypeFor[error]()
 	hostMaybeType  = reflect.TypeFor[stdlibffi.Maybe[any]]()
+	hostResultType = reflect.TypeFor[stdlibffi.Result[any, any]]()
 	anyInterface   = reflect.TypeFor[any]()
 )
 
@@ -157,6 +158,9 @@ func (vm *VM) validateHostReturns(returnType air.TypeID, fnType reflect.Type) er
 func (vm *VM) validateHostResultReturns(returnInfo air.TypeInfo, fnType reflect.Type) error {
 	switch fnType.NumOut() {
 	case 1:
+		if isHostResultType(fnType.Out(0)) {
+			return vm.validateHostResultType(returnInfo, fnType.Out(0), false)
+		}
 		if !fnType.Out(0).Implements(errorInterface) {
 			return fmt.Errorf("Result extern returning one value must return error, got %s", fnType.Out(0))
 		}
@@ -176,6 +180,31 @@ func (vm *VM) validateHostResultReturns(returnInfo air.TypeInfo, fnType reflect.
 	default:
 		return fmt.Errorf("Result extern must return error or (value, error), got %d values", fnType.NumOut())
 	}
+}
+
+func (vm *VM) validateHostResultType(typeInfo air.TypeInfo, target reflect.Type, param bool) error {
+	valueField, ok := target.FieldByName("Value")
+	if !ok {
+		return fmt.Errorf("host Result type %s missing Value field", target)
+	}
+	errorField, ok := target.FieldByName("Error")
+	if !ok {
+		return fmt.Errorf("host Result type %s missing Error field", target)
+	}
+	okField, ok := target.FieldByName("Ok")
+	if !ok {
+		return fmt.Errorf("host Result type %s missing Ok field", target)
+	}
+	if okField.Type.Kind() != reflect.Bool {
+		return fmt.Errorf("host Result type %s Ok field must be bool, got %s", target, okField.Type)
+	}
+	if err := vm.validateHostType(typeInfo.Value, valueField.Type, param); err != nil {
+		return fmt.Errorf("Result value: %w", err)
+	}
+	if err := vm.validateHostType(typeInfo.Error, errorField.Type, param); err != nil {
+		return fmt.Errorf("Result error: %w", err)
+	}
+	return nil
 }
 
 func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param bool) error {
@@ -234,6 +263,9 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 	case air.TypeMaybe:
 		return vm.validateHostMaybeType(typeInfo, target, param)
 	case air.TypeStruct:
+		if param && target.Kind() == reflect.Pointer {
+			return vm.validateHostStructType(typeInfo, target.Elem(), param)
+		}
 		return vm.validateHostStructType(typeInfo, target, param)
 	case air.TypeExtern:
 		return vm.validateHostExternType(typeInfo, target)
@@ -363,6 +395,15 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic extern values, got %s", typeInfo.Name)
 	}
 	if target.Kind() == reflect.Pointer {
+		if value.Kind == ValueStruct {
+			inner, err := vm.structToHost(value, target.Elem())
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			out := reflect.New(target.Elem())
+			out.Elem().Set(inner)
+			return out, nil
+		}
 		if value.Kind == ValueMaybe {
 			maybeValue, err := value.maybeValue()
 			if err != nil {
@@ -431,6 +472,9 @@ func (vm *VM) hostReturnsToValue(returnType air.TypeID, returns []reflect.Value)
 }
 
 func (vm *VM) hostReturnsToResult(returnInfo air.TypeInfo, returnType air.TypeID, returns []reflect.Value) (Value, error) {
+	if len(returns) == 1 && isHostResultType(returns[0].Type()) {
+		return vm.hostResultToValue(returnInfo, returnType, returns[0])
+	}
 	if len(returns) == 1 && isErrorValue(returns[0]) {
 		if !returns[0].IsNil() {
 			return vm.resultErr(returnType, returnInfo.Error, returns[0].Interface().(error))
@@ -448,6 +492,30 @@ func (vm *VM) hostReturnsToResult(returnInfo air.TypeInfo, returnType air.TypeID
 		return Result(returnType, true, value), nil
 	}
 	return Value{}, fmt.Errorf("Result extern must return error or (value, error), got %d values", len(returns))
+}
+
+func (vm *VM) hostResultToValue(returnInfo air.TypeInfo, returnType air.TypeID, value reflect.Value) (Value, error) {
+	for value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return Result(returnType, false, vm.zeroValue(returnInfo.Error)), nil
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return Value{}, fmt.Errorf("host Result value must be struct, got %s", value.Type())
+	}
+	if value.FieldByName("Ok").Bool() {
+		okValue, err := vm.hostValueToValue(returnInfo.Value, value.FieldByName("Value"))
+		if err != nil {
+			return Value{}, err
+		}
+		return Result(returnType, true, okValue), nil
+	}
+	errValue, err := vm.hostValueToValue(returnInfo.Error, value.FieldByName("Error"))
+	if err != nil {
+		return Value{}, err
+	}
+	return Result(returnType, false, errValue), nil
 }
 
 func (vm *VM) resultErr(resultType, errType air.TypeID, err error) (Value, error) {
@@ -494,6 +562,11 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 			return Value{}, fmt.Errorf("cannot convert %s to Int", value.Type())
 		}
 		return Int(typeID, int(value.Int())), nil
+	case air.TypeEnum:
+		if value.Kind() < reflect.Int || value.Kind() > reflect.Int64 {
+			return Value{}, fmt.Errorf("cannot convert %s to enum %s", value.Type(), typeInfo.Name)
+		}
+		return Enum(typeID, int(value.Int())), nil
 	case air.TypeFloat:
 		if value.Kind() != reflect.Float64 {
 			return Value{}, fmt.Errorf("cannot convert %s to Float", value.Type())
@@ -653,6 +726,22 @@ func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.V
 		result, err := vm.callClosure(value, args)
 		if err != nil {
 			return []reflect.Value{zero, reflect.ValueOf(err)}
+		}
+		for i, input := range inputs {
+			if i >= len(fn.Signature.Params) || !fn.Signature.Params[i].Mutable {
+				continue
+			}
+			if input.Kind() != reflect.Pointer || input.IsNil() {
+				continue
+			}
+			hostArg, err := vm.valueToHost(args[i], input.Type().Elem())
+			if err != nil {
+				return []reflect.Value{zero, reflect.ValueOf(err)}
+			}
+			if !input.Elem().CanSet() {
+				return []reflect.Value{zero, reflect.ValueOf(fmt.Errorf("callback arg %d is not settable", i))}
+			}
+			input.Elem().Set(hostArg)
 		}
 		hostResult, err := vm.valueToHost(result, callType.Out(0))
 		if err != nil {
@@ -814,6 +903,12 @@ func isHostMaybeType(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Struct &&
 		typ.PkgPath() == hostMaybeType.PkgPath() &&
 		strings.HasPrefix(typ.Name(), "Maybe[")
+}
+
+func isHostResultType(typ reflect.Type) bool {
+	return typ.Kind() == reflect.Struct &&
+		typ.PkgPath() == hostResultType.PkgPath() &&
+		strings.HasPrefix(typ.Name(), "Result[")
 }
 
 func isHostCallbackType(typ reflect.Type) bool {

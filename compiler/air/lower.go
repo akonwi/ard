@@ -42,6 +42,7 @@ type functionLowerer struct {
 	parent        *functionLowerer
 	captureByName map[string]LocalID
 	captureLocals []LocalID
+	typeVars      map[string]TypeID
 }
 
 func newLowerer() *lowerer {
@@ -303,6 +304,35 @@ func (l *lowerer) declareAndLowerFunction(module ModuleID, def *checker.Function
 	return id, nil
 }
 
+func (l *lowerer) declareClosureFunction(module ModuleID, def *checker.FunctionDef, typeID TypeID) (FunctionID, error) {
+	typeInfo, ok := l.typeInfo(typeID)
+	if !ok || typeInfo.Kind != TypeFunction {
+		return NoFunction, fmt.Errorf("closure %s lowered with non-function AIR type %d", def.Name, typeID)
+	}
+	if len(def.Parameters) != len(typeInfo.Params) {
+		return NoFunction, fmt.Errorf("closure %s expects %d params, got %d AIR params", def.Name, len(def.Parameters), len(typeInfo.Params))
+	}
+	params := make([]Param, len(def.Parameters))
+	for i, param := range def.Parameters {
+		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i], Mutable: param.Mutable}
+	}
+	signature := Signature{Params: params, Return: typeInfo.Return}
+	key := concreteFunctionKey(module, def.Name, signature)
+	if id, ok := l.functions[key]; ok {
+		return id, nil
+	}
+	id := FunctionID(len(l.program.Functions))
+	l.functions[key] = id
+	l.program.Functions = append(l.program.Functions, Function{
+		ID:        id,
+		Module:    module,
+		Name:      def.Name,
+		Signature: signature,
+	})
+	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
+	return id, nil
+}
+
 func (l *lowerer) declareScriptFunction(module ModuleID) (FunctionID, error) {
 	key := functionKey(module, "<script>")
 	if id, ok := l.functions[key]; ok {
@@ -344,7 +374,7 @@ func (l *lowerer) lowerFunctionByID(id FunctionID, def *checker.FunctionDef) err
 	l.loweringFuncs[id] = true
 	defer delete(l.loweringFuncs, id)
 	fn := l.program.Functions[id]
-	fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
+	fl := l.newFunctionLowerer(&fn, def, nil)
 	for _, param := range fn.Signature.Params {
 		fl.defineLocal(param.Name, param.Type, param.Mutable)
 	}
@@ -361,6 +391,165 @@ func (l *lowerer) lowerFunctionByID(id FunctionID, def *checker.FunctionDef) err
 	l.program.Functions[id] = fn
 	l.loweredFuncs[id] = true
 	return nil
+}
+
+func (l *lowerer) newFunctionLowerer(fn *Function, def *checker.FunctionDef, parent *functionLowerer) *functionLowerer {
+	fl := &functionLowerer{
+		l:        l,
+		locals:   map[string]LocalID{},
+		fn:       fn,
+		parent:   parent,
+		typeVars: map[string]TypeID{},
+	}
+	if def != nil {
+		for i, param := range def.Parameters {
+			if i < len(fn.Signature.Params) {
+				fl.bindTypeVars(param.Type, fn.Signature.Params[i].Type)
+			}
+		}
+		fl.bindTypeVars(def.ReturnType, fn.Signature.Return)
+	}
+	return fl
+}
+
+func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
+	if pattern == nil || actual == NoType || !validTypeID(&fl.l.program, actual) {
+		return
+	}
+	if tv, ok := pattern.(*checker.TypeVar); ok {
+		if tv.Actual() == nil {
+			fl.typeVars[tv.Name()] = actual
+			return
+		}
+		fl.bindTypeVars(tv.Actual(), actual)
+		return
+	}
+	actualInfo, ok := fl.l.typeInfo(actual)
+	if !ok {
+		return
+	}
+	switch typ := pattern.(type) {
+	case *checker.List:
+		if actualInfo.Kind == TypeList {
+			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+		}
+	case *checker.Map:
+		if actualInfo.Kind == TypeMap {
+			fl.bindTypeVars(typ.Key(), actualInfo.Key)
+			fl.bindTypeVars(typ.Value(), actualInfo.Value)
+		}
+	case *checker.Maybe:
+		if actualInfo.Kind == TypeMaybe {
+			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+		}
+	case *checker.Result:
+		if actualInfo.Kind == TypeResult {
+			fl.bindTypeVars(typ.Val(), actualInfo.Value)
+			fl.bindTypeVars(typ.Err(), actualInfo.Error)
+		}
+	case *checker.FunctionDef:
+		if actualInfo.Kind == TypeFunction {
+			for i, param := range typ.Parameters {
+				if i < len(actualInfo.Params) {
+					fl.bindTypeVars(param.Type, actualInfo.Params[i])
+				}
+			}
+			fl.bindTypeVars(typ.ReturnType, actualInfo.Return)
+		}
+	case *checker.StructDef:
+		if actualInfo.Kind == TypeStruct || actualInfo.Kind == TypeFiber {
+			fieldsByName := map[string]FieldInfo{}
+			for _, field := range actualInfo.Fields {
+				fieldsByName[field.Name] = field
+			}
+			for name, fieldType := range typ.Fields {
+				if field, ok := fieldsByName[name]; ok {
+					fl.bindTypeVars(fieldType, field.Type)
+				}
+			}
+			if actualInfo.Kind == TypeFiber {
+				if result, ok := typ.Fields["result"]; ok {
+					fl.bindTypeVars(result, actualInfo.Elem)
+				}
+			}
+		}
+	}
+}
+
+func (fl *functionLowerer) internType(t checker.Type) (TypeID, error) {
+	if tv, ok := t.(*checker.TypeVar); ok {
+		if tv.Actual() != nil {
+			return fl.internType(tv.Actual())
+		}
+		if id, ok := fl.typeVars[tv.Name()]; ok {
+			return id, nil
+		}
+	}
+	if !typeHasUnresolvedTypeVar(t) {
+		return fl.l.internType(t)
+	}
+	return fl.internCompositeType(t)
+}
+
+func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
+	switch typ := t.(type) {
+	case *checker.List:
+		elem, err := fl.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType("["+fl.l.typeName(elem)+"]", TypeInfo{Kind: TypeList, Elem: elem})
+	case *checker.Map:
+		key, err := fl.internType(typ.Key())
+		if err != nil {
+			return NoType, err
+		}
+		value, err := fl.internType(typ.Value())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType("["+fl.l.typeName(key)+":"+fl.l.typeName(value)+"]", TypeInfo{Kind: TypeMap, Key: key, Value: value})
+	case *checker.Maybe:
+		elem, err := fl.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
+	case *checker.Result:
+		value, err := fl.internType(typ.Val())
+		if err != nil {
+			return NoType, err
+		}
+		errType, err := fl.internType(typ.Err())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+	case *checker.FunctionDef:
+		params := make([]TypeID, len(typ.Parameters))
+		for i, param := range typ.Parameters {
+			paramType, err := fl.internType(param.Type)
+			if err != nil {
+				return NoType, err
+			}
+			params[i] = paramType
+		}
+		returnType, err := fl.internType(typ.ReturnType)
+		if err != nil {
+			return NoType, err
+		}
+		name := "fn("
+		for i, param := range params {
+			if i > 0 {
+				name += ","
+			}
+			name += fl.l.typeName(param)
+		}
+		name += ") " + fl.l.typeName(returnType)
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, Return: returnType})
+	default:
+		return fl.l.internType(t)
+	}
 }
 
 func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) error {
@@ -548,7 +737,7 @@ func (l *lowerer) lowerMethodFunction(id FunctionID, def *checker.FunctionDef) e
 		return fmt.Errorf("method function has invalid id %d", id)
 	}
 	fn := l.program.Functions[id]
-	fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
+	fl := l.newFunctionLowerer(&fn, def, nil)
 	for _, param := range fn.Signature.Params {
 		fl.defineLocal(param.Name, param.Type, param.Mutable)
 	}
@@ -561,6 +750,49 @@ func (l *lowerer) lowerMethodFunction(id FunctionID, def *checker.FunctionDef) e
 	}
 	l.program.Functions[id] = fn
 	return nil
+}
+
+func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName string, ownerType TypeID, def *checker.FunctionDef) (FunctionID, error) {
+	key := methodFunctionKey(module, ownerName, "instance", def.Name)
+	if id, ok := l.functions[key]; ok {
+		return id, nil
+	}
+
+	receiver := def.Receiver
+	if receiver == "" {
+		receiver = "self"
+	}
+	params := make([]Param, 0, len(def.Parameters)+1)
+	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
+	for _, param := range def.Parameters {
+		typeID, err := l.internType(param.Type)
+		if err != nil {
+			return NoFunction, err
+		}
+		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+	}
+	returnType, err := l.internType(def.ReturnType)
+	if err != nil {
+		return NoFunction, err
+	}
+
+	id := FunctionID(len(l.program.Functions))
+	l.functions[key] = id
+	l.program.Functions = append(l.program.Functions, Function{
+		ID:     id,
+		Module: module,
+		Name:   ownerName + "." + def.Name,
+		Signature: Signature{
+			Params: params,
+			Return: returnType,
+		},
+	})
+	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
+	return id, nil
+}
+
+func (l *lowerer) lowerInstanceMethodFunction(id FunctionID, def *checker.FunctionDef) error {
+	return l.lowerFunctionByID(id, def)
 }
 
 func (l *lowerer) declareExtern(module ModuleID, def *checker.ExternalFunctionDef) (ExternID, error) {
@@ -848,6 +1080,26 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	return id, nil
 }
 
+func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
+	if id, ok := l.typeByName[name]; ok {
+		return id, nil
+	}
+	id := TypeID(len(l.program.Types) + 1)
+	info.ID = id
+	info.Name = name
+	l.typeByName[name] = id
+	l.program.Types = append(l.program.Types, info)
+	return id, nil
+}
+
+func (l *lowerer) typeName(id TypeID) string {
+	info, ok := l.typeInfo(id)
+	if !ok {
+		return fmt.Sprintf("<invalid:%d>", id)
+	}
+	return info.Name
+}
+
 func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 	if trait == nil {
 		return 0, fmt.Errorf("cannot intern nil trait")
@@ -962,6 +1214,15 @@ func typeHasUnresolvedTypeVar(t checker.Type) bool {
 	}
 }
 
+func canWrapAsDynamic(kind TypeKind) bool {
+	switch kind {
+	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeDynamic:
+		return true
+	default:
+		return false
+	}
+}
+
 func signaturesEqual(left, right Signature) bool {
 	if left.Return != right.Return || len(left.Params) != len(right.Params) {
 		return false
@@ -1021,6 +1282,9 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 	if wrapped, ok, err := fl.lowerTraitUpcastIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
+	if wrapped, ok, err := fl.lowerDynamicWrapIfNeeded(expr, expected); ok || err != nil {
+		return wrapped, err
+	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeList {
 			return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
@@ -1029,6 +1293,16 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 	if m, ok := expr.(*checker.MapLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeMap {
 			return fl.lowerMapLiteral(expected, m, expectedInfo.Key, expectedInfo.Value)
+		}
+	}
+	if closure, ok := expr.(*checker.FunctionDef); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeFunction {
+			return fl.lowerClosure(expected, closure)
+		}
+	}
+	if symbol, ok := expr.(*checker.ModuleSymbol); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeFunction {
+			return fl.lowerModuleSymbol(expected, symbol)
 		}
 	}
 	if call, ok := expr.(*checker.ModuleFunctionCall); ok {
@@ -1042,10 +1316,36 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 	if match, ok := expr.(*checker.BoolMatch); ok {
 		return fl.lowerBoolMatch(expected, match)
 	}
+	if match, ok := expr.(*checker.IntMatch); ok {
+		return fl.lowerIntMatch(expected, match)
+	}
 	if ifExpr, ok := expr.(*checker.If); ok {
 		return fl.lowerIf(expected, ifExpr)
 	}
 	return fl.lowerExpr(expr)
+}
+
+func (fl *functionLowerer) lowerDynamicWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
+	expectedInfo, ok := fl.l.typeInfo(expected)
+	if !ok || expectedInfo.Kind != TypeDynamic {
+		return nil, false, nil
+	}
+	actual, err := fl.internType(expr.Type())
+	if err != nil {
+		return nil, false, err
+	}
+	if actual == expected {
+		return nil, false, nil
+	}
+	actualInfo, ok := fl.l.typeInfo(actual)
+	if !ok || !canWrapAsDynamic(actualInfo.Kind) {
+		return nil, false, nil
+	}
+	value, err := fl.lowerExpr(expr)
+	if err != nil {
+		return nil, true, err
+	}
+	return &Expr{Kind: ExprToDynamic, Type: expected, Target: value}, true, nil
 }
 
 func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
@@ -1053,7 +1353,7 @@ func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expec
 	if !ok || expectedInfo.Kind != TypeUnion {
 		return nil, false, nil
 	}
-	actual, err := fl.l.internType(expr.Type())
+	actual, err := fl.internType(expr.Type())
 	if err != nil {
 		return nil, false, err
 	}
@@ -1077,7 +1377,7 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 	if !ok || expectedInfo.Kind != TypeTraitObject {
 		return nil, false, nil
 	}
-	actual, err := fl.l.internType(expr.Type())
+	actual, err := fl.internType(expr.Type())
 	if err != nil {
 		return nil, false, err
 	}
@@ -1115,7 +1415,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 	}
 	switch s := stmt.Stmt.(type) {
 	case *checker.VariableDef:
-		typeID, err := fl.l.internType(s.Type())
+		typeID, err := fl.internType(s.Type())
 		if err != nil {
 			return nil, err
 		}
@@ -1126,19 +1426,22 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 		}
 		return &Stmt{Kind: StmtLet, Local: local, Name: s.Name, Type: typeID, Mutable: s.Mutable, Value: value}, nil
 	case *checker.Reassignment:
-		target, ok := s.Target.(*checker.Variable)
-		if !ok {
+		switch target := s.Target.(type) {
+		case *checker.Variable:
+			local, ok := fl.locals[target.Name()]
+			if !ok {
+				return nil, fmt.Errorf("assignment to unknown local %s", target.Name())
+			}
+			value, err := fl.lowerExprWithExpected(s.Value, fl.fn.Locals[local].Type)
+			if err != nil {
+				return nil, err
+			}
+			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
+		case *checker.InstanceProperty:
+			return fl.lowerFieldAssignment(target, s.Value)
+		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
-		local, ok := fl.locals[target.Name()]
-		if !ok {
-			return nil, fmt.Errorf("assignment to unknown local %s", target.Name())
-		}
-		value, err := fl.lowerExprWithExpected(s.Value, fl.fn.Locals[local].Type)
-		if err != nil {
-			return nil, err
-		}
-		return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 	case *checker.WhileLoop:
 		return fl.lowerWhileLoop(s)
 	default:
@@ -1413,7 +1716,25 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}, nil
 	}
-	typeID, err := fl.l.internType(expr.Type())
+	if e, ok := expr.(*checker.FunctionCall); ok {
+		local, ok, err := fl.resolveLocal(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if ok && fl.localKind(local) == TypeFunction {
+			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+			args, err := fl.lowerArgsForFunctionType(e.Args, target.Type)
+			if err != nil {
+				return nil, err
+			}
+			typeInfo, ok := fl.l.typeInfo(target.Type)
+			if !ok || typeInfo.Kind != TypeFunction {
+				return nil, fmt.Errorf("local %s is not a function", e.Name)
+			}
+			return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: args}, nil
+		}
+	}
+	typeID, err := fl.internType(expr.Type())
 	if err != nil {
 		return nil, err
 	}
@@ -1571,12 +1892,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[extern].Signature.Return, Extern: extern, Args: args}, nil
+	case *checker.ModuleSymbol:
+		return fl.lowerModuleSymbol(typeID, e)
 	case *checker.ListLiteral:
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:
 		return fl.lowerMapLiteral(typeID, e, NoType, NoType)
 	case *checker.StructInstance:
 		return fl.lowerStructInstance(typeID, e)
+	case *checker.ModuleStructInstance:
+		return fl.lowerStructInstance(typeID, e.Property)
 	case *checker.InstanceProperty:
 		return fl.lowerInstanceProperty(typeID, e)
 	case *checker.InstanceMethod:
@@ -1615,6 +1940,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
 	case *checker.BoolMatch:
 		return fl.lowerBoolMatch(typeID, e)
+	case *checker.IntMatch:
+		return fl.lowerIntMatch(typeID, e)
 	case *checker.EnumMatch:
 		return fl.lowerEnumMatch(typeID, e)
 	case *checker.UnionMatch:
@@ -1902,6 +2229,75 @@ func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatc
 		Target:    subject,
 		EnumCases: cases,
 		CatchAll:  catchAll,
+	}, nil
+}
+
+func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	subjectType, ok := fl.l.typeInfo(subject.Type)
+	if !ok || subjectType.Kind != TypeInt {
+		return nil, fmt.Errorf("int match lowered with non-int subject %s", match.Subject.Type().String())
+	}
+
+	intValues := make([]int, 0, len(match.IntCases))
+	for value := range match.IntCases {
+		intValues = append(intValues, value)
+	}
+	sort.Ints(intValues)
+	intCases := make([]IntMatchCase, 0, len(intValues))
+	for _, value := range intValues {
+		block := match.IntCases[value]
+		if block == nil {
+			continue
+		}
+		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+		intCases = append(intCases, IntMatchCase{Value: value, Body: lowered})
+	}
+
+	ranges := make([]checker.IntRange, 0, len(match.RangeCases))
+	for intRange := range match.RangeCases {
+		ranges = append(ranges, intRange)
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].Start == ranges[j].Start {
+			return ranges[i].End < ranges[j].End
+		}
+		return ranges[i].Start < ranges[j].Start
+	})
+	rangeCases := make([]IntRangeMatchCase, 0, len(ranges))
+	for _, intRange := range ranges {
+		block := match.RangeCases[intRange]
+		if block == nil {
+			continue
+		}
+		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+		rangeCases = append(rangeCases, IntRangeMatchCase{Start: intRange.Start, End: intRange.End, Body: lowered})
+	}
+
+	var catchAll Block
+	if match.CatchAll != nil {
+		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Expr{
+		Kind:       ExprMatchInt,
+		Type:       typeID,
+		Target:     subject,
+		IntCases:   intCases,
+		RangeCases: rangeCases,
+		CatchAll:   catchAll,
 	}, nil
 }
 
@@ -2245,7 +2641,7 @@ func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, 
 
 	expr.HasCatch = true
 	if op.Kind == checker.TryResult {
-		errType, err := fl.l.internType(op.ErrType)
+		errType, err := fl.internType(op.ErrType)
 		if err != nil {
 			return nil, err
 		}
@@ -2428,19 +2824,36 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
 }
 
+func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, valueExpr checker.Expression) (*Stmt, error) {
+	target, err := fl.lowerExpr(prop.Subject)
+	if err != nil {
+		return nil, err
+	}
+	targetInfo, ok := fl.l.typeInfo(target.Type)
+	if !ok || targetInfo.Kind != TypeStruct {
+		return nil, fmt.Errorf("field assignment on non-struct AIR type %s", prop.Subject.Type().String())
+	}
+	for _, field := range targetInfo.Fields {
+		if field.Name != prop.Property {
+			continue
+		}
+		value, err := fl.lowerExprWithExpected(valueExpr, field.Type)
+		if err != nil {
+			return nil, err
+		}
+		return &Stmt{Kind: StmtSetField, Target: target, Field: field.Index, Type: field.Type, Value: value}, nil
+	}
+	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
+}
+
 func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {
-	id, err := fl.l.declareFunction(fl.fn.Module, def, false)
+	id, err := fl.l.declareClosureFunction(fl.fn.Module, def, typeID)
 	if err != nil {
 		return nil, err
 	}
 	fn := fl.l.program.Functions[id]
-	child := &functionLowerer{
-		l:             fl.l,
-		locals:        map[string]LocalID{},
-		fn:            &fn,
-		parent:        fl,
-		captureByName: map[string]LocalID{},
-	}
+	child := fl.l.newFunctionLowerer(&fn, def, fl)
+	child.captureByName = map[string]LocalID{}
 	for _, param := range fn.Signature.Params {
 		child.defineLocal(param.Name, param.Type, param.Mutable)
 	}
@@ -2456,6 +2869,19 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	fl.l.program.Functions[id] = fn
 
 	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id, CaptureLocals: child.captureLocals}, nil
+}
+
+func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {
+	def, ok := fl.l.moduleFunctionDefinitionForSymbol(symbol)
+	if !ok {
+		return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
+	}
+	module := fl.l.internModule(symbol.Module)
+	id, err := fl.l.declareAndLowerFunction(module, def)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
 }
 
 func (fl *functionLowerer) lowerFiberSpawn(typeID TypeID, fn checker.Expression) (*Expr, error) {
@@ -2510,6 +2936,9 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		}
 		return nil, fmt.Errorf("trait %s has no method %s", trait.Name, method.Method.Name)
 	}
+	if typeInfo.Kind == TypeStruct || typeInfo.Kind == TypeEnum {
+		return fl.lowerUserInstanceMethod(typeID, target, typeInfo, method)
+	}
 	if typeInfo.Kind != TypeFiber {
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
@@ -2521,6 +2950,30 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 	default:
 		return nil, fmt.Errorf("unsupported AIR Fiber method %s", method.Method.Name)
 	}
+}
+
+func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod) (*Expr, error) {
+	def := method.Method.Definition()
+	if def == nil || def.Body == nil {
+		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
+	}
+	module := fl.l.moduleForInstanceMethod(method, fl.fn.Module)
+	id, err := fl.l.declareInstanceMethodFunction(module, typeInfo.Name, target.Type, def)
+	if err != nil {
+		return nil, err
+	}
+	if err := fl.l.lowerInstanceMethodFunction(id, def); err != nil {
+		return nil, err
+	}
+	fn := fl.l.program.Functions[id]
+	args := make([]Expr, 0, len(method.Method.Args)+1)
+	args = append(args, *target)
+	loweredArgs, err := fl.lowerArgsWithSignature(method.Method.Args, Signature{Params: fn.Signature.Params[1:], Return: fn.Signature.Return})
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, loweredArgs...)
+	return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, nil
 }
 
 func (fl *functionLowerer) defineLocal(name string, typeID TypeID, mutable bool) LocalID {
@@ -2654,6 +3107,31 @@ func (l *lowerer) moduleFunctionDefinitionForCall(call *checker.ModuleFunctionCa
 	}
 }
 
+func (l *lowerer) moduleFunctionDefinitionForSymbol(symbol *checker.ModuleSymbol) (*checker.FunctionDef, bool) {
+	if symbol == nil {
+		return nil, false
+	}
+	def, ok := symbol.Symbol.Type.(*checker.FunctionDef)
+	if !ok {
+		return nil, false
+	}
+	bodyDef := l.lookupModuleFunctionDefinition(symbol.Module, symbol.Symbol.Name)
+	if bodyDef == nil || bodyDef.Body == nil || def.Body != nil {
+		return def, true
+	}
+	return &checker.FunctionDef{
+		Name:                    def.Name,
+		Receiver:                bodyDef.Receiver,
+		Parameters:              def.Parameters,
+		ReturnType:              def.ReturnType,
+		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,
+		Mutates:                 bodyDef.Mutates,
+		IsTest:                  bodyDef.IsTest,
+		Body:                    bodyDef.Body,
+		Private:                 bodyDef.Private,
+	}, true
+}
+
 func (l *lowerer) lookupModuleFunctionDefinition(modulePath, name string) *checker.FunctionDef {
 	mod, ok := l.moduleByName[modulePath]
 	if !ok || mod.Program() == nil {
@@ -2665,6 +3143,39 @@ func (l *lowerer) lookupModuleFunctionDefinition(modulePath, name string) *check
 		}
 	}
 	return nil
+}
+
+func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallback ModuleID) ModuleID {
+	if method == nil || method.Method == nil {
+		return fallback
+	}
+	ownerName := ""
+	switch {
+	case method.StructType != nil:
+		ownerName = method.StructType.Name
+	case method.EnumType != nil:
+		ownerName = method.EnumType.Name
+	default:
+		return fallback
+	}
+	for modulePath, mod := range l.moduleByName {
+		if mod.Program() == nil {
+			continue
+		}
+		for _, stmt := range mod.Program().Statements {
+			switch def := stmt.Stmt.(type) {
+			case *checker.StructDef:
+				if def.Name == ownerName && def.Methods[method.Method.Name] != nil {
+					return l.internModule(modulePath)
+				}
+			case *checker.Enum:
+				if def.Name == ownerName && def.Methods[method.Method.Name] != nil {
+					return l.internModule(modulePath)
+				}
+			}
+		}
+	}
+	return fallback
 }
 
 func (l *lowerer) resolveModuleExtern(modulePath, name string) (ExternID, bool, error) {

@@ -210,9 +210,32 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Target != nil {
+			if err := validateExpr(program, fn, *stmt.Target); err != nil {
+				return err
+			}
+		}
 		if stmt.Condition != nil {
 			if err := validateExpr(program, fn, *stmt.Condition); err != nil {
 				return err
+			}
+		}
+		if stmt.Kind == StmtSetField {
+			if stmt.Target == nil {
+				return fmt.Errorf("field set statement missing target")
+			}
+			targetType, err := typeInfo(program, stmt.Target.Type)
+			if err != nil {
+				return err
+			}
+			if targetType.Kind != TypeStruct {
+				return fmt.Errorf("field set target has type kind %d", targetType.Kind)
+			}
+			if stmt.Field < 0 || stmt.Field >= len(targetType.Fields) {
+				return fmt.Errorf("field set index %d out of range for %s", stmt.Field, targetType.Name)
+			}
+			if targetType.Fields[stmt.Field].Type != stmt.Type {
+				return fmt.Errorf("field set type %d does not match field type %d", stmt.Type, targetType.Fields[stmt.Field].Type)
 			}
 		}
 		if stmt.Kind == StmtWhile {
@@ -360,6 +383,34 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	}
 	if expr.Kind == ExprMatchEnum {
 		for _, matchCase := range expr.EnumCases {
+			if err := validateBlock(program, fn, matchCase.Body); err != nil {
+				return err
+			}
+		}
+		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+			return err
+		}
+	}
+	if expr.Kind == ExprMatchInt {
+		if expr.Target == nil {
+			return fmt.Errorf("int match missing target")
+		}
+		targetType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if targetType.Kind != TypeInt {
+			return fmt.Errorf("int match target has type kind %d", targetType.Kind)
+		}
+		for _, matchCase := range expr.IntCases {
+			if err := validateBlock(program, fn, matchCase.Body); err != nil {
+				return err
+			}
+		}
+		for _, matchCase := range expr.RangeCases {
+			if matchCase.Start > matchCase.End {
+				return fmt.Errorf("int match range start %d is greater than end %d", matchCase.Start, matchCase.End)
+			}
 			if err := validateBlock(program, fn, matchCase.Body); err != nil {
 				return err
 			}

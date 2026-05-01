@@ -256,15 +256,26 @@ func lowerHostFunction(binding string, fn *parse.ExternalFunction, aliases map[s
 
 func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}) ([]string, error) {
 	if result, ok := typ.(*parse.ResultType); ok {
-		if !isStringType(result.Err) {
-			return nil, fmt.Errorf("Result error type %s is not generated yet", result.Err.GetName())
-		}
 		if isVoidType(result.Val) {
+			if !isStringType(result.Err) {
+				errType, err := typeGoType(result.Err, aliases, definedTypes)
+				if err != nil {
+					return nil, err
+				}
+				return []string{fmt.Sprintf("Result[struct{}, %s]", errType)}, nil
+			}
 			return []string{"error"}, nil
 		}
 		valueType, err := typeGoType(result.Val, aliases, definedTypes)
 		if err != nil {
 			return nil, err
+		}
+		if !isStringType(result.Err) {
+			errType, err := typeGoType(result.Err, aliases, definedTypes)
+			if err != nil {
+				return nil, err
+			}
+			return []string{fmt.Sprintf("Result[%s, %s]", valueType, errType)}, nil
 		}
 		return []string{valueType, "error"}, nil
 	}
@@ -383,6 +394,9 @@ func render(c contract) ([]byte, error) {
 	out.WriteString("type Maybe[T any] struct {\n\tValue T\n\tSome  bool\n}\n\n")
 	out.WriteString("func Some[T any](value T) Maybe[T] {\n\treturn Maybe[T]{Value: value, Some: true}\n}\n\n")
 	out.WriteString("func None[T any]() Maybe[T] {\n\treturn Maybe[T]{}\n}\n\n")
+	out.WriteString("type Result[T, E any] struct {\n\tValue T\n\tError E\n\tOk    bool\n}\n\n")
+	out.WriteString("func Ok[T, E any](value T) Result[T, E] {\n\treturn Result[T, E]{Value: value, Ok: true}\n}\n\n")
+	out.WriteString("func Err[T, E any](err E) Result[T, E] {\n\treturn Result[T, E]{Error: err}\n}\n\n")
 	out.WriteString("type Callback0[R any] struct {\n\tCall func() (R, error)\n}\n")
 	out.WriteString("type Callback1[A, R any] struct {\n\tCall func(A) (R, error)\n}\n")
 	out.WriteString("type Callback2[A, B, R any] struct {\n\tCall func(A, B) (R, error)\n}\n\n")

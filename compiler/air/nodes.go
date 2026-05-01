@@ -10,6 +10,7 @@ type StmtKind uint8
 const (
 	StmtLet StmtKind = iota
 	StmtAssign
+	StmtSetField
 	StmtExpr
 	StmtWhile
 	StmtBreak
@@ -23,6 +24,8 @@ type Stmt struct {
 	Mutable bool
 	Value   *Expr
 	Expr    *Expr
+	Target  *Expr
+	Field   int
 
 	Condition *Expr
 	Body      Block
@@ -103,6 +106,7 @@ const (
 	ExprMakeResultErr
 	ExprEnumVariant
 	ExprMatchEnum
+	ExprMatchInt
 	ExprMakeMaybeSome
 	ExprMakeMaybeNone
 	ExprMatchMaybe
@@ -160,6 +164,8 @@ type Expr struct {
 	Else      Block
 
 	EnumCases  []EnumMatchCase
+	IntCases   []IntMatchCase
+	RangeCases []IntRangeMatchCase
 	UnionCases []UnionMatchCase
 	CatchAll   Block
 
@@ -192,6 +198,17 @@ type EnumMatchCase struct {
 	Variant      int
 	Discriminant int
 	Body         Block
+}
+
+type IntMatchCase struct {
+	Value int
+	Body  Block
+}
+
+type IntRangeMatchCase struct {
+	Start int
+	End   int
+	Body  Block
 }
 
 type UnionMatchCase struct {
