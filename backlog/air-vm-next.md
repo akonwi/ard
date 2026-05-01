@@ -826,10 +826,10 @@ Status: In progress
   - Current progress: core non-network samples now cover template strings,
     list/map methods, list/map iteration, imported module externs, string
     helpers, EOF-driven stdin, and generic stdlib function specialization for
-    `ard/async::join`.
+    `ard/async::join`. `samples/concurrent_stress.ard` now runs under
+    `vm_next`, including range-loop async captures and `async::sleep`.
   - Known remaining blockers: a targetable test CLI path, controlled stdin
-    harnessing for interactive samples, the mutable loop-cursor capture in
-    `samples/concurrent_stress.ard`, and host capability coverage for
+    harnessing for interactive samples, and host capability coverage for
     HTTP/network samples.
 - [ ] Add `vm_next` to the benchmark suite.
 - [ ] Add conformance tests that can run against current VM, `vm_next`, and later

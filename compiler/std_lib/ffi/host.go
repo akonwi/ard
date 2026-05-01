@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/akonwi/ard/runtime"
 )
@@ -29,6 +30,7 @@ var HostFunctions = Host{
 	OsArgs:          OsArgs,
 	Print:           Print,
 	ReadLine:        ReadLine,
+	Sleep:           Sleep,
 }.Functions()
 
 func OsArgs() []string {
@@ -62,6 +64,10 @@ func ReadLine() (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
+}
+
+func Sleep(ns int) {
+	time.Sleep(time.Duration(ns))
 }
 
 func Base64Encode(input string, noPad Maybe[bool]) string {

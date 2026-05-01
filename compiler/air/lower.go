@@ -1200,39 +1200,59 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 		return nil, err
 	}
 
-	cursor := fl.defineLocal(loop.Cursor, intType, true)
+	counter := fl.defineLocal(loop.Cursor+"$range", intType, true)
 	endLocal := fl.defineLocal(loop.Cursor+"$end", intType, false)
 	stmts := []Stmt{
-		{Kind: StmtLet, Local: cursor, Name: loop.Cursor, Type: intType, Mutable: true, Value: start},
+		{Kind: StmtLet, Local: counter, Name: loop.Cursor + "$range", Type: intType, Mutable: true, Value: start},
 		{Kind: StmtLet, Local: endLocal, Name: loop.Cursor + "$end", Type: intType, Value: end},
 	}
 
+	cursor := fl.defineLocal(loop.Cursor, intType, false)
+	var indexCounter LocalID
 	var index LocalID
 	if loop.Index != "" {
-		index = fl.defineLocal(loop.Index, intType, true)
-		stmts = append(stmts, Stmt{Kind: StmtLet, Local: index, Name: loop.Index, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}})
+		indexCounter = fl.defineLocal(loop.Index+"$range", intType, true)
+		index = fl.defineLocal(loop.Index, intType, false)
+		stmts = append(stmts, Stmt{Kind: StmtLet, Local: indexCounter, Name: loop.Index + "$range", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}})
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
 	if err != nil {
 		return nil, err
 	}
+	iterationLocals := []Stmt{{
+		Kind:  StmtLet,
+		Local: cursor,
+		Name:  loop.Cursor,
+		Type:  intType,
+		Value: loadLocal(intType, counter),
+	}}
+	if loop.Index != "" {
+		iterationLocals = append(iterationLocals, Stmt{
+			Kind:  StmtLet,
+			Local: index,
+			Name:  loop.Index,
+			Type:  intType,
+			Value: loadLocal(intType, indexCounter),
+		})
+	}
+	body.Stmts = append(iterationLocals, body.Stmts...)
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
-		Local: cursor,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, cursor), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+		Local: counter,
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, counter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
 	})
 	if loop.Index != "" {
 		body.Stmts = append(body.Stmts, Stmt{
 			Kind:  StmtAssign,
-			Local: index,
-			Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+			Local: indexCounter,
+			Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, indexCounter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
 		})
 	}
 
 	stmts = append(stmts, Stmt{
 		Kind:      StmtWhile,
-		Condition: &Expr{Kind: ExprLte, Type: boolType, Left: loadLocal(intType, cursor), Right: loadLocal(intType, endLocal)},
+		Condition: &Expr{Kind: ExprLte, Type: boolType, Left: loadLocal(intType, counter), Right: loadLocal(intType, endLocal)},
 		Body:      body,
 	})
 	return stmts, nil
@@ -1257,12 +1277,16 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 	}
 
 	listLocal := fl.defineLocal(loop.Cursor+"$list", list.Type, false)
-	indexName := loop.Index
-	if indexName == "" {
-		indexName = loop.Cursor + "$index"
+	indexName := loop.Cursor + "$index"
+	if loop.Index != "" {
+		indexName = loop.Index + "$index"
 	}
 	index := fl.defineLocal(indexName, intType, true)
 	cursor := fl.defineLocal(loop.Cursor, listType.Elem, false)
+	var visibleIndex LocalID
+	if loop.Index != "" {
+		visibleIndex = fl.defineLocal(loop.Index, intType, false)
+	}
 
 	stmts := []Stmt{
 		{Kind: StmtLet, Local: listLocal, Name: loop.Cursor + "$list", Type: list.Type, Value: list},
@@ -1273,13 +1297,23 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 	if err != nil {
 		return nil, err
 	}
-	body.Stmts = append([]Stmt{{
+	iterationLocals := []Stmt{{
 		Kind:  StmtLet,
 		Local: cursor,
 		Name:  loop.Cursor,
 		Type:  listType.Elem,
 		Value: &Expr{Kind: ExprListAt, Type: listType.Elem, Target: loadLocal(list.Type, listLocal), Args: []Expr{*loadLocal(intType, index)}},
-	}}, body.Stmts...)
+	}}
+	if loop.Index != "" {
+		iterationLocals = append(iterationLocals, Stmt{
+			Kind:  StmtLet,
+			Local: visibleIndex,
+			Name:  loop.Index,
+			Type:  intType,
+			Value: loadLocal(intType, index),
+		})
+	}
+	body.Stmts = append(iterationLocals, body.Stmts...)
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: index,

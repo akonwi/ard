@@ -498,6 +498,19 @@ func TestRunEntryEvaluatesAsyncStartFiberJoin(t *testing.T) {
 	}
 }
 
+func TestRunEntryEvaluatesAsyncSleep(t *testing.T) {
+	got := runSource(t, `
+		use ard/async
+
+		async::sleep(0)
+		42
+	`)
+
+	if got.Kind != ValueInt || got.Int != 42 {
+		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
 func TestRunEntryEvaluatesAsyncJoinFiberList(t *testing.T) {
 	got := runSource(t, `
 		use ard/async
@@ -510,6 +523,53 @@ func TestRunEntryEvaluatesAsyncJoinFiberList(t *testing.T) {
 
 	if got.Kind != ValueInt || got.Int != 42 {
 		t.Fatalf("got %#v, want int 42", got)
+	}
+}
+
+func TestRunEntryAllowsAsyncCaptureOfRangeCursor(t *testing.T) {
+	got := runSource(t, `
+		use ard/async
+
+		mut fibers: [async::Fiber<Int>] = []
+		for i in 0..3 {
+			fibers.push(async::eval(fn() Int { i }))
+		}
+
+		async::join(fibers)
+
+		mut total = 0
+		for fiber in fibers {
+			total =+ fiber.get()
+		}
+		total
+	`)
+
+	if got.Kind != ValueInt || got.Int != 6 {
+		t.Fatalf("got %#v, want int 6", got)
+	}
+}
+
+func TestRunEntryAllowsAsyncCaptureOfListCursorAndIndex(t *testing.T) {
+	got := runSource(t, `
+		use ard/async
+
+		let values = [10, 20, 30]
+		mut fibers: [async::Fiber<Int>] = []
+		for value, index in values {
+			fibers.push(async::eval(fn() Int { value + index }))
+		}
+
+		async::join(fibers)
+
+		mut total = 0
+		for fiber in fibers {
+			total =+ fiber.get()
+		}
+		total
+	`)
+
+	if got.Kind != ValueInt || got.Int != 63 {
+		t.Fatalf("got %#v, want int 63", got)
 	}
 }
 
