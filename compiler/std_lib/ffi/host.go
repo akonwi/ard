@@ -2,6 +2,7 @@ package ffi
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,13 +27,30 @@ var HostFunctions = Host{
 	Base64Encode:        Base64Encode,
 	Base64EncodeURL:     Base64EncodeURL,
 	BoolToDynamic:       BoolToDynamic,
+	CryptoUUID:          CryptoUUID,
 	DecodeBool:          DecodeBool,
 	DecodeFloat:         DecodeFloat,
 	DecodeInt:           DecodeInt,
 	DecodeString:        DecodeString,
 	DynamicToList:       DynamicToList,
 	DynamicToMap:        DynamicToMap,
+	EnvGet:              EnvGet,
 	ExtractField:        ExtractField,
+	FSAbs:               FSAbs,
+	FSAppendFile:        FSAppendFile,
+	FSCopy:              FSCopy,
+	FSCreateDir:         FSCreateDir,
+	FSCreateFile:        FSCreateFile,
+	FSCwd:               FSCwd,
+	FSDeleteDir:         FSDeleteDir,
+	FSDeleteFile:        FSDeleteFile,
+	FSExists:            FSExists,
+	FSIsDir:             FSIsDir,
+	FSIsFile:            FSIsFile,
+	FSListDir:           FSListDir,
+	FSReadFile:          FSReadFile,
+	FSRename:            FSRename,
+	FSWriteFile:         FSWriteFile,
 	FloatFloor:          FloatFloor,
 	FloatFromInt:        FloatFromInt,
 	FloatFromStr:        FloatFromStr,
@@ -172,6 +192,122 @@ func IntFromStr(str string) Maybe[int] {
 	return Some(value)
 }
 
+func EnvGet(key string) Maybe[string] {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return None[string]()
+	}
+	return Some(value)
+}
+
+func FSExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func FSIsFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func FSIsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func FSCreateFile(path string) (bool, error) {
+	file, err := os.Create(path)
+	if err != nil {
+		return false, err
+	}
+	if err := file.Close(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func FSWriteFile(path string, content string) error {
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func FSAppendFile(path string, content string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(content)
+	return err
+}
+
+func FSReadFile(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+func FSDeleteFile(path string) error {
+	return os.Remove(path)
+}
+
+func FSCopy(from string, to string) error {
+	content, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(to, content, 0o644)
+}
+
+func FSRename(from string, to string) error {
+	return os.Rename(from, to)
+}
+
+func FSCwd() (string, error) {
+	return os.Getwd()
+}
+
+func FSAbs(path string) (string, error) {
+	return filepath.Abs(path)
+}
+
+func FSCreateDir(path string) error {
+	return os.MkdirAll(path, 0o755)
+}
+
+func FSDeleteDir(path string) error {
+	return os.RemoveAll(path)
+}
+
+func FSListDir(path string) (map[string]bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		out[entry.Name()] = !entry.IsDir()
+	}
+	return out, nil
+}
+
+func CryptoUUID() string {
+	var uuid [16]byte
+	if _, err := rand.Read(uuid[:]); err != nil {
+		panic(fmt.Errorf("CryptoUUID failed: %w", err))
+	}
+	uuid[6] = (uuid[6] & 0x0f) | 0x40
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		uuid[0:4],
+		uuid[4:6],
+		uuid[6:8],
+		uuid[8:10],
+		uuid[10:16],
+	)
+}
+
 func StrToDynamic(value string) any {
 	return value
 }
@@ -226,7 +362,7 @@ func DecodeString(data any) Result[string, Error] {
 	if value, ok := data.(string); ok {
 		return Ok[string, Error](value)
 	}
-	return Err[string](decodeError("String", dynamicKind(data)))
+	return Err[string](decodeError("Str", formatDynamicValueForError(data)))
 }
 
 func DecodeInt(data any) Result[int, Error] {
@@ -244,7 +380,7 @@ func DecodeInt(data any) Result[int, Error] {
 			return Ok[int, Error](int(parsed))
 		}
 	}
-	return Err[int](decodeError("Int", dynamicKind(data)))
+	return Err[int](decodeError("Int", formatDynamicValueForError(data)))
 }
 
 func DecodeFloat(data any) Result[float64, Error] {
@@ -260,14 +396,14 @@ func DecodeFloat(data any) Result[float64, Error] {
 			return Ok[float64, Error](parsed)
 		}
 	}
-	return Err[float64](decodeError("Float", dynamicKind(data)))
+	return Err[float64](decodeError("Float", formatDynamicValueForError(data)))
 }
 
 func DecodeBool(data any) Result[bool, Error] {
 	if value, ok := data.(bool); ok {
 		return Ok[bool, Error](value)
 	}
-	return Err[bool](decodeError("Bool", dynamicKind(data)))
+	return Err[bool](decodeError("Bool", formatDynamicValueForError(data)))
 }
 
 func DynamicToList(data any) ([]any, error) {
@@ -277,7 +413,7 @@ func DynamicToList(data any) ([]any, error) {
 	if values, ok := data.([]any); ok {
 		return values, nil
 	}
-	return nil, fmt.Errorf("%s", dynamicKind(data))
+	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
 func DynamicToMap(data any) (map[any]any, error) {
@@ -294,7 +430,7 @@ func DynamicToMap(data any) (map[any]any, error) {
 		}
 		return out, nil
 	}
-	return nil, fmt.Errorf("%s", dynamicKind(data))
+	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
 func ExtractField(data any, name string) (any, error) {
@@ -312,7 +448,7 @@ func ExtractField(data any, name string) (any, error) {
 		}
 		return value, nil
 	}
-	return nil, fmt.Errorf("%s", dynamicKind(data))
+	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
 func HTTPDo(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (RawResponse, error) {
@@ -501,23 +637,82 @@ func decodeError(expected string, found string) Error {
 	return Error{Expected: expected, Found: found}
 }
 
-func dynamicKind(data any) string {
-	switch data.(type) {
+func formatDynamicValueForError(data any) string {
+	switch value := data.(type) {
 	case nil:
-		return "Void"
+		return "null"
 	case string:
-		return "String"
+		if len(value) > 50 {
+			return fmt.Sprintf("%q", value[:47]+"...")
+		}
+		return fmt.Sprintf("%q", value)
 	case bool:
-		return "Bool"
-	case int, int64:
-		return "Int"
-	case float64, json.Number:
-		return "Number"
+		return strconv.FormatBool(value)
+	case int:
+		return strconv.Itoa(value)
+	case int64:
+		return strconv.FormatInt(value, 10)
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case json.Number:
+		return value.String()
 	case []any:
-		return "List"
-	case map[string]any, map[any]any:
-		return "Map"
+		if len(value) == 0 {
+			return "[]"
+		}
+		if len(value) <= 3 {
+			parts := make([]string, len(value))
+			for i, item := range value {
+				parts[i] = formatDynamicValueForError(item)
+			}
+			return "[" + strings.Join(parts, ", ") + "]"
+		}
+		return fmt.Sprintf("[array with %d elements]", len(value))
+	case map[string]any:
+		return formatStringAnyMapForError(value)
+	case map[any]any:
+		return formatAnyMapForError(value)
 	default:
 		return fmt.Sprintf("%T", data)
 	}
+}
+
+func formatStringAnyMapForError(values map[string]any) string {
+	if len(values) == 0 {
+		return "{}"
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > 3 {
+		return fmt.Sprintf("{object with keys: %v}", keys[:3])
+	}
+	parts := make([]string, len(keys))
+	for i, key := range keys {
+		parts[i] = fmt.Sprintf("%s: %s", key, formatDynamicValueForError(values[key]))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+func formatAnyMapForError(values map[any]any) string {
+	if len(values) == 0 {
+		return "{}"
+	}
+	keys := make([]any, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return fmt.Sprint(keys[i]) < fmt.Sprint(keys[j])
+	})
+	if len(keys) > 3 {
+		return fmt.Sprintf("{object with keys: %v}", keys[:3])
+	}
+	parts := make([]string, len(keys))
+	for i, key := range keys {
+		parts[i] = fmt.Sprintf("%s: %s", formatDynamicValueForError(key), formatDynamicValueForError(values[key]))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }

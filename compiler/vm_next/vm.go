@@ -270,6 +270,12 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return Bool(expr.Type, expr.Bool), nil
 	case air.ExprConstStr:
 		return Str(expr.Type, expr.Str), nil
+	case air.ExprPanic:
+		message, err := f.evalExprPtr(expr.Target)
+		if err != nil {
+			return Value{}, err
+		}
+		return Value{}, fmt.Errorf("%s", message.GoValueString())
 	case air.ExprEnumVariant:
 		return Enum(expr.Type, expr.Discriminant), nil
 	case air.ExprLoadLocal:

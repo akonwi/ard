@@ -39,6 +39,7 @@ const (
 	ExprConstFloat
 	ExprConstBool
 	ExprConstStr
+	ExprPanic
 	ExprLoadLocal
 	ExprCall
 	ExprCallExtern

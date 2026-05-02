@@ -833,8 +833,14 @@ Status: In progress
     concrete `Void` layouts for uninhabited generic values like `none` and
     error-only `Result` expressions.
   - [ ] Port bytecode VM host-capability tests where they apply to the new FFI
-    model: dynamic/decode/json, crypto, env, fs, http, io, sql, duration, and
-    async timing behavior.
+    model.
+    - [x] Port duration, `Dynamic`/decode/from_json, env, filesystem, and UUID
+      coverage.
+    - [ ] Restore successful `decode::path` payload cases after nested generic
+      decoder factories preserve returned payload types through closure
+      specialization.
+    - [ ] Port or intentionally defer json/encode, broader crypto, http, io,
+      sql, and async timing behavior.
   - [ ] Decide which bytecode VM internal tests are intentionally not copied
     because they validate old registry/type-resolver/profile implementation
     details rather than Ard runtime behavior.

@@ -1823,6 +1823,17 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		if !ok {
+			if def, ok := e.Type().(*checker.FunctionDef); ok {
+				functionType, err := fl.internType(e.Type())
+				if err != nil {
+					return nil, err
+				}
+				id, err := fl.l.declareAndLowerFunction(fl.fn.Module, def)
+				if err != nil {
+					return nil, err
+				}
+				return &Expr{Kind: ExprMakeClosure, Type: functionType, Function: id}, nil
+			}
 			return nil, fmt.Errorf("unknown local %s", e.Name())
 		}
 		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}, nil
@@ -1860,6 +1871,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstBool, Type: typeID, Bool: e.Value}, nil
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
+	case *checker.Panic:
+		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprPanic, Type: typeID, Target: message}, nil
 	case *checker.TemplateStr:
 		return fl.lowerTemplateStr(typeID, e)
 	case *checker.CopyExpression:
@@ -3030,15 +3047,76 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 
 func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {
 	def, ok := fl.l.moduleFunctionDefinitionForSymbol(symbol)
-	if !ok {
-		return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
+	if ok {
+		module := fl.l.internModule(symbol.Module)
+		id, err := fl.l.declareAndLowerFunction(module, def)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
 	}
-	module := fl.l.internModule(symbol.Module)
-	id, err := fl.l.declareAndLowerFunction(module, def)
+
+	if def, ok := symbol.Symbol.Type.(*checker.ExternalFunctionDef); ok {
+		id, err := fl.lowerExternModuleSymbol(typeID, symbol.Module, symbol.Symbol.Name, def)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
+}
+
+func (fl *functionLowerer) lowerExternModuleSymbol(typeID TypeID, modulePath string, name string, def *checker.ExternalFunctionDef) (FunctionID, error) {
+	typeInfo, ok := fl.l.typeInfo(typeID)
+	if !ok || typeInfo.Kind != TypeFunction {
+		return NoFunction, fmt.Errorf("extern module symbol %s::%s lowered with non-function AIR type %d", modulePath, name, typeID)
+	}
+	module := fl.l.internModule(modulePath)
+	extern, err := fl.l.declareExtern(module, def)
 	if err != nil {
-		return nil, err
+		return NoFunction, err
 	}
-	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
+
+	signature := fl.l.program.Externs[extern].Signature
+	if len(signature.Params) != len(typeInfo.Params) {
+		return NoFunction, fmt.Errorf("extern module symbol %s::%s expects %d params, got %d", modulePath, name, len(signature.Params), len(typeInfo.Params))
+	}
+
+	key := fmt.Sprintf("extern-symbol:%d:%s:%d", module, name, typeID)
+	if id, ok := fl.l.functions[key]; ok {
+		return id, nil
+	}
+
+	params := make([]Param, len(signature.Params))
+	locals := make([]Local, len(signature.Params))
+	args := make([]Expr, len(signature.Params))
+	for i, param := range signature.Params {
+		params[i] = param
+		locals[i] = Local{ID: LocalID(i), Name: param.Name, Type: param.Type, Mutable: param.Mutable}
+		args[i] = *loadLocal(param.Type, LocalID(i))
+	}
+
+	id := FunctionID(len(fl.l.program.Functions))
+	fl.l.functions[key] = id
+	fl.l.program.Functions = append(fl.l.program.Functions, Function{
+		ID:     id,
+		Module: module,
+		Name:   modulePath + "::" + name,
+		Signature: Signature{
+			Params: params,
+			Return: signature.Return,
+		},
+		Locals: locals,
+		Body: Block{Result: &Expr{
+			Kind:   ExprCallExtern,
+			Type:   signature.Return,
+			Extern: extern,
+			Args:   args,
+		}},
+	})
+	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
+	return id, nil
 }
 
 func (fl *functionLowerer) lowerFiberSpawn(typeID TypeID, fn checker.Expression) (*Expr, error) {
