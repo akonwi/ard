@@ -835,7 +835,8 @@ Status: In progress
   - [ ] Port bytecode VM host-capability tests where they apply to the new FFI
     model.
     - [x] Port duration, `Dynamic`/decode/from_json, env, filesystem, UUID,
-      IO printing, HTTP client timeout behavior, and async timing coverage.
+      FFI panic recovery, IO printing, HTTP client timeout behavior, and async
+      timing coverage.
     - [x] Restore successful `decode::path` payload cases after nested generic
       decoder factories preserve returned payload types through closure
       specialization.

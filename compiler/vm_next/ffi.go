@@ -1,6 +1,7 @@
 package vm_next
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -57,8 +58,20 @@ func (vm *VM) callExtern(id air.ExternID, args []Value) (value Value, err error)
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			message := fmt.Sprintf("panic in FFI function '%s': %v", binding, recovered)
+			returnInfo, infoErr := vm.typeInfo(extern.Signature.Return)
+			if infoErr == nil && returnInfo.Kind == air.TypeResult {
+				result, resultErr := vm.resultErr(extern.Signature.Return, returnInfo.Error, errors.New(message))
+				if resultErr == nil {
+					value = result
+					err = nil
+					return
+				}
+				err = resultErr
+				return
+			}
 			value = Value{}
-			err = fmt.Errorf("extern %s panicked: %v", binding, recovered)
+			err = errors.New(message)
 		}
 	}()
 	return adapter.call(vm, args)
