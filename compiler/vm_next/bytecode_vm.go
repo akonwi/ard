@@ -568,6 +568,50 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				entries[i] = MapEntryValue{Key: key, Value: value}
 			}
 			push(Map(air.TypeID(inst.A), entries))
+		case vmcode.OpMapSizeLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map local %d out of range", fn.Name, inst.B)
+			}
+			mapValue, err := locals[inst.B].mapValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Int(air.TypeID(inst.A), len(mapValue.Entries)))
+		case vmcode.OpMapIndexLtLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/index local out of range", fn.Name)
+			}
+			indexValue := locals[inst.B]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("map entry index must be Int")
+			}
+			mapValue, err := locals[inst.C].mapValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Bool(air.TypeID(inst.A), indexValue.Int < len(mapValue.Entries)))
+		case vmcode.OpMapKeyAtLocal, vmcode.OpMapValueAtLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/index local out of range", fn.Name)
+			}
+			mapValue, err := locals[inst.B].mapValue()
+			if err != nil {
+				return Value{}, err
+			}
+			indexValue := locals[inst.C]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("map entry index must be Int")
+			}
+			index := indexValue.Int
+			if index < 0 || index >= len(mapValue.Entries) {
+				return Value{}, fmt.Errorf("map entry index out of range")
+			}
+			entries := sortedMapEntries(mapValue)
+			if inst.Op == vmcode.OpMapKeyAtLocal {
+				push(entries[index].Key)
+			} else {
+				push(entries[index].Value)
+			}
 		case vmcode.OpMapKeys, vmcode.OpMapSize, vmcode.OpMapGet, vmcode.OpMapSet, vmcode.OpMapDrop, vmcode.OpMapHas, vmcode.OpMapKeyAt, vmcode.OpMapValueAt:
 			value, err := vm.execBytecodeMapOp(inst, &stack)
 			if err != nil {
@@ -593,6 +637,18 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("field index %d out of range", inst.B)
 			}
 			push(structValue.Fields[inst.B])
+		case vmcode.OpGetFieldLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
+			}
+			structValue, err := locals[inst.B].structValue()
+			if err != nil {
+				return Value{}, err
+			}
+			if inst.C < 0 || inst.C >= len(structValue.Fields) {
+				return Value{}, fmt.Errorf("field index %d out of range", inst.C)
+			}
+			push(structValue.Fields[inst.C])
 		case vmcode.OpSetField:
 			value, err := pop()
 			if err != nil {

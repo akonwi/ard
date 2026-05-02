@@ -22,6 +22,7 @@ type hostExternAdapter struct {
 	extern   air.Extern
 	callable reflect.Value
 	inputs   []reflect.Type
+	fast     func(*VM, []Value) (Value, error)
 	buildErr error
 }
 
@@ -129,6 +130,7 @@ func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (h
 		extern:   extern,
 		callable: callable,
 		inputs:   inputs,
+		fast:     vm.newFastHostExternAdapter(extern, fn),
 	}, nil
 }
 
@@ -138,6 +140,15 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	}
 	if len(adapter.inputs) != len(args) {
 		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.inputs), len(args))
+	}
+	if adapter.fast != nil {
+		if vm.profile == nil {
+			return adapter.fast(vm, args)
+		}
+		start := time.Now()
+		value, err := adapter.fast(vm, args)
+		vm.profile.RecordExternCall(adapter.binding, len(args), 0, time.Since(start), 0)
+		return value, err
 	}
 	if vm.profile == nil {
 		inputs, err := adapter.hostInputs(vm, args)
@@ -161,6 +172,445 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	convertOut := time.Since(convertOutStart)
 	vm.profile.RecordExternCall(adapter.binding, len(args), convertIn, hostDuration, convertOut)
 	return value, err
+}
+
+func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Value) (Value, error) {
+	returnInfo, returnInfoErr := vm.typeInfo(extern.Signature.Return)
+	isResultReturn := returnInfoErr == nil && returnInfo.Kind == air.TypeResult
+	var resultValueInfo air.TypeInfo
+	if isResultReturn {
+		resultValueInfo, _ = vm.typeInfo(returnInfo.Value)
+	}
+	switch typed := fn.(type) {
+	case func(any) stdlibffi.Result[int, stdlibffi.Error]:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			result := typed(dynamicArg(args[0]))
+			return vm.fastDecodeIntResultWithInfo(extern.Signature.Return, returnInfo, result)
+		}
+	case func(any) stdlibffi.Result[string, stdlibffi.Error]:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			result := typed(dynamicArg(args[0]))
+			return vm.fastDecodeStringResultWithInfo(extern.Signature.Return, returnInfo, result)
+		}
+	case func(any) stdlibffi.Result[float64, stdlibffi.Error]:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			result := typed(dynamicArg(args[0]))
+			return vm.fastDecodeFloatResultWithInfo(extern.Signature.Return, returnInfo, result)
+		}
+	case func(any) stdlibffi.Result[bool, stdlibffi.Error]:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			result := typed(dynamicArg(args[0]))
+			return vm.fastDecodeBoolResultWithInfo(extern.Signature.Return, returnInfo, result)
+		}
+	case func(any) bool:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			return Bool(extern.Signature.Return, typed(dynamicArg(args[0]))), nil
+		}
+	case func(string) bool:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return Bool(extern.Signature.Return, typed(args[0].Str)), nil
+		}
+	case func(string) (bool, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			out, err := typed(args[0].Str)
+			return vm.fastBoolStringErrorResultWithInfo(extern.Signature.Return, returnInfo, out, err)
+		}
+	case func(string) error:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return vm.fastVoidStringErrorResultWithInfo(extern.Signature.Return, returnInfo, typed(args[0].Str))
+		}
+	case func(string, string) error:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 2 || args[0].Kind != ValueStr || args[1].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str, Str", goExternBinding(extern))
+			}
+			return vm.fastVoidStringErrorResultWithInfo(extern.Signature.Return, returnInfo, typed(args[0].Str, args[1].Str))
+		}
+	case func() (string, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 0 {
+				return Value{}, fmt.Errorf("extern %s expects no args", goExternBinding(extern))
+			}
+			out, err := typed()
+			return vm.fastStringStringErrorResultWithInfo(extern.Signature.Return, returnInfo, out, err)
+		}
+	case func(string) (string, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			out, err := typed(args[0].Str)
+			return vm.fastStringStringErrorResultWithInfo(extern.Signature.Return, returnInfo, out, err)
+		}
+	case func(string) (map[string]bool, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			out, err := typed(args[0].Str)
+			return vm.fastStringBoolMapResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, err)
+		}
+	case func(string) (any, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			out, err := typed(args[0].Str)
+			return vm.fastDynamicResultWithInfo(extern.Signature.Return, returnInfo, out, err)
+		}
+	case func(any) ([]any, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			out, err := typed(dynamicArg(args[0]))
+			return vm.fastDynamicListResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, err)
+		}
+	case func(any) (map[any]any, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			out, err := typed(dynamicArg(args[0]))
+			return vm.fastDynamicMapResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, err)
+		}
+	case func(any, string) (any, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 2 || args[1].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Dynamic and Str", goExternBinding(extern))
+			}
+			out, err := typed(dynamicArg(args[0]), args[1].Str)
+			return vm.fastDynamicResultWithInfo(extern.Signature.Return, returnInfo, out, err)
+		}
+	}
+	return nil
+}
+
+func dynamicArg(value Value) any {
+	if value.Kind == ValueDynamic {
+		if dynamicValue, ok := value.Ref.(*DynamicValue); ok && dynamicValue != nil {
+			return dynamicValue.Raw
+		}
+	}
+	return value.GoValue()
+}
+
+func (vm *VM) fastResultInfo(returnType air.TypeID) (air.TypeInfo, error) {
+	info, err := vm.typeInfo(returnType)
+	if err != nil {
+		return air.TypeInfo{}, err
+	}
+	if info.Kind != air.TypeResult {
+		return air.TypeInfo{}, fmt.Errorf("fast extern return type %s is not Result", info.Name)
+	}
+	return info, nil
+}
+
+func (vm *VM) fastDecodeIntResult(returnType air.TypeID, result stdlibffi.Result[int, stdlibffi.Error]) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDecodeIntResultWithInfo(returnType, info, result)
+}
+
+func (vm *VM) fastDecodeIntResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[int, stdlibffi.Error]) (Value, error) {
+	if result.Ok {
+		return Result(returnType, true, Int(info.Value, result.Value)), nil
+	}
+	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
+	if err != nil {
+		return Value{}, err
+	}
+	return Result(returnType, false, errValue), nil
+}
+
+func (vm *VM) fastDecodeStringResult(returnType air.TypeID, result stdlibffi.Result[string, stdlibffi.Error]) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDecodeStringResultWithInfo(returnType, info, result)
+}
+
+func (vm *VM) fastDecodeStringResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[string, stdlibffi.Error]) (Value, error) {
+	if result.Ok {
+		return Result(returnType, true, Str(info.Value, result.Value)), nil
+	}
+	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
+	if err != nil {
+		return Value{}, err
+	}
+	return Result(returnType, false, errValue), nil
+}
+
+func (vm *VM) fastDecodeFloatResult(returnType air.TypeID, result stdlibffi.Result[float64, stdlibffi.Error]) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDecodeFloatResultWithInfo(returnType, info, result)
+}
+
+func (vm *VM) fastDecodeFloatResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[float64, stdlibffi.Error]) (Value, error) {
+	if result.Ok {
+		return Result(returnType, true, Float(info.Value, result.Value)), nil
+	}
+	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
+	if err != nil {
+		return Value{}, err
+	}
+	return Result(returnType, false, errValue), nil
+}
+
+func (vm *VM) fastDecodeBoolResult(returnType air.TypeID, result stdlibffi.Result[bool, stdlibffi.Error]) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDecodeBoolResultWithInfo(returnType, info, result)
+}
+
+func (vm *VM) fastDecodeBoolResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[bool, stdlibffi.Error]) (Value, error) {
+	if result.Ok {
+		return Result(returnType, true, Bool(info.Value, result.Value)), nil
+	}
+	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
+	if err != nil {
+		return Value{}, err
+	}
+	return Result(returnType, false, errValue), nil
+}
+
+func (vm *VM) fastStringErrorValue(typeID air.TypeID, hostErr error) Value {
+	if hostErr == nil {
+		return vm.zeroValue(typeID)
+	}
+	return Str(typeID, hostErr.Error())
+}
+
+func (vm *VM) fastBoolStringErrorResult(returnType air.TypeID, out bool, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastBoolStringErrorResultWithInfo(returnType, info, out, hostErr)
+}
+
+func (vm *VM) fastBoolStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, out bool, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	return Result(returnType, true, Bool(info.Value, out)), nil
+}
+
+func (vm *VM) fastVoidStringErrorResult(returnType air.TypeID, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastVoidStringErrorResultWithInfo(returnType, info, hostErr)
+}
+
+func (vm *VM) fastVoidStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	return Result(returnType, true, vm.zeroValue(info.Value)), nil
+}
+
+func (vm *VM) fastStringStringErrorResult(returnType air.TypeID, out string, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastStringStringErrorResultWithInfo(returnType, info, out, hostErr)
+}
+
+func (vm *VM) fastStringStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, out string, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	return Result(returnType, true, Str(info.Value, out)), nil
+}
+
+func (vm *VM) fastDynamicResult(returnType air.TypeID, raw any, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDynamicResultWithInfo(returnType, info, raw, hostErr)
+}
+
+func (vm *VM) fastDynamicResultWithInfo(returnType air.TypeID, info air.TypeInfo, raw any, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	return Result(returnType, true, Dynamic(info.Value, raw)), nil
+}
+
+func (vm *VM) fastDynamicListResult(returnType air.TypeID, raw []any, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	listInfo, err := vm.typeInfo(info.Value)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDynamicListResultWithInfo(returnType, info, listInfo, raw, hostErr)
+}
+
+func (vm *VM) fastDynamicListResultWithInfo(returnType air.TypeID, info air.TypeInfo, listInfo air.TypeInfo, raw []any, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	items := make([]Value, len(raw))
+	for i, item := range raw {
+		items[i] = Dynamic(listInfo.Elem, item)
+	}
+	return Result(returnType, true, List(info.Value, items)), nil
+}
+
+func (vm *VM) fastStringBoolMapResult(returnType air.TypeID, raw map[string]bool, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	mapInfo, err := vm.typeInfo(info.Value)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastStringBoolMapResultWithInfo(returnType, info, mapInfo, raw, hostErr)
+}
+
+func (vm *VM) fastStringBoolMapResultWithInfo(returnType air.TypeID, info air.TypeInfo, mapInfo air.TypeInfo, raw map[string]bool, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	entries := make([]MapEntryValue, 0, len(raw))
+	for key, value := range raw {
+		entries = append(entries, MapEntryValue{Key: Str(mapInfo.Key, key), Value: Bool(mapInfo.Value, value)})
+	}
+	return Result(returnType, true, Map(info.Value, entries)), nil
+}
+
+func (vm *VM) fastDynamicMapResult(returnType air.TypeID, raw map[any]any, hostErr error) (Value, error) {
+	info, err := vm.fastResultInfo(returnType)
+	if err != nil {
+		return Value{}, err
+	}
+	mapInfo, err := vm.typeInfo(info.Value)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.fastDynamicMapResultWithInfo(returnType, info, mapInfo, raw, hostErr)
+}
+
+func (vm *VM) fastDynamicMapResultWithInfo(returnType air.TypeID, info air.TypeInfo, mapInfo air.TypeInfo, raw map[any]any, hostErr error) (Value, error) {
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	entries := make([]MapEntryValue, 0, len(raw))
+	for key, value := range raw {
+		entries = append(entries, MapEntryValue{Key: Dynamic(mapInfo.Key, key), Value: Dynamic(mapInfo.Value, value)})
+	}
+	return Result(returnType, true, Map(info.Value, entries)), nil
+}
+
+func (vm *VM) fastDecodeErrorValue(typeID air.TypeID, decodeErr stdlibffi.Error) (Value, error) {
+	info, err := vm.typeInfo(typeID)
+	if err != nil {
+		return Value{}, err
+	}
+	fields := make([]Value, len(info.Fields))
+	for _, field := range info.Fields {
+		switch field.Name {
+		case "expected":
+			fields[field.Index] = Str(field.Type, decodeErr.Expected)
+		case "found":
+			fields[field.Index] = Str(field.Type, decodeErr.Found)
+		case "path":
+			pathItems := make([]Value, len(decodeErr.Path))
+			pathType, err := vm.typeInfo(field.Type)
+			if err != nil {
+				return Value{}, err
+			}
+			for i, path := range decodeErr.Path {
+				pathItems[i] = Str(pathType.Elem, path)
+			}
+			fields[field.Index] = List(field.Type, pathItems)
+		default:
+			fields[field.Index] = vm.zeroValue(field.Type)
+		}
+	}
+	return Struct(typeID, fields), nil
 }
 
 func (adapter hostExternAdapter) hostInputs(vm *VM, args []Value) ([]reflect.Value, error) {

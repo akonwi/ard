@@ -136,6 +136,7 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 		} else {
 			mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: args[0], Value: args[1]})
 		}
+		mapValue.SortedDirty = true
 		out = Bool(air.TypeID(inst.A), true)
 	case vmcode.OpMapDrop:
 		if len(args) != 1 {
@@ -143,6 +144,7 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 		}
 		if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
 			mapValue.Entries = append(mapValue.Entries[:index], mapValue.Entries[index+1:]...)
+			mapValue.SortedDirty = true
 		}
 		out = vm.zeroValue(air.TypeID(inst.A))
 	case vmcode.OpMapHas:

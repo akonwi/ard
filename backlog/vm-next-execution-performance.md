@@ -194,6 +194,22 @@ Recommended Milestone 2 feedback loop:
     invocations.
   - [ ] Consider a contiguous locals arena if profiles still show locals copy or
     pool overhead after frame-loop dispatch.
+- [x] Merge autoresearch-proven local bytecode specializations into this
+  milestone.
+  - [x] Cache sorted map entries for deterministic map iteration and invalidate
+    the cache on mutation, avoiding repeated sort/copy work for `key_at` /
+    `value_at` loops.
+  - [x] Add local map iteration opcodes for map size, index comparison,
+    key-at, and value-at patterns.
+  - [x] Add local struct field access opcode for `LoadLocal` + `GetField`
+    patterns.
+- [x] Pull forward limited direct FFI fast paths where they unblock runtime
+  execution benchmarks.
+  - [x] Add signature-based adapters for stdlib dynamic/decode externs.
+  - [x] Add signature-based adapters for common string/bool/error filesystem
+    and SQL-style externs.
+  - [x] Precompute Result/value type metadata captured by fast FFI adapters.
+  - [ ] Generalize into generated/direct adapter coverage in Milestone 4.
 - [ ] Remove redundant runtime validation from trusted hot paths after bytecode
   validation succeeds.
 - [ ] Benchmark pure-runtime programs after each step.
@@ -471,6 +487,43 @@ Profile highlights:
 
 Next target: either continue specializing hot loop/control-flow opcodes, or move
 back to FFI and `Maybe`/`Result` value representation for decode/sql/fs.
+
+### Milestone 2 autoresearch contribution snapshot
+
+Validation:
+
+- `cd compiler && go test ./...`
+- Official autoresearch runtime harness (`./autoresearch.sh`) with output
+  verification.
+
+Kept autoresearch contributions merged into `refactor.vm-next`:
+
+- Signature-based fast FFI adapters for stdlib dynamic/decode and
+  string/bool/error extern signatures.
+- Precomputed fast FFI Result/value type metadata.
+- Cached sorted map entries for deterministic map iteration, invalidated on
+  mutation.
+- Local map iteration bytecode specialization (`MapSizeLocal`,
+  `MapIndexLtLocal`, `MapKeyAtLocal`, `MapValueAtLocal`).
+- Local struct field access bytecode specialization (`GetFieldLocal`).
+
+Best official runtime-suite snapshot from autoresearch:
+
+| Benchmark | vm_next bytecode |
+|---|---:|
+| `sales_pipeline` | 74.3 ms |
+| `shape_catalog` | 88.3 ms |
+| `decode_pipeline` | 391.6 ms |
+| `word_frequency_batch` | 72.0 ms |
+| `async_batches` | 11.7 ms |
+| `fs_batch` | 100.3 ms |
+| `sql_batch` | 52.8 ms |
+| **total** | **791.0 ms** |
+
+This reduced the autoresearch suite total from `1511.9 ms` to `791.0 ms`
+(`-47.7%`) while preserving benchmark output verification. Several attempted
+micro-optimizations were rejected by the full suite; see the autoresearch branch
+history for discarded experiments.
 
 ### Initial notes
 

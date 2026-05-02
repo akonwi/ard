@@ -38,6 +38,10 @@ func verifyFunction(program *Program, fn *Function) error {
 			if inst.A < 0 || inst.A >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
 			}
+		case OpGetFieldLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
+			}
 		case OpListSizeLocal:
 			if inst.B < 0 || inst.B >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: list local index out of range", fn.Name, ip)
@@ -45,6 +49,14 @@ func verifyFunction(program *Program, fn *Function) error {
 		case OpListAtLocal, OpListIndexLtLocal:
 			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: list/index local out of range", fn.Name, ip)
+			}
+		case OpMapSizeLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: map local index out of range", fn.Name, ip)
+			}
+		case OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal:
+			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: map/index local out of range", fn.Name, ip)
 			}
 		case OpJump, OpJumpIfFalse:
 			if inst.A < 0 || inst.A > len(fn.Code) {
@@ -74,7 +86,9 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 	switch inst.Op {
 	case OpNoop:
 		return 0, 0, nil
-	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal, OpListSizeLocal, OpListAtLocal, OpListIndexLtLocal:
+	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal,
+		OpListSizeLocal, OpListAtLocal, OpListIndexLtLocal,
+		OpMapSizeLocal, OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal:
 		return 0, 1, nil
 	case OpStoreLocal, OpPop:
 		return 1, 0, nil
@@ -100,6 +114,8 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		OpMakeResultOk, OpMakeResultErr, OpResultExpect, OpResultErrValue, OpResultIsOk, OpResultIsErr,
 		OpTryResult, OpTryMaybe, OpToDynamic, OpPanic, OpFiberGet, OpFiberJoin:
 		return 1, 1, nil
+	case OpGetFieldLocal:
+		return 0, 1, nil
 	case OpSetField:
 		return 2, 0, nil
 	case OpBlock:

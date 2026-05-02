@@ -63,14 +63,19 @@ const (
 	OpMakeMap
 	OpMapKeys
 	OpMapSize
+	OpMapSizeLocal
+	OpMapIndexLtLocal
 	OpMapGet
 	OpMapSet
 	OpMapDrop
 	OpMapHas
 	OpMapKeyAt
+	OpMapKeyAtLocal
 	OpMapValueAt
+	OpMapValueAtLocal
 	OpMakeStruct
 	OpGetField
+	OpGetFieldLocal
 	OpSetField
 	OpEnumVariant
 	OpStrAt
@@ -229,6 +234,10 @@ func (op Opcode) String() string {
 		return "MapKeys"
 	case OpMapSize:
 		return "MapSize"
+	case OpMapSizeLocal:
+		return "MapSizeLocal"
+	case OpMapIndexLtLocal:
+		return "MapIndexLtLocal"
 	case OpMapGet:
 		return "MapGet"
 	case OpMapSet:
@@ -239,12 +248,18 @@ func (op Opcode) String() string {
 		return "MapHas"
 	case OpMapKeyAt:
 		return "MapKeyAt"
+	case OpMapKeyAtLocal:
+		return "MapKeyAtLocal"
 	case OpMapValueAt:
 		return "MapValueAt"
+	case OpMapValueAtLocal:
+		return "MapValueAtLocal"
 	case OpMakeStruct:
 		return "MakeStruct"
 	case OpGetField:
 		return "GetField"
+	case OpGetFieldLocal:
+		return "GetFieldLocal"
 	case OpSetField:
 		return "SetField"
 	case OpEnumVariant:

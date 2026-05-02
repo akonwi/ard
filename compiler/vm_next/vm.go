@@ -166,11 +166,19 @@ func copyValue(value Value) Value {
 }
 
 func sortedMapEntries(mapValue *MapValue) []MapEntryValue {
+	if mapValue == nil {
+		return nil
+	}
+	if !mapValue.SortedDirty && len(mapValue.SortedEntries) == len(mapValue.Entries) {
+		return mapValue.SortedEntries
+	}
 	entries := make([]MapEntryValue, len(mapValue.Entries))
 	copy(entries, mapValue.Entries)
 	sort.SliceStable(entries, func(i, j int) bool {
 		return valuesLess(entries[i].Key, entries[j].Key)
 	})
+	mapValue.SortedEntries = entries
+	mapValue.SortedDirty = false
 	return entries
 }
 

@@ -285,6 +285,10 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 	case air.ExprMakeStruct:
 		return fl.lowerMakeStruct(expr)
 	case air.ExprGetField:
+		if expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal {
+			fl.emit(Instruction{Op: OpGetFieldLocal, A: int(expr.Type), B: int(expr.Target.Local), C: expr.Field})
+			return nil
+		}
 		if err := fl.lowerExpr(expr.Target); err != nil {
 			return err
 		}
@@ -566,6 +570,18 @@ func (fl *functionLowerer) lowerListOp(expr *air.Expr) error {
 }
 
 func (fl *functionLowerer) lowerMapOp(expr *air.Expr) error {
+	if expr.Kind == air.ExprMapSize && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 0 {
+		fl.emit(Instruction{Op: OpMapSizeLocal, A: int(expr.Type), B: int(expr.Target.Local)})
+		return nil
+	}
+	if (expr.Kind == air.ExprMapKeyAt || expr.Kind == air.ExprMapValueAt) && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 && expr.Args[0].Kind == air.ExprLoadLocal {
+		op := OpMapKeyAtLocal
+		if expr.Kind == air.ExprMapValueAt {
+			op = OpMapValueAtLocal
+		}
+		fl.emit(Instruction{Op: op, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+		return nil
+	}
 	if err := fl.lowerExpr(expr.Target); err != nil {
 		return err
 	}
@@ -714,9 +730,15 @@ func mapOpcode(kind air.ExprKind) Opcode {
 }
 
 func (fl *functionLowerer) lowerBinary(expr *air.Expr) error {
-	if expr.Kind == air.ExprLt && expr.Left != nil && expr.Left.Kind == air.ExprLoadLocal && expr.Right != nil && expr.Right.Kind == air.ExprListSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
-		fl.emit(Instruction{Op: OpListIndexLtLocal, A: int(expr.Type), B: int(expr.Left.Local), C: int(expr.Right.Target.Local)})
-		return nil
+	if expr.Kind == air.ExprLt && expr.Left != nil && expr.Left.Kind == air.ExprLoadLocal && expr.Right != nil {
+		if expr.Right.Kind == air.ExprListSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
+			fl.emit(Instruction{Op: OpListIndexLtLocal, A: int(expr.Type), B: int(expr.Left.Local), C: int(expr.Right.Target.Local)})
+			return nil
+		}
+		if expr.Right.Kind == air.ExprMapSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
+			fl.emit(Instruction{Op: OpMapIndexLtLocal, A: int(expr.Type), B: int(expr.Left.Local), C: int(expr.Right.Target.Local)})
+			return nil
+		}
 	}
 	if err := fl.lowerExpr(expr.Left); err != nil {
 		return err
