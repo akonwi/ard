@@ -238,6 +238,13 @@ Status: Pending
 The current `Value` representation boxes many common Ard values behind `Ref any`.
 This is simple but allocation-heavy and type-assertion-heavy.
 
+This milestone is now the primary follow-up for the remaining `decode_pipeline`
+gap after Milestone 2. Profiling shows decode still executes hundreds of
+thousands of `TryResult`, `Return`, closure, and frame operations. Fast FFI
+adapters removed much of the reflective boundary cost, so the next decode wins
+are likely in `Result`/`Maybe` representation, cheaper zero values, and reducing
+wrapper allocation/type-assertion churn on success-heavy decode paths.
+
 - [ ] Measure allocation counts for `vm_next` execution with Go allocation
   profiling or additional counters.
 - [ ] Inline or specialize common wrappers.
@@ -273,10 +280,16 @@ conversion. This is especially visible in decode and SQL workloads.
 
 ### Milestone 5: Collection and iteration fast paths
 
-Status: Pending
+Status: In progress
 
 Current list/map operations are expressed as generic method-like AIR operations,
 and map storage is a linear entry list.
+
+List-local iteration fast paths have landed, but collection-heavy workloads such
+as `word_frequency_batch` still spend most remaining time in interpreter loop
+mechanics: `LoadLocal`, `StoreLocal`, loop jumps, constants, and scalar integer
+updates. Keep this milestone as the tracking home for remaining collection/loop
+work so the pure-runtime gap does not get lost behind decode/FFI work.
 
 - [x] Add explicit bytecode instructions or lowered operations for list
   iteration.
@@ -284,6 +297,16 @@ and map storage is a linear entry list.
     `for item in list` by lowering local-list size/index access to specialized
     bytecode opcodes.
   - [x] Support index-producing list loops without extra method overhead.
+- [ ] Track and reduce remaining loop-control overhead in collection-heavy
+  programs.
+  - [ ] Re-profile `word_frequency_batch` after each runtime milestone and
+    watch `LoadLocal`, `StoreLocal`, `ConstInt`, `IntAdd`, `Jump`, and
+    `JumpIfFalse` counts.
+  - [ ] Consider specialized loop/scalar opcodes only under a pure-runtime or
+    collection-weighted objective; autoresearch rejected fused local increment
+    under the aggregate suite despite some collection/decode wins.
+  - [ ] Look for lower-risk lowering changes that reduce local load/store pairs
+    without adding broad dispatch complexity.
 - [ ] Add explicit map iteration support.
   - [ ] Avoid sorting/copying entries more often than necessary.
   - [ ] Preserve deterministic iteration order.
@@ -293,7 +316,8 @@ and map storage is a linear entry list.
   - [ ] Fallback representation for unsupported key shapes if needed.
 - [ ] Add list growth/capacity improvements for common push-heavy patterns.
 - [ ] Benchmark `sales_pipeline`, `shape_catalog`, and
-  `word_frequency_batch`.
+  `word_frequency_batch` with at least `--runs 10 --warmup 3` for retained
+  changes.
 
 ### Milestone 6: Closure, trait, and async call fast paths
 
@@ -302,10 +326,21 @@ Status: Pending
 Closure and trait dispatch are important for decode helpers, sorting callbacks,
 trait-based encoding, and host callback APIs.
 
+This is the other major tracking area for the remaining `decode_pipeline` gap.
+Current profiles show very high closure call volume and many one-capture closure
+creations in decode combinators. Runtime representation tweaks alone may not be
+enough; compiler/lowering-level closure reuse or hoisting may be needed to reduce
+closure churn without adding branch-heavy `ClosureValue` access paths.
+
 - [ ] Reduce closure creation allocation.
   - [ ] Avoid capture slice allocation for zero-capture closures.
   - [ ] Reuse or compact capture storage where safe.
+  - [ ] Investigate lowering-level closure hoisting/reuse for decoder
+    combinators; autoresearch rejected a runtime-only unary capture inline
+    representation because the added branching hurt the aggregate suite.
 - [ ] Add closure call fast paths for common arities.
+  - [ ] Pay special attention to unary closure calls from decode and
+    `Maybe`/`Result` mapper paths.
 - [ ] Make trait calls cheaper after bytecode validation.
   - [ ] Pre-resolve impl method function IDs in bytecode operands.
   - [ ] Avoid repeated trait/impl bounds checks in hot dispatch.
