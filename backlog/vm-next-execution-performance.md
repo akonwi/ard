@@ -395,6 +395,11 @@ closure expression.
     the full benchmark suite, so only the profiling histogram was kept.
   - [ ] Avoid capture slice allocation for zero-capture closures only if a
     cheaper representation than runtime caching is available.
+  - [x] Evaluate small-arity capture collection fast paths for `OpMakeClosure`.
+    Special-casing 0/1/2 captures removed `popArgs` profile counts but did not
+    remove captured-slice allocation, and the full 10-run suite did not improve;
+    keep the simpler generic helper until representation changes remove the
+    underlying allocation.
   - [ ] Reuse or compact capture storage where safe.
   - [ ] Investigate lowering-level closure hoisting/reuse for decoder
     combinators; autoresearch rejected a runtime-only unary capture inline
