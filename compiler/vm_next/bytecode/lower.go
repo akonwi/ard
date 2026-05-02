@@ -36,9 +36,10 @@ type lowerer struct {
 }
 
 type functionLowerer struct {
-	root *lowerer
-	fn   *air.Function
-	code []Instruction
+	root       *lowerer
+	fn         *air.Function
+	code       []Instruction
+	breakStack [][]int
 }
 
 func (l *lowerer) lowerFunction(fn *air.Function) (Function, error) {
@@ -79,15 +80,54 @@ func (fl *functionLowerer) lowerStmt(stmt *air.Stmt) error {
 		}
 		fl.emit(Instruction{Op: OpStoreLocal, A: int(stmt.Local)})
 		return nil
+	case air.StmtSetField:
+		if err := fl.lowerExpr(stmt.Target); err != nil {
+			return err
+		}
+		if err := fl.lowerExpr(stmt.Value); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpSetField, A: int(stmt.Type), B: stmt.Field})
+		return nil
 	case air.StmtExpr:
 		if err := fl.lowerExpr(stmt.Expr); err != nil {
 			return err
 		}
 		fl.emit(Instruction{Op: OpPop})
 		return nil
+	case air.StmtWhile:
+		return fl.lowerWhile(stmt)
+	case air.StmtBreak:
+		jump := fl.emit(Instruction{Op: OpJump})
+		if len(fl.breakStack) == 0 {
+			return fmt.Errorf("break outside loop")
+		}
+		fl.breakStack[len(fl.breakStack)-1] = append(fl.breakStack[len(fl.breakStack)-1], jump)
+		return nil
 	default:
 		return fmt.Errorf("unsupported statement kind %d", stmt.Kind)
 	}
+}
+
+func (fl *functionLowerer) lowerWhile(stmt *air.Stmt) error {
+	loopStart := len(fl.code)
+	if err := fl.lowerExpr(stmt.Condition); err != nil {
+		return err
+	}
+	jumpEnd := fl.emit(Instruction{Op: OpJumpIfFalse})
+	fl.breakStack = append(fl.breakStack, nil)
+	if err := fl.lowerBlock(stmt.Body, fl.mustTypeID(air.TypeVoid)); err != nil {
+		return err
+	}
+	breaks := fl.breakStack[len(fl.breakStack)-1]
+	fl.breakStack = fl.breakStack[:len(fl.breakStack)-1]
+	fl.emit(Instruction{Op: OpJump, A: loopStart})
+	loopEnd := len(fl.code)
+	fl.patch(jumpEnd, loopEnd)
+	for _, jump := range breaks {
+		fl.patch(jump, loopEnd)
+	}
+	return nil
 }
 
 func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
@@ -118,6 +158,38 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 			}
 		}
 		fl.emit(Instruction{Op: OpCall, A: int(expr.Function), B: len(expr.Args)})
+	case air.ExprCallExtern:
+		for i := range expr.Args {
+			if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+				return err
+			}
+		}
+		fl.emit(Instruction{Op: OpCallExtern, A: int(expr.Extern), B: len(expr.Args)})
+	case air.ExprCopy:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpCopy, A: int(expr.Type)})
+	case air.ExprTraitUpcast:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpTraitUpcast, A: int(expr.Type), B: int(expr.Trait), C: int(expr.Impl)})
+	case air.ExprCallTrait:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		for i := range expr.Args {
+			if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+				return err
+			}
+		}
+		fl.emit(Instruction{Op: OpCallTrait, A: int(expr.Type), B: int(expr.Trait), C: expr.Method, Imm: len(expr.Args)})
+	case air.ExprUnionWrap:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpUnionWrap, A: int(expr.Type), Imm: int(expr.Tag)})
 	case air.ExprBlock:
 		fl.emit(Instruction{Op: OpBlock})
 		return fl.lowerBlock(expr.Body, expr.Type)
@@ -145,17 +217,153 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 			return err
 		}
 		fl.emit(Instruction{Op: unaryOpcode(expr.Kind), A: int(expr.Type)})
+	case air.ExprEnumVariant:
+		fl.emit(Instruction{Op: OpEnumVariant, A: int(expr.Type), Imm: expr.Discriminant})
+	case air.ExprMakeList:
+		for i := range expr.Args {
+			if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+				return err
+			}
+		}
+		fl.emit(Instruction{Op: OpMakeList, A: int(expr.Type), B: len(expr.Args)})
+	case air.ExprListAt, air.ExprListPrepend, air.ExprListPush, air.ExprListSet, air.ExprListSize, air.ExprListSort, air.ExprListSwap:
+		return fl.lowerListOp(expr)
+	case air.ExprMakeMap:
+		for i := range expr.Entries {
+			if err := fl.lowerExpr(&expr.Entries[i].Key); err != nil {
+				return err
+			}
+			if err := fl.lowerExpr(&expr.Entries[i].Value); err != nil {
+				return err
+			}
+		}
+		fl.emit(Instruction{Op: OpMakeMap, A: int(expr.Type), B: len(expr.Entries)})
+	case air.ExprMapKeys, air.ExprMapSize, air.ExprMapGet, air.ExprMapSet, air.ExprMapDrop, air.ExprMapHas, air.ExprMapKeyAt, air.ExprMapValueAt:
+		return fl.lowerMapOp(expr)
 	case air.ExprMakeStruct:
-		return fmt.Errorf("struct construction bytecode is not implemented yet")
+		return fl.lowerMakeStruct(expr)
 	case air.ExprGetField:
 		if err := fl.lowerExpr(expr.Target); err != nil {
 			return err
 		}
 		fl.emit(Instruction{Op: OpGetField, A: int(expr.Type), B: expr.Field})
+	case air.ExprMakeMaybeSome:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpMakeMaybeSome, A: int(expr.Type)})
+	case air.ExprMakeMaybeNone:
+		fl.emit(Instruction{Op: OpMakeMaybeNone, A: int(expr.Type), B: int(fl.mustMaybeElem(expr.Type))})
+	case air.ExprMakeResultOk:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpMakeResultOk, A: int(expr.Type)})
+	case air.ExprMakeResultErr:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpMakeResultErr, A: int(expr.Type)})
 	default:
 		return fmt.Errorf("unsupported expression kind %d", expr.Kind)
 	}
 	return nil
+}
+
+func (fl *functionLowerer) lowerListOp(expr *air.Expr) error {
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	for i := range expr.Args {
+		if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+			return err
+		}
+	}
+	fl.emit(Instruction{Op: listOpcode(expr.Kind), A: int(expr.Type), B: len(expr.Args)})
+	return nil
+}
+
+func (fl *functionLowerer) lowerMapOp(expr *air.Expr) error {
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	for i := range expr.Args {
+		if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+			return err
+		}
+	}
+	fl.emit(Instruction{Op: mapOpcode(expr.Kind), A: int(expr.Type), B: len(expr.Args)})
+	return nil
+}
+
+func (fl *functionLowerer) lowerMakeStruct(expr *air.Expr) error {
+	typeInfo, ok := fl.root.out.TypeInfo(expr.Type)
+	if !ok {
+		return fmt.Errorf("invalid struct type %d", expr.Type)
+	}
+	for _, field := range typeInfo.Fields {
+		found := false
+		for i := range expr.Fields {
+			if expr.Fields[i].Index == field.Index {
+				if err := fl.lowerExpr(&expr.Fields[i].Value); err != nil {
+					return err
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			if err := fl.emitZero(field.Type); err != nil {
+				return err
+			}
+		}
+	}
+	fl.emit(Instruction{Op: OpMakeStruct, A: int(expr.Type), B: len(typeInfo.Fields)})
+	return nil
+}
+
+func listOpcode(kind air.ExprKind) Opcode {
+	switch kind {
+	case air.ExprListAt:
+		return OpListAt
+	case air.ExprListPrepend:
+		return OpListPrepend
+	case air.ExprListPush:
+		return OpListPush
+	case air.ExprListSet:
+		return OpListSet
+	case air.ExprListSize:
+		return OpListSize
+	case air.ExprListSort:
+		return OpListSort
+	case air.ExprListSwap:
+		return OpListSwap
+	default:
+		return OpNoop
+	}
+}
+
+func mapOpcode(kind air.ExprKind) Opcode {
+	switch kind {
+	case air.ExprMapKeys:
+		return OpMapKeys
+	case air.ExprMapSize:
+		return OpMapSize
+	case air.ExprMapGet:
+		return OpMapGet
+	case air.ExprMapSet:
+		return OpMapSet
+	case air.ExprMapDrop:
+		return OpMapDrop
+	case air.ExprMapHas:
+		return OpMapHas
+	case air.ExprMapKeyAt:
+		return OpMapKeyAt
+	case air.ExprMapValueAt:
+		return OpMapValueAt
+	default:
+		return OpNoop
+	}
 }
 
 func (fl *functionLowerer) lowerBinary(expr *air.Expr) error {
@@ -245,6 +453,14 @@ func (fl *functionLowerer) emitZero(typeID air.TypeID) error {
 		return fmt.Errorf("unsupported zero value for type %s", info.Name)
 	}
 	return nil
+}
+
+func (fl *functionLowerer) mustMaybeElem(typeID air.TypeID) air.TypeID {
+	typeInfo, ok := fl.root.out.TypeInfo(typeID)
+	if !ok || typeInfo.Kind != air.TypeMaybe {
+		return fl.mustTypeID(air.TypeVoid)
+	}
+	return typeInfo.Elem
 }
 
 func (fl *functionLowerer) mustTypeID(kind air.TypeKind) air.TypeID {

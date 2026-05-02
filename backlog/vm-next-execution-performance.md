@@ -100,14 +100,17 @@ Feedback loop for this milestone:
   - [x] Lower scalar expressions into stack operations for the initial slice.
   - [x] Lower blocks and `if` control flow into jumps for the initial slice.
   - [x] Lower direct function calls for the initial slice.
-  - [ ] Lower closure calls, extern calls, and trait calls.
-  - [ ] Lower list/map/string operations used by current benchmark programs.
+  - [x] Lower extern and trait calls for the initial print/Encodable slice.
+  - [ ] Lower closure calls.
+  - [x] Lower initial list/map/string operations used by simple loops and
+    collection tests.
   - [ ] Lower `Maybe`, `Result`, `try`, match, union, and enum operations.
 - [x] Add an initial bytecode verifier for backend-facing invariants.
   - [ ] Valid instruction operands and jump targets.
   - [ ] Valid local/function/extern/type references.
   - [ ] Arity checks for calls and extern calls.
-  - [ ] Field indexes and match tags are valid.
+  - [x] Field indexes are validated for the initial field opcodes.
+  - [ ] Match tags are valid once match lowering lands.
 - [ ] Add a bytecode interpreter loop.
   - [x] Execute entry and script roots for the initial scalar/direct-call slice.
   - [ ] Preserve panic/diagnostic behavior expected by parity tests.

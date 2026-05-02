@@ -106,21 +106,76 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 				ip = inst.A
 			}
 		case vmcode.OpCall:
-			callArgs := make([]Value, inst.B)
-			for i := inst.B - 1; i >= 0; i-- {
-				value, err := pop()
-				if err != nil {
-					return Value{}, err
-				}
-				callArgs[i] = value
+			callArgs, err := popArgs(pop, inst.B)
+			if err != nil {
+				return Value{}, err
 			}
 			result, err := vm.runBytecode(air.FunctionID(inst.A), callArgs)
 			if err != nil {
 				return Value{}, err
 			}
 			push(result)
+		case vmcode.OpCallExtern:
+			callArgs, err := popArgs(pop, inst.B)
+			if err != nil {
+				return Value{}, err
+			}
+			result, err := vm.callExtern(air.ExternID(inst.A), callArgs)
+			if err != nil {
+				return Value{}, err
+			}
+			push(result)
 		case vmcode.OpReturn:
 			return pop()
+		case vmcode.OpCopy:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			push(copyValue(value))
+		case vmcode.OpTraitUpcast:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			push(TraitObject(air.TypeID(inst.A), air.TraitID(inst.B), air.ImplID(inst.C), value))
+		case vmcode.OpCallTrait:
+			callArgs, err := popArgs(pop, inst.Imm)
+			if err != nil {
+				return Value{}, err
+			}
+			subject, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			traitObject, err := subject.traitObjectValue()
+			if err != nil {
+				return Value{}, err
+			}
+			if traitObject.Trait != air.TraitID(inst.B) {
+				return Value{}, fmt.Errorf("trait object has trait %d, call expects %d", traitObject.Trait, inst.B)
+			}
+			if traitObject.Impl < 0 || int(traitObject.Impl) >= len(vm.program.Impls) {
+				return Value{}, fmt.Errorf("invalid trait object impl %d", traitObject.Impl)
+			}
+			impl := vm.program.Impls[traitObject.Impl]
+			if inst.C < 0 || inst.C >= len(impl.Methods) {
+				return Value{}, fmt.Errorf("invalid trait method index %d", inst.C)
+			}
+			argsWithReceiver := make([]Value, 0, len(callArgs)+1)
+			argsWithReceiver = append(argsWithReceiver, traitObject.Value)
+			argsWithReceiver = append(argsWithReceiver, callArgs...)
+			result, err := vm.runBytecode(impl.Methods[inst.C], argsWithReceiver)
+			if err != nil {
+				return Value{}, err
+			}
+			push(result)
+		case vmcode.OpUnionWrap:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Union(air.TypeID(inst.A), uint32(inst.Imm), value))
 		case vmcode.OpIntAdd, vmcode.OpIntSub, vmcode.OpIntMul, vmcode.OpIntDiv, vmcode.OpIntMod:
 			left, right, err := popBinary(pop)
 			if err != nil {
@@ -198,6 +253,46 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 				return Value{}, err
 			}
 			push(out)
+		case vmcode.OpEnumVariant:
+			push(Enum(air.TypeID(inst.A), inst.Imm))
+		case vmcode.OpMakeList:
+			items, err := popArgs(pop, inst.B)
+			if err != nil {
+				return Value{}, err
+			}
+			push(List(air.TypeID(inst.A), items))
+		case vmcode.OpListAt, vmcode.OpListPrepend, vmcode.OpListPush, vmcode.OpListSet, vmcode.OpListSize, vmcode.OpListSort, vmcode.OpListSwap:
+			value, err := vm.execBytecodeListOp(inst, pop)
+			if err != nil {
+				return Value{}, err
+			}
+			push(value)
+		case vmcode.OpMakeMap:
+			entries := make([]MapEntryValue, inst.B)
+			for i := inst.B - 1; i >= 0; i-- {
+				value, err := pop()
+				if err != nil {
+					return Value{}, err
+				}
+				key, err := pop()
+				if err != nil {
+					return Value{}, err
+				}
+				entries[i] = MapEntryValue{Key: key, Value: value}
+			}
+			push(Map(air.TypeID(inst.A), entries))
+		case vmcode.OpMapKeys, vmcode.OpMapSize, vmcode.OpMapGet, vmcode.OpMapSet, vmcode.OpMapDrop, vmcode.OpMapHas, vmcode.OpMapKeyAt, vmcode.OpMapValueAt:
+			value, err := vm.execBytecodeMapOp(inst, pop)
+			if err != nil {
+				return Value{}, err
+			}
+			push(value)
+		case vmcode.OpMakeStruct:
+			fields, err := popArgs(pop, inst.B)
+			if err != nil {
+				return Value{}, err
+			}
+			push(Struct(air.TypeID(inst.A), fields))
 		case vmcode.OpGetField:
 			value, err := pop()
 			if err != nil {
@@ -211,6 +306,37 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 				return Value{}, fmt.Errorf("field index %d out of range", inst.B)
 			}
 			push(structValue.Fields[inst.B])
+		case vmcode.OpSetField:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			target, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			structValue, err := target.structValue()
+			if err != nil {
+				return Value{}, err
+			}
+			if inst.B < 0 || inst.B >= len(structValue.Fields) {
+				return Value{}, fmt.Errorf("field index %d out of range", inst.B)
+			}
+			structValue.Fields[inst.B] = value
+		case vmcode.OpMakeMaybeSome:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Maybe(air.TypeID(inst.A), true, value))
+		case vmcode.OpMakeMaybeNone:
+			push(Maybe(air.TypeID(inst.A), false, vm.zeroValue(air.TypeID(inst.B))))
+		case vmcode.OpMakeResultOk, vmcode.OpMakeResultErr:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Result(air.TypeID(inst.A), inst.Op == vmcode.OpMakeResultOk, value))
 		default:
 			return Value{}, fmt.Errorf("unsupported bytecode opcode %s", inst.Op)
 		}
@@ -227,6 +353,18 @@ func (vm *VM) bytecodeConstant(index int, kind vmcode.ConstantKind) (vmcode.Cons
 		return vmcode.Constant{}, fmt.Errorf("constant %d has kind %d, want %d", index, constant.Kind, kind)
 	}
 	return constant, nil
+}
+
+func popArgs(pop func() (Value, error), count int) ([]Value, error) {
+	args := make([]Value, count)
+	for i := count - 1; i >= 0; i-- {
+		value, err := pop()
+		if err != nil {
+			return nil, err
+		}
+		args[i] = value
+	}
+	return args, nil
 }
 
 func popBinary(pop func() (Value, error)) (Value, Value, error) {

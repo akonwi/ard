@@ -65,6 +65,73 @@ func TestBytecodeRunScriptScalarSliceMatchesTreeWalk(t *testing.T) {
 	}
 }
 
+func TestBytecodeRunScriptDataAndExternSliceMatchesTreeWalk(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		externs HostFunctionRegistry
+	}{
+		{
+			name: "struct fields and assignment",
+			input: `
+				struct User { name: Str, age: Int }
+				mut user = User{name: "Ada", age: 41}
+				user.age = user.age + 1
+				user.age
+			`,
+		},
+		{
+			name: "list operations",
+			input: `
+				mut xs = [1, 2]
+				xs.push(40)
+				xs.at(0) + xs.at(1) + xs.at(2) + xs.size()
+			`,
+		},
+		{
+			name: "map operations",
+			input: `
+				mut values = ["a": 1]
+				values.set("b", 2)
+				if values.has("b") { values.size() } else { 0 }
+			`,
+		},
+		{
+			name: "extern call",
+			input: `
+				use ard/io
+				io::print(42)
+			`,
+			externs: HostFunctionRegistry{"Print": func(value string) {}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			program := lowerProgramForBytecodeTest(t, test.input)
+			wantVM, err := NewWithExterns(program, test.externs)
+			if err != nil {
+				t.Fatalf("new tree vm: %v", err)
+			}
+			want, err := wantVM.RunScript()
+			if err != nil {
+				t.Fatalf("run tree vm: %v", err)
+			}
+			gotVM, err := NewWithBytecode(program, test.externs)
+			if err != nil {
+				t.Fatalf("new bytecode vm: %v", err)
+			}
+			got, err := gotVM.RunScript()
+			if err != nil {
+				t.Fatalf("run bytecode vm: %v", err)
+			}
+			if !valuesEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestBytecodeRunEntryScalarSliceMatchesTreeWalk(t *testing.T) {
 	program := lowerProgramForBytecodeTest(t, `
 		fn main() Int {
