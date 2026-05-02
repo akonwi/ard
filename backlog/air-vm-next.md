@@ -887,11 +887,9 @@ Status: Done
 
 ### Post-Milestone 8: userland FFI workflow
 
-Status: Pending
+Moved to [userland-ffi-workflow.md](userland-ffi-workflow.md).
 
-- [ ] Generate Go FFI code into `PROJECT_ROOT/ffi/ard.gen.go` for projects with
-  root `go.mod`.
-- [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.
+Status: Pending
 
 ### Milestone 9: vm_next executable builds
 
@@ -912,10 +910,6 @@ Status: Done
 
 ### Milestone 10: go_next from AIR
 
-Status: Pending
+Moved to [go-next-air.md](go-next-air.md).
 
-- [ ] Build the Go target from scratch against AIR.
-- [ ] Do not preserve or adapt the current Go targeting implementation unless a
-  small piece is independently useful.
-- [ ] Generate native Go structs, tagged unions, fiber/runtime helpers, and
-  idiomatic host FFI adapters.
+Status: Pending
