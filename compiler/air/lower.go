@@ -3190,6 +3190,60 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod) (*Expr, error) {
 	def := method.Method.Definition()
 	if def == nil || def.Body == nil {
+		if expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method); ok || err != nil {
+			return expr, err
+		}
+		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
+	}
+	return fl.lowerUserDefinedInstanceMethod(typeID, target, typeInfo, method, def)
+}
+
+func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, method *checker.InstanceMethod) (*Expr, bool, error) {
+	module := fl.l.moduleForInstanceMethod(method, fl.fn.Module)
+	if module >= 0 && int(module) < len(fl.l.program.Modules) {
+		path := fl.l.program.Modules[module].Path
+		if mod, ok := fl.l.moduleByName[path]; ok && !fl.l.loweredModules[path] {
+			if err := fl.l.lowerModule(mod, false); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+
+	for _, impl := range fl.l.program.Impls {
+		if impl.ForType != target.Type {
+			continue
+		}
+		if !validTraitID(&fl.l.program, impl.Trait) {
+			return nil, false, fmt.Errorf("impl %d references invalid trait %d", impl.ID, impl.Trait)
+		}
+		trait := fl.l.program.Traits[impl.Trait]
+		for i, traitMethod := range trait.Methods {
+			if traitMethod.Name != method.Method.Name {
+				continue
+			}
+			if i >= len(impl.Methods) {
+				return nil, false, fmt.Errorf("impl %d missing method %d for trait %s", impl.ID, i, trait.Name)
+			}
+			id := impl.Methods[i]
+			if !validFunctionID(&fl.l.program, id) {
+				return nil, false, fmt.Errorf("impl %d method %d has invalid function id %d", impl.ID, i, id)
+			}
+			fn := fl.l.program.Functions[id]
+			args := make([]Expr, 0, len(method.Method.Args)+1)
+			args = append(args, *target)
+			loweredArgs, err := fl.lowerArgsWithSignature(method.Method.Args, Signature{Params: fn.Signature.Params[1:], Return: fn.Signature.Return})
+			if err != nil {
+				return nil, false, err
+			}
+			args = append(args, loweredArgs...)
+			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod, def *checker.FunctionDef) (*Expr, error) {
+	if def == nil || def.Body == nil {
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
 	module := fl.l.moduleForInstanceMethod(method, fl.fn.Module)

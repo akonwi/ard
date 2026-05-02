@@ -834,13 +834,13 @@ Status: In progress
     error-only `Result` expressions.
   - [ ] Port bytecode VM host-capability tests where they apply to the new FFI
     model.
-    - [x] Port duration, `Dynamic`/decode/from_json, env, filesystem, and UUID
-      coverage.
+    - [x] Port duration, `Dynamic`/decode/from_json, env, filesystem, UUID,
+      IO printing, HTTP client timeout behavior, and async timing coverage.
     - [ ] Restore successful `decode::path` payload cases after nested generic
       decoder factories preserve returned payload types through closure
       specialization.
-    - [ ] Port or intentionally defer json/encode, broader crypto, http, io,
-      sql, and async timing behavior.
+    - [ ] Port or intentionally defer json/encode, broader crypto, SQL, and
+      server-side HTTP behavior.
   - [ ] Decide which bytecode VM internal tests are intentionally not copied
     because they validate old registry/type-resolver/profile implementation
     details rather than Ard runtime behavior.

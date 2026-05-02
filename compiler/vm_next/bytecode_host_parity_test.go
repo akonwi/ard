@@ -1,11 +1,16 @@
 package vm_next
 
 import (
+	"bytes"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestVMNextBytecodeParityDurationFunctions(t *testing.T) {
@@ -331,6 +336,38 @@ func TestVMNextBytecodeParityEnvGet(t *testing.T) {
 	})
 }
 
+func TestVMNextBytecodeParityPrinting(t *testing.T) {
+	got := captureVMNextStdout(t, `
+		use ard/io
+		io::print("Hello, World!")
+	`)
+
+	if want := "Hello, World!"; strings.TrimSpace(got) != want {
+		t.Fatalf("Expected %q, got %q", want, got)
+	}
+}
+
+func TestVMNextBytecodeParityEscapeSequences(t *testing.T) {
+	got := captureVMNextStdout(t, `
+		use ard/io
+		io::print("Line 1\nLine 2")
+		io::print("Tab\tTest")
+		io::print("Quote \"Test\"")
+	`)
+
+	expectedOutputs := []string{
+		"Line 1",
+		"Line 2",
+		"Tab\tTest",
+		"Quote \"Test\"",
+	}
+	for _, want := range expectedOutputs {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Expected output to contain %q, got %q", want, got)
+		}
+	}
+}
+
 func TestVMNextBytecodeParityFS(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "fake.file")
@@ -344,6 +381,14 @@ func TestVMNextBytecodeParityFS(t *testing.T) {
 				fs::exists(%q)
 			`, filepath.Join(tmpDir, "missing.file")),
 			want: false,
+		},
+		{
+			name: "fs::exists true for existing path",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::exists(%q)
+			`, tmpDir),
+			want: true,
 		},
 		{
 			name: "fs::create_dir",
@@ -366,6 +411,14 @@ func TestVMNextBytecodeParityFS(t *testing.T) {
 			input: fmt.Sprintf(`
 				use ard/fs
 				fs::create_file(%q).expect("Failed to create file")
+			`, filePath),
+			want: true,
+		},
+		{
+			name: "fs::is_file true for created file",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::is_file(%q)
 			`, filePath),
 			want: true,
 		},
@@ -404,6 +457,14 @@ func TestVMNextBytecodeParityFS(t *testing.T) {
 			`, filePath),
 			want: nil,
 		},
+		{
+			name: "fs::delete removed file",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::exists(%q)
+			`, filePath),
+			want: false,
+		},
 	})
 }
 
@@ -414,6 +475,10 @@ func TestVMNextBytecodeParityFSCopyRenameCwdAndAbs(t *testing.T) {
 	renamedPath := filepath.Join(tmpDir, "renamed.txt")
 
 	if err := os.WriteFile(srcPath, []byte("copy me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -435,6 +500,14 @@ func TestVMNextBytecodeParityFSCopyRenameCwdAndAbs(t *testing.T) {
 			want: "copy me",
 		},
 		{
+			name: "fs::copy source still exists",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::exists(%q)
+			`, srcPath),
+			want: true,
+		},
+		{
 			name: "fs::rename",
 			input: fmt.Sprintf(`
 				use ard/fs
@@ -451,12 +524,109 @@ func TestVMNextBytecodeParityFSCopyRenameCwdAndAbs(t *testing.T) {
 			want: "copy me",
 		},
 		{
+			name: "fs::rename removed source",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::exists(%q)
+			`, copyPath),
+			want: false,
+		},
+		{
+			name: "fs::cwd",
+			input: `
+				use ard/fs
+				fs::cwd().expect("cwd failed")
+			`,
+			want: cwd,
+		},
+		{
 			name: "fs::abs resolves relative path",
+			input: `
+				use ard/fs
+				fs::abs(".").expect("abs failed")
+			`,
+			want: cwd,
+		},
+		{
+			name: "fs::abs resolves absolute path",
 			input: fmt.Sprintf(`
 				use ard/fs
 				fs::abs(%q).expect("abs failed")
 			`, tmpDir),
 			want: tmpDir,
+		},
+	})
+}
+
+func TestVMNextBytecodeParityFSDeleteDirAndListDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	dirPath := filepath.Join(tmpDir, "removeme", "nested")
+	filePath := filepath.Join(dirPath, "file.txt")
+	listDir := filepath.Join(tmpDir, "entries")
+	listFile := filepath.Join(listDir, "a.txt")
+	listNested := filepath.Join(listDir, "nested")
+
+	runBytecodeParityCases(t, []bytecodeParityCase{
+		{
+			name: "setup: create nested dir",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::create_dir(%q)
+			`, dirPath),
+			want: nil,
+		},
+		{
+			name: "setup: create file in dir",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::write(%q, "data")
+			`, filePath),
+			want: nil,
+		},
+		{
+			name: "fs::delete_dir",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::delete_dir(%q)
+			`, filepath.Join(tmpDir, "removeme")),
+			want: nil,
+		},
+		{
+			name: "fs::delete_dir removed everything",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::exists(%q)
+			`, filepath.Join(tmpDir, "removeme")),
+			want: false,
+		},
+		{
+			name: "setup: create list_dir entries",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fs::create_dir(%q).expect("create list dir failed")
+				fs::write(%q, "data").expect("write list file failed")
+				fs::create_dir(%q).expect("create nested list dir failed")
+			`, listDir, listFile, listNested),
+			want: nil,
+		},
+		{
+			name: "fs::list_dir returns files and directories",
+			input: fmt.Sprintf(`
+				use ard/fs
+				let entries = fs::list_dir(%q).expect("list_dir failed")
+				mut saw_file = false
+				mut saw_dir = false
+				for entry in entries {
+					if entry.name == "a.txt" and entry.is_file {
+						saw_file = true
+					}
+					if entry.name == "nested" and not entry.is_file {
+						saw_dir = true
+					}
+				}
+				saw_file and saw_dir
+			`, listDir),
+			want: true,
 		},
 	})
 }
@@ -476,4 +646,146 @@ func TestVMNextBytecodeParityCryptoUUID(t *testing.T) {
 	if !pattern.MatchString(uuid) {
 		t.Fatalf("Expected valid UUID v4 format, got %q", uuid)
 	}
+}
+
+func TestVMNextBytecodeParityHttpMethod(t *testing.T) {
+	runBytecodeParityCases(t, []bytecodeParityCase{
+		{
+			name: "Method implements ToString",
+			input: `
+				use ard/http
+				let method = http::Method::Post
+				"{method}"
+			`,
+			want: "POST",
+		},
+	})
+}
+
+func TestVMNextBytecodeParityHttpSendUsesRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	got := runSourceGoValue(t, fmt.Sprintf(`
+		use ard/http
+		use ard/maybe
+
+		http::send(http::Request{
+			method: http::Method::Get,
+			url: %q,
+			headers: [:],
+			timeout: maybe::some(1),
+		}).or(http::Response::new(-1, "")).status
+	`, server.URL))
+
+	if got != -1 {
+		t.Fatalf("Expected request timeout fallback status -1, got %v", got)
+	}
+}
+
+func TestVMNextBytecodeParityHttpSendCallSiteTimeoutOverridesRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1100 * time.Millisecond)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("created"))
+	}))
+	defer server.Close()
+
+	got := runSourceGoValue(t, fmt.Sprintf(`
+		use ard/http
+		use ard/maybe
+
+		let req = http::Request{
+			method: http::Method::Get,
+			url: %q,
+			headers: [:],
+			timeout: maybe::some(1),
+		}
+
+		http::send(req, 2).or(http::Response::new(-1, "")).status
+	`, server.URL))
+
+	if got != http.StatusCreated {
+		t.Fatalf("Expected override timeout to succeed with %d, got %v", http.StatusCreated, got)
+	}
+}
+
+func TestVMNextBytecodeParityAsyncTiming(t *testing.T) {
+	t.Run("async::sleep waits at least requested duration", func(t *testing.T) {
+		start := time.Now()
+		runSource(t, `
+			use ard/async
+			async::sleep(1000000)
+		`)
+		if elapsed := time.Since(start); elapsed < time.Millisecond {
+			t.Fatalf("Expected script to take >= 1ms, took %v", elapsed)
+		}
+	})
+
+	t.Run("joining fibers waits for concurrent work", func(t *testing.T) {
+		start := time.Now()
+		runSource(t, `
+			use ard/async
+			let fiber1 = async::start(fn() { async::sleep(2000000) })
+			let fiber2 = async::start(fn() { async::sleep(1000000) })
+			let fiber3 = async::start(fn() { async::sleep(1000000) })
+			fiber1.join()
+			fiber2.join()
+			fiber3.join()
+		`)
+		if elapsed := time.Since(start); elapsed < 2*time.Millisecond {
+			t.Fatalf("Expected concurrent execution >= 2ms, got %v", elapsed)
+		}
+	})
+
+	t.Run("async::join waits for the longest fiber", func(t *testing.T) {
+		start := time.Now()
+		runSource(t, `
+			use ard/async
+			use ard/duration
+			async::join([
+				async::start(fn() { async::sleep(duration::from_millis(20)) }),
+				async::start(fn() { async::sleep(duration::from_millis(20)) }),
+				async::start(fn() { async::sleep(duration::from_millis(40)) }),
+			])
+		`)
+		elapsed := time.Since(start)
+		if elapsed < 40*time.Millisecond {
+			t.Fatalf("Expected concurrent execution >= 40ms, got %v", elapsed)
+		}
+		if elapsed > 200*time.Millisecond {
+			t.Fatalf("Expected concurrent execution <= 200ms, got %v", elapsed)
+		}
+	})
+}
+
+func captureVMNextStdout(t *testing.T, input string) string {
+	t.Helper()
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+	}()
+
+	runSource(t, input)
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
 }
