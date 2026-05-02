@@ -62,11 +62,33 @@ Status markers:
 
 Status: Pending
 
-This is the first major step. The current tree-walk interpreter should remain
-available temporarily as a fallback/comparison while bytecode coverage reaches
-parity.
+This is the first major step. The goal is not to optimize everything at once.
+The goal is to introduce a real execution artifact and feedback loop:
 
-- [ ] Define a compact `vm_next` bytecode program representation.
+```text
+AIR -> compiler/vm_next/bytecode -> vm_next bytecode interpreter
+```
+
+The current tree-walk interpreter should remain available temporarily as a
+fallback/comparison while bytecode coverage reaches parity. The initial success
+condition is behavioral parity, not immediate benchmark wins at any cost. Once
+parity is established, the bytecode path becomes the foundation for targeted
+runtime optimizations.
+
+Feedback loop for this milestone:
+
+1. Build small vertical slices: scalars/locals/arithmetic first, then control
+   flow, calls, data types, FFI, closures, traits/unions, and fibers.
+2. For each slice, compare bytecode execution against the current AIR tree-walk
+   execution where practical.
+3. Run focused `vm_next` tests, then broaden to parity tests and eventually
+   `go test ./...`.
+4. Use `ARD_VM_NEXT_PROFILE=1` and later opcode counters to identify hot
+   instructions after the bytecode path is running.
+5. Record benchmark checkpoints in this document after major slices.
+
+- [ ] Define a compact `vm_next` bytecode program representation in nested
+  package `compiler/vm_next/bytecode`.
   - [ ] Function chunks with local counts, parameter counts, return type, and
     instruction stream.
   - [ ] Constant pool or immediate encoding for scalar/string constants.
