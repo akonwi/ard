@@ -86,7 +86,7 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		OpFloatAdd, OpFloatSub, OpFloatMul, OpFloatDiv,
 		OpStrConcat, OpEq, OpNotEq, OpLt, OpLte, OpGt, OpGte, OpAnd, OpOr:
 		return 2, 1, nil
-	case OpNot, OpNeg, OpToStr, OpCopy, OpGetField, OpTraitUpcast, OpUnionWrap,
+	case OpNot, OpNeg, OpToStr, OpCopy, OpGetField, OpTraitUpcast, OpUnionWrap, OpUnionTag, OpUnionValue,
 		OpListSize, OpMapKeys, OpMapSize, OpStrSize, OpStrIsEmpty, OpStrTrim,
 		OpMakeMaybeSome, OpMaybeExpect, OpMaybeIsNone, OpMaybeIsSome,
 		OpMakeResultOk, OpMakeResultErr, OpResultExpect, OpResultErrValue, OpResultIsOk, OpResultIsErr,

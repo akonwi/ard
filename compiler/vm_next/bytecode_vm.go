@@ -250,6 +250,26 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				return Value{}, err
 			}
 			push(Union(air.TypeID(inst.A), uint32(inst.Imm), value))
+		case vmcode.OpUnionTag:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			unionValue, err := value.unionValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Int(air.TypeID(inst.A), int(unionValue.Tag)))
+		case vmcode.OpUnionValue:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			unionValue, err := value.unionValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(unionValue.Value)
 		case vmcode.OpIntAdd, vmcode.OpIntSub, vmcode.OpIntMul, vmcode.OpIntDiv, vmcode.OpIntMod:
 			left, right, err := popBinary(pop)
 			if err != nil {

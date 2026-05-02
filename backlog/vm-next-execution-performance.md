@@ -104,9 +104,9 @@ Feedback loop for this milestone:
   - [ ] Lower closure calls.
   - [x] Lower initial list/map/string operations used by simple loops and
     collection tests.
-  - [x] Lower initial `Maybe`, `Result`, `try`, enum match, and int match
-    operations.
-  - [ ] Lower union matching and remaining advanced match shapes.
+  - [x] Lower initial `Maybe`, `Result`, `try`, enum match, int match, and
+    union match operations.
+  - [ ] Lower remaining advanced match shapes and edge cases.
 - [x] Add an initial bytecode verifier for backend-facing invariants.
   - [ ] Valid instruction operands and jump targets.
   - [ ] Valid local/function/extern/type references.

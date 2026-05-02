@@ -47,6 +47,8 @@ const (
 	OpFiberGet
 	OpFiberJoin
 	OpUnionWrap
+	OpUnionTag
+	OpUnionValue
 	OpMakeList
 	OpListAt
 	OpListPrepend
@@ -190,6 +192,10 @@ func (op Opcode) String() string {
 		return "FiberJoin"
 	case OpUnionWrap:
 		return "UnionWrap"
+	case OpUnionTag:
+		return "UnionTag"
+	case OpUnionValue:
+		return "UnionValue"
 	case OpMakeList:
 		return "MakeList"
 	case OpListAt:

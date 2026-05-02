@@ -297,6 +297,8 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		return fl.lowerIntMatch(expr)
 	case air.ExprMatchMaybe:
 		return fl.lowerMaybeMatch(expr)
+	case air.ExprMatchUnion:
+		return fl.lowerUnionMatch(expr)
 	case air.ExprMatchResult:
 		return fl.lowerResultMatch(expr)
 	case air.ExprMaybeExpect, air.ExprMaybeIsNone, air.ExprMaybeIsSome, air.ExprMaybeOr, air.ExprMaybeMap, air.ExprMaybeAndThen:
@@ -413,6 +415,42 @@ func (fl *functionLowerer) lowerMaybeMatch(expr *air.Expr) error {
 		return err
 	}
 	fl.patch(jumpEnd, len(fl.code))
+	return nil
+}
+
+func (fl *functionLowerer) lowerUnionMatch(expr *air.Expr) error {
+	subjectLocal := fl.tempLocal()
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
+	endJumps := []int{}
+	for _, matchCase := range expr.UnionCases {
+		fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+		fl.emit(Instruction{Op: OpUnionTag, A: int(fl.mustTypeID(air.TypeInt))})
+		fl.emit(Instruction{Op: OpConstInt, A: int(fl.mustTypeID(air.TypeInt)), Imm: int(matchCase.Tag)})
+		fl.emit(Instruction{Op: OpEq, A: int(fl.mustTypeID(air.TypeBool))})
+		next := fl.emit(Instruction{Op: OpJumpIfFalse})
+		fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+		fl.emit(Instruction{Op: OpUnionValue, A: int(expr.Type)})
+		fl.emit(Instruction{Op: OpStoreLocal, A: int(matchCase.Local)})
+		if err := fl.lowerBlock(matchCase.Body, expr.Type); err != nil {
+			return err
+		}
+		endJumps = append(endJumps, fl.emit(Instruction{Op: OpJump}))
+		fl.patch(next, len(fl.code))
+	}
+	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
+		if err := fl.lowerBlock(expr.CatchAll, expr.Type); err != nil {
+			return err
+		}
+	} else if err := fl.emitZero(expr.Type); err != nil {
+		return err
+	}
+	end := len(fl.code)
+	for _, jump := range endJumps {
+		fl.patch(jump, end)
+	}
 	return nil
 }
 

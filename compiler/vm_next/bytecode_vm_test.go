@@ -168,6 +168,14 @@ func TestBytecodeRunScriptMatchSliceMatchesTreeWalk(t *testing.T) {
 				err => err.size() + 38,
 			}
 		`,
+		`
+			type Printable = Str | Int
+			let value: Printable = 42
+			match value {
+				Str => 0,
+				Int => it,
+			}
+		`,
 	}
 
 	for _, input := range tests {
