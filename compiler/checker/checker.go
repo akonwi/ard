@@ -114,6 +114,40 @@ func derefType(t Type) Type {
 			Name:  typ.Name,
 			Types: newTypes,
 		}
+	case *StructDef:
+		fieldsChanged := false
+		newFields := make(map[string]Type, len(typ.Fields))
+		for name, fieldType := range typ.Fields {
+			derefFieldType := derefType(fieldType)
+			newFields[name] = derefFieldType
+			if derefFieldType != fieldType {
+				fieldsChanged = true
+			}
+		}
+		methodsChanged := false
+		newMethods := make(map[string]*FunctionDef, len(typ.Methods))
+		for name, method := range typ.Methods {
+			derefMethod, _ := derefType(method).(*FunctionDef)
+			if derefMethod == nil {
+				derefMethod = method
+			}
+			newMethods[name] = derefMethod
+			if derefMethod != method {
+				methodsChanged = true
+			}
+		}
+		if !fieldsChanged && !methodsChanged {
+			return typ
+		}
+		return &StructDef{
+			Name:          typ.Name,
+			Fields:        newFields,
+			Methods:       newMethods,
+			Self:          typ.Self,
+			Traits:        typ.Traits,
+			GenericParams: append([]string(nil), typ.GenericParams...),
+			Private:       typ.Private,
+		}
 	case *FunctionDef:
 		newParams := make([]Parameter, len(typ.Parameters))
 		paramsChanged := false
@@ -4133,6 +4167,14 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			bindInferredTypeVars(exp.Key(), act.Key())
 			bindInferredTypeVars(exp.Value(), act.Value())
 		}
+	case *StructDef:
+		if act, ok := actual.(*StructDef); ok && exp.Name == act.Name {
+			for fieldName, expectedField := range exp.Fields {
+				if actualField, ok := act.Fields[fieldName]; ok {
+					bindInferredTypeVars(expectedField, actualField)
+				}
+			}
+		}
 	case *FunctionDef:
 		if act, ok := actual.(*FunctionDef); ok {
 			limit := len(exp.Parameters)
@@ -4558,6 +4600,20 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		)
 	case *List:
 		return &List{of: substituteType(typ.of, typeMap)}
+	case *Map:
+		return &Map{key: substituteType(typ.key, typeMap), value: substituteType(typ.value, typeMap)}
+	case *Union:
+		types := make([]Type, len(typ.Types))
+		for i, member := range typ.Types {
+			types[i] = substituteType(member, typeMap)
+		}
+		return &Union{Name: typ.Name, Types: types}
+	case *StructDef:
+		var out Type = typ
+		for genericName, concrete := range typeMap {
+			out = replaceGeneric(out, genericName, concrete)
+		}
+		return out
 	case *FunctionDef:
 		// Substitute generics in function parameters and return type
 		substitutedParams := make([]Parameter, len(typ.Parameters))
@@ -5018,6 +5074,21 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
 		}
 		return fmt.Errorf("expected list type, got %T", actual)
+	case *StructDef:
+		actualStruct, ok := actual.(*StructDef)
+		if !ok || expectedType.Name != actualStruct.Name {
+			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+		}
+		for fieldName, expectedField := range expectedType.Fields {
+			actualField, ok := actualStruct.Fields[fieldName]
+			if !ok {
+				return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+			}
+			if err := c.unifyTypes(expectedField, actualField, genericScope); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ExternType:
 		actualExtern, ok := actual.(*ExternType)
 		if !ok || expectedType.Name_ != actualExtern.Name_ || len(expectedType.TypeArgs) != len(actualExtern.TypeArgs) {

@@ -32,7 +32,12 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			name:        "env blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/env\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: bytecode, go, js-server",
+			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: bytecode, vm_next, go, js-server",
+		},
+		{
+			name:   "env allowed on vm_next",
+			target: backend.TargetVMNext,
+			source: "use ard/env\nfn main() Int { 1 }",
 		},
 		{
 			name:   "fs allowed on js-server",
@@ -43,19 +48,29 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			name:        "fs blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/fs\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: bytecode, go, js-server",
+			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: bytecode, vm_next, go, js-server",
+		},
+		{
+			name:   "fs allowed on vm_next",
+			target: backend.TargetVMNext,
+			source: "use ard/fs\nfn main() Int { 1 }",
 		},
 		{
 			name:        "sql blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/sql\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/sql when targeting js-browser; allowed targets: bytecode, go",
+			wantErrPart: "Cannot import ard/sql when targeting js-browser; allowed targets: bytecode, vm_next, go",
+		},
+		{
+			name:   "sql allowed on vm_next",
+			target: backend.TargetVMNext,
+			source: "use ard/sql\nfn main() Int { 1 }",
 		},
 		{
 			name:        "io blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/io\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: bytecode, go, js-server",
+			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: bytecode, vm_next, go, js-server",
 		},
 		{
 			name:   "js promise allowed on js-server",

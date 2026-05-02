@@ -11,25 +11,30 @@ import (
 var StdlibAllowedTargets = map[string]map[string]bool{
 	"ard/fs": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
 	"ard/sql": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 	},
 	"ard/env": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
 	"ard/io": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
 	"ard/argv": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
@@ -45,6 +50,7 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 
 var targetDisplayOrder = []string{
 	backend.TargetBytecode,
+	backend.TargetVMNext,
 	backend.TargetGo,
 	backend.TargetJSBrowser,
 	backend.TargetJSServer,

@@ -15,6 +15,7 @@ func TestParseTarget(t *testing.T) {
 	}{
 		{name: "default empty", raw: "", want: backend.TargetBytecode},
 		{name: "bytecode", raw: backend.TargetBytecode, want: backend.TargetBytecode},
+		{name: "vm_next", raw: backend.TargetVMNext, want: backend.TargetVMNext},
 		{name: "go", raw: backend.TargetGo, want: backend.TargetGo},
 		{name: "js-browser", raw: backend.TargetJSBrowser, want: backend.TargetJSBrowser},
 		{name: "js-server", raw: backend.TargetJSServer, want: backend.TargetJSServer},
