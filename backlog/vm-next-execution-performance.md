@@ -259,7 +259,12 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     showing repeated zero construction as a standalone bottleneck.
 - [ ] Inline or specialize common wrappers.
   - [ ] `Maybe` fast representation.
-  - [ ] `Result` fast representation.
+  - [ ] Result fast representation.
+  - [x] Evaluate helper-level `TryResult`/`TryMaybe` unboxing specialization.
+    Inlining the try unbox path directly into the bytecode switch passed tests
+    but regressed the 10-run runtime suite directionally, matching earlier
+    autoresearch results. Do not pursue helper inlining as the representation
+    strategy; focus on changing allocation/boxing shape if revisiting wrappers.
   - [ ] Small/void result cases without heap allocation.
 - [ ] Reduce `Ref any` usage on hot paths.
   - [ ] Prefer typed heap references or tagged heap records.
