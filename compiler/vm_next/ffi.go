@@ -18,12 +18,29 @@ type HostFunctionRegistry map[string]any
 type hostExternAdapters map[air.ExternID]hostExternAdapter
 
 type hostExternAdapter struct {
-	binding  string
-	extern   air.Extern
-	callable reflect.Value
-	inputs   []reflect.Type
-	fast     func(*VM, []Value) (Value, error)
-	buildErr error
+	binding    string
+	extern     air.Extern
+	callable   reflect.Value
+	inputs     []reflect.Type
+	inputPlans []hostInputPlan
+	fast       func(*VM, []Value) (Value, error)
+	buildErr   error
+}
+
+type hostInputKind uint8
+
+const (
+	hostInputGeneric hostInputKind = iota
+	hostInputInt
+	hostInputFloat64
+	hostInputBool
+	hostInputString
+	hostInputDynamicAny
+)
+
+type hostInputPlan struct {
+	kind   hostInputKind
+	target reflect.Type
 }
 
 var (
@@ -31,6 +48,10 @@ var (
 	hostMaybeType  = reflect.TypeFor[stdlibffi.Maybe[any]]()
 	hostResultType = reflect.TypeFor[stdlibffi.Result[any, any]]()
 	anyInterface   = reflect.TypeFor[any]()
+	intType        = reflect.TypeFor[int]()
+	float64Type    = reflect.TypeFor[float64]()
+	boolType       = reflect.TypeFor[bool]()
+	stringType     = reflect.TypeFor[string]()
 )
 
 func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, error) {
@@ -115,22 +136,25 @@ func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (h
 		return hostExternAdapter{}, fmt.Errorf("extern %s expects %d params from AIR, host function accepts %d", binding, len(extern.Signature.Params), fnType.NumIn())
 	}
 	inputs := make([]reflect.Type, len(extern.Signature.Params))
+	inputPlans := make([]hostInputPlan, len(extern.Signature.Params))
 	for i, param := range extern.Signature.Params {
 		target := fnType.In(i)
 		if err := vm.validateHostParamType(param.Type, target); err != nil {
 			return hostExternAdapter{}, fmt.Errorf("arg %d %s: %w", i, param.Name, err)
 		}
 		inputs[i] = target
+		inputPlans[i] = vm.newHostInputPlan(param.Type, target)
 	}
 	if err := vm.validateHostReturns(extern.Signature.Return, fnType); err != nil {
 		return hostExternAdapter{}, err
 	}
 	return hostExternAdapter{
-		binding:  binding,
-		extern:   extern,
-		callable: callable,
-		inputs:   inputs,
-		fast:     vm.newFastHostExternAdapter(extern, fn),
+		binding:    binding,
+		extern:     extern,
+		callable:   callable,
+		inputs:     inputs,
+		inputPlans: inputPlans,
+		fast:       vm.newFastHostExternAdapter(extern, fn),
 	}, nil
 }
 
@@ -622,13 +646,89 @@ func (adapter hostExternAdapter) hostInputs(vm *VM, args []Value) ([]reflect.Val
 		inputs = make([]reflect.Value, len(args))
 	}
 	for i, arg := range args {
-		input, err := vm.valueToHost(arg, adapter.inputs[i])
+		input, err := adapter.inputPlans[i].valueToHost(vm, arg)
 		if err != nil {
 			return nil, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
 		}
 		inputs[i] = input
 	}
 	return inputs, nil
+}
+
+func (vm *VM) newHostInputPlan(typeID air.TypeID, target reflect.Type) hostInputPlan {
+	plan := hostInputPlan{target: target}
+	info, err := vm.typeInfo(typeID)
+	if err != nil {
+		return plan
+	}
+	switch target.Kind() {
+	case reflect.Int:
+		if info.Kind == air.TypeInt || info.Kind == air.TypeEnum {
+			plan.kind = hostInputInt
+		}
+	case reflect.Float64:
+		if info.Kind == air.TypeFloat {
+			plan.kind = hostInputFloat64
+		}
+	case reflect.Bool:
+		if info.Kind == air.TypeBool {
+			plan.kind = hostInputBool
+		}
+	case reflect.String:
+		if info.Kind == air.TypeStr {
+			plan.kind = hostInputString
+		}
+	case reflect.Interface:
+		if target.NumMethod() == 0 && info.Kind == air.TypeDynamic {
+			plan.kind = hostInputDynamicAny
+		}
+	}
+	return plan
+}
+
+func (plan hostInputPlan) valueToHost(vm *VM, value Value) (reflect.Value, error) {
+	switch plan.kind {
+	case hostInputInt:
+		if value.Kind != ValueInt && value.Kind != ValueEnum {
+			return reflect.Value{}, fmt.Errorf("expected int-compatible value, got kind %d", value.Kind)
+		}
+		out := reflect.ValueOf(value.Int)
+		if plan.target != intType {
+			out = out.Convert(plan.target)
+		}
+		return out, nil
+	case hostInputFloat64:
+		if value.Kind != ValueFloat {
+			return reflect.Value{}, fmt.Errorf("expected float value, got kind %d", value.Kind)
+		}
+		out := reflect.ValueOf(value.Float)
+		if plan.target != float64Type {
+			out = out.Convert(plan.target)
+		}
+		return out, nil
+	case hostInputBool:
+		if value.Kind != ValueBool {
+			return reflect.Value{}, fmt.Errorf("expected bool value, got kind %d", value.Kind)
+		}
+		out := reflect.ValueOf(value.Bool)
+		if plan.target != boolType {
+			out = out.Convert(plan.target)
+		}
+		return out, nil
+	case hostInputString:
+		if value.Kind != ValueStr {
+			return reflect.Value{}, fmt.Errorf("expected string value, got kind %d", value.Kind)
+		}
+		out := reflect.ValueOf(value.Str)
+		if plan.target != stringType {
+			out = out.Convert(plan.target)
+		}
+		return out, nil
+	case hostInputDynamicAny:
+		return vm.dynamicToHost(value, plan.target)
+	default:
+		return vm.valueToHost(value, plan.target)
+	}
 }
 
 func goExternBinding(extern air.Extern) string {

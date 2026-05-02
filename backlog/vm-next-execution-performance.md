@@ -178,7 +178,10 @@ Recommended Milestone 2 feedback loop:
     string, Maybe, and Result operations.
   - [x] Closure call fast path for unary Maybe/Result mapper callbacks.
   - [x] Direct function/closure locals fast paths for 0/1/2/3 args.
-  - [ ] Extern reflection input fast paths beyond the current small fixed array.
+  - [x] Extern reflection input fast paths beyond the current small fixed array.
+    - [x] Precompute scalar/dynamic host input conversion plans after signature
+      validation so generic reflective extern calls avoid repeated type-shape
+      dispatch before constructing `reflect.Value` inputs.
 - [ ] Introduce reusable frame/local storage.
   - [x] Reuse locals and operand stack slices through a VM-local `sync.Pool`.
   - [x] Avoid allocating a fresh locals slice on every call when a pooled slice
@@ -555,6 +558,38 @@ Directional single-run runtime benchmark snapshot:
 This is within expected single-run noise relative to the immediately prior
 post-merge snapshot (`832.5 ms` total). Continue to treat very small interpreter
 micro-optimizations cautiously and verify against full-suite output checks.
+
+### Milestone 2 FFI input-plan checkpoint
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 10 --warmup 3`
+
+Changes in this checkpoint:
+
+- Added prevalidated host input conversion plans to generic extern adapters.
+- Fast-planned common scalar parameters (`Int`/enum, `Float`, `Bool`, `Str`) and
+  `Dynamic -> any` before falling back to the full generic `valueToHost` path.
+- Kept the existing small fixed `reflect.Value` input array for low-arity extern
+  calls.
+
+10-run mean runtime benchmark snapshot:
+
+| Benchmark | vm_next bytecode |
+|---|---:|
+| `sales_pipeline` | 75.8 ms |
+| `shape_catalog` | 91.3 ms |
+| `decode_pipeline` | 405.9 ms |
+| `word_frequency_batch` | 75.4 ms |
+| `async_batches` | 12.4 ms |
+| `fs_batch` | 103.8 ms |
+| `sql_batch` | 56.7 ms |
+| **total** | **821.3 ms** |
+
+This remains broadly in line with the locals fast-path checkpoint and keeps the
+remaining reflective extern path simpler to profile before Milestone 4 expands
+coverage with generated/direct adapters.
 
 ### Initial notes
 
