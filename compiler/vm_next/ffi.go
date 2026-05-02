@@ -10,6 +10,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
 type HostFunctionRegistry map[string]any
@@ -43,6 +44,14 @@ func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, er
 		registry[name] = fn
 	}
 	vm := &VM{program: program, profile: newExecutionProfile()}
+	code, err := vmcode.Lower(program)
+	if err != nil {
+		return nil, err
+	}
+	if err := vmcode.Verify(code); err != nil {
+		return nil, err
+	}
+	vm.bytecode = code
 	vm.externs = vm.buildHostExternAdapters(registry)
 	return vm, nil
 }

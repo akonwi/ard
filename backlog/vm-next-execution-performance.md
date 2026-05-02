@@ -60,39 +60,69 @@ Status markers:
 
 ### Milestone 1: Lower AIR to vm_next bytecode
 
-Status: Pending
+Status: Done
 
-This is the first major step. The current tree-walk interpreter should remain
-available temporarily as a fallback/comparison while bytecode coverage reaches
-parity.
+This is the first major step. The goal is not to optimize everything at once.
+The goal is to introduce a real execution artifact and feedback loop:
 
-- [ ] Define a compact `vm_next` bytecode program representation.
-  - [ ] Function chunks with local counts, parameter counts, return type, and
+```text
+AIR -> compiler/vm_next/bytecode -> vm_next bytecode interpreter
+```
+
+The current tree-walk interpreter should remain available temporarily as a
+fallback/comparison while bytecode coverage reaches parity. The initial success
+condition is behavioral parity, not immediate benchmark wins at any cost. Once
+parity is established, the bytecode path becomes the foundation for targeted
+runtime optimizations.
+
+Feedback loop for this milestone:
+
+1. Build small vertical slices: scalars/locals/arithmetic first, then control
+   flow, calls, data types, FFI, closures, traits/unions, and fibers.
+2. For each slice, compare bytecode execution against the current AIR tree-walk
+   execution where practical.
+3. Run focused `vm_next` tests, then broaden to parity tests and eventually
+   `go test ./...`.
+4. Use `ARD_VM_NEXT_PROFILE=1` and later opcode counters to identify hot
+   instructions after the bytecode path is running.
+5. Record benchmark checkpoints in this document after major slices.
+
+- [x] Define an initial compact `vm_next` bytecode program representation in
+  nested package `compiler/vm_next/bytecode`.
+  - [x] Function chunks with local counts, parameter counts, return type, and
     instruction stream.
-  - [ ] Constant pool or immediate encoding for scalar/string constants.
-  - [ ] Pre-resolved function, extern, type, field, trait, and impl IDs.
-  - [ ] Explicit instruction operands for local slots, field indexes, jump
+  - [x] Constant pool or immediate encoding for scalar/string constants.
+  - [x] Pre-resolved function, extern, type, field, trait, and impl IDs for the
+    supported instruction set.
+  - [x] Explicit instruction operands for local slots, field indexes, jump
     offsets, arities, and type IDs.
-- [ ] Add `AIR -> vm_next bytecode` lowering.
-  - [ ] Lower expressions into stack or register operations.
-  - [ ] Lower blocks and control flow into jumps.
-  - [ ] Lower function calls, closure calls, extern calls, and trait calls.
-  - [ ] Lower list/map/string operations used by current benchmark programs.
-  - [ ] Lower `Maybe`, `Result`, `try`, match, union, and enum operations.
-- [ ] Add a bytecode verifier or validator for backend-facing invariants.
-  - [ ] Valid instruction operands and jump targets.
-  - [ ] Valid local/function/extern/type references.
-  - [ ] Arity checks for calls and extern calls.
-  - [ ] Field indexes and match tags are valid.
-- [ ] Add a bytecode interpreter loop.
-  - [ ] Execute entry and script roots.
-  - [ ] Preserve panic/diagnostic behavior expected by parity tests.
-  - [ ] Keep the current tree-walk interpreter available behind an internal
-    fallback or test path until bytecode parity is complete.
-- [ ] Integrate bytecode execution into `ard run --target vm_next` and embedded
+- [x] Add `AIR -> vm_next bytecode` lowering.
+  - [x] Lower scalar expressions into stack operations for the initial slice.
+  - [x] Lower blocks and `if` control flow into jumps for the initial slice.
+  - [x] Lower direct function calls for the initial slice.
+  - [x] Lower extern and trait calls for the initial print/Encodable slice.
+  - [x] Lower closure calls.
+  - [x] Lower initial list/map/string operations used by simple loops and
+    collection tests.
+  - [x] Lower initial `Maybe`, `Result`, `try`, enum match, int match, and
+    union match operations.
+  - [x] Lower remaining match shapes covered by current `vm_next` parity tests.
+- [x] Add an initial bytecode verifier for backend-facing invariants.
+  - [x] Valid instruction operands and jump targets.
+  - [x] Valid local/function/extern/type references.
+  - [x] Arity checks for calls and extern calls.
+  - [x] Field indexes are validated for field opcodes.
+  - [x] Match tags are lowered into validated scalar comparisons for union
+    matching.
+- [x] Add a bytecode interpreter loop.
+  - [x] Execute entry and script roots.
+  - [x] Preserve panic/diagnostic behavior expected by parity tests.
+  - [x] Keep the current tree-walk interpreter implementation available
+    internally as a reference while default construction uses bytecode.
+- [x] Integrate bytecode execution into `ard run --target vm_next` and embedded
   `ard build --target vm_next` executables.
-- [ ] Run current `vm_next` parity tests against the bytecode path.
-- [ ] Run benchmark suite and record before/after numbers in this document.
+- [x] Run current `vm_next` parity tests against the bytecode path.
+- [x] Run benchmark suite and record before/after numbers in this document.
 
 ### Milestone 2: Remove obvious interpreter allocation overhead
 
@@ -227,6 +257,32 @@ changes.
 ## Benchmark snapshot log
 
 Add dated entries here as work lands.
+
+### Milestone 1 completion snapshot
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 1 --warmup 0 ...`
+
+Runtime benchmark snapshot after switching default `vm_next` construction to the
+new bytecode path. These are single-run numbers, so use them as directional data,
+not statistical proof:
+
+| Benchmark | bytecode VM | vm_next bytecode | vm_next delta |
+|---|---:|---:|---:|
+| `sales_pipeline` | 62.4 ms | 100.1 ms | 1.6x slower |
+| `shape_catalog` | 75.4 ms | 137.3 ms | 1.8x slower |
+| `decode_pipeline` | 233.9 ms | 871.4 ms | 3.7x slower |
+| `word_frequency_batch` | 48.3 ms | 101.4 ms | 2.1x slower |
+| `async_batches` | 14.3 ms | 12.1 ms | 1.2x faster |
+| `fs_batch` | 105.3 ms | 500.4 ms | 4.8x slower |
+| `sql_batch` | 44.7 ms | 89.7 ms | 2.0x slower |
+
+Compared with the PR #101 baseline, the bytecode layer substantially improves
+pure runtime and SQL/decode workloads, while FS remains dominated by remaining
+VM/string/result/FFI overhead around host filesystem calls. Milestone 2 should
+now focus on allocation and argument/frame overhead in the bytecode interpreter.
 
 ### Initial notes
 
