@@ -135,6 +135,9 @@ func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Valu
 			return Value{}, fmt.Errorf("Maybe closure method expects one function")
 		}
 		if !maybeValue.Some {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocMaybe)
+			}
 			out = Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A))))
 			break
 		}
@@ -145,6 +148,9 @@ func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Valu
 		if inst.Op == vmcode.OpMaybeAndThen {
 			out = mapped
 		} else {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocMaybe)
+			}
 			out = Maybe(air.TypeID(inst.A), true, mapped)
 		}
 	default:
@@ -195,6 +201,9 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		out = Bool(air.TypeID(inst.A), !resultValue.Ok)
 	case vmcode.OpResultMap:
 		if !resultValue.Ok {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocResult)
+			}
 			out = Result(air.TypeID(inst.A), false, resultValue.Value)
 			break
 		}
@@ -202,9 +211,15 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		if err != nil {
 			return Value{}, err
 		}
+		if vm.profile != nil {
+			vm.profile.RecordValueAlloc(valueAllocResult)
+		}
 		out = Result(air.TypeID(inst.A), true, mapped)
 	case vmcode.OpResultMapErr:
 		if resultValue.Ok {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocResult)
+			}
 			out = Result(air.TypeID(inst.A), true, resultValue.Value)
 			break
 		}
@@ -212,9 +227,15 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		if err != nil {
 			return Value{}, err
 		}
+		if vm.profile != nil {
+			vm.profile.RecordValueAlloc(valueAllocResult)
+		}
 		out = Result(air.TypeID(inst.A), false, mapped)
 	case vmcode.OpResultAndThen:
 		if !resultValue.Ok {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocResult)
+			}
 			out = Result(air.TypeID(inst.A), false, resultValue.Value)
 			break
 		}
@@ -247,6 +268,9 @@ func (vm *VM) execBytecodeTryResult(inst vmcode.Instruction, pop func() (Value, 
 		}
 		return Value{}, inst.B, false, nil
 	}
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	return Result(air.TypeID(inst.A), false, resultValue.Value), -1, true, nil
 }
 
@@ -264,6 +288,9 @@ func (vm *VM) execBytecodeTryMaybe(inst vmcode.Instruction, pop func() (Value, e
 	}
 	if inst.B >= 0 {
 		return Value{}, inst.B, false, nil
+	}
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocMaybe)
 	}
 	return Maybe(air.TypeID(inst.A), false, vm.bytecodeZeroMaybeForReturn(air.TypeID(inst.A))), -1, true, nil
 }

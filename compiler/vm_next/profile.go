@@ -86,6 +86,8 @@ type executionProfile struct {
 	argSliceAllocs atomic.Uint64
 	argSliceSlots  atomic.Uint64
 
+	valueAllocs [valueAllocKindCount]atomic.Uint64
+
 	externCalls    atomic.Uint64
 	externArgSum   atomic.Uint64
 	externMaxArity atomic.Uint64
@@ -200,6 +202,13 @@ func (p *executionProfile) RecordArgSliceAlloc(slots int) {
 	p.argSliceSlots.Add(uint64(slots))
 }
 
+func (p *executionProfile) RecordValueAlloc(kind valueAllocKind) {
+	if p == nil || kind < 0 || kind >= valueAllocKindCount {
+		return
+	}
+	p.valueAllocs[kind].Add(1)
+}
+
 func (p *executionProfile) RecordExternCall(binding string, argc int, convertIn, host, convertOut time.Duration) {
 	if p == nil {
 		return
@@ -264,6 +273,7 @@ func (p *executionProfile) Report() string {
 		fmt.Fprintf(&out, "alloc sites locals=%d slots=%d stacks=%d stack_slots=%d arg_slices=%d arg_slots=%d\n",
 			p.localsAllocs.Load(), p.localsSlots.Load(), p.stacksAllocs.Load(), p.stackCapSlots.Load(), p.argSliceAllocs.Load(), p.argSliceSlots.Load())
 	}
+	p.writeValueAllocReport(&out)
 
 	if closureCalls > 0 || closureCreations > 0 {
 		avgClosureArity := avgUint64(p.closureArgSum.Load(), closureCalls)
@@ -279,6 +289,26 @@ func (p *executionProfile) Report() string {
 	p.writeTopExprCounts(&out)
 	p.writeExternReport(&out, externCalls)
 	return strings.TrimRight(out.String(), "\n")
+}
+
+func (p *executionProfile) writeValueAllocReport(out *strings.Builder) {
+	var total uint64
+	for i := range p.valueAllocs {
+		total += p.valueAllocs[i].Load()
+	}
+	if total == 0 {
+		return
+	}
+	fmt.Fprintf(out, "value allocations total=%d maybe=%d result=%d struct=%d list=%d map=%d union=%d dynamic=%d closure=%d\n",
+		total,
+		p.valueAllocs[valueAllocMaybe].Load(),
+		p.valueAllocs[valueAllocResult].Load(),
+		p.valueAllocs[valueAllocStruct].Load(),
+		p.valueAllocs[valueAllocList].Load(),
+		p.valueAllocs[valueAllocMap].Load(),
+		p.valueAllocs[valueAllocUnion].Load(),
+		p.valueAllocs[valueAllocDynamic].Load(),
+		p.valueAllocs[valueAllocClosure].Load())
 }
 
 func (p *executionProfile) writeExternReport(out *strings.Builder, externCalls uint64) {

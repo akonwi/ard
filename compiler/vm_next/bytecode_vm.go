@@ -341,6 +341,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 			if vm.profile != nil {
 				vm.profile.RecordClosureCreation(len(captures))
+				vm.profile.RecordValueAlloc(valueAllocClosure)
 			}
 			push(Closure(air.TypeID(inst.A), air.FunctionID(inst.C), captures))
 		case vmcode.OpCallClosure:
@@ -498,6 +499,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocUnion)
+			}
 			push(Union(air.TypeID(inst.A), uint32(inst.Imm), value))
 		case vmcode.OpUnionTag:
 			value, err := pop()
@@ -601,6 +605,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocDynamic)
+			}
 			push(Dynamic(air.TypeID(inst.A), value.GoValue()))
 		case vmcode.OpPanic:
 			value, err := pop()
@@ -620,6 +627,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			items, err := popArgs(nil, pop, inst.B)
 			if err != nil {
 				return Value{}, err
+			}
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocList)
 			}
 			push(List(air.TypeID(inst.A), items))
 		case vmcode.OpListSizeLocal:
@@ -668,6 +678,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 			push(value)
 		case vmcode.OpMakeMap:
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocMap)
+			}
 			entries := make([]MapEntryValue, inst.B)
 			for i := inst.B - 1; i >= 0; i-- {
 				value, err := pop()
@@ -736,6 +749,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocStruct)
+			}
 			push(Struct(air.TypeID(inst.A), fields))
 		case vmcode.OpGetField:
 			value, err := pop()
@@ -784,8 +800,14 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocMaybe)
+			}
 			push(Maybe(air.TypeID(inst.A), true, value))
 		case vmcode.OpMakeMaybeNone:
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocMaybe)
+			}
 			push(Maybe(air.TypeID(inst.A), false, vm.zeroValue(air.TypeID(inst.B))))
 		case vmcode.OpMaybeExpect, vmcode.OpMaybeIsNone, vmcode.OpMaybeIsSome, vmcode.OpMaybeOr, vmcode.OpMaybeMap, vmcode.OpMaybeAndThen:
 			value, err := vm.execBytecodeMaybeOp(inst, &stack)
@@ -797,6 +819,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			value, err := pop()
 			if err != nil {
 				return Value{}, err
+			}
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocResult)
 			}
 			push(Result(air.TypeID(inst.A), inst.Op == vmcode.OpMakeResultOk, value))
 		case vmcode.OpResultExpect, vmcode.OpResultErrValue, vmcode.OpResultOr, vmcode.OpResultIsOk, vmcode.OpResultIsErr, vmcode.OpResultMap, vmcode.OpResultMapErr, vmcode.OpResultAndThen:

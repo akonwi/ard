@@ -405,6 +405,9 @@ func (vm *VM) fastDecodeIntResult(returnType air.TypeID, result stdlibffi.Result
 }
 
 func (vm *VM) fastDecodeIntResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[int, stdlibffi.Error]) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if result.Ok {
 		return Result(returnType, true, Int(info.Value, result.Value)), nil
 	}
@@ -424,6 +427,9 @@ func (vm *VM) fastDecodeStringResult(returnType air.TypeID, result stdlibffi.Res
 }
 
 func (vm *VM) fastDecodeStringResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[string, stdlibffi.Error]) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if result.Ok {
 		return Result(returnType, true, Str(info.Value, result.Value)), nil
 	}
@@ -443,6 +449,9 @@ func (vm *VM) fastDecodeFloatResult(returnType air.TypeID, result stdlibffi.Resu
 }
 
 func (vm *VM) fastDecodeFloatResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[float64, stdlibffi.Error]) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if result.Ok {
 		return Result(returnType, true, Float(info.Value, result.Value)), nil
 	}
@@ -462,6 +471,9 @@ func (vm *VM) fastDecodeBoolResult(returnType air.TypeID, result stdlibffi.Resul
 }
 
 func (vm *VM) fastDecodeBoolResultWithInfo(returnType air.TypeID, info air.TypeInfo, result stdlibffi.Result[bool, stdlibffi.Error]) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if result.Ok {
 		return Result(returnType, true, Bool(info.Value, result.Value)), nil
 	}
@@ -488,6 +500,9 @@ func (vm *VM) fastBoolStringErrorResult(returnType air.TypeID, out bool, hostErr
 }
 
 func (vm *VM) fastBoolStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, out bool, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
@@ -503,6 +518,9 @@ func (vm *VM) fastVoidStringErrorResult(returnType air.TypeID, hostErr error) (V
 }
 
 func (vm *VM) fastVoidStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
@@ -518,6 +536,9 @@ func (vm *VM) fastStringStringErrorResult(returnType air.TypeID, out string, hos
 }
 
 func (vm *VM) fastStringStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, out string, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
@@ -533,6 +554,9 @@ func (vm *VM) fastDynamicResult(returnType air.TypeID, raw any, hostErr error) (
 }
 
 func (vm *VM) fastDynamicResultWithInfo(returnType air.TypeID, info air.TypeInfo, raw any, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
@@ -552,6 +576,9 @@ func (vm *VM) fastDynamicListResult(returnType air.TypeID, raw []any, hostErr er
 }
 
 func (vm *VM) fastDynamicListResultWithInfo(returnType air.TypeID, info air.TypeInfo, listInfo air.TypeInfo, raw []any, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
@@ -575,6 +602,9 @@ func (vm *VM) fastStringBoolMapResult(returnType air.TypeID, raw map[string]bool
 }
 
 func (vm *VM) fastStringBoolMapResultWithInfo(returnType air.TypeID, info air.TypeInfo, mapInfo air.TypeInfo, raw map[string]bool, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
@@ -598,6 +628,9 @@ func (vm *VM) fastDynamicMapResult(returnType air.TypeID, raw map[any]any, hostE
 }
 
 func (vm *VM) fastDynamicMapResultWithInfo(returnType air.TypeID, info air.TypeInfo, mapInfo air.TypeInfo, raw map[any]any, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}

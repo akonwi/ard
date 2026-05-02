@@ -252,6 +252,17 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     wrapper/control-flow pressure: ~588k frames, ~120k closures created, ~492k
     `TryResult` opcodes, and ~468k fast extern Result calls in a representative
     profile sample.
+  - Added opt-in value allocation counters under `ARD_VM_NEXT_PROFILE=1` to
+    count constructed wrapper/container values by kind. Representative profile
+    samples show where wrapper work concentrates:
+    - `decode_pipeline`: ~1.13M value allocations counted, including ~924k
+      `Result`, ~120k closure, ~60k list, ~12k map, and ~12k union values.
+    - `sql_batch`: ~120k value allocations counted, including ~85k `Result`,
+      ~20k union, ~5k struct, ~5k list, and ~5k map values.
+    - `shape_catalog`: ~100k value allocations counted, split mostly between
+      ~50k struct and ~50k union values.
+    - `word_frequency_batch`: only ~15 counted value allocations; its remaining
+      cost is interpreter loop/local/scalar overhead rather than wrapper churn.
   - Evaluated a conservative immutable zero-value cache for scalar and nested
     immutable `Maybe`/`Result`/`Union` zero values. Tests passed, but the
     10-run runtime suite did not improve directionally, so the change was not
