@@ -826,7 +826,7 @@ Status: In progress
     language/runtime regression cases: expressions, block expressions, function
     calls, nullable argument wrapping, `try`, `Maybe`, `Result`, lists, maps,
     loops, matching, structs, enums, unions, generic equality, type helper
-    methods, and Maybe propagation through `try`.
+    methods, concurrent runtime access, and Maybe propagation through `try`.
   - [x] Close parity gaps exposed by those tests: AIR block expressions,
     C-style `for` loops, string iteration, conditional matches, sorted map
     iteration, checker `Identifier` locals in optional property chains, and
