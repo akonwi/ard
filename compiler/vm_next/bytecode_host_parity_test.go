@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
 func TestVMNextBytecodeParityDurationFunctions(t *testing.T) {
@@ -712,6 +714,77 @@ func TestVMNextBytecodeParityHttpMethod(t *testing.T) {
 			want: "POST",
 		},
 	})
+}
+
+func TestVMNextBytecodeParityHttpServerCallbacks(t *testing.T) {
+	got := runSourceWithExterns(t, `
+		use ard/decode
+		use ard/http
+
+		let routes: [Str:http::HandlerFn] = [
+			"/users/:id": fn(req: http::Request, mut res: http::Response) {
+				let raw_body = try req.body -> _ {
+					res.status = 400
+					res.body = "missing body"
+				}
+				let body_text = try decode::run(raw_body, decode::string) -> errs {
+					res.status = 400
+					res.body = decode::flatten(errs)
+				}
+				let payload = try decode::from_json(body_text) -> err {
+					res.status = 400
+					res.body = err
+				}
+				let email = try decode::run(payload, decode::field("email", decode::string)) -> errs {
+					res.status = 400
+					res.body = decode::flatten(errs)
+				}
+
+				res.status = 201
+				res.headers = ["X-User": req.path_param("id")]
+				res.body = "{req.path().or("")}|{req.query_param("debug")}|{email}"
+			},
+		]
+
+		http::serve(9999, routes).expect("serve failed")
+	`, HostFunctionRegistry{
+		"HTTP_Serve": func(port int, handlers map[string]stdlibffi.Callback2[stdlibffi.Request, *stdlibffi.Response, struct{}]) error {
+			if port != 9999 {
+				return fmt.Errorf("port = %d, want 9999", port)
+			}
+			handler, ok := handlers["/users/:id"]
+			if !ok {
+				return fmt.Errorf("missing /users/:id handler")
+			}
+			req := httptest.NewRequest(http.MethodPost, "http://example.test/users/42?debug=true", nil)
+			req.SetPathValue("id", "42")
+			res := &stdlibffi.Response{Status: 200, Headers: map[string]string{}}
+			_, err := handler.Call(stdlibffi.Request{
+				Method:  stdlibffi.Method(1),
+				Url:     req.URL.String(),
+				Headers: map[string]string{"Content-Type": "application/json"},
+				Body:    stdlibffi.Some[any](`{"email":"ada@example.com"}`),
+				Raw:     stdlibffi.Some(stdlibffi.RawRequest{Handle: req}),
+			}, res)
+			if err != nil {
+				return err
+			}
+			if res.Status != 201 {
+				return fmt.Errorf("status = %d, want 201", res.Status)
+			}
+			if res.Headers["X-User"] != "42" {
+				return fmt.Errorf("X-User header = %q, want 42", res.Headers["X-User"])
+			}
+			if res.Body != "/users/42|true|ada@example.com" {
+				return fmt.Errorf("body = %q", res.Body)
+			}
+			return nil
+		},
+	})
+
+	if got.Kind != ValueVoid {
+		t.Fatalf("got %#v, want void", got)
+	}
 }
 
 func TestVMNextBytecodeParityHttpSendUsesRequestTimeout(t *testing.T) {

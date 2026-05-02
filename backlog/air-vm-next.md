@@ -821,7 +821,7 @@ Status: In progress
 
 - [x] Separate program entry execution from script execution with
   `vm_next.RunEntry` and `vm_next.RunScript`.
-- [ ] Run current VM behavioral tests against `vm_next`.
+- [x] Run current VM behavioral tests against `vm_next`.
   - [x] Add `vm_next` parity coverage for the current bytecode VM's pure
     language/runtime regression cases: expressions, block expressions, function
     calls, nullable argument wrapping, `try`, `Maybe`, `Result`, lists, maps,
@@ -832,7 +832,7 @@ Status: In progress
     iteration, checker `Identifier` locals in optional property chains, and
     concrete `Void` layouts for uninhabited generic values like `none` and
     error-only `Result` expressions.
-  - [ ] Port bytecode VM host-capability tests where they apply to the new FFI
+  - [x] Port bytecode VM host-capability tests where they apply to the new FFI
     model.
     - [x] Port duration, `Dynamic`/decode/from_json, env, filesystem, UUID,
       FFI panic recovery, IO printing, HTTP client timeout behavior, and async
@@ -845,7 +845,8 @@ Status: In progress
     - [x] Port JSON encode coverage for primitive `Encodable` values.
     - [x] Port broader stdlib crypto coverage for hash digests, password
       verification, and scrypt helpers.
-    - [ ] Port or intentionally defer server-side HTTP behavior.
+    - [x] Port server-side HTTP callback behavior for route maps, mutable
+      responses, request bodies, and raw request opaques.
   - [x] Decide which bytecode VM internal tests are intentionally not copied
     because they validate old registry/type-resolver/profile implementation
     details rather than Ard runtime behavior.
