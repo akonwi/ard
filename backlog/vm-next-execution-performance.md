@@ -245,8 +245,18 @@ adapters removed much of the reflective boundary cost, so the next decode wins
 are likely in `Result`/`Maybe` representation, cheaper zero values, and reducing
 wrapper allocation/type-assertion churn on success-heavy decode paths.
 
-- [ ] Measure allocation counts for `vm_next` execution with Go allocation
+- [x] Measure allocation counts for `vm_next` execution with Go allocation
   profiling or additional counters.
+  - Initial Milestone 3 profiling reused `ARD_VM_NEXT_PROFILE=1` counters after
+    the Milestone 2 locals arena. `decode_pipeline` still reports very high
+    wrapper/control-flow pressure: ~588k frames, ~120k closures created, ~492k
+    `TryResult` opcodes, and ~468k fast extern Result calls in a representative
+    profile sample.
+  - Evaluated a conservative immutable zero-value cache for scalar and nested
+    immutable `Maybe`/`Result`/`Union` zero values. Tests passed, but the
+    10-run runtime suite did not improve directionally, so the change was not
+    kept. Zero-value caching should only be revisited with allocation evidence
+    showing repeated zero construction as a standalone bottleneck.
 - [ ] Inline or specialize common wrappers.
   - [ ] `Maybe` fast representation.
   - [ ] `Result` fast representation.
