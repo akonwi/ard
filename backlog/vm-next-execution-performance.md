@@ -69,10 +69,11 @@ The goal is to introduce a real execution artifact and feedback loop:
 AIR -> compiler/vm_next/bytecode -> vm_next bytecode interpreter
 ```
 
-The current tree-walk interpreter should remain available temporarily as a
-fallback/comparison while bytecode coverage reaches parity. The initial success
-condition is behavioral parity, not immediate benchmark wins at any cost. Once
-parity is established, the bytecode path becomes the foundation for targeted
+The current tree-walk interpreter was kept temporarily as a fallback/comparison
+while bytecode coverage reached parity. After parity passed, the tree-walk
+implementation was removed and `vm_next` now executes through bytecode by
+default. The initial success condition was behavioral parity, not immediate
+benchmark wins at any cost. The bytecode path is now the foundation for targeted
 runtime optimizations.
 
 Feedback loop for this milestone:
@@ -117,8 +118,7 @@ Feedback loop for this milestone:
 - [x] Add a bytecode interpreter loop.
   - [x] Execute entry and script roots.
   - [x] Preserve panic/diagnostic behavior expected by parity tests.
-  - [x] Keep the current tree-walk interpreter implementation available
-    internally as a reference while default construction uses bytecode.
+  - [x] Remove the old tree-walk interpreter after bytecode parity passed.
 - [x] Integrate bytecode execution into `ard run --target vm_next` and embedded
   `ard build --target vm_next` executables.
 - [x] Run current `vm_next` parity tests against the bytecode path.
@@ -131,14 +131,52 @@ Status: Pending
 Once the bytecode path exists, reduce allocation and dispatch overhead in the new
 execution loop.
 
-- [ ] Avoid per-expression/per-statement AIR object copying in the hot path.
+Preparation notes after Milestone 1:
+
+- The old per-expression/per-statement AIR tree-walk cost is gone.
+- Fresh bytecode profiles show pure-runtime programs no longer report useful
+  call/frame counters because profiling has not yet been wired to bytecode
+  calls/opcodes.
+- `decode_pipeline` and `sql_batch` still spend substantial time in reflective
+  FFI conversion, but pure-runtime workloads (`sales_pipeline`,
+  `word_frequency_batch`, `shape_catalog`) now point at bytecode interpreter
+  overhead and allocation as the next general-purpose target.
+- Hot allocation candidates in the bytecode interpreter:
+  - per-call `locals := make([]Value, fn.Locals)`
+  - per-call `stack := make([]Value, 0, len(fn.Code))`
+  - per-call/per-method `popArgs(...)` and `popMethodArgs(...)` slices
+  - trait calls building `argsWithReceiver`
+  - closure callbacks such as `[]Value{maybeValue.Value}` and sort comparator
+    `[]Value{left, right}`
+  - zero-capture closure construction still allocating empty capture slices
+  - FFI `[]reflect.Value` input slices, which will be handled more fully in
+    Milestone 4 but can get small-arity fast paths here
+
+Recommended Milestone 2 feedback loop:
+
+1. Add bytecode execution counters and allocation-oriented microbenchmarks before
+   changing data structures.
+2. Remove easy `[]Value` allocations for common arities.
+3. Reuse frame/local/stack storage or introduce an explicit bytecode call stack.
+4. Rerun `go test ./...` and runtime benchmarks after each step.
+5. Record benchmark and profile deltas in this document.
+
+- [x] Avoid per-expression/per-statement AIR object copying in the hot path.
+  - Completed by Milestone 1 when default execution moved to bytecode.
+- [ ] Add bytecode-specific instrumentation needed to guide this milestone.
+  - [ ] Direct function, closure, trait, and extern call counts from bytecode.
+  - [ ] Opcode counters gated by `ARD_VM_NEXT_PROFILE=1`.
+  - [ ] Optional allocation counters for frames, locals slices, stacks, and arg
+    slices.
 - [ ] Avoid generic `[]Value` allocation for common call arities.
   - [ ] Direct call fast paths for 0/1/2/3 args.
   - [ ] Closure call fast paths for 0/1/2 args.
   - [ ] Extern call fast paths for common arities.
+  - [ ] Method-op fast paths that avoid `popMethodArgs` slices for 0/1/2 args.
 - [ ] Introduce reusable frame/local storage.
   - [ ] Reuse frame objects or use a contiguous call stack.
   - [ ] Avoid allocating a new locals slice on every call.
+  - [ ] Avoid allocating a new stack slice on every call.
   - [ ] Preserve safe behavior for recursion and fibers.
 - [ ] Remove redundant runtime validation from trusted hot paths after bytecode
   validation succeeds.
