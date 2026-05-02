@@ -2,11 +2,16 @@ package ffi
 
 import (
 	"bufio"
+	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/sha512"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -23,74 +28,84 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/scrypt"
+	"golang.org/x/text/unicode/norm"
 )
 
 var HostFunctions = Host{
-	Base64Decode:        Base64Decode,
-	Base64DecodeURL:     Base64DecodeURL,
-	Base64Encode:        Base64Encode,
-	Base64EncodeURL:     Base64EncodeURL,
-	BoolToDynamic:       BoolToDynamic,
-	CryptoUUID:          CryptoUUID,
-	DecodeBool:          DecodeBool,
-	DecodeFloat:         DecodeFloat,
-	DecodeInt:           DecodeInt,
-	DecodeString:        DecodeString,
-	DynamicToList:       DynamicToList,
-	DynamicToMap:        DynamicToMap,
-	EnvGet:              EnvGet,
-	ExtractField:        ExtractField,
-	FSAbs:               FSAbs,
-	FSAppendFile:        FSAppendFile,
-	FSCopy:              FSCopy,
-	FSCreateDir:         FSCreateDir,
-	FSCreateFile:        FSCreateFile,
-	FSCwd:               FSCwd,
-	FSDeleteDir:         FSDeleteDir,
-	FSDeleteFile:        FSDeleteFile,
-	FSExists:            FSExists,
-	FSIsDir:             FSIsDir,
-	FSIsFile:            FSIsFile,
-	FSListDir:           FSListDir,
-	FSReadFile:          FSReadFile,
-	FSRename:            FSRename,
-	FSWriteFile:         FSWriteFile,
-	FloatFloor:          FloatFloor,
-	FloatFromInt:        FloatFromInt,
-	FloatFromStr:        FloatFromStr,
-	FloatToDynamic:      FloatToDynamic,
-	GetPathValue:        GetPathValue,
-	GetQueryParam:       GetQueryParam,
-	GetReqPath:          GetReqPath,
-	HTTPDo:              HTTPDo,
-	HTTPResponseBody:    HTTPResponseBody,
-	HTTPResponseClose:   HTTPResponseClose,
-	HTTPResponseHeaders: HTTPResponseHeaders,
-	HTTPResponseStatus:  HTTPResponseStatus,
-	HTTPServe:           HTTPServe,
-	HexDecode:           HexDecode,
-	HexEncode:           HexEncode,
-	IntFromStr:          IntFromStr,
-	IntToDynamic:        IntToDynamic,
-	IsNil:               IsNil,
-	JsonEncode:          JsonEncode,
-	JsonToDynamic:       JsonToDynamic,
-	ListToDynamic:       ListToDynamic,
-	MapToDynamic:        MapToDynamic,
-	OsArgs:              OsArgs,
-	Print:               Print,
-	ReadLine:            ReadLine,
-	Sleep:               Sleep,
-	SqlBeginTx:          SqlBeginTx,
-	SqlClose:            SqlClose,
-	SqlCommit:           SqlCommit,
-	SqlCreateConnection: SqlCreateConnection,
-	SqlExecute:          SqlExecute,
-	SqlExtractParams:    SqlExtractParams,
-	SqlQuery:            SqlQuery,
-	SqlRollback:         SqlRollback,
-	StrToDynamic:        StrToDynamic,
-	VoidToDynamic:       VoidToDynamic,
+	Base64Decode:         Base64Decode,
+	Base64DecodeURL:      Base64DecodeURL,
+	Base64Encode:         Base64Encode,
+	Base64EncodeURL:      Base64EncodeURL,
+	BoolToDynamic:        BoolToDynamic,
+	CryptoHashPassword:   CryptoHashPassword,
+	CryptoMd5:            CryptoMd5,
+	CryptoScryptHash:     CryptoScryptHash,
+	CryptoScryptVerify:   CryptoScryptVerify,
+	CryptoSha256:         CryptoSha256,
+	CryptoSha512:         CryptoSha512,
+	CryptoUUID:           CryptoUUID,
+	CryptoVerifyPassword: CryptoVerifyPassword,
+	DecodeBool:           DecodeBool,
+	DecodeFloat:          DecodeFloat,
+	DecodeInt:            DecodeInt,
+	DecodeString:         DecodeString,
+	DynamicToList:        DynamicToList,
+	DynamicToMap:         DynamicToMap,
+	EnvGet:               EnvGet,
+	ExtractField:         ExtractField,
+	FSAbs:                FSAbs,
+	FSAppendFile:         FSAppendFile,
+	FSCopy:               FSCopy,
+	FSCreateDir:          FSCreateDir,
+	FSCreateFile:         FSCreateFile,
+	FSCwd:                FSCwd,
+	FSDeleteDir:          FSDeleteDir,
+	FSDeleteFile:         FSDeleteFile,
+	FSExists:             FSExists,
+	FSIsDir:              FSIsDir,
+	FSIsFile:             FSIsFile,
+	FSListDir:            FSListDir,
+	FSReadFile:           FSReadFile,
+	FSRename:             FSRename,
+	FSWriteFile:          FSWriteFile,
+	FloatFloor:           FloatFloor,
+	FloatFromInt:         FloatFromInt,
+	FloatFromStr:         FloatFromStr,
+	FloatToDynamic:       FloatToDynamic,
+	GetPathValue:         GetPathValue,
+	GetQueryParam:        GetQueryParam,
+	GetReqPath:           GetReqPath,
+	HTTPDo:               HTTPDo,
+	HTTPResponseBody:     HTTPResponseBody,
+	HTTPResponseClose:    HTTPResponseClose,
+	HTTPResponseHeaders:  HTTPResponseHeaders,
+	HTTPResponseStatus:   HTTPResponseStatus,
+	HTTPServe:            HTTPServe,
+	HexDecode:            HexDecode,
+	HexEncode:            HexEncode,
+	IntFromStr:           IntFromStr,
+	IntToDynamic:         IntToDynamic,
+	IsNil:                IsNil,
+	JsonEncode:           JsonEncode,
+	JsonToDynamic:        JsonToDynamic,
+	ListToDynamic:        ListToDynamic,
+	MapToDynamic:         MapToDynamic,
+	OsArgs:               OsArgs,
+	Print:                Print,
+	ReadLine:             ReadLine,
+	Sleep:                Sleep,
+	SqlBeginTx:           SqlBeginTx,
+	SqlClose:             SqlClose,
+	SqlCommit:            SqlCommit,
+	SqlCreateConnection:  SqlCreateConnection,
+	SqlExecute:           SqlExecute,
+	SqlExtractParams:     SqlExtractParams,
+	SqlQuery:             SqlQuery,
+	SqlRollback:          SqlRollback,
+	StrToDynamic:         StrToDynamic,
+	VoidToDynamic:        VoidToDynamic,
 }.Functions()
 
 type sqlConnection struct {
@@ -102,6 +117,14 @@ type sqlTransaction struct {
 	tx     *sql.Tx
 	driver string
 }
+
+const (
+	defaultScryptN       = 16384
+	defaultScryptR       = 16
+	defaultScryptP       = 1
+	defaultScryptDKLen   = 64
+	defaultScryptSaltLen = 16
+)
 
 type sqlRunner interface {
 	Query(query string, args ...any) (*sql.Rows, error)
@@ -193,6 +216,146 @@ func HexDecode(input string) (string, error) {
 		return "", err
 	}
 	return string(decoded), nil
+}
+
+func CryptoMd5(input string) string {
+	sum := md5.Sum([]byte(input))
+	return hex.EncodeToString(sum[:])
+}
+
+func CryptoSha256(input string) string {
+	sum := sha256.Sum256([]byte(input))
+	return string(sum[:])
+}
+
+func CryptoSha512(input string) string {
+	sum := sha512.Sum512([]byte(input))
+	return string(sum[:])
+}
+
+func CryptoHashPassword(password string, cost Maybe[int]) (string, error) {
+	hashCost := bcrypt.DefaultCost
+	if cost.Some {
+		hashCost = cost.Value
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hashed), nil
+}
+
+func CryptoVerifyPassword(password, hashed string) (bool, error) {
+	err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password))
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+		return false, nil
+	}
+	return false, err
+}
+
+func CryptoScryptHash(password string, saltHex Maybe[string], n Maybe[int], r Maybe[int], p Maybe[int], dkLen Maybe[int]) (string, error) {
+	password = norm.NFKC.String(password)
+	nVal := maybeOr(n, defaultScryptN)
+	rVal := maybeOr(r, defaultScryptR)
+	pVal := maybeOr(p, defaultScryptP)
+	dkLenVal := maybeOr(dkLen, defaultScryptDKLen)
+
+	if err := validateScryptParams(nVal, rVal, pVal, dkLenVal); err != nil {
+		return "", fmt.Errorf("scrypt_runtime: %s", err.Error())
+	}
+
+	var saltHexValue string
+	if saltHex.Some {
+		saltHexValue = strings.TrimSpace(saltHex.Value)
+		decoded, err := hex.DecodeString(saltHexValue)
+		if err != nil {
+			return "", fmt.Errorf("scrypt_runtime: invalid salt hex: %s", err.Error())
+		}
+		if len(decoded) == 0 {
+			return "", errors.New("scrypt_runtime: invalid salt hex: empty salt")
+		}
+	} else {
+		saltBytes := make([]byte, defaultScryptSaltLen)
+		if _, err := rand.Read(saltBytes); err != nil {
+			return "", fmt.Errorf("scrypt_runtime: failed to generate salt: %s", err.Error())
+		}
+		saltHexValue = hex.EncodeToString(saltBytes)
+	}
+
+	derived, err := scrypt.Key([]byte(password), []byte(saltHexValue), nVal, rVal, pVal, dkLenVal)
+	if err != nil {
+		return "", fmt.Errorf("scrypt_runtime: %s", err.Error())
+	}
+
+	return fmt.Sprintf("%s:%s", saltHexValue, hex.EncodeToString(derived)), nil
+}
+
+func CryptoScryptVerify(password, hash string, n Maybe[int], r Maybe[int], p Maybe[int], dkLen Maybe[int]) (bool, error) {
+	password = norm.NFKC.String(password)
+	hash = strings.TrimSpace(hash)
+	nVal := maybeOr(n, defaultScryptN)
+	rVal := maybeOr(r, defaultScryptR)
+	pVal := maybeOr(p, defaultScryptP)
+	dkLenVal := maybeOr(dkLen, defaultScryptDKLen)
+
+	if err := validateScryptParams(nVal, rVal, pVal, dkLenVal); err != nil {
+		return false, fmt.Errorf("scrypt_runtime: %s", err.Error())
+	}
+
+	parts := strings.Split(hash, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false, errors.New("scrypt_malformed_hash: expected format <salt_hex>:<derived_key_hex>")
+	}
+
+	saltHex := parts[0]
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return false, fmt.Errorf("scrypt_malformed_hash: invalid salt hex: %s", err.Error())
+	}
+	if len(salt) == 0 {
+		return false, errors.New("scrypt_malformed_hash: invalid salt hex: empty salt")
+	}
+
+	storedKey, err := hex.DecodeString(parts[1])
+	if err != nil {
+		return false, fmt.Errorf("scrypt_malformed_hash: invalid derived key hex: %s", err.Error())
+	}
+	if len(storedKey) != dkLenVal {
+		return false, fmt.Errorf("scrypt_malformed_hash: derived key length mismatch: expected %d bytes, got %d", dkLenVal, len(storedKey))
+	}
+
+	derived, err := scrypt.Key([]byte(password), []byte(saltHex), nVal, rVal, pVal, dkLenVal)
+	if err != nil {
+		return false, fmt.Errorf("scrypt_runtime: %s", err.Error())
+	}
+
+	return subtle.ConstantTimeCompare(derived, storedKey) == 1, nil
+}
+
+func maybeOr(value Maybe[int], fallback int) int {
+	if value.Some {
+		return value.Value
+	}
+	return fallback
+}
+
+func validateScryptParams(n, r, p, dkLen int) error {
+	if n <= 1 || n&(n-1) != 0 {
+		return fmt.Errorf("invalid N parameter: must be a power of two greater than 1")
+	}
+	if r <= 0 {
+		return fmt.Errorf("invalid r parameter: must be greater than 0")
+	}
+	if p <= 0 {
+		return fmt.Errorf("invalid p parameter: must be greater than 0")
+	}
+	if dkLen <= 0 {
+		return fmt.Errorf("invalid dk_len parameter: must be greater than 0")
+	}
+	return nil
 }
 
 func FloatFromStr(str string) Maybe[float64] {

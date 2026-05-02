@@ -843,8 +843,9 @@ Status: In progress
     - [x] Port SQL coverage for parameter extraction, query execution, null
       values, missing parameter errors, and transactions.
     - [x] Port JSON encode coverage for primitive `Encodable` values.
-    - [ ] Port or intentionally defer broader crypto and server-side HTTP
-      behavior.
+    - [x] Port broader stdlib crypto coverage for hash digests, password
+      verification, and scrypt helpers.
+    - [ ] Port or intentionally defer server-side HTTP behavior.
   - [x] Decide which bytecode VM internal tests are intentionally not copied
     because they validate old registry/type-resolver/profile implementation
     details rather than Ard runtime behavior.
