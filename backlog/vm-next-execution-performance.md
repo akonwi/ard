@@ -215,6 +215,14 @@ Recommended Milestone 2 feedback loop:
   - [ ] Generalize into generated/direct adapter coverage in Milestone 4.
 - [ ] Remove redundant runtime validation from trusted hot paths after bytecode
   validation succeeds.
+  - Evaluated trusted removal of `LoadLocal`/`StoreLocal` local bounds checks
+    after the locals arena work; `go test ./...` passed, but the 10-run runtime
+    suite regressed directionally (`vm_next` total about `805.0 ms` vs the
+    `790.7 ms` locals-arena checkpoint), so the change was not kept.
+  - Evaluated trusting verified direct-call target/arity operands in the frame
+    loop; tests passed, but the 10-run runtime suite regressed more broadly, so
+    the change was not kept. Continue to require profiling evidence before
+    removing defensive validation.
 - [ ] Benchmark pure-runtime programs after each step.
 
 ### Milestone 3: Value representation improvements
