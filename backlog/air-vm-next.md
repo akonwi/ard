@@ -18,7 +18,7 @@ built from scratch around it.
   executable story.
 - Make FFI signature-driven and target-native by default.
 - Allow the standard library to be self-hosted in Ard wherever possible.
-- Leave room for a later `go_next` backend that consumes the same IR and emits
+- Leave room for a later Go target rewrite that consumes the same IR and emits
   idiomatic Go without preserving the current Go targeting code.
 
 ## Non-goals
@@ -38,7 +38,7 @@ parse AST
   -> AIR lowering produces typed, target-neutral IR
   -> AIR validator checks backend-facing invariants
   -> vm_next executes AIR/lowered AIR bytecode
-  -> go_next later emits Go from the same AIR
+  -> rewritten Go target later emits Go from the same AIR
 ```
 
 The order of work should be:
@@ -47,7 +47,7 @@ The order of work should be:
 2. Use AIR to build `vm_next`.
    - Generate target adapters for FFI from Ard signatures.
    - Get to behavioral parity with the current VM.
-3. Use AIR to build `go_next` from scratch.
+3. Use AIR to rewrite the Go target from scratch.
    - Coalesce Ard stdlib FFI bindings into idiomatic generated Go where possible.
    - Keep host-specific capabilities behind explicit externs and generated
      adapters.
@@ -714,7 +714,7 @@ Rule of thumb:
 
 > If it can be expressed in Ard without privileged host access, it belongs in Ard.
 
-The `go_next` backend can then coalesce Ard stdlib and extern bindings into
+The rewritten Go target can then coalesce Ard stdlib and extern bindings into
 idiomatic generated Go. For example, pure Ard modules become generated Go from
 AIR, while low-level externs become direct Go calls or generated adapters.
 
@@ -882,8 +882,8 @@ Status: Done
 - [x] Do not add a separate conformance harness for this milestone.
   - Coverage comes from the `vm_next` parity tests, `ard run --target vm_next`
     sample execution, and CLI benchmark participation.
-  - Later `go_next` work can reuse those same samples and parity cases instead
-    of introducing another parallel suite now.
+  - Later Go target rewrite work can reuse those same samples and parity cases
+    instead of introducing another parallel suite now.
 
 ### Post-Milestone 8: userland FFI workflow
 
@@ -908,8 +908,8 @@ Status: Done
 - [x] Consider Milestone 8 plus this milestone the parity gate for replacing the
   current bytecode VM as the primary VM target.
 
-### Milestone 10: go_next from AIR
+### Milestone 10: rewrite the Go target
 
-Moved to [go-next-air.md](go-next-air.md).
+Moved to [rewrite-go-target.md](rewrite-go-target.md).
 
 Status: Pending

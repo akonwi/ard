@@ -1,8 +1,8 @@
-# go_next from AIR
+# Rewrite the Go Target
 
-This backlog tracks the Go target rewrite after AIR and `vm_next` parity. The
-new Go target should consume AIR directly and should not preserve the current Go
-target architecture unless a small piece is independently useful.
+This backlog tracks a clean replacement for Ard's Go target after AIR and
+`vm_next` parity. The intent is to start over from AIR, not to refactor the
+current Go emitter into shape.
 
 ## Status
 
@@ -15,8 +15,13 @@ the bytecode VM and independent of `runtime.Object`. `vm_next` proves that the
 language can execute against AIR with signature-driven FFI and target-shaped
 values.
 
-The next Go target should use that same AIR input so Ard is not merely syntactic
-sugar over Go, while still generating idiomatic Go where the target supports it.
+The rewritten Go target should use that same AIR input so Ard is not merely
+syntactic sugar over Go, while still generating idiomatic Go where the target
+supports it.
+
+The current Go target should be treated as disposable. It can be used as a source
+of examples or test cases, but the new implementation should not inherit its
+architecture, runtime assumptions, or lowering strategy by default.
 
 ## Goals
 
@@ -33,7 +38,8 @@ sugar over Go, while still generating idiomatic Go where the target supports it.
 
 ## Non-goals
 
-- Do not preserve the current Go target's implementation structure by default.
+- Do not preserve the current Go target's implementation structure.
+- Do not incrementally patch the current Go target into the AIR model.
 - Do not make `runtime.Object` part of generated Go.
 - Do not model every Ard value as `any`.
 - Do not force `vm_next` callback handles into generated Go when native Go
@@ -84,7 +90,7 @@ The Go target should reuse the generated FFI contract:
 
 ## Checklist
 
-- [ ] Define the `go_next` package layout.
+- [ ] Choose the package layout for the replacement Go target.
 - [ ] Lower AIR scalar expressions and direct calls to Go.
 - [ ] Generate package/module structure from AIR modules.
 - [ ] Generate structs, enums, `Maybe`, and `Result`.
@@ -96,4 +102,4 @@ The Go target should reuse the generated FFI contract:
 - [ ] Compile self-hosted stdlib modules from AIR.
 - [ ] Add Go target parity tests using the existing `vm_next` parity corpus and
   sample programs.
-- [ ] Add runtime benchmark coverage for `go_next`.
+- [ ] Add runtime benchmark coverage for the rewritten Go target.
