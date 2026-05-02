@@ -271,7 +271,12 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     especially decode. Interface-boxing a full `Value` payload and compatibility
     paths outweighed removing wrapper structs, so this representation is not a
     keeper.
-  - [ ] Small/void result cases without heap allocation.
+  - [x] Evaluate small/void result cases without heap allocation. A narrow
+    `Result[Void, E]` success representation using `Value.Bool` for the tag and
+    `Value.Int` for the void payload type passed tests, but the 10-run suite did
+    not improve and introduced compatibility overhead in result access. Do not
+    keep ad hoc partial encodings unless paired with a broader tagged
+    representation.
 - [ ] Reduce `Ref any` usage on hot paths.
   - [ ] Prefer typed heap references or tagged heap records.
   - [ ] Avoid repeated Go type assertions for validated value kinds.
