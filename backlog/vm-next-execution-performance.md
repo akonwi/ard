@@ -381,18 +381,20 @@ closure churn without adding branch-heavy `ClosureValue` access paths.
 Added opt-in closure capture histogram counters under `ARD_VM_NEXT_PROFILE=1`.
 Representative decode profiling after local match-subject opcodes shows
 ~120k closure creations split across ~48k zero-capture, ~24k one-capture, and
-~48k two-capture closures. A VM-level zero-capture closure cache removed those
-counted zero-capture allocations but regressed the 10-run runtime suite strongly;
-the per-creation map lookup and broader VM shape cost outweighed allocation
-savings. Do not retry zero-capture runtime caching without a lower-overhead
-indexed/precomputed representation.
+~48k two-capture closures. VM-level zero-capture closure caching removed those
+counted zero-capture allocations but regressed the 10-run runtime suite. Both a
+map-backed runtime cache and a lower-overhead bytecode-indexed zero-closure pool
+passed tests but failed to improve pure/decode benchmark means, so only the
+histogram was kept. Do not retry zero-capture closure caching unless the runtime
+representation can avoid adding dispatch/cache checks to every zero-capture
+closure expression.
 
 - [ ] Reduce closure creation allocation.
-  - [x] Evaluate capture distribution and zero-capture closure caching. Cache
-    experiment passed tests but regressed the full benchmark suite, so only the
-    profiling histogram was kept.
-  - [ ] Avoid capture slice allocation for zero-capture closures with a cheaper
-    representation than map-backed runtime caching.
+  - [x] Evaluate capture distribution and zero-capture closure caching. Both
+    map-backed and bytecode-indexed cache experiments passed tests but regressed
+    the full benchmark suite, so only the profiling histogram was kept.
+  - [ ] Avoid capture slice allocation for zero-capture closures only if a
+    cheaper representation than runtime caching is available.
   - [ ] Reuse or compact capture storage where safe.
   - [ ] Investigate lowering-level closure hoisting/reuse for decoder
     combinators; autoresearch rejected a runtime-only unary capture inline
