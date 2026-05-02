@@ -60,7 +60,7 @@ Status markers:
 
 ### Milestone 1: Lower AIR to vm_next bytecode
 
-Status: Pending
+Status: In progress
 
 This is the first major step. The goal is not to optimize everything at once.
 The goal is to introduce a real execution artifact and feedback loop:
@@ -87,27 +87,29 @@ Feedback loop for this milestone:
    instructions after the bytecode path is running.
 5. Record benchmark checkpoints in this document after major slices.
 
-- [ ] Define a compact `vm_next` bytecode program representation in nested
-  package `compiler/vm_next/bytecode`.
-  - [ ] Function chunks with local counts, parameter counts, return type, and
+- [x] Define an initial compact `vm_next` bytecode program representation in
+  nested package `compiler/vm_next/bytecode`.
+  - [x] Function chunks with local counts, parameter counts, return type, and
     instruction stream.
-  - [ ] Constant pool or immediate encoding for scalar/string constants.
-  - [ ] Pre-resolved function, extern, type, field, trait, and impl IDs.
-  - [ ] Explicit instruction operands for local slots, field indexes, jump
-    offsets, arities, and type IDs.
+  - [x] Constant pool or immediate encoding for scalar/string constants.
+  - [ ] Pre-resolved function, extern, type, field, trait, and impl IDs for the
+    full supported instruction set.
+  - [x] Explicit instruction operands for local slots, jump offsets, arities,
+    and type IDs in the scalar/control-flow slice.
 - [ ] Add `AIR -> vm_next bytecode` lowering.
-  - [ ] Lower expressions into stack or register operations.
-  - [ ] Lower blocks and control flow into jumps.
-  - [ ] Lower function calls, closure calls, extern calls, and trait calls.
+  - [x] Lower scalar expressions into stack operations for the initial slice.
+  - [x] Lower blocks and `if` control flow into jumps for the initial slice.
+  - [x] Lower direct function calls for the initial slice.
+  - [ ] Lower closure calls, extern calls, and trait calls.
   - [ ] Lower list/map/string operations used by current benchmark programs.
   - [ ] Lower `Maybe`, `Result`, `try`, match, union, and enum operations.
-- [ ] Add a bytecode verifier or validator for backend-facing invariants.
+- [x] Add an initial bytecode verifier for backend-facing invariants.
   - [ ] Valid instruction operands and jump targets.
   - [ ] Valid local/function/extern/type references.
   - [ ] Arity checks for calls and extern calls.
   - [ ] Field indexes and match tags are valid.
 - [ ] Add a bytecode interpreter loop.
-  - [ ] Execute entry and script roots.
+  - [x] Execute entry and script roots for the initial scalar/direct-call slice.
   - [ ] Preserve panic/diagnostic behavior expected by parity tests.
   - [ ] Keep the current tree-walk interpreter available behind an internal
     fallback or test path until bytecode parity is complete.

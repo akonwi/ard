@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/air"
+	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
 type VM struct {
-	program *air.Program
-	externs hostExternAdapters
-	profile *executionProfile
+	program  *air.Program
+	bytecode *vmcode.Program
+	externs  hostExternAdapters
+	profile  *executionProfile
 }
 
 type TestStatus string
@@ -38,12 +40,18 @@ func (vm *VM) RunEntry() (Value, error) {
 	if vm.program.Entry == air.NoFunction {
 		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
 	}
+	if vm.bytecode != nil {
+		return vm.runBytecode(vm.program.Entry, nil)
+	}
 	return vm.call(vm.program.Entry, nil)
 }
 
 func (vm *VM) RunScript() (Value, error) {
 	if vm.program.Script == air.NoFunction {
 		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
+	}
+	if vm.bytecode != nil {
+		return vm.runBytecode(vm.program.Script, nil)
 	}
 	return vm.call(vm.program.Script, nil)
 }
