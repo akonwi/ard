@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/akonwi/ard/air"
 )
@@ -12,6 +13,7 @@ import (
 type VM struct {
 	program *air.Program
 	externs hostExternAdapters
+	profile *executionProfile
 }
 
 type TestStatus string
@@ -55,6 +57,13 @@ func (vm *VM) Call(name string, args ...Value) (Value, error) {
 	return Value{}, fmt.Errorf("function not found: %s", name)
 }
 
+func (vm *VM) ProfileReport() string {
+	if vm == nil || vm.profile == nil {
+		return ""
+	}
+	return vm.profile.Report()
+}
+
 func (vm *VM) RunTests() []TestOutcome {
 	outcomes := make([]TestOutcome, 0, len(vm.program.Tests))
 	for _, test := range vm.program.Tests {
@@ -92,6 +101,9 @@ func (vm *VM) call(id air.FunctionID, args []Value) (Value, error) {
 	if len(args) != len(fn.Signature.Params) {
 		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, len(fn.Signature.Params), len(args))
 	}
+	if vm.profile != nil {
+		vm.profile.RecordDirectCall(len(args), len(fn.Locals))
+	}
 	frame := &frame{
 		vm:     vm,
 		fn:     fn,
@@ -118,6 +130,9 @@ func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
 	fn := vm.program.Functions[closure.Function]
 	if len(args) != len(fn.Signature.Params) {
 		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, len(fn.Signature.Params), len(args))
+	}
+	if vm.profile != nil {
+		vm.profile.RecordClosureCall(len(args), len(fn.Locals))
 	}
 	if len(closure.Captures) != len(fn.Captures) {
 		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
@@ -180,6 +195,9 @@ func (f *frame) evalBlockWithDefault(block air.Block, defaultType air.TypeID) (V
 }
 
 func (f *frame) evalStmt(stmt air.Stmt) (Value, error) {
+	if f.vm.profile != nil {
+		f.vm.profile.RecordStmt(stmt.Kind)
+	}
 	switch stmt.Kind {
 	case air.StmtLet:
 		value, err := f.evalExprPtr(stmt.Value)
@@ -259,6 +277,9 @@ func (f *frame) evalExprPtr(expr *air.Expr) (Value, error) {
 }
 
 func (f *frame) evalExpr(expr air.Expr) (Value, error) {
+	if f.vm.profile != nil {
+		f.vm.profile.RecordExpr(expr.Kind)
+	}
 	switch expr.Kind {
 	case air.ExprConstVoid:
 		return Void(expr.Type), nil
@@ -469,6 +490,9 @@ func (f *frame) evalArgs(args []air.Expr) ([]Value, error) {
 
 func (f *frame) evalMakeClosure(expr air.Expr) (Value, error) {
 	captures := make([]Value, len(expr.CaptureLocals))
+	if f.vm.profile != nil {
+		f.vm.profile.RecordClosureCreation(len(captures))
+	}
 	for i, local := range expr.CaptureLocals {
 		if int(local) < 0 || int(local) >= len(f.locals) {
 			return Value{}, fmt.Errorf("invalid closure capture local id %d", local)
@@ -554,6 +578,9 @@ func copyValue(value Value) Value {
 }
 
 func (f *frame) evalSpawnFiber(expr air.Expr) (Value, error) {
+	if f.vm.profile != nil {
+		f.vm.profile.RecordFiberSpawn()
+	}
 	fiber := &FiberValue{
 		Type: expr.Type,
 		Done: make(chan struct{}),
@@ -588,7 +615,13 @@ func (f *frame) evalFiberGet(expr air.Expr) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	<-fiber.Done
+	if f.vm.profile != nil {
+		started := time.Now()
+		<-fiber.Done
+		f.vm.profile.RecordFiberWait(time.Since(started))
+	} else {
+		<-fiber.Done
+	}
 	if fiber.Err != nil {
 		return Value{}, fiber.Err
 	}
@@ -604,7 +637,13 @@ func (f *frame) evalFiberJoin(expr air.Expr) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	<-fiber.Done
+	if f.vm.profile != nil {
+		started := time.Now()
+		<-fiber.Done
+		f.vm.profile.RecordFiberWait(time.Since(started))
+	} else {
+		<-fiber.Done
+	}
 	if fiber.Err != nil {
 		return Value{}, fiber.Err
 	}
@@ -1106,6 +1145,9 @@ func (f *frame) evalUnionMatch(expr air.Expr) (Value, error) {
 }
 
 func (f *frame) evalTraitCall(expr air.Expr) (Value, error) {
+	if f.vm.profile != nil {
+		f.vm.profile.RecordTraitCall()
+	}
 	subject, err := f.evalExprPtr(expr.Target)
 	if err != nil {
 		return Value{}, err

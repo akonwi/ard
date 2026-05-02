@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/akonwi/ard/air"
@@ -41,7 +42,7 @@ func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, er
 	for name, fn := range externs {
 		registry[name] = fn
 	}
-	vm := &VM{program: program}
+	vm := &VM{program: program, profile: newExecutionProfile()}
 	vm.externs = vm.buildHostExternAdapters(registry)
 	return vm, nil
 }
@@ -129,6 +130,19 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	if len(adapter.inputs) != len(args) {
 		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.inputs), len(args))
 	}
+	if vm.profile == nil {
+		inputs := make([]reflect.Value, len(args))
+		for i, arg := range args {
+			input, err := vm.valueToHost(arg, adapter.inputs[i])
+			if err != nil {
+				return Value{}, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
+			}
+			inputs[i] = input
+		}
+		return vm.hostReturnsToValue(adapter.extern.Signature.Return, adapter.callable.Call(inputs))
+	}
+
+	convertInStart := time.Now()
 	inputs := make([]reflect.Value, len(args))
 	for i, arg := range args {
 		input, err := vm.valueToHost(arg, adapter.inputs[i])
@@ -137,7 +151,15 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 		}
 		inputs[i] = input
 	}
-	return vm.hostReturnsToValue(adapter.extern.Signature.Return, adapter.callable.Call(inputs))
+	convertIn := time.Since(convertInStart)
+	hostStart := time.Now()
+	hostReturns := adapter.callable.Call(inputs)
+	hostDuration := time.Since(hostStart)
+	convertOutStart := time.Now()
+	value, err := vm.hostReturnsToValue(adapter.extern.Signature.Return, hostReturns)
+	convertOut := time.Since(convertOutStart)
+	vm.profile.RecordExternCall(adapter.binding, len(args), convertIn, hostDuration, convertOut)
+	return value, err
 }
 
 func goExternBinding(extern air.Extern) string {
