@@ -352,7 +352,10 @@ work so the pure-runtime gap does not get lost behind decode/FFI work.
     collection-weighted objective; autoresearch rejected fused local increment
     under the aggregate suite despite some collection/decode wins.
   - [ ] Look for lower-risk lowering changes that reduce local load/store pairs
-    without adding broad dispatch complexity.
+    without adding broad dispatch complexity. A `ReturnLocal` peephole for
+    trailing `LoadLocal; Return` passed tests and reduced some decode opcode
+    counts, but the full 10-run suite regressed directionally, so it was not
+    kept.
 - [ ] Add explicit map iteration support.
   - [ ] Avoid sorting/copying entries more often than necessary.
   - [ ] Preserve deterministic iteration order.
