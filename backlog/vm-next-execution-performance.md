@@ -265,6 +265,12 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     but regressed the 10-run runtime suite directionally, matching earlier
     autoresearch results. Do not pursue helper inlining as the representation
     strategy; focus on changing allocation/boxing shape if revisiting wrappers.
+  - [x] Evaluate storing `Maybe`/`Result` payloads directly in `Value.Ref` with
+    the tag in `Value.Bool` instead of allocating `MaybeValue`/`ResultValue`
+    wrappers. Tests passed, but the 10-run runtime suite regressed strongly,
+    especially decode. Interface-boxing a full `Value` payload and compatibility
+    paths outweighed removing wrapper structs, so this representation is not a
+    keeper.
   - [ ] Small/void result cases without heap allocation.
 - [ ] Reduce `Ref any` usage on hot paths.
   - [ ] Prefer typed heap references or tagged heap records.
