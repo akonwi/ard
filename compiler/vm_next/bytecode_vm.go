@@ -8,6 +8,13 @@ import (
 	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
+type bytecodeFrame struct {
+	fn        *vmcode.Function
+	locals    []Value
+	ip        int
+	stackBase int
+}
+
 func NewWithBytecode(program *air.Program, externs HostFunctionRegistry) (*VM, error) {
 	return NewWithExterns(program, externs)
 }
@@ -51,12 +58,29 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	if vm.bytecode == nil {
 		return Value{}, fmt.Errorf("vm_next bytecode program is not initialized")
 	}
+	frame, err := vm.newDirectBytecodeFrame(id, args, 0)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.runBytecodeFrameLoop(frame)
+}
+
+func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, error) {
 	fn, ok := vm.bytecode.Function(id)
 	if !ok {
+		vm.putValueSlice(locals)
 		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
 	}
+	return vm.runBytecodeFrameLoop(bytecodeFrame{fn: fn, locals: locals})
+}
+
+func (vm *VM) newDirectBytecodeFrame(id air.FunctionID, args []Value, stackBase int) (bytecodeFrame, error) {
+	fn, ok := vm.bytecode.Function(id)
+	if !ok {
+		return bytecodeFrame{}, fmt.Errorf("invalid bytecode function id %d", id)
+	}
 	if len(args) != fn.Arity {
-		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
+		return bytecodeFrame{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
 	}
 	if vm.profile != nil {
 		vm.profile.RecordDirectCall(len(args), fn.Locals)
@@ -64,24 +88,49 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	}
 	locals := vm.getValueSlice(fn.Locals)
 	copy(locals, args)
-	return vm.runBytecodeWithLocals(id, locals)
+	return bytecodeFrame{fn: fn, locals: locals, stackBase: stackBase}, nil
 }
 
-func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, error) {
-	fn, ok := vm.bytecode.Function(id)
-	if !ok {
-		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
+func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function, args []Value, stackBase int) (bytecodeFrame, error) {
+	if len(args) != fn.Arity {
+		return bytecodeFrame{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
 	}
-	defer vm.putValueSlice(locals)
+	if len(closure.Captures) != len(fn.Captures) {
+		return bytecodeFrame{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	}
 	if vm.profile != nil {
-		vm.profile.RecordStackAlloc(len(fn.Code))
+		vm.profile.RecordClosureCall(len(args), fn.Locals)
+		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
-	stack := vm.getValueStack(len(fn.Code))
+	locals := vm.getValueSlice(fn.Locals)
+	copy(locals, args)
+	for i, capture := range fn.Captures {
+		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
+			vm.putValueSlice(locals)
+			return bytecodeFrame{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
+		}
+		locals[capture.Local] = closure.Captures[i]
+	}
+	return bytecodeFrame{fn: fn, locals: locals, stackBase: stackBase}, nil
+}
+
+func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordStackAlloc(len(first.fn.Code))
+	}
+	stack := vm.getValueStack(len(first.fn.Code))
+	frames := []bytecodeFrame{first}
 	defer func() {
+		for i := range frames {
+			vm.putValueSlice(frames[i].locals)
+		}
 		vm.putValueSlice(stack)
 	}()
+
+	var frame *bytecodeFrame
+	var fn *vmcode.Function
 	pop := func() (Value, error) {
-		if len(stack) == 0 {
+		if len(stack) <= frame.stackBase {
 			return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
 		}
 		value := stack[len(stack)-1]
@@ -91,10 +140,27 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 	push := func(value Value) {
 		stack = append(stack, value)
 	}
+	returnFromFrame := func(value Value) (Value, bool) {
+		stack = stack[:frame.stackBase]
+		vm.putValueSlice(frame.locals)
+		frames = frames[:len(frames)-1]
+		if len(frames) == 0 {
+			return value, true
+		}
+		stack = append(stack, value)
+		return Value{}, false
+	}
 
-	for ip := 0; ip < len(fn.Code); {
-		inst := fn.Code[ip]
-		ip++
+	for len(frames) > 0 {
+		frame = &frames[len(frames)-1]
+		fn = frame.fn
+		locals := frame.locals
+
+		if frame.ip >= len(fn.Code) {
+			return Value{}, fmt.Errorf("%s: missing return", fn.Name)
+		}
+		inst := fn.Code[frame.ip]
+		frame.ip++
 		if vm.profile != nil {
 			vm.profile.RecordOpcode(inst.Op)
 		}
@@ -138,7 +204,7 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				return Value{}, err
 			}
 		case vmcode.OpJump:
-			ip = inst.A
+			frame.ip = inst.A
 		case vmcode.OpJumpIfFalse:
 			condition, err := pop()
 			if err != nil {
@@ -148,14 +214,20 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				return Value{}, fmt.Errorf("jump condition must be Bool, got kind %d", condition.Kind)
 			}
 			if !condition.Bool {
-				ip = inst.A
+				frame.ip = inst.A
 			}
 		case vmcode.OpCall:
-			result, err := vm.runBytecodeFromStack(air.FunctionID(inst.A), inst.B, &stack)
+			if inst.B < 0 || inst.B > len(stack)-frame.stackBase {
+				return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
+			}
+			argsStart := len(stack) - inst.B
+			calleeFrame, err := vm.newDirectBytecodeFrame(air.FunctionID(inst.A), stack[argsStart:], argsStart)
 			if err != nil {
 				return Value{}, err
 			}
-			push(result)
+			stack = stack[:argsStart]
+			frames = append(frames, calleeFrame)
+			continue
 		case vmcode.OpCallExtern:
 			callArgs, err := stackTailArgs(&stack, inst.B)
 			if err != nil {
@@ -177,13 +249,31 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			}
 			push(Closure(air.TypeID(inst.A), air.FunctionID(inst.C), captures))
 		case vmcode.OpCallClosure:
-			result, err := vm.runBytecodeClosureFromStack(inst.B, &stack)
+			if inst.B < 0 || inst.B+1 > len(stack)-frame.stackBase {
+				return Value{}, fmt.Errorf("closure call: stack underflow")
+			}
+			targetIndex := len(stack) - inst.B - 1
+			target := stack[targetIndex]
+			closure, err := target.closureValue()
 			if err != nil {
 				return Value{}, err
 			}
-			push(result)
+			callee, ok := vm.bytecode.Function(closure.Function)
+			if !ok {
+				return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+			}
+			calleeFrame, err := vm.newClosureBytecodeFrame(closure, callee, stack[targetIndex+1:], targetIndex)
+			if err != nil {
+				return Value{}, err
+			}
+			stack = stack[:targetIndex]
+			frames = append(frames, calleeFrame)
+			continue
 		case vmcode.OpSpawnFiber:
 			fiber := &FiberValue{Type: air.TypeID(inst.A), Done: make(chan struct{})}
+			if vm.profile != nil {
+				vm.profile.RecordFiberSpawn()
+			}
 			if inst.B > 0 {
 				target, err := pop()
 				if err != nil {
@@ -229,7 +319,14 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			}
 			push(vm.zeroValue(air.TypeID(inst.A)))
 		case vmcode.OpReturn:
-			return pop()
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			if result, done := returnFromFrame(value); done {
+				return result, nil
+			}
+			continue
 		case vmcode.OpCopy:
 			value, err := pop()
 			if err != nil {
@@ -243,14 +340,11 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			}
 			push(TraitObject(air.TypeID(inst.A), air.TraitID(inst.B), air.ImplID(inst.C), value))
 		case vmcode.OpCallTrait:
-			callArgs, err := popArgs(vm.profile, pop, inst.Imm)
-			if err != nil {
-				return Value{}, err
+			if inst.Imm < 0 || inst.Imm+1 > len(stack)-frame.stackBase {
+				return Value{}, fmt.Errorf("trait call: stack underflow")
 			}
-			subject, err := pop()
-			if err != nil {
-				return Value{}, err
-			}
+			subjectIndex := len(stack) - inst.Imm - 1
+			subject := stack[subjectIndex]
 			traitObject, err := subject.traitObjectValue()
 			if err != nil {
 				return Value{}, err
@@ -265,18 +359,27 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			if inst.C < 0 || inst.C >= len(impl.Methods) {
 				return Value{}, fmt.Errorf("invalid trait method index %d", inst.C)
 			}
+			callee, ok := vm.bytecode.Function(impl.Methods[inst.C])
+			if !ok {
+				return Value{}, fmt.Errorf("invalid bytecode function id %d", impl.Methods[inst.C])
+			}
+			if callee.Arity != inst.Imm+1 {
+				return Value{}, fmt.Errorf("%s expects %d args, got %d", callee.Name, callee.Arity, inst.Imm+1)
+			}
 			if vm.profile != nil {
 				vm.profile.RecordTraitCall()
-				vm.profile.RecordArgSliceAlloc(len(callArgs) + 1)
+				vm.profile.RecordDirectCall(callee.Arity, callee.Locals)
+				vm.profile.RecordLocalsAlloc(callee.Locals)
 			}
-			argsWithReceiver := make([]Value, 0, len(callArgs)+1)
-			argsWithReceiver = append(argsWithReceiver, traitObject.Value)
-			argsWithReceiver = append(argsWithReceiver, callArgs...)
-			result, err := vm.runBytecode(impl.Methods[inst.C], argsWithReceiver)
-			if err != nil {
-				return Value{}, err
+			if callee.Locals < callee.Arity {
+				return Value{}, fmt.Errorf("%s has %d locals for %d args", callee.Name, callee.Locals, callee.Arity)
 			}
-			push(result)
+			locals := vm.getValueSlice(callee.Locals)
+			locals[0] = traitObject.Value
+			copy(locals[1:callee.Arity], stack[subjectIndex+1:])
+			stack = stack[:subjectIndex]
+			frames = append(frames, bytecodeFrame{fn: callee, locals: locals, stackBase: subjectIndex})
+			continue
 		case vmcode.OpUnionWrap:
 			value, err := pop()
 			if err != nil {
@@ -500,10 +603,13 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				return Value{}, err
 			}
 			if returned {
-				return value, nil
+				if result, done := returnFromFrame(value); done {
+					return result, nil
+				}
+				continue
 			}
 			if jump >= 0 {
-				ip = jump
+				frame.ip = jump
 			} else {
 				push(value)
 			}
@@ -513,10 +619,13 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				return Value{}, err
 			}
 			if returned {
-				return value, nil
+				if result, done := returnFromFrame(value); done {
+					return result, nil
+				}
+				continue
 			}
 			if jump >= 0 {
-				ip = jump
+				frame.ip = jump
 			} else {
 				push(value)
 			}
@@ -524,28 +633,7 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			return Value{}, fmt.Errorf("unsupported bytecode opcode %s", inst.Op)
 		}
 	}
-	return Value{}, fmt.Errorf("%s: missing return", fn.Name)
-}
-
-func (vm *VM) runBytecodeFromStack(id air.FunctionID, argc int, stack *[]Value) (Value, error) {
-	fn, ok := vm.bytecode.Function(id)
-	if !ok {
-		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
-	}
-	if argc != fn.Arity {
-		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, argc)
-	}
-	if argc < 0 || argc > len(*stack) {
-		return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
-	}
-	if vm.profile != nil {
-		vm.profile.RecordDirectCall(argc, fn.Locals)
-		vm.profile.RecordLocalsAlloc(fn.Locals)
-	}
-	locals := vm.getValueSlice(fn.Locals)
-	copy(locals, (*stack)[len(*stack)-argc:])
-	*stack = (*stack)[:len(*stack)-argc]
-	return vm.runBytecodeWithLocals(id, locals)
+	return Value{}, fmt.Errorf("bytecode frame loop exited without return")
 }
 
 func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, error) {
@@ -553,36 +641,11 @@ func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, er
 	if !ok {
 		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
 	}
-	if len(args) != fn.Arity {
-		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
-	}
-	return vm.runBytecodeClosureWithFunction(closure, fn, args)
-}
-
-func (vm *VM) runBytecodeClosureFromStack(argc int, stack *[]Value) (Value, error) {
-	if argc < 0 || argc+1 > len(*stack) {
-		return Value{}, fmt.Errorf("closure call: stack underflow")
-	}
-	targetIndex := len(*stack) - argc - 1
-	target := (*stack)[targetIndex]
-	closure, err := target.closureValue()
+	frame, err := vm.newClosureBytecodeFrame(closure, fn, args, 0)
 	if err != nil {
 		return Value{}, err
 	}
-	fn, ok := vm.bytecode.Function(closure.Function)
-	if !ok {
-		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
-	}
-	if argc != fn.Arity {
-		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, argc)
-	}
-	args := (*stack)[targetIndex+1:]
-	result, err := vm.runBytecodeClosureWithFunction(closure, fn, args)
-	if err != nil {
-		return Value{}, err
-	}
-	*stack = (*stack)[:targetIndex]
-	return result, nil
+	return vm.runBytecodeFrameLoop(frame)
 }
 
 func (vm *VM) runBytecodeClosure1(closure *ClosureValue, arg Value) (Value, error) {
@@ -593,43 +656,13 @@ func (vm *VM) runBytecodeClosure1(closure *ClosureValue, arg Value) (Value, erro
 	if fn.Arity != 1 {
 		return Value{}, fmt.Errorf("%s expects %d args, got 1", fn.Name, fn.Arity)
 	}
-	if len(closure.Captures) != len(fn.Captures) {
-		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	var args [1]Value
+	args[0] = arg
+	frame, err := vm.newClosureBytecodeFrame(closure, fn, args[:], 0)
+	if err != nil {
+		return Value{}, err
 	}
-	if vm.profile != nil {
-		vm.profile.RecordClosureCall(1, fn.Locals)
-		vm.profile.RecordLocalsAlloc(fn.Locals)
-	}
-	locals := vm.getValueSlice(fn.Locals)
-	if fn.Locals > 0 {
-		locals[0] = arg
-	}
-	for i, capture := range fn.Captures {
-		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
-			return Value{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
-		}
-		locals[capture.Local] = closure.Captures[i]
-	}
-	return vm.runBytecodeWithLocals(fn.ID, locals)
-}
-
-func (vm *VM) runBytecodeClosureWithFunction(closure *ClosureValue, fn *vmcode.Function, args []Value) (Value, error) {
-	if len(closure.Captures) != len(fn.Captures) {
-		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
-	}
-	if vm.profile != nil {
-		vm.profile.RecordClosureCall(len(args), fn.Locals)
-		vm.profile.RecordLocalsAlloc(fn.Locals)
-	}
-	locals := vm.getValueSlice(fn.Locals)
-	copy(locals, args)
-	for i, capture := range fn.Captures {
-		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
-			return Value{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
-		}
-		locals[capture.Local] = closure.Captures[i]
-	}
-	return vm.runBytecodeWithLocals(fn.ID, locals)
+	return vm.runBytecodeFrameLoop(frame)
 }
 
 func (vm *VM) bytecodeConstant(index int, kind vmcode.ConstantKind) (vmcode.Constant, error) {

@@ -187,8 +187,13 @@ Recommended Milestone 2 feedback loop:
     available.
   - [x] Preserve safe behavior for recursion and fibers with separate borrowed
     slices per active frame and pool return on frame exit.
-  - [ ] Consider a contiguous call stack if profiles still show frame overhead
-    after slice pooling.
+  - [x] Replace recursive direct/closure/trait bytecode calls with an explicit
+    frame loop and shared operand stack per VM invocation.
+  - [x] Reduce operand stack allocations from per-frame to per invocation for
+    in-VM calls; fibers and host callback closures still get separate safe
+    invocations.
+  - [ ] Consider a contiguous locals arena if profiles still show locals copy or
+    pool overhead after frame-loop dispatch.
 - [ ] Remove redundant runtime validation from trusted hot paths after bytecode
   validation succeeds.
 - [ ] Benchmark pure-runtime programs after each step.
@@ -378,6 +383,53 @@ Profile highlights after temporary arg-slice removal:
 Next Milestone 2 target: decide whether to continue with contiguous frame/call
 stack work now, or move to FFI/value representation because pure temporary
 argument allocation is no longer dominant.
+
+### Milestone 2 frame-loop checkpoint snapshot
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 1 --warmup 0`
+
+Changes in this checkpoint:
+
+- Replaced recursive bytecode direct/closure/trait calls with an explicit frame
+  loop.
+- Shared one operand stack per bytecode VM invocation, using frame `stackBase`
+  boundaries to isolate callee temporaries and return values.
+- Kept fibers and host callback closure calls as independent bytecode VM
+  invocations for safety.
+- Trait calls now push a bytecode frame directly instead of allocating a receiver
+  args slice and recursively entering the VM.
+
+Directional runtime benchmark snapshot:
+
+| Benchmark | bytecode VM | vm_next bytecode | vm_next delta |
+|---|---:|---:|---:|
+| `sales_pipeline` | 62.3 ms | 78.5 ms | 1.3x slower |
+| `shape_catalog` | 78.4 ms | 95.2 ms | 1.2x slower |
+| `decode_pipeline` | 233.9 ms | 670.0 ms | 2.9x slower |
+| `word_frequency_batch` | 48.1 ms | 84.7 ms | 1.8x slower |
+| `async_batches` | 13.2 ms | 13.0 ms | parity |
+| `fs_batch` | 102.8 ms | 515.7 ms | 5.0x slower |
+| `sql_batch` | 45.0 ms | 68.1 ms | 1.5x slower |
+
+Profile highlights after the explicit frame loop:
+
+- `sales_pipeline`: stack allocation sites dropped from ~80k frame requests to
+  16 invocation-level stack requests.
+- `decode_pipeline`: stack allocation sites dropped from ~588k to 1 for the main
+  invocation; reflective FFI and value conversion remain dominant.
+- `sql_batch`: stack allocation sites dropped from ~50k to 1 for the main
+  invocation.
+- `word_frequency_batch`: worsened directionally despite few stack allocations;
+  its remaining bottleneck is likely dispatch/list-iteration overhead rather
+  than call-stack allocation.
+
+Next Milestone 2 target: locals are still copied per call/frame. Consider a
+locals arena or direct scalar/local fast paths only if profiles show further
+call-heavy wins; otherwise move to list iteration, FFI, and Maybe/Result value
+representation.
 
 ### Initial notes
 
