@@ -11,15 +11,18 @@ import (
 var StdlibAllowedTargets = map[string]map[string]bool{
 	"ard/fs": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},
 	"ard/sql": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 	},
 	"ard/env": {
 		backend.TargetBytecode: true,
+		backend.TargetVMNext:   true,
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
 	},

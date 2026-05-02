@@ -3,6 +3,7 @@
 This directory contains a small benchmark corpus for comparing:
 
 - the default bytecode VM target (`ard run` / `ard build`)
+- the next VM target in CLI mode (`ard run --target vm_next`)
 - the Go backend (`ard run --target go` / `ard build --target go`)
 - the JavaScript server backend where supported (`ard run --target js-server` / `ard build --target js-server`)
 - handwritten idiomatic Go variants (`benchmarks/go/*`)
@@ -56,7 +57,7 @@ and benchmarks the resulting executables / runtime entrypoints.
 
 ### End-to-end CLI comparison
 
-Benchmarks the full `ard run` / `ard run --target go` / `ard run --target js-server` path instead of prebuilt binaries. The handwritten Go variant is included via `go run`:
+Benchmarks the full `ard run` / `ard run --target vm_next` / `ard run --target go` / `ard run --target js-server` path instead of prebuilt binaries. The handwritten Go variant is included via `go run`:
 
 ```bash
 ./benchmarks/run.sh --mode cli
@@ -78,6 +79,8 @@ Benchmarks the full `ard run` / `ard run --target go` / `ard run --target js-ser
 
 - `runtime` mode is the better apples-to-apples backend execution comparison.
 - `cli` mode is useful if you want to include transpilation/build overhead in backend measurements.
+- `vm_next` is included in `cli` mode because it does not have a buildable
+  executable artifact yet.
 - `native-go:*` command names refer to the handwritten idiomatic Go variants; `go:*` command names refer to Ard's generated Go backend.
 - The runner verifies exact output equality for compiler backends. Native Go variants are sanity-checked for output, but are allowed to differ when idiomatic Go semantics better capture the benchmark's intent than Ard implementation quirks.
 - `js-server` is included automatically for the currently supported benchmark subset:

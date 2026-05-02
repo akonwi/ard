@@ -215,6 +215,8 @@ run_cli_benchmark() {
   echo "==> verifying outputs for $name"
   local expected actual
   expected="$(cd "$ROOT_DIR" && "$ARD_BIN" run "$rel_path")"
+  actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target vm_next "$rel_path")"
+  assert_same_output "$name" "vm" "$expected" "vm_next" "$actual"
   actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target go "$rel_path")"
   assert_same_output "$name" "vm" "$expected" "go" "$actual"
   cleanup_generated_program_dir "$rel_path"
@@ -228,6 +230,7 @@ run_cli_benchmark() {
 
   local commands=(
     --command-name "vm:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
+    --command-name "vm_next:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target vm_next '$rel_path'"
     --command-name "go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target go '$rel_path'"
     --command-name "native-go:$name" "cd '$ROOT_DIR' && go run '$native_go_src'"
   )

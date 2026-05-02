@@ -875,7 +875,10 @@ Status: In progress
     opaques, and JSON request decoding.
   - `samples/pokemon_js.ard` remains intentionally target-gated to JS modules
     and is not a `vm_next` sample.
-- [ ] Add `vm_next` to the benchmark suite.
+- [x] Add `vm_next` to the benchmark suite.
+  - `vm_next` participates in CLI-mode benchmarks through
+    `ard run --target vm_next`; runtime-mode binary comparisons remain
+    bytecode/Go/JS/native-Go until `vm_next` has a buildable executable artifact.
 - [ ] Add conformance tests that can run against current VM, `vm_next`, and later
   `go_next`.
 
