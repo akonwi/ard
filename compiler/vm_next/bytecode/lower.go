@@ -150,6 +150,11 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		fl.emit(Instruction{Op: OpConstBool, A: int(expr.Type), Imm: imm})
 	case air.ExprConstStr:
 		fl.emit(Instruction{Op: OpConstStr, A: int(expr.Type), B: fl.addConst(Constant{Kind: ConstStr, Str: expr.Str})})
+	case air.ExprPanic:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpPanic})
 	case air.ExprLoadLocal:
 		fl.emit(Instruction{Op: OpLoadLocal, A: int(expr.Local)})
 	case air.ExprMakeClosure:
@@ -247,7 +252,7 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		air.ExprStrConcat, air.ExprEq, air.ExprNotEq, air.ExprLt, air.ExprLte,
 		air.ExprGt, air.ExprGte, air.ExprAnd, air.ExprOr:
 		return fl.lowerBinary(expr)
-	case air.ExprNot, air.ExprNeg, air.ExprToStr:
+	case air.ExprNot, air.ExprNeg, air.ExprToStr, air.ExprToDynamic:
 		if err := fl.lowerExpr(expr.Target); err != nil {
 			return err
 		}
@@ -530,7 +535,7 @@ func (fl *functionLowerer) lowerTryOp(expr *air.Expr, op Opcode) error {
 		return nil
 	}
 	jumpNormal := fl.emit(Instruction{Op: OpJump})
-	fl.patch(tryIndex, len(fl.code))
+	fl.code[tryIndex].B = len(fl.code)
 	if err := fl.lowerBlock(expr.Catch, fl.fn.Signature.Return); err != nil {
 		return err
 	}
@@ -762,6 +767,8 @@ func unaryOpcode(kind air.ExprKind) Opcode {
 		return OpNeg
 	case air.ExprToStr:
 		return OpToStr
+	case air.ExprToDynamic:
+		return OpToDynamic
 	default:
 		return OpNoop
 	}
@@ -783,6 +790,27 @@ func (fl *functionLowerer) emitZero(typeID air.TypeID) error {
 		fl.emit(Instruction{Op: OpConstBool, A: int(typeID), Imm: 0})
 	case air.TypeStr:
 		fl.emit(Instruction{Op: OpConstStr, A: int(typeID), B: fl.addConst(Constant{Kind: ConstStr, Str: ""})})
+	case air.TypeList:
+		fl.emit(Instruction{Op: OpMakeList, A: int(typeID), B: 0})
+	case air.TypeMap:
+		fl.emit(Instruction{Op: OpMakeMap, A: int(typeID), B: 0})
+	case air.TypeMaybe:
+		fl.emit(Instruction{Op: OpMakeMaybeNone, A: int(typeID), B: int(info.Elem)})
+	case air.TypeResult:
+		if err := fl.emitZero(info.Value); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpMakeResultOk, A: int(typeID)})
+	case air.TypeDynamic:
+		fl.emit(Instruction{Op: OpConstVoid, A: int(fl.mustTypeID(air.TypeVoid))})
+		fl.emit(Instruction{Op: OpToDynamic, A: int(typeID)})
+	case air.TypeStruct:
+		for _, field := range info.Fields {
+			if err := fl.emitZero(field.Type); err != nil {
+				return err
+			}
+		}
+		fl.emit(Instruction{Op: OpMakeStruct, A: int(typeID), B: len(info.Fields)})
 	default:
 		return fmt.Errorf("unsupported zero value for type %s", info.Name)
 	}

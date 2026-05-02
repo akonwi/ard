@@ -99,6 +99,8 @@ const (
 	OpResultAndThen
 	OpTryResult
 	OpTryMaybe
+	OpToDynamic
+	OpPanic
 	OpToStr
 )
 
@@ -296,6 +298,10 @@ func (op Opcode) String() string {
 		return "TryResult"
 	case OpTryMaybe:
 		return "TryMaybe"
+	case OpToDynamic:
+		return "ToDynamic"
+	case OpPanic:
+		return "Panic"
 	case OpToStr:
 		return "ToStr"
 	default:

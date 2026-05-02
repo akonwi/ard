@@ -9,19 +9,7 @@ import (
 )
 
 func NewWithBytecode(program *air.Program, externs HostFunctionRegistry) (*VM, error) {
-	vm, err := NewWithExterns(program, externs)
-	if err != nil {
-		return nil, err
-	}
-	code, err := vmcode.Lower(program)
-	if err != nil {
-		return nil, err
-	}
-	if err := vmcode.Verify(code); err != nil {
-		return nil, err
-	}
-	vm.bytecode = code
-	return vm, nil
+	return NewWithExterns(program, externs)
 }
 
 func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
@@ -347,6 +335,18 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				return Value{}, err
 			}
 			push(out)
+		case vmcode.OpToDynamic:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Dynamic(air.TypeID(inst.A), value.GoValue()))
+		case vmcode.OpPanic:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			return Value{}, fmt.Errorf("%s", value.GoValueString())
 		case vmcode.OpEnumVariant:
 			push(Enum(air.TypeID(inst.A), inst.Imm))
 		case vmcode.OpStrAt, vmcode.OpStrSize, vmcode.OpStrIsEmpty, vmcode.OpStrContains, vmcode.OpStrReplace, vmcode.OpStrReplaceAll, vmcode.OpStrSplit, vmcode.OpStrStartsWith, vmcode.OpStrTrim:

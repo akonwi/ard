@@ -90,7 +90,7 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		OpListSize, OpMapKeys, OpMapSize, OpStrSize, OpStrIsEmpty, OpStrTrim,
 		OpMakeMaybeSome, OpMaybeExpect, OpMaybeIsNone, OpMaybeIsSome,
 		OpMakeResultOk, OpMakeResultErr, OpResultExpect, OpResultErrValue, OpResultIsOk, OpResultIsErr,
-		OpTryResult, OpTryMaybe, OpFiberGet, OpFiberJoin:
+		OpTryResult, OpTryMaybe, OpToDynamic, OpPanic, OpFiberGet, OpFiberJoin:
 		return 1, 1, nil
 	case OpSetField:
 		return 2, 0, nil
