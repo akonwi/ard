@@ -35,7 +35,6 @@ All commands should be run from the `/compiler` directory:
 - Generate FFI registry: `cd compiler && go generate ./bytecode/vm` (run when adding new FFI functions)
 
 ## Instructions
-- When searching the codebase, use the codanna tool first and only grep or use search CLI commands if codanna doesn't yield results
 - use the gopls tool (Go language server) to get diagnostics and compilation info
 
 ## Code Style Guidelines
