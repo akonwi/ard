@@ -195,8 +195,8 @@ Recommended Milestone 2 feedback loop:
   - [x] Reduce operand stack allocations from per-frame to per invocation for
     in-VM calls; fibers and host callback closures still get separate safe
     invocations.
-  - [ ] Consider a contiguous locals arena if profiles still show locals copy or
-    pool overhead after frame-loop dispatch.
+  - [x] Add a contiguous locals arena for nested frame-loop calls to avoid
+    repeated pool get/put traffic for active direct, closure, and trait frames.
 - [x] Merge autoresearch-proven local bytecode specializations into this
   milestone.
   - [x] Cache sorted map entries for deterministic map iteration and invalidate
@@ -590,6 +590,39 @@ Changes in this checkpoint:
 This remains broadly in line with the locals fast-path checkpoint and keeps the
 remaining reflective extern path simpler to profile before Milestone 4 expands
 coverage with generated/direct adapters.
+
+### Milestone 2 locals arena checkpoint
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 10 --warmup 3`
+
+Changes in this checkpoint:
+
+- Added an invocation-local contiguous locals arena for nested bytecode direct,
+  closure, and trait frames.
+- Kept the first frame, fibers, and host callback invocations isolated through
+  the existing safe pooled locals path.
+- Released arena locals in LIFO order as frames return, clearing slots before
+  truncating the arena.
+
+10-run mean runtime benchmark snapshot:
+
+| Benchmark | vm_next bytecode |
+|---|---:|
+| `sales_pipeline` | 74.3 ms |
+| `shape_catalog` | 91.2 ms |
+| `decode_pipeline` | 376.5 ms |
+| `word_frequency_batch` | 76.4 ms |
+| `async_batches` | 13.0 ms |
+| `fs_batch` | 106.3 ms |
+| `sql_batch` | 53.0 ms |
+| **total** | **790.7 ms** |
+
+The biggest improvement in this run was `decode_pipeline`, consistent with its
+very high direct/closure frame volume. This suggests frame-local pool traffic was
+still meaningful after earlier argument and stack allocation work.
 
 ### Initial notes
 

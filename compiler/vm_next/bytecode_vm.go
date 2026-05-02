@@ -9,10 +9,12 @@ import (
 )
 
 type bytecodeFrame struct {
-	fn        *vmcode.Function
-	locals    []Value
-	ip        int
-	stackBase int
+	fn          *vmcode.Function
+	locals      []Value
+	ip          int
+	stackBase   int
+	localsBase  int
+	arenaLocals bool
 }
 
 func NewWithBytecode(program *air.Program, externs HostFunctionRegistry) (*VM, error) {
@@ -115,6 +117,28 @@ func initBytecodeLocals(fnName string, locals []Value, args []Value) error {
 	return nil
 }
 
+func initTraitBytecodeLocals(fnName string, locals []Value, receiver Value, args []Value, arity int) error {
+	if len(locals) < arity {
+		return fmt.Errorf("%s has %d locals for %d args", fnName, len(locals), arity)
+	}
+	locals[0] = receiver
+	switch len(args) {
+	case 0:
+	case 1:
+		locals[1] = args[0]
+	case 2:
+		locals[1] = args[0]
+		locals[2] = args[1]
+	case 3:
+		locals[1] = args[0]
+		locals[2] = args[1]
+		locals[3] = args[2]
+	default:
+		copy(locals[1:arity], args)
+	}
+	return nil
+}
+
 func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function, args []Value, stackBase int) (bytecodeFrame, error) {
 	if len(args) != fn.Arity {
 		return bytecodeFrame{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
@@ -147,9 +171,41 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 	}
 	stack := vm.getValueStack(len(first.fn.Code))
 	frames := []bytecodeFrame{first}
+	localsArena := make([]Value, 0, first.fn.Locals)
+	takeArenaLocals := func(length int) ([]Value, int) {
+		base := len(localsArena)
+		if length <= 0 {
+			return nil, base
+		}
+		needed := base + length
+		if needed > cap(localsArena) {
+			capacity := cap(localsArena) * 2
+			if capacity < needed {
+				capacity = needed
+			}
+			if capacity == 0 {
+				capacity = length
+			}
+			next := make([]Value, needed, capacity)
+			copy(next, localsArena)
+			localsArena = next
+		} else {
+			localsArena = localsArena[:needed]
+			clear(localsArena[base:needed])
+		}
+		return localsArena[base:needed], base
+	}
+	releaseFrameLocals := func(frame bytecodeFrame) {
+		if frame.arenaLocals {
+			clear(frame.locals)
+			localsArena = localsArena[:frame.localsBase]
+			return
+		}
+		vm.putValueSlice(frame.locals)
+	}
 	defer func() {
-		for i := range frames {
-			vm.putValueSlice(frames[i].locals)
+		for i := len(frames) - 1; i >= 0; i-- {
+			releaseFrameLocals(frames[i])
 		}
 		vm.putValueSlice(stack)
 	}()
@@ -169,7 +225,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 	}
 	returnFromFrame := func(value Value) (Value, bool) {
 		stack = stack[:frame.stackBase]
-		vm.putValueSlice(frame.locals)
+		releaseFrameLocals(*frame)
 		frames = frames[:len(frames)-1]
 		if len(frames) == 0 {
 			return value, true
@@ -247,13 +303,25 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B > len(stack)-frame.stackBase {
 				return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
 			}
+			callee, ok := vm.bytecode.Function(air.FunctionID(inst.A))
+			if !ok {
+				return Value{}, fmt.Errorf("invalid bytecode function id %d", inst.A)
+			}
+			if inst.B != callee.Arity {
+				return Value{}, fmt.Errorf("%s expects %d args, got %d", callee.Name, callee.Arity, inst.B)
+			}
 			argsStart := len(stack) - inst.B
-			calleeFrame, err := vm.newDirectBytecodeFrame(air.FunctionID(inst.A), stack[argsStart:], argsStart)
-			if err != nil {
+			if vm.profile != nil {
+				vm.profile.RecordDirectCall(inst.B, callee.Locals)
+				vm.profile.RecordLocalsAlloc(callee.Locals)
+			}
+			locals, localsBase := takeArenaLocals(callee.Locals)
+			if err := initBytecodeLocals(callee.Name, locals, stack[argsStart:]); err != nil {
+				localsArena = localsArena[:localsBase]
 				return Value{}, err
 			}
 			stack = stack[:argsStart]
-			frames = append(frames, calleeFrame)
+			frames = append(frames, bytecodeFrame{fn: callee, locals: locals, stackBase: argsStart, localsBase: localsBase, arenaLocals: true})
 			continue
 		case vmcode.OpCallExtern:
 			callArgs, err := stackTailArgs(&stack, inst.B)
@@ -289,12 +357,31 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if !ok {
 				return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
 			}
-			calleeFrame, err := vm.newClosureBytecodeFrame(closure, callee, stack[targetIndex+1:], targetIndex)
-			if err != nil {
+			args := stack[targetIndex+1:]
+			if len(args) != callee.Arity {
+				return Value{}, fmt.Errorf("%s expects %d args, got %d", callee.Name, callee.Arity, len(args))
+			}
+			if len(closure.Captures) != len(callee.Captures) {
+				return Value{}, fmt.Errorf("%s expects %d captures, got %d", callee.Name, len(callee.Captures), len(closure.Captures))
+			}
+			if vm.profile != nil {
+				vm.profile.RecordClosureCall(len(args), callee.Locals)
+				vm.profile.RecordLocalsAlloc(callee.Locals)
+			}
+			locals, localsBase := takeArenaLocals(callee.Locals)
+			if err := initBytecodeLocals(callee.Name, locals, args); err != nil {
+				localsArena = localsArena[:localsBase]
 				return Value{}, err
 			}
+			for i, capture := range callee.Captures {
+				if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
+					localsArena = localsArena[:localsBase]
+					return Value{}, fmt.Errorf("%s capture %s has invalid local %d", callee.Name, capture.Name, capture.Local)
+				}
+				locals[capture.Local] = closure.Captures[i]
+			}
 			stack = stack[:targetIndex]
-			frames = append(frames, calleeFrame)
+			frames = append(frames, bytecodeFrame{fn: callee, locals: locals, stackBase: targetIndex, localsBase: localsBase, arenaLocals: true})
 			continue
 		case vmcode.OpSpawnFiber:
 			fiber := &FiberValue{Type: air.TypeID(inst.A), Done: make(chan struct{})}
@@ -398,14 +485,13 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				vm.profile.RecordDirectCall(callee.Arity, callee.Locals)
 				vm.profile.RecordLocalsAlloc(callee.Locals)
 			}
-			if callee.Locals < callee.Arity {
-				return Value{}, fmt.Errorf("%s has %d locals for %d args", callee.Name, callee.Locals, callee.Arity)
+			locals, localsBase := takeArenaLocals(callee.Locals)
+			if err := initTraitBytecodeLocals(callee.Name, locals, traitObject.Value, stack[subjectIndex+1:], callee.Arity); err != nil {
+				localsArena = localsArena[:localsBase]
+				return Value{}, err
 			}
-			locals := vm.getValueSlice(callee.Locals)
-			locals[0] = traitObject.Value
-			copy(locals[1:callee.Arity], stack[subjectIndex+1:])
 			stack = stack[:subjectIndex]
-			frames = append(frames, bytecodeFrame{fn: callee, locals: locals, stackBase: subjectIndex})
+			frames = append(frames, bytecodeFrame{fn: callee, locals: locals, stackBase: subjectIndex, localsBase: localsBase, arenaLocals: true})
 			continue
 		case vmcode.OpUnionWrap:
 			value, err := pop()
