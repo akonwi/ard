@@ -100,6 +100,14 @@ func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
 	return vm.runBytecodeClosure(closure, args)
 }
 
+func (vm *VM) callClosure1(value Value, arg Value) (Value, error) {
+	closure, err := value.closureValue()
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.runBytecodeClosure1(closure, arg)
+}
+
 func copyValue(value Value) Value {
 	switch value.Kind {
 	case ValueStruct:

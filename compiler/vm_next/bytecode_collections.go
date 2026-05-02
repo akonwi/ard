@@ -8,8 +8,8 @@ import (
 	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
-func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, pop func() (Value, error)) (Value, error) {
-	args, target, err := popMethodArgs(pop, inst.B)
+func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
+	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
 	if err != nil {
 		return Value{}, err
 	}
@@ -17,6 +17,7 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, pop func() (Value, err
 	if err != nil {
 		return Value{}, err
 	}
+	var out Value
 	switch inst.Op {
 	case vmcode.OpListAt:
 		if len(args) != 1 || args[0].Kind != ValueInt {
@@ -26,31 +27,32 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, pop func() (Value, err
 		if index < 0 || index >= len(listValue.Items) {
 			return Value{}, fmt.Errorf("list index out of range")
 		}
-		return listValue.Items[index], nil
+		out = listValue.Items[index]
 	case vmcode.OpListPrepend:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("list prepend expects one arg")
 		}
 		listValue.Items = append([]Value{args[0]}, listValue.Items...)
-		return Int(air.TypeID(inst.A), len(listValue.Items)), nil
+		out = Int(air.TypeID(inst.A), len(listValue.Items))
 	case vmcode.OpListPush:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("list push expects one arg")
 		}
 		listValue.Items = append(listValue.Items, args[0])
-		return Int(air.TypeID(inst.A), len(listValue.Items)), nil
+		out = Int(air.TypeID(inst.A), len(listValue.Items))
 	case vmcode.OpListSet:
 		if len(args) != 2 || args[0].Kind != ValueInt {
 			return Value{}, fmt.Errorf("list set expects index and value")
 		}
 		index := args[0].Int
 		if index < 0 || index >= len(listValue.Items) {
-			return Bool(air.TypeID(inst.A), false), nil
+			out = Bool(air.TypeID(inst.A), false)
+			break
 		}
 		listValue.Items[index] = args[1]
-		return Bool(air.TypeID(inst.A), true), nil
+		out = Bool(air.TypeID(inst.A), true)
 	case vmcode.OpListSize:
-		return Int(air.TypeID(inst.A), len(listValue.Items)), nil
+		out = Int(air.TypeID(inst.A), len(listValue.Items))
 	case vmcode.OpListSwap:
 		if len(args) != 2 || args[0].Kind != ValueInt || args[1].Kind != ValueInt {
 			return Value{}, fmt.Errorf("list swap expects integer indexes")
@@ -60,17 +62,21 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, pop func() (Value, err
 			return Value{}, fmt.Errorf("list index out of range")
 		}
 		listValue.Items[left], listValue.Items[right] = listValue.Items[right], listValue.Items[left]
-		return vm.zeroValue(air.TypeID(inst.A)), nil
+		out = vm.zeroValue(air.TypeID(inst.A))
 	case vmcode.OpListSort:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("list sort expects comparator")
 		}
+		comparator := args[0]
 		var sortErr error
 		sort.SliceStable(listValue.Items, func(i, j int) bool {
 			if sortErr != nil {
 				return false
 			}
-			value, err := vm.callClosure(args[0], []Value{listValue.Items[i], listValue.Items[j]})
+			if vm.profile != nil {
+				vm.profile.RecordArgSliceAlloc(2)
+			}
+			value, err := vm.callClosure(comparator, []Value{listValue.Items[i], listValue.Items[j]})
 			if err != nil {
 				sortErr = err
 				return false
@@ -84,14 +90,16 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, pop func() (Value, err
 		if sortErr != nil {
 			return Value{}, sortErr
 		}
-		return vm.zeroValue(air.TypeID(inst.A)), nil
+		out = vm.zeroValue(air.TypeID(inst.A))
 	default:
 		return Value{}, fmt.Errorf("unsupported list opcode %s", inst.Op)
 	}
+	*stack = (*stack)[:targetIndex]
+	return out, nil
 }
 
-func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, pop func() (Value, error)) (Value, error) {
-	args, target, err := popMethodArgs(pop, inst.B)
+func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
+	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
 	if err != nil {
 		return Value{}, err
 	}
@@ -99,6 +107,7 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, pop func() (Value, erro
 	if err != nil {
 		return Value{}, err
 	}
+	var out Value
 	switch inst.Op {
 	case vmcode.OpMapKeys:
 		keys := make([]Value, len(mapValue.Entries))
@@ -106,17 +115,18 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, pop func() (Value, erro
 			keys[i] = entry.Key
 		}
 		sort.SliceStable(keys, func(i, j int) bool { return valuesLess(keys[i], keys[j]) })
-		return List(air.TypeID(inst.A), keys), nil
+		out = List(air.TypeID(inst.A), keys)
 	case vmcode.OpMapSize:
-		return Int(air.TypeID(inst.A), len(mapValue.Entries)), nil
+		out = Int(air.TypeID(inst.A), len(mapValue.Entries))
 	case vmcode.OpMapGet:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("map get expects key")
 		}
 		if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
-			return Maybe(air.TypeID(inst.A), true, mapValue.Entries[index].Value), nil
+			out = Maybe(air.TypeID(inst.A), true, mapValue.Entries[index].Value)
+			break
 		}
-		return Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A)))), nil
+		out = Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A))))
 	case vmcode.OpMapSet:
 		if len(args) != 2 {
 			return Value{}, fmt.Errorf("map set expects key and value")
@@ -126,7 +136,7 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, pop func() (Value, erro
 		} else {
 			mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: args[0], Value: args[1]})
 		}
-		return Bool(air.TypeID(inst.A), true), nil
+		out = Bool(air.TypeID(inst.A), true)
 	case vmcode.OpMapDrop:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("map drop expects key")
@@ -134,12 +144,12 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, pop func() (Value, erro
 		if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
 			mapValue.Entries = append(mapValue.Entries[:index], mapValue.Entries[index+1:]...)
 		}
-		return vm.zeroValue(air.TypeID(inst.A)), nil
+		out = vm.zeroValue(air.TypeID(inst.A))
 	case vmcode.OpMapHas:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("map has expects key")
 		}
-		return Bool(air.TypeID(inst.A), mapEntryIndex(mapValue, args[0]) >= 0), nil
+		out = Bool(air.TypeID(inst.A), mapEntryIndex(mapValue, args[0]) >= 0)
 	case vmcode.OpMapKeyAt, vmcode.OpMapValueAt:
 		if len(args) != 1 || args[0].Kind != ValueInt {
 			return Value{}, fmt.Errorf("map entry index must be Int")
@@ -150,15 +160,29 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, pop func() (Value, erro
 		}
 		entries := sortedMapEntries(mapValue)
 		if inst.Op == vmcode.OpMapKeyAt {
-			return entries[index].Key, nil
+			out = entries[index].Key
+		} else {
+			out = entries[index].Value
 		}
-		return entries[index].Value, nil
 	default:
 		return Value{}, fmt.Errorf("unsupported map opcode %s", inst.Op)
 	}
+	*stack = (*stack)[:targetIndex]
+	return out, nil
 }
 
-func popMethodArgs(pop func() (Value, error), argCount int) ([]Value, Value, error) {
+func methodArgsFromStack(stack *[]Value, argCount int) ([]Value, Value, int, error) {
+	if argCount < 0 || argCount+1 > len(*stack) {
+		return nil, Value{}, 0, fmt.Errorf("method call: stack underflow")
+	}
+	targetIndex := len(*stack) - argCount - 1
+	return (*stack)[targetIndex+1:], (*stack)[targetIndex], targetIndex, nil
+}
+
+func popMethodArgs(profile *executionProfile, pop func() (Value, error), argCount int) ([]Value, Value, error) {
+	if profile != nil {
+		profile.RecordArgSliceAlloc(argCount)
+	}
 	args := make([]Value, argCount)
 	for i := argCount - 1; i >= 0; i-- {
 		value, err := pop()

@@ -126,7 +126,7 @@ Feedback loop for this milestone:
 
 ### Milestone 2: Remove obvious interpreter allocation overhead
 
-Status: Pending
+Status: In progress
 
 Once the bytecode path exists, reduce allocation and dispatch overhead in the new
 execution loop.
@@ -134,9 +134,9 @@ execution loop.
 Preparation notes after Milestone 1:
 
 - The old per-expression/per-statement AIR tree-walk cost is gone.
-- Fresh bytecode profiles show pure-runtime programs no longer report useful
-  call/frame counters because profiling has not yet been wired to bytecode
-  calls/opcodes.
+- Bytecode profiles now report direct/closure/trait/extern calls, frames,
+  opcode counts, and allocation-site counters for locals, stacks, and temporary
+  arg slices.
 - `decode_pipeline` and `sql_batch` still spend substantial time in reflective
   FFI conversion, but pure-runtime workloads (`sales_pipeline`,
   `word_frequency_batch`, `shape_catalog`) now point at bytecode interpreter
@@ -163,16 +163,22 @@ Recommended Milestone 2 feedback loop:
 
 - [x] Avoid per-expression/per-statement AIR object copying in the hot path.
   - Completed by Milestone 1 when default execution moved to bytecode.
-- [ ] Add bytecode-specific instrumentation needed to guide this milestone.
-  - [ ] Direct function, closure, trait, and extern call counts from bytecode.
-  - [ ] Opcode counters gated by `ARD_VM_NEXT_PROFILE=1`.
-  - [ ] Optional allocation counters for frames, locals slices, stacks, and arg
-    slices.
+- [x] Add bytecode-specific instrumentation needed to guide this milestone.
+  - [x] Direct function, closure, trait, and extern call counts from bytecode.
+  - [x] Opcode counters gated by `ARD_VM_NEXT_PROFILE=1`.
+  - [x] Allocation counters for frames, locals slices, stacks, and arg slices.
 - [ ] Avoid generic `[]Value` allocation for common call arities.
-  - [ ] Direct call fast paths for 0/1/2/3 args.
-  - [ ] Closure call fast paths for 0/1/2 args.
-  - [ ] Extern call fast paths for common arities.
-  - [ ] Method-op fast paths that avoid `popMethodArgs` slices for 0/1/2 args.
+  - [x] Direct call path reads args from the caller stack instead of allocating
+    a temporary args slice.
+  - [x] Closure bytecode call path reads args from the caller stack instead of
+    allocating a temporary args slice.
+  - [x] Extern call path passes a caller-stack arg window instead of allocating
+    a temporary `[]Value`.
+  - [x] Method-op fast paths avoid `popMethodArgs` slices for list, map,
+    string, Maybe, and Result operations.
+  - [x] Closure call fast path for unary Maybe/Result mapper callbacks.
+  - [ ] Direct function/closure locals fast paths for 0/1/2/3 args.
+  - [ ] Extern reflection input fast paths beyond the current small fixed array.
 - [ ] Introduce reusable frame/local storage.
   - [ ] Reuse frame objects or use a contiguous call stack.
   - [ ] Avoid allocating a new locals slice on every call.
@@ -321,6 +327,50 @@ Compared with the PR #101 baseline, the bytecode layer substantially improves
 pure runtime and SQL/decode workloads, while FS remains dominated by remaining
 VM/string/result/FFI overhead around host filesystem calls. Milestone 2 should
 now focus on allocation and argument/frame overhead in the bytecode interpreter.
+
+### Milestone 2 first checkpoint snapshot
+
+Validation:
+
+- `cd compiler && go test ./vm_next`
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 1 --warmup 0`
+
+Changes in this checkpoint:
+
+- Added bytecode opcode/call/frame/allocation-site counters to
+  `ARD_VM_NEXT_PROFILE=1`.
+- Removed temporary `[]Value` argument slices for direct calls, closure calls,
+  extern calls, and list/map/string/Maybe/Result method ops by using caller
+  stack windows.
+- Added a unary closure fast path for Maybe/Result mapper callbacks.
+- Used a small fixed reflection input array for <=3-arity extern calls.
+
+Directional runtime benchmark snapshot:
+
+| Benchmark | bytecode VM | vm_next bytecode | vm_next delta |
+|---|---:|---:|---:|
+| `sales_pipeline` | 60.7 ms | 84.8 ms | 1.4x slower |
+| `shape_catalog` | 75.6 ms | 107.3 ms | 1.4x slower |
+| `decode_pipeline` | 230.4 ms | 766.5 ms | 3.3x slower |
+| `word_frequency_batch` | 49.5 ms | 75.0 ms | 1.5x slower |
+| `async_batches` | 12.8 ms | 11.4 ms | 1.1x faster |
+| `fs_batch` | 103.2 ms | 518.2 ms | 5.0x slower |
+| `sql_batch` | 45.1 ms | 81.0 ms | 1.8x slower |
+
+Profile highlights after temporary arg-slice removal:
+
+- `sales_pipeline`: temporary arg slices fell to 16; remaining dominant cost is
+  80,022 locals/stack allocations from bytecode frames.
+- `word_frequency_batch`: temporary arg slices fell to 20; remaining dominant
+  opcode pattern is list iteration via repeated `ListSize`/`ListAt`.
+- `decode_pipeline`: temporary arg slices fell to 72,007, with 588,052
+  locals/stack allocations and reflective FFI still dominant.
+- `sql_batch`: temporary arg slices fell to 5, with reflective FFI and frame
+  allocation still visible.
+
+Next Milestone 2 target: frame/local/stack reuse or a contiguous call stack,
+while preserving recursion and fiber safety.
 
 ### Initial notes
 

@@ -140,25 +140,17 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.inputs), len(args))
 	}
 	if vm.profile == nil {
-		inputs := make([]reflect.Value, len(args))
-		for i, arg := range args {
-			input, err := vm.valueToHost(arg, adapter.inputs[i])
-			if err != nil {
-				return Value{}, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
-			}
-			inputs[i] = input
+		inputs, err := adapter.hostInputs(vm, args)
+		if err != nil {
+			return Value{}, err
 		}
 		return vm.hostReturnsToValue(adapter.extern.Signature.Return, adapter.callable.Call(inputs))
 	}
 
 	convertInStart := time.Now()
-	inputs := make([]reflect.Value, len(args))
-	for i, arg := range args {
-		input, err := vm.valueToHost(arg, adapter.inputs[i])
-		if err != nil {
-			return Value{}, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
-		}
-		inputs[i] = input
+	inputs, err := adapter.hostInputs(vm, args)
+	if err != nil {
+		return Value{}, err
 	}
 	convertIn := time.Since(convertInStart)
 	hostStart := time.Now()
@@ -169,6 +161,24 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	convertOut := time.Since(convertOutStart)
 	vm.profile.RecordExternCall(adapter.binding, len(args), convertIn, hostDuration, convertOut)
 	return value, err
+}
+
+func (adapter hostExternAdapter) hostInputs(vm *VM, args []Value) ([]reflect.Value, error) {
+	var small [3]reflect.Value
+	var inputs []reflect.Value
+	if len(args) <= len(small) {
+		inputs = small[:len(args)]
+	} else {
+		inputs = make([]reflect.Value, len(args))
+	}
+	for i, arg := range args {
+		input, err := vm.valueToHost(arg, adapter.inputs[i])
+		if err != nil {
+			return nil, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
+		}
+		inputs[i] = input
+	}
+	return inputs, nil
 }
 
 func goExternBinding(extern air.Extern) string {

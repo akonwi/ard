@@ -23,6 +23,10 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	if len(args) != fn.Arity {
 		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
 	}
+	if vm.profile != nil {
+		vm.profile.RecordDirectCall(len(args), fn.Locals)
+		vm.profile.RecordLocalsAlloc(fn.Locals)
+	}
 	locals := make([]Value, fn.Locals)
 	copy(locals, args)
 	return vm.runBytecodeWithLocals(id, locals)
@@ -32,6 +36,9 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 	fn, ok := vm.bytecode.Function(id)
 	if !ok {
 		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
+	}
+	if vm.profile != nil {
+		vm.profile.RecordStackAlloc(len(fn.Code))
 	}
 	stack := make([]Value, 0, len(fn.Code))
 	pop := func() (Value, error) {
@@ -49,6 +56,9 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 	for ip := 0; ip < len(fn.Code); {
 		inst := fn.Code[ip]
 		ip++
+		if vm.profile != nil {
+			vm.profile.RecordOpcode(inst.Op)
+		}
 		switch inst.Op {
 		case vmcode.OpNoop, vmcode.OpBlock:
 			continue
@@ -102,17 +112,13 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 				ip = inst.A
 			}
 		case vmcode.OpCall:
-			callArgs, err := popArgs(pop, inst.B)
-			if err != nil {
-				return Value{}, err
-			}
-			result, err := vm.runBytecode(air.FunctionID(inst.A), callArgs)
+			result, err := vm.runBytecodeFromStack(air.FunctionID(inst.A), inst.B, &stack)
 			if err != nil {
 				return Value{}, err
 			}
 			push(result)
 		case vmcode.OpCallExtern:
-			callArgs, err := popArgs(pop, inst.B)
+			callArgs, err := stackTailArgs(&stack, inst.B)
 			if err != nil {
 				return Value{}, err
 			}
@@ -120,23 +126,19 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			if err != nil {
 				return Value{}, err
 			}
+			stack = stack[:len(stack)-inst.B]
 			push(result)
 		case vmcode.OpMakeClosure:
-			captures, err := popArgs(pop, inst.B)
+			captures, err := popArgs(vm.profile, pop, inst.B)
 			if err != nil {
 				return Value{}, err
+			}
+			if vm.profile != nil {
+				vm.profile.RecordClosureCreation(len(captures))
 			}
 			push(Closure(air.TypeID(inst.A), air.FunctionID(inst.C), captures))
 		case vmcode.OpCallClosure:
-			callArgs, err := popArgs(pop, inst.B)
-			if err != nil {
-				return Value{}, err
-			}
-			target, err := pop()
-			if err != nil {
-				return Value{}, err
-			}
-			result, err := vm.callClosure(target, callArgs)
+			result, err := vm.runBytecodeClosureFromStack(inst.B, &stack)
 			if err != nil {
 				return Value{}, err
 			}
@@ -202,7 +204,7 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			}
 			push(TraitObject(air.TypeID(inst.A), air.TraitID(inst.B), air.ImplID(inst.C), value))
 		case vmcode.OpCallTrait:
-			callArgs, err := popArgs(pop, inst.Imm)
+			callArgs, err := popArgs(vm.profile, pop, inst.Imm)
 			if err != nil {
 				return Value{}, err
 			}
@@ -223,6 +225,10 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			impl := vm.program.Impls[traitObject.Impl]
 			if inst.C < 0 || inst.C >= len(impl.Methods) {
 				return Value{}, fmt.Errorf("invalid trait method index %d", inst.C)
+			}
+			if vm.profile != nil {
+				vm.profile.RecordTraitCall()
+				vm.profile.RecordArgSliceAlloc(len(callArgs) + 1)
 			}
 			argsWithReceiver := make([]Value, 0, len(callArgs)+1)
 			argsWithReceiver = append(argsWithReceiver, traitObject.Value)
@@ -350,19 +356,19 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 		case vmcode.OpEnumVariant:
 			push(Enum(air.TypeID(inst.A), inst.Imm))
 		case vmcode.OpStrAt, vmcode.OpStrSize, vmcode.OpStrIsEmpty, vmcode.OpStrContains, vmcode.OpStrReplace, vmcode.OpStrReplaceAll, vmcode.OpStrSplit, vmcode.OpStrStartsWith, vmcode.OpStrTrim:
-			value, err := vm.execBytecodeStrOp(inst, pop)
+			value, err := vm.execBytecodeStrOp(inst, &stack)
 			if err != nil {
 				return Value{}, err
 			}
 			push(value)
 		case vmcode.OpMakeList:
-			items, err := popArgs(pop, inst.B)
+			items, err := popArgs(nil, pop, inst.B)
 			if err != nil {
 				return Value{}, err
 			}
 			push(List(air.TypeID(inst.A), items))
 		case vmcode.OpListAt, vmcode.OpListPrepend, vmcode.OpListPush, vmcode.OpListSet, vmcode.OpListSize, vmcode.OpListSort, vmcode.OpListSwap:
-			value, err := vm.execBytecodeListOp(inst, pop)
+			value, err := vm.execBytecodeListOp(inst, &stack)
 			if err != nil {
 				return Value{}, err
 			}
@@ -382,13 +388,13 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			}
 			push(Map(air.TypeID(inst.A), entries))
 		case vmcode.OpMapKeys, vmcode.OpMapSize, vmcode.OpMapGet, vmcode.OpMapSet, vmcode.OpMapDrop, vmcode.OpMapHas, vmcode.OpMapKeyAt, vmcode.OpMapValueAt:
-			value, err := vm.execBytecodeMapOp(inst, pop)
+			value, err := vm.execBytecodeMapOp(inst, &stack)
 			if err != nil {
 				return Value{}, err
 			}
 			push(value)
 		case vmcode.OpMakeStruct:
-			fields, err := popArgs(pop, inst.B)
+			fields, err := popArgs(nil, pop, inst.B)
 			if err != nil {
 				return Value{}, err
 			}
@@ -432,7 +438,7 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 		case vmcode.OpMakeMaybeNone:
 			push(Maybe(air.TypeID(inst.A), false, vm.zeroValue(air.TypeID(inst.B))))
 		case vmcode.OpMaybeExpect, vmcode.OpMaybeIsNone, vmcode.OpMaybeIsSome, vmcode.OpMaybeOr, vmcode.OpMaybeMap, vmcode.OpMaybeAndThen:
-			value, err := vm.execBytecodeMaybeOp(inst, pop)
+			value, err := vm.execBytecodeMaybeOp(inst, &stack)
 			if err != nil {
 				return Value{}, err
 			}
@@ -444,7 +450,7 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 			}
 			push(Result(air.TypeID(inst.A), inst.Op == vmcode.OpMakeResultOk, value))
 		case vmcode.OpResultExpect, vmcode.OpResultErrValue, vmcode.OpResultOr, vmcode.OpResultIsOk, vmcode.OpResultIsErr, vmcode.OpResultMap, vmcode.OpResultMapErr, vmcode.OpResultAndThen:
-			value, err := vm.execBytecodeResultOp(inst, pop)
+			value, err := vm.execBytecodeResultOp(inst, &stack)
 			if err != nil {
 				return Value{}, err
 			}
@@ -482,6 +488,27 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 	return Value{}, fmt.Errorf("%s: missing return", fn.Name)
 }
 
+func (vm *VM) runBytecodeFromStack(id air.FunctionID, argc int, stack *[]Value) (Value, error) {
+	fn, ok := vm.bytecode.Function(id)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
+	}
+	if argc != fn.Arity {
+		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, argc)
+	}
+	if argc < 0 || argc > len(*stack) {
+		return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
+	}
+	if vm.profile != nil {
+		vm.profile.RecordDirectCall(argc, fn.Locals)
+		vm.profile.RecordLocalsAlloc(fn.Locals)
+	}
+	locals := make([]Value, fn.Locals)
+	copy(locals, (*stack)[len(*stack)-argc:])
+	*stack = (*stack)[:len(*stack)-argc]
+	return vm.runBytecodeWithLocals(id, locals)
+}
+
 func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, error) {
 	fn, ok := vm.bytecode.Function(closure.Function)
 	if !ok {
@@ -490,8 +517,70 @@ func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, er
 	if len(args) != fn.Arity {
 		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
 	}
+	return vm.runBytecodeClosureWithFunction(closure, fn, args)
+}
+
+func (vm *VM) runBytecodeClosureFromStack(argc int, stack *[]Value) (Value, error) {
+	if argc < 0 || argc+1 > len(*stack) {
+		return Value{}, fmt.Errorf("closure call: stack underflow")
+	}
+	targetIndex := len(*stack) - argc - 1
+	target := (*stack)[targetIndex]
+	closure, err := target.closureValue()
+	if err != nil {
+		return Value{}, err
+	}
+	fn, ok := vm.bytecode.Function(closure.Function)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+	}
+	if argc != fn.Arity {
+		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, argc)
+	}
+	args := (*stack)[targetIndex+1:]
+	result, err := vm.runBytecodeClosureWithFunction(closure, fn, args)
+	if err != nil {
+		return Value{}, err
+	}
+	*stack = (*stack)[:targetIndex]
+	return result, nil
+}
+
+func (vm *VM) runBytecodeClosure1(closure *ClosureValue, arg Value) (Value, error) {
+	fn, ok := vm.bytecode.Function(closure.Function)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+	}
+	if fn.Arity != 1 {
+		return Value{}, fmt.Errorf("%s expects %d args, got 1", fn.Name, fn.Arity)
+	}
 	if len(closure.Captures) != len(fn.Captures) {
 		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	}
+	if vm.profile != nil {
+		vm.profile.RecordClosureCall(1, fn.Locals)
+		vm.profile.RecordLocalsAlloc(fn.Locals)
+	}
+	locals := make([]Value, fn.Locals)
+	if fn.Locals > 0 {
+		locals[0] = arg
+	}
+	for i, capture := range fn.Captures {
+		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
+			return Value{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
+		}
+		locals[capture.Local] = closure.Captures[i]
+	}
+	return vm.runBytecodeWithLocals(fn.ID, locals)
+}
+
+func (vm *VM) runBytecodeClosureWithFunction(closure *ClosureValue, fn *vmcode.Function, args []Value) (Value, error) {
+	if len(closure.Captures) != len(fn.Captures) {
+		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	}
+	if vm.profile != nil {
+		vm.profile.RecordClosureCall(len(args), fn.Locals)
+		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
 	locals := make([]Value, fn.Locals)
 	copy(locals, args)
@@ -501,7 +590,7 @@ func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, er
 		}
 		locals[capture.Local] = closure.Captures[i]
 	}
-	return vm.runBytecodeWithLocals(closure.Function, locals)
+	return vm.runBytecodeWithLocals(fn.ID, locals)
 }
 
 func (vm *VM) bytecodeConstant(index int, kind vmcode.ConstantKind) (vmcode.Constant, error) {
@@ -515,7 +604,17 @@ func (vm *VM) bytecodeConstant(index int, kind vmcode.ConstantKind) (vmcode.Cons
 	return constant, nil
 }
 
-func popArgs(pop func() (Value, error), count int) ([]Value, error) {
+func stackTailArgs(stack *[]Value, count int) ([]Value, error) {
+	if count < 0 || count > len(*stack) {
+		return nil, fmt.Errorf("stack underflow")
+	}
+	return (*stack)[len(*stack)-count:], nil
+}
+
+func popArgs(profile *executionProfile, pop func() (Value, error), count int) ([]Value, error) {
+	if profile != nil {
+		profile.RecordArgSliceAlloc(count)
+	}
 	args := make([]Value, count)
 	for i := count - 1; i >= 0; i-- {
 		value, err := pop()

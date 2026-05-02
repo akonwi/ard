@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/air"
+	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
 const (
@@ -74,8 +75,16 @@ type executionProfile struct {
 	frames           atomic.Uint64
 	maxLocals        atomic.Uint64
 
-	stmtCounts [256]atomic.Uint64
-	exprCounts [256]atomic.Uint64
+	stmtCounts   [256]atomic.Uint64
+	exprCounts   [256]atomic.Uint64
+	opcodeCounts [256]atomic.Uint64
+
+	localsAllocs   atomic.Uint64
+	localsSlots    atomic.Uint64
+	stacksAllocs   atomic.Uint64
+	stackCapSlots  atomic.Uint64
+	argSliceAllocs atomic.Uint64
+	argSliceSlots  atomic.Uint64
 
 	externCalls    atomic.Uint64
 	externArgSum   atomic.Uint64
@@ -160,6 +169,37 @@ func (p *executionProfile) RecordExpr(kind air.ExprKind) {
 	p.exprCounts[uint8(kind)].Add(1)
 }
 
+func (p *executionProfile) RecordOpcode(op vmcode.Opcode) {
+	if p == nil {
+		return
+	}
+	p.opcodeCounts[uint8(op)].Add(1)
+}
+
+func (p *executionProfile) RecordLocalsAlloc(slots int) {
+	if p == nil {
+		return
+	}
+	p.localsAllocs.Add(1)
+	p.localsSlots.Add(uint64(slots))
+}
+
+func (p *executionProfile) RecordStackAlloc(capacity int) {
+	if p == nil {
+		return
+	}
+	p.stacksAllocs.Add(1)
+	p.stackCapSlots.Add(uint64(capacity))
+}
+
+func (p *executionProfile) RecordArgSliceAlloc(slots int) {
+	if p == nil || slots == 0 {
+		return
+	}
+	p.argSliceAllocs.Add(1)
+	p.argSliceSlots.Add(uint64(slots))
+}
+
 func (p *executionProfile) RecordExternCall(binding string, argc int, convertIn, host, convertOut time.Duration) {
 	if p == nil {
 		return
@@ -220,6 +260,10 @@ func (p *executionProfile) Report() string {
 	fmt.Fprintf(&out, "wall=%s\n", wall.Round(time.Microsecond))
 	fmt.Fprintf(&out, "calls direct=%d closure=%d trait=%d extern=%d\n", directCalls, closureCalls, p.traitCalls.Load(), externCalls)
 	fmt.Fprintf(&out, "frames=%d max_locals=%d\n", p.frames.Load(), p.maxLocals.Load())
+	if p.localsAllocs.Load() > 0 || p.stacksAllocs.Load() > 0 || p.argSliceAllocs.Load() > 0 {
+		fmt.Fprintf(&out, "alloc sites locals=%d slots=%d stacks=%d stack_slots=%d arg_slices=%d arg_slots=%d\n",
+			p.localsAllocs.Load(), p.localsSlots.Load(), p.stacksAllocs.Load(), p.stackCapSlots.Load(), p.argSliceAllocs.Load(), p.argSliceSlots.Load())
+	}
 
 	if closureCalls > 0 || closureCreations > 0 {
 		avgClosureArity := avgUint64(p.closureArgSum.Load(), closureCalls)
@@ -230,6 +274,7 @@ func (p *executionProfile) Report() string {
 		fmt.Fprintf(&out, "fibers spawned=%d waits=%d wait_total=%s\n", p.fiberSpawns.Load(), fiberWaits, time.Duration(p.fiberWaitNS.Load()).Round(time.Microsecond))
 	}
 
+	p.writeTopOpcodeCounts(&out)
 	p.writeTopStmtCounts(&out)
 	p.writeTopExprCounts(&out)
 	p.writeExternReport(&out, externCalls)
@@ -281,6 +326,17 @@ func (p *executionProfile) writeExternReport(out *strings.Builder, externCalls u
 		fmt.Fprintf(out, "  %2d. %s calls=%d total=%s avg=%s in=%s host=%s out=%s avg_arity=%.2f max_arity=%d\n",
 			i+1, stat.binding, stat.calls, total.Round(time.Microsecond), formatProfileDuration(avg), stat.convertIn.Round(time.Microsecond), stat.host.Round(time.Microsecond), stat.convertOut.Round(time.Microsecond), avgArity, stat.maxArity)
 	}
+}
+
+func (p *executionProfile) writeTopOpcodeCounts(out *strings.Builder) {
+	counts := make([]kindCount, 0)
+	for i := range p.opcodeCounts {
+		count := p.opcodeCounts[i].Load()
+		if count > 0 {
+			counts = append(counts, kindCount{name: vmcode.Opcode(i).String(), count: count})
+		}
+	}
+	writeTopCounts(out, "top opcodes", counts)
 }
 
 func (p *executionProfile) writeTopStmtCounts(out *strings.Builder) {
