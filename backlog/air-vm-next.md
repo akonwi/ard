@@ -845,9 +845,20 @@ Status: In progress
     - [x] Port JSON encode coverage for primitive `Encodable` values.
     - [ ] Port or intentionally defer broader crypto and server-side HTTP
       behavior.
-  - [ ] Decide which bytecode VM internal tests are intentionally not copied
+  - [x] Decide which bytecode VM internal tests are intentionally not copied
     because they validate old registry/type-resolver/profile implementation
     details rather than Ard runtime behavior.
+    - The old FFI registry registration/generation tests are not copied because
+      `vm_next` uses AIR extern signatures plus generated host adapters instead
+      of the bytecode `runtime.Object` registry. The behavior-facing panic
+      recovery case is retained as parity coverage.
+    - The old string type resolver test is not copied because AIR carries typed
+      IDs and signatures directly instead of parsing type names at runtime.
+    - The old execution profile report test is not copied because it validates a
+      bytecode VM profiling surface that `vm_next` has not adopted.
+    - Method/module registry concurrency risks are covered through concurrent
+      `vm_next` runtime parity tests rather than by preserving the old cache
+      implementation.
 - [x] Support `ard run --target vm_next` for all `vm_next`-targetable sample
   programs.
   - Core samples cover template strings, list/map methods, list/map iteration,
