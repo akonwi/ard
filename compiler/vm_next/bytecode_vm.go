@@ -87,8 +87,32 @@ func (vm *VM) newDirectBytecodeFrame(id air.FunctionID, args []Value, stackBase 
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
 	locals := vm.getValueSlice(fn.Locals)
-	copy(locals, args)
+	if err := initBytecodeLocals(fn.Name, locals, args); err != nil {
+		vm.putValueSlice(locals)
+		return bytecodeFrame{}, err
+	}
 	return bytecodeFrame{fn: fn, locals: locals, stackBase: stackBase}, nil
+}
+
+func initBytecodeLocals(fnName string, locals []Value, args []Value) error {
+	if len(locals) < len(args) {
+		return fmt.Errorf("%s has %d locals for %d args", fnName, len(locals), len(args))
+	}
+	switch len(args) {
+	case 0:
+	case 1:
+		locals[0] = args[0]
+	case 2:
+		locals[0] = args[0]
+		locals[1] = args[1]
+	case 3:
+		locals[0] = args[0]
+		locals[1] = args[1]
+		locals[2] = args[2]
+	default:
+		copy(locals, args)
+	}
+	return nil
 }
 
 func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function, args []Value, stackBase int) (bytecodeFrame, error) {
@@ -103,7 +127,10 @@ func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
 	locals := vm.getValueSlice(fn.Locals)
-	copy(locals, args)
+	if err := initBytecodeLocals(fn.Name, locals, args); err != nil {
+		vm.putValueSlice(locals)
+		return bytecodeFrame{}, err
+	}
 	for i, capture := range fn.Captures {
 		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
 			vm.putValueSlice(locals)

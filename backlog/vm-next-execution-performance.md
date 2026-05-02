@@ -177,7 +177,7 @@ Recommended Milestone 2 feedback loop:
   - [x] Method-op fast paths avoid `popMethodArgs` slices for list, map,
     string, Maybe, and Result operations.
   - [x] Closure call fast path for unary Maybe/Result mapper callbacks.
-  - [ ] Direct function/closure locals fast paths for 0/1/2/3 args.
+  - [x] Direct function/closure locals fast paths for 0/1/2/3 args.
   - [ ] Extern reflection input fast paths beyond the current small fixed array.
 - [ ] Introduce reusable frame/local storage.
   - [x] Reuse locals and operand stack slices through a VM-local `sync.Pool`.
@@ -524,6 +524,37 @@ This reduced the autoresearch suite total from `1511.9 ms` to `791.0 ms`
 (`-47.7%`) while preserving benchmark output verification. Several attempted
 micro-optimizations were rejected by the full suite; see the autoresearch branch
 history for discarded experiments.
+
+### Milestone 2 locals fast-path checkpoint
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 1 --warmup 0`
+
+Changes in this checkpoint:
+
+- Added direct locals initialization fast paths for direct and closure bytecode
+  frames with 0, 1, 2, or 3 arguments.
+- Kept the generic `copy` fallback for higher arities and added an explicit
+  locals-vs-arity guard before assignment.
+
+Directional single-run runtime benchmark snapshot:
+
+| Benchmark | vm_next bytecode |
+|---|---:|
+| `sales_pipeline` | 75.9 ms |
+| `shape_catalog` | 92.5 ms |
+| `decode_pipeline` | 409.1 ms |
+| `word_frequency_batch` | 77.1 ms |
+| `async_batches` | 13.0 ms |
+| `fs_batch` | 104.6 ms |
+| `sql_batch` | 54.6 ms |
+| **total** | **826.8 ms** |
+
+This is within expected single-run noise relative to the immediately prior
+post-merge snapshot (`832.5 ms` total). Continue to treat very small interpreter
+micro-optimizations cautiously and verify against full-suite output checks.
 
 ### Initial notes
 
