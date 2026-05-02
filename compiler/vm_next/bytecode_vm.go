@@ -14,7 +14,7 @@ func NewWithBytecode(program *air.Program, externs HostFunctionRegistry) (*VM, e
 
 func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	if vm.bytecode == nil {
-		return vm.call(id, args)
+		return Value{}, fmt.Errorf("vm_next bytecode program is not initialized")
 	}
 	fn, ok := vm.bytecode.Function(id)
 	if !ok {
