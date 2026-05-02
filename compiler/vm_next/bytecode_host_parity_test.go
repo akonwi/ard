@@ -272,6 +272,35 @@ func TestVMNextBytecodeParityDecodeNullableListMapAndField(t *testing.T) {
 func TestVMNextBytecodeParityDecodePathOneOfAndFlatten(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
+			name: "path with only string segments",
+			input: `
+				use ard/decode
+				let data = decode::from_json("\{\"foo\": \{\"bar\": 42\}\}").expect("parse")
+				let result = decode::run(data, decode::path(["foo", "bar"], decode::int))
+				result.expect("decode")
+			`,
+			want: 42,
+		},
+		{
+			name: "path with array index",
+			input: `
+				use ard/decode
+				let data = decode::from_json("\{\"items\": [10, 20, 30]\}").expect("parse")
+				let result = decode::run(data, decode::path(["items", 1], decode::int))
+				result.expect("decode")
+			`,
+			want: 20,
+		},
+		{
+			name: "decode nested path with mixed segments",
+			input: `
+				use ard/decode
+				let data = decode::from_json("\{\"response\": [\{\"name\": \"Alice\"\}, \{\"name\": \"Bob\"\}]\}").expect("parse")
+				decode::run(data, decode::path(["response", 0, "name"], decode::string)).expect("decode")
+			`,
+			want: "Alice",
+		},
+		{
 			name: "path error includes array index",
 			input: `
 				use ard/decode

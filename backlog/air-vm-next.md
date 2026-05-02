@@ -836,7 +836,7 @@ Status: In progress
     model.
     - [x] Port duration, `Dynamic`/decode/from_json, env, filesystem, UUID,
       IO printing, HTTP client timeout behavior, and async timing coverage.
-    - [ ] Restore successful `decode::path` payload cases after nested generic
+    - [x] Restore successful `decode::path` payload cases after nested generic
       decoder factories preserve returned payload types through closure
       specialization.
     - [ ] Port or intentionally defer json/encode, broader crypto, SQL, and

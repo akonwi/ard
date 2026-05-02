@@ -271,6 +271,10 @@ func (l *lowerer) declareFunctionSpecialization(module ModuleID, def *checker.Fu
 	if err != nil {
 		return NoFunction, err
 	}
+	return l.declareFunctionSpecializationWithSignature(module, def, signature)
+}
+
+func (l *lowerer) declareFunctionSpecializationWithSignature(module ModuleID, def *checker.FunctionDef, signature Signature) (FunctionID, error) {
 	if id, ok := l.functions[functionKey(module, def.Name)]; ok {
 		if signaturesEqual(l.program.Functions[id].Signature, signature) {
 			return id, nil
@@ -295,6 +299,21 @@ func (l *lowerer) declareFunctionSpecialization(module ModuleID, def *checker.Fu
 
 func (l *lowerer) declareAndLowerFunction(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
 	id, err := l.declareFunctionSpecialization(module, def)
+	if err != nil {
+		return NoFunction, err
+	}
+	if err := l.lowerFunctionByID(id, def); err != nil {
+		return NoFunction, err
+	}
+	return id, nil
+}
+
+func (l *lowerer) declareAndLowerFunctionCall(module ModuleID, def *checker.FunctionDef, call *checker.FunctionCall) (FunctionID, error) {
+	signature, err := l.signatureForCall(call)
+	if err != nil {
+		return NoFunction, err
+	}
+	id, err := l.declareFunctionSpecializationWithSignature(module, def, signature)
 	if err != nil {
 		return NoFunction, err
 	}
@@ -907,7 +926,26 @@ func (l *lowerer) declareConcreteExternCall(module ModuleID, name string, call *
 
 func (l *lowerer) signatureForCall(call *checker.FunctionCall) (Signature, error) {
 	if def := call.Definition(); def != nil {
-		return l.signatureForFunction(def.Parameters, call.Type())
+		if !functionHasTypeVar(def) {
+			return l.signatureForFunction(def.Parameters, def.ReturnType)
+		}
+		params := make([]Param, len(def.Parameters))
+		for i, param := range def.Parameters {
+			paramType := param.Type
+			if i < len(call.Args) {
+				paramType = call.Args[i].Type()
+			}
+			typeID, err := l.internType(paramType)
+			if err != nil {
+				return Signature{}, err
+			}
+			params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+		}
+		returnType, err := l.internType(call.Type())
+		if err != nil {
+			return Signature{}, err
+		}
+		return Signature{Params: params, Return: returnType}, nil
 	}
 	params := make([]Param, len(call.Args))
 	for i, arg := range call.Args {
@@ -1156,6 +1194,18 @@ func functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
 	return typeHasUnresolvedTypeVar(def.ReturnType)
 }
 
+func functionHasTypeVar(def *checker.FunctionDef) bool {
+	if def == nil {
+		return false
+	}
+	for _, param := range def.Parameters {
+		if typeContainsTypeVar(param.Type) {
+			return true
+		}
+	}
+	return typeContainsTypeVar(def.ReturnType)
+}
+
 func externalFunctionHasUnresolvedTypeVar(def *checker.ExternalFunctionDef) bool {
 	if def == nil {
 		return false
@@ -1166,6 +1216,48 @@ func externalFunctionHasUnresolvedTypeVar(def *checker.ExternalFunctionDef) bool
 		}
 	}
 	return typeHasUnresolvedTypeVar(def.ReturnType)
+}
+
+func typeContainsTypeVar(t checker.Type) bool {
+	switch typ := t.(type) {
+	case nil:
+		return false
+	case *checker.TypeVar:
+		return true
+	case *checker.List:
+		return typeContainsTypeVar(typ.Of())
+	case *checker.Map:
+		return typeContainsTypeVar(typ.Key()) || typeContainsTypeVar(typ.Value())
+	case *checker.Maybe:
+		return typeContainsTypeVar(typ.Of())
+	case *checker.Result:
+		return typeContainsTypeVar(typ.Val()) || typeContainsTypeVar(typ.Err())
+	case *checker.Union:
+		for _, member := range typ.Types {
+			if typeContainsTypeVar(member) {
+				return true
+			}
+		}
+		return false
+	case *checker.StructDef:
+		for _, fieldType := range typ.Fields {
+			if typeContainsTypeVar(fieldType) {
+				return true
+			}
+		}
+		return false
+	case *checker.FunctionDef:
+		return functionHasTypeVar(typ)
+	case *checker.ExternalFunctionDef:
+		for _, param := range typ.Parameters {
+			if typeContainsTypeVar(param.Type) {
+				return true
+			}
+		}
+		return typeContainsTypeVar(typ.ReturnType)
+	default:
+		return false
+	}
 }
 
 func typeHasUnresolvedTypeVar(t checker.Type) bool {
@@ -1918,8 +2010,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
 		}
 		if def := e.Definition(); def != nil {
-			if !functionHasUnresolvedTypeVar(def) && def.Body != nil {
-				id, err := fl.l.declareAndLowerFunction(fl.fn.Module, def)
+			if def.Body != nil {
+				id, err := fl.l.declareAndLowerFunctionCall(fl.fn.Module, def, e)
 				if err != nil {
 					return nil, err
 				}
@@ -1982,8 +2074,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
 		}
-		if def := fl.l.moduleFunctionDefinitionForCall(e); def != nil && !functionHasUnresolvedTypeVar(def) && def.Body != nil {
-			id, err := fl.l.declareAndLowerFunction(moduleID, def)
+		if def := fl.l.moduleFunctionDefinitionForCall(e); def != nil && def.Body != nil {
+			id, err := fl.l.declareAndLowerFunctionCall(moduleID, def, e.Call)
 			if err != nil {
 				return nil, err
 			}
@@ -2841,15 +2933,19 @@ func (fl *functionLowerer) lowerBoundBlock(name string, typeID TypeID, stmts []c
 }
 
 func (fl *functionLowerer) lowerBoundBlockWithDefault(name string, typeID TypeID, stmts []checker.Statement, defaultType TypeID) (LocalID, Block, error) {
-	oldLocal, hadOldLocal := fl.locals[name]
+	oldLocals := fl.cloneLocals()
 	local := fl.defineLocal(name, typeID, false)
 	block, err := fl.lowerBlockWithDefault(stmts, defaultType)
-	if hadOldLocal {
-		fl.locals[name] = oldLocal
-	} else {
-		delete(fl.locals, name)
-	}
+	fl.locals = oldLocals
 	return local, block, err
+}
+
+func (fl *functionLowerer) cloneLocals() map[string]LocalID {
+	locals := make(map[string]LocalID, len(fl.locals))
+	for name, local := range fl.locals {
+		locals[name] = local
+	}
+	return locals
 }
 
 func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
