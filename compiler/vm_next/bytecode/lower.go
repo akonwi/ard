@@ -40,10 +40,11 @@ type functionLowerer struct {
 	fn         *air.Function
 	code       []Instruction
 	breakStack [][]int
+	localTop   int
 }
 
 func (l *lowerer) lowerFunction(fn *air.Function) (Function, error) {
-	fl := &functionLowerer{root: l, fn: fn}
+	fl := &functionLowerer{root: l, fn: fn, localTop: len(fn.Locals)}
 	if err := fl.lowerBlock(fn.Body, fn.Signature.Return); err != nil {
 		return Function{}, fmt.Errorf("lower function %s: %w", fn.Name, err)
 	}
@@ -54,7 +55,7 @@ func (l *lowerer) lowerFunction(fn *air.Function) (Function, error) {
 		Name:     fn.Name,
 		Arity:    len(fn.Signature.Params),
 		Return:   fn.Signature.Return,
-		Locals:   len(fn.Locals),
+		Locals:   fl.localTop,
 		Captures: append([]air.Capture(nil), fn.Captures...),
 		Code:     fl.code,
 	}, nil
@@ -151,6 +152,40 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		fl.emit(Instruction{Op: OpConstStr, A: int(expr.Type), B: fl.addConst(Constant{Kind: ConstStr, Str: expr.Str})})
 	case air.ExprLoadLocal:
 		fl.emit(Instruction{Op: OpLoadLocal, A: int(expr.Local)})
+	case air.ExprMakeClosure:
+		for _, local := range expr.CaptureLocals {
+			fl.emit(Instruction{Op: OpLoadLocal, A: int(local)})
+		}
+		fl.emit(Instruction{Op: OpMakeClosure, A: int(expr.Type), B: len(expr.CaptureLocals), C: int(expr.Function)})
+	case air.ExprCallClosure:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		for i := range expr.Args {
+			if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+				return err
+			}
+		}
+		fl.emit(Instruction{Op: OpCallClosure, A: int(expr.Type), B: len(expr.Args)})
+	case air.ExprSpawnFiber:
+		if expr.Target != nil {
+			if err := fl.lowerExpr(expr.Target); err != nil {
+				return err
+			}
+			fl.emit(Instruction{Op: OpSpawnFiber, A: int(expr.Type), B: 1})
+		} else {
+			fl.emit(Instruction{Op: OpSpawnFiber, A: int(expr.Type), C: int(expr.Function)})
+		}
+	case air.ExprFiberGet:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpFiberGet, A: int(expr.Type)})
+	case air.ExprFiberJoin:
+		if err := fl.lowerExpr(expr.Target); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpFiberJoin, A: int(expr.Type)})
 	case air.ExprCall:
 		for i := range expr.Args {
 			if err := fl.lowerExpr(&expr.Args[i]); err != nil {
@@ -219,6 +254,8 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		fl.emit(Instruction{Op: unaryOpcode(expr.Kind), A: int(expr.Type)})
 	case air.ExprEnumVariant:
 		fl.emit(Instruction{Op: OpEnumVariant, A: int(expr.Type), Imm: expr.Discriminant})
+	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
+		return fl.lowerStrOp(expr)
 	case air.ExprMakeList:
 		for i := range expr.Args {
 			if err := fl.lowerExpr(&expr.Args[i]); err != nil {
@@ -254,6 +291,16 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		fl.emit(Instruction{Op: OpMakeMaybeSome, A: int(expr.Type)})
 	case air.ExprMakeMaybeNone:
 		fl.emit(Instruction{Op: OpMakeMaybeNone, A: int(expr.Type), B: int(fl.mustMaybeElem(expr.Type))})
+	case air.ExprMatchEnum:
+		return fl.lowerEnumMatch(expr)
+	case air.ExprMatchInt:
+		return fl.lowerIntMatch(expr)
+	case air.ExprMatchMaybe:
+		return fl.lowerMaybeMatch(expr)
+	case air.ExprMatchResult:
+		return fl.lowerResultMatch(expr)
+	case air.ExprMaybeExpect, air.ExprMaybeIsNone, air.ExprMaybeIsSome, air.ExprMaybeOr, air.ExprMaybeMap, air.ExprMaybeAndThen:
+		return fl.lowerMaybeOp(expr)
 	case air.ExprMakeResultOk:
 		if err := fl.lowerExpr(expr.Target); err != nil {
 			return err
@@ -264,9 +311,193 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 			return err
 		}
 		fl.emit(Instruction{Op: OpMakeResultErr, A: int(expr.Type)})
+	case air.ExprResultExpect, air.ExprResultOr, air.ExprResultIsOk, air.ExprResultIsErr, air.ExprResultMap, air.ExprResultMapErr, air.ExprResultAndThen:
+		return fl.lowerResultOp(expr)
+	case air.ExprTryResult:
+		return fl.lowerTryOp(expr, OpTryResult)
+	case air.ExprTryMaybe:
+		return fl.lowerTryOp(expr, OpTryMaybe)
 	default:
 		return fmt.Errorf("unsupported expression kind %d", expr.Kind)
 	}
+	return nil
+}
+
+func (fl *functionLowerer) lowerEnumMatch(expr *air.Expr) error {
+	return fl.lowerDiscriminantMatch(expr, true)
+}
+
+func (fl *functionLowerer) lowerIntMatch(expr *air.Expr) error {
+	return fl.lowerDiscriminantMatch(expr, false)
+}
+
+func (fl *functionLowerer) lowerDiscriminantMatch(expr *air.Expr, enum bool) error {
+	subjectLocal := fl.tempLocal()
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
+	endJumps := []int{}
+	if enum {
+		for _, matchCase := range expr.EnumCases {
+			fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+			fl.emit(Instruction{Op: OpConstInt, A: int(fl.mustTypeID(air.TypeInt)), Imm: matchCase.Discriminant})
+			fl.emit(Instruction{Op: OpEq, A: int(fl.mustTypeID(air.TypeBool))})
+			next := fl.emit(Instruction{Op: OpJumpIfFalse})
+			if err := fl.lowerBlock(matchCase.Body, expr.Type); err != nil {
+				return err
+			}
+			endJumps = append(endJumps, fl.emit(Instruction{Op: OpJump}))
+			fl.patch(next, len(fl.code))
+		}
+	} else {
+		for _, matchCase := range expr.IntCases {
+			fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+			fl.emit(Instruction{Op: OpConstInt, A: int(fl.mustTypeID(air.TypeInt)), Imm: matchCase.Value})
+			fl.emit(Instruction{Op: OpEq, A: int(fl.mustTypeID(air.TypeBool))})
+			next := fl.emit(Instruction{Op: OpJumpIfFalse})
+			if err := fl.lowerBlock(matchCase.Body, expr.Type); err != nil {
+				return err
+			}
+			endJumps = append(endJumps, fl.emit(Instruction{Op: OpJump}))
+			fl.patch(next, len(fl.code))
+		}
+		for _, matchCase := range expr.RangeCases {
+			fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+			fl.emit(Instruction{Op: OpConstInt, A: int(fl.mustTypeID(air.TypeInt)), Imm: matchCase.Start})
+			fl.emit(Instruction{Op: OpGte, A: int(fl.mustTypeID(air.TypeBool))})
+			fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+			fl.emit(Instruction{Op: OpConstInt, A: int(fl.mustTypeID(air.TypeInt)), Imm: matchCase.End})
+			fl.emit(Instruction{Op: OpLte, A: int(fl.mustTypeID(air.TypeBool))})
+			fl.emit(Instruction{Op: OpAnd, A: int(fl.mustTypeID(air.TypeBool))})
+			next := fl.emit(Instruction{Op: OpJumpIfFalse})
+			if err := fl.lowerBlock(matchCase.Body, expr.Type); err != nil {
+				return err
+			}
+			endJumps = append(endJumps, fl.emit(Instruction{Op: OpJump}))
+			fl.patch(next, len(fl.code))
+		}
+	}
+	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
+		if err := fl.lowerBlock(expr.CatchAll, expr.Type); err != nil {
+			return err
+		}
+	} else if err := fl.emitZero(expr.Type); err != nil {
+		return err
+	}
+	end := len(fl.code)
+	for _, jump := range endJumps {
+		fl.patch(jump, end)
+	}
+	return nil
+}
+
+func (fl *functionLowerer) lowerMaybeMatch(expr *air.Expr) error {
+	subjectLocal := fl.tempLocal()
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpMaybeIsSome, A: int(fl.mustTypeID(air.TypeBool))})
+	jumpNone := fl.emit(Instruction{Op: OpJumpIfFalse})
+	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpMaybeExpect, A: int(expr.Type)})
+	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.SomeLocal)})
+	if err := fl.lowerBlock(expr.Some, expr.Type); err != nil {
+		return err
+	}
+	jumpEnd := fl.emit(Instruction{Op: OpJump})
+	fl.patch(jumpNone, len(fl.code))
+	if err := fl.lowerBlock(expr.None, expr.Type); err != nil {
+		return err
+	}
+	fl.patch(jumpEnd, len(fl.code))
+	return nil
+}
+
+func (fl *functionLowerer) lowerResultMatch(expr *air.Expr) error {
+	subjectLocal := fl.tempLocal()
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpResultIsOk, A: int(fl.mustTypeID(air.TypeBool))})
+	jumpErr := fl.emit(Instruction{Op: OpJumpIfFalse})
+	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpResultExpect, A: int(expr.Type)})
+	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.OkLocal)})
+	if err := fl.lowerBlock(expr.Ok, expr.Type); err != nil {
+		return err
+	}
+	jumpEnd := fl.emit(Instruction{Op: OpJump})
+	fl.patch(jumpErr, len(fl.code))
+	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
+	fl.emit(Instruction{Op: OpResultErrValue, A: int(expr.Type)})
+	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.ErrLocal)})
+	if err := fl.lowerBlock(expr.Err, expr.Type); err != nil {
+		return err
+	}
+	fl.patch(jumpEnd, len(fl.code))
+	return nil
+}
+
+func (fl *functionLowerer) lowerStrOp(expr *air.Expr) error {
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	for i := range expr.Args {
+		if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+			return err
+		}
+	}
+	fl.emit(Instruction{Op: strOpcode(expr.Kind), A: int(expr.Type), B: len(expr.Args)})
+	return nil
+}
+
+func (fl *functionLowerer) lowerMaybeOp(expr *air.Expr) error {
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	for i := range expr.Args {
+		if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+			return err
+		}
+	}
+	fl.emit(Instruction{Op: maybeOpcode(expr.Kind), A: int(expr.Type), B: len(expr.Args)})
+	return nil
+}
+
+func (fl *functionLowerer) lowerResultOp(expr *air.Expr) error {
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	for i := range expr.Args {
+		if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+			return err
+		}
+	}
+	fl.emit(Instruction{Op: resultOpcode(expr.Kind), A: int(expr.Type), B: len(expr.Args)})
+	return nil
+}
+
+func (fl *functionLowerer) lowerTryOp(expr *air.Expr, op Opcode) error {
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	inst := Instruction{Op: op, A: int(fl.fn.Signature.Return), B: -1, C: int(expr.CatchLocal)}
+	tryIndex := fl.emit(inst)
+	if !expr.HasCatch {
+		return nil
+	}
+	jumpNormal := fl.emit(Instruction{Op: OpJump})
+	fl.patch(tryIndex, len(fl.code))
+	if err := fl.lowerBlock(expr.Catch, fl.fn.Signature.Return); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpReturn})
+	fl.patch(jumpNormal, len(fl.code))
 	return nil
 }
 
@@ -320,6 +551,71 @@ func (fl *functionLowerer) lowerMakeStruct(expr *air.Expr) error {
 	}
 	fl.emit(Instruction{Op: OpMakeStruct, A: int(expr.Type), B: len(typeInfo.Fields)})
 	return nil
+}
+
+func strOpcode(kind air.ExprKind) Opcode {
+	switch kind {
+	case air.ExprStrAt:
+		return OpStrAt
+	case air.ExprStrSize:
+		return OpStrSize
+	case air.ExprStrIsEmpty:
+		return OpStrIsEmpty
+	case air.ExprStrContains:
+		return OpStrContains
+	case air.ExprStrReplace:
+		return OpStrReplace
+	case air.ExprStrReplaceAll:
+		return OpStrReplaceAll
+	case air.ExprStrSplit:
+		return OpStrSplit
+	case air.ExprStrStartsWith:
+		return OpStrStartsWith
+	case air.ExprStrTrim:
+		return OpStrTrim
+	default:
+		return OpNoop
+	}
+}
+
+func maybeOpcode(kind air.ExprKind) Opcode {
+	switch kind {
+	case air.ExprMaybeExpect:
+		return OpMaybeExpect
+	case air.ExprMaybeIsNone:
+		return OpMaybeIsNone
+	case air.ExprMaybeIsSome:
+		return OpMaybeIsSome
+	case air.ExprMaybeOr:
+		return OpMaybeOr
+	case air.ExprMaybeMap:
+		return OpMaybeMap
+	case air.ExprMaybeAndThen:
+		return OpMaybeAndThen
+	default:
+		return OpNoop
+	}
+}
+
+func resultOpcode(kind air.ExprKind) Opcode {
+	switch kind {
+	case air.ExprResultExpect:
+		return OpResultExpect
+	case air.ExprResultOr:
+		return OpResultOr
+	case air.ExprResultIsOk:
+		return OpResultIsOk
+	case air.ExprResultIsErr:
+		return OpResultIsErr
+	case air.ExprResultMap:
+		return OpResultMap
+	case air.ExprResultMapErr:
+		return OpResultMapErr
+	case air.ExprResultAndThen:
+		return OpResultAndThen
+	default:
+		return OpNoop
+	}
 }
 
 func listOpcode(kind air.ExprKind) Opcode {
@@ -453,6 +749,12 @@ func (fl *functionLowerer) emitZero(typeID air.TypeID) error {
 		return fmt.Errorf("unsupported zero value for type %s", info.Name)
 	}
 	return nil
+}
+
+func (fl *functionLowerer) tempLocal() int {
+	local := fl.localTop
+	fl.localTop++
+	return local
 }
 
 func (fl *functionLowerer) mustMaybeElem(typeID air.TypeID) air.TypeID {

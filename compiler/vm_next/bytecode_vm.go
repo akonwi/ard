@@ -37,6 +37,14 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	}
 	locals := make([]Value, fn.Locals)
 	copy(locals, args)
+	return vm.runBytecodeWithLocals(id, locals)
+}
+
+func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, error) {
+	fn, ok := vm.bytecode.Function(id)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
+	}
 	stack := make([]Value, 0, len(fn.Code))
 	pop := func() (Value, error) {
 		if len(stack) == 0 {
@@ -125,6 +133,72 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 				return Value{}, err
 			}
 			push(result)
+		case vmcode.OpMakeClosure:
+			captures, err := popArgs(pop, inst.B)
+			if err != nil {
+				return Value{}, err
+			}
+			push(Closure(air.TypeID(inst.A), air.FunctionID(inst.C), captures))
+		case vmcode.OpCallClosure:
+			callArgs, err := popArgs(pop, inst.B)
+			if err != nil {
+				return Value{}, err
+			}
+			target, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			result, err := vm.callClosure(target, callArgs)
+			if err != nil {
+				return Value{}, err
+			}
+			push(result)
+		case vmcode.OpSpawnFiber:
+			fiber := &FiberValue{Type: air.TypeID(inst.A), Done: make(chan struct{})}
+			if inst.B > 0 {
+				target, err := pop()
+				if err != nil {
+					return Value{}, err
+				}
+				go func() {
+					defer close(fiber.Done)
+					fiber.Result, fiber.Err = vm.callClosure(target, nil)
+				}()
+			} else {
+				go func() {
+					defer close(fiber.Done)
+					fiber.Result, fiber.Err = vm.runBytecode(air.FunctionID(inst.C), nil)
+				}()
+			}
+			push(Fiber(air.TypeID(inst.A), fiber))
+		case vmcode.OpFiberGet:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			fiber, err := value.fiberValue()
+			if err != nil {
+				return Value{}, err
+			}
+			<-fiber.Done
+			if fiber.Err != nil {
+				return Value{}, fiber.Err
+			}
+			push(fiber.Result)
+		case vmcode.OpFiberJoin:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			fiber, err := value.fiberValue()
+			if err != nil {
+				return Value{}, err
+			}
+			<-fiber.Done
+			if fiber.Err != nil {
+				return Value{}, fiber.Err
+			}
+			push(vm.zeroValue(air.TypeID(inst.A)))
 		case vmcode.OpReturn:
 			return pop()
 		case vmcode.OpCopy:
@@ -255,6 +329,12 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 			push(out)
 		case vmcode.OpEnumVariant:
 			push(Enum(air.TypeID(inst.A), inst.Imm))
+		case vmcode.OpStrAt, vmcode.OpStrSize, vmcode.OpStrIsEmpty, vmcode.OpStrContains, vmcode.OpStrReplace, vmcode.OpStrReplaceAll, vmcode.OpStrSplit, vmcode.OpStrStartsWith, vmcode.OpStrTrim:
+			value, err := vm.execBytecodeStrOp(inst, pop)
+			if err != nil {
+				return Value{}, err
+			}
+			push(value)
 		case vmcode.OpMakeList:
 			items, err := popArgs(pop, inst.B)
 			if err != nil {
@@ -331,17 +411,77 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 			push(Maybe(air.TypeID(inst.A), true, value))
 		case vmcode.OpMakeMaybeNone:
 			push(Maybe(air.TypeID(inst.A), false, vm.zeroValue(air.TypeID(inst.B))))
+		case vmcode.OpMaybeExpect, vmcode.OpMaybeIsNone, vmcode.OpMaybeIsSome, vmcode.OpMaybeOr, vmcode.OpMaybeMap, vmcode.OpMaybeAndThen:
+			value, err := vm.execBytecodeMaybeOp(inst, pop)
+			if err != nil {
+				return Value{}, err
+			}
+			push(value)
 		case vmcode.OpMakeResultOk, vmcode.OpMakeResultErr:
 			value, err := pop()
 			if err != nil {
 				return Value{}, err
 			}
 			push(Result(air.TypeID(inst.A), inst.Op == vmcode.OpMakeResultOk, value))
+		case vmcode.OpResultExpect, vmcode.OpResultErrValue, vmcode.OpResultOr, vmcode.OpResultIsOk, vmcode.OpResultIsErr, vmcode.OpResultMap, vmcode.OpResultMapErr, vmcode.OpResultAndThen:
+			value, err := vm.execBytecodeResultOp(inst, pop)
+			if err != nil {
+				return Value{}, err
+			}
+			push(value)
+		case vmcode.OpTryResult:
+			value, jump, returned, err := vm.execBytecodeTryResult(inst, pop, locals)
+			if err != nil {
+				return Value{}, err
+			}
+			if returned {
+				return value, nil
+			}
+			if jump >= 0 {
+				ip = jump
+			} else {
+				push(value)
+			}
+		case vmcode.OpTryMaybe:
+			value, jump, returned, err := vm.execBytecodeTryMaybe(inst, pop, locals)
+			if err != nil {
+				return Value{}, err
+			}
+			if returned {
+				return value, nil
+			}
+			if jump >= 0 {
+				ip = jump
+			} else {
+				push(value)
+			}
 		default:
 			return Value{}, fmt.Errorf("unsupported bytecode opcode %s", inst.Op)
 		}
 	}
 	return Value{}, fmt.Errorf("%s: missing return", fn.Name)
+}
+
+func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, error) {
+	fn, ok := vm.bytecode.Function(closure.Function)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+	}
+	if len(args) != fn.Arity {
+		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
+	}
+	if len(closure.Captures) != len(fn.Captures) {
+		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	}
+	locals := make([]Value, fn.Locals)
+	copy(locals, args)
+	for i, capture := range fn.Captures {
+		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
+			return Value{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
+		}
+		locals[capture.Local] = closure.Captures[i]
+	}
+	return vm.runBytecodeWithLocals(closure.Function, locals)
 }
 
 func (vm *VM) bytecodeConstant(index int, kind vmcode.ConstantKind) (vmcode.Constant, error) {

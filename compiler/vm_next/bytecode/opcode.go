@@ -41,6 +41,11 @@ const (
 	OpCopy
 	OpTraitUpcast
 	OpCallTrait
+	OpMakeClosure
+	OpCallClosure
+	OpSpawnFiber
+	OpFiberGet
+	OpFiberJoin
 	OpUnionWrap
 	OpMakeList
 	OpListAt
@@ -63,10 +68,35 @@ const (
 	OpGetField
 	OpSetField
 	OpEnumVariant
+	OpStrAt
+	OpStrSize
+	OpStrIsEmpty
+	OpStrContains
+	OpStrReplace
+	OpStrReplaceAll
+	OpStrSplit
+	OpStrStartsWith
+	OpStrTrim
 	OpMakeMaybeSome
 	OpMakeMaybeNone
+	OpMaybeExpect
+	OpMaybeIsNone
+	OpMaybeIsSome
+	OpMaybeOr
+	OpMaybeMap
+	OpMaybeAndThen
 	OpMakeResultOk
 	OpMakeResultErr
+	OpResultExpect
+	OpResultErrValue
+	OpResultOr
+	OpResultIsOk
+	OpResultIsErr
+	OpResultMap
+	OpResultMapErr
+	OpResultAndThen
+	OpTryResult
+	OpTryMaybe
 	OpToStr
 )
 
@@ -148,6 +178,16 @@ func (op Opcode) String() string {
 		return "TraitUpcast"
 	case OpCallTrait:
 		return "CallTrait"
+	case OpMakeClosure:
+		return "MakeClosure"
+	case OpCallClosure:
+		return "CallClosure"
+	case OpSpawnFiber:
+		return "SpawnFiber"
+	case OpFiberGet:
+		return "FiberGet"
+	case OpFiberJoin:
+		return "FiberJoin"
 	case OpUnionWrap:
 		return "UnionWrap"
 	case OpMakeList:
@@ -192,14 +232,64 @@ func (op Opcode) String() string {
 		return "SetField"
 	case OpEnumVariant:
 		return "EnumVariant"
+	case OpStrAt:
+		return "StrAt"
+	case OpStrSize:
+		return "StrSize"
+	case OpStrIsEmpty:
+		return "StrIsEmpty"
+	case OpStrContains:
+		return "StrContains"
+	case OpStrReplace:
+		return "StrReplace"
+	case OpStrReplaceAll:
+		return "StrReplaceAll"
+	case OpStrSplit:
+		return "StrSplit"
+	case OpStrStartsWith:
+		return "StrStartsWith"
+	case OpStrTrim:
+		return "StrTrim"
 	case OpMakeMaybeSome:
 		return "MakeMaybeSome"
 	case OpMakeMaybeNone:
 		return "MakeMaybeNone"
 	case OpMakeResultOk:
 		return "MakeResultOk"
+	case OpMaybeExpect:
+		return "MaybeExpect"
+	case OpMaybeIsNone:
+		return "MaybeIsNone"
+	case OpMaybeIsSome:
+		return "MaybeIsSome"
+	case OpMaybeOr:
+		return "MaybeOr"
+	case OpMaybeMap:
+		return "MaybeMap"
+	case OpMaybeAndThen:
+		return "MaybeAndThen"
 	case OpMakeResultErr:
 		return "MakeResultErr"
+	case OpResultExpect:
+		return "ResultExpect"
+	case OpResultErrValue:
+		return "ResultErrValue"
+	case OpResultOr:
+		return "ResultOr"
+	case OpResultIsOk:
+		return "ResultIsOk"
+	case OpResultIsErr:
+		return "ResultIsErr"
+	case OpResultMap:
+		return "ResultMap"
+	case OpResultMapErr:
+		return "ResultMapErr"
+	case OpResultAndThen:
+		return "ResultAndThen"
+	case OpTryResult:
+		return "TryResult"
+	case OpTryMaybe:
+		return "TryMaybe"
 	case OpToStr:
 		return "ToStr"
 	default:

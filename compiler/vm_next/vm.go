@@ -139,6 +139,9 @@ func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
 	if len(args) != len(fn.Signature.Params) {
 		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, len(fn.Signature.Params), len(args))
 	}
+	if vm.bytecode != nil {
+		return vm.runBytecodeClosure(closure, args)
+	}
 	if vm.profile != nil {
 		vm.profile.RecordClosureCall(len(args), len(fn.Locals))
 	}

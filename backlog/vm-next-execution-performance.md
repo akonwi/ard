@@ -104,13 +104,15 @@ Feedback loop for this milestone:
   - [ ] Lower closure calls.
   - [x] Lower initial list/map/string operations used by simple loops and
     collection tests.
-  - [ ] Lower `Maybe`, `Result`, `try`, match, union, and enum operations.
+  - [x] Lower initial `Maybe`, `Result`, `try`, enum match, and int match
+    operations.
+  - [ ] Lower union matching and remaining advanced match shapes.
 - [x] Add an initial bytecode verifier for backend-facing invariants.
   - [ ] Valid instruction operands and jump targets.
   - [ ] Valid local/function/extern/type references.
   - [ ] Arity checks for calls and extern calls.
   - [x] Field indexes are validated for the initial field opcodes.
-  - [ ] Match tags are valid once match lowering lands.
+  - [ ] Match tags are valid once union match lowering lands.
 - [ ] Add a bytecode interpreter loop.
   - [x] Execute entry and script roots for the initial scalar/direct-call slice.
   - [ ] Preserve panic/diagnostic behavior expected by parity tests.

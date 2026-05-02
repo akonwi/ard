@@ -132,6 +132,121 @@ func TestBytecodeRunScriptDataAndExternSliceMatchesTreeWalk(t *testing.T) {
 	}
 }
 
+func TestBytecodeRunScriptMatchSliceMatchesTreeWalk(t *testing.T) {
+	tests := []string{
+		`
+			enum Status {
+				Open,
+				Closed,
+			}
+			let status = Status::Closed
+			match status {
+				Status::Open => 1,
+				Status::Closed => 42,
+			}
+		`,
+		`
+			let x = 7
+			match x {
+				0 => 0,
+				1..10 => 42,
+				_ => 1,
+			}
+		`,
+		`
+			use ard/maybe
+			let value = maybe::some(42)
+			match value {
+				x => x,
+				_ => 0,
+			}
+		`,
+		`
+			let value: Int!Str = Result::err("nope")
+			match value {
+				ok => ok,
+				err => err.size() + 38,
+			}
+		`,
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			program := lowerProgramForBytecodeTest(t, input)
+			wantVM, err := NewWithExterns(program, nil)
+			if err != nil {
+				t.Fatalf("new tree vm: %v", err)
+			}
+			want, err := wantVM.RunScript()
+			if err != nil {
+				t.Fatalf("run tree vm: %v", err)
+			}
+			gotVM, err := NewWithBytecode(program, nil)
+			if err != nil {
+				t.Fatalf("new bytecode vm: %v", err)
+			}
+			got, err := gotVM.RunScript()
+			if err != nil {
+				t.Fatalf("run bytecode vm: %v", err)
+			}
+			if !valuesEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestBytecodeRunScriptHelpersAndClosureSliceMatchesTreeWalk(t *testing.T) {
+	tests := []string{
+		`
+			use ard/maybe
+			let value = maybe::some(41)
+			value.map(fn(x: Int) Int { x + 1 }).expect("mapped")
+		`,
+		`
+			let value: Int!Str = Result::ok(41)
+			value.map(fn(x: Int) Int { x + 1 }).expect("mapped")
+		`,
+		`
+			fn parse() Int!Str { Result::ok(42) }
+			fn main_value() Int!Str {
+				let value = try parse()
+				Result::ok(value)
+			}
+			main_value().expect("ok")
+		`,
+		`
+			let parts = "  ard lang  ".trim().split(" ")
+			parts.size() + parts.at(0).size() + parts.at(1).size()
+		`,
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			program := lowerProgramForBytecodeTest(t, input)
+			wantVM, err := NewWithExterns(program, nil)
+			if err != nil {
+				t.Fatalf("new tree vm: %v", err)
+			}
+			want, err := wantVM.RunScript()
+			if err != nil {
+				t.Fatalf("run tree vm: %v", err)
+			}
+			gotVM, err := NewWithBytecode(program, nil)
+			if err != nil {
+				t.Fatalf("new bytecode vm: %v", err)
+			}
+			got, err := gotVM.RunScript()
+			if err != nil {
+				t.Fatalf("run bytecode vm: %v", err)
+			}
+			if !valuesEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestBytecodeRunEntryScalarSliceMatchesTreeWalk(t *testing.T) {
 	program := lowerProgramForBytecodeTest(t, `
 		fn main() Int {

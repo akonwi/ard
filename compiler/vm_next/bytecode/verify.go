@@ -78,25 +78,35 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return inst.B, 1, nil
 	case OpCallTrait:
 		return inst.Imm + 1, 1, nil
+	case OpCallClosure:
+		return inst.B + 1, 1, nil
 	case OpReturn:
 		return 1, 0, nil
 	case OpIntAdd, OpIntSub, OpIntMul, OpIntDiv, OpIntMod,
 		OpFloatAdd, OpFloatSub, OpFloatMul, OpFloatDiv,
 		OpStrConcat, OpEq, OpNotEq, OpLt, OpLte, OpGt, OpGte, OpAnd, OpOr:
 		return 2, 1, nil
-	case OpNot, OpNeg, OpToStr, OpCopy, OpGetField, OpTraitUpcast, OpUnionWrap, OpListSize, OpMapKeys, OpMapSize, OpMakeMaybeSome, OpMakeResultOk, OpMakeResultErr:
+	case OpNot, OpNeg, OpToStr, OpCopy, OpGetField, OpTraitUpcast, OpUnionWrap,
+		OpListSize, OpMapKeys, OpMapSize, OpStrSize, OpStrIsEmpty, OpStrTrim,
+		OpMakeMaybeSome, OpMaybeExpect, OpMaybeIsNone, OpMaybeIsSome,
+		OpMakeResultOk, OpMakeResultErr, OpResultExpect, OpResultErrValue, OpResultIsOk, OpResultIsErr,
+		OpTryResult, OpTryMaybe, OpFiberGet, OpFiberJoin:
 		return 1, 1, nil
 	case OpSetField:
 		return 2, 0, nil
 	case OpBlock:
 		return 0, 0, nil
-	case OpMakeList, OpMakeStruct:
+	case OpMakeList, OpMakeStruct, OpMakeClosure:
 		return inst.B, 1, nil
 	case OpMakeMap:
 		return inst.B * 2, 1, nil
-	case OpListAt, OpListPrepend, OpListPush, OpMapGet, OpMapDrop, OpMapHas, OpMapKeyAt, OpMapValueAt:
+	case OpListAt, OpListPrepend, OpListPush, OpMapGet, OpMapDrop, OpMapHas, OpMapKeyAt, OpMapValueAt,
+		OpStrAt, OpStrContains, OpStrSplit, OpStrStartsWith, OpMaybeOr, OpMaybeMap,
+		OpMaybeAndThen, OpResultOr, OpResultMap, OpResultMapErr, OpResultAndThen:
 		return 2, 1, nil
-	case OpListSet, OpListSwap, OpMapSet:
+	case OpSpawnFiber:
+		return inst.B, 1, nil
+	case OpListSet, OpListSwap, OpMapSet, OpStrReplace, OpStrReplaceAll:
 		return 3, 1, nil
 	case OpListSort:
 		return 2, 1, nil
