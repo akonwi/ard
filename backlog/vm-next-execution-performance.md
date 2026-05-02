@@ -180,10 +180,15 @@ Recommended Milestone 2 feedback loop:
   - [ ] Direct function/closure locals fast paths for 0/1/2/3 args.
   - [ ] Extern reflection input fast paths beyond the current small fixed array.
 - [ ] Introduce reusable frame/local storage.
-  - [ ] Reuse frame objects or use a contiguous call stack.
-  - [ ] Avoid allocating a new locals slice on every call.
-  - [ ] Avoid allocating a new stack slice on every call.
-  - [ ] Preserve safe behavior for recursion and fibers.
+  - [x] Reuse locals and operand stack slices through a VM-local `sync.Pool`.
+  - [x] Avoid allocating a fresh locals slice on every call when a pooled slice
+    is available.
+  - [x] Avoid allocating a fresh stack slice on every call when a pooled slice is
+    available.
+  - [x] Preserve safe behavior for recursion and fibers with separate borrowed
+    slices per active frame and pool return on frame exit.
+  - [ ] Consider a contiguous call stack if profiles still show frame overhead
+    after slice pooling.
 - [ ] Remove redundant runtime validation from trusted hot paths after bytecode
   validation succeeds.
 - [ ] Benchmark pure-runtime programs after each step.
@@ -345,32 +350,34 @@ Changes in this checkpoint:
   stack windows.
 - Added a unary closure fast path for Maybe/Result mapper callbacks.
 - Used a small fixed reflection input array for <=3-arity extern calls.
+- Reused locals and operand stack slices through a VM-local `sync.Pool`.
 
 Directional runtime benchmark snapshot:
 
 | Benchmark | bytecode VM | vm_next bytecode | vm_next delta |
 |---|---:|---:|---:|
-| `sales_pipeline` | 60.7 ms | 84.8 ms | 1.4x slower |
-| `shape_catalog` | 75.6 ms | 107.3 ms | 1.4x slower |
-| `decode_pipeline` | 230.4 ms | 766.5 ms | 3.3x slower |
-| `word_frequency_batch` | 49.5 ms | 75.0 ms | 1.5x slower |
-| `async_batches` | 12.8 ms | 11.4 ms | 1.1x faster |
-| `fs_batch` | 103.2 ms | 518.2 ms | 5.0x slower |
-| `sql_batch` | 45.1 ms | 81.0 ms | 1.8x slower |
+| `sales_pipeline` | 62.5 ms | 83.3 ms | 1.3x slower |
+| `shape_catalog` | 80.0 ms | 102.4 ms | 1.3x slower |
+| `decode_pipeline` | 231.6 ms | 743.8 ms | 3.2x slower |
+| `word_frequency_batch` | 47.6 ms | 76.3 ms | 1.6x slower |
+| `async_batches` | 13.4 ms | 12.1 ms | 1.1x faster |
+| `fs_batch` | 103.3 ms | 517.6 ms | 5.0x slower |
+| `sql_batch` | 43.3 ms | 71.8 ms | 1.7x slower |
 
 Profile highlights after temporary arg-slice removal:
 
-- `sales_pipeline`: temporary arg slices fell to 16; remaining dominant cost is
-  80,022 locals/stack allocations from bytecode frames.
+- `sales_pipeline`: temporary arg slices fell to 16; frame slice requests are
+  now served through pooling after warm-up.
 - `word_frequency_batch`: temporary arg slices fell to 20; remaining dominant
   opcode pattern is list iteration via repeated `ListSize`/`ListAt`.
-- `decode_pipeline`: temporary arg slices fell to 72,007, with 588,052
-  locals/stack allocations and reflective FFI still dominant.
-- `sql_batch`: temporary arg slices fell to 5, with reflective FFI and frame
-  allocation still visible.
+- `decode_pipeline`: temporary arg slices fell to 72,007, with reflective FFI and
+  high closure/frame traffic still dominant.
+- `sql_batch`: temporary arg slices fell to 5; reflective FFI and Result-heavy
+  control flow remain visible.
 
-Next Milestone 2 target: frame/local/stack reuse or a contiguous call stack,
-while preserving recursion and fiber safety.
+Next Milestone 2 target: decide whether to continue with contiguous frame/call
+stack work now, or move to FFI/value representation because pure temporary
+argument allocation is no longer dominant.
 
 ### Initial notes
 

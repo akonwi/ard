@@ -12,6 +12,41 @@ func NewWithBytecode(program *air.Program, externs HostFunctionRegistry) (*VM, e
 	return NewWithExterns(program, externs)
 }
 
+func (vm *VM) getValueSlice(length int) []Value {
+	if length <= 0 {
+		return nil
+	}
+	if raw := vm.valueSlices.Get(); raw != nil {
+		slice := raw.([]Value)
+		if cap(slice) >= length {
+			return slice[:length]
+		}
+	}
+	return make([]Value, length)
+}
+
+func (vm *VM) getValueStack(capacity int) []Value {
+	if capacity <= 0 {
+		return nil
+	}
+	if raw := vm.valueSlices.Get(); raw != nil {
+		slice := raw.([]Value)
+		if cap(slice) >= capacity {
+			return slice[:0]
+		}
+	}
+	return make([]Value, 0, capacity)
+}
+
+func (vm *VM) putValueSlice(slice []Value) {
+	if cap(slice) == 0 {
+		return
+	}
+	all := slice[:cap(slice)]
+	clear(all)
+	vm.valueSlices.Put(all[:0])
+}
+
 func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	if vm.bytecode == nil {
 		return Value{}, fmt.Errorf("vm_next bytecode program is not initialized")
@@ -27,7 +62,7 @@ func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 		vm.profile.RecordDirectCall(len(args), fn.Locals)
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
-	locals := make([]Value, fn.Locals)
+	locals := vm.getValueSlice(fn.Locals)
 	copy(locals, args)
 	return vm.runBytecodeWithLocals(id, locals)
 }
@@ -37,10 +72,14 @@ func (vm *VM) runBytecodeWithLocals(id air.FunctionID, locals []Value) (Value, e
 	if !ok {
 		return Value{}, fmt.Errorf("invalid bytecode function id %d", id)
 	}
+	defer vm.putValueSlice(locals)
 	if vm.profile != nil {
 		vm.profile.RecordStackAlloc(len(fn.Code))
 	}
-	stack := make([]Value, 0, len(fn.Code))
+	stack := vm.getValueStack(len(fn.Code))
+	defer func() {
+		vm.putValueSlice(stack)
+	}()
 	pop := func() (Value, error) {
 		if len(stack) == 0 {
 			return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
@@ -503,7 +542,7 @@ func (vm *VM) runBytecodeFromStack(id air.FunctionID, argc int, stack *[]Value) 
 		vm.profile.RecordDirectCall(argc, fn.Locals)
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
-	locals := make([]Value, fn.Locals)
+	locals := vm.getValueSlice(fn.Locals)
 	copy(locals, (*stack)[len(*stack)-argc:])
 	*stack = (*stack)[:len(*stack)-argc]
 	return vm.runBytecodeWithLocals(id, locals)
@@ -561,7 +600,7 @@ func (vm *VM) runBytecodeClosure1(closure *ClosureValue, arg Value) (Value, erro
 		vm.profile.RecordClosureCall(1, fn.Locals)
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
-	locals := make([]Value, fn.Locals)
+	locals := vm.getValueSlice(fn.Locals)
 	if fn.Locals > 0 {
 		locals[0] = arg
 	}
@@ -582,7 +621,7 @@ func (vm *VM) runBytecodeClosureWithFunction(closure *ClosureValue, fn *vmcode.F
 		vm.profile.RecordClosureCall(len(args), fn.Locals)
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
-	locals := make([]Value, fn.Locals)
+	locals := vm.getValueSlice(fn.Locals)
 	copy(locals, args)
 	for i, capture := range fn.Captures {
 		if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {

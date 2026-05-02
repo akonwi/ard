@@ -3,16 +3,18 @@ package vm_next
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/akonwi/ard/air"
 	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
 type VM struct {
-	program  *air.Program
-	bytecode *vmcode.Program
-	externs  hostExternAdapters
-	profile  *executionProfile
+	program     *air.Program
+	bytecode    *vmcode.Program
+	externs     hostExternAdapters
+	profile     *executionProfile
+	valueSlices sync.Pool
 }
 
 type TestStatus string
