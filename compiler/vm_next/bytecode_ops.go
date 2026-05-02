@@ -160,6 +160,29 @@ func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Valu
 	return out, nil
 }
 
+func (vm *VM) execBytecodeResultLocalOp(inst vmcode.Instruction, locals []Value) (Value, error) {
+	if inst.B < 0 || inst.B >= len(locals) {
+		return Value{}, fmt.Errorf("result local %d out of range", inst.B)
+	}
+	resultValue, err := locals[inst.B].resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	if inst.Op == vmcode.OpResultIsOkLocal {
+		return Bool(air.TypeID(inst.A), resultValue.Ok), nil
+	}
+	if inst.Op == vmcode.OpResultExpectLocal {
+		if !resultValue.Ok {
+			return Value{}, fmt.Errorf("expected Result to be ok")
+		}
+		return resultValue.Value, nil
+	}
+	if resultValue.Ok {
+		return Value{}, fmt.Errorf("expected Result error value")
+	}
+	return resultValue.Value, nil
+}
+
 func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
 	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
 	if err != nil {

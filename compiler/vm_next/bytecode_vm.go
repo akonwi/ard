@@ -513,12 +513,30 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			push(Int(air.TypeID(inst.A), int(unionValue.Tag)))
+		case vmcode.OpUnionTagLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
+			}
+			unionValue, err := locals[inst.B].unionValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Int(air.TypeID(inst.A), int(unionValue.Tag)))
 		case vmcode.OpUnionValue:
 			value, err := pop()
 			if err != nil {
 				return Value{}, err
 			}
 			unionValue, err := value.unionValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(unionValue.Value)
+		case vmcode.OpUnionValueLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
+			}
+			unionValue, err := locals[inst.B].unionValue()
 			if err != nil {
 				return Value{}, err
 			}
@@ -826,6 +844,12 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			push(Result(air.TypeID(inst.A), inst.Op == vmcode.OpMakeResultOk, value))
 		case vmcode.OpResultExpect, vmcode.OpResultErrValue, vmcode.OpResultOr, vmcode.OpResultIsOk, vmcode.OpResultIsErr, vmcode.OpResultMap, vmcode.OpResultMapErr, vmcode.OpResultAndThen:
 			value, err := vm.execBytecodeResultOp(inst, &stack)
+			if err != nil {
+				return Value{}, err
+			}
+			push(value)
+		case vmcode.OpResultExpectLocal, vmcode.OpResultErrValueLocal, vmcode.OpResultIsOkLocal:
+			value, err := vm.execBytecodeResultLocalOp(inst, locals)
 			if err != nil {
 				return Value{}, err
 			}

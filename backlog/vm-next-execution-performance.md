@@ -233,7 +233,7 @@ Recommended Milestone 2 feedback loop:
 
 ### Milestone 3: Value representation improvements
 
-Status: Pending
+Status: In progress
 
 The current `Value` representation boxes many common Ard values behind `Ref any`.
 This is simple but allocation-heavy and type-assertion-heavy.
@@ -290,11 +290,20 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     representation.
 - [ ] Reduce `Ref any` usage on hot paths.
   - [ ] Prefer typed heap references or tagged heap records.
+  - [x] Avoid repeated stack traffic and value assertions for local match
+    subjects by lowering Result and Union match probes/extractions to local
+    bytecode opcodes (`ResultIsOkLocal`, `ResultExpectLocal`,
+    `ResultErrValueLocal`, `UnionTagLocal`, and `UnionValueLocal`). This keeps
+    defensive validation but removes repeated `LoadLocal` + wrapper op pairs in
+    decode/shape/sql hot paths. A follow-up attempt to inline the Result-local
+    helper directly into the interpreter switch passed tests but worsened the
+    full 10-run suite, so the smaller helper-based form was retained.
   - [ ] Avoid repeated Go type assertions for validated value kinds.
 - [ ] Add cheaper zero-value handling.
   - [ ] Cache common zero values by `TypeID` where safe.
   - [ ] Avoid repeatedly scanning type tables for `Void`.
-- [ ] Benchmark decode/result-heavy and map/maybe-heavy workloads.
+- [x] Benchmark decode/result-heavy and map/maybe-heavy workloads after local
+  match subject opcodes.
 
 ### Milestone 4: Direct generated FFI adapters
 
@@ -709,6 +718,44 @@ Changes in this checkpoint:
 The biggest improvement in this run was `decode_pipeline`, consistent with its
 very high direct/closure frame volume. This suggests frame-local pool traffic was
 still meaningful after earlier argument and stack allocation work.
+
+### Milestone 3 local match-subject checkpoint
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 10 --warmup 3`
+
+Changes in this checkpoint:
+
+- Added local bytecode opcodes for Result match tests/extractions:
+  `ResultIsOkLocal`, `ResultExpectLocal`, and `ResultErrValueLocal`.
+- Added local bytecode opcodes for Union match tests/extractions:
+  `UnionTagLocal` and `UnionValueLocal`.
+- Lowered Result and Union matches to use these local subject operations instead
+  of repeated `LoadLocal` + generic wrapper operations.
+- Preserved runtime validation and wrapper semantics; this is a lowering and
+  dispatch optimization, not a representation change.
+
+10-run mean runtime benchmark snapshot:
+
+| Benchmark | vm_next bytecode |
+|---|---:|
+| `sales_pipeline` | 77.6 ms |
+| `shape_catalog` | 91.1 ms |
+| `decode_pipeline` | 381.5 ms |
+| `word_frequency_batch` | 78.1 ms |
+| `async_batches` | 12.9 ms |
+| `fs_batch` | 104.2 ms |
+| `sql_batch` | 55.0 ms |
+| **total** | **800.4 ms** |
+
+The local match opcodes reduced profiled `decode_pipeline` `LoadLocal` count from
+~5.10M to ~4.31M and improved the 10-run `decode_pipeline`/`shape_catalog`
+means relative to the value-allocation profiling checkpoint. The aggregate total
+is still close to the Milestone 2 locals-arena checkpoint, so larger remaining
+wins are likely in closure churn, Result allocation shape, and loop/scalar
+lowering.
 
 ### Initial notes
 

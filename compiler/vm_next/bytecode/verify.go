@@ -38,6 +38,14 @@ func verifyFunction(program *Program, fn *Function) error {
 			if inst.A < 0 || inst.A >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
 			}
+		case OpResultExpectLocal, OpResultErrValueLocal, OpResultIsOkLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: result local index out of range", fn.Name, ip)
+			}
+		case OpUnionTagLocal, OpUnionValueLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: union local index out of range", fn.Name, ip)
+			}
 		case OpGetFieldLocal:
 			if inst.B < 0 || inst.B >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
@@ -88,7 +96,9 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return 0, 0, nil
 	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal,
 		OpListSizeLocal, OpListAtLocal, OpListIndexLtLocal,
-		OpMapSizeLocal, OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal:
+		OpMapSizeLocal, OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal,
+		OpUnionTagLocal, OpUnionValueLocal,
+		OpResultExpectLocal, OpResultErrValueLocal, OpResultIsOkLocal:
 		return 0, 1, nil
 	case OpStoreLocal, OpPop:
 		return 1, 0, nil

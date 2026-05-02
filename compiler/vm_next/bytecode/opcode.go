@@ -48,7 +48,9 @@ const (
 	OpFiberJoin
 	OpUnionWrap
 	OpUnionTag
+	OpUnionTagLocal
 	OpUnionValue
+	OpUnionValueLocal
 	OpMakeList
 	OpListAt
 	OpListPrepend
@@ -98,9 +100,12 @@ const (
 	OpMakeResultOk
 	OpMakeResultErr
 	OpResultExpect
+	OpResultExpectLocal
 	OpResultErrValue
+	OpResultErrValueLocal
 	OpResultOr
 	OpResultIsOk
+	OpResultIsOkLocal
 	OpResultIsErr
 	OpResultMap
 	OpResultMapErr
@@ -204,8 +209,12 @@ func (op Opcode) String() string {
 		return "UnionWrap"
 	case OpUnionTag:
 		return "UnionTag"
+	case OpUnionTagLocal:
+		return "UnionTagLocal"
 	case OpUnionValue:
 		return "UnionValue"
+	case OpUnionValueLocal:
+		return "UnionValueLocal"
 	case OpMakeList:
 		return "MakeList"
 	case OpListAt:
@@ -304,12 +313,18 @@ func (op Opcode) String() string {
 		return "MakeResultErr"
 	case OpResultExpect:
 		return "ResultExpect"
+	case OpResultExpectLocal:
+		return "ResultExpectLocal"
 	case OpResultErrValue:
 		return "ResultErrValue"
+	case OpResultErrValueLocal:
+		return "ResultErrValueLocal"
 	case OpResultOr:
 		return "ResultOr"
 	case OpResultIsOk:
 		return "ResultIsOk"
+	case OpResultIsOkLocal:
+		return "ResultIsOkLocal"
 	case OpResultIsErr:
 		return "ResultIsErr"
 	case OpResultMap:

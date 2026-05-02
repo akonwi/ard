@@ -435,13 +435,11 @@ func (fl *functionLowerer) lowerUnionMatch(expr *air.Expr) error {
 	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
 	endJumps := []int{}
 	for _, matchCase := range expr.UnionCases {
-		fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
-		fl.emit(Instruction{Op: OpUnionTag, A: int(fl.mustTypeID(air.TypeInt))})
+		fl.emit(Instruction{Op: OpUnionTagLocal, A: int(fl.mustTypeID(air.TypeInt)), B: subjectLocal})
 		fl.emit(Instruction{Op: OpConstInt, A: int(fl.mustTypeID(air.TypeInt)), Imm: int(matchCase.Tag)})
 		fl.emit(Instruction{Op: OpEq, A: int(fl.mustTypeID(air.TypeBool))})
 		next := fl.emit(Instruction{Op: OpJumpIfFalse})
-		fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
-		fl.emit(Instruction{Op: OpUnionValue, A: int(expr.Type)})
+		fl.emit(Instruction{Op: OpUnionValueLocal, A: int(expr.Type), B: subjectLocal})
 		fl.emit(Instruction{Op: OpStoreLocal, A: int(matchCase.Local)})
 		if err := fl.lowerBlock(matchCase.Body, expr.Type); err != nil {
 			return err
@@ -469,19 +467,16 @@ func (fl *functionLowerer) lowerResultMatch(expr *air.Expr) error {
 		return err
 	}
 	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
-	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
-	fl.emit(Instruction{Op: OpResultIsOk, A: int(fl.mustTypeID(air.TypeBool))})
+	fl.emit(Instruction{Op: OpResultIsOkLocal, A: int(fl.mustTypeID(air.TypeBool)), B: subjectLocal})
 	jumpErr := fl.emit(Instruction{Op: OpJumpIfFalse})
-	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
-	fl.emit(Instruction{Op: OpResultExpect, A: int(expr.Type)})
+	fl.emit(Instruction{Op: OpResultExpectLocal, A: int(expr.Type), B: subjectLocal})
 	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.OkLocal)})
 	if err := fl.lowerBlock(expr.Ok, expr.Type); err != nil {
 		return err
 	}
 	jumpEnd := fl.emit(Instruction{Op: OpJump})
 	fl.patch(jumpErr, len(fl.code))
-	fl.emit(Instruction{Op: OpLoadLocal, A: subjectLocal})
-	fl.emit(Instruction{Op: OpResultErrValue, A: int(expr.Type)})
+	fl.emit(Instruction{Op: OpResultErrValueLocal, A: int(expr.Type), B: subjectLocal})
 	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.ErrLocal)})
 	if err := fl.lowerBlock(expr.Err, expr.Type); err != nil {
 		return err
