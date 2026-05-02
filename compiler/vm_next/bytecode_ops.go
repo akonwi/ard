@@ -1,0 +1,277 @@
+package vm_next
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/akonwi/ard/air"
+	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+)
+
+func (vm *VM) execBytecodeStrOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
+	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
+	if err != nil {
+		return Value{}, err
+	}
+	if target.Kind != ValueStr {
+		return Value{}, fmt.Errorf("string method target must be Str, got kind %d", target.Kind)
+	}
+	targetStr := target.Str
+	var out Value
+	switch inst.Op {
+	case vmcode.OpStrAt:
+		if len(args) != 1 || args[0].Kind != ValueInt {
+			return Value{}, fmt.Errorf("string index must be Int")
+		}
+		runes := []rune(targetStr)
+		if args[0].Int < 0 || args[0].Int >= len(runes) {
+			return Value{}, fmt.Errorf("string index out of range")
+		}
+		out = Str(air.TypeID(inst.A), string(runes[args[0].Int]))
+	case vmcode.OpStrSize:
+		out = Int(air.TypeID(inst.A), len(targetStr))
+	case vmcode.OpStrIsEmpty:
+		out = Bool(air.TypeID(inst.A), targetStr == "")
+	case vmcode.OpStrContains:
+		arg0, err := stringArg(args, 0)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Bool(air.TypeID(inst.A), strings.Contains(targetStr, arg0))
+	case vmcode.OpStrReplace:
+		arg0, arg1, err := stringArgs2(args)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Str(air.TypeID(inst.A), strings.Replace(targetStr, arg0, arg1, 1))
+	case vmcode.OpStrReplaceAll:
+		arg0, arg1, err := stringArgs2(args)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Str(air.TypeID(inst.A), strings.ReplaceAll(targetStr, arg0, arg1))
+	case vmcode.OpStrSplit:
+		arg0, err := stringArg(args, 0)
+		if err != nil {
+			return Value{}, err
+		}
+		parts := strings.Split(targetStr, arg0)
+		items := make([]Value, len(parts))
+		strType := vm.mustTypeID(air.TypeStr)
+		for i, part := range parts {
+			items[i] = Str(strType, part)
+		}
+		out = List(air.TypeID(inst.A), items)
+	case vmcode.OpStrStartsWith:
+		arg0, err := stringArg(args, 0)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Bool(air.TypeID(inst.A), strings.HasPrefix(targetStr, arg0))
+	case vmcode.OpStrTrim:
+		out = Str(air.TypeID(inst.A), strings.Trim(targetStr, " "))
+	default:
+		return Value{}, fmt.Errorf("unsupported string opcode %s", inst.Op)
+	}
+	*stack = (*stack)[:targetIndex]
+	return out, nil
+}
+
+func stringArg(args []Value, index int) (string, error) {
+	if index < 0 || index >= len(args) || args[index].Kind != ValueStr {
+		return "", fmt.Errorf("string method arg %d must be Str", index)
+	}
+	return args[index].Str, nil
+}
+
+func stringArgs2(args []Value) (string, string, error) {
+	left, err := stringArg(args, 0)
+	if err != nil {
+		return "", "", err
+	}
+	right, err := stringArg(args, 1)
+	if err != nil {
+		return "", "", err
+	}
+	return left, right, nil
+}
+
+func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
+	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
+	if err != nil {
+		return Value{}, err
+	}
+	maybeValue, err := target.maybeValue()
+	if err != nil {
+		return Value{}, err
+	}
+	var out Value
+	switch inst.Op {
+	case vmcode.OpMaybeExpect:
+		if maybeValue.Some {
+			out = maybeValue.Value
+			break
+		}
+		message := "expected Maybe to contain a value"
+		if len(args) > 0 {
+			message = args[0].GoValueString()
+		}
+		return Value{}, fmt.Errorf("%s", message)
+	case vmcode.OpMaybeIsNone:
+		out = Bool(air.TypeID(inst.A), !maybeValue.Some)
+	case vmcode.OpMaybeIsSome:
+		out = Bool(air.TypeID(inst.A), maybeValue.Some)
+	case vmcode.OpMaybeOr:
+		if maybeValue.Some {
+			out = maybeValue.Value
+			break
+		}
+		if len(args) != 1 {
+			return Value{}, fmt.Errorf("Maybe.or expects one fallback")
+		}
+		out = args[0]
+	case vmcode.OpMaybeMap, vmcode.OpMaybeAndThen:
+		if len(args) != 1 {
+			return Value{}, fmt.Errorf("Maybe closure method expects one function")
+		}
+		if !maybeValue.Some {
+			out = Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A))))
+			break
+		}
+		mapped, err := vm.callClosure1(args[0], maybeValue.Value)
+		if err != nil {
+			return Value{}, err
+		}
+		if inst.Op == vmcode.OpMaybeAndThen {
+			out = mapped
+		} else {
+			out = Maybe(air.TypeID(inst.A), true, mapped)
+		}
+	default:
+		return Value{}, fmt.Errorf("unsupported maybe opcode %s", inst.Op)
+	}
+	*stack = (*stack)[:targetIndex]
+	return out, nil
+}
+
+func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
+	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
+	if err != nil {
+		return Value{}, err
+	}
+	resultValue, err := target.resultValue()
+	if err != nil {
+		return Value{}, err
+	}
+	var out Value
+	switch inst.Op {
+	case vmcode.OpResultExpect:
+		if resultValue.Ok {
+			out = resultValue.Value
+			break
+		}
+		message := "expected Result to be ok"
+		if len(args) > 0 {
+			message = args[0].GoValueString()
+		}
+		return Value{}, fmt.Errorf("%s", message)
+	case vmcode.OpResultErrValue:
+		if resultValue.Ok {
+			return Value{}, fmt.Errorf("expected Result error value")
+		}
+		out = resultValue.Value
+	case vmcode.OpResultOr:
+		if resultValue.Ok {
+			out = resultValue.Value
+			break
+		}
+		if len(args) != 1 {
+			return Value{}, fmt.Errorf("Result.or expects one fallback")
+		}
+		out = args[0]
+	case vmcode.OpResultIsOk:
+		out = Bool(air.TypeID(inst.A), resultValue.Ok)
+	case vmcode.OpResultIsErr:
+		out = Bool(air.TypeID(inst.A), !resultValue.Ok)
+	case vmcode.OpResultMap:
+		if !resultValue.Ok {
+			out = Result(air.TypeID(inst.A), false, resultValue.Value)
+			break
+		}
+		mapped, err := vm.callClosure1(args[0], resultValue.Value)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Result(air.TypeID(inst.A), true, mapped)
+	case vmcode.OpResultMapErr:
+		if resultValue.Ok {
+			out = Result(air.TypeID(inst.A), true, resultValue.Value)
+			break
+		}
+		mapped, err := vm.callClosure1(args[0], resultValue.Value)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Result(air.TypeID(inst.A), false, mapped)
+	case vmcode.OpResultAndThen:
+		if !resultValue.Ok {
+			out = Result(air.TypeID(inst.A), false, resultValue.Value)
+			break
+		}
+		out, err = vm.callClosure1(args[0], resultValue.Value)
+		if err != nil {
+			return Value{}, err
+		}
+	default:
+		return Value{}, fmt.Errorf("unsupported result opcode %s", inst.Op)
+	}
+	*stack = (*stack)[:targetIndex]
+	return out, nil
+}
+
+func (vm *VM) execBytecodeTryResult(inst vmcode.Instruction, pop func() (Value, error), locals []Value) (value Value, jump int, returned bool, err error) {
+	target, err := pop()
+	if err != nil {
+		return Value{}, -1, false, err
+	}
+	resultValue, err := target.resultValue()
+	if err != nil {
+		return Value{}, -1, false, err
+	}
+	if resultValue.Ok {
+		return resultValue.Value, -1, false, nil
+	}
+	if inst.B >= 0 {
+		if inst.C >= 0 && inst.C < len(locals) {
+			locals[inst.C] = resultValue.Value
+		}
+		return Value{}, inst.B, false, nil
+	}
+	return Result(air.TypeID(inst.A), false, resultValue.Value), -1, true, nil
+}
+
+func (vm *VM) execBytecodeTryMaybe(inst vmcode.Instruction, pop func() (Value, error), locals []Value) (value Value, jump int, returned bool, err error) {
+	target, err := pop()
+	if err != nil {
+		return Value{}, -1, false, err
+	}
+	maybeValue, err := target.maybeValue()
+	if err != nil {
+		return Value{}, -1, false, err
+	}
+	if maybeValue.Some {
+		return maybeValue.Value, -1, false, nil
+	}
+	if inst.B >= 0 {
+		return Value{}, inst.B, false, nil
+	}
+	return Maybe(air.TypeID(inst.A), false, vm.bytecodeZeroMaybeForReturn(air.TypeID(inst.A))), -1, true, nil
+}
+
+func (vm *VM) bytecodeZeroMaybeForReturn(returnType air.TypeID) Value {
+	typeInfo, err := vm.typeInfo(returnType)
+	if err != nil || typeInfo.Kind != air.TypeMaybe {
+		return vm.zeroValue(vm.mustTypeID(air.TypeVoid))
+	}
+	return vm.zeroValue(typeInfo.Elem)
+}

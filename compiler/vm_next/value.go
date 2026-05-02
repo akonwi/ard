@@ -50,8 +50,10 @@ type ListValue struct {
 }
 
 type MapValue struct {
-	Type    air.TypeID
-	Entries []MapEntryValue
+	Type          air.TypeID
+	Entries       []MapEntryValue
+	SortedEntries []MapEntryValue
+	SortedDirty   bool
 }
 
 type MapEntryValue struct {
@@ -144,7 +146,7 @@ func List(typeID air.TypeID, items []Value) Value {
 }
 
 func Map(typeID air.TypeID, entries []MapEntryValue) Value {
-	return Value{Kind: ValueMap, Type: typeID, Ref: &MapValue{Type: typeID, Entries: entries}}
+	return Value{Kind: ValueMap, Type: typeID, Ref: &MapValue{Type: typeID, Entries: entries, SortedDirty: true}}
 }
 
 func Result(typeID air.TypeID, ok bool, value Value) Value {

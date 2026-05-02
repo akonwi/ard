@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
@@ -89,16 +90,26 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetVMNext:
-				module, err := loadModule(inputPath, target)
-				if err != nil {
+				profile := newPipelineProfile("run vm_next")
+				defer profile.Print()
+				var module checker.Module
+				if err := profile.Time("frontend.load_module", func() error {
+					var loadErr error
+					module, loadErr = loadModule(inputPath, target)
+					return loadErr
+				}); err != nil {
 					os.Exit(1)
 				}
-				program, err := air.Lower(module)
-				if err != nil {
+				var program *air.Program
+				if err := profile.Time("air.lower", func() error {
+					var lowerErr error
+					program, lowerErr = air.Lower(module)
+					return lowerErr
+				}); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
-				if err := runVMNextProgram(program, os.Args); err != nil {
+				if err := runVMNextProgramProfile(program, os.Args, profile); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -694,29 +705,47 @@ func buildBytecodeBinary(inputPath string, outputPath string, target string) (st
 }
 
 func buildVMNextBinary(inputPath string, outputPath string) (string, error) {
-	module, err := loadModule(inputPath, backend.TargetVMNext)
-	if err != nil {
+	profile := newPipelineProfile("build vm_next")
+	defer profile.Print()
+	var module checker.Module
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		module, loadErr = loadModule(inputPath, backend.TargetVMNext)
+		return loadErr
+	}); err != nil {
 		return "", err
 	}
-	program, err := air.Lower(module)
-	if err != nil {
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(module)
+		return lowerErr
+	}); err != nil {
 		return "", err
 	}
-	if err := air.Validate(program); err != nil {
+	if err := profile.Time("air.validate", func() error {
+		return air.Validate(program)
+	}); err != nil {
 		return "", err
 	}
 	if program.Entry == air.NoFunction {
 		return "", fmt.Errorf("vm_next builds require fn main()")
 	}
-	data, err := air.SerializeProgram(program)
-	if err != nil {
+	var data []byte
+	if err := profile.Time("air.serialize", func() error {
+		var serializeErr error
+		data, serializeErr = air.SerializeProgram(program)
+		return serializeErr
+	}); err != nil {
 		return "", err
 	}
 	selfPath, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	if err := writeEmbeddedBinary(selfPath, outputPath, vmNextFooterMarker, data); err != nil {
+	if err := profile.Time("embed.write_binary", func() error {
+		return writeEmbeddedBinary(selfPath, outputPath, vmNextFooterMarker, data)
+	}); err != nil {
 		return "", err
 	}
 	return outputPath, nil
@@ -753,16 +782,24 @@ func maybeRunEmbedded() bool {
 			os.Exit(1)
 		}
 	case vmNextFooterMarker:
-		program, err := air.DeserializeProgram(data)
-		if err != nil {
+		profile := newPipelineProfile("embedded vm_next")
+		defer profile.Print()
+		var program *air.Program
+		if err := profile.Time("air.deserialize", func() error {
+			var deserializeErr error
+			program, deserializeErr = air.DeserializeProgram(data)
+			return deserializeErr
+		}); err != nil {
 			fmt.Fprintln(os.Stderr, "Failed to deserialize vm_next AIR:", err)
 			os.Exit(1)
 		}
-		if err := air.Validate(program); err != nil {
+		if err := profile.Time("air.validate", func() error {
+			return air.Validate(program)
+		}); err != nil {
 			fmt.Fprintln(os.Stderr, "Invalid vm_next AIR:", err)
 			os.Exit(1)
 		}
-		if runErr := runVMNextProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
+		if runErr := runVMNextProgramProfile(program, argsForEmbeddedProgram(os.Args), profile); runErr != nil {
 			fmt.Fprintln(os.Stderr, runErr)
 			os.Exit(1)
 		}
@@ -799,19 +836,34 @@ func runBytecodeProgram(program bytecode.Program, args []string) error {
 }
 
 func runVMNextProgram(program *air.Program, args []string) error {
+	return runVMNextProgramProfile(program, args, nil)
+}
+
+func runVMNextProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
 	runtime.SetOSArgs(args)
 	defer runtime.SetOSArgs(nil)
 
-	vm, err := vm_next.New(program)
-	if err != nil {
+	var vm *vm_next.VM
+	if err := profile.Time("vm_next.init", func() error {
+		var initErr error
+		vm, initErr = vm_next.New(program)
+		return initErr
+	}); err != nil {
 		return err
 	}
-	if program.Entry != air.NoFunction {
-		_, err = vm.RunEntry()
+	var err error
+	runErr := profile.Time("vm_next.run", func() error {
+		if program.Entry != air.NoFunction {
+			_, err = vm.RunEntry()
+			return err
+		}
+		_, err = vm.RunScript()
 		return err
+	})
+	if report := vm.ProfileReport(); report != "" {
+		fmt.Fprintln(os.Stderr, report)
 	}
-	_, err = vm.RunScript()
-	return err
+	return runErr
 }
 
 func writeEmbeddedBinary(srcPath string, dstPath string, marker string, data []byte) error {
@@ -897,4 +949,63 @@ func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
 		return "", nil, err
 	}
 	return marker, data, nil
+}
+
+const pipelineProfileEnvVar = "ARD_PIPELINE_PROFILE"
+
+type pipelineProfile struct {
+	scope   string
+	started time.Time
+	stages  []pipelineProfileStage
+}
+
+type pipelineProfileStage struct {
+	name string
+	dur  time.Duration
+}
+
+func newPipelineProfile(scope string) *pipelineProfile {
+	if !pipelineProfilingEnabled() {
+		return nil
+	}
+	return &pipelineProfile{scope: scope, started: time.Now()}
+}
+
+func pipelineProfilingEnabled() bool {
+	raw, ok := os.LookupEnv(pipelineProfileEnvVar)
+	if !ok {
+		return false
+	}
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	return raw != "" && raw != "0" && raw != "false" && raw != "off"
+}
+
+func (p *pipelineProfile) Time(name string, fn func() error) error {
+	if p == nil {
+		return fn()
+	}
+	started := time.Now()
+	err := fn()
+	p.stages = append(p.stages, pipelineProfileStage{name: name, dur: time.Since(started)})
+	return err
+}
+
+func (p *pipelineProfile) Print() {
+	if p == nil {
+		return
+	}
+	fmt.Fprintln(os.Stderr, p.Report())
+}
+
+func (p *pipelineProfile) Report() string {
+	if p == nil {
+		return ""
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "[ard pipeline profile: %s]\n", p.scope)
+	fmt.Fprintf(&out, "total=%s\n", time.Since(p.started).Round(time.Microsecond))
+	for _, stage := range p.stages {
+		fmt.Fprintf(&out, "%s=%s\n", stage.name, stage.dur.Round(time.Microsecond))
+	}
+	return strings.TrimRight(out.String(), "\n")
 }

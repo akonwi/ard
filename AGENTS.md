@@ -1,12 +1,11 @@
 # AGENTS.md
 
-This file provides guidance to a coding agent.
-
 ## Project Summary
-This is the source code for the parser, compiler, bytecode VM, and documentation website of a programming language called Ard.
+This is the source code for the Ard programming language.
 
 ### Repo structure
 This is a monorepo with the following top-level directories:
+- /backlog: research and documentation for ideas
 - /compiler: The Ard language compiler, parser, type checker, and runtime VM
   - /compiler/docs: documentation about language syntax, feature design, and implementation decisions
   - /compiler/samples: runnable Ard program samples
@@ -16,8 +15,17 @@ This is a monorepo with the following top-level directories:
   - /compiler/std_lib: standard library definitions
   - /compiler/main.go: compiler CLI entry point
   - /compiler/go.mod & go.sum: Go module dependencies for the compiler
+- /tree-sitter-ard: tree-sitter grammar for Ard (used for the zed plugin and syntax highlighting)
 - /website: the documentation website built with Astro and Starlight as a static site
-- TODO.md: The running backlog of bugs, refactorings, and new feature ideas
+- /zed-plugin: plugin for the Zed editor
+- TODO.md: The running backlog of bugs, refactorings, and new feature ideas. more detail on entries usually reside in /backlog
+
+## Philosophy
+
+- Code quality is important. Do not take shortcuts or create hard to maintain problems.
+- Be pragmatic and solution oriented
+- Test Driven Development: use tests to guide implmeentation
+  - when working on bugs, start with test reproduction. tests also add documentation of the case for future reference
 
 ## Commands
 The project uses the `jsonv2` experiment for the [new json tools](https://antonz.org/go-json-v2/) and has build tag directives for it.
@@ -35,7 +43,6 @@ All commands should be run from the `/compiler` directory:
 - Generate FFI registry: `cd compiler && go generate ./bytecode/vm` (run when adding new FFI functions)
 
 ## Instructions
-- When searching the codebase, use the codanna tool first and only grep or use search CLI commands if codanna doesn't yield results
 - use the gopls tool (Go language server) to get diagnostics and compilation info
 
 ## Code Style Guidelines
