@@ -817,7 +817,7 @@ Status: Done
 
 ### Milestone 8: vm_next parity
 
-Status: In progress
+Status: Done
 
 - [x] Separate program entry execution from script execution with
   `vm_next.RunEntry` and `vm_next.RunScript`.
@@ -879,8 +879,11 @@ Status: In progress
   - `vm_next` participates in CLI-mode benchmarks through
     `ard run --target vm_next`; runtime-mode binary comparisons remain
     bytecode/Go/JS/native-Go until `vm_next` has a buildable executable artifact.
-- [ ] Add conformance tests that can run against current VM, `vm_next`, and later
-  `go_next`.
+- [x] Do not add a separate conformance harness for this milestone.
+  - Coverage comes from the `vm_next` parity tests, `ard run --target vm_next`
+    sample execution, and CLI benchmark participation.
+  - Later `go_next` work can reuse those same samples and parity cases instead
+    of introducing another parallel suite now.
 
 ### Post-Milestone 8: userland FFI workflow
 
