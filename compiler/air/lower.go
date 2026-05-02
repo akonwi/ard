@@ -484,6 +484,7 @@ func (fl *functionLowerer) internType(t checker.Type) (TypeID, error) {
 		if id, ok := fl.typeVars[tv.Name()]; ok {
 			return id, nil
 		}
+		return fl.l.internType(checker.Void)
 	}
 	if !typeHasUnresolvedTypeVar(t) {
 		return fl.l.internType(t)
@@ -1322,6 +1323,9 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 	if ifExpr, ok := expr.(*checker.If); ok {
 		return fl.lowerIf(expected, ifExpr)
 	}
+	if match, ok := expr.(*checker.ConditionalMatch); ok {
+		return fl.lowerConditionalMatch(expected, match)
+	}
 	return fl.lowerExpr(expr)
 }
 
@@ -1472,11 +1476,17 @@ func (fl *functionLowerer) lowerStmts(stmt checker.Statement) ([]Stmt, error) {
 	if loop, ok := stmt.Stmt.(*checker.ForIntRange); ok {
 		return fl.lowerForIntRange(loop)
 	}
+	if loop, ok := stmt.Stmt.(*checker.ForInStr); ok {
+		return fl.lowerForInStr(loop)
+	}
 	if loop, ok := stmt.Stmt.(*checker.ForInList); ok {
 		return fl.lowerForInList(loop)
 	}
 	if loop, ok := stmt.Stmt.(*checker.ForInMap); ok {
 		return fl.lowerForInMap(loop)
+	}
+	if loop, ok := stmt.Stmt.(*checker.ForLoop); ok {
+		return fl.lowerForLoop(loop)
 	}
 	lowered, err := fl.lowerStmt(stmt)
 	if err != nil || lowered == nil {
@@ -1556,6 +1566,76 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 	stmts = append(stmts, Stmt{
 		Kind:      StmtWhile,
 		Condition: &Expr{Kind: ExprLte, Type: boolType, Left: loadLocal(intType, counter), Right: loadLocal(intType, endLocal)},
+		Body:      body,
+	})
+	return stmts, nil
+}
+
+func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error) {
+	strType, err := fl.l.internType(checker.Str)
+	if err != nil {
+		return nil, err
+	}
+	intType, err := fl.l.internType(checker.Int)
+	if err != nil {
+		return nil, err
+	}
+	boolType, err := fl.l.internType(checker.Bool)
+	if err != nil {
+		return nil, err
+	}
+	str, err := fl.lowerExprWithExpected(loop.Value, strType)
+	if err != nil {
+		return nil, err
+	}
+
+	strLocal := fl.defineLocal(loop.Cursor+"$str", strType, false)
+	indexName := loop.Cursor + "$index"
+	if loop.Index != "" {
+		indexName = loop.Index + "$index"
+	}
+	index := fl.defineLocal(indexName, intType, true)
+	cursor := fl.defineLocal(loop.Cursor, strType, false)
+	var visibleIndex LocalID
+	if loop.Index != "" {
+		visibleIndex = fl.defineLocal(loop.Index, intType, false)
+	}
+
+	stmts := []Stmt{
+		{Kind: StmtLet, Local: strLocal, Name: loop.Cursor + "$str", Type: strType, Value: str},
+		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
+	}
+
+	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	iterationLocals := []Stmt{{
+		Kind:  StmtLet,
+		Local: cursor,
+		Name:  loop.Cursor,
+		Type:  strType,
+		Value: &Expr{Kind: ExprStrAt, Type: strType, Target: loadLocal(strType, strLocal), Args: []Expr{*loadLocal(intType, index)}},
+	}}
+	if loop.Index != "" {
+		iterationLocals = append(iterationLocals, Stmt{
+			Kind:  StmtLet,
+			Local: visibleIndex,
+			Name:  loop.Index,
+			Type:  intType,
+			Value: loadLocal(intType, index),
+		})
+	}
+	body.Stmts = append(iterationLocals, body.Stmts...)
+	body.Stmts = append(body.Stmts, Stmt{
+		Kind:  StmtAssign,
+		Local: index,
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+	})
+
+	stmts = append(stmts, Stmt{
+		Kind:      StmtWhile,
+		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprStrSize, Type: intType, Target: loadLocal(strType, strLocal)}},
 		Body:      body,
 	})
 	return stmts, nil
@@ -1693,6 +1773,27 @@ func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error)
 	return stmts, nil
 }
 
+func (fl *functionLowerer) lowerForLoop(loop *checker.ForLoop) ([]Stmt, error) {
+	init, err := fl.lowerStmt(checker.Statement{Stmt: loop.Init})
+	if err != nil {
+		return nil, err
+	}
+	condition, err := fl.lowerExpr(loop.Condition)
+	if err != nil {
+		return nil, err
+	}
+	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
+	if err != nil {
+		return nil, err
+	}
+	update, err := fl.lowerStmt(checker.Statement{Stmt: loop.Update})
+	if err != nil {
+		return nil, err
+	}
+	body.Stmts = append(body.Stmts, *update)
+	return []Stmt{*init, Stmt{Kind: StmtWhile, Condition: condition, Body: body}}, nil
+}
+
 func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Block, error) {
 	var block Block
 	for _, stmt := range stmts {
@@ -1706,6 +1807,16 @@ func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Bl
 }
 
 func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
+	if e, ok := expr.(*checker.Identifier); ok {
+		local, ok, err := fl.resolveLocal(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("unknown local %s", e.Name)
+		}
+		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}, nil
+	}
 	if e, ok := expr.(*checker.Variable); ok {
 		local, ok, err := fl.resolveLocal(e.Name())
 		if err != nil {
@@ -2010,11 +2121,57 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprNeg, Type: typeID, Target: value}, nil
+	case *checker.Block:
+		body, err := fl.lowerBlockWithDefault(e.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprBlock, Type: typeID, Body: body}, nil
 	case *checker.If:
 		return fl.lowerIf(typeID, e)
+	case *checker.ConditionalMatch:
+		return fl.lowerConditionalMatch(typeID, e)
 	default:
 		return nil, fmt.Errorf("unsupported AIR expression %T", expr)
 	}
+}
+
+func (fl *functionLowerer) lowerConditionalMatch(typeID TypeID, match *checker.ConditionalMatch) (*Expr, error) {
+	return fl.lowerConditionalCases(typeID, match.Cases, match.CatchAll)
+}
+
+func (fl *functionLowerer) lowerConditionalCases(typeID TypeID, cases []checker.ConditionalCase, catchAll *checker.Block) (*Expr, error) {
+	if len(cases) == 0 {
+		body := Block{}
+		if catchAll != nil {
+			var err error
+			body, err = fl.lowerBlockWithDefault(catchAll.Stmts, typeID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &Expr{Kind: ExprBlock, Type: typeID, Body: body}, nil
+	}
+
+	condition, err := fl.lowerExpr(cases[0].Condition)
+	if err != nil {
+		return nil, err
+	}
+	thenBlock, err := fl.lowerBlockWithDefault(cases[0].Body.Stmts, typeID)
+	if err != nil {
+		return nil, err
+	}
+	elseExpr, err := fl.lowerConditionalCases(typeID, cases[1:], catchAll)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{
+		Kind:      ExprIf,
+		Type:      typeID,
+		Condition: condition,
+		Then:      thenBlock,
+		Else:      Block{Result: elseExpr},
+	}, nil
 }
 
 func (fl *functionLowerer) lowerIf(typeID TypeID, expr *checker.If) (*Expr, error) {

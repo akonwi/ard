@@ -373,6 +373,11 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprBlock {
+		if err := validateBlock(program, fn, expr.Body); err != nil {
+			return err
+		}
+	}
 	if expr.Kind == ExprIf {
 		if err := validateBlock(program, fn, expr.Then); err != nil {
 			return err

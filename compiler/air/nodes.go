@@ -82,6 +82,7 @@ const (
 	ExprFloatDiv
 	ExprStrConcat
 	ExprToStr
+	ExprStrAt
 	ExprStrSize
 	ExprStrIsEmpty
 	ExprStrContains
@@ -101,6 +102,7 @@ const (
 	ExprOr
 	ExprNot
 	ExprNeg
+	ExprBlock
 	ExprIf
 	ExprMakeResultOk
 	ExprMakeResultErr
@@ -160,6 +162,7 @@ type Expr struct {
 	Right *Expr
 
 	Condition *Expr
+	Body      Block
 	Then      Block
 	Else      Block
 

@@ -822,6 +822,22 @@ Status: In progress
 - [x] Separate program entry execution from script execution with
   `vm_next.RunEntry` and `vm_next.RunScript`.
 - [ ] Run current VM behavioral tests against `vm_next`.
+  - [x] Add `vm_next` parity coverage for the current bytecode VM's pure
+    language/runtime regression cases: expressions, block expressions, function
+    calls, nullable argument wrapping, `try`, `Maybe`, `Result`, lists, maps,
+    loops, matching, structs, enums, unions, generic equality, type helper
+    methods, and Maybe propagation through `try`.
+  - [x] Close parity gaps exposed by those tests: AIR block expressions,
+    C-style `for` loops, string iteration, conditional matches, sorted map
+    iteration, checker `Identifier` locals in optional property chains, and
+    concrete `Void` layouts for uninhabited generic values like `none` and
+    error-only `Result` expressions.
+  - [ ] Port bytecode VM host-capability tests where they apply to the new FFI
+    model: dynamic/decode/json, crypto, env, fs, http, io, sql, duration, and
+    async timing behavior.
+  - [ ] Decide which bytecode VM internal tests are intentionally not copied
+    because they validate old registry/type-resolver/profile implementation
+    details rather than Ard runtime behavior.
 - [x] Support `ard run --target vm_next` for all `vm_next`-targetable sample
   programs.
   - Core samples cover template strings, list/map methods, list/map iteration,

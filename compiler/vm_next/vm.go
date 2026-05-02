@@ -359,6 +359,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		return f.evalToStr(expr)
 	case air.ExprToDynamic:
 		return f.evalToDynamic(expr)
+	case air.ExprStrAt:
+		return f.evalStrAt(expr)
 	case air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
 		return f.evalStrMethod(expr)
 	case air.ExprEq, air.ExprNotEq:
@@ -386,6 +388,8 @@ func (f *frame) evalExpr(expr air.Expr) (Value, error) {
 		default:
 			return Value{}, fmt.Errorf("cannot negate value kind %d", target.Kind)
 		}
+	case air.ExprBlock:
+		return f.evalBlockWithDefault(expr.Body, expr.Type)
 	case air.ExprIf:
 		condition, err := f.evalExprPtr(expr.Condition)
 		if err != nil {
@@ -702,6 +706,31 @@ func (f *frame) evalStrMethod(expr air.Expr) (Value, error) {
 	}
 }
 
+func (f *frame) evalStrAt(expr air.Expr) (Value, error) {
+	target, err := f.evalExprPtr(expr.Target)
+	if err != nil {
+		return Value{}, err
+	}
+	if target.Kind != ValueStr {
+		return Value{}, fmt.Errorf("string index target must be Str, got kind %d", target.Kind)
+	}
+	if len(expr.Args) != 1 {
+		return Value{}, fmt.Errorf("string index expects one argument, got %d", len(expr.Args))
+	}
+	index, err := f.evalExpr(expr.Args[0])
+	if err != nil {
+		return Value{}, err
+	}
+	if index.Kind != ValueInt {
+		return Value{}, fmt.Errorf("string index must be Int, got kind %d", index.Kind)
+	}
+	runes := []rune(target.Str)
+	if index.Int < 0 || index.Int >= len(runes) {
+		return Value{}, fmt.Errorf("string index out of range")
+	}
+	return Str(expr.Type, string(runes[index.Int])), nil
+}
+
 func (f *frame) evalStrMethodArgs(expr air.Expr) (string, []string, error) {
 	target, err := f.evalExprPtr(expr.Target)
 	if err != nil {
@@ -944,10 +973,20 @@ func (f *frame) evalMapEntryAt(expr air.Expr, key bool) (Value, error) {
 	if index < 0 || index >= len(mapValue.Entries) {
 		return Value{}, fmt.Errorf("map entry index out of range")
 	}
+	entries := sortedMapEntries(mapValue)
 	if key {
-		return mapValue.Entries[index].Key, nil
+		return entries[index].Key, nil
 	}
-	return mapValue.Entries[index].Value, nil
+	return entries[index].Value, nil
+}
+
+func sortedMapEntries(mapValue *MapValue) []MapEntryValue {
+	entries := make([]MapEntryValue, len(mapValue.Entries))
+	copy(entries, mapValue.Entries)
+	sort.SliceStable(entries, func(i, j int) bool {
+		return valuesLess(entries[i].Key, entries[j].Key)
+	})
+	return entries
 }
 
 func (f *frame) evalMapMethodArgs(expr air.Expr, wantArgs int) (*MapValue, []Value, error) {
