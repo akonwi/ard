@@ -212,11 +212,11 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 	if err != nil {
 		return err
 	}
-	if target == anyInterface && typeInfo.Kind != air.TypeDynamic && typeInfo.Kind != air.TypeExtern && typeInfo.Kind != air.TypeUnion {
+	if target == anyInterface && typeInfo.Kind != air.TypeDynamic && typeInfo.Kind != air.TypeExtern && typeInfo.Kind != air.TypeUnion && !vm.isEncodableTraitObject(typeInfo) {
 		if param {
-			return fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, and union extern values, got %s", typeInfo.Name)
+			return fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, union, and Encodable trait extern values, got %s", typeInfo.Name)
 		}
-		return fmt.Errorf("empty interface returns are only supported for Dynamic, extern, and union extern values, got %s", typeInfo.Name)
+		return fmt.Errorf("empty interface returns are only supported for Dynamic, extern, union, and Encodable trait extern values, got %s", typeInfo.Name)
 	}
 	switch typeInfo.Kind {
 	case air.TypeVoid:
@@ -249,6 +249,10 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 			return nil
 		}
 		return fmt.Errorf("union %s must use host any until generated tagged union adapters exist, got %s", typeInfo.Name, target)
+	case air.TypeTraitObject:
+		if target == anyInterface && vm.isEncodableTraitObject(typeInfo) {
+			return nil
+		}
 	case air.TypeList:
 		if target.Kind() != reflect.Slice {
 			return fmt.Errorf("list %s must use host slice, got %s", typeInfo.Name, target)
@@ -383,6 +387,9 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	if value.Kind == ValueUnion && target.Kind() == reflect.Interface && target.NumMethod() == 0 {
 		return vm.unionToHost(value, target)
 	}
+	if value.Kind == ValueTraitObject && target.Kind() == reflect.Interface && target.NumMethod() == 0 {
+		return vm.traitObjectToHost(value, target)
+	}
 	if value.Kind == ValueClosure && isHostCallbackType(target) {
 		return vm.closureToHostCallback(value, target)
 	}
@@ -400,7 +407,7 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, and union extern values, got %s", typeInfo.Name)
+		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, union, and Encodable trait extern values, got %s", typeInfo.Name)
 	}
 	if target.Kind() == reflect.Pointer {
 		if value.Kind == ValueStruct {
@@ -732,6 +739,46 @@ func (vm *VM) unionToHost(value Value, target reflect.Type) (reflect.Value, erro
 		}
 		return reflect.Value{}, fmt.Errorf("cannot pass union member %s as host any", typeInfo.Name)
 	}
+}
+
+func (vm *VM) traitObjectToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	typeInfo, err := vm.typeInfo(value.Type)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if !vm.isEncodableTraitObject(typeInfo) {
+		return reflect.Value{}, fmt.Errorf("trait object %s cannot be passed as host any", typeInfo.Name)
+	}
+	traitObject, err := value.traitObjectValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	switch traitObject.Value.Kind {
+	case ValueInt:
+		return reflect.ValueOf(traitObject.Value.Int), nil
+	case ValueFloat:
+		return reflect.ValueOf(traitObject.Value.Float), nil
+	case ValueBool:
+		return reflect.ValueOf(traitObject.Value.Bool), nil
+	case ValueStr:
+		return reflect.ValueOf(traitObject.Value.Str), nil
+	default:
+		memberInfo, err := vm.typeInfo(traitObject.Value.Type)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		return reflect.Value{}, fmt.Errorf("Encodable member %s cannot be passed as host any", memberInfo.Name)
+	}
+}
+
+func (vm *VM) isEncodableTraitObject(typeInfo air.TypeInfo) bool {
+	if typeInfo.Kind != air.TypeTraitObject {
+		return false
+	}
+	if typeInfo.Trait < 0 || int(typeInfo.Trait) >= len(vm.program.Traits) {
+		return false
+	}
+	return vm.program.Traits[typeInfo.Trait].Name == "Encodable"
 }
 
 func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.Value, error) {
