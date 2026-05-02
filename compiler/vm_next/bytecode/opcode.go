@@ -55,6 +55,9 @@ const (
 	OpListPush
 	OpListSet
 	OpListSize
+	OpListSizeLocal
+	OpListAtLocal
+	OpListIndexLtLocal
 	OpListSort
 	OpListSwap
 	OpMakeMap
@@ -210,6 +213,12 @@ func (op Opcode) String() string {
 		return "ListSet"
 	case OpListSize:
 		return "ListSize"
+	case OpListSizeLocal:
+		return "ListSizeLocal"
+	case OpListAtLocal:
+		return "ListAtLocal"
+	case OpListIndexLtLocal:
+		return "ListIndexLtLocal"
 	case OpListSort:
 		return "ListSort"
 	case OpListSwap:

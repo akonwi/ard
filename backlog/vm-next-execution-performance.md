@@ -245,10 +245,12 @@ Status: Pending
 Current list/map operations are expressed as generic method-like AIR operations,
 and map storage is a linear entry list.
 
-- [ ] Add explicit bytecode instructions or lowered operations for list
+- [x] Add explicit bytecode instructions or lowered operations for list
   iteration.
-  - [ ] Avoid repeated `list.size()`/`list.at()` patterns for `for item in list`.
-  - [ ] Support index-producing list loops without extra method overhead.
+  - [x] Avoid repeated method-style `list.size()`/`list.at()` patterns for
+    `for item in list` by lowering local-list size/index access to specialized
+    bytecode opcodes.
+  - [x] Support index-producing list loops without extra method overhead.
 - [ ] Add explicit map iteration support.
   - [ ] Avoid sorting/copying entries more often than necessary.
   - [ ] Preserve deterministic iteration order.
@@ -430,6 +432,45 @@ Next Milestone 2 target: locals are still copied per call/frame. Consider a
 locals arena or direct scalar/local fast paths only if profiles show further
 call-heavy wins; otherwise move to list iteration, FFI, and Maybe/Result value
 representation.
+
+### List iteration bytecode fast-path snapshot
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 1 --warmup 0`
+
+Changes in this checkpoint:
+
+- Added `ListSizeLocal`, `ListAtLocal`, and `ListIndexLtLocal` bytecode opcodes.
+- Lowered `list.size()`, `list.at(index)`, and `index < list.size()` patterns
+  against locals to specialized instructions.
+- Preserved dynamic loop-size semantics: the list length is still checked each
+  loop condition rather than cached once up front.
+
+Directional runtime benchmark snapshot:
+
+| Benchmark | bytecode VM | vm_next bytecode | vm_next delta |
+|---|---:|---:|---:|
+| `sales_pipeline` | 63.2 ms | 79.1 ms | 1.3x slower |
+| `shape_catalog` | 78.9 ms | 96.2 ms | 1.2x slower |
+| `decode_pipeline` | 239.8 ms | 652.1 ms | 2.7x slower |
+| `word_frequency_batch` | 52.9 ms | 77.7 ms | 1.5x slower |
+| `async_batches` | 13.3 ms | 12.8 ms | parity |
+| `fs_batch` | 103.2 ms | 520.7 ms | 5.0x slower |
+| `sql_batch` | 46.5 ms | 66.0 ms | 1.4x slower |
+
+Profile highlights:
+
+- `word_frequency_batch`: repeated list iteration opcodes changed from
+  `ListSize`/`ListAt` method-style ops to `ListIndexLtLocal`/`ListAtLocal`; top
+  opcode `LoadLocal` dropped by roughly another 120k in the profile sample.
+- `decode_pipeline` and `sql_batch` still improve slightly because general local
+  list-size/index patterns are also cheaper, but reflective FFI remains the
+  dominant bottleneck.
+
+Next target: either continue specializing hot loop/control-flow opcodes, or move
+back to FFI and `Maybe`/`Result` value representation for decode/sql/fs.
 
 ### Initial notes
 

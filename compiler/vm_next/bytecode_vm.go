@@ -509,6 +509,45 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			push(List(air.TypeID(inst.A), items))
+		case vmcode.OpListSizeLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: list local %d out of range", fn.Name, inst.B)
+			}
+			listValue, err := locals[inst.B].listValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Int(air.TypeID(inst.A), len(listValue.Items)))
+		case vmcode.OpListAtLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
+			}
+			listValue, err := locals[inst.B].listValue()
+			if err != nil {
+				return Value{}, err
+			}
+			indexValue := locals[inst.C]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("list index must be Int")
+			}
+			index := indexValue.Int
+			if index < 0 || index >= len(listValue.Items) {
+				return Value{}, fmt.Errorf("list index out of range")
+			}
+			push(listValue.Items[index])
+		case vmcode.OpListIndexLtLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
+			}
+			indexValue := locals[inst.B]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("list index must be Int")
+			}
+			listValue, err := locals[inst.C].listValue()
+			if err != nil {
+				return Value{}, err
+			}
+			push(Bool(air.TypeID(inst.A), indexValue.Int < len(listValue.Items)))
 		case vmcode.OpListAt, vmcode.OpListPrepend, vmcode.OpListPush, vmcode.OpListSet, vmcode.OpListSize, vmcode.OpListSort, vmcode.OpListSwap:
 			value, err := vm.execBytecodeListOp(inst, &stack)
 			if err != nil {

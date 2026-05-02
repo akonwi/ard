@@ -545,6 +545,14 @@ func (fl *functionLowerer) lowerTryOp(expr *air.Expr, op Opcode) error {
 }
 
 func (fl *functionLowerer) lowerListOp(expr *air.Expr) error {
+	if expr.Kind == air.ExprListSize && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 0 {
+		fl.emit(Instruction{Op: OpListSizeLocal, A: int(expr.Type), B: int(expr.Target.Local)})
+		return nil
+	}
+	if expr.Kind == air.ExprListAt && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 && expr.Args[0].Kind == air.ExprLoadLocal {
+		fl.emit(Instruction{Op: OpListAtLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+		return nil
+	}
 	if err := fl.lowerExpr(expr.Target); err != nil {
 		return err
 	}
@@ -706,6 +714,10 @@ func mapOpcode(kind air.ExprKind) Opcode {
 }
 
 func (fl *functionLowerer) lowerBinary(expr *air.Expr) error {
+	if expr.Kind == air.ExprLt && expr.Left != nil && expr.Left.Kind == air.ExprLoadLocal && expr.Right != nil && expr.Right.Kind == air.ExprListSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
+		fl.emit(Instruction{Op: OpListIndexLtLocal, A: int(expr.Type), B: int(expr.Left.Local), C: int(expr.Right.Target.Local)})
+		return nil
+	}
 	if err := fl.lowerExpr(expr.Left); err != nil {
 		return err
 	}

@@ -38,6 +38,14 @@ func verifyFunction(program *Program, fn *Function) error {
 			if inst.A < 0 || inst.A >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
 			}
+		case OpListSizeLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: list local index out of range", fn.Name, ip)
+			}
+		case OpListAtLocal, OpListIndexLtLocal:
+			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: list/index local out of range", fn.Name, ip)
+			}
 		case OpJump, OpJumpIfFalse:
 			if inst.A < 0 || inst.A > len(fn.Code) {
 				return fmt.Errorf("%s ip=%d: jump target out of range", fn.Name, ip)
@@ -66,7 +74,7 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 	switch inst.Op {
 	case OpNoop:
 		return 0, 0, nil
-	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal:
+	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal, OpListSizeLocal, OpListAtLocal, OpListIndexLtLocal:
 		return 0, 1, nil
 	case OpStoreLocal, OpPop:
 		return 1, 0, nil
