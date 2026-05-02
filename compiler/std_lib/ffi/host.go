@@ -3,6 +3,7 @@ package ffi
 import (
 	"bufio"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,9 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/runtime"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var HostFunctions = Host{
@@ -77,9 +81,32 @@ var HostFunctions = Host{
 	Print:               Print,
 	ReadLine:            ReadLine,
 	Sleep:               Sleep,
+	SqlBeginTx:          SqlBeginTx,
+	SqlClose:            SqlClose,
+	SqlCommit:           SqlCommit,
+	SqlCreateConnection: SqlCreateConnection,
+	SqlExecute:          SqlExecute,
+	SqlExtractParams:    SqlExtractParams,
+	SqlQuery:            SqlQuery,
+	SqlRollback:         SqlRollback,
 	StrToDynamic:        StrToDynamic,
 	VoidToDynamic:       VoidToDynamic,
 }.Functions()
+
+type sqlConnection struct {
+	db     *sql.DB
+	driver string
+}
+
+type sqlTransaction struct {
+	tx     *sql.Tx
+	driver string
+}
+
+type sqlRunner interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	Exec(query string, args ...any) (sql.Result, error)
+}
 
 func OsArgs() []string {
 	return runtime.CurrentOSArgs()
@@ -306,6 +333,209 @@ func CryptoUUID() string {
 		uuid[8:10],
 		uuid[10:16],
 	)
+}
+
+func SqlCreateConnection(connectionString string) (Db, error) {
+	driver := detectSQLDriver(connectionString)
+	db, err := sql.Open(driver, connectionString)
+	if err != nil {
+		return Db{}, err
+	}
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return Db{}, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	return Db{Handle: &sqlConnection{db: db, driver: driver}}, nil
+}
+
+func SqlClose(db Db) error {
+	conn, ok := db.Handle.(*sqlConnection)
+	if !ok {
+		return fmt.Errorf("SQL Error: invalid connection object")
+	}
+	return conn.db.Close()
+}
+
+func SqlBeginTx(db Db) (Tx, error) {
+	conn, ok := db.Handle.(*sqlConnection)
+	if !ok {
+		return Tx{}, fmt.Errorf("SQL Error: invalid connection object")
+	}
+	tx, err := conn.db.Begin()
+	if err != nil {
+		return Tx{}, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	return Tx{Handle: &sqlTransaction{tx: tx, driver: conn.driver}}, nil
+}
+
+func SqlCommit(tx Tx) error {
+	wrapped, ok := tx.Handle.(*sqlTransaction)
+	if !ok {
+		return fmt.Errorf("SQL Error: invalid transaction object")
+	}
+	return wrapped.tx.Commit()
+}
+
+func SqlRollback(tx Tx) error {
+	wrapped, ok := tx.Handle.(*sqlTransaction)
+	if !ok {
+		return fmt.Errorf("SQL Error: invalid transaction object")
+	}
+	return wrapped.tx.Rollback()
+}
+
+func SqlExtractParams(sqlStr string) []string {
+	delimiters := []string{" ", "(", ")", ",", ";", "=", "<", ">", "!", "\t", "\n", "\r"}
+	tokens := splitSQLByMultipleDelimiters(sqlStr, delimiters)
+	var paramNames []string
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "@") && len(token) > 1 {
+			paramName := strings.TrimLeft(token[1:], "@")
+			paramName = strings.TrimRight(paramName, ".,;:!?")
+			if paramName != "" {
+				paramNames = append(paramNames, paramName)
+			}
+		}
+	}
+	return paramNames
+}
+
+func SqlQuery(conn any, sqlStr string, values []any) ([]any, error) {
+	runner, driver, ok := resolveSQLRunner(conn)
+	if !ok {
+		return nil, fmt.Errorf("SQL Error: invalid connection object")
+	}
+	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
+	return executeSQLQuery(runner, sqlStr, values)
+}
+
+func SqlExecute(conn any, sqlStr string, values []any) error {
+	runner, driver, ok := resolveSQLRunner(conn)
+	if !ok {
+		return fmt.Errorf("SQL Error: invalid connection object")
+	}
+	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
+	_, err := runner.Exec(sqlStr, values...)
+	return err
+}
+
+func detectSQLDriver(connStr string) string {
+	connStr = strings.TrimSpace(connStr)
+	if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
+		return "pgx"
+	}
+	if strings.Contains(connStr, "@tcp(") || strings.Contains(connStr, "@unix(") {
+		return "mysql"
+	}
+	return "sqlite3"
+}
+
+func splitSQLByMultipleDelimiters(s string, delimiters []string) []string {
+	result := s
+	for _, delimiter := range delimiters {
+		result = strings.ReplaceAll(result, delimiter, " ")
+	}
+	tokens := strings.Split(result, " ")
+	nonEmpty := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token != "" {
+			nonEmpty = append(nonEmpty, token)
+		}
+	}
+	return nonEmpty
+}
+
+func resolveSQLRunner(raw any) (sqlRunner, string, bool) {
+	if conn, ok := raw.(*sqlConnection); ok {
+		return conn.db, conn.driver, true
+	}
+	if tx, ok := raw.(*sqlTransaction); ok {
+		return tx.tx, tx.driver, true
+	}
+	return nil, "", false
+}
+
+func normalizeSQLPlaceholders(sqlStr string, driver string) string {
+	if driver != "pgx" {
+		return sqlStr
+	}
+
+	var out strings.Builder
+	out.Grow(len(sqlStr) + 16)
+	index := 1
+	for i := 0; i < len(sqlStr); i++ {
+		ch := sqlStr[i]
+		if ch == '@' {
+			j := i + 1
+			for j < len(sqlStr) {
+				c := sqlStr[j]
+				isAlpha := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+				isDigit := c >= '0' && c <= '9'
+				if isAlpha || isDigit || c == '_' {
+					j++
+					continue
+				}
+				break
+			}
+			if j > i+1 {
+				out.WriteString(fmt.Sprintf("$%d", index))
+				index++
+				i = j - 1
+				continue
+			}
+		}
+		if ch == '?' {
+			out.WriteString(fmt.Sprintf("$%d", index))
+			index++
+			continue
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
+}
+
+func executeSQLQuery(runner sqlRunner, sqlStr string, values []any) ([]any, error) {
+	rows, err := runner.Query(sqlStr, values...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column names: %w", err)
+	}
+
+	var results []any
+	for rows.Next() {
+		scanValues := make([]any, len(columns))
+		scanTargets := make([]any, len(columns))
+		for i := range scanValues {
+			scanTargets[i] = &scanValues[i]
+		}
+		if err := rows.Scan(scanTargets...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		rowMap := make(map[string]any, len(columns))
+		for i, columnName := range columns {
+			rowMap[columnName] = normalizeSQLDynamicValue(scanValues[i])
+		}
+		results = append(results, rowMap)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+	return results, nil
+}
+
+func normalizeSQLDynamicValue(value any) any {
+	switch value := value.(type) {
+	case []byte:
+		return string(value)
+	default:
+		return value
+	}
 }
 
 func StrToDynamic(value string) any {

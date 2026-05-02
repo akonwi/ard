@@ -839,7 +839,9 @@ Status: In progress
     - [x] Restore successful `decode::path` payload cases after nested generic
       decoder factories preserve returned payload types through closure
       specialization.
-    - [ ] Port or intentionally defer json/encode, broader crypto, SQL, and
+    - [x] Port SQL coverage for parameter extraction, query execution, null
+      values, missing parameter errors, and transactions.
+    - [ ] Port or intentionally defer json/encode, broader crypto, and
       server-side HTTP behavior.
   - [ ] Decide which bytecode VM internal tests are intentionally not copied
     because they validate old registry/type-resolver/profile implementation

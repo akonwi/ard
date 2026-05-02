@@ -212,11 +212,11 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 	if err != nil {
 		return err
 	}
-	if target == anyInterface && typeInfo.Kind != air.TypeDynamic && typeInfo.Kind != air.TypeExtern {
+	if target == anyInterface && typeInfo.Kind != air.TypeDynamic && typeInfo.Kind != air.TypeExtern && typeInfo.Kind != air.TypeUnion {
 		if param {
-			return fmt.Errorf("empty interface parameters are only supported for Dynamic extern values, got %s", typeInfo.Name)
+			return fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, and union extern values, got %s", typeInfo.Name)
 		}
-		return fmt.Errorf("empty interface returns are only supported for Dynamic extern values, got %s", typeInfo.Name)
+		return fmt.Errorf("empty interface returns are only supported for Dynamic, extern, and union extern values, got %s", typeInfo.Name)
 	}
 	switch typeInfo.Kind {
 	case air.TypeVoid:
@@ -244,6 +244,11 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 			return nil
 		}
 		return fmt.Errorf("Dynamic must use host any, got %s", target)
+	case air.TypeUnion:
+		if target == anyInterface {
+			return nil
+		}
+		return fmt.Errorf("union %s must use host any until generated tagged union adapters exist, got %s", typeInfo.Name, target)
 	case air.TypeList:
 		if target.Kind() != reflect.Slice {
 			return fmt.Errorf("list %s must use host slice, got %s", typeInfo.Name, target)
@@ -375,6 +380,9 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	if value.Kind == ValueExtern {
 		return vm.externToHost(value, target)
 	}
+	if value.Kind == ValueUnion && target.Kind() == reflect.Interface && target.NumMethod() == 0 {
+		return vm.unionToHost(value, target)
+	}
 	if value.Kind == ValueClosure && isHostCallbackType(target) {
 		return vm.closureToHostCallback(value, target)
 	}
@@ -392,7 +400,7 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic extern values, got %s", typeInfo.Name)
+		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, and union extern values, got %s", typeInfo.Name)
 	}
 	if target.Kind() == reflect.Pointer {
 		if value.Kind == ValueStruct {
@@ -694,6 +702,36 @@ func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, er
 		return raw, nil
 	}
 	return reflect.Value{}, fmt.Errorf("cannot pass Dynamic payload %s as %s", raw.Type(), target)
+}
+
+func (vm *VM) unionToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	unionValue, err := value.unionValue()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	member := unionValue.Value
+	switch member.Kind {
+	case ValueVoid:
+		return reflect.Zero(target), nil
+	case ValueInt:
+		return reflect.ValueOf(member.Int), nil
+	case ValueFloat:
+		return reflect.ValueOf(member.Float), nil
+	case ValueBool:
+		return reflect.ValueOf(member.Bool), nil
+	case ValueStr:
+		return reflect.ValueOf(member.Str), nil
+	case ValueDynamic:
+		return vm.dynamicToHost(member, target)
+	case ValueExtern:
+		return vm.externToHost(member, target)
+	default:
+		typeInfo, err := vm.typeInfo(member.Type)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		return reflect.Value{}, fmt.Errorf("cannot pass union member %s as host any", typeInfo.Name)
+	}
 }
 
 func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.Value, error) {

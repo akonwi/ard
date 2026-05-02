@@ -2062,6 +2062,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if kind, ok := maybeConstructorKind(e); ok {
 			return fl.lowerMaybeConstructor(kind, typeID, e)
 		}
+		if e.Module == "ard/list" && e.Call.Name == "new" {
+			if len(e.Call.Args) != 0 {
+				return nil, fmt.Errorf("ard/list::new expects no arguments")
+			}
+			return &Expr{Kind: ExprMakeList, Type: typeID}, nil
+		}
 		moduleID := fl.l.internModule(e.Module)
 		if e.Call.ExternalBinding != "" {
 			id, err := fl.l.declareConcreteExternCall(moduleID, e.Call.Name, e.Call)

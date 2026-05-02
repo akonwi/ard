@@ -836,7 +836,7 @@ func TestRunEntryRejectsAnyParameterForNonDynamicExtern(t *testing.T) {
 	if err == nil {
 		t.Fatal("RunScript succeeded, want unsupported host parameter error")
 	}
-	if !strings.Contains(err.Error(), "empty interface parameters are only supported for Dynamic extern values") {
+	if !strings.Contains(err.Error(), "empty interface parameters are only supported for Dynamic, extern, and union extern values") {
 		t.Fatalf("RunScript error = %v", err)
 	}
 }
