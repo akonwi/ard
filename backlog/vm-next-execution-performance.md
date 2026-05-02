@@ -373,13 +373,26 @@ Closure and trait dispatch are important for decode helpers, sorting callbacks,
 trait-based encoding, and host callback APIs.
 
 This is the other major tracking area for the remaining `decode_pipeline` gap.
-Current profiles show very high closure call volume and many one-capture closure
+Current profiles show very high closure call volume and many captured closure
 creations in decode combinators. Runtime representation tweaks alone may not be
 enough; compiler/lowering-level closure reuse or hoisting may be needed to reduce
 closure churn without adding branch-heavy `ClosureValue` access paths.
 
+Added opt-in closure capture histogram counters under `ARD_VM_NEXT_PROFILE=1`.
+Representative decode profiling after local match-subject opcodes shows
+~120k closure creations split across ~48k zero-capture, ~24k one-capture, and
+~48k two-capture closures. A VM-level zero-capture closure cache removed those
+counted zero-capture allocations but regressed the 10-run runtime suite strongly;
+the per-creation map lookup and broader VM shape cost outweighed allocation
+savings. Do not retry zero-capture runtime caching without a lower-overhead
+indexed/precomputed representation.
+
 - [ ] Reduce closure creation allocation.
-  - [ ] Avoid capture slice allocation for zero-capture closures.
+  - [x] Evaluate capture distribution and zero-capture closure caching. Cache
+    experiment passed tests but regressed the full benchmark suite, so only the
+    profiling histogram was kept.
+  - [ ] Avoid capture slice allocation for zero-capture closures with a cheaper
+    representation than map-backed runtime caching.
   - [ ] Reuse or compact capture storage where safe.
   - [ ] Investigate lowering-level closure hoisting/reuse for decoder
     combinators; autoresearch rejected a runtime-only unary capture inline

@@ -68,6 +68,7 @@ type executionProfile struct {
 	closureArgSum    atomic.Uint64
 	closureCreations atomic.Uint64
 	captureSlots     atomic.Uint64
+	captureBuckets   [4]atomic.Uint64
 	traitCalls       atomic.Uint64
 	fiberSpawns      atomic.Uint64
 	fiberWaits       atomic.Uint64
@@ -133,6 +134,14 @@ func (p *executionProfile) RecordClosureCreation(captures int) {
 	}
 	p.closureCreations.Add(1)
 	p.captureSlots.Add(uint64(captures))
+	bucket := captures
+	if bucket > 3 {
+		bucket = 3
+	}
+	if bucket < 0 {
+		bucket = 0
+	}
+	p.captureBuckets[bucket].Add(1)
 }
 
 func (p *executionProfile) RecordTraitCall() {
@@ -278,7 +287,14 @@ func (p *executionProfile) Report() string {
 	if closureCalls > 0 || closureCreations > 0 {
 		avgClosureArity := avgUint64(p.closureArgSum.Load(), closureCalls)
 		avgCaptures := avgUint64(p.captureSlots.Load(), closureCreations)
-		fmt.Fprintf(&out, "closures created=%d avg_captures=%.2f avg_call_arity=%.2f\n", closureCreations, avgCaptures, avgClosureArity)
+		fmt.Fprintf(&out, "closures created=%d captures_0=%d captures_1=%d captures_2=%d captures_3plus=%d avg_captures=%.2f avg_call_arity=%.2f\n",
+			closureCreations,
+			p.captureBuckets[0].Load(),
+			p.captureBuckets[1].Load(),
+			p.captureBuckets[2].Load(),
+			p.captureBuckets[3].Load(),
+			avgCaptures,
+			avgClosureArity)
 	}
 	if p.fiberSpawns.Load() > 0 || fiberWaits > 0 {
 		fmt.Fprintf(&out, "fibers spawned=%d waits=%d wait_total=%s\n", p.fiberSpawns.Load(), fiberWaits, time.Duration(p.fiberWaitNS.Load()).Round(time.Microsecond))
