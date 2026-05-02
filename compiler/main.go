@@ -24,7 +24,10 @@ import (
 	vm_next "github.com/akonwi/ard/vm_next"
 )
 
-const bytecodeFooterMarker = "ARDBYTECODEv1"
+const (
+	bytecodeFooterMarker = "ARDBYTECODEv1"
+	vmNextFooterMarker   = "ARDVMNEXTv001"
+)
 
 func main() {
 	if maybeRunEmbedded() {
@@ -130,6 +133,8 @@ func main() {
 			switch target {
 			case backend.TargetBytecode:
 				builtPath, err = buildBytecodeBinary(inputPath, outputPath, target)
+			case backend.TargetVMNext:
+				builtPath, err = buildVMNextBinary(inputPath, outputPath)
 			case backend.TargetGo:
 				builtPath, err = go_backend.BuildBinary(inputPath, outputPath)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
@@ -682,7 +687,36 @@ func buildBytecodeBinary(inputPath string, outputPath string, target string) (st
 	if err != nil {
 		return "", err
 	}
-	if err := writeEmbeddedBinary(selfPath, outputPath, data); err != nil {
+	if err := writeEmbeddedBinary(selfPath, outputPath, bytecodeFooterMarker, data); err != nil {
+		return "", err
+	}
+	return outputPath, nil
+}
+
+func buildVMNextBinary(inputPath string, outputPath string) (string, error) {
+	module, err := loadModule(inputPath, backend.TargetVMNext)
+	if err != nil {
+		return "", err
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		return "", err
+	}
+	if err := air.Validate(program); err != nil {
+		return "", err
+	}
+	if program.Entry == air.NoFunction {
+		return "", fmt.Errorf("vm_next builds require fn main()")
+	}
+	data, err := air.SerializeProgram(program)
+	if err != nil {
+		return "", err
+	}
+	selfPath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if err := writeEmbeddedBinary(selfPath, outputPath, vmNextFooterMarker, data); err != nil {
 		return "", err
 	}
 	return outputPath, nil
@@ -699,22 +733,41 @@ func argsForEmbeddedProgram(args []string) []string {
 }
 
 func maybeRunEmbedded() bool {
-	data, err := readEmbeddedBytecode()
+	marker, data, err := readEmbeddedPayload()
 	if err != nil || data == nil {
 		return false
 	}
-	program, err := bytecode.DeserializeProgram(data)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to deserialize bytecode:", err)
-		os.Exit(1)
-	}
-	if err := bytecode.VerifyProgram(program); err != nil {
-		fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
-		os.Exit(1)
-	}
-	if runErr := runBytecodeProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
-		fmt.Fprintln(os.Stderr, runErr)
-		os.Exit(1)
+	switch marker {
+	case bytecodeFooterMarker:
+		program, err := bytecode.DeserializeProgram(data)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to deserialize bytecode:", err)
+			os.Exit(1)
+		}
+		if err := bytecode.VerifyProgram(program); err != nil {
+			fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
+			os.Exit(1)
+		}
+		if runErr := runBytecodeProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
+			fmt.Fprintln(os.Stderr, runErr)
+			os.Exit(1)
+		}
+	case vmNextFooterMarker:
+		program, err := air.DeserializeProgram(data)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to deserialize vm_next AIR:", err)
+			os.Exit(1)
+		}
+		if err := air.Validate(program); err != nil {
+			fmt.Fprintln(os.Stderr, "Invalid vm_next AIR:", err)
+			os.Exit(1)
+		}
+		if runErr := runVMNextProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
+			fmt.Fprintln(os.Stderr, runErr)
+			os.Exit(1)
+		}
+	default:
+		return false
 	}
 	return true
 }
@@ -761,7 +814,7 @@ func runVMNextProgram(program *air.Program, args []string) error {
 	return err
 }
 
-func writeEmbeddedBinary(srcPath string, dstPath string, data []byte) error {
+func writeEmbeddedBinary(srcPath string, dstPath string, marker string, data []byte) error {
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return err
@@ -780,14 +833,14 @@ func writeEmbeddedBinary(srcPath string, dstPath string, data []byte) error {
 	if _, err := dst.Write(data); err != nil {
 		return err
 	}
-	if err := writeFooter(dst, uint64(len(data))); err != nil {
+	if err := writeFooter(dst, marker, uint64(len(data))); err != nil {
 		return err
 	}
 	return dst.Chmod(0o755)
 }
 
-func writeFooter(w io.Writer, length uint64) error {
-	if _, err := w.Write([]byte(bytecodeFooterMarker)); err != nil {
+func writeFooter(w io.Writer, marker string, length uint64) error {
+	if _, err := w.Write([]byte(marker)); err != nil {
 		return err
 	}
 	buf := make([]byte, 8)
@@ -796,48 +849,52 @@ func writeFooter(w io.Writer, length uint64) error {
 	return err
 }
 
-func readEmbeddedBytecode() ([]byte, error) {
+func readEmbeddedPayload() (string, []byte, error) {
 	path, err := os.Executable()
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
+	return readEmbeddedPayloadFromPath(path)
+}
+
+func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	footerSize := int64(len(bytecodeFooterMarker) + 8)
 	if info.Size() < footerSize {
-		return nil, nil
+		return "", nil, nil
 	}
 	_, err = file.Seek(info.Size()-footerSize, io.SeekStart)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	footer := make([]byte, footerSize)
 	if _, err := io.ReadFull(file, footer); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	marker := string(footer[:len(bytecodeFooterMarker)])
-	if marker != bytecodeFooterMarker {
-		return nil, nil
+	if marker != bytecodeFooterMarker && marker != vmNextFooterMarker {
+		return "", nil, nil
 	}
 	length := binary.LittleEndian.Uint64(footer[len(bytecodeFooterMarker):])
 	dataOffset := info.Size() - footerSize - int64(length)
 	if dataOffset < 0 {
-		return nil, fmt.Errorf("invalid embedded bytecode length")
+		return "", nil, fmt.Errorf("invalid embedded payload length")
 	}
 	if _, err := file.Seek(dataOffset, io.SeekStart); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	data := make([]byte, length)
 	if _, err := io.ReadFull(file, data); err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return data, nil
+	return marker, data, nil
 }

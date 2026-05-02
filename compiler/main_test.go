@@ -234,6 +234,13 @@ func TestParseBuildArgs(t *testing.T) {
 			target: "go",
 		},
 		{
+			name:   "vm_next target",
+			args:   []string{"samples/main.ard", "--out", "demo", "--target", "vm_next"},
+			path:   "samples/main.ard",
+			out:    "demo",
+			target: "vm_next",
+		},
+		{
 			name:       "missing target value",
 			args:       []string{"samples/main.ard", "--target"},
 			expectErr:  true,
@@ -567,4 +574,55 @@ func TestArgsForEmbeddedProgram(t *testing.T) {
 			t.Fatalf("expected returned args to be copied")
 		}
 	})
+}
+
+func TestReadEmbeddedPayloadFromPath(t *testing.T) {
+	if len(vmNextFooterMarker) != len(bytecodeFooterMarker) {
+		t.Fatalf("vm_next footer marker length = %d, want %d", len(vmNextFooterMarker), len(bytecodeFooterMarker))
+	}
+
+	path := filepath.Join(t.TempDir(), "embedded")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create embedded fixture: %v", err)
+	}
+	if _, err := file.WriteString("binary-prefix"); err != nil {
+		t.Fatalf("write prefix: %v", err)
+	}
+	payload := []byte("serialized-air")
+	if _, err := file.Write(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := writeFooter(file, vmNextFooterMarker, uint64(len(payload))); err != nil {
+		t.Fatalf("write footer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close fixture: %v", err)
+	}
+
+	marker, got, err := readEmbeddedPayloadFromPath(path)
+	if err != nil {
+		t.Fatalf("read embedded payload: %v", err)
+	}
+	if marker != vmNextFooterMarker {
+		t.Fatalf("marker = %q, want %q", marker, vmNextFooterMarker)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("payload = %q, want %q", got, payload)
+	}
+}
+
+func TestBuildVMNextBinaryRequiresMain(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "script.ard")
+	if err := os.WriteFile(sourcePath, []byte("1 + 1"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	_, err := buildVMNextBinary(sourcePath, filepath.Join(t.TempDir(), "script"))
+	if err == nil {
+		t.Fatal("buildVMNextBinary succeeded, want missing main error")
+	}
+	if !strings.Contains(err.Error(), "vm_next builds require fn main()") {
+		t.Fatalf("error = %v", err)
+	}
 }

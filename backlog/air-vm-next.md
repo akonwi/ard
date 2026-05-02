@@ -893,7 +893,24 @@ Status: Pending
   root `go.mod`.
 - [ ] Add `ard ffi init`, `ard ffi`, and `ard ffi check` CLI workflow.
 
-### Milestone 9: go_next from AIR
+### Milestone 9: vm_next executable builds
+
+Status: Done
+
+- [x] Support `ard build --target vm_next` as a real build target.
+- [x] Produce single-file executables for `vm_next` programs so the new VM can
+  be exercised with the same portability story as the current bytecode VM.
+- [x] Define a serialized AIR or lowered-VM artifact format that is explicitly a
+  `vm_next` implementation detail, not the language ABI.
+- [x] Teach embedded executable startup to dispatch to `vm_next.RunEntry`.
+- [x] Add build/run verification for generated `vm_next` executables through
+  focused tests and benchmark-runner output checks.
+- [x] Add `vm_next` executables to runtime-mode benchmarks once build support
+  exists.
+- [x] Consider Milestone 8 plus this milestone the parity gate for replacing the
+  current bytecode VM as the primary VM target.
+
+### Milestone 10: go_next from AIR
 
 Status: Pending
 
