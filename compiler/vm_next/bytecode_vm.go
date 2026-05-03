@@ -350,6 +350,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 			targetIndex := len(stack) - inst.B - 1
 			target := stack[targetIndex]
+			vm.recordRefAccess(refAccessClosure)
 			closure, err := target.closureValue()
 			if err != nil {
 				return Value{}, err
@@ -410,6 +411,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			vm.recordRefAccess(refAccessFiber)
 			fiber, err := value.fiberValue()
 			if err != nil {
 				return Value{}, err
@@ -424,6 +426,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			vm.recordRefAccess(refAccessFiber)
 			fiber, err := value.fiberValue()
 			if err != nil {
 				return Value{}, err
@@ -460,6 +463,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 			subjectIndex := len(stack) - inst.Imm - 1
 			subject := stack[subjectIndex]
+			vm.recordRefAccess(refAccessTraitObject)
 			traitObject, err := subject.traitObjectValue()
 			if err != nil {
 				return Value{}, err
@@ -508,6 +512,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			vm.recordRefAccess(refAccessUnion)
 			unionValue, err := value.unionValue()
 			if err != nil {
 				return Value{}, err
@@ -517,6 +522,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) {
 				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
 			}
+			vm.recordRefAccess(refAccessUnion)
 			unionValue, err := locals[inst.B].unionValue()
 			if err != nil {
 				return Value{}, err
@@ -527,6 +533,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			vm.recordRefAccess(refAccessUnion)
 			unionValue, err := value.unionValue()
 			if err != nil {
 				return Value{}, err
@@ -536,6 +543,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) {
 				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
 			}
+			vm.recordRefAccess(refAccessUnion)
 			unionValue, err := locals[inst.B].unionValue()
 			if err != nil {
 				return Value{}, err
@@ -654,6 +662,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) {
 				return Value{}, fmt.Errorf("%s: list local %d out of range", fn.Name, inst.B)
 			}
+			vm.recordRefAccess(refAccessList)
 			listValue, err := locals[inst.B].listValue()
 			if err != nil {
 				return Value{}, err
@@ -663,6 +672,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
 				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
 			}
+			vm.recordRefAccess(refAccessList)
 			listValue, err := locals[inst.B].listValue()
 			if err != nil {
 				return Value{}, err
@@ -684,6 +694,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if indexValue.Kind != ValueInt {
 				return Value{}, fmt.Errorf("list index must be Int")
 			}
+			vm.recordRefAccess(refAccessList)
 			listValue, err := locals[inst.C].listValue()
 			if err != nil {
 				return Value{}, err
@@ -716,6 +727,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) {
 				return Value{}, fmt.Errorf("%s: map local %d out of range", fn.Name, inst.B)
 			}
+			vm.recordRefAccess(refAccessMap)
 			mapValue, err := locals[inst.B].mapValue()
 			if err != nil {
 				return Value{}, err
@@ -729,6 +741,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if indexValue.Kind != ValueInt {
 				return Value{}, fmt.Errorf("map entry index must be Int")
 			}
+			vm.recordRefAccess(refAccessMap)
 			mapValue, err := locals[inst.C].mapValue()
 			if err != nil {
 				return Value{}, err
@@ -738,6 +751,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
 				return Value{}, fmt.Errorf("%s: map/index local out of range", fn.Name)
 			}
+			vm.recordRefAccess(refAccessMap)
 			mapValue, err := locals[inst.B].mapValue()
 			if err != nil {
 				return Value{}, err
@@ -776,6 +790,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			vm.recordRefAccess(refAccessStruct)
 			structValue, err := value.structValue()
 			if err != nil {
 				return Value{}, err
@@ -788,6 +803,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if inst.B < 0 || inst.B >= len(locals) {
 				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
 			}
+			vm.recordRefAccess(refAccessStruct)
 			structValue, err := locals[inst.B].structValue()
 			if err != nil {
 				return Value{}, err
@@ -805,6 +821,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
+			vm.recordRefAccess(refAccessStruct)
 			structValue, err := target.structValue()
 			if err != nil {
 				return Value{}, err
@@ -818,14 +835,10 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
-			if vm.profile != nil {
-				vm.profile.RecordValueAlloc(valueAllocMaybe)
-			}
+			vm.recordMaybeAlloc(true)
 			push(Maybe(air.TypeID(inst.A), true, value))
 		case vmcode.OpMakeMaybeNone:
-			if vm.profile != nil {
-				vm.profile.RecordValueAlloc(valueAllocMaybe)
-			}
+			vm.recordMaybeAlloc(false)
 			push(Maybe(air.TypeID(inst.A), false, vm.zeroValue(air.TypeID(inst.B))))
 		case vmcode.OpMaybeExpect, vmcode.OpMaybeIsNone, vmcode.OpMaybeIsSome, vmcode.OpMaybeOr, vmcode.OpMaybeMap, vmcode.OpMaybeAndThen:
 			value, err := vm.execBytecodeMaybeOp(inst, &stack)

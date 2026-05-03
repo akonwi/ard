@@ -1001,10 +1001,12 @@ func (vm *VM) validateHostFunctionType(typeInfo air.TypeInfo, target reflect.Typ
 
 func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, error) {
 	if isHostMaybeType(target) {
+		vm.recordRefAccess(refAccessMaybe)
 		maybeValue, err := value.maybeValue()
 		if err != nil {
 			return reflect.Value{}, err
 		}
+		vm.recordMaybeAccess(maybeValue)
 		out := reflect.New(target).Elem()
 		if !maybeValue.Some {
 			return out, nil
@@ -1057,10 +1059,12 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 			return out, nil
 		}
 		if value.Kind == ValueMaybe {
+			vm.recordRefAccess(refAccessMaybe)
 			maybeValue, err := value.maybeValue()
 			if err != nil {
 				return reflect.Value{}, err
 			}
+			vm.recordMaybeAccess(maybeValue)
 			if !maybeValue.Some {
 				return reflect.Zero(target), nil
 			}
@@ -1185,6 +1189,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 	}
 	if !value.IsValid() {
 		if typeInfo.Kind == air.TypeMaybe {
+			vm.recordMaybeDetailAlloc(false)
 			return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
 		}
 		return vm.zeroValue(typeID), nil
@@ -1198,12 +1203,14 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 	if typeInfo.Kind == air.TypeMaybe && isHostMaybeType(value.Type()) {
 		some := value.FieldByName("Some").Bool()
 		if !some {
+			vm.recordMaybeDetailAlloc(false)
 			return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
 		}
 		inner, err := vm.hostValueToValue(typeInfo.Elem, value.FieldByName("Value"))
 		if err != nil {
 			return Value{}, err
 		}
+		vm.recordMaybeDetailAlloc(true)
 		return Maybe(typeID, true, inner), nil
 	}
 	switch typeInfo.Kind {
@@ -1246,6 +1253,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 	case air.TypeMaybe:
 		if value.Kind() == reflect.Pointer {
 			if value.IsNil() {
+				vm.recordMaybeDetailAlloc(false)
 				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
 			}
 			value = value.Elem()
@@ -1254,6 +1262,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 		if err != nil {
 			return Value{}, err
 		}
+		vm.recordMaybeDetailAlloc(true)
 		return Maybe(typeID, true, inner), nil
 	case air.TypeStruct:
 		return vm.hostStructToValue(typeInfo, value)
@@ -1265,6 +1274,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 }
 
 func (vm *VM) externToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessExtern)
 	externValue, err := value.externValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1334,6 +1344,7 @@ func (vm *VM) hostExternToValue(typeID air.TypeID, value reflect.Value) (Value, 
 }
 
 func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessDynamic)
 	dynamicValue, err := value.dynamicValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1349,6 +1360,7 @@ func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, er
 }
 
 func (vm *VM) unionToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessUnion)
 	unionValue, err := value.unionValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1386,6 +1398,7 @@ func (vm *VM) traitObjectToHost(value Value, target reflect.Type) (reflect.Value
 	if !vm.isEncodableTraitObject(typeInfo) {
 		return reflect.Value{}, fmt.Errorf("trait object %s cannot be passed as host any", typeInfo.Name)
 	}
+	vm.recordRefAccess(refAccessTraitObject)
 	traitObject, err := value.traitObjectValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1419,6 +1432,7 @@ func (vm *VM) isEncodableTraitObject(typeInfo air.TypeInfo) bool {
 }
 
 func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessClosure)
 	closure, err := value.closureValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1477,6 +1491,7 @@ func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.V
 }
 
 func (vm *VM) listToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessList)
 	listValue, err := value.listValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1514,6 +1529,7 @@ func (vm *VM) hostListToValue(typeInfo air.TypeInfo, value reflect.Value) (Value
 }
 
 func (vm *VM) mapToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessMap)
 	mapValue, err := value.mapValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -1567,6 +1583,7 @@ func (vm *VM) structToHost(value Value, target reflect.Type) (reflect.Value, err
 	if typeInfo.Kind != air.TypeStruct {
 		return reflect.Value{}, fmt.Errorf("cannot pass AIR type %s as Go struct", typeInfo.Name)
 	}
+	vm.recordRefAccess(refAccessStruct)
 	structValue, err := value.structValue()
 	if err != nil {
 		return reflect.Value{}, err

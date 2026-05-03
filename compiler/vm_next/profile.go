@@ -87,7 +87,14 @@ type executionProfile struct {
 	argSliceAllocs atomic.Uint64
 	argSliceSlots  atomic.Uint64
 
-	valueAllocs [valueAllocKindCount]atomic.Uint64
+	valueAllocs     [valueAllocKindCount]atomic.Uint64
+	maybeSomeAllocs atomic.Uint64
+	maybeNoneAllocs atomic.Uint64
+	maybeAccesses   atomic.Uint64
+	maybeSomeAccess atomic.Uint64
+	maybeNoneAccess atomic.Uint64
+	refAccesses     [refAccessKindCount]atomic.Uint64
+	zeroValues      [zeroValueKindCount]atomic.Uint64
 
 	externCalls    atomic.Uint64
 	externArgSum   atomic.Uint64
@@ -218,6 +225,44 @@ func (p *executionProfile) RecordValueAlloc(kind valueAllocKind) {
 	p.valueAllocs[kind].Add(1)
 }
 
+func (p *executionProfile) RecordMaybeAlloc(some bool) {
+	if p == nil {
+		return
+	}
+	p.RecordValueAlloc(valueAllocMaybe)
+	if some {
+		p.maybeSomeAllocs.Add(1)
+	} else {
+		p.maybeNoneAllocs.Add(1)
+	}
+}
+
+func (p *executionProfile) RecordMaybeAccess(some bool) {
+	if p == nil {
+		return
+	}
+	p.maybeAccesses.Add(1)
+	if some {
+		p.maybeSomeAccess.Add(1)
+	} else {
+		p.maybeNoneAccess.Add(1)
+	}
+}
+
+func (p *executionProfile) RecordRefAccess(kind refAccessKind) {
+	if p == nil || kind < 0 || kind >= refAccessKindCount {
+		return
+	}
+	p.refAccesses[kind].Add(1)
+}
+
+func (p *executionProfile) RecordZeroValue(kind zeroValueKind) {
+	if p == nil || kind < 0 || kind >= zeroValueKindCount {
+		return
+	}
+	p.zeroValues[kind].Add(1)
+}
+
 func (p *executionProfile) RecordExternCall(binding string, argc int, convertIn, host, convertOut time.Duration) {
 	if p == nil {
 		return
@@ -283,6 +328,7 @@ func (p *executionProfile) Report() string {
 			p.localsAllocs.Load(), p.localsSlots.Load(), p.stacksAllocs.Load(), p.stackCapSlots.Load(), p.argSliceAllocs.Load(), p.argSliceSlots.Load())
 	}
 	p.writeValueAllocReport(&out)
+	p.writeMilestone3ProfileReport(&out)
 
 	if closureCalls > 0 || closureCreations > 0 {
 		avgClosureArity := avgUint64(p.closureArgSum.Load(), closureCalls)
@@ -325,6 +371,63 @@ func (p *executionProfile) writeValueAllocReport(out *strings.Builder) {
 		p.valueAllocs[valueAllocUnion].Load(),
 		p.valueAllocs[valueAllocDynamic].Load(),
 		p.valueAllocs[valueAllocClosure].Load())
+}
+
+func (p *executionProfile) writeMilestone3ProfileReport(out *strings.Builder) {
+	maybeAllocs := p.maybeSomeAllocs.Load() + p.maybeNoneAllocs.Load()
+	maybeAccesses := p.maybeAccesses.Load()
+	if maybeAllocs > 0 || maybeAccesses > 0 {
+		fmt.Fprintf(out, "maybe profile allocs=%d some_allocs=%d none_allocs=%d accesses=%d some_access=%d none_access=%d\n",
+			maybeAllocs,
+			p.maybeSomeAllocs.Load(),
+			p.maybeNoneAllocs.Load(),
+			maybeAccesses,
+			p.maybeSomeAccess.Load(),
+			p.maybeNoneAccess.Load())
+	}
+
+	var refTotal uint64
+	for i := range p.refAccesses {
+		refTotal += p.refAccesses[i].Load()
+	}
+	if refTotal > 0 {
+		fmt.Fprintf(out, "ref accesses total=%d struct=%d list=%d map=%d maybe=%d result=%d union=%d trait_object=%d extern=%d dynamic=%d closure=%d fiber=%d\n",
+			refTotal,
+			p.refAccesses[refAccessStruct].Load(),
+			p.refAccesses[refAccessList].Load(),
+			p.refAccesses[refAccessMap].Load(),
+			p.refAccesses[refAccessMaybe].Load(),
+			p.refAccesses[refAccessResult].Load(),
+			p.refAccesses[refAccessUnion].Load(),
+			p.refAccesses[refAccessTraitObject].Load(),
+			p.refAccesses[refAccessExtern].Load(),
+			p.refAccesses[refAccessDynamic].Load(),
+			p.refAccesses[refAccessClosure].Load(),
+			p.refAccesses[refAccessFiber].Load())
+	}
+
+	var zeroTotal uint64
+	for i := range p.zeroValues {
+		zeroTotal += p.zeroValues[i].Load()
+	}
+	if zeroTotal > 0 {
+		fmt.Fprintf(out, "zero values total=%d void=%d scalar=%d list=%d map=%d dynamic=%d fiber=%d enum=%d maybe=%d struct=%d result=%d union=%d trait_object=%d extern=%d other=%d\n",
+			zeroTotal,
+			p.zeroValues[zeroValueVoid].Load(),
+			p.zeroValues[zeroValueScalar].Load(),
+			p.zeroValues[zeroValueList].Load(),
+			p.zeroValues[zeroValueMap].Load(),
+			p.zeroValues[zeroValueDynamic].Load(),
+			p.zeroValues[zeroValueFiber].Load(),
+			p.zeroValues[zeroValueEnum].Load(),
+			p.zeroValues[zeroValueMaybe].Load(),
+			p.zeroValues[zeroValueStruct].Load(),
+			p.zeroValues[zeroValueResult].Load(),
+			p.zeroValues[zeroValueUnion].Load(),
+			p.zeroValues[zeroValueTraitObject].Load(),
+			p.zeroValues[zeroValueExtern].Load(),
+			p.zeroValues[zeroValueOther].Load())
+	}
 }
 
 func (p *executionProfile) writeExternReport(out *strings.Builder, externCalls uint64) {

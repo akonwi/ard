@@ -233,7 +233,8 @@ Recommended Milestone 2 feedback loop:
 
 ### Milestone 3: Value representation improvements
 
-Status: In progress
+Status: In progress — Result representation complete; remaining Maybe,
+`Ref any`, and zero-value work is profiling-gated.
 
 The current `Value` representation boxes many common Ard values behind `Ref any`.
 This is simple but allocation-heavy and type-assertion-heavy.
@@ -261,8 +262,30 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
       ~20k union, ~5k struct, ~5k list, and ~5k map values.
     - `shape_catalog`: ~100k value allocations counted, split mostly between
       ~50k struct and ~50k union values.
-    - `word_frequency_batch`: only ~15 counted value allocations; its remaining
-      cost is interpreter loop/local/scalar overhead rather than wrapper churn.
+    - `word_frequency_batch`: only ~15 counted value allocations in the initial
+      broad wrapper counters; its remaining cost was interpreter loop/local/
+      scalar overhead rather than Result wrapper churn.
+  - After the scalar Result representation landed, added more targeted
+    profiling counters for the remaining Milestone 3 questions. These detailed
+    counters are built with `-tags vmnext_profile_detail` and reported when
+    `ARD_VM_NEXT_PROFILE=1` is set, keeping the default runtime path focused on
+    the existing lighter profile hooks:
+    - `maybe profile`: `Some`/`None` construction and access counts.
+    - `ref accesses`: helper-level typed `Ref any` access counts split by
+      struct/list/map/Maybe/Result/union/trait/extern/dynamic/closure/fiber.
+    - `zero values`: `zeroValue` calls split by AIR type category.
+    Representative `ARD_VM_NEXT_PROFILE=1` samples now show that the remaining
+    questions are workload-specific rather than obviously global:
+    - `decode_pipeline`: `Maybe` is cold (`maybe=0`), while list/map/closure
+      `Ref` access dominates; zero values are effectively absent.
+    - `shape_catalog`: `Maybe` construction/access is hot (~100k, nearly all
+      `Some`), with union/map/list/struct `Ref` access also high.
+    - `sql_batch`: moderate `Maybe` (~20k all `Some`), Result (~85k), union,
+      closure, and extern access remain visible; zero values are mostly `Void`.
+    - `word_frequency_batch`: `Maybe` is now visible through map lookup
+      profiling (~120k, almost all `Some`), but this should be evaluated with
+      loop/collection overhead in Milestone 5 before changing global Maybe
+      representation.
   - Evaluated a conservative immutable zero-value cache for scalar and nested
     immutable `Maybe`/`Result`/`Union` zero values. Tests passed, but the
     10-run runtime suite did not improve directionally, so the change was not
@@ -270,7 +293,22 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     showing repeated zero construction as a standalone bottleneck.
 - [ ] Inline or specialize common wrappers.
   - [ ] `Maybe` fast representation.
-  - [ ] Result fast representation.
+    - Profiling-gated. A broad Result-style `Maybe` representation was already
+      rejected, and new counters show Maybe is hot in shape/sql/word-frequency
+      paths but cold in decode. Prefer lower-risk access/lowering experiments
+      over a global representation change unless profiles show a specific hot
+      Maybe shape.
+  - [x] Result fast representation.
+    - Autoresearch retained a coherent Result redesign: inline success tag in
+      `Value.Bool`, generic payload as typed `*Value`, dedicated internal
+      scalar success kinds for `Int`, `Str`, `Bool`, and `Float`, and direct
+      unboxing in hot `TryResult` plus local Result-match paths.
+    - Best retained Milestone 3 Result autoresearch snapshot improved the
+      session baseline from `total_ms=867.3 ms` to `775.8 ms` (`-10.5%`), with
+      the largest win in `decode_pipeline`.
+    - Rejected follow-ups include `Maybe` generalization, void/reference/list/
+      dynamic Result kinds, switch dispatch, branch reshuffles, and pruning the
+      float specialization.
   - [x] Evaluate helper-level `TryResult`/`TryMaybe` unboxing specialization.
     Inlining the try unbox path directly into the bytecode switch passed tests
     but regressed the 10-run runtime suite directionally, matching earlier
@@ -290,6 +328,8 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     representation.
 - [ ] Reduce `Ref any` usage on hot paths.
   - [ ] Prefer typed heap references or tagged heap records.
+  - [x] Add profiling counters for typed `Ref any` access by helper kind so
+    future storage changes can be driven by actual assertion/access volume.
   - [x] Avoid repeated stack traffic and value assertions for local match
     subjects by lowering Result and Union match probes/extractions to local
     bytecode opcodes (`ResultIsOkLocal`, `ResultExpectLocal`,
@@ -300,6 +340,7 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     full 10-run suite, so the smaller helper-based form was retained.
   - [ ] Avoid repeated Go type assertions for validated value kinds.
 - [ ] Add cheaper zero-value handling.
+  - [x] Add profiling counters for `zeroValue` calls by AIR type category.
   - [ ] Cache common zero values by `TypeID` where safe.
   - [ ] Avoid repeatedly scanning type tables for `Void`.
 - [x] Benchmark decode/result-heavy and map/maybe-heavy workloads after local

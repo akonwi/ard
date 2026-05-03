@@ -13,6 +13,7 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, stack *[]Value) (Value
 	if err != nil {
 		return Value{}, err
 	}
+	vm.recordRefAccess(refAccessList)
 	listValue, err := target.listValue()
 	if err != nil {
 		return Value{}, err
@@ -103,6 +104,7 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 	if err != nil {
 		return Value{}, err
 	}
+	vm.recordRefAccess(refAccessMap)
 	mapValue, err := target.mapValue()
 	if err != nil {
 		return Value{}, err
@@ -123,9 +125,11 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 			return Value{}, fmt.Errorf("map get expects key")
 		}
 		if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
+			vm.recordMaybeDetailAlloc(true)
 			out = Maybe(air.TypeID(inst.A), true, mapValue.Entries[index].Value)
 			break
 		}
+		vm.recordMaybeDetailAlloc(false)
 		out = Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A))))
 	case vmcode.OpMapSet:
 		if len(args) != 2 {

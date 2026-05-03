@@ -65,6 +65,13 @@ func (vm *VM) ProfileReport() string {
 	return vm.profile.Report()
 }
 
+func (vm *VM) recordMaybeAlloc(some bool) {
+	if vm == nil || vm.profile == nil {
+		return
+	}
+	vm.profile.RecordMaybeAlloc(some)
+}
+
 func (vm *VM) RunTests() []TestOutcome {
 	outcomes := make([]TestOutcome, 0, len(vm.program.Tests))
 	for _, test := range vm.program.Tests {
@@ -95,6 +102,7 @@ func (vm *VM) runTest(test air.Test) TestOutcome {
 }
 
 func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
+	vm.recordRefAccess(refAccessClosure)
 	closure, err := value.closureValue()
 	if err != nil {
 		return Value{}, err
@@ -103,6 +111,7 @@ func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
 }
 
 func (vm *VM) callClosure1(value Value, arg Value) (Value, error) {
+	vm.recordRefAccess(refAccessClosure)
 	closure, err := value.closureValue()
 	if err != nil {
 		return Value{}, err
@@ -287,6 +296,7 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 	if err != nil {
 		return Value{}
 	}
+	vm.recordZeroValue(zeroValueProfileKind(typeInfo.Kind))
 	switch typeInfo.Kind {
 	case air.TypeVoid:
 		return Void(typeID)
@@ -312,6 +322,7 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		}
 		return Enum(typeID, typeInfo.Variants[0].Discriminant)
 	case air.TypeMaybe:
+		vm.recordMaybeDetailAlloc(false)
 		return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem))
 	case air.TypeStruct:
 		fields := make([]Value, len(typeInfo.Fields))
@@ -333,6 +344,39 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		return Extern(typeID, nil)
 	default:
 		return Value{Type: typeID}
+	}
+}
+
+func zeroValueProfileKind(kind air.TypeKind) zeroValueKind {
+	switch kind {
+	case air.TypeVoid:
+		return zeroValueVoid
+	case air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeStr:
+		return zeroValueScalar
+	case air.TypeList:
+		return zeroValueList
+	case air.TypeMap:
+		return zeroValueMap
+	case air.TypeDynamic:
+		return zeroValueDynamic
+	case air.TypeFiber:
+		return zeroValueFiber
+	case air.TypeEnum:
+		return zeroValueEnum
+	case air.TypeMaybe:
+		return zeroValueMaybe
+	case air.TypeStruct:
+		return zeroValueStruct
+	case air.TypeResult:
+		return zeroValueResult
+	case air.TypeUnion:
+		return zeroValueUnion
+	case air.TypeTraitObject:
+		return zeroValueTraitObject
+	case air.TypeExtern:
+		return zeroValueExtern
+	default:
+		return zeroValueOther
 	}
 }
 

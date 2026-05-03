@@ -101,10 +101,12 @@ func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Valu
 	if err != nil {
 		return Value{}, err
 	}
+	vm.recordRefAccess(refAccessMaybe)
 	maybeValue, err := target.maybeValue()
 	if err != nil {
 		return Value{}, err
 	}
+	vm.recordMaybeAccess(maybeValue)
 	var out Value
 	switch inst.Op {
 	case vmcode.OpMaybeExpect:
@@ -135,9 +137,7 @@ func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Valu
 			return Value{}, fmt.Errorf("Maybe closure method expects one function")
 		}
 		if !maybeValue.Some {
-			if vm.profile != nil {
-				vm.profile.RecordValueAlloc(valueAllocMaybe)
-			}
+			vm.recordMaybeAlloc(false)
 			out = Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A))))
 			break
 		}
@@ -148,9 +148,7 @@ func (vm *VM) execBytecodeMaybeOp(inst vmcode.Instruction, stack *[]Value) (Valu
 		if inst.Op == vmcode.OpMaybeAndThen {
 			out = mapped
 		} else {
-			if vm.profile != nil {
-				vm.profile.RecordValueAlloc(valueAllocMaybe)
-			}
+			vm.recordMaybeAlloc(true)
 			out = Maybe(air.TypeID(inst.A), true, mapped)
 		}
 	default:
@@ -186,6 +184,7 @@ func (vm *VM) execBytecodeResultLocalOp(inst vmcode.Instruction, locals []Value)
 	if target.Kind != ValueResult {
 		return Value{}, fmt.Errorf("expected result value, got kind %d", target.Kind)
 	}
+	vm.recordRefAccess(refAccessResult)
 	var resultPayload Value
 	if payload, ok := target.Ref.(*Value); ok && payload != nil {
 		resultPayload = *payload
@@ -211,6 +210,9 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 	args, target, targetIndex, err := methodArgsFromStack(stack, inst.B)
 	if err != nil {
 		return Value{}, err
+	}
+	if target.Kind == ValueResult {
+		vm.recordRefAccess(refAccessResult)
 	}
 	resultOK, resultPayload, err := target.resultParts()
 	if err != nil {
@@ -317,6 +319,7 @@ func (vm *VM) execBytecodeTryResult(inst vmcode.Instruction, pop func() (Value, 
 	if target.Kind != ValueResult {
 		return Value{}, -1, false, fmt.Errorf("expected result value, got kind %d", target.Kind)
 	}
+	vm.recordRefAccess(refAccessResult)
 	var resultPayload Value
 	if payload, ok := target.Ref.(*Value); ok && payload != nil {
 		resultPayload = *payload
@@ -343,19 +346,19 @@ func (vm *VM) execBytecodeTryMaybe(inst vmcode.Instruction, pop func() (Value, e
 	if err != nil {
 		return Value{}, -1, false, err
 	}
+	vm.recordRefAccess(refAccessMaybe)
 	maybeValue, err := target.maybeValue()
 	if err != nil {
 		return Value{}, -1, false, err
 	}
+	vm.recordMaybeAccess(maybeValue)
 	if maybeValue.Some {
 		return maybeValue.Value, -1, false, nil
 	}
 	if inst.B >= 0 {
 		return Value{}, inst.B, false, nil
 	}
-	if vm.profile != nil {
-		vm.profile.RecordValueAlloc(valueAllocMaybe)
-	}
+	vm.recordMaybeAlloc(false)
 	return Maybe(air.TypeID(inst.A), false, vm.bytecodeZeroMaybeForReturn(air.TypeID(inst.A))), -1, true, nil
 }
 
