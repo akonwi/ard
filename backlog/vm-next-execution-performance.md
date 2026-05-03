@@ -533,7 +533,14 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
     remove captured-slice allocation, and the full 10-run suite did not improve;
     keep the simpler generic helper until representation changes remove the
     underlying allocation.
-  - [ ] Reuse or compact capture storage where safe.
+  - [x] Reuse or compact capture storage where safe.
+    - Evaluated shrinking captured `ClosureValue` records by removing the
+      redundant `Type` field after zero-capture closures moved inline. Tests
+      passed, but the 10-run suite did not improve directionally (`vm_next`
+      aggregate about `783.3 ms` vs the `781.4 ms` inline-zero-capture
+      checkpoint; `decode_pipeline 358.3 ms` vs `357.6 ms`). Reverted. Further
+      captured-closure storage changes should come from a design that also
+      removes/reuses the capture slice itself.
   - [ ] Investigate lowering-level closure hoisting/reuse for decoder
     combinators; autoresearch rejected a runtime-only unary capture inline
     representation because the added branching hurt the aggregate suite.
