@@ -543,6 +543,11 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
       (`vm_next` aggregate about `791.7 ms` vs the `785.6 ms` `CallClosureLocal`
       checkpoint, with `decode_pipeline` `361.8 ms` vs `357.8 ms`). Reverted;
       keep the more general `CallClosureLocal` path.
+    - Also evaluated keeping `CallClosureLocal` but branching internally to a
+      unary frame-init helper for `argCount == 1`. This avoided a separate
+      opcode but still regressed directionally (`vm_next` aggregate about
+      `789.0 ms`, `decode_pipeline 359.9 ms`, `sql_batch 55.2 ms`). Reverted;
+      the generic local closure frame path has better aggregate behavior.
 - [ ] Make trait calls cheaper after bytecode validation.
   - [ ] Pre-resolve impl method function IDs in bytecode operands.
   - [ ] Avoid repeated trait/impl bounds checks in hot dispatch.
