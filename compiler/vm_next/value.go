@@ -20,6 +20,10 @@ const (
 	ValueList
 	ValueMap
 	ValueResult
+	ValueResultInt
+	ValueResultStr
+	ValueResultBool
+	ValueResultFloat
 	ValueUnion
 	ValueTraitObject
 	ValueExtern
@@ -65,6 +69,10 @@ type ResultValue struct {
 	Type  air.TypeID
 	Ok    bool
 	Value Value
+}
+
+type ResultIntValue struct {
+	Int int
 }
 
 type UnionValue struct {
@@ -150,7 +158,36 @@ func Map(typeID air.TypeID, entries []MapEntryValue) Value {
 }
 
 func Result(typeID air.TypeID, ok bool, value Value) Value {
-	return Value{Kind: ValueResult, Type: typeID, Ref: &ResultValue{Type: typeID, Ok: ok, Value: value}}
+	if ok {
+		switch value.Kind {
+		case ValueInt:
+			return ResultInt(typeID, value.Type, value.Int)
+		case ValueFloat:
+			return ResultFloat(typeID, value.Type, value.Float)
+		case ValueBool:
+			return ResultBool(typeID, value.Type, value.Bool)
+		case ValueStr:
+			return ResultStr(typeID, value.Type, value.Str)
+		}
+	}
+	payload := value
+	return Value{Kind: ValueResult, Type: typeID, Bool: ok, Ref: &payload}
+}
+
+func ResultInt(typeID air.TypeID, valueType air.TypeID, value int) Value {
+	return Value{Kind: ValueResultInt, Type: typeID, Bool: true, Int: value}
+}
+
+func ResultStr(typeID air.TypeID, valueType air.TypeID, value string) Value {
+	return Value{Kind: ValueResultStr, Type: typeID, Bool: true, Str: value}
+}
+
+func ResultBool(typeID air.TypeID, valueType air.TypeID, value bool) Value {
+	return Value{Kind: ValueResultBool, Type: typeID, Bool: value}
+}
+
+func ResultFloat(typeID air.TypeID, valueType air.TypeID, value float64) Value {
+	return Value{Kind: ValueResultFloat, Type: typeID, Bool: true, Float: value}
 }
 
 func Union(typeID air.TypeID, tag uint32, value Value) Value {
@@ -227,12 +264,12 @@ func (v Value) GoValue() any {
 			out[entry.Key.GoValue()] = entry.Value.GoValue()
 		}
 		return out
-	case ValueResult:
-		resultValue, ok := v.Ref.(*ResultValue)
-		if !ok {
+	case ValueResult, ValueResultInt, ValueResultStr, ValueResultBool, ValueResultFloat:
+		_, resultValue, err := v.resultParts()
+		if err != nil {
 			return nil
 		}
-		return resultValue.Value.GoValue()
+		return resultValue.GoValue()
 	case ValueUnion:
 		unionValue, ok := v.Ref.(*UnionValue)
 		if !ok {
@@ -317,15 +354,34 @@ func (v Value) maybeValue() (*MaybeValue, error) {
 	return maybeValue, nil
 }
 
-func (v Value) resultValue() (*ResultValue, error) {
+func (v Value) resultParts() (bool, Value, error) {
+	if v.Kind == ValueResultInt {
+		return true, Int(air.NoType, v.Int), nil
+	}
+	if v.Kind == ValueResultStr {
+		return true, Str(air.NoType, v.Str), nil
+	}
+	if v.Kind == ValueResultBool {
+		return true, Bool(air.NoType, v.Bool), nil
+	}
+	if v.Kind == ValueResultFloat {
+		return true, Float(air.NoType, v.Float), nil
+	}
 	if v.Kind != ValueResult {
-		return nil, fmt.Errorf("expected result value, got kind %d", v.Kind)
+		return false, Value{}, fmt.Errorf("expected result value, got kind %d", v.Kind)
 	}
-	resultValue, ok := v.Ref.(*ResultValue)
-	if !ok || resultValue == nil {
-		return nil, fmt.Errorf("result value has invalid payload %T", v.Ref)
+	if payload, ok := v.Ref.(*Value); ok && payload != nil {
+		return v.Bool, *payload, nil
 	}
-	return resultValue, nil
+	return false, Value{}, fmt.Errorf("result value has invalid payload %T", v.Ref)
+}
+
+func (v Value) resultValue() (*ResultValue, error) {
+	ok, value, err := v.resultParts()
+	if err != nil {
+		return nil, err
+	}
+	return &ResultValue{Type: v.Type, Ok: ok, Value: value}, nil
 }
 
 func (v Value) unionValue() (*UnionValue, error) {
